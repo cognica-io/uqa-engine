@@ -106,14 +106,21 @@ impl SnapshotTableSources {
             &self.selection[1],
             control,
         )?;
-        let membership = self.membership.key()?.captured(&cut)?;
-        Ok(SnapshotTableCut { cut, membership })
+        let key = self.membership.key()?;
+        let image_generation = key.image_generation(&cut)?;
+        let membership = key.captured(&cut)?;
+        Ok(SnapshotTableCut {
+            cut,
+            membership,
+            image_generation,
+        })
     }
 }
 
 #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 pub(crate) struct SnapshotTableCut {
     pub(crate) cut: uqa_storage::memory_capture::MemoryCapture,
+    pub(crate) image_generation: Option<uqa_storage::memory_capture::MemoryImageGeneration>,
     membership: std::sync::Arc<uqa_core::memory::Budgeted<CapturedTableMembership>>,
 }
 

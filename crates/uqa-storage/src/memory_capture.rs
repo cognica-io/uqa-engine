@@ -20,6 +20,8 @@ use crate::{read_control::StorageReadControl, StorageBackendError, StorageBacken
 
 mod admission;
 mod failure;
+mod image_fingerprints;
+pub use image_fingerprints::{MemoryImageGeneration, MemoryImageOwner};
 mod selection;
 use selection::SelectedSources;
 pub use selection::{MemoryCaptureMember, MemoryCaptureMembership, MemoryCaptureSources};
@@ -97,6 +99,7 @@ struct Registry {
     captures: Mutex<OwnedMap<u64, Weak<Capture>>>,
     next_capture: AtomicU64,
     next_cell: AtomicU64,
+    images: image_fingerprints::RegistryImages,
 }
 
 impl Default for Registry {
@@ -106,6 +109,7 @@ impl Default for Registry {
             captures: Mutex::default(),
             next_capture: AtomicU64::new(1),
             next_cell: AtomicU64::new(1),
+            images: image_fingerprints::RegistryImages::default(),
         }
     }
 }
@@ -163,6 +167,7 @@ impl MemoryCaptureRegistry {
             registry: Arc::downgrade(&self.0),
             id,
             control: control.clone(),
+            image_generation: self.0.images.current(),
             state: Mutex::new(State::Active {
                 sources,
                 values: OwnedMap::new(),
@@ -290,6 +295,7 @@ struct Capture {
     id: u64,
     control: StorageReadControl,
     state: Mutex<State>,
+    image_generation: u64,
     _memory: MemoryReservation,
 }
 
@@ -545,9 +551,11 @@ impl<T: MemoryCaptureSource> MemoryCaptureCell<T> {
     fn admit_write<'a>(&'a self, value: RwLockWriteGuard<'a, T>) -> MemoryCaptureWriteGuard<'a, T> {
         #[cfg(test)]
         tests::source_locked();
-        let admission = self
-            .registration()
-            .map(|registration| registration.preserve(&*value));
+        let admission = self.registration().map(|registration| {
+            let admission = registration.preserve(&*value);
+            registration.registry.images.invalidate();
+            admission
+        });
         MemoryCaptureWriteGuard {
             source_guard: parking_lot::RwLockWriteGuard::map(value, |value| value),
             _admission: admission,

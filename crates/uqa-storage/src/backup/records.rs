@@ -6,7 +6,7 @@
 
 //! Complete live-record and allocator input streams over an already retained joint cut.
 
-use super::{BackupError, BackupResult};
+use super::{BackupError, BackupResult, UnitFingerprint};
 use crate::{
     mvcc::{
         BackupCursorKey, CommitSequence, CommittedBackupSnapshot, DatabaseId, RecordMetadata,
@@ -14,7 +14,42 @@ use crate::{
     },
     read_control::StorageReadControl,
 };
+use sha2::{Digest, Sha256};
 use std::sync::Arc;
+
+/// SHA-256 over the record mapping's revision prefix and untagged value bytes.
+/// The same accumulator is used for already-owned writes and streamed imports.
+pub struct RecordImageHasher(Sha256);
+
+impl RecordImageHasher {
+    pub fn new(revision: CommitSequence) -> Self {
+        let mut hash = Sha256::new();
+        hash.update(revision.as_u64().to_be_bytes());
+        Self(hash)
+    }
+
+    pub fn update(&mut self, bytes: &[u8]) {
+        self.0.update(bytes);
+    }
+
+    pub fn finish(self) -> super::ImageDigest {
+        super::ImageDigest::from_bytes(self.0.finalize().into())
+    }
+
+    pub fn for_value(
+        revision: CommitSequence,
+        value: &[u8],
+        control: &StorageReadControl,
+    ) -> VersionResult<super::ImageDigest> {
+        let mut hash = Self::new(revision);
+        for chunk in value.chunks(16 * 1024) {
+            control.check()?;
+            hash.update(chunk);
+        }
+        control.check()?;
+        Ok(hash.finish())
+    }
+}
 
 /// The provider image adapter assigns qualified namespaces and the final wire format to these raw input families.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -59,6 +94,7 @@ struct Unit {
     payload: Payload,
     length: usize,
     offset: usize,
+    fingerprint: Option<UnitFingerprint>,
 }
 
 #[derive(Clone, Copy)]
@@ -81,6 +117,7 @@ pub struct RecordImageCursor {
     stage: Stage,
     positions: u64,
     copied_bytes: u64,
+    fingerprint_bytes: u64,
 }
 
 impl RecordImageCursor {
@@ -102,6 +139,7 @@ impl RecordImageCursor {
             stage: Stage::Scan(Plane::Identifiers),
             positions: 0,
             copied_bytes: 0,
+            fingerprint_bytes: 0,
         })
     }
 
@@ -120,6 +158,10 @@ impl RecordImageCursor {
         self.copied_bytes
     }
 
+    pub const fn fingerprint_bytes(&self) -> u64 {
+        self.fingerprint_bytes
+    }
+
     pub fn current_unit(&self) -> Option<RecordImageUnit<'_>> {
         let Stage::Unit(unit) = self.stage else {
             return None;
@@ -136,6 +178,13 @@ impl RecordImageCursor {
                 Payload::Watermark(_) => None,
             },
         })
+    }
+
+    pub(super) fn current_fingerprint(&self) -> Option<UnitFingerprint> {
+        match self.stage {
+            Stage::Unit(unit) => unit.fingerprint,
+            _ => None,
+        }
     }
 
     /// Omit the selected raw input without reading its remaining payload. Image owners use this only after classifying the unit at this same cut. Advancing still counts every inspected physical position; omitted bytes never enter the copied-byte count. Misuse or cancellation terminates the cursor and releases its cut.
@@ -193,6 +242,8 @@ impl RecordImageCursor {
         let source = self.source.as_ref().expect("active cursor owns its source");
         let mut next = None;
         let mut selected = None;
+        let mut fingerprint = None;
+        let mut fingerprint_bytes = 0_u64;
         let mut ended = false;
         let mut count = 0_u64;
         let mut visit = |key: &[u8], payload: Option<Payload>| -> VersionResult<bool> {
@@ -214,12 +265,15 @@ impl RecordImageCursor {
                 &self.control,
                 &mut |key, value| visit(key, value.map(Payload::Watermark)),
             ),
-            Plane::Records => source.visit_record_positions(
+            Plane::Records => source.visit_record_image_positions(
                 self.after.as_deref(),
                 positions,
                 &self.control,
-                &mut |key, metadata| {
-                    let value = metadata
+                &mut |key, image| {
+                    fingerprint_bytes += u64::from(image.fingerprint_bytes);
+                    fingerprint = image.fingerprint;
+                    let value = image
+                        .visible
                         .filter(|metadata| metadata.live)
                         .map(|RecordMetadata { revision, .. }| {
                             revision.ok_or(crate::mvcc::VersionError::InvalidEncoding(
@@ -235,24 +289,50 @@ impl RecordImageCursor {
             .positions
             .checked_add(count)
             .ok_or(uqa_core::memory::MemoryError::SizeOverflow)?;
+        self.fingerprint_bytes = self
+            .fingerprint_bytes
+            .checked_add(fingerprint_bytes)
+            .ok_or(BackupError::Invalid(
+                "fingerprint metadata counter overflow",
+            ))?;
         visited?;
         if let Some(next) = next {
             self.after = Some(next);
         }
         if let Some(payload) = selected {
-            let length = self.selected_length(payload)?;
-            self.stage = Stage::Unit(Unit {
-                plane,
-                payload,
-                length,
-                offset: 0,
-            });
+            self.select_unit(plane, payload, fingerprint)?;
             return Ok(RecordImageStep::Unit);
         }
         if ended || count < positions as u64 {
             return Ok(self.end_plane(plane));
         }
         Ok(RecordImageStep::Pending)
+    }
+
+    fn select_unit(
+        &mut self,
+        plane: Plane,
+        payload: Payload,
+        fingerprint: Option<UnitFingerprint>,
+    ) -> BackupResult<()> {
+        let certified = fingerprint.and_then(|fp| {
+            fp.decoded_bytes
+                .checked_sub(8)
+                .and_then(|n| usize::try_from(n).ok())
+                .map(|length| (fp, length))
+        });
+        let (fingerprint, length) = match certified {
+            Some((fingerprint, length)) => (Some(fingerprint), length),
+            None => (None, self.selected_length(payload)?),
+        };
+        self.stage = Stage::Unit(Unit {
+            plane,
+            payload,
+            length,
+            offset: 0,
+            fingerprint,
+        });
+        Ok(())
     }
 
     fn selected_length(&self, payload: Payload) -> BackupResult<usize> {

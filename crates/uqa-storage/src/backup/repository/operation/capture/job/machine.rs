@@ -195,7 +195,7 @@ impl<'a, S: BackupImageSource> Machine<'a, S> {
                 }
             }
             Stage::Select => self.select(operation, maximum_positions.min(128))?,
-            Stage::Match => self.match_parent(operation, bytes)?,
+            Stage::Match => self.match_parent(operation, bytes, maximum_positions.min(128))?,
             Stage::Compare => self.compare(operation, bytes)?,
             Stage::Write => self.write_unit(operation, bytes)?,
             Stage::UnitComplete => self.complete_unit(operation)?,
@@ -219,7 +219,7 @@ impl<'a, S: BackupImageSource> Machine<'a, S> {
     ) -> BackupResult<()> {
         let source = self.source.as_mut().expect("source stage owns source");
         if !self.selected {
-            match source.advance(maximum_positions)? {
+            match source.advance_for_comparison(maximum_positions)? {
                 BackupSourceStep::Unit => self.selected = true,
                 BackupSourceStep::Pending => (),
                 BackupSourceStep::Complete => {
@@ -269,6 +269,7 @@ impl<'a, S: BackupImageSource> Machine<'a, S> {
                 bytes: 0,
             },
             unit.decoded_bytes,
+            source.current_hash(),
         ));
         self.stage = Stage::Match;
         Ok(())

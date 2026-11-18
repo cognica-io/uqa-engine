@@ -62,11 +62,14 @@ pub use memory::{
     MemoryTableUnit, MEMORY_IMAGE_CATALOG_COUNT, MEMORY_IMAGE_RESOURCE_KINDS,
     MEMORY_IMAGE_TABLE_METADATA_COUNT,
 };
-pub use records::{RecordImageCursor, RecordImageFamily, RecordImageStep, RecordImageUnit};
+pub use records::{
+    RecordImageCursor, RecordImageFamily, RecordImageHasher, RecordImageStep, RecordImageUnit,
+};
 pub use root::BackupRoot;
 pub use source::{
     BackupImageSource, BackupSourceStatistics, BackupSourceStep, BackupSourceUnit,
     NativeBackupImage, NativeImageEntries, NativeImageStep, NativeImageUnit, OwnedBackupImage,
+    SourceUnitHash, UnitFingerprint,
 };
 pub use types::{
     BackupCapabilities, BackupCut, BackupId, BackupLimits, ImageDigest, ImageFormat, ImageProvider,

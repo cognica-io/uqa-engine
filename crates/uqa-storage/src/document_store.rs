@@ -193,6 +193,16 @@ impl SharedDocumentRow {
 
 /// Mutating methods are fallible: persistent backends surface their write failures so callers (engine DML, upserts, referential rewrites) can abort the enclosing transaction instead of silently committing a partially-applied statement. A rewrite that deletes a row and then fails to re-insert it must never look like success.
 pub trait DocumentStore: Send + Sync {
+    /// Immutable native owner of the complete row image, including fields and tuple metadata. Unknown owners use the captured generation and bounded image codec.
+    fn image_document_owner(
+        &self,
+        _doc_id: DocId,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<crate::memory_capture::MemoryImageOwner>> {
+        control.check()?;
+        Ok(None)
+    }
+
     /// Borrow a resumable evaluated document image from this exact read view. The cursor header is admitted before allocation, payloads remain owned by the source, and reads retain both source and invoking cancellation. Unsupported owners do not materialize a document or execute SQL as a fallback.
     fn image_document_reader<'a>(
         &'a self,

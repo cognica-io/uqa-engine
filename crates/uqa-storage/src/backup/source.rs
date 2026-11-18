@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use super::{BackupCut, BackupResult, UnitAddress, UnitKind};
+use super::{BackupCut, BackupResult, ImageDigest, UnitAddress, UnitKind};
 
 mod native;
 pub use native::{NativeBackupImage, NativeImageEntries, NativeImageStep, NativeImageUnit};
@@ -26,6 +26,21 @@ pub enum BackupSourceStep {
     Complete,
 }
 
+/// SHA-256 and exact length of one encoded image unit selected by the provider's current cut, address and mapping.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct UnitFingerprint {
+    pub digest: ImageDigest,
+    pub decoded_bytes: u64,
+}
+
+/// Sources that maintain their own immutable certificate can hash the ordinary payload stream once and give its completed digest to the repository.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SourceUnitHash {
+    Repository,
+    Computing,
+    Complete(UnitFingerprint),
+}
+
 /// Explicit source work. These counters do not estimate physical page or cache activity.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct BackupSourceStatistics {
@@ -39,7 +54,24 @@ pub struct BackupSourceStatistics {
 pub trait BackupImageSource {
     fn cut(&self) -> BackupCut;
     fn advance(&mut self, maximum_positions: usize) -> BackupResult<BackupSourceStep>;
+    /// Offer a certified unit before preparing its payload. Repository callers drive payload preparation only when comparison requires reading it.
+    fn advance_for_comparison(
+        &mut self,
+        maximum_positions: usize,
+    ) -> BackupResult<BackupSourceStep> {
+        self.advance(maximum_positions)
+    }
+    fn prepare_current(&mut self, _maximum_positions: usize) -> BackupResult<bool> {
+        Ok(true)
+    }
+    fn current_hash(&self) -> SourceUnitHash {
+        SourceUnitHash::Repository
+    }
     fn current_unit(&self) -> Option<BackupSourceUnit<'_>>;
+    /// Consume the selected unit on an exact certified match. An unavailable or differing fingerprint leaves the payload at its original position for bounded comparison.
+    fn reuse_current(&mut self, _parent: UnitFingerprint) -> BackupResult<bool> {
+        Ok(false)
+    }
     fn read_current(&mut self, output: &mut [u8]) -> BackupResult<usize>;
     fn statistics(&self) -> BackupSourceStatistics;
 }
