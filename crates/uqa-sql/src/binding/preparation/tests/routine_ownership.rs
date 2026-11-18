@@ -96,6 +96,74 @@ fn command_returning(plan: PlanRef<'_>) -> &[crate::plan::ProjectionPlan] {
 }
 
 #[test]
+fn routine_parameter_discovery_preserves_assignment_operands_across_missing_targets() {
+    let budget = MemoryBudget::new(4 << 20);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&budget, &token, &token);
+    let parameters =
+        RoutineParameterScope::new("f", vec!["n".into()], vec![Some(ColumnType::Integer)]);
+    let params = [crate::SQLParam::typed_scalar(
+        Value::Null,
+        ColumnType::Integer,
+    )];
+    for (sql, references) in [
+        (
+            "MERGE INTO assignment_target t USING (VALUES (1)) s(n) ON t.id=s.n
+             WHEN MATCHED THEN UPDATE SET removed=f.n
+             WHEN NOT MATCHED THEN INSERT(removed) VALUES(s.n)
+             WHEN NOT MATCHED BY SOURCE THEN UPDATE SET removed=n RETURNING t.id",
+            2,
+        ),
+        (
+            "UPDATE assignment_target SET removed[(SELECT n)] = f.n RETURNING id",
+            2,
+        ),
+        (
+            "INSERT INTO assignment_target(removed) VALUES(n)
+             ON CONFLICT(id) DO UPDATE SET removed=excluded.id+f.n RETURNING id",
+            2,
+        ),
+        (
+            "WITH changed AS (UPDATE assignment_target SET removed=(SELECT n) RETURNING id)
+             SELECT id FROM changed",
+            1,
+        ),
+    ] {
+        let mut ordinary = UnifiedPlan::lower(crate::compile(sql).unwrap().remove(0));
+        crate::binding::bind_routine_parameter_references(
+            &NoRoutines,
+            &mut ordinary,
+            &params,
+            &assignment_context(),
+            &parameters,
+        )
+        .unwrap();
+        let owned = bind(sql, &control).unwrap();
+        for plan in [PlanRef::from(&ordinary), owned.as_plan_ref()] {
+            let mut found = 0;
+            plan.visit_scalar_expressions(&mut |expression| {
+                expression.visit(&mut |node| {
+                    if matches!(node, ScalarExpr::Param(1)) {
+                        found += 1;
+                    }
+                });
+            });
+            assert_eq!(found, references, "{sql}");
+        }
+        let result = infer_prepared_parameter_types(
+            &NoRoutines,
+            &ordinary,
+            &[Some(ColumnType::Integer)],
+            &assignment_context(),
+        )
+        .unwrap_err();
+        assert_eq!(result.sqlstate(), Some("42703"), "{sql}");
+        drop(owned);
+        assert_eq!(budget.used(), 0);
+    }
+}
+
+#[test]
 fn owned_routine_references_preserve_returning_labels_in_all_mutations_and_ctes() {
     let budget = MemoryBudget::new(4 << 20);
     let token = CancellationToken::new();
@@ -302,6 +370,7 @@ fn routine_analysis_state_transfers_with_its_original_scopes_and_observations() 
         "SELECT sum(x) OVER (PARTITION BY n ORDER BY x ROWS BETWEEN n PRECEDING AND CURRENT ROW) FROM (VALUES (1), (2)) v(x)",
         "INSERT INTO assignment_target(id) VALUES(n) RETURNING n, id",
         "UPDATE assignment_target SET id=n RETURNING f.n, id",
+        "UPDATE assignment_target SET removed=n RETURNING id",
         "DELETE FROM assignment_target WHERE id=n RETURNING f.n, id",
     ] {
         let mut expected = UnifiedPlan::lower(crate::compile(sql).unwrap().remove(0));
@@ -309,7 +378,7 @@ fn routine_analysis_state_transfers_with_its_original_scopes_and_observations() 
         crate::binding::bind_routine_parameter_references(&NoRoutines, &mut expected, &params, &assignment_context(), &parameters).unwrap();
         let mut scope = SchemaScope::for_analysis_with_control(assignment_context().copy_with_control(&control).unwrap(), &control).unwrap();
         scope.routine_parameters = Some(parameters.clone());
-        scope.scalar_binding = crate::binding::ScalarBindingMode::References;
+        scope.scalar_binding = crate::binding::ScalarBindingMode::RoutineParameters;
         scope.preserve_syntax_shape = true;
         let mut analysis = Preparation {
             bound_condition_queries: None,

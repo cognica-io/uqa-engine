@@ -216,7 +216,18 @@ impl MergePlan {
 }
 
 impl MergeWhenPlan {
-    fn expressions(&self) -> impl Iterator<Item = &ScalarExpr> {
+    /// Select the candidate row visible to this action's condition and operands.
+    pub(crate) fn input_scope<T>(&self, matched: T, target: T, source: T) -> T {
+        match self {
+            Self::UpdateNotMatchedBySource { .. }
+            | Self::DeleteNotMatchedBySource { .. }
+            | Self::NothingNotMatchedBySource { .. } => target,
+            Self::InsertNotMatched { .. } | Self::NothingNotMatched { .. } => source,
+            _ => matched,
+        }
+    }
+
+    pub(crate) fn expressions(&self) -> impl Iterator<Item = &ScalarExpr> {
         let (condition, assignments, columns, values): (
             _,
             &[AssignmentPlan],
@@ -250,7 +261,7 @@ impl MergeWhenPlan {
             .chain(values)
     }
 
-    fn expressions_mut(&mut self) -> impl Iterator<Item = &mut ScalarExpr> {
+    pub(crate) fn expressions_mut(&mut self) -> impl Iterator<Item = &mut ScalarExpr> {
         let (condition, assignments, columns, values): (
             _,
             &mut [AssignmentPlan],
