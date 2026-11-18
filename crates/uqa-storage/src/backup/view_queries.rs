@@ -177,7 +177,10 @@ impl BackupCatalogTextInput {
         };
         let result = input.as_mut().advance();
         self.statistics.visited_positions = input.records.visited_positions();
-        self.statistics.metadata_read_bytes = input.records.copied_bytes();
+        self.statistics.metadata_read_bytes = input
+            .records
+            .copied_bytes()
+            .saturating_add(input.records.fingerprint_bytes());
         if matches!(result, Ok(CatalogInputStep::Complete) | Err(_)) {
             self.failed = result.is_err();
             self.input = None;

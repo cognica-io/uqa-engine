@@ -11,6 +11,7 @@ pub(crate) mod backup_import;
 mod backup_metadata;
 mod codec;
 mod identifiers;
+mod image_fingerprints;
 mod migration;
 mod read;
 mod receipts;
@@ -40,8 +41,8 @@ use uqa_storage::read_control::StorageReadControl;
 use crate::error::redb_error;
 use codec::{read_u64, receipt_bytes, status};
 
-/// Every identifier writer preserves metadata boundaries retained by online backups.
-const RECORD_FORMAT: u64 = 64;
+/// New writers atomically publish record image digests alongside each immutable revision.
+const RECORD_FORMAT: u64 = 65;
 
 const METADATA: TableDefinition<&str, &[u8]> = TableDefinition::new("uqa_mvcc_metadata");
 const HEADS: TableDefinition<&[u8], u64> = TableDefinition::new("uqa_mvcc_heads");
@@ -91,8 +92,10 @@ impl RedbRecordStore {
                     15
                 } else if format < 64 {
                     31
-                } else {
+                } else if format < 65 {
                     127
+                } else {
+                    255
                 };
                 if present != expected {
                     return Err(VersionError::InvalidEncoding(
@@ -100,7 +103,7 @@ impl RedbRecordStore {
                     ));
                 }
                 let allocated = read_u64(&metadata, "allocated")?;
-                read_u64(&metadata, "sequence")?;
+                image_fingerprints::initialize_boundary(&mut metadata, format)?;
                 let identity = codec::database_id(&metadata)?;
                 if format < 43 {
                     // Predecessor receipts retain manual resolution ownership. Validate their old encoding before exposing the new acknowledgement tags.
@@ -146,6 +149,9 @@ impl RedbRecordStore {
                 initialize_record_metadata(&mut metadata)?
             }
         };
+        transaction
+            .open_table(image_fingerprints::TABLE)
+            .map_err(redb_error)?;
         backup_metadata::initialize(&transaction, initialize_backup_metadata)?;
         transaction.commit().map_err(redb_error)?;
         let snapshots = retention::registry(&database, identity)?;
@@ -221,18 +227,32 @@ impl RedbRecordStore {
             .map_err(|error| uqa_storage::StorageBackendError::Memory(error.into()))?;
         workspace.grow(encoded.capacity() - maximum)?;
         let mut versions = transaction.open_table(VERSIONS).map_err(redb_error)?;
+        let mut fingerprints = transaction
+            .open_table(image_fingerprints::TABLE)
+            .map_err(redb_error)?;
         let mut writes = prepared.writes();
         while let Some(write) = writes.next(control)? {
             let value = write.value();
             // redb's insert_reserve allocates a temporary value for every row. Reuse one charged encoding buffer for this bounded physical commit instead.
             encoded.clear();
             encoded.push(u8::from(value.is_some()));
-            if let Some(value) = value {
+            let fingerprint = if let Some(value) = value {
+                let mut hash = uqa_storage::backup::RecordImageHasher::new(sequence);
                 for source in value.chunks(65536) {
                     control.cancellation().check()?;
                     encoded.extend_from_slice(source);
+                    hash.update(source);
                 }
-            }
+                Some((value.len(), hash.finish()))
+            } else {
+                None
+            };
+            image_fingerprints::insert(
+                &mut fingerprints,
+                write.key(),
+                sequence.as_u64(),
+                fingerprint,
+            )?;
             versions
                 .insert((write.key(), sequence.as_u64()), encoded.as_slice())
                 .map_err(redb_error)?;
@@ -473,6 +493,12 @@ fn initialize_record_metadata(
         .insert("format", RECORD_FORMAT.to_be_bytes().as_slice())
         .map_err(redb_error)?;
     metadata
+        .insert(
+            image_fingerprints::LEGACY_THROUGH,
+            0_u64.to_be_bytes().as_slice(),
+        )
+        .map_err(redb_error)?;
+    metadata
         .insert("allocated", 0_u64.to_be_bytes().as_slice())
         .map_err(redb_error)?;
     metadata
@@ -496,6 +522,7 @@ fn record_table_presence(transaction: &WriteTransaction) -> VersionResult<u8> {
         identifiers::TABLE.name(),
         backup_metadata::BIRTHS.name(),
         backup_metadata::HISTORY.name(),
+        image_fingerprints::TABLE.name(),
     ];
     let mut present = 0_u8;
     for table in transaction.list_tables().map_err(redb_error)? {
@@ -503,7 +530,7 @@ fn record_table_presence(transaction: &WriteTransaction) -> VersionResult<u8> {
             present |= 1 << position;
         }
     }
-    if !matches!(present, 0 | 15 | 31 | 127) {
+    if !matches!(present, 0 | 15 | 31 | 127 | 255) {
         return Err(VersionError::InvalidEncoding("incomplete record table set"));
     }
     Ok(present)

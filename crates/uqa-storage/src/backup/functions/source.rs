@@ -10,6 +10,7 @@ use super::{
 };
 use crate::backup::{
     BackupCut, BackupImageSource, BackupSourceStatistics, BackupSourceUnit, OwnedBackupImage,
+    SourceUnitHash, UnitFingerprint,
 };
 
 enum Stage {
@@ -60,6 +61,32 @@ fn emit(output: &mut [u8], input: &[u8]) -> usize {
     bytes
 }
 
+impl<S> Functions<S> {
+    fn select(
+        &mut self,
+        maximum_positions: usize,
+        advance_provider: fn(&mut OwnedBackupImage, usize) -> BackupResult<BackupSourceStep>,
+    ) -> BackupResult<BackupSourceStep> {
+        self.control.check()?;
+        if maximum_positions == 0 {
+            return Err(BackupError::Invalid("zero function image source window"));
+        }
+        match self.stage {
+            Stage::New => {
+                self.stage = Stage::Section;
+                Ok(BackupSourceStep::Unit)
+            }
+            Stage::Section if !matches!(self.encoder, Encoder::End) => Err(BackupError::Invalid(
+                "function declaration section is not consumed",
+            )),
+            Stage::Section | Stage::Provider => {
+                self.stage = Stage::Provider;
+                advance_provider(&mut self.provider, maximum_positions)
+            }
+        }
+    }
+}
+
 impl<S: BackupFunctionSource> BackupImageSource for Functions<S> {
     fn cut(&self) -> BackupCut {
         self.provider.cut()
@@ -84,22 +111,39 @@ impl<S: BackupFunctionSource> BackupImageSource for Functions<S> {
     }
 
     fn advance(&mut self, maximum_positions: usize) -> BackupResult<BackupSourceStep> {
+        self.select(maximum_positions, OwnedBackupImage::advance)
+    }
+
+    fn advance_for_comparison(
+        &mut self,
+        maximum_positions: usize,
+    ) -> BackupResult<BackupSourceStep> {
+        self.select(maximum_positions, OwnedBackupImage::advance_for_comparison)
+    }
+
+    fn prepare_current(&mut self, maximum_positions: usize) -> BackupResult<bool> {
         self.control.check()?;
-        if maximum_positions == 0 {
-            return Err(BackupError::Invalid("zero function image source window"));
-        }
         match self.stage {
-            Stage::New => {
-                self.stage = Stage::Section;
-                Ok(BackupSourceStep::Unit)
-            }
-            Stage::Section if !matches!(self.encoder, Encoder::End) => Err(BackupError::Invalid(
-                "function declaration section is not consumed",
-            )),
-            Stage::Section | Stage::Provider => {
-                self.stage = Stage::Provider;
-                self.provider.advance(maximum_positions)
-            }
+            Stage::Provider => self.provider.prepare_current(maximum_positions),
+            Stage::Section => Ok(true),
+            Stage::New => Err(BackupError::Finished),
+        }
+    }
+
+    fn current_hash(&self) -> SourceUnitHash {
+        match self.stage {
+            Stage::Provider => self.provider.current_hash(),
+            Stage::New | Stage::Section => SourceUnitHash::Repository,
+        }
+    }
+
+    fn reuse_current(&mut self, parent: UnitFingerprint) -> BackupResult<bool> {
+        self.control.check()?;
+        match self.stage {
+            Stage::Provider => self.provider.reuse_current(parent),
+            // The SQL registry and the provider can change independently between cuts.
+            Stage::Section => Ok(false),
+            Stage::New => Err(BackupError::Finished),
         }
     }
 

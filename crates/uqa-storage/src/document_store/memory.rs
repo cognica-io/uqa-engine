@@ -141,6 +141,24 @@ impl MemoryDocumentStore {
 }
 
 impl DocumentStore for MemoryDocumentStore {
+    fn image_document_owner(
+        &self,
+        id: DocId,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<crate::memory_capture::MemoryImageOwner>> {
+        control.check()?;
+        self.check_retained_read()?;
+        // Replacing either fields or tuple metadata always installs a freshly allocated value vector. Snapshots only clone that vector with the same field layout and metadata.
+        Ok(self.state.documents.get(id).map(|row| match &row.values {
+            SharedDocumentValues::Ordinary(values) => {
+                crate::memory_capture::MemoryImageOwner::from_arc(values)
+            }
+            SharedDocumentValues::Retained(values) => {
+                crate::memory_capture::MemoryImageOwner::from_arc(values)
+            }
+        }))
+    }
+
     fn image_document_reader<'a>(
         &'a self,
         doc_id: DocId,

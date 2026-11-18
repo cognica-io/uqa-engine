@@ -142,6 +142,9 @@ impl KeyValueBackupImage {
 }
 
 impl BackupImageSource for KeyValueBackupImage {
+    fn reuse_current(&mut self, parent: crate::backup::UnitFingerprint) -> BackupResult<bool> {
+        self.0.reuse_current(parent)
+    }
     fn cut(&self) -> BackupCut {
         self.cut()
     }

@@ -10,9 +10,11 @@ use rusqlite::Connection;
 
 use super::{schema, PhysicalResult, VersionError};
 
+pub(super) const ADDRESSED_TABLE: &str = "CREATE TABLE _uqa_mvcc_version_metadata (key BLOB NOT NULL, sequence BLOB NOT NULL, version_id INTEGER NOT NULL CHECK(version_id > 0), payload_length INTEGER CHECK(payload_length IS NULL OR (typeof(payload_length) = 'integer' AND payload_length >= -1)), PRIMARY KEY(key, sequence)) WITHOUT ROWID";
+
 pub(super) const TABLE: (&str, &str) = (
     "_uqa_mvcc_version_metadata",
-    "CREATE TABLE _uqa_mvcc_version_metadata (key BLOB NOT NULL, sequence BLOB NOT NULL, version_id INTEGER NOT NULL CHECK(version_id > 0), payload_length INTEGER CHECK(payload_length IS NULL OR (typeof(payload_length) = 'integer' AND payload_length >= -1)), PRIMARY KEY(key, sequence)) WITHOUT ROWID",
+    "CREATE TABLE _uqa_mvcc_version_metadata (key BLOB NOT NULL, sequence BLOB NOT NULL, version_id INTEGER NOT NULL CHECK(version_id > 0), payload_length INTEGER CHECK(payload_length IS NULL OR (typeof(payload_length) = 'integer' AND payload_length >= -1)), image_digest BLOB, PRIMARY KEY(key, sequence)) WITHOUT ROWID",
 );
 
 // The explicit INTEGER PRIMARY KEY keeps addresses stable across VACUUM. Addresses
@@ -34,14 +36,20 @@ const PREVIOUS_TRIGGERS: [(&str, &str); 3] = [
 
 pub(super) fn create_triggers(connection: &Connection) -> PhysicalResult<()> {
     for (_, definition) in PREVIOUS_TRIGGERS {
-        connection.execute_batch(&addressed_trigger(definition))?;
+        connection.execute_batch(&fingerprint_trigger(definition))?;
     }
     Ok(())
 }
 
-pub(super) fn validate_triggers(connection: &Connection, addressed: bool) -> PhysicalResult<()> {
+pub(super) fn validate_triggers(
+    connection: &Connection,
+    addressed: bool,
+    fingerprints: bool,
+) -> PhysicalResult<()> {
     for (name, definition) in PREVIOUS_TRIGGERS {
-        let expected = if addressed {
+        let expected = if fingerprints {
+            fingerprint_trigger(definition)
+        } else if addressed {
             addressed_trigger(definition)
         } else {
             definition.to_owned()
@@ -58,6 +66,70 @@ pub(super) fn validate_triggers(connection: &Connection, addressed: bool) -> Phy
 
 fn addressed_trigger(definition: &str) -> String {
     definition.replace("NEW.sequence, CASE", "NEW.sequence, NEW.version_id, CASE")
+}
+
+fn fingerprint_trigger(definition: &str) -> String {
+    addressed_trigger(definition).replace(
+        "INSERT INTO _uqa_mvcc_version_metadata VALUES",
+        "INSERT INTO _uqa_mvcc_version_metadata (key, sequence, version_id, payload_length) VALUES",
+    )
+}
+
+pub(super) fn add_fingerprint_column(connection: &Connection) -> PhysicalResult<()> {
+    for (name, _) in PREVIOUS_TRIGGERS {
+        connection.execute_batch(&format!("DROP TRIGGER {name}"))?;
+    }
+    connection
+        .execute_batch("ALTER TABLE _uqa_mvcc_version_metadata ADD COLUMN image_digest BLOB")?;
+    create_triggers(connection)
+}
+
+pub(super) fn set_image_digest(
+    connection: &Connection,
+    key: &[u8],
+    revision: uqa_storage::mvcc::CommitSequence,
+    digest: uqa_storage::backup::ImageDigest,
+) -> PhysicalResult<()> {
+    let mut update = connection.prepare_cached(
+        "UPDATE _uqa_mvcc_version_metadata SET image_digest = ?3 WHERE key = ?1 AND sequence = ?2 AND payload_length >= 0",
+    )?;
+    let changed = update.execute(rusqlite::params![
+        key,
+        revision.as_u64().to_be_bytes().as_slice(),
+        digest.as_bytes().as_slice()
+    ])?;
+    if changed != 1 {
+        return Err(
+            VersionError::InvalidEncoding("record fingerprint has no matching version").into(),
+        );
+    }
+    Ok(())
+}
+
+pub(super) fn retain_image_digest(
+    connection: &Connection,
+    key: &[u8],
+    revision: uqa_storage::mvcc::CommitSequence,
+    value: Option<&[u8]>,
+    control: &uqa_storage::read_control::StorageReadControl,
+) -> PhysicalResult<()> {
+    if let Some(value) = value {
+        let digest = uqa_storage::backup::RecordImageHasher::for_value(revision, value, control)?;
+        set_image_digest(connection, key, revision, digest)?;
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+pub(super) fn install_addressed_predecessor(connection: &Connection) -> PhysicalResult<()> {
+    for (name, _) in PREVIOUS_TRIGGERS {
+        connection.execute_batch(&format!("DROP TRIGGER {name}"))?;
+    }
+    connection.execute_batch("ALTER TABLE _uqa_mvcc_version_metadata DROP COLUMN image_digest")?;
+    for (_, definition) in PREVIOUS_TRIGGERS {
+        connection.execute_batch(&addressed_trigger(definition))?;
+    }
+    Ok(())
 }
 
 fn remove_metadata(connection: &Connection) -> PhysicalResult<()> {

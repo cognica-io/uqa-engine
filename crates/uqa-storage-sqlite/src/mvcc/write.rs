@@ -266,6 +266,13 @@ fn stage(
             }
             versions.execute(params![write.key(), sequence.as_slice(), write.value()])?;
             versions.clear_bindings();
+            super::version_metadata::retain_image_digest(
+                connection,
+                write.key(),
+                receipt.sequence,
+                write.value(),
+                control,
+            )?;
             heads.execute(params![write.key(), sequence.as_slice()])?;
             heads.clear_bindings();
         }
@@ -288,12 +295,14 @@ pub(super) fn stage_record(
     control.cancellation().check().map_err(VersionError::from)?;
     let _bindings =
         crate::read_control::reserve_bindings(control, &[key, value.unwrap_or_default()])?;
+    let revision = sequence;
     let sequence = sequence.as_u64().to_be_bytes();
     super::runs::extract(connection, key, control)?;
     connection.prepare_cached("INSERT INTO _uqa_mvcc_versions (key, sequence, value) SELECT key, sequence, NULL FROM _uqa_mvcc_heads WHERE key = ?1 AND compacted = 1")?.execute([key])?;
     connection
         .prepare_cached("INSERT INTO _uqa_mvcc_versions(key, sequence, value) VALUES (?1, ?2, ?3)")?
         .execute(params![key, sequence.as_slice(), value])?;
+    super::version_metadata::retain_image_digest(connection, key, revision, value, control)?;
     connection.prepare_cached("INSERT INTO _uqa_mvcc_heads(key, sequence, compacted) VALUES (?1, ?2, 0) ON CONFLICT(key) DO UPDATE SET sequence = excluded.sequence, compacted = 0")?.execute(params![key, sequence.as_slice()])?;
     Ok(())
 }

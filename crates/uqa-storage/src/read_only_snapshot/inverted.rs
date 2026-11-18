@@ -71,6 +71,16 @@ impl InvertedIndex for ReadOnlySnapshot<dyn InvertedIndex> {
         Ok(next)
     }
 
+    fn image_document_owner(
+        &self,
+        id: DocId,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<crate::memory_capture::MemoryImageOwner>> {
+        control.check()?;
+        self.check_inverted_read()?;
+        self.0.image_document_owner(id, control)
+    }
+
     fn image_document_reader<'a>(
         &'a self,
         doc_id: DocId,

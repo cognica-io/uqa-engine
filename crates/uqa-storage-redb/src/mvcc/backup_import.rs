@@ -242,19 +242,17 @@ impl<'a> RedbBackupImport<'a> {
                         .map_err(redb_error)?;
                     let output = value.as_mut();
                     output[0] = 1;
-                    let mut offset = 1;
-                    while offset < length {
-                        let end = length.min(offset.saturating_add(16 * 1024));
-                        let read = input.read_current(&mut output[offset..end])?;
-                        if read == 0 {
-                            return Err(BackupError::Invalid("truncated imported record"));
-                        }
-                        offset += read;
-                    }
-                    if input.read_current(&mut [0])? != 0 {
-                        return Err(BackupError::Invalid("trailing imported record bytes"));
-                    }
+                    let digest = read_record_image(input, revision, &mut output[1..])?;
                     drop(value);
+                    let mut fingerprints = transaction
+                        .open_table(super::image_fingerprints::TABLE)
+                        .map_err(redb_error)?;
+                    super::image_fingerprints::insert(
+                        &mut fingerprints,
+                        &owned_key,
+                        revision.as_u64(),
+                        Some((length - 1, digest)),
+                    )?;
                     heads
                         .insert(&*owned_key, revision.as_u64())
                         .map_err(redb_error)?;
@@ -266,6 +264,28 @@ impl<'a> RedbBackupImport<'a> {
         }
         Ok(RedbBackupImportStep::Pending)
     }
+}
+
+fn read_record_image(
+    input: &mut KeyValueImageImportReader<'_>,
+    revision: uqa_storage::mvcc::CommitSequence,
+    destination: &mut [u8],
+) -> BackupResult<uqa_storage::backup::ImageDigest> {
+    let mut hash = uqa_storage::backup::RecordImageHasher::new(revision);
+    let mut remaining = destination;
+    while !remaining.is_empty() {
+        let length = remaining.len().min(16 * 1024);
+        let read = input.read_current(&mut remaining[..length])?;
+        if read == 0 {
+            return Err(BackupError::Invalid("truncated imported record"));
+        }
+        hash.update(&remaining[..read]);
+        remaining = &mut remaining[read..];
+    }
+    if input.read_current(&mut [0])? != 0 {
+        return Err(BackupError::Invalid("trailing imported record bytes"));
+    }
+    Ok(hash.finish())
 }
 
 fn initialize(
@@ -304,6 +324,7 @@ fn initialize(
         for (name, value) in [
             ("format", 0),
             ("allocated", 0),
+            (super::image_fingerprints::LEGACY_THROUGH, 0),
             ("sequence", root.cut().sequence.unwrap().as_u64()),
             ("receipt_limit", DEFAULT_RECEIPT_RETENTION_LIMIT),
         ] {
@@ -312,6 +333,9 @@ fn initialize(
                 .map_err(redb_error)?;
         }
     }
+    transaction
+        .open_table(super::image_fingerprints::TABLE)
+        .map_err(redb_error)?;
     transaction.open_table(HEADS).map_err(redb_error)?;
     transaction.open_table(VERSIONS).map_err(redb_error)?;
     transaction.open_table(TRANSACTIONS).map_err(redb_error)?;

@@ -22,11 +22,42 @@ pub type IdentifierWatermarkVisitor<'a> = dyn FnMut(&[u8], Option<u64>) -> Versi
 pub type BackupRecordPositionVisitor<'a> =
     dyn FnMut(&[u8], Option<RecordMetadata>) -> VersionResult<bool> + 'a;
 
+/// Metadata returned by the provider's captured record scan. Fingerprint bytes measure only extra encoded metadata actually read by that provider.
+#[derive(Clone, Copy)]
+pub struct BackupRecordImagePosition {
+    pub visible: Option<RecordMetadata>,
+    pub fingerprint: Option<crate::backup::UnitFingerprint>,
+    pub fingerprint_bytes: u8,
+}
+
+pub type BackupRecordImageVisitor<'a> =
+    dyn FnMut(&[u8], BackupRecordImagePosition) -> VersionResult<bool> + 'a;
+
 /// One owner retains record visibility and autonomous allocations from the same physical publication boundary. This is an input to a provider image adapter, not a claim that its encoded catalog/index/resource image is complete.
 pub trait CommittedBackupSnapshot: Send + Sync {
     fn records(&self) -> &dyn CommittedRecordSnapshot;
     fn database_id(&self) -> DatabaseId;
     fn metadata_epoch(&self) -> MetadataEpoch;
+
+    /// Return exact digests of the selected immutable revision and payload when available. Missing metadata keeps the ordinary bounded content-comparison path.
+    fn visit_record_image_positions(
+        &self,
+        after: Option<&[u8]>,
+        limit: usize,
+        control: &StorageReadControl,
+        visit: &mut BackupRecordImageVisitor<'_>,
+    ) -> VersionResult<()> {
+        self.visit_record_positions(after, limit, control, &mut |key, visible| {
+            visit(
+                key,
+                BackupRecordImagePosition {
+                    visible,
+                    fingerprint: None,
+                    fingerprint_bytes: 0,
+                },
+            )
+        })
+    }
 
     /// Greatest physical record key at this call, including keys created after capture. It bounds a subsequent export traversal without changing the captured record view. Every captured live key is at or below this ceiling; no key means the captured domain is empty.
     fn record_key_ceiling(
@@ -80,6 +111,17 @@ pub fn retain_backup_snapshot<T: CommittedBackupSnapshot + 'static>(
 }
 
 impl<T: CommittedBackupSnapshot> CommittedBackupSnapshot for RetainedBackupSnapshot<T> {
+    fn visit_record_image_positions(
+        &self,
+        after: Option<&[u8]>,
+        limit: usize,
+        control: &StorageReadControl,
+        visit: &mut BackupRecordImageVisitor<'_>,
+    ) -> VersionResult<()> {
+        self.snapshot
+            .visit_record_image_positions(after, limit, control, visit)
+    }
+
     fn record_key_ceiling(
         &self,
         control: &StorageReadControl,

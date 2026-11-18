@@ -8,13 +8,14 @@
 
 use super::{
     BackupCut, BackupImageSource, BackupResult, BackupSourceStatistics, BackupSourceStep,
-    BackupSourceUnit, UnitAddress, UnitKind,
+    BackupSourceUnit, SourceUnitHash, UnitAddress, UnitFingerprint, UnitKind,
 };
 use crate::{
     backup::{BackupError, NamespaceId},
     image_io::ImageReader,
     read_control::StorageReadControl,
 };
+use sha2::{Digest, Sha256};
 use uqa_core::memory::BudgetedVec;
 
 /// One admitted native component. Its immutable source and payload reservations stay with the reader; its key is already admitted by the mapping owner. No complete encoded payload is retained here.
@@ -39,6 +40,13 @@ pub trait NativeImageEntries: Send {
     /// Observe retirement or failure of the retained generation during every selection and output call.
     fn check(&self) -> BackupResult<()>;
 
+    /// An ownership group must cover every immutable input of this family. Unsupplied groups retain the complete streaming comparison.
+    fn fingerprint_generation(
+        &self,
+        _family: u16,
+    ) -> Option<&crate::memory_capture::MemoryImageGeneration> {
+        None
+    }
     fn next_image(&mut self, control: &StorageReadControl) -> BackupResult<NativeImageStep>;
 }
 
@@ -50,6 +58,14 @@ struct Current {
     kind: UnitKind,
     reader: Option<ImageReader<'static>>,
     ready: bool,
+    offered: bool,
+    read_started: bool,
+    cache_key: Option<[u8; 32]>,
+    immutable_owner: Option<crate::memory_capture::MemoryImageOwner>,
+    fingerprint: Option<UnitFingerprint>,
+    hash: Option<Sha256>,
+    hashed: u64,
+    completed: Option<UnitFingerprint>,
 }
 
 impl Current {
@@ -64,7 +80,8 @@ impl Current {
 }
 
 impl From<NativeImageUnit> for Current {
-    fn from(unit: NativeImageUnit) -> Self {
+    fn from(mut unit: NativeImageUnit) -> Self {
+        let immutable_owner = unit.reader.take_image_owner();
         Self {
             namespace: unit.namespace,
             generation: unit.generation,
@@ -73,6 +90,14 @@ impl From<NativeImageUnit> for Current {
             kind: unit.kind,
             reader: Some(unit.reader),
             ready: false,
+            offered: false,
+            read_started: false,
+            cache_key: None,
+            immutable_owner,
+            fingerprint: None,
+            hash: None,
+            hashed: 0,
+            completed: None,
         }
     }
 }
@@ -82,16 +107,11 @@ struct Active<S> {
     current: Option<Current>,
 }
 
-enum State<S> {
-    Active(Active<S>),
-    Complete,
-    Failed,
-}
-
 /// Stream a complete native mapping with bounded selection/preparation, unknown unit lengths and one current codec. The source owns admission and retirement: invalid calls, errors and unwinds retire the cut and cannot resume. Successful EOF retires each codec before the next component is selected.
 pub struct NativeBackupImage<S> {
     cut: BackupCut,
-    state: State<S>,
+    active: Option<Active<S>>,
+    complete: bool,
     control: StorageReadControl,
     statistics: BackupSourceStatistics,
 }
@@ -101,10 +121,11 @@ impl<S: NativeImageEntries> NativeBackupImage<S> {
         control.check()?;
         Ok(Self {
             cut,
-            state: State::Active(Active {
+            active: Some(Active {
                 entries,
                 current: None,
             }),
+            complete: false,
             control: control.clone(),
             statistics: BackupSourceStatistics::default(),
         })
@@ -132,35 +153,29 @@ impl<S: NativeImageEntries> NativeBackupImage<S> {
             BackupSourceStep::Pending
         })
     }
-}
 
-impl<S: NativeImageEntries> BackupImageSource for NativeBackupImage<S> {
-    fn cut(&self) -> BackupCut {
-        self.cut
-    }
-
-    fn advance(&mut self, maximum_positions: usize) -> BackupResult<BackupSourceStep> {
-        let mut active = match std::mem::replace(&mut self.state, State::Failed) {
-            State::Active(active) => active,
-            State::Complete => {
-                self.state = State::Complete;
-                return Ok(BackupSourceStep::Complete);
-            }
-            State::Failed => return Err(BackupError::Finished),
-        };
+    fn select(
+        &mut self,
+        maximum_positions: usize,
+        comparison: bool,
+    ) -> BackupResult<BackupSourceStep> {
+        if self.complete {
+            return Ok(BackupSourceStep::Complete);
+        }
+        let mut active = self.active.take().ok_or(BackupError::Finished)?;
         self.control.check()?;
         active.entries.check()?;
         if maximum_positions == 0 {
             return Err(BackupError::Invalid("zero native image scan window"));
         }
         if let Some(current) = active.current.as_mut().filter(|unit| unit.reader.is_some()) {
-            if current.ready {
+            if current.ready || current.offered {
                 return Err(BackupError::Invalid("native image unit is not consumed"));
             }
             let step = self.prepare(current, maximum_positions)?;
             self.control.check()?;
             active.entries.check()?;
-            self.state = State::Active(active);
+            self.active = Some(active);
             return Ok(step);
         }
         if let Some(previous) = &mut active.current {
@@ -172,7 +187,7 @@ impl<S: NativeImageEntries> BackupImageSource for NativeBackupImage<S> {
         active.entries.check()?;
         let step = match step {
             NativeImageStep::Complete => {
-                self.state = State::Complete;
+                self.complete = true;
                 return Ok(BackupSourceStep::Complete);
             }
             NativeImageStep::Pending => BackupSourceStep::Pending,
@@ -186,38 +201,127 @@ impl<S: NativeImageEntries> BackupImageSource for NativeBackupImage<S> {
                 {
                     return Err(BackupError::Invalid("unordered native image units"));
                 }
-                let step = self.prepare(&mut current, maximum_positions - 1)?;
+                if let Some(generation) = active.entries.fingerprint_generation(current.family) {
+                    let key = crate::memory_capture::MemoryImageGeneration::address_key(
+                        self.cut,
+                        current.address(),
+                        current.kind,
+                    );
+                    current.fingerprint = generation.get(&key, current.immutable_owner.as_ref());
+                    current.cache_key = Some(key);
+                    if comparison {
+                        current.hash = Some(Sha256::new());
+                    }
+                    if current.fingerprint.is_some() {
+                        self.statistics.metadata_read_bytes =
+                            self.statistics.metadata_read_bytes.checked_add(40).ok_or(
+                                BackupError::Invalid("native fingerprint metadata overflow"),
+                            )?;
+                    }
+                }
+                let step = if comparison && current.fingerprint.is_some() {
+                    current.offered = true;
+                    BackupSourceStep::Unit
+                } else {
+                    self.prepare(&mut current, maximum_positions - 1)?
+                };
                 active.current = Some(current);
                 step
             }
         };
         self.control.check()?;
         active.entries.check()?;
-        self.state = State::Active(active);
+        self.active = Some(active);
         Ok(step)
+    }
+}
+impl<S: NativeImageEntries> BackupImageSource for NativeBackupImage<S> {
+    fn cut(&self) -> BackupCut {
+        self.cut
+    }
+    fn advance(&mut self, maximum_positions: usize) -> BackupResult<BackupSourceStep> {
+        self.select(maximum_positions, false)
+    }
+    fn advance_for_comparison(
+        &mut self,
+        maximum_positions: usize,
+    ) -> BackupResult<BackupSourceStep> {
+        self.select(maximum_positions, true)
+    }
+
+    fn prepare_current(&mut self, maximum_positions: usize) -> BackupResult<bool> {
+        let mut active = self.active.take().ok_or(BackupError::Finished)?;
+        self.control.check()?;
+        active.entries.check()?;
+        let current = active.current.as_mut().ok_or(BackupError::Finished)?;
+        if !current.ready {
+            if !current.offered {
+                return Err(BackupError::Invalid("native image unit is not selected"));
+            }
+            self.prepare(current, maximum_positions)?;
+        }
+        let ready = current.ready;
+        self.control.check()?;
+        active.entries.check()?;
+        self.active = Some(active);
+        Ok(ready)
+    }
+
+    fn reuse_current(&mut self, parent: UnitFingerprint) -> BackupResult<bool> {
+        let mut active = self.active.take().ok_or(BackupError::Finished)?;
+        self.control.check()?;
+        active.entries.check()?;
+        let current = active
+            .current
+            .as_mut()
+            .filter(|unit| unit.offered || unit.ready)
+            .ok_or(BackupError::Finished)?;
+        let reused = !current.read_started
+            && current.reader.is_some()
+            && current.fingerprint == Some(parent);
+        if reused {
+            current.reader = None;
+            current.hash = None;
+            current.completed = Some(parent);
+            current.ready = true;
+            current.offered = false;
+        }
+        self.active = Some(active);
+        Ok(reused)
+    }
+
+    fn current_hash(&self) -> SourceUnitHash {
+        let Some(unit) = self
+            .active
+            .as_ref()
+            .and_then(|active| active.current.as_ref())
+        else {
+            return SourceUnitHash::Repository;
+        };
+        if let Some(fingerprint) = unit.completed {
+            SourceUnitHash::Complete(fingerprint)
+        } else if unit.hash.is_some() {
+            SourceUnitHash::Computing
+        } else {
+            SourceUnitHash::Repository
+        }
     }
 
     fn current_unit(&self) -> Option<BackupSourceUnit<'_>> {
-        let State::Active(active) = &self.state else {
-            return None;
-        };
-        let current = active.current.as_ref().filter(|unit| unit.ready)?;
+        let active = self.active.as_ref()?;
+        let current = active
+            .current
+            .as_ref()
+            .filter(|unit| unit.ready || unit.offered)?;
         Some(BackupSourceUnit {
             address: current.address(),
             kind: current.kind,
-            decoded_bytes: None,
+            decoded_bytes: current.fingerprint.map(|fp| fp.decoded_bytes),
         })
     }
 
     fn read_current(&mut self, output: &mut [u8]) -> BackupResult<usize> {
-        let mut active = match std::mem::replace(&mut self.state, State::Failed) {
-            State::Active(active) => active,
-            State::Complete => {
-                self.state = State::Complete;
-                return Err(BackupError::Finished);
-            }
-            State::Failed => return Err(BackupError::Finished),
-        };
+        let mut active = self.active.take().ok_or(BackupError::Finished)?;
         self.control.check()?;
         active.entries.check()?;
         let current = active
@@ -236,10 +340,34 @@ impl<S: NativeImageEntries> BackupImageSource for NativeBackupImage<S> {
             .copied_payload_bytes
             .checked_add(count as u64)
             .ok_or(BackupError::Invalid("native image byte count overflow"))?;
+        current.read_started |= count != 0;
+        if let Some(hash) = &mut current.hash {
+            hash.update(&output[..count]);
+            current.hashed = current
+                .hashed
+                .checked_add(count as u64)
+                .ok_or(BackupError::Integrity)?;
+        }
         if count == 0 && !output.is_empty() {
             current.reader = None;
+            if let Some(hash) = current.hash.take() {
+                let fingerprint = UnitFingerprint {
+                    decoded_bytes: current.hashed,
+                    digest: crate::backup::ImageDigest::from_bytes(hash.finalize().into()),
+                };
+                let generation = active
+                    .entries
+                    .fingerprint_generation(current.family)
+                    .expect("hash belongs to a source generation");
+                generation.observe(
+                    current.cache_key.expect("hash owns cache key"),
+                    current.immutable_owner.as_ref(),
+                    fingerprint,
+                );
+                current.completed = Some(fingerprint);
+            }
         }
-        self.state = State::Active(active);
+        self.active = Some(active);
         Ok(count)
     }
 

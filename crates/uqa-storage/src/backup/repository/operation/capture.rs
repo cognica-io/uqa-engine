@@ -27,6 +27,9 @@ pub use job::{BackupCapturePhase, BackupCaptureProgress, BackupCaptureStep, Back
 pub struct BackupImageStatistics {
     pub parent_units: u64,
     pub hashed_payload_bytes: u64,
+    /// Units inherited from an exact snapshot fingerprint without reading their encoded source payload.
+    pub certified_reused_units: u64,
+    pub certified_reused_bytes: u64,
     pub reused_units: u64,
     pub reused_payload_bytes: u64,
     pub written_units: u64,

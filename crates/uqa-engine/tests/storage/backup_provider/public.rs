@@ -9,7 +9,8 @@ use uqa_engine::backup::{
     BackupCapabilities, BackupCapturePhase, BackupError, BackupJob, BackupOptions,
 };
 use uqa_storage::backup::{
-    BackupSourceStep, DecodedMemoryImageAddress, DecodedMemoryTableUnit, MemoryImageImportReader,
+    BackupFunctionKind, BackupReadStep, BackupSourceStep, DecodedMemoryImageAddress,
+    DecodedMemoryTableUnit, MemoryImageImportReader,
 };
 
 fn repository(path: &Path, control: &StorageReadControl, encrypted: bool) -> LocalRepository {
@@ -73,7 +74,7 @@ fn public_backup_jobs_preserve_committed_images_after_engine_and_source_loss(
         BackupCapabilities {
             export: true,
             import: false,
-            snapshot_fingerprints: false,
+            snapshot_fingerprints: true,
         }
     );
     setup(&engine);
@@ -137,6 +138,233 @@ fn public_backup_jobs_preserve_committed_images_after_engine_and_source_loss(
     );
 }
 
+fn capture_report(mut job: BackupJob<'_>) -> (BackupRoot, BackupCaptureReport) {
+    while job.advance(3, 4096).unwrap() == BackupCaptureStep::Pending {}
+    let report = job.report().unwrap();
+    (job.publish().unwrap(), report)
+}
+
+fn function_section_bytes(
+    repository: &LocalRepository,
+    root: BackupRoot,
+    control: &StorageReadControl,
+) -> u64 {
+    let lease = repository.open_backup(root.backup(), control).unwrap();
+    let mut input = lease.read_image(16 << 20, control).unwrap();
+    assert_eq!(input.advance(1024).unwrap(), BackupReadStep::Unit);
+    let entry = input.current_unit().unwrap();
+    assert_eq!(entry.kind(), UnitKind::FunctionReferences);
+    entry.decoded_bytes()
+}
+
+#[rstest::rstest]
+#[case::memory(None)]
+#[case::native(Some(Provider::Native))]
+#[case::sqlite_kv(Some(Provider::KV))]
+#[case::redb(Some(Provider::Redb))]
+fn incremental_fingerprints_preserve_a_pinned_sparse_image_and_measure_actual_reads(
+    #[case] kind: Option<Provider>,
+) {
+    let directory = tempfile::tempdir().unwrap();
+    let engine = kind.map_or_else(Engine::new, |kind| {
+        Engine::from_persistent_provider(kind.open(&directory.path().join("source"), 0)).unwrap()
+    });
+    sql(
+        &engine,
+        "CREATE TABLE archive_rows (id INTEGER PRIMARY KEY, body TEXT)",
+    );
+    sql(
+        &engine,
+        "INSERT INTO archive_rows VALUES (1,repeat('a',65536)),(2,repeat('b',65536))",
+    );
+    let control = StorageReadControl::with_limit(32 << 20);
+    let repository = repository(&directory.path().join("repository"), &control, false);
+    let options = BackupOptions::new(32 << 20, 16 << 20);
+    let capture = |parent| {
+        engine
+            .begin_backup(&repository, BackupOptions { parent, ..options }, &control)
+            .unwrap()
+    };
+    // Keep automatic statistics publication outside the two cuts whose inventories are compared.
+    if kind.is_some() {
+        sql(
+            &engine,
+            "BEGIN; LOCK TABLE archive_rows IN ACCESS EXCLUSIVE MODE",
+        );
+    }
+    let (parent, full) = capture_report(capture(None));
+    assert_eq!(
+        full.image.hashed_payload_bytes,
+        full.inventory.decoded_bytes
+    );
+    let (unchanged, steady) = capture_report(capture(Some(parent.backup())));
+    assert_eq!(unchanged.summary(), parent.summary());
+    assert_eq!(steady.image.written_units, 0);
+    if kind.is_none() {
+        // This cut has the 33-byte OID header and an empty declaration section.
+        let section = function_section_bytes(&repository, unchanged, &control);
+        assert_eq!(section, 9);
+        assert_eq!(
+            steady.image.hashed_payload_bytes,
+            33 + section,
+            "{steady:?}"
+        );
+    }
+    assert_eq!(
+        steady.image.written_object_bytes,
+        unchanged.inventory().object_bytes()
+    );
+    assert!(
+        steady.image.certified_reused_bytes >= 2 * 65536,
+        "{steady:?}"
+    );
+    if kind.is_some() {
+        sql(&engine, "ROLLBACK");
+    }
+    sql(
+        &engine,
+        "UPDATE archive_rows SET body=repeat('c',65536) WHERE id=2",
+    );
+    assert_eq!(
+        sql(
+            &engine,
+            "SELECT body = repeat('c',65536) AS changed FROM archive_rows WHERE id=2"
+        )[0]["changed"],
+        Value::Bool(true)
+    );
+    if kind.is_some() {
+        sql(
+            &engine,
+            "BEGIN; LOCK TABLE archive_rows IN ACCESS EXCLUSIVE MODE",
+        );
+    }
+    let sparse = capture(Some(parent.backup()));
+    let independent = capture(None);
+    if kind.is_some() {
+        sql(&engine, "ROLLBACK");
+    }
+    sql(
+        &engine,
+        "UPDATE archive_rows SET body=repeat('d',65536) WHERE id=1",
+    );
+    let (child, report) = capture_report(sparse);
+    let (reference, _) = capture_report(independent);
+    assert_eq!(child.summary(), reference.summary());
+    assert_ne!(child.summary(), parent.summary());
+    assert!(report.source.visited_positions > 0 && report.source.metadata_read_bytes > 0);
+    assert!(report.image.certified_reused_bytes >= 65536, "{report:?}");
+    assert!(
+        report.source.copied_payload_bytes >= 65536 && report.image.written_object_bytes > 0,
+        "{report:?}"
+    );
+    assert_eq!(
+        report.image.hashed_payload_bytes + report.image.certified_reused_bytes,
+        report.inventory.decoded_bytes
+    );
+    assert_eq!(
+        report.image.reused_payload_bytes + report.image.written_payload_bytes,
+        report.inventory.decoded_bytes
+    );
+    assert_eq!(control.memory().used(), 0);
+}
+
+#[rstest::rstest]
+#[case::memory(None)]
+#[case::native(Some(Provider::Native))]
+#[case::sqlite_kv(Some(Provider::KV))]
+#[case::redb(Some(Provider::Redb))]
+fn incremental_capture_reuses_provider_units_and_recomputes_the_registered_function_section(
+    #[case] kind: Option<Provider>,
+) {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use BackupFunctionKind::{AbsentAggregate, AbsentScalar, AbsentTable, Scalar};
+    let directory = tempfile::tempdir().unwrap();
+    let engine = kind.map_or_else(Engine::new, |kind| {
+        Engine::from_persistent_provider(kind.open(&directory.path().join("source"), 0)).unwrap()
+    });
+    let calls = Arc::new(AtomicUsize::new(0));
+    let observed = Arc::clone(&calls);
+    let mut registered = engine
+        .register_scalar_function_retained(
+            "abs",
+            uqa_engine::SQLFunctionOptions::default(),
+            move |_: &[Value]| {
+                observed.fetch_add(1, Ordering::SeqCst);
+                Ok(Value::Int(17))
+            },
+        )
+        .unwrap();
+    sql(&engine, "CREATE VIEW saved_function AS SELECT abs(-5) AS v");
+    sql(&engine, "CREATE TABLE payload(id INTEGER PRIMARY KEY, value TEXT); INSERT INTO payload VALUES (1, repeat('p',65536))");
+    if kind.is_some() {
+        sql(
+            &engine,
+            "BEGIN; LOCK TABLE payload IN ACCESS EXCLUSIVE MODE",
+        );
+    }
+    let control = StorageReadControl::with_limit(32 << 20);
+    let repository = repository(&directory.path().join("backup"), &control, false);
+    let start = |parent| {
+        let mut options = BackupOptions::new(32 << 20, 16 << 20);
+        options.parent = parent;
+        engine.begin_backup(&repository, options, &control).unwrap()
+    };
+    let before = calls.load(Ordering::SeqCst);
+    let (parent, _) = capture_report(start(None));
+    let pinned = start(Some(parent.backup()));
+    registered.unregister().unwrap();
+    let (steady, unchanged) = capture_report(pinned);
+    assert_eq!(steady.summary(), parent.summary());
+    assert_eq!(unchanged.image.written_units, 0);
+    let mut next = start(Some(parent.backup()));
+    // Until the first unit completes, all reported source positions belong to the declarations.
+    while next.progress().image.written_units == 0 {
+        assert_eq!(next.advance(1, 1024).unwrap(), BackupCaptureStep::Pending);
+    }
+    let inspected = next.progress().source;
+    assert!(inspected.visited_positions > 0, "{inspected:?}");
+    if kind.is_some() {
+        assert!(inspected.metadata_read_bytes > 0, "{inspected:?}");
+    }
+    let (changed, report) = capture_report(next);
+    let (independent, _) = capture_report(start(None));
+    if kind.is_some() {
+        sql(&engine, "ROLLBACK");
+    }
+    assert_eq!(calls.load(Ordering::SeqCst), before);
+    assert_eq!(independent.summary(), changed.summary());
+    assert_ne!(changed.summary(), parent.summary());
+    let read = |root: BackupRoot| {
+        let lease = repository.open_backup(root.backup(), &control).unwrap();
+        lease.verify(16 << 20, &control).unwrap();
+        let mut declarations = lease.function_references(&control).unwrap().unwrap();
+        let mut kinds = Vec::new();
+        loop {
+            match declarations.advance(1).unwrap() {
+                BackupSourceStep::Unit => {
+                    let reference = declarations.current().unwrap();
+                    assert_eq!(reference.name, "abs");
+                    kinds.push(reference.kind);
+                }
+                BackupSourceStep::Pending => (),
+                BackupSourceStep::Complete => return kinds,
+            }
+        }
+    };
+    assert_eq!(read(steady), [Scalar, AbsentTable, AbsentAggregate]);
+    assert_eq!(read(changed), [AbsentScalar, AbsentTable, AbsentAggregate]);
+    assert_eq!(report.image.written_units, 1);
+    let bytes = function_section_bytes(&repository, changed, &control);
+    assert_eq!(report.image.written_payload_bytes, bytes);
+    assert!(report.image.hashed_payload_bytes >= bytes);
+    assert!(report.image.certified_reused_bytes >= 65536, "{report:?}");
+    assert_eq!(
+        report.image.hashed_payload_bytes + report.image.certified_reused_bytes,
+        report.inventory.decoded_bytes
+    );
+    assert_eq!(control.memory().used(), 0);
+}
+
 #[test]
 fn public_backup_admission_preserves_authority_and_failed_transaction_boundaries() {
     let directory = tempfile::tempdir().unwrap();
@@ -184,7 +412,7 @@ fn public_backup_admission_preserves_authority_and_failed_transaction_boundaries
         BackupCapabilities {
             export: true,
             import: false,
-            snapshot_fingerprints: false
+            snapshot_fingerprints: true
         }
     );
     sql(&memory, "CREATE ROLE restricted; SET ROLE restricted");

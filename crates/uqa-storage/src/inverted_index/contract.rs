@@ -61,6 +61,16 @@ impl std::str::FromStr for AnalyzerPhase {
 }
 
 pub trait InvertedIndex: Send + Sync {
+    /// An immutable owner of this document's evaluated posting image. Providers can omit it when the complete posting state has no independently shared generation.
+    fn image_document_owner(
+        &self,
+        _id: DocId,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<Option<crate::memory_capture::MemoryImageOwner>> {
+        control.check()?;
+        Ok(None)
+    }
+
     /// Select the next evaluated text document from this exact image owner without reading its payload. Identity zero and the maximum identity are valid; absent text fields do not create an image document. Unsupported owners reject the request instead of collecting or rebuilding the index.
     fn next_image_document_id(
         &self,
