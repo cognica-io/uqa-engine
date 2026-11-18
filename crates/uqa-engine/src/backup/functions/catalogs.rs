@@ -183,8 +183,10 @@ impl Catalogs {
                                     routines::record(&bytes, source, work, visit).await?;
                                 }
                                 Definition::Table(field) => {
-                                    visit_stored_table_functions(&bytes, field, source, work, visit)
-                                        .await?;
+                                    visit_stored_table_functions(
+                                        &bytes, field, source, work, visit,
+                                    )
+                                    .await?;
                                 }
                                 Definition::View => visit_stored_query_json_runtime_calls(
                                     &bytes,
