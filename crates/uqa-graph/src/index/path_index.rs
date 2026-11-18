@@ -97,6 +97,14 @@ fn observed_store(
 }
 
 impl PathIndex {
+    /// Physical definitions created under an older key keep that key for page lookup, replacement and transaction observations.
+    pub fn physical_key(&self) -> Option<&str> {
+        match &self.storage {
+            PathStorage::Persistent(index) => Some(&index.key),
+            PathStorage::Memory(_) | PathStorage::ReadView { .. } => None,
+        }
+    }
+
     pub fn build<G: GraphStore>(
         store: &G,
         graph: &str,

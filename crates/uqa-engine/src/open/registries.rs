@@ -139,7 +139,7 @@ impl Engine {
         .map_err(|error| StorageBackendError::Other(error.to_string()))?;
         uqa_execution::catalog::range_type::validate_catalog(&self.restored_catalog_read_view())
             .map_err(|error| StorageBackendError::Other(error.to_string()))?;
-        self.restore_path_indexes_from_catalog(catalog)?;
+        self.restore_path_indexes(None)?;
         Ok(())
     }
 
@@ -269,67 +269,21 @@ impl Engine {
         Ok(())
     }
 
-    fn restore_path_indexes_from_catalog(
+    pub(super) fn restore_path_indexes(
         &self,
-        catalog: &dyn CatalogFacade,
+        changed: Option<&std::collections::BTreeSet<String>>,
     ) -> StorageBackendResult<()> {
-        let mut indexes = self.durable.path_indexes.read().clone();
-        for (key, seq_json) in catalog.load_path_indexes()? {
-            let label_sequences: Vec<Vec<String>> = serde_json::from_str(&seq_json)?;
-            let (graph, name) = key.split_once("::").ok_or_else(|| {
-                StorageBackendError::Other(format!("invalid path-index key `{key}`"))
-            })?;
-            if graph.is_empty() || name.is_empty() {
-                return Err(StorageBackendError::Other(format!(
-                    "invalid path-index key `{key}`"
-                )));
-            }
-            let graphs = self.durable.graphs.read();
-            let store = graphs.get(graph).ok_or_else(|| {
-                StorageBackendError::Other(format!(
-                    "path index `{key}` references missing graph `{graph}`"
-                ))
-            })?;
-            let _ = store;
-            let idx = self.bind_path_index_definition(&key, graph, &label_sequences)?;
-            drop(graphs);
-            indexes.insert(&key, idx)?;
-        }
-        *self.durable.path_indexes.write() = indexes;
-        Ok(())
-    }
-
-    pub(super) fn refresh_changed_graph_path_indexes(
-        &self,
-        catalog: &dyn CatalogFacade,
-        changed: &std::collections::BTreeSet<String>,
-    ) -> StorageBackendResult<()> {
-        if changed.is_empty() {
+        if changed.is_some_and(std::collections::BTreeSet::is_empty) {
             return Ok(());
         }
-        let mut indexes = self.durable.path_indexes.read().clone();
-        indexes.remove_where(|key| {
-            key.split_once("::")
-                .is_some_and(|(graph, _)| changed.contains(graph))
-        })?;
-        for (key, json) in catalog.load_path_indexes()? {
-            let Some((graph, _)) = key.split_once("::") else {
-                continue;
-            };
-            if !changed.contains(graph) {
-                continue;
-            }
-            let sequences: Vec<Vec<String>> = serde_json::from_str(&json)?;
-            let graphs = self.durable.graphs.read();
-            let store = graphs.get(graph).ok_or_else(|| {
-                StorageBackendError::Other(format!(
-                    "path index `{key}` references missing graph `{graph}`"
-                ))
-            })?;
-            let _ = store;
-            let index = self.bind_path_index_definition(&key, graph, &sequences)?;
-            indexes.insert(&key, index)?;
-        }
+        let graphs = self.durable.graphs.read().clone();
+        let current = self.durable.path_indexes.read().clone();
+        let indexes = current.restored(
+            &graphs,
+            self.storage.catalog.as_ref().expect("persistent catalog"),
+            self.storage.backend.as_ref().expect("persistent backend"),
+            changed,
+        )?;
         *self.durable.path_indexes.write() = indexes;
         Ok(())
     }

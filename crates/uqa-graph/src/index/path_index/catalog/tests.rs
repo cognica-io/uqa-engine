@@ -9,6 +9,7 @@ use crate::{GraphStoreHandle, MemoryGraphStore};
 use uqa_storage::{read_control::StorageReadControl, StorageBackendError};
 
 mod input;
+mod ownership;
 
 #[test]
 fn decoded_path_catalog_retains_original_names_and_materializations_through_runtime_replacement() {

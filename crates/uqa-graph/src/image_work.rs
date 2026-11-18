@@ -7,9 +7,34 @@
 //! Native graph transformations share ordinary and retained work boundaries.
 
 use std::{
+    borrow::Borrow,
+    cmp::Ordering,
     future::Future,
     task::{Context, Poll, Waker},
 };
+use uqa_core::{
+    image_io::AsyncImageInput,
+    memory::{MapKeyInput, Produced},
+};
+use uqa_storage::{StorageBackendError, StorageBackendResult};
+
+pub(crate) struct CatalogNames<'a, 'input>(pub &'a mut AsyncImageInput<'input>);
+
+impl<Q: Borrow<str> + Sync + ?Sized> MapKeyInput<Q, Produced<String>> for CatalogNames<'_, '_> {
+    type Error = StorageBackendError;
+
+    async fn checkpoint(&mut self) -> StorageBackendResult<()> {
+        Ok(self.0.checkpoint().await?)
+    }
+
+    async fn compare(
+        &mut self,
+        query: &Q,
+        stored: &Produced<String>,
+    ) -> StorageBackendResult<Ordering> {
+        uqa_storage::catalog::compare_names(query.borrow(), stored, self.0).await
+    }
+}
 
 pub(crate) trait Work<E>: Send {
     fn checkpoint(&mut self) -> impl Future<Output = Result<(), E>> + Send;

@@ -221,7 +221,11 @@ impl Resources {
                                     3 => {
                                         resources.paths = resources
                                             .paths
-                                            .read_image_from(name, &mut input)
+                                            .read_graph_image_from(
+                                                name,
+                                                &resources.graphs,
+                                                &mut input,
+                                            )
                                             .await?;
                                     }
                                     4 => {

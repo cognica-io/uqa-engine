@@ -82,28 +82,6 @@ impl Engine {
         Ok(())
     }
 
-    pub(super) fn bind_path_index_definition(
-        &self,
-        key: &str,
-        graph: &str,
-        sequences: &[Vec<String>],
-    ) -> StorageBackendResult<uqa_graph::PathIndex> {
-        let catalog = self.storage.catalog.as_ref().ok_or_else(|| {
-            StorageBackendError::Other("persistent path index requires a catalog".into())
-        })?;
-        let backend = self.storage.backend.as_ref().ok_or_else(|| {
-            StorageBackendError::Other("persistent path index requires a backend".into())
-        })?;
-        uqa_graph::PathIndex::open_persistent(
-            Arc::clone(catalog),
-            Arc::clone(backend),
-            key,
-            graph,
-            sequences,
-        )
-        .map_err(|error| StorageBackendError::backend("graph catalog", error))
-    }
-
     pub(super) fn restore_graphs_from_catalog(
         &self,
         catalog: &dyn CatalogFacade,
