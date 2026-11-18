@@ -6,6 +6,7 @@
 
 //! Catalog text projections share the physical export cut and retire each selected row independently.
 
+use super::records::RecordSelection;
 use super::{
     BackupError, BackupResult, BackupSourceStatistics, RecordImageCursor, RecordImageStep,
 };
@@ -35,6 +36,32 @@ enum Envelope {
 enum Projection {
     View(Envelope),
     Metadata(Option<TextRange>),
+    TableField(BackupTableField),
+}
+
+/// The independently stored SQL column and constraint declarations in a table catalog row.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BackupTableField {
+    Columns,
+    Constraints,
+}
+
+/// Select stored SQL declarations from the original capture cut.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BackupCatalogField<'a> {
+    ViewQuery,
+    MetadataPrefix(&'a str),
+    Table(BackupTableField),
+    Metadata(&'a str),
+}
+
+impl BackupTableField {
+    fn key(self) -> &'static [u8] {
+        match self {
+            Self::Columns => b"columns_json",
+            Self::Constraints => b"constraints_json",
+        }
+    }
 }
 
 type KeySelection = fn(&[u8], &str, &StorageReadControl) -> crate::StorageBackendResult<bool>;
@@ -72,7 +99,7 @@ impl BackupCatalogTextInput {
     ) -> BackupResult<Self> {
         Self::new(
             records,
-            prefix,
+            RecordSelection::Descendants(prefix),
             Projection::View(Envelope::Text(locate)),
             None,
             limits,
@@ -88,8 +115,43 @@ impl BackupCatalogTextInput {
     ) -> BackupResult<Self> {
         Self::new(
             records,
-            prefix,
+            RecordSelection::Descendants(prefix),
             Projection::View(Envelope::KeyValue),
+            None,
+            limits,
+            control,
+        )
+    }
+
+    pub(crate) fn from_table_records(
+        records: &RecordImageCursor,
+        prefix: &[u8],
+        field: BackupTableField,
+        limits: CatalogInputLimits,
+        control: &StorageReadControl,
+    ) -> BackupResult<Self> {
+        Self::new(
+            records,
+            RecordSelection::Descendants(prefix),
+            Projection::TableField(field),
+            None,
+            limits,
+            control,
+        )
+    }
+
+    /// Read one encoded metadata key using the native TEXT range or the complete Key/Value payload.
+    pub fn from_metadata_key(
+        records: &RecordImageCursor,
+        encoded_key: &[u8],
+        locate: Option<TextRange>,
+        limits: CatalogInputLimits,
+        control: &StorageReadControl,
+    ) -> BackupResult<Self> {
+        Self::new(
+            records,
+            RecordSelection::Exact(encoded_key),
+            Projection::Metadata(locate),
             None,
             limits,
             control,
@@ -106,7 +168,7 @@ impl BackupCatalogTextInput {
     ) -> BackupResult<Self> {
         Self::new(
             records,
-            prefix,
+            RecordSelection::Descendants(prefix),
             Projection::Metadata(Some(locate)),
             None,
             limits,
@@ -127,7 +189,7 @@ impl BackupCatalogTextInput {
         prefix.push_str(logical_prefix)?;
         Self::new(
             records,
-            physical_prefix,
+            RecordSelection::Descendants(physical_prefix),
             Projection::Metadata(None),
             Some(Filter { prefix, select }),
             limits,
@@ -137,7 +199,7 @@ impl BackupCatalogTextInput {
 
     fn new(
         records: &RecordImageCursor,
-        prefix: &[u8],
+        selection: RecordSelection<'_>,
         projection: Projection,
         filter: Option<Filter>,
         limits: CatalogInputLimits,
@@ -147,7 +209,7 @@ impl BackupCatalogTextInput {
         limits.validate()?;
         let memory = control.memory().reserve(size_of::<Input>())?;
         let source_cancellation = records.cancellation().clone();
-        let records = records.record_prefix(prefix, limits.maximum_key_bytes, control)?;
+        let records = records.record_selection(selection, limits.maximum_key_bytes, control)?;
         Ok(Self {
             input: Some(Budgeted::new(
                 Box::new(Input {
@@ -244,7 +306,9 @@ impl Input {
                 let range = match self.projection {
                     Projection::View(Envelope::Text(locate))
                     | Projection::Metadata(Some(locate)) => locate(&mut self.records)?,
-                    Projection::View(Envelope::KeyValue) | Projection::Metadata(None) => 0..length,
+                    Projection::View(Envelope::KeyValue)
+                    | Projection::Metadata(None)
+                    | Projection::TableField(_) => 0..length,
                 };
                 if range.start > range.end || range.end > length {
                     return Err(BackupError::Invalid("catalog text exceeds its record"));
@@ -305,6 +369,13 @@ impl Row {
                         .then(FieldProjector::definition),
                     string: StringBytes::default(),
                     query: (!legacy).then(FieldProjector::query),
+                },
+                Output::Query(BudgetedVec::new(control.memory())),
+            ),
+            Projection::TableField(field) => (
+                View {
+                    wrapper: Some(FieldProjector::table(field)),
+                    ..View::default()
                 },
                 Output::Query(BudgetedVec::new(control.memory())),
             ),
@@ -376,6 +447,7 @@ impl View {
             if let Some(wrapper) = self.wrapper.as_mut() {
                 match wrapper.feed(byte, control)? {
                     FieldStep::Ignore => continue,
+                    FieldStep::Absent if wrapper.allows_missing() => return Ok(Next::Done),
                     FieldStep::Absent => return Err(invalid()),
                     FieldStep::Last => {
                         self.string.finish()?;

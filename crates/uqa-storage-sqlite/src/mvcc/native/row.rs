@@ -198,6 +198,18 @@ pub(super) fn metadata_value_range(
     text_column_range(record, super::NativeRecordFamily::Metadata, "value")
 }
 
+pub(super) fn table_columns_range(
+    record: &mut uqa_storage::backup::RecordImageCursor,
+) -> uqa_storage::backup::BackupResult<std::ops::Range<usize>> {
+    text_column_range(record, super::NativeRecordFamily::Tables, "columns")
+}
+
+pub(super) fn table_constraints_range(
+    record: &mut uqa_storage::backup::RecordImageCursor,
+) -> uqa_storage::backup::BackupResult<std::ops::Range<usize>> {
+    text_column_range(record, super::NativeRecordFamily::Tables, "constraints")
+}
+
 fn text_column_range(
     record: &mut uqa_storage::backup::RecordImageCursor,
     family: super::NativeRecordFamily,
@@ -213,15 +225,23 @@ fn text_column_range(
     record.read_record_at(0, &mut header)?;
     read_header(&mut header.as_slice(), layout.columns.len())?;
     let mut offset = header.len();
-    for column in layout.columns {
-        let mut field = [0; 5];
-        record.read_record_at(offset, &mut field)?;
-        if field[0] != TEXT {
+    for (column, nullable) in layout.columns.iter().zip(layout.nullable) {
+        let mut tag = [0; 1];
+        record.read_record_at(offset, &mut tag)?;
+        offset += tag.len();
+        if tag == [0] && *nullable {
+            if *column == target {
+                return Ok(offset..offset);
+            }
+            continue;
+        }
+        if tag != [TEXT] {
             return Err(invalid("native catalog text prefix requires TEXT columns").into());
         }
-        offset += field.len();
-        let bytes =
-            u32::from_be_bytes(field[1..].try_into().expect("native field length")) as usize;
+        let mut width = [0; 4];
+        record.read_record_at(offset, &mut width)?;
+        offset += width.len();
+        let bytes = u32::from_be_bytes(width) as usize;
         let end = offset
             .checked_add(bytes)
             .filter(|end| *end <= length)

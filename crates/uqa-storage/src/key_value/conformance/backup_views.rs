@@ -5,7 +5,9 @@
 //
 
 use crate::{
-    backup::{BackupError, BackupImageSource, BackupResult, BackupSourceStatistics},
+    backup::{
+        BackupCatalogField, BackupError, BackupImageSource, BackupResult, BackupSourceStatistics,
+    },
     catalog::input::{CatalogInputLimits, CatalogInputStep},
     read_control::StorageReadControl,
     PersistentStorageProvider, RelationSecurityRow, ViewRow,
@@ -22,7 +24,7 @@ fn collect(
         maximum_value_bytes,
     };
     let mut input = image
-        .stored_view_queries(limits, control)?
+        .stored_catalog_text(BackupCatalogField::ViewQuery, limits, control)?
         .ok_or(BackupError::Invalid("missing persistent view input"))?;
     let mut output = Vec::new();
     loop {
@@ -111,7 +113,7 @@ pub fn verify_backup_view_queries(provider: &dyn PersistentStorageProvider) -> B
         maximum_value_bytes: 8192,
     };
     let mut input = old
-        .stored_view_queries(limits, &control)?
+        .stored_catalog_text(BackupCatalogField::ViewQuery, limits, &control)?
         .ok_or(BackupError::Invalid("missing persistent view input"))?;
     control.cancellation().cancel();
     if !matches!(input.advance(), Err(BackupError::Cancelled(_)))
@@ -124,7 +126,7 @@ pub fn verify_backup_view_queries(provider: &dyn PersistentStorageProvider) -> B
     }
     let independent = StorageReadControl::with_limit(64 << 10);
     let mut input = old
-        .stored_view_queries(limits, &independent)?
+        .stored_catalog_text(BackupCatalogField::ViewQuery, limits, &independent)?
         .ok_or(BackupError::Invalid("missing persistent view input"))?;
     capture.cancellation().cancel();
     if !matches!(input.advance(), Err(BackupError::Cancelled(_)))

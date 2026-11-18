@@ -28,8 +28,7 @@ mod root;
 mod source;
 mod types;
 mod view_queries;
-pub use view_queries::BackupCatalogTextInput;
-pub use view_queries::BackupCatalogTextInput as BackupViewQueryInput;
+pub use view_queries::{BackupCatalogField, BackupCatalogTextInput, BackupTableField};
 
 #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 pub use memory::{MemoryImageImportReader, MemoryImageImportUnit};

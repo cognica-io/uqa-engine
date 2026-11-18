@@ -100,9 +100,16 @@ struct Unit {
 #[derive(Clone, Copy)]
 enum Stage {
     Scan(Plane),
+    ExactRecord,
     Unit(Unit),
     Complete,
     Failed,
+}
+
+#[derive(Clone, Copy)]
+pub(super) enum RecordSelection<'a> {
+    Descendants(&'a [u8]),
+    Exact(&'a [u8]),
 }
 
 /// Streams only the joint cut's MVCC records and autonomous watermarks. Provider adapters remain responsible for complete image coverage, versioned encoding and import. The cursor owns the cut until completion or failure, and closes every source read before returning to its caller.
@@ -147,20 +154,28 @@ impl RecordImageCursor {
         })
     }
 
-    /// Read only the proper descendants of a physical key prefix on this same captured cut. The original scan ceiling bounds post-capture insertions. There is no second snapshot or allocator scan.
-    pub(super) fn record_prefix(
+    /// Select one physical key or the proper descendants of a prefix on this captured cut.
+    pub(super) fn record_selection(
         &self,
-        prefix: &[u8],
+        selection: RecordSelection<'_>,
         maximum_key_bytes: usize,
         control: &StorageReadControl,
     ) -> BackupResult<Self> {
+        let (prefix, stage, ceiling) = match selection {
+            RecordSelection::Descendants(prefix) => (
+                prefix,
+                Stage::Scan(Plane::Records),
+                self.records_end.as_deref(),
+            ),
+            RecordSelection::Exact(key) => (key, Stage::ExactRecord, None),
+        };
         control.check_value_size(prefix.len(), maximum_key_bytes)?;
         let source = self.source.as_ref().ok_or(BackupError::Finished)?;
         let mut after = BackupCursorKey::new(control.memory());
         after.extend_from_slice(prefix)?;
         let mut exclusive = false;
         let mut end = None;
-        if let Some(ceiling) = self.records_end.as_deref().filter(|end| *end > prefix) {
+        if let Some(ceiling) = ceiling.filter(|end| *end > prefix) {
             let mut key = BackupCursorKey::new(control.memory());
             if ceiling.starts_with(prefix) {
                 control.check_value_size(ceiling.len(), maximum_key_bytes)?;
@@ -186,7 +201,7 @@ impl RecordImageCursor {
             records_end_exclusive: exclusive,
             maximum_key_bytes,
             after: Some(after),
-            stage: Stage::Scan(Plane::Records),
+            stage,
             positions: 0,
             copied_bytes: 0,
             fingerprint_bytes: 0,
@@ -280,6 +295,7 @@ impl RecordImageCursor {
             Stage::Complete => return Ok(RecordImageStep::Complete),
             Stage::Failed => return Err(BackupError::Finished),
             Stage::Unit(unit) if unit.offset == unit.length => unit.plane,
+            Stage::ExactRecord => return self.select_exact_record(),
             Stage::Unit(_) => {
                 return Err(BackupError::Invalid("record image unit is not consumed"))
             }
@@ -333,13 +349,9 @@ impl RecordImageCursor {
                     let value = image
                         .visible
                         .filter(|metadata| metadata.live)
-                        .map(|RecordMetadata { revision, .. }| {
-                            revision.ok_or(crate::mvcc::VersionError::InvalidEncoding(
-                                "live image record has no revision",
-                            ))
-                        })
+                        .map(Self::record_payload)
                         .transpose()?;
-                    visit(key, value.map(Payload::Record))
+                    visit(key, value)
                 },
             ),
         };
@@ -365,6 +377,27 @@ impl RecordImageCursor {
             return Ok(self.end_plane(plane));
         }
         Ok(RecordImageStep::Pending)
+    }
+
+    fn select_exact_record(&mut self) -> BackupResult<RecordImageStep> {
+        let key = self.after.as_deref().expect("requested record key");
+        let source = self.source.as_ref().ok_or(BackupError::Finished)?;
+        let visible = source.records().metadata(key, &self.control)?;
+        self.positions += 1;
+        if let Some(metadata) = visible.filter(|metadata| metadata.live) {
+            self.select_unit(Plane::Records, Self::record_payload(metadata)?, None)?;
+            return Ok(RecordImageStep::Unit);
+        }
+        Ok(self.end_plane(Plane::Records))
+    }
+
+    fn record_payload(metadata: RecordMetadata) -> VersionResult<Payload> {
+        metadata
+            .revision
+            .map(Payload::Record)
+            .ok_or(crate::mvcc::VersionError::InvalidEncoding(
+                "live image record has no revision",
+            ))
     }
 
     fn select_unit(
