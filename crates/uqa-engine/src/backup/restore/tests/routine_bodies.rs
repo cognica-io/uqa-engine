@@ -121,6 +121,7 @@ pub(super) fn reject(
         error.to_string().contains(expected),
         "{provider:?}: {error}"
     );
+    drop(error);
     assert_eq!(job.phase(), RestorePhase::Failed);
     assert!(!path.exists());
     assert_eq!(control.memory().used(), 0);
