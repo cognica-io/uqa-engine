@@ -51535,6 +51535,32 @@
       ]
     },
     {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "deferred_source_copies_exact_utf8_windows_and_preserves_later_parameter_edits",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/stored_routine/tests.rs",
+      "capability": "Stored routine restoration",
+      "workload": "Restore a deferred routine body with multibyte text at work-window boundaries and edit a subsequently restored parameter.",
+      "invariant": "Each copy advances by at most 4096 complete UTF-8 bytes in the original allocation. Source text and parameter changes survive publication.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "deferred_source_keeps_the_ordinary_peak_and_releases_every_unpublished_prefix",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/stored_routine/tests.rs",
+      "capability": "Stored routine restoration",
+      "workload": "Copy a deferred body at the ordinary memory limit, one byte below it and with cancellation during construction.",
+      "invariant": "The exact allowance suffices, denial or cancellation releases the private declaration, and a partial body cannot be published.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
       "package": "uqa-storage",
       "kind": "lib",
       "test": "native_image_preparation_and_output_are_bounded_and_preserve_exact_units",

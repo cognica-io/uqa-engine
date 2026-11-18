@@ -9,7 +9,9 @@
 use super::{capture_stored_with_footprint, syntax::SyntaxCopy, CopyPurpose, Copying, Result};
 use crate::ast::{CreateFunction, FunctionBody, FunctionParam, Statement};
 use crate::routines::{dependencies::RoutineDeclaration, SQLRoutine};
-use uqa_core::memory::{BudgetedVec, MemoryError, MemoryReservation, Produced, ProductionControl};
+use uqa_core::memory::{
+    BudgetedVec, MemoryError, MemoryReservation, Produced, ProductionControl, ProductionString,
+};
 
 #[derive(Clone, Copy)]
 struct Field {
@@ -64,7 +66,7 @@ impl Field {
     }
 }
 
-/// The private declaration keeps its original stored field projection and one reservation measurement per independently replaceable item. Parameters and body statements are populated in declaration order.
+/// The private declaration keeps its original stored field projection and one reservation measurement per independently replaceable item. Deferred source text, parameters and body statements are populated from the immutable routine before binding or publication.
 pub struct StoredRoutineDefinition {
     source: SQLRoutine,
     definition: CreateFunction,
@@ -89,7 +91,12 @@ impl StoredRoutineDefinition {
             &mut copying,
             |copying| Field::slots(source.params.len(), &mut parameters, copying),
             |copying| match &source.body {
-                body @ FunctionBody::Source(_) => body.copy_syntax(copying),
+                FunctionBody::Source(text) => {
+                    let mut value = ProductionString::new(*control);
+                    value.reserve(text.len())?;
+                    value.push_str_chunk(text)?;
+                    Ok(FunctionBody::Source(copying.take(value.finish()?)))
+                }
                 FunctionBody::Statements(source) => {
                     Field::slots(source.len(), &mut statements, copying)
                         .map(FunctionBody::Statements)
@@ -109,9 +116,20 @@ impl StoredRoutineDefinition {
         })
     }
 
-    /// Copy one parameter or body statement from the immutable placeholder into the private declaration.
+    /// Copy one source-text chunk, parameter or body statement from the immutable placeholder into the private declaration.
     pub fn copy_next_field(&mut self, control: &ProductionControl<'_>) -> Result<bool> {
         control.check()?;
+        if let (FunctionBody::Source(original), FunctionBody::Source(copied)) =
+            (&self.source.def.body, &mut self.definition.body)
+        {
+            if copied.len() < original.len() {
+                // The header admitted this buffer at its complete size before installing it.
+                debug_assert!(copied.capacity() >= original.len());
+                copied.push_str(ProductionString::first_chunk(&original[copied.len()..]));
+                control.check()?;
+                return Ok(self.complete());
+            }
+        }
         if let Some(parameter) = self.source.def.params.get(self.parameters.len()) {
             Field::append(
                 parameter,
@@ -140,9 +158,14 @@ impl StoredRoutineDefinition {
 
     fn complete(&self) -> bool {
         self.parameters.len() == self.source.def.params.len()
-            && match &self.source.def.body {
-                FunctionBody::Statements(statements) => self.statements.len() == statements.len(),
-                FunctionBody::Source(_) => true,
+            && match (&self.source.def.body, &self.definition.body) {
+                (FunctionBody::Statements(statements), FunctionBody::Statements(_)) => {
+                    self.statements.len() == statements.len()
+                }
+                (FunctionBody::Source(original), FunctionBody::Source(copied)) => {
+                    copied.len() == original.len()
+                }
+                _ => unreachable!("retained routine body form"),
             }
     }
 
