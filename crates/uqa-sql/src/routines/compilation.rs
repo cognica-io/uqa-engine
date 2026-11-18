@@ -7,7 +7,9 @@
 //! Routine language validation and body lowering over declared types and fresh binding inputs.
 
 mod ownership;
+mod standard;
 pub use ownership::bind_analyzed_sql_body_types_owned;
+pub use standard::SQLStandardBodyCompilation;
 
 use super::{
     declaration::{
@@ -180,7 +182,14 @@ fn compile_body(
     persisted_definition: bool,
     mode: crate::plpgsql::PLpgSQLCompileMode,
 ) -> Result<CompiledFunctionBody, SQLError> {
-    let mut stored_regrole_constants = validate_routine_signature(context, def)?;
+    if let FunctionBody::Statements(statements) = &def.body {
+        let control = uqa_core::memory::ProductionControl::uncontrolled();
+        let mut compilation =
+            SQLStandardBodyCompilation::new(context, def, persisted_definition, &control)?;
+        while !compilation.advance(context, statements, &control)? {}
+        return Ok(compilation.into_ordinary());
+    }
+    let stored_regrole_constants = validate_routine_signature(context, def)?;
     match def.language.as_str() {
         "plpgsql" => {
             stored_regrole_constants.reject_with(context.regroles)?;
@@ -192,84 +201,35 @@ fn compile_body(
             Ok(CompiledFunctionBody::PLpgSQL(function))
         }
         "sql" => {
-            let (statements, bind_catalog_dependencies) = match &def.body {
-                FunctionBody::Source(source) => {
-                    stored_regrole_constants.reject_with(context.regroles)?;
-                    (
-                        crate::compile(source).map_err(|error| def.source_body_error(error))?,
-                        false,
-                    )
-                }
-                FunctionBody::Statements(statements) => (statements.clone(), true),
+            let FunctionBody::Source(source) = &def.body else {
+                unreachable!("SQL-standard body compiled above")
             };
-            let mut plans = compile_sql_routine_plans(
+            stored_regrole_constants.reject_with(context.regroles)?;
+            let statements =
+                crate::compile(source).map_err(|error| def.source_body_error(error))?;
+            let compiler = standard::StatementCompiler::new(
                 context,
                 def,
-                statements,
-                bind_catalog_dependencies,
-                persisted_definition && matches!(def.body, FunctionBody::Statements(_)),
+                &uqa_core::memory::ProductionControl::uncontrolled(),
             )?;
-            if bind_catalog_dependencies {
-                for plan in &mut plans {
-                    stored_regrole_constants.collect_plan(plan);
-                }
-                stored_regrole_constants.reject_with(context.regroles)?;
-            }
+            let plans = statements
+                .into_iter()
+                .map(|statement| {
+                    compiler.compile(
+                        context,
+                        statement,
+                        SQLRoutineLowering {
+                            bind_catalog_dependencies: false,
+                            persisted_definition: false,
+                            preserve_target_expressions: false,
+                        },
+                    )
+                })
+                .collect::<Result<_, _>>()?;
             Ok(CompiledFunctionBody::SQL(plans))
         }
         _ => unreachable!("routine language was validated above"),
     }
-}
-
-fn compile_sql_routine_plans(
-    context: &RoutineCompilationContext<'_>,
-    def: &CreateFunction,
-    statements: Vec<Statement>,
-    bind_catalog_dependencies: bool,
-    persisted_definition: bool,
-) -> Result<Vec<UnifiedPlan>, SQLError> {
-    let positional_parameters =
-        super::body_validation::routine_parameter_values(context.types, def);
-    let parameters = super::body_parameters::sql_body_parameter_scope(def, &positional_parameters)?;
-    statements
-        .into_iter()
-        .map(|statement| {
-            let mut plan = lower_sql_routine_statement(
-                context,
-                statement,
-                SQLRoutineLowering {
-                    bind_catalog_dependencies,
-                    persisted_definition,
-                    preserve_target_expressions: false,
-                },
-            )?;
-            // A SQL-standard body keeps definition-time names. Source syntax
-            // stays unbound so statement reanalysis can use the current path;
-            // successful first-use analysis retains its own type identities.
-            if bind_catalog_dependencies {
-                let binding = context.catalog.binding_snapshot()?;
-                crate::binding::bind_routine_parameter_references(
-                    context.routines,
-                    &mut plan,
-                    &positional_parameters,
-                    &binding.context(),
-                    &parameters,
-                )?;
-                if let UnifiedPlan::Query(query) = &mut plan {
-                    crate::binding::bind_query_plan_routines_for_storage(
-                        context.routines,
-                        query,
-                        &positional_parameters,
-                        &binding.context(),
-                        None,
-                    )?;
-                }
-            }
-            // Stored definitions retain their analyzed logical expressions;
-            // immutable evaluation belongs to invocation planning.
-            Ok(plan)
-        })
-        .collect()
 }
 
 /// How a SQL routine statement is lowered from its stored syntax.

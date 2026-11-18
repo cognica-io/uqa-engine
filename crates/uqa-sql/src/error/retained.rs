@@ -32,6 +32,30 @@ impl SQLError {
         message: Produced<String>,
         control: &ProductionControl<'_>,
     ) -> Result<Self, Self> {
+        Ok(Self::produced_routine_message(sqlstate, message, control)?)
+    }
+
+    /// Preserve the SQLSTATE and display text when a native catalog returns an analysis diagnostic across the storage boundary.
+    pub fn into_retained_catalog_message(
+        self,
+        control: &ProductionControl<'_>,
+    ) -> Result<Self, uqa_core::ValueRetentionError> {
+        if control.budget().is_none()
+            || matches!(self, Self::Cancelled(_) | Self::RetainedRoutine(_))
+        {
+            return Ok(self);
+        }
+        let Some(sqlstate) = self.sqlstate() else {
+            return Ok(self);
+        };
+        Self::produced_routine_message(sqlstate, control.format(format_args!("{self}"))?, control)
+    }
+
+    fn produced_routine_message(
+        sqlstate: &str,
+        message: Produced<String>,
+        control: &ProductionControl<'_>,
+    ) -> Result<Self, uqa_core::ValueRetentionError> {
         if control.budget().is_none() {
             let (message, memory) = message.into_parts();
             debug_assert!(memory.is_none());

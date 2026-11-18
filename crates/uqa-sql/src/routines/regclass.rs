@@ -6,12 +6,13 @@
 
 //! Creation-time relation identities in SQL-standard bodies and argument defaults.
 
+use super::dependencies::RoutineDeclaration;
 use super::{declaration::RoutineTypeCatalog, lifecycle::relations::is_regclass};
 use crate::{
-    ast::{ColumnType, CreateFunction, Expr, FunctionBody},
+    ast::{ColumnType, CreateFunction, Expr},
     SQLError,
 };
-use uqa_core::Value;
+use uqa_core::{memory::ProductionControl, Value};
 
 pub trait RoutineRegclassCatalog {
     fn resolve_routine_regclass(&self, reference: &str) -> Result<Option<i64>, SQLError>;
@@ -21,7 +22,17 @@ pub fn bind_routine_regclass_constants(
     relations: &dyn RoutineRegclassCatalog,
     definition: &mut CreateFunction,
 ) -> Result<bool, SQLError> {
-    RegclassBinding { types, relations }.bind_routine_constants(definition)
+    let mut binding = RoutineRegclassBinding::default();
+    loop {
+        if let Some(changed) = binding.advance(
+            types,
+            relations,
+            definition,
+            &ProductionControl::uncontrolled(),
+        )? {
+            return Ok(changed);
+        }
+    }
 }
 struct RegclassBinding<'a> {
     types: &'a dyn RoutineTypeCatalog,
@@ -107,31 +118,67 @@ impl RegclassBinding<'_> {
             _ => Ok(false),
         }
     }
+}
 
-    fn bind_routine_constants(&self, definition: &mut CreateFunction) -> Result<bool, SQLError> {
+#[derive(Default)]
+pub struct RoutineRegclassBinding {
+    parameters_done: bool,
+    position: usize,
+    changed: bool,
+}
+
+impl RoutineRegclassBinding {
+    pub fn advance(
+        &mut self,
+        types: &dyn RoutineTypeCatalog,
+        relations: &dyn RoutineRegclassCatalog,
+        definition: &mut impl RoutineDeclaration,
+        control: &ProductionControl<'_>,
+    ) -> Result<Option<bool>, SQLError> {
+        control.check()?;
+        let binding = RegclassBinding { types, relations };
         let mut changed = false;
-        for parameter in &mut definition.params {
-            if let Some(default) = &mut parameter.default {
-                if self.regclass_base_type(&parameter.type_name) {
-                    changed |= self.bind_regclass_literal(default)?;
-                }
-                crate::catalog::stored_ast::visit_stored_expression(default, &mut |expression| {
-                    changed |= self.bind_regclass_expression(expression)?;
-                    Ok(())
-                })?;
+        if !self.parameters_done {
+            if let Some(result) =
+                definition.edit_parameter(self.position, control, |parameter| {
+                    if let Some(default) = &mut parameter.default {
+                        if binding.regclass_base_type(&parameter.type_name) {
+                            changed |= binding.bind_regclass_literal(default)?;
+                        }
+                        crate::catalog::stored_ast::visit_stored_expression(
+                            default,
+                            &mut |expression| {
+                                changed |= binding.bind_regclass_expression(expression)?;
+                                Ok(())
+                            },
+                        )?;
+                    }
+                    Ok(changed)
+                })?
+            {
+                self.changed |= result;
+                self.position += 1;
+            } else {
+                self.position = 0;
+                self.parameters_done = true;
             }
-        }
-        if let FunctionBody::Statements(statements) = &mut definition.body {
-            for statement in statements {
+        } else if let Some(result) =
+            definition.edit_statement(self.position, control, |statement| {
                 crate::catalog::stored_ast::visit_stored_statement_expressions(
                     statement,
                     &mut |expression| {
-                        changed |= self.bind_regclass_expression(expression)?;
+                        changed |= binding.bind_regclass_expression(expression)?;
                         Ok(())
                     },
                 )?;
-            }
+                Ok(changed)
+            })?
+        {
+            self.changed |= result;
+            self.position += 1;
+        } else {
+            return Ok(Some(self.changed));
         }
-        Ok(changed)
+        Ok(None)
     }
 }

@@ -62665,6 +62665,51 @@
     {
       "package": "uqa-engine",
       "kind": "lib",
+      "test": "restored_sql_body_advances_through_each_statement",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/open/persistent_input/tests/routines/body_steps.rs",
+      "capability": "Private backup routine binding",
+      "workload": "Load one-statement and seventeen-statement routines in one-step windows on persistent stores.",
+      "invariant": "Additional stored statements consume additional steps and the fully compiled routines return their original results.",
+      "case_names": [
+        "case_1_sqlite_native",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "partial_sql_body_analysis_releases_its_registry_and_allowance",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/open/persistent_input/tests/routines/body_steps.rs",
+      "capability": "Private backup routine binding",
+      "workload": "Interrupt private SQL routine analysis with only part of its statement list processed.",
+      "invariant": "Cancellation and allocation denial retire the private transaction and temporary owners without publishing partial compiled bodies.",
+      "case_names": [
+        "case_1_sqlite_native",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "routine_statement_errors_keep_postgresql_order_during_creation_and_restore",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/open/persistent_input/tests/routines/body_steps.rs",
+      "capability": "Private backup routine binding",
+      "workload": "Reverse a missing-column and missing-relation statement in stored SQL.",
+      "invariant": "Creation and private restore report the first invalid statement with the original SQLSTATE.",
+      "case_names": [
+        "case_1_sqlite_native",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
       "test": "persistent_restore_recovers_private_completion_and_retires_failed_or_cancelled_input",
       "cases": 15,
       "source": "crates/uqa-engine/src/backup/restore/tests/persistent.rs",

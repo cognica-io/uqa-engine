@@ -6,35 +6,61 @@
 
 use super::{Copying, Result, SyntaxCopy};
 
-syntax_struct!(crate::ast::CreateFunction {
-    object_id,
-    catalog_revision,
-    catalog_oid,
-    name,
-    or_replace,
-    is_procedure,
-    params,
-    returns,
-    return_type_reference,
-    return_written_type,
-    language,
-    body,
-    body_origin = None,
-    sql_body_form,
-    creation_search_path,
-    volatility,
-    strict,
-    owner,
-    security,
-    parallel,
-    support,
-    cost,
-    rows,
-    config,
-    config_actions,
-    attribute_clauses,
-    execute_acl
-});
+impl crate::ast::CreateFunction {
+    pub(in crate::plan::copy) fn copy_definition_with(
+        &self,
+        copying: &mut Copying<'_>,
+        params: impl FnOnce(&mut Copying<'_>) -> Result<Vec<crate::ast::FunctionParam>>,
+        body: impl FnOnce(&mut Copying<'_>) -> Result<crate::ast::FunctionBody>,
+    ) -> Result<Self> {
+        macro_rules! field {
+            ($name:ident) => {
+                copying.field(stringify!($name), |child| self.$name.copy_syntax(child))?
+            };
+        }
+        copying.check()?;
+        Ok(Self {
+            object_id: field!(object_id),
+            catalog_revision: field!(catalog_revision),
+            catalog_oid: field!(catalog_oid),
+            name: field!(name),
+            or_replace: field!(or_replace),
+            is_procedure: field!(is_procedure),
+            params: copying.field("params", params)?,
+            returns: field!(returns),
+            return_type_reference: field!(return_type_reference),
+            return_written_type: field!(return_written_type),
+            language: field!(language),
+            body: copying.field("body", body)?,
+            body_origin: copying.field("body_origin", |child| {
+                syntax_field!(child, self.body_origin, None)
+            })?,
+            sql_body_form: field!(sql_body_form),
+            creation_search_path: field!(creation_search_path),
+            volatility: field!(volatility),
+            strict: field!(strict),
+            owner: field!(owner),
+            security: field!(security),
+            parallel: field!(parallel),
+            support: field!(support),
+            cost: field!(cost),
+            rows: field!(rows),
+            config: field!(config),
+            config_actions: field!(config_actions),
+            attribute_clauses: field!(attribute_clauses),
+            execute_acl: field!(execute_acl),
+        })
+    }
+}
+impl SyntaxCopy for crate::ast::CreateFunction {
+    fn copy_syntax(&self, copying: &mut Copying<'_>) -> Result<Self> {
+        self.copy_definition_with(
+            copying,
+            |child| self.params.copy_syntax(child),
+            |child| self.body.copy_syntax(child),
+        )
+    }
+}
 
 syntax_struct!(crate::ast::DropFunctionItem { name, arg_types });
 

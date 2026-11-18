@@ -108,7 +108,7 @@ impl RoutineCatalogDocument {
     }
 }
 
-pub(super) fn binding_error(error: SQLError) -> StorageBackendError {
+pub(in crate::routines) fn binding_error(error: SQLError) -> StorageBackendError {
     match error {
         SQLError::Cancelled(error) => error.into(),
         SQLError::RetainedRoutine(source) => StorageBackendError::RetainedDiagnostic(source),

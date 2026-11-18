@@ -275,6 +275,8 @@ mod owned_deferred;
 mod owned_projection;
 mod owned_query;
 mod owned_scalar;
+mod stored_routine;
+pub use stored_routine::StoredRoutineDefinition;
 
 impl<'a> Copying<'a> {
     fn new(control: ProductionControl<'a>) -> Option<Self> {

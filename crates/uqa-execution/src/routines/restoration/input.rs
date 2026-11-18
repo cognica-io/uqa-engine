@@ -6,19 +6,19 @@
 
 //! Compile stored bodies in declaration order and publish each private overload group in its established signature order.
 
-use super::{
-    bind_stored, publish_restored, RoutineRegistry, RoutineRegistryState, RoutineRestoreContext,
+use super::{publish_restored, RoutineRegistry, RoutineRegistryState, RoutineRestoreContext};
+use crate::routines::{
+    catalog::input::binding_error,
+    definition::{CatalogRoutineBinding, RoutineBodyCompilation},
 };
 use uqa_core::{
     image_io::{ImageDecodeWindow, ImageDecoder},
     memory::{Budgeted, BudgetedVec, ProductionControl},
 };
-use uqa_sql::{
-    routines::{
-        lifecycle::restoration::{PendingRoutineDefinitions, RoutineRestorePlaceholders},
-        SQLRoutine,
-    },
-    SQLError,
+use uqa_sql::routines::{
+    dependencies::RoutineDeclaration,
+    lifecycle::restoration::{PendingRoutineDefinitions, RoutineRestorePlaceholders},
+    SQLRoutine, StoredRoutineDefinition,
 };
 use uqa_storage::{read_control::StorageReadControl, StorageBackendError, StorageBackendResult};
 
@@ -42,7 +42,26 @@ struct Bodies {
 
 enum Stage {
     Bind(Bodies),
+    Declaration(Bodies, Budgeted<Box<Declaration>>),
     Group(ImageDecoder<Bodies, StorageBackendError>),
+}
+
+struct Declaration {
+    definition: StoredRoutineDefinition,
+    binding: Option<CatalogRoutineBinding>,
+}
+
+fn catalog_message(
+    error: uqa_sql::SQLError,
+    control: &ProductionControl<'_>,
+) -> StorageBackendError {
+    match error.into_retained_catalog_message(control) {
+        Ok(uqa_sql::SQLError::RetainedRoutine(source)) => {
+            StorageBackendError::CatalogBinding(source)
+        }
+        Ok(error) => binding_error(error),
+        Err(error) => error.into(),
+    }
 }
 
 impl RetainedRoutineFinalization {
@@ -73,7 +92,7 @@ impl RetainedRoutineFinalization {
         })
     }
 
-    /// A call compiles at most one declaration or advances the private registry by one work step.
+    /// A call advances one declaration field, body statement, or private registry step.
     /// The compiler borrows the Engine only during that call. The owning private session retires
     /// both the placeholders and the saved predecessor if an open operation is abandoned.
     pub fn advance(
@@ -98,7 +117,10 @@ impl RetainedRoutineFinalization {
                 )
                 .map(|()| None);
             }
-            (Ok(()), Stage::Bind(bodies)) => bodies.advance(context, read),
+            (Ok(()), Stage::Bind(bodies)) => bodies.advance(read),
+            (Ok(()), Stage::Declaration(bodies, input)) => {
+                bodies.advance_declaration(input, context, read)
+            }
             (Ok(()), Stage::Group(mut input)) => input
                 .advance(
                     &mut std::io::empty(),
@@ -123,11 +145,7 @@ impl RetainedRoutineFinalization {
 }
 
 impl Bodies {
-    fn advance(
-        mut self,
-        context: &RoutineRestoreContext<'_>,
-        read: &StorageReadControl,
-    ) -> StorageBackendResult<Stage> {
+    fn advance(mut self, read: &StorageReadControl) -> StorageBackendResult<Stage> {
         let group = self
             .definitions
             .group(self.group)
@@ -138,15 +156,17 @@ impl Bodies {
             }
             let control =
                 ProductionControl::new(read.memory(), read.cancellation(), read.cancellation());
-            let (routine, changed) = routine
-                .rebind_stored_with_control(&control, |def| bind_stored(context, def))
-                .map_err(|error| match error {
-                    SQLError::Cancelled(source) => source.into(),
-                    error => StorageBackendError::Other(error.to_string()),
-                })?;
-            self.compiled.push(routine)?;
-            self.migrated |= changed;
-            return Ok(Stage::Bind(self));
+            let lease = read.memory().reserve(size_of::<Declaration>())?;
+            let definition = StoredRoutineDefinition::new(routine.clone(), &control)
+                .map_err(|error| catalog_message(error, &control))?;
+            let input = Budgeted::new(
+                Box::new(Declaration {
+                    definition,
+                    binding: None,
+                }),
+                lease,
+            );
+            return Ok(Stage::Declaration(self, input));
         }
         let retained = read.clone();
         let input = ImageDecoder::new(
@@ -180,5 +200,45 @@ impl Bodies {
             },
         )?;
         Ok(Stage::Group(input))
+    }
+
+    fn advance_declaration(
+        mut self,
+        mut input: Budgeted<Box<Declaration>>,
+        context: &RoutineRestoreContext<'_>,
+        read: &StorageReadControl,
+    ) -> StorageBackendResult<Stage> {
+        let control =
+            ProductionControl::new(read.memory(), read.cancellation(), read.cancellation());
+        let declaration = input.as_mut();
+        if let Some(binding) = &mut declaration.binding {
+            if let Some(bound) = binding
+                .advance(&context.definition, &mut declaration.definition, &control)
+                .map_err(|error| catalog_message(error, &control))?
+            {
+                let (input, _state_lease) = input.into_parts();
+                let routine = input
+                    .definition
+                    .publish(bound.body, &control)
+                    .map_err(|error| catalog_message(error, &control))?;
+                self.compiled.push(routine)?;
+                self.migrated |= bound.changed;
+                return Ok(Stage::Bind(self));
+            }
+        } else if declaration
+            .definition
+            .copy_next_statement(&control)
+            .map_err(|error| catalog_message(error, &control))?
+        {
+            declaration.binding = Some(
+                CatalogRoutineBinding::new(
+                    declaration.definition.declaration(),
+                    RoutineBodyCompilation::Stored,
+                    &control,
+                )
+                .map_err(|error| catalog_message(error, &control))?,
+            );
+        }
+        Ok(Stage::Declaration(self, input))
     }
 }

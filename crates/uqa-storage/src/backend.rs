@@ -73,6 +73,9 @@ pub enum StorageBackendError {
     /// A native diagnostic retains its original owner instead of copying its message across the catalog boundary.
     #[error("{0}")]
     RetainedDiagnostic(#[source] Arc<dyn std::error::Error + Send + Sync>),
+    /// An analyzed object reference keeps its binding diagnostic and source when restoration reports an unusable catalog.
+    #[error("{0}")]
+    CatalogBinding(#[source] Arc<dyn std::error::Error + Send + Sync>),
 }
 
 impl StorageBackendError {

@@ -8,6 +8,8 @@ use super::super::super::authority_input::PersistentAuthorityInput;
 use super::*;
 use uqa_sql::routines::{CompiledFunctionBody, RoutineBody};
 
+mod body_steps;
+
 fn reading_routines(input: &PersistentEngineInput) -> bool {
     matches!(
         input.candidate.as_ref().unwrap().stage,
