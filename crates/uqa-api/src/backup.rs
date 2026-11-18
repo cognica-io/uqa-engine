@@ -58,47 +58,9 @@ pub fn begin_backup<'a>(
 mod tests {
     use super::*;
 
-    #[derive(Clone, Copy)]
-    enum Provider {
-        Native,
-        KeyValue,
-        Redb,
-    }
-
-    impl Provider {
-        fn open(self, path: &std::path::Path) -> uqa_engine::Engine {
-            match self {
-                Self::Native => uqa_engine::Engine::open(path).unwrap(),
-                Self::KeyValue => {
-                    uqa_engine::Engine::from_persistent_provider(std::sync::Arc::new(
-                        uqa_storage_sqlite::SQLiteKeyValueStorage::open(path).unwrap(),
-                    ))
-                    .unwrap()
-                }
-                Self::Redb => uqa_engine::Engine::from_persistent_provider(std::sync::Arc::new(
-                    uqa_storage_redb::RedbStorage::open(path).unwrap(),
-                ))
-                .unwrap(),
-            }
-        }
-
-        fn destination(self, directory: std::path::PathBuf) -> RestoreDestination {
-            RestoreDestination::Persistent {
-                directory,
-                target: match self {
-                    Self::Native => {
-                        std::sync::Arc::new(SQLiteBackupTarget::new(SQLiteBackupMapping::Native))
-                    }
-                    Self::KeyValue => {
-                        std::sync::Arc::new(SQLiteBackupTarget::new(SQLiteBackupMapping::KeyValue))
-                    }
-                    Self::Redb => {
-                        std::sync::Arc::new(uqa_storage_redb::RedbBackupTarget::default())
-                    }
-                },
-            }
-        }
-    }
+    mod acceptance;
+    mod providers;
+    use providers::{FileMode, Provider};
 
     #[test]
     fn api_persistent_restore_resolves_completion_and_cancellation_without_archive_replay() {
@@ -125,7 +87,7 @@ mod tests {
             &control,
         )
         .unwrap();
-        let source = provider.open(&directory.path().join("source"));
+        let source = provider.open(&directory.path().join("source"), FileMode::Plain);
         source
             .sql(
                 "CREATE TABLE items(value integer); INSERT INTO items VALUES(7)",
@@ -143,7 +105,7 @@ mod tests {
         let root = capture.publish().unwrap();
         drop((capture, source));
         let authority = uqa_engine::Engine::new();
-        let target = provider.destination(directory.path().join("restored"));
+        let target = provider.destination(directory.path().join("restored"), FileMode::Plain);
         let options = RestoreOptions::new(16 << 20, 8 << 20);
         let mut job = begin_restore(
             &authority,

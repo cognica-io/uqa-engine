@@ -3853,10 +3853,12 @@ dependencies = [
  "arrow-array",
  "arrow-schema",
  "parquet",
+ "rstest",
  "tempfile",
  "uqa-core",
  "uqa-engine",
  "uqa-sql",
+ "uqa-storage",
  "uqa-storage-redb",
  "uqa-storage-sqlite",
 ]
