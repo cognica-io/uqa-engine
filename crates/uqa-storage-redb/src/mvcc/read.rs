@@ -134,6 +134,30 @@ impl CommittedRecordSnapshot for Snapshot {
         Ok(())
     }
 
+    fn visit_keys(
+        &self,
+        prefix: &[u8],
+        after: Option<&[u8]>,
+        limit: usize,
+        control: &StorageReadControl,
+        visit: &mut uqa_storage::mvcc::RecordKeyVisitor<'_>,
+    ) -> VersionResult<()> {
+        super::image_fingerprints::visit_positions(
+            || self.begin_read(),
+            self.sequence(),
+            prefix,
+            after,
+            limit,
+            control,
+            &mut |key, position| {
+                position
+                    .visible
+                    .map(|record| visit(key, record))
+                    .transpose()
+            },
+        )
+    }
+
     fn visit_prefix(
         &self,
         prefix: &[u8],

@@ -32,19 +32,29 @@ fn cold_value_cache_keeps_bounded_payload_and_transaction_snapshots(#[case] kind
     let path = directory.path().join("retained.db");
     let engine = open(kind, &path);
     engine.sql("CREATE TABLE retained_keys (id INTEGER PRIMARY KEY, body TEXT); INSERT INTO retained_keys SELECT g, g::text || repeat('x', 8192) FROM generate_series(1, 256) AS g; CREATE INDEX retained_body ON retained_keys (body)", &[]).unwrap();
-    let engine = if kind == "memory" {
-        engine
+    let field = ValueIndexKey::Column("body".into());
+    let hydrate = |engine: &crate::Engine| {
+        engine.sql("SET work_mem = '64kB'", &[]).unwrap();
+        let table = engine.require_table("retained_keys").unwrap();
+        crate::Engine::value_indexes_clear(&table).unwrap();
+        let allocation = allocation_counter::measure(|| {
+            assert!(engine.ensure_value_index("retained_keys", &field).unwrap());
+        });
+        (table, allocation)
+    };
+    let (engine, bounded_cache) = if kind == "memory" {
+        (engine, None)
     } else {
         drop(engine);
-        open(kind, &path)
+        let bounded = (kind == "redb").then(|| {
+            let provider =
+                uqa_storage_redb::RedbStorage::open_with_page_cache(&path, 64 << 10).unwrap();
+            hydrate(&crate::Engine::from_persistent_provider(Arc::new(provider)).unwrap()).1
+        });
+        (open(kind, &path), bounded)
     };
-    engine.sql("SET work_mem = '64kB'", &[]).unwrap();
-    let table = engine.require_table("retained_keys").unwrap();
-    crate::Engine::value_indexes_clear(&table).unwrap();
-    let field = ValueIndexKey::Column("body".into());
-    let allocation = allocation_counter::measure(|| {
-        assert!(engine.ensure_value_index("retained_keys", &field).unwrap());
-    });
+    let (table, ordinary) = hydrate(&engine);
+    let allocation = bounded_cache.unwrap_or(ordinary);
     assert!(allocation.bytes_max < 1536 * 1024, "{kind}: {allocation:?}");
     let control = engine.query_retention_control().unwrap();
     let before = table.value_indexes.read().get(&field).unwrap().clone();

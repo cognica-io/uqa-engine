@@ -46,6 +46,17 @@ fn cold_fingerprint_reads_stay_bounded_and_select_the_pinned_revision() {
     write(&store, Some(first), b"later", &setup);
     backend.read_bytes.store(0, Ordering::Relaxed);
     let found = fingerprint(cut.as_ref(), &reader).unwrap();
+    let mut visited = 0;
+    cut.records()
+        .visit_keys(b"ro", Some(b"r"), 1, &reader, &mut |key, record| {
+            assert_eq!(key, b"row");
+            assert_eq!(record.revision, Some(first));
+            assert!(record.live);
+            visited += 1;
+            Ok(true)
+        })
+        .unwrap();
+    assert_eq!(visited, 1);
     let physical = backend.read_bytes.load(Ordering::Relaxed);
     assert!(
         physical < 256 << 10,

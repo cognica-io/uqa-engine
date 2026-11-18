@@ -172,6 +172,14 @@ fn assert_positions(
             after = Some(next);
         }
     }
+    let mut selected = Vec::new();
+    cut.records()
+        .visit_keys(b"", Some(b""), 2, control, &mut |key, metadata| {
+            selected.push((key.to_vec(), metadata.live));
+            Ok(true)
+        })
+        .unwrap();
+    assert_eq!(selected, visible[1..]);
     assert_eq!(physical, 184);
     assert_eq!(
         visible,
