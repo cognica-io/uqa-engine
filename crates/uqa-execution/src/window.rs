@@ -523,26 +523,29 @@ fn window_function(
             actual: slot.args.len(),
         })
     };
-    Ok(match name.as_ref() {
-        "row_number" => WindowFunction::RowNumber,
-        "rank" => WindowFunction::Rank,
-        "dense_rank" => WindowFunction::DenseRank,
-        "percent_rank" => WindowFunction::PercentRank,
-        "cume_dist" => WindowFunction::CumeDist,
-        "ntile" => WindowFunction::Ntile(required(0)?),
-        "lag" | "lead" => WindowFunction::Shift(Box::new(functions::Shift {
-            forward: name == "lead",
-            target: required(0)?,
-            offset: argument(1),
-            default: argument(2),
-        })),
-        "first_value" => WindowFunction::FirstValue(required(0)?),
-        "last_value" => WindowFunction::LastValue(required(0)?),
-        "nth_value" => WindowFunction::NthValue {
+    use uqa_sql::semantics::windows::BuiltinWindowFunction as Builtin;
+    Ok(match Builtin::from_dispatch_name(&name) {
+        Some(Builtin::RowNumber) => WindowFunction::RowNumber,
+        Some(Builtin::Rank) => WindowFunction::Rank,
+        Some(Builtin::DenseRank) => WindowFunction::DenseRank,
+        Some(Builtin::PercentRank) => WindowFunction::PercentRank,
+        Some(Builtin::CumeDist) => WindowFunction::CumeDist,
+        Some(Builtin::Ntile) => WindowFunction::Ntile(required(0)?),
+        Some(direction @ (Builtin::Lag | Builtin::Lead)) => {
+            WindowFunction::Shift(Box::new(functions::Shift {
+                forward: direction == Builtin::Lead,
+                target: required(0)?,
+                offset: argument(1),
+                default: argument(2),
+            }))
+        }
+        Some(Builtin::FirstValue) => WindowFunction::FirstValue(required(0)?),
+        Some(Builtin::LastValue) => WindowFunction::LastValue(required(0)?),
+        Some(Builtin::NthValue) => WindowFunction::NthValue {
             target: required(0)?,
             position: required(1)?,
         },
-        _ => {
+        None => {
             let call = ScalarExpr::Func {
                 order_syntax: uqa_sql::ast::FunctionOrderSyntax::Ordinary,
                 name: slot.name.clone(),

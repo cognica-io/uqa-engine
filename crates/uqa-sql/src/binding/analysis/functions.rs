@@ -493,11 +493,11 @@ fn window_call_kind(
     resolver: &dyn FunctionTypeResolver,
 ) -> Result<Option<WindowCallKind>, SQLError> {
     let lower = crate::semantics::builtin_function_dispatch_name(name);
+    let native = crate::semantics::windows::BuiltinWindowFunction::from_dispatch_name(&lower);
+    if native.is_some_and(|function| function.accepts(args.len())) {
+        return Ok(Some(WindowCallKind::WindowFunction));
+    }
     let kind = match (lower.as_ref(), args.len()) {
-        ("row_number" | "rank" | "dense_rank" | "percent_rank" | "cume_dist", 0)
-        | ("lag" | "lead", 1..=3)
-        | ("first_value" | "last_value" | "ntile", 1)
-        | ("nth_value", 2) => Some(WindowCallKind::WindowFunction),
         ("percentile_cont" | "percentile_disc", 2)
         | ("mode", 1)
         | ("rank" | "dense_rank" | "percent_rank" | "cume_dist", 1..) => {
@@ -520,23 +520,12 @@ fn window_call_kind(
         return Ok(kind);
     }
     // The built-in window and ordered-set functions have no other signatures; only a user routine can take these arguments.
-    if matches!(
-        lower.as_ref(),
-        "row_number"
-            | "rank"
-            | "dense_rank"
-            | "percent_rank"
-            | "cume_dist"
-            | "ntile"
-            | "lag"
-            | "lead"
-            | "first_value"
-            | "last_value"
-            | "nth_value"
-            | "percentile_cont"
-            | "percentile_disc"
-            | "mode"
-    ) {
+    if native.is_some()
+        || matches!(
+            lower.as_ref(),
+            "percentile_cont" | "percentile_disc" | "mode"
+        )
+    {
         return Ok(
             resolve_sql_function(routines, name, None, args, schema, params, resolver)?
                 .map(|_| WindowCallKind::Ordinary),

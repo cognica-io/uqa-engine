@@ -13,9 +13,11 @@ use crate::{
 };
 use uqa_core::{RelationIdentity, Value};
 
+mod application_calls;
 pub(crate) mod owned;
 mod references;
 mod stored_query;
+pub use application_calls::ApplicationFunctionKind;
 pub(crate) use owned::bind_query_relation_targets_owned;
 pub use references::{
     visit_stored_plan_function_bindings, visit_stored_plan_output_types,
