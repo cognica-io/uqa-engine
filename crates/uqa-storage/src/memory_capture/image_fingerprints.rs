@@ -17,11 +17,18 @@ use std::sync::{
     atomic::{AtomicU64, Ordering},
     Arc, OnceLock, Weak,
 };
-use uqa_core::memory::{BudgetedDeque, BudgetedMap, MemoryBudget, MemoryReservation};
+use uqa_core::memory::{BudgetedMap, MemoryBudget, MemoryReservation};
 
 /// This optional source metadata has one fixed maximum across old cuts, active captures and current data. Replacing a slot loses an optimization and never changes an image.
 const ENTRIES: usize = 1024;
-type Cache = Arc<Mutex<CacheEntries>>;
+const CACHE_BYTES: usize = 256 << 10;
+type Cache = Arc<Mutex<BudgetedMap<[u8; 32], (Scope, UnitFingerprint)>>>;
+
+fn new_cache() -> Cache {
+    Arc::new(Mutex::new(BudgetedMap::new(&MemoryBudget::new(
+        CACHE_BYTES,
+    ))))
+}
 
 #[derive(Clone)]
 pub struct MemoryImageOwner {
@@ -46,21 +53,6 @@ enum Scope {
         owner: MemoryImageOwner,
         _memory: MemoryReservation,
     },
-}
-
-struct CacheEntries {
-    rows: BudgetedMap<[u8; 32], (Scope, UnitFingerprint)>,
-    insertion: BudgetedDeque<[u8; 32]>,
-}
-
-impl CacheEntries {
-    fn new() -> Self {
-        let memory = MemoryBudget::new(256 << 10);
-        Self {
-            rows: BudgetedMap::new(&memory),
-            insertion: BudgetedDeque::new(&memory),
-        }
-    }
 }
 
 #[derive(Default)]
@@ -114,11 +106,7 @@ impl<F: Send + Sync + 'static> MemoryCaptureKey<F> {
         };
         let generation = cut.0.image_generation;
         Ok((generation != u64::MAX).then(|| MemoryImageGeneration {
-            cache: registry
-                .images
-                .cache
-                .get_or_init(|| Arc::new(Mutex::new(CacheEntries::new())))
-                .clone(),
+            cache: registry.images.cache.get_or_init(new_cache).clone(),
             source: self.id,
             generation,
         }))
@@ -149,7 +137,7 @@ impl MemoryImageGeneration {
         owner: Option<&MemoryImageOwner>,
     ) -> Option<UnitFingerprint> {
         let cache = self.cache.lock();
-        let (scope, fingerprint) = cache.rows.get(key)?;
+        let (scope, fingerprint) = cache.get(key)?;
         let valid = match (scope, owner) {
             (Scope::Group(id, version), None) => *id == self.source && *version == self.generation,
             (Scope::Owner { owner: saved, .. }, Some(current)) => {
@@ -167,17 +155,16 @@ impl MemoryImageGeneration {
         fingerprint: UnitFingerprint,
     ) {
         let mut cache = self.cache.lock();
-        // Reclaim at most one old entry per observation. Expensive weak headers remain optional even when the cache has room for another fixed-size digest.
-        if cache.rows.len() == ENTRIES
-            || cache.rows.budget().available()
-                < owner.map_or(0, |owner| owner.bytes).saturating_add(256)
-        {
-            if let Some(oldest) = cache.insertion.pop_front() {
-                cache.rows.remove(&oldest);
+        // Keep a stable sample by address hash. Sequential scans larger than the cache must not evict every reusable unit before they reach it.
+        if cache.len() == ENTRIES && !cache.contains_key(&key) {
+            let lowest_key = *cache.iter().next().expect("full fingerprint cache").0;
+            if key < lowest_key {
+                return;
             }
+            cache.remove(&lowest_key);
         }
         let scope = if let Some(owner) = owner {
-            let Ok(memory) = cache.rows.budget().reserve(owner.bytes) else {
+            let Ok(memory) = cache.budget().reserve(owner.bytes) else {
                 return;
             };
             Scope::Owner {
@@ -187,17 +174,66 @@ impl MemoryImageGeneration {
         } else {
             Scope::Group(self.source, self.generation)
         };
-        if let Some(existing) = cache.rows.get_mut(&key) {
-            *existing = (scope, fingerprint);
-            return;
+        let _ = cache.insert(key, (scope, fingerprint));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::backup::ImageDigest;
+
+    #[test]
+    fn bounded_fingerprint_cache_rejects_evicted_and_replaced_owners() {
+        let first = MemoryImageGeneration {
+            cache: new_cache(),
+            source: 1,
+            generation: 3,
+        };
+        let later = MemoryImageGeneration {
+            generation: 4,
+            ..first.clone()
+        };
+        let fp = UnitFingerprint {
+            digest: ImageDigest::of_bytes(b"payload"),
+            decoded_bytes: 7,
+        };
+        let key = [0; 32];
+        first.observe(key, None, fp);
+        assert_eq!(first.get(&key, None), Some(fp));
+        assert_eq!(later.get(&key, None), None);
+        let owner = Arc::new(vec![7; 65536]);
+        let weak = MemoryImageOwner::from_arc(&owner);
+        first.observe(key, Some(&weak), fp);
+        assert_eq!(later.get(&key, Some(&weak)), Some(fp));
+        drop(owner);
+        assert!(weak.owner.upgrade().is_none());
+        let different = Arc::new(vec![7; 65536]);
+        assert_eq!(
+            later.get(&key, Some(&MemoryImageOwner::from_arc(&different))),
+            None
+        );
+
+        for number in 1..=ENTRIES {
+            let mut key = [0; 32];
+            key[..8].copy_from_slice(&(number as u64).to_be_bytes());
+            first.observe(key, None, fp);
         }
-        if cache.insertion.reserve(1).is_ok()
-            && cache.rows.insert(key, (scope, fingerprint)).is_ok()
-        {
-            cache
-                .insertion
-                .push_back(key)
-                .expect("reserved fingerprint order entry");
+        assert_eq!(first.get(&key, Some(&weak)), None);
+        let cache = first.cache.lock();
+        assert_eq!(cache.len(), ENTRIES);
+        assert!(cache.budget().used() <= CACHE_BYTES);
+        drop(cache);
+        let mut reused = 0;
+        for number in 0..=ENTRIES {
+            let mut key = [0; 32];
+            key[..8].copy_from_slice(&(number as u64).to_be_bytes());
+            if first.get(&key, None).is_some() {
+                reused += 1;
+            } else {
+                first.observe(key, None, fp);
+            }
         }
+        assert_eq!(reused, ENTRIES);
     }
 }
