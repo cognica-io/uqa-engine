@@ -5,11 +5,13 @@
 //
 
 use super::{Copying, Result, SyntaxCopy};
+use crate::plan::copy::stored_routine::Lists;
 
 impl crate::ast::CreateFunction {
     pub(in crate::plan::copy) fn copy_definition_with(
         &self,
         copying: &mut Copying<'_>,
+        lists: Lists,
         params: impl FnOnce(&mut Copying<'_>) -> Result<Vec<crate::ast::FunctionParam>>,
         body: impl FnOnce(&mut Copying<'_>) -> Result<crate::ast::FunctionBody>,
     ) -> Result<Self> {
@@ -36,7 +38,9 @@ impl crate::ast::CreateFunction {
                 syntax_field!(child, self.body_origin, None)
             })?,
             sql_body_form: field!(sql_body_form),
-            creation_search_path: field!(creation_search_path),
+            creation_search_path: copying.field("creation_search_path", |child| {
+                lists.copy(&self.creation_search_path, child)
+            })?,
             volatility: field!(volatility),
             strict: field!(strict),
             owner: field!(owner),
@@ -45,10 +49,15 @@ impl crate::ast::CreateFunction {
             support: field!(support),
             cost: field!(cost),
             rows: field!(rows),
-            config: field!(config),
+            config: copying.field("config", |child| lists.copy(&self.config, child))?,
             config_actions: field!(config_actions),
             attribute_clauses: field!(attribute_clauses),
-            execute_acl: field!(execute_acl),
+            execute_acl: copying.field("execute_acl", |child| {
+                self.execute_acl
+                    .as_ref()
+                    .map(|acl| lists.copy(acl, child))
+                    .transpose()
+            })?,
         })
     }
 }
@@ -56,6 +65,7 @@ impl SyntaxCopy for crate::ast::CreateFunction {
     fn copy_syntax(&self, copying: &mut Copying<'_>) -> Result<Self> {
         self.copy_definition_with(
             copying,
+            Lists::Inline,
             |child| self.params.copy_syntax(child),
             |child| self.body.copy_syntax(child),
         )

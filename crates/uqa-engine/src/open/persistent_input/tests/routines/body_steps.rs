@@ -64,6 +64,29 @@ fn restored_sql_body_advances_through_each_statement(#[case] provider: Provider)
 #[case::sqlite_native(Provider::SQLiteNative)]
 #[case::sqlite_kv(Provider::SQLiteKeyValue)]
 #[case::redb(Provider::Redb)]
+fn restored_routine_configuration_advances_through_large_effective_values(
+    #[case] provider: Provider,
+) {
+    let directory = tempfile::tempdir().unwrap();
+    let steps = |file: &str, value: &str| {
+        let source = provider.open(&directory.path().join(file));
+        source.sql(&format!(
+            "CREATE FUNCTION public.stepped_body() RETURNS integer LANGUAGE sql SET my.retained = '{value}' AS $$ SELECT length(current_setting('my.retained')) $$"
+        ), &[]).unwrap();
+        body_steps(&source, i64::try_from(value.chars().count()).unwrap())
+    };
+    let short = steps("short", "a");
+    let wide = steps("wide", &"a𐐷".repeat(40960));
+    assert!(
+        wide >= short + 4,
+        "{provider:?}: {short} short versus {wide} wide body steps"
+    );
+}
+
+#[rstest::rstest]
+#[case::sqlite_native(Provider::SQLiteNative)]
+#[case::sqlite_kv(Provider::SQLiteKeyValue)]
+#[case::redb(Provider::Redb)]
 fn partial_sql_body_analysis_releases_its_registry_and_allowance(#[case] provider: Provider) {
     let directory = tempfile::tempdir().unwrap();
     let source = provider.open(&directory.path().join("partial"));

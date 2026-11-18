@@ -6,7 +6,12 @@
 
 use super::*;
 use crate::routines::{RoutineBody, SQLUserFunction};
-use uqa_core::{memory::MemoryBudget, CancellationToken};
+use uqa_core::{
+    memory::{MemoryBudget, ProductionString},
+    CancellationToken,
+};
+
+mod header;
 
 fn routine(count: usize, standard: bool, last_default: &str) -> SQLRoutine {
     let params: Vec<_> = (1..=count)

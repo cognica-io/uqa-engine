@@ -9,9 +9,11 @@
 use super::{capture_stored_with_footprint, syntax::SyntaxCopy, CopyPurpose, Copying, Result};
 use crate::ast::{CreateFunction, FunctionBody, FunctionParam, Statement};
 use crate::routines::{dependencies::RoutineDeclaration, SQLRoutine};
-use uqa_core::memory::{
-    BudgetedVec, MemoryError, MemoryReservation, Produced, ProductionControl, ProductionString,
-};
+use uqa_core::memory::{BudgetedVec, MemoryError, MemoryReservation, Produced, ProductionControl};
+
+mod header;
+pub(super) use header::Lists;
+use header::{continue_text, start_text, Header};
 
 #[derive(Clone, Copy)]
 struct Field {
@@ -26,11 +28,7 @@ impl Field {
         copying: &mut Copying<'_>,
     ) -> Result<Vec<T>> {
         fields.reserve(count)?;
-        let mut values = BudgetedVec::new(fields.budget());
-        values.reserve(count)?;
-        let (values, memory) = values.into_parts();
-        copying.absorb(Some(memory));
-        Ok(values)
+        Lists::reserve(count, copying)
     }
 
     fn append<T: SyntaxCopy>(
@@ -70,6 +68,7 @@ impl Field {
 pub struct StoredRoutineDefinition {
     source: SQLRoutine,
     definition: CreateFunction,
+    header: Header,
     parameters: BudgetedVec<Field>,
     statements: BudgetedVec<Field>,
     children: usize,
@@ -89,14 +88,12 @@ impl StoredRoutineDefinition {
         let mut copying = Copying::capture(*control, CopyPurpose::Stored);
         let definition = source.copy_definition_with(
             &mut copying,
+            Lists::Retained,
             |copying| Field::slots(source.params.len(), &mut parameters, copying),
             |copying| match &source.body {
-                FunctionBody::Source(text) => {
-                    let mut value = ProductionString::new(*control);
-                    value.reserve(text.len())?;
-                    value.push_str_chunk(text)?;
-                    Ok(FunctionBody::Source(copying.take(value.finish()?)))
-                }
+                FunctionBody::Source(text) => Ok(FunctionBody::Source(
+                    copying.take(start_text(text, control)?),
+                )),
                 FunctionBody::Statements(source) => {
                     Field::slots(source.len(), &mut statements, copying)
                         .map(FunctionBody::Statements)
@@ -106,26 +103,46 @@ impl StoredRoutineDefinition {
         let children = copying.retained_children;
         let (definition, lease) = copying.finish(definition)?.into_parts();
         let direct = lease.expect("native declaration header");
-        Ok(Self {
+        let mut capture = Self {
             source: routine,
             definition,
+            header: Header::default(),
             parameters,
             statements,
             children,
             direct,
-        })
+        };
+        capture.copy_header(control)?;
+        Ok(capture)
     }
 
-    /// Copy one source-text chunk, parameter or body statement from the immutable placeholder into the private declaration.
+    fn copy_header(&mut self, control: &ProductionControl<'_>) -> Result<()> {
+        let mut copying = Copying::capture(*control, CopyPurpose::Stored);
+        let result = self
+            .header
+            .copy_window(&self.source.def, &mut self.definition, &mut copying);
+        // Even a failed window can already own completed items and part of a setting.
+        self.direct
+            .absorb(copying.memory.expect("controlled declaration"));
+        self.children = self
+            .children
+            .checked_add(copying.retained_children)
+            .ok_or(MemoryError::SizeOverflow)?;
+        result
+    }
+
+    /// Advance the captured header, source text, parameters and body of the immutable placeholder before binding its private declaration.
     pub fn copy_next_field(&mut self, control: &ProductionControl<'_>) -> Result<bool> {
         control.check()?;
+        if !self.header.complete() {
+            self.copy_header(control)?;
+            return Ok(self.complete());
+        }
         if let (FunctionBody::Source(original), FunctionBody::Source(copied)) =
             (&self.source.def.body, &mut self.definition.body)
         {
             if copied.len() < original.len() {
-                // The header admitted this buffer at its complete size before installing it.
-                debug_assert!(copied.capacity() >= original.len());
-                copied.push_str(ProductionString::first_chunk(&original[copied.len()..]));
+                continue_text(original, copied);
                 control.check()?;
                 return Ok(self.complete());
             }
@@ -157,7 +174,8 @@ impl StoredRoutineDefinition {
     }
 
     fn complete(&self) -> bool {
-        self.parameters.len() == self.source.def.params.len()
+        self.header.complete()
+            && self.parameters.len() == self.source.def.params.len()
             && match (&self.source.def.body, &self.definition.body) {
                 (FunctionBody::Statements(statements), FunctionBody::Statements(_)) => {
                     self.statements.len() == statements.len()

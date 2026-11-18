@@ -51511,6 +51511,60 @@
     {
       "package": "uqa-sql",
       "kind": "lib",
+      "test": "stored_routine_catalog_lists_bound_each_entry_and_text_chunk_before_binding",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/stored_routine/tests/header.rs",
+      "capability": "Bounded stored routine catalog headers",
+      "workload": "Copy wide search paths, UTF-8 configuration settings and explicit grants while observing the published prefix after each step.",
+      "invariant": "A window advances at most eight entries or text chunks. The completed declaration and its footprint match ordinary copying.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_routine_catalog_lists_release_denied_cancelled_and_abandoned_headers",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/stored_routine/tests/header.rs",
+      "capability": "Bounded stored routine catalog headers",
+      "workload": "Stop private header construction by denying its next allocation, cancelling either caller or dropping the continuation.",
+      "invariant": "Incomplete definitions stay private and every retained allocation returns to the original allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_routine_catalog_lists_preserve_the_ordinary_peak_and_optional_acl",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/stored_routine/tests/header.rs",
+      "capability": "Bounded stored routine catalog headers",
+      "workload": "Compare ordinary and resumed header copies with absent, empty and populated execution privileges.",
+      "invariant": "Copying preserves ACL presence, entry order and the routine's allocation peak.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "restored_routine_configuration_advances_through_large_effective_values",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/open/persistent_input/tests/routines/body_steps.rs",
+      "capability": "Bounded stored routine catalog headers",
+      "workload": "Load a stored SQL function with a short or wide UTF-8 setting on native SQLite, SQLite KV and redb, then invoke the restored function.",
+      "invariant": "The wide effective setting requires additional work windows and its value is visible to the function after publication.",
+      "case_names": [
+        "case_1_sqlite_native",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
       "test": "stored_routine_parameters_and_statements_are_copied_in_separate_windows",
       "cases": 1,
       "source": "crates/uqa-sql/src/plan/copy/stored_routine/tests.rs",
