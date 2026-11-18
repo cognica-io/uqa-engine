@@ -181,6 +181,12 @@ impl SQLiteNativeBackupImage {
 }
 
 impl BackupImageSource for SQLiteNativeBackupImage {
+    fn reuse_current(
+        &mut self,
+        parent: uqa_storage::backup::UnitFingerprint,
+    ) -> BackupResult<bool> {
+        self.0.reuse_current(parent)
+    }
     fn cut(&self) -> BackupCut {
         self.cut()
     }
