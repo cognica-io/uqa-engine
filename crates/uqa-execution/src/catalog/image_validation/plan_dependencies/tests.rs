@@ -64,10 +64,11 @@ fn catalog(sql: &str) -> CatalogReadView {
     CatalogReadView::new(snapshot)
 }
 
-fn check(catalog: &CatalogReadView) -> Result<(), SQLError> {
+fn check(catalog: &CatalogReadView) -> Result<(), String> {
     let memory = MemoryBudget::new(64 << 10);
     let token = CancellationToken::new();
-    let result = validate(catalog, &ProductionControl::new(&memory, &token, &token));
+    let result = validate(catalog, &ProductionControl::new(&memory, &token, &token))
+        .map_err(|error| error.to_string());
     assert_eq!(memory.used(), 0);
     result
 }
