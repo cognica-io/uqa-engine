@@ -24,8 +24,10 @@ use uqa_storage::{
 };
 
 mod configuration;
+mod functions;
 pub(crate) use configuration::RestoreBindings;
 pub use configuration::RestoreConfiguration;
+use functions::Admission;
 
 /// The new database's storage owner. It never replaces an existing Engine.
 #[derive(Clone)]
@@ -93,7 +95,11 @@ impl Deref for RestoredEngine {
 }
 
 enum State<'a> {
-    Reading(Budgeted<Box<Input<'a>>>, RestoreBindings),
+    Reading(
+        Budgeted<Box<Input<'a>>>,
+        RestoreBindings,
+        Option<Admission<'a>>,
+    ),
     Decoded(Budgeted<Box<MemoryState>>, RestoreBindings),
     Validating(RestoredEngine, CatalogValidation, RestoreBindings),
     Persistent(Budgeted<Box<persistent::Persistent<'a>>>),
@@ -147,6 +153,7 @@ impl Engine {
                             .memory()
                             .reserve(size_of::<Input<'_>>())
                             .map_err(|e| start_error(e.into()))?;
+                        let functions = Admission::open(&lease, &control).map_err(start_error)?;
                         let input = Input::new(
                             MemoryImageImportReader::new(
                                 lease,
@@ -164,6 +171,7 @@ impl Engine {
                             state: State::Reading(
                                 Budgeted::new(Box::new(input), memory),
                                 admitted.bindings,
+                                functions,
                             ),
                             backup,
                             root: Some(root),
@@ -345,14 +353,23 @@ impl RestoreJob<'_> {
             return Err(BackupError::Invalid("zero restore verification window"));
         }
         self.state = match state {
-            State::Reading(mut input, bindings) => {
+            State::Reading(mut input, bindings, mut functions) => {
+                if !Admission::advance(
+                    &mut functions,
+                    maximum_object_bytes,
+                    &bindings,
+                    &self.control,
+                )? {
+                    self.state = State::Reading(input, bindings, functions);
+                    return Ok(self.phase());
+                }
                 match input.as_mut().advance(maximum_object_bytes)? {
                     Some(candidate) => {
                         drop(input);
                         let memory = self.control.memory().reserve(size_of::<MemoryState>())?;
                         State::Decoded(Budgeted::new(Box::new(candidate), memory), bindings)
                     }
-                    None => State::Reading(input, bindings),
+                    None => State::Reading(input, bindings, functions),
                 }
             }
             State::Decoded(candidate, bindings) => {
