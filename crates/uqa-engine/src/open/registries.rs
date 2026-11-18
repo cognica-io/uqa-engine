@@ -103,10 +103,11 @@ impl Engine {
     ) -> StorageBackendResult<()> {
         self.restore_schema_routine_identities(mode)?;
         self.restore_analyzers_from_catalog(catalog, mode)?;
-        self.restore_registries_after_analyzers(catalog, mode, domains, pending_sql_functions)
+        self.restore_registries_before_path_indexes(catalog, mode, domains, pending_sql_functions)?;
+        self.restore_path_indexes(None)
     }
 
-    pub(super) fn restore_registries_after_analyzers(
+    pub(super) fn restore_registries_before_path_indexes(
         &self,
         catalog: &dyn CatalogFacade,
         mode: super::CatalogRestoreMode,
@@ -138,9 +139,7 @@ impl Engine {
         )
         .map_err(|error| StorageBackendError::Other(error.to_string()))?;
         uqa_execution::catalog::range_type::validate_catalog(&self.restored_catalog_read_view())
-            .map_err(|error| StorageBackendError::Other(error.to_string()))?;
-        self.restore_path_indexes(None)?;
-        Ok(())
+            .map_err(|error| StorageBackendError::Other(error.to_string()))
     }
 
     fn restore_foreign_registries_from_catalog(

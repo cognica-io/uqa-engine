@@ -2,6 +2,142 @@
   "schema_version": 1,
   "checks": [
     {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "a_single_wide_path_definition_yields_for_sequences_labels_and_utf8_fragments",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/index/path_index/catalog/persistent/definition/tests.rs",
+      "capability": "Persistent graph path-index restoration",
+      "workload": "Read large nested sequence lists, wide lists of labels and long escaped UTF-8 strings with single-step windows.",
+      "invariant": "Definition input yields within each shape, keeps the compact physical spelling and releases partial allocations after interruption.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "stored_path_sequences_preserve_compact_serde_spelling_and_diagnostics",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/index/path_index/catalog/persistent/definition/tests.rs",
+      "capability": "Persistent graph path-index restoration",
+      "workload": "Read valid and malformed stored declarations and compare results to the original typed JSON decoder.",
+      "invariant": "Valid sequences retain their compact JSON and malformed input reports the original error and position.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "test",
+      "test": "private_durable_path_catalog_binds_complete_generations_in_bounded_windows",
+      "cases": 1,
+      "source": "crates/uqa-graph/tests/embedding_index/paths/registry.rs",
+      "capability": "Persistent graph path-index restoration",
+      "workload": "Reconstruct a 4,096-definition registry in small windows across an independent committed edit and interrupt partial inputs.",
+      "invariant": "The complete selected generation retains its original physical handles. Cancellation and admission denial release partial bindings and preserve the caller-owned transaction.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "retained_registration_resolves_the_recorded_graph_in_windows_and_transfers_both_outputs",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/path_index/tests.rs",
+      "capability": "Persistent graph path-index restoration",
+      "workload": "Resolve the recorded owner of a wide legacy key using a single-step window and exhaust the input allowance.",
+      "invariant": "Both the canonical key and the graph identity preserve their complete text and storage reservations and retire on failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "sqlite_native_path_index_owner_reads_bound_physical_rows_and_preserve_private_state",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/catalog/tests/text_input.rs",
+      "capability": "Persistent graph path-index restoration",
+      "workload": "Point-read the recorded path owner and test key and value size limits, memory denial and cancellation in the native SQLite session.",
+      "invariant": "The provider charges the encoded state row and exact key before returning an owner and retains the selected transaction.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "sqlite_key_value_path_index_owner_reads_bound_physical_rows_and_preserve_private_state",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/catalog/tests/text_input.rs",
+      "capability": "Persistent graph path-index restoration",
+      "workload": "Point-read the recorded path owner at the encoded key and exercise exact bounds in a SQLite KV session.",
+      "invariant": "The six-byte key prefix and owner value are charged at the physical boundary. Failure leaves the selected state intact.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-redb",
+      "kind": "test",
+      "test": "redb_path_index_owner_reads_bound_physical_rows_and_preserve_private_state",
+      "cases": 1,
+      "source": "crates/uqa-storage-redb/tests/store_contract/catalog_text_input.rs",
+      "capability": "Persistent graph path-index restoration",
+      "workload": "Point-read the recorded path owner at the encoded key and exercise exact bounds in a redb session.",
+      "invariant": "The six-byte key prefix and owner value are charged at the physical boundary. Failure leaves the selected state intact.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "persistent_path_registries_yield_between_definitions_before_publication",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/open/persistent_input/tests/graph_paths.rs",
+      "capability": "Persistent graph path-index restoration",
+      "workload": "Build one and 33 path indexes on a graph with a real edge. Reconstruct each registry one step at a time and query the published index.",
+      "invariant": "Each additional registration requires a later step. The private Engine installs the complete registry together and the resulting index returns the original vertex pair.",
+      "case_names": [
+        "case_1_sqlite_native",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "persistent_path_registries_keep_selected_pairs_and_then_accept_later_writes",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/open/persistent_input/tests/graph_paths.rs",
+      "capability": "Persistent graph path-index restoration",
+      "workload": "Change the source after a private registry has started. Read the selected definition and reachability pair, finish the session and then register another index.",
+      "invariant": "The private transaction keeps the old materialization. The activated engine sees later commits and admits a new index after the restore allowance is occupied and its token cancelled.",
+      "case_names": [
+        "case_1_sqlite_native",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "persistent_path_registries_release_partial_bindings_and_the_read_transaction",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/open/persistent_input/tests/graph_paths.rs",
+      "capability": "Persistent graph path-index restoration",
+      "workload": "Interrupt a private path catalog after input has started using cancellation or allocation denial. Resume ordinary writes against the same provider.",
+      "invariant": "Both failures preserve the published catalog, retire the read transaction and release the restore allowance.",
+      "case_names": [
+        "case_1_sqlite_native",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
+    },
+    {
       "package": "uqa-engine",
       "kind": "lib",
       "test": "empty_path_index_names_and_adjacent_colons_round_trip",

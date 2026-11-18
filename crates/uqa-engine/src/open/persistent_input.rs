@@ -62,8 +62,13 @@ enum Stage {
     NamedAnalyzers(NamedAnalyzers),
     GinAnalyzers(GinAnalyzers),
     FieldAnalyzers(FieldAnalyzers),
-    Registries(RestoredAuthorities),
+    Registries(RegistryInput),
     Caches(CacheInput),
+}
+
+enum RegistryInput {
+    Definitions(RestoredAuthorities),
+    PathIndexes(uqa_graph::PathIndexCatalogInput),
 }
 
 enum CacheInput {
@@ -166,7 +171,7 @@ impl FieldAnalyzers {
             } => match input.advance(1)? {
                 Some(fields) => {
                     *engine.durable.table_field_analyzers.write() = fields;
-                    Ok(Stage::Registries(retained))
+                    Ok(Stage::Registries(RegistryInput::Definitions(retained)))
                 }
                 None => Ok(Stage::FieldAnalyzers(Self::Installation {
                     input,
@@ -231,7 +236,7 @@ impl PersistentEngineInput {
         })
     }
 
-    /// Constraint, role, schema, table, partition-counter, graph, sequence, graph OID, enum, shell, range, comment, composite, domain, system, database, built-in routine authority, named/GIN/field analyzer input, field installation and scoring parameters consume bounded native polls. The remaining registry and model owners retain their existing whole-operation boundaries. Any error or unwind consumes the private session, including its read transaction.
+    /// Advance the private catalog within the requested work window. Graph path indexes are installed once every definition from the selected transaction has been bound. Any error or unwind consumes the private session and its read transaction.
     pub(crate) fn advance(
         &mut self,
         maximum_steps: usize,
@@ -353,11 +358,7 @@ impl Candidate {
             Stage::NamedAnalyzers(input) => input.advance(engine, self.limits, control)?,
             Stage::GinAnalyzers(input) => input.advance(engine, self.limits, control)?,
             Stage::FieldAnalyzers(input) => input.advance(engine, control)?,
-            Stage::Registries(retained) => {
-                self.session
-                    .restore_remaining_registries(catalog.as_ref(), retained)?;
-                Stage::Caches(CacheInput::Models)
-            }
+            Stage::Registries(input) => input.advance(engine, catalog, self.limits, control)?,
             Stage::Caches(input) => return input.advance(self.session, self.limits, control),
         };
         Ok(Progress::Pending(self))
@@ -393,6 +394,46 @@ impl Stage {
                 }))
             }
         }
+    }
+}
+
+impl RegistryInput {
+    fn advance(
+        self,
+        engine: &Engine,
+        catalog: Arc<dyn uqa_storage::CatalogFacade>,
+        limits: CatalogInputLimits,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Stage> {
+        let next = match self {
+            Self::Definitions(retained) => {
+                engine.restore_registries_before_path_indexes(
+                    catalog.as_ref(),
+                    CatalogRestoreMode::LoadOnly,
+                    retained.domains,
+                    retained.routines,
+                )?;
+                Self::PathIndexes(uqa_graph::PathIndexCatalogInput::new(
+                    engine.durable.graphs.read().clone(),
+                    catalog,
+                    Arc::clone(engine.storage.backend.as_ref().expect("persistent backend")),
+                    engine.durable.path_indexes.read().budget().clone(),
+                    limits,
+                    control,
+                )?)
+            }
+            Self::PathIndexes(mut input) => match input.advance(1)? {
+                Some(paths) => {
+                    *engine.durable.path_indexes.write() = paths;
+                    uqa_execution::schema::types::relation_arrays::restoration::validate(
+                        &engine.restored_catalog_read_view(),
+                    )?;
+                    return Ok(Stage::Caches(CacheInput::Models));
+                }
+                None => Self::PathIndexes(input),
+            },
+        };
+        Ok(Stage::Registries(next))
     }
 }
 
@@ -457,22 +498,6 @@ impl PersistentEngineState {
     fn complete_catalog(self, control: &StorageReadControl) -> StorageBackendResult<Progress> {
         control.check()?;
         Ok(Progress::Complete(self))
-    }
-
-    fn restore_remaining_registries(
-        &self,
-        catalog: &dyn uqa_storage::CatalogFacade,
-        restored: RestoredAuthorities,
-    ) -> StorageBackendResult<()> {
-        self.engine.restore_registries_after_analyzers(
-            catalog,
-            CatalogRestoreMode::LoadOnly,
-            restored.domains,
-            restored.routines,
-        )?;
-        uqa_execution::schema::types::relation_arrays::restoration::validate(
-            &self.engine.restored_catalog_read_view(),
-        )
     }
 
     pub(crate) fn engine(&self) -> &Engine {
