@@ -60,6 +60,24 @@ impl SessionNamespace {
             control,
         )
     }
+
+    pub(crate) async fn capture_from_input(
+        &self,
+        control: &ProductionControl<'_>,
+        input: &mut uqa_core::image_io::AsyncImageInput<'_>,
+    ) -> Result<Produced<RelationNameResolution>, SQLError> {
+        let temporary_schema = control.format(format_args!("pg_temp_{}", self.session_id))?;
+        RelationNameResolution::from_inputs_with_work(
+            self.expanded_path(),
+            temporary_schema,
+            self.temporary_namespace_allocated,
+            &RoleReference::Bound(self.role.clone()),
+            RelationLookupMode::Dynamic,
+            control,
+            input,
+        )
+        .await
+    }
 }
 
 #[cfg(test)]

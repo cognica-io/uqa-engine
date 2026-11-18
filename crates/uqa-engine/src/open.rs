@@ -26,6 +26,7 @@ mod lifecycle;
 #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 mod persistent_input;
 mod registries;
+mod routine_input;
 mod session_seed;
 mod statistics;
 #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]

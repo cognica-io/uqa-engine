@@ -31,6 +31,22 @@ impl CompiledFunctionBody {
 }
 
 impl SQLUserFunction {
+    /// Bind one private editable declaration while lookups continue to see the immutable
+    /// placeholder. The resulting catalog value owns its post-binding allocations.
+    pub fn rebind_stored_with_control(
+        &self,
+        control: &ProductionControl<'_>,
+        bind: impl FnOnce(&mut crate::ast::CreateFunction) -> Result<(RoutineBody, bool), SQLError>,
+    ) -> Result<(SQLRoutine, bool), SQLError> {
+        let (definition, scratch) =
+            crate::plan::copy::capture_stored_with_control(&self.def, control)?.into_parts();
+        let mut writable = definition;
+        let (body, changed) = bind(&mut writable)?;
+        let result = Self::new(writable, body).copy_native(control)?;
+        drop(scratch);
+        Ok((result, changed))
+    }
+
     /// An unpublished definition enters the native catalog through its admitted publication owner.
     pub fn shared(self) -> SQLRoutine {
         RetainedRoutineValue::native(

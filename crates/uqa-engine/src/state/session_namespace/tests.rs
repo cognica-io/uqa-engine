@@ -40,17 +40,7 @@ fn retained_session_namespace_survives_setting_role_and_source_retirement(
     let mut input = ImageDecoder::<_, SQLError>::new(&work, &token, |mut reader| async move {
         let mut input = reader.input();
         let control = ProductionControl::new(&retained_native, &original, input.cancellation);
-        let temporary_schema = control.format(format_args!("pg_temp_{}", selected.session_id))?;
-        RelationNameResolution::from_inputs_with_work(
-            selected.expanded_path(),
-            temporary_schema,
-            selected.temporary_namespace_allocated,
-            &RoleReference::Bound(selected.role.clone()),
-            RelationLookupMode::Dynamic,
-            &control,
-            &mut input,
-        )
-        .await
+        selected.capture_from_input(&control, &mut input).await
     })
     .unwrap();
     let window = ImageDecodeWindow { bytes: 1, steps: 1 };

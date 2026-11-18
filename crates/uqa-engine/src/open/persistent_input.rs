@@ -231,7 +231,7 @@ impl PersistentEngineInput {
         })
     }
 
-    /// Constraint, role, schema, table, partition-counter, graph, sequence, graph OID, enum, shell, range, comment, composite, domain, system, database, built-in routine authority, named/GIN/field analyzer input, field installation and scoring parameters consume bounded native polls. The remaining registry and model owners retain their existing whole-operation boundaries. Any error or unwind consumes the private session, including its read transaction.
+    /// Stored routine declarations and placeholders share the native polling boundary with the catalog inputs, analyzers, models and scoring parameters. Routine body compilation and the remaining registry finalizers still run synchronously. Any error or unwind retires the private session and its read transaction.
     pub(crate) fn advance(
         &mut self,
         maximum_steps: usize,

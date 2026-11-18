@@ -6,7 +6,7 @@
 
 //! Private authority generations retain their original position around routine placeholders.
 
-use super::{CatalogRestoreMode, Engine};
+use super::Engine;
 use std::sync::Arc;
 use uqa_execution::{
     catalog::{
@@ -14,7 +14,9 @@ use uqa_execution::{
         security::database_lifecycle::input::DatabaseCatalogInput,
         security::system_relations::input::SystemRelationCatalogInput,
     },
-    routines::restoration::PendingSQLFunctionRestore,
+    routines::{
+        catalog::input::RoutineCatalogPlaceholderInput, restoration::PendingSQLFunctionRestore,
+    },
 };
 use uqa_storage::{
     catalog::input::CatalogInputLimits, read_control::StorageReadControl, StorageBackendResult,
@@ -35,7 +37,10 @@ pub(super) enum PersistentAuthorityInput {
         input: DatabaseCatalogInput,
         domains: DomainRestoreState,
     },
-    Routines(DomainRestoreState),
+    Routines {
+        input: RoutineCatalogPlaceholderInput,
+        domains: DomainRestoreState,
+    },
     Builtins {
         input: BuiltinRoutineCatalogInput,
         retained: RestoredAuthorities,
@@ -91,27 +96,32 @@ impl PersistentAuthorityInput {
             Self::Database { mut input, domains } => match input.advance(1)? {
                 Some(value) => {
                     *engine.durable.database_security.write() = value;
-                    Self::Routines(domains)
+                    Self::Routines {
+                        input: engine.routine_placeholder_input(limits, control)?,
+                        domains,
+                    }
                 }
                 None => Self::Database { input, domains },
             },
-            Self::Routines(domains) => {
-                let routines = engine.install_sql_function_restore_placeholders(
-                    catalog.as_ref(),
-                    CatalogRestoreMode::LoadOnly,
-                )?;
-                let input = BuiltinRoutineCatalogInput::new(
-                    Arc::clone(catalog),
-                    engine.durable.roles.read().clone(),
-                    limits,
-                    engine.durable.builtin_routine_security.read().budget(),
-                    control,
-                )?;
-                Self::Builtins {
-                    input,
-                    retained: RestoredAuthorities { domains, routines },
+            Self::Routines { mut input, domains } => match input.advance(1)? {
+                None => Self::Routines { input, domains },
+                Some(prepared) => {
+                    let routines = PendingSQLFunctionRestore::install(engine, prepared, control);
+                    Self::Builtins {
+                        input: BuiltinRoutineCatalogInput::new(
+                            Arc::clone(catalog),
+                            engine.durable.roles.read().clone(),
+                            limits,
+                            engine.durable.builtin_routine_security.read().budget(),
+                            control,
+                        )?,
+                        retained: RestoredAuthorities {
+                            domains,
+                            routines: Some(routines),
+                        },
+                    }
                 }
-            }
+            },
             Self::Builtins {
                 mut input,
                 retained,

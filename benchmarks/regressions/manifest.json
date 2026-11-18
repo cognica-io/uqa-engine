@@ -2,6 +2,36 @@
   "schema_version": 1,
   "checks": [
     {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "persistent_routines_publish_complete_placeholders_and_finalize_after_views",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/open/persistent_input/tests/routines.rs",
+      "capability": "Persistent routine catalog restoration",
+      "workload": "Restore overloaded source and SQL-standard routines that reference a domain, a view and a later routine while another session publishes a function.",
+      "invariant": "Suspended work preserves the selected generation. Completed declarations preserve revision, signature ordering and later reads and writes after the read allowance is exhausted.",
+      "case_names": [
+        "case_1_sqlite_native",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "persistent_routine_input_retires_partial_declarations_and_the_private_transaction",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/open/persistent_input/tests/routines.rs",
+      "capability": "Persistent routine catalog restoration",
+      "workload": "Cancel, deny read memory, submit zero work and abandon a private Engine during stored declaration input.",
+      "invariant": "The published source metadata survives every terminal path and all private memory and read transactions retire.",
+      "case_names": [
+        "case_1_sqlite_native",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
+    },
+    {
       "package": "uqa-sql",
       "kind": "lib",
       "test": "scalar_free_query_and_source_containers_consume_bounded_work",
