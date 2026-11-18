@@ -165,7 +165,7 @@ impl RoutineDefinitionDependencies {
             }
             Stage::Defaults => {
                 let Some(changed) = def.edit_parameter(self.position, control, |parameter| {
-                    bind_default(context, parameter)
+                    bind_default(context, parameter, self.mode)
                 })?
                 else {
                     return Ok(Some(self.changed));

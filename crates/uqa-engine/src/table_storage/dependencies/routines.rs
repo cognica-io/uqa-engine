@@ -138,13 +138,14 @@ impl Engine {
         columns: &mut [uqa_sql::ast::ColumnDef],
         checks: &mut [uqa_sql::ast::TableCheck],
     ) -> StorageBackendResult<bool> {
-        uqa_sql::schema::dependencies::registration::bind_table_schema_routine_identities(
-            &self.schema_dependency_binding_context(),
-            table_name,
-            columns,
-            checks,
-        )
-        .map_err(StorageBackendError::Other)
+        uqa_sql::binding::stored_routines::StoredCallOrigin::Persisted
+            .bind_table_identities(
+                &self.schema_dependency_binding_context(),
+                table_name,
+                columns,
+                checks,
+            )
+            .map_err(StorageBackendError::Other)
     }
 
     pub(crate) fn rewrite_schema_routine_identity(

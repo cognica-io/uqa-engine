@@ -28,11 +28,7 @@ use crate::{
 };
 use uqa_core::memory::{Produced, ProductionControl, ProductionVec};
 
-#[derive(Clone, Copy)]
-pub enum RoutineCompilationMode {
-    Definition,
-    Persisted,
-}
+pub use crate::binding::stored_routines::StoredCallOrigin as RoutineCompilationMode;
 
 pub fn bind_routine_definition_dependencies(
     context: &RoutineCompilationContext<'_>,
@@ -53,6 +49,7 @@ pub fn bind_routine_definition_dependencies(
 fn bind_default(
     context: &RoutineCompilationContext<'_>,
     parameter: &mut crate::ast::FunctionParam,
+    mode: RoutineCompilationMode,
 ) -> Result<bool, SQLError> {
     let mut changed = false;
     let Some(default) = &mut parameter.default else {
@@ -88,7 +85,7 @@ fn bind_default(
         changed = true;
     }
     let sites = expression_syntax_sites(&lowered, &plan)?;
-    changed |= stored_ast::bind_stored_expression_sites(default, &sites)?;
+    changed |= mode.bind_expression_sites(default, &sites)?;
     // A default is assigned to its parameter.
     if let Some(ty) = user_defined_type(context, &parameter.type_name)? {
         changed |=
@@ -205,7 +202,7 @@ impl SQLBodyInputs {
                 bind_catalog_statement_routines(&routines, &lowered, positional)?
             }
         };
-        changed |= stored_ast::bind_stored_statement_sites(statement, &routines.sites)?;
+        changed |= mode.bind_statement_sites(statement, &routines.sites)?;
         Ok(changed)
     }
 }

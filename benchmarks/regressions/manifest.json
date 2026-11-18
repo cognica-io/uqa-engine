@@ -4,6 +4,19 @@
     {
       "package": "uqa-sql",
       "kind": "lib",
+      "test": "persisted_call_sites_preserve_runtime_fallback_and_require_concrete_function_identities",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/stored_ast/sites/tests.rs",
+      "capability": "Persistent stored function lookup",
+      "workload": "Bind scalar call sites from new and existing declarations against the same selected builtins, qualified names, structural operations and SQL routine identities.",
+      "invariant": "An existing bare call retains its runtime lookup. A positive or qualified builtin keeps its selection, and a resolved SQL object or structural operation still requires its identity.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
       "test": "stored_routine_defaults_and_bound_bodies_keep_their_call_placements_while_source_remains_deferred",
       "cases": 1,
       "source": "crates/uqa-sql/src/routines/native/runtime_calls/tests.rs",

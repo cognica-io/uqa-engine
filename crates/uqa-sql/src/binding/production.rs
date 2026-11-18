@@ -200,6 +200,7 @@ impl SchemaScope {
             stored_whole_rows: [None, None],
             routine_parameters: None,
             scalar_binding: super::ScalarBindingMode::Stored,
+            stored_call_origin: super::stored_routines::StoredCallOrigin::Definition,
             variable_sites: None,
             preserve_syntax_shape: false,
             prepared_dependencies: None,

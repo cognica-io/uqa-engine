@@ -831,7 +831,7 @@ impl SchemaScope {
             )?
         };
         if let Some(selected) = selected {
-            FunctionBinding::rebind(binding, selected.binding);
+            self.store_call_selection(name, binding, selected.binding);
         }
         Ok(())
     }
@@ -844,7 +844,39 @@ pub fn bind_query_plan_routines_for_storage(
     ctes: &BindingContext,
     outer: Option<&RowSchema>,
 ) -> Result<RowSchema, SQLError> {
-    SchemaScope::for_analysis(ctes)?.bind_query_routines_for_storage(engine, plan, params, outer)
+    super::stored_routines::StoredCallOrigin::Definition
+        .bind_query(engine, plan, params, ctes, outer)
+}
+
+impl super::stored_routines::StoredCallOrigin {
+    pub(crate) fn bind_query(
+        self,
+        engine: &dyn RoutineResolution,
+        plan: &mut QueryPlan,
+        params: &[SQLParam],
+        ctes: &BindingContext,
+        outer: Option<&RowSchema>,
+    ) -> Result<RowSchema, SQLError> {
+        let mut scope = SchemaScope::for_analysis(ctes)?;
+        scope.stored_call_origin = self;
+        scope.bind_query_routines_for_storage(engine, plan, params, outer)
+    }
+}
+
+impl SchemaScope {
+    pub(super) fn store_call_selection(
+        &self,
+        name: &str,
+        binding: &mut Option<FunctionBinding>,
+        selected: FunctionBinding,
+    ) {
+        if !self
+            .stored_call_origin
+            .keeps_runtime_lookup(name, binding.as_ref(), &selected)
+        {
+            FunctionBinding::rebind(binding, selected);
+        }
+    }
 }
 
 /// Bind a copy of a query lowered from stored syntax, keeping its shape so every bound identity can be carried back to that syntax.

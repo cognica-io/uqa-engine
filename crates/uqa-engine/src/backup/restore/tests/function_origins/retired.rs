@@ -17,7 +17,8 @@ fn restore_preserves_late_function_lookup_after_source_registration_retirement(
 ) {
     let files = tempfile::tempdir().unwrap();
     let store = repository(&files.path().join("archive"));
-    let source = provider.open(&files.path().join("source"));
+    let source_path = files.path().join("source");
+    let source = provider.open(&source_path);
     source
         .sql("CREATE VIEW fixed AS SELECT abs(-5)::integer AS v", &[])
         .unwrap();
@@ -54,9 +55,17 @@ fn restore_preserves_late_function_lookup_after_source_registration_retirement(
     check(&source, 5);
     let root = capture(&source, &store, None);
     assert_eq!(calls.load(Ordering::SeqCst), before);
-    let (_replacement, _) = register_abs(&source, 42);
+    let (replacement, _) = register_abs(&source, 42);
     check(&source, 42);
-    drop(source);
+    drop((replacement, registered, source));
+    if !matches!(provider, Provider::Memory) {
+        let reopened = provider.open(&source_path);
+        check(&reopened, 5);
+        let (mut replacement, _) = register_abs(&reopened, 42);
+        check(&reopened, 42);
+        replacement.unregister().unwrap();
+        check(&reopened, 5);
+    }
 
     let authority = Engine::new();
     let target = files.path().join("restored");

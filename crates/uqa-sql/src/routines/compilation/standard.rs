@@ -67,7 +67,12 @@ impl StatementCompiler {
                 &self.parameters,
             )?;
             if let UnifiedPlan::Query(query) = &mut plan {
-                crate::binding::bind_query_plan_routines_for_storage(
+                let origin = if lowering.persisted_definition {
+                    crate::binding::stored_routines::StoredCallOrigin::Persisted
+                } else {
+                    crate::binding::stored_routines::StoredCallOrigin::Definition
+                };
+                origin.bind_query(
                     context.routines,
                     query,
                     &self.positional,
