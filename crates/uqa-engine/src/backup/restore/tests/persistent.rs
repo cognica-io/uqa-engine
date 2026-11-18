@@ -455,18 +455,7 @@ fn persistent_restore_publishes_full_and_standalone_incremental_images(
     std::fs::remove_dir_all(source_directory).unwrap();
     let control = StorageReadControl::with_limit(32 << 20);
     if incremental {
-        repository.remove_backup(parent.backup(), &control).unwrap();
-        for attempt in 0..100 {
-            if repository
-                .collect_garbage(16, 16 << 20, &control)
-                .unwrap()
-                .remaining_files
-                == 0
-            {
-                break;
-            }
-            assert!(attempt < 99, "ancestor collection did not finish");
-        }
+        retire_ancestor(&repository, parent, &control);
     }
     let path = directory.path().join("restored");
     let target = kind.target((mode + usize::from(incremental)) % 4);

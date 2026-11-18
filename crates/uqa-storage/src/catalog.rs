@@ -933,21 +933,7 @@ pub trait CatalogFacade: Send + Sync {
 
     /// Drop this graph's path definitions within the enclosing graph mutation.
     fn drop_graph_path_indexes(&self, graph: &str) -> StorageBackendResult<()> {
-        let mut selected = Vec::new();
-        for (key, _) in self.load_path_indexes()? {
-            if path_index::belongs_to(
-                &key,
-                graph,
-                || self.path_index_graph(&key),
-                |name| self.named_graph_exists(name),
-            )? {
-                selected.push(key);
-            }
-        }
-        for key in selected {
-            self.drop_path_index(&key)?;
-        }
-        Ok(())
+        path_index::drop_graph(self, graph)
     }
 
     /// Durable reachability records, paged lexicographically by (source, target).

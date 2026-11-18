@@ -483,6 +483,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Preserve graph ownership when path index names contain double colons or meet at a colon. Distinct graph and index names retain their own reachability pairs across graph edits, repeatable reads, cold opens and backup restores. Existing persistent indexes keep their recorded graph identities.
+
 - Make `pg_catalog.pg_shadow` queryable through the existing login-role projection, retaining its private table and column permissions, catalog identity and view locks.
 
 - Include retained routine defaults and bound scalar literals in independent catalog capture limits, including restored owners and reused SQL bodies.

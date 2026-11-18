@@ -246,6 +246,27 @@ pub fn belongs_to(
     Ok(resolve(key, recorded()?.as_deref(), exists)?.is_some_and(|(owner, _)| owner == graph))
 }
 
+pub(super) fn drop_graph(
+    catalog: &(impl super::CatalogFacade + ?Sized),
+    graph: &str,
+) -> StorageBackendResult<()> {
+    let mut selected = Vec::new();
+    for (key, _) in catalog.load_path_indexes()? {
+        if belongs_to(
+            &key,
+            graph,
+            || catalog.path_index_graph(&key),
+            |name| catalog.named_graph_exists(name),
+        )? {
+            selected.push(key);
+        }
+    }
+    for key in selected {
+        catalog.drop_path_index(&key)?;
+    }
+    Ok(())
+}
+
 /// Validate an original memory image address and retain its existing allocation whenever already canonical.
 pub async fn canonicalized_from(
     key: Budgeted<String>,
