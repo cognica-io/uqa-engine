@@ -62,6 +62,14 @@ impl BackupImageSource for OwnedBackupImage {
         self.source.read_current(output)
     }
 
+    fn read_current_bounded(
+        &mut self,
+        output: &mut [u8],
+        maximum_positions: usize,
+    ) -> BackupResult<Option<usize>> {
+        self.source.read_current_bounded(output, maximum_positions)
+    }
+
     fn statistics(&self) -> BackupSourceStatistics {
         self.source.statistics()
     }

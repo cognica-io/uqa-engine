@@ -240,6 +240,7 @@ pub enum UnitKind {
     Tombstone = 3,
     Artifact = 4,
     Resource = 5,
+    FunctionReferences = 6,
 }
 
 impl UnitKind {
@@ -250,6 +251,7 @@ impl UnitKind {
             3 => Ok(Self::Tombstone),
             4 => Ok(Self::Artifact),
             5 => Ok(Self::Resource),
+            6 => Ok(Self::FunctionReferences),
             _ => Err(BackupError::Unsupported("unit kind")),
         }
     }

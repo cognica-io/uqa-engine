@@ -131,13 +131,17 @@ impl<'a, S: BackupImageSource> Machine<'a, S> {
         &mut self,
         operation: &mut BackupOperation<'a>,
         maximum_bytes: usize,
+        maximum_positions: usize,
     ) -> BackupResult<()> {
         let unit = self.unit.as_mut().expect("selected comparison");
-        let read = self
+        let Some(read) = self
             .source
             .as_mut()
             .expect("comparison owns source")
-            .read_current(&mut self.frame[..maximum_bytes])?;
+            .read_current_bounded(&mut self.frame[..maximum_bytes], maximum_positions)?
+        else {
+            return Ok(());
+        };
         unit.record(read, maximum_bytes)?;
         let Mode::Compare { file, .. } = &mut unit.mode else {
             unreachable!("comparison stage owns spool");
@@ -173,17 +177,24 @@ impl<'a, S: BackupImageSource> Machine<'a, S> {
         &mut self,
         operation: &mut BackupOperation<'a>,
         maximum_bytes: usize,
+        maximum_positions: usize,
     ) -> BackupResult<()> {
         let unit = self.unit.as_mut().expect("writing selected unit");
         let size = maximum_bytes.min(self.frame.len() - self.filled);
         let output = &mut self.frame[self.filled..self.filled + size];
         let current = matches!(unit.mode, Mode::Current);
         let read = match &mut unit.mode {
-            Mode::Current => self
-                .source
-                .as_mut()
-                .expect("current source")
-                .read_current(output)?,
+            Mode::Current => {
+                let Some(read) = self
+                    .source
+                    .as_mut()
+                    .expect("current source")
+                    .read_current_bounded(output, maximum_positions)?
+                else {
+                    return Ok(());
+                };
+                read
+            }
             Mode::Spooled { file, .. } => match file.read(output) {
                 Ok(read) => read,
                 Err(error) if error.kind() == io::ErrorKind::Interrupted => return Ok(()),

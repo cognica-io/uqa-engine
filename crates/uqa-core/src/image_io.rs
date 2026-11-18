@@ -17,7 +17,7 @@ const CHUNK: usize = 4096;
 mod decode;
 pub use decode::{
     decode_image, decode_image_from, AsyncImageInput, AsyncImageRead, ImageDecodeWindow,
-    ImageDecoder, ImageRead,
+    ImageDecoder, ImageRead, ImageUtf8,
 };
 
 #[derive(Debug, thiserror::Error)]

@@ -15,6 +15,7 @@
 mod destination;
 mod error;
 mod frame;
+mod functions;
 #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 mod import;
 mod inventory;
@@ -35,12 +36,13 @@ pub use memory::{MemoryImageImportReader, MemoryImageImportUnit};
 #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 pub use repository::{
     BackupCapturePhase, BackupCaptureProgress, BackupCaptureReport, BackupCaptureStep,
-    BackupCollectionReport, BackupCopyReport, BackupImageCapture, BackupImageReader,
-    BackupImageStatistics, BackupLease, BackupLeaseInput, BackupListing, BackupOperation,
-    BackupPack, BackupReadStep, BackupRestoreFactory, BackupRestoreImporter, BackupRestoreJob,
-    BackupRestoreOperation, BackupRestoreStep, BackupRestoreWork, BackupRestoreWorkStep,
-    LocalRepository, PackObject, PackRange, PreparedRestoreStep, PreparedRestoreValidation,
-    RestoreDirectory, RestoreFileWork, RestoredDatabase, VerifiedBackupImage,
+    BackupCollectionReport, BackupCopyReport, BackupFunctionReader, BackupImageCapture,
+    BackupImageReader, BackupImageStatistics, BackupLease, BackupLeaseInput, BackupListing,
+    BackupOperation, BackupPack, BackupReadStep, BackupRestoreFactory, BackupRestoreImporter,
+    BackupRestoreJob, BackupRestoreOperation, BackupRestoreStep, BackupRestoreWork,
+    BackupRestoreWorkStep, LocalRepository, PackObject, PackRange, PreparedRestoreStep,
+    PreparedRestoreValidation, RestoreDirectory, RestoreFileWork, RestoredDatabase,
+    VerifiedBackupImage,
 };
 
 #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
@@ -51,6 +53,9 @@ pub use destination::{
 };
 pub use error::{BackupError, BackupResult};
 pub use frame::{read_frame, write_frame, BackupKey, FrameContext, FrameKind, Protection};
+pub use functions::{
+    BackupFunctionDigestJob, BackupFunctionKind, BackupFunctionReference, BackupFunctionSource,
+};
 #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 pub use import::{BackupRecordImportMapping, MappedRecordImageImportReader, RecordImageImportUnit};
 pub use inventory::{InventoryEntry, InventoryReader, InventorySummary, InventoryWriter};

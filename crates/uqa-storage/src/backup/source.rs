@@ -53,5 +53,13 @@ pub trait BackupImageSource {
     fn advance(&mut self, maximum_positions: usize) -> BackupResult<BackupSourceStep>;
     fn current_unit(&self) -> Option<BackupSourceUnit<'_>>;
     fn read_current(&mut self, output: &mut [u8]) -> BackupResult<usize>;
+    /// A producer that must finish other bounded source work before emitting bytes may return None. A successful zero-byte read still certifies exact unit EOF.
+    fn read_current_bounded(
+        &mut self,
+        output: &mut [u8],
+        _maximum_positions: usize,
+    ) -> BackupResult<Option<usize>> {
+        self.read_current(output).map(Some)
+    }
     fn statistics(&self) -> BackupSourceStatistics;
 }

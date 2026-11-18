@@ -196,8 +196,8 @@ impl<'a, S: BackupImageSource> Machine<'a, S> {
             }
             Stage::Select => self.select(operation, maximum_positions.min(128))?,
             Stage::Match => self.match_parent(operation, bytes)?,
-            Stage::Compare => self.compare(operation, bytes)?,
-            Stage::Write => self.write_unit(operation, bytes)?,
+            Stage::Compare => self.compare(operation, bytes, maximum_positions.min(128))?,
+            Stage::Write => self.write_unit(operation, bytes, maximum_positions.min(128))?,
             Stage::UnitComplete => self.complete_unit(operation)?,
             Stage::Pack => self.finish_pack(operation)?,
             Stage::Entries => self.append_entry(operation)?,
