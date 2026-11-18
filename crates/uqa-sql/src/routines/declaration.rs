@@ -19,8 +19,11 @@ mod validation;
 pub use validation::validate_routine_declaration_from_input;
 mod captured;
 mod parameters;
-pub use captured::validate_captured_declaration;
 pub(super) use captured::validate_language as validate_routine_language;
+pub use captured::{
+    catalog_variadic_array, validate_captured_declaration, CapturedDeclarationCheck,
+    CapturedDeclarationStep, CapturedVariadicArgument,
+};
 
 mod shells;
 pub use shells::RoutineShellTypes;

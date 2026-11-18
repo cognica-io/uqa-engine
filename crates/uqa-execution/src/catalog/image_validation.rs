@@ -27,7 +27,9 @@ pub use routine_dependencies::validate as validate_routines;
 mod routine_bindings;
 pub use routine_bindings::validate as validate_routine_bindings;
 mod routine_declarations;
-pub use routine_declarations::validate as validate_routine_declarations;
+pub use routine_declarations::{
+    validate as validate_routine_declarations, DeclarationTypeLookup, VariadicLookup,
+};
 mod sequence_functions;
 pub use sequence_functions::validate as validate_sequence_functions;
 mod namespaces;

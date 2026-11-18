@@ -6,6 +6,9 @@
 
 //! Ordered native relationship checks against one immutable catalog view.
 
+use super::routine_declarations::{
+    BorrowedTypes, Cursor as DeclarationCursor, DeclarationTypeLookup,
+};
 use super::{
     validate_authority, validate_constraint_bindings, validate_constraints,
     validate_event_bindings, validate_hierarchies, validate_index_bindings, validate_indexes,
@@ -38,6 +41,7 @@ struct Inputs<'a> {
 enum Predicate {
     Direct(fn(&Inputs<'_>) -> Result<(), SQLError>),
     Scheduled(Scheduled),
+    Declarations,
 }
 
 #[derive(Clone, Copy)]
@@ -66,9 +70,7 @@ const ORDERED: &[Predicate] = &[
             input.cancellation,
         )
     }),
-    Predicate::Direct(|input| {
-        validate_routine_declarations(input.snapshot, input.types, &input.production)
-    }),
+    Predicate::Declarations,
     Predicate::Scheduled(Scheduled::Hierarchies),
     Predicate::Scheduled(Scheduled::Sequences),
     Predicate::Direct(|input| validate_indexes(input.snapshot, input.memory, input.cancellation)),
@@ -107,7 +109,12 @@ pub struct RelationshipValidation {
     memory: MemoryBudget,
     cancellation: CancellationToken,
     remaining: &'static [Predicate],
-    reading: Option<Budgeted<Box<ImageDecoder<(), SQLError>>>>,
+    reading: Option<Reading>,
+}
+
+enum Reading {
+    Catalog(Budgeted<Box<ImageDecoder<(), SQLError>>>),
+    Declarations(Budgeted<Box<DeclarationCursor>>),
 }
 
 impl RelationshipValidation {
@@ -139,18 +146,30 @@ impl RelationshipValidation {
         types: &dyn RoutineTypeCatalog,
         steps: usize,
     ) -> Result<Option<Self>, SQLError> {
+        self.advance_with_declaration_types(routines, types, &BorrowedTypes(types), steps)
+    }
+
+    /// Drive native declaration lookups against this catalog while other borrowed services remain local to this call.
+    pub fn advance_with_declaration_types(
+        self,
+        routines: &dyn RoutineResolution,
+        types: &dyn RoutineTypeCatalog,
+        declarations: &dyn DeclarationTypeLookup,
+        steps: usize,
+    ) -> Result<Option<Self>, SQLError> {
         if steps == 0 {
             return Err(SQLError::Internal(
                 "catalog validation requires a nonzero work window".into(),
             ));
         }
-        self.next(routines, types, Some(steps))
+        self.next(routines, types, declarations, Some(steps))
     }
 
     fn next(
         mut self,
         routines: &dyn RoutineResolution,
         types: &dyn RoutineTypeCatalog,
+        declarations: &dyn DeclarationTypeLookup,
         steps: Option<usize>,
     ) -> Result<Option<Self>, SQLError> {
         self.cancellation.check()?;
@@ -172,10 +191,51 @@ impl RelationshipValidation {
                     &self.cancellation,
                 ),
             })?,
+            Predicate::Declarations
+                if !self
+                    .catalog
+                    .snapshot()
+                    .definitions
+                    .sql_user_functions
+                    .is_empty() =>
+            {
+                if let Some(steps) = steps {
+                    let mut cursor = match self.reading.take() {
+                        Some(Reading::Declarations(cursor)) => cursor,
+                        None => DeclarationCursor::new(&self.catalog, &self.memory)?,
+                        Some(Reading::Catalog(_)) => {
+                            unreachable!("declaration validation owns its cursor")
+                        }
+                    };
+                    if !cursor.as_mut().advance(
+                        &self.catalog,
+                        declarations,
+                        &self.memory,
+                        &self.cancellation,
+                        steps,
+                    )? {
+                        self.reading = Some(Reading::Declarations(cursor));
+                        return Ok(Some(self));
+                    }
+                } else {
+                    validate_routine_declarations(
+                        self.catalog.snapshot(),
+                        types,
+                        &ProductionControl::new(
+                            &self.memory,
+                            &self.cancellation,
+                            &self.cancellation,
+                        ),
+                    )?;
+                }
+            }
             Predicate::Scheduled(check) if check.applies(self.catalog.snapshot()) => {
                 if let Some(steps) = steps {
                     let mut reading = match self.reading.take() {
-                        Some(reading) => reading,
+                        Some(Reading::Catalog(reading)) => reading,
+                        Some(Reading::Declarations(_)) => {
+                            unreachable!("catalog predicate owns its reader")
+                        }
                         None => check.begin(&self.catalog, &self.memory, &self.cancellation)?,
                     };
                     if reading
@@ -183,14 +243,14 @@ impl RelationshipValidation {
                         .advance(&mut std::io::empty(), ImageDecodeWindow { bytes: 1, steps })?
                         .is_none()
                     {
-                        self.reading = Some(reading);
+                        self.reading = Some(Reading::Catalog(reading));
                         return Ok(Some(self));
                     }
                 } else {
                     check.inline(&self.catalog, &self.memory, &self.cancellation)?;
                 }
             }
-            Predicate::Scheduled(_) => (),
+            Predicate::Scheduled(_) | Predicate::Declarations => (),
         }
         self.cancellation.check()?;
         self.remaining = remaining;
@@ -304,7 +364,7 @@ pub fn validate(
         cancellation,
     ));
     while let Some(checks) = remaining {
-        remaining = checks.next(routines, types, None)?;
+        remaining = checks.next(routines, types, &BorrowedTypes(types), None)?;
     }
     Ok(())
 }

@@ -71727,6 +71727,90 @@
       ]
     },
     {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "captured_layout_bounds_wide_duplicate_comparisons_and_keeps_the_first_diagnostic",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/routines/declaration/captured/tests.rs",
+      "capability": "Stored routine declaration validation",
+      "workload": "Compare long UTF-8 argument names in a stored declaration containing a later invalid return type.",
+      "invariant": "A bounded comparison preserves the spelling and precedence of the duplicate-parameter error.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "variadic_type_selection_matches_catalog_array_shapes_and_only_reads_the_selected_namespace",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/projection/regtypes/type_names/input_tests/resolution.rs",
+      "capability": "Stored routine declaration validation",
+      "workload": "Look up variadic argument types through the captured namespace, including builtins, arrays, domains and missing names.",
+      "invariant": "The native lookup preserves the ordinary catalog's array classification. Qualified names use their own schema and unqualified names read the selected search path only when needed.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "captured_overload_validation_yields_until_the_selected_variadic_lookup",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/routine_declarations/tests.rs",
+      "capability": "Stored routine declaration validation",
+      "workload": "Validate a catalog with a VARIADIC type alias after many overloads and compare one-step and grouped advances.",
+      "invariant": "Only the selected variadic argument needs a type lookup. Both work windows reach the same result.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "captured_overload_validation_releases_cancelled_denied_and_abandoned_work",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/routine_declarations/tests.rs",
+      "capability": "Stored routine declaration validation",
+      "workload": "Deny cursor admission, interrupt it between overloads and abandon its private input while a sibling reservation remains live.",
+      "invariant": "The cursor releases only its own workspace. Cancellation preserves the original diagnostic and stops before an unvisited type lookup.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "duplicate_parameter_positions_preserve_restore_windows_and_precede_invalid_results",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/backup/restore/tests/routine_declarations/corruption.rs",
+      "capability": "Stored routine declaration validation",
+      "workload": "Restore backups with an early or late duplicate argument and an invalid polymorphic result on each provider.",
+      "invariant": "The duplicate argument wins in both cases. Moving the duplicate later changes when the running job reports it.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "restored_variadic_catalog_array_alias_accepts_expanded_and_explicit_calls",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/backup/restore/tests/routine_declarations/corruption.rs",
+      "capability": "Stored routine declaration validation",
+      "workload": "Create a variadic function with pg_catalog._int4, restore it on each provider and reopen each persistent destination.",
+      "invariant": "Expanded and explicit arrays return their original cardinalities after publication and after a durable reopen.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
       "package": "uqa-engine",
       "kind": "lib",
       "test": "restored_routine_declarations_reject_invalid_original_signatures",

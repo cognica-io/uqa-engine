@@ -53,7 +53,8 @@ pub use type_names::{
     catalog_user_type_name_with_control, named_type_exists, resolve_catalog_column_type,
     resolve_catalog_column_type_name_with_control, resolve_catalog_column_type_with_control,
     resolve_catalog_user_type_by_oid, resolve_catalog_user_type_by_oid_with_control,
-    routine_type_name_identity_from_input, CatalogEnumLabels,
+    routine_type_name_identity_from_input, routine_variadic_array_from_input, CatalogEnumLabels,
+    RoutineTypeNamespace,
 };
 
 fn cross_database_reference(name: &str) -> SQLError {

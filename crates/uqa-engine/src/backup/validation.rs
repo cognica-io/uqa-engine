@@ -6,12 +6,18 @@
 
 //! Memory and persistent restore validate the same immutable catalog before publication.
 
-use crate::Engine;
+use crate::{state::SessionNamespace, Engine};
 use uqa_core::{
-    image_io::{ImageDecodeWindow, ImageDecoder},
-    memory::ProductionControl,
+    image_io::{AsyncImageInput, ImageDecodeWindow, ImageDecoder},
+    memory::{MemoryBudget, Produced, ProductionControl},
+    CancellationToken,
 };
-use uqa_execution::catalog::{image_validation::RelationshipValidation, CatalogReadView};
+use uqa_execution::catalog::{
+    image_validation::{DeclarationTypeLookup, RelationshipValidation, VariadicLookup},
+    projection::{routine_variadic_array_from_input, RoutineTypeNamespace},
+    CatalogReadView, RelationNameResolution,
+};
+use uqa_sql::SQLError;
 use uqa_storage::{read_control::StorageReadControl, StorageBackendError, StorageBackendResult};
 
 pub(super) enum CatalogValidation {
@@ -44,7 +50,7 @@ impl CatalogValidation {
         Ok(Self::Capture(input))
     }
 
-    /// Advance table capture, one native predicate, or a window of foreign binding validation.
+    /// Advance immutable table capture or the next ordered catalog relationship check.
     pub(super) fn advance(
         self,
         engine: &Engine,
@@ -75,12 +81,46 @@ impl CatalogValidation {
             }
             Self::Relationships(checks) => {
                 let next = checks
-                    .advance_with_steps(engine, engine, steps)
+                    .advance_with_declaration_types(engine, engine, engine, steps)
                     .map_err(sql_error)?;
                 control.check()?;
                 Ok(next.map(Self::Relationships))
             }
         }
+    }
+}
+
+impl DeclarationTypeLookup for Engine {
+    fn variadic_lookup(
+        &self,
+        catalog: &CatalogReadView,
+        canonical: Produced<String>,
+        memory: &MemoryBudget,
+        cancellation: &CancellationToken,
+    ) -> Result<VariadicLookup, SQLError> {
+        let catalog = catalog.clone();
+        let namespace = self.session.namespace_snapshot(self.session_id);
+        let original = cancellation.clone();
+        let input = ImageDecoder::new(memory, cancellation, |mut reader| async move {
+            let mut input = reader.input();
+            let control = ProductionControl::new(input.memory, &original, input.cancellation);
+            routine_variadic_array_from_input(
+                &catalog, &namespace, &canonical, &control, &mut input,
+            )
+            .await
+        })?;
+        Ok(VariadicLookup::Reading(input))
+    }
+}
+
+impl RoutineTypeNamespace for SessionNamespace {
+    type Namespace<'a> = Produced<RelationNameResolution>;
+    async fn capture<'a>(
+        &'a self,
+        control: &ProductionControl<'_>,
+        input: &mut AsyncImageInput<'_>,
+    ) -> Result<Self::Namespace<'a>, SQLError> {
+        self.capture_from_input(control, input).await
     }
 }
 
