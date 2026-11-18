@@ -203,7 +203,8 @@ where
     W::Error: From<CatalogRetentionError>,
 {
     let mut current = Frame::new_from(source, control, mode, work).await?;
-    let mut stack = Stack::<_, 4>::new(control);
+    // Complete constructor frames use admitted heap storage instead of expanding enclosing poll frames.
+    let mut stack = Stack::<_, 0>::new(control);
     loop {
         current.lowering.checkpoint(work).await?;
         if let Some(child) = current.next_child()? {
