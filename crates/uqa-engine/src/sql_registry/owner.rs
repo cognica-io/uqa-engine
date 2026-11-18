@@ -69,6 +69,7 @@ struct Session {
 struct Members {
     sessions: Vec<Session>,
     functions: Vec<WeakFunction>,
+    restore_readers: Weak<()>,
 }
 
 pub(crate) struct Registry {
@@ -96,6 +97,17 @@ impl Registry {
         self.revision.load(Ordering::Acquire)
     }
 
+    /// Keep registered names and implementations fixed while a restore prepares and publishes its private database.
+    pub(crate) fn retain_for_restore(&self) -> Arc<()> {
+        let mut members = self.members.lock();
+        if let Some(active) = members.restore_readers.upgrade() {
+            return active;
+        }
+        let active = Arc::new(());
+        members.restore_readers = Arc::downgrade(&active);
+        active
+    }
+
     pub(crate) fn attach(&self, session: &Arc<SessionContext>, gate: &Arc<StatementGate>) {
         let mut members = self.members.lock();
         members
@@ -118,6 +130,9 @@ impl Registry {
             .members
             .try_lock()
             .ok_or(SQLFunctionRegistrationError::Busy)?;
+        if members.restore_readers.strong_count() != 0 {
+            return Err(SQLFunctionRegistrationError::Busy);
+        }
         let sessions: Vec<_> = members
             .sessions
             .iter()

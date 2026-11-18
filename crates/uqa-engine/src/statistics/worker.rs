@@ -23,6 +23,7 @@ const POLL: Duration = Duration::from_secs(1);
 
 pub(super) fn run(
     provider: &Weak<dyn PersistentStorageProvider>,
+    extensions: &crate::RuntimeExtensions,
     manager: &Weak<RowLockManager>,
     statistics: &Weak<super::StatisticsCoordinator>,
     receiver: &mpsc::Receiver<()>,
@@ -58,7 +59,11 @@ pub(super) fn run(
         };
         if session.is_none() {
             match provider.open_session().and_then(|storage| {
-                Engine::from_initialized_persistent_session(storage, Some(Arc::clone(&provider)))
+                Engine::from_initialized_persistent_session(
+                    storage,
+                    Some(Arc::clone(&provider)),
+                    Some(extensions),
+                )
             }) {
                 Ok(mut engine) => {
                     engine

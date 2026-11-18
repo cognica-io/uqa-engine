@@ -47,6 +47,84 @@ impl crate::catalog::stored_view::StoredViewDefinition {
 }
 
 impl ViewRewriteDefinitionRef<'_> {
+    /// Resolve names whose definitions are supplied by the destination runtime. A stored view can intentionally raise an error only when queried, including a recursive relation reference.
+    pub fn validate_function_names_with_control(
+        self,
+        routines: &dyn crate::routines::RoutineResolution,
+        scope: crate::binding::production::ControlledBindingContext<'_>,
+        control: &ProductionControl<'_>,
+    ) -> Result<(), SQLError> {
+        let mut unresolved = false;
+        let mut observe = |name: &str,
+                           binding: Option<&crate::ast::FunctionBinding>,
+                           from: bool|
+         -> Result<(), SQLError> {
+            control.check()?;
+            if unresolved
+                || binding.is_some_and(|binding| {
+                    binding.object_id.is_some()
+                        || binding.builtin
+                        || binding.dispatch.is_some()
+                        || binding.value_binding.is_some()
+                        || binding.resolution_error.is_some()
+                })
+            {
+                return Ok(());
+            }
+            let name =
+                crate::semantics::builtin_function_dispatch_name_with_control(name, control)?;
+            if crate::semantics::is_pg_catalog_function_name(&name)
+                || crate::semantics::is_builtin_table_function(&name)
+                || routines.has_visible_sql_functions_with_control(&name, control)?
+                || routines.has_registered_table_function_with_control(&name, control)?
+                || (!from
+                    && (routines.has_registered_scalar_function_with_control(&name, control)?
+                        || routines
+                            .has_registered_aggregate_function_with_control(&name, control)?))
+            {
+                return Ok(());
+            }
+            unresolved = true;
+            Ok(())
+        };
+        self.query.try_visit_scalar_expressions(&mut |root| {
+            root.try_visit(&mut |expression| {
+                control.check()?;
+                if let crate::ScalarExpr::Func { name, binding, .. } = expression {
+                    observe(name, binding.as_ref(), false)?;
+                }
+                Ok::<_, SQLError>(true)
+            })
+        })?;
+        crate::binding::view_dependencies::visit_table_function_calls(
+            crate::plan::PlanRef::Query(self.query),
+            control,
+            &mut |name, binding| observe(name, binding, true),
+        )?;
+        if unresolved {
+            self.query_schema_with_control(routines, scope, control)?;
+        }
+        Ok(())
+    }
+
+    fn query_schema_with_control(
+        self,
+        routines: &dyn crate::routines::RoutineResolution,
+        scope: crate::binding::production::ControlledBindingContext<'_>,
+        control: &ProductionControl<'_>,
+    ) -> Result<RowSchema, SQLError> {
+        let _stored =
+            crate::semantics::sets::placement_scope::SetPlacementScope::stored_definition();
+        crate::binding::analyze_query_plan_schema_with_control(
+            routines,
+            self.query,
+            &[],
+            scope,
+            None,
+            control,
+        )
+    }
+
     pub fn row_schema_with_control(
         self,
         routines: &dyn crate::routines::RoutineResolution,
@@ -62,18 +140,7 @@ impl ViewRewriteDefinitionRef<'_> {
                 control,
             );
         }
-        let query_schema = {
-            let _stored =
-                crate::semantics::sets::placement_scope::SetPlacementScope::stored_definition();
-            crate::binding::analyze_query_plan_schema_with_control(
-                routines,
-                self.query,
-                &[],
-                scope,
-                None,
-                control,
-            )?
-        };
+        let query_schema = self.query_schema_with_control(routines, scope, control)?;
         if let Some(columns) = self.output_columns {
             named_view_schema_with_control(&query_schema, columns, control)
         } else {

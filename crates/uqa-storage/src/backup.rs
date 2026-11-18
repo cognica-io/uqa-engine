@@ -37,8 +37,8 @@ pub use repository::{
     BackupImageStatistics, BackupLease, BackupLeaseInput, BackupListing, BackupOperation,
     BackupPack, BackupReadStep, BackupRestoreFactory, BackupRestoreImporter, BackupRestoreJob,
     BackupRestoreOperation, BackupRestoreStep, BackupRestoreWork, BackupRestoreWorkStep,
-    LocalRepository, PackObject, PackRange, RestoreDirectory, RestoreFileWork, RestoredDatabase,
-    VerifiedBackupImage,
+    LocalRepository, PackObject, PackRange, PreparedRestoreStep, PreparedRestoreValidation,
+    RestoreDirectory, RestoreFileWork, RestoredDatabase, VerifiedBackupImage,
 };
 
 #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]

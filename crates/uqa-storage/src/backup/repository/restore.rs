@@ -6,10 +6,12 @@
 
 //! Durable restore identities and exclusive directory publication. Importers own physical import, logical validation and the new transaction-history transition.
 
+mod prepared;
 mod record;
 mod scheduled;
 mod target;
 
+pub use prepared::{PreparedRestoreStep, PreparedRestoreValidation};
 pub use scheduled::{
     BackupRestoreFactory, BackupRestoreJob, BackupRestoreStep, BackupRestoreWork,
     BackupRestoreWorkStep, RestoreFileWork,

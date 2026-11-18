@@ -14,7 +14,7 @@ pub fn cancel_restore(
     repository: &LocalRepository,
     id: RestoreId,
     destination: RestoreDestination,
-    options: RestoreOptions,
+    options: impl Into<RestoreConfiguration>,
     control: &StorageReadControl,
 ) -> Result<Option<RestoredEngine>, uqa_sql::SQLError> {
     engine.cancel_restore(repository, id, destination, options, control)
@@ -26,7 +26,7 @@ pub fn resume_restore<'a>(
     repository: &'a LocalRepository,
     id: RestoreId,
     destination: RestoreDestination,
-    options: RestoreOptions,
+    options: impl Into<RestoreConfiguration>,
     control: &StorageReadControl,
 ) -> Result<RestoreJob<'a>, uqa_sql::SQLError> {
     engine.resume_restore(repository, id, destination, options, control)
@@ -38,7 +38,7 @@ pub fn begin_restore<'a>(
     repository: &'a LocalRepository,
     backup: BackupId,
     destination: RestoreDestination,
-    options: RestoreOptions,
+    options: impl Into<RestoreConfiguration>,
     control: &StorageReadControl,
 ) -> Result<RestoreJob<'a>, uqa_sql::SQLError> {
     engine.begin_restore(repository, backup, destination, options, control)

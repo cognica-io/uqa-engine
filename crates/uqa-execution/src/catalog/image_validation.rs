@@ -33,6 +33,8 @@ mod name_claims;
 pub use name_claims::validate as validate_name_uniqueness;
 mod constraint_bindings;
 mod scalar_bindings;
+mod stored_expressions;
+pub use stored_expressions::validate as validate_stored_expressions;
 pub use constraint_bindings::validate as validate_constraint_bindings;
 mod index_bindings;
 pub use index_bindings::validate as validate_index_bindings;

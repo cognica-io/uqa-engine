@@ -14,13 +14,16 @@ use std::sync::{Arc, Weak};
 
 pub(super) struct Table<F> {
     function: F,
+    columns: Option<Vec<String>>,
     owner: Weak<Self>,
 }
 
 impl<F: SQLTableFunction + 'static> Table<F> {
     pub(super) fn wrap(function: F) -> Arc<dyn SQLTableFunction> {
+        let columns = function.output_columns().map(<[String]>::to_vec);
         Arc::new_cyclic(|owner| Self {
             function,
+            columns,
             owner: owner.clone(),
         })
     }
@@ -28,7 +31,7 @@ impl<F: SQLTableFunction + 'static> Table<F> {
 
 impl<F: SQLTableFunction + 'static> SQLTableFunction for Table<F> {
     fn output_columns(&self) -> Option<&[String]> {
-        self.function.output_columns()
+        self.columns.as_deref()
     }
 
     fn call(&self, args: &[Value]) -> Result<SQLTableFunctionResult, SQLError> {

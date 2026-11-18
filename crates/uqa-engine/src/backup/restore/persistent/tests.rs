@@ -27,7 +27,7 @@ fn persistent_validation_holds_the_private_read_transaction_until_completion_or_
         let provider = Arc::clone(source.storage.provider.as_ref().unwrap());
         let limits = catalog_limits(RestoreOptions::new(16 << 20, 8 << 20));
         let mut work =
-            Validation::new(provider, MemoryBudget::new(16 << 20), limits, &control).unwrap();
+            Validation::new(provider, MemoryBudget::new(16 << 20), limits, &RestoreFunctions::default(), &control).unwrap();
         let backend = loop {
             if let Some(ValidationStage::Relationships(
                 session,

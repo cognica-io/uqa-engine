@@ -16,6 +16,7 @@ use uqa_core::{RelationIdentity, Value};
 pub(crate) mod owned;
 mod references;
 pub(crate) use owned::bind_query_relation_targets_owned;
+pub(crate) use references::visit_table_function_calls;
 pub use references::{
     visit_stored_plan_function_bindings, visit_stored_plan_output_types,
     visit_stored_plan_relation_references,

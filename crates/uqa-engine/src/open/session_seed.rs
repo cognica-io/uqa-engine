@@ -48,6 +48,7 @@ impl Engine {
             ),
             Some(Arc::clone(provider)),
         );
+        session.share_runtime_extensions(&self.extensions);
         session.durable.restore(&self.durable.snapshot());
         session.runtime.physical_index_cache = self.runtime.physical_index_cache.clone();
         uqa_execution::catalog::foreign::restoration::retain_durable_registry(&session)?;

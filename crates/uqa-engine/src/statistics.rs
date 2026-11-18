@@ -366,6 +366,7 @@ impl Engine {
         }
         let (requests, receiver) = mpsc::sync_channel(1);
         let provider = Arc::downgrade(provider);
+        let extensions = crate::RuntimeExtensions::shared_from(&self.extensions);
         let manager = Arc::downgrade(&self.row_locks);
         let statistics = Arc::downgrade(&self.statistics);
         let cancellation = uqa_core::CancellationToken::new();
@@ -375,6 +376,7 @@ impl Engine {
             .spawn(move || {
                 worker::run(
                     &provider,
+                    &extensions,
                     &manager,
                     &statistics,
                     &receiver,

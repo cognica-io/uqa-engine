@@ -6,8 +6,8 @@
 
 //! Open the durably installed database in bounded catalog steps.
 
-use super::{catalog_limits, RestoreOptions, RestoredEngine};
-use crate::open::PersistentEngineInput;
+use super::{catalog_limits, AdmittedRestore, RestoredEngine};
+use crate::{backup::RestoreFunctions, open::PersistentEngineInput};
 use std::path::Path;
 use uqa_core::memory::{Budgeted, MemoryBudget, RetainedValue};
 use uqa_storage::{
@@ -18,6 +18,8 @@ use uqa_storage::{
 
 pub(in crate::backup::restore) struct PublishedInput {
     input: Budgeted<Box<PersistentEngineInput>>,
+    // Keep the validated registrations stable until the writable session is returned.
+    _functions: RestoreFunctions,
 }
 
 impl PublishedInput {
@@ -25,7 +27,7 @@ impl PublishedInput {
         target: &dyn PersistentBackupTarget,
         directory: &Path,
         request: DatabaseRestore,
-        options: RestoreOptions,
+        options: &AdmittedRestore,
         retained: MemoryBudget,
         control: &StorageReadControl,
     ) -> BackupResult<Self> {
@@ -34,10 +36,16 @@ impl PublishedInput {
             .memory()
             .reserve(size_of::<PersistentEngineInput>())?;
         let provider = target.open(directory, request, &completion)?;
-        let input =
-            PersistentEngineInput::new(provider, retained, catalog_limits(options), &completion)?;
+        let input = PersistentEngineInput::new(
+            provider,
+            retained,
+            catalog_limits(options.limits),
+            &options.functions,
+            &completion,
+        )?;
         Ok(Self {
             input: Budgeted::new(Box::new(input), memory),
+            _functions: options.functions.clone(),
         })
     }
 

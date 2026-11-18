@@ -16,6 +16,7 @@ use super::super::Fault;
 use super::*;
 
 mod paths;
+mod prepared;
 mod scheduled;
 
 #[test]

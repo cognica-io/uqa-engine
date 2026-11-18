@@ -41,18 +41,26 @@ pub fn visit_stored_plan_function_bindings(
     control: &ProductionControl<'_>,
     visit: &mut impl FnMut(&crate::ast::FunctionBinding) -> Result<(), SQLError>,
 ) -> Result<(), SQLError> {
+    visit_table_function_calls(plan, control, &mut |_, binding| {
+        if let Some(binding) = binding {
+            visit(binding)?;
+        }
+        Ok(())
+    })
+}
+
+pub(crate) fn visit_table_function_calls(
+    plan: PlanRef<'_>,
+    control: &ProductionControl<'_>,
+    visit: &mut impl FnMut(&str, Option<&crate::ast::FunctionBinding>) -> Result<(), SQLError>,
+) -> Result<(), SQLError> {
     visit_references(plan, control, &mut |_, _| Ok(()), &mut |source| {
         match source {
-            SourcePlan::Function {
-                binding: Some(binding),
-                ..
-            } => visit(binding)?,
+            SourcePlan::Function { name, binding, .. } => visit(name, binding.as_ref())?,
             SourcePlan::FunctionGroup { functions, .. } => {
                 for function in functions {
                     control.check()?;
-                    if let Some(binding) = &function.binding {
-                        visit(binding)?;
-                    }
+                    visit(&function.name, function.binding.as_ref())?;
                 }
             }
             _ => {}

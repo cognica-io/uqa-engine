@@ -186,7 +186,7 @@ pub trait PersistentBackupTarget: Send + Sync {
         control: &StorageReadControl,
     ) -> BackupResult<OwnedPersistentBackupImport<'a>>;
 
-    /// Open the installed provider after the enclosing restore owner has published its directory, resolving the exact durable request without creating a missing file or replacing later history.
+    /// Open the database at its prepared or published directory for the exact durable request. The caller owns private handles until validation finishes. Opening a published database preserves later transactions.
     fn open(
         &self,
         directory: &Path,

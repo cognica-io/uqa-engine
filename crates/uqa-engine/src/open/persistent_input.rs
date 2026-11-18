@@ -226,6 +226,7 @@ impl PersistentEngineInput {
         provider: Arc<dyn PersistentStorageProvider>,
         retention: MemoryBudget,
         limits: CatalogInputLimits,
+        functions: &crate::backup::RestoreFunctions,
         control: &StorageReadControl,
     ) -> StorageBackendResult<Self> {
         control.check()?;
@@ -233,7 +234,7 @@ impl PersistentEngineInput {
         let memory = control.memory().reserve(size_of::<Engine>())?;
         let storage = provider.open_session()?;
         storage.validate_transaction_affinity()?;
-        let engine = Budgeted::new(
+        let mut engine = Budgeted::new(
             Box::new(Engine::empty_persistent_session_with_retention(
                 storage,
                 Some(provider),
@@ -241,6 +242,7 @@ impl PersistentEngineInput {
             )),
             memory,
         );
+        functions.attach(engine.as_mut());
         let backend = engine.storage.backend.as_ref().expect("persistent backend");
         let version = backend.change_version()?;
         backend.begin_read_transaction()?;

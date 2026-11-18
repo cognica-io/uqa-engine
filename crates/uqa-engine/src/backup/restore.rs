@@ -24,6 +24,10 @@ use uqa_storage::{
     read_control::StorageReadControl,
 };
 
+mod functions;
+pub use functions::RestoreConfiguration;
+pub(crate) use functions::RestoreFunctions;
+
 /// The new database's storage owner. It never replaces an existing Engine.
 #[derive(Clone)]
 #[non_exhaustive]
@@ -71,7 +75,7 @@ pub enum RestorePhase {
     Reading,
     Validating,
     Prepared,
-    /// Publication has started, and the persistent runtime is still opening.
+    /// The job is rechecking a recovered prepared image or opening the installed runtime.
     Publishing,
     Complete,
     Cancelled,
@@ -90,11 +94,11 @@ impl Deref for RestoredEngine {
 }
 
 enum State<'a> {
-    Reading(Budgeted<Box<Input<'a>>>),
-    Decoded(Budgeted<Box<MemoryState>>),
-    Validating(RestoredEngine, CatalogValidation),
+    Reading(Budgeted<Box<Input<'a>>>, RestoreFunctions),
+    Decoded(Budgeted<Box<MemoryState>>, RestoreFunctions),
+    Validating(RestoredEngine, CatalogValidation, RestoreFunctions),
     Persistent(Budgeted<Box<persistent::Persistent<'a>>>),
-    Prepared(RestoredEngine),
+    Prepared(RestoredEngine, RestoreFunctions),
     Opening(persistent::PublishedInput),
     Complete(RestoredEngine),
     Cancelled,
@@ -117,14 +121,17 @@ impl Engine {
         repository: &'a LocalRepository,
         backup: BackupId,
         destination: RestoreDestination,
-        options: RestoreOptions,
+        options: impl Into<RestoreConfiguration>,
         control: &StorageReadControl,
     ) -> Result<RestoreJob<'a>, SQLError> {
         self.with_direct_query_snapshot(
             true,
             |engine| {
                 control.check().map_err(|e| start_error(e.into()))?;
+                let configuration = options.into();
+                let options = configuration.options;
                 engine.authorize_restore(options)?;
+                let admitted = configuration.admit();
                 let control = control.with_temporary_limit(options.maximum_workspace_bytes);
                 let lease = repository
                     .open_backup(backup, &control)
@@ -155,7 +162,10 @@ impl Engine {
                         )
                         .map_err(start_error)?;
                         Ok(RestoreJob {
-                            state: State::Reading(Budgeted::new(Box::new(input), memory)),
+                            state: State::Reading(
+                                Budgeted::new(Box::new(input), memory),
+                                admitted.functions,
+                            ),
                             backup,
                             root: Some(root),
                             id: None,
@@ -175,7 +185,7 @@ impl Engine {
                             .reserve(size_of::<persistent::Persistent<'_>>())
                             .map_err(|e| start_error(e.into()))?;
                         let candidate = persistent::Persistent::begin(
-                            repository, backup, directory, target, options, &control,
+                            repository, backup, directory, target, admitted, &control,
                         )
                         .map_err(start_error)?;
                         let id = candidate.id();
@@ -200,12 +210,14 @@ impl Engine {
         repository: &'a LocalRepository,
         id: RestoreId,
         destination: RestoreDestination,
-        options: RestoreOptions,
+        options: impl Into<RestoreConfiguration>,
         control: &StorageReadControl,
     ) -> Result<RestoreJob<'a>, SQLError> {
         self.with_direct_query_snapshot(
             true,
             |engine| {
+                let configuration = options.into();
+                let options = configuration.options;
                 engine.authorize_restore(options)?;
                 let RestoreDestination::Persistent { directory, target } = destination else {
                     return Err(start_error(BackupError::Unsupported(
@@ -218,7 +230,12 @@ impl Engine {
                     .reserve(size_of::<persistent::Persistent<'_>>())
                     .map_err(|e| start_error(e.into()))?;
                 let (candidate, backup) = persistent::Persistent::resume(
-                    repository, id, directory, target, options, &control,
+                    repository,
+                    id,
+                    directory,
+                    target,
+                    configuration.admit(),
+                    &control,
                 )
                 .map_err(start_error)?;
                 Ok(RestoreJob {
@@ -240,13 +257,14 @@ impl Engine {
         repository: &LocalRepository,
         id: RestoreId,
         destination: RestoreDestination,
-        options: RestoreOptions,
+        options: impl Into<RestoreConfiguration>,
         control: &StorageReadControl,
     ) -> Result<Option<RestoredEngine>, SQLError> {
         self.with_direct_query_snapshot(
             true,
             |engine| {
-                engine.authorize_restore(options)?;
+                let configuration = options.into();
+                engine.authorize_restore(configuration.options)?;
                 let RestoreDestination::Persistent { directory, target } = destination else {
                     return Err(start_error(BackupError::Unsupported(
                         "durable memory restore recovery",
@@ -257,7 +275,7 @@ impl Engine {
                     id,
                     directory.as_path(),
                     target.as_ref(),
-                    options,
+                    &configuration.admit(),
                     control,
                 )
                 .map_err(start_error)
@@ -300,10 +318,10 @@ impl RestoreJob<'_> {
 
     pub fn phase(&self) -> RestorePhase {
         match self.state {
-            State::Reading(_) => RestorePhase::Reading,
-            State::Decoded(_) | State::Validating(_, _) => RestorePhase::Validating,
+            State::Reading(..) => RestorePhase::Reading,
+            State::Decoded(..) | State::Validating(..) => RestorePhase::Validating,
             State::Persistent(ref candidate) => candidate.phase(),
-            State::Prepared(_) => RestorePhase::Prepared,
+            State::Prepared(..) => RestorePhase::Prepared,
             State::Opening(_) => RestorePhase::Publishing,
             State::Complete(_) => RestorePhase::Complete,
             State::Cancelled => RestorePhase::Cancelled,
@@ -311,7 +329,7 @@ impl RestoreJob<'_> {
         }
     }
 
-    /// Advance repository input, catalog capture or one ordered catalog predicate. A persistent candidate retains its private read transaction until validation completes.
+    /// Advance repository input, catalog capture or validation. Catalog checks that span multiple work windows retain their progress. A persistent candidate retains its private read transaction until validation completes.
     pub fn advance(&mut self, maximum_object_bytes: usize) -> BackupResult<RestorePhase> {
         match self.phase() {
             RestorePhase::Prepared | RestorePhase::Complete => return Ok(self.phase()),
@@ -328,27 +346,30 @@ impl RestoreJob<'_> {
             return Err(BackupError::Invalid("zero restore verification window"));
         }
         self.state = match state {
-            State::Reading(mut input) => match input.as_mut().advance(maximum_object_bytes)? {
-                Some(candidate) => {
-                    drop(input);
-                    let memory = self.control.memory().reserve(size_of::<MemoryState>())?;
-                    State::Decoded(Budgeted::new(Box::new(candidate), memory))
+            State::Reading(mut input, functions) => {
+                match input.as_mut().advance(maximum_object_bytes)? {
+                    Some(candidate) => {
+                        drop(input);
+                        let memory = self.control.memory().reserve(size_of::<MemoryState>())?;
+                        State::Decoded(Budgeted::new(Box::new(candidate), memory), functions)
+                    }
+                    None => State::Reading(input, functions),
                 }
-                None => State::Reading(input),
-            },
-            State::Decoded(candidate) => {
+            }
+            State::Decoded(candidate, functions) => {
                 let (candidate, memory) = candidate.into_parts();
-                let engine = candidate.assemble(self.retained.clone(), &self.control)?;
+                let mut engine = candidate.assemble(self.retained.clone(), &self.control)?;
+                functions.attach(&mut engine);
                 drop(memory);
                 let engine =
                     RestoredEngine(RetainedValue::with_budget(engine, self.control.memory())?);
                 let checks = CatalogValidation::begin(&engine, &self.control)?;
-                State::Validating(engine, checks)
+                State::Validating(engine, checks, functions)
             }
-            State::Validating(engine, checks) => {
+            State::Validating(engine, checks, functions) => {
                 match checks.advance(&engine, &self.control, 64)? {
-                    Some(checks) => State::Validating(engine, checks),
-                    None => State::Prepared(engine),
+                    Some(checks) => State::Validating(engine, checks, functions),
+                    None => State::Prepared(engine, functions),
                 }
             }
             State::Persistent(mut candidate) => {
@@ -378,15 +399,19 @@ impl RestoreJob<'_> {
             return Err(BackupError::Invalid("zero restore publication step limit"));
         }
         self.state = match mem::replace(&mut self.state, State::Failed) {
-            State::Prepared(engine) => {
+            State::Prepared(engine, _functions) => {
                 self.control.check()?;
                 State::Complete(engine)
             }
             State::Persistent(mut candidate) => {
-                let input = candidate
-                    .as_mut()
-                    .begin_publication(self.retained.clone(), &self.control)?;
-                State::Opening(input)
+                match candidate.as_mut().advance_publication(
+                    maximum_steps,
+                    self.retained.clone(),
+                    &self.control,
+                )? {
+                    Some(input) => State::Opening(input),
+                    None => State::Persistent(candidate),
+                }
             }
             State::Opening(mut input) => match input.advance(maximum_steps)? {
                 Some(engine) => State::Complete(engine),

@@ -301,6 +301,7 @@ impl Engine {
             None => Self::from_initialized_persistent_session(
                 storage_session,
                 Some(Arc::clone(provider)),
+                Some(&self.extensions),
             )?,
         };
         session
@@ -337,11 +338,6 @@ impl Engine {
         // restored. Only that case needs a second catalog or data refresh.
         // Catalog cells keep independent mutable owners over shared immutable
         // values, so a writer cannot expose uncommitted definitions to siblings.
-        session.extensions = super::RuntimeExtensions::shared_from(&self.extensions);
-        session
-            .extensions
-            .functions
-            .attach(&session.session, &session.runtime.statement_gate);
         if internal_read {
             session.runtime.function_context = Arc::clone(&self.runtime.function_context);
         }
@@ -428,14 +424,22 @@ impl Engine {
         storage_session: PersistentStorageSession,
         provider: Option<Arc<dyn PersistentStorageProvider>>,
     ) -> StorageBackendResult<Self> {
-        Self::build_persistent_session(storage_session, provider, true)
+        Self::build_persistent_session(storage_session, provider, true, None)
     }
 
     pub(crate) fn from_initialized_persistent_session(
         storage_session: PersistentStorageSession,
         provider: Option<Arc<dyn PersistentStorageProvider>>,
+        extensions: Option<&crate::RuntimeExtensions>,
     ) -> StorageBackendResult<Self> {
-        Self::build_persistent_session(storage_session, provider, false)
+        Self::build_persistent_session(storage_session, provider, false, extensions)
+    }
+
+    pub(super) fn share_runtime_extensions(&mut self, extensions: &crate::RuntimeExtensions) {
+        self.extensions = crate::RuntimeExtensions::shared_from(extensions);
+        self.extensions
+            .functions
+            .attach(&self.session, &self.runtime.statement_gate);
     }
 
     pub(super) fn empty_persistent_session(
@@ -505,11 +509,15 @@ impl Engine {
         storage_session: PersistentStorageSession,
         provider: Option<Arc<dyn PersistentStorageProvider>>,
         initialize_catalog: bool,
+        extensions: Option<&crate::RuntimeExtensions>,
     ) -> StorageBackendResult<Self> {
         storage_session.validate_transaction_affinity()?;
         let restore_catalog = Arc::clone(&storage_session.catalog);
         let restore_backend = Arc::clone(&storage_session.backend);
         let mut engine = Self::empty_persistent_session(storage_session, provider);
+        if let Some(extensions) = extensions {
+            engine.share_runtime_extensions(extensions);
+        }
         let own_read = !initialize_catalog && !restore_backend.in_transaction();
         let version_before_read = if own_read {
             let version = restore_backend.change_version()?;

@@ -191,7 +191,7 @@ fn memory_restore_job_cancel_drop_and_failed_steps_retire_unpublished_state() {
         if matches!(mode, "catalog_cancel" | "catalog_drop") {
             while !matches!(
                 job.state,
-                State::Validating(_, CatalogValidation::Relationships(_))
+                State::Validating(_, CatalogValidation::Relationships(_), _)
             ) {
                 assert_ne!(job.advance(1024).unwrap(), RestorePhase::Prepared);
             }
@@ -327,6 +327,7 @@ fn memory_restore_job_admission_preserves_authority_and_transaction_failures() {
 }
 
 mod constraint_bindings;
+mod external_functions;
 mod foreign_bindings;
 mod foreign_callbacks;
 mod index_bindings;

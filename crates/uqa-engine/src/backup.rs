@@ -9,7 +9,11 @@
 mod memory;
 mod restore;
 mod validation;
-pub use restore::{RestoreDestination, RestoreJob, RestoreOptions, RestorePhase, RestoredEngine};
+pub(crate) use restore::RestoreFunctions;
+pub use restore::{
+    RestoreConfiguration, RestoreDestination, RestoreJob, RestoreOptions, RestorePhase,
+    RestoredEngine,
+};
 
 use crate::{Engine, SQLError};
 use std::sync::Arc;

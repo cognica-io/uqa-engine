@@ -308,7 +308,7 @@ fn first_worker_session_during_insert_keeps_committed_statistics_current(
         requested.recv_timeout(Duration::from_secs(30)).unwrap();
         let storage = provider.open_session().unwrap();
         let mut worker =
-            Engine::from_initialized_persistent_session(storage, Some(provider)).unwrap();
+            Engine::from_initialized_persistent_session(storage, Some(provider), None).unwrap();
         worker
             .session
             .statistics_worker

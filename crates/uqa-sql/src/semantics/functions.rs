@@ -44,13 +44,7 @@ pub fn builtin_function_dispatch_name(name: &str) -> Cow<'_, str> {
     };
     let is_builtin = match schema {
         "ag_catalog" => is_age_catalog_function(local),
-        "pg_catalog" => {
-            crate::registry::is_registered(local)
-                || crate::type_resolution::is_fixed_builtin(local)
-                || crate::expr::variadic_any::is_variadic_any(local)
-                || crate::ast::is_builtin_aggregate_function(local)
-                || is_pg_catalog_function(local)
-        }
+        "pg_catalog" => is_pg_catalog_function_name(local),
         _ => false,
     };
     if !is_builtin {
@@ -64,6 +58,14 @@ pub fn builtin_function_dispatch_name(name: &str) -> Cow<'_, str> {
             Cow::Owned(lower)
         }
     }
+}
+
+pub(crate) fn is_pg_catalog_function_name(local: &str) -> bool {
+    crate::registry::is_registered(local)
+        || crate::type_resolution::is_fixed_builtin(local)
+        || crate::expr::variadic_any::is_variadic_any(local)
+        || crate::ast::is_builtin_aggregate_function(local)
+        || is_pg_catalog_function(local)
 }
 
 pub(crate) fn lowercase_function_name(name: &str) -> Cow<'_, str> {

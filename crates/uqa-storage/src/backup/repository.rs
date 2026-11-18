@@ -21,8 +21,8 @@ pub use operation::{
 };
 pub use restore::{
     BackupRestoreFactory, BackupRestoreImporter, BackupRestoreJob, BackupRestoreOperation,
-    BackupRestoreStep, BackupRestoreWork, BackupRestoreWorkStep, RestoreDirectory, RestoreFileWork,
-    RestoredDatabase,
+    BackupRestoreStep, BackupRestoreWork, BackupRestoreWorkStep, PreparedRestoreStep,
+    PreparedRestoreValidation, RestoreDirectory, RestoreFileWork, RestoredDatabase,
 };
 pub use retention::{BackupCollectionReport, BackupListing};
 pub use verify::{BackupImageReader, BackupReadStep, VerifiedBackupImage};

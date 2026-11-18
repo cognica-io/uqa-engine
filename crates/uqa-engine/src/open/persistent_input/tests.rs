@@ -138,6 +138,7 @@ fn input(source: &Engine, control: &StorageReadControl) -> PersistentEngineInput
         Arc::clone(source.storage.provider.as_ref().unwrap()),
         MemoryBudget::new(16 << 20),
         LIMITS,
+        &crate::backup::RestoreFunctions::default(),
         control,
     )
     .unwrap()

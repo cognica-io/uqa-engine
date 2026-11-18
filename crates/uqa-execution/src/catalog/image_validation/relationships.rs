@@ -61,6 +61,14 @@ const PREDICATES: &[Predicate] = &[
     },
     |input| validate_types(input.snapshot, input.memory, input.cancellation),
     |input| validate_plan_relations(input.view, &input.production),
+    |input| {
+        super::validate_stored_expressions(
+            input.view,
+            input.routines,
+            input.memory,
+            input.cancellation,
+        )
+    },
     |input| validate_routine_declarations(input.snapshot, input.types, &input.production),
     |input| validate_hierarchies(input.snapshot, input.memory, input.cancellation),
     |input| validate_sequences(input.snapshot, input.memory, input.cancellation),

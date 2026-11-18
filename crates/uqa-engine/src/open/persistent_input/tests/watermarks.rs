@@ -96,6 +96,7 @@ fn persistent_partition_watermarks_match_reopen_and_publish_one_root_per_step(
     let ordinary = Engine::from_initialized_persistent_session(
         provider.open_session().unwrap(),
         Some(Arc::clone(provider)),
+        None,
     )
     .unwrap();
     assert_eq!(

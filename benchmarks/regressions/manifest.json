@@ -62537,8 +62537,71 @@
     {
       "package": "uqa-engine",
       "kind": "lib",
+      "test": "restore_binds_application_functions_without_executing_callbacks",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/backup/restore/tests/external_functions.rs",
+      "capability": "Private backup routine binding",
+      "workload": "Supply missing, mismatched and matching table functions to real restore jobs.",
+      "invariant": "Binding reads stable result columns and executes no application code until SQL is invoked on the published Engine.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "restore_preserves_recursive_views_and_deferred_function_resolution",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/backup/restore/tests/external_functions.rs",
+      "capability": "Private backup routine binding",
+      "workload": "Restore a recursive view and a source routine with a deferred application dependency.",
+      "invariant": "Restoration preserves the original query-time errors and deferred lookup.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "restore_resolves_function_calls_in_stored_views_and_defaults",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/backup/restore/tests/external_functions.rs",
+      "capability": "Private backup routine binding",
+      "workload": "Bind application scalar calls from views, materialized views, table defaults and domain defaults.",
+      "invariant": "A missing mandatory name fails before publication and a supplied registration is used for later SQL.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "resumed_prepared_restore_checks_new_process_functions_before_publication",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/backup/restore/tests/external_functions.rs",
+      "capability": "Private backup routine binding",
+      "workload": "Prepare a persistent image, remove the archive and resume with a different process-local registry.",
+      "invariant": "An incompatible or absent binding leaves the database private. Compatible registrations open the requested database and subsequent recovery keeps later writes.",
+      "case_names": [
+        "case_1_sqlite_native",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
       "test": "persistent_restore_recovers_private_completion_and_retires_failed_or_cancelled_input",
-      "cases": 12,
+      "cases": 15,
       "source": "crates/uqa-engine/src/backup/restore/tests/persistent.rs",
       "capability": "Owned persistent restore lifecycle",
       "workload": "Recover private physical/prepared images and cancel active or failed jobs on all persistent providers.",
@@ -62548,14 +62611,17 @@
         "case_1_native::outcome_2___prepared__",
         "case_1_native::outcome_3___cancel__",
         "case_1_native::outcome_4___failure__",
+        "case_1_native::outcome_5___prepared_cancel__",
         "case_2_kv::outcome_1___validating__",
         "case_2_kv::outcome_2___prepared__",
         "case_2_kv::outcome_3___cancel__",
         "case_2_kv::outcome_4___failure__",
+        "case_2_kv::outcome_5___prepared_cancel__",
         "case_3_redb::outcome_1___validating__",
         "case_3_redb::outcome_2___prepared__",
         "case_3_redb::outcome_3___cancel__",
-        "case_3_redb::outcome_4___failure__"
+        "case_3_redb::outcome_4___failure__",
+        "case_3_redb::outcome_5___prepared_cancel__"
       ]
     },
     {
