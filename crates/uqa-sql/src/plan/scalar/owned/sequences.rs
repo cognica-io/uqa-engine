@@ -48,9 +48,12 @@ where
         }
         expression
             .map_child_from(0, control, |argument| async {
-                argument
-                    .edit_from((), control, work, &mut Name(&mut self.0))
-                    .await
+                let mut name = Name(&mut self.0);
+                let output = crate::construction::retain_with(*control, || {
+                    argument.edit_from((), control, work, &mut name)
+                })?
+                .await;
+                output
             })
             .await
     }
