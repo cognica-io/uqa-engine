@@ -30,11 +30,15 @@ pub fn walk_schema_expr_with_control(
             control.check()?;
             visit(node)
         },
-        &mut || match control.copy_text(SUBQUERY_DEPENDENCY_ERROR) {
-            Ok(message) => crate::SQLError::Internal(message.into_parts().0),
-            Err(error) => error.into(),
-        },
+        &mut || subquery_error(control),
     )
+}
+
+pub(crate) fn subquery_error(control: &uqa_core::memory::ProductionControl<'_>) -> crate::SQLError {
+    match control.copy_text(SUBQUERY_DEPENDENCY_ERROR) {
+        Ok(message) => crate::SQLError::Internal(message.into_parts().0),
+        Err(error) => error.into(),
+    }
 }
 
 pub fn schema_expr_references_column(expression: &crate::ast::Expr, column: &str) -> bool {

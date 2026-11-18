@@ -53415,6 +53415,32 @@
     {
       "package": "uqa-execution",
       "kind": "lib",
+      "test": "stored_default_types_yield_for_native_syntax_and_selected_invocation_fields",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/type_dependencies/tests/defaults.rs",
+      "capability": "Stored routine default type references",
+      "workload": "Read a stored routine default with 4,096 syntax children, routine argument types or empty source positions, then cancel a suspended read.",
+      "invariant": "One-step and 32-step windows produce the same type diagnostic and release the selected syntax and invocation work on cancellation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "stored_default_type_spelling_yields_for_whitespace_digits_and_array_suffixes",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/type_dependencies/tests/defaults.rs",
+      "capability": "Stored routine default type names",
+      "workload": "Read stored default type names with 131,072 Unicode spaces, zero digits or array suffixes in one-step and 32-step windows.",
+      "invariant": "Long type names yield while scanning, preserve the first invalid type diagnostic and release the operation allowance on cancellation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
       "test": "type_claims_yield_before_checking_the_last_column_and_retire_on_every_exit",
       "cases": 1,
       "source": "crates/uqa-execution/src/catalog/image_validation/type_dependencies/tests.rs",

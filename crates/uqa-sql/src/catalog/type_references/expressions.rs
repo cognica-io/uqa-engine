@@ -6,7 +6,7 @@
 
 //! Immutable selected type references in stored syntax and executable metadata.
 
-use super::{invalid, type_metadata, TypeReferences};
+use super::{inline, invalid, type_metadata, TypeReferences, Work};
 use crate::{
     ast::{CompositeRowBinding, Expr, FunctionBinding, FunctionDispatch, UserTypeKind},
     plan::{PlanRef, UnifiedPlan},
@@ -16,24 +16,38 @@ use crate::{
 impl TypeReferences<'_> {
     /// Inspect selected identities without parsing source text, resolving replacement names or evaluating a value.
     pub fn expression(&self, expression: &Expr) -> Result<(), SQLError> {
-        crate::schema::dependencies::walk_schema_expr_with_control(
-            expression,
-            &self.control(),
-            &mut |node| match node {
+        inline(self.expression_with_work(expression, &mut ()))
+    }
+
+    pub async fn expression_with_work(
+        &self,
+        expression: &Expr,
+        work: &mut (impl Work + Send),
+    ) -> Result<(), SQLError> {
+        let control = self.control();
+        let mut nodes = expression.stored_nodes(self.memory)?;
+        while let Some(node) = nodes.next(&control, work).await? {
+            match node {
                 Expr::Cast { ty, .. }
                 | Expr::TypedLiteral { ty, .. }
                 | Expr::CompositeRow {
                     binding: CompositeRowBinding { ty, .. },
                     ..
-                } => self.stored_name(ty),
+                } => self.stored_name_with_work(ty, work).await?,
                 Expr::Func {
                     binding: Some(binding),
                     ..
-                } => self.function_types(binding),
-                Expr::RetainedLiteral(literal) => self.retained_literal(&literal.0),
-                _ => Ok(()),
-            },
-        )
+                } => self.function_types_with_work(binding, work).await?,
+                Expr::RetainedLiteral(literal) => {
+                    self.retained_literal_with_work(&literal.0, work).await?
+                }
+                Expr::ScalarSubquery(_) | Expr::Exists { .. } | Expr::InSubquery { .. } => {
+                    return Err(crate::schema::dependencies::subquery_error(&control));
+                }
+                _ => {}
+            }
+        }
+        Ok(())
     }
 
     pub fn scalar(&self, expression: &ScalarExpr) -> Result<(), SQLError> {
@@ -52,7 +66,9 @@ impl TypeReferences<'_> {
                     binding: Some(binding),
                     ..
                 } => self.function_types(binding)?,
-                ScalarExpr::RetainedLiteral(literal) => self.retained_literal(literal)?,
+                ScalarExpr::RetainedLiteral(literal) => {
+                    inline(self.retained_literal_with_work(literal, &mut ()))?
+                }
                 _ => {}
             }
             match node {
@@ -71,30 +87,50 @@ impl TypeReferences<'_> {
         })
     }
 
-    fn retained_literal(&self, literal: &crate::ir::RetainedScalarLiteral) -> Result<(), SQLError> {
+    async fn retained_literal_with_work(
+        &self,
+        literal: &crate::ir::RetainedScalarLiteral,
+        work: &mut (impl Work + Send),
+    ) -> Result<(), SQLError> {
         if let Some(ty) = &literal.ty {
-            self.column_type(ty)?;
+            self.column_type_with_work(ty, work).await?;
         }
         if let Some(declaration) = &literal.declaration {
-            self.stored_name(declaration)?;
+            self.stored_name_with_work(declaration, work).await?;
         }
         Ok(())
     }
 
     pub fn function_types(&self, binding: &FunctionBinding) -> Result<(), SQLError> {
+        inline(self.function_types_with_work(binding, &mut ()))
+    }
+
+    async fn function_types_with_work(
+        &self,
+        binding: &FunctionBinding,
+        work: &mut (impl Work + Send),
+    ) -> Result<(), SQLError> {
         self.cancellation.check()?;
         for ty in &binding.argument_types {
-            self.stored_name(ty)?;
+            self.stored_name_with_work(ty, work).await?;
         }
         if let Some(invocation) = &binding.invocation {
+            for ty in &invocation.argument_targets {
+                self.stored_name_with_work(ty, work).await?;
+            }
+            for source in &invocation.argument_sources {
+                if let Some(ty) = source {
+                    self.stored_name_with_work(ty, work).await?;
+                } else {
+                    self.checkpoint(work).await?;
+                }
+            }
             for ty in invocation
-                .argument_targets
+                .parameter_types
                 .iter()
-                .chain(invocation.argument_sources.iter().flatten())
-                .chain(&invocation.parameter_types)
                 .chain(&invocation.return_type)
             {
-                self.stored_name(ty)?;
+                self.stored_name_with_work(ty, work).await?;
             }
         }
         match binding.dispatch {

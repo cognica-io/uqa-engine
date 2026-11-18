@@ -39,6 +39,16 @@ impl UserTypeIdentity {
         parse(name, control, input).await
     }
 
+    /// Read a selected native declaration, distinguishing ordinary type names from malformed identity spellings.
+    pub(crate) async fn parse_stored<W: crate::catalog::work::Work + Send>(
+        name: &str,
+        control: &ProductionControl<'_>,
+        work: &mut W,
+        malformed: impl FnOnce() -> crate::SQLError,
+    ) -> Result<Option<Self>, crate::SQLError> {
+        parse_identity(name, control, &mut CatalogInput(work), || Err(malformed())).await
+    }
+
     pub fn render_with_control(
         &self,
         control: &ProductionControl<'_>,
@@ -60,6 +70,24 @@ pub(super) async fn parse<W: Work>(
     name: &str,
     control: &ProductionControl<'_>,
     work: &mut W,
+) -> Result<Option<UserTypeIdentity>, W::Error> {
+    parse_identity(name, control, work, || Ok(None)).await
+}
+
+struct CatalogInput<'a, W>(&'a mut W);
+
+impl<W: crate::catalog::work::Work + Send> Work for CatalogInput<'_, W> {
+    type Error = crate::SQLError;
+    async fn checkpoint(&mut self) -> Result<(), Self::Error> {
+        Ok(self.0.checkpoint().await?)
+    }
+}
+
+async fn parse_identity<W: Work>(
+    name: &str,
+    control: &ProductionControl<'_>,
+    work: &mut W,
+    malformed: impl FnOnce() -> Result<Option<UserTypeIdentity>, W::Error>,
 ) -> Result<Option<UserTypeIdentity>, W::Error> {
     checkpoint(control, work).await?;
     let mut element = lexical::trim(name, control, work).await?;
@@ -88,7 +116,7 @@ pub(super) async fn parse<W: Work>(
     };
     let Some(oid) = lexical::integer(digits, 0..=i64::from(u32::MAX), false, control, work).await?
     else {
-        return Ok(None);
+        return malformed();
     };
     let oid = u32::try_from(oid).expect("validated OID range");
     control.check()?;

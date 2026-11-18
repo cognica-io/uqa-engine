@@ -205,23 +205,28 @@ impl<'a> TypeReferences<'a> {
 
     /// Stored names representing a bound user type resolve by kind and OID, independently of display names or search paths. Ordinary builtin and pseudo-type spellings retain their existing declaration validation.
     pub fn stored_name(&self, name: &str) -> Result<(), SQLError> {
-        self.cancellation.check()?;
-        if let Some(identity) = UserTypeIdentity::parse(name) {
-            if identity.kind == UserTypeKind::Domain
-                && super::system_catalog_domain_with_control(identity.oid, &self.control())?
-                    .is_some()
-            {
-                return Ok(());
-            }
-            self.claim(identity.oid, identity.kind)?;
-        }
-        if ["enum#", "domain#", "composite#", "range#", "multirange#"]
-            .iter()
-            .any(|prefix| name.trim().starts_with(prefix))
-            && UserTypeIdentity::parse(name).is_none()
+        inline(self.stored_name_with_work(name, &mut ()))
+    }
+
+    pub async fn stored_name_with_work(
+        &self,
+        name: &str,
+        work: &mut (impl Work + Send),
+    ) -> Result<(), SQLError> {
+        let control = self.control();
+        let Some(identity) = UserTypeIdentity::parse_stored(name, &control, work, || {
+            invalid("malformed stored type identity")
+        })
+        .await?
+        else {
+            return Ok(());
+        };
+        if identity.kind == UserTypeKind::Domain
+            && super::system_catalog_domain_with_control(identity.oid, &control)?.is_some()
         {
-            return Err(invalid("malformed stored type identity"));
+            return Ok(());
         }
+        self.claim(identity.oid, identity.kind)?;
         Ok(())
     }
 

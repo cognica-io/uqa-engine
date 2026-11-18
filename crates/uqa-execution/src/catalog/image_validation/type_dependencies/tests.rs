@@ -226,3 +226,5 @@ fn routine_utility_statements_keep_their_native_type_validation_order() {
         assert_eq!(memory.used(), 0);
     }
 }
+
+mod defaults;

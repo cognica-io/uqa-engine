@@ -99,9 +99,11 @@ async fn validate_with_work(
             types.checkpoint(work).await?;
             for parameter in &function.def.params {
                 types.checkpoint(work).await?;
-                types.stored_name(&parameter.type_name)?;
+                types
+                    .stored_name_with_work(&parameter.type_name, work)
+                    .await?;
                 if let Some(default) = &parameter.default {
-                    types.expression(default)?;
+                    types.expression_with_work(default, work).await?;
                 }
                 if let Some(RoutineDefaultType::Concrete(ty)) = &parameter.default_type {
                     types.column_type_with_work(ty, work).await?;
@@ -123,7 +125,7 @@ async fn validate_with_work(
             }
             match &function.def.returns {
                 FunctionReturns::Scalar { type_name } | FunctionReturns::SetOf { type_name } => {
-                    types.stored_name(type_name)?;
+                    types.stored_name_with_work(type_name, work).await?;
                 }
                 FunctionReturns::None | FunctionReturns::Table => {}
             }
