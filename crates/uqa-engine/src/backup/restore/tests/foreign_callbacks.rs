@@ -142,3 +142,63 @@ fn restore_preserves_retired_sql_validators_and_invokes_live_callbacks_only_on_u
     drop(restored);
     assert_eq!(control.memory().used(), 0);
 }
+
+#[test]
+fn large_callback_archive_yields_before_a_late_binding_failure_and_cancels_before_publication() {
+    let files = tempfile::tempdir().unwrap();
+    let source = Engine::new();
+    source
+        .sql(
+            "CREATE FUNCTION live_validator(text[],oid) RETURNS integer LANGUAGE SQL RETURN 1",
+            &[],
+        )
+        .unwrap();
+    for index in 0..48 {
+        source
+            .sql(
+                &format!("CREATE FOREIGN DATA WRAPPER w{index:03} VALIDATOR live_validator"),
+                &[],
+            )
+            .unwrap();
+    }
+    let mut last = source.wrappers()["w047"].clone();
+    last.validator.as_mut().unwrap().oid += 1;
+    source
+        .wrappers_write()
+        .insert(last.name.clone(), last)
+        .unwrap();
+    let repository = repository(&files.path().join("repository"));
+    let root = capture(&source, &repository, None);
+    drop(source);
+    for cancel in [false, true] {
+        let control = StorageReadControl::with_limit(32 << 20);
+        let mut job = begin(&repository, root, &control);
+        while !matches!(
+            &job.state,
+            State::Validating(_, CatalogValidation::Relationships(_), ..)
+        ) {
+            job.advance(4096).unwrap();
+        }
+        for _ in 0..7 {
+            assert_eq!(job.advance(4096).unwrap(), RestorePhase::Validating);
+        }
+        if cancel {
+            control.cancellation().cancel();
+        }
+        let error = loop {
+            match job.advance(4096) {
+                Ok(RestorePhase::Validating) => (),
+                Ok(state) => panic!("corrupt callback reached {state:?}"),
+                Err(error) => break error,
+            }
+        };
+        if cancel {
+            assert!(matches!(error, BackupError::Cancelled(_)));
+        } else {
+            assert!(error.to_string().contains("w047"), "{error}");
+        }
+        assert!(matches!(job.publish(), Err(BackupError::Finished)));
+        drop(job);
+        assert_eq!(control.memory().used(), 0);
+    }
+}

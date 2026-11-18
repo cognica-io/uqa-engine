@@ -62535,6 +62535,71 @@
       ]
     },
     {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "foreign_server_and_table_bindings_yield_for_each_selected_definition",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/foreign/reference/tests.rs",
+      "capability": "Stored foreign catalog relationships",
+      "workload": "Traverse 40 foreign servers followed by 40 foreign tables in one-step windows.",
+      "invariant": "Server definitions precede table definitions and each work window examines at most one selected table.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "each_window_visits_at_most_one_routine_and_multiple_callbacks_scan_the_registry_once",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/foreign_wrapper/callbacks/tests.rs",
+      "capability": "Stored foreign wrapper callback validation",
+      "workload": "Bind 48 wrapper callbacks against 64 stored routines one step at a time.",
+      "invariant": "All callbacks share one registry scan and each step examines at most one stored routine.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "a_later_bad_target_cannot_displace_the_first_callback_and_cancellation_releases_its_index",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/foreign_wrapper/callbacks/tests.rs",
+      "capability": "Stored foreign wrapper callback validation",
+      "workload": "Select a malformed callback and interrupt the scan after seven routine entries.",
+      "invariant": "Handler and validator order determine the first error. Cancellation reports its original SQLSTATE and releases the index.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "wrappers_without_stored_callbacks_need_no_index_and_visit_no_routines",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/foreign_wrapper/callbacks/tests.rs",
+      "capability": "Stored foreign wrapper callback validation",
+      "workload": "Validate native wrappers with no memory for a stored callback index.",
+      "invariant": "No index is allocated and the stored routine registry is never visited.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "large_callback_archive_yields_before_a_late_binding_failure_and_cancels_before_publication",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/backup/restore/tests/foreign_callbacks.rs",
+      "capability": "Stored foreign wrapper callback validation",
+      "workload": "Restore an archive with a late invalid wrapper callback and cancel a second restore while it validates.",
+      "invariant": "The restore remains private between work windows and retires its budget on error or cancellation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
       "package": "uqa-engine",
       "kind": "lib",
       "test": "restore_binds_application_functions_without_executing_callbacks",

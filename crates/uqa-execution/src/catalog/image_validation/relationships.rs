@@ -13,8 +13,9 @@ use super::{
     validate_plan_relations, validate_routine_bindings, validate_routine_declarations,
     validate_routines, validate_sequence_functions, validate_sequences, validate_types,
 };
-use crate::catalog::{CatalogReadSnapshot, CatalogReadView};
+use crate::catalog::{foreign::relationships as foreign, CatalogReadSnapshot, CatalogReadView};
 use uqa_core::{
+    image_io::ImageDecodeWindow,
     memory::{MemoryBudget, ProductionControl},
     CancellationToken,
 };
@@ -35,30 +36,13 @@ struct Inputs<'a> {
 
 type Predicate = fn(&Inputs<'_>) -> Result<(), SQLError>;
 
-const PREDICATES: &[Predicate] = &[
+const BEFORE_FOREIGN: &[Predicate] = &[
     |input| validate_namespaces(input.view, &input.production),
     |input| validate_name_uniqueness(input.snapshot, input.memory, input.cancellation),
     |input| validate_authority(input.snapshot, input.memory, input.cancellation),
-    |input| {
-        crate::catalog::foreign::reference::validate_live_wrappers(
-            &input.snapshot.definitions.foreign_servers,
-            &input.snapshot.definitions.foreign_wrappers,
-            &input.production,
-        )
-    },
-    |input| {
-        crate::catalog::foreign::wrappers::validate_callback_bindings(
-            input.snapshot,
-            &input.production,
-        )
-    },
-    |input| {
-        crate::catalog::foreign::reference::validate_live_servers(
-            input.snapshot.definitions.foreign_tables.values(),
-            &input.snapshot.definitions.foreign_servers,
-            &input.production,
-        )
-    },
+];
+
+const AFTER_FOREIGN: &[Predicate] = &[
     |input| validate_types(input.snapshot, input.memory, input.cancellation),
     |input| validate_plan_relations(input.view, &input.production),
     |input| {
@@ -102,6 +86,12 @@ pub struct RelationshipValidation {
     memory: MemoryBudget,
     cancellation: CancellationToken,
     remaining: &'static [Predicate],
+    foreign: Option<ForeignCheck>,
+}
+
+enum ForeignCheck {
+    Start,
+    Reading(foreign::Input),
 }
 
 impl RelationshipValidation {
@@ -114,20 +104,43 @@ impl RelationshipValidation {
             catalog,
             memory: memory.clone(),
             cancellation: cancellation.clone(),
-            remaining: PREDICATES,
+            remaining: BEFORE_FOREIGN,
+            foreign: Some(ForeignCheck::Start),
         }
     }
 
     pub fn advance(
-        mut self,
+        self,
         routines: &dyn RoutineResolution,
         types: &dyn RoutineTypeCatalog,
     ) -> Result<Option<Self>, SQLError> {
+        self.advance_with_steps(routines, types, 1)
+    }
+
+    pub fn advance_with_steps(
+        self,
+        routines: &dyn RoutineResolution,
+        types: &dyn RoutineTypeCatalog,
+        steps: usize,
+    ) -> Result<Option<Self>, SQLError> {
+        if steps == 0 {
+            return Err(SQLError::Internal(
+                "catalog validation requires a nonzero work window".into(),
+            ));
+        }
+        self.next(routines, types, Some(steps))
+    }
+
+    fn next(
+        mut self,
+        routines: &dyn RoutineResolution,
+        types: &dyn RoutineTypeCatalog,
+        steps: Option<usize>,
+    ) -> Result<Option<Self>, SQLError> {
         self.cancellation.check()?;
-        let (predicate, remaining) = self
-            .remaining
-            .split_first()
-            .expect("active catalog validation");
+        let Some((predicate, remaining)) = self.remaining.split_first() else {
+            return self.advance_foreign(steps);
+        };
         predicate(&Inputs {
             view: &self.catalog,
             snapshot: self.catalog.snapshot(),
@@ -143,7 +156,38 @@ impl RelationshipValidation {
         })?;
         self.cancellation.check()?;
         self.remaining = remaining;
-        Ok((!remaining.is_empty()).then_some(self))
+        Ok((!remaining.is_empty() || self.foreign.is_some()).then_some(self))
+    }
+
+    fn advance_foreign(mut self, steps: Option<usize>) -> Result<Option<Self>, SQLError> {
+        let check = self
+            .foreign
+            .take()
+            .expect("active foreign relationship check");
+        if !foreign::has_bindings(self.catalog.snapshot()) {
+            self.remaining = AFTER_FOREIGN;
+            return Ok(Some(self));
+        }
+        if let Some(steps) = steps {
+            let mut input = match check {
+                ForeignCheck::Start => {
+                    foreign::begin(&self.catalog, &self.memory, &self.cancellation)?
+                }
+                ForeignCheck::Reading(input) => input,
+            };
+            if input
+                .as_mut()
+                .advance(&mut std::io::empty(), ImageDecodeWindow { bytes: 1, steps })?
+                .is_none()
+            {
+                self.foreign = Some(ForeignCheck::Reading(input));
+                return Ok(Some(self));
+            }
+        } else {
+            foreign::inline(self.catalog.snapshot(), &self.memory, &self.cancellation)?;
+        }
+        self.remaining = AFTER_FOREIGN;
+        Ok(Some(self))
     }
 }
 
@@ -160,7 +204,7 @@ pub fn validate(
         cancellation,
     ));
     while let Some(checks) = remaining {
-        remaining = checks.advance(routines, types)?;
+        remaining = checks.next(routines, types, None)?;
     }
     Ok(())
 }

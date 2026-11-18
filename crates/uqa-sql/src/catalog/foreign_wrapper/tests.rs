@@ -102,8 +102,7 @@ fn restoration_rejects_aliases_invalid_options_and_replaced_owners() {
     assert!(validate_wrappers(&native, &roles()).is_err());
 }
 
-#[test]
-fn missing_functions_are_retained_but_live_oid_conflicts_are_corruption() {
+pub(super) fn callback_fixture() -> (ForeignWrapperDefinition, crate::routines::SQLRoutine) {
     let crate::ast::Statement::CreateFunction(mut definition) = crate::compile(
         "CREATE FUNCTION callback(text[],oid) RETURNS integer LANGUAGE SQL RETURN 1",
     )
@@ -124,20 +123,25 @@ fn missing_functions_are_retained_but_live_oid_conflicts_are_corruption() {
         resolution_error: None,
         input_collation: None,
     };
-    let routines = crate::routines::registry::RoutineRegistry::try_from_iter([(
-        definition.name.clone(),
-        vec![crate::routines::SQLUserFunction::new(
-            *definition,
-            crate::routines::RoutineBody::Source,
-        )
-        .shared()],
-    )])
-    .unwrap();
+    let routine =
+        crate::routines::SQLUserFunction::new(*definition, crate::routines::RoutineBody::Source)
+            .shared();
     let mut wrapper = custom();
     wrapper.validator = Some(ForeignWrapperFunction {
         oid: 20_000,
         binding,
     });
+    (wrapper, routine)
+}
+
+#[test]
+fn missing_functions_are_retained_but_live_oid_conflicts_are_corruption() {
+    let (wrapper, routine) = callback_fixture();
+    let routines = crate::routines::registry::RoutineRegistry::try_from_iter([(
+        routine.def.name.clone(),
+        vec![routine],
+    )])
+    .unwrap();
     let mut wrappers = ForeignWrappers::try_from_iter([("custom".into(), wrapper)]).unwrap();
     validate_functions(&wrappers, &routines).unwrap();
     let memory = uqa_core::memory::MemoryBudget::new(0);

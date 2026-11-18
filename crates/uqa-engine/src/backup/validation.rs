@@ -44,7 +44,7 @@ impl CatalogValidation {
         Ok(Self::Capture(input))
     }
 
-    /// Advance table capture through its work window, or run one predicate on the assembled view.
+    /// Advance table capture, one native predicate, or a window of foreign binding validation.
     pub(super) fn advance(
         self,
         engine: &Engine,
@@ -74,7 +74,9 @@ impl CatalogValidation {
                 ))))
             }
             Self::Relationships(checks) => {
-                let next = checks.advance(engine, engine).map_err(sql_error)?;
+                let next = checks
+                    .advance_with_steps(engine, engine, steps)
+                    .map_err(sql_error)?;
                 control.check()?;
                 Ok(next.map(Self::Relationships))
             }

@@ -37,26 +37,51 @@ pub(crate) async fn checkpoint(
     Ok(())
 }
 
+pub(crate) struct NameComparison<'a, 'b, W> {
+    pub(crate) control: ProductionControl<'a>,
+    pub(crate) work: &'b mut W,
+}
+impl<W: Work> uqa_core::memory::MapKeyInput<str, String> for NameComparison<'_, '_, W> {
+    type Error = SQLError;
+    async fn checkpoint(&mut self) -> Result<(), Self::Error> {
+        crate::catalog::selection_work::checkpoint(&self.control, self.work).await
+    }
+    async fn compare(
+        &mut self,
+        query: &str,
+        stored: &String,
+    ) -> Result<std::cmp::Ordering, Self::Error> {
+        compare(query, stored, &self.control, self.work).await
+    }
+}
+
 pub(crate) async fn equal(
     left: &str,
     right: &str,
     control: &ProductionControl<'_>,
     work: &mut impl Work,
 ) -> Result<bool, SQLError> {
-    if left.len() != right.len() {
-        return Ok(false);
-    }
+    Ok(left.len() == right.len() && compare(left, right, control, work).await?.is_eq())
+}
+
+pub(crate) async fn compare(
+    left: &str,
+    right: &str,
+    control: &ProductionControl<'_>,
+    work: &mut impl Work,
+) -> Result<std::cmp::Ordering, SQLError> {
     for (left, right) in left
         .as_bytes()
         .chunks(4096)
         .zip(right.as_bytes().chunks(4096))
     {
         checkpoint(control, work).await?;
-        if left != right {
-            return Ok(false);
+        let order = left.cmp(right);
+        if order.is_ne() {
+            return Ok(order);
         }
     }
-    Ok(true)
+    Ok(left.len().cmp(&right.len()))
 }
 
 pub(crate) fn inline<F: Future>(future: F) -> F::Output {

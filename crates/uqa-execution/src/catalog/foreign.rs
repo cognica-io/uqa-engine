@@ -17,6 +17,7 @@ pub mod capture;
 mod input;
 pub mod reference;
 pub mod registry;
+pub(crate) mod relationships;
 mod validation;
 pub mod wrappers;
 pub use reference::ForeignServerReference;

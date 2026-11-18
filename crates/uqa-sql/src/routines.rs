@@ -512,20 +512,12 @@ pub(crate) fn routine_signature_matches_with_control(
     types: &[String],
     control: &uqa_core::memory::ProductionControl<'_>,
 ) -> Result<bool, SQLError> {
-    let mut parameters = definition.identity_params();
-    for expected in types {
-        let Some(parameter) = parameters.next() else {
-            return Ok(false);
-        };
-        if *crate::type_resolution::canonical_routine_type_name_with_control(
-            &parameter.type_name,
-            control,
-        )? != *expected
-        {
-            return Ok(false);
-        }
-    }
-    Ok(parameters.next().is_none())
+    crate::catalog::work::inline(names_production::signature_matches(
+        definition,
+        types,
+        control,
+        &mut (),
+    ))
 }
 
 pub fn routine_signature_types(def: &CreateFunction) -> Vec<String> {
@@ -642,6 +634,7 @@ pub use names_production::{
     routine_local_name_with_control, routine_returns_anonymous_record_with_control,
     routine_signature_types_from_input,
 };
+pub(crate) use names_production::{signature_matches, SignatureWork};
 
 pub fn routine_kind(def: &CreateFunction) -> &'static str {
     if def.is_procedure {

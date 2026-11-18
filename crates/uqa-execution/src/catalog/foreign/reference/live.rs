@@ -7,12 +7,13 @@
 //! A retired user object may stay bound across name reuse. A live incarnation must retain its original name and OID.
 
 use super::{ForeignServerReference, StoredForeignTable};
+use crate::catalog::selection_work::{checkpoint, equal, inline, NameComparison, Work};
 use uqa_core::memory::{ProductionControl, ProductionMap};
 use uqa_sql::{
     catalog::{
         foreign_server::{ForeignServerDefinition, ForeignServers},
-        foreign_wrapper::ForeignWrappers,
-        named_definitions::NamedDefinitionView,
+        foreign_wrapper::{ForeignWrapperReference, ForeignWrappers},
+        named_definitions::NamedDefinitions,
         oids::FIRST_NORMAL_OBJECT_ID,
     },
     SQLError,
@@ -23,6 +24,15 @@ pub(crate) fn validate_live_servers<'a>(
     servers: &ForeignServers,
     control: &ProductionControl<'_>,
 ) -> Result<(), SQLError> {
+    inline(servers_with_work(tables, servers, control, &mut ()))
+}
+
+pub(crate) async fn servers_with_work<'a>(
+    tables: impl Iterator<Item = &'a StoredForeignTable>,
+    servers: &ForeignServers,
+    control: &ProductionControl<'_>,
+    work: &mut impl Work,
+) -> Result<(), SQLError> {
     let bindings = tables.map(|table| {
         Ok(table
             .selected_server()
@@ -32,10 +42,12 @@ pub(crate) fn validate_live_servers<'a>(
         bindings,
         servers,
         server_selection,
-        |reference| reference.object_id,
+        |_, _| Ok(false),
         ("foreign table", "foreign server"),
         control,
+        work,
     )
+    .await
 }
 
 impl StoredForeignTable {
@@ -63,23 +75,21 @@ pub(crate) fn validate_live_wrappers(
     wrappers: &ForeignWrappers,
     control: &ProductionControl<'_>,
 ) -> Result<(), SQLError> {
+    inline(wrappers_with_work(servers, wrappers, control, &mut ()))
+}
+
+pub(crate) async fn wrappers_with_work(
+    servers: &ForeignServers,
+    wrappers: &ForeignWrappers,
+    control: &ProductionControl<'_>,
+    work: &mut impl Work,
+) -> Result<(), SQLError> {
     let bindings = servers.values().map(|server| {
         let Some(identity) = server.metadata.wrapper_reference else {
-            let message = control.format(format_args!(
-                "foreign server `{}` has no wrapper identity",
-                server.name
-            ))?;
-            return Err(SQLError::Internal(message.into_parts().0));
+            return Err(InvalidReference::MissingWrapper(&server.name));
         };
         if identity.oid == 0 || identity.object_id == [0; 16] {
-            return Err(SQLError::Internal(
-                "invalid stored foreign-wrapper reference".into(),
-            ));
-        }
-        if identity.oid < FIRST_NORMAL_OBJECT_ID {
-            // Reserved host implementations cannot be deleted by SQL, including inside a validator.
-            server.bound_wrapper(wrappers)?;
-            return Ok(None);
+            return Err(InvalidReference::MalformedWrapper);
         }
         Ok(Some((
             server.name.as_str(),
@@ -96,10 +106,18 @@ pub(crate) fn validate_live_wrappers(
             name: &wrapper.name,
             identity: wrapper.identity,
         },
-        |reference| reference.object_id,
+        |identity: ForeignWrapperReference, current| {
+            if identity.oid >= FIRST_NORMAL_OBJECT_ID {
+                return Ok(false);
+            }
+            identity.resolve(current)?;
+            Ok(true)
+        },
         ("foreign server", "foreign-data wrapper"),
         control,
+        work,
     )
+    .await
 }
 
 #[derive(PartialEq, Eq)]
@@ -108,34 +126,77 @@ struct Selection<'a, I> {
     identity: I,
 }
 
-fn validate_bindings<'a, I: Copy + Eq, T>(
-    bindings: impl Iterator<Item = Result<Option<(&'a str, Selection<'a, I>)>, SQLError>>,
-    targets: &impl NamedDefinitionView<T>,
+enum InvalidReference<'a> {
+    MissingWrapper(&'a str),
+    MalformedWrapper,
+}
+
+trait Incarnation: Copy + Eq {
+    fn object_id(self) -> [u8; 16];
+}
+
+impl Incarnation for ForeignServerReference {
+    fn object_id(self) -> [u8; 16] {
+        self.object_id
+    }
+}
+
+impl Incarnation for ForeignWrapperReference {
+    fn object_id(self) -> [u8; 16] {
+        self.object_id
+    }
+}
+
+async fn validate_bindings<'a, I: Incarnation, T>(
+    bindings: impl Iterator<Item = Result<Option<(&'a str, Selection<'a, I>)>, InvalidReference<'a>>>,
+    targets: &NamedDefinitions<T>,
     identify: impl Fn(&T) -> Selection<'_, I>,
-    object_id: impl Fn(I) -> [u8; 16],
+    reserved: impl Fn(I, Option<&T>) -> Result<bool, SQLError>,
     kinds: (&str, &str),
     control: &ProductionControl<'_>,
+    work: &mut impl Work,
 ) -> Result<(), SQLError> {
     control.check()?;
-    let inconsistent = |owner: &str, target: &str| {
-        let (source_kind, target_kind) = kinds;
-        let message = control.format(format_args!(
-            "{source_kind} `{owner}` has an inconsistent binding to live {target_kind} `{target}`"
-        ))?;
-        Err(SQLError::Internal(message.into_parts().0))
-    };
     // Only a name miss or reuse needs a second lookup by incarnation.
     let mut unresolved = ProductionMap::new(*control);
     for binding in bindings {
-        control.check()?;
-        let Some((owner, selection)) = binding? else {
-            continue;
+        checkpoint(control, work).await?;
+        let (owner, selection) = match binding {
+            Ok(Some(binding)) => binding,
+            Ok(None) => continue,
+            Err(InvalidReference::MissingWrapper(name)) => {
+                return invalid(
+                    &["foreign server `", name, "` has no wrapper identity"],
+                    control,
+                    work,
+                )
+                .await;
+            }
+            Err(InvalidReference::MalformedWrapper) => {
+                return Err(SQLError::Internal(
+                    "invalid stored foreign-wrapper reference".into(),
+                ));
+            }
         };
-        let id = object_id(selection.identity);
-        match targets.get(selection.name).map(&identify) {
-            Some(current) if id == object_id(current.identity) => {
-                if selection != current {
-                    return inconsistent(owner, current.name);
+        let id = selection.identity.object_id();
+        let current = targets
+            .get_from(
+                selection.name,
+                &mut NameComparison {
+                    control: *control,
+                    work,
+                },
+            )
+            .await?;
+        if reserved(selection.identity, current)? {
+            continue;
+        }
+        match current.map(&identify) {
+            Some(current) if id == current.identity.object_id() => {
+                if selection.identity != current.identity
+                    || !equal(selection.name, current.name, control, work).await?
+                {
+                    return inconsistent(kinds, owner, current.name, control, work).await;
                 }
             }
             _ => {
@@ -145,12 +206,53 @@ fn validate_bindings<'a, I: Copy + Eq, T>(
     }
     if !unresolved.is_empty() {
         for target in targets.values() {
-            control.check()?;
+            checkpoint(control, work).await?;
             let current = identify(target);
-            if let Some(owner) = unresolved.get(&object_id(current.identity)) {
-                return inconsistent(owner, current.name);
+            if let Some(owner) = unresolved.get(&current.identity.object_id()) {
+                return inconsistent(kinds, owner, current.name, control, work).await;
             }
         }
     }
     Ok(())
+}
+
+async fn inconsistent(
+    (source, target_kind): (&str, &str),
+    owner: &str,
+    target: &str,
+    control: &ProductionControl<'_>,
+    work: &mut impl Work,
+) -> Result<(), SQLError> {
+    invalid(
+        &[
+            source,
+            " `",
+            owner,
+            "` has an inconsistent binding to live ",
+            target_kind,
+            " `",
+            target,
+            "`",
+        ],
+        control,
+        work,
+    )
+    .await
+}
+
+async fn invalid(
+    parts: &[&str],
+    control: &ProductionControl<'_>,
+    work: &mut impl Work,
+) -> Result<(), SQLError> {
+    let mut message = uqa_core::memory::ProductionString::new(*control);
+    for &part in parts {
+        let mut tail = part;
+        while !tail.is_empty() {
+            checkpoint(control, work).await?;
+            let appended = message.push_str_chunk(tail)?;
+            tail = &tail[appended..];
+        }
+    }
+    Err(SQLError::Internal(message.finish()?.into_parts().0))
 }

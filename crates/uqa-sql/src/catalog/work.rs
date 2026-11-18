@@ -59,13 +59,27 @@ pub(crate) async fn copy_text<W: Work + Send>(
     source: &str,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<String>, SQLError> {
+    text_parts(work, &[source], control).await
+}
+
+pub(crate) async fn text_parts<W: Work + Send>(
+    work: &mut W,
+    parts: &[&str],
+    control: &ProductionControl<'_>,
+) -> Result<Produced<String>, SQLError> {
     let mut value = ProductionString::new(*control);
-    value.reserve(source.len())?;
-    let mut begin = 0;
-    while begin < source.len() {
-        work.checkpoint().await?;
-        control.check()?;
-        begin += value.push_str_chunk(&source[begin..])?;
+    let length = parts
+        .iter()
+        .try_fold(0usize, |size, part| size.checked_add(part.len()))
+        .ok_or(uqa_core::memory::MemoryError::SizeOverflow)?;
+    value.reserve(length)?;
+    for source in parts {
+        let mut begin = 0;
+        while begin < source.len() {
+            work.checkpoint().await?;
+            control.check()?;
+            begin += value.push_str_chunk(&source[begin..])?;
+        }
     }
     Ok(value.finish()?)
 }

@@ -10,7 +10,9 @@ use super::StoredForeignTable;
 mod input;
 mod live;
 pub(crate) use input::check_format_with_control;
-pub(crate) use live::{validate_live_servers, validate_live_wrappers};
+pub(crate) use live::{
+    servers_with_work, validate_live_servers, validate_live_wrappers, wrappers_with_work,
+};
 use serde::{Deserialize, Serialize};
 use uqa_sql::{catalog::foreign_server::ForeignServerDefinition, SQLError};
 use uqa_storage::{CatalogFacade, StorageBackendError, StorageBackendResult};
