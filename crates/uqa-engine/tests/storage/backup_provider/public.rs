@@ -73,7 +73,7 @@ fn public_backup_jobs_preserve_committed_images_after_engine_and_source_loss(
         BackupCapabilities {
             export: true,
             import: false,
-            snapshot_fingerprints: false,
+            snapshot_fingerprints: true,
         }
     );
     setup(&engine);
@@ -137,6 +137,117 @@ fn public_backup_jobs_preserve_committed_images_after_engine_and_source_loss(
     );
 }
 
+#[rstest::rstest]
+#[case::memory(None)]
+#[case::native(Some(Provider::Native))]
+#[case::sqlite_kv(Some(Provider::KV))]
+#[case::redb(Some(Provider::Redb))]
+fn incremental_fingerprints_preserve_a_pinned_sparse_image_and_measure_actual_reads(
+    #[case] kind: Option<Provider>,
+) {
+    let directory = tempfile::tempdir().unwrap();
+    let engine = kind.map_or_else(Engine::new, |kind| {
+        Engine::from_persistent_provider(kind.open(&directory.path().join("source"), 0)).unwrap()
+    });
+    sql(
+        &engine,
+        "CREATE TABLE archive_rows (id INTEGER PRIMARY KEY, body TEXT)",
+    );
+    sql(
+        &engine,
+        "INSERT INTO archive_rows VALUES (1,repeat('a',65536)),(2,repeat('b',65536))",
+    );
+    let control = StorageReadControl::with_limit(32 << 20);
+    let repository = repository(&directory.path().join("repository"), &control, false);
+    let options = BackupOptions::new(32 << 20, 16 << 20);
+    let capture = |parent| {
+        engine
+            .begin_backup(&repository, BackupOptions { parent, ..options }, &control)
+            .unwrap()
+    };
+    let run = |mut job: BackupJob<'_>| {
+        while job.advance(3, 4096).unwrap() == BackupCaptureStep::Pending {}
+        let report = job.report().unwrap();
+        let root = job.publish().unwrap();
+        (root, report)
+    };
+    // Keep automatic statistics publication outside the two cuts whose inventories are compared.
+    if kind.is_some() {
+        sql(
+            &engine,
+            "BEGIN; LOCK TABLE archive_rows IN ACCESS EXCLUSIVE MODE",
+        );
+    }
+    let (parent, full) = run(capture(None));
+    assert_eq!(
+        full.image.hashed_payload_bytes,
+        full.inventory.decoded_bytes
+    );
+    let (unchanged, steady) = run(capture(Some(parent.backup())));
+    assert_eq!(unchanged.summary(), parent.summary());
+    assert_eq!(steady.image.written_units, 0);
+    if kind.is_none() {
+        // The catalog OID header is the only uncached memory unit in this small unchanged image.
+        assert_eq!(steady.image.hashed_payload_bytes, 33, "{steady:?}");
+    }
+    assert_eq!(
+        steady.image.written_object_bytes,
+        unchanged.inventory().object_bytes()
+    );
+    assert!(
+        steady.image.certified_reused_bytes >= 2 * 65536,
+        "{steady:?}"
+    );
+    if kind.is_some() {
+        sql(&engine, "ROLLBACK");
+    }
+    sql(
+        &engine,
+        "UPDATE archive_rows SET body=repeat('c',65536) WHERE id=2",
+    );
+    assert_eq!(
+        sql(
+            &engine,
+            "SELECT body = repeat('c',65536) AS changed FROM archive_rows WHERE id=2"
+        )[0]["changed"],
+        Value::Bool(true)
+    );
+    if kind.is_some() {
+        sql(
+            &engine,
+            "BEGIN; LOCK TABLE archive_rows IN ACCESS EXCLUSIVE MODE",
+        );
+    }
+    let sparse = capture(Some(parent.backup()));
+    let independent = capture(None);
+    if kind.is_some() {
+        sql(&engine, "ROLLBACK");
+    }
+    sql(
+        &engine,
+        "UPDATE archive_rows SET body=repeat('d',65536) WHERE id=1",
+    );
+    let (child, report) = run(sparse);
+    let (reference, _) = run(independent);
+    assert_eq!(child.summary(), reference.summary());
+    assert_ne!(child.summary(), parent.summary());
+    assert!(report.source.visited_positions > 0 && report.source.metadata_read_bytes > 0);
+    assert!(report.image.certified_reused_bytes >= 65536, "{report:?}");
+    assert!(
+        report.source.copied_payload_bytes >= 65536 && report.image.written_object_bytes > 0,
+        "{report:?}"
+    );
+    assert_eq!(
+        report.image.hashed_payload_bytes + report.image.certified_reused_bytes,
+        report.inventory.decoded_bytes
+    );
+    assert_eq!(
+        report.image.reused_payload_bytes + report.image.written_payload_bytes,
+        report.inventory.decoded_bytes
+    );
+    assert_eq!(control.memory().used(), 0);
+}
+
 #[test]
 fn public_backup_admission_preserves_authority_and_failed_transaction_boundaries() {
     let directory = tempfile::tempdir().unwrap();
@@ -184,7 +295,7 @@ fn public_backup_admission_preserves_authority_and_failed_transaction_boundaries
         BackupCapabilities {
             export: true,
             import: false,
-            snapshot_fingerprints: false
+            snapshot_fingerprints: true
         }
     );
     sql(&memory, "CREATE ROLE restricted; SET ROLE restricted");

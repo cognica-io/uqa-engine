@@ -2,6 +2,48 @@
   "schema_version": 1,
   "checks": [
     {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "bounded_fingerprint_cache_rejects_evicted_and_replaced_owners",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/memory_capture/image_fingerprints.rs",
+      "capability": "Bounded native image fingerprint retention",
+      "workload": "Replace the registry generation and an immutable owner, then scan more distinct image addresses than the fingerprint cache can retain.",
+      "invariant": "Weak certificates do not retain payloads, old generations and replaced or evicted owners compare through the reader, and repeated ordered scans reuse the complete bounded address sample.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "incremental_fingerprints_preserve_a_pinned_sparse_image_and_measure_actual_reads",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/storage/backup_provider/public.rs",
+      "capability": "Snapshot-qualified incremental image reuse",
+      "workload": "Capture two large rows, repeat the same cut, replace one row and compare an incremental image and an independent full image pinned before a later write.",
+      "invariant": "Each provider reads the changed row and reuses at least one complete unchanged row from bounded metadata. The unchanged small memory image hashes only its 33-byte header. Reported hashed, reused and stored byte counts agree with the inventory.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-storage-redb",
+      "kind": "lib",
+      "test": "cold_fingerprint_reads_stay_bounded_and_select_the_pinned_revision",
+      "cases": 1,
+      "source": "crates/uqa-storage-redb/src/mvcc/tests/backup_metadata/fingerprints.rs",
+      "capability": "Cold redb retained revision fingerprints",
+      "workload": "Reopen a database without the redb page cache, select a two-MiB revision, replace the live row and read the original certificate through the counted file backend.",
+      "invariant": "The original encoded length and independently computed SHA-256 match while the physical backend reads less than 256 KiB with an 8 KiB invocation allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
       "package": "uqa-sql",
       "kind": "lib",
       "test": "native_legacy_routine_binding_admits_complete_grants_and_retires_denied_validation",

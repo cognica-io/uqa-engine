@@ -111,8 +111,8 @@ impl SnapshotTableSources {
         let membership = key.captured(&cut)?;
         Ok(SnapshotTableCut {
             cut,
-            membership,
             image_generation,
+            membership,
         })
     }
 }
