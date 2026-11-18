@@ -280,7 +280,7 @@ fn restore_resolves_function_calls_in_stored_views_and_defaults(#[case] provider
     verify_declared_view_calls(provider, files.path(), &repository, &control, limits);
 }
 
-struct Total(i64);
+pub(super) struct Total(pub(super) i64);
 
 impl SQLAggregateState for Total {
     fn observe(&mut self, _: &[Value]) -> Result<(), SQLError> {

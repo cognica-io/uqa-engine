@@ -7,7 +7,10 @@
 use super::RestoreBindings;
 use uqa_core::memory::{Budgeted, ProductionControl};
 use uqa_storage::{
-    backup::{BackupFunctionKind as Kind, BackupFunctionReader, BackupLease, BackupResult, BackupSourceStep},
+    backup::{
+        BackupFunctionKind as Kind, BackupFunctionReader, BackupLease, BackupResult,
+        BackupSourceStep,
+    },
     read_control::StorageReadControl,
     StorageBackendError,
 };

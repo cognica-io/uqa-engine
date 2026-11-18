@@ -342,11 +342,12 @@ fn memory_restore_job_admission_preserves_authority_and_transaction_failures() {
 }
 
 mod analyzer_resources;
+mod application_priority;
 mod constraint_bindings;
 mod external_functions;
-mod function_origins;
 mod foreign_bindings;
 mod foreign_callbacks;
+mod function_origins;
 mod index_bindings;
 mod models;
 mod partition_bindings;

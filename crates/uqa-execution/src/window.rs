@@ -18,6 +18,7 @@ use uqa_core::Value;
 use uqa_sql::ast::{ColumnType, FrameExclusion, FrameMode, NullsOrder};
 use uqa_sql::plan::ProjectionPlan;
 use uqa_sql::semantics::projection_columns;
+use uqa_sql::semantics::windows::BuiltinWindowFunction as Builtin;
 use uqa_sql::{SQLError, SQLParam};
 
 mod aggregates;
@@ -523,7 +524,6 @@ fn window_function(
             actual: slot.args.len(),
         })
     };
-    use uqa_sql::semantics::windows::BuiltinWindowFunction as Builtin;
     Ok(match Builtin::from_dispatch_name(&name) {
         Some(Builtin::RowNumber) => WindowFunction::RowNumber,
         Some(Builtin::Rank) => WindowFunction::Rank,
