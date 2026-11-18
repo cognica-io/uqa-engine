@@ -68,9 +68,7 @@ fn persistent_sequence_input_keeps_selected_definitions_values_authority_and_liv
     }
     let mut restored = session.finish().unwrap();
     // Complete the same provider attachment as the restored-provider constructor before issuing live sequence operations.
-    restored
-        .activate_persistent_provider(source.storage.provider.as_ref().unwrap())
-        .unwrap();
+    restored.activate_persistent_provider().unwrap();
     let occupied = control
         .memory()
         .reserve(control.memory().available())

@@ -7,7 +7,7 @@
 //! Storage owns durable admission and publication; Engine supplies immutable catalog validation and fresh runtime activation.
 
 use super::{
-    functions::AdmittedRestore, RestoreFunctions, RestoreOptions, RestorePhase, RestoredEngine,
+    configuration::AdmittedRestore, RestoreBindings, RestoreOptions, RestorePhase, RestoredEngine,
 };
 use std::{
     path::{Path, PathBuf},
@@ -356,7 +356,7 @@ fn catalog_limits(options: RestoreOptions) -> CatalogInputLimits {
 struct Validator {
     retention: MemoryBudget,
     limits: CatalogInputLimits,
-    functions: RestoreFunctions,
+    bindings: RestoreBindings,
 }
 
 impl Validator {
@@ -364,7 +364,7 @@ impl Validator {
         Self {
             retention: MemoryBudget::new(settings.limits.retained_bytes),
             limits: catalog_limits(settings.limits),
-            functions: settings.functions.clone(),
+            bindings: settings.bindings.clone(),
         }
     }
 }
@@ -390,7 +390,7 @@ impl BackupImageValidator for Validator {
                 provider,
                 self.retention.clone(),
                 self.limits,
-                &self.functions,
+                &self.bindings,
                 control,
             )
         })
@@ -415,11 +415,11 @@ impl Validation {
         provider: Arc<dyn PersistentStorageProvider>,
         retention: MemoryBudget,
         limits: CatalogInputLimits,
-        functions: &RestoreFunctions,
+        bindings: &RestoreBindings,
         control: &StorageReadControl,
     ) -> BackupResult<Self> {
         let input = crate::open::PersistentEngineInput::new(
-            provider, retention, limits, functions, control,
+            provider, retention, limits, bindings, control,
         )?;
         Ok(Self {
             stage: Some(ValidationStage::Catalog(input)),

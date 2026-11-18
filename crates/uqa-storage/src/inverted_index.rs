@@ -210,7 +210,8 @@ impl MemoryInvertedIndex {
         Self::with_bindings(AnalyzerBindings::new(analyzer))
     }
 
-    fn with_bindings(bindings: AnalyzerBindings) -> Self {
+    /// Create an empty index with the caller's selected default and field analyzer owners.
+    pub fn with_bindings(bindings: AnalyzerBindings) -> Self {
         Self {
             bindings,
             state: Arc::default(),

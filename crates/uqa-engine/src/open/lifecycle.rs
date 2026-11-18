@@ -352,20 +352,34 @@ impl Engine {
 
     /// Build an engine and retain the provider used to create future
     /// independent sessions.
-    #[allow(clippy::needless_pass_by_value)]
     pub fn from_persistent_provider(
         provider: Arc<dyn PersistentStorageProvider>,
     ) -> StorageBackendResult<Self> {
+        Self::open_provider(provider, None)
+    }
+
+    /// Open a persistent database with installed analyzer resources. Existing descriptors identify dictionaries by their exact digest. Sessions opened from this Engine share the supplied owner.
+    pub fn from_persistent_provider_with_analyzer_resources(
+        provider: Arc<dyn PersistentStorageProvider>,
+        resources: uqa_analysis::AnalyzerResources,
+    ) -> StorageBackendResult<Self> {
+        Self::open_provider(provider, Some(resources))
+    }
+
+    fn open_provider(
+        provider: Arc<dyn PersistentStorageProvider>,
+        resources: Option<uqa_analysis::AnalyzerResources>,
+    ) -> StorageBackendResult<Self> {
         let session = provider.open_initial_session()?;
-        let mut engine = Self::from_persistent_session(session, Some(Arc::clone(&provider)))?;
-        engine.activate_persistent_provider(&provider)?;
+        let mut engine = Self::build_persistent_session(session, Some(provider), true, |engine| {
+            engine.extensions.analyzer_resources = resources;
+        })?;
+        engine.activate_persistent_provider()?;
         Ok(engine)
     }
 
-    pub(super) fn activate_persistent_provider(
-        &mut self,
-        provider: &Arc<dyn PersistentStorageProvider>,
-    ) -> StorageBackendResult<()> {
+    pub(super) fn activate_persistent_provider(&mut self) -> StorageBackendResult<()> {
+        let provider = self.storage.provider.as_ref().expect("persistent provider");
         let identity = provider.storage_identity()?;
         let row_locks = crate::row_locks::shared_provider_manager(identity.clone(), provider);
         let notification_hub =

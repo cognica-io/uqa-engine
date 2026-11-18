@@ -226,7 +226,7 @@ impl PersistentEngineInput {
         provider: Arc<dyn PersistentStorageProvider>,
         retention: MemoryBudget,
         limits: CatalogInputLimits,
-        functions: &crate::backup::RestoreFunctions,
+        bindings: &crate::backup::RestoreBindings,
         control: &StorageReadControl,
     ) -> StorageBackendResult<Self> {
         control.check()?;
@@ -242,7 +242,7 @@ impl PersistentEngineInput {
             )),
             memory,
         );
-        functions.attach(engine.as_mut());
+        bindings.attach(engine.as_mut());
         let backend = engine.storage.backend.as_ref().expect("persistent backend");
         let version = backend.change_version()?;
         backend.begin_read_transaction()?;
@@ -409,7 +409,7 @@ impl Stage {
             AuthorityProgress::Pending(input) => Ok(Self::Authority(input)),
             AuthorityProgress::Complete(retained) => {
                 engine.restore_schema_routine_identities(CatalogRestoreMode::LoadOnly)?;
-                let resources = Arc::new(uqa_analysis::AnalyzerResources::default());
+                let resources = Arc::new(engine.analyzer_resources());
                 let catalog = engine.storage.catalog.as_ref().expect("persistent catalog");
                 let input = NamedAnalyzerCatalogInput::new(
                     Arc::clone(catalog),
@@ -514,14 +514,7 @@ impl PersistentEngineState {
 
     pub(crate) fn activate(self) -> StorageBackendResult<Engine> {
         let mut engine = self.finish()?;
-        let provider = Arc::clone(
-            engine
-                .storage
-                .provider
-                .as_ref()
-                .expect("persistent provider"),
-        );
-        engine.activate_persistent_provider(&provider)?;
+        engine.activate_persistent_provider()?;
         Ok(engine)
     }
 

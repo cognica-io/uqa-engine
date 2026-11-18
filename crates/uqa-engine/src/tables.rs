@@ -6,9 +6,9 @@
 
 use super::{
     standard_analyzer, Analyzer, AtomicBool, BTreeMap, DocId, Document, DocumentStore, Engine,
-    FieldName, HNSWIndex, IVFIndex, InvertedIndex, MemoryDocumentStore, MemoryInvertedIndex,
-    MemoryVectorIndex, RelationIdentity, SQLError, StorageBackendError, StorageBackendResult,
-    TableSchema, TableState, VectorFieldSchema, VectorIndex, VectorIndexOpenMode, VectorIndexSpec,
+    FieldName, HNSWIndex, IVFIndex, MemoryDocumentStore, MemoryVectorIndex, RelationIdentity,
+    SQLError, StorageBackendError, StorageBackendResult, TableSchema, TableState,
+    VectorFieldSchema, VectorIndex, VectorIndexOpenMode, VectorIndexSpec,
 };
 use crate::state::{BoundTableSecurity, CatalogCell, TableMetadataCell};
 use crate::statistics::MaintenanceState;
@@ -271,28 +271,22 @@ impl Engine {
             )));
         }
         let default_revision = (!fts_fields.is_empty())
-            .then(|| analyzer.compile())
+            .then(|| analyzer.compile_with_resources(&self.analyzer_resources()))
             .transpose()?;
         let analyzer = match &default_revision {
             Some(revision) => revision.descriptor().configuration()?,
             None => analyzer,
         };
-        let (docs, inv): (Box<dyn DocumentStore>, Box<dyn InvertedIndex>) = if let Some(backend) =
-            self.storage
-                .backend
-                .as_ref()
-                .filter(|_| persistence != uqa_sql::ast::RelationPersistence::Temporary)
-        {
-            (
-                backend.document_store(name),
-                backend.inverted_index(name, analyzer.clone()),
-            )
-        } else {
-            (
-                Box::new(MemoryDocumentStore::new()),
-                Box::new(MemoryInvertedIndex::new(analyzer.clone())),
-            )
+        let backend = self
+            .storage
+            .backend
+            .as_deref()
+            .filter(|_| persistence != uqa_sql::ast::RelationPersistence::Temporary);
+        let docs: Box<dyn DocumentStore> = match backend {
+            Some(backend) => backend.document_store(name),
+            None => Box::new(MemoryDocumentStore::new()),
         };
+        let inv = self.open_text_index(backend, name, analyzer.clone())?;
         self.relation_creation_context()
             .retain_owner(owner)
             .map_err(|error| StorageBackendError::backend("CREATE TABLE owner", error))?;

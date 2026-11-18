@@ -9,7 +9,7 @@
 mod memory;
 mod restore;
 mod validation;
-pub(crate) use restore::RestoreFunctions;
+pub(crate) use restore::RestoreBindings;
 pub use restore::{
     RestoreConfiguration, RestoreDestination, RestoreJob, RestoreOptions, RestorePhase,
     RestoredEngine,

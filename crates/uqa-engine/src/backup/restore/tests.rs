@@ -49,6 +49,19 @@ fn begin<'a>(
     job
 }
 
+fn assert_unusable(mut job: RestoreJob<'_>, expected: &str) {
+    let error = loop {
+        match job.advance(4096) {
+            Err(error) => break error,
+            Ok(RestorePhase::Reading | RestorePhase::Validating) => (),
+            Ok(phase) => panic!("unusable restore input reached {phase:?}"),
+        }
+    };
+    assert!(error.to_string().contains(expected), "{error}");
+    assert_eq!(job.phase(), RestorePhase::Failed);
+    assert!(matches!(job.publish(), Err(BackupError::Finished)));
+}
+
 fn prepare(job: &mut RestoreJob<'_>) {
     let mut validating = false;
     loop {
@@ -326,6 +339,7 @@ fn memory_restore_job_admission_preserves_authority_and_transaction_failures() {
     assert_eq!(denied.memory().used(), 0);
 }
 
+mod analyzer_resources;
 mod constraint_bindings;
 mod external_functions;
 mod foreign_bindings;

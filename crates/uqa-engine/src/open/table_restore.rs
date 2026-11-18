@@ -67,7 +67,7 @@ impl Engine {
         let names = KeyConstraintNames::load(catalog)?;
         for (schema, security) in schemas {
             let relation = schema.relation.clone();
-            let table = Self::load_session_table(catalog, backend, schema, security, &names)?;
+            let table = self.load_session_table(catalog, backend, schema, security, &names)?;
             self.storage.tables.write().insert(relation, table)?;
         }
         self.synchronize_partition_identity_watermarks()?;
@@ -156,6 +156,7 @@ impl Engine {
     }
 
     pub(super) fn load_session_table(
+        &self,
         catalog: &dyn CatalogFacade,
         backend: &dyn PersistentStorageBackend,
         schema: TableSchema,
@@ -165,7 +166,7 @@ impl Engine {
         let table_name = schema.relation.qualified_name();
         let analyzer: Analyzer = serde_json::from_str(&schema.analyzer_json)?;
         let docs = backend.document_store(&table_name);
-        let inv = backend.inverted_index(&table_name, analyzer.clone());
+        let inv = self.open_text_index(Some(backend), &table_name, analyzer.clone())?;
         let mut vectors: BTreeMap<FieldName, Box<dyn VectorIndex>> = BTreeMap::new();
         for vector_field in &schema.vector_fields {
             vectors.insert(

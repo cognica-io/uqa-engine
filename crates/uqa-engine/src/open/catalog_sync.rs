@@ -647,7 +647,7 @@ impl Engine {
             )?
         {
             let relation = schema.relation.clone();
-            let table = Self::load_session_table(
+            let table = self.load_session_table(
                 catalog.as_ref(),
                 backend.as_ref(),
                 schema,

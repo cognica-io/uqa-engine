@@ -26,7 +26,9 @@ impl Engine {
             .doc_count_dirty
             .store(true, std::sync::atomic::Ordering::Release);
         Self::value_indexes_clear(table)?;
-        *table.inverted_index.write() = backend.inverted_index(table_name, analyzer).into();
+        *table.inverted_index.write() = self
+            .open_text_index(Some(backend.as_ref()), table_name, analyzer)?
+            .into();
 
         let vector_fields = table
             .vector_indexes

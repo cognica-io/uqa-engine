@@ -74,7 +74,7 @@ impl Engine {
         catalog: &dyn CatalogFacade,
         mode: CatalogRestoreMode,
     ) -> StorageBackendResult<()> {
-        let resources = AnalyzerResources::default();
+        let resources = self.analyzer_resources();
         let names = uqa_execution::catalog::analyzers::named::restore(
             catalog,
             &resources,

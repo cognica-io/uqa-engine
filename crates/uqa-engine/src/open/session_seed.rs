@@ -58,7 +58,7 @@ impl Engine {
                 continue;
             }
             let name = relation.qualified_name();
-            let table = Self::bind_shared_session_table(storage, &name, source);
+            let table = self.bind_shared_session_table(storage, &name, source)?;
             session
                 .storage
                 .tables
@@ -96,12 +96,13 @@ impl Engine {
     }
 
     fn bind_shared_session_table(
+        &self,
         storage: &PersistentStorageSession,
         name: &str,
         source: &TableState,
-    ) -> Arc<TableState> {
+    ) -> StorageBackendResult<Arc<TableState>> {
         let analyzer = source.analyzer.read().configuration().clone();
-        Arc::new(TableState {
+        Ok(Arc::new(TableState {
             _image_memory: None,
             lifecycle_id: AtomicU64::new(crate::next_table_lifecycle_id()),
             object_id: source.object_id(),
@@ -113,7 +114,8 @@ impl Engine {
                 storage.backend.document_store(name).into(),
             ),
             inverted_index: uqa_storage::memory_capture::MemoryCaptureCell::new(
-                storage.backend.inverted_index(name, analyzer).into(),
+                self.open_text_index(Some(storage.backend.as_ref()), name, analyzer)?
+                    .into(),
             ),
             // Bind catalog-selected vector stores after installing the table, which DiskANN restoration needs for its owner and resource handles.
             vector_indexes: uqa_storage::memory_capture::MemoryCaptureCell::new(
@@ -161,6 +163,6 @@ impl Engine {
             dropped_attributes: crate::state::TableMetadataCell::from_generation(
                 source.dropped_attributes.generation(),
             ),
-        })
+        }))
     }
 }

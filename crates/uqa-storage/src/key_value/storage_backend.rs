@@ -169,6 +169,18 @@ impl PersistentStorageBackend for KeyValueStorageBackend {
         ))
     }
 
+    fn inverted_index_with_bindings(
+        &self,
+        table: &str,
+        bindings: crate::inverted_index::AnalyzerBindings,
+    ) -> StorageBackendResult<Box<dyn InvertedIndex>> {
+        Ok(Box::new(KeyValueInvertedIndex::with_bindings(
+            Arc::clone(&self.store),
+            table,
+            bindings,
+        )))
+    }
+
     fn inverted_index_with_control(
         &self,
         table: crate::StorageName,

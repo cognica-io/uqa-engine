@@ -13,7 +13,6 @@ use super::{
 };
 use crate::{Engine, SQLError};
 use std::{fmt, mem, ops::Deref, path::PathBuf, sync::Arc};
-use uqa_analysis::AnalyzerResources;
 use uqa_core::memory::{Budgeted, MemoryBudget, RetainedValue};
 use uqa_storage::{
     backup::{
@@ -24,9 +23,9 @@ use uqa_storage::{
     read_control::StorageReadControl,
 };
 
-mod functions;
-pub use functions::RestoreConfiguration;
-pub(crate) use functions::RestoreFunctions;
+mod configuration;
+pub(crate) use configuration::RestoreBindings;
+pub use configuration::RestoreConfiguration;
 
 /// The new database's storage owner. It never replaces an existing Engine.
 #[derive(Clone)]
@@ -94,11 +93,11 @@ impl Deref for RestoredEngine {
 }
 
 enum State<'a> {
-    Reading(Budgeted<Box<Input<'a>>>, RestoreFunctions),
-    Decoded(Budgeted<Box<MemoryState>>, RestoreFunctions),
-    Validating(RestoredEngine, CatalogValidation, RestoreFunctions),
+    Reading(Budgeted<Box<Input<'a>>>, RestoreBindings),
+    Decoded(Budgeted<Box<MemoryState>>, RestoreBindings),
+    Validating(RestoredEngine, CatalogValidation, RestoreBindings),
     Persistent(Budgeted<Box<persistent::Persistent<'a>>>),
-    Prepared(RestoredEngine, RestoreFunctions),
+    Prepared(RestoredEngine, RestoreBindings),
     Opening(persistent::PublishedInput),
     Complete(RestoredEngine),
     Cancelled,
@@ -155,7 +154,7 @@ impl Engine {
                                 &control,
                             )
                             .map_err(start_error)?,
-                            AnalyzerResources::default(),
+                            admitted.bindings.analyzers.clone().unwrap_or_default(),
                             DiskANNTemporaryBudget::new(options.maximum_workspace_bytes),
                             options.maximum_value_bytes,
                             &control,
@@ -164,7 +163,7 @@ impl Engine {
                         Ok(RestoreJob {
                             state: State::Reading(
                                 Budgeted::new(Box::new(input), memory),
-                                admitted.functions,
+                                admitted.bindings,
                             ),
                             backup,
                             root: Some(root),
@@ -346,30 +345,30 @@ impl RestoreJob<'_> {
             return Err(BackupError::Invalid("zero restore verification window"));
         }
         self.state = match state {
-            State::Reading(mut input, functions) => {
+            State::Reading(mut input, bindings) => {
                 match input.as_mut().advance(maximum_object_bytes)? {
                     Some(candidate) => {
                         drop(input);
                         let memory = self.control.memory().reserve(size_of::<MemoryState>())?;
-                        State::Decoded(Budgeted::new(Box::new(candidate), memory), functions)
+                        State::Decoded(Budgeted::new(Box::new(candidate), memory), bindings)
                     }
-                    None => State::Reading(input, functions),
+                    None => State::Reading(input, bindings),
                 }
             }
-            State::Decoded(candidate, functions) => {
+            State::Decoded(candidate, bindings) => {
                 let (candidate, memory) = candidate.into_parts();
                 let mut engine = candidate.assemble(self.retained.clone(), &self.control)?;
-                functions.attach(&mut engine);
+                bindings.attach(&mut engine);
                 drop(memory);
                 let engine =
                     RestoredEngine(RetainedValue::with_budget(engine, self.control.memory())?);
                 let checks = CatalogValidation::begin(&engine, &self.control)?;
-                State::Validating(engine, checks, functions)
+                State::Validating(engine, checks, bindings)
             }
-            State::Validating(engine, checks, functions) => {
+            State::Validating(engine, checks, bindings) => {
                 match checks.advance(&engine, &self.control, 64)? {
-                    Some(checks) => State::Validating(engine, checks, functions),
-                    None => State::Prepared(engine, functions),
+                    Some(checks) => State::Validating(engine, checks, bindings),
+                    None => State::Prepared(engine, bindings),
                 }
             }
             State::Persistent(mut candidate) => {

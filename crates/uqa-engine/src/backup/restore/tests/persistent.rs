@@ -337,7 +337,8 @@ fn persistent_restore_recovers_private_completion_and_retires_failed_or_cancelle
     let directory = tempfile::tempdir().unwrap();
     let source_dir = directory.path().join("source");
     std::fs::create_dir(&source_dir).unwrap();
-    let source = Engine::from_persistent_provider(kind.open(&source_dir.join("database"), 0)).unwrap();
+    let source =
+        Engine::from_persistent_provider(kind.open(&source_dir.join("database"), 0)).unwrap();
     source
         .sql(
             "CREATE TABLE items(id integer); INSERT INTO items VALUES(17)",

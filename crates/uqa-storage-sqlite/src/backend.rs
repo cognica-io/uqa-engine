@@ -307,6 +307,18 @@ impl PersistentStorageBackend for SQLiteStorageBackend {
         Ok(value.into())
     }
 
+    fn inverted_index_with_bindings(
+        &self,
+        table: &str,
+        bindings: uqa_storage::inverted_index::AnalyzerBindings,
+    ) -> StorageBackendResult<Box<dyn InvertedIndex>> {
+        Ok(Box::new(SQLiteInvertedIndex::from_bindings(
+            self.conn.clone(),
+            table.into(),
+            bindings,
+        )))
+    }
+
     fn inverted_index_with_control(
         &self,
         table: uqa_storage::StorageName,

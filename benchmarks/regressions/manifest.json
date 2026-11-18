@@ -17,6 +17,50 @@
       ]
     },
     {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "private_maintenance_keeps_registered_declarations_without_holding_application_gates",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/statistics/worker/tests.rs",
+      "capability": "Registered SQL functions during automatic maintenance",
+      "workload": "Hold a maintenance session's statement gate while replacing and retiring an application function.",
+      "invariant": "The private session binds against stable registered declarations. Automatic sampling permits ordinary application registration changes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "archive_analysis_uses_the_supplied_owner_before_and_after_publication",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/backup/restore/tests/analyzer_resources.rs",
+      "capability": "Restored analyzer resource ownership",
+      "workload": "Restore an analyzer under a denied descriptor allowance and then with an available resource owner. Use the published Engine and a cold persistent session.",
+      "invariant": "Unavailable resources leave the destination private. Successful restoration and later analyzer registrations retain the selected owner.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "persistent_dictionary_restore_requires_the_archived_digest",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/backup/restore/tests/analyzer_resources.rs",
+      "capability": "Restored analyzer resource ownership",
+      "workload": "Restore a saved Korean analyzer against missing, mismatched and matching dictionary bytes. Reopen the destination with the installed resources.",
+      "invariant": "The resolver receives the archived digest. Only its validated contents publish and produce the original text analysis after reopen.",
+      "case_names": [
+        "case_1_sqlite_native",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
+    },
+    {
       "package": "uqa-storage",
       "kind": "lib",
       "test": "durable_completion_keeps_both_allowances_after_the_request_is_cancelled",

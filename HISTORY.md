@@ -160,7 +160,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Restore persistent role catalogs through bounded metadata selection, ordered identity validation and native publication while preserving their original snapshot and later writable authority.
 - Retain stored role definitions and membership bindings under their original restore allowance, preserving incarnation identities, tuple revisions and existing declaration formats.
 
-- Expose Engine/uqa-api restore, recovery and cancellation entry points and connect native SQLite, SQLite KV and redb restore jobs to retained table input and private catalog validation, with exact-request recovery and shared runtime activation. The Engine import capability remains false until bounded catalog loading, logical closure and final restore qualification are complete.
+- Expose Engine/uqa-api restore, recovery and cancellation for memory, native SQLite, SQLite KV and redb. Persistent jobs validate a private database before installation and can open the published runtime in caller-sized catalog windows. Restore accepts application-registered SQL functions and rechecks them when recovering an unpublished prepared database. A restore can also use installed analyzer resources to resolve exact dictionary digests. Reopening a completed request preserves subsequent writes. The Engine import capability remains disabled pending complete catalog validation and final qualification.
 
 - Reconstruct memory backup catalogs, resources and evaluated table data into the ordinary Engine state, retaining original allocation ownership through validation, publication, later writes and repeated backup. Complete restore qualification remains in progress.
 

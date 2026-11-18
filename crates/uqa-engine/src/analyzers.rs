@@ -17,6 +17,40 @@ mod field_restoration;
 mod persistence;
 
 impl Engine {
+    pub(crate) fn analyzer_resources(&self) -> uqa_analysis::AnalyzerResources {
+        self.extensions
+            .analyzer_resources
+            .clone()
+            .unwrap_or_default()
+    }
+
+    pub(crate) fn open_text_index(
+        &self,
+        backend: Option<&dyn uqa_storage::PersistentStorageBackend>,
+        table: &str,
+        analyzer: uqa_analysis::Analyzer,
+    ) -> StorageBackendResult<Box<dyn uqa_storage::inverted_index::InvertedIndex>> {
+        let Some(backend) = backend else {
+            let bindings = uqa_storage::inverted_index::AnalyzerBindings::with_resources(
+                analyzer,
+                self.analyzer_resources(),
+            );
+            return Ok(Box::new(crate::MemoryInvertedIndex::with_bindings(
+                bindings,
+            )));
+        };
+        match &self.extensions.analyzer_resources {
+            Some(resources) => backend.inverted_index_with_bindings(
+                table,
+                uqa_storage::inverted_index::AnalyzerBindings::with_resources(
+                    analyzer,
+                    resources.clone(),
+                ),
+            ),
+            None => Ok(backend.inverted_index(table, analyzer)),
+        }
+    }
+
     pub(crate) fn resolve_analyzer_revision(
         &self,
         name: &str,
@@ -49,7 +83,7 @@ impl Engine {
             return Err(format!("cannot overwrite built-in analyzer `{name}`"));
         }
         let compiled = parse_analyzer_config(name, config_json)?
-            .compile()
+            .compile_with_resources(&self.analyzer_resources())
             .map_err(|error| error.to_string())?;
         let configuration = serde_json::to_string(
             &compiled

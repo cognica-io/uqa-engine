@@ -11,19 +11,6 @@ use crate::{
 };
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-fn assert_unusable(mut job: RestoreJob<'_>, expected: &str) {
-    let error = loop {
-        match job.advance(4096) {
-            Err(error) => break error,
-            Ok(RestorePhase::Reading | RestorePhase::Validating) => (),
-            Ok(phase) => panic!("unusable function descriptor reached {phase:?}"),
-        }
-    };
-    assert!(error.to_string().contains(expected), "{error}");
-    assert_eq!(job.phase(), RestorePhase::Failed);
-    assert!(matches!(job.publish(), Err(BackupError::Finished)));
-}
-
 struct Rows {
     columns: [String; 1],
     metadata_reads: Arc<AtomicUsize>,

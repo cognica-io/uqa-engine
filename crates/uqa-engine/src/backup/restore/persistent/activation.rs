@@ -7,7 +7,7 @@
 //! Open the durably installed database in bounded catalog steps.
 
 use super::{catalog_limits, AdmittedRestore, RestoredEngine};
-use crate::{backup::RestoreFunctions, open::PersistentEngineInput};
+use crate::{backup::RestoreBindings, open::PersistentEngineInput};
 use std::path::Path;
 use uqa_core::memory::{Budgeted, MemoryBudget, RetainedValue};
 use uqa_storage::{
@@ -19,7 +19,7 @@ use uqa_storage::{
 pub(in crate::backup::restore) struct PublishedInput {
     input: Budgeted<Box<PersistentEngineInput>>,
     // Keep the validated registrations stable until the writable session is returned.
-    _functions: RestoreFunctions,
+    _bindings: RestoreBindings,
 }
 
 impl PublishedInput {
@@ -40,12 +40,12 @@ impl PublishedInput {
             provider,
             retained,
             catalog_limits(options.limits),
-            &options.functions,
+            &options.bindings,
             &completion,
         )?;
         Ok(Self {
             input: Budgeted::new(Box::new(input), memory),
-            _functions: options.functions.clone(),
+            _bindings: options.bindings.clone(),
         })
     }
 
