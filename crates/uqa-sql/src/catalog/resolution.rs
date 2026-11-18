@@ -181,23 +181,104 @@ pub fn bound_relation_identity_with_control(
     name: &str,
     control: &uqa_core::memory::ProductionControl<'_>,
 ) -> Result<uqa_core::memory::Produced<uqa_core::RelationIdentity>, SQLError> {
+    super::work::inline(bound_relation_identity_with_work(name, control, &mut ()))
+}
+
+/// Decode an already selected relation identity and its original diagnostic under the caller's work window.
+pub async fn bound_relation_identity_with_work<W: super::work::Work + Send>(
+    name: &str,
+    control: &uqa_core::memory::ProductionControl<'_>,
+    work: &mut W,
+) -> Result<uqa_core::memory::Produced<uqa_core::RelationIdentity>, SQLError> {
+    use super::work::{text_parts, ReferenceWork};
+    use uqa_core::RelationReferenceInputError;
     control.check()?;
-    let diagnostic = |message: std::fmt::Arguments<'_>| match control.format(message) {
-        Ok(message) => SQLError::Internal(message.into_parts().0),
-        Err(error) => error.into(),
+    let reference = match uqa_core::RelationIdentity::try_borrowed_reference_from(
+        name,
+        &mut ReferenceWork { control, work },
+    )
+    .await
+    {
+        Ok(reference) => reference,
+        Err(RelationReferenceInputError::Input(error)) => return Err(error),
+        Err(RelationReferenceInputError::Reference(error)) => {
+            let [prefix, value, suffix] = error.message_parts();
+            let message = text_parts(
+                work,
+                &[
+                    "decode bound relation `",
+                    name,
+                    "`: ",
+                    prefix,
+                    value,
+                    suffix,
+                ],
+                control,
+            )
+            .await?;
+            return Err(SQLError::admit_internal_message(message, control)?);
+        }
     };
-    let reference = uqa_core::RelationIdentity::try_borrowed_reference(name)
-        .map_err(|error| diagnostic(format_args!("decode bound relation `{name}`: {error}")))?;
-    let schema = reference.schema.ok_or_else(|| {
-        diagnostic(format_args!(
-            "bound query contains non-canonical relation reference `{name}`"
-        ))
-    })?;
-    Ok(reference.identity_with_control(schema, control)?)
+    let Some(schema) = reference.schema else {
+        let message = text_parts(
+            work,
+            &[
+                "bound query contains non-canonical relation reference `",
+                name,
+                "`",
+            ],
+            control,
+        )
+        .await?;
+        return Err(SQLError::admit_internal_message(message, control)?);
+    };
+    reference
+        .identity_from(schema, control, &mut ReferenceWork { control, work })
+        .await
 }
 
 #[cfg(test)]
 mod bound_identity_tests {
+    #[test]
+    fn malformed_bound_names_yield_while_decoding_and_keep_the_admitted_original_diagnostic() {
+        use uqa_core::{
+            image_io::{ImageDecodeWindow, ImageDecoder},
+            memory::{MemoryBudget, ProductionControl},
+            CancellationToken,
+        };
+        let original = CancellationToken::new();
+        let memory = MemoryBudget::new(1 << 20);
+        let name = format!("\"{}", "資料".repeat(8_192));
+        let expected = format!("internal error: decode bound relation `{name}`: unterminated quoted relation name `{name}`");
+        let source = original.clone();
+        let mut reader = ImageDecoder::new(&memory, &original, move |mut reader| async move {
+            let mut input = reader.input();
+            let control = ProductionControl::new(input.memory, &source, input.cancellation);
+            super::bound_relation_identity_with_work(&name, &control, &mut input).await
+        })
+        .unwrap();
+        let mut polls = 0;
+        let error = loop {
+            polls += 1;
+            match reader.advance(
+                &mut std::io::empty(),
+                ImageDecodeWindow { bytes: 1, steps: 1 },
+            ) {
+                Err(error) => break error,
+                Ok(None) => assert!(polls < 20_000),
+                Ok(Some(_)) => panic!("unterminated reference accepted"),
+            }
+        };
+        assert!(polls > 16);
+        assert_eq!(error.to_string(), expected);
+        assert_eq!(error.sqlstate(), Some("XX000"));
+        assert!(matches!(error.primary(), crate::SQLError::Internal(_)));
+        drop(reader);
+        assert!(memory.used() >= expected.len() - "internal error: ".len());
+        drop(error);
+        assert_eq!(memory.used(), 0);
+    }
+
     #[test]
     fn controlled_bound_identity_retains_admission_and_original_cancellation() {
         use uqa_core::{

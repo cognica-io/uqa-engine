@@ -20,7 +20,7 @@ fn table(name: &str, parents: &[&str]) -> Table {
     )
 }
 
-fn check(tables: &[Table]) -> Result<(), SQLError> {
+fn check(tables: &[Table]) -> Result<(), String> {
     let memory = MemoryBudget::new(16 << 20);
     let token = CancellationToken::new();
     let result = validate(
@@ -29,7 +29,8 @@ fn check(tables: &[Table]) -> Result<(), SQLError> {
             .map(|(name, hierarchy, persistence)| (name, hierarchy, *persistence)),
         &memory,
         &token,
-    );
+    )
+    .map_err(|error| error.to_string());
     assert_eq!(memory.used(), 0);
     result
 }

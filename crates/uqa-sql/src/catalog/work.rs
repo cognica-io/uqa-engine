@@ -159,9 +159,9 @@ pub(crate) async fn decoded_name<W: Work + Send>(
         .await
 }
 
-struct ReferenceWork<'a, 'c, W> {
-    control: &'a ProductionControl<'c>,
-    work: &'a mut W,
+pub(super) struct ReferenceWork<'a, 'c, W> {
+    pub(super) control: &'a ProductionControl<'c>,
+    pub(super) work: &'a mut W,
 }
 impl<W: Work + Send> uqa_core::RelationReferenceWork for ReferenceWork<'_, '_, W> {
     type Error = SQLError;

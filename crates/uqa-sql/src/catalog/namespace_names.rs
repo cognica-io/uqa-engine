@@ -6,9 +6,11 @@
 
 //! Native relation and type declarations claim separate catalog name spaces without rebinding.
 
+use super::work::{compare_text, inline, Work};
 use crate::SQLError;
+use std::cmp::Ordering;
 use uqa_core::{
-    memory::{BudgetedMap, MemoryBudget, Produced, ProductionControl},
+    memory::{Budgeted, MapKeyInput, MemoryBudget, OwnedMap, Produced, ProductionControl},
     CancellationToken, RelationIdentity,
 };
 
@@ -24,7 +26,8 @@ pub enum NativeNameInput<'a> {
     TypeWithArray(&'a RelationIdentity, Option<&'a str>),
 }
 
-type Names = BudgetedMap<(Produced<String>, Produced<String>), ()>;
+type Key = (Produced<String>, Produced<String>);
+type Names = OwnedMap<Key, ()>;
 
 /// Reject duplicate or fixed relation/type names across the supplied complete native declarations. All claims remain private and are discarded together on failure; no catalog names are changed or generated arrays displaced.
 pub fn validate<'a>(
@@ -32,106 +35,158 @@ pub fn validate<'a>(
     memory: &MemoryBudget,
     cancellation: &CancellationToken,
 ) -> Result<(), SQLError> {
+    inline(validate_with_work(
+        declarations,
+        memory,
+        cancellation,
+        &mut (),
+    ))
+}
+
+/// Validate and retire the same ordered names through the caller's work channel.
+pub async fn validate_with_work<'a, W: Work + Send>(
+    declarations: impl Iterator<Item = NativeNameInput<'a>>,
+    memory: &MemoryBudget,
+    cancellation: &CancellationToken,
+    work: &mut W,
+) -> Result<(), SQLError> {
     let control = ProductionControl::new(memory, cancellation, cancellation);
     control.check()?;
-    let mut relations = Names::new(memory);
-    let mut types = Names::new(memory);
-    for declaration in declarations {
-        control.check()?;
-        match declaration {
-            NativeNameInput::Relation(identity) => relation(&mut relations, identity, &control)?,
-            NativeNameInput::RowRelation(identity, array) => {
-                relation(&mut relations, identity, &control)?;
-                data_type(&mut types, identity, &control)?;
-                array_type(&mut types, identity, array, &control)?;
-            }
-            NativeNameInput::Type(identity) => data_type(&mut types, identity, &control)?,
-            NativeNameInput::TypeWithArray(identity, array) => {
-                data_type(&mut types, identity, &control)?;
-                array_type(&mut types, identity, array, &control)?;
-            }
-        }
-    }
-    control.check()?;
-    Ok(())
-}
-
-fn relation(
-    names: &mut Names,
-    identity: &RelationIdentity,
-    control: &ProductionControl<'_>,
-) -> Result<(), SQLError> {
-    if super::SystemRelation::at(&identity.schema, &identity.name).is_some() {
-        return Err(invalid("fixed relation"));
-    }
-    insert(
-        names,
-        &identity.schema,
-        control.copy_text(&identity.name)?,
-        control,
-    )
-}
-
-fn data_type(
-    names: &mut Names,
-    identity: &RelationIdentity,
-    control: &ProductionControl<'_>,
-) -> Result<(), SQLError> {
-    insert_type(
-        names,
-        &identity.schema,
-        control.copy_text(&identity.name)?,
-        control,
-    )
-}
-
-fn array_type(
-    names: &mut Names,
-    identity: &RelationIdentity,
-    recorded: Option<&str>,
-    control: &ProductionControl<'_>,
-) -> Result<(), SQLError> {
-    let name = match recorded {
-        Some(name) => control.copy_text(name)?,
-        None => {
-            super::array_type_names::default_array_type_name_with_control(&identity.name, control)?
-        }
+    let mut relations = Names::new();
+    let mut types = Names::new();
+    let mut claims = Claims {
+        memory,
+        control: &control,
+        work,
     };
-    insert_type(names, &identity.schema, name, control)
+    let result = async {
+        for declaration in declarations {
+            claims.checkpoint().await?;
+            match declaration {
+                NativeNameInput::Relation(identity) => {
+                    claims.relation(&mut relations, identity).await?;
+                }
+                NativeNameInput::RowRelation(identity, array) => {
+                    claims.relation(&mut relations, identity).await?;
+                    claims.data_type(&mut types, identity).await?;
+                    claims.array_type(&mut types, identity, array).await?;
+                }
+                NativeNameInput::Type(identity) => claims.data_type(&mut types, identity).await?,
+                NativeNameInput::TypeWithArray(identity, array) => {
+                    claims.data_type(&mut types, identity).await?;
+                    claims.array_type(&mut types, identity, array).await?;
+                }
+            }
+        }
+        control.check()?;
+        Ok(())
+    }
+    .await;
+    for map in [relations, types] {
+        super::work::retire_entries(map.into_iter(), &control, work).await?;
+    }
+    result
 }
 
-fn insert_type(
-    names: &mut Names,
-    schema: &str,
-    name: Produced<String>,
-    control: &ProductionControl<'_>,
-) -> Result<(), SQLError> {
-    if super::SystemRelation::at(schema, &name).is_some()
-        || super::type_production::is_system_catalog_type_name(schema, &name)
-        || (schema == "pg_catalog"
-            && (super::type_metadata::builtin_scalar_type_by_name(&name).is_some()
-                || super::type_metadata::routine_pseudo_type_oid(&name).is_some()
-                || crate::ast::builtin_array_element_name(&name).is_some()))
-    {
-        return Err(invalid("fixed type"));
-    }
-    insert(names, schema, name, control)
+struct Claims<'a, 'c, W> {
+    memory: &'a MemoryBudget,
+    control: &'a ProductionControl<'c>,
+    work: &'a mut W,
 }
 
-fn insert(
-    names: &mut Names,
-    schema: &str,
-    name: Produced<String>,
-    control: &ProductionControl<'_>,
-) -> Result<(), SQLError> {
-    control.check()?;
-    if names
-        .insert((control.copy_text(schema)?, name), ())?
-        .is_some()
-    {
-        return Err(invalid("duplicate declaration"));
+impl<W: Work + Send> MapKeyInput<Key> for Claims<'_, '_, W> {
+    type Error = SQLError;
+
+    async fn checkpoint(&mut self) -> Result<(), SQLError> {
+        self.control.check()?;
+        self.work.checkpoint().await?;
+        self.control.check()?;
+        Ok(())
     }
-    Ok(())
+
+    async fn compare(&mut self, query: &Key, stored: &Key) -> Result<Ordering, SQLError> {
+        let schema = compare_text(self.work, &query.0, &stored.0, self.control).await?;
+        if schema.is_eq() {
+            compare_text(self.work, &query.1, &stored.1, self.control).await
+        } else {
+            Ok(schema)
+        }
+    }
+}
+
+impl<W: Work + Send> Claims<'_, '_, W> {
+    async fn relation(
+        &mut self,
+        names: &mut Names,
+        identity: &RelationIdentity,
+    ) -> Result<(), SQLError> {
+        if super::SystemRelation::at(&identity.schema, &identity.name).is_some() {
+            return Err(invalid("fixed relation"));
+        }
+        let name = self.work.text(&identity.name, self.control).await?;
+        self.insert(names, &identity.schema, name).await
+    }
+
+    async fn data_type(
+        &mut self,
+        names: &mut Names,
+        identity: &RelationIdentity,
+    ) -> Result<(), SQLError> {
+        let name = self.work.text(&identity.name, self.control).await?;
+        self.insert_type(names, &identity.schema, name).await
+    }
+
+    async fn array_type(
+        &mut self,
+        names: &mut Names,
+        identity: &RelationIdentity,
+        recorded: Option<&str>,
+    ) -> Result<(), SQLError> {
+        let name = match recorded {
+            Some(name) => self.work.text(name, self.control).await?,
+            None => super::array_type_names::default_array_type_name_with_control(
+                &identity.name,
+                self.control,
+            )?,
+        };
+        self.insert_type(names, &identity.schema, name).await
+    }
+
+    async fn insert_type(
+        &mut self,
+        names: &mut Names,
+        schema: &str,
+        name: Produced<String>,
+    ) -> Result<(), SQLError> {
+        if super::SystemRelation::at(schema, &name).is_some()
+            || super::type_production::is_system_catalog_type_name(schema, &name)
+            || (schema == "pg_catalog"
+                && (super::type_metadata::builtin_scalar_type_by_name(&name).is_some()
+                    || super::type_metadata::routine_pseudo_type_oid(&name).is_some()
+                    || crate::ast::builtin_array_element_name(&name).is_some()))
+        {
+            return Err(invalid("fixed type"));
+        }
+        self.insert(names, schema, name).await
+    }
+
+    async fn insert(
+        &mut self,
+        names: &mut Names,
+        schema: &str,
+        name: Produced<String>,
+    ) -> Result<(), SQLError> {
+        let schema = self.work.text(schema, self.control).await?;
+        let key = Budgeted::new((schema, name), self.memory.reserve(0)?);
+        if names
+            .insert_admitted_key_from(key, (), self)
+            .await?
+            .is_some()
+        {
+            return Err(invalid("duplicate declaration"));
+        }
+        Ok(())
+    }
 }
 
 fn invalid(reason: &str) -> SQLError {

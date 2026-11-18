@@ -42,15 +42,15 @@ enum Predicate {
 
 #[derive(Clone, Copy)]
 enum Scheduled {
+    Namespaces,
+    Names,
     Authority,
     Foreign,
 }
 
 const ORDERED: &[Predicate] = &[
-    Predicate::Direct(|input| validate_namespaces(input.view, &input.production)),
-    Predicate::Direct(|input| {
-        validate_name_uniqueness(input.snapshot, input.memory, input.cancellation)
-    }),
+    Predicate::Scheduled(Scheduled::Namespaces),
+    Predicate::Scheduled(Scheduled::Names),
     Predicate::Scheduled(Scheduled::Authority),
     Predicate::Scheduled(Scheduled::Foreign),
     Predicate::Direct(|input| validate_types(input.snapshot, input.memory, input.cancellation)),
@@ -200,7 +200,7 @@ impl RelationshipValidation {
 impl Scheduled {
     fn applies(self, snapshot: &CatalogReadSnapshot) -> bool {
         match self {
-            Self::Authority => true,
+            Self::Namespaces | Self::Names | Self::Authority => true,
             Self::Foreign => foreign::has_bindings(snapshot),
         }
     }
@@ -227,6 +227,11 @@ impl Scheduled {
         cancellation: &CancellationToken,
     ) -> Result<(), SQLError> {
         match self {
+            Self::Namespaces => validate_namespaces(
+                catalog,
+                &ProductionControl::new(memory, cancellation, cancellation),
+            ),
+            Self::Names => validate_name_uniqueness(catalog.snapshot(), memory, cancellation),
             Self::Authority => validate_authority(catalog.snapshot(), memory, cancellation),
             Self::Foreign => decode_image(
                 &mut std::io::empty(),
@@ -244,6 +249,8 @@ impl Scheduled {
         input: &mut AsyncImageInput<'_>,
     ) -> Result<(), SQLError> {
         match self {
+            Self::Namespaces => super::namespaces::from_input(catalog, cancellation, input).await,
+            Self::Names => super::name_claims::from_input(catalog, cancellation, input).await,
             Self::Authority => {
                 super::authority::validate(catalog.snapshot(), input.memory, cancellation, input)
                     .await

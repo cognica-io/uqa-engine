@@ -149,3 +149,60 @@ fn native_name_claims_release_all_name_and_map_owners_on_denial_or_cancellation(
     )
     .unwrap();
 }
+
+#[test]
+fn long_namespace_claims_yield_during_comparison_and_successful_retirement() {
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+    use uqa_core::image_io::{ImageDecodeWindow, ImageDecoder};
+    fn exercise(prefix: usize) -> (usize, usize) {
+        let names: Vec<_> = (0..8)
+            .map(|index| RelationIdentity::new("s".repeat(prefix), format!("type_{index}")))
+            .collect();
+        let delivered = Arc::new(AtomicUsize::new(0));
+        let entered = Arc::clone(&delivered);
+        let memory = MemoryBudget::new(16 << 20);
+        let token = CancellationToken::new();
+        let original = token.clone();
+        let mut decoder = ImageDecoder::new(&memory, &token, move |mut reader| async move {
+            let mut input = reader.input();
+            let declarations = names.iter().map(|identity| {
+                entered.fetch_add(1, Ordering::Relaxed);
+                NativeNameInput::RowRelation(identity, None)
+            });
+            validate_with_work(declarations, input.memory, &original, &mut input).await
+        })
+        .unwrap();
+        let mut retirement = 0;
+        let mut positions = 0;
+        let mut previous = 0;
+        loop {
+            positions += 1;
+            let done = decoder
+                .advance(
+                    &mut std::io::empty(),
+                    ImageDecodeWindow { bytes: 1, steps: 1 },
+                )
+                .unwrap()
+                .is_some();
+            let used = memory.used();
+            if delivered.load(Ordering::Relaxed) == 8 && used < previous {
+                retirement += 1;
+            }
+            previous = used;
+            if done {
+                break;
+            }
+            assert!(positions < 1_000_000);
+        }
+        drop(decoder);
+        assert_eq!(memory.used(), 0);
+        (positions, retirement)
+    }
+    let (short, _) = exercise(15);
+    let (wide, retiring) = exercise(20_480);
+    assert!(wide > short + 100);
+    assert!(retiring >= 16);
+}

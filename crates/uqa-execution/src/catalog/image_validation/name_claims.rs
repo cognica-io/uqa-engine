@@ -6,8 +6,8 @@
 
 //! Join native relation and type declarations from one immutable catalog for SQL name validation.
 
-use crate::catalog::CatalogReadSnapshot;
-use uqa_core::{memory::MemoryBudget, CancellationToken};
+use crate::catalog::{CatalogReadSnapshot, CatalogReadView};
+use uqa_core::{image_io::AsyncImageInput, memory::MemoryBudget, CancellationToken};
 use uqa_sql::{catalog::namespace_names::NativeNameInput, SQLError};
 
 pub fn validate(
@@ -15,6 +15,26 @@ pub fn validate(
     memory: &MemoryBudget,
     cancellation: &CancellationToken,
 ) -> Result<(), SQLError> {
+    uqa_sql::catalog::namespace_names::validate(declarations(snapshot), memory, cancellation)
+}
+
+pub(super) async fn from_input(
+    catalog: &CatalogReadView,
+    original: &CancellationToken,
+    input: &mut AsyncImageInput<'_>,
+) -> Result<(), SQLError> {
+    uqa_sql::catalog::namespace_names::validate_with_work(
+        declarations(catalog.snapshot()),
+        input.memory,
+        original,
+        input,
+    )
+    .await
+}
+
+fn declarations(
+    snapshot: &CatalogReadSnapshot,
+) -> impl Iterator<Item = NativeNameInput<'_>> + Send {
     let d = &snapshot.definitions;
     let tables = snapshot.tables.iter().map(|(name, table)| {
         NativeNameInput::RowRelation(name, table.row_type_array_name.as_deref())
@@ -55,20 +75,16 @@ pub fn validate(
         .shells
         .values()
         .map(|definition| NativeNameInput::Type(&definition.identity));
-    uqa_sql::catalog::namespace_names::validate(
-        tables
-            .chain(views)
-            .chain(foreign)
-            .chain(sequences)
-            .chain(indexes)
-            .chain(composites)
-            .chain(domains)
-            .chain(enums)
-            .chain(ranges)
-            .chain(shells),
-        memory,
-        cancellation,
-    )
+    tables
+        .chain(views)
+        .chain(foreign)
+        .chain(sequences)
+        .chain(indexes)
+        .chain(composites)
+        .chain(domains)
+        .chain(enums)
+        .chain(ranges)
+        .chain(shells)
 }
 
 #[cfg(test)]

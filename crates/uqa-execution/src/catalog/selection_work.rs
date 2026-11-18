@@ -41,7 +41,9 @@ pub(crate) struct NameComparison<'a, 'b, W> {
     pub(crate) control: ProductionControl<'a>,
     pub(crate) work: &'b mut W,
 }
-impl<W: Work> uqa_core::memory::MapKeyInput<str, String> for NameComparison<'_, '_, W> {
+impl<W: Work, K: std::borrow::Borrow<str> + Sync> uqa_core::memory::MapKeyInput<str, K>
+    for NameComparison<'_, '_, W>
+{
     type Error = SQLError;
     async fn checkpoint(&mut self) -> Result<(), Self::Error> {
         crate::catalog::selection_work::checkpoint(&self.control, self.work).await
@@ -49,9 +51,9 @@ impl<W: Work> uqa_core::memory::MapKeyInput<str, String> for NameComparison<'_, 
     async fn compare(
         &mut self,
         query: &str,
-        stored: &String,
+        stored: &K,
     ) -> Result<std::cmp::Ordering, Self::Error> {
-        compare(query, stored, &self.control, self.work).await
+        compare(query, stored.borrow(), &self.control, self.work).await
     }
 }
 

@@ -64,7 +64,7 @@ fn owner(dependency: SequenceOwnerDependency) -> SequenceOwner {
 fn check(
     tables: &[([u8; 16], Vec<ColumnDef>)],
     sequences: &[(RelationIdentity, Option<SequenceOwner>)],
-) -> Result<(), SQLError> {
+) -> Result<(), String> {
     let memory = MemoryBudget::new(64 << 10);
     let token = CancellationToken::new();
     let result = validate(
@@ -72,7 +72,8 @@ fn check(
         sequences.iter().map(|(name, owner)| (name, *owner)),
         &memory,
         &token,
-    );
+    )
+    .map_err(|error| error.to_string());
     assert_eq!(memory.used(), 0);
     result
 }

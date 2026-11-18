@@ -54135,6 +54135,45 @@
       ]
     },
     {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "late_namespaces_and_array_collisions_yield_in_order_and_retire_their_private_claims",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/name_claims/tests.rs",
+      "capability": "Bounded namespace and name validation",
+      "workload": "Drive 12 and 72 native enum declarations to the last missing namespace or duplicate generated array. Suspend, cancel and abandon an immutable catalog separately.",
+      "invariant": "One-step and larger windows preserve the first diagnostic. More declarations require more steps. Each terminal path releases private validation memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "long_namespace_claims_yield_during_comparison_and_successful_retirement",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/namespace_names/tests.rs",
+      "capability": "SQL namespace claim work",
+      "workload": "Compare eight row declarations under 15-byte and 20,480-byte common schema names. Advance one step until all private claims retire.",
+      "invariant": "Long shared key bytes require additional steps and completed claim entries release their admitted memory across separate steps.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "malformed_bound_names_yield_while_decoding_and_keep_the_admitted_original_diagnostic",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/resolution.rs",
+      "capability": "Canonical stored relation diagnostics",
+      "workload": "Decode an unterminated 49,153-byte quoted reference one step at a time and retain the resulting SQL error after dropping its decoder.",
+      "invariant": "The original XX000 text and typed primary error remain available until the last diagnostic owner releases its allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
       "package": "uqa-sql",
       "kind": "lib",
       "test": "native_name_claims_separate_plain_relations_from_row_and_scalar_types",
