@@ -23,6 +23,10 @@ fn cancelled_serialized_notification_commit_clears_its_transaction_frame() {
     let error = sender.commit().unwrap_err();
     assert_eq!(error.sqlstate(), Some("57014"), "{error}");
     assert!(sender.session.transactions.lock().is_empty());
+    assert_eq!(
+        sender.runtime.cancellation.check(),
+        Err(uqa_core::QueryCancelled::USER_REQUEST)
+    );
     sender.runtime.cancellation.reset();
     assert_eq!(sender.sql("SELECT 1", &[]).unwrap().rows.len(), 1);
 }
