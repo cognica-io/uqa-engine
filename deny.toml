@@ -14,13 +14,16 @@ all-features = true
 [advisories]
 version = 2
 # In v2, cargo-deny errors on vulnerability, unmaintained, unsound, and notice
-# advisories. Keep any intentional transitive unmaintained exceptions explicit.
+# advisories. Keep maintenance exceptions explicit.
 yanked = "deny"
 ignore = [
     # `paste` is pulled transitively through Arrow/Parquet. RUSTSEC marks it
     # unmaintained and offers no safe upgrade; keep this explicit so real
     # vulnerability advisories still fail the gate.
     "RUSTSEC-2024-0436",
+    # Remove this maintenance exception when #1425 replaces chrono across the
+    # workspace and its transitive dependencies. The notice covers every version.
+    "RUSTSEC-2026-0543",
 ]
 
 [licenses]
