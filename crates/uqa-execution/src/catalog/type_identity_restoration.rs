@@ -6,6 +6,7 @@
 
 //! Initial-transaction upgrade of the user-defined type names that earlier releases recorded in stored syntax, stored plans, routine declarations and routine bindings to the identities current releases record, so that a type renamed or moved after the upgrade keeps every stored reference meaning the same type. Earlier releases wrote a type as its name was spelled at definition time; a name without a schema meant the type the open session's default search path found.
 
+use super::domain::{DOMAINS_METADATA_KEY, DOMAIN_RECORD_PREFIX};
 use std::collections::BTreeMap;
 
 use serde::Deserialize;
@@ -18,9 +19,6 @@ mod forms;
 const VERSION_KEY: &str = "sql_stored_type_identity_version";
 /// The schema an unqualified name meant when earlier releases stored it: the default search path's.
 const DEFAULT_SCHEMA: &str = "public";
-const DOMAIN_RECORD_PREFIX: &str = "uqa.sql.domain.v1:";
-/// The metadata key of the domain catalog: the format marker of per-domain records, or in earlier formats the domains themselves.
-const DOMAINS_METADATA_KEY: &str = "sql_domains_json";
 
 /// Upgrade every stored definition once, inside the caller's initial catalog transaction; the version marker is written only after every changed record.
 pub fn upgrade_stored_type_names(catalog: &dyn CatalogFacade) -> StorageBackendResult<()> {
