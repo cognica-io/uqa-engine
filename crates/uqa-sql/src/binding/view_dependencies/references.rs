@@ -17,6 +17,7 @@ use uqa_core::{
 
 #[derive(Clone, Copy)]
 enum Task<'a> {
+    Queries(&'a [crate::plan::QueryPlan]),
     Plan(PlanRef<'a>),
     Root(&'a RelationalPlan),
     Source(&'a SourcePlan),
@@ -49,24 +50,105 @@ pub fn visit_stored_plan_function_bindings(
     })
 }
 
+enum SourceMember<'a> {
+    Source(&'a SourcePlan),
+    Function(&'a crate::plan::TableFunctionPlan),
+}
+
 pub(crate) fn visit_table_function_calls(
     plan: PlanRef<'_>,
     control: &ProductionControl<'_>,
     visit: &mut impl FnMut(&str, Option<&crate::ast::FunctionBinding>) -> Result<(), SQLError>,
 ) -> Result<(), SQLError> {
-    visit_references(plan, control, &mut |_, _| Ok(()), &mut |source| {
-        match source {
-            SourcePlan::Function { name, binding, .. } => visit(name, binding.as_ref())?,
-            SourcePlan::FunctionGroup { functions, .. } => {
-                for function in functions {
-                    control.check()?;
+    crate::catalog::work::inline(table_calls(plan, control, &mut (), visit))
+}
+
+async fn table_calls<W: crate::catalog::work::Work>(
+    plan: PlanRef<'_>,
+    control: &ProductionControl<'_>,
+    scheduler: &mut W,
+    visit: &mut impl FnMut(&str, Option<&crate::ast::FunctionBinding>) -> Result<(), SQLError>,
+) -> Result<(), SQLError> {
+    visit_references_with_work(
+        plan,
+        control,
+        scheduler,
+        &mut |_, _| Ok(()),
+        &mut |member| {
+            match member {
+                SourceMember::Source(SourcePlan::Function { name, binding, .. }) => {
+                    visit(name, binding.as_ref())?;
+                }
+                SourceMember::Function(function) => {
                     visit(&function.name, function.binding.as_ref())?;
                 }
+                SourceMember::Source(_) => (),
             }
-            _ => {}
+            Ok(())
+        },
+    )
+    .await
+}
+
+/// The stored placement determines which application registry can supply an unresolved call.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StoredFunctionSite {
+    Expression,
+    Window,
+    From,
+    Domain,
+}
+
+/// Visit calls whose stored selection still permits runtime lookup. A selected SQL object, builtin, structural operation or retained resolution error keeps its original authority. Window calls and FROM items keep their distinct SQL placement; scalar arguments are visited by the ordinary plan expression walker.
+pub fn visit_stored_runtime_calls(
+    plan: PlanRef<'_>,
+    control: &ProductionControl<'_>,
+    visit: &mut impl FnMut(&str, StoredFunctionSite) -> Result<(), SQLError>,
+) -> Result<(), SQLError> {
+    crate::catalog::work::inline(runtime_calls(plan, control, &mut (), visit))
+}
+
+/// Observe the same original call sites with resumable plan, list and scalar work.
+pub async fn visit_stored_runtime_calls_from(
+    plan: PlanRef<'_>,
+    control: &ProductionControl<'_>,
+    input: &mut uqa_core::image_io::AsyncImageInput<'_>,
+    visit: &mut (impl FnMut(&str, StoredFunctionSite) -> Result<(), SQLError> + Send),
+) -> Result<(), SQLError> {
+    runtime_calls(plan, control, input, visit).await
+}
+
+async fn runtime_calls<W: crate::catalog::work::Work>(
+    plan: PlanRef<'_>,
+    control: &ProductionControl<'_>,
+    scheduler: &mut W,
+    visit: &mut impl FnMut(&str, StoredFunctionSite) -> Result<(), SQLError>,
+) -> Result<(), SQLError> {
+    let mut unbound =
+        |name: &str, binding: Option<&crate::ast::FunctionBinding>, site: StoredFunctionSite| {
+            control.check()?;
+            if let Some(site) = site.with_stored_binding(binding) {
+                visit(name, site)?;
+            }
+            Ok::<_, SQLError>(())
+        };
+    crate::plan::visit_scalar_nodes_with_work(plan, control, scheduler, &mut |expression| {
+        match expression {
+            crate::ScalarExpr::Func { name, binding, .. } => {
+                unbound(name, binding.as_ref(), StoredFunctionSite::Expression)?;
+            }
+            crate::ScalarExpr::WindowCall { name, .. } => {
+                unbound(name, None, StoredFunctionSite::Window)?;
+            }
+            _ => (),
         }
         Ok(())
     })
+    .await?;
+    table_calls(plan, control, scheduler, &mut |name, binding| {
+        unbound(name, binding, StoredFunctionSite::From)
+    })
+    .await
 }
 
 /// Visit table-function declarations and retained VALUES types through the same admitted scopes as stored relation references.
@@ -78,25 +160,22 @@ pub fn visit_stored_plan_output_types(
 ) -> Result<(), SQLError> {
     visit_references(plan, control, &mut |_, _| Ok(()), &mut |source| {
         match source {
-            SourcePlan::Function { column_types, .. } => {
+            SourceMember::Source(SourcePlan::Function { column_types, .. }) => {
                 for ty in column_types {
                     control.check()?;
                     visit(ty)?;
                 }
             }
-            SourcePlan::FunctionGroup { functions, .. } => {
-                for function in functions {
+            SourceMember::Function(function) => {
+                for ty in &function.column_types {
                     control.check()?;
-                    for ty in &function.column_types {
-                        control.check()?;
-                        visit(ty)?;
-                    }
+                    visit(ty)?;
                 }
             }
-            SourcePlan::Values {
+            SourceMember::Source(SourcePlan::Values {
                 internal_column_types,
                 ..
-            } => {
+            }) => {
                 for ty in internal_column_types.iter().flatten() {
                     control.check()?;
                     concrete(ty)?;
@@ -112,7 +191,23 @@ fn visit_references(
     plan: PlanRef<'_>,
     control: &ProductionControl<'_>,
     visit: &mut impl FnMut(&str, bool) -> Result<(), SQLError>,
-    source_visit: &mut impl FnMut(&SourcePlan) -> Result<(), SQLError>,
+    source_visit: &mut impl FnMut(SourceMember<'_>) -> Result<(), SQLError>,
+) -> Result<(), SQLError> {
+    crate::catalog::work::inline(visit_references_with_work(
+        plan,
+        control,
+        &mut (),
+        visit,
+        source_visit,
+    ))
+}
+
+async fn visit_references_with_work<W: crate::catalog::work::Work>(
+    plan: PlanRef<'_>,
+    control: &ProductionControl<'_>,
+    scheduler: &mut W,
+    visit: &mut impl FnMut(&str, bool) -> Result<(), SQLError>,
+    source_visit: &mut impl FnMut(SourceMember<'_>) -> Result<(), SQLError>,
 ) -> Result<(), SQLError> {
     let mut work = Work {
         pending: ProductionSmallVec::new(*control),
@@ -121,13 +216,15 @@ fn visit_references(
     };
     work.pending.push(Task::Plan(plan))?;
     while let Some(task) = work.pending.pop() {
-        control.check()?;
+        checkpoint(control, scheduler).await?;
         match task {
             Task::Plan(PlanRef::Query(query)) => {
-                work.enter(&query.ctes, Task::Root(&query.root))?;
+                work.enter(&query.ctes, Task::Root(&query.root), scheduler)
+                    .await?;
             }
             Task::Plan(PlanRef::Command(command)) => {
-                work.enter(command.ctes(), Task::Command(command))?;
+                work.enter(command.ctes(), Task::Command(command), scheduler)
+                    .await?;
             }
             Task::Ctes(ctes, index, recursive) => {
                 if let Some(cte) = ctes.get(index) {
@@ -141,10 +238,18 @@ fn visit_references(
                     }))?;
                 }
             }
+            Task::Queries(queries) => {
+                if let Some((last, rest)) = queries.split_last() {
+                    if !rest.is_empty() {
+                        work.pending.push(Task::Queries(rest))?;
+                    }
+                    work.pending.push(Task::Plan(PlanRef::Query(last)))?;
+                }
+            }
             Task::Add(name) => work.add(name)?,
             Task::Leave(ctes) => {
                 for cte in ctes {
-                    control.check()?;
+                    checkpoint(control, scheduler).await?;
                     let name = RelationName::decoded(&cte.name);
                     let count = work.visible.remove(&name).expect("entered CTE scope");
                     if count > 1 {
@@ -154,8 +259,14 @@ fn visit_references(
             }
             Task::Root(root) => work.root(root)?,
             Task::Source(source) => {
-                source_visit(source)?;
-                work.source(source, visit)?;
+                source_visit(SourceMember::Source(source))?;
+                if let SourcePlan::FunctionGroup { functions, .. } = source {
+                    for function in functions {
+                        checkpoint(control, scheduler).await?;
+                        source_visit(SourceMember::Function(function))?;
+                    }
+                }
+                work.source(source, visit, scheduler).await?;
             }
             Task::Command(command) => {
                 if let Some(target) = command.mutation_target() {
@@ -172,8 +283,12 @@ fn visit_references(
                         "unsupported stored command relation scope".into(),
                     ));
                 }
-                for query in command.query_inputs() {
-                    work.pending.push(Task::Plan(PlanRef::Query(query)))?;
+                let (first, rest) = command.query_input_parts();
+                if let Some(first) = first {
+                    work.pending.push(Task::Plan(PlanRef::Query(first)))?;
+                }
+                if !rest.is_empty() {
+                    work.pending.push(Task::Queries(rest))?;
                 }
                 if let Some(source) = command.source_input() {
                     work.pending.push(Task::Source(source))?;
@@ -204,14 +319,24 @@ impl<'a> Work<'a, '_> {
         Ok(())
     }
 
-    fn enter(&mut self, ctes: &'a [CtePlan], body: Task<'a>) -> Result<(), SQLError> {
+    async fn enter<W: crate::catalog::work::Work>(
+        &mut self,
+        ctes: &'a [CtePlan],
+        body: Task<'a>,
+        scheduler: &mut W,
+    ) -> Result<(), SQLError> {
+        if ctes.is_empty() {
+            self.pending.push(body)?;
+            return Ok(());
+        }
         let mut recursive = false;
         for cte in ctes {
-            self.control.check()?;
+            checkpoint(&self.control, scheduler).await?;
             recursive |= cte.recursive;
         }
         if recursive {
             for cte in ctes {
+                checkpoint(&self.control, scheduler).await?;
                 self.add(&cte.name)?;
             }
         }
@@ -241,16 +366,17 @@ impl<'a> Work<'a, '_> {
             }
             RelationalPlan::Values { subqueries, .. } => subqueries,
         };
-        for query in subqueries {
-            self.pending.push(Task::Plan(PlanRef::Query(query)))?;
+        if !subqueries.is_empty() {
+            self.pending.push(Task::Queries(subqueries))?;
         }
         Ok(())
     }
 
-    fn source(
+    async fn source<W: crate::catalog::work::Work>(
         &mut self,
         source: &'a SourcePlan,
         visit: &mut impl FnMut(&str, bool) -> Result<(), SQLError>,
+        scheduler: &mut W,
     ) -> Result<(), SQLError> {
         match source {
             SourcePlan::Table {
@@ -281,7 +407,7 @@ impl<'a> Work<'a, '_> {
             }
             SourcePlan::FunctionGroup { functions, .. } => {
                 for function in functions {
-                    self.control.check()?;
+                    checkpoint(&self.control, scheduler).await?;
                     if let Some(relations) = &function.relations {
                         visit(&relations.left, false)?;
                         self.control.check()?;
@@ -295,5 +421,17 @@ impl<'a> Work<'a, '_> {
     }
 }
 
+async fn checkpoint<W: crate::catalog::work::Work>(
+    control: &ProductionControl<'_>,
+    work: &mut W,
+) -> Result<(), SQLError> {
+    control.check()?;
+    work.checkpoint().await?;
+    control.check()?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod native_tests;
 #[cfg(test)]
 mod tests;

@@ -27,7 +27,8 @@ impl std::error::Error for RetainedRoutineDiagnostic {
 }
 
 impl SQLError {
-    pub(crate) fn admit_routine_message(
+    /// Preserve an already produced SQL diagnostic and its SQLSTATE without formatting or copying its message again.
+    pub fn admit_routine_message(
         sqlstate: &'static str,
         message: Produced<String>,
         control: &ProductionControl<'_>,

@@ -413,12 +413,20 @@ pub(super) struct Info {
     run: bool,
 }
 
-pub(super) const POINT_METADATA_SQL: &str = concat!(
-    "SELECT h.sequence, h.compacted, v.sequence, v.payload_length ",
-    "FROM _uqa_mvcc_heads h LEFT JOIN _uqa_mvcc_version_metadata v ",
-    "ON v.key = h.key AND v.sequence <= ?2 WHERE h.key = ?1 ",
-    "ORDER BY v.sequence DESC LIMIT 1"
-);
+macro_rules! point_metadata_sql {
+    ($extra:literal) => {
+        concat!(
+            "SELECT h.sequence, h.compacted, v.sequence, v.payload_length",
+            $extra,
+            " ",
+            "FROM _uqa_mvcc_heads h LEFT JOIN _uqa_mvcc_version_metadata v ",
+            "ON v.key = h.key AND v.sequence <= ?2 WHERE h.key = ?1 ",
+            "ORDER BY v.sequence DESC LIMIT 1"
+        )
+    };
+}
+pub(super) const POINT_METADATA_SQL: &str = point_metadata_sql!("");
+pub(super) const POINT_IMAGE_METADATA_SQL: &str = point_metadata_sql!(", CASE WHEN typeof(v.image_digest) = 'blob' AND length(v.image_digest) = 32 THEN v.image_digest END");
 
 /// Version payloads of at most this many bytes are read with their metadata in one statement. The metadata length bounds `SQLite`'s copy before the payload is evaluated, and the payload is admitted against the read's memory budget before it is exposed; larger payloads keep the separate admitted read.
 pub(super) const INLINE_PAYLOAD_BYTES: u16 = 16 * 1024;
@@ -440,14 +448,26 @@ pub(super) fn info(
     key: &[u8],
     boundary: CommitSequence,
 ) -> PhysicalResult<Option<Info>> {
-    // The descending version range supplies its first row directly. A scalar
-    // predecessor subquery would seek the same version tree a second time.
-    let mut statement = connection.prepare_cached(POINT_METADATA_SQL)?;
+    with_point_info(connection, key, boundary, POINT_METADATA_SQL, |info, _| {
+        Ok(info)
+    })
+}
+
+/// Select and validate the exact predecessor once, including compacted runs. Additional read-only columns are evaluated on that same metadata row.
+pub(super) fn with_point_info<T>(
+    connection: &Connection,
+    key: &[u8],
+    boundary: CommitSequence,
+    statement: &str,
+    visit: impl FnOnce(Option<Info>, Option<&rusqlite::Row<'_>>) -> PhysicalResult<T>,
+) -> PhysicalResult<T> {
+    let mut statement = connection.prepare_cached(statement)?;
     let mut rows = statement.query(params![key, boundary.as_u64().to_be_bytes().as_slice()])?;
-    let Some(row) = rows.next()? else {
-        return run_info(connection, key, boundary);
-    };
-    point_info(row, boundary)
+    if let Some(row) = rows.next()? {
+        visit(point_info(row, boundary)?, Some(row))
+    } else {
+        visit(run_info(connection, key, boundary)?, None)
+    }
 }
 
 /// A key without a point head can only be stored in a compacted run.

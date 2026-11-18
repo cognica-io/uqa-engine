@@ -7,7 +7,8 @@
 //! Storage owns durable admission and publication; Engine supplies immutable catalog validation and fresh runtime activation.
 
 use super::{
-    configuration::AdmittedRestore, RestoreBindings, RestoreOptions, RestorePhase, RestoredEngine,
+    configuration::AdmittedRestore, Admission, RestoreBindings, RestoreOptions, RestorePhase,
+    RestoredEngine,
 };
 use std::{
     path::{Path, PathBuf},
@@ -16,12 +17,12 @@ use std::{
 use uqa_core::memory::{Budgeted, MemoryBudget};
 use uqa_storage::{
     backup::{
-        BackupId, BackupImageImportStep, BackupImageValidationStep, BackupImageValidationWork,
-        BackupImageValidator, BackupImportLimits, BackupLease, BackupRestoreFactory,
-        BackupRestoreJob, BackupRestoreOperation, BackupRestoreStep, BackupRestoreWork,
-        BackupRestoreWorkStep, BackupResult, LocalRepository, OwnedBackupImageValidation,
-        OwnedPersistentBackupImport, PersistentBackupTarget, PreparedRestoreStep,
-        PreparedRestoreValidation, RestoreDirectory, RestoreId,
+        BackupFunctionDigestJob, BackupId, BackupImageImportStep, BackupImageValidationStep,
+        BackupImageValidationWork, BackupImageValidator, BackupImportLimits, BackupLease,
+        BackupRestoreFactory, BackupRestoreJob, BackupRestoreOperation, BackupRestoreStep,
+        BackupRestoreWork, BackupRestoreWorkStep, BackupResult, ImageDigest, LocalRepository,
+        OwnedBackupImageValidation, OwnedPersistentBackupImport, PersistentBackupTarget,
+        PreparedRestoreStep, PreparedRestoreValidation, RestoreDirectory, RestoreId,
     },
     catalog::input::CatalogInputLimits,
     mvcc::DatabaseRestore,
@@ -154,9 +155,10 @@ impl<'a> Persistent<'a> {
         let execution = std::mem::replace(&mut self.execution, Execution::Failed);
         let step = match execution {
             Execution::Admitted(operation) => {
+                let expected = operation.function_reference_digest();
                 operation.begin_prepared_validation(|directory, request, original| {
                     let provider = self.target.open(directory, request, original)?;
-                    Validator::new(&self.options).begin(provider, original)
+                    Validator::new(&self.options, expected).begin(provider, original)
                 })?
             }
             Execution::CheckingPrepared(work) => work.advance(|validation| {
@@ -257,10 +259,11 @@ impl<'a> BackupRestoreFactory<'a> for Factory {
         request: DatabaseRestore,
         control: &StorageReadControl,
     ) -> BackupResult<Self::Work> {
+        let functions = Admission::open(&backup, control)?;
         let input = self
             .target
             .import(directory, backup, request, self.limits(), control)?;
-        Ok(self.work(input, control))
+        Ok(self.work(input, functions, control))
     }
 
     fn recover(
@@ -270,10 +273,11 @@ impl<'a> BackupRestoreFactory<'a> for Factory {
         request: DatabaseRestore,
         control: &StorageReadControl,
     ) -> BackupResult<Self::Work> {
+        let functions = Admission::open(&backup, control)?;
         let input = self
             .target
             .recover(directory, backup, request, self.limits(), control)?;
-        Ok(self.work(input, control))
+        Ok(self.work(input, functions, control))
     }
 }
 
@@ -288,11 +292,13 @@ impl Factory {
     fn work<'a>(
         &self,
         input: OwnedPersistentBackupImport<'a>,
+        functions: Option<Admission<'a>>,
         control: &StorageReadControl,
     ) -> Work<'a> {
         Work {
             stage: Stage::Reading(input),
-            validator: Validator::new(&self.options),
+            validator: Validator::new(&self.options, None),
+            functions,
             control: control.clone(),
         }
     }
@@ -308,6 +314,7 @@ enum Stage<'a> {
 pub(super) struct Work<'a> {
     stage: Stage<'a>,
     validator: Validator,
+    functions: Option<Admission<'a>>,
     control: StorageReadControl,
 }
 
@@ -324,6 +331,15 @@ impl Work<'_> {
         }
         let stage = std::mem::replace(&mut self.stage, Stage::Failed);
         self.control.check()?;
+        if !Admission::advance(
+            &mut self.functions,
+            maximum_object_bytes,
+            &self.validator.bindings,
+            &self.control,
+        )? {
+            self.stage = stage;
+            return Ok(BackupRestoreWorkStep::Pending);
+        }
         self.stage = match stage {
             Stage::Reading(mut input) => match input.advance(maximum_object_bytes)? {
                 BackupImageImportStep::Pending => Stage::Reading(input),
@@ -357,14 +373,16 @@ struct Validator {
     retention: MemoryBudget,
     limits: CatalogInputLimits,
     bindings: RestoreBindings,
+    expected: Option<ImageDigest>,
 }
 
 impl Validator {
-    fn new(settings: &AdmittedRestore) -> Self {
+    fn new(settings: &AdmittedRestore, expected: Option<ImageDigest>) -> Self {
         Self {
             retention: MemoryBudget::new(settings.limits.retained_bytes),
             limits: catalog_limits(settings.limits),
             bindings: settings.bindings.clone(),
+            expected,
         }
     }
 }
@@ -391,6 +409,7 @@ impl BackupImageValidator for Validator {
                 self.retention.clone(),
                 self.limits,
                 &self.bindings,
+                self.expected,
                 control,
             )
         })
@@ -399,11 +418,16 @@ impl BackupImageValidator for Validator {
 
 struct Validation {
     stage: Option<ValidationStage>,
+    expected: Option<ImageDigest>,
     control: StorageReadControl,
 }
 
 enum ValidationStage {
     Catalog(crate::open::PersistentEngineInput),
+    Functions(
+        crate::open::PersistentEngineState,
+        Budgeted<Box<BackupFunctionDigestJob<crate::backup::functions::References>>>,
+    ),
     Relationships(
         crate::open::PersistentEngineState,
         crate::backup::validation::CatalogValidation,
@@ -416,6 +440,7 @@ impl Validation {
         retention: MemoryBudget,
         limits: CatalogInputLimits,
         bindings: &RestoreBindings,
+        expected: Option<ImageDigest>,
         control: &StorageReadControl,
     ) -> BackupResult<Self> {
         let input = crate::open::PersistentEngineInput::new(
@@ -423,6 +448,7 @@ impl Validation {
         )?;
         Ok(Self {
             stage: Some(ValidationStage::Catalog(input)),
+            expected,
             control: control.clone(),
         })
     }
@@ -445,10 +471,37 @@ impl BackupImageValidationWork for Validation {
                 let Some(checks) =
                     checks.advance(session.engine(), &self.control, maximum_steps)?
                 else {
+                    if self.expected.is_some() {
+                        let source = crate::backup::functions::References::staged(
+                            session.engine(),
+                            &self.control,
+                        )?;
+                        let memory = self.control.memory().reserve(size_of::<
+                            BackupFunctionDigestJob<crate::backup::functions::References>,
+                        >())?;
+                        let digest = BackupFunctionDigestJob::new(source, &self.control);
+                        self.stage = Some(ValidationStage::Functions(
+                            session,
+                            Budgeted::new(Box::new(digest), memory),
+                        ));
+                        return Ok(BackupImageValidationStep::Pending);
+                    }
                     drop(session.finish()?);
                     return Ok(BackupImageValidationStep::Complete);
                 };
                 ValidationStage::Relationships(session, checks)
+            }
+            ValidationStage::Functions(session, mut input) => {
+                if let Some(digest) = input.as_mut().advance(maximum_steps, 4096)? {
+                    if Some(digest) != self.expected {
+                        return Err(uqa_storage::backup::BackupError::Invalid(
+                            "application function declarations differ from the captured database",
+                        ));
+                    }
+                    drop(session.finish()?);
+                    return Ok(BackupImageValidationStep::Complete);
+                }
+                ValidationStage::Functions(session, input)
             }
         };
         self.stage = Some(next);

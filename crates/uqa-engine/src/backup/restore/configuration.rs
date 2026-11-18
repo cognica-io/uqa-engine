@@ -92,6 +92,12 @@ pub(crate) struct RestoreBindings {
 }
 
 impl RestoreBindings {
+    pub(super) fn registered_kinds(&self, name: &str) -> crate::sql_registry::RegisteredKinds {
+        self.registry
+            .as_ref()
+            .map(|(registry, _)| registry.kinds(name))
+            .unwrap_or_default()
+    }
     pub(crate) fn attach(&self, candidate: &mut Engine) {
         candidate
             .extensions

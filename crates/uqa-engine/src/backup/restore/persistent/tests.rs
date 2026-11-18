@@ -31,6 +31,7 @@ fn persistent_validation_holds_the_private_read_transaction_until_completion_or_
             MemoryBudget::new(16 << 20),
             limits,
             &RestoreBindings::default(),
+            None,
             &control,
         )
         .unwrap();

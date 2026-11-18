@@ -22,12 +22,14 @@ fn capture(source: &Engine, repository: &LocalRepository, parent: Option<BackupI
     let control = StorageReadControl::with_limit(32 << 20);
     let mut options = BackupOptions::new(32 << 20, 16 << 20);
     options.parent = parent;
-    let mut job = source.begin_backup(repository, options, &control).unwrap();
-    while job.advance(8, 4096).unwrap() == BackupCaptureStep::Pending {}
-    let root = job.publish().unwrap();
-    drop(job);
+    let root = finish_capture(source.begin_backup(repository, options, &control).unwrap());
     assert_eq!(control.memory().used(), 0);
     root
+}
+
+fn finish_capture(mut job: crate::backup::BackupJob<'_>) -> BackupRoot {
+    while job.advance(8, 4096).unwrap() == BackupCaptureStep::Pending {}
+    job.publish().unwrap()
 }
 
 fn begin<'a>(
@@ -340,10 +342,12 @@ fn memory_restore_job_admission_preserves_authority_and_transaction_failures() {
 }
 
 mod analyzer_resources;
+mod application_priority;
 mod constraint_bindings;
 mod external_functions;
 mod foreign_bindings;
 mod foreign_callbacks;
+mod function_origins;
 mod index_bindings;
 mod models;
 mod partition_bindings;

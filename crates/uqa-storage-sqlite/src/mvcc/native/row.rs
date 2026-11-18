@@ -14,6 +14,7 @@ use uqa_storage::read_control::StorageReadControl;
 use super::invalid;
 
 const PREFIX: &[u8] = b"UNR\x01";
+const TEXT: u8 = 3;
 
 /// Exact envelope bound for a row containing only TEXT/BLOB fields, before materializing its encoded bytes.
 pub(crate) fn variable_fields_limit(lengths: &[usize]) -> VersionResult<usize> {
@@ -97,7 +98,7 @@ pub fn encode_row(
             }
             ValueRef::Text(bytes) => {
                 std::str::from_utf8(bytes).map_err(|_| invalid("native row text is not UTF-8"))?;
-                output.push(3)?;
+                output.push(TEXT)?;
                 encode_bytes(&mut output, bytes, control)?;
             }
             ValueRef::Blob(bytes) => {
@@ -132,13 +133,7 @@ pub fn decode_row<'a>(
 ) -> VersionResult<BudgetedVec<ValueRef<'a>>> {
     control.cancellation().check()?;
     let mut input = bytes;
-    if take(&mut input, PREFIX.len())? != PREFIX {
-        return Err(invalid("unknown native row codec"));
-    }
-    let columns = usize::from(u16::from_be_bytes(take_array(&mut input)?));
-    if columns != expected_columns {
-        return Err(invalid("native row column count does not match its layout"));
-    }
+    let columns = read_header(&mut input, expected_columns)?;
     // Each column needs at least a tag; reject impossible counts before allocating descriptors.
     if columns > input.len() {
         return Err(invalid("truncated native row"));
@@ -158,10 +153,10 @@ pub fn decode_row<'a>(
                 }
                 ValueRef::Real(value)
             }
-            3 | 4 => {
+            TEXT | 4 => {
                 let length = u32::from_be_bytes(take_array(&mut input)?) as usize;
                 let value = take(&mut input, length)?;
-                if tag == 3 {
+                if tag == TEXT {
                     std::str::from_utf8(value)
                         .map_err(|_| invalid("native row text is not UTF-8"))?;
                     ValueRef::Text(value)
@@ -177,6 +172,66 @@ pub fn decode_row<'a>(
         return Err(invalid("native row has trailing bytes"));
     }
     Ok(values)
+}
+
+fn read_header(input: &mut &[u8], expected_columns: usize) -> VersionResult<usize> {
+    if take(input, PREFIX.len())? != PREFIX {
+        return Err(invalid("unknown native row codec"));
+    }
+    let columns = usize::from(u16::from_be_bytes(take_array(input)?));
+    if columns != expected_columns {
+        return Err(invalid("native row column count does not match its layout"));
+    }
+    Ok(columns)
+}
+
+/// Locate the definition through the original TEXT field lengths. Schema, relation name, kind and the materialized rows within the definition never need a whole-row buffer.
+pub(super) fn view_definition_range(
+    record: &mut uqa_storage::backup::RecordImageCursor,
+) -> uqa_storage::backup::BackupResult<std::ops::Range<usize>> {
+    text_column_range(record, super::NativeRecordFamily::Views, "definition_json")
+}
+
+pub(super) fn metadata_value_range(
+    record: &mut uqa_storage::backup::RecordImageCursor,
+) -> uqa_storage::backup::BackupResult<std::ops::Range<usize>> {
+    text_column_range(record, super::NativeRecordFamily::Metadata, "value")
+}
+
+fn text_column_range(
+    record: &mut uqa_storage::backup::RecordImageCursor,
+    family: super::NativeRecordFamily,
+    target: &str,
+) -> uqa_storage::backup::BackupResult<std::ops::Range<usize>> {
+    use uqa_storage::backup::BackupError;
+    let length = record
+        .current_unit()
+        .ok_or(BackupError::Finished)?
+        .decoded_bytes;
+    let layout = family.layout();
+    let mut header = [0; PREFIX.len() + 2];
+    record.read_record_at(0, &mut header)?;
+    read_header(&mut header.as_slice(), layout.columns.len())?;
+    let mut offset = header.len();
+    for column in layout.columns {
+        let mut field = [0; 5];
+        record.read_record_at(offset, &mut field)?;
+        if field[0] != TEXT {
+            return Err(invalid("native catalog text prefix requires TEXT columns").into());
+        }
+        offset += field.len();
+        let bytes =
+            u32::from_be_bytes(field[1..].try_into().expect("native field length")) as usize;
+        let end = offset
+            .checked_add(bytes)
+            .filter(|end| *end <= length)
+            .ok_or_else(|| invalid("truncated native row"))?;
+        if *column == target {
+            return Ok(offset..end);
+        }
+        offset = end;
+    }
+    Err(invalid("native catalog layout has no selected column").into())
 }
 
 fn take<'a>(input: &mut &'a [u8], length: usize) -> VersionResult<&'a [u8]> {

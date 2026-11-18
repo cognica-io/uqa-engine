@@ -12,7 +12,7 @@ use crate::{
     backup::{
         BackupCut, BackupError, BackupImageSource, BackupResult, BackupSourceStep,
         BackupSourceUnit, ImageFormat, NamespaceId, RecordImageCursor, RecordImageFamily,
-        RecordImageStep, SnapshotId, UnitAddress, UnitKind,
+        RecordImageStep, SnapshotId, UnitAddress, UnitFingerprint, UnitKind,
     },
     mvcc::{CommittedBackupSnapshot, CommittedRecordSnapshot},
     read_control::StorageReadControl,
@@ -23,6 +23,27 @@ pub trait BackupRecordMapping {
     fn format(&self) -> ImageFormat;
     fn namespace(&self) -> NamespaceId;
     fn header(&self) -> &[u8];
+    fn stored_view_queries(
+        &self,
+        _records: &RecordImageCursor,
+        limits: crate::catalog::input::CatalogInputLimits,
+        control: &StorageReadControl,
+    ) -> BackupResult<Option<super::BackupViewQueryInput>> {
+        control.check()?;
+        limits.validate()?;
+        Ok(None)
+    }
+    fn stored_metadata_values(
+        &self,
+        _records: &RecordImageCursor,
+        prefix: &str,
+        limits: crate::catalog::input::CatalogInputLimits,
+        control: &crate::read_control::StorageReadControl,
+    ) -> BackupResult<Option<crate::backup::BackupCatalogTextInput>> {
+        limits.validate()?;
+        control.check_value_size(prefix.len(), limits.maximum_key_bytes)?;
+        Ok(None)
+    }
     fn include(
         &self,
         records: &dyn CommittedRecordSnapshot,
@@ -100,7 +121,7 @@ impl<M: BackupRecordMapping> MappedRecordBackupImage<M> {
         self.copied_bytes
     }
 
-    /// Generation-state bytes read for image membership, separately from streamed payloads. Opaque provider cache and page activity are not measured here.
+    /// Generation-state and fingerprint bytes read for image membership and comparison, separately from streamed payloads. Opaque provider cache and page activity are not measured here.
     pub const fn metadata_read_bytes(&self) -> u64 {
         self.metadata_read_bytes
     }
@@ -186,7 +207,13 @@ impl<M: BackupRecordMapping> MappedRecordBackupImage<M> {
             _ => (),
         }
         let records = self.records.as_mut().expect("active image owns cursor");
-        match records.advance(positions)? {
+        let previous = records.fingerprint_bytes();
+        let step = records.advance(positions);
+        self.metadata_read_bytes = self
+            .metadata_read_bytes
+            .checked_add(records.fingerprint_bytes() - previous)
+            .ok_or(BackupError::Invalid("image counter overflow"))?;
+        match step? {
             RecordImageStep::Complete => {
                 self.release(Stage::Complete);
                 Ok(BackupSourceStep::Complete)
@@ -235,6 +262,27 @@ impl<M: BackupRecordMapping> MappedRecordBackupImage<M> {
     /// Copy the current unit into a caller-owned buffer. Errors make the image terminal and release the cut; discard the output of a failed call.
     pub fn read_current(&mut self, output: &mut [u8]) -> BackupResult<usize> {
         let result = self.read_inner(output);
+        self.finish_call(&result);
+        result
+    }
+
+    pub fn reuse_current(&mut self, parent: UnitFingerprint) -> BackupResult<bool> {
+        let result = (|| {
+            self.control.check()?;
+            let Stage::Unit(0) = self.stage else {
+                return Ok(false);
+            };
+            let cursor = self
+                .records
+                .as_mut()
+                .expect("selected record owns its cursor");
+            if cursor.current_fingerprint() != Some(parent) {
+                return Ok(false);
+            }
+            cursor.skip_current()?;
+            self.stage = Stage::Scan;
+            Ok(true)
+        })();
         self.finish_call(&result);
         result
     }
@@ -296,6 +344,38 @@ impl<M: BackupRecordMapping> BackupImageSource for MappedRecordBackupImage<M> {
         self.cut()
     }
 
+    fn stored_view_queries(
+        &self,
+        limits: crate::catalog::input::CatalogInputLimits,
+        control: &StorageReadControl,
+    ) -> BackupResult<Option<super::BackupViewQueryInput>> {
+        self.control.check()?;
+        self.mapping
+            .as_ref()
+            .ok_or(BackupError::Finished)?
+            .stored_view_queries(
+                self.records.as_ref().ok_or(BackupError::Finished)?,
+                limits,
+                control,
+            )
+    }
+    fn stored_metadata_values(
+        &self,
+        prefix: &str,
+        limits: crate::catalog::input::CatalogInputLimits,
+        control: &crate::read_control::StorageReadControl,
+    ) -> BackupResult<Option<crate::backup::BackupCatalogTextInput>> {
+        self.control.check()?;
+        self.mapping
+            .as_ref()
+            .ok_or(BackupError::Finished)?
+            .stored_metadata_values(
+                self.records.as_ref().ok_or(BackupError::Finished)?,
+                prefix,
+                limits,
+                control,
+            )
+    }
     fn advance(
         &mut self,
         maximum_positions: usize,
@@ -309,6 +389,10 @@ impl<M: BackupRecordMapping> BackupImageSource for MappedRecordBackupImage<M> {
 
     fn read_current(&mut self, output: &mut [u8]) -> BackupResult<usize> {
         self.read_current(output)
+    }
+
+    fn reuse_current(&mut self, parent: UnitFingerprint) -> BackupResult<bool> {
+        self.reuse_current(parent)
     }
 
     fn statistics(&self) -> crate::backup::BackupSourceStatistics {

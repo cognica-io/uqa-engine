@@ -205,13 +205,21 @@ pub(super) fn extract(
         ],
     )?;
     let mut output = [0; MAX_VALUE];
+    let value = run.value(key, &mut output);
     connection.execute(
         "INSERT INTO _uqa_mvcc_versions (key, sequence, value) VALUES (?1, ?2, ?3)",
         params![
             key,
             run.bounds.sequence.as_u64().to_be_bytes().as_slice(),
-            run.value(key, &mut output)
+            value
         ],
+    )?;
+    super::version_metadata::retain_image_digest(
+        connection,
+        key,
+        run.bounds.sequence,
+        value,
+        control,
     )?;
     connection.execute(
         "DELETE FROM _uqa_mvcc_runs WHERE key_length = ?1 AND first_key = ?2",

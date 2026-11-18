@@ -30,6 +30,9 @@ pub(super) fn reclaim(
         let horizon = ReclamationHorizon::new(current, oldest)?;
         let heads = transaction.open_table(HEADS).map_err(redb_error)?;
         let mut versions = transaction.open_table(VERSIONS).map_err(redb_error)?;
+        let mut fingerprints = transaction
+            .open_table(super::image_fingerprints::TABLE)
+            .map_err(redb_error)?;
         for entry in heads.iter().map_err(redb_error)? {
             control.cancellation().check()?;
             let (key, _) = entry.map_err(redb_error)?;
@@ -58,6 +61,7 @@ pub(super) fn reclaim(
                     break;
                 };
                 versions.remove((key, obsolete)).map_err(redb_error)?;
+                fingerprints.remove((key, obsolete)).map_err(redb_error)?;
                 removed = removed.checked_add(1).ok_or(VersionError::InvalidEncoding(
                     "reclaimed version count overflow",
                 ))?;

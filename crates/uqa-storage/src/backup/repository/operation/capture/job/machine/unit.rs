@@ -10,7 +10,7 @@ use super::{
     add, BackupError, BackupImageSource, BackupOperation, BackupResult, CapturePack, Machine,
     Pending, Reference, Stage, TemporaryFile, UnitMetadata,
 };
-use crate::backup::{FrameKind, ImageDigest, ObjectSpan};
+use crate::backup::{FrameKind, ImageDigest, ObjectSpan, UnitFingerprint};
 use sha2::{Digest, Sha256};
 use std::io::{self, Read, Seek, SeekFrom, Write};
 
@@ -35,7 +35,7 @@ pub(super) enum Mode {
 pub(super) struct Unit {
     pub(super) metadata: UnitMetadata,
     mode: Mode,
-    hash: Sha256,
+    hash: Option<Sha256>,
     expected: Option<u64>,
     read: u64,
     offset: u64,
@@ -43,15 +43,34 @@ pub(super) struct Unit {
 }
 
 impl Unit {
-    pub(super) fn new(metadata: UnitMetadata, expected: Option<u64>) -> Self {
+    pub(super) fn new(
+        metadata: UnitMetadata,
+        expected: Option<u64>,
+        source_hash: crate::backup::SourceUnitHash,
+    ) -> Self {
         Self {
             metadata,
             mode: Mode::Current,
-            hash: Sha256::new(),
+            hash: matches!(source_hash, crate::backup::SourceUnitHash::Repository)
+                .then(Sha256::new),
             expected,
             read: 0,
             offset: 0,
             frames: 0,
+        }
+    }
+
+    fn complete_digest(&mut self, source: &impl BackupImageSource) -> BackupResult<ImageDigest> {
+        match self.hash.take() {
+            Some(hash) => Ok(ImageDigest::from_bytes(hash.finalize().into())),
+            None => match source.current_hash() {
+                crate::backup::SourceUnitHash::Complete(fp)
+                    if fp.decoded_bytes == self.metadata.bytes =>
+                {
+                    Ok(fp.digest)
+                }
+                _ => Err(BackupError::Integrity),
+            },
         }
     }
 
@@ -82,6 +101,7 @@ impl<'a, S: BackupImageSource> Machine<'a, S> {
         &mut self,
         operation: &mut BackupOperation<'a>,
         maximum_bytes: usize,
+        maximum_positions: usize,
     ) -> BackupResult<()> {
         let unit = self.unit.as_mut().expect("selected unit");
         if let Some(parent) = &mut self.parent {
@@ -99,6 +119,37 @@ impl<'a, S: BackupImageSource> Machine<'a, S> {
                         .expected
                         .is_none_or(|bytes| entry.decoded_bytes() == bytes)
             }) {
+                let fingerprint = UnitFingerprint {
+                    digest: entry.digest(),
+                    decoded_bytes: entry.decoded_bytes(),
+                };
+                if self
+                    .source
+                    .as_mut()
+                    .expect("selected source")
+                    .reuse_current(fingerprint)?
+                {
+                    add(&mut self.statistics.certified_reused_units, 1)?;
+                    add(
+                        &mut self.statistics.certified_reused_bytes,
+                        fingerprint.decoded_bytes,
+                    )?;
+                    unit.metadata.bytes = fingerprint.decoded_bytes;
+                    unit.mode = Mode::Reused {
+                        digest: fingerprint.digest,
+                        span: entry.object(),
+                    };
+                    self.stage = Stage::UnitComplete;
+                    return Ok(());
+                }
+                if !self
+                    .source
+                    .as_mut()
+                    .expect("selected source")
+                    .prepare_current(maximum_positions)?
+                {
+                    return Ok(());
+                }
                 unit.mode = Mode::Compare {
                     digest: entry.digest(),
                     span: entry.object(),
@@ -108,6 +159,14 @@ impl<'a, S: BackupImageSource> Machine<'a, S> {
                 self.stage = Stage::Compare;
                 return Ok(());
             }
+        }
+        if !self
+            .source
+            .as_mut()
+            .expect("selected source")
+            .prepare_current(maximum_positions)?
+        {
+            return Ok(());
         }
         self.begin_write(operation)
     }
@@ -131,24 +190,30 @@ impl<'a, S: BackupImageSource> Machine<'a, S> {
         &mut self,
         operation: &mut BackupOperation<'a>,
         maximum_bytes: usize,
+        maximum_positions: usize,
     ) -> BackupResult<()> {
         let unit = self.unit.as_mut().expect("selected comparison");
-        let read = self
+        let Some(read) = self
             .source
             .as_mut()
             .expect("comparison owns source")
-            .read_current(&mut self.frame[..maximum_bytes])?;
+            .read_current_bounded(&mut self.frame[..maximum_bytes], maximum_positions)?
+        else {
+            return Ok(());
+        };
         unit.record(read, maximum_bytes)?;
         let Mode::Compare { file, .. } = &mut unit.mode else {
             unreachable!("comparison stage owns spool");
         };
         if read != 0 {
-            unit.hash.update(&self.frame[..read]);
+            if let Some(hash) = &mut unit.hash {
+                hash.update(&self.frame[..read]);
+            }
             add(&mut self.statistics.hashed_payload_bytes, read as u64)?;
             file.write_all(&self.frame[..read])?;
             return Ok(());
         }
-        let digest = ImageDigest::from_bytes(unit.hash.clone().finalize().into());
+        let digest = unit.complete_digest(self.source.as_ref().expect("selected source"))?;
         let Mode::Compare {
             digest: expected,
             span,
@@ -173,17 +238,24 @@ impl<'a, S: BackupImageSource> Machine<'a, S> {
         &mut self,
         operation: &mut BackupOperation<'a>,
         maximum_bytes: usize,
+        maximum_positions: usize,
     ) -> BackupResult<()> {
         let unit = self.unit.as_mut().expect("writing selected unit");
         let size = maximum_bytes.min(self.frame.len() - self.filled);
         let output = &mut self.frame[self.filled..self.filled + size];
         let current = matches!(unit.mode, Mode::Current);
         let read = match &mut unit.mode {
-            Mode::Current => self
-                .source
-                .as_mut()
-                .expect("current source")
-                .read_current(output)?,
+            Mode::Current => {
+                let Some(read) = self
+                    .source
+                    .as_mut()
+                    .expect("current source")
+                    .read_current_bounded(output, maximum_positions)?
+                else {
+                    return Ok(());
+                };
+                read
+            }
             Mode::Spooled { file, .. } => match file.read(output) {
                 Ok(read) => read,
                 Err(error) if error.kind() == io::ErrorKind::Interrupted => return Ok(()),
@@ -193,7 +265,9 @@ impl<'a, S: BackupImageSource> Machine<'a, S> {
         };
         unit.record(read, size)?;
         if current {
-            unit.hash.update(&output[..read]);
+            if let Some(hash) = &mut unit.hash {
+                hash.update(&output[..read]);
+            }
             add(&mut self.statistics.hashed_payload_bytes, read as u64)?;
         }
         self.filled += read;
@@ -219,10 +293,10 @@ impl<'a, S: BackupImageSource> Machine<'a, S> {
     }
 
     pub(super) fn complete_unit(&mut self, operation: &BackupOperation<'a>) -> BackupResult<()> {
-        let unit = self.unit.take().expect("completed unit");
+        let mut unit = self.unit.take().expect("completed unit");
         let (digest, reference) = match unit.mode {
             Mode::Current => (
-                ImageDigest::from_bytes(unit.hash.finalize().into()),
+                unit.complete_digest(self.source.as_ref().expect("selected source"))?,
                 Reference::Written(
                     self.pack
                         .as_ref()

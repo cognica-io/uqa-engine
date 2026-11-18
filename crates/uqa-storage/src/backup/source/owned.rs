@@ -8,7 +8,7 @@
 
 use super::{
     BackupCut, BackupImageSource, BackupResult, BackupSourceStatistics, BackupSourceStep,
-    BackupSourceUnit,
+    BackupSourceUnit, UnitFingerprint,
 };
 use crate::read_control::StorageReadControl;
 use uqa_core::memory::MemoryReservation;
@@ -42,16 +42,58 @@ impl BackupImageSource for OwnedBackupImage {
         self.source.cut()
     }
 
+    fn stored_view_queries(
+        &self,
+        limits: crate::catalog::input::CatalogInputLimits,
+        control: &StorageReadControl,
+    ) -> BackupResult<Option<crate::backup::BackupViewQueryInput>> {
+        self.source.stored_view_queries(limits, control)
+    }
+
+    fn stored_metadata_values(
+        &self,
+        prefix: &str,
+        limits: crate::catalog::input::CatalogInputLimits,
+        control: &crate::read_control::StorageReadControl,
+    ) -> BackupResult<Option<crate::backup::BackupCatalogTextInput>> {
+        self.source.stored_metadata_values(prefix, limits, control)
+    }
+
     fn advance(&mut self, maximum_positions: usize) -> BackupResult<BackupSourceStep> {
         self.source.advance(maximum_positions)
+    }
+
+    fn advance_for_comparison(
+        &mut self,
+        maximum_positions: usize,
+    ) -> BackupResult<BackupSourceStep> {
+        self.source.advance_for_comparison(maximum_positions)
+    }
+    fn prepare_current(&mut self, maximum_positions: usize) -> BackupResult<bool> {
+        self.source.prepare_current(maximum_positions)
+    }
+    fn current_hash(&self) -> super::SourceUnitHash {
+        self.source.current_hash()
     }
 
     fn current_unit(&self) -> Option<BackupSourceUnit<'_>> {
         self.source.current_unit()
     }
 
+    fn reuse_current(&mut self, parent: UnitFingerprint) -> BackupResult<bool> {
+        self.source.reuse_current(parent)
+    }
+
     fn read_current(&mut self, output: &mut [u8]) -> BackupResult<usize> {
         self.source.read_current(output)
+    }
+
+    fn read_current_bounded(
+        &mut self,
+        output: &mut [u8],
+        maximum_positions: usize,
+    ) -> BackupResult<Option<usize>> {
+        self.source.read_current_bounded(output, maximum_positions)
     }
 
     fn statistics(&self) -> BackupSourceStatistics {

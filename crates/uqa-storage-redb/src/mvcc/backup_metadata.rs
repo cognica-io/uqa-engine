@@ -199,6 +199,15 @@ impl CommittedBackupSnapshot for Snapshot {
     ) -> VersionResult<Option<uqa_storage::mvcc::BackupCursorKey>> {
         self.identifier_ceiling(control)
     }
+    fn visit_record_image_positions(
+        &self,
+        after: Option<&[u8]>,
+        limit: usize,
+        control: &StorageReadControl,
+        visit: &mut uqa_storage::mvcc::BackupRecordImageVisitor<'_>,
+    ) -> VersionResult<()> {
+        self.record_positions(after, limit, control, visit)
+    }
     fn visit_record_positions(
         &self,
         after: Option<&[u8]>,
@@ -206,7 +215,9 @@ impl CommittedBackupSnapshot for Snapshot {
         control: &StorageReadControl,
         visit: &mut uqa_storage::mvcc::BackupRecordPositionVisitor<'_>,
     ) -> VersionResult<()> {
-        self.record_positions(after, limit, control, visit)
+        self.record_positions(after, limit, control, &mut |key, image| {
+            visit(key, image.visible)
+        })
     }
     fn records(&self) -> &dyn CommittedRecordSnapshot {
         self.records.as_ref()

@@ -629,7 +629,7 @@ impl PersistentStorageProvider for SQLiteKeyValueStorage {
         uqa_storage::backup::BackupCapabilities {
             export: cfg!(any(windows, all(unix, not(target_os = "emscripten")))),
             import: cfg!(any(windows, all(unix, not(target_os = "emscripten")))),
-            snapshot_fingerprints: false,
+            snapshot_fingerprints: true,
         }
     }
 

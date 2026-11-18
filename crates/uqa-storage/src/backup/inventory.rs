@@ -181,6 +181,7 @@ impl Accumulator {
         control: &StorageReadControl,
     ) -> BackupResult<()> {
         validate_length(entry.decoded_bytes, entry.object, limits)?;
+        super::functions::validate_position(entry, self.units)?;
         if self
             .previous
             .as_ref()

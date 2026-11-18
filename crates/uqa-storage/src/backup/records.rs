@@ -6,7 +6,7 @@
 
 //! Complete live-record and allocator input streams over an already retained joint cut.
 
-use super::{BackupError, BackupResult};
+use super::{BackupError, BackupResult, UnitFingerprint};
 use crate::{
     mvcc::{
         BackupCursorKey, CommitSequence, CommittedBackupSnapshot, DatabaseId, RecordMetadata,
@@ -14,7 +14,42 @@ use crate::{
     },
     read_control::StorageReadControl,
 };
+use sha2::{Digest, Sha256};
 use std::sync::Arc;
+
+/// SHA-256 over the record mapping's revision prefix and untagged value bytes.
+/// The same accumulator is used for already-owned writes and streamed imports.
+pub struct RecordImageHasher(Sha256);
+
+impl RecordImageHasher {
+    pub fn new(revision: CommitSequence) -> Self {
+        let mut hash = Sha256::new();
+        hash.update(revision.as_u64().to_be_bytes());
+        Self(hash)
+    }
+
+    pub fn update(&mut self, bytes: &[u8]) {
+        self.0.update(bytes);
+    }
+
+    pub fn finish(self) -> super::ImageDigest {
+        super::ImageDigest::from_bytes(self.0.finalize().into())
+    }
+
+    pub fn for_value(
+        revision: CommitSequence,
+        value: &[u8],
+        control: &StorageReadControl,
+    ) -> VersionResult<super::ImageDigest> {
+        let mut hash = Self::new(revision);
+        for chunk in value.chunks(16 * 1024) {
+            control.check()?;
+            hash.update(chunk);
+        }
+        control.check()?;
+        Ok(hash.finish())
+    }
+}
 
 /// The provider image adapter assigns qualified namespaces and the final wire format to these raw input families.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -59,6 +94,7 @@ struct Unit {
     payload: Payload,
     length: usize,
     offset: usize,
+    fingerprint: Option<UnitFingerprint>,
 }
 
 #[derive(Clone, Copy)]
@@ -77,10 +113,13 @@ pub struct RecordImageCursor {
     control: StorageReadControl,
     records_end: Option<BackupCursorKey>,
     identifiers_end: Option<BackupCursorKey>,
+    records_end_exclusive: bool,
+    maximum_key_bytes: usize,
     after: Option<BackupCursorKey>,
     stage: Stage,
     positions: u64,
     copied_bytes: u64,
+    fingerprint_bytes: u64,
 }
 
 impl RecordImageCursor {
@@ -98,11 +137,64 @@ impl RecordImageCursor {
             control: control.clone(),
             records_end,
             identifiers_end,
+            records_end_exclusive: false,
+            maximum_key_bytes: usize::MAX,
             after: None,
             stage: Stage::Scan(Plane::Identifiers),
             positions: 0,
             copied_bytes: 0,
+            fingerprint_bytes: 0,
         })
+    }
+
+    /// Read only the proper descendants of a physical key prefix on this same captured cut. The original scan ceiling bounds post-capture insertions. There is no second snapshot or allocator scan.
+    pub(super) fn record_prefix(
+        &self,
+        prefix: &[u8],
+        maximum_key_bytes: usize,
+        control: &StorageReadControl,
+    ) -> BackupResult<Self> {
+        control.check_value_size(prefix.len(), maximum_key_bytes)?;
+        let source = self.source.as_ref().ok_or(BackupError::Finished)?;
+        let mut after = BackupCursorKey::new(control.memory());
+        after.extend_from_slice(prefix)?;
+        let mut exclusive = false;
+        let mut end = None;
+        if let Some(ceiling) = self.records_end.as_deref().filter(|end| *end > prefix) {
+            let mut key = BackupCursorKey::new(control.memory());
+            if ceiling.starts_with(prefix) {
+                control.check_value_size(ceiling.len(), maximum_key_bytes)?;
+                key.extend_from_slice(ceiling)?;
+            } else {
+                let last = prefix
+                    .iter()
+                    .rposition(|&byte| byte != u8::MAX)
+                    .ok_or(BackupError::Invalid("invalid record prefix ceiling"))?;
+                key.extend_from_slice(&prefix[..=last])?;
+                key[last] += 1;
+                exclusive = true;
+            }
+            end = Some(key);
+        }
+        Ok(Self {
+            source: Some(source.clone()),
+            source_id: self.source_id,
+            sequence: self.sequence,
+            control: control.clone(),
+            records_end: end,
+            identifiers_end: None,
+            records_end_exclusive: exclusive,
+            maximum_key_bytes,
+            after: Some(after),
+            stage: Stage::Scan(Plane::Records),
+            positions: 0,
+            copied_bytes: 0,
+            fingerprint_bytes: 0,
+        })
+    }
+
+    pub(super) fn cancellation(&self) -> &uqa_core::CancellationToken {
+        self.control.cancellation()
     }
 
     pub const fn source_id(&self) -> DatabaseId {
@@ -118,6 +210,10 @@ impl RecordImageCursor {
     /// Bytes successfully copied to the caller's output. This is not a physical disk-read counter.
     pub const fn copied_bytes(&self) -> u64 {
         self.copied_bytes
+    }
+
+    pub const fn fingerprint_bytes(&self) -> u64 {
+        self.fingerprint_bytes
     }
 
     pub fn current_unit(&self) -> Option<RecordImageUnit<'_>> {
@@ -136,6 +232,13 @@ impl RecordImageCursor {
                 Payload::Watermark(_) => None,
             },
         })
+    }
+
+    pub(super) fn current_fingerprint(&self) -> Option<UnitFingerprint> {
+        match self.stage {
+            Stage::Unit(unit) => unit.fingerprint,
+            _ => None,
+        }
     }
 
     /// Omit the selected raw input without reading its remaining payload. Image owners use this only after classifying the unit at this same cut. Advancing still counts every inspected physical position; omitted bytes never enter the copied-byte count. Misuse or cancellation terminates the cursor and releases its cut.
@@ -193,13 +296,19 @@ impl RecordImageCursor {
         let source = self.source.as_ref().expect("active cursor owns its source");
         let mut next = None;
         let mut selected = None;
+        let mut fingerprint = None;
+        let mut fingerprint_bytes = 0_u64;
         let mut ended = false;
         let mut count = 0_u64;
         let mut visit = |key: &[u8], payload: Option<Payload>| -> VersionResult<bool> {
             count += 1;
-            if key > end {
+            if key > end || (self.records_end_exclusive && key == end) {
                 ended = true;
                 return Ok(false);
+            }
+            if key.len() > self.maximum_key_bytes {
+                self.control
+                    .check_value_size(key.len(), self.maximum_key_bytes)?;
             }
             let mut retained = BackupCursorKey::new(self.control.memory());
             retained.extend_from_slice(key)?;
@@ -214,12 +323,15 @@ impl RecordImageCursor {
                 &self.control,
                 &mut |key, value| visit(key, value.map(Payload::Watermark)),
             ),
-            Plane::Records => source.visit_record_positions(
+            Plane::Records => source.visit_record_image_positions(
                 self.after.as_deref(),
                 positions,
                 &self.control,
-                &mut |key, metadata| {
-                    let value = metadata
+                &mut |key, image| {
+                    fingerprint_bytes += u64::from(image.fingerprint_bytes);
+                    fingerprint = image.fingerprint;
+                    let value = image
+                        .visible
                         .filter(|metadata| metadata.live)
                         .map(|RecordMetadata { revision, .. }| {
                             revision.ok_or(crate::mvcc::VersionError::InvalidEncoding(
@@ -235,24 +347,50 @@ impl RecordImageCursor {
             .positions
             .checked_add(count)
             .ok_or(uqa_core::memory::MemoryError::SizeOverflow)?;
+        self.fingerprint_bytes = self
+            .fingerprint_bytes
+            .checked_add(fingerprint_bytes)
+            .ok_or(BackupError::Invalid(
+                "fingerprint metadata counter overflow",
+            ))?;
         visited?;
         if let Some(next) = next {
             self.after = Some(next);
         }
         if let Some(payload) = selected {
-            let length = self.selected_length(payload)?;
-            self.stage = Stage::Unit(Unit {
-                plane,
-                payload,
-                length,
-                offset: 0,
-            });
+            self.select_unit(plane, payload, fingerprint)?;
             return Ok(RecordImageStep::Unit);
         }
         if ended || count < positions as u64 {
             return Ok(self.end_plane(plane));
         }
         Ok(RecordImageStep::Pending)
+    }
+
+    fn select_unit(
+        &mut self,
+        plane: Plane,
+        payload: Payload,
+        fingerprint: Option<UnitFingerprint>,
+    ) -> BackupResult<()> {
+        let certified = fingerprint.and_then(|fp| {
+            fp.decoded_bytes
+                .checked_sub(8)
+                .and_then(|n| usize::try_from(n).ok())
+                .map(|length| (fp, length))
+        });
+        let (fingerprint, length) = match certified {
+            Some((fingerprint, length)) => (Some(fingerprint), length),
+            None => (None, self.selected_length(payload)?),
+        };
+        self.stage = Stage::Unit(Unit {
+            plane,
+            payload,
+            length,
+            offset: 0,
+            fingerprint,
+        });
+        Ok(())
     }
 
     fn selected_length(&self, payload: Payload) -> BackupResult<usize> {
@@ -288,6 +426,27 @@ impl RecordImageCursor {
             self.release(Stage::Failed);
         }
         result
+    }
+
+    /// Copy an exact range from the selected record on its original revision. Field projections may skip unrelated bytes or revisit a prefix. Only bytes actually read contribute to the source counters.
+    pub fn read_record_at(&mut self, offset: usize, output: &mut [u8]) -> BackupResult<()> {
+        let Stage::Unit(mut unit) = self.stage else {
+            if !matches!(self.stage, Stage::Complete | Stage::Failed) {
+                self.release(Stage::Failed);
+            }
+            return Err(BackupError::Finished);
+        };
+        if !matches!(unit.plane, Plane::Records)
+            || offset
+                .checked_add(output.len())
+                .is_none_or(|end| end > unit.length)
+        {
+            self.release(Stage::Failed);
+            return Err(BackupError::Invalid("record projection exceeds its value"));
+        }
+        unit.offset = offset;
+        self.stage = Stage::Unit(unit);
+        self.read_current(output).map(|_| ())
     }
 
     fn read_inner(&mut self, output: &mut [u8]) -> BackupResult<usize> {

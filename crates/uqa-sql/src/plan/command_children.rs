@@ -54,14 +54,18 @@ impl CommandPlan {
 
     /// Borrow query children evaluated in the command's WITH scope without collecting a child list. INSERT's source precedes the scalar-query arena. Source-plan subqueries are owned by `source_input`; visitors should not traverse either owner twice.
     pub fn query_inputs(&self) -> impl Iterator<Item = &QueryPlan> {
-        let (source, subqueries): (Option<&QueryPlan>, &[QueryPlan]) = match self {
+        let (source, subqueries) = self.query_input_parts();
+        source.into_iter().chain(subqueries)
+    }
+
+    pub(crate) fn query_input_parts(&self) -> (Option<&QueryPlan>, &[QueryPlan]) {
+        match self {
             Self::Insert(plan) => (plan.source.as_deref(), &plan.subqueries),
             Self::Update(plan) => (None, &plan.subqueries),
             Self::Delete(plan) => (None, &plan.subqueries),
             Self::Merge(plan) => (None, &plan.subqueries),
             _ => (None, &[]),
-        };
-        source.into_iter().chain(subqueries)
+        }
     }
 
     /// Borrow mutable query children in the same source-then-arena order, without allocating a reference vector.

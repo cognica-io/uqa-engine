@@ -7,6 +7,7 @@
 //! Pinned local repositories, immutable objects and publication ownership.
 
 mod directory;
+mod functions;
 mod generation;
 mod objects;
 mod operation;
@@ -14,6 +15,7 @@ mod restore;
 mod retention;
 mod verify;
 
+pub use functions::BackupFunctionReader;
 pub use operation::{
     BackupCapturePhase, BackupCaptureProgress, BackupCaptureReport, BackupCaptureStep,
     BackupCopyReport, BackupImageCapture, BackupImageStatistics, BackupOperation, BackupPack,

@@ -11,9 +11,10 @@ use uqa_core::memory::BudgetedVec;
 use uqa_storage::{
     backup::{
         BackupCut, BackupError, BackupImageSource, BackupRecordMapping, BackupResult,
-        BackupSourceStatistics, BackupSourceStep, BackupSourceUnit, ImageFormat, ImageProvider,
-        MappedRecordBackupImage, NamespaceId,
+        BackupSourceStatistics, BackupSourceStep, BackupSourceUnit, BackupViewQueryInput,
+        ImageFormat, ImageProvider, MappedRecordBackupImage, NamespaceId, RecordImageCursor,
     },
+    catalog::input::CatalogInputLimits,
     key_value::diskann_backup_membership,
     mvcc::{CommittedRecordSnapshot, DatabaseId, NotificationRecordLayout, VersionError},
     read_control::StorageReadControl,
@@ -61,6 +62,48 @@ impl BackupRecordMapping for Mapping {
         &self.header
     }
 
+    fn stored_view_queries(
+        &self,
+        records: &RecordImageCursor,
+        limits: CatalogInputLimits,
+        control: &StorageReadControl,
+    ) -> BackupResult<Option<BackupViewQueryInput>> {
+        let prefix = NativeRecordIdentity::new(
+            NativeRecordFamily::Views,
+            NativeRecordOwner::Database(self.namespace),
+        )?
+        .encode_prefix(&[], control)?;
+        BackupViewQueryInput::from_text_records(
+            records,
+            &prefix,
+            super::row::view_definition_range,
+            limits,
+            control,
+        )
+        .map(Some)
+    }
+    fn stored_metadata_values(
+        &self,
+        records: &RecordImageCursor,
+        prefix: &str,
+        limits: uqa_storage::catalog::input::CatalogInputLimits,
+        control: &StorageReadControl,
+    ) -> BackupResult<Option<uqa_storage::backup::BackupCatalogTextInput>> {
+        control.check_value_size(prefix.len(), limits.maximum_key_bytes)?;
+        let key = NativeRecordIdentity::new(
+            NativeRecordFamily::Metadata,
+            NativeRecordOwner::Database(self.namespace),
+        )?
+        .encode_text_prefix(prefix.as_bytes(), control)?;
+        uqa_storage::backup::BackupCatalogTextInput::from_metadata_records(
+            records,
+            &key,
+            super::row::metadata_value_range,
+            limits,
+            control,
+        )
+        .map(Some)
+    }
     fn include(
         &self,
         records: &dyn CommittedRecordSnapshot,
@@ -181,9 +224,31 @@ impl SQLiteNativeBackupImage {
 }
 
 impl BackupImageSource for SQLiteNativeBackupImage {
+    fn reuse_current(
+        &mut self,
+        parent: uqa_storage::backup::UnitFingerprint,
+    ) -> BackupResult<bool> {
+        self.0.reuse_current(parent)
+    }
     fn cut(&self) -> BackupCut {
         self.cut()
     }
+    fn stored_view_queries(
+        &self,
+        limits: CatalogInputLimits,
+        control: &StorageReadControl,
+    ) -> BackupResult<Option<BackupViewQueryInput>> {
+        self.0.stored_view_queries(limits, control)
+    }
+    fn stored_metadata_values(
+        &self,
+        prefix: &str,
+        limits: uqa_storage::catalog::input::CatalogInputLimits,
+        control: &StorageReadControl,
+    ) -> BackupResult<Option<uqa_storage::backup::BackupCatalogTextInput>> {
+        self.0.stored_metadata_values(prefix, limits, control)
+    }
+
     fn advance(&mut self, maximum_positions: usize) -> BackupResult<BackupSourceStep> {
         self.advance(maximum_positions)
     }

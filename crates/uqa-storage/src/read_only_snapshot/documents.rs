@@ -31,6 +31,18 @@ impl ReadOnlySnapshot<dyn DocumentStore> {
 }
 
 impl DocumentStore for ReadOnlySnapshot<dyn DocumentStore> {
+    fn image_document_owner(
+        &self,
+        id: DocId,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<crate::memory_capture::MemoryImageOwner>> {
+        control.check()?;
+        if let Some(original) = &self.2 {
+            original.check()?;
+        }
+        self.0.image_document_owner(id, control)
+    }
+
     fn image_document_reader<'a>(
         &'a self,
         doc_id: DocId,
