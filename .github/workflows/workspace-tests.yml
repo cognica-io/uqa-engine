@@ -24,8 +24,8 @@ jobs:
   build:
     name: Build workspace tests and validate local macOS suites
     runs-on: ${{ inputs.os == 'macos-26-arm64' && fromJSON('["self-hosted","macOS","ARM64","macos-arm64","macos-26-arm64"]') || inputs.os }}
-    # macOS builds and executes the full suite here; execution has its own deadline.
-    timeout-minutes: ${{ inputs.os == 'macos-26-arm64' && 240 || 60 }}
+    # macOS also executes the full suite here. Linux compiles two optimized test targets at a time.
+    timeout-minutes: ${{ inputs.os == 'macos-26-arm64' && 240 || 90 }}
     outputs:
       archive-sha256: ${{ steps.archive.outputs.sha256 }}
     steps:
@@ -51,7 +51,9 @@ jobs:
           save-if: ${{ (runner.os != 'macOS' || runner.environment != 'self-hosted') && github.ref == 'refs/heads/main' }}
       - uses: ./.github/actions/setup-nextest
       - name: Build workspace tests once
-        timeout-minutes: 60
+        timeout-minutes: ${{ runner.os == 'Linux' && 90 || 60 }}
+        env:
+          CARGO_BUILD_JOBS: ${{ runner.os == 'Linux' && '2' || env.CARGO_BUILD_JOBS }}
         shell: bash
         run: |
           args=(--workspace --locked)
