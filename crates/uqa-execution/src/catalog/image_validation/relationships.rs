@@ -15,8 +15,8 @@ use super::{
 };
 use crate::catalog::{foreign::relationships as foreign, CatalogReadSnapshot, CatalogReadView};
 use uqa_core::{
-    image_io::ImageDecodeWindow,
-    memory::{MemoryBudget, ProductionControl},
+    image_io::{decode_image, AsyncImageInput, ImageDecodeWindow, ImageDecoder},
+    memory::{Budgeted, MemoryBudget, ProductionControl},
     CancellationToken,
 };
 use uqa_sql::{
@@ -34,39 +34,57 @@ struct Inputs<'a> {
     production: ProductionControl<'a>,
 }
 
-type Predicate = fn(&Inputs<'_>) -> Result<(), SQLError>;
+#[derive(Clone, Copy)]
+enum Predicate {
+    Direct(fn(&Inputs<'_>) -> Result<(), SQLError>),
+    Scheduled(Scheduled),
+}
 
-const BEFORE_FOREIGN: &[Predicate] = &[
-    |input| validate_namespaces(input.view, &input.production),
-    |input| validate_name_uniqueness(input.snapshot, input.memory, input.cancellation),
-    |input| validate_authority(input.snapshot, input.memory, input.cancellation),
-];
+#[derive(Clone, Copy)]
+enum Scheduled {
+    Authority,
+    Foreign,
+}
 
-const AFTER_FOREIGN: &[Predicate] = &[
-    |input| validate_types(input.snapshot, input.memory, input.cancellation),
-    |input| validate_plan_relations(input.view, &input.production),
-    |input| {
+const ORDERED: &[Predicate] = &[
+    Predicate::Direct(|input| validate_namespaces(input.view, &input.production)),
+    Predicate::Direct(|input| {
+        validate_name_uniqueness(input.snapshot, input.memory, input.cancellation)
+    }),
+    Predicate::Scheduled(Scheduled::Authority),
+    Predicate::Scheduled(Scheduled::Foreign),
+    Predicate::Direct(|input| validate_types(input.snapshot, input.memory, input.cancellation)),
+    Predicate::Direct(|input| validate_plan_relations(input.view, &input.production)),
+    Predicate::Direct(|input| {
         super::validate_stored_expressions(
             input.view,
             input.routines,
             input.memory,
             input.cancellation,
         )
-    },
-    |input| validate_routine_declarations(input.snapshot, input.types, &input.production),
-    |input| validate_hierarchies(input.snapshot, input.memory, input.cancellation),
-    |input| validate_sequences(input.snapshot, input.memory, input.cancellation),
-    |input| validate_indexes(input.snapshot, input.memory, input.cancellation),
-    |input| validate_constraints(input.snapshot, input.memory, input.cancellation),
-    |input| {
+    }),
+    Predicate::Direct(|input| {
+        validate_routine_declarations(input.snapshot, input.types, &input.production)
+    }),
+    Predicate::Direct(|input| {
+        validate_hierarchies(input.snapshot, input.memory, input.cancellation)
+    }),
+    Predicate::Direct(|input| validate_sequences(input.snapshot, input.memory, input.cancellation)),
+    Predicate::Direct(|input| validate_indexes(input.snapshot, input.memory, input.cancellation)),
+    Predicate::Direct(|input| {
+        validate_constraints(input.snapshot, input.memory, input.cancellation)
+    }),
+    Predicate::Direct(|input| {
         validate_constraint_bindings(input.view, input.routines, input.memory, input.cancellation)
-    },
-    |input| validate_index_bindings(input.view, input.routines, input.memory, input.cancellation),
-    |input| {
+    }),
+    Predicate::Direct(|input| {
+        validate_index_bindings(input.view, input.routines, input.memory, input.cancellation)
+    }),
+    Predicate::Direct(|input| {
         validate_partition_bindings(input.view, input.routines, input.memory, input.cancellation)
-    },
-    |input| validate_routines(input.snapshot, input.memory, input.cancellation),
-    |input| {
+    }),
+    Predicate::Direct(|input| validate_routines(input.snapshot, input.memory, input.cancellation)),
+    Predicate::Direct(|input| {
         validate_routine_bindings(
             input.view,
             input.routines,
@@ -74,9 +92,11 @@ const AFTER_FOREIGN: &[Predicate] = &[
             input.memory,
             input.cancellation,
         )
-    },
-    |input| validate_event_bindings(input.view, input.routines, input.memory, input.cancellation),
-    |input| validate_sequence_functions(input.view, &input.production),
+    }),
+    Predicate::Direct(|input| {
+        validate_event_bindings(input.view, input.routines, input.memory, input.cancellation)
+    }),
+    Predicate::Direct(|input| validate_sequence_functions(input.view, &input.production)),
 ];
 
 /// The outstanding predicates of an unpublished catalog. Each advance borrows the private
@@ -86,12 +106,7 @@ pub struct RelationshipValidation {
     memory: MemoryBudget,
     cancellation: CancellationToken,
     remaining: &'static [Predicate],
-    foreign: Option<ForeignCheck>,
-}
-
-enum ForeignCheck {
-    Start,
-    Reading(foreign::Input),
+    reading: Option<Budgeted<Box<ImageDecoder<(), SQLError>>>>,
 }
 
 impl RelationshipValidation {
@@ -104,8 +119,8 @@ impl RelationshipValidation {
             catalog,
             memory: memory.clone(),
             cancellation: cancellation.clone(),
-            remaining: BEFORE_FOREIGN,
-            foreign: Some(ForeignCheck::Start),
+            remaining: ORDERED,
+            reading: None,
         }
     }
 
@@ -138,56 +153,103 @@ impl RelationshipValidation {
         steps: Option<usize>,
     ) -> Result<Option<Self>, SQLError> {
         self.cancellation.check()?;
-        let Some((predicate, remaining)) = self.remaining.split_first() else {
-            return self.advance_foreign(steps);
-        };
-        predicate(&Inputs {
-            view: &self.catalog,
-            snapshot: self.catalog.snapshot(),
-            routines,
-            types,
-            memory: &self.memory,
-            cancellation: &self.cancellation,
-            production: ProductionControl::new(
-                &self.memory,
-                &self.cancellation,
-                &self.cancellation,
-            ),
-        })?;
+        let (predicate, remaining) = self
+            .remaining
+            .split_first()
+            .expect("active relationship predicate");
+        match *predicate {
+            Predicate::Direct(predicate) => predicate(&Inputs {
+                view: &self.catalog,
+                snapshot: self.catalog.snapshot(),
+                routines,
+                types,
+                memory: &self.memory,
+                cancellation: &self.cancellation,
+                production: ProductionControl::new(
+                    &self.memory,
+                    &self.cancellation,
+                    &self.cancellation,
+                ),
+            })?,
+            Predicate::Scheduled(check) if check.applies(self.catalog.snapshot()) => {
+                if let Some(steps) = steps {
+                    let mut reading = match self.reading.take() {
+                        Some(reading) => reading,
+                        None => check.begin(&self.catalog, &self.memory, &self.cancellation)?,
+                    };
+                    if reading
+                        .as_mut()
+                        .advance(&mut std::io::empty(), ImageDecodeWindow { bytes: 1, steps })?
+                        .is_none()
+                    {
+                        self.reading = Some(reading);
+                        return Ok(Some(self));
+                    }
+                } else {
+                    check.inline(&self.catalog, &self.memory, &self.cancellation)?;
+                }
+            }
+            Predicate::Scheduled(_) => (),
+        }
         self.cancellation.check()?;
         self.remaining = remaining;
-        Ok((!remaining.is_empty() || self.foreign.is_some()).then_some(self))
+        Ok((!remaining.is_empty()).then_some(self))
+    }
+}
+
+impl Scheduled {
+    fn applies(self, snapshot: &CatalogReadSnapshot) -> bool {
+        match self {
+            Self::Authority => true,
+            Self::Foreign => foreign::has_bindings(snapshot),
+        }
     }
 
-    fn advance_foreign(mut self, steps: Option<usize>) -> Result<Option<Self>, SQLError> {
-        let check = self
-            .foreign
-            .take()
-            .expect("active foreign relationship check");
-        if !foreign::has_bindings(self.catalog.snapshot()) {
-            self.remaining = AFTER_FOREIGN;
-            return Ok(Some(self));
+    fn begin(
+        self,
+        catalog: &CatalogReadView,
+        memory: &MemoryBudget,
+        cancellation: &CancellationToken,
+    ) -> Result<Budgeted<Box<ImageDecoder<(), SQLError>>>, SQLError> {
+        let header = memory.reserve(size_of::<ImageDecoder<(), SQLError>>())?;
+        let catalog = catalog.clone();
+        let original = cancellation.clone();
+        let input = ImageDecoder::new(memory, cancellation, |mut reader| async move {
+            self.read(&catalog, &original, &mut reader.input()).await
+        })?;
+        Ok(Budgeted::new(Box::new(input), header))
+    }
+
+    fn inline(
+        self,
+        catalog: &CatalogReadView,
+        memory: &MemoryBudget,
+        cancellation: &CancellationToken,
+    ) -> Result<(), SQLError> {
+        match self {
+            Self::Authority => validate_authority(catalog.snapshot(), memory, cancellation),
+            Self::Foreign => decode_image(
+                &mut std::io::empty(),
+                memory,
+                cancellation,
+                async |mut input| self.read(catalog, cancellation, &mut input).await,
+            ),
         }
-        if let Some(steps) = steps {
-            let mut input = match check {
-                ForeignCheck::Start => {
-                    foreign::begin(&self.catalog, &self.memory, &self.cancellation)?
-                }
-                ForeignCheck::Reading(input) => input,
-            };
-            if input
-                .as_mut()
-                .advance(&mut std::io::empty(), ImageDecodeWindow { bytes: 1, steps })?
-                .is_none()
-            {
-                self.foreign = Some(ForeignCheck::Reading(input));
-                return Ok(Some(self));
+    }
+
+    async fn read(
+        self,
+        catalog: &CatalogReadView,
+        cancellation: &CancellationToken,
+        input: &mut AsyncImageInput<'_>,
+    ) -> Result<(), SQLError> {
+        match self {
+            Self::Authority => {
+                super::authority::validate(catalog.snapshot(), input.memory, cancellation, input)
+                    .await
             }
-        } else {
-            foreign::inline(self.catalog.snapshot(), &self.memory, &self.cancellation)?;
+            Self::Foreign => foreign::validate(catalog.snapshot(), cancellation, input).await,
         }
-        self.remaining = AFTER_FOREIGN;
-        Ok(Some(self))
     }
 }
 
@@ -208,3 +270,6 @@ pub fn validate(
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod authority_tests;

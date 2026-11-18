@@ -36,6 +36,27 @@ pub(in crate::catalog::security) fn validate_with_control<'a>(
     crate::catalog::work::inline(validate_from(security, columns, roles, control, &mut ()))
 }
 
+pub(in crate::catalog::security) async fn contains_column<'a>(
+    columns: impl Iterator<Item = &'a str>,
+    name: &str,
+    control: &ProductionControl<'_>,
+    work: &mut impl crate::catalog::work::Work,
+) -> Result<bool, SQLError> {
+    for column in columns {
+        control.check()?;
+        work.checkpoint().await?;
+        control.check()?;
+        if column.len() == name.len()
+            && crate::catalog::work::compare_text(work, column, name, control)
+                .await?
+                .is_eq()
+        {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 pub(in crate::catalog::security) async fn validate_from<'a>(
     security: &TableSecurity,
     columns: Option<impl Iterator<Item = &'a str> + Clone>,
@@ -56,16 +77,7 @@ pub(in crate::catalog::security) async fn validate_from<'a>(
     for (column, acl) in &security.column_acls {
         work.checkpoint().await?;
         control.check()?;
-        let mut exists = false;
-        for candidate in columns.clone().into_iter().flatten() {
-            work.checkpoint().await?;
-            control.check()?;
-            if candidate == column.as_str() {
-                exists = true;
-                break;
-            }
-        }
-        if !exists {
+        if !contains_column(columns.clone().into_iter().flatten(), column, control, work).await? {
             return Err(SQLError::Internal(format!(
                 "column ACL references missing column `{column}`"
             )));

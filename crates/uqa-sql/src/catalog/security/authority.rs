@@ -12,7 +12,10 @@ use super::{
 };
 use crate::{
     ast::ObjectAclEntry,
-    catalog::roles::{RoleDefinition, RoleDefinitions, RoleIdentity, RoleMemberships},
+    catalog::{
+        roles::{RoleDefinition, RoleDefinitions, RoleIdentity, RoleMemberships},
+        work::{inline, Work},
+    },
     SQLError,
 };
 use uqa_core::{
@@ -20,10 +23,11 @@ use uqa_core::{
     catalog_role::BoundAclEntry,
     catalog_schema::SchemaPrivileges,
     catalog_sequence::SequencePrivileges,
-    memory::{BudgetedMap, MemoryBudget},
+    memory::{BudgetedMap, MemoryBudget, ProductionControl},
     CancellationToken,
 };
 
+mod columns;
 mod grants;
 mod memberships;
 #[cfg(test)]
@@ -42,6 +46,16 @@ impl<'a> AuthorityCatalog<'a> {
         memory: &'a MemoryBudget,
         cancellation: &'a CancellationToken,
     ) -> Result<Self, SQLError> {
+        inline(Self::new_with_work(roles, memory, cancellation, &mut ()))
+    }
+
+    /// Index the selected role incarnations without borrowing a later catalog generation.
+    pub async fn new_with_work<W: Work + Send>(
+        roles: &'a RoleDefinitions,
+        memory: &'a MemoryBudget,
+        cancellation: &'a CancellationToken,
+        work: &mut W,
+    ) -> Result<Self, SQLError> {
         cancellation.check()?;
         let mut result = Self {
             roles: BudgetedMap::new(memory),
@@ -49,9 +63,16 @@ impl<'a> AuthorityCatalog<'a> {
             cancellation,
         };
         let mut objects = BudgetedMap::new(memory);
+        let control = ProductionControl::new(memory, cancellation, cancellation);
         for (name, role) in roles {
-            cancellation.check()?;
-            if name != &role.name || !valid_identity(role.identity()) || role.revision == 0 {
+            result.checkpoint(work).await?;
+            if name.len() != role.name.len()
+                || !crate::catalog::work::compare_text(work, name, &role.name, &control)
+                    .await?
+                    .is_eq()
+                || !valid_identity(role.identity())
+                || role.revision == 0
+            {
                 return Err(invalid("invalid role definition"));
             }
             if result.roles.insert(role.oid, role)?.is_some()
@@ -60,8 +81,27 @@ impl<'a> AuthorityCatalog<'a> {
                 return Err(invalid("duplicate role identity"));
             }
         }
+        crate::catalog::work::retire_entries(objects.into_entries(), &control, work).await?;
         cancellation.check()?;
         Ok(result)
+    }
+
+    fn control(&self) -> ProductionControl<'a> {
+        ProductionControl::new(self.memory, self.cancellation, self.cancellation)
+    }
+
+    /// Retire the selected role index after successful validation using the original operation's work channel.
+    pub async fn retire(self, work: &mut impl Work) -> Result<(), SQLError> {
+        let control = self.control();
+        crate::catalog::work::retire_entries(self.roles.into_entries(), &control, work).await
+    }
+
+    /// Bound the next authority row or edge with the selected catalog's original cancellation owner.
+    pub async fn checkpoint(&self, work: &mut impl Work) -> Result<(), SQLError> {
+        self.cancellation.check()?;
+        work.checkpoint().await?;
+        self.cancellation.check()?;
+        Ok(())
     }
 
     pub fn role(&self, identity: RoleIdentity) -> Result<(), SQLError> {
@@ -78,13 +118,30 @@ impl<'a> AuthorityCatalog<'a> {
 
     /// Memberships preserve deleted target/member incarnations without rebinding them to new roles; grantors must still exist. The retained role graph must be acyclic.
     pub fn memberships(&self, memberships: &RoleMemberships) -> Result<(), SQLError> {
-        memberships::validate(self, memberships)
+        inline(self.memberships_with_work(memberships, &mut ()))
+    }
+
+    pub async fn memberships_with_work(
+        &self,
+        memberships: &RoleMemberships,
+        work: &mut impl Work,
+    ) -> Result<(), SQLError> {
+        memberships::validate(self, memberships, work).await
     }
 
     pub fn object(
         &self,
         owner: RoleIdentity,
         acl: Option<&[ObjectAclEntry]>,
+    ) -> Result<(), SQLError> {
+        inline(self.object_with_work(owner, acl, &mut ()))
+    }
+
+    pub async fn object_with_work(
+        &self,
+        owner: RoleIdentity,
+        acl: Option<&[ObjectAclEntry]>,
+        work: &mut impl Work,
     ) -> Result<(), SQLError> {
         self.grants(
             owner,
@@ -95,10 +152,20 @@ impl<'a> AuthorityCatalog<'a> {
                 options: u16::from(entry.grant_option),
             }),
             std::iter::empty(),
+            work,
         )
+        .await
     }
 
     pub fn schema(&self, value: &BoundSchemaSecurity) -> Result<(), SQLError> {
+        inline(self.schema_with_work(value, &mut ()))
+    }
+
+    pub async fn schema_with_work(
+        &self,
+        value: &BoundSchemaSecurity,
+        work: &mut impl Work,
+    ) -> Result<(), SQLError> {
         if value.tuple.is_some_and(|tuple| !tuple.is_valid()) {
             return Err(invalid("invalid schema tuple identity"));
         }
@@ -106,70 +173,60 @@ impl<'a> AuthorityCatalog<'a> {
             value.role_owner,
             acl(value.acl.as_deref(), schema_bits),
             std::iter::empty(),
+            work,
         )
+        .await
     }
 
     pub fn sequence(&self, value: &BoundSequenceSecurity) -> Result<(), SQLError> {
+        inline(self.sequence_with_work(value, &mut ()))
+    }
+
+    pub async fn sequence_with_work(
+        &self,
+        value: &BoundSequenceSecurity,
+        work: &mut impl Work,
+    ) -> Result<(), SQLError> {
         self.grants(
             value.role_owner,
             acl(value.acl.as_deref(), sequence_bits),
             std::iter::empty(),
+            work,
         )
+        .await
     }
 
     pub fn database(&self, value: &BoundDatabaseSecurity) -> Result<(), SQLError> {
+        inline(self.database_with_work(value, &mut ()))
+    }
+
+    pub async fn database_with_work(
+        &self,
+        value: &BoundDatabaseSecurity,
+        work: &mut impl Work,
+    ) -> Result<(), SQLError> {
         self.grants(
             value.role_owner,
             acl(value.acl.as_deref(), database_bits),
             std::iter::empty(),
+            work,
         )
-    }
-
-    /// Column existence comes from the accompanying immutable row descriptor. Relation grants contribute column grant options, while each ACL retains its own ordered paths and duplicate-path boundary.
-    pub fn table(
-        &self,
-        value: &BoundTableSecurity,
-        mut column_exists: impl FnMut(&str) -> Result<bool, SQLError>,
-    ) -> Result<(), SQLError> {
-        if value.acl_revisions.relation == Some([0; 16]) {
-            return Err(invalid("invalid relation ACL tuple identity"));
-        }
-        self.grants(
-            value.role_owner,
-            acl(value.acl.as_deref(), table_bits),
-            std::iter::empty(),
-        )?;
-        for (column, revision) in &value.acl_revisions.columns {
-            self.cancellation.check()?;
-            if *revision == [0; 16] || !column_exists(column)? {
-                return Err(invalid("invalid column ACL tuple identity"));
-            }
-        }
-        for (column, entries) in &value.column_acls {
-            self.cancellation.check()?;
-            if !column_exists(column)? {
-                return Err(invalid("column ACL references a missing column"));
-            }
-            for entry in entries {
-                self.cancellation.check()?;
-                if (table_bits(entry.privileges) | table_bits(entry.grant_options)) & !0x27 != 0 {
-                    return Err(invalid("column ACL contains a relation-only privilege"));
-                }
-            }
-            self.grants(
-                value.role_owner,
-                acl(Some(entries), table_bits),
-                acl(value.acl.as_deref(), table_bits),
-            )?;
-        }
-        self.cancellation.check()?;
-        Ok(())
+        .await
     }
 
     pub fn system_relation(
         &self,
         relation: crate::catalog::SystemRelation,
         value: &super::system_relations::SystemRelationSecurity,
+    ) -> Result<(), SQLError> {
+        inline(self.system_relation_with_work(relation, value, &mut ()))
+    }
+
+    pub async fn system_relation_with_work(
+        &self,
+        relation: crate::catalog::SystemRelation,
+        value: &super::system_relations::SystemRelationSecurity,
+        work: &mut impl Work,
     ) -> Result<(), SQLError> {
         let owner = RoleIdentity::BOOTSTRAP;
         let (default, count) = relation.bootstrap_acl();
@@ -184,7 +241,13 @@ impl<'a> AuthorityCatalog<'a> {
         {
             return Err(invalid("invalid system relation ACL revision"));
         }
-        self.grants(owner, acl(Some(table), table_bits), std::iter::empty())?;
+        self.grants(
+            owner,
+            acl(Some(table), table_bits),
+            std::iter::empty(),
+            work,
+        )
+        .await?;
         let control = uqa_core::memory::ProductionControl::new(
             self.memory,
             self.cancellation,
@@ -192,12 +255,12 @@ impl<'a> AuthorityCatalog<'a> {
         );
         let columns = relation.column_names_with_control(&control)?;
         for (column, entry) in &value.columns {
-            self.cancellation.check()?;
+            self.checkpoint(work).await?;
             if entry.revision == [0; 16] || !columns.contains(column) {
                 return Err(invalid("invalid system column ACL identity"));
             }
             for grant in &entry.acl {
-                self.cancellation.check()?;
+                self.checkpoint(work).await?;
                 if (table_bits(grant.privileges) | table_bits(grant.grant_options)) & !0x27 != 0 {
                     return Err(invalid("column ACL contains a relation-only privilege"));
                 }
@@ -206,7 +269,9 @@ impl<'a> AuthorityCatalog<'a> {
                 owner,
                 acl(Some(&entry.acl), table_bits),
                 acl(Some(table), table_bits),
-            )?;
+                work,
+            )
+            .await?;
         }
         Ok(())
     }

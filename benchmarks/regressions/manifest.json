@@ -53355,6 +53355,71 @@
       ]
     },
     {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "one_step_relationship_validation_reaches_last_missing_routine_owner_in_order",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/relationships/authority_tests.rs",
+      "capability": "Stored routine owner validation",
+      "workload": "Read 4,096 sorted routine declarations with the final owner missing through one-step catalog validation.",
+      "invariant": "The authority check advances across routine owners and returns the same first error as inline validation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "one_step_relationship_validation_suspends_within_one_routine_grant_graph",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/relationships/authority_tests.rs",
+      "capability": "Routine grant graph validation",
+      "workload": "Restore one routine with 4,096 role grants and a final grant detached from the owner-rooted chain.",
+      "invariant": "Single-step work windows reach the invalid grant after checking endpoints and propagating grant options.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "suspended_relationship_authority_retires_on_pressure_cancellation_and_drop",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/relationships/authority_tests.rs",
+      "capability": "Retained authority validation",
+      "workload": "Suspend a 4,096-grant catalog check, abandon it, exhaust its remaining allowance, and cancel during grant analysis.",
+      "invariant": "Each terminal path releases the cursor and graph scratch, with the original memory or cancellation SQLSTATE.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "valid_large_routine_grants_retire_the_final_role_index_across_work_windows",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/relationships/authority_tests.rs",
+      "capability": "Bounded privilege scratch retirement",
+      "workload": "Advance a valid 4,096-edge routine grant graph one step at a time and sample its original memory allowance.",
+      "invariant": "The final role index releases nodes across at least 4,096 consecutive shrinking windows before the next relationship predicate.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "consuming_budgeted_map_releases_each_original_node_without_another_allowance",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/map/tests.rs",
+      "capability": "Incremental map retirement",
+      "workload": "Fill an allowance with 257 AVL nodes, consume a sorted prefix, and drop the remaining cursor.",
+      "invariant": "Each returned entry releases exactly one node and dropping the cursor releases all remaining reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
       "package": "uqa-sql",
       "kind": "lib",
       "test": "native_type_references_follow_identity_and_reject_wrong_kind_or_array_metadata",

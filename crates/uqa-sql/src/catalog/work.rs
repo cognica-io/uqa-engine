@@ -16,7 +16,8 @@ use uqa_core::{
     memory::{Produced, ProductionControl, ProductionString},
 };
 
-pub(crate) trait Work {
+/// Schedule borrowed catalog validation and text construction through the invoking operation.
+pub trait Work {
     fn checkpoint(&mut self) -> impl Future<Output = Result<(), ImageIoError>> + Send;
 
     fn text(
@@ -84,7 +85,7 @@ pub(crate) async fn text_parts<W: Work + Send>(
     Ok(value.finish()?)
 }
 
-pub(crate) async fn compare_text<W: Work + Send>(
+pub(crate) async fn compare_text<W: Work>(
     work: &mut W,
     left: &str,
     right: &str,
@@ -104,6 +105,21 @@ pub(crate) async fn compare_text<W: Work + Send>(
         }
     }
     Ok(left.len().cmp(&right.len()))
+}
+
+/// Retire one originally owned entry per work checkpoint. An interrupted continuation still owns all pending entries.
+pub(crate) async fn retire_entries(
+    mut entries: impl ExactSizeIterator,
+    control: &ProductionControl<'_>,
+    work: &mut impl Work,
+) -> Result<(), SQLError> {
+    while entries.len() != 0 {
+        control.check()?;
+        work.checkpoint().await?;
+        control.check()?;
+        drop(entries.next());
+    }
+    Ok(())
 }
 
 pub(crate) fn inline<F: Future>(future: F) -> F::Output {

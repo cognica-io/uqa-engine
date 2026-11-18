@@ -98,6 +98,30 @@ impl uqa_sql::FunctionTypeResolver for NoRoutines {
 }
 impl uqa_sql::routines::RoutineResolution for NoRoutines {}
 
+impl uqa_sql::routines::declaration::RoutineTypeCatalog for NoRoutines {
+    fn try_describe_table(&self, _: &str) -> Result<Option<Vec<uqa_sql::ast::ColumnDef>>, String> {
+        panic!("query fixture does not read procedure types");
+    }
+    fn resolve_catalog_column_type(&self, _: &str) -> Option<uqa_sql::ColumnType> {
+        panic!("query fixture does not read procedure types");
+    }
+    fn resolve_catalog_column_type_name(
+        &self,
+        _: &str,
+    ) -> Result<uqa_sql::ColumnType, uqa_sql::SQLError> {
+        panic!("query fixture does not read procedure types");
+    }
+    fn resolve_catalog_user_type_by_oid(&self, _: u32) -> Option<uqa_sql::ColumnType> {
+        panic!("query fixture does not read procedure types");
+    }
+    fn require_type_usage(&self, _: &uqa_sql::ColumnType) -> Result<(), uqa_sql::SQLError> {
+        panic!("query fixture does not read procedure types");
+    }
+    fn format_type(&self, _: &uqa_sql::ColumnType) -> Result<String, uqa_sql::SQLError> {
+        panic!("query fixture does not read procedure types");
+    }
+}
+
 impl uqa_sql::semantics::volatility::VolatilityCatalog for NoRoutines {
     fn host_function_volatility(&self, _: &str) -> Option<uqa_sql::ast::FunctionVolatility> {
         None
