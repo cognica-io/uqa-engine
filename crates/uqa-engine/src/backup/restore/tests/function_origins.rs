@@ -4,6 +4,8 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
+mod retired;
+
 use super::{providers::destination, *};
 use crate::{tests::providers::Provider, SQLFunctionOptions, SQLFunctionRegistration};
 use std::{

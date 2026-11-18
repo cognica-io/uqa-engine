@@ -63191,6 +63191,26 @@
       ]
     },
     {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "restore_preserves_late_function_lookup_after_source_registration_retirement",
+      "cases": 8,
+      "source": "crates/uqa-engine/src/backup/restore/tests/function_origins/retired.rs",
+      "capability": "Application function references in backups",
+      "workload": "Remove an application scalar before capturing table defaults and checks or eager routines and argument defaults. Restore the captured state and change its registrations after publication.",
+      "invariant": "Both engines use the builtin while the registration is absent and use the replacement after registration. A view originally bound to the builtin keeps its value. Persistent requests also resume after archive removal.",
+      "case_names": [
+        "case_1_memory::routine_1_false",
+        "case_1_memory::routine_2_true",
+        "case_2_sqlite_native::routine_1_false",
+        "case_2_sqlite_native::routine_2_true",
+        "case_3_sqlite_kv::routine_1_false",
+        "case_3_sqlite_kv::routine_2_true",
+        "case_4_redb::routine_1_false",
+        "case_4_redb::routine_2_true"
+      ]
+    },
+    {
       "package": "uqa-execution",
       "kind": "lib",
       "test": "backup_domain_declarations_select_named_and_positional_records_with_bounded_work",
