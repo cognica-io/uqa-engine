@@ -45,7 +45,7 @@ This inventory does not complete any original backup requirement. Complete persi
 
 ## Current scope and progress
 
-The integrated candidate preserves the application functions selected by views and domain expressions. When only a registration changes, an incremental capture writes a new function-reference section and can reuse unchanged provider data. All 30 public capture and incremental cases passed on Linux ARM64 and macOS across memory, native SQLite, SQLite Key/Value and redb. [Integrated backup candidate #1428](https://github.com/cognica-io/uqa-engine/pull/1428)
+The integrated candidate preserves application functions used by views, domain and table defaults and checks, routine argument defaults and SQL-standard routine bodies. All 38 function-origin cases passed on macOS. Durable restore after removing a function before capture still requires a correction to routine-identity binding. When only a registration changes, an incremental capture writes a new function-reference section and can reuse unchanged provider data. All 30 public capture and incremental cases passed on Linux ARM64 and macOS across memory, native SQLite, SQLite Key/Value and redb. [Integrated backup candidate #1428](https://github.com/cognica-io/uqa-engine/pull/1428)
 
 The persistent Engine installs the complete routine namespace before binding bodies against restored foreign tables and views. It analyzes stored statements in source order and assembles overload groups across work windows. All compiled bodies become visible together. Restored entries retain their read allowance and subsequent SQL edits use the Engine's own allowance. Some operations inside a single statement and other registry loads still run synchronously.
 
