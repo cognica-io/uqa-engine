@@ -16,8 +16,10 @@ use std::sync::Arc;
 use crate::{
     backup::{
         BackupCut, BackupError, BackupImageSource, BackupRecordMapping, BackupResult,
-        BackupSourceStatistics, ImageFormat, ImageProvider, MappedRecordBackupImage, NamespaceId,
+        BackupSourceStatistics, BackupViewQueryInput, ImageFormat, ImageProvider,
+        MappedRecordBackupImage, NamespaceId, RecordImageCursor,
     },
+    catalog::input::CatalogInputLimits,
     mvcc::{
         BackupCursorKey, CommittedBackupSnapshot, CommittedRecordSnapshot, NotificationRecordLayout,
     },
@@ -46,6 +48,15 @@ impl BackupRecordMapping for Mapping {
     }
     fn header(&self) -> &[u8] {
         &self.header
+    }
+    fn stored_view_queries(
+        &self,
+        records: &RecordImageCursor,
+        limits: CatalogInputLimits,
+        control: &StorageReadControl,
+    ) -> BackupResult<Option<BackupViewQueryInput>> {
+        BackupViewQueryInput::from_key_value_records(records, &[super::TAG_VIEW], limits, control)
+            .map(Some)
     }
     fn include(
         &self,
@@ -116,6 +127,13 @@ impl KeyValueBackupImage {
 impl BackupImageSource for KeyValueBackupImage {
     fn cut(&self) -> BackupCut {
         self.cut()
+    }
+    fn stored_view_queries(
+        &self,
+        limits: CatalogInputLimits,
+        control: &StorageReadControl,
+    ) -> BackupResult<Option<BackupViewQueryInput>> {
+        self.0.stored_view_queries(limits, control)
     }
     fn advance(&mut self, maximum_positions: usize) -> BackupResult<KeyValueImageStep> {
         self.advance(maximum_positions)

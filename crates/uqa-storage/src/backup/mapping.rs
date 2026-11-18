@@ -23,6 +23,16 @@ pub trait BackupRecordMapping {
     fn format(&self) -> ImageFormat;
     fn namespace(&self) -> NamespaceId;
     fn header(&self) -> &[u8];
+    fn stored_view_queries(
+        &self,
+        _records: &RecordImageCursor,
+        limits: crate::catalog::input::CatalogInputLimits,
+        control: &StorageReadControl,
+    ) -> BackupResult<Option<super::BackupViewQueryInput>> {
+        control.check()?;
+        limits.validate()?;
+        Ok(None)
+    }
     fn include(
         &self,
         records: &dyn CommittedRecordSnapshot,
@@ -296,6 +306,21 @@ impl<M: BackupRecordMapping> BackupImageSource for MappedRecordBackupImage<M> {
         self.cut()
     }
 
+    fn stored_view_queries(
+        &self,
+        limits: crate::catalog::input::CatalogInputLimits,
+        control: &StorageReadControl,
+    ) -> BackupResult<Option<super::BackupViewQueryInput>> {
+        self.control.check()?;
+        self.mapping
+            .as_ref()
+            .ok_or(BackupError::Finished)?
+            .stored_view_queries(
+                self.records.as_ref().ok_or(BackupError::Finished)?,
+                limits,
+                control,
+            )
+    }
     fn advance(
         &mut self,
         maximum_positions: usize,

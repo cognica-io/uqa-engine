@@ -38,6 +38,18 @@ pub struct BackupSourceStatistics {
 /// One provider-owned complete image over a retained cut. Units must have strictly increasing addresses; supplied lengths are exact, and an omitted length is established by draining the unit. A nonempty read returns zero only at successful EOF. Each call releases source physical reads before returning; dropping the source releases its cut. Implementing this contract does not qualify another provider or mapping.
 pub trait BackupImageSource {
     fn cut(&self) -> BackupCut;
+
+    /// Open the stored view queries on this exact image cut when its mapping exposes physical catalog rows.
+    fn stored_view_queries(
+        &self,
+        limits: crate::catalog::input::CatalogInputLimits,
+        control: &crate::read_control::StorageReadControl,
+    ) -> BackupResult<Option<super::BackupViewQueryInput>> {
+        control.check()?;
+        limits.validate()?;
+        Ok(None)
+    }
+
     fn advance(&mut self, maximum_positions: usize) -> BackupResult<BackupSourceStep>;
     fn current_unit(&self) -> Option<BackupSourceUnit<'_>>;
     fn read_current(&mut self, output: &mut [u8]) -> BackupResult<usize>;

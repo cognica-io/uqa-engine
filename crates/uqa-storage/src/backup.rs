@@ -26,6 +26,8 @@ mod repository;
 mod root;
 mod source;
 mod types;
+mod view_queries;
+pub use view_queries::BackupViewQueryInput;
 
 #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 pub use memory::{MemoryImageImportReader, MemoryImageImportUnit};

@@ -357,6 +357,22 @@ mod tests {
     use super::*;
 
     #[rstest::rstest]
+    fn stored_view_queries_read_the_original_physical_cut(
+        #[values(SQLiteBackupMapping::Native, SQLiteBackupMapping::KeyValue)]
+        mapping: SQLiteBackupMapping,
+    ) {
+        let directory = tempfile::tempdir().unwrap();
+        let connection = ManagedConnection::open(&directory.path().join("views")).unwrap();
+        let provider: Box<dyn PersistentStorageProvider> = match mapping {
+            SQLiteBackupMapping::Native => Box::new(SQLiteStorageProvider::new(connection)),
+            SQLiteBackupMapping::KeyValue => {
+                Box::new(SQLiteKeyValueStorage::from_connection(connection).unwrap())
+            }
+        };
+        uqa_storage::key_value::conformance::verify_backup_view_queries(&*provider).unwrap();
+    }
+
+    #[rstest::rstest]
     fn sqlite_destination_retains_validation_until_completion_and_recovers_cancellation(
         #[values(SQLiteBackupMapping::Native, SQLiteBackupMapping::KeyValue)]
         mapping: SQLiteBackupMapping,

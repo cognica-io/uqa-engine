@@ -11,9 +11,10 @@ use uqa_core::memory::BudgetedVec;
 use uqa_storage::{
     backup::{
         BackupCut, BackupError, BackupImageSource, BackupRecordMapping, BackupResult,
-        BackupSourceStatistics, BackupSourceStep, BackupSourceUnit, ImageFormat, ImageProvider,
-        MappedRecordBackupImage, NamespaceId,
+        BackupSourceStatistics, BackupSourceStep, BackupSourceUnit, BackupViewQueryInput,
+        ImageFormat, ImageProvider, MappedRecordBackupImage, NamespaceId, RecordImageCursor,
     },
+    catalog::input::CatalogInputLimits,
     key_value::diskann_backup_membership,
     mvcc::{CommittedRecordSnapshot, DatabaseId, NotificationRecordLayout, VersionError},
     read_control::StorageReadControl,
@@ -61,6 +62,26 @@ impl BackupRecordMapping for Mapping {
         &self.header
     }
 
+    fn stored_view_queries(
+        &self,
+        records: &RecordImageCursor,
+        limits: CatalogInputLimits,
+        control: &StorageReadControl,
+    ) -> BackupResult<Option<BackupViewQueryInput>> {
+        let prefix = NativeRecordIdentity::new(
+            NativeRecordFamily::Views,
+            NativeRecordOwner::Database(self.namespace),
+        )?
+        .encode_prefix(&[], control)?;
+        BackupViewQueryInput::from_text_records(
+            records,
+            &prefix,
+            super::row::view_definition_range,
+            limits,
+            control,
+        )
+        .map(Some)
+    }
     fn include(
         &self,
         records: &dyn CommittedRecordSnapshot,
@@ -183,6 +204,13 @@ impl SQLiteNativeBackupImage {
 impl BackupImageSource for SQLiteNativeBackupImage {
     fn cut(&self) -> BackupCut {
         self.cut()
+    }
+    fn stored_view_queries(
+        &self,
+        limits: CatalogInputLimits,
+        control: &StorageReadControl,
+    ) -> BackupResult<Option<BackupViewQueryInput>> {
+        self.0.stored_view_queries(limits, control)
     }
     fn advance(&mut self, maximum_positions: usize) -> BackupResult<BackupSourceStep> {
         self.advance(maximum_positions)

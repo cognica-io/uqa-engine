@@ -42,6 +42,14 @@ impl BackupImageSource for OwnedBackupImage {
         self.source.cut()
     }
 
+    fn stored_view_queries(
+        &self,
+        limits: crate::catalog::input::CatalogInputLimits,
+        control: &StorageReadControl,
+    ) -> BackupResult<Option<crate::backup::BackupViewQueryInput>> {
+        self.source.stored_view_queries(limits, control)
+    }
+
     fn advance(&mut self, maximum_positions: usize) -> BackupResult<BackupSourceStep> {
         self.source.advance(maximum_positions)
     }
