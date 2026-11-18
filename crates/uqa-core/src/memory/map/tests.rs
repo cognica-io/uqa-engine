@@ -166,6 +166,10 @@ fn consuming_budgeted_map_releases_each_original_node_without_another_allowance(
     }
     assert_eq!(memory.used(), memory.limit());
     let mut entries = map.into_entries();
+    assert_eq!(
+        size_of_val(&entries),
+        size_of::<(Link<usize, usize>, usize)>()
+    );
     for key in 0..count / 2 {
         assert_eq!(entries.next(), Some((key, key + 1)));
         assert_eq!(entries.len(), count - key - 1);

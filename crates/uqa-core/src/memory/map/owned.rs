@@ -393,18 +393,16 @@ impl<'a, K, V> IntoIterator for &'a OwnedMap<K, V> {
     }
 }
 
-/// Consuming traversal keeps the pending AVL path on the stack and frees each visited node before yielding its entry.
+/// Consuming traversal keeps the pending AVL path in the nodes' vacated left links and frees each visited node before yielding its entry.
 pub struct OwnedMapIntoIter<K, V> {
-    stack: [Option<OwnedNode<K, V>>; MAX_HEIGHT],
-    depth: usize,
+    path: Link<K, V>,
     remaining: usize,
 }
 
 impl<K, V> OwnedMapIntoIter<K, V> {
     pub(super) fn new(root: Link<K, V>, len: usize) -> Self {
         let mut iter = Self {
-            stack: std::array::from_fn(|_| None),
-            depth: 0,
+            path: None,
             remaining: len,
         };
         iter.push_left(root);
@@ -419,18 +417,27 @@ impl<K, V> OwnedMapIntoIter<K, V> {
     fn push_left(&mut self, mut link: Link<K, V>) {
         while let Some(mut node) = link {
             link = node.value.left.take();
-            self.stack[self.depth] = Some(node);
-            self.depth += 1;
+            node.value.left = self.path.take();
+            self.path = Some(node);
         }
     }
 
     fn next_node(&mut self) -> Option<OwnedNode<K, V>> {
-        self.depth = self.depth.checked_sub(1)?;
-        let mut node = self.stack[self.depth].take().expect("owned traversal node");
+        let mut node = self.path.take()?;
+        self.path = node.value.left.take();
         self.push_left(node.value.right.take());
         node.value.height = 1;
         self.remaining -= 1;
         Some(node)
+    }
+}
+
+impl<K, V> Drop for OwnedMapIntoIter<K, V> {
+    fn drop(&mut self) {
+        // The right children remain unmodified AVL subtrees. Detach the pending path before dropping each subtree to keep its original stack bound.
+        while let Some(mut node) = self.path.take() {
+            self.path = node.value.left.take();
+        }
     }
 }
 
