@@ -62709,6 +62709,37 @@
     {
       "package": "uqa-engine",
       "kind": "lib",
+      "test": "standalone_restore_preserves_the_function_selected_at_the_source_cut",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/backup/restore/tests/function_origins.rs",
+      "capability": "Application function references in backups",
+      "workload": "Retire a scalar function named abs after starting an incremental backup, capture a second child and remove each parent before restoring its child.",
+      "invariant": "Both children retain their source selections. Unused registrations are optional, capture and restore never invoke callbacks, and failed restore releases its allowance.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "prepared_restore_keeps_the_function_requirement_after_archive_removal",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/backup/restore/tests/function_origins.rs",
+      "capability": "Application function references in backups",
+      "workload": "Prepare a persistent target, remove the archive and reopen the restore request in a process with different function registrations.",
+      "invariant": "A missing callback leaves the target private and releases its memory. A matching registration takes effect on the first application query.",
+      "case_names": [
+        "case_1_sqlite_native",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
       "test": "restored_sql_body_advances_through_each_statement",
       "cases": 3,
       "source": "crates/uqa-engine/src/open/persistent_input/tests/routines/body_steps.rs",
