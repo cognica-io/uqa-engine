@@ -8,7 +8,7 @@
 
 use super::CatalogReadSnapshot;
 use uqa_core::{memory::MemoryBudget, CancellationToken};
-use uqa_sql::SQLError;
+use uqa_sql::{catalog::CatalogWork, SQLError};
 
 mod authority;
 pub use authority::validate_authority;
@@ -123,7 +123,21 @@ pub fn validate_sequences(
     memory: &MemoryBudget,
     cancellation: &CancellationToken,
 ) -> Result<(), SQLError> {
-    uqa_sql::schema::sequences::native::validate(
+    super::selection_work::inline(validate_sequences_with_work(
+        snapshot,
+        memory,
+        cancellation,
+        &mut (),
+    ))
+}
+
+async fn validate_sequences_with_work(
+    snapshot: &CatalogReadSnapshot,
+    memory: &MemoryBudget,
+    cancellation: &CancellationToken,
+    work: &mut (impl CatalogWork + Send),
+) -> Result<(), SQLError> {
+    uqa_sql::schema::sequences::native::validate_with_work(
         snapshot
             .tables
             .values()
@@ -142,7 +156,9 @@ pub fn validate_sequences(
             .map(|(name, record)| (name, record.state.owner)),
         memory,
         cancellation,
+        work,
     )
+    .await
 }
 
 /// Validate original table parent references against the complete selected table registry. SQL owns inheritance/partition semantics and the admitted acyclicity traversal.
@@ -151,14 +167,30 @@ pub fn validate_hierarchies(
     memory: &MemoryBudget,
     cancellation: &CancellationToken,
 ) -> Result<(), SQLError> {
-    uqa_sql::schema::inheritance::native::validate(
+    super::selection_work::inline(validate_hierarchies_with_work(
+        snapshot,
+        memory,
+        cancellation,
+        &mut (),
+    ))
+}
+
+async fn validate_hierarchies_with_work(
+    snapshot: &CatalogReadSnapshot,
+    memory: &MemoryBudget,
+    cancellation: &CancellationToken,
+    work: &mut (impl CatalogWork + Send),
+) -> Result<(), SQLError> {
+    uqa_sql::schema::inheritance::native::validate_with_work(
         snapshot
             .tables
             .iter()
             .map(|(name, table)| (name, &*table.hierarchy, table.persistence)),
         memory,
         cancellation,
+        work,
     )
+    .await
 }
 
 #[cfg(test)]

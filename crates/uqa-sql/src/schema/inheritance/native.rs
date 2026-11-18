@@ -8,11 +8,15 @@
 
 use crate::{
     ast::{PartitionBound, PartitionStrategy, RelationPersistence, TableHierarchy},
-    catalog::resolution::bound_relation_identity_with_control,
+    catalog::{
+        resolution::bound_relation_identity_with_work,
+        work::{inline, retire_entries, ReferenceWork},
+        CatalogWork,
+    },
     SQLError,
 };
 use uqa_core::{
-    memory::{BudgetedMap, BudgetedVec, MemoryBudget, ProductionControl},
+    memory::{Budgeted, BudgetedMap, BudgetedVec, MemoryBudget, OwnedMap, ProductionControl},
     CancellationToken, RelationIdentity,
 };
 
@@ -45,23 +49,46 @@ pub fn validate<'a>(
     memory: &MemoryBudget,
     cancellation: &CancellationToken,
 ) -> Result<(), SQLError> {
+    inline(validate_with_work(tables, memory, cancellation, &mut ()))
+}
+
+/// Validate the same ordered declarations, parent edges and acyclicity graph within the caller's work windows.
+pub async fn validate_with_work<'a, W: CatalogWork + Send>(
+    tables: impl Iterator<
+        Item = (
+            &'a RelationIdentity,
+            &'a TableHierarchy,
+            RelationPersistence,
+        ),
+    >,
+    memory: &MemoryBudget,
+    cancellation: &CancellationToken,
+    work: &mut W,
+) -> Result<(), SQLError> {
     let control = ProductionControl::new(memory, cancellation, cancellation);
     control.check()?;
-    let mut relations = BudgetedMap::new(memory);
+    let mut input = ReferenceWork {
+        control: &control,
+        work,
+    };
+    let mut relations = OwnedMap::new();
     let mut nodes = BudgetedVec::new(memory);
     for (name, hierarchy, persistence) in tables {
-        control.check()?;
+        input.checkpoint().await?;
         let index = nodes.len();
         nodes.push(Node::default())?;
+        let key = Budgeted::new(name, memory.reserve(0)?);
         if relations
-            .insert(
-                name,
+            .insert_admitted_key_from(
+                key,
                 Relation {
                     hierarchy,
                     persistence,
                     index,
                 },
-            )?
+                &mut input,
+            )
+            .await?
             .is_some()
         {
             return Err(invalid("duplicate relation"));
@@ -69,44 +96,64 @@ pub fn validate<'a>(
     }
     let mut edges = BudgetedVec::new(memory);
     for (_, relation) in &relations {
-        control.check()?;
-        shape(relation.hierarchy, memory, cancellation)?;
-        let mut selected = BudgetedMap::new(memory);
-        for parent in &relation.hierarchy.parents {
-            control.check()?;
-            let name = bound_relation_identity_with_control(parent, &control)?;
-            let target = relations
-                .get(&*name)
-                .ok_or_else(|| invalid("missing parent table"))?;
-            if selected.insert(target.index, ())?.is_some() {
-                return Err(invalid("repeated parent table"));
-            }
-            parent_shape(relation.hierarchy, target.hierarchy)?;
-            super::check_parent_persistence(
-                parent,
-                target.persistence,
-                relation.persistence,
-                relation.hierarchy.is_partition(),
-            )?;
-            let index = edges.len();
-            edges.push(Edge {
-                parent: target.index,
-                next: nodes[relation.index].first_parent,
-            })?;
-            nodes[relation.index].first_parent = Some(index);
-            nodes[target.index].incoming = nodes[target.index]
-                .incoming
-                .checked_add(1)
-                .ok_or_else(|| invalid("parent count overflow"))?;
-        }
+        input.checkpoint().await?;
+        parents(
+            relation, &relations, &mut nodes, &mut edges, memory, &mut input,
+        )
+        .await?;
     }
-    acyclic(&mut nodes, &edges, memory, cancellation)
+    acyclic(&mut nodes, &edges, memory, &mut input).await?;
+    retire_entries(relations.into_iter(), &control, work).await
 }
 
-fn shape(
+async fn parents(
+    relation: &Relation<'_>,
+    relations: &OwnedMap<&RelationIdentity, Relation<'_>>,
+    nodes: &mut [Node],
+    edges: &mut BudgetedVec<Edge>,
+    memory: &MemoryBudget,
+    input: &mut ReferenceWork<'_, '_, impl CatalogWork + Send>,
+) -> Result<(), SQLError> {
+    shape(relation.hierarchy, memory, input).await?;
+    let mut selected = BudgetedMap::new(memory);
+    for parent in &relation.hierarchy.parents {
+        input.checkpoint().await?;
+        let name = bound_relation_identity_with_work(parent, input.control, input.work).await?;
+        let target = relations
+            .get_from(&*name, input)
+            .await?
+            .ok_or_else(|| invalid("missing parent table"))?;
+        if selected.insert(target.index, ())?.is_some() {
+            return Err(invalid("repeated parent table"));
+        }
+        parent_shape(relation.hierarchy, target.hierarchy)?;
+        super::check_parent_persistence_with_work(
+            parent,
+            target.persistence,
+            relation.persistence,
+            relation.hierarchy.is_partition(),
+            input.control,
+            input.work,
+        )
+        .await?;
+        let index = edges.len();
+        edges.push(Edge {
+            parent: target.index,
+            next: nodes[relation.index].first_parent,
+        })?;
+        nodes[relation.index].first_parent = Some(index);
+        nodes[target.index].incoming = nodes[target.index]
+            .incoming
+            .checked_add(1)
+            .ok_or_else(|| invalid("parent count overflow"))?;
+    }
+    retire_entries(selected.into_entries(), input.control, input.work).await
+}
+
+async fn shape(
     hierarchy: &TableHierarchy,
     memory: &MemoryBudget,
-    cancellation: &CancellationToken,
+    input: &mut ReferenceWork<'_, '_, impl CatalogWork + Send>,
 ) -> Result<(), SQLError> {
     if hierarchy.is_partition() && hierarchy.parents.len() != 1 {
         return Err(invalid("partition parent cardinality"));
@@ -117,12 +164,12 @@ fn shape(
     }
     let mut selected = BudgetedMap::new(memory);
     for number in numbers {
-        cancellation.check()?;
+        input.checkpoint().await?;
         if *number <= 0 || selected.insert(*number, ())?.is_some() {
             return Err(invalid("parent sequence identity"));
         }
     }
-    Ok(())
+    retire_entries(selected.into_entries(), input.control, input.work).await
 }
 
 fn parent_shape(child: &TableHierarchy, parent: &TableHierarchy) -> Result<(), SQLError> {
@@ -152,26 +199,26 @@ fn parent_shape(child: &TableHierarchy, parent: &TableHierarchy) -> Result<(), S
     }
 }
 
-fn acyclic(
-    nodes: &mut BudgetedVec<Node>,
-    edges: &BudgetedVec<Edge>,
+async fn acyclic(
+    nodes: &mut [Node],
+    edges: &[Edge],
     memory: &MemoryBudget,
-    cancellation: &CancellationToken,
+    input: &mut ReferenceWork<'_, '_, impl CatalogWork + Send>,
 ) -> Result<(), SQLError> {
     let mut ready = BudgetedVec::new(memory);
     for (index, node) in nodes.iter().enumerate() {
-        cancellation.check()?;
+        input.checkpoint().await?;
         if node.incoming == 0 {
             ready.push(index)?;
         }
     }
     let mut remaining = nodes.len();
     while let Some(index) = ready.pop() {
-        cancellation.check()?;
+        input.checkpoint().await?;
         remaining -= 1;
         let mut edge = nodes[index].first_parent;
         while let Some(index) = edge {
-            cancellation.check()?;
+            input.checkpoint().await?;
             let parent = edges[index].parent;
             nodes[parent].incoming -= 1;
             if nodes[parent].incoming == 0 {

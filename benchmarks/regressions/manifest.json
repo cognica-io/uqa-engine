@@ -53558,6 +53558,32 @@
     {
       "package": "uqa-execution",
       "kind": "lib",
+      "test": "private_catalog_validation_yields_between_inheritance_parents",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/relationships/table_tests.rs",
+      "capability": "Restored table inheritance",
+      "workload": "Move a missing parent from the first to the last entry of a 256-parent catalog and read it in one- and 32-step windows.",
+      "invariant": "Later parents take additional calls to reach. Both positions return the missing-parent diagnostic and release the original allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "private_catalog_validation_yields_between_implicit_sequence_columns",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/relationships/table_tests.rs",
+      "capability": "Restored implicit sequence names",
+      "workload": "Move an absent implicit sequence from the first to the last of 256 columns in the same table.",
+      "invariant": "Both window sizes reach the late column after the early column and release all scratch memory with the same error.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
       "test": "one_step_relationship_validation_reaches_last_missing_routine_owner_in_order",
       "cases": 1,
       "source": "crates/uqa-execution/src/catalog/image_validation/relationships/authority_tests.rs",
@@ -54013,6 +54039,32 @@
     {
       "package": "uqa-sql",
       "kind": "lib",
+      "test": "native_hierarchy_yields_for_parent_sequences_edges_cycles_and_retirement",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/inheritance/native/tests.rs",
+      "capability": "Native table inheritance validation",
+      "workload": "Visit 4,096 parent edges and sequence numbers, including a late missing parent and a cycle.",
+      "invariant": "Single-step and batched validation agree on membership and the first error. Active graph traversal can be cancelled and successful cleanup releases nodes across calls.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_hierarchy_yields_while_comparing_quoted_parent_names_and_reporting_persistence",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/inheritance/native/tests.rs",
+      "capability": "Native parent-name validation",
+      "workload": "Resolve long quoted parent names and build the temporary-parent persistence diagnostic within the supplied allowance.",
+      "invariant": "Name comparison and error construction yield across work windows and retain the original names, SQLSTATE and message.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
       "test": "native_hierarchy_preserves_diamond_and_quoted_parent_identity",
       "cases": 1,
       "source": "crates/uqa-sql/src/schema/inheritance/native/tests.rs",
@@ -54084,6 +54136,45 @@
       "capability": "Native inheritance dependency closure",
       "workload": "Validate inherited and partition parent identity, edge kind, sparse sequence numbers and iterative deep ancestry under original admission.",
       "invariant": "Missing, repeated and cyclic parents reject; valid diamond ancestry retains borrowed definitions and scratch retires on failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_sequence_validation_yields_for_original_tables_columns_owners_and_scratch_retirement",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/sequences/native/tests.rs",
+      "capability": "Native sequence ownership validation",
+      "workload": "Read 4,096 original tables, columns and sequence owners, then retire the lookup indexes.",
+      "invariant": "Window size preserves the result and first bad owner. Cancellation, abandoned input and denied allocation release the original allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_sequence_name_comparisons_yield_within_shared_utf8_prefixes_and_reject_the_first_conflict",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/sequences/native/tests.rs",
+      "capability": "Native sequence identity comparison",
+      "workload": "Compare two duplicate native sequence names with shared 192 KiB UTF-8 schema and relation prefixes.",
+      "invariant": "Both window sizes yield within the long names and report the duplicate before the invalid internal owner.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "implicit_sequence_checks_yield_across_empty_tables_and_columns_without_object_ids",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/sequences/native/tests.rs",
+      "capability": "Native implicit sequence validation",
+      "workload": "Place an invalid SERIAL declaration after 4,096 empty tables or 4,096 columns without object IDs.",
+      "invariant": "Each visited table and column contributes work before the original missing-sequence error, including entries with no owner key.",
       "case_names": [
         ""
       ]

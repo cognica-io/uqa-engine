@@ -10,13 +10,16 @@ use crate::{
     ast::ColumnDef,
     catalog::{
         regobject::{numeric_regobject_oid, NumericRegobjectOid},
-        resolution::bound_relation_identity_with_control,
+        resolution::{bound_relation_identity_with_control, bound_relation_identity_with_work},
+        work::{inline, retire_entries, ReferenceWork, Work},
     },
     SQLError,
 };
 use uqa_core::{
     catalog_sequence::{SequenceOwner, SequenceOwnerDependency},
-    memory::{BudgetedMap, MemoryBudget, Produced, ProductionControl},
+    memory::{
+        Budgeted, BudgetedMap, MapKeyInput, MemoryBudget, OwnedMap, Produced, ProductionControl,
+    },
     CancellationToken, RelationIdentity,
 };
 
@@ -43,17 +46,38 @@ pub fn validate<'a>(
     memory: &MemoryBudget,
     cancellation: &CancellationToken,
 ) -> Result<(), SQLError> {
+    inline(validate_with_work(
+        tables,
+        sequences,
+        memory,
+        cancellation,
+        &mut (),
+    ))
+}
+
+/// Validate the same stable identities and canonical sequence names under a caller-supplied work window. Successful cleanup releases the original map nodes in bounded steps.
+pub async fn validate_with_work<'a, W: Work + Send>(
+    tables: impl Iterator<Item = ([u8; 16], &'a [ColumnDef])>,
+    sequences: impl Iterator<Item = (&'a RelationIdentity, Option<SequenceOwner>)>,
+    memory: &MemoryBudget,
+    cancellation: &CancellationToken,
+    work: &mut W,
+) -> Result<(), SQLError> {
     let control = ProductionControl::new(memory, cancellation, cancellation);
-    control.check()?;
+    let mut input = ReferenceWork {
+        control: &control,
+        work,
+    };
+    input.control.check()?;
     let mut relations = BudgetedMap::new(memory);
     let mut columns = BudgetedMap::new(memory);
     for (table, definitions) in tables {
-        control.check()?;
+        input.checkpoint().await?;
         if relations.insert(table, definitions)?.is_some() {
             return Err(invalid("duplicate owner table identity"));
         }
         for column in definitions {
-            control.check()?;
+            input.checkpoint().await?;
             if let Some(id) = column.object_id {
                 if columns.insert((table, id), column)?.is_some() {
                     return Err(invalid("duplicate owner column identity"));
@@ -61,55 +85,81 @@ pub fn validate<'a>(
             }
         }
     }
-    let mut names = BudgetedMap::new(memory);
+    let mut names = OwnedMap::new();
     for (name, owner) in sequences {
-        control.check()?;
-        if names.insert(name, ())?.is_some() {
+        let key = Budgeted::new(name, memory.reserve(0)?);
+        if names
+            .insert_admitted_key_from(key, (), &mut input)
+            .await?
+            .is_some()
+        {
             return Err(invalid("duplicate sequence name"));
         }
-        let Some(owner) = owner else {
-            continue;
-        };
-        let column = columns
-            .get(&(owner.table_object_id, owner.column_object_id))
-            .ok_or_else(|| invalid("missing owned column identity"))?;
-        if owner.dependency == SequenceOwnerDependency::Internal {
-            let provenance = column
-                .auto_increment
-                .as_ref()
-                .filter(|provenance| provenance.is_identity())
-                .ok_or_else(|| invalid("internal owner is not an identity column"))?;
-            let reference = provenance
-                .sequence
-                .as_deref()
-                .ok_or_else(|| invalid("identity column has no sequence"))?;
-            if &*bound_relation_identity_with_control(reference, &control)? != name {
-                return Err(invalid("internal owner names another sequence"));
+        if let Some(owner) = owner {
+            let column = columns
+                .get(&(owner.table_object_id, owner.column_object_id))
+                .ok_or_else(|| invalid("missing owned column identity"))?;
+            if owner.dependency == SequenceOwnerDependency::Internal {
+                internal_owner(column, name, &mut input).await?;
             }
         }
     }
     for (_, definitions) in &relations {
+        input.checkpoint().await?;
         for column in *definitions {
-            control.check()?;
-            let Some(provenance) = &column.auto_increment else {
-                continue;
-            };
-            if provenance.declaration.is_some() {
-                return Err(invalid("unconsumed identity declaration"));
-            }
-            let Some(reference) = &provenance.sequence else {
-                if provenance.is_legacy() {
-                    continue;
-                }
-                return Err(invalid("implicit column has no sequence"));
-            };
-            let name = bound_relation_identity_with_control(reference, &control)?;
-            if !names.contains_key(&*name) {
-                return Err(invalid("missing implicit sequence"));
-            }
+            input.checkpoint().await?;
+            implicit_sequence(column, &names, &mut input).await?;
         }
     }
-    control.check()?;
+    input.control.check()?;
+    retire_entries(names.into_iter(), &control, input.work).await?;
+    retire_entries(columns.into_entries(), &control, input.work).await?;
+    retire_entries(relations.into_entries(), &control, input.work).await
+}
+
+async fn internal_owner<W: Work + Send>(
+    column: &ColumnDef,
+    name: &RelationIdentity,
+    input: &mut ReferenceWork<'_, '_, W>,
+) -> Result<(), SQLError> {
+    let provenance = column
+        .auto_increment
+        .as_ref()
+        .filter(|provenance| provenance.is_identity())
+        .ok_or_else(|| invalid("internal owner is not an identity column"))?;
+    let reference = provenance
+        .sequence
+        .as_deref()
+        .ok_or_else(|| invalid("identity column has no sequence"))?;
+    let original = bound_relation_identity_with_work(reference, input.control, input.work).await?;
+    if input.compare(&*original, &name).await?.is_ne() {
+        return Err(invalid("internal owner names another sequence"));
+    }
+    Ok(())
+}
+
+async fn implicit_sequence<W: Work + Send>(
+    column: &ColumnDef,
+    names: &OwnedMap<&RelationIdentity, ()>,
+    input: &mut ReferenceWork<'_, '_, W>,
+) -> Result<(), SQLError> {
+    let Some(provenance) = &column.auto_increment else {
+        return Ok(());
+    };
+    if provenance.declaration.is_some() {
+        return Err(invalid("unconsumed identity declaration"));
+    }
+    let Some(reference) = &provenance.sequence else {
+        return if provenance.is_legacy() {
+            Ok(())
+        } else {
+            Err(invalid("implicit column has no sequence"))
+        };
+    };
+    let name = bound_relation_identity_with_work(reference, input.control, input.work).await?;
+    if names.get_from(&*name, input).await?.is_none() {
+        return Err(invalid("missing implicit sequence"));
+    }
     Ok(())
 }
 

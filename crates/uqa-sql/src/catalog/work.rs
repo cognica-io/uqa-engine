@@ -8,12 +8,15 @@
 
 use crate::SQLError;
 use std::{
+    borrow::Borrow,
+    cmp::Ordering,
     future::Future,
     task::{Context, Poll, Waker},
 };
 use uqa_core::{
     image_io::{AsyncImageInput, ImageIoError},
-    memory::{Produced, ProductionControl, ProductionString},
+    memory::{MapKeyInput, Produced, ProductionControl, ProductionString},
+    RelationIdentity,
 };
 
 /// Schedule borrowed catalog validation and text construction through the invoking operation.
@@ -159,16 +162,48 @@ pub(crate) async fn decoded_name<W: Work + Send>(
         .await
 }
 
-pub(super) struct ReferenceWork<'a, 'c, W> {
-    pub(super) control: &'a ProductionControl<'c>,
-    pub(super) work: &'a mut W,
+pub(crate) struct ReferenceWork<'a, 'c, W> {
+    pub(crate) control: &'a ProductionControl<'c>,
+    pub(crate) work: &'a mut W,
 }
-impl<W: Work + Send> uqa_core::RelationReferenceWork for ReferenceWork<'_, '_, W> {
-    type Error = SQLError;
-    async fn checkpoint(&mut self) -> Result<(), SQLError> {
+
+impl<W: Work + Send> ReferenceWork<'_, '_, W> {
+    pub(crate) async fn checkpoint(&mut self) -> Result<(), SQLError> {
         self.control.check()?;
         self.work.checkpoint().await?;
         self.control.check()?;
         Ok(())
+    }
+}
+
+impl<W: Work + Send> uqa_core::RelationReferenceWork for ReferenceWork<'_, '_, W> {
+    type Error = SQLError;
+
+    async fn checkpoint(&mut self) -> Result<(), SQLError> {
+        ReferenceWork::checkpoint(self).await
+    }
+}
+
+impl<Q: Borrow<RelationIdentity> + Sync, W: Work + Send> MapKeyInput<Q, &RelationIdentity>
+    for ReferenceWork<'_, '_, W>
+{
+    type Error = SQLError;
+
+    async fn checkpoint(&mut self) -> Result<(), SQLError> {
+        ReferenceWork::checkpoint(self).await
+    }
+
+    async fn compare(
+        &mut self,
+        query: &Q,
+        stored: &&RelationIdentity,
+    ) -> Result<Ordering, SQLError> {
+        let query = query.borrow();
+        let schema = compare_text(self.work, &query.schema, &stored.schema, self.control).await?;
+        if schema.is_eq() {
+            compare_text(self.work, &query.name, &stored.name, self.control).await
+        } else {
+            Ok(schema)
+        }
     }
 }

@@ -47,6 +47,8 @@ enum Scheduled {
     Authority,
     Foreign,
     Types,
+    Hierarchies,
+    Sequences,
 }
 
 const ORDERED: &[Predicate] = &[
@@ -67,10 +69,8 @@ const ORDERED: &[Predicate] = &[
     Predicate::Direct(|input| {
         validate_routine_declarations(input.snapshot, input.types, &input.production)
     }),
-    Predicate::Direct(|input| {
-        validate_hierarchies(input.snapshot, input.memory, input.cancellation)
-    }),
-    Predicate::Direct(|input| validate_sequences(input.snapshot, input.memory, input.cancellation)),
+    Predicate::Scheduled(Scheduled::Hierarchies),
+    Predicate::Scheduled(Scheduled::Sequences),
     Predicate::Direct(|input| validate_indexes(input.snapshot, input.memory, input.cancellation)),
     Predicate::Direct(|input| {
         validate_constraints(input.snapshot, input.memory, input.cancellation)
@@ -203,6 +203,12 @@ impl Scheduled {
         match self {
             Self::Namespaces | Self::Names | Self::Authority | Self::Types => true,
             Self::Foreign => foreign::has_bindings(snapshot),
+            Self::Hierarchies => !snapshot.tables.is_empty(),
+            Self::Sequences => {
+                !snapshot.tables.is_empty()
+                    || !snapshot.definitions.foreign_tables.is_empty()
+                    || !snapshot.definitions.sequences.is_empty()
+            }
         }
     }
 
@@ -235,6 +241,8 @@ impl Scheduled {
             Self::Names => validate_name_uniqueness(catalog.snapshot(), memory, cancellation),
             Self::Authority => validate_authority(catalog.snapshot(), memory, cancellation),
             Self::Types => validate_types(catalog.snapshot(), memory, cancellation),
+            Self::Hierarchies => validate_hierarchies(catalog.snapshot(), memory, cancellation),
+            Self::Sequences => validate_sequences(catalog.snapshot(), memory, cancellation),
             Self::Foreign => decode_image(
                 &mut std::io::empty(),
                 memory,
@@ -261,6 +269,24 @@ impl Scheduled {
             Self::Types => {
                 super::type_dependencies::from_input(catalog.snapshot(), cancellation, input).await
             }
+            Self::Hierarchies => {
+                super::validate_hierarchies_with_work(
+                    catalog.snapshot(),
+                    input.memory,
+                    cancellation,
+                    input,
+                )
+                .await
+            }
+            Self::Sequences => {
+                super::validate_sequences_with_work(
+                    catalog.snapshot(),
+                    input.memory,
+                    cancellation,
+                    input,
+                )
+                .await
+            }
         }
     }
 }
@@ -285,3 +311,6 @@ pub fn validate(
 
 #[cfg(test)]
 mod authority_tests;
+
+#[cfg(test)]
+mod table_tests;
