@@ -225,12 +225,11 @@ impl Copying<'_> {
         &mut self,
         aliases: &crate::ast::ReturningAliases,
     ) -> Result<crate::ast::ReturningAliases> {
-        Ok(crate::ast::ReturningAliases {
-            old: self.text(&aliases.old)?,
-            new: self.text(&aliases.new)?,
-            old_explicit: aliases.old_explicit,
-            new_explicit: aliases.new_explicit,
-        })
+        crate::catalog::work::inline(super::lowering::input::text::returning_aliases(
+            aliases,
+            self,
+            &mut (),
+        ))
     }
 
     fn view_check(&mut self, check: &ViewCheckPlan) -> Result<ViewCheckPlan> {

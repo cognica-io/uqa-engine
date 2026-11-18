@@ -15,6 +15,7 @@ mod attached_queries;
 mod command;
 mod generated_sources;
 mod lowering;
+pub use lowering::RetainedExecutablePlan;
 mod owned_mutation;
 mod production;
 mod query;
@@ -217,7 +218,7 @@ fn require_mutation(command: &CommandPlan) -> Result<()> {
     }
 }
 
-type ParameterLookup<'a> = dyn Fn(&crate::ast::Expr) -> Option<usize> + 'a;
+type ParameterLookup<'a> = dyn Fn(&crate::ast::Expr) -> Option<usize> + Sync + 'a;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum CopyPurpose {
@@ -252,6 +253,20 @@ pub(crate) struct Copying<'a> {
     fields: Option<BudgetedVec<RewriteField>>,
     scalar_items: Option<BudgetedVec<Option<super::scalar::ScalarMemory>>>,
     parameters: Option<&'a ParameterLookup<'a>>,
+    plan_retirement: Option<super::retirement::construction::Context>,
+}
+
+trait CopyBuffer<T> {
+    fn values_mut(&mut self) -> &mut BudgetedVec<T>;
+    fn into_parts(self) -> (Vec<T>, MemoryReservation);
+}
+impl<T> CopyBuffer<T> for BudgetedVec<T> {
+    fn values_mut(&mut self) -> &mut BudgetedVec<T> {
+        self
+    }
+    fn into_parts(self) -> (Vec<T>, MemoryReservation) {
+        self.into_parts()
+    }
 }
 
 mod owned_assignments;
@@ -277,6 +292,7 @@ impl<'a> Copying<'a> {
             fields: None,
             scalar_items: None,
             parameters: None,
+            plan_retirement: None,
         }
     }
 
@@ -312,6 +328,7 @@ impl<'a> Copying<'a> {
                 .pop()
                 .expect("single scalar field")
                 .memory
+                .take()
                 .expect("scalar owner");
         }
         RewriteMemory::Fields { direct, fields }
@@ -329,6 +346,7 @@ impl<'a> Copying<'a> {
         fields.reserve(1)?;
         let mut child = Self::for_rewrite(self.control).expect("controlled rewrite");
         child.parameters = self.parameters;
+        child.plan_retirement.clone_from(&self.plan_retirement);
         let value = copy(&mut child)?;
         self.fields
             .as_mut()
@@ -361,7 +379,16 @@ impl<'a> Copying<'a> {
     pub(crate) fn map<I: ExactSizeIterator, T>(
         &mut self,
         items: I,
+        copy: impl FnMut(&mut Self, I::Item) -> Result<T>,
+    ) -> Result<Vec<T>> {
+        self.map_with_buffer(items, copy, BudgetedVec::new)
+    }
+
+    fn map_with_buffer<I: ExactSizeIterator, T, B: CopyBuffer<T>>(
+        &mut self,
+        items: I,
         mut copy: impl FnMut(&mut Self, I::Item) -> Result<T>,
+        buffer: impl FnOnce(&uqa_core::memory::MemoryBudget) -> B,
     ) -> Result<Vec<T>> {
         self.check()?;
         let Some(budget) = self.control.budget() else {
@@ -372,14 +399,16 @@ impl<'a> Copying<'a> {
                 })
                 .collect();
         };
-        let mut output = BudgetedVec::new(budget);
-        output.reserve(items.len())?;
+        let mut output = buffer(budget);
+        output.values_mut().reserve(items.len())?;
         if let Some(fields) = &mut self.fields {
             fields.reserve(items.len())?;
         }
         for item in items {
             self.check()?;
-            output.push(self.field("item", |copying| copy(copying, item))?)?;
+            output
+                .values_mut()
+                .push(self.field("item", |copying| copy(copying, item))?)?;
         }
         let (output, memory) = output.into_parts();
         self.absorb(Some(memory));
@@ -401,11 +430,28 @@ impl<'a> Copying<'a> {
     }
 
     fn boxed<T>(&mut self, copy: impl FnOnce(&mut Self) -> Result<T>) -> Result<Box<T>> {
+        self.boxed_with(copy, std::convert::identity, std::convert::identity)
+    }
+
+    fn boxed_with<T, O>(
+        &mut self,
+        copy: impl FnOnce(&mut Self) -> Result<T>,
+        retain: impl FnOnce(T) -> O,
+        take: impl FnOnce(O) -> T,
+    ) -> Result<Box<T>> {
+        self.admit_box::<T>()?;
+        let value = retain(copy(self)?);
+        self.finish_box(value, take)
+    }
+
+    fn admit_box<T>(&mut self) -> Result<()> {
         self.check()?;
-        self.reserve(size_of::<T>())?;
-        let value = copy(self)?;
+        self.reserve(size_of::<T>())
+    }
+
+    fn finish_box<T, O>(&self, value: O, take: impl FnOnce(O) -> T) -> Result<Box<T>> {
         self.check()?;
-        Ok(Box::new(value))
+        Ok(Box::new(take(value)))
     }
 
     pub(crate) fn text(&mut self, value: &str) -> Result<String> {

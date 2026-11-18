@@ -8,19 +8,20 @@
 
 use super::{copy::Copying, OwnedScalarExpr, QueryPlan, RelationalPlan};
 use crate::{SQLError, ScalarExpr};
-use uqa_core::{
-    memory::{Produced, ProductionControl},
-    Value,
-};
+use uqa_core::memory::{Produced, ProductionControl};
 
 mod analysis;
 mod arenas;
-pub(crate) use analysis::{QueryMetadataUpdate, SourceMetadataUpdate};
+pub(crate) use analysis::{
+    MetadataObserver, MetadataTarget, ProjectionAliasUpdates, QueryLayoutUpdate,
+    QueryMetadataUpdate, QueryReplacement, SourceMetadataUpdate, SourceReplacement,
+};
 pub use arenas::{ScalarArenaTransform, ScalarQueryArena};
 pub(crate) mod commands;
 pub(crate) mod construction;
 mod ctes;
 mod deferred;
+mod edits;
 pub use deferred::OwnedDeferredRewriteIter;
 mod executable;
 mod expression;
@@ -107,22 +108,20 @@ impl MutableQueryPlan {
     ) -> Result<Self, SQLError> {
         self.assert_owner(control);
         control.check()?;
-        let Some(expression) = slot.expression_mut(&mut self.query) else {
+        let Some(mut slot) = self.scalar_slot(slot) else {
             return Ok(self);
         };
-        let memory_slot = self.memory.as_mut().map(|memory| slot.memory_mut(memory));
-        let scalar_memory = memory_slot.and_then(Option::take);
-        let input = OwnedScalarExpr::from_rewrite_parts(
-            std::mem::replace(expression, ScalarExpr::Literal(Value::Null)),
-            scalar_memory,
-        );
+        let input = slot.take();
         let output = input.rewrite(control, map)?;
-        let (output, memory) = output.into_rewrite_parts();
-        *expression = output;
-        if let Some(owner) = &mut self.memory {
-            *slot.memory_mut(owner) = memory;
-        }
+        slot.restore(output);
         Ok(self)
+    }
+
+    fn scalar_slot(&mut self, slot: QueryScalarSlot) -> Option<edits::Slot<'_, OwnedScalarExpr>> {
+        Some(edits::Slot::new(
+            slot.expression_mut(&mut self.query)?,
+            self.memory.as_mut().map(|memory| slot.memory_mut(memory)),
+        ))
     }
 
     /// Keep selected projection entries in their original vector. Removed expression and alias storage is destroyed before its own constructor records; surviving aliases and scalar children keep their addresses and allowance.

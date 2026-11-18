@@ -60,7 +60,11 @@ impl LegacyVectorValue {
         array: Produced<ArrayValue>,
         control: &ProductionControl<'_>,
     ) -> Result<Option<Produced<Self>>, ValueRetentionError> {
-        control.check()?;
+        let (array, memory) = array.into_parts();
+        let owned = control.finish(crate::types::OwnedValue::new(Value::Array(array)), memory)?;
+        let Value::Array(array) = &**owned else {
+            unreachable!("owned array")
+        };
         if array.dimensions().len() > 1 {
             return Ok(None);
         }
@@ -70,7 +74,10 @@ impl LegacyVectorValue {
                 return Ok(None);
             }
         }
-        let (array, memory) = array.into_parts();
+        let (owned, memory) = owned.into_parts();
+        let Value::Array(array) = owned.into_inner() else {
+            unreachable!("owned array")
+        };
         control.finish(Self { kind, array }, memory).map(Some)
     }
 
@@ -111,6 +118,10 @@ impl LegacyVectorValue {
 
     pub fn elements(&self) -> &[Value] {
         self.array.elements()
+    }
+
+    pub(in crate::types) fn retirement_values(&mut self) -> &mut Vec<Value> {
+        self.array.retirement_values()
     }
 
     /// Owned payload size, excluding this value's inline layout, saturated if its buffers exceed the addressable sum. Elements are inline integers and have no additional retained payload.

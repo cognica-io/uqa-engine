@@ -31,6 +31,8 @@ mod ctes;
 mod driver;
 mod fields;
 mod forest;
+pub(super) use crate::plan::retirement::empty_query;
+use crate::plan::retirement::{empty_source, Node};
 use forest::NativeNode;
 mod memory;
 mod metadata;
@@ -53,23 +55,12 @@ pub(in crate::catalog::image) use statements::{read_routines, read_rules};
 pub use unified::CapturedPlan;
 
 use super::{invalid, Fields, Input};
+use crate::plan::retirement::RetainedTree;
 use crate::{
-    plan::{
-        CommandPlan, CtePlan, CtePlanBody, ExpressionPlan, QueryPlan, RelationalPlan, SourcePlan,
-    },
+    plan::{CommandPlan, CtePlan, CtePlanBody, ExpressionPlan, QueryPlan},
     SQLError, ScalarExpr,
 };
-use uqa_core::memory::{BudgetedVec, MemoryBudget};
-
-#[derive(Debug)]
-pub(super) enum Node {
-    Empty,
-    Query(QueryPlan),
-    Source(SourcePlan),
-    Cte(CtePlan),
-    Command(CommandPlan),
-    Expression(ExpressionPlan),
-}
+use uqa_core::memory::MemoryBudget;
 
 #[derive(Clone, Copy)]
 pub(super) enum Kind {
@@ -105,25 +96,23 @@ impl<N> Frame<N> {
 
 #[derive(Debug)]
 pub(super) struct Owner<N: NativeNode = Node> {
-    root: N,
-    frames: BudgetedVec<Frame<N>>,
+    tree: RetainedTree<Frame<N>>,
     memory: PlanMemory,
 }
 
 impl<N: NativeNode> Owner<N> {
     fn new(memory: &MemoryBudget) -> Self {
         Self {
-            root: N::empty(),
-            frames: BudgetedVec::new(memory),
+            tree: RetainedTree::new(memory),
             memory: PlanMemory::new(memory),
         }
     }
 
     fn begin(&mut self, kind: N::Kind) -> Result<(), SQLError> {
         // One extra slot covers a required, still-empty boxed child during partial reconstruction. Retirement reuses this capacity and never acquires another allowance.
-        self.frames.reserve(2)?;
+        self.tree.frames.reserve(2)?;
         let node = N::new(kind, &mut self.memory)?;
-        self.frames.push(Frame::new(node))?;
+        self.tree.frames.push(Frame::new(node))?;
         Ok(())
     }
 }
@@ -151,32 +140,5 @@ impl Node {
                 })
             }
         })
-    }
-}
-
-pub(super) fn empty_query() -> QueryPlan {
-    QueryPlan {
-        analyzed_output: None,
-        analyzed_source: None,
-        analyzed_grouping: None,
-        relations_bound: false,
-        relation_privilege_subject: None,
-        ctes: Vec::new(),
-        root: RelationalPlan::Values {
-            rows: Vec::new(),
-            subqueries: Vec::new(),
-        },
-    }
-}
-
-fn empty_source() -> SourcePlan {
-    SourcePlan::Values {
-        lateral: false,
-        rows: Vec::new(),
-        alias: None,
-        column_aliases: Vec::new(),
-        internal_relation: None,
-        internal_column_types: Vec::new(),
-        internal_column_collations: Vec::new(),
     }
 }

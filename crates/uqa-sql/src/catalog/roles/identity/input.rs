@@ -88,17 +88,6 @@ impl<W: Work + Send> MapKeyInput<str, String> for Comparison<'_, '_, W> {
         Ok(())
     }
     async fn compare(&mut self, query: &str, stored: &String) -> Result<Ordering, Self::Error> {
-        for (left, right) in query
-            .as_bytes()
-            .chunks(4096)
-            .zip(stored.as_bytes().chunks(4096))
-        {
-            self.checkpoint().await?;
-            let order = left.cmp(right);
-            if order.is_ne() {
-                return Ok(order);
-            }
-        }
-        Ok(query.len().cmp(&stored.len()))
+        crate::catalog::work::compare_text(self.work, query, stored, &self.control).await
     }
 }

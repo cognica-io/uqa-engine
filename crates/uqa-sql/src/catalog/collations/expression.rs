@@ -36,12 +36,36 @@ pub(crate) fn validate_literal_collation(
     ty: Option<&ColumnType>,
     oid: Option<u32>,
 ) -> Result<(), SQLError> {
-    if oid.is_some_and(|oid| oid != 0)
-        && ty.is_none_or(|ty| !crate::schema::composites::type_is_collatable(ty))
-    {
+    crate::catalog::work::inline(validate_literal_collation_from(
+        ty,
+        oid,
+        &ProductionControl::uncontrolled(),
+        &mut (),
+    ))
+    .map_err(Into::into)
+}
+
+pub(crate) async fn validate_literal_collation_from<W: crate::plan::ScalarInputWork>(
+    ty: Option<&ColumnType>,
+    oid: Option<u32>,
+    control: &ProductionControl<'_>,
+    work: &mut W,
+) -> Result<(), W::Error>
+where
+    W::Error: From<SQLError>,
+{
+    if oid.is_none_or(|oid| oid == 0) {
+        return Ok(());
+    }
+    let collatable = match ty {
+        Some(ty) => crate::schema::composites::type_is_collatable_from(ty, control, work).await?,
+        None => false,
+    };
+    if !collatable {
         return Err(SQLError::Internal(
             "constant collation does not match its declared type".into(),
-        ));
+        )
+        .into());
     }
     Ok(())
 }

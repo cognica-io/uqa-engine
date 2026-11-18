@@ -60,7 +60,7 @@ pub(super) fn produce(
     Ok(Arc::new(DiagnosticNamespace {
         name,
         columns,
-        _memory: SchemaMemory::new(
+        memory: SchemaMemory::new(
             control.combine(header, control.combine(name_memory, columns_memory)),
         ),
     }))

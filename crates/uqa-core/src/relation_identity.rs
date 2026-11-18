@@ -12,6 +12,7 @@ mod borrowed;
 mod production;
 pub use borrowed::{
     RelationName, RelationReference, RelationReferenceError, RelationReferenceInputError,
+    RelationReferenceWork,
 };
 #[cfg(test)]
 mod tests;

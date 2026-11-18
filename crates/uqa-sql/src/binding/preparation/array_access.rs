@@ -6,11 +6,13 @@
 
 //! Array inputs are analyzed before their bounds, in written lower/upper order.
 
+use crate::binding::preparation::{LiteralInput, SchemaContext};
+
 use super::ownership::{AnalysisType, AnalysisVec};
 use super::{ColumnType, ExpressionType, Preparation, QueryPlan, RowSchema, SQLError, ScalarExpr};
 use crate::ast::ArrayAccess;
 
-impl Preparation<'_> {
+impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
     pub(super) fn array_access(
         &mut self,
         access: ArrayAccess,

@@ -16,7 +16,7 @@ fn namespace(schema: &RowSchema, name: &str) -> DiagnosticNamespace {
             .into_iter()
             .map(|(name, ..)| name.into())
             .collect(),
-        _memory: crate::schema::production::lease::SchemaMemory::default(),
+        memory: crate::schema::production::lease::SchemaMemory::default(),
     }
 }
 

@@ -265,11 +265,16 @@ impl Engine {
     ) -> StorageBackendResult<Option<String>> {
         self.refresh_sequences_from_catalog()?;
         let sequences = self.durable.sequences.read();
-        Ok(self
-            .relation_lookup_candidates(name)?
-            .into_iter()
-            .find(|candidate| sequences.contains_key(candidate))
-            .map(|relation| relation.qualified_name()))
+        let candidates = self.relation_lookup_candidates(name)?;
+        Ok(
+            uqa_sql::binding::stored_relations::select_query_sequence_with_control(
+                &candidates,
+                |candidate| sequences.contains_key(candidate),
+                &uqa_core::memory::ProductionControl::uncontrolled(),
+            )
+            .map_err(|error| StorageBackendError::Other(error.to_string()))?
+            .map(|name| name.into_uncontrolled().expect("ordinary sequence name")),
+        )
     }
 
     pub(crate) fn table(&self, name: &str) -> StorageBackendResult<Option<Arc<TableState>>> {

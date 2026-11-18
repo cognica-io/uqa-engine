@@ -29,7 +29,7 @@ impl CapturedPlan {
 
 impl Owner {
     pub(super) fn unified_value(&mut self) -> Result<UnifiedPlan, SQLError> {
-        Ok(match &mut self.root {
+        Ok(match &mut self.tree.root {
             Node::Query(query) => {
                 self.memory.grow(size_of::<QueryPlan>())?;
                 let mut value = Box::new(empty_query());
@@ -47,7 +47,7 @@ impl Owner {
     }
 
     pub(super) fn exchange_unified(&mut self, value: &mut UnifiedPlan) {
-        match (value, &mut self.root) {
+        match (value, &mut self.tree.root) {
             (UnifiedPlan::Query(value), Node::Query(query)) => {
                 std::mem::swap(value.as_mut(), query);
             }

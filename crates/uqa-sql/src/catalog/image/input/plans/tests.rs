@@ -6,6 +6,7 @@
 
 use super::*;
 use crate::plan::UnifiedPlan;
+use crate::plan::{RelationalPlan, SourcePlan};
 use uqa_core::CancellationToken;
 
 mod resources;

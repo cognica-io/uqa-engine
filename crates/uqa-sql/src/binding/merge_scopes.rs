@@ -7,7 +7,7 @@
 //! MERGE expressions resolve against their candidate row's relation namespace.
 
 use super::{RowSchema, SchemaScope};
-use crate::plan::{MergePlan, MergeWhenPlan};
+use crate::plan::MergePlan;
 use crate::routines::RoutineResolution;
 use crate::{SQLError, SQLParam};
 
@@ -37,49 +37,8 @@ impl SchemaScope {
             self.bind_expression_type(routines, predicate, joined, &merge.subqueries, params)?;
         }
         for clause in &merge.when_clauses {
-            let input = match clause {
-                MergeWhenPlan::UpdateNotMatchedBySource { .. }
-                | MergeWhenPlan::DeleteNotMatchedBySource { .. }
-                | MergeWhenPlan::NothingNotMatchedBySource { .. } => &target,
-                MergeWhenPlan::InsertNotMatched { .. }
-                | MergeWhenPlan::NothingNotMatched { .. } => &source,
-                _ => joined,
-            };
-            let (condition, values) = match clause {
-                MergeWhenPlan::UpdateMatched {
-                    condition,
-                    assignments,
-                }
-                | MergeWhenPlan::UpdateNotMatchedBySource {
-                    condition,
-                    assignments,
-                } => (
-                    condition,
-                    assignments
-                        .iter()
-                        .flat_map(crate::plan::AssignmentPlan::expressions)
-                        .collect::<Vec<_>>(),
-                ),
-                MergeWhenPlan::InsertNotMatched {
-                    condition,
-                    columns,
-                    values,
-                    ..
-                } => (
-                    condition,
-                    columns
-                        .iter()
-                        .flat_map(crate::ast::AssignmentTarget::expressions)
-                        .chain(values)
-                        .collect(),
-                ),
-                MergeWhenPlan::DeleteMatched { condition }
-                | MergeWhenPlan::DeleteNotMatchedBySource { condition }
-                | MergeWhenPlan::NothingMatched { condition }
-                | MergeWhenPlan::NothingNotMatched { condition }
-                | MergeWhenPlan::NothingNotMatchedBySource { condition } => (condition, Vec::new()),
-            };
-            for expression in condition.iter().chain(values) {
+            let input = clause.input_scope(joined, &target, &source);
+            for expression in clause.expressions() {
                 self.bind_expression_type(routines, expression, input, &merge.subqueries, params)?;
             }
         }

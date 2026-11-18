@@ -330,3 +330,19 @@ pub(crate) fn empty_projection_block() -> QueryBlockPlan {
         locking: Vec::new(),
     }
 }
+
+impl crate::plan::retirement::construction::Prefix<MutableQueryPlan> {
+    pub(in crate::plan) fn into_query_parts(
+        self,
+    ) -> (
+        crate::plan::retirement::construction::Prefix<crate::plan::QueryPlan>,
+        super::RewriteMemory,
+    ) {
+        let context = self.context().clone();
+        let MutableQueryPlan { query, memory } = self.take();
+        (
+            context.retain(query),
+            memory.expect("retained query fields"),
+        )
+    }
+}

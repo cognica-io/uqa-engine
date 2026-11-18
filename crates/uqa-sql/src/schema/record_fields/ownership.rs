@@ -12,10 +12,11 @@ use std::sync::Arc;
 use uqa_core::memory::{MemoryReservation, Produced, ProductionControl, ProductionVec};
 
 #[derive(Clone)]
-pub struct RecordFields(Storage);
+pub struct RecordFields(pub(super) Option<Storage>);
 #[derive(Clone)]
-enum Storage {
+pub(super) enum Storage {
     Ordinary(Arc<[Option<ColumnType>]>),
+    Owned(Arc<Vec<Option<ColumnType>>>),
     Produced(Arc<Produced<Vec<Option<ColumnType>>>>),
 }
 impl RecordFields {
@@ -23,7 +24,7 @@ impl RecordFields {
         types: Produced<Vec<Option<ColumnType>>>,
         control: &ProductionControl<'_>,
     ) -> Result<Self, SQLError> {
-        Ok(Self(Storage::Produced(types.into_shared(control)?)))
+        Ok(Self(Some(Storage::Produced(types.into_shared(control)?))))
     }
     pub fn from_types_with_control<'a>(
         types: impl IntoIterator<Item = Option<&'a ColumnType>>,
@@ -44,8 +45,13 @@ impl RecordFields {
     }
     pub fn shares_storage(&self, other: &Self) -> bool {
         match (&self.0, &other.0) {
-            (Storage::Ordinary(left), Storage::Ordinary(right)) => Arc::ptr_eq(left, right),
-            (Storage::Produced(left), Storage::Produced(right)) => Arc::ptr_eq(left, right),
+            (Some(Storage::Ordinary(left)), Some(Storage::Ordinary(right))) => {
+                Arc::ptr_eq(left, right)
+            }
+            (Some(Storage::Owned(left)), Some(Storage::Owned(right))) => Arc::ptr_eq(left, right),
+            (Some(Storage::Produced(left)), Some(Storage::Produced(right))) => {
+                Arc::ptr_eq(left, right)
+            }
             _ => false,
         }
     }
@@ -53,8 +59,9 @@ impl RecordFields {
 impl std::ops::Deref for RecordFields {
     type Target = [Option<ColumnType>];
     fn deref(&self) -> &Self::Target {
-        match &self.0 {
+        match self.0.as_ref().expect("live record field types") {
             Storage::Ordinary(types) => types,
+            Storage::Owned(types) => types,
             Storage::Produced(types) => types,
         }
     }
@@ -77,12 +84,12 @@ impl PartialEq for RecordFields {
 impl Eq for RecordFields {}
 impl From<Vec<Option<ColumnType>>> for RecordFields {
     fn from(types: Vec<Option<ColumnType>>) -> Self {
-        Self(Storage::Ordinary(types.into()))
+        Self(Some(Storage::Owned(Arc::new(types))))
     }
 }
 impl From<Arc<[Option<ColumnType>]>> for RecordFields {
     fn from(types: Arc<[Option<ColumnType>]>) -> Self {
-        Self(Storage::Ordinary(types))
+        Self(Some(Storage::Ordinary(types)))
     }
 }
 impl FromIterator<Option<ColumnType>> for RecordFields {

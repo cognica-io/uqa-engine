@@ -18,11 +18,14 @@ pub use comparison_control::{
 };
 mod cloning;
 mod copying;
+pub use copying::ValueCopyWork;
 mod decoding;
 mod identity;
 pub mod image;
 mod nonfinite;
 mod observation;
+mod ownership;
+pub use ownership::{OwnedValue, ValueRetirement};
 mod retention;
 mod serialization;
 pub use decoding::JsonValueDecoder;

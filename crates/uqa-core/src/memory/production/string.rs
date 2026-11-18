@@ -79,21 +79,27 @@ impl<'a> ProductionString<'a> {
         self.control.check()?;
         let mut begin = 0;
         while begin < text.len() {
-            self.control.check()?;
-            let mut end = begin.saturating_add(4096).min(text.len());
-            while !text.is_char_boundary(end) {
-                end -= 1;
-            }
-            match &mut self.buffer {
-                Buffer::Ordinary(value) => {
-                    value.try_reserve(end - begin).map_err(MemoryError::from)?;
-                    value.push_str(&text[begin..end]);
-                }
-                Buffer::Controlled(value) => value.push_str(&text[begin..end])?,
-            }
-            begin = end;
+            begin += self.push_str_chunk(&text[begin..])?;
         }
         self.control.check()
+    }
+
+    /// Append at most 4096 bytes ending at a complete UTF-8 character and return the consumed byte count. Inline and scheduled producers share this admission and copying step.
+    pub fn push_str_chunk(&mut self, text: &str) -> Result<usize, ValueRetentionError> {
+        self.control.check()?;
+        let mut end = text.len().min(4096);
+        while !text.is_char_boundary(end) {
+            end -= 1;
+        }
+        match &mut self.buffer {
+            Buffer::Ordinary(value) => {
+                value.try_reserve(end).map_err(MemoryError::from)?;
+                value.push_str(&text[..end]);
+            }
+            Buffer::Controlled(value) => value.push_str(&text[..end])?,
+        }
+        self.control.check()?;
+        Ok(end)
     }
 
     pub fn push(&mut self, character: char) -> Result<(), ValueRetentionError> {
@@ -151,6 +157,53 @@ impl std::ops::Deref for ProductionString<'_> {
 mod tests {
     use super::*;
     use crate::{memory::MemoryBudget, CancellationToken};
+
+    #[test]
+    fn string_chunks_share_utf8_boundaries_and_admission_with_inline_copying() {
+        let source = format!("{}€🙂{}", "a".repeat(4095), "δ".repeat(7000));
+        let native = MemoryBudget::new(1 << 20);
+        let original = CancellationToken::new();
+        let invoking = CancellationToken::new();
+        let control = ProductionControl::new(&native, &original, &invoking);
+        let expected = control.copy_text(&source).unwrap();
+        let mut output = ProductionString::new(control);
+        output.reserve(source.len()).unwrap();
+        let mut offset = 0;
+        while offset < source.len() {
+            let copied = output.push_str_chunk(&source[offset..]).unwrap();
+            assert!((1..=4096).contains(&copied));
+            if offset == 0 {
+                assert_eq!(copied, 4095);
+            }
+            offset += copied;
+            assert!(source.is_char_boundary(offset));
+            assert_eq!(&*output, &source[..offset]);
+        }
+        assert_eq!(output.push_str_chunk("").unwrap(), 0);
+        let output = output.finish().unwrap();
+        assert_eq!(*output, *expected);
+        assert_eq!(output.reserved_bytes(), expected.reserved_bytes());
+        drop((output, expected));
+        assert_eq!(native.used(), 0);
+        let exhausted = MemoryBudget::new(0);
+        let denied = ProductionControl::new(&exhausted, &original, &invoking);
+        assert!(ProductionString::new(denied).push_str_chunk("é").is_err());
+        for cancel_original in [true, false] {
+            let original = CancellationToken::new();
+            let invoking = CancellationToken::new();
+            let control = ProductionControl::new(&native, &original, &invoking);
+            if cancel_original {
+                original.cancel();
+            } else {
+                invoking.cancel();
+            }
+            assert!(matches!(
+                ProductionString::new(control).push_str_chunk(""),
+                Err(ValueRetentionError::Cancelled(_))
+            ));
+        }
+        assert_eq!(native.used(), 0);
+    }
 
     #[test]
     fn resumed_string_keeps_capacity_and_releases_on_both_cancellations() {

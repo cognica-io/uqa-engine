@@ -145,16 +145,37 @@ pub const MAX_ATTRIBUTES: usize = 1600;
 /// Whether values of a type carry a collation.
 #[must_use]
 pub fn type_is_collatable(ty: &ColumnType) -> bool {
-    match ty {
-        ColumnType::Text
-        | ColumnType::Varchar(_)
-        | ColumnType::Bpchar
-        | ColumnType::Character(_)
-        | ColumnType::Name
-        | ColumnType::PgNodeTree => true,
-        ColumnType::Domain { base, .. } | ColumnType::Array(base) => type_is_collatable(base),
-        _ => false,
+    crate::catalog::work::inline(type_is_collatable_from(
+        ty,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+        &mut (),
+    ))
+    .expect("ordinary type collation inspection cannot be cancelled")
+}
+
+pub(crate) async fn type_is_collatable_from<W: crate::plan::ScalarInputWork>(
+    mut ty: &ColumnType,
+    control: &uqa_core::memory::ProductionControl<'_>,
+    work: &mut W,
+) -> Result<bool, W::Error> {
+    loop {
+        control.check()?;
+        work.checkpoint().await?;
+        control.check()?;
+        match ty {
+            ColumnType::Domain { base, .. } | ColumnType::Array(base) => ty = base,
+            _ => break,
+        }
     }
+    Ok(matches!(
+        ty,
+        ColumnType::Text
+            | ColumnType::Varchar(_)
+            | ColumnType::Bpchar
+            | ColumnType::Character(_)
+            | ColumnType::Name
+            | ColumnType::PgNodeTree
+    ))
 }
 
 pub use crate::catalog::collations::builtin_collation_oid;

@@ -26,10 +26,7 @@ impl OwnedScalarExpr {
         control.check()?;
         let mut output = Self {
             expression: ScalarExpr::Literal(Value::Null),
-            memory: control.empty_reservation().map(|direct| ScalarMemory {
-                children: Vec::new(),
-                direct,
-            }),
+            memory: control.empty_reservation().map(ScalarMemory::new),
         };
         let (value, value_memory) = value.into_parts();
         let (ty, type_memory) = declaration.into_parts();
@@ -65,10 +62,7 @@ impl OwnedScalarExpr {
     ) -> Result<Self> {
         let output = Self {
             expression: ScalarExpr::RetainedLiteral(literal),
-            memory: control.empty_reservation().map(|direct| ScalarMemory {
-                children: Vec::new(),
-                direct,
-            }),
+            memory: control.empty_reservation().map(ScalarMemory::new),
         };
         control.check()?;
         Ok(output)
@@ -85,16 +79,13 @@ impl OwnedScalarExpr {
         control.check()?;
         let mut output = Self {
             expression: ScalarExpr::Literal(Value::Null),
-            memory: control.empty_reservation().map(|direct| ScalarMemory {
-                children: Vec::new(),
-                direct,
-            }),
+            memory: control.empty_reservation().map(ScalarMemory::new),
         };
         if let Some(owner) = &mut output.memory {
             owner.reserve_children(1)?;
         }
         let boxed = control.reserve(size_of::<ScalarExpr>())?;
-        let Self { expression, memory } = child;
+        let (expression, memory) = child.into_rewrite_parts();
         let (ty, declaration_memory) = declaration.into_parts();
         output.expression = ScalarExpr::Cast {
             expr: Box::new(expression),

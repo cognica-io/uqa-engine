@@ -14,21 +14,46 @@ use crate::{
     SQLError,
 };
 use std::collections::BTreeSet;
-use uqa_core::RelationIdentity;
+use uqa_core::{
+    memory::{Produced, ProductionControl},
+    RelationIdentity,
+};
 
 pub trait StoredQuerySequences {
     fn query_sequence(&self, reference: &str) -> Result<String, String>;
     fn loaded_query_sequence(&self, reference: &str) -> Result<String, String>;
+
+    /// External callbacks own name construction; their returned buffer transfers without copying. Native catalogs override this boundary to admit candidates and the selected name before allocation.
+    fn query_sequence_with_control(
+        &self,
+        reference: &str,
+        control: &ProductionControl<'_>,
+    ) -> Result<Produced<String>, SQLError> {
+        sequences::external_name(|| self.query_sequence(reference), control)
+    }
+
+    /// Resolve only against already-loaded catalog state with the same ownership contract as the live lookup.
+    fn loaded_query_sequence_with_control(
+        &self,
+        reference: &str,
+        control: &ProductionControl<'_>,
+    ) -> Result<Produced<String>, SQLError> {
+        sequences::external_name(|| self.loaded_query_sequence(reference), control)
+    }
 }
 /// Namespace metadata captured at the start of a stored query binding pass.
 pub struct StoredQueryNamespace {
     pub temporary_schema: String,
     pub transition_relations: BTreeSet<String>,
 }
-pub struct StoredQueryBindingContext<'a> {
-    pub relations: &'a dyn StoredRelationCatalog,
+pub struct StoredQueryBindingContext<
+    'a,
+    R: ?Sized = dyn StoredRelationCatalog + 'a,
+    S: ?Sized = dyn StoredQuerySequences + 'a,
+> {
+    pub relations: &'a R,
     pub lookup_mode: RelationLookupMode,
-    pub sequences: &'a dyn StoredQuerySequences,
+    pub sequences: &'a S,
     pub temporary_schema: &'a str,
     pub transition_relations: &'a BTreeSet<String>,
 }
@@ -36,17 +61,26 @@ pub struct StoredQueryBindingContext<'a> {
 pub fn resolve_loaded_query_sequence(
     reference: &str,
     candidates: Vec<RelationIdentity>,
-    mut contains: impl FnMut(&RelationIdentity) -> bool,
+    contains: impl FnMut(&RelationIdentity) -> bool,
 ) -> Result<String, String> {
-    candidates
-        .into_iter()
-        .find(|candidate| contains(candidate))
-        .map(|candidate| candidate.qualified_name())
-        .ok_or_else(|| format!("Sequence `{reference}` does not exist"))
+    sequences::resolve_loaded_query_sequence_with_control(
+        reference,
+        &candidates,
+        contains,
+        &ProductionControl::uncontrolled(),
+    )
+    .map(|name| name.into_uncontrolled().expect("ordinary sequence lookup"))
+    .map_err(|error| match error {
+        SQLError::Unsupported(message) => message,
+        error => error.to_string(),
+    })
 }
 
-pub fn bind_stored_query_relations(
-    catalog: &StoredQueryBindingContext<'_>,
+pub fn bind_stored_query_relations<
+    R: StoredRelationCatalog + ?Sized,
+    S: StoredQuerySequences + ?Sized,
+>(
+    catalog: &StoredQueryBindingContext<'_, R, S>,
     plan: &mut QueryPlan,
     context: &str,
     reject_transition_relations: bool,
@@ -54,64 +88,32 @@ pub fn bind_stored_query_relations(
 ) -> Result<bool, SQLError> {
     let mut uses_temporary_relation = false;
     bind_query_plan_relations(plan, &std::collections::BTreeSet::new(), &mut |reference| {
-        if catalog.lookup_mode == RelationLookupMode::Dynamic {
-            if let Some(canonical) = catalog
-                .relations
-                .resolve_age_label_relation_name(reference)?
-            {
-                return Ok(canonical);
-            }
-        }
-        if RelationIdentity::parse_reference(reference).is_ok_and(|(schema, relation)| {
-            schema.is_none() && catalog.transition_relations.contains(&relation)
-        }) {
-            if reject_transition_relations {
-                return Err(SQLError::Routine {
-                    sqlstate: "0A000".into(),
-                    message: "transition tables cannot be referenced in a view definition".into(),
-                });
-            }
-            return Ok(reference.to_string());
-        }
-        let resolved = match (catalog.lookup_mode, loaded_catalog) {
-            (RelationLookupMode::Bound, _) => {
-                catalog.relations.resolve_bound_relation_kind(reference)?
-            }
-            (RelationLookupMode::Dynamic, true) => catalog
-                .relations
-                .resolve_loaded_visible_relation_kind(reference)?,
-            (RelationLookupMode::Dynamic, false) => {
-                catalog.relations.resolve_visible_relation_kind(reference)?
-            }
-        }
-        .into_found();
-        match resolved {
-            Some((canonical, "table" | "view" | "materialized view" | "foreign table")) => {
-                uses_temporary_relation |= RelationIdentity::from_legacy_name(&canonical)
-                    .is_ok_and(|relation| relation.schema == catalog.temporary_schema);
-                Ok(canonical)
-            }
-            Some((canonical, "composite type")) => Err(composite_relation_error(&canonical)),
-            Some((canonical, kind)) => Err(SQLError::Routine {
-                sqlstate: "42809".into(),
-                message: format!(
-                    "{context} source \"{canonical}\" is a {kind}, not a row relation"
-                ),
-            }),
-            None => Err(SQLError::UnknownTable(reference.to_string())),
-        }
+        let (canonical, temporary) = catalog.canonical_relation_with_control(
+            reference,
+            context,
+            reject_transition_relations,
+            loaded_catalog,
+            &uqa_core::memory::ProductionControl::uncontrolled(),
+        )?;
+        uses_temporary_relation |= temporary;
+        Ok::<_, SQLError>(
+            canonical
+                .into_uncontrolled()
+                .expect("ordinary stored binding"),
+        )
     })?;
     bind_query_plan_sequence_references(plan, &mut |reference| {
-        let resolved = if loaded_catalog {
-            catalog.sequences.loaded_query_sequence(reference)
-        } else {
-            catalog.sequences.query_sequence(reference)
-        };
-        resolved.map_err(|error| {
-            SQLError::Unsupported(format!(
-                "{context} sequence reference `{reference}`: {error}"
-            ))
-        })
+        Ok::<_, SQLError>(
+            catalog
+                .canonical_sequence_with_control(
+                    reference,
+                    context,
+                    loaded_catalog,
+                    &ProductionControl::uncontrolled(),
+                )?
+                .into_uncontrolled()
+                .expect("ordinary sequence binding"),
+        )
     })?;
     Ok(uses_temporary_relation)
 }
@@ -125,6 +127,10 @@ pub(super) fn composite_relation_error(canonical: &str) -> SQLError {
     }
     .error()
 }
+
+mod production;
+mod sequences;
+pub use sequences::{resolve_query_sequence_with_control, select_query_sequence_with_control};
 
 #[cfg(test)]
 mod tests;

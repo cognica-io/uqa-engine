@@ -116,3 +116,88 @@ fn retained_value_copy_failure_retires_each_partially_constructed_native_owner()
         assert_eq!(budget.used(), 0, "{failure}");
     }
 }
+
+fn controlled_input(
+    value: Value,
+    native: &MemoryBudget,
+    work: &MemoryBudget,
+    original: &CancellationToken,
+    invoking: &CancellationToken,
+) -> ImageDecoder<Produced<Value>> {
+    let native = native.clone();
+    let original = original.clone();
+    ImageDecoder::new(work, invoking, |mut reader| async move {
+        let mut input = reader.input();
+        let control = ProductionControl::new(&native, &original, input.cancellation);
+        value
+            .clone_from_input(&control, &mut input)
+            .await
+            .map_err(|error| match error {
+                ValueRetentionError::Memory(error) => crate::image_io::ImageIoError::Memory(error),
+                ValueRetentionError::Cancelled(error) => {
+                    crate::image_io::ImageIoError::Cancelled(error)
+                }
+                error @ ValueRetentionError::Malformed { .. } => {
+                    panic!("unexpected copying error: {error}")
+                }
+            })
+    })
+    .unwrap()
+}
+
+#[test]
+fn retained_value_copy_keeps_destination_allowance_separate_from_work_channel() {
+    let native = MemoryBudget::new(1 << 20);
+    let work = MemoryBudget::new(1 << 20);
+    let token = CancellationToken::new();
+    let source = Value::List(vec![
+        Value::Str("é🦀".repeat(4096)),
+        Value::Bytes(vec![7; 32768]),
+    ]);
+    let control = ProductionControl::new(&native, &token, &token);
+    let ordinary = control.copy_value(&source).unwrap();
+    let copied = controlled_input(source, &native, &work, &token, &token)
+        .read(&mut NoRead)
+        .unwrap();
+    assert_eq!(*copied, *ordinary);
+    assert_eq!(copied.reserved_bytes(), ordinary.reserved_bytes());
+    assert_eq!(native.used(), copied.reserved_bytes() * 2);
+    assert_eq!(work.used(), 0);
+    drop((copied, ordinary));
+    assert_eq!(native.used(), 0);
+}
+
+#[test]
+fn retained_value_copy_keeps_both_cancellation_owners_active_inside_large_payloads() {
+    for cancel_original in [true, false] {
+        let native = MemoryBudget::new(1 << 20);
+        let work = MemoryBudget::new(1 << 20);
+        let original = CancellationToken::new();
+        let invoking = CancellationToken::new();
+        let mut input = controlled_input(
+            Value::Str("é🦀".repeat(8192)),
+            &native,
+            &work,
+            &original,
+            &invoking,
+        );
+        for _ in 0..5 {
+            assert!(input
+                .advance(&mut NoRead, ImageDecodeWindow { bytes: 1, steps: 1 })
+                .unwrap()
+                .is_none());
+        }
+        assert!(native.used() > 0);
+        if cancel_original {
+            original.cancel();
+        } else {
+            invoking.cancel();
+        }
+        assert!(matches!(
+            input.advance(&mut NoRead, ImageDecodeWindow { bytes: 1, steps: 1 }),
+            Err(crate::image_io::ImageIoError::Cancelled(_))
+        ));
+        drop(input);
+        assert_eq!((native.used(), work.used()), (0, 0));
+    }
+}

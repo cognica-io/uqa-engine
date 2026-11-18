@@ -63,6 +63,21 @@ pub struct CompositeRowBinding {
     pub argument_types: Option<Vec<ColumnType>>,
 }
 
+impl CompositeRowBinding {
+    pub(crate) fn retire_step(&mut self) -> bool {
+        let Some(types) = self.argument_types.as_mut() else {
+            return true;
+        };
+        let Some(last) = types.last_mut() else {
+            return true;
+        };
+        if last.retire_step() {
+            types.pop();
+        }
+        false
+    }
+}
+
 /// Definition-time layout of a typed ROW, including positions that were already dropped.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

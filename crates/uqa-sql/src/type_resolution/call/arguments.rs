@@ -6,7 +6,11 @@
 
 //! Temporary argument slots keep their own capacity separate from independently owned scalar payloads.
 
-use crate::{plan::OwnedScalarExpr, SQLError};
+use crate::{
+    plan::{OwnedScalarExpr, ScalarInputWork},
+    schema::retention::CatalogRetentionError,
+    SQLError,
+};
 use uqa_core::memory::{MemoryReservation, ProductionControl, ProductionVec};
 
 pub(in crate::type_resolution) struct Arguments<'a> {
@@ -54,25 +58,28 @@ impl<'a> Arguments<'a> {
     }
 
     pub(in crate::type_resolution) fn finish(self) -> Result<OwnedScalarExpr, SQLError> {
-        let (values, memory) = self.values.finish()?.into_parts();
-        Ok(OwnedScalarExpr::boolean(
-            ArgumentIterator {
-                values: values.into_iter(),
-                _memory: memory,
-            },
-            false,
-            &self.control,
+        Ok(crate::catalog::work::inline(
+            self.finish_from(false, &mut ()),
         )?)
     }
 
-    pub(in crate::type_resolution) fn finish_array(self) -> Result<OwnedScalarExpr, SQLError> {
+    pub(in crate::type_resolution) async fn finish_from<W: ScalarInputWork>(
+        self,
+        array: bool,
+        work: &mut W,
+    ) -> Result<OwnedScalarExpr, W::Error>
+    where
+        W::Error: From<CatalogRetentionError>,
+    {
         let (values, memory) = self.values.finish()?.into_parts();
-        Ok(OwnedScalarExpr::array(
-            ArgumentIterator {
-                values: values.into_iter(),
-                _memory: memory,
-            },
-            &self.control,
-        )?)
+        let children = ArgumentIterator {
+            values: values.into_iter(),
+            _memory: memory,
+        };
+        if array {
+            OwnedScalarExpr::array_from(children, &self.control, work).await
+        } else {
+            OwnedScalarExpr::boolean_from(children, false, &self.control, work).await
+        }
     }
 }

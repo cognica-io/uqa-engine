@@ -18,236 +18,24 @@ impl ScalarExpr {
         .unwrap_or_else(|never| match never {});
     }
 
-    /// Visit a window call's arguments, `FILTER` condition, partition and ordering keys, and frame offsets.
-    fn try_visit_window<'a, E>(
-        args: &'a [Self],
-        filter: Option<&'a Self>,
-        spec: &'a super::ScalarWindowSpec,
-        visitor: &mut impl FnMut(&'a Self) -> Result<bool, E>,
-    ) -> Result<(), E> {
-        for expression in args
-            .iter()
-            .chain(filter)
-            .chain(&spec.partition_by)
-            .chain(spec.order_by.iter().map(|order| &order.expr))
-        {
-            expression.try_visit(visitor)?;
-        }
-        for bound in spec
-            .frame
-            .iter()
-            .flat_map(|frame| [&frame.start, &frame.end])
-        {
-            if let ScalarFrameBound::Preceding(expression)
-            | ScalarFrameBound::Following(expression) = bound
-            {
-                expression.try_visit(visitor)?;
-            }
-        }
-        Ok(())
-    }
-
     /// Visit in pre-order, skipping a subtree when the visitor returns false and stopping immediately on its first error.
     pub fn try_visit<'a, E>(
         &'a self,
         visitor: &mut impl FnMut(&'a Self) -> Result<bool, E>,
     ) -> Result<(), E> {
-        if !visitor(self)? {
-            return Ok(());
-        }
-        match self {
-            Self::And(parts)
-            | Self::Or(parts)
-            | Self::Array(parts)
-            | Self::Row(parts)
-            | Self::CompositeRow { items: parts, .. } => {
-                for part in parts {
-                    part.try_visit(visitor)?;
-                }
+        if visitor(self)? {
+            for child in self.children(super::children::Scope::Complete) {
+                child.try_visit(visitor)?;
             }
-            Self::Not(inner)
-            | Self::UnaryMinus(inner)
-            | Self::Cast { expr: inner, .. }
-            | Self::Collated { expr: inner, .. }
-            | Self::IsNull { expr: inner, .. }
-            | Self::InSubquery { expr: inner, .. } => inner.try_visit(visitor)?,
-            Self::Binary { lhs, rhs, .. } => {
-                lhs.try_visit(visitor)?;
-                rhs.try_visit(visitor)?;
-            }
-            Self::Between { expr, low, high } => {
-                expr.try_visit(visitor)?;
-                low.try_visit(visitor)?;
-                high.try_visit(visitor)?;
-            }
-            Self::InList { expr, list, .. } => {
-                expr.try_visit(visitor)?;
-                for part in list {
-                    part.try_visit(visitor)?;
-                }
-            }
-            Self::Func {
-                args,
-                order_by,
-                filter,
-                ..
-            } => {
-                for argument in args {
-                    argument.try_visit(visitor)?;
-                }
-                for order in order_by {
-                    order.expr.try_visit(visitor)?;
-                }
-                if let Some(filter) = filter {
-                    filter.try_visit(visitor)?;
-                }
-            }
-            Self::WindowCall {
-                args, spec, filter, ..
-            } => Self::try_visit_window(args, filter.as_deref(), spec, visitor)?,
-            Self::Case {
-                base,
-                when,
-                else_branch,
-            } => {
-                if let Some(base) = base {
-                    base.try_visit(visitor)?;
-                }
-                for (condition, result) in when {
-                    condition.try_visit(visitor)?;
-                    result.try_visit(visitor)?;
-                }
-                if let Some(else_branch) = else_branch {
-                    else_branch.try_visit(visitor)?;
-                }
-            }
-            Self::Default
-            | Self::Star
-            | Self::QualifiedStar(_)
-            | Self::Column(_)
-            | Self::Position(_)
-            | Self::InternalColumn(_)
-            | Self::QualifiedColumn { .. }
-            | Self::Literal(_)
-            | Self::TypedLiteral { .. }
-            | Self::RetainedLiteral(_)
-            | Self::Param(_)
-            | Self::ScalarSubquery(_)
-            | Self::Exists { .. } => {}
         }
         Ok(())
-    }
-
-    /// Visit a window call's arguments, `FILTER` condition, partition and ordering keys, and frame offsets mutably.
-    fn visit_window_mut(
-        args: &mut [Self],
-        filter: Option<&mut Self>,
-        spec: &mut super::ScalarWindowSpec,
-        visitor: &mut impl FnMut(&mut Self),
-    ) {
-        for expression in args
-            .iter_mut()
-            .chain(filter)
-            .chain(&mut spec.partition_by)
-            .chain(spec.order_by.iter_mut().map(|order| &mut order.expr))
-        {
-            expression.visit_mut(visitor);
-        }
-        for bound in spec
-            .frame
-            .iter_mut()
-            .flat_map(|frame| [&mut frame.start, &mut frame.end])
-        {
-            if let ScalarFrameBound::Preceding(expression)
-            | ScalarFrameBound::Following(expression) = bound
-            {
-                expression.visit_mut(visitor);
-            }
-        }
     }
 
     /// Visit this expression and every nested scalar expression mutably in pre-order: a node is visited before its children, so the children of a node the visitor replaces are those of the replacement.
     pub fn visit_mut(&mut self, visitor: &mut impl FnMut(&mut Self)) {
         visitor(self);
-        match self {
-            Self::And(parts)
-            | Self::Or(parts)
-            | Self::Array(parts)
-            | Self::Row(parts)
-            | Self::CompositeRow { items: parts, .. } => {
-                for part in parts {
-                    part.visit_mut(visitor);
-                }
-            }
-            Self::Not(inner)
-            | Self::UnaryMinus(inner)
-            | Self::Cast { expr: inner, .. }
-            | Self::Collated { expr: inner, .. }
-            | Self::IsNull { expr: inner, .. }
-            | Self::InSubquery { expr: inner, .. } => inner.visit_mut(visitor),
-            Self::Binary { lhs, rhs, .. } => {
-                lhs.visit_mut(visitor);
-                rhs.visit_mut(visitor);
-            }
-            Self::Between { expr, low, high } => {
-                expr.visit_mut(visitor);
-                low.visit_mut(visitor);
-                high.visit_mut(visitor);
-            }
-            Self::InList { expr, list, .. } => {
-                expr.visit_mut(visitor);
-                for part in list {
-                    part.visit_mut(visitor);
-                }
-            }
-            Self::Func {
-                args,
-                order_by,
-                filter,
-                ..
-            } => {
-                for argument in args {
-                    argument.visit_mut(visitor);
-                }
-                for order in order_by {
-                    order.expr.visit_mut(visitor);
-                }
-                if let Some(filter) = filter {
-                    filter.visit_mut(visitor);
-                }
-            }
-            Self::WindowCall {
-                args, spec, filter, ..
-            } => Self::visit_window_mut(args, filter.as_deref_mut(), spec, visitor),
-            Self::Case {
-                base,
-                when,
-                else_branch,
-            } => {
-                if let Some(base) = base {
-                    base.visit_mut(visitor);
-                }
-                for (condition, result) in when {
-                    condition.visit_mut(visitor);
-                    result.visit_mut(visitor);
-                }
-                if let Some(else_branch) = else_branch {
-                    else_branch.visit_mut(visitor);
-                }
-            }
-            Self::Default
-            | Self::Star
-            | Self::QualifiedStar(_)
-            | Self::Column(_)
-            | Self::Position(_)
-            | Self::InternalColumn(_)
-            | Self::QualifiedColumn { .. }
-            | Self::Literal(_)
-            | Self::TypedLiteral { .. }
-            | Self::RetainedLiteral(_)
-            | Self::Param(_)
-            | Self::ScalarSubquery(_)
-            | Self::Exists { .. } => {}
+        for child in self.children_mut(super::children::Scope::Complete) {
+            child.visit_mut(visitor);
         }
     }
 
@@ -358,61 +146,27 @@ impl ScalarExpr {
 
     #[must_use]
     pub fn contains_window(&self) -> bool {
-        match self {
-            Self::WindowCall { .. } => true,
-            Self::Func {
-                args,
-                order_by,
-                filter,
-                ..
-            } => {
-                args.iter().any(Self::contains_window)
-                    || order_by.iter().any(|order| order.expr.contains_window())
-                    || filter.as_deref().is_some_and(Self::contains_window)
-            }
-            Self::Array(items)
-            | Self::Row(items)
-            | Self::CompositeRow { items, .. }
-            | Self::And(items)
-            | Self::Or(items) => items.iter().any(Self::contains_window),
-            Self::Binary { lhs, rhs, .. } => lhs.contains_window() || rhs.contains_window(),
-            Self::UnaryMinus(expr)
-            | Self::Not(expr)
-            | Self::IsNull { expr, .. }
-            | Self::Cast { expr, .. }
-            | Self::Collated { expr, .. }
-            | Self::InSubquery { expr, .. } => expr.contains_window(),
-            Self::Between { expr, low, high } => {
-                expr.contains_window() || low.contains_window() || high.contains_window()
-            }
-            Self::InList { expr, list, .. } => {
-                expr.contains_window() || list.iter().any(Self::contains_window)
-            }
-            Self::Case {
-                base,
-                when,
-                else_branch,
-            } => {
-                base.as_deref().is_some_and(Self::contains_window)
-                    || when.iter().any(|(condition, result)| {
-                        condition.contains_window() || result.contains_window()
-                    })
-                    || else_branch.as_deref().is_some_and(Self::contains_window)
-            }
-            Self::Default
-            | Self::Star
-            | Self::QualifiedStar(_)
-            | Self::Column(_)
-            | Self::QualifiedColumn { .. }
-            | Self::Position(_)
-            | Self::InternalColumn(_)
-            | Self::Literal(_)
-            | Self::TypedLiteral { .. }
-            | Self::RetainedLiteral(_)
-            | Self::Param(_)
-            | Self::ScalarSubquery(_)
-            | Self::Exists { .. } => false,
-        }
+        crate::catalog::work::inline(self.contains_window_with_work(
+            &uqa_core::memory::ProductionControl::uncontrolled(),
+            &mut (),
+        ))
+        .expect("ordinary window observation")
+    }
+
+    pub(crate) async fn contains_window_with_work<W: crate::catalog::work::Work>(
+        &self,
+        control: &uqa_core::memory::ProductionControl<'_>,
+        work: &mut W,
+    ) -> Result<bool, crate::SQLError> {
+        use super::observation::Decision;
+        super::observation::visit(self, control, work, true, &mut |expression| {
+            Ok(if matches!(expression, Self::WindowCall { .. }) {
+                Decision::Stop
+            } else {
+                Decision::Descend
+            })
+        })
+        .await
     }
 
     #[must_use]

@@ -6,12 +6,15 @@
 
 //! AST lowering can publish independently movable scalar children directly.
 
+mod input;
+pub(in crate::plan) use input::ScalarQueryInput;
+
 use super::{
     resources::{Control, Lowering, Result},
     source::Source,
     AggregateClassifier, Expr, OwnedScalarExpr, QueryLowering, ScalarExpr, ScalarMemory,
 };
-use uqa_core::memory::{BudgetedVec, ProductionControl};
+use uqa_core::memory::ProductionControl;
 
 impl super::super::ExpressionPlan {
     /// Lower borrowed scalar syntax directly into a mutable owner. Every child retains its own allocation lease, so subsequent selection or replacement releases discarded payloads without copying the completed scalar tree. Query children retain the scalar-only lowerer's rejection behavior.
@@ -19,8 +22,8 @@ impl super::super::ExpressionPlan {
         expression: &Expr,
         control: &ProductionControl<'_>,
     ) -> Result<OwnedScalarExpr> {
-        lower_owned(
-            Source::Borrowed(expression),
+        lower_scalar_with_arena(
+            expression,
             &super::super::NoRegisteredAggregates,
             &mut Vec::new(),
             *control,
@@ -46,7 +49,7 @@ impl Lowering<'_> {
         self.owned_children
             .as_mut()
             .expect("mutable scalar lowering")
-            .reserve(1)?;
+            .reserve_children(1)?;
         let child = lower_owned(expression, aggregates, subqueries, control)?;
         OwnedScalarExpr::attach_child(self, child)
     }
@@ -61,7 +64,9 @@ fn lower_owned(
     control.check()?;
     let mut lowering = Lowering {
         control: control.budget().map(|_| Control::from_production(control)),
-        owned_children: control.budget().map(BudgetedVec::new),
+        owned_children: control
+            .budget()
+            .map(|budget| ScalarMemory::new(budget.empty_reservation())),
     };
     let expression = lowering.expression_node(expression, aggregates, subqueries)?;
     let output = OwnedScalarExpr::from_rewrite_parts(
@@ -83,6 +88,9 @@ pub(in crate::plan) fn lower_scalar_with_arena(
     subqueries: &mut dyn QueryLowering,
     control: ProductionControl<'_>,
 ) -> Result<OwnedScalarExpr> {
+    if control.budget().is_some() {
+        return input::lower_inline(expression, aggregates, subqueries, control);
+    }
     lower_owned(
         Source::Borrowed(expression),
         aggregates,
@@ -93,3 +101,14 @@ pub(in crate::plan) fn lower_scalar_with_arena(
 
 #[cfg(test)]
 mod tests;
+
+pub(super) fn lower_immutable(
+    expression: &Expr,
+    control: &ProductionControl<'_>,
+) -> Result<uqa_core::memory::Produced<ScalarExpr>> {
+    if control.budget().is_some() {
+        input::lower_inline_immutable(expression, control)
+    } else {
+        crate::plan::ExpressionPlan::lower_scalar_for_rewrite(expression, control)?.finish(control)
+    }
+}

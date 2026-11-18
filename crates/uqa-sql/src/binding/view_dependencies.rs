@@ -13,7 +13,9 @@ use crate::{
 };
 use uqa_core::{RelationIdentity, Value};
 
+pub(crate) mod owned;
 mod references;
+pub(crate) use owned::bind_query_relation_targets_owned;
 pub use references::{
     visit_stored_plan_function_bindings, visit_stored_plan_output_types,
     visit_stored_plan_relation_references,
@@ -34,7 +36,7 @@ pub fn sequence_function_reference_mut(expression: &mut ScalarExpr) -> Option<&m
     regclass_literal_mut(args.first_mut()?)
 }
 
-fn is_sequence_function(name: &str) -> bool {
+pub(crate) fn is_sequence_function(name: &str) -> bool {
     let local = match name.split_once('.') {
         Some((schema, local)) if schema.eq_ignore_ascii_case("pg_catalog") => local,
         None => name,
@@ -52,31 +54,27 @@ pub fn sequence_function_reference(expression: &ScalarExpr) -> Option<&str> {
     if !is_sequence_function(name) {
         return None;
     }
-    fn regclass_literal(expression: &ScalarExpr) -> Option<&str> {
+    let mut expression = args.first()?;
+    loop {
         match expression {
-            ScalarExpr::Literal(Value::Str(reference)) => Some(reference),
-            ScalarExpr::Cast { expr, ty, .. }
-                if crate::ColumnType::from_sql_name(ty)
-                    .is_ok_and(|ty| matches!(ty, crate::ColumnType::Regclass)) =>
-            {
-                regclass_literal(expr)
-            }
-            _ => None,
+            ScalarExpr::Literal(Value::Str(reference)) => return Some(reference),
+            ScalarExpr::Cast { expr, ty, .. } if is_regclass_cast(ty) => expression = expr,
+            _ => return None,
         }
     }
-    regclass_literal(args.first()?)
 }
 
-pub fn regclass_literal_mut(expression: &mut ScalarExpr) -> Option<&mut String> {
-    match expression {
-        ScalarExpr::Literal(Value::Str(reference)) => Some(reference),
-        ScalarExpr::Cast { expr, ty, .. }
-            if crate::ColumnType::from_sql_name(ty)
-                .is_ok_and(|ty| matches!(ty, crate::ColumnType::Regclass)) =>
-        {
-            regclass_literal_mut(expr)
+pub(crate) fn is_regclass_cast(ty: &str) -> bool {
+    crate::ColumnType::from_sql_name(ty).is_ok_and(|ty| matches!(ty, crate::ColumnType::Regclass))
+}
+
+pub fn regclass_literal_mut(mut expression: &mut ScalarExpr) -> Option<&mut String> {
+    loop {
+        match expression {
+            ScalarExpr::Literal(Value::Str(reference)) => return Some(reference),
+            ScalarExpr::Cast { expr, ty, .. } if is_regclass_cast(ty) => expression = expr,
+            _ => return None,
         }
-        _ => None,
     }
 }
 
@@ -691,21 +689,7 @@ fn bind_cte_relation_targets<E>(
     if let Some(target) = command.mutation_target_mut() {
         *target = resolve(target, include_descendants)?;
     }
-    match command.as_mut() {
-        crate::plan::CommandPlan::Insert(plan) => {
-            plan.target_relation_bound = true;
-            plan.relations_bound = true;
-        }
-        crate::plan::CommandPlan::Update(plan) => {
-            plan.target_relation_bound = true;
-            plan.relations_bound = true;
-        }
-        crate::plan::CommandPlan::Delete(plan) => {
-            plan.target_relation_bound = true;
-            plan.relations_bound = true;
-        }
-        _ => {}
-    }
+    command.mark_stored_cte_target_bound();
     let mut visible = inherited.clone();
     if let Some(ctes) = command.ctes_mut() {
         let recursive = ctes.iter().any(|cte| cte.recursive).then(|| {

@@ -9,7 +9,7 @@
 use std::collections::BTreeSet;
 use std::io::BufRead;
 use std::process::{Child, Command, ExitStatus, Stdio};
-use std::sync::mpsc::{self, RecvTimeoutError};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, TryRecvError};
 use std::time::{Duration, Instant};
 
 struct Progress<'a> {
@@ -55,6 +55,8 @@ impl<'a> Progress<'a> {
                 return Err(format!("unexpected fixture summary: {line}"));
             }
             self.summary = true;
+        } else {
+            self.remaining(now)?;
         }
         Ok(())
     }
@@ -63,14 +65,33 @@ impl<'a> Progress<'a> {
         self.deadline
             .checked_duration_since(now)
             .filter(|remaining| !remaining.is_zero())
-            .ok_or_else(|| {
-                format!(
-                    "no new fixture completed within {:?}; completed {}/{}",
-                    self.allowance,
-                    self.completed.len(),
-                    self.expected
-                )
-            })
+            .ok_or_else(|| self.stalled())
+    }
+
+    fn stalled(&self) -> String {
+        format!(
+            "no new fixture completed within {:?}; completed {}/{}",
+            self.allowance,
+            self.completed.len(),
+            self.expected
+        )
+    }
+
+    fn receive(
+        &self,
+        receiver: &Receiver<std::io::Result<String>>,
+    ) -> Result<Option<String>, String> {
+        let result = match receiver.try_recv() {
+            Ok(line) => Ok(line),
+            Err(TryRecvError::Disconnected) => Err(RecvTimeoutError::Disconnected),
+            Err(TryRecvError::Empty) => receiver.recv_timeout(self.remaining(Instant::now())?),
+        };
+        match result {
+            Ok(Ok(line)) => Ok(Some(line)),
+            Ok(Err(error)) => Err(format!("cannot read child suite: {error}")),
+            Err(RecvTimeoutError::Timeout) => Err(self.stalled()),
+            Err(RecvTimeoutError::Disconnected) => Ok(None),
+        }
     }
 
     fn finish(self) -> Result<(), String> {
@@ -92,13 +113,16 @@ struct OwnedChild(Option<Child>);
 impl OwnedChild {
     fn finish(&mut self, progress: &Progress<'_>) -> Result<ExitStatus, String> {
         loop {
-            let remaining = progress.remaining(Instant::now())?;
             match self.0.as_mut().unwrap().try_wait() {
                 Ok(Some(status)) => {
                     self.0.take();
                     return Ok(status);
                 }
-                Ok(None) => std::thread::sleep(remaining.min(Duration::from_millis(10))),
+                Ok(None) => std::thread::sleep(
+                    progress
+                        .remaining(Instant::now())?
+                        .min(Duration::from_millis(10)),
+                ),
                 Err(error) => return Err(format!("cannot reap child suite: {error}")),
             }
         }
@@ -139,23 +163,9 @@ pub(super) fn run(
             }
         });
         let mut progress = Progress::new(prefix, expected, allowance, Instant::now());
-        loop {
-            let remaining = progress.remaining(Instant::now())?;
-            match receive.recv_timeout(remaining) {
-                Ok(Ok(line)) => {
-                    eprintln!("{label}: {line}");
-                    progress.observe(&line, Instant::now())?;
-                }
-                Ok(Err(error)) => return Err(format!("cannot read child suite: {error}")),
-                Err(RecvTimeoutError::Timeout) => {
-                    return Err(format!(
-                        "no new fixture completed within {allowance:?}; completed {}/{}",
-                        progress.completed.len(),
-                        expected
-                    ));
-                }
-                Err(RecvTimeoutError::Disconnected) => break,
-            }
+        while let Some(line) = progress.receive(&receive)? {
+            eprintln!("{label}: {line}");
+            progress.observe(&line, Instant::now())?;
         }
         drop(receive);
         let status = child.finish(&progress)?;

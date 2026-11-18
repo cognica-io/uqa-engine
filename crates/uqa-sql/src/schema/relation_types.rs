@@ -10,6 +10,7 @@ use super::{Arc, ColumnIdentity, ColumnType, RowSchema, SchemaMap};
 use crate::SQLError;
 
 mod production;
+mod retirement;
 
 /// Absent namespaces allocate no map; copies of a retained scope share its identities.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]

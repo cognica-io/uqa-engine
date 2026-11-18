@@ -6,6 +6,8 @@
 
 //! Reached procedural statements retain converted inputs and selected dependencies in their own executable destination.
 
+use crate::binding::preparation::{LiteralInput, SchemaContext};
+
 use super::{
     include_plan_dependencies, retain_input_metadata_owned, AnalyzedResult, ColumnType,
     ControlledBindingContext, MutableExecutablePlan, OidAliasInput, ParameterTypes, PlanRef,
@@ -192,26 +194,65 @@ pub fn bind_routine_parameter_references_owned(
     parameters: &RoutineParameterScope,
     control: &ProductionControl<'_>,
 ) -> Result<MutableExecutablePlan, SQLError> {
-    let mut scope = SchemaScope::for_analysis_with_control(binding, control)?;
+    let scope = SchemaScope::for_analysis_with_control(binding, control)?;
+    let references = routine_parameter_references(
+        routines,
+        plan.as_plan_ref(),
+        params,
+        scope,
+        parameters,
+        control,
+    )?;
+    references.apply_owned(&mut plan, routines, params, control)?;
+    super::normalize_windows(plan, control)
+}
+
+pub(in crate::binding) fn bind_routine_parameter_references(
+    routines: &dyn RoutineResolution,
+    plan: &mut crate::plan::UnifiedPlan,
+    params: &[SQLParam],
+    binding: &crate::binding::BindingContext<'_>,
+    parameters: &RoutineParameterScope,
+) -> Result<(), SQLError> {
+    let control = ProductionControl::uncontrolled();
+    let scope = SchemaScope::for_analysis(binding)?;
+    let references = routine_parameter_references(
+        routines,
+        PlanRef::from(&*plan),
+        params,
+        scope,
+        parameters,
+        &control,
+    )?;
+    references.apply(plan, routines, params)?;
+    plan.normalize_window_definitions()
+}
+
+fn routine_parameter_references(
+    routines: &dyn RoutineResolution,
+    plan: PlanRef<'_>,
+    params: &[SQLParam],
+    mut scope: SchemaScope,
+    parameters: &RoutineParameterScope,
+    control: &ProductionControl<'_>,
+) -> Result<super::super::parameters::InputConstants, SQLError> {
     scope.routine_parameters = Some(parameters.clone());
-    scope.scalar_binding = crate::binding::ScalarBindingMode::References;
+    scope.scalar_binding = crate::binding::ScalarBindingMode::RoutineParameters;
     scope.preserve_syntax_shape = true;
     let mut analysis = Preparation {
         bound_condition_queries: None,
         routines,
         scope: &mut scope,
         parameters: ParameterTypes::fixed_with_control(params, control)?.with_reference_retention(),
-        schema_expression: None,
+        schema_expression: (),
     };
-    analysis.observe_routine_parameter_references(plan.as_plan_ref(), parameters.schema())?;
-    let references = analysis.parameters.take_reference_constants();
-    references.apply_owned(&mut plan, routines, params, control)?;
-    Ok(plan)
+    analysis.observe_routine_parameter_references(plan, parameters.schema())?;
+    Ok(analysis.parameters.take_reference_constants())
 }
 
-impl Preparation<'_> {
+impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
     /// Parameter binding follows statement namespaces without selecting the calls that later statement analysis owns.
-    fn observe_routine_parameter_references(
+    pub(in crate::binding::preparation) fn observe_routine_parameter_references(
         &mut self,
         plan: PlanRef<'_>,
         outer: &crate::RowSchema,

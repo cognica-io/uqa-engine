@@ -30,17 +30,13 @@ pub(crate) fn canonical_catalog_relation_with_control(
             return Ok((canonical, true));
         }
     }
-    let resolution = match (lookup_mode, loaded_catalog) {
-        (RelationLookupMode::Dynamic, true) => {
-            catalog.resolve_loaded_visible_relation_kind_with_control(reference, control)?
-        }
-        (RelationLookupMode::Dynamic, false) => {
-            catalog.resolve_visible_relation_kind_with_control(reference, control)?
-        }
-        (RelationLookupMode::Bound, _) => {
-            catalog.resolve_bound_relation_kind_with_control(reference, control)?
-        }
-    };
+    let resolution = resolve_catalog_relation_kind_with_control(
+        catalog,
+        reference,
+        lookup_mode,
+        loaded_catalog,
+        control,
+    )?;
     let (resolution, memory) = resolution.into_parts();
     let canonical = match resolution {
         RelationResolution::Found(
@@ -78,6 +74,39 @@ pub(crate) fn canonical_catalog_relation_with_control(
     };
     validate(&canonical, control)?;
     Ok((canonical, false))
+}
+
+pub(super) fn resolve_catalog_relation_kind_with_control(
+    catalog: &(impl StoredRelationCatalog + ?Sized),
+    reference: &str,
+    lookup_mode: RelationLookupMode,
+    loaded_catalog: bool,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<RelationResolution>, SQLError> {
+    control.check()?;
+    if control.budget().is_none() {
+        let value = match (lookup_mode, loaded_catalog) {
+            (RelationLookupMode::Dynamic, true) => {
+                catalog.resolve_loaded_visible_relation_kind(reference)?
+            }
+            (RelationLookupMode::Dynamic, false) => {
+                catalog.resolve_visible_relation_kind(reference)?
+            }
+            (RelationLookupMode::Bound, _) => catalog.resolve_bound_relation_kind(reference)?,
+        };
+        return Ok(control.finish(value, None)?);
+    }
+    match (lookup_mode, loaded_catalog) {
+        (RelationLookupMode::Dynamic, true) => {
+            catalog.resolve_loaded_visible_relation_kind_with_control(reference, control)
+        }
+        (RelationLookupMode::Dynamic, false) => {
+            catalog.resolve_visible_relation_kind_with_control(reference, control)
+        }
+        (RelationLookupMode::Bound, _) => {
+            catalog.resolve_bound_relation_kind_with_control(reference, control)
+        }
+    }
 }
 
 fn validate(canonical: &str, control: &ProductionControl<'_>) -> Result<(), SQLError> {

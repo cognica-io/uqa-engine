@@ -13,7 +13,7 @@ use std::{
 };
 
 mod iter;
-pub use iter::BudgetedHashIndexIter;
+pub use iter::{BudgetedHashIndexIter, BudgetedHashIndexSlots};
 
 #[derive(Debug)]
 struct Entry<K, V> {
@@ -169,6 +169,22 @@ impl<K, V, H> BudgetedHashIndex<K, V, H> {
         BudgetedHashIndexIter {
             buckets: self.buckets.iter(),
             remaining: self.len,
+        }
+    }
+
+    /// Transfer the original bucket buffer and its lease to a consuming cursor. Each step exposes exactly one occupied or empty bucket, so callers can suspend without scanning an unbounded run of empty buckets. Entries retain their original key and value reservations independently of the cursor.
+    pub fn into_slots(mut self) -> BudgetedHashIndexSlots<K, V> {
+        self.drain_slots()
+    }
+
+    /// Detach the complete original layout, leaving a valid empty index with the same hasher and allowance. The returned cursor owns the buffer independently of this index.
+    pub fn drain_slots(&mut self) -> BudgetedHashIndexSlots<K, V> {
+        let empty = BudgetedVec::new(self.buckets.budget());
+        let (buckets, memory) = std::mem::replace(&mut self.buckets, empty).into_parts();
+        BudgetedHashIndexSlots {
+            buckets: buckets.into_iter(),
+            remaining: std::mem::take(&mut self.len),
+            _memory: memory,
         }
     }
 }

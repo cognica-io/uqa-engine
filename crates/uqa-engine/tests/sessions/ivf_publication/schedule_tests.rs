@@ -4,8 +4,9 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use super::{run, Progress};
-use std::process::Command;
+use super::{run, OwnedChild, Progress};
+use std::process::{Command, Stdio};
+use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 const PREFIX: &str = "schedule_probe::";
@@ -71,23 +72,72 @@ fn repeated_or_unrelated_results_cannot_extend_fixture_progress() {
     }
 }
 
-fn probe(mode: &str, allowance: Duration) -> Result<(), String> {
+fn child_command(mode: &str) -> Command {
     let module = module_path!().split_once("::").unwrap().1;
-    run(
-        Command::new(std::env::current_exe().unwrap())
-            .args([
-                "--exact",
-                &format!("{module}::child_fixture"),
-                "--ignored",
-                "--nocapture",
-                "--format=terse",
-            ])
-            .env("UQA_NATIVE_SCHEDULE_PROBE", mode),
-        PREFIX,
-        2,
-        allowance,
-        mode,
-    )
+    let mut command = Command::new(std::env::current_exe().unwrap());
+    command
+        .args([
+            "--exact",
+            &format!("{module}::child_fixture"),
+            "--ignored",
+            "--nocapture",
+            "--format=terse",
+        ])
+        .env("UQA_NATIVE_SCHEDULE_PROBE", mode);
+    command
+}
+
+fn probe(mode: &str, allowance: Duration) -> Result<(), String> {
+    run(&mut child_command(mode), PREFIX, 2, allowance, mode)
+}
+
+#[test]
+fn observed_child_exit_precedes_an_expired_progress_deadline() {
+    for (mode, success) in [("complete", true), ("failed_exit", false)] {
+        let mut child = child_command(mode).stdout(Stdio::null()).spawn().unwrap();
+        assert_eq!(child.wait().unwrap().success(), success);
+        let mut child = OwnedChild(Some(child));
+        let progress = Progress::new(PREFIX, 2, Duration::ZERO, Instant::now());
+        assert_eq!(child.finish(&progress).unwrap().success(), success);
+        assert!(child.0.is_none());
+    }
+}
+
+#[test]
+fn buffered_results_and_closed_output_precede_an_expired_observation_deadline() {
+    let start = Instant::now();
+    let mut progress = Progress::new(PREFIX, 2, Duration::ZERO, start);
+    let (send, receive) = mpsc::sync_channel(3);
+    for line in [
+        "test schedule_probe::one ... ok",
+        "test schedule_probe::two ... ok",
+        "test result: ok. 2 passed; 0 failed; 0 ignored;",
+    ] {
+        send.send(Ok(line.to_owned())).unwrap();
+    }
+    drop(send);
+    while let Some(line) = progress.receive(&receive).unwrap() {
+        progress.observe(&line, start).unwrap();
+    }
+    progress.finish().unwrap();
+}
+
+#[test]
+fn buffered_diagnostics_do_not_extend_a_running_childs_deadline() {
+    let start = Instant::now();
+    let mut progress = Progress::new(PREFIX, 2, Duration::ZERO, start);
+    let (send, receive) = mpsc::sync_channel(1);
+    send.send(Ok("diagnostic output".to_owned())).unwrap();
+    let line = progress.receive(&receive).unwrap().unwrap();
+    assert!(progress
+        .observe(&line, start)
+        .unwrap_err()
+        .contains("no new fixture completed"));
+    assert!(progress
+        .receive(&receive)
+        .unwrap_err()
+        .contains("no new fixture completed"));
+    drop(send);
 }
 
 #[test]
@@ -106,7 +156,7 @@ fn completed_child_requires_every_fixture_and_successful_process_exit() {
 
 #[test]
 fn stalled_or_noisy_children_are_terminated_and_reaped() {
-    for mode in ["stalled", "noisy"] {
+    for mode in ["stalled", "noisy", "complete_stalled"] {
         let error = probe(mode, Duration::from_secs(2)).unwrap_err();
         assert!(
             error.contains("no new fixture completed"),
@@ -131,9 +181,14 @@ fn child_fixture() {
             println!("diagnostic output cannot extend the deadline");
             std::thread::sleep(Duration::from_millis(10));
         },
-        "complete" | "failed_exit" => {
+        "complete" | "failed_exit" | "complete_stalled" => {
             println!("test schedule_probe::two ... ok");
             println!("test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out;");
+            if mode == "complete_stalled" {
+                loop {
+                    std::thread::park();
+                }
+            }
         }
         _ => panic!("unknown schedule probe"),
     }

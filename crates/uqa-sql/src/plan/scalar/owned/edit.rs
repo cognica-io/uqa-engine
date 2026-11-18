@@ -10,6 +10,22 @@ use super::{children, OwnedScalarExpr, Result, ScalarExpr};
 use uqa_core::{memory::ProductionControl, Value};
 
 impl OwnedScalarExpr {
+    /// Move the selected child through the existing slot owner and retire its discarded parent through the shared scalar cleanup continuation.
+    pub(crate) async fn select_child_from<W: super::super::resources::input::Work>(
+        mut self,
+        index: usize,
+        control: &ProductionControl<'_>,
+        work: &mut W,
+    ) -> std::result::Result<Self, W::Error>
+    where
+        W::Error: From<crate::schema::retention::CatalogRetentionError>,
+    {
+        self.assert_owner(control);
+        let child = self.take_child(index);
+        self.retire_from(control, work).await?;
+        Ok(child)
+    }
+
     /// Replace one immediate child and return the previous child with its complete independent owner. The parent retains the same box or vector slot; neither child is copied or implicitly discarded.
     pub fn replace_child(
         mut self,
@@ -21,11 +37,7 @@ impl OwnedScalarExpr {
         replacement.assert_owner(control);
         control.check()?;
         let previous = self.take_child(index);
-        let Self { expression, memory } = replacement;
-        *children::get_mut(&mut self.expression, index).expect("scalar child index") = expression;
-        if let Some(parent) = &mut self.memory {
-            parent.children[index] = memory;
-        }
+        self.restore_child(index, replacement);
         control.check()?;
         Ok((self, previous))
     }
@@ -127,17 +139,18 @@ impl OwnedScalarExpr {
             panic!("CASE fallback edit requires a CASE expression");
         };
         if let Some(branch) = else_branch {
-            let Self { expression, memory } = replacement;
+            let (expression, memory) = replacement.into_rewrite_parts();
             **branch = expression;
             if let Some(parent) = &mut self.memory {
-                *parent.children.last_mut().expect("CASE fallback owner") = memory;
+                let index = parent.children.len() - 1;
+                drop(parent.children.replace(index, memory));
             }
         } else {
             if let Some(parent) = &mut self.memory {
                 parent.reserve_children(1)?;
             }
             let boxed = control.reserve(size_of::<ScalarExpr>())?;
-            let Self { expression, memory } = replacement;
+            let (expression, memory) = replacement.into_rewrite_parts();
             *else_branch = Some(Box::new(expression));
             if let Some(parent) = &mut self.memory {
                 parent
@@ -157,7 +170,7 @@ impl OwnedScalarExpr {
         if let Some(memory) = &mut self.memory {
             let count = removed.len();
             let retained = memory.children.len() - count;
-            memory.children[removed.start..].rotate_left(count);
+            memory.children.rotate_suffix_left(removed.start, count);
             memory.children.truncate(retained);
         }
     }

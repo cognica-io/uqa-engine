@@ -1,0 +1,316 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
+//! Partial constructors share the existing plan-tree retirement workspace. Structural descent admits its depth before a child can exist; sibling prefixes reuse that workspace when they retire.
+
+use super::{Node, RetainedTree, Retire, RetirementFrame, ScalarRetirement};
+use crate::plan::{
+    CommandPlan, CtePlan, CtePlanBody, DeletePlan, ExpressionPlan, InsertPlan, MergePlan,
+    QueryBlockPlan, QueryPlan, RelationalPlan, SourcePlan, UnifiedPlan, UpdatePlan,
+};
+use std::{
+    ops::{Deref, DerefMut},
+    sync::{Arc, Mutex},
+};
+use uqa_core::memory::{BudgetedVec, MemoryError, Produced, ProductionControl};
+
+mod retirement;
+pub(in crate::plan) use retirement::Retirement;
+mod local;
+use local::{Local, NodeRetirement};
+
+#[cfg(test)]
+mod tests;
+
+#[derive(Debug)]
+struct Frame<L = ScalarRetirement> {
+    node: Node,
+    position: usize,
+    retiring: bool,
+    local: std::marker::PhantomData<L>,
+}
+
+impl<L: NodeRetirement> RetirementFrame for Frame<L> {
+    type Node = Node;
+    type Local = L;
+    fn empty() -> Node {
+        Node::Empty
+    }
+    fn is_empty(node: &Node) -> bool {
+        matches!(node, Node::Empty)
+    }
+    fn new(node: Node) -> Self {
+        Self {
+            node,
+            position: 0,
+            retiring: false,
+            local: std::marker::PhantomData,
+        }
+    }
+    fn advance_retirement(&mut self, local: &mut L) -> bool {
+        if self.retiring {
+            return true;
+        }
+        if local.advance(&mut self.node) {
+            self.retiring = true;
+        }
+        self.retiring
+    }
+    fn retire_child(&mut self) -> Option<Node> {
+        self.node.retire_child(&mut self.position)
+    }
+}
+
+pub(in crate::plan) struct Workspace(RetainedTree<Frame>);
+
+impl Workspace {
+    fn node(&mut self, node: Node) {
+        debug_assert!(matches!(self.0.root, Node::Empty));
+        self.0.root = node;
+        self.0.retire();
+    }
+}
+
+#[derive(Clone)]
+pub(in crate::plan) struct Context {
+    workspace: Arc<Produced<Mutex<Workspace>>>,
+    depth: usize,
+}
+
+impl Context {
+    pub(in crate::plan) fn new(control: &ProductionControl<'_>) -> Result<Self, crate::SQLError> {
+        control.check()?;
+        let tree = RetainedTree::with_budget(control.budget());
+        Ok(Self {
+            workspace: control
+                .finish(Mutex::new(Workspace(tree)), control.empty_reservation())?
+                .into_shared(control)?,
+            depth: 0,
+        })
+    }
+
+    pub(in crate::plan) fn child(
+        &self,
+        control: &ProductionControl<'_>,
+    ) -> Result<Self, crate::SQLError> {
+        control.check()?;
+        let depth = self.depth.checked_add(1).ok_or(MemoryError::SizeOverflow)?;
+        // Required but still-empty boxed children can add one retirement level to a partial node.
+        let capacity = depth.checked_add(1).ok_or(MemoryError::SizeOverflow)?;
+        self.workspace
+            .lock()
+            .expect("plan retirement workspace")
+            .0
+            .frames
+            .reserve(capacity)?;
+        Ok(Self {
+            workspace: self.workspace.clone(),
+            depth,
+        })
+    }
+
+    pub(in crate::plan) fn retain<T: Root>(&self, value: T) -> Prefix<T> {
+        Prefix {
+            value: Some(value),
+            context: self.clone(),
+        }
+    }
+
+    pub(in crate::plan) fn prepare_retirement(
+        &self,
+        control: &ProductionControl<'_>,
+    ) -> Result<Retirement, crate::SQLError> {
+        control.check()?;
+        let capacity = self
+            .workspace
+            .lock()
+            .expect("plan retirement workspace")
+            .0
+            .frames
+            .capacity();
+        Retirement::new(capacity, control)
+    }
+
+    /// Admit an independently constructed subtree at its destination depth before transferring its payload. Both constructor workspaces remain available if admission fails.
+    pub(in crate::plan) fn admit_replacement(
+        &self,
+        replacement: &Self,
+        depth: usize,
+        control: &ProductionControl<'_>,
+    ) -> Result<(), crate::SQLError> {
+        control.check()?;
+        let capacity = replacement
+            .workspace
+            .lock()
+            .expect("replacement retirement workspace")
+            .0
+            .frames
+            .capacity();
+        let capacity = self
+            .depth
+            .checked_add(depth)
+            .and_then(|depth| depth.checked_add(capacity))
+            .ok_or(MemoryError::SizeOverflow)?;
+        self.workspace
+            .lock()
+            .expect("destination retirement workspace")
+            .0
+            .frames
+            .reserve(capacity)?;
+        Ok(())
+    }
+}
+
+pub(in crate::plan) trait Root {
+    fn retire(self, workspace: &mut Workspace);
+}
+
+pub(in crate::plan) struct Prefix<T: Root> {
+    value: Option<T>,
+    context: Context,
+}
+
+impl<T: Root + std::fmt::Debug> std::fmt::Debug for Prefix<T> {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.value.fmt(formatter)
+    }
+}
+
+impl<T: Root> Prefix<T> {
+    pub(in crate::plan) fn context(&self) -> &Context {
+        &self.context
+    }
+
+    /// Transfer a completed root into another native owner without an intervening fallible operation.
+    pub(in crate::plan) fn map<U: Root>(mut self, map: impl FnOnce(T) -> U) -> Prefix<U> {
+        let value = self.value.take().expect("pending plan root");
+        self.context.retain(map(value))
+    }
+
+    pub(in crate::plan) fn take(mut self) -> T {
+        self.value.take().expect("pending plan root")
+    }
+}
+impl<T: Root> Deref for Prefix<T> {
+    type Target = T;
+    fn deref(&self) -> &T {
+        self.value.as_ref().expect("pending plan root")
+    }
+}
+impl<T: Root> DerefMut for Prefix<T> {
+    fn deref_mut(&mut self) -> &mut T {
+        self.value.as_mut().expect("pending plan root")
+    }
+}
+impl<T: Root> Drop for Prefix<T> {
+    fn drop(&mut self) {
+        if let Some(value) = self.value.take() {
+            value.retire(
+                &mut self
+                    .context
+                    .workspace
+                    .lock()
+                    .expect("plan retirement workspace"),
+            );
+        }
+    }
+}
+
+macro_rules! root {
+    ($ty:ty, $variant:ident) => {
+        impl Root for $ty {
+            fn retire(self, workspace: &mut Workspace) {
+                workspace.node(Node::$variant(self));
+            }
+        }
+    };
+}
+root!(QueryPlan, Query);
+root!(SourcePlan, Source);
+root!(CtePlan, Cte);
+root!(CommandPlan, Command);
+root!(ExpressionPlan, Expression);
+impl Root for CtePlanBody {
+    fn retire(self, workspace: &mut Workspace) {
+        match self {
+            Self::Query(query) => Root::retire(query, workspace),
+            Self::Command(command) => Root::retire(command, workspace),
+        }
+    }
+}
+impl Root for UnifiedPlan {
+    fn retire(self, workspace: &mut Workspace) {
+        match self {
+            Self::Query(value) => Root::retire(value, workspace),
+            Self::Command(value) => Root::retire(value, workspace),
+        }
+    }
+}
+macro_rules! mutation_root {
+    ($ty:ty, $child:ident) => {
+        impl Root for $ty {
+            fn retire(mut self, workspace: &mut Workspace) {
+                Retire::retire(&mut self);
+                while let Some(child) = super::commands::$child(&mut self) {
+                    workspace.node(child);
+                }
+            }
+        }
+    };
+}
+mutation_root!(InsertPlan, insert_child);
+mutation_root!(UpdatePlan, update_child);
+mutation_root!(DeletePlan, delete_child);
+impl Root for MergePlan {
+    fn retire(mut self, workspace: &mut Workspace) {
+        Retire::retire(&mut self);
+        let mut position = 0;
+        while let Some(child) = super::commands::merge_child(&mut self, &mut position) {
+            workspace.node(child);
+        }
+    }
+}
+impl Root for RelationalPlan {
+    fn retire(self, workspace: &mut Workspace) {
+        let mut query = super::empty_query();
+        query.root = self;
+        workspace.node(Node::Query(query));
+    }
+}
+impl Root for QueryBlockPlan {
+    fn retire(mut self, workspace: &mut Workspace) {
+        Retire::retire(&mut self);
+        while let Some(child) = super::block_child(&mut self) {
+            workspace.node(child);
+        }
+    }
+}
+impl<T: Root> Root for Box<T> {
+    fn retire(self, workspace: &mut Workspace) {
+        (*self).retire(workspace);
+    }
+}
+impl<T: Root> Root for Option<T> {
+    fn retire(self, workspace: &mut Workspace) {
+        if let Some(value) = self {
+            value.retire(workspace);
+        }
+    }
+}
+impl<T: Root> Root for Vec<T> {
+    fn retire(self, workspace: &mut Workspace) {
+        for value in self {
+            value.retire(workspace);
+        }
+    }
+}
+impl<T: Root> Root for BudgetedVec<T> {
+    fn retire(self, workspace: &mut Workspace) {
+        let (values, lease) = self.into_parts();
+        values.retire(workspace);
+        drop(lease);
+    }
+}

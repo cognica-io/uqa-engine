@@ -6,19 +6,32 @@
 
 //! Selected child rewrites retain parent metadata and transfer only constructor-owned buffers.
 
-use super::{children, OwnedScalarExpr, Result, ScalarExpr, ScalarMemory};
+use super::{OwnedScalarExpr, Result, ScalarExpr, ScalarMemory};
 use crate::schema::retention::CatalogRetentionError;
 use uqa_core::memory::ProductionControl;
 
 impl OwnedScalarExpr {
     /// Remove validated call-argument markers by transferring their value child and immediately retiring marker metadata and containers.
     pub fn into_call_argument(
-        mut self,
+        self,
         control: &ProductionControl<'_>,
     ) -> std::result::Result<Self, crate::SQLError> {
+        Ok(crate::catalog::work::inline(
+            self.into_call_argument_from(control, &mut ()),
+        )?)
+    }
+
+    pub(crate) async fn into_call_argument_from<W: crate::plan::ScalarInputWork>(
+        mut self,
+        control: &ProductionControl<'_>,
+        work: &mut W,
+    ) -> std::result::Result<Self, W::Error>
+    where
+        W::Error: From<crate::SQLError> + From<CatalogRetentionError>,
+    {
         self.assert_owner(control);
         control.check()?;
-        crate::scalar_call_argument(&self)?;
+        crate::scalar_call_argument(&self).map_err(W::Error::from)?;
         while let ScalarExpr::Func { binding, args, .. } = &self.expression {
             if !binding
                 .as_ref()
@@ -28,7 +41,7 @@ impl OwnedScalarExpr {
                 break;
             }
             let index = args.len() - 1;
-            self = self.select_child(index);
+            self = self.select_child_from(index, control, work).await?;
         }
         control.check()?;
         Ok(self)
@@ -50,11 +63,7 @@ impl OwnedScalarExpr {
         let replacement = map(&self.expression, child)?;
         replacement.assert_owner(control);
         control.check().map_err(CatalogRetentionError::from)?;
-        let Self { expression, memory } = replacement;
-        *children::get_mut(&mut self.expression, index).expect("scalar child index") = expression;
-        if let Some(parent) = &mut self.memory {
-            parent.children[index] = memory;
-        }
+        self.restore_child(index, replacement);
         Ok(self)
     }
 
@@ -66,10 +75,10 @@ impl OwnedScalarExpr {
             panic!("argument selection requires a function call");
         };
         let count = args.len();
-        let mut selected_memory = self.memory.as_ref().map(|parent| ScalarMemory {
-            direct: parent.direct.budget().empty_reservation(),
-            children: Vec::new(),
-        });
+        let mut selected_memory = self
+            .memory
+            .as_ref()
+            .map(|parent| ScalarMemory::new(parent.direct.budget().empty_reservation()));
         if let Some(selected) = &mut selected_memory {
             selected.reserve_children(count)?;
         }
@@ -88,9 +97,9 @@ impl OwnedScalarExpr {
                     .direct
                     .split(arguments.capacity() * size_of::<ScalarExpr>()),
             );
-            for child in &mut parent.children[..count] {
+            for index in 0..count {
                 output
-                    .push_child(child.take())
+                    .push_child(parent.children.take(index))
                     .expect("admitted selected argument slot");
             }
             parent.children.rotate_left(count);
@@ -122,22 +131,22 @@ impl OwnedScalarExpr {
             parent.reserve_children(count.saturating_sub(previous_count))?;
         }
         let previous_bytes = args.capacity() * size_of::<ScalarExpr>();
-        let Self { expression, memory } = replacement;
+        let (expression, memory) = replacement.into_rewrite_parts();
         let (ScalarExpr::And(items) | ScalarExpr::Or(items)) = expression else {
             unreachable!();
         };
         *args = items;
         if let (Some(parent), Some(mut replacement)) = (&mut self.memory, memory) {
             drop(parent.direct.split(previous_bytes));
-            for child in &mut parent.children[..previous_count] {
-                *child = None;
+            for index in 0..previous_count {
+                drop(parent.children.take(index));
             }
             parent.children.rotate_left(previous_count);
             let retained = parent.children.len() - previous_count;
             parent.children.truncate(retained);
-            for child in &mut *replacement.children {
+            for index in 0..replacement.children.len() {
                 parent
-                    .push_child(child.take())
+                    .push_child(replacement.children.take(index))
                     .expect("admitted replacement argument slot");
             }
             parent.children.rotate_right(count);

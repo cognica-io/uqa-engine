@@ -11,6 +11,7 @@ use crate::ScalarExpr;
 use super::{CommandPlan, QueryPlan, RelationalPlan, SourcePlan};
 
 mod compaction;
+pub(in crate::plan) use compaction::{prepare_query_from, rewrite_query_from};
 pub use compaction::{
     prune_command_with_control, prune_expression_with_control, prune_query_with_control,
 };
@@ -55,7 +56,7 @@ pub fn prune_expression(plan: &mut super::ExpressionPlan) {
         .expect("uncontrolled scalar-subquery compaction");
 }
 
-fn query_arena(root: &mut RelationalPlan) -> &mut Vec<QueryPlan> {
+pub(in crate::plan) fn query_arena(root: &mut RelationalPlan) -> &mut Vec<QueryPlan> {
     match root {
         RelationalPlan::QueryBlock(block) => &mut block.subqueries,
         RelationalPlan::Values { subqueries, .. } | RelationalPlan::SetOp { subqueries, .. } => {
@@ -100,34 +101,12 @@ pub(crate) fn visit_root(root: &mut RelationalPlan, visitor: &mut dyn FnMut(&mut
 }
 
 fn visit_source(source: &mut SourcePlan, visitor: &mut dyn FnMut(&mut ScalarExpr)) {
-    match source {
-        crate::plan::SourcePlan::RetainedRows(_) => {}
-        SourcePlan::Join {
-            left, right, on, ..
-        } => {
-            visit_source(left, visitor);
-            visit_source(right, visitor);
-            if let Some(on) = on {
-                super::rewrite_scalar_expression(on, visitor);
-            }
-        }
-        SourcePlan::Values { rows, .. } => {
-            for expression in rows.iter_mut().flatten() {
-                super::rewrite_scalar_expression(expression, visitor);
-            }
-        }
-        SourcePlan::Function { args, .. } => {
-            for argument in args {
-                super::rewrite_scalar_expression(argument, visitor);
-            }
-        }
-        SourcePlan::FunctionGroup { functions, .. } => {
-            for argument in functions.iter_mut().flat_map(|function| &mut function.args) {
-                super::rewrite_scalar_expression(argument, visitor);
-            }
-        }
-        // A derived query owns its own scalar-subquery arena.
-        SourcePlan::Subquery { .. } | SourcePlan::Table { .. } => {}
+    let (children, expressions) = source.expression_inputs_mut();
+    for child in children.into_iter().flatten() {
+        visit_source(child, visitor);
+    }
+    for expression in expressions.flatten() {
+        super::rewrite_scalar_expression(expression, visitor);
     }
 }
 
@@ -136,23 +115,8 @@ fn visit_block(block: &mut super::QueryBlockPlan, visitor: &mut dyn FnMut(&mut S
         visit_source(source, visitor);
     }
     for expression in block
-        .projections
-        .iter_mut()
-        .map(|projection| &mut projection.expr)
-        .chain(block.r#where.iter_mut())
-        .chain(block.group_by.iter_mut())
-        .chain(block.grouping_sets.iter_mut().flatten())
-        .chain(block.having.iter_mut())
-        .chain(block.order_by.iter_mut().map(|order| &mut order.expr))
-        .chain(block.limit.iter_mut())
-        .chain(block.offset.iter_mut())
-        .chain(block.distinct_on.iter_mut())
-        .chain(
-            block
-                .windows
-                .iter_mut()
-                .flat_map(|window| window.spec.expressions_mut()),
-        )
+        .expression_steps_mut(super::query::ExpressionOrder::Rewrite)
+        .flatten()
     {
         super::rewrite_scalar_expression(expression, visitor);
     }

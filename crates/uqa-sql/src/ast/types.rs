@@ -12,11 +12,13 @@ mod catalog_names;
 mod display;
 mod identity;
 mod input;
+mod lexical;
 mod modifiers;
 mod names;
 mod ownership;
 mod parsing;
 mod production;
+pub(crate) use production::ColumnTypeInputWork;
 mod references;
 
 pub use display::TypeDisplayScope;

@@ -10,6 +10,7 @@ use crate::{
     memory::{
         Budgeted, BudgetedVec, MemoryBudget, MemoryError, MemoryReservation, ProductionControl,
     },
+    types::OwnedValue,
     BitStringValue, CancellationToken, DecimalValue, EnumLabelKey, EnumValue, Value,
 };
 
@@ -18,7 +19,7 @@ mod datum;
 mod temporal;
 
 enum Node {
-    Value(Budgeted<Value>),
+    Value(Budgeted<OwnedValue>),
     Container(containers::Container),
 }
 
@@ -69,16 +70,16 @@ impl Reader<'_, '_> {
         })
     }
 
-    fn scalar(&self, value: Value) -> Budgeted<Value> {
-        Budgeted::new(value, self.memory.empty_reservation())
+    fn scalar(&self, value: Value) -> Budgeted<OwnedValue> {
+        Budgeted::new(OwnedValue::new(value), self.memory.empty_reservation())
     }
 
-    fn owned<T>(value: Budgeted<T>, wrap: impl FnOnce(T) -> Value) -> Budgeted<Value> {
+    fn owned<T>(value: Budgeted<T>, wrap: impl FnOnce(T) -> Value) -> Budgeted<OwnedValue> {
         let (value, memory) = value.into_parts();
-        Budgeted::new(wrap(value), memory)
+        Budgeted::new(OwnedValue::new(wrap(value)), memory)
     }
 
-    pub(super) async fn value(&mut self, depth: usize) -> ValueImageResult<Budgeted<Value>> {
+    pub(super) async fn value(&mut self, depth: usize) -> ValueImageResult<Budgeted<OwnedValue>> {
         let mut parents = BudgetedVec::new(self.memory);
         let mut node = self.node(depth).await?;
         loop {
@@ -155,7 +156,7 @@ impl Reader<'_, '_> {
                 memory.absorb(byte_memory);
                 let value = BitStringValue::try_from_packed(bytes, length)
                     .ok_or(ValueImageError::Invalid("packed bits"))?;
-                Budgeted::new(Value::BitString(value), memory)
+                Budgeted::new(OwnedValue::new(Value::BitString(value)), memory)
             }
             _ => return Err(ValueImageError::Invalid("value tag")),
         };
@@ -163,7 +164,7 @@ impl Reader<'_, '_> {
         Ok(Node::Value(value))
     }
 
-    async fn enum_value(&mut self) -> ValueImageResult<Budgeted<Value>> {
+    async fn enum_value(&mut self) -> ValueImageResult<Budgeted<OwnedValue>> {
         let oid = u32::from_le_bytes(self.fixed().await?);
         let label = self.optional_oid().await?;
         let key = self.blob().await?;
@@ -177,7 +178,7 @@ impl Reader<'_, '_> {
             EnumLabelKey::from_bytes(key).map_err(|_| ValueImageError::Invalid("enum key"))?;
         drop(memory.split(source_bytes));
         Ok(Budgeted::new(
-            Value::Enum(EnumValue::new(oid, key).with_label_oid(label)),
+            OwnedValue::new(Value::Enum(EnumValue::new(oid, key).with_label_oid(label))),
             memory,
         ))
     }

@@ -6,6 +6,8 @@
 
 //! Scalar coercion contexts used while preparing a statement.
 
+use crate::binding::preparation::{LiteralInput, SchemaContext};
+
 use super::function_calls::{FunctionResult, ObservedFunctionArguments};
 use super::ownership::AnalysisType;
 use super::{
@@ -17,7 +19,7 @@ use uqa_core::Value;
 
 mod nodes;
 
-impl Preparation<'_> {
+impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
     pub(super) fn retain_stored_reference(
         &mut self,
         expression: &ScalarExpr,
@@ -264,7 +266,7 @@ impl Preparation<'_> {
                 .retain_collation(expression, &mut value, oid)?;
             return Ok(value);
         }
-        if self.schema_expression.is_some() {
+        if self.schema_expression.schema_expression().is_some() {
             if let Some(qualifier) = expression.reference_qualifier() {
                 if !input.has_qualifier(qualifier) {
                     return Err(error(
@@ -495,7 +497,7 @@ impl Preparation<'_> {
                     )
                 })?;
                 self.check_schema_window(name, (args, filter.is_some(), *modifiers), input)?;
-                if self.schema_expression.is_some() {
+                if self.schema_expression.schema_expression().is_some() {
                     self.window_specification(spec, input, subqueries)?;
                 }
                 super::function_calls::collated_result(

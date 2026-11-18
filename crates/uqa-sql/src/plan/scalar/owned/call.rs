@@ -6,13 +6,15 @@
 
 //! Call metadata replacement transfers children while old constructor storage remains owned.
 
-use super::{OwnedScalarExpr, Result, ScalarExpr, ScalarMemory};
-use crate::{
-    ast::FunctionBinding,
-    plan::scalar::resources::{Control, Lowering},
-    ScalarOrder,
+use super::{
+    generated::{call_fields, children_from, finish, owned_lowering},
+    OwnedScalarExpr, Result, ScalarExpr,
 };
-use uqa_core::memory::{BudgetedVec, Produced, ProductionControl};
+use crate::{
+    ast::FunctionBinding, plan::scalar::resources::input::Work,
+    schema::retention::CatalogRetentionError, ScalarOrder,
+};
+use uqa_core::memory::{Produced, ProductionControl};
 
 impl OwnedScalarExpr {
     /// Canonicalize a grouping identity's built-in spelling in its existing string buffer. Removing a prefix changes length, never retained capacity.
@@ -84,21 +86,75 @@ impl OwnedScalarExpr {
         binding: Option<Produced<FunctionBinding>>,
         control: &ProductionControl<'_>,
     ) -> Result<Self> {
+        crate::catalog::work::inline(self.replace_call_binding_from(binding, control, &mut ()))
+    }
+
+    pub(crate) async fn replace_call_binding_from<W: Work>(
+        self,
+        binding: Option<Produced<FunctionBinding>>,
+        control: &ProductionControl<'_>,
+        work: &mut W,
+    ) -> std::result::Result<Self, W::Error>
+    where
+        W::Error: From<CatalogRetentionError>,
+    {
         let ScalarExpr::Func { name, .. } = &self.expression else {
             panic!("binding replacement requires a function call");
         };
-        let name = control.copy_text(name)?;
-        self.replace_call_metadata(name, binding, control)
+        let name = work.text(name, control).await?;
+        self.replace_call_metadata_from(name, binding, control, work)
+            .await
     }
 
     /// Install an independently produced call name and binding. This storage operation retains scalar payload identity and performs no overload selection or expression evaluation.
     pub fn replace_call_metadata(
-        mut self,
+        self,
         name: Produced<String>,
         binding: Option<Produced<FunctionBinding>>,
         control: &ProductionControl<'_>,
     ) -> Result<Self> {
+        crate::catalog::work::inline(self.replace_call_metadata_from(
+            name,
+            binding,
+            control,
+            &mut (),
+        ))
+    }
+
+    pub(crate) async fn replace_call_metadata_from<W: Work>(
+        self,
+        name: Produced<String>,
+        binding: Option<Produced<FunctionBinding>>,
+        control: &ProductionControl<'_>,
+        work: &mut W,
+    ) -> std::result::Result<Self, W::Error>
+    where
+        W::Error: From<CatalogRetentionError>,
+    {
+        self.replace_call_fields_from(name, binding, None, control, work)
+            .await
+    }
+
+    /// Replace call metadata and optionally its argument container through the same field producer, preserving ordering and filter owners.
+    pub(crate) async fn replace_call_fields_from<W: Work>(
+        mut self,
+        name: Produced<String>,
+        binding: Option<Produced<FunctionBinding>>,
+        mut replacement: Option<Self>,
+        control: &ProductionControl<'_>,
+        work: &mut W,
+    ) -> std::result::Result<Self, W::Error>
+    where
+        W::Error: From<CatalogRetentionError>,
+    {
         self.assert_owner(control);
+        if let Some(arguments) = &replacement {
+            arguments.assert_owner(control);
+            assert!(
+                matches!(arguments.expression, ScalarExpr::And(_) | ScalarExpr::Or(_)),
+                "argument replacement requires a boolean container"
+            );
+        }
         control.check()?;
         let ScalarExpr::Func {
             args,
@@ -111,70 +167,71 @@ impl OwnedScalarExpr {
         else {
             panic!("metadata replacement requires a function call");
         };
-        let (argument_count, order_count, has_filter, distinct, order_syntax) = (
+        let (original_argument_count, order_count, has_filter, distinct, order_syntax) = (
             args.len(),
             order_by.len(),
             filter.is_some(),
             *distinct,
             *order_syntax,
         );
-        let mut lowering = Lowering {
-            control: control.budget().map(|_| Control::from_production(*control)),
-            owned_children: control.budget().map(BudgetedVec::new),
+        let argument_count = replacement
+            .as_ref()
+            .map_or(original_argument_count, Self::child_count);
+        let mut lowering = owned_lowering(control);
+        let mut output = call_fields(&mut lowering, name, binding);
+        let arguments = children_from(
+            &mut lowering,
+            (0..argument_count).map(|index| match &mut replacement {
+                Some(arguments) => arguments.take_child(index),
+                None => self.take_child(index),
+            }),
+            work,
+        )
+        .await?;
+        let ScalarExpr::Func {
+            args,
+            order_by: orders,
+            filter,
+            distinct: output_distinct,
+            order_syntax: output_syntax,
+            ..
+        } = &mut *output
+        else {
+            unreachable!()
         };
-        let (name, name_memory) = name.into_parts();
-        let (binding, binding_memory) = match binding {
-            Some(binding) => {
-                let (binding, memory) = binding.into_parts();
-                (Some(binding), memory)
-            }
-            None => (None, control.empty_reservation()),
-        };
-        let metadata = control.combine(name_memory, binding_memory);
-        if let Some(owner) = &mut lowering.control {
-            owner
-                .memory
-                .absorb(metadata.expect("admitted call metadata"));
-        }
-        let args = lowering.map(0..argument_count, |lowering, index| {
-            Self::attach_child(lowering, self.take_child(index))
-        })?;
-        let order_by = lowering.map(0..order_count, |lowering, index| {
+        *output_distinct = distinct;
+        *output_syntax = order_syntax;
+        *args = arguments.take();
+        lowering.checkpoint(work).await?;
+        *orders = lowering.vector(order_count)?;
+        for index in 0..order_count {
+            lowering.checkpoint(work).await?;
             let ScalarExpr::Func { order_by, .. } = &self.expression else {
                 unreachable!();
             };
             let (descending, nulls) = (order_by[index].descending, order_by[index].nulls);
-            Ok(ScalarOrder {
-                expr: Self::attach_child(lowering, self.take_child(argument_count + index))?,
+            orders.push(ScalarOrder {
+                expr: Self::attach_child(
+                    &mut lowering,
+                    self.take_child(original_argument_count + index),
+                )?,
                 descending,
                 nulls,
-            })
-        })?;
-        let filter = has_filter
-            .then(|| {
-                lowering.boxed(|lowering| {
-                    Self::attach_child(lowering, self.take_child(argument_count + order_count))
-                })
-            })
-            .transpose()?;
-        let output = Self {
-            expression: ScalarExpr::Func {
-                order_syntax,
-                name,
-                binding,
-                args,
-                distinct,
-                order_by,
-                filter,
-            },
-            memory: lowering.control.map(|control| {
-                ScalarMemory::from_parts(
-                    control.memory,
-                    lowering.owned_children.expect("mutable call construction"),
-                )
-            }),
-        };
-        drop(self);
+            });
+        }
+        if has_filter {
+            lowering.checkpoint(work).await?;
+            lowering.admit_box::<ScalarExpr>()?;
+            *filter = Some(Box::new(Self::attach_child(
+                &mut lowering,
+                self.take_child(original_argument_count + order_count),
+            )?));
+        }
+        let output = finish(output.take(), lowering, control)?;
+        if let Some(arguments) = replacement {
+            arguments.retire_from(control, work).await?;
+        }
+        self.retire_from(control, work).await?;
         control.check()?;
         Ok(output)
     }

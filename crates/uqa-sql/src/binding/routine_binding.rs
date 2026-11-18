@@ -639,7 +639,9 @@ impl SchemaScope {
         self.canonicalize_routine_parameters(expression, schema);
         self.resolve_variable_sites(expression, schema);
         match self.scalar_binding {
-            super::ScalarBindingMode::References => return Ok(()),
+            super::ScalarBindingMode::References | super::ScalarBindingMode::RoutineParameters => {
+                return Ok(())
+            }
             super::ScalarBindingMode::CompositeInputs => {
                 return self.retain_composite_inputs_in_scope(
                     engine, expression, schema, subqueries, params,

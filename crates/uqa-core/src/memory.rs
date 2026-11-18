@@ -22,12 +22,13 @@ mod observation;
 mod production;
 mod retained_map;
 mod retained_value;
+mod retirement;
 mod small_vec;
 mod string;
 mod vec;
 
 pub use deque::BudgetedDeque;
-pub use hash_index::{BudgetedHashIndex, BudgetedHashIndexIter};
+pub use hash_index::{BudgetedHashIndex, BudgetedHashIndexIter, BudgetedHashIndexSlots};
 pub use hash_set::BudgetedHashSet;
 pub use heap::BudgetedBinaryHeap;
 pub use map::{
@@ -47,6 +48,7 @@ pub use retained_map::{
 };
 pub(crate) use retained_value::{Admitted as AdmittedRetainedValue, Owner as RetainedValueOwner};
 pub use retained_value::{RetainedValue, RetainedValueIdentity};
+pub use retirement::{PairedRetirementNode, RetirementNode, TreeRetirement};
 pub use small_vec::BudgetedSmallVec;
 pub use string::BudgetedString;
 pub use vec::BudgetedVec;

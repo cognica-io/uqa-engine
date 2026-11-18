@@ -6,7 +6,7 @@
 
 //! Command children retain their enclosing command boxes and local query arenas.
 
-use super::super::{sources::empty_source, MutableSourcePlan};
+use super::super::{edits::Slot, MutableSourcePlan};
 use super::{item, CommandPlan, MutableCommandPlan, MutableQueryPlan, RewriteMemory, SQLError};
 use crate::plan::QueryPlan;
 use uqa_core::memory::ProductionControl;
@@ -39,25 +39,16 @@ impl MutableCommandPlan {
     ) -> Result<Self, SQLError> {
         self.assert_owner(control);
         control.check()?;
-        let Some(query) = slot.query_mut(&mut self.command) else {
+        let Some(mut position) = self.query_slot(slot) else {
             return Ok(self);
         };
-        let input = MutableQueryPlan {
-            query: std::mem::replace(query, super::super::queries::empty_query()),
-            memory: self
-                .memory
-                .as_mut()
-                .and_then(|memory| slot.memory_mut(memory).take()),
-        };
+        let input = position.take();
         let output = map(&self.command, input)?;
         output.assert_owner(control);
         control.check()?;
-        *slot
-            .query_mut(&mut self.command)
-            .expect("original command query") = output.query;
-        if let Some(memory) = &mut self.memory {
-            *slot.memory_mut(memory) = output.memory;
-        }
+        self.query_slot(slot)
+            .expect("original command query")
+            .restore(output);
         Ok(self)
     }
 
@@ -77,25 +68,34 @@ impl MutableCommandPlan {
     ) -> Result<Self, SQLError> {
         self.assert_owner(control);
         control.check()?;
-        let Some(source) = self.command.source_input_mut() else {
+        let Some(mut slot) = self.source_slot() else {
             return Ok(self);
         };
-        let source = std::mem::replace(source, empty_source());
-        let memory = self
-            .memory
-            .as_mut()
-            .and_then(|memory| source_memory(memory).take());
-        let output = map(&self.command, MutableSourcePlan { source, memory })?;
+        let input = slot.take();
+        let output = map(&self.command, input)?;
         output.assert_owner(control);
         control.check()?;
-        *self
-            .command
-            .source_input_mut()
-            .expect("original command source") = output.source;
-        if let Some(memory) = &mut self.memory {
-            *source_memory(memory) = output.memory;
-        }
+        self.source_slot()
+            .expect("original command source")
+            .restore(output);
         Ok(self)
+    }
+
+    pub(in crate::plan::mutable) fn query_slot(
+        &mut self,
+        slot: CommandQuerySlot,
+    ) -> Option<Slot<'_, MutableQueryPlan>> {
+        Some(Slot::new(
+            slot.query_mut(&mut self.command)?,
+            self.memory.as_mut().map(|memory| slot.memory_mut(memory)),
+        ))
+    }
+
+    pub(in crate::plan::mutable) fn source_slot(&mut self) -> Option<Slot<'_, MutableSourcePlan>> {
+        Some(Slot::new(
+            self.command.source_input_mut()?,
+            self.memory.as_mut().map(source_memory),
+        ))
     }
 }
 

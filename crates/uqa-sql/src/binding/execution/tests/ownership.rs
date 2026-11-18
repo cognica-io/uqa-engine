@@ -155,7 +155,16 @@ fn captured_source_metadata_admits_exact_nodes_and_releases_independent_readers(
     let mut captured = CapturedSources::for_source(source, &control).unwrap();
     assert!(budget.used() > 0);
     captured.record(derived(left), &schema, None);
-    captured.record(derived(right), &schema, None);
+    let mut captured = std::thread::scope(|tasks| {
+        let schema = &schema;
+        tasks
+            .spawn(move || {
+                captured.record(derived(right), schema, None);
+                captured
+            })
+            .join()
+            .unwrap()
+    });
     let retained = captured.take(source, &control).unwrap();
     drop(captured);
     let header = size_of::<Produced<ExecutionSourceBindings<'_>>>();

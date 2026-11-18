@@ -25,7 +25,7 @@ pub fn restore_query_layouts(
         routines,
         scope: &mut scope,
         parameters: ParameterTypes::fixed(params).with_query_schemas(),
-        schema_expression: None,
+        schema_expression: (),
     };
     analysis.query(query, outer)?;
     analysis
@@ -49,7 +49,7 @@ pub fn restore_query_layouts_owned(
         routines,
         scope: &mut scope,
         parameters: ParameterTypes::fixed_with_control(params, control)?.with_query_schemas(),
-        schema_expression: None,
+        schema_expression: (),
     };
     let mut plan = MutableExecutablePlan::Query(query);
     analysis.observe_owned_plan(&plan, outer)?;

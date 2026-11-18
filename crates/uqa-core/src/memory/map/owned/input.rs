@@ -7,7 +7,7 @@
 //! Suspended comparisons retain an exclusive insertion path before any publication.
 
 use super::{tree, Node, OwnedMap, OwnedNode, MAX_HEIGHT};
-use crate::memory::{Budgeted, MemoryError};
+use crate::memory::{Budgeted, MemoryError, Produced};
 use std::{cmp::Ordering, future::Future};
 
 /// Compare a borrowed query with an original stored key through the caller's work channel. Ordering must agree with the map's ordinary key order. The comparison owns its cancellation and work checks; no synchronous key comparison follows it.
@@ -73,6 +73,20 @@ impl<K: Ord, V> OwnedMap<K, V> {
         C: MapKeyInput<K>,
         C::Error: From<MemoryError>,
     {
+        self.insert_produced_key_from(key.into(), value, input)
+            .await
+    }
+
+    pub(crate) async fn insert_produced_key_from<C>(
+        &mut self,
+        key: Produced<K>,
+        value: V,
+        input: &mut C,
+    ) -> Result<Option<V>, C::Error>
+    where
+        C: MapKeyInput<K>,
+        C::Error: From<MemoryError>,
+    {
         input.checkpoint().await?;
         let mut path = [Ordering::Less; MAX_HEIGHT];
         let mut depth = 0;
@@ -92,9 +106,19 @@ impl<K: Ord, V> OwnedMap<K, V> {
             depth += 1;
         }
         input.checkpoint().await?;
-        let mut memory = key.budget().reserve(Self::entry_bytes())?;
-        let (key, key_memory) = key.into_parts();
-        memory.absorb(key_memory);
+        let (key, memory) = match key.into_budgeted() {
+            Ok(key) => {
+                let mut memory = key.budget().reserve(Self::entry_bytes())?;
+                let (key, key_memory) = key.into_parts();
+                memory.absorb(key_memory);
+                (key, Some(memory))
+            }
+            Err(key) => (
+                key.into_uncontrolled()
+                    .unwrap_or_else(|_| unreachable!("ordinary key")),
+                None,
+            ),
+        };
         let entry = OwnedNode {
             value: Box::new(Node {
                 key,
@@ -103,7 +127,7 @@ impl<K: Ord, V> OwnedMap<K, V> {
                 right: None,
                 height: 1,
             }),
-            memory: Some(memory),
+            memory,
         };
         tree::insert_selected(&mut self.root, entry, &path[..depth]);
         self.len += 1;

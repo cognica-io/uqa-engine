@@ -10,9 +10,9 @@ use crate::memory::{MemoryError, Produced, ProductionControl};
 use crate::ValueRetentionError;
 use std::sync::Arc;
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RecordDescriptor {
-    names: Arc<FieldNames>,
+    names: Option<Arc<FieldNames>>,
     type_oid: Option<u32>,
 }
 
@@ -21,20 +21,37 @@ struct FieldNames {
     names: Box<[String]>,
 }
 
+impl Default for RecordDescriptor {
+    fn default() -> Self {
+        Self::new(Vec::new(), None)
+    }
+}
+
 impl RecordDescriptor {
     #[must_use]
     pub fn new(names: Vec<String>, type_oid: Option<u32>) -> Self {
         Self {
-            names: Arc::new(FieldNames {
+            names: Some(Arc::new(FieldNames {
                 names: names.into_boxed_slice(),
-            }),
+            })),
             type_oid,
         }
     }
 
     #[must_use]
     pub fn field_names(&self) -> &[String] {
-        &self.names.names
+        &self.names().names
+    }
+
+    fn names(&self) -> &Arc<FieldNames> {
+        self.names.as_ref().expect("live record descriptor")
+    }
+
+    pub(in crate::types) fn retirement_names(&mut self) -> Option<Box<[String]>> {
+        self.names
+            .take()
+            .and_then(Arc::into_inner)
+            .map(|names| names.names)
     }
 
     #[must_use]
@@ -50,13 +67,13 @@ impl RecordDescriptor {
 
     #[must_use]
     pub fn shares_storage_with(&self, other: &Self) -> bool {
-        Arc::ptr_eq(&self.names, &other.names)
+        Arc::ptr_eq(self.names(), other.names())
     }
 
     /// Explicitly obtain independently mutable names at an owned API boundary.
     #[must_use]
     pub fn into_field_names(self) -> Vec<String> {
-        match Arc::try_unwrap(self.names) {
+        match Arc::try_unwrap(self.names.expect("live record descriptor")) {
             Ok(names) => names.names.into_vec(),
             Err(shared) => shared.names.to_vec(),
         }
@@ -75,13 +92,12 @@ impl RecordDescriptor {
     }
 
     pub fn retained_buffer_bytes(&self) -> Result<usize, MemoryError> {
-        Self::buffer_bytes(self.names.names.len())
+        Self::buffer_bytes(self.field_names().len())
     }
 
     /// Logical admission includes all names even when their allocation is shared.
     pub fn retained_payload_bytes(&self) -> Result<usize, MemoryError> {
-        self.names
-            .names
+        self.field_names()
             .iter()
             .try_fold(self.retained_buffer_bytes()?, |bytes, name| {
                 bytes
@@ -113,10 +129,10 @@ impl crate::memory::ObserveAllocations for RecordDescriptor {
         &'a self,
         observer: &mut crate::memory::AllocationObserver<'a, '_>,
     ) -> Result<(), ValueRetentionError> {
-        if observer.shared_owner(self.names.as_ref())? {
+        if observer.shared_owner(self.names().as_ref())? {
             observer.allocation(size_of::<FieldNames>(), size_of::<FieldNames>())?;
-            observer.buffer::<String>(self.names.names.len(), self.names.names.len())?;
-            for name in &self.names.names {
+            observer.buffer::<String>(self.field_names().len(), self.field_names().len())?;
+            for name in self.field_names() {
                 observer.child(name)?;
             }
         }

@@ -6,6 +6,8 @@
 
 //! Keep call selection separate from input coercion so modifiers precede input effects.
 
+use crate::binding::preparation::{LiteralInput, SchemaContext};
+
 use super::ownership::{AnalysisType, AnalysisVec};
 use super::{ColumnType, ExpressionType, Preparation, QueryPlan, RowSchema, SQLError, ScalarExpr};
 use crate::ast::{BinaryOp, FunctionBinding};
@@ -212,7 +214,7 @@ pub(super) enum FunctionResult {
     Unselected,
 }
 
-impl Preparation<'_> {
+impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
     /// Borrow the original direct and ordered children: their input leaf identities
     /// must survive until the retained constants are applied to the original plan.
     pub(super) fn observe_function_arguments(
@@ -765,7 +767,7 @@ fn ordered_result_type(
 }
 
 /// Ordered and FILTER expressions are visited independently of a call's result collation.
-impl Preparation<'_> {
+impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
     pub(super) fn function_modifier_collations(
         &mut self,
         orders: &[crate::ScalarOrder],

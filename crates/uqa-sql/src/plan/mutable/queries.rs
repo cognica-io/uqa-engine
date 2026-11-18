@@ -10,6 +10,8 @@ use super::{memory::RewriteMemory, MutableQueryPlan, QueryPlan, RelationalPlan};
 use crate::{plan::CtePlanBody, SQLError};
 use uqa_core::memory::ProductionControl;
 
+pub(super) use crate::plan::retirement::empty_query;
+
 /// A directly retained query child. Each child keeps its own scalar-subquery namespace.
 #[derive(Clone, Copy, Debug)]
 pub enum QueryChildSlot {
@@ -29,21 +31,20 @@ impl MutableQueryPlan {
     ) -> Result<Self, SQLError> {
         self.assert_owner(control);
         control.check()?;
-        let input = Self {
-            query: std::mem::replace(slot.query_mut(&mut self.query), empty_query()),
-            memory: self
-                .memory
-                .as_mut()
-                .and_then(|memory| slot.memory_mut(memory).take()),
-        };
+        let mut slot = self.query_slot(slot);
+        let input = slot.take();
         let output = map(input)?;
         output.assert_owner(control);
         control.check()?;
-        *slot.query_mut(&mut self.query) = output.query;
-        if let Some(memory) = &mut self.memory {
-            *slot.memory_mut(memory) = output.memory;
-        }
+        slot.restore(output);
         Ok(self)
+    }
+
+    pub(super) fn query_slot(&mut self, slot: QueryChildSlot) -> super::edits::Slot<'_, Self> {
+        super::edits::Slot::new(
+            slot.query_mut(&mut self.query),
+            self.memory.as_mut().map(|memory| slot.memory_mut(memory)),
+        )
     }
 }
 
@@ -119,20 +120,5 @@ impl QueryChildSlot {
             }
         };
         input.field_mut("query")
-    }
-}
-
-pub(super) fn empty_query() -> QueryPlan {
-    QueryPlan {
-        analyzed_output: None,
-        analyzed_source: None,
-        analyzed_grouping: None,
-        relations_bound: false,
-        relation_privilege_subject: None,
-        ctes: Vec::new(),
-        root: RelationalPlan::Values {
-            rows: Vec::new(),
-            subqueries: Vec::new(),
-        },
     }
 }

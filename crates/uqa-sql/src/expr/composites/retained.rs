@@ -43,6 +43,16 @@ impl PartialEq for CompositeConstantSource {
 }
 
 impl CompositeConstantSource {
+    pub(crate) fn retire_metadata_step(&mut self) -> bool {
+        let Some(descriptor) = self.descriptors.last_mut() else {
+            return true;
+        };
+        if descriptor.retire_step() {
+            self.descriptors.pop();
+        }
+        false
+    }
+
     pub(crate) fn capture(
         value: &Value,
         ty: &ColumnType,

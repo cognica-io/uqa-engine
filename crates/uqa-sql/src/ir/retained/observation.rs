@@ -10,12 +10,12 @@ use super::{RetainedConstantValue, RetainedScalarLiteral};
 use crate::SQLError;
 use uqa_core::{
     memory::{Produced, ProductionControl},
-    Value,
+    OwnedValue, Value,
 };
 
 pub(crate) enum Observation<'a> {
     Resident(&'a Value),
-    Decoded(Produced<Value>),
+    Decoded(Produced<OwnedValue>),
 }
 
 impl std::ops::Deref for Observation<'_> {
@@ -38,7 +38,7 @@ pub(crate) fn observe<'a>(
         return Ok(Some(Observation::Resident(value)));
     }
     match value.read_with_control(control) {
-        Ok(value) => Ok(Some(Observation::Decoded(value))),
+        Ok(value) => Ok(Some(Observation::Decoded(value.into_owned_value()))),
         Err(error) if matches!(error.sqlstate(), Some("53200" | "57014")) => Err(error),
         Err(_) => Ok(None),
     }

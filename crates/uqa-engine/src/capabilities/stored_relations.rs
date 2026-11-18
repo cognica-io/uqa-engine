@@ -74,6 +74,30 @@ impl StoredQuerySequences for Engine {
             sequences.contains_key(candidate)
         })
     }
+    fn query_sequence_with_control(
+        &self,
+        reference: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_core::memory::Produced<String>, SQLError> {
+        control.check()?;
+        self.refresh_sequences_from_catalog().map_err(|error| {
+            uqa_execution::storage_errors::storage_error("load sequence catalog", &error)
+        })?;
+        self.loaded_query_sequence_with_control(reference, control)
+    }
+    fn loaded_query_sequence_with_control(
+        &self,
+        reference: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_core::memory::Produced<String>, SQLError> {
+        let sequences = self.durable.sequences.read();
+        analysis::resolve_query_sequence_with_control(
+            self,
+            reference,
+            |candidate| sequences.contains_key(candidate),
+            control,
+        )
+    }
 }
 impl Engine {
     pub(crate) fn bind_stored_query_relations(

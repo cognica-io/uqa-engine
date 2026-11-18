@@ -6,12 +6,14 @@
 
 //! Observe recursive nodes in separate frames so unrelated scalar variants do not accumulate stack storage at every child.
 
+use crate::binding::preparation::{LiteralInput, SchemaContext};
+
 use super::{
     BinaryOp, ColumnType, Derivation, ExpressionType, Preparation, QueryPlan, RowSchema, SQLError,
     ScalarExpr,
 };
 
-impl Preparation<'_> {
+impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
     pub(super) fn scalar_subquery_expression(
         &mut self,
         index: usize,

@@ -14,20 +14,30 @@ use uqa_core::{
 };
 
 mod call;
+mod child_memory;
 mod children;
+use child_memory::ChildMemory;
+pub(in crate::plan::scalar) use children::get_mut as child_slot_mut;
 mod composite;
 mod composites;
 mod construction;
 mod constructors;
 mod edit;
+mod folding;
+pub(in crate::plan) use folding::Folding as ScalarMemoryFolding;
 mod generated;
 mod iteration;
 mod literals;
 mod metadata;
+pub(in crate::plan::scalar) mod publication;
 mod query_ids;
 mod references;
 mod replacement;
 mod selection;
+mod sequences;
+mod traversal;
+pub(in crate::plan) use sequences::Bind as SequenceBinding;
+pub(crate) use traversal::{Edit as ScalarEdit, EditIdentity as ScalarEditIdentity};
 pub(in crate::plan) mod windows;
 pub use iteration::OwnedScalarChildren;
 pub use replacement::ScalarNodeTransform;
@@ -40,35 +50,60 @@ pub struct OwnedScalarExpr {
     pub(super) memory: Option<ScalarMemory>,
 }
 
+impl Drop for OwnedScalarExpr {
+    fn drop(&mut self) {
+        crate::ir::ownership::retire(&mut self.expression);
+    }
+}
+
 /// Direct allocations include this node's names, types, values, child boxes and child-vector buffers. Each child's payload has its own owner; the metadata vector also admits its actual capacity before allocation.
 #[derive(Debug)]
 pub(crate) struct ScalarMemory {
     // The direct lease includes this metadata buffer; destroy it before releasing the lease.
-    pub(super) children: Vec<Option<Self>>,
+    children: ChildMemory,
     pub(super) direct: MemoryReservation,
 }
 
+impl Drop for ScalarMemory {
+    fn drop(&mut self) {
+        if self.children.iter().all(Option::is_none) {
+            return;
+        }
+        let empty = self.direct.budget().empty_reservation();
+        let retained = Self {
+            children: std::mem::take(&mut self.children),
+            direct: std::mem::replace(&mut self.direct, empty),
+        };
+        drop(retained.into_reservation());
+    }
+}
+
 impl ScalarMemory {
-    pub(super) fn from_parts(
-        mut direct: MemoryReservation,
-        children: BudgetedVec<Option<Self>>,
-    ) -> Self {
-        let (children, memory) = children.into_parts();
-        direct.absorb(memory);
-        Self { children, direct }
+    pub(in crate::plan::scalar) fn new(direct: MemoryReservation) -> Self {
+        Self {
+            children: ChildMemory::default(),
+            direct,
+        }
     }
 
-    fn into_parts(self) -> (MemoryReservation, BudgetedVec<Option<Self>>) {
-        let Self {
-            children,
-            mut direct,
-        } = self;
+    pub(in crate::plan::scalar) fn from_parts(
+        direct: MemoryReservation,
+        mut children: Self,
+    ) -> Self {
+        children.direct.absorb(direct);
+        children
+    }
+
+    fn into_parts(mut self) -> (MemoryReservation, BudgetedVec<Option<Self>>) {
+        let children = self.children.take_buffer();
+        let empty = self.direct.budget().empty_reservation();
+        let mut direct = std::mem::replace(&mut self.direct, empty);
         let memory = direct.split(children.capacity() * size_of::<Option<Self>>());
         (direct, BudgetedVec::from_parts(children, memory))
     }
 
     fn child_buffer(&mut self) -> ScalarChildren<'_> {
-        let children = std::mem::take(&mut self.children);
+        let children = self.children.take_buffer();
         let memory = self
             .direct
             .split(children.capacity() * size_of::<Option<Self>>());
@@ -78,7 +113,10 @@ impl ScalarMemory {
         }
     }
 
-    pub(super) fn reserve_children(&mut self, count: usize) -> Result<()> {
+    pub(in crate::plan::scalar) fn reserve_children(
+        &mut self,
+        count: usize,
+    ) -> std::result::Result<(), uqa_core::memory::MemoryError> {
         self.child_buffer()
             .buffer
             .as_mut()
@@ -87,33 +125,38 @@ impl ScalarMemory {
         Ok(())
     }
 
-    pub(super) fn push_child(&mut self, child: Option<Self>) -> Result<()> {
+    pub(in crate::plan::scalar) fn push_child(
+        &mut self,
+        child: Option<Self>,
+    ) -> std::result::Result<(), uqa_core::memory::MemoryError> {
+        let bytes = child.as_ref().map_or(0, Self::reserved_bytes);
         self.child_buffer()
             .buffer
             .as_mut()
             .expect("child buffer")
             .push(child)?;
+        self.children.add_bytes(bytes);
         Ok(())
     }
 
     pub(crate) fn reserved_bytes(&self) -> usize {
-        self.direct.bytes()
-            + self
-                .children
-                .iter()
-                .flatten()
-                .map(Self::reserved_bytes)
-                .sum::<usize>()
+        self.direct.bytes() + self.children.reserved_bytes()
     }
 
     pub(crate) fn into_reservation(self) -> MemoryReservation {
-        let (mut direct, mut children) = self.into_parts();
-        while let Some(child) = children.pop() {
-            direct.absorb(child.expect("owned scalar child").into_reservation());
-        }
-        // Ownership metadata is temporary, not part of the immutable scalar allocation.
+        let mut folding = folding::Folding::new(self);
+        while !folding.advance() {}
+        folding.finish()
+    }
+}
+
+fn absorb_leaf(node: Option<ScalarMemory>, retained: &mut MemoryReservation) {
+    if let Some(node) = node {
+        let (direct, children) = node.into_parts();
+        // All actual descendants were detached before the metadata buffer is released.
+        debug_assert!(children.iter().all(Option::is_none));
         drop(children);
-        direct
+        retained.absorb(direct);
     }
 }
 
@@ -126,14 +169,17 @@ struct ScalarChildren<'a> {
 impl Drop for ScalarChildren<'_> {
     fn drop(&mut self) {
         let (children, memory) = self.buffer.take().expect("child buffer").into_parts();
-        self.parent.children = children;
+        self.parent.children.restore_buffer(children);
         self.parent.direct.absorb(memory);
     }
 }
 
 impl OwnedScalarExpr {
-    pub(crate) fn into_rewrite_parts(self) -> (ScalarExpr, Option<ScalarMemory>) {
-        (self.expression, self.memory)
+    pub(crate) fn into_rewrite_parts(mut self) -> (ScalarExpr, Option<ScalarMemory>) {
+        (
+            std::mem::replace(&mut self.expression, ScalarExpr::Star),
+            self.memory.take(),
+        )
     }
 
     pub(crate) fn from_rewrite_parts(expression: ScalarExpr, memory: Option<ScalarMemory>) -> Self {
@@ -153,10 +199,7 @@ impl OwnedScalarExpr {
         let (value, memory) = value.into_parts();
         let output = Self {
             expression: ScalarExpr::Literal(value),
-            memory: memory.map(|direct| ScalarMemory {
-                children: Vec::new(),
-                direct,
-            }),
+            memory: memory.map(ScalarMemory::new),
         };
         output.assert_owner(control);
         control.check()?;
@@ -205,7 +248,16 @@ impl OwnedScalarExpr {
             memory: self
                 .memory
                 .as_mut()
-                .map(|memory| memory.children[index].take().expect("owned scalar child")),
+                .map(|memory| memory.children.take(index).expect("owned scalar child")),
+        }
+    }
+
+    // Reattach a detached child without reallocating its parent's payload or metadata slots.
+    fn restore_child(&mut self, index: usize, child: Self) {
+        let (expression, memory) = child.into_rewrite_parts();
+        *children::get_mut(&mut self.expression, index).expect("scalar child index") = expression;
+        if let Some(parent) = &mut self.memory {
+            drop(parent.children.replace(index, memory));
         }
     }
 
@@ -226,12 +278,7 @@ impl OwnedScalarExpr {
             let replacement = map(ordinal, child)?;
             replacement.assert_owner(control);
             control.check().map_err(CatalogRetentionError::from)?;
-            let Self { expression, memory } = replacement;
-            *children::get_mut(&mut self.expression, ordinal).expect("scalar child index") =
-                expression;
-            if let Some(parent) = &mut self.memory {
-                parent.children[ordinal] = memory;
-            }
+            self.restore_child(ordinal, replacement);
         }
         control.check().map_err(CatalogRetentionError::from)?;
         Ok(self)
@@ -239,7 +286,7 @@ impl OwnedScalarExpr {
 
     /// Rewrite one immediate child while retaining all parent containers and sibling owners.
     pub fn map_child<E>(
-        mut self,
+        self,
         index: usize,
         control: &ProductionControl<'_>,
         map: impl FnOnce(Self) -> std::result::Result<Self, E>,
@@ -247,26 +294,34 @@ impl OwnedScalarExpr {
     where
         E: From<CatalogRetentionError>,
     {
+        crate::catalog::work::inline(
+            self.map_child_from(index, control, |child| std::future::ready(map(child))),
+        )
+    }
+
+    /// Keep the original parent slot and sibling owners while one child replacement suspends.
+    pub(crate) async fn map_child_from<E, F>(
+        mut self,
+        index: usize,
+        control: &ProductionControl<'_>,
+        map: impl FnOnce(Self) -> F,
+    ) -> std::result::Result<Self, E>
+    where
+        E: From<CatalogRetentionError>,
+        F: std::future::Future<Output = std::result::Result<Self, E>>,
+    {
         self.assert_owner(control);
         control.check().map_err(CatalogRetentionError::from)?;
-        let replacement = map(self.take_child(index))?;
+        let replacement = map(self.take_child(index)).await?;
         replacement.assert_owner(control);
         control.check().map_err(CatalogRetentionError::from)?;
-        let Self { expression, memory } = replacement;
-        *children::get_mut(&mut self.expression, index).expect("scalar child index") = expression;
-        if let Some(parent) = &mut self.memory {
-            parent.children[index] = memory;
-        }
+        self.restore_child(index, replacement);
         Ok(self)
     }
 
     /// Freeze a completed rewrite. Surviving IR reservations become one immutable lease, while the temporary ownership metadata is destroyed and its capacity released.
     pub fn finish(self, control: &ProductionControl<'_>) -> Result<Produced<ScalarExpr>> {
-        self.assert_owner(control);
-        control.check()?;
-        let Self { expression, memory } = self;
-        let memory = memory.map(ScalarMemory::into_reservation);
-        Ok(control.finish(expression, memory)?)
+        publication::Publication::new(self, control)?.finish(control)
     }
 
     fn assert_owner(&self, control: &ProductionControl<'_>) {

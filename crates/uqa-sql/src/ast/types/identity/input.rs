@@ -6,8 +6,8 @@
 
 //! Native identity spelling shares its grammar between ordinary and retained work.
 
+use super::super::lexical::{self, checkpoint, Work};
 use super::{UserTypeIdentity, UserTypeKind};
-use std::future::Future;
 use uqa_core::{
     image_io::{AsyncImageInput, ImageIoError},
     memory::{Produced, ProductionControl, ProductionString},
@@ -22,31 +22,11 @@ pub enum TypeIdentityInputError {
     Work(#[from] ImageIoError),
 }
 
-pub(super) trait Work: Send {
-    type Error: From<ValueRetentionError>;
-    fn checkpoint(&mut self) -> impl Future<Output = Result<(), Self::Error>> + Send;
-}
-impl Work for () {
-    type Error = ValueRetentionError;
-    async fn checkpoint(&mut self) -> Result<(), Self::Error> {
-        Ok(())
-    }
-}
 impl Work for AsyncImageInput<'_> {
     type Error = TypeIdentityInputError;
     async fn checkpoint(&mut self) -> Result<(), Self::Error> {
         Ok(AsyncImageInput::checkpoint(self).await?)
     }
-}
-
-async fn checkpoint<W: Work>(
-    control: &ProductionControl<'_>,
-    work: &mut W,
-) -> Result<(), W::Error> {
-    control.check()?;
-    work.checkpoint().await?;
-    control.check()?;
-    Ok(())
 }
 
 impl UserTypeIdentity {
@@ -82,27 +62,7 @@ pub(super) async fn parse<W: Work>(
     work: &mut W,
 ) -> Result<Option<UserTypeIdentity>, W::Error> {
     checkpoint(control, work).await?;
-    let mut start = 0;
-    for (index, character) in name.chars().enumerate() {
-        if index % 1024 == 0 {
-            checkpoint(control, work).await?;
-        }
-        if !character.is_whitespace() {
-            break;
-        }
-        start += character.len_utf8();
-    }
-    let mut end = name.len();
-    for (index, character) in name[start..].chars().rev().enumerate() {
-        if index % 1024 == 0 {
-            checkpoint(control, work).await?;
-        }
-        if !character.is_whitespace() {
-            break;
-        }
-        end -= character.len_utf8();
-    }
-    let mut element = &name[start..end];
+    let mut element = lexical::trim(name, control, work).await?;
     let mut dimensions = 0;
     while let Some(inner) = element.strip_suffix("[]") {
         if dimensions % 1024 == 0 {
@@ -126,25 +86,11 @@ pub(super) async fn parse<W: Work>(
     }) else {
         return Ok(None);
     };
-    if digits.is_empty() {
+    let Some(oid) = lexical::integer(digits, 0..=i64::from(u32::MAX), false, control, work).await?
+    else {
         return Ok(None);
-    }
-    let mut oid = 0_u32;
-    for (index, byte) in digits.bytes().enumerate() {
-        if index % 1024 == 0 {
-            checkpoint(control, work).await?;
-        }
-        if !byte.is_ascii_digit() {
-            return Ok(None);
-        }
-        let Some(next) = oid
-            .checked_mul(10)
-            .and_then(|oid| oid.checked_add(u32::from(byte - b'0')))
-        else {
-            return Ok(None);
-        };
-        oid = next;
-    }
+    };
+    let oid = u32::try_from(oid).expect("validated OID range");
     control.check()?;
     Ok(Some(UserTypeIdentity {
         kind,

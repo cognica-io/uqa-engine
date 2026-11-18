@@ -32,6 +32,7 @@ mod async_sql_engine;
 pub mod binding;
 pub mod catalog;
 pub mod compiler;
+mod construction;
 pub mod copy;
 pub mod error;
 pub mod explain;

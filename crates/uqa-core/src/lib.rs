@@ -41,7 +41,7 @@ pub use ranked_view::RankedView;
 pub use relation::{LogSemiring, Relation, RelationEntry, Semiring};
 pub use relation_identity::{
     RelationIdentity, RelationName, RelationReference, RelationReferenceError,
-    RelationReferenceInputError,
+    RelationReferenceInputError, RelationReferenceWork,
 };
 pub use types::value_image;
 pub use types::{
@@ -51,13 +51,13 @@ pub use types::{
     ControlledArrayElements, DatumValue, DecimalValue, DiskANNIndexStats, DiskANNQueryStats, DocId,
     Edge, EdgeId, EnumLabelKey, EnumLabelKeyError, EnumLabelKeyParseError, EnumValue, FieldName,
     GeneralizedPayload, GeneralizedPostingEntry, IndexStats, IndexStatsBuilder, JsonValueDecoder,
-    JsonbKeyError, LegacyVectorKind, LegacyVectorValue, OwnedIndexStats, PathExpr, PathSegment,
-    Payload, PostingEntry, RecordDatumField, RecordDescriptor, RecordFieldType, RecordIter,
-    RecordIterMut, RecordValue, RowDescriptor, RowValue, TemporalDate, TemporalDateOrder,
-    TemporalDateStyle, TemporalDateTime, TemporalInfinity, TemporalInputError,
+    JsonbKeyError, LegacyVectorKind, LegacyVectorValue, OwnedIndexStats, OwnedValue, PathExpr,
+    PathSegment, Payload, PostingEntry, RecordDatumField, RecordDescriptor, RecordFieldType,
+    RecordIter, RecordIterMut, RecordValue, RowDescriptor, RowValue, TemporalDate,
+    TemporalDateOrder, TemporalDateStyle, TemporalDateTime, TemporalInfinity, TemporalInputError,
     TemporalIntervalStyle, TemporalTimeZone, TemporalValue, TokenOccurrence, TokenOccurrenceError,
-    TokenOffsets, Value, ValueRetentionError, ValueSerialization, VectorGeneration,
-    VectorPopulationStats, VectorQueryRoute, VectorReadStats, Vertex, VertexId,
+    TokenOffsets, Value, ValueCopyWork, ValueRetentionError, ValueRetirement, ValueSerialization,
+    VectorGeneration, VectorPopulationStats, VectorQueryRoute, VectorReadStats, Vertex, VertexId,
     MAX_ENUM_LABEL_KEY_BYTES, POSTGRES_EPOCH_DAYS, POSTGRES_EPOCH_MICROS,
 };
 

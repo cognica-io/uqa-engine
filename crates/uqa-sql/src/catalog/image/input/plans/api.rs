@@ -15,7 +15,7 @@ pub struct CapturedQuery(Owner);
 impl Deref for CapturedQuery {
     type Target = QueryPlan;
     fn deref(&self) -> &Self::Target {
-        let Node::Query(value) = &self.0.root else {
+        let Node::Query(value) = &self.0.tree.root else {
             unreachable!("captured query root")
         };
         value
@@ -29,7 +29,7 @@ pub struct CapturedExpressionPlan(Owner);
 impl Deref for CapturedExpressionPlan {
     type Target = ExpressionPlan;
     fn deref(&self) -> &Self::Target {
-        let Node::Expression(value) = &self.0.root else {
+        let Node::Expression(value) = &self.0.tree.root else {
             unreachable!("captured expression root")
         };
         value

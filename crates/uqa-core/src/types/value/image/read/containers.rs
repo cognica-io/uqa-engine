@@ -10,8 +10,8 @@ use super::{
     Budgeted, BudgetedVec, MemoryReservation, Reader, Value, ValueImageError, ValueImageResult,
 };
 use crate::{
-    ArrayValue, LegacyVectorKind, LegacyVectorValue, RecordDescriptor, RecordFieldType,
-    RecordValue, RowDescriptor, RowValue,
+    types::OwnedValue, ArrayValue, LegacyVectorKind, LegacyVectorValue, RecordDescriptor,
+    RecordFieldType, RecordValue, RowDescriptor, RowValue, ValueRetirement,
 };
 use std::collections::BTreeMap;
 
@@ -41,6 +41,17 @@ pub(super) struct Container {
     memory: MemoryReservation,
 }
 
+impl Drop for Container {
+    fn drop(&mut self) {
+        while let Some(value) = self.values.pop() {
+            drop(ValueRetirement::new(value));
+        }
+        if let Kind::Map(fields) = &mut self.kind {
+            drop(ValueRetirement::new(Value::Map(std::mem::take(fields))));
+        }
+    }
+}
+
 impl ArrayHeader {
     async fn read(reader: &mut Reader<'_, '_>) -> ValueImageResult<Self> {
         let rank = reader.length().await?;
@@ -65,12 +76,12 @@ impl ArrayHeader {
 
     fn finish(
         self,
-        elements: Budgeted<Vec<Value>>,
+        elements: Budgeted<OwnedValue>,
         reader: &Reader<'_, '_>,
     ) -> ValueImageResult<Budgeted<ArrayValue>> {
         let rank = self.dimensions.len();
         let shape = ArrayValue::decoded_shape_budgeted(
-            &elements,
+            elements.values(),
             rank,
             reader.memory,
             reader.cancellation,
@@ -88,7 +99,7 @@ impl ArrayHeader {
         memory.absorb(dimension_memory);
         memory.absorb(bound_memory);
         Ok(Budgeted::new(
-            ArrayValue::from_copied_parts(elements, dimensions, bounds)
+            ArrayValue::from_copied_parts(elements.into_values(), dimensions, bounds)
                 .with_element_type_oid(self.oid),
             memory,
         ))
@@ -152,47 +163,48 @@ impl Container {
         Ok(())
     }
 
-    pub(super) fn accept(&mut self, value: Budgeted<Value>) -> ValueImageResult<()> {
+    pub(super) fn accept(&mut self, value: Budgeted<OwnedValue>) -> ValueImageResult<()> {
         let (value, memory) = value.into_parts();
         self.memory.absorb(memory);
         match &mut self.kind {
             Kind::Map(fields) => {
                 let (key, memory) = self.key.take().expect("native map key").into_parts();
                 self.memory.absorb(memory);
-                fields.insert(key, value);
+                fields.insert(key, value.into_inner());
             }
             Kind::Record { names, .. } => {
                 let (key, memory) = self.key.take().expect("native record key").into_parts();
                 self.memory.absorb(memory);
                 names.push(key)?;
-                self.values.push(value)?;
+                self.values.push_owned_value(value)?;
             }
-            _ => self.values.push(value)?,
+            _ => self.values.push_owned_value(value)?,
         }
         self.remaining -= 1;
         Ok(())
     }
 
     pub(super) async fn finish(
-        self,
+        mut self,
         reader: &mut Reader<'_, '_>,
-    ) -> ValueImageResult<Budgeted<Value>> {
-        let mut memory = self.memory;
-        let (values, value_memory) = self.values.into_parts();
+    ) -> ValueImageResult<Budgeted<OwnedValue>> {
+        let mut memory = std::mem::replace(&mut self.memory, reader.memory.empty_reservation());
+        let (values, value_memory) =
+            std::mem::replace(&mut self.values, BudgetedVec::new(reader.memory)).into_parts();
         memory.absorb(value_memory);
-        let values = Budgeted::new(values, memory);
-        Ok(match self.kind {
-            Kind::List => Reader::owned(values, Value::List),
+        let values = Budgeted::new(OwnedValue::new(Value::List(values)), memory);
+        Ok(match std::mem::replace(&mut self.kind, Kind::List) {
+            Kind::List => values,
             Kind::Array(header) => Reader::owned(header.finish(values, reader)?, Value::Array),
             Kind::Legacy(kind, header) => {
                 let (array, memory) = header.finish(values, reader)?.into_parts();
                 let control = reader.control();
-                let array = control.finish(array, Some(memory))?;
+                let array = crate::memory::Produced::from(Budgeted::new(array, memory));
                 let vector = LegacyVectorValue::try_from_array_with_control(kind, array, &control)?
                     .ok_or(ValueImageError::Invalid("legacy vector elements"))?;
                 let (vector, memory) = vector.into_parts();
                 Budgeted::new(
-                    Value::LegacyVector(vector),
+                    OwnedValue::new(Value::LegacyVector(vector)),
                     memory.expect("admitted vector"),
                 )
             }
@@ -210,13 +222,16 @@ impl Container {
                 let descriptor = RecordDescriptor::new(names, oid);
                 drop(memory.split(source_bytes));
                 Budgeted::new(
-                    Value::Record(RecordValue::from_validated_parts(values, descriptor)),
+                    OwnedValue::new(Value::Record(RecordValue::from_validated_parts(
+                        values.into_values(),
+                        descriptor,
+                    ))),
                     memory,
                 )
             }
             Kind::Map(fields) => {
                 let (_, memory) = values.into_parts();
-                Budgeted::new(Value::Map(fields), memory)
+                Budgeted::new(OwnedValue::new(Value::Map(fields)), memory)
             }
         })
     }
@@ -225,12 +240,12 @@ impl Container {
 impl Reader<'_, '_> {
     async fn row_from(
         &mut self,
-        values: Budgeted<Vec<Value>>,
-    ) -> ValueImageResult<Budgeted<Value>> {
+        values: Budgeted<OwnedValue>,
+    ) -> ValueImageResult<Budgeted<OwnedValue>> {
         let field_types = if self.flag().await? {
             let mut types = BudgetedVec::new(self.memory);
-            types.reserve(values.len())?;
-            for _ in 0..values.len() {
+            types.reserve(values.values().len())?;
+            for _ in 0..values.values().len() {
                 types.push(RecordFieldType {
                     oid: u32::from_le_bytes(self.fixed().await?),
                     type_modifier: i32::from_le_bytes(self.fixed().await?),
@@ -254,7 +269,10 @@ impl Reader<'_, '_> {
             memory.absorb(type_memory);
             types
         });
-        let value = Value::Row(RowValue::from_validated_parts(values, field_types));
+        let value = OwnedValue::new(Value::Row(RowValue::from_validated_parts(
+            values.into_values(),
+            field_types,
+        )));
         drop(memory.split(type_source_bytes));
         Ok(Budgeted::new(value, memory))
     }

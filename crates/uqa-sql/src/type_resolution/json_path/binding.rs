@@ -17,6 +17,9 @@ use uqa_core::{
     Value,
 };
 
+#[cfg(test)]
+mod tests;
+
 pub(in crate::type_resolution) fn bind_call(
     call: &mut BindingCall,
     memory: &mut Option<MemoryReservation>,
@@ -140,35 +143,63 @@ pub(super) fn signature(
     })
 }
 
-pub(super) fn invocation(
-    binding: &FunctionBinding,
+pub(super) fn invocation<'a>(
+    binding: &'a FunctionBinding,
     argument_count: usize,
     original_count: usize,
     explicit_variadic: bool,
-) -> Result<&crate::ast::RoutineInvocationBinding, SQLError> {
-    let invocation = binding
-        .invocation
-        .as_ref()
-        .ok_or_else(|| SQLError::Internal("JSON path call lost its variadic contract".into()))?;
+    control: &ProductionControl<'_>,
+) -> Result<&'a crate::ast::RoutineInvocationBinding, SQLError> {
+    Ok(crate::catalog::work::inline(invocation_from(
+        binding,
+        argument_count,
+        original_count,
+        explicit_variadic,
+        control,
+        &mut (),
+    ))?)
+}
+
+pub(super) async fn invocation_from<'a, W: crate::plan::ScalarInputWork>(
+    binding: &'a FunctionBinding,
+    argument_count: usize,
+    original_count: usize,
+    explicit_variadic: bool,
+    control: &ProductionControl<'_>,
+    work: &mut W,
+) -> Result<&'a crate::ast::RoutineInvocationBinding, W::Error>
+where
+    W::Error: From<SQLError>,
+{
+    let invocation = binding.invocation.as_ref().ok_or_else(|| {
+        W::Error::from(SQLError::Internal(
+            "JSON path call lost its variadic contract".into(),
+        ))
+    })?;
+    let invalid = || {
+        W::Error::from(SQLError::Internal(
+            "invalid selected JSON path invocation".into(),
+        ))
+    };
     if original_count != argument_count
         || invocation.argument_targets.len() != argument_count
         || invocation.argument_positions.len() != argument_count
-        || invocation
-            .argument_positions
-            .iter()
-            .filter(|&&position| position == 0)
-            .count()
-            != 1
-        || invocation
-            .argument_positions
-            .iter()
-            .any(|&position| position > 1)
+    {
+        return Err(invalid());
+    }
+    let mut documents = 0;
+    let mut invalid_position = false;
+    for position in &invocation.argument_positions {
+        crate::plan::retirement::checkpoint(control, work).await?;
+        documents += usize::from(*position == 0);
+        invalid_position |= *position > 1;
+    }
+    if documents != 1
+        || invalid_position
         || argument_count < 2
         || explicit_variadic && argument_count != 2
     {
-        return Err(SQLError::Internal(
-            "invalid selected JSON path invocation".into(),
-        ));
+        return Err(invalid());
     }
     Ok(invocation)
 }
@@ -182,7 +213,13 @@ fn normalize(
     control: &ProductionControl<'_>,
 ) -> Result<(), SQLError> {
     let entry = JsonPathFunction::lookup(&binding.name).expect("selected JSON path declaration");
-    let invocation = invocation(binding, arguments.len(), original.len(), explicit_variadic)?;
+    let invocation = invocation(
+        binding,
+        arguments.len(),
+        original.len(),
+        explicit_variadic,
+        control,
+    )?;
     let mut document = None;
     let mut paths = ProductionVec::new(*control);
     paths.reserve(arguments.len().saturating_sub(1))?;

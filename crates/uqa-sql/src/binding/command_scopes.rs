@@ -369,55 +369,8 @@ fn merge_action_expressions(when_clauses: &mut [MergeWhenPlan]) -> MergeActionEx
     let mut not_matched = Vec::new();
     let mut not_matched_by_source = Vec::new();
     for clause in when_clauses {
-        match clause {
-            MergeWhenPlan::UpdateMatched {
-                condition,
-                assignments,
-            } => {
-                matched.extend(condition.as_mut());
-                matched.extend(
-                    assignments
-                        .iter_mut()
-                        .flat_map(AssignmentPlan::expressions_mut),
-                );
-            }
-            MergeWhenPlan::DeleteMatched { condition }
-            | MergeWhenPlan::NothingMatched { condition } => {
-                matched.extend(condition.as_mut());
-            }
-            MergeWhenPlan::InsertNotMatched {
-                condition,
-                columns,
-                values,
-                ..
-            } => {
-                not_matched.extend(condition.as_mut());
-                not_matched.extend(
-                    columns
-                        .iter_mut()
-                        .flat_map(AssignmentTarget::expressions_mut),
-                );
-                not_matched.extend(values.iter_mut());
-            }
-            MergeWhenPlan::NothingNotMatched { condition } => {
-                not_matched.extend(condition.as_mut());
-            }
-            MergeWhenPlan::UpdateNotMatchedBySource {
-                condition,
-                assignments,
-            } => {
-                not_matched_by_source.extend(condition.as_mut());
-                not_matched_by_source.extend(
-                    assignments
-                        .iter_mut()
-                        .flat_map(AssignmentPlan::expressions_mut),
-                );
-            }
-            MergeWhenPlan::DeleteNotMatchedBySource { condition }
-            | MergeWhenPlan::NothingNotMatchedBySource { condition } => {
-                not_matched_by_source.extend(condition.as_mut());
-            }
-        }
+        let scope = clause.input_scope(&mut matched, &mut not_matched_by_source, &mut not_matched);
+        scope.extend(clause.expressions_mut());
     }
     (matched, not_matched, not_matched_by_source)
 }

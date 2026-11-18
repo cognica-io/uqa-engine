@@ -383,3 +383,41 @@ fn retained_relation_rendering_separates_native_output_from_work_admission() {
         assert_eq!((native.used(), work.used()), (0, 0));
     }
 }
+
+#[test]
+fn borrowed_relation_component_observes_work_cancellation_before_buffer_admission() {
+    struct Work(CancellationToken);
+    impl crate::RelationReferenceWork for Work {
+        type Error = ValueRetentionError;
+        async fn checkpoint(&mut self) -> Result<(), ValueRetentionError> {
+            self.0.check().map_err(Into::into)
+        }
+    }
+    let memory = MemoryBudget::new(1 << 20);
+    let original = CancellationToken::new();
+    let control = ProductionControl::new(&memory, &original, &original);
+    for name in ["", "quoted_é🙂\"", &"wide".repeat(8192)] {
+        let token = CancellationToken::new();
+        token.cancel();
+        let mut work = Work(token);
+        let mut result = None;
+        let allocations = allocation_counter::measure(|| {
+            result = Some(inline(
+                RelationName::decoded(name).decode_from(&control, &mut work),
+            ));
+        });
+        assert!(matches!(
+            result.unwrap(),
+            Err(ValueRetentionError::Cancelled(_))
+        ));
+        assert_eq!(allocations.count_total, 0);
+        assert_eq!(memory.used(), 0);
+    }
+    let source = "\"a\"\"b名\"";
+    let name = RelationIdentity::borrowed_reference(source).unwrap().name;
+    let output = inline(name.decode_from(&control, &mut Work(CancellationToken::new()))).unwrap();
+    assert_eq!(&**output, "a\"b名");
+    assert_eq!(memory.used(), output.capacity());
+    drop(output);
+    assert_eq!(memory.used(), 0);
+}

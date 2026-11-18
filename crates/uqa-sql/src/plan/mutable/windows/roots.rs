@@ -4,127 +4,89 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
+//! Window consumers use the same paired scalar fields as statement rewrites.
+
 use super::{
-    scalar, MutableQueryPlan, MutableSourcePlan, ProductionControl, QueryScalarSlot,
-    RelationalPlan, SQLError, ScalarWindowSpec, SourceChildSlot, SourcePlan, SourceScalarSlot,
+    checkpoint, Input, MutableQueryPlan, MutableSourcePlan, ProductionControl, SQLError,
+    SourceChildSlot, SourcePlan, SourceScope, Windows,
+};
+use crate::plan::{
+    mutable::{
+        edits::Slot,
+        nodes::{roots, ScalarMemory},
+    },
+    scalar::OwnedScalarExpr,
 };
 
-pub(super) fn normalize(
-    mut query: MutableQueryPlan,
-    resolved: &[ScalarWindowSpec],
+pub(super) async fn normalize<I: Input>(
+    query: &mut MutableQueryPlan,
+    resolved: Windows,
     control: &ProductionControl<'_>,
-) -> Result<MutableQueryPlan, SQLError> {
-    query = query.map_source(control, |source| source_roots(source, resolved, control))?;
-    let RelationalPlan::QueryBlock(block) = &query.root else {
-        unreachable!("local window roots belong to a query block")
-    };
-    let counts = (
-        block.projections.len(),
-        block.group_by.len(),
-        block.grouping_sets.len(),
-        block.order_by.len(),
-        block.distinct_on.len(),
-    );
-    for index in 0..counts.0 {
-        query = slot(query, QueryScalarSlot::Projection(index), resolved, control)?;
+    input: &mut I,
+) -> Result<(), SQLError> {
+    if let Some(mut slot) = query.source_slot()? {
+        let value = input
+            .source(slot.take(), SourceScope::Roots(resolved.clone()), control)?
+            .await?;
+        slot.restore(value);
     }
-    query = slot(query, QueryScalarSlot::Where, resolved, control)?;
-    for index in 0..counts.1 {
-        query = slot(query, QueryScalarSlot::GroupBy(index), resolved, control)?;
-    }
-    for set in 0..counts.2 {
-        let RelationalPlan::QueryBlock(block) = &query.root else {
-            unreachable!()
-        };
-        for expression in 0..block.grouping_sets[set].len() {
-            query = slot(
-                query,
-                QueryScalarSlot::GroupingSet { set, expression },
-                resolved,
-                control,
-            )?;
-        }
-    }
-    query = slot(query, QueryScalarSlot::Having, resolved, control)?;
-    for index in 0..counts.3 {
-        query = slot(query, QueryScalarSlot::OrderBy(index), resolved, control)?;
-    }
-    query = slot(query, QueryScalarSlot::Limit, resolved, control)?;
-    query = slot(query, QueryScalarSlot::Offset, resolved, control)?;
-    for index in 0..counts.4 {
-        query = slot(query, QueryScalarSlot::DistinctOn(index), resolved, control)?;
-    }
-    Ok(query)
+    roots::query(
+        &mut query.query,
+        query.memory.as_mut(),
+        roots::QueryScope::WindowUses,
+        control,
+        &mut Fields { input, resolved },
+    )
+    .await
 }
-fn slot(
-    query: MutableQueryPlan,
-    slot: QueryScalarSlot,
-    resolved: &[ScalarWindowSpec],
-    control: &ProductionControl<'_>,
-) -> Result<MutableQueryPlan, SQLError> {
-    query.map_scalar(slot, control, |expression| {
-        scalar(expression, resolved, control)
-    })
+
+struct Fields<'a, I> {
+    input: &'a mut I,
+    resolved: Windows,
 }
-fn source_roots(
-    mut source: MutableSourcePlan,
-    resolved: &[ScalarWindowSpec],
-    control: &ProductionControl<'_>,
-) -> Result<MutableSourcePlan, SQLError> {
-    control.check()?;
-    match &*source {
-        SourcePlan::Join { .. } => {
-            source = source.map_child(SourceChildSlot::Left, control, |source| {
-                source_roots(source, resolved, control)
-            })?;
-            source = source.map_child(SourceChildSlot::Right, control, |source| {
-                source_roots(source, resolved, control)
-            })?;
-            source = source.map_scalar(SourceScalarSlot::JoinOn, control, |expression| {
-                scalar(expression, resolved, control)
-            })?;
-        }
-        SourcePlan::Values { rows, .. } => {
-            let count = rows.len();
-            for row in 0..count {
-                let SourcePlan::Values { rows, .. } = &*source else {
-                    unreachable!()
-                };
-                for column in 0..rows[row].len() {
-                    source = source.map_scalar(
-                        SourceScalarSlot::Value { row, column },
-                        control,
-                        |expression| scalar(expression, resolved, control),
-                    )?;
-                }
-            }
-        }
-        SourcePlan::Function { args, .. } => {
-            let count = args.len();
-            for index in 0..count {
-                source = source.map_scalar(
-                    SourceScalarSlot::Argument(index),
-                    control,
-                    |expression| scalar(expression, resolved, control),
-                )?;
-            }
-        }
-        SourcePlan::FunctionGroup { functions, .. } => {
-            let count = functions.len();
-            for function in 0..count {
-                let SourcePlan::FunctionGroup { functions, .. } = &*source else {
-                    unreachable!()
-                };
-                for argument in 0..functions[function].args.len() {
-                    source = source.map_scalar(
-                        SourceScalarSlot::GroupArgument { function, argument },
-                        control,
-                        |expression| scalar(expression, resolved, control),
-                    )?;
-                }
-            }
-        }
-        SourcePlan::RetainedRows(_) | SourcePlan::Table { .. } | SourcePlan::Subquery { .. } => {}
+
+impl<I: Input> roots::Input for Fields<'_, I> {
+    type Work = I::Work;
+    fn work(&mut self) -> &mut Self::Work {
+        self.input.work()
     }
-    Ok(source)
+    async fn scalar(
+        &mut self,
+        expression: &mut crate::ScalarExpr,
+        memory: Option<&mut Option<ScalarMemory>>,
+        control: &ProductionControl<'_>,
+    ) -> Result<(), SQLError> {
+        let mut slot = Slot::<OwnedScalarExpr>::new(expression, memory);
+        let value = self
+            .input
+            .scalar(slot.take(), self.resolved.clone(), control)?
+            .await?;
+        slot.restore(value);
+        Ok(())
+    }
+}
+
+pub(super) async fn source<I: Input>(
+    source: &mut MutableSourcePlan,
+    resolved: Windows,
+    control: &ProductionControl<'_>,
+    input: &mut I,
+) -> Result<(), SQLError> {
+    checkpoint(control, input).await?;
+    if matches!(&**source, SourcePlan::Join { .. }) {
+        for child in [SourceChildSlot::Left, SourceChildSlot::Right] {
+            let mut slot = source.child_slot(child);
+            let value = input
+                .source(slot.take(), SourceScope::Roots(resolved.clone()), control)?
+                .await?;
+            slot.restore(value);
+        }
+    }
+    roots::source(
+        &mut source.source,
+        source.memory.as_mut(),
+        control,
+        &mut Fields { input, resolved },
+    )
+    .await
 }

@@ -8,6 +8,8 @@ use super::*;
 use crate::schema::retention::CatalogRetentionError;
 use uqa_core::{memory::MemoryBudget, CancellationToken, Value};
 
+mod input;
+
 fn text(length: usize) -> ScalarExpr {
     ScalarExpr::Literal(Value::Str("x".repeat(length)))
 }
@@ -16,7 +18,7 @@ fn suspend_ancestors<'s, 'c>(
     source: &'s ScalarExpr,
     control: ProductionControl<'c>,
     mutable: bool,
-) -> (Stack<'s, 'c>, Frame<'s, 'c>) {
+) -> (Stack<Frame<'s, 'c>, 4>, Frame<'s, 'c>) {
     let mut stack = Stack::new(control);
     let mut current = Frame::new(source, control, mutable.into()).unwrap();
     for _ in 0..8 {

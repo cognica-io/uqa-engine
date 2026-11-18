@@ -8,6 +8,8 @@
 
 use crate::SQLError;
 use uqa_core::memory::{BudgetedVec, MemoryReservation, Produced, ProductionControl};
+mod identity;
+pub(in crate::binding) use identity::AnalysisIdentity;
 mod types;
 pub(super) use types::AnalysisType;
 mod maps;

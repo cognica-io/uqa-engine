@@ -27,8 +27,11 @@ impl Copying<'_> {
         let mut shell = crate::plan::mutable::construction::empty_projection_query();
         shell.relations_bound = relations_bound;
         self.query_fields_using(&shell, |copying| {
-            copying.fields.as_mut().expect("VALUES fields").reserve(1)?;
-            let crate::plan::mutable::values::OwnedRows { rows, memory } = rows;
+            copying.fields.as_mut().expect("VALUES fields").reserve(2)?;
+            let subqueries = copying.field("subqueries", |copying| {
+                copying.map(subqueries.iter(), Self::query)
+            })?;
+            let (rows, memory) = rows.into_parts();
             copying
                 .fields
                 .as_mut()
@@ -36,13 +39,9 @@ impl Copying<'_> {
                 .push(RewriteField {
                     name: "rows",
                     memory,
-                })?;
-            Ok(RelationalPlan::Values {
-                rows,
-                subqueries: copying.field("subqueries", |copying| {
-                    copying.map(subqueries.iter(), Self::query)
-                })?,
-            })
+                })
+                .expect("VALUES rows and subquery records were admitted");
+            Ok(RelationalPlan::Values { rows, subqueries })
         })
     }
 

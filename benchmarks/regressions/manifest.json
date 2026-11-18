@@ -4,6 +4,422 @@
     {
       "package": "uqa-sql",
       "kind": "lib",
+      "test": "scalar_free_query_and_source_containers_consume_bounded_work",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/mutable/nodes/roots/tests.rs",
+      "capability": "Shared scalar-field traversal",
+      "workload": "Visit 4096 empty VALUES rows or grouping sets through one-step work windows.",
+      "invariant": "Each empty container consumes work without scalar callbacks or polling allocations; complete input releases both allowances.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "scalar_free_containers_preserve_cancellation_and_abandonment_at_every_yield",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/mutable/nodes/roots/tests.rs",
+      "capability": "Shared scalar-field traversal",
+      "workload": "Abandon each work prefix and cancel either owner while traversing empty query rows, source rows and grouping sets.",
+      "invariant": "Every suspended prefix reports the original cancellation and retires without allocation while the independent sibling reservation remains live.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_value_rows_share_ordinary_shape_and_independently_movable_cells",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/rows/tests.rs",
+      "capability": "Retained row construction",
+      "workload": "Lower empty, scalar and composite rows through ordinary and one-step native construction, then detach one cell.",
+      "invariant": "Row values and retained bytes agree; only the selected cell remains charged after its parent retires.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_value_rows_retire_every_prefix_cancellation_and_denied_destination",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/rows/tests.rs",
+      "capability": "Retained row construction",
+      "workload": "Stop at every suspended prefix, cancel either owner, deny five allowances and reject a later query after completing a large row.",
+      "invariant": "All abandoned or failed rows release destination and work memory while an independent sibling lease survives.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_value_rows_count_empty_rows_against_each_work_window",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/rows/tests.rs",
+      "capability": "Retained row construction",
+      "workload": "Build 2,048 empty rows before a payload row with one work step per poll.",
+      "invariant": "Empty rows consume bounded work; the detached last cell retains exactly its original bytes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_value_rows_release_completed_and_partial_deep_cells_on_a_small_stack",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/rows/tests.rs",
+      "capability": "Retained row construction",
+      "workload": "Retire complete rows, extracted iterators and partial native input containing an 8,192-level cell on a 256 KiB stack.",
+      "invariant": "Cleanup allocates nothing and releases all row payload and ownership reservations without recursive stack growth.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "deep_query_constructor_records_fold_and_drop_without_recursive_cleanup",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/mutable/memory/retirement/tests.rs",
+      "capability": "Query constructor ownership",
+      "workload": "Fold and drop 8,192 nested query constructor records on a 256 KiB thread stack.",
+      "invariant": "Payload leases survive freezing while temporary metadata is released; both paths allocate nothing during cleanup.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "denied_query_constructor_records_retire_deep_partial_owners_and_keep_siblings",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/mutable/memory/retirement/tests.rs",
+      "capability": "Query constructor ownership",
+      "workload": "Deny five allowances while constructing deep mixed field/scalar metadata.",
+      "invariant": "Failed admission releases all partial records and preserves a separate 47-byte reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "moving_query_constructor_fields_preserves_exact_surviving_reservations",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/mutable/memory/retirement/tests.rs",
+      "capability": "Query constructor ownership",
+      "workload": "Detach a nested constructor field, retire its original parent and freeze the child.",
+      "invariant": "The detached field retains exactly its original lease; parent and scratch metadata disappear independently.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_computation_preserves_aggregate_precedence_and_query_window_boundaries",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/query/computation/tests.rs",
+      "capability": "Retained query computation discovery",
+      "workload": "Select nine computation shapes with grouped roots, registered aggregates, window ordering and nested query scopes.",
+      "invariant": "Native and ordinary selection agree; a one-step poll performs at most one controlled aggregate lookup.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_computation_counts_empty_window_definitions_against_work",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/query/computation/tests.rs",
+      "capability": "Retained query computation discovery",
+      "workload": "Visit 2,048 empty window definitions with a one-step input window.",
+      "invariant": "Empty definitions consume work instead of disappearing inside a flattening iterator.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_aggregate_observation_keeps_pruning_order_and_late_lookup_failures",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/query/computation/tests.rs",
+      "capability": "Retained query computation discovery",
+      "workload": "Observe ordered CASE and row expressions with a selected aggregate subtree and a later failing callback.",
+      "invariant": "Selected aggregate descendants stay pruned, later siblings remain observable and the original late error is preserved.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_scalar_observation_bounds_deep_work_and_retires_every_interrupted_prefix",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/query/computation/tests.rs",
+      "capability": "Retained query computation discovery",
+      "workload": "Traverse an 8,192-level scalar on a 256 KiB stack; interrupt selected prefixes, cancel either owner and deny spill admission.",
+      "invariant": "Work windows bound visits, scratch is admitted and released, source ownership survives interruption and retirement allocates nothing.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_construction_driver_keeps_deep_polling_and_retirement_on_a_small_stack",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/construction/tests.rs",
+      "capability": "Native SQL constructor scheduling",
+      "workload": "Drive 8,192 nested owners on a 256 KiB stack; count completed owners per one-step poll and inspect every cancelled or denied prefix.",
+      "invariant": "A poll completes at most one owner, native frames remain admitted, and retirement requires no allocation or recursive poll chain.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_construction_driver_retires_each_prefix_both_cancellations_and_denied_children",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/construction/tests.rs",
+      "capability": "Native SQL constructor scheduling",
+      "workload": "Drive 8,192 nested owners on a 256 KiB stack; count completed owners per one-step poll and inspect every cancelled or denied prefix.",
+      "invariant": "A poll completes at most one owner, native frames remain admitted, and retirement requires no allocation or recursive poll chain.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_scalar_query_input_preserves_ordinary_query_slot_order",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/lowering/input/tests/queries.rs",
+      "capability": "Retained scalar query construction",
+      "workload": "Compare nested IN, CASE, array and window query slots with ordinary lowering.",
+      "invariant": "Query slots preserve source order, parameter substitution suppresses replaced syntax, and private partial owners retire on every failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_scalar_parameter_input_suppresses_replaced_subtree_construction",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/lowering/input/tests/queries.rs",
+      "capability": "Retained scalar query construction",
+      "workload": "Replace a parameter and a query subtree whose construction would fail.",
+      "invariant": "Query slots preserve source order, parameter substitution suppresses replaced syntax, and private partial owners retire on every failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_scalar_query_input_retires_each_prefix_and_failed_query_owner",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/lowering/input/tests/queries.rs",
+      "capability": "Retained scalar query construction",
+      "workload": "Cancel either retained owner at every query construction prefix and reject a later query.",
+      "invariant": "Query slots preserve source order, parameter substitution suppresses replaced syntax, and private partial owners retire on every failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "retained_value_copy_keeps_destination_allowance_separate_from_work_channel",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/value/copying/tests/input.rs",
+      "capability": "Retained value production",
+      "workload": "Use distinct destination/work allowances and cancel either owner while a large native payload is suspended.",
+      "invariant": "Complete values preserve original admission; cancellation releases partial payloads without reading source bytes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "retained_value_copy_keeps_both_cancellation_owners_active_inside_large_payloads",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/value/copying/tests/input.rs",
+      "capability": "Retained value production",
+      "workload": "Use distinct destination/work allowances and cancel either owner while a large native payload is suspended.",
+      "invariant": "Complete values preserve original admission; cancellation releases partial payloads without reading source bytes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_call_copy_preserves_bound_identity_invocation_types_and_exact_payload_ownership",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/binding/input/tests.rs",
+      "capability": "Retained routine call metadata",
+      "workload": "Copy stored call identities, wide names and invocation vectors through one-step work windows, denial and every suspended prefix.",
+      "invariant": "Identity, dispatch, type metadata, diagnostics and exact ownership match ordinary copying; terminal paths release all private allocations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_call_copy_retires_every_suspended_prefix_and_both_cancellation_owners",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/binding/input/tests.rs",
+      "capability": "Retained routine call metadata",
+      "workload": "Copy stored call identities, wide names and invocation vectors through one-step work windows, denial and every suspended prefix.",
+      "invariant": "Identity, dispatch, type metadata, diagnostics and exact ownership match ordinary copying; terminal paths release all private allocations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_call_copy_bounds_wide_invocations_and_admits_destination_before_copying",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/binding/input/tests.rs",
+      "capability": "Retained routine call metadata",
+      "workload": "Copy stored call identities, wide names and invocation vectors through one-step work windows, denial and every suspended prefix.",
+      "invariant": "Identity, dispatch, type metadata, diagnostics and exact ownership match ordinary copying; terminal paths release all private allocations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_call_copy_preserves_assignment_paths_and_both_resolution_error_variants",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/binding/input/tests.rs",
+      "capability": "Retained routine call metadata",
+      "workload": "Copy stored call identities, wide names and invocation vectors through one-step work windows, denial and every suspended prefix.",
+      "invariant": "Identity, dispatch, type metadata, diagnostics and exact ownership match ordinary copying; terminal paths release all private allocations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_scalar_lowering_preserves_all_containers_windows_and_movable_child_ownership",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/lowering/input/tests.rs",
+      "capability": "Retained scalar lowering",
+      "workload": "Lower scalar containers, windows, wide payloads and deep syntax through one-step work windows and terminal failures.",
+      "invariant": "Native scalar output and child ownership match ordinary lowering; polling is iterative, work is bounded and failed construction publishes nothing.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_scalar_lowering_retires_every_prefix_and_both_cancellation_owners",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/lowering/input/tests.rs",
+      "capability": "Retained scalar lowering",
+      "workload": "Lower scalar containers, windows, wide payloads and deep syntax through one-step work windows and terminal failures.",
+      "invariant": "Native scalar output and child ownership match ordinary lowering; polling is iterative, work is bounded and failed construction publishes nothing.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_scalar_lowering_keeps_wide_work_bounded_and_releases_discarded_siblings",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/lowering/input/tests.rs",
+      "capability": "Retained scalar lowering",
+      "workload": "Lower scalar containers, windows, wide payloads and deep syntax through one-step work windows and terminal failures.",
+      "invariant": "Native scalar output and child ownership match ordinary lowering; polling is iterative, work is bounded and failed construction publishes nothing.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_scalar_lowering_uses_constant_poll_stack_for_deep_syntax",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/lowering/input/tests.rs",
+      "capability": "Retained scalar lowering",
+      "workload": "Lower scalar containers, windows, wide payloads and deep syntax through one-step work windows and terminal failures.",
+      "invariant": "Native scalar output and child ownership match ordinary lowering; polling is iterative, work is bounded and failed construction publishes nothing.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_scalar_lowering_rejects_queries_without_leaking_partial_inputs",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/lowering/input/tests.rs",
+      "capability": "Retained scalar lowering",
+      "workload": "Lower scalar containers, windows, wide payloads and deep syntax through one-step work windows and terminal failures.",
+      "invariant": "Native scalar output and child ownership match ordinary lowering; polling is iterative, work is bounded and failed construction publishes nothing.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "deep_scalar_owner_retires_without_allocating_or_recursing",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/owned/tests/retirement.rs",
+      "capability": "Scalar ownership retirement",
+      "workload": "Drop, freeze and fail rewrites of 8192-level scalar owners on a 256 KiB stack.",
+      "invariant": "Retirement and ownership folding allocate no continuation storage, preserve surviving payload leases and release complete private trees.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "deep_scalar_freezing_releases_only_ownership_metadata_without_recursive_folds",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/owned/tests/retirement.rs",
+      "capability": "Scalar ownership retirement",
+      "workload": "Drop, freeze and fail rewrites of 8192-level scalar owners on a 256 KiB stack.",
+      "invariant": "Retirement and ownership folding allocate no continuation storage, preserve surviving payload leases and release complete private trees.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "deep_scalar_rewrite_failure_retires_detached_child_and_remaining_siblings",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/owned/tests/retirement.rs",
+      "capability": "Scalar ownership retirement",
+      "workload": "Drop, freeze and fail rewrites of 8192-level scalar owners on a 256 KiB stack.",
+      "invariant": "Retirement and ownership folding allocate no continuation storage, preserve surviving payload leases and release complete private trees.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
       "test": "native_legacy_routine_binding_admits_complete_grants_and_retires_denied_validation",
       "cases": 1,
       "source": "crates/uqa-sql/src/routines/security/binding/tests/legacy_input.rs",
@@ -21807,7 +22223,7 @@
       "source": "crates/uqa-engine/src/tests/catalog/index_registry/diskann/recovery.rs",
       "capability": "Vector cache owner liveness and retained dimensions",
       "workload": "All nine native SQLite, SQLite Key/Value and redb combinations with DiskANN, HNSW and IVF; fresh sessions, index creation, publication, fixed snapshot queries and cleanup.",
-      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner\u2019s deadline.",
+      "invariant": "Each independent cache owner completes under its unchanged liveness guard and retains exact rows, scores and registered dimensions; unrelated fixture construction cannot consume another owner’s deadline.",
       "case_names": [
         ""
       ]
@@ -69870,6 +70286,45 @@
       ]
     },
     {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_projection_preserves_alias_bytes_order_and_independent_scalar_ownership",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/projections/tests.rs",
+      "capability": "Retained projection construction",
+      "workload": "Lower a scalar and long Unicode alias through ordinary and one-step retained construction, then release the alias.",
+      "invariant": "The exact alias and scalar values survive source retirement; the independently retained scalar keeps only its own allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_projection_retires_each_suspended_prefix_and_denied_alias",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/projections/tests.rs",
+      "capability": "Retained projection construction",
+      "workload": "Abandon or cancel every projection construction prefix and deny scalar or alias admission under finite allowances.",
+      "invariant": "No partial projection is published and every partial payload retires without releasing an unrelated sibling lease.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "projection_destination_admission_keeps_deep_scalars_owned_until_alias_transfer",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/projections/tests.rs",
+      "capability": "Retained projection construction",
+      "workload": "Transfer an 8192-level scalar and alias on a 256 KiB stack with destination allowance for only one field record.",
+      "invariant": "Failed destination admission keeps the scalar owned until allocation-free retirement; successful publication preserves both field records.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
       "package": "uqa-core",
       "kind": "lib",
       "test": "typed_json_f64_keeps_text_parser_bits_errors_and_cancellation",
@@ -70110,6 +70565,3382 @@
         "case_2_sqlite_native",
         "case_3_sqlite_kv",
         "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_window_definitions_preserve_query_order_frame_flags_and_owned_payloads",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/windows/tests.rs",
+      "capability": "Retained window definition construction",
+      "workload": "Compare retained window definitions with independent ordinary lowering across query children, UTF-8 literals, null ordering and all frame bounds/exclusions.",
+      "invariant": "Preserve exact scalars, query slot order and frame flags; completed payloads outlive the source and retire without cleanup allocations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_window_definitions_retire_every_prefix_and_denied_field_admission",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/windows/tests.rs",
+      "capability": "Retained window definition construction",
+      "workload": "Abandon and cancel both owners at every suspended prefix of a window with a long Unicode partition payload and two frame endpoints; deny destination allowances.",
+      "invariant": "No partial definition is published; all destination and work memory retires without consuming a sibling lease.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_window_definitions_bound_wide_partition_and_order_work",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/windows/tests.rs",
+      "capability": "Retained window definition construction",
+      "workload": "Construct a definition with 2,048 partition roots and 2,048 ordering roots through one-step work windows.",
+      "invariant": "Every root consumes work, preserves order and retains its admitted payload until output retirement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_window_definitions_retire_deep_partial_fields_after_late_query_failure",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/windows/tests.rs",
+      "capability": "Retained window definition construction",
+      "workload": "Construct an 8,192-level partition expression on a 256 KiB stack before an ordering query rejects the definition.",
+      "invariant": "Retire the completed partition and all partial field owners without recursive cleanup or leaked destination/work memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "late_scalar_publication_cancellation_retires_deep_roots_before_their_leases",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/owned/tests/retirement.rs",
+      "capability": "Retained scalar publication",
+      "workload": "Cancel each owner after freezing an 8,192-level scalar and abandon the same prepared publication on a 256 KiB stack.",
+      "invariant": "The final fallible handoff retains iterative destruction; every scalar allocation retires before its folded lease without allocating cleanup memory or consuming a sibling lease.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_query_scalar_fields_preserve_slots_ordering_flags_and_optional_shape",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/input/tests.rs",
+      "capability": "Retained query field construction",
+      "workload": "Construct scalar vectors, ordering vectors and optional boxed/unboxed roots, including empty fields, through one-step work windows.",
+      "invariant": "Preserve original query slots, ordering/null flags and optional shape; complete outputs retire without cleanup allocations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_query_scalar_fields_retire_cancelled_prefixes_and_denied_destinations",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/input/tests.rs",
+      "capability": "Retained query field construction",
+      "workload": "Abandon every suspended prefix of long Unicode vectors and optional roots; cancel each owner and deny output allowances.",
+      "invariant": "No partial field escapes; all work and destination leases retire while an independent sibling lease remains live.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_query_scalar_vectors_retire_deep_prefixes_after_late_query_failure",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/input/tests.rs",
+      "capability": "Retained query field construction",
+      "workload": "Reject a later scalar query after retaining an 8,192-level earlier root on a 256 KiB stack.",
+      "invariant": "Preserve the original query error and retire the deep prefix without recursive cleanup or retained memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_query_named_fields_preserve_query_order_inheritance_and_owned_names",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/input/tests.rs",
+      "capability": "Retained query field construction",
+      "workload": "Construct query projections and window-definition vectors through retained scalar and text input, including long Unicode names and inherited window slots.",
+      "invariant": "Preserve ordinary scalar/query order, aliases, names, inheritance and flags; published native values outlive source retirement and need no cleanup allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_query_named_vectors_retire_every_cancelled_or_denied_prefix",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/input/tests.rs",
+      "capability": "Retained query field construction",
+      "workload": "Abandon or cancel every long-name projection/window prefix and deny destination allowances.",
+      "invariant": "Every name and scalar remains admitted until publication; both cancellation owners retire complete prefixes without consuming an independent sibling lease.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_query_named_vectors_bound_empty_and_wide_work",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/input/tests.rs",
+      "capability": "Retained query field construction",
+      "workload": "Construct empty and 2,048-element projection and window-definition vectors through one-step work windows.",
+      "invariant": "Preserve exact projection values and window fields; empty and wide vectors consume bounded work and release every destination and work reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_mutation_fields_preserve_ordinary_paths_positions_and_query_order",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/mutations/assignments/tests/semantics.rs",
+      "capability": "Retained mutation field construction",
+      "workload": "Construct assignment paths, grouped targets, conflict actions and all MERGE clause kinds through one-step work windows.",
+      "invariant": "Match independently lowered native fields, original query-arena slots, overriding flags and first-use order.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_mutation_fields_keep_owned_names_and_nonconsecutive_source_positions",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/mutations/assignments/tests/semantics.rs",
+      "capability": "Retained mutation field construction",
+      "workload": "Construct grouped assignment targets with long Unicode column/field names and sparse positional mappings, then retire the source.",
+      "invariant": "Keep exact names, source width and positions independently owned after source retirement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_mutation_vectors_bound_empty_and_wide_clause_work",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/mutations/assignments/tests/semantics.rs",
+      "capability": "Retained mutation field construction",
+      "workload": "Construct empty and 2,048-element target, assignment and MERGE vectors.",
+      "invariant": "Every vector consumes bounded work, preserves its complete shape and retires without cleanup allocations or remaining reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_mutation_fields_retire_every_suspended_prefix_and_denied_destination",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/mutations/assignments/tests/retirement.rs",
+      "capability": "Retained mutation field construction",
+      "workload": "Abandon or cancel every retained target, assignment, conflict and MERGE prefix under both cancellation owners; deny output allowances.",
+      "invariant": "Keep completed prefixes private and admitted; release work and destination owners without allocation while preserving an independent sibling lease.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_mutation_fields_retire_deep_prefixes_after_late_callback_failure",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/mutations/assignments/tests/retirement.rs",
+      "capability": "Retained mutation field construction",
+      "workload": "Reject a later query after producing an 8,192-level target, action or value prefix on a 256 KiB stack.",
+      "invariant": "Preserve the original callback failure and retire every deep prefix iteratively without consuming an independent sibling lease.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_cte_metadata_preserves_ordinary_names_flags_and_independent_query_slots",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/ctes/tests.rs",
+      "capability": "Retained CTE traversal metadata",
+      "workload": "Construct depth-first and breadth-first SEARCH metadata and independent mark/default scalar-query callbacks.",
+      "invariant": "Match ordinary and controlled CTE fields, original names and flags, and independent zero-based query slots.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_cte_metadata_bounds_wide_names_and_retires_each_suspended_prefix",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/ctes/tests.rs",
+      "capability": "Retained CTE traversal metadata",
+      "workload": "Construct empty and 2,048-column SEARCH/CYCLE vectors with long Unicode names; cancel or abandon each suspended prefix and deny destination allowances.",
+      "invariant": "Bound per-step work, retain exact names and release private reservations without allocating or consuming sibling leases.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_cte_metadata_retires_deep_marks_after_late_default_and_text_failure",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/ctes/tests.rs",
+      "capability": "Retained CTE traversal metadata",
+      "workload": "Reject a later default query or path callback after constructing an 8,192-level mark on a 256 KiB stack.",
+      "invariant": "Preserve the original callback error and retire every admitted scalar prefix iteratively.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_cte_metadata_retires_deep_marks_after_body_construction_failure",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/ctes/tests.rs",
+      "capability": "Retained CTE traversal metadata",
+      "workload": "Reject a malformed canonical window in a CTE body after constructing an 8,192-level cycle mark.",
+      "invariant": "The ordinary controlled CTE path preserves the body diagnostic and retires the mark before returning its allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "controlled_scalar_construction_retires_deep_prefixes_and_preserves_typed_errors",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/lowering/tests.rs",
+      "capability": "Controlled scalar construction",
+      "workload": "Lower an 8,192-level scalar prefix before a rejected query on a 256 KiB stack and deny small construction allowances.",
+      "invariant": "Use the shared iterative constructor while retaining typed subquery and memory errors and independent sibling reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_source_leaves_preserve_ordinary_fields_and_query_order",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/input/tests/sources.rs",
+      "capability": "Retained FROM source construction",
+      "workload": "Construct table, VALUES, table-function and function-group sources with ordered scalar subqueries.",
+      "invariant": "Match ordinary, controlled and retained fields, preserve query slots and retire private reservations without allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_source_metadata_owns_bound_names_types_and_call_identity",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/input/tests/sources.rs",
+      "capability": "Retained FROM source construction",
+      "workload": "Construct long Unicode table and bound-column names, nested types, collations and selected function identities.",
+      "invariant": "Preserve every metadata payload after source retirement using the existing owning producers.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_source_leaves_share_execution_row_identity_without_copying_rows",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/input/tests/sources.rs",
+      "capability": "Retained FROM source construction",
+      "workload": "Retain empty, single-row and million-row execution sources through bounded source construction.",
+      "invariant": "Share the original internal relation and schema descriptor without traversing row contents or allocating during retirement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_source_leaves_bound_empty_and_wide_metadata_work",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/input/tests/sources.rs",
+      "capability": "Retained FROM source construction",
+      "workload": "Construct empty and 2,048-element bound-column, type, collation and table-function vectors.",
+      "invariant": "Yield for each metadata element, preserve output and release private reservations without allocating during retirement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_source_leaves_retire_each_suspended_prefix_and_denied_owner",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/input/tests/sources.rs",
+      "capability": "Retained FROM source construction",
+      "workload": "Abandon or cancel every function-group input prefix through both cancellation owners and deny small destination allowances.",
+      "invariant": "Preserve cancellation and admission SQLSTATEs, terminal input state and independent sibling reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_source_leaves_retire_deep_prefixes_after_metadata_failure",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/input/tests/sources.rs",
+      "capability": "Retained FROM source construction",
+      "workload": "Reject a later source alias after constructing an 8,192-level row or argument prefix on a 256 KiB stack.",
+      "invariant": "Preserve the original callback error and retire every deep prefix iteratively before releasing its allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "enclosing_query_and_mutation_failures_retire_completed_deep_scalar_prefixes",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/ownership/tests.rs",
+      "capability": "Executable construction prefix ownership",
+      "workload": "Reject a later field after completing an 8192-level scalar in SELECT, a joined source, INSERT, UPDATE, DELETE and MERGE on a 256 KiB thread stack.",
+      "invariant": "Release every private constructor and completed scalar through the owning retirement paths, retain the sibling reservation and preserve allocation failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "enclosing_constructors_retire_each_cancelled_prefix_and_preserve_siblings",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/ownership/tests.rs",
+      "capability": "Executable construction prefix ownership",
+      "workload": "Cancel original and invoking tokens at every observed scalar prefix of CTE, set-operation, joined-source, mutation, prepared, explained and call constructors.",
+      "invariant": "Preserve cancellation identity and scalar-query order while releasing complete and partial fields without leaking or releasing sibling allowances.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "partial_plan_retirement_reuses_depth_capacity_and_drops_without_allocating",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/retirement/construction/tests.rs",
+      "capability": "Executable construction prefix ownership",
+      "workload": "Retire an 8192-level source tree and 2048 sibling prefixes using one depth-admitted workspace on a 256 KiB thread stack, with controlled and ordinary ownership.",
+      "invariant": "Reuse the existing plan-tree retirement algorithm with zero cleanup allocations and depth-bounded shared capacity, preserving sibling reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_query_blocks_preserve_order_flags_locking_and_query_local_fields",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/input/tests/blocks.rs",
+      "capability": "Retained query-block construction",
+      "workload": "Construct every query-local field with ordered query callbacks, Unicode aliases and lock targets; compare Project, Aggregate and Window blocks with the existing consuming lowerer.",
+      "invariant": "Preserve eleven ordered query slots, field values, flags and computation selection; retire complete output without cleanup allocations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_query_blocks_release_every_abandoned_cancelled_or_denied_prefix",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/input/tests/blocks.rs",
+      "capability": "Retained query-block construction",
+      "workload": "Abandon or cancel either owner at every one-step suspended block prefix and deny destination allowances while retaining an independent sibling lease.",
+      "invariant": "Release every partial field and work owner, preserve cancellation and admission errors, and leave sibling reservations live.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_query_blocks_bound_empty_wide_locking_and_aggregate_observation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/input/tests/blocks.rs",
+      "capability": "Retained query-block construction",
+      "workload": "Construct zero or 2,048 empty window definitions and row-lock clauses through one-step work windows.",
+      "invariant": "Each empty definition and locking clause consumes bounded work; aggregate observation preserves Project selection and all leases retire.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_query_blocks_retire_deep_fields_after_late_scalar_or_locking_failure",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/input/tests/blocks.rs",
+      "capability": "Retained query-block construction",
+      "workload": "Reject a later scalar query or locking-name payload after retaining an 8,192-level projection on a 256 KiB stack.",
+      "invariant": "The shared block owner preserves the original late error and retires the deep prefix without recursive cleanup or retained memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_enclosing_queries_construct_real_arenas_sets_values_and_parameter_scopes",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/input/tests/queries.rs",
+      "capability": "Retained enclosing query construction",
+      "workload": "Construct complete nested scalar-query arenas, explicit and implicit set operands, VALUES and parameter-pruned subtrees through one-step work windows.",
+      "invariant": "Match existing consuming and controlled lowering, preserving query-local slot order, field values and allocation-free retirement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_enclosing_queries_release_each_pending_arena_and_set_prefix",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/input/tests/queries.rs",
+      "capability": "Retained enclosing query construction",
+      "workload": "Abandon or cancel either owner at every pending nested-arena and set-operation prefix, then deny destination admission with an independent sibling lease.",
+      "invariant": "Retire every partial query and constructor owner, preserve typed cancellation and admission errors, and retain only the sibling allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_enclosing_queries_bound_nested_polling_and_retire_late_failures",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/input/tests/queries.rs",
+      "capability": "Retained enclosing query construction",
+      "workload": "Construct 512 nested scalar queries on a 256 KiB thread stack and fail a later catalog aggregate observation after completing the inner arena.",
+      "invariant": "Use independent driver tasks and depth-admitted retirement, with constant polling stack, allocation-free cleanup and no retained memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_query_trees_preserve_join_cte_and_arena_ownership",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/input/tests/queries/trees.rs",
+      "capability": "Retained structural query construction",
+      "workload": "Construct joins, lateral derived queries, recursive/materialized CTEs and SEARCH/CYCLE metadata through one-step work windows.",
+      "invariant": "Match consuming and controlled plans, preserving flags, names, query-local slots and parameter pruning.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_query_trees_retire_each_join_cte_and_derived_prefix",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/input/tests/queries/trees.rs",
+      "capability": "Retained structural query construction",
+      "workload": "Abandon or cancel either owner at every retained JOIN, CTE and derived-query prefix, then deny destination admission.",
+      "invariant": "Release every private plan and work owner while preserving the independent sibling allowance and original typed errors.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_query_trees_bound_deep_children_and_late_metadata_failure",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/input/tests/queries/trees.rs",
+      "capability": "Retained structural query construction",
+      "workload": "Construct 512 nested joins, derived queries and CTEs on a 256 KiB stack, then fail the enclosing query catalog aggregate observation.",
+      "invariant": "Reuse independent child tasks and admitted plan retirement without recursive polling, cleanup allocations or retained memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_query_ctes_preserve_cycle_scopes_and_each_suspended_prefix",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/input/tests/queries/ctes.rs",
+      "capability": "Retained structural query construction",
+      "workload": "Construct independent CYCLE mark/default query scopes and cancel, abandon or deny each pending prefix.",
+      "invariant": "Preserve ordinary query-slot origins and parameter pruning; all private owners retire without releasing a sibling lease.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_query_ctes_retire_deep_cycle_after_body_or_sibling_failure",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/input/tests/queries/ctes.rs",
+      "capability": "Retained structural query construction",
+      "workload": "Retain an 8,192-level CYCLE mark before catalog classification fails in a query body, mutation body or later CTE body on a 256 KiB stack.",
+      "invariant": "The existing scalar and plan-tree owners retain the completed mark through every later boundary and release its full allowance on failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_future_admission_precedes_construction",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/construction/tests.rs",
+      "capability": "Native SQL constructor scheduling",
+      "workload": "Deny future admission or cancel either owner before invoking the constructor, then complete an admitted future with an independent sibling lease.",
+      "invariant": "Rejected construction performs no constructor work; admitted future storage retains its allowance through completion and preserves sibling ownership.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_mutation_roots_preserve_complete_fields_and_query_scopes",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/input/tests/queries/mutations.rs",
+      "capability": "Retained mutation construction",
+      "workload": "Construct complete INSERT, UPDATE, DELETE and MERGE roots, including data-modifying CTEs, conflict actions, grouped and indirect targets, RETURNING aliases and nested query arenas.",
+      "invariant": "Match consuming and controlled lowering with identical fields, flags, query-slot order and parameter pruning.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_mutation_roots_release_each_pending_body_and_field_prefix",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/input/tests/queries/mutations.rs",
+      "capability": "Retained mutation construction",
+      "workload": "Abandon or cancel either owner at every pending body and field prefix of all four mutations, then deny destination admission.",
+      "invariant": "Retire all partial mutation, query and constructor owners while preserving typed errors and the independent sibling lease.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_mutation_roots_bound_nested_cte_bodies_and_late_failure",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/input/tests/queries/mutations.rs",
+      "capability": "Retained mutation construction",
+      "workload": "Construct 512 nested data-modifying CTE bodies on a 256 KiB stack and fail a later outer RETURNING query catalog observation.",
+      "invariant": "Independent child tasks preserve bounded polling stack; complete and failed prefixes retire without cleanup allocations or retained allowances.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_scalar_copy_preserves_analyzed_fields_and_movable_children",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/copy/iterative/tests/input.rs",
+      "capability": "Retained analyzed scalar and window copying",
+      "workload": "Copy analyzed window, function, composite, typed, collation and subquery fields through one-step work windows.",
+      "invariant": "Preserve the original analyzed scalar, arena positions, bindings and independent child leases with the same retained bytes as ready construction.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_scalar_copy_retires_every_interrupted_constructor_prefix",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/copy/iterative/tests/input.rs",
+      "capability": "Retained analyzed scalar and window copying",
+      "workload": "Abandon or cancel either owner at every pending copy prefix, including trailing type metadata.",
+      "invariant": "Retire incomplete and completed scalar roots without cleanup allocations; preserve sibling reservations and typed terminal errors.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_scalar_copy_bounds_wide_work_and_preserves_admission",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/copy/iterative/tests/input.rs",
+      "capability": "Retained analyzed scalar and window copying",
+      "workload": "Copy 2,048 payloads under one-step work windows and reject five insufficient destination allowances.",
+      "invariant": "Bound constructor work, reject before exceeding admission, and release all native and work storage.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "scalar_copy_retires_deep_children_on_late_metadata_failure_with_small_stack",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/copy/iterative/tests/input.rs",
+      "capability": "Retained analyzed scalar and window copying",
+      "workload": "Copy an 8,192-level child before a denied 32 MiB type name on a 256 KiB stack through mutable, immutable and retained inputs.",
+      "invariant": "Reject the trailing metadata after child completion and retire every deep prefix without stack overflow or lost sibling ownership.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_window_copy_preserves_fields_and_retires_each_pending_prefix",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/owned/windows/tests.rs",
+      "capability": "Retained analyzed scalar and window copying",
+      "workload": "Copy partition, ordering and both frame bounds through one-step work windows, then interrupt every pending prefix.",
+      "invariant": "Preserve exact specifications and retained bytes; abandoned and cancelled fields retire without cleanup allocations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "window_copy_and_replacement_retire_deep_specifications_with_small_stack",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/owned/windows/tests.rs",
+      "capability": "Retained analyzed scalar and window copying",
+      "workload": "Copy an 8,192-level partition before a denied ordering payload, then replace a complete deep specification on a 256 KiB stack.",
+      "invariant": "Preserve ready and retained diagnostic order and retire superseded or partially copied specifications before releasing their leases.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "retained_production_map_shares_nodes_with_inline_insertion_and_lookup",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/production/map/tests/input.rs",
+      "capability": "Retained canonical window resolution",
+      "workload": "Mix ordinary and suspended operations across 257 ordered keys with controlled and uncontrolled construction.",
+      "invariant": "Preserve reference-map contents, exact live node charges and replacement addresses without a separate map algorithm.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "interrupted_production_map_admission_preserves_entries_and_both_cancellation_scopes",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/production/map/tests/input.rs",
+      "capability": "Retained canonical window resolution",
+      "workload": "Abandon, fail or cancel each insertion prefix and deny the first node before allocation.",
+      "invariant": "Preserve all existing entries and leases until publication; retirement and rejected admission allocate nothing.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_canonical_windows_preserve_inherited_clauses_and_exact_owners",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/windows/production/tests.rs",
+      "capability": "Retained canonical window resolution",
+      "workload": "Resolve ordered partition, ordering and frame inheritance through one-step work windows.",
+      "invariant": "Preserve canonical slot identities, inherited clauses and the same final reservations as ordinary resolution.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "canonical_window_validation_keeps_first_failure_order_across_work_boundaries",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/windows/production/tests.rs",
+      "capability": "Retained canonical window resolution",
+      "workload": "Combine malformed slots, empty or duplicate names, invalid parents and conflicting clauses.",
+      "invariant": "Preserve original ordered validation and exact diagnostics in ready and suspended resolution.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_canonical_windows_retire_every_interrupted_resolution_and_freeze_prefix",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/windows/production/tests.rs",
+      "capability": "Retained canonical window resolution",
+      "workload": "Drop or cancel either owner at every pending canonical resolution and metadata-freezing boundary.",
+      "invariant": "Retire completed specifications and partial memory trees before releasing their leases without cleanup allocations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "canonical_window_names_use_bounded_borrowed_comparisons",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/windows/production/tests.rs",
+      "capability": "Retained canonical window resolution",
+      "workload": "Compare long shared-prefix Unicode names and reject five insufficient destination allowances.",
+      "invariant": "Borrow name payloads, bound comparisons to 4096-byte chunks, preserve admission errors and release all work and payload leases.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "canonical_window_failure_retires_completed_deep_definitions_with_small_stack",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/windows/production/tests.rs",
+      "capability": "Retained canonical window resolution",
+      "workload": "Resolve an 8192-level specification before a later duplicate definition on a 256 KiB stack.",
+      "invariant": "Keep the completed specification under iterative retirement through late validation failure and release its complete reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_window_publication_retires_interrupted_deep_metadata_folds",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/owned/windows/tests.rs",
+      "capability": "Retained canonical window resolution",
+      "workload": "Interrupt freezing at seven positions of an 8192-level specification on a 256 KiB stack, with either cancellation owner or abandonment.",
+      "invariant": "Keep the deep payload alive before partial folding leases and retire every detached metadata tree without allocation or recursion.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_window_rewrites_preserve_arguments_filters_and_constructor_owners",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/owned/windows/tests/normalization.rs",
+      "capability": "Retained canonical window resolution",
+      "workload": "Replace and normalize a window with zero, two and seven canonical partition expressions.",
+      "invariant": "Preserve original argument and filter values and addresses, exact retained fields and constructor reservations in inline and suspended execution.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_window_rewrites_retire_every_interrupted_edit_and_traversal",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/owned/windows/tests/normalization.rs",
+      "capability": "Retained canonical window resolution",
+      "workload": "Abandon and cancel every one-step prefix of specification replacement and scalar normalization through both cancellation scopes.",
+      "invariant": "Keep payloads before detached owners, allocate nothing during retirement and return every native and input reservation without disturbing a sibling.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "window_normalization_preserves_argument_filter_and_specification_failure_order",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/owned/windows/tests/normalization.rs",
+      "capability": "Retained canonical window resolution",
+      "workload": "Combine an invalid filter window slot with a canonical partition that exceeds the destination allowance, with and without an earlier argument failure.",
+      "invariant": "Visit arguments, then FILTER, then specification children and report the same first failure in ordinary and retained work.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "window_normalization_retires_deep_pending_parents_without_recursion",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/owned/windows/tests/normalization.rs",
+      "capability": "Retained canonical window resolution",
+      "workload": "Normalize an 8192-level scalar on a 256 KiB stack and interrupt descent and ascent through either cancellation owner or abandonment.",
+      "invariant": "Reuse the admitted constructor stack, preserve the normalized leaf and retire all suspended parents without recursion or allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "window_normalization_admits_ancestor_storage_before_detached_children_escape",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/owned/windows/tests/normalization.rs",
+      "capability": "Retained canonical window resolution",
+      "workload": "Exhaust the remaining native allowance after constructing a 32-level scalar, then normalize through ordinary and retained entry points.",
+      "invariant": "Reject heap-frame admission before exceeding the allowance, return no partial result and release the complete input while preserving independent reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_window_payload_retirement_limits_each_work_window",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/owned/windows/tests/normalization/retirement.rs",
+      "capability": "Retained canonical window resolution",
+      "workload": "Replace 128 independently retained old window inputs through one-step image windows while observing each final source release.",
+      "invariant": "Retire at most one scalar root per work window without evaluating constants, and keep every old payload ahead of its constructor leases.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_window_payload_retirement_preserves_owners_at_every_interruption",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/owned/windows/tests/normalization/retirement.rs",
+      "capability": "Retained canonical window resolution",
+      "workload": "Abandon and cancel every prefix of replacing two 32-level retained window inputs, through both cancellation owners.",
+      "invariant": "Release old payloads before their original reservations, allocate nothing during cleanup and preserve an independent reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_window_payload_retirement_suspends_before_releasing_deep_leaves",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/owned/windows/tests/normalization/retirement.rs",
+      "capability": "Retained canonical window resolution",
+      "workload": "Replace an 8192-level retained window input on a 256 KiB stack; observe the live leaf after 64 work windows, then finish or cancel through either token.",
+      "invariant": "The productive retirement itself suspends before reaching the deep leaf, and every completion/cancellation releases the full ownership tree without recursion.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "window_specification_copy_admits_its_suspended_workspace",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/owned/windows/tests/normalization/retirement.rs",
+      "capability": "Retained canonical window resolution",
+      "workload": "Exhaust the remaining native allowance after constructing a window, then attempt empty-specification replacement through ordinary and retained entry points.",
+      "invariant": "Admit the suspended specification-copy workspace before allocating or polling it, reject immediately with the original input still safely owned and return all input reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "query_source_parent_observation_preserves_absence_until_child_returns",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/mutable/tests/traversal.rs",
+      "capability": "Retained canonical window resolution",
+      "workload": "Rewrite present and absent FROM inputs while inspecting the original parent and exact live allocation accounting.",
+      "invariant": "A detached optional source remains absent during the callback and returns to the same field with its original ownership; an absent source does not invoke the callback.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_query_normalization_preserves_canonical_scopes_and_native_owners",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/input/tests/queries/normalization.rs",
+      "capability": "Retained canonical window resolution",
+      "workload": "Normalize native query roots, inherited windows, nested arenas, CTEs, mutation CTEs, derived joins and set operations through one-step work windows.",
+      "invariant": "Preserve complete ordinary plan fields and canonical query namespaces; completed native payloads retire before their constructor reservations without cleanup allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_query_normalization_releases_every_interrupted_prefix",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/input/tests/queries/normalization.rs",
+      "capability": "Retained canonical window resolution",
+      "workload": "Abandon or cancel both ownership scopes at every pending native construction and normalization prefix, and deny six destination allowances.",
+      "invariant": "Retire the complete private parent, detached children and untouched siblings while preserving independent reservations; denied admission publishes nothing.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_query_normalization_bounds_structural_polling_and_cleanup_stack",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/input/tests/queries/normalization.rs",
+      "capability": "Retained canonical window resolution",
+      "workload": "Construct and normalize 512 nested scalar-query arenas with a canonical window at the leaf on a 256 KiB stack.",
+      "invariant": "Schedule structural children independently, admit specification-copy workspace in its owning constructor and retire the complete plan without recursive polling or cleanup allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "resolved_window_retirement_bounds_final_shared_payload_release",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/windows/production/tests/retirement.rs",
+      "capability": "Retained canonical window resolution",
+      "workload": "Retire three shared canonical specifications containing 128 independent retained inputs each through one-step windows with the destination allowance exhausted.",
+      "invariant": "Release at most one final scalar source per work window without evaluating constants or requiring additional destination memory; retain all original leases until payload retirement finishes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "resolved_window_retirement_keeps_all_leases_through_every_interruption",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/windows/production/tests/retirement.rs",
+      "capability": "Retained canonical window resolution",
+      "workload": "Abandon and cancel every prefix of final shared-definition retirement for six 16-level inputs through both cancellation owners.",
+      "invariant": "Keep each payload ahead of the original vector, scalar and shared-header reservations; allocate nothing during terminal cleanup and preserve an independent reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "resolved_window_retirement_suspends_deep_release_and_uses_bounded_stack",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/windows/production/tests/retirement.rs",
+      "capability": "Retained canonical window resolution",
+      "workload": "Retire three 8192-level canonical inputs on a 256 KiB stack, observing live leaves after 64 work windows before completion or cancellation.",
+      "invariant": "Suspend productive release before reaching deep leaves, then retire every remaining input without recursive stack growth or cleanup allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "scalar_child_borrows_preserve_window_and_call_ownership_order",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ir/children/tests.rs",
+      "capability": "Retained scalar-query compaction",
+      "workload": "Borrow complete, constructor and observation children from aggregate and window calls, including FILTER and both frame offsets.",
+      "invariant": "Preserve each existing child order and omission policy with shared and mutable borrows and no iterator allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "scalar_case_children_skip_pairs_without_losing_pending_results",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ir/children/tests.rs",
+      "capability": "Retained scalar-query compaction",
+      "workload": "Select every CASE child by index and skip each suffix after every previously consumed prefix.",
+      "invariant": "Preserve base, condition/result and ELSE order, exact remaining lengths and mutable reference uniqueness without rescanning skipped slice elements.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_query_compaction_keeps_namespaces_and_paired_constructor_owners",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/mutable/arenas/tests.rs",
+      "capability": "Retained scalar-query compaction",
+      "workload": "Compact shifted arenas in query, canonical-window, derived-source, JOIN, VALUES and set-operation inputs through one-step windows.",
+      "invariant": "Keep original query targets and independent namespaces, pair every surviving payload with its constructor records and retain parent arena buffers.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_query_compaction_retires_each_interruption_and_failed_admission",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/mutable/arenas/tests.rs",
+      "capability": "Retained scalar-query compaction",
+      "workload": "Abandon or cancel each pending compaction prefix through both owners and exhaust destination allowance before scratch admission.",
+      "invariant": "Leave the borrowed source unchanged, retire all private owners without cleanup allocation and preserve an independent reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_query_compaction_preserves_invalid_ids_without_partial_rewriting",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/mutable/arenas/tests.rs",
+      "capability": "Retained scalar-query compaction",
+      "workload": "Collect valid and out-of-range scalar-query references with an unreferenced child.",
+      "invariant": "An invalid local reference preserves all original identities and children for their original diagnostic, without partial remapping.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_query_compaction_visits_empty_containers_through_bounded_windows",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/mutable/arenas/tests.rs",
+      "capability": "Retained scalar-query compaction",
+      "workload": "Collect and rewrite 4096 empty grouping sets, windows, FROM VALUES rows, function-group members and top-level VALUES rows.",
+      "invariant": "Every empty member reaches a work boundary in collection and rewriting; retained native owners release fully after completion.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_query_compaction_bounds_deep_scalar_and_source_polling_stack",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/mutable/arenas/tests.rs",
+      "capability": "Retained scalar-query compaction",
+      "workload": "Remap an 8192-level scalar and 2048-level FROM tree on a 256 KiB stack through one-step windows.",
+      "invariant": "Borrowed collection and private rewriting use admitted iterative frames, preserve the surviving query identity and retire the original structural guard without cleanup allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "constructor_record_folding_preserves_exact_payload_leases_between_steps",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/mutable/memory/retirement/tests/resources.rs",
+      "capability": "Retained scalar-query compaction",
+      "workload": "Fold 64 nested constructor records, a 128-level scalar owner and 256 absent scalar slots one transition at a time.",
+      "invariant": "Release temporary metadata without allocating, retain the independently calculated payload reservation until completion and preserve a sibling allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "constructor_record_retirement_releases_every_suspended_and_cancelled_prefix",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/mutable/memory/retirement/tests/resources.rs",
+      "capability": "Retained scalar-query compaction",
+      "workload": "Abandon or cancel both ownership scopes at every pending prefix of mixed constructor/scalar metadata retirement.",
+      "invariant": "Keep all original payload leases through each pending boundary, retire every remaining record without cleanup allocation and preserve an independent reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "constructor_record_retirement_bounds_deep_work_without_new_allowance",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/mutable/memory/retirement/tests/resources.rs",
+      "capability": "Retained scalar-query compaction",
+      "workload": "Retire 8192 constructor levels, 8192 scalar levels and 4096 absent scalar slots on a 256 KiB stack with the native allowance exhausted.",
+      "invariant": "Suspend productive metadata work, reuse original field slots and the existing scalar fold, acquire no new native allowance and return every original reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "query_compaction_scratch_retires_one_node_per_window_without_mutation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/subqueries/compaction/tests/retirement.rs",
+      "capability": "Retained scalar-query compaction",
+      "workload": "Prepare 256 retained query indices with complete reachability or an additional invalid reference through one-step windows.",
+      "invariant": "Release exactly one admitted map node per productive retirement window, leave the input unchanged and release all temporary ownership after the no-op result.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "query_compaction_scratch_retirement_observes_each_cancellation_owner",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/subqueries/compaction/tests/retirement.rs",
+      "capability": "Retained scalar-query compaction",
+      "workload": "Abandon or cancel both ownership scopes before work and after each pending map-node release for complete and invalid local references.",
+      "invariant": "Retire remaining ordered scratch without allocation, preserve the original query and keep an independent reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "suspended_query_tree_retirement_keeps_original_parent_cleanup_available",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/retirement/construction/retirement/tests.rs",
+      "capability": "Retained scalar-query compaction",
+      "workload": "Retire 65 retained query roots while another 17-root parent uses the original cleanup context and the destination allowance is exhausted.",
+      "invariant": "Keep parent and discarded-child retirement independent, release at most one observed root per work window and allocate nothing after admission.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "query_tree_retirement_releases_every_interrupted_prefix_without_new_allocations",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/retirement/construction/retirement/tests.rs",
+      "capability": "Retained scalar-query compaction",
+      "workload": "Abandon or cancel either owner at every pending prefix of a seven-query retirement.",
+      "invariant": "Release every native payload exactly once without cleanup allocation and preserve unrelated reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "deep_query_tree_retirement_reuses_admitted_frames_on_a_small_stack",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/retirement/construction/retirement/tests.rs",
+      "capability": "Retained scalar-query compaction",
+      "workload": "Retire 8193 nested queries on a 256 KiB stack after exhausting the native allowance.",
+      "invariant": "Use the existing plan-tree algorithm and pre-admitted capacity through productive work and final cleanup.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "query_retirement_admission_failure_preserves_the_original_tree",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/retirement/construction/retirement/tests.rs",
+      "capability": "Retained scalar-query compaction",
+      "workload": "Deny detached-tree workspace admission while its original seven-query owner remains live.",
+      "invariant": "Reject before transferring payloads or rewriting references; preserve the complete original cleanup context.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_query_compaction_retires_deep_discarded_payloads_before_constructor_leases",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/mutable/arenas/tests/retirement.rs",
+      "capability": "Retained scalar-query compaction",
+      "workload": "Complete, abandon or cancel either owner while compacting an unreachable 512-level controlled query child on a 256 KiB stack; independently observe its final payload release.",
+      "invariant": "Retire through the existing structural owner before releasing any matching constructor reservation; leave the selected query and arena capacity valid.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "query_tree_retirement_suspends_deep_scalar_roots_and_empty_rows",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/retirement/construction/retirement/tests.rs",
+      "capability": "Retained scalar-query compaction",
+      "workload": "Retire 4096 empty row containers followed by an 8192-level scalar in a discarded query under one-step work windows.",
+      "invariant": "Bound scalar-root and container progress, preserve source ownership until productive descent reaches it and allocate nothing after admission.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "scalar_field_retirement_preserves_order_at_the_deepest_native_container_layout",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/retirement/scalars/steps/tests.rs",
+      "capability": "Retained scalar-query compaction",
+      "workload": "Retire MERGE clauses with assignments, multiple targets and subscript indirection through all four native container levels.",
+      "invariant": "Preserve all 22 independently observed scalar releases in declared order, retire at most one per step and reuse the existing allocation-free scalar state.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "scalar_retirement_bounds_private_type_and_signature_metadata_work",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ir/ownership/tests.rs",
+      "capability": "Retained scalar metadata retirement",
+      "workload": "Retire calls, composite rows, typed constants and collated expressions with 4,096-level types and 2,048 signature or descriptor elements.",
+      "invariant": "Every productive step allocates nothing and releases at most sixteen allocations; type depth and signature width require independent work steps.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "scalar_metadata_retirement_and_ordinary_cleanup_share_small_stack_ownership",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ir/ownership/tests.rs",
+      "capability": "Retained scalar metadata retirement",
+      "workload": "Retire complete and suspended metadata containing 8,192-level array/domain types through ordinary scalar cleanup and the shared advancing owner on a 256 KiB stack.",
+      "invariant": "Both paths release the deep metadata without new allocations or recursive stack growth.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "scalar_metadata_retirement_keeps_leases_through_every_interruption",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ir/ownership/tests.rs",
+      "capability": "Retained scalar metadata retirement",
+      "workload": "Complete, abandon and cancel either owner at every pending metadata prefix with exhausted native allowance and an independent sibling reservation.",
+      "invariant": "The original payload reservation survives every pending step; completion and interruption release all private storage without cleanup allocations or releasing the sibling lease.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "native_value_retirement_releases_deep_mixed_trees_without_stack_growth_or_allocation",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/value/ownership/tests.rs",
+      "capability": "Owned native value retirement",
+      "workload": "Mixed trees with 8,192 levels, 4,096-field containers and descriptors, shared readers, concurrent final owners and every suspended prefix.",
+      "invariant": "Reuse the existing tree transitions without recursive stack growth or cleanup allocations; bound productive deallocation, preserve independent readers and release every private allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "native_value_retirement_bounds_wide_container_and_descriptor_steps",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/value/ownership/tests.rs",
+      "capability": "Owned native value retirement",
+      "workload": "Mixed trees with 8,192 levels, 4,096-field containers and descriptors, shared readers, concurrent final owners and every suspended prefix.",
+      "invariant": "Reuse the existing tree transitions without recursive stack growth or cleanup allocations; bound productive deallocation, preserve independent readers and release every private allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "native_value_retirement_preserves_independently_retained_descriptors",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/value/ownership/tests.rs",
+      "capability": "Owned native value retirement",
+      "workload": "Mixed trees with 8,192 levels, 4,096-field containers and descriptors, shared readers, concurrent final owners and every suspended prefix.",
+      "invariant": "Reuse the existing tree transitions without recursive stack growth or cleanup allocations; bound productive deallocation, preserve independent readers and release every private allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "native_value_retirement_transfers_shared_metadata_to_one_final_owner",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/value/ownership/tests.rs",
+      "capability": "Owned native value retirement",
+      "workload": "Mixed trees with 8,192 levels, 4,096-field containers and descriptors, shared readers, concurrent final owners and every suspended prefix.",
+      "invariant": "Reuse the existing tree transitions without recursive stack growth or cleanup allocations; bound productive deallocation, preserve independent readers and release every private allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "native_value_retirement_finishes_every_suspended_prefix_without_leaking",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/value/ownership/tests.rs",
+      "capability": "Owned native value retirement",
+      "workload": "Mixed trees with 8,192 levels, 4,096-field containers and descriptors, shared readers, concurrent final owners and every suspended prefix.",
+      "invariant": "Reuse the existing tree transitions without recursive stack growth or cleanup allocations; bound productive deallocation, preserve independent readers and release every private allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_scalar_literals_retire_deep_values_and_original_composites_on_small_stacks",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ir/ownership/tests/values.rs",
+      "capability": "Owned scalar literal retirement",
+      "workload": "Literal and typed-literal values, original composite sources, deep types and wide records through ordinary and suspended scalar owners.",
+      "invariant": "Retire value and descriptor payloads in bounded steps while retaining original reservations through abandonment, both cancellation scopes and exhausted native allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_scalar_literal_retirement_bounds_container_and_descriptor_release",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ir/ownership/tests/values.rs",
+      "capability": "Owned scalar literal retirement",
+      "workload": "Literal and typed-literal values, original composite sources, deep types and wide records through ordinary and suspended scalar owners.",
+      "invariant": "Retire value and descriptor payloads in bounded steps while retaining original reservations through abandonment, both cancellation scopes and exhausted native allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_scalar_literal_retirement_keeps_payload_leases_through_each_interruption",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ir/ownership/tests/values.rs",
+      "capability": "Owned scalar literal retirement",
+      "workload": "Literal and typed-literal values, original composite sources, deep types and wide records through ordinary and suspended scalar owners.",
+      "invariant": "Retire value and descriptor payloads in bounded steps while retaining original reservations through abandonment, both cancellation scopes and exhausted native allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_syntax_literals_retire_deep_values_and_original_composites_without_allocation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/expressions/ownership/tests.rs",
+      "capability": "Native syntax value ownership",
+      "workload": "Deep native literals and original composite sources beneath 2,048 syntax nodes on a 256 KiB stack.",
+      "invariant": "Native syntax destruction delegates evaluated values to the same Core tree owner without allocation or recursive stack growth.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "native_value_copy_retires_deep_completed_children_at_late_cancellation_boundaries",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/value/copying/tests/retirement.rs",
+      "capability": "Native value production ownership",
+      "workload": "Copy 8,192-level lists inside lists, maps, rows, records and arrays on a 256 KiB stack, then cancel at each of the final thirteen checked boundaries.",
+      "invariant": "Completed children and metadata keep their original reservation until allocation-free iterative retirement; no native allocation or sibling reservation leaks.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "native_value_copy_retires_every_pending_prefix_with_original_ownership",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/value/copying/tests/retirement.rs",
+      "capability": "Native value production ownership",
+      "workload": "Interrupt each pending copy prefix by abandonment, either cancellation owner or exhausted destination allowance while retaining a separate work allowance and sibling reservation.",
+      "invariant": "The original allocation and cancellation owners remain effective before the first work request and throughout native copy construction; interrupted state retires without new allocations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "native_value_copy_and_external_admission_share_iterative_private_retirement",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/value/copying/tests/retirement.rs",
+      "capability": "Native value production ownership",
+      "workload": "Copy an 8,192-level ordinary value, deny external payload admission and cancel immediately after a transform supplies a completed deep replacement.",
+      "invariant": "Ordinary and controlled copies reuse the existing iterative copier; private admission and replacement failures retire the original payload without recursive stack growth.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "native_value_image_retirement_preserves_leases_at_every_pending_prefix",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/value/image/tests/retirement.rs",
+      "capability": "Native value production ownership",
+      "workload": "Decode mixed records and typed rows with seven-byte, one-step windows; abandon, cancel or exhaust admission at every pending prefix.",
+      "invariant": "Every prefix retains its completed children and original reservations, successful output preserves the complete value and interrupted cleanup neither allocates nor releases sibling resources.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "native_value_image_retires_completed_children_after_metadata_and_trailing_errors",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/value/image/tests/retirement.rs",
+      "capability": "Native value production ownership",
+      "workload": "Truncate late record or row metadata, append trailing bytes and reject a legacy-vector array containing an 8,192-level invalid element on a 256 KiB stack.",
+      "invariant": "Original diagnostics are preserved while completed private values release all reservations and allocations through the shared native retirement owner.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "native_value_image_preserves_the_existing_nesting_limit",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/value/image/tests/retirement.rs",
+      "capability": "Native value production ownership",
+      "workload": "Encode and decode native values at and beyond the existing 128-level image nesting limit.",
+      "invariant": "The unchanged native image contract accepts the limit, rejects excess nesting and releases all original payload reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_native_values_share_iterative_reads_and_failed_publication_cleanup",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ir/ownership/tests/retained.rs",
+      "capability": "Shared native literal ownership",
+      "workload": "Read, share and reject 8,192-level native constants or metadata on a 256 KiB stack.",
+      "invariant": "All native handoffs use existing value copying and retirement; failed publication releases the original payload reservation without recursive stack growth.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_literal_final_owners_bound_value_and_type_retirement_without_copying",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ir/ownership/tests/retained.rs",
+      "capability": "Shared native literal ownership",
+      "workload": "Retire shared 4,096-level values and types with 4,096 record fields while an independent metadata reader remains live.",
+      "invariant": "Only the final shared owner acquires private retirement; each step allocates nothing, frees at most eight allocations and releases reservations only after their payloads.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_literal_retirement_keeps_original_leases_at_every_pending_prefix",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ir/ownership/tests/retained.rs",
+      "capability": "Shared native literal ownership",
+      "workload": "Advance every pending shared-literal prefix with exhausted native admission, independent work memory, both cancellation owners and a sibling reservation.",
+      "invariant": "Completion, cancellation and abandonment preserve original ownership and release every private allocation without allocating cleanup workspace.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_literal_concurrent_final_references_transfer_one_native_payload",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ir/ownership/tests/retained.rs",
+      "capability": "Shared native literal ownership",
+      "workload": "Retire independent metadata owners of one 8,192-level native value concurrently on 256 KiB stacks.",
+      "invariant": "Atomic final-reference transfer gives one owner the stepped payload cleanup without copying, recursive fallback or premature reservation release.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_value_reads_retire_completed_external_payloads_after_late_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ir/ownership/tests/retained.rs",
+      "capability": "Shared native literal ownership",
+      "workload": "Return a completed 8,192-level external payload and then cancel ordinary, controlled and capture reads.",
+      "invariant": "Post-read cancellation retains the original diagnostic while completed values and their reservations retire through the native owner.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_capture_keeps_completed_values_owned_through_later_metadata_failures",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ir/ownership/tests/retained.rs",
+      "capability": "Shared native literal ownership",
+      "workload": "Exhaust destination admission after a deep external value completes, then fail type, declaration or shared-header construction.",
+      "invariant": "Capture does not reread its source and keeps the completed value owned until later metadata failure releases all payload reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_literal_retirement_preserves_opaque_external_resource_ownership",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ir/ownership/tests/retained.rs",
+      "capability": "Shared native literal ownership",
+      "workload": "Retire metadata referencing an opaque external source while independent source and value readers remain live.",
+      "invariant": "Retirement does not read or reinterpret the external source, preserves its original positional identity and releases the resource exactly once at its last reference.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_external_storage_admission_keeps_native_cleanup_before_handoff",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ir/ownership/tests/retained.rs",
+      "capability": "Shared native literal ownership",
+      "workload": "Cancel either owner after constructing an 8,192-level input before the default external storage callback.",
+      "invariant": "Rejected admission cannot call external publication and retires the complete native payload and reservation on a small stack.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "retained_constant_storage_retires_deep_inputs_before_failed_publication",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/scalar/retained/tests.rs",
+      "capability": "Native constant storage publication ownership",
+      "workload": "Cancel either owner or exhaust admission for an 8,192-level input against resident and spilled stores with an existing published row.",
+      "invariant": "The rejected input retires without stack growth or leaked reservations; prior row identity and disk bytes remain unchanged and subsequent publication succeeds.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "query_source_metadata_retirement_bounds_wide_names_and_deep_types_per_window",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/retirement/construction/retirement/tests/metadata.rs",
+      "capability": "Retained scalar-query compaction",
+      "workload": "Retire seven native source/CTE shapes with 2048 names and a 4096-level column type under one-step work windows.",
+      "invariant": "Bound each productive step to at most sixteen deallocations and zero new allocations while the native allowance is exhausted.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "query_source_metadata_retirement_releases_each_cancelled_or_abandoned_prefix",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/retirement/construction/retirement/tests/metadata.rs",
+      "capability": "Retained scalar-query compaction",
+      "workload": "Cancel either owner or abandon every suspended prefix of seven source/CTE metadata shapes.",
+      "invariant": "Retire every private field without new allocations and release both work and native workspace while preserving an independent reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "mutation_metadata_retirement_bounds_rule_fields_without_cleanup_allocations",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/retirement/construction/retirement/tests/metadata.rs",
+      "capability": "Retained scalar-query compaction",
+      "workload": "Retire INSERT, UPDATE, DELETE and MERGE bodies with 2048 retained rule metadata fields.",
+      "invariant": "Reuse native field and vector retirement, bounding each work window independently of metadata width with no cleanup allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_statement_entry_preserves_registered_aggregates_and_original_names",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/input/tests/queries/entry.rs",
+      "capability": "Retained enclosing query construction",
+      "workload": "Construct native query, CTE and mutation roots with an external registered-aggregate classifier and names previously reserved by test rejection fixtures.",
+      "invariant": "Match ordinary complete plan fields and independently assert aggregate selection; production text input accepts the original names and retains its complete allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_statement_entry_preserves_nested_window_error_before_later_catalog_failure",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/input/tests/queries/entry.rs",
+      "capability": "Retained enclosing query construction",
+      "workload": "Construct a nested query with a removed canonical window definition before a later failing catalog aggregate callback.",
+      "invariant": "Complete each child query normalization before observing later enclosing fields, preserving the ordinary first SQLSTATE and diagnostic.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_statement_result_keeps_completed_fields_after_source_and_input_retirement",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/input/tests/queries/entry.rs",
+      "capability": "Retained enclosing query construction",
+      "workload": "Complete a native statement with query-local windows, a CTE, nested arenas and a registered aggregate, then retire its input and syntax and cancel both tokens.",
+      "invariant": "Keep the completed native plan independently usable and its original reservations live; allocation-free final retirement preserves an independent sibling lease.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_query_name_selection_shares_lookup_modes_and_original_diagnostics",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/stored_relations/query/tests/production.rs",
+      "capability": "Relation-name binding",
+      "workload": "Bind stored source names across dynamic/bound and loaded/live catalogs, transition visibility, quoted names, temporary schemas and relation kinds.",
+      "invariant": "Preserve canonical names, temporary-source flags, callback route, SQLSTATE and diagnostics while the returned name owns exactly its admitted buffer.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_query_name_selection_transfers_the_catalog_lease_and_rejects_cancelled_work",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/stored_relations/query/tests/production.rs",
+      "capability": "Relation-name binding",
+      "workload": "Transfer a controlled catalog name, cancel before selection and deny each insufficient destination allowance.",
+      "invariant": "Retain the original catalog buffer and reservation without recopying; cancelled work makes no callback and failure preserves sibling reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_query_binding_finishes_relation_resolution_before_sequence_errors",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/stored_relations/query/tests/production.rs",
+      "capability": "Relation-name binding",
+      "workload": "Bind CTE and enclosing relation sources before a failing sequence reference; fail an earlier relation separately.",
+      "invariant": "Preserve the complete relation pass before sequence resolution and the first observable catalog failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "owned_query_relation_binding_preserves_cte_scopes_mutations_and_source_order",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/stored_relations/query/tests/production.rs",
+      "capability": "Relation-name binding",
+      "workload": "Bind owned recursive/nonrecursive CTEs, INSERT/UPDATE/DELETE bodies, set operations, scalar arenas, function sources and temporary relations.",
+      "invariant": "Reuse scoped traversal and source replacements, preserving full plans, target flags, callback order and exact remaining field reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "owned_query_relation_failure_releases_completed_fields_without_sibling_leases",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/stored_relations/query/tests/production.rs",
+      "capability": "Relation-name binding",
+      "workload": "Fail a later relation after successful CTE, mutation and set-operation source replacements.",
+      "invariant": "Return the ordinary first diagnostic and release completed private source fields while unrelated reservations remain live.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "owned_query_relation_admission_retires_partial_names_and_keeps_other_reservations",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/stored_relations/query/tests/production.rs",
+      "capability": "Relation-name binding",
+      "workload": "Sweep 512 destination allowances after constructing an owned CTE and JOIN query, preserving two independent reservations.",
+      "invariant": "Reject unadmitted field and lexical-name buffers, release each failed or completed private result completely and preserve the original source.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_relation_binding_preserves_complete_plans_scopes_and_callback_order",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/stored_relations/query/tests/production/native.rs",
+      "capability": "Relation-name binding",
+      "workload": "Bind complete queries, CTE mutations, nested scopes, sets, VALUES and operator joins across live/loaded and bound/dynamic catalog modes.",
+      "invariant": "Match the established raw visitor for every plan field, catalog callback order and temporary-source flag; sequence callbacks remain untouched.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_relation_binding_retires_every_pending_prefix_and_both_cancellations",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/stored_relations/query/tests/production/native.rs",
+      "capability": "Relation-name binding",
+      "workload": "Abandon and cancel each relation-binding work boundary with both independent tokens and a sibling reservation.",
+      "invariant": "Retire private roots, lexical scopes and scheduler owners without allocation or loss of the independent reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_relation_binding_preserves_first_errors_and_releases_denied_names",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/stored_relations/query/tests/production/native.rs",
+      "capability": "Relation-name binding",
+      "workload": "Fail late relation lookups and deny remaining name/scheduler allowances after statement construction.",
+      "invariant": "Preserve first SQLSTATE, stop later catalog callbacks and release the complete private root without touching independent reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_relation_binding_bounds_wide_scopes_and_large_decoded_names",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/stored_relations/query/tests/production/native.rs",
+      "capability": "Relation-name binding",
+      "workload": "Bind 512 lexical CTEs and a long quoted Unicode reference one work step at a time.",
+      "invariant": "Bound allocations and productive retirement per window, retain CTE visibility without catalog lookup and release all name owners.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_relation_binding_keeps_deep_children_and_failure_cleanup_on_small_stack",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/stored_relations/query/tests/production/native.rs",
+      "capability": "Relation-name binding",
+      "workload": "Bind and fail 512 nested query bodies on a 256 KiB stack.",
+      "invariant": "Poll independent child tasks and retire complete or failed prefixes without recursive plan destruction or new cleanup allocations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_relation_binding_preserves_mutation_roots_and_original_target_flags",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/stored_relations/query/tests/production/native.rs",
+      "capability": "Relation-name binding",
+      "workload": "Bind native INSERT, UPDATE, DELETE and MERGE roots with nested queries and CTEs through the retained statement entry.",
+      "invariant": "Match the established CTE mutation binder for every command field, target flag and catalog callback order.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "borrowed_relation_component_observes_work_cancellation_before_buffer_admission",
+      "cases": 1,
+      "source": "crates/uqa-core/src/relation_identity/production/input_tests.rs",
+      "capability": "Relation-name ownership",
+      "workload": "Decode empty, Unicode and wide borrowed components with an independently cancelled work token, then decode an escaped quoted component.",
+      "invariant": "Observe work cancellation before any buffer allocation and retain exactly the successful decoded buffer allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_sequence_binding_preserves_scalar_fields_order_and_catalog_buffers",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/owned/sequences/tests.rs",
+      "capability": "Stored scalar binding",
+      "workload": "Bind nested calls, regclass casts, ordering, FILTER and window fields through inline and suspended scalar editing.",
+      "invariant": "Match established raw scalar binding for complete syntax and callback order, and transfer exact admitted catalog buffers.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_sequence_binding_retires_each_prefix_and_both_cancellation_scopes",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/owned/sequences/tests.rs",
+      "capability": "Stored scalar binding",
+      "workload": "Abandon and independently cancel every suspended sequence-binding boundary with an unrelated live reservation.",
+      "invariant": "Retire private scalar, traversal and work owners without allocation or loss of the unrelated reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_sequence_binding_preserves_first_failure_and_denied_admission",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/owned/sequences/tests.rs",
+      "capability": "Stored scalar binding",
+      "workload": "Fail the second catalog lookup and sweep remaining destination allowances after constructing the private scalar.",
+      "invariant": "Preserve the first SQLSTATE, skip later callbacks, reject unadmitted names and release all private ownership.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_sequence_binding_bounds_wide_work_and_handles_deep_casts_on_small_stack",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/owned/sequences/tests.rs",
+      "capability": "Stored scalar binding",
+      "workload": "Bind 2,048 calls and 8,192 nested regclass casts one work step at a time on a 256 KiB stack.",
+      "invariant": "Bound productive allocations per window, preserve all expected lookups and retire completed owners without allocation or recursion.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "shared_scalar_edits_preserve_original_analysis_identities_and_replacement_order",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/owned/tests/traversal.rs",
+      "capability": "Stored scalar binding",
+      "workload": "Compare original scalar-node identities and window field order with the established raw traversal, and replace a leaf with a new subtree.",
+      "invariant": "Preserve post-order identity selection and pre-order traversal of newly inserted children with complete constructor ownership.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "shared_scalar_edits_keep_deep_traversal_and_failure_cleanup_on_small_stack",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/owned/tests/traversal.rs",
+      "capability": "Stored scalar binding",
+      "workload": "Transform and replace 8,192 nested scalar nodes, with successful and failing callbacks on a 256 KiB stack.",
+      "invariant": "Share admitted traversal for inline editing, stop at the first callback error and release all private storage while preserving a sibling reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_statement_sequences_preserve_complete_fields_order_and_name_owners",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/stored_relations/query/tests/production/native/sequences.rs",
+      "capability": "Stored statement binding",
+      "workload": "Bind sequence references across thirteen complete SELECT, VALUES, CTE and mutation fixtures and compare the complete plans and lookup trace with the established raw traversal.",
+      "invariant": "Preserve structural and scalar field order, transfer original canonical-name buffers and retire every original constructor owner without allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_statement_sequences_retire_every_interrupted_structural_prefix",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/stored_relations/query/tests/production/native/sequences.rs",
+      "capability": "Stored statement binding",
+      "workload": "Abandon and independently cancel every suspended prefix of a command CTE, nested query and joined VALUES source.",
+      "invariant": "Preserve both cancellation scopes, allocation-free private cleanup and a separate 37-byte reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_statement_sequence_failures_keep_first_diagnostics_and_sibling_owners",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/stored_relations/query/tests/production/native/sequences.rs",
+      "capability": "Stored statement binding",
+      "workload": "Reject the second ordered sequence lookup and sweep remaining destination allowances with an independent live reservation.",
+      "invariant": "Preserve the first typed failure, skip later lookups and release all private plan and work ownership after denied admission.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_statement_sequences_bound_wide_scalar_and_empty_command_fields",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/stored_relations/query/tests/production/native/sequences.rs",
+      "capability": "Stored statement binding",
+      "workload": "Bind 4,096 projected sequence calls or visit 4,096 scalar-free assignment-field steps in one-step windows.",
+      "invariant": "Each productive window allocates at most sixteen objects and retires at most sixty-four; field width consumes independent work and final cleanup allocates nothing.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_statement_sequences_keep_deep_children_and_failures_on_small_stack",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/stored_relations/query/tests/production/native/sequences.rs",
+      "capability": "Stored statement binding",
+      "workload": "Bind successful and failing sequence references beneath 512 nested queries with independent CTE bodies on a 256 KiB stack.",
+      "invariant": "Preserve all 512 preceding CTE lookups and the final leaf diagnostic, and retire the complete retained tree without recursive stack growth or sibling-owner loss.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_catalog_binding_completes_relations_before_sequences_in_each_lookup_mode",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/stored_relations/query/tests/production/native/catalog.rs",
+      "capability": "Stored query catalog binding",
+      "workload": "Compare complete CTE, mutation-child and set-operation queries across live/loaded and dynamic/bound lookup modes.",
+      "invariant": "Finish every relation lookup before the first sequence lookup, preserve complete output and transfer each admitted canonical-name buffer.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_catalog_binding_preserves_relation_and_sequence_failure_precedence",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/stored_relations/query/tests/production/native/catalog.rs",
+      "capability": "Stored query catalog binding",
+      "workload": "Combine missing row sources, a later missing sequence and an original typed permission diagnostic.",
+      "invariant": "Preserve the first relation or sequence failure, original detail and hint, skip later callbacks and release private ownership.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_catalog_binding_retires_every_interrupted_composed_prefix",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/stored_relations/query/tests/production/native/catalog.rs",
+      "capability": "Stored query catalog binding",
+      "workload": "Abandon and independently cancel every pending boundary across complete relation and sequence passes.",
+      "invariant": "Retire both passes and their nested constructors without allocation while preserving an unrelated 37-byte reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_sequence_candidates_preserve_order_quoted_names_and_controlled_failures",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/stored_relations/query/sequences/tests.rs",
+      "capability": "Stored query catalog binding",
+      "workload": "Select the first matching quoted identity from ordered namespace candidates and reject exhausted or cancelled construction.",
+      "invariant": "Preserve canonical spelling and lookup order, stop before later candidates and release all temporary and result reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_sequence_external_names_transfer_capacity_and_keep_legacy_diagnostics",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/stored_relations/query/sequences/tests.rs",
+      "capability": "Stored query catalog binding",
+      "workload": "Transfer an external callback name with 4,096-byte capacity through the existing production-value owner.",
+      "invariant": "Keep the original name buffer, charge actual returned capacity without copying, preserve ordinary missing-name context and retain an independent reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "retained_catalog_names_share_live_sequence_selection_without_consuming_values",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/tests/catalog/sequences/binding.rs",
+      "capability": "Stored query catalog binding",
+      "workload": "Bind retained and ordinary queries through Engine with two namespace orders, live and loaded catalogs, and memory, native SQLite, SQLite Key/Value and redb.",
+      "invariant": "Preserve complete plans and selected sequence identities, release native ownership and leave both sequence values unconsumed.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "retained_sequence_lookup_keeps_resource_failures_and_catalog_state",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/tests/catalog/sequences/binding.rs",
+      "capability": "Stored query catalog binding",
+      "workload": "Reject malformed and missing sequence names, denied admission and both cancellation scopes through all four Engine providers.",
+      "invariant": "Preserve original name diagnostics and typed resource SQLSTATEs, release private reservations and leave the sequence ready at its original value.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "owned_routine_references_preserve_stored_query_scopes_and_diagnostics",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/preparation/tests/routine_ownership.rs",
+      "capability": "Routine parameter binding",
+      "workload": "Compare ordinary and owned parameter binding with the existing scoped walk across query sources, shadowing, CTEs, grouping, windows, set operations and failed lookups.",
+      "invariant": "Share parameter observation and alias publication, retain complete bound windows and preserve original plans and diagnostics.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "routine_window_parameters_preserve_results_and_persistent_bodies",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/catalog/function_sqlbody.rs",
+      "capability": "Routine parameter binding",
+      "workload": "Execute SQL-standard and source routine windows with successive partition and frame parameters on all four providers and reopen each persistent catalog.",
+      "invariant": "Match PostgreSQL 18.4 rows, retain output labels and reuse declarations without stale window parameter bindings.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "prepared_input_owners_preserve_original_sites_across_task_transfer",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/preparation/tests/routine_ownership.rs",
+      "capability": "Prepared input ownership",
+      "workload": "Transfer captured input constants to another task and apply them to the original retained plan across coercions, CTEs, grouping, membership and windows.",
+      "invariant": "Preserve distinct original node identities, exact prepared plans and parameter types while retaining each admitted payload.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "transferred_input_failures_retire_observations_and_preserve_original_owners",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/preparation/tests/routine_ownership.rs",
+      "capability": "Prepared input ownership",
+      "workload": "Abandon transferred parameter observations or fail application through either cancellation owner and denied alias admission.",
+      "invariant": "Retire all captured values and map storage while preserving the original input and an independent reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "routine_analysis_state_transfers_with_its_original_scopes_and_observations",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/preparation/tests/routine_ownership.rs",
+      "capability": "Routine analysis ownership",
+      "workload": "Transfer complete routine reference analysis to a worker and return its populated state across eight query and mutation shapes, then apply it to the stationary original plan.",
+      "invariant": "Row and parameter scopes, complete output syntax, labels and canonical window specifications match ordinary binding; analysis and output reservations retire completely.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "transferred_routine_analysis_retires_partial_state_without_changing_its_input",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/preparation/tests/routine_ownership.rs",
+      "capability": "Routine analysis ownership",
+      "workload": "Transfer a partially populated routine analysis owner before abandonment, original cancellation, invoking cancellation and denied admission.",
+      "invariant": "Both cancellation owners retain SQLSTATE 57014, denied admission retains 53200, the original plan is unchanged and independent reservations remain live.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_tasks_preserve_nested_analysis_modes_across_threads_and_work_windows",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/construction/tests.rs",
+      "capability": "Scheduled SQL analysis context",
+      "workload": "Resume twelve nested constructor tasks with alternating stored/source analysis modes on different threads and opposing invoking scopes.",
+      "invariant": "Each task retains its submission mode across checkpoints and child completion; every poll restores the invoking thread and all reservations retire.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_task_analysis_scopes_restore_the_invoking_thread_after_failure",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/construction/tests.rs",
+      "capability": "Scheduled SQL analysis context",
+      "workload": "Resume stored-definition tasks through a checkpoint and terminate by an ordinary error or unwinding while an independent reservation remains live.",
+      "invariant": "The existing scope restores the invoking mode on failure and unwinding; private task storage retires without releasing the independent reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "scheduled_routine_analysis_preserves_stored_and_source_set_placement",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/preparation/tests/routine_ownership.rs",
+      "capability": "Scheduled SQL analysis context",
+      "workload": "Schedule existing routine analysis of set-returning calls in CASE, COALESCE and aggregate arguments under the opposite invoking mode.",
+      "invariant": "Stored-definition handling and source SQLSTATE, message and hint match ordinary analysis; task completion restores the caller mode and releases analysis storage.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_statement_edits_preserve_original_scalar_identities_and_order",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/input/tests/queries/edits.rs",
+      "capability": "Stored statement binding",
+      "workload": "Edit ten query and mutation shapes, including nested JOIN ON roots, CTEs, sets, windows and RETURNING, using original-node observations.",
+      "invariant": "Match the established immediate editor in complete plan output and callback order; consume each original scalar identity exactly once.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_statement_edits_retire_each_interrupted_prefix_and_failed_child",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/input/tests/queries/edits.rs",
+      "capability": "Stored statement binding",
+      "workload": "Abandon or independently cancel every suspended prefix of a joined query and fail the fourth scalar callback.",
+      "invariant": "Stop at the first selected failure, release all editor, plan and task storage without cleanup allocation, and preserve a separate 37-byte reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_statement_edits_bound_wide_work_and_deep_polling",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/input/tests/queries/edits.rs",
+      "capability": "Stored statement binding",
+      "workload": "Edit 2,048 projected roots or 512 nested scalar queries on a 256 KiB stack using single-step work windows.",
+      "invariant": "Invoke at most one edit callback per window, preserve the complete callback count and retire every returned owner without allocating.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_statement_edit_admission_retires_original_plan_and_editor",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/input/tests/queries/edits.rs",
+      "capability": "Stored statement binding",
+      "workload": "Exhaust the destination allowance after retained construction and original-identity capture, before native editing.",
+      "invariant": "Reject task admission with 53200 before any callback and release the retained plan and editor while preserving an independent reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "metadata_selection_preserves_names_binding_slots_and_observation_ownership",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/preparation/parameters/application/tests.rs",
+      "capability": "Stored statement binding",
+      "workload": "Select routine output aliases and single/grouped table-function bindings from original node observations, including duplicate names, explicit labels and multibyte names.",
+      "invariant": "Preserve selected positions and exact names in inline and suspended work, consume only source selections, and retain parameter observations for scalar replacement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "metadata_selection_retires_every_pending_prefix_and_both_cancellation_owners",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/preparation/parameters/application/tests.rs",
+      "capability": "Stored statement binding",
+      "workload": "Abandon or independently cancel every pending prefix of projection-name copying and grouped function binding selection.",
+      "invariant": "Retire all selected payloads, pending result buffers and observation maps without cleanup allocation, preserving an independent 37-byte reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "metadata_selection_rejects_unfunded_names_and_reuses_released_binding_storage",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/preparation/parameters/application/tests.rs",
+      "capability": "Stored statement binding",
+      "workload": "Exhaust the destination allowance after observing names and calls, then select aliases or transfer function bindings.",
+      "invariant": "Reject an unfunded name copy with 53200; transfer already owned calls using released observation-node space and release all private owners on completion or failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "metadata_selection_bounds_wide_sources_and_long_names_on_a_small_stack",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/preparation/parameters/application/tests.rs",
+      "capability": "Stored statement binding",
+      "workload": "Select 4,096 projections, 4,096 grouped functions or a 73,728-byte UTF-8 output name on a 256 KiB stack.",
+      "invariant": "Complete at most one admitted selection or text-copy work step per single-step window, preserve nonempty output and return all destination and work reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "metadata_traversal_preserves_original_slots_and_statement_order",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/mutable/analysis/tests.rs",
+      "capability": "Stored statement binding",
+      "workload": "Walk query, CTE, set, VALUES, mutation and utility owners with ordinary and admitted metadata.",
+      "invariant": "Retain original scalar addresses and explicit projection visitation order across sixteen statement shapes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "metadata_traversal_retires_every_interruption_and_failed_update",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/mutable/analysis/tests.rs",
+      "capability": "Stored statement binding",
+      "workload": "Abandon or cancel every single-step metadata prefix and reject a selected producer or exhausted allowance.",
+      "invariant": "Retire the private plan, pending aliases and traversal stack without allocating; preserve an independent 37-byte reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "metadata_traversal_bounds_deep_and_wide_work_on_a_small_stack",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/input/native/statement/tests.rs",
+      "capability": "Stored statement binding",
+      "workload": "Construct and apply metadata to 512-deep query owners or 4,096 projections on a 256 KiB stack through the existing native constructor.",
+      "invariant": "Suspend traversal and alias production through single-step windows and retire the complete returned owner without allocating.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "metadata_traversal_visits_replacements_and_keeps_table_query_selection",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/mutable/analysis/tests.rs",
+      "capability": "Stored statement binding",
+      "workload": "Replace a query root and a source, visit attached table queries, and use a single-threaded metadata callback.",
+      "invariant": "Visit installed descendants in the original phase, keep source-only table-query exclusion and preserve the ordinary callback threading contract.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "parameter_alias_installation_uses_original_observations_across_work_windows",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/preparation/parameters/application/tests/installation.rs",
+      "capability": "Stored statement binding",
+      "workload": "Apply actual parameter-label observations to CTE, set, mutation and utility plans through immediate and suspended work.",
+      "invariant": "Preserve identical complete plans and reference observations while completing at most one traversal, selection, text or installation step per window.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "paired_tree_retirement_reuses_links_and_bounds_local_steps",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/retirement/paired/tests.rs",
+      "capability": "Stored statement binding",
+      "workload": "Retire alternating binary child pairs while admitting independent single-byte payload reservations.",
+      "invariant": "Reuse original optional child links, release at most one payload per productive step and preserve a sibling reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "paired_tree_retirement_releases_every_suspended_prefix_without_allocating",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/retirement/paired/tests.rs",
+      "capability": "Stored statement binding",
+      "workload": "Abandon every pending prefix of a paired topology retirement.",
+      "invariant": "Destroy each node exactly once without cleanup allocation and return every owned reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "paired_tree_retirement_drops_deep_native_nodes_on_a_small_stack",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/retirement/paired/tests.rs",
+      "capability": "Stored statement binding",
+      "workload": "Drop 8,192 alternating binary levels containing 16,384 nodes on a 256 KiB stack.",
+      "invariant": "Drive terminal cleanup through the same Core retirement transitions without recursive topology destruction or allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "source_metadata_assembly_preserves_preorder_selection_and_original_schema_owners",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/preparation/parameters/sources/tests.rs",
+      "capability": "Stored statement binding",
+      "workload": "Assemble a seven-node JOIN layout with complete observations or each individual observation missing in ordinary, admitted and suspended execution.",
+      "invariant": "Preserve selection order, exact remaining observations, output topology and shared row-index identity.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "source_metadata_assembly_retires_every_interruption_and_denied_parent_allocation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/preparation/parameters/sources/tests.rs",
+      "capability": "Stored statement binding",
+      "workload": "Abandon and independently cancel every prefix of complete and missing-right layout assembly, and deny the final parent allocation.",
+      "invariant": "Release private layouts and metadata maps without allocating, retain independent reservations and preserve 57014 or 53200 failures.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "source_metadata_assembly_bounds_deep_work_and_retirement_on_a_small_stack",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/preparation/parameters/sources/tests.rs",
+      "capability": "Stored statement binding",
+      "workload": "Assemble 512 nested JOINs containing 1,025 source layouts on a 256 KiB stack using single-step windows.",
+      "invariant": "Complete at most one topology work step per window, preserve original row indexes and retire the complete result without allocating.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "input_metadata_application_preserves_complete_plans_and_original_observations",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/preparation/parameters/application/tests/installation/metadata.rs",
+      "capability": "Shared input metadata application",
+      "workload": "Apply query layouts, parameter labels and source-call bindings across six query, mutation, utility and replacement shapes.",
+      "invariant": "Immediate and suspended paths preserve complete plans, original row-schema indexes and function-name buffers while keeping scalar reference observations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "input_metadata_application_retires_each_interruption_and_rejects_denied_admission",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/preparation/parameters/application/tests/installation/metadata.rs",
+      "capability": "Shared input metadata application",
+      "workload": "Abandon or independently cancel every suspended metadata-application prefix and exhaust destination capacity at each prefix.",
+      "invariant": "Every failure retires private state without allocation and preserves an independent reservation; new allocations reject with 53200 while reusable released capacity remains available.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "input_metadata_application_bounds_wide_installation_on_a_small_stack",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/preparation/parameters/application/tests/installation/metadata.rs",
+      "capability": "Shared input metadata application",
+      "workload": "Install metadata for 4096 projected names and 4096 table-function bindings on a 256 KiB stack.",
+      "invariant": "Each single-step window completes at most one work checkpoint, all original metadata owners transfer and cleanup allocates nothing.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "layout_restoration_replaces_absent_source_metadata_and_retires_its_original_allowance",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/preparation/tests/stored_inputs/owned.rs",
+      "capability": "Complete query layout replacement",
+      "workload": "Reanalyze four query shapes with obsolete output/source layouts through ordinary and owned restoration.",
+      "invariant": "Both restoration APIs publish the same descriptor presence and release the complete prior layout allowance before the destination is dropped.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "consuming_slots_transfer_original_entries_without_lookup_copy_or_allocation",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/hash_index/tests/slots.rs",
+      "capability": "Retained schema index retirement",
+      "workload": "Consume empty and colliding indexes with 1, 17 and 64 non-Clone keys while their allowance is exhausted.",
+      "invariant": "Every step exposes one original bucket; key/value pointers and independent reservations survive without hashing, equality, copying or allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "transferred_key_and_value_keep_independent_allowances_after_cursor_drop",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/hash_index/tests/slots.rs",
+      "capability": "Retained schema index retirement",
+      "workload": "Keep one transferred key/value pair after retiring its original index.",
+      "invariant": "The bucket allowance and other entries retire while each selected payload keeps its exact original reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "draining_detaches_the_layout_and_leaves_a_valid_empty_index",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/hash_index/tests/slots.rs",
+      "capability": "Retained schema index retirement",
+      "workload": "Detach an index buffer while retaining both the cursor and its source.",
+      "invariant": "The source has no entries or buckets; the cursor independently retains the original storage and allowance without allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "abandoning_each_bucket_prefix_releases_only_the_cursor_owned_storage",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/hash_index/tests/slots.rs",
+      "capability": "Retained schema index retirement",
+      "workload": "Abandon every occupied/empty bucket prefix of a colliding index.",
+      "invariant": "Every cursor prefix retires without allocation and preserves the independent reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "schema_index_retirement_preserves_original_entries_and_buffer_allowances",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/lookup_map/retirement/tests.rs",
+      "capability": "Retained schema index retirement",
+      "workload": "Consume admitted hashed and sorted schema indexes with exhausted destination capacity.",
+      "invariant": "Every original pointer and payload reservation survives; sorted order and exact slot counts hold without copying or allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "schema_index_last_owner_retires_each_partial_prefix_without_affecting_shared_readers",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/lookup_map/retirement/tests.rs",
+      "capability": "Retained schema index retirement",
+      "workload": "Retain an independent schema lookup reader and abandon every private slot prefix.",
+      "invariant": "Readers keep the original lookup generation; final or partial cleanup releases only its own allowance without allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "schema_index_entries_keep_their_original_owners_after_detached_storage_retires",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/lookup_map/retirement/tests.rs",
+      "capability": "Retained schema index retirement",
+      "workload": "Keep a produced key/value pair after the hashed or sorted schema-index storage retires.",
+      "invariant": "Each returned payload independently retains its original allowance until its own owner is released.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "concurrent_schema_index_retirement_selects_exactly_one_last_owner",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/lookup_map/retirement/tests.rs",
+      "capability": "Retained schema index retirement",
+      "workload": "Release four shared hashed or sorted index owners concurrently through the consuming interface.",
+      "invariant": "Exactly one thread acquires the original entries; every key/value pointer survives and all allowance retires after completion.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "row_schema_retirement_preserves_readers_and_releases_native_fields_without_allocation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/retirement/tests.rs",
+      "capability": "Retained row schema retirement",
+      "workload": "128-column admitted schema with 16-level types, a shared reader and exhausted allowance.",
+      "invariant": "The reader retains original storage; productive retirement allocates nothing, bounds each deallocation window and releases only the final owned generation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "every_row_schema_retirement_prefix_keeps_independent_reservations",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/retirement/tests.rs",
+      "capability": "Retained row schema retirement",
+      "workload": "Abandon every retirement prefix of a multi-column typed schema.",
+      "invariant": "Every prefix retires without allocation and leaves an independent reservation intact.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "owned_record_fields_keep_the_original_vector_and_shared_external_fields_keep_their_identity",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/retirement/tests.rs",
+      "capability": "Retained row schema retirement",
+      "workload": "Owned vectors and externally shared unsized field arrays with nested SQL types.",
+      "invariant": "Owned construction preserves the vector pointer; both representations preserve independent readers and release without allocating.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "concurrent_schema_owners_select_one_original_generation_for_retirement",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/retirement/tests.rs",
+      "capability": "Retained row schema retirement",
+      "workload": "Four concurrent owners release a shared typed row schema.",
+      "invariant": "Exactly one owner acquires the original fields; the entire original allowance retires.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "deep_analyzed_sources_and_type_metadata_retire_on_a_small_stack",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/retirement/tests.rs",
+      "capability": "Retained row schema retirement",
+      "workload": "8,192 source levels sharing an 8,192-level type on a 256 KiB stack.",
+      "invariant": "Ordinary analyzed-source destruction uses the existing tree and type owners without allocation or stack growth with depth.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "nested_schema_metadata_keeps_independent_descriptors_and_diagnostic_generations",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/retirement/tests/metadata.rs",
+      "capability": "Retained row schema retirement",
+      "workload": "Shared admitted record fields, named descriptors, collations and lateral diagnostic generations.",
+      "invariant": "Schema retirement preserves independent descriptor storage and reservations until the last original reader releases them.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "last_schema_descriptor_retires_native_types_and_names_one_work_unit_at_a_time",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/retirement/tests/metadata.rs",
+      "capability": "Retained row schema retirement",
+      "workload": "128-field admitted record descriptor with 32-level types and exhausted allowance.",
+      "invariant": "Productive retirement releases nested types through existing transitions without allocation or unbounded deallocation batches.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "query_layout_replacement_retires_old_generations_with_bounded_native_work",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/mutable/analysis/tests/layouts.rs",
+      "capability": "Retained row schema retirement",
+      "workload": "Replace shared output and analyzed-source layouts containing 64 columns and 32-level types with one-step windows.",
+      "invariant": "Both old slots retire through existing ownership with bounded deallocation, exhausted allowance and no allocation; explicit absence clears both destinations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "query_layout_replacement_cleans_every_suspended_prefix_and_both_cancellation_scopes",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/mutable/analysis/tests/layouts.rs",
+      "capability": "Retained row schema retirement",
+      "workload": "Abandon or cancel every suspended layout replacement prefix while retaining the new output independently.",
+      "invariant": "Original and invoking cancellation preserve their diagnostic, all old owners retire, and the independent output generation remains usable.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "command_source_observations_retire_wide_type_metadata_between_work_windows",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/preparation/parameters/application/tests/cleanup.rs",
+      "capability": "Retained row schema retirement",
+      "workload": "Consume a command source observation with 64 columns, 32-level types and exhausted allowance.",
+      "invariant": "Source-call binding consumes the same row retirement owner with no allocation and bounded deallocation per work window.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_query_replacement_preserves_headers_and_moves_original_root_storage",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/input/native/statement/tests/replacement.rs",
+      "capability": "Native plan replacement ownership",
+      "workload": "Replace a native query root while retaining a CTE, bound-relation flag and shared output descriptor.",
+      "invariant": "CTE and projection buffers preserve their original addresses, descendants retain visitation order and all reservations return after final release.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_source_replacement_preserves_parent_and_visits_new_descendants",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/input/native/statement/tests/replacement.rs",
+      "capability": "Native plan replacement ownership",
+      "workload": "Replace a native FROM source with an independently constructed derived query and nested scalar query.",
+      "invariant": "Parent projections and the incoming query box retain their original addresses; traversal visits the replacement descendants and cleanup allocates nothing.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_replacement_retires_every_suspended_prefix_and_both_cancellation_scopes",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/input/native/statement/tests/replacement/interruption.rs",
+      "capability": "Native plan replacement ownership",
+      "workload": "Replace query roots and FROM sources, then abandon every work prefix or cancel either owner.",
+      "invariant": "Every interrupted prefix returns both allowances while the independent sibling lease survives; completed output preserves selected columns.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_replacement_denial_and_missing_constructor_leave_destination_unchanged",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/input/native/statement/tests/replacement/interruption.rs",
+      "capability": "Native plan replacement ownership",
+      "workload": "Deny root and source replacement admission or supply an update without its native constructor owner.",
+      "invariant": "Both failures preserve the destination syntax and return candidate reservations; terminal cleanup allocates nothing.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_root_replacement_retires_wide_syntax_and_original_layouts_in_work_windows",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/input/native/statement/tests/replacement/resource.rs",
+      "capability": "Native plan replacement ownership",
+      "workload": "Discard 2048 projections and replacement-header metadata containing 64 columns with 32 nested type levels.",
+      "invariant": "Individual work windows bound released allocations; original descriptor owners and constructor records retire before all reservations return.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "nested_native_replacement_admits_new_depth_before_small_stack_retirement",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/input/native/statement/tests/replacement/resource.rs",
+      "capability": "Native plan replacement ownership",
+      "workload": "Insert 512 query levels beneath 128 existing levels and retire on a 256 KiB thread stack.",
+      "invariant": "The existing constructor owner admits the combined depth before publication and complete cleanup allocates no new traversal storage.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_replacement_depth_does_not_accumulate_across_sibling_queries",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/input/native/statement/tests/replacement/resource.rs",
+      "capability": "Native plan replacement ownership",
+      "workload": "Replace the last scalar query among 16 or 256 siblings with a 32-level native query.",
+      "invariant": "Replacement reservation changes are identical across widths; collection continuations do not increase structural depth.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_input_metadata_application_preserves_plans_and_original_observations",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/preparation/parameters/application/tests/installation/metadata/native.rs",
+      "capability": "Native plan observation ownership",
+      "workload": "Apply retained query outputs, source layouts, projection labels and function selections to five native statement shapes, including a constructed replacement query.",
+      "invariant": "The original maps and shared installer preserve complete ordinary output, selected allocation identities and later scalar observation keys.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_input_metadata_application_bounds_wide_labels_and_retains_private_maps",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/preparation/parameters/application/tests/installation/metadata/native.rs",
+      "capability": "Native plan observation ownership",
+      "workload": "Install metadata and 2048 projection labels into a native statement through one-step work windows.",
+      "invariant": "Each window completes at most one checkpoint; original scalar observations survive metadata application and every allowance returns after release.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_input_metadata_application_retires_every_prefix_and_both_cancellation_scopes",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/preparation/parameters/application/tests/installation/metadata/native/interruption.rs",
+      "capability": "Native plan observation ownership",
+      "workload": "Abandon every pending prefix of native observation application or cancel either operation, including a retained rewritten query.",
+      "invariant": "Original constructor owners travel through the observation map and release without allocation; independent sibling reservations survive.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_input_metadata_application_releases_observations_after_denied_admission",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/preparation/parameters/application/tests/installation/metadata/native/interruption.rs",
+      "capability": "Native plan observation ownership",
+      "workload": "Exhaust the destination allowance before applying a native replacement and its output/source observations.",
+      "invariant": "Admission fails and all private plan, map and descriptor owners release while the independent sibling lease remains live.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "command_scalar_transforms_follow_original_postorder_and_owner_wrappers",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/mutable/tests/transformation.rs",
+      "capability": "Shared scalar arena traversal",
+      "workload": "Visit scalar roots in 13 mutation and utility statements.",
+      "invariant": "Callbacks preserve the original postorder and finished statements retain their original serialized plans and exact constructor reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "command_scalar_replacements_release_retired_payloads_and_all_failures",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/mutable/tests/transformation.rs",
+      "capability": "Shared scalar arena traversal",
+      "workload": "Replace long string payloads inside a nested UPDATE, then inject failure, either cancellation token and unwinding.",
+      "invariant": "Live allocation changes match retained reservations; every unsuccessful path releases all constructor ownership.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "scalar_arena_edits_keep_mutation_roots_separate_from_detached_query_owners",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/mutable/tests/transformation.rs",
+      "capability": "Shared scalar arena traversal",
+      "workload": "Visit 13 mutation and utility statements through both copied and borrowed lowering owners.",
+      "invariant": "No-op arena edits allocate nothing, preserve the complete statement and retain exactly the original live reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "scalar_arena_edits_finish_ctes_and_nested_queries_before_copying_parent_occurrences",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/mutable/tests/transformation.rs",
+      "capability": "Shared scalar arena traversal",
+      "workload": "Complete a recursive CTE and CYCLE marks, two derived sources, a scalar subquery and parent JOIN and WHERE expressions.",
+      "invariant": "The explicit callback order completes child metadata before copying a query occurrence, isolates CYCLE scalar namespaces and retains the original constructor reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "failed_mutation_arena_edits_release_detached_queries_and_remaining_command_storage",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/mutable/tests/transformation.rs",
+      "capability": "Shared scalar arena traversal",
+      "workload": "Fail or cancel an IN expression in DELETE with a separate RETURNING subquery, including unwinding.",
+      "invariant": "Every detached query and remaining command allocation is released while an independent sibling reservation survives.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "generated_scalar_inputs_preserve_fields_payload_addresses_and_each_cancelled_prefix",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/owned/tests/input.rs",
+      "capability": "Shared owned scalar construction",
+      "workload": "Construct arrays, rows, Boolean lists, CASE and calls; replace call metadata through one-step input and abandon or cancel every suspended prefix.",
+      "invariant": "Inline and suspended output and retained bytes agree, original child addresses and call decorations survive, and all private allocations retire without cleanup allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "generated_scalar_failure_retires_attached_deep_children_on_a_small_stack",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/owned/tests/input.rs",
+      "capability": "Shared owned scalar construction",
+      "workload": "Reject a binary right box or CASE branch vector after an 8192-level left operand or base has moved into the destination on a 256 KiB stack.",
+      "invariant": "Admission failure retires previously attached children iteratively before releasing their leases and leaves the independent held reservation intact.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "call_replacement_consumes_work_for_wide_children_and_old_binding_retirement",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/owned/tests/input.rs",
+      "capability": "Shared owned scalar construction",
+      "workload": "Replace a call containing 4096 arguments and 4096 old binding type names using one-step work windows.",
+      "invariant": "Argument order survives, construction and replaced metadata consume work proportional to their width, and both allowances return to zero.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "membership_input_matches_stored_rewrite_and_retires_every_suspended_prefix",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/type_resolution/membership/owned/tests.rs",
+      "capability": "Shared owned scalar construction",
+      "workload": "Rewrite IN and NOT IN with four array-position shapes, then cancel or abandon every one-step prefix and deny destination admission.",
+      "invariant": "The existing stored-syntax rewrite independently establishes exact output and query references; interrupted inputs and partial outputs release all private ownership.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "membership_input_copies_deep_operands_without_recursive_polls_or_cleanup",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/type_resolution/membership/owned/tests.rs",
+      "capability": "Shared owned scalar construction",
+      "workload": "Rewrite two comparisons with an 8192-level left operand on a 256 KiB stack and interrupt selected copy and completion prefixes.",
+      "invariant": "Left copies use bounded iterative input; both cancellation owners retain SQLSTATE 57014 and terminal cleanup allocates nothing or retains either allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "catalog_spelling_input_preserves_identity_modifiers_and_original_named_text",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/types/catalog_names/tests.rs",
+      "capability": "Shared selected scalar input application",
+      "workload": "Render builtin modifiers, OID identity and quoted Unicode names with two array dimensions through one-step input.",
+      "invariant": "Explicit spellings match both ordinary and suspended production; retained bytes equal the actual destination capacity.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "catalog_spelling_input_releases_every_cancelled_prefix_and_denied_destination",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/types/catalog_names/tests.rs",
+      "capability": "Shared selected scalar input application",
+      "workload": "Render a long Unicode named type, abandon or cancel every suspended prefix and deny the destination allowance.",
+      "invariant": "Both cancellation owners preserve 57014, denial preserves 53200 and private output retires without affecting a sibling reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "catalog_spelling_input_bounds_deep_arrays_without_recursive_formatting",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/types/catalog_names/tests.rs",
+      "capability": "Shared selected scalar input application",
+      "workload": "Render an 8192-level array type through ordinary and one-step work on a 256 KiB stack.",
+      "invariant": "The same formatter retains the exact scalar spelling and every suffix while traversal and output consume bounded work.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "selected_input_application_preserves_order_and_every_suspended_owner",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/preparation/parameters/selection/tests.rs",
+      "capability": "Shared selected scalar input application",
+      "workload": "Apply nine unchanged, constant, COLLATE, result, cast and call-collation selections, then abandon or cancel every suspended prefix.",
+      "invariant": "Original application order, values, type identities, collation and parameter metadata and reservations agree; private owners retire without cleanup allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "selected_input_application_retires_replaced_trees_and_rejects_unadmitted_wrappers",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/preparation/parameters/selection/tests.rs",
+      "capability": "Shared selected scalar input application",
+      "workload": "Replace an 8192-level scalar on a 256 KiB stack, deny allocating wrappers and consume released observation storage for a smaller final wrapper.",
+      "invariant": "Replaced trees consume bounded work before releasing their leases, allocation denial preserves 53200 and retired storage becomes reusable.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "selected_result_types_share_readers_and_bound_validation_copy_and_retirement",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/preparation/parameters/selection/tests.rs",
+      "capability": "Shared selected scalar input application",
+      "workload": "Apply 8192-level selected array types to collated expressions and typed literals with and without an independent shared reader.",
+      "invariant": "Validation, copying and last-reader retirement consume one-step work without bulk productive destruction; original readers retain their own leases.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_row_expansion_consumes_original_field_identities_in_order",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/preparation/parameters/rows/tests.rs",
+      "capability": "Shared retained ROW expansion",
+      "workload": "Expand selected ROW positions through ordinary input application and one-step work, with nested original identities, an empty expansion and unchanged siblings.",
+      "invariant": "Original field identities are consumed before moves, ordered selected values agree and untouched payload addresses and exact reservations survive.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_row_expansion_retires_each_cancelled_or_unadmitted_prefix",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/preparation/parameters/rows/tests.rs",
+      "capability": "Shared retained ROW expansion",
+      "workload": "Abandon, cancel either owner or exhaust native allowance at every suspended ROW expansion prefix.",
+      "invariant": "Private selected fields and original children retire without cleanup allocation, both cancellation scopes preserve 57014 and denied admission preserves 53200 without releasing sibling reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_row_expansion_bounds_wide_fields_and_deep_field_edits",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/preparation/parameters/rows/tests.rs",
+      "capability": "Shared retained ROW expansion",
+      "workload": "Expand 4096 fields, edit 8192-level selected operands and retire 8192-level replaced children on a 256 KiB stack through one-step work.",
+      "invariant": "The existing scalar traversal, child retirement and ROW constructor bound productive work while preserving every selected value and releasing all native owners.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_row_expansion_keeps_field_buffer_admission_until_payload_retirement",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/preparation/parameters/rows/tests/retirement.rs",
+      "capability": "Shared retained ROW expansion",
+      "workload": "Reject the first selected field while the second retains the existing payload-lifetime probe, for immediate and suspended work.",
+      "invariant": "The original field buffer reservation remains live when unvisited field payloads retire; the same existing retirement probe observes release without reading constants.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "string_chunks_share_utf8_boundaries_and_admission_with_inline_copying",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/production/string.rs",
+      "capability": "Shared bounded SQL type parsing",
+      "workload": "Append text across multibyte UTF-8 boundaries through the ordinary and stepped string constructor, then reject empty or nonempty input under cancellation or exhausted allowance.",
+      "invariant": "Both paths use the same admitted copying step, consume at most 4096 bytes per step and retain the exact completed buffer reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_sql_type_parsing_preserves_scalar_modifiers_aliases_and_diagnostics",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/types/parsing/tests.rs",
+      "capability": "Shared bounded SQL type parsing",
+      "workload": "Parse explicit scalar, catalog, array and modifier cases through immediate and suspended work and compare integer boundaries with standard integer parsing.",
+      "invariant": "Original declarations, quoted names, ignored array-alias modifiers, numeric limits and first diagnostics remain unchanged; no temporary owner survives completion.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_sql_type_parsing_bounds_long_text_digits_and_deep_arrays",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/types/parsing/tests.rs",
+      "capability": "Shared bounded SQL type parsing",
+      "workload": "Parse Unicode whitespace, 32769 leading zeroes per numeric modifier and 8192 array suffixes on a 256 KiB stack.",
+      "invariant": "One shared type grammar consumes bounded text and constructor work without recursion; result shape and exact reservations agree with immediate parsing.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_sql_type_parsing_retires_every_interrupted_or_denied_prefix",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/ast/types/parsing/tests.rs",
+      "capability": "Shared bounded SQL type parsing",
+      "workload": "Abandon, cancel either original owner or exhaust the destination allowance at every suspended type-parsing prefix.",
+      "invariant": "Partial normalized names and constructed arrays retire without cleanup allocation, preserve sibling reservations and return 57014 or 53200 at their original resource boundaries.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_json_path_normalization_matches_existing_calls_and_preserves_child_owners",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/type_resolution/json_path/binding/tests.rs",
+      "capability": "Retained JSON path normalization",
+      "workload": "Compare expanded, named and explicit variadic inputs with the existing aggregate-lease normalizer.",
+      "invariant": "Immediate and suspended calls retain exact scalar structure, dispatch, collation, object identity, ordering and filter payload addresses under identical reservations."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_json_path_normalization_retires_every_interrupted_or_denied_prefix",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/type_resolution/json_path/binding/tests.rs",
+      "capability": "Retained JSON path ownership",
+      "workload": "Abandon every suspended prefix or cancel either owner or exhaust the remaining allowance.",
+      "invariant": "Existing scalar and field retirement release all private allocations without new cleanup allocation, preserve an independent sibling lease and allow completion from storage already admitted."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_json_path_normalization_keeps_invalid_invocations_and_parse_errors_ordered",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/type_resolution/json_path/binding/tests.rs",
+      "capability": "Retained JSON path validation",
+      "workload": "Mismatched source, target and position vectors, duplicate or invalid positions, and an unknown target declaration.",
+      "invariant": "Native work preserves the selected invocation diagnostic and type-input failure before publishing a replacement call."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_json_path_normalization_bounds_wide_calls_and_deep_operand_retirement",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/type_resolution/json_path/binding/tests.rs",
+      "capability": "Retained JSON path work bounds",
+      "workload": "Normalize 4,096 path operands including 8,192 cast levels on a 256 KiB stack with one-step input windows.",
+      "invariant": "Existing argument constructors and retirement bound productive destruction below 64 allocations per poll, preserve all paths and release final owners without allocating cleanup state."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_row_fields_share_complete_parameter_call_and_nested_input_application",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/preparation/parameters/rows/tests/application.rs",
+      "capability": "Shared retained node input application",
+      "workload": "Apply selected parameters, function bindings, JSON path normalization, nested ROW expansion and final casts through ordinary and one-step construction; abandon, cancel either owner or deny memory at every prefix.",
+      "invariant": "Both paths consume the original analysis identities in order and retain equal values and reservations; cancellation and admission failure retire without allocation or affecting the independent sibling lease.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_nested_row_application_uses_independent_constructor_tasks_on_small_stacks",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/preparation/parameters/rows/tests/application.rs",
+      "capability": "Shared retained node input application",
+      "workload": "Apply 512 nested selected ROW expansions on a 256 KiB stack through the existing constructor driver.",
+      "invariant": "Parent input applications await independently admitted tasks; each work window stays bounded and complete output retires without allocation or leaked memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_membership_application_shares_coercion_constant_and_occurrence_order",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/preparation/membership/application/tests.rs",
+      "capability": "Shared retained membership application",
+      "workload": "Apply selected array casts, distinct left constants and occurrence callbacks for IN and NOT IN through immediate and one-step input, including an ordinary callback with non-Send state.",
+      "invariant": "Selected positions, comparison order, constant ownership, callback count and output reservations agree without imposing new threading requirements on ordinary callbacks.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_membership_application_retires_each_interrupted_or_unadmitted_prefix",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/preparation/membership/application/tests.rs",
+      "capability": "Shared retained membership application",
+      "workload": "Abandon, cancel either owner or exhaust native allowance at every suspended membership-application prefix.",
+      "invariant": "Each private parent and its detached child retire without cleanup allocation; failed admission preserves the independent sibling lease.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_membership_application_preserves_shape_count_and_occurrence_errors",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/preparation/membership/application/tests.rs",
+      "capability": "Shared retained membership application",
+      "workload": "Reject mismatched syntax, comparison counts and an injected occurrence-copy failure through immediate and suspended input.",
+      "invariant": "The original diagnostic order and callback boundary survive with complete destination and work retirement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_membership_application_bounds_wide_coercions_and_deep_replacement_retirement",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/preparation/membership/application/tests.rs",
+      "capability": "Shared retained membership application",
+      "workload": "Apply 4096 selected casts and replace an 8192-level left operand with 8192-level target declarations on a 256 KiB stack.",
+      "invariant": "Each one-step poll destroys fewer than 64 allocations; completed structure, cast spelling and replacement constants are preserved and cleanup allocates nothing.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "query_index_edits_preserve_distinct_visit_orders_and_original_field_owners",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/owned/tests/query_ids.rs",
+      "capability": "Shared scalar-query index editing",
+      "workload": "Remap every existing scalar child-shape fixture and nested IN/EXISTS/repeated query references through ordinary pre-order, ordinary post-order and one-step suspended post-order.",
+      "invariant": "Original visitor order, non-Send ordinary callbacks, field addresses, query identities and exact constructor reservations are preserved.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "query_index_edits_retire_every_interrupted_prefix_and_preserve_first_error",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/owned/tests/query_ids.rs",
+      "capability": "Shared scalar-query index editing",
+      "workload": "Abandon or cancel either owner at every suspended occurrence-remapping prefix and fail each occurrence callback in turn.",
+      "invariant": "No later callback runs after the selected error; detached parents and children retire without cleanup allocation while an independent sibling reservation survives.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "query_index_edits_bound_deep_traversal_and_unadmitted_scratch_on_small_stack",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/owned/tests/query_ids.rs",
+      "capability": "Shared scalar-query index editing",
+      "workload": "Remap 8192 cast levels on a 256 KiB stack and deny scratch admission at every prefix of a retained nested expression.",
+      "invariant": "Ordinary and suspended edits reuse the scalar editor; work windows remain bounded, rejected scratch precedes the query callback and all payloads and reservations retire.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "scalar_footprint_is_exact_without_scratch_on_deep_unary_and_branching_owners",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/owned/tests/footprint.rs",
+      "capability": "Retained scalar footprint observation",
+      "workload": "Observe 8192 unary levels and an additional 8192 branching levels on a 256 KiB stack, replacing and transferring children while an independent sibling remains live.",
+      "invariant": "Every observed scalar total equals the independent live allowance, including with no headroom; observation and final cleanup allocate nothing.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "enclosing_query_observes_deep_scalar_footprint_after_slot_transfer_and_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/owned/tests/footprint.rs",
+      "capability": "Retained scalar footprint observation",
+      "workload": "Transfer an 8192-level scalar into a retained query projection and observe it before and after cancellation with the allowance exhausted.",
+      "invariant": "The public query footprint includes the complete scalar owner without recursion or scratch, excludes independent owners and preserves allocation-free retirement.",
+      "case_names": [
+        ""
       ]
     }
   ]

@@ -11,7 +11,7 @@ use crate::ast::{CompositeTypeReference, EnumTypeReference, RangeTypeReference};
 use std::future::Future;
 use uqa_core::image_io::AsyncImageInput;
 
-pub(super) trait Work: Send {
+pub(crate) trait Work: Send {
     type Error: From<ValueRetentionError>;
     fn checkpoint(&mut self) -> impl Future<Output = Result<(), Self::Error>> + Send;
     fn text(

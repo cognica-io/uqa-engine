@@ -4,9 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use super::{
-    empty_source, MutableQueryPlan, MutableSourcePlan, SQLError, SourceChildSlot, SourcePlan,
-};
+use super::{MutableQueryPlan, MutableSourcePlan, SQLError, SourceChildSlot, SourcePlan};
 use uqa_core::memory::ProductionControl;
 
 impl MutableSourcePlan {
@@ -18,52 +16,16 @@ impl MutableSourcePlan {
     ) -> Result<Self, SQLError> {
         self.assert_owner(control);
         control.check()?;
-        let (query, field) = match &mut self.source {
-            SourcePlan::Subquery { body, .. } => (body, "body"),
-            SourcePlan::Table {
-                executable_query: Some(query),
-                ..
-            } => (query, "executable_query"),
-            SourcePlan::Table {
-                executable_query: None,
-                ..
-            } => return Ok(self),
-            _ => {
-                return Err(SQLError::Internal(
-                    "source has no directly retained query".into(),
-                ))
-            }
+        let Some(mut slot) = self.query_slot()? else {
+            return Ok(self);
         };
-        let input = MutableQueryPlan {
-            query: std::mem::replace(query.as_mut(), super::super::queries::empty_query()),
-            memory: self.memory.as_mut().and_then(|memory| {
-                memory
-                    .field_mut(field)
-                    .as_mut()
-                    .expect("source query box")
-                    .field_mut("query")
-                    .take()
-            }),
-        };
+        let input = slot.take();
         let output = map(&self.source, input)?;
         output.assert_owner(control);
         control.check()?;
-        let query = match &mut self.source {
-            SourcePlan::Subquery { body, .. } => body,
-            SourcePlan::Table {
-                executable_query: Some(query),
-                ..
-            } => query,
-            _ => unreachable!("read-only parent cannot change topology"),
-        };
-        **query = output.query;
-        if let Some(memory) = &mut self.memory {
-            *memory
-                .field_mut(field)
-                .as_mut()
-                .expect("source query box")
-                .field_mut("query") = output.memory;
-        }
+        self.query_slot()?
+            .expect("original source query")
+            .restore(output);
         Ok(self)
     }
 
@@ -76,20 +38,11 @@ impl MutableSourcePlan {
     ) -> Result<Self, SQLError> {
         self.assert_owner(control);
         control.check()?;
-        let input = Self {
-            source: std::mem::replace(slot.source_mut(&mut self.source), empty_source()),
-            memory: self
-                .memory
-                .as_mut()
-                .and_then(|memory| slot.memory_mut(memory).take()),
-        };
+        let input = self.child_slot(slot).take();
         let output = map(&self.source, input)?;
         output.assert_owner(control);
         control.check()?;
-        *slot.source_mut(&mut self.source) = output.source;
-        if let Some(memory) = &mut self.memory {
-            *slot.memory_mut(memory) = output.memory;
-        }
+        self.child_slot(slot).restore(output);
         Ok(self)
     }
 }

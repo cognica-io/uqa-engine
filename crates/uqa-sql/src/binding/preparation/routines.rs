@@ -29,7 +29,7 @@ pub(crate) fn analyze_stored_routine_statement(
         routines,
         scope: &mut scope,
         parameters: ParameterTypes::fixed_with_control(params, control)?.with_reference_retention(),
-        schema_expression: None,
+        schema_expression: (),
     };
     let result = match plan {
         crate::plan::PlanRef::Query(query) => Some(analysis.query(

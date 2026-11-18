@@ -9,6 +9,7 @@
 use super::ColumnType;
 
 mod input;
+pub(crate) use input::Work as ColumnTypeInputWork;
 use uqa_core::{
     memory::{Produced, ProductionControl},
     ValueRetentionError,
@@ -95,6 +96,14 @@ impl ColumnType {
         input: &mut uqa_core::image_io::AsyncImageInput<'_>,
     ) -> Result<Produced<Self>, crate::SQLError> {
         input::copy(self, control, input).await
+    }
+
+    pub(crate) async fn clone_with_input_work<W: ColumnTypeInputWork>(
+        &self,
+        control: &ProductionControl<'_>,
+        work: &mut W,
+    ) -> Result<Produced<Self>, W::Error> {
+        input::copy(self, control, work).await
     }
 
     fn clone_scalar_with_control(

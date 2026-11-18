@@ -16,6 +16,10 @@ pub struct RelationName<'a> {
 }
 
 impl<'a> RelationName<'a> {
+    pub(super) fn encoded_len(self) -> usize {
+        self.text.len()
+    }
+
     /// Borrow an already decoded identifier; punctuation remains part of the name.
     pub fn decoded(text: &'a str) -> Self {
         Self {
@@ -130,4 +134,4 @@ pub(super) fn parse(value: &str) -> Result<RelationReference<'_>, InvalidReferen
 }
 
 mod input;
-pub use input::RelationReferenceInputError;
+pub use input::{RelationReferenceInputError, RelationReferenceWork};

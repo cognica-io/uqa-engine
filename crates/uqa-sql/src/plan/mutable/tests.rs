@@ -6,7 +6,7 @@
 
 use super::*;
 use crate::plan::UnifiedPlan;
-use uqa_core::{memory::MemoryBudget, CancellationToken};
+use uqa_core::{memory::MemoryBudget, CancellationToken, Value};
 
 mod children;
 mod command_inputs;
@@ -14,6 +14,7 @@ mod construction;
 mod executable_bodies;
 mod projections;
 mod query_visitation;
+mod transformation;
 mod traversal;
 mod vectors;
 

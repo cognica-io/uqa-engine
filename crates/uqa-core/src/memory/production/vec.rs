@@ -7,7 +7,8 @@
 use super::{Produced, ProductionControl};
 use crate::{
     memory::{BudgetedVec, MemoryError, MemoryReservation},
-    ValueRetentionError,
+    types::OwnedValue,
+    Value, ValueRetentionError, ValueRetirement,
 };
 
 enum Buffer<T> {
@@ -50,15 +51,27 @@ impl<'a, T> ProductionVec<'a, T> {
         self.control.assert_owner(value.memory.as_ref());
         self.reserve(1)?;
         let (value, memory) = value.into_parts();
-        match &mut self.buffer {
-            Buffer::Ordinary(values) => values.push(value),
-            Buffer::Controlled(values) => values.push(value)?,
-        }
-        self.elements = self.control.combine(self.elements.take(), memory);
+        self.push_admitted(value, memory);
         Ok(())
     }
 
+    // Only this owner changes the length between admission and transfer.
+    fn push_admitted(&mut self, value: T, memory: Option<MemoryReservation>) {
+        match &mut self.buffer {
+            Buffer::Ordinary(values) => values.push(value),
+            Buffer::Controlled(values) => values.push(value).expect("admitted vector slot"),
+        }
+        self.elements = self.control.combine(self.elements.take(), memory);
+    }
+
     pub fn finish(self) -> Result<Produced<Vec<T>>, ValueRetentionError> {
+        let control = self.control;
+        let (value, memory) = self.into_parts();
+        control.finish(value, memory)
+    }
+
+    /// Transfer an already admitted private buffer without imposing another fallible publication boundary. Its receiving owner retains both capacity and element reservations.
+    pub(crate) fn into_parts(self) -> (Vec<T>, Option<MemoryReservation>) {
         let (value, memory) = match self.buffer {
             Buffer::Ordinary(value) => (value, None),
             Buffer::Controlled(value) => {
@@ -66,8 +79,31 @@ impl<'a, T> ProductionVec<'a, T> {
                 (value, Some(memory))
             }
         };
-        self.control
-            .finish(value, self.control.combine(memory, self.elements))
+        (value, self.control.combine(memory, self.elements))
+    }
+}
+
+impl ProductionVec<'_, Value> {
+    pub(crate) fn push_owned_value(
+        &mut self,
+        value: Produced<OwnedValue>,
+    ) -> Result<(), ValueRetentionError> {
+        self.control.assert_owner(value.memory.as_ref());
+        self.reserve(1)?;
+        let (value, memory) = value.into_parts();
+        self.push_admitted(value.into_inner(), memory);
+        Ok(())
+    }
+
+    pub(crate) fn retire_values(&mut self) {
+        loop {
+            let value = match &mut self.buffer {
+                Buffer::Ordinary(values) => values.pop(),
+                Buffer::Controlled(values) => values.pop(),
+            };
+            let Some(value) = value else { return };
+            drop(ValueRetirement::new(value));
+        }
     }
 }
 

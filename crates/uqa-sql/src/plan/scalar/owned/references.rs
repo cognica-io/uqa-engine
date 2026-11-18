@@ -53,10 +53,7 @@ impl OwnedScalarExpr {
         };
         let output = Self {
             expression,
-            memory: memory.map(|direct| ScalarMemory {
-                children: Vec::new(),
-                direct,
-            }),
+            memory: memory.map(ScalarMemory::new),
         };
         output.rewrite(control, Ok)
     }

@@ -12,7 +12,8 @@ use std::{
     task::{Context, Poll, Waker},
 };
 
-pub(super) trait Work: Send {
+/// Cooperatively schedule native value-copy steps without choosing their destination allowance.
+pub trait Work: Send {
     fn checkpoint(&mut self) -> impl Future<Output = Result<(), ValueRetentionError>> + Send;
 }
 

@@ -9,6 +9,7 @@
 use std::collections::BTreeMap;
 
 mod work;
+pub use work::Work as ValueCopyWork;
 use work::{inline, Work};
 
 use crate::{
@@ -16,8 +17,9 @@ use crate::{
         Budgeted, BudgetedVec, MemoryBudget, MemoryReservation, Produced, ProductionControl,
         ProductionString, ProductionVec,
     },
+    types::OwnedValue,
     ArrayValue, CancellationToken, LegacyVectorKind, LegacyVectorValue, QueryCancelled, RowValue,
-    Value, ValueRetentionError,
+    Value, ValueRetentionError, ValueRetirement,
 };
 
 impl Value {
@@ -62,6 +64,22 @@ impl Value {
         .map(|value| value.into_budgeted().expect("controlled value copy"))
     }
 
+    /// Copy through a retained work channel while preserving the destination allowance and both cancellation owners selected by the enclosing native producer. The channel supplies suspension only; it does not replace the value's allocation owner.
+    pub async fn clone_from_input(
+        &self,
+        control: &ProductionControl<'_>,
+        input: &mut impl ValueCopyWork,
+    ) -> Result<Produced<Self>, ValueRetentionError> {
+        copy_with_work(
+            self,
+            *control,
+            &mut || control.check(),
+            &mut |_| Ok::<_, ValueRetentionError>(None),
+            input,
+        )
+        .await
+    }
+
     /// Copy native containers with an iterative, admitted traversal. A replacement owns its admitted payload under the same control and stops traversal at that node; all other nodes preserve their shape, bounds and descriptors. Replacements are never interpreted by Core. A failed transform releases every partial copy.
     pub fn transform_with_control<E: From<ValueRetentionError>>(
         &self,
@@ -99,6 +117,7 @@ async fn copy_with_work<E: From<ValueRetentionError>>(
         check,
         work,
     };
+    (copier.check)()?;
     let mut stack = Stack::new(control.budget());
     let mut next = Some(source);
     let mut ready = None;
@@ -107,7 +126,7 @@ async fn copy_with_work<E: From<ValueRetentionError>>(
         (copier.check)()?;
         if let Some(source) = next.take() {
             if let Some(value) = replace(source)? {
-                let (value, memory) = value.into_parts();
+                let (value, memory) = value.into_owned_value().into_parts();
                 ready = Some(control.finish(value, memory)?);
             } else {
                 match Frame::new(source, &mut copier)? {
@@ -126,7 +145,7 @@ async fn copy_with_work<E: From<ValueRetentionError>>(
         if let Some(value) = ready.take() {
             let Some(parent) = stack.last_mut() else {
                 (copier.check)()?;
-                return Ok(value);
+                return Ok(value.into_value());
             };
             parent.push(value, &mut copier)?;
         }
@@ -190,6 +209,7 @@ enum Input<'a> {
     Map(std::collections::btree_map::Iter<'a, String, Value>),
 }
 
+#[derive(Clone, Copy)]
 enum Sequence<'a> {
     List,
     Row(&'a RowValue),
@@ -207,6 +227,17 @@ struct Frame<'source, 'control> {
     output: Output<'source, 'control>,
     key: Option<Produced<String>>,
     memory: Option<MemoryReservation>,
+}
+
+impl Drop for Frame<'_, '_> {
+    fn drop(&mut self) {
+        match &mut self.output {
+            Output::Values(values, _) => values.retire_values(),
+            Output::Map(fields) => {
+                drop(ValueRetirement::new(Value::Map(std::mem::take(fields))));
+            }
+        }
+    }
 }
 
 impl<'source, 'control> Frame<'source, 'control> {
@@ -290,15 +321,15 @@ impl<'source, 'control> Frame<'source, 'control> {
 
     fn push(
         &mut self,
-        value: Produced<Value>,
+        value: Produced<OwnedValue>,
         copier: &mut Copier<'control, impl FnMut() -> Result<(), ValueRetentionError>, impl Work>,
     ) -> Result<(), ValueRetentionError> {
         match &mut self.output {
-            Output::Values(values, _) => values.push_produced(value)?,
+            Output::Values(values, _) => values.push_owned_value(value)?,
             Output::Map(fields) => {
                 let (name, name_memory) = self.key.take().expect("copied map name").into_parts();
                 let (value, memory) = value.into_parts();
-                fields.insert(name, value);
+                fields.insert(name, value.into_inner());
                 self.memory = copier.control.combine(
                     self.memory.take(),
                     copier.control.combine(name_memory, memory),
@@ -311,66 +342,96 @@ impl<'source, 'control> Frame<'source, 'control> {
     async fn finish(
         mut self,
         copier: &mut Copier<'control, impl FnMut() -> Result<(), ValueRetentionError>, impl Work>,
-    ) -> Result<Produced<Value>, ValueRetentionError> {
+    ) -> Result<Produced<OwnedValue>, ValueRetentionError> {
         (copier.check)()?;
-        let value = match self.output {
-            Output::Values(values, kind) => {
-                let (values, memory) = values.finish()?.into_parts();
-                self.memory = copier.control.combine(self.memory.take(), memory);
-                match kind {
-                    Sequence::List => Value::List(values),
-                    Sequence::Record(source) => {
-                        let descriptor = source.descriptor().clone();
-                        let mut bytes = descriptor.retained_buffer_bytes()?;
-                        for name in descriptor.field_names() {
-                            copier.work.checkpoint().await?;
-                            (copier.check)()?;
-                            bytes = bytes
-                                .checked_add(name.capacity())
-                                .ok_or(crate::memory::MemoryError::SizeOverflow)?;
-                        }
-                        copier.grow(&mut self.memory, bytes)?;
-                        copier.grow(
-                            &mut self.memory,
-                            crate::RecordValue::retained_header_bytes(),
-                        )?;
-                        (copier.check)()?;
-                        Value::Record(crate::RecordValue::from_validated_parts(values, descriptor))
-                    }
-                    Sequence::Row(source) => {
-                        let descriptor = source.descriptor().cloned();
-                        if let Some(descriptor) = &descriptor {
-                            copier.grow(&mut self.memory, descriptor.retained_buffer_bytes()?)?;
-                        }
-                        copier.grow(&mut self.memory, RowValue::decoded_header_bytes())?;
-                        (copier.check)()?;
-                        Value::Row(RowValue::from_shared_parts(values, descriptor))
-                    }
-                    Sequence::Array(source, legacy_kind) => {
-                        let dimensions = copier.slice(source.dimensions()).await?;
-                        let lower_bounds = copier.slice(source.lower_bounds()).await?;
-                        copier.grow(&mut self.memory, ArrayValue::decoded_header_bytes())?;
-                        let (dimensions, dimensions_memory) = dimensions.into_parts();
-                        let (lower_bounds, lower_memory) = lower_bounds.into_parts();
-                        self.memory = copier.control.combine(
-                            self.memory.take(),
-                            copier.control.combine(dimensions_memory, lower_memory),
-                        );
-                        (copier.check)()?;
-                        let array = ArrayValue::from_copied_parts(values, dimensions, lower_bounds)
-                            .with_element_type_oid(source.element_type_oid());
-                        match legacy_kind {
-                            Some(kind) => Value::LegacyVector(
-                                LegacyVectorValue::from_validated_array(kind, array),
-                            ),
-                            None => Value::Array(array),
-                        }
-                    }
-                }
+        let kind = match &self.output {
+            Output::Values(_, kind) => {
+                copier.control.check()?;
+                Some(*kind)
             }
-            Output::Map(fields) => Value::Map(fields),
+            Output::Map(_) => None,
         };
-        copier.control.finish(value, self.memory)
+        match kind {
+            Some(Sequence::List) => self.finish_values(copier, Value::List),
+            Some(Sequence::Record(source)) => {
+                let descriptor = source.descriptor().clone();
+                let mut bytes = descriptor.retained_buffer_bytes()?;
+                for name in descriptor.field_names() {
+                    copier.work.checkpoint().await?;
+                    (copier.check)()?;
+                    bytes = bytes
+                        .checked_add(name.capacity())
+                        .ok_or(crate::memory::MemoryError::SizeOverflow)?;
+                }
+                copier.grow(&mut self.memory, bytes)?;
+                copier.grow(
+                    &mut self.memory,
+                    crate::RecordValue::retained_header_bytes(),
+                )?;
+                (copier.check)()?;
+                self.finish_values(copier, |values| {
+                    Value::Record(crate::RecordValue::from_validated_parts(values, descriptor))
+                })
+            }
+            Some(Sequence::Row(source)) => {
+                let descriptor = source.descriptor().cloned();
+                if let Some(descriptor) = &descriptor {
+                    copier.grow(&mut self.memory, descriptor.retained_buffer_bytes()?)?;
+                }
+                copier.grow(&mut self.memory, RowValue::decoded_header_bytes())?;
+                (copier.check)()?;
+                self.finish_values(copier, |values| {
+                    Value::Row(RowValue::from_shared_parts(values, descriptor))
+                })
+            }
+            Some(Sequence::Array(source, legacy_kind)) => {
+                let dimensions = copier.slice(source.dimensions()).await?;
+                let lower_bounds = copier.slice(source.lower_bounds()).await?;
+                copier.grow(&mut self.memory, ArrayValue::decoded_header_bytes())?;
+                let (dimensions, dimensions_memory) = dimensions.into_parts();
+                let (lower_bounds, lower_memory) = lower_bounds.into_parts();
+                self.memory = copier.control.combine(
+                    self.memory.take(),
+                    copier.control.combine(dimensions_memory, lower_memory),
+                );
+                (copier.check)()?;
+                self.finish_values(copier, |values| {
+                    let array = ArrayValue::from_copied_parts(values, dimensions, lower_bounds)
+                        .with_element_type_oid(source.element_type_oid());
+                    match legacy_kind {
+                        Some(kind) => Value::LegacyVector(LegacyVectorValue::from_validated_array(
+                            kind, array,
+                        )),
+                        None => Value::Array(array),
+                    }
+                })
+            }
+            None => {
+                let Output::Map(fields) =
+                    std::mem::replace(&mut self.output, Output::Map(BTreeMap::new()))
+                else {
+                    unreachable!("map output");
+                };
+                copier
+                    .control
+                    .finish(OwnedValue::new(Value::Map(fields)), self.memory.take())
+            }
+        }
+    }
+
+    fn finish_values(
+        mut self,
+        copier: &Copier<'control, impl FnMut() -> Result<(), ValueRetentionError>, impl Work>,
+        wrap: impl FnOnce(Vec<Value>) -> Value,
+    ) -> Result<Produced<OwnedValue>, ValueRetentionError> {
+        let Output::Values(values, _) =
+            std::mem::replace(&mut self.output, Output::Map(BTreeMap::new()))
+        else {
+            unreachable!("sequence output");
+        };
+        let (values, memory) = values.into_parts();
+        let memory = copier.control.combine(self.memory.take(), memory);
+        copier.control.finish(OwnedValue::new(wrap(values)), memory)
     }
 }
 
@@ -420,7 +481,10 @@ impl<C: FnMut() -> Result<(), ValueRetentionError>, W: Work> Copier<'_, C, W> {
         copied.finish()
     }
 
-    async fn scalar(&mut self, source: &Value) -> Result<Produced<Value>, ValueRetentionError> {
+    async fn scalar(
+        &mut self,
+        source: &Value,
+    ) -> Result<Produced<OwnedValue>, ValueRetentionError> {
         (self.check)()?;
         let mut memory = self.control.empty_reservation();
         let value = match source {
@@ -476,7 +540,7 @@ impl<C: FnMut() -> Result<(), ValueRetentionError>, W: Work> Copier<'_, C, W> {
                 unreachable!("container has a copy frame")
             }
         };
-        let result = self.control.finish(value, memory)?;
+        let result = self.control.finish(OwnedValue::new(value), memory)?;
         (self.check)()?;
         Ok(result)
     }
