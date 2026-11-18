@@ -79,7 +79,7 @@
       "cases": 1,
       "source": "crates/uqa-storage-redb/src/mvcc/tests/backup_metadata/fingerprints.rs",
       "capability": "Cold redb retained revision fingerprints",
-      "workload": "Reopen a database without the redb page cache, select a two-MiB revision, replace the live row and read the original certificate through the counted file backend.",
+      "workload": "Reopen without the redb page cache, replace a two-MiB row, then read the original revision through both backup certificates and ordinary key-only access on the counted file backend.",
       "invariant": "The original encoded length and independently computed SHA-256 match while the physical backend reads less than 256 KiB with an 8 KiB invocation allowance.",
       "case_names": [
         ""
@@ -26733,7 +26733,7 @@
       "cases": 4,
       "source": "crates/uqa-engine/src/value_index/tests/retained_cache.rs",
       "capability": "Bounded cold value-index consumers",
-      "workload": "256 indexed 8KiB values, persistent reopen, cold hydration under 64KiB query work memory, mutation, savepoint and rollback.",
+      "workload": "256 indexed 8KiB values, persistent reopen and cold hydration under 64KiB query work memory. The redb allocation measurement uses a 64KiB physical page cache. The ordinary provider configuration exercises hydration, mutation, savepoint and rollback.",
       "invariant": "Cold retained-key construction stays below a fixed 1536KiB peak ceiling; previous snapshots and transaction-visible results remain exact.",
       "case_names": [
         "case_1_memory",

@@ -74,7 +74,7 @@ windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Storage
 allocation-counter = "=0.8.1"
 regex = { workspace = true }
 rstest = { workspace = true }
-uqa-storage-redb = { workspace = true }
+uqa-storage-redb = { workspace = true, features = ["test-support"] }
 serde_json = { workspace = true }
 serde = { workspace = true }
 criterion = { workspace = true }
