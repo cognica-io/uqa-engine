@@ -9,7 +9,8 @@
 use crate::catalog::{CatalogDefinitionSnapshot, CatalogReadSnapshot};
 use uqa_core::{memory::MemoryBudget, CancellationToken};
 use uqa_sql::{
-    catalog::{security::authority::AuthorityCatalog, CatalogWork},
+    ast::ObjectAclEntry,
+    catalog::{roles::RoleIdentity, security::authority::AuthorityCatalog, CatalogWork},
     SQLError,
 };
 
@@ -49,29 +50,7 @@ pub(super) async fn validate(
     }
     relations(definitions, &authority, work).await?;
     types(definitions, &authority, work).await?;
-    for overloads in definitions.sql_user_functions.values() {
-        authority.checkpoint(work).await?;
-        for routine in overloads {
-            authority.checkpoint(work).await?;
-            authority
-                .object_with_work(
-                    routine.def.owner.ok_or_else(|| invalid("routine owner"))?,
-                    routine.def.execute_acl.as_deref(),
-                    work,
-                )
-                .await?;
-        }
-    }
-    for security in definitions.builtin_routine_security.values() {
-        authority.checkpoint(work).await?;
-        authority
-            .object_with_work(
-                uqa_sql::catalog::roles::RoleIdentity::BOOTSTRAP,
-                Some(&security.execute_acl),
-                work,
-            )
-            .await?;
-    }
+    routines(definitions, &authority, work).await?;
     for (name, security) in definitions.system_relation_security.iter() {
         authority.checkpoint(work).await?;
         let relation = uqa_sql::catalog::SystemRelation::at(&name.schema, &name.name)
@@ -80,14 +59,7 @@ pub(super) async fn validate(
             .system_relation_with_work(relation, security, work)
             .await?;
     }
-    for wrapper in definitions.foreign_wrappers.values() {
-        authority.checkpoint(work).await?;
-        authority.role(wrapper.owner)?;
-    }
-    for server in definitions.foreign_servers.values() {
-        authority.checkpoint(work).await?;
-        authority.role(server.metadata.owner)?;
-    }
+    foreign_owners(definitions, &authority, work).await?;
     cancellation.check()?;
     authority.retire(work).await
 }
@@ -127,6 +99,53 @@ async fn relations(
     Ok(())
 }
 
+async fn routines(
+    definitions: &CatalogDefinitionSnapshot,
+    authority: &AuthorityCatalog<'_>,
+    work: &mut (impl CatalogWork + Send),
+) -> Result<(), SQLError> {
+    for overloads in definitions.sql_user_functions.values() {
+        authority.checkpoint(work).await?;
+        for routine in overloads {
+            authority.checkpoint(work).await?;
+            authority
+                .object_with_work(
+                    routine.def.owner.ok_or_else(|| invalid("routine owner"))?,
+                    routine.def.execute_acl.as_deref(),
+                    work,
+                )
+                .await?;
+        }
+    }
+    for security in definitions.builtin_routine_security.values() {
+        authority.checkpoint(work).await?;
+        authority
+            .object_with_work(RoleIdentity::BOOTSTRAP, Some(&security.execute_acl), work)
+            .await?;
+    }
+    Ok(())
+}
+
+async fn foreign_owners(
+    definitions: &CatalogDefinitionSnapshot,
+    authority: &AuthorityCatalog<'_>,
+    work: &mut (impl CatalogWork + Send),
+) -> Result<(), SQLError> {
+    let wrappers = definitions
+        .foreign_wrappers
+        .values()
+        .map(|wrapper| wrapper.owner);
+    let servers = definitions
+        .foreign_servers
+        .values()
+        .map(|server| server.metadata.owner);
+    for owner in wrappers.chain(servers) {
+        authority.checkpoint(work).await?;
+        authority.role(owner)?;
+    }
+    Ok(())
+}
+
 async fn types(
     definitions: &CatalogDefinitionSnapshot,
     authority: &AuthorityCatalog<'_>,
@@ -134,13 +153,26 @@ async fn types(
 ) -> Result<(), SQLError> {
     macro_rules! check {
         ($($field:ident),+ $(,)?) => {$(
-            for definition in definitions.$field.values() {
-                authority.checkpoint(work).await?;
-                authority.object_with_work(definition.owner, definition.usage_acl.as_deref(), work).await?;
-            }
+            type_owners(definitions.$field.values(), authority, work, |definition| {
+                (definition.owner, definition.usage_acl.as_deref())
+            }).await?;
         )+};
     }
     check!(domains, enums, composites, ranges, shells);
+    Ok(())
+}
+
+async fn type_owners<'a, T: Sync + 'a>(
+    definitions: impl Iterator<Item = &'a T> + Send,
+    authority: &AuthorityCatalog<'_>,
+    work: &mut (impl CatalogWork + Send),
+    security: fn(&T) -> (RoleIdentity, Option<&[ObjectAclEntry]>),
+) -> Result<(), SQLError> {
+    for definition in definitions {
+        authority.checkpoint(work).await?;
+        let (owner, acl) = security(definition);
+        authority.object_with_work(owner, acl, work).await?;
+    }
     Ok(())
 }
 
