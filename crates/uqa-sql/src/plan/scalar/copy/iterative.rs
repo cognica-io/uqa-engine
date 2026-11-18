@@ -190,10 +190,11 @@ impl<'s, 'c> Frame<'s, 'c> {
 }
 
 fn copy(source: &ScalarExpr, control: ProductionControl<'_>, mode: CopyMode) -> Result<Copied> {
-    inline(copy_from(source, control, mode, &mut ()))
+    // Immediate copies keep their existing shallow workspace without another heap reservation.
+    inline(copy_from::<_, 4>(source, control, mode, &mut ()))
 }
 
-async fn copy_from<W: Work>(
+async fn copy_from<W: Work, const N: usize>(
     source: &ScalarExpr,
     control: ProductionControl<'_>,
     mode: CopyMode,
@@ -203,8 +204,7 @@ where
     W::Error: From<CatalogRetentionError>,
 {
     let mut current = Frame::new_from(source, control, mode, work).await?;
-    // Complete constructor frames use admitted heap storage instead of expanding enclosing poll frames.
-    let mut stack = Stack::<_, 0>::new(control);
+    let mut stack = Stack::<_, N>::new(control);
     loop {
         current.lowering.checkpoint(work).await?;
         if let Some(child) = current.next_child()? {
@@ -221,6 +221,13 @@ where
     }
 }
 
+pub(super) fn mutable(
+    source: &ScalarExpr,
+    control: ProductionControl<'_>,
+) -> Result<OwnedScalarExpr> {
+    Ok(copy(source, control, CopyMode::Mutable)?.into_mutable())
+}
+
 pub(super) async fn mutable_from<W: Work>(
     source: &ScalarExpr,
     control: ProductionControl<'_>,
@@ -229,17 +236,23 @@ pub(super) async fn mutable_from<W: Work>(
 where
     W::Error: From<CatalogRetentionError>,
 {
-    let Copied {
-        expression, memory, ..
-    } = copy_from(source, control, CopyMode::Mutable, work).await?;
-    Ok(OwnedScalarExpr {
-        expression: expression.take(),
-        memory: match memory {
-            Memory::Ordinary => None,
-            Memory::Mutable(memory) => Some(memory),
-            Memory::Immutable(_) => unreachable!("mutable copy output"),
-        },
-    })
+    // Suspended copies admit their ancestor frames without enlarging the enclosing poll frame.
+    Ok(copy_from::<_, 0>(source, control, CopyMode::Mutable, work)
+        .await?
+        .into_mutable())
+}
+
+impl Copied {
+    fn into_mutable(self) -> OwnedScalarExpr {
+        OwnedScalarExpr {
+            expression: self.expression.take(),
+            memory: match self.memory {
+                Memory::Ordinary => None,
+                Memory::Mutable(memory) => Some(memory),
+                Memory::Immutable(_) => unreachable!("mutable copy output"),
+            },
+        }
+    }
 }
 
 pub(super) fn immutable(

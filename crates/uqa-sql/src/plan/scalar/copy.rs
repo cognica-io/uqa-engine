@@ -32,7 +32,7 @@ impl ScalarExpr {
 
     /// Copy into a mutable scalar owner with independent direct and child reservations. Iterative constructors preserve field order, destination admission and query-arena identities in both ordinary and controlled modes.
     pub fn copy_for_rewrite(&self, control: &ProductionControl<'_>) -> Result<OwnedScalarExpr> {
-        crate::catalog::work::inline(self.copy_for_rewrite_from(control, &mut ()))
+        iterative::mutable(self, *control)
     }
 
     pub(crate) async fn copy_for_rewrite_from<W: Work>(
