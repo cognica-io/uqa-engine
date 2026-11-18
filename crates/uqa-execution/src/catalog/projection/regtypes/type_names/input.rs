@@ -110,15 +110,11 @@ async fn select(
     input: &mut AsyncImageInput<'_>,
 ) -> Result<Selection, SQLError> {
     checkpoint(control, input).await?;
-    let parsed = match uqa_sql::parse_regtype_name_from_input(type_name, control, input).await {
-        Ok(Some(parsed)) => parsed,
-        Err(error)
-            if matches!(error.primary(), SQLError::Cancelled(_))
-                || error.sqlstate() == Some("53200") =>
-        {
-            return Err(error)
-        }
-        _ => return Ok(Selection::Missing),
+    let Some(parsed) = super::resolution::optional(
+        uqa_sql::parse_regtype_name_from_input(type_name, control, input).await,
+    )?
+    .flatten() else {
+        return Ok(Selection::Missing);
     };
     let (schema, local) = match parsed.names.as_slice() {
         [local] => (None, local.as_str()),
