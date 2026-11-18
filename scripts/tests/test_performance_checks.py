@@ -285,9 +285,15 @@ class PerformanceChecksTest(unittest.TestCase):
         self.assertIn("**failed**", (output / "summary.md").read_text())
         self.assertIn("missing provider case", (self.root / "step.md").read_text())
 
-    def run_main(self, *, listing=None, listing_failure=None, failure=None, archive=None, extraction_failure=None):
+    def run_main(self, *, listing=None, listing_failure=None, failure=None, archive=None,
+                 extraction_failure=None, built_in_place=False):
         self.write_inventory()
         output = self.root / "run-output"
+        argv = ["run-performance-checks", "--output", str(output)]
+        if archive is not None:
+            argv.extend(["--archive-file", str(archive)])
+        if built_in_place:
+            argv.append("--built-in-place")
         output.mkdir(parents=True, exist_ok=True)
         (output / "test-inventory.json").write_text("stale inventory")
         junit = self.root / "target/nextest/ci/junit.xml"
@@ -300,9 +306,7 @@ class PerformanceChecksTest(unittest.TestCase):
                 [extraction_failure or "binary metadata"] if archive is not None else []
             ) + [listing_failure or json.dumps(self.listing if listing is None else listing)]) as capture,
             mock.patch.object(runner.subprocess, "run", side_effect=failure) as run,
-            mock.patch("sys.argv", ["run-performance-checks", "--output", str(output)] + (
-                ["--archive-file", str(archive)] if archive is not None else []
-            )),
+            mock.patch("sys.argv", argv),
             mock.patch.dict("os.environ", {}, clear=True),
             mock.patch("sys.stderr"),
         ):
@@ -322,6 +326,16 @@ class PerformanceChecksTest(unittest.TestCase):
         self.assertTrue(run.call_args.kwargs["check"])
         self.assertIsNone(capture.call_args.kwargs["timeout"])
         self.assertEqual(json.loads((self.root / "run-output/test-inventory.json").read_text()), self.listing)
+
+    def test_in_place_build_uses_the_local_targets_and_bounded_discovery(self):
+        status, result, capture, run = self.run_main(built_in_place=True)
+        self.assertEqual(status, 0)
+        self.assertEqual(result["checks"][0]["selected_cases"], 2)
+        selection = runner.arguments([self.check], self.root / "run-output/selection.toml")
+        self.assertEqual(capture.call_args_list[3:], [
+            mock.call("cargo", "nextest", "list", "--message-format", "json", *selection, timeout=120)
+        ])
+        run.assert_called_once_with(["cargo", "nextest", "run", *selection], cwd=self.root, check=True)
 
     def test_test_process_failure_stays_failed_and_retains_summary(self):
         status, result, _, _ = self.run_main(failure=subprocess.CalledProcessError(100, ["cargo", "nextest", "run"]))

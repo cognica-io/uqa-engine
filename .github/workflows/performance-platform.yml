@@ -54,16 +54,19 @@ jobs:
           CARGO_BUILD_JOBS: ${{ runner.os == 'Linux' && '2' || env.CARGO_BUILD_JOBS }}
         run: python3 scripts/run-performance-checks.py --build-archive "$RUNNER_TEMP/uqa-performance-tests.tar.zst"
       - name: Build the independent-process claim fixture
+        id: claim_fixture
         run: |
           python3 scripts/run-performance-checks.py --build-claim-fixture
           tar -czf "$RUNNER_TEMP/uqa-claim-fixture.tar.gz" -C target/debug/examples row_claim_contention
       - name: Check macOS bounded work, memory and output correctness on the build worker
         if: runner.os == 'macOS'
         timeout-minutes: 120
-        run: python3 scripts/run-performance-checks.py --archive-file "$RUNNER_TEMP/uqa-performance-tests.tar.zst"
+        run: python3 scripts/run-performance-checks.py --built-in-place
       - name: Verify macOS independent-process claim workload without timing
-        if: runner.os == 'macOS'
-        run: target/debug/examples/row_claim_contention --verify > target/performance-checks/claim-contention.json
+        if: ${{ !cancelled() && runner.os == 'macOS' && steps.claim_fixture.outcome == 'success' }}
+        run: |
+          mkdir -p target/performance-checks
+          target/debug/examples/row_claim_contention --verify > target/performance-checks/claim-contention.json
       - name: Retain macOS regression results
         if: always() && runner.os == 'macOS'
         uses: actions/upload-artifact@v7.0.2
