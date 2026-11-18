@@ -227,7 +227,7 @@ impl Bodies {
             }
         } else if declaration
             .definition
-            .copy_next_statement(&control)
+            .copy_next_field(&control)
             .map_err(|error| catalog_message(error, &control))?
         {
             declaration.binding = Some(

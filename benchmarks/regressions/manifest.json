@@ -51509,6 +51509,32 @@
       ]
     },
     {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_routine_parameters_and_statements_are_copied_in_separate_windows",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/stored_routine/tests.rs",
+      "capability": "Stored routine restoration",
+      "workload": "Copy declarations with zero, one and 64 parameters and with SQL text or a two-statement body.",
+      "invariant": "Each step transfers one parameter or statement in source order. The completed declaration and its reservation match ordinary stored-syntax capture.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_routine_parameters_release_partial_copies_after_denial_or_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/stored_routine/tests.rs",
+      "capability": "Stored routine restoration",
+      "workload": "Copy 63 parameters before cancelling or denying the last 128 KiB default.",
+      "invariant": "An interrupted declaration keeps its last completed field and releases the private reservation when discarded.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
       "package": "uqa-storage",
       "kind": "lib",
       "test": "native_image_preparation_and_output_are_bounded_and_preserve_exact_units",
