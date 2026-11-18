@@ -116,7 +116,7 @@ fn public_backup_jobs_preserve_committed_images_after_engine_and_source_loss(
     let child = finish(child_job, None);
     assert_eq!(control.memory().used(), 0);
     std::fs::remove_dir_all(source).unwrap();
-    restore::verify(
+    restore::verify_engine(
         &repository,
         full,
         &directory.path().join("full"),
@@ -126,7 +126,7 @@ fn public_backup_jobs_preserve_committed_images_after_engine_and_source_loss(
         &control,
     );
     repository.remove_backup(full.backup(), &control).unwrap();
-    restore::verify(
+    restore::verify_engine(
         &repository,
         child,
         &directory.path().join("child"),
