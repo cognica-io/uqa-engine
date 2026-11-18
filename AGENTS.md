@@ -34,6 +34,8 @@ PR #1361 is the integration-only exception for the existing backup source and im
 
 PR #1404 is the integration-only exception for the existing backup successor stack #1381–#1383, #1385–#1389, #1393–#1395 and #1397–#1404 through product source `7334ce08207838fc274f9f818a85451fb88d1470`. Its 142,562 changed product/documentation lines across 1,262 files against #1380 source `e60bd5db2494a570b0a1bcbe6964f48a2ac63b5b` are consolidated for one final-source qualification. Preserve all component commits and their source-specific evidence; do not expand the product scope. Only integration policy, delivery records and corrections required by integrated qualification may be added. Remaining backup implementation stays in #1322 and subsequent bounded PRs.
 
+PR #1423 is the integration-only exception for the existing retained SQL construction and ownership stack #1415 and #1418–#1423 through product source `36669ef19e386cbf36ddf6548f6b4237c9dec49e`. Its 53,630 changed product/documentation lines across 436 files against main `3597b918350bb1820b1334e7fcd86fd5374566d4` are consolidated into one delivery candidate. Preserve all component commits and their source-specific evidence; do not expand the product scope. Only integration policy, delivery records and corrections required by qualification may be added. Remaining backup implementation stays in #1322 and #1417; arbitrary nested plan-field footprint observation remains in #1424.
+
 Keep each prose paragraph on one physical line. Do not insert line breaks inside paragraphs.
 
 Describe decisions, scope, behavior and verification evidence directly in issues, PRs and documentation. Do not narrate instructions, approvals or conversation history, or attribute a decision or requirement to a person.
