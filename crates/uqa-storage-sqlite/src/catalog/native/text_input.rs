@@ -14,6 +14,7 @@ use uqa_storage::{
     catalog::text_input::{
         CatalogTextDecoder, CatalogTextFamily, CatalogTextInput, CatalogTextLimits, CatalogTextRow,
     },
+    catalog::text_load::{CatalogTextLoad, CatalogTextOrder},
     key_value::KeyValueRead,
     read_control::StorageReadControl,
     StorageBackendError, StorageBackendResult,
@@ -42,8 +43,9 @@ impl Catalog {
         CatalogTextInput::new(read, &prefix, decode, limits, control)
     }
 
-    pub(in crate::catalog) fn native_metadata_with_control(
+    pub(in crate::catalog) fn native_text_point_with_control(
         &self,
+        family: Family,
         name: &str,
         limits: CatalogTextLimits,
         control: &StorageReadControl,
@@ -54,11 +56,9 @@ impl Catalog {
         let snapshot = self.conn.native_snapshot()?.ok_or_else(|| {
             StorageBackendError::Other("controlled metadata reads require native records".into())
         })?;
-        let identity = NativeRecordIdentity::new(
-            Family::Metadata,
-            NativeRecordOwner::Database(snapshot.database),
-        )
-        .map_err(uqa_storage::mvcc::VersionError::into_storage_error)?;
+        let identity =
+            NativeRecordIdentity::new(family, NativeRecordOwner::Database(snapshot.database))
+                .map_err(uqa_storage::mvcc::VersionError::into_storage_error)?;
         let key = identity
             .encode_key(&[text(name)], control)
             .map_err(uqa_storage::mvcc::VersionError::into_storage_error)?;
@@ -79,6 +79,19 @@ impl Catalog {
         control.check()?;
         read.control().check()?;
         Ok(result)
+    }
+
+    pub(in crate::catalog) fn native_text_load(
+        &self,
+        family: CatalogTextFamily,
+        limits: CatalogTextLimits,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<CatalogTextLoad> {
+        CatalogTextLoad::new(
+            self.native_text_input(family, limits, control)?,
+            CatalogTextOrder::Physical,
+            control,
+        )
     }
 
     pub(in crate::catalog) fn native_text_input(

@@ -8,6 +8,34 @@ use crate::{ManagedConnection, SQLiteKeyValueStorage, SQLiteStorageProvider};
 use uqa_storage::PersistentStorageProvider;
 
 #[test]
+fn sqlite_native_path_index_owner_reads_bound_physical_rows_and_preserve_private_state() {
+    let provider = SQLiteStorageProvider::new(ManagedConnection::open_in_memory().unwrap());
+    let physical = uqa_storage::key_value::conformance::verify_controlled_path_index_owner_reads(
+        provider.open_session().unwrap(),
+        true,
+    )
+    .unwrap();
+    eprintln!(
+        "physical path owner key {} bytes, value {} bytes",
+        physical.maximum_key_bytes, physical.maximum_value_bytes
+    );
+}
+
+#[test]
+fn sqlite_key_value_path_index_owner_reads_bound_physical_rows_and_preserve_private_state() {
+    let provider = SQLiteKeyValueStorage::open_in_memory().unwrap();
+    let physical = uqa_storage::key_value::conformance::verify_controlled_path_index_owner_reads(
+        provider.open_session().unwrap(),
+        false,
+    )
+    .unwrap();
+    eprintln!(
+        "physical path owner key {} bytes, value {} bytes",
+        physical.maximum_key_bytes, physical.maximum_value_bytes
+    );
+}
+
+#[test]
 fn sqlite_native_analyzer_input_preserves_bindings_labels_and_selected_generations() {
     let provider = SQLiteStorageProvider::new(ManagedConnection::open_in_memory().unwrap());
     uqa_storage::key_value::conformance::verify_catalog_analyzer_input(

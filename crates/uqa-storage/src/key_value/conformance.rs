@@ -40,6 +40,8 @@ pub use catalog_revisions::verify_catalog_record_revisions;
 mod key_mapping;
 mod metadata_input;
 mod metadata_reads;
+mod path_index_owners;
+pub use path_index_owners::verify_controlled_path_index_owner_reads;
 mod table_metadata;
 pub use foreign_servers::{verify_foreign_server_reopen, verify_foreign_server_rows};
 pub use key_mapping::verify_integer_key_mapping_input;

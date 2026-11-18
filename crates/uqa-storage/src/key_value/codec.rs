@@ -250,9 +250,18 @@ pub(super) fn single_str_key_prefix(
     key_bytes: usize,
     budget: &uqa_core::memory::MemoryBudget,
 ) -> StorageBackendResult<uqa_core::memory::BudgetedVec<u8>> {
+    tagged_str_key_prefix(&[tag], prefix, key_bytes, budget)
+}
+
+pub(super) fn tagged_str_key_prefix(
+    tags: &[u8],
+    prefix: &str,
+    key_bytes: usize,
+    budget: &uqa_core::memory::MemoryBudget,
+) -> StorageBackendResult<uqa_core::memory::BudgetedVec<u8>> {
     let length = key_segment_length(key_bytes)?;
     let mut key = uqa_core::memory::BudgetedVec::new(budget);
-    key.push(tag)?;
+    key.extend_from_slice(tags)?;
     key.extend_from_slice(&length.to_be_bytes())?;
     key.extend_from_slice(prefix.as_bytes())?;
     Ok(key)

@@ -122,6 +122,43 @@ impl PathIndexGraphs for Known {
 }
 
 #[test]
+fn retained_registration_resolves_the_recorded_graph_in_windows_and_transfers_both_outputs() {
+    let graph = format!("{}::events", "한글".repeat(4096));
+    let name = "related::paths";
+    let canonical = key(&graph, name);
+    let legacy = format!("{graph}::{name}");
+    for physical in [legacy, canonical.clone()] {
+        let budget = MemoryBudget::new(1 << 20);
+        let token = CancellationToken::new();
+        let graphs = Known(graph.clone());
+        let mut reader = ImageDecoder::new(&budget, &token, |mut channel| async move {
+            registration_from(&physical, Some(&graphs.0), &graphs, &mut channel.input()).await
+        })
+        .unwrap();
+        let mut windows = 0;
+        let (key, owner) = loop {
+            windows += 1;
+            if let Some(result) = reader
+                .advance(
+                    &mut std::io::empty(),
+                    ImageDecodeWindow { bytes: 1, steps: 1 },
+                )
+                .unwrap()
+            {
+                break result.unwrap();
+            }
+        };
+        assert!(windows > 64);
+        assert_eq!((&*key, &*owner), (&canonical, &graph));
+        drop(reader);
+        assert!(key.budget().shares_allowance(&budget) && owner.budget().shares_allowance(&budget));
+        assert_eq!(budget.used(), key.capacity() + owner.capacity());
+        drop((key, owner));
+        assert_eq!(budget.used(), 0);
+    }
+}
+
+#[test]
 fn retained_legacy_conversion_limits_work_and_preserves_admission_and_cancellation() {
     let prefix = "한글-x".repeat(1000);
     let graph = format!("{prefix}::owner");

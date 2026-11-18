@@ -15,6 +15,8 @@ use crate::key_value::KeyValueRead;
 use crate::key_value::TAG_PATH_INDEX_DATA;
 use crate::MAX_GRAPH_ID_PAGE;
 
+pub(super) const OWNER_STATE: u8 = b's';
+
 fn key(kind: u8, name: &str) -> StorageBackendResult<Vec<u8>> {
     let mut key = vec![TAG_PATH_INDEX_DATA, kind];
     push_str(&mut key, name)?;
@@ -41,7 +43,7 @@ impl KeyValueCatalog {
         read: &dyn KeyValueRead,
         index: &str,
     ) -> StorageBackendResult<Option<String>> {
-        read.get(&key(b's', index)?)?
+        read.get(&key(OWNER_STATE, index)?)?
             .map(|value| {
                 std::str::from_utf8(&value)
                     .map(str::to_owned)
@@ -60,7 +62,7 @@ impl KeyValueCatalog {
         for_each_key(read, &prefix, &mut |stored_key| {
             let mut offset = prefix.len();
             let index = read_str(stored_key, &mut offset)?;
-            if read.get(&key(b's', &index)?)?.as_deref() == Some(graph.as_bytes()) {
+            if read.get(&key(OWNER_STATE, &index)?)?.as_deref() == Some(graph.as_bytes()) {
                 batch.preview_graph_invalidation(&key(b'v', &index)?, None)?;
             }
             Ok(true)
@@ -71,7 +73,7 @@ impl KeyValueCatalog {
         batch: &mut dyn KeyValueBatch,
         index: &str,
     ) -> StorageBackendResult<()> {
-        let state = key(b's', index)?;
+        let state = key(OWNER_STATE, index)?;
         if let Some(graph) = read.get(&state)? {
             let graph = std::str::from_utf8(&graph)
                 .map_err(|error| StorageBackendError::Other(error.to_string()))?;
@@ -125,14 +127,14 @@ impl KeyValueCatalog {
                     "path index {index:?} definition changed during build"
                 )));
             }
-            if let Some(previous) = read.get(&key(b's', index)?)? {
+            if let Some(previous) = read.get(&key(OWNER_STATE, index)?)? {
                 let previous = std::str::from_utf8(&previous)
                     .map_err(|error| StorageBackendError::Other(error.to_string()))?;
                 if previous != graph {
                     batch.delete(&reverse_key(previous, index)?)?;
                 }
             }
-            batch.put(&key(b's', index)?, graph.as_bytes())?;
+            batch.put(&key(OWNER_STATE, index)?, graph.as_bytes())?;
             batch.replace_graph_cache(&key(b'v', index)?, Some(definition.as_bytes()))?;
             batch.put(&reverse_key(graph, index)?, &[])?;
             batch.graph_mutation(crate::mvcc::GraphMutation::PublishPath {

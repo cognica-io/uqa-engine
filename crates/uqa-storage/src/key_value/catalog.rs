@@ -218,6 +218,20 @@ impl CatalogFacade for KeyValueCatalog {
         self.with_graph_read(|read| Self::path_index_graph_from(read.read, index))
     }
 
+    fn path_index_graph_with_control(
+        &self,
+        index: &str,
+        limits: crate::catalog::input::CatalogInputLimits,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<Option<uqa_core::memory::Budgeted<String>>> {
+        self.text_point_with_control(
+            &[super::TAG_PATH_INDEX_DATA, path_index_data::OWNER_STATE],
+            index,
+            limits,
+            control,
+        )
+    }
+
     fn drop_graph_path_indexes(&self, graph: &str) -> StorageBackendResult<()> {
         self.with_graph_mutation(|read, batch| read.remove_paths(batch, graph))
     }
@@ -357,7 +371,7 @@ impl CatalogFacade for KeyValueCatalog {
         limits: crate::catalog::input::CatalogInputLimits,
         control: &crate::read_control::StorageReadControl,
     ) -> StorageBackendResult<Option<uqa_core::memory::Budgeted<String>>> {
-        self.metadata_with_control(key, limits, control)
+        self.text_point_with_control(&[TAG_METADATA], key, limits, control)
     }
 
     fn metadata_has_private_changes(&self, key: &str) -> StorageBackendResult<bool> {

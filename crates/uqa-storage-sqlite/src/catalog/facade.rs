@@ -12,6 +12,7 @@ use super::{
     SQLiteError, SequenceReservationResult, SequenceRow, SequenceSetValueResult,
     StorageBackendError, StorageBackendResult, TableSchema, ViewRow,
 };
+use crate::mvcc::native::NativeRecordFamily as Family;
 
 fn into_storage_result<T>(result: Result<T>) -> StorageBackendResult<T> {
     result.map_err(StorageBackendError::from)
@@ -83,11 +84,7 @@ impl CatalogFacade for Catalog {
         limits: uqa_storage::catalog::input::CatalogInputLimits,
         control: &uqa_storage::read_control::StorageReadControl,
     ) -> uqa_storage::StorageBackendResult<uqa_storage::catalog::text_load::CatalogTextLoad> {
-        uqa_storage::catalog::text_load::CatalogTextLoad::new(
-            self.native_text_input(family, limits, control)?,
-            uqa_storage::catalog::text_load::CatalogTextOrder::Physical,
-            control,
-        )
+        self.native_text_load(family, limits, control)
     }
 
     fn begin_text_input(
@@ -127,6 +124,15 @@ impl CatalogFacade for Catalog {
 
     fn path_index_graph(&self, index: &str) -> StorageBackendResult<Option<String>> {
         into_storage_result(Catalog::path_index_graph(self, index))
+    }
+
+    fn path_index_graph_with_control(
+        &self,
+        index: &str,
+        limits: uqa_storage::catalog::input::CatalogInputLimits,
+        control: &uqa_storage::read_control::StorageReadControl,
+    ) -> StorageBackendResult<Option<uqa_core::memory::Budgeted<String>>> {
+        self.native_text_point_with_control(Family::GraphPathIndexState, index, limits, control)
     }
 
     fn drop_graph_path_indexes(&self, graph: &str) -> StorageBackendResult<()> {
@@ -279,7 +285,7 @@ impl CatalogFacade for Catalog {
         limits: uqa_storage::catalog::input::CatalogInputLimits,
         control: &uqa_storage::read_control::StorageReadControl,
     ) -> StorageBackendResult<Option<uqa_core::memory::Budgeted<String>>> {
-        self.native_metadata_with_control(key, limits, control)
+        self.native_text_point_with_control(Family::Metadata, key, limits, control)
     }
 
     fn metadata_has_private_changes(&self, key: &str) -> StorageBackendResult<bool> {

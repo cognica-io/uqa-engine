@@ -152,7 +152,7 @@ async fn select<'a>(
     memory: &MemoryBudget,
 ) -> StorageBackendResult<Option<Identity<'a>>> {
     if let Some((graph, name)) = codec::decode(raw, memory, graphs).await? {
-        if recorded.is_some_and(|owner| owner != graph.as_str()) {
+        if !matches_recorded(recorded, &graph, graphs).await? {
             return Err(disagrees());
         }
         if !graphs.contains(&graph).await? {
@@ -165,12 +165,17 @@ async fn select<'a>(
         }));
     }
     let mut selected = None;
+    let mut recorded_boundary = false;
     let mut count = 0_usize;
     for step in (Separators { raw, offset: 0 }) {
         graphs.checkpoint().await?;
         let Some((graph, name)) = step else { continue };
         count += 1;
-        if recorded.is_none_or(|owner| owner == graph) && graphs.contains(graph).await? {
+        if !matches_recorded(recorded, graph, graphs).await? {
+            continue;
+        }
+        recorded_boundary = true;
+        if graphs.contains(graph).await? {
             if selected.is_some() {
                 return Err(StorageBackendError::Other(
                     "ambiguous path-index owner".into(),
@@ -182,15 +187,23 @@ async fn select<'a>(
     match selected {
         Some(pair) => Ok(Some(Identity::raw(pair, count == 1))),
         None if count == 0 => Ok(None),
-        None if recorded.is_some_and(|graph| {
-            !raw.strip_prefix(graph)
-                .is_some_and(|tail| tail.starts_with("::"))
-        }) =>
-        {
-            Err(disagrees())
-        }
+        None if recorded.is_some() && !recorded_boundary => Err(disagrees()),
         None => Err(missing()),
     }
+}
+
+async fn matches_recorded(
+    recorded: Option<&str>,
+    graph: &str,
+    work: &mut impl Work,
+) -> StorageBackendResult<bool> {
+    let Some(owner) = recorded else {
+        return Ok(true);
+    };
+    Ok(owner.len() == graph.len()
+        && super::ordering::compare_with(owner, graph, work)
+            .await?
+            .is_eq())
 }
 
 /// Decode a key that intrinsically identifies one pair. Ambiguous legacy and opaque keys require an owning catalog.
@@ -286,6 +299,30 @@ pub async fn canonicalized_from(
         return Ok(key);
     }
     codec::key_from(identity.graph.as_ref(), identity.name.as_ref(), input).await
+}
+
+/// Bind a persistent definition to its canonical registration key and captured graph. Each independent output keeps its allocation on the caller's allowance.
+pub async fn registration_from(
+    physical: &str,
+    recorded: Option<&str>,
+    graphs: &impl PathIndexGraphs,
+    input: &mut AsyncImageInput<'_>,
+) -> StorageBackendResult<Option<(Budgeted<String>, Budgeted<String>)>> {
+    let memory = input.memory.clone();
+    let Some(identity) = select(physical, recorded, &mut Captured(graphs, input), &memory).await?
+    else {
+        return Ok(None);
+    };
+    let key = if identity.canonical {
+        input.copy_text(physical).await?
+    } else {
+        codec::key_from(identity.graph.as_ref(), identity.name.as_ref(), input).await?
+    };
+    let graph = match identity.graph {
+        Component::Borrowed(text) => input.copy_text(text).await?,
+        Component::Decoded(value) => value,
+    };
+    Ok(Some((key, graph)))
 }
 
 #[cfg(test)]

@@ -24,6 +24,7 @@ pub mod graph_guards;
 pub mod graph_identifiers;
 pub mod graph_observations;
 pub(crate) mod graph_snapshot;
+pub use graph_snapshot::GraphSnapshot;
 mod identity;
 pub mod index_load;
 pub mod input;
@@ -112,15 +113,6 @@ pub struct GraphVertexRow {
     pub vertex_id: u64,
     pub label: String,
     pub properties_json: String,
-}
-
-/// Complete persisted shape of one named graph. Catalog implementations
-/// replace the graph membership and entity rows as one atomic operation.
-#[derive(Debug, Clone)]
-pub struct GraphSnapshot {
-    pub vertices: Vec<GraphVertexRow>,
-    pub edges: Vec<EdgeRow>,
-    pub label_registry_json: String,
 }
 
 /// One row from the foreign-table registry.
@@ -929,6 +921,19 @@ pub trait CatalogFacade: Send + Sync {
     /// Original owning graph from optional physical materialization, including invalidated data.
     fn path_index_graph(&self, _index: &str) -> StorageBackendResult<Option<String>> {
         Ok(None)
+    }
+
+    /// Read a materialized path index's original owner on the caller's catalog transaction. The provider checks the physical key and row limits before reading its value.
+    fn path_index_graph_with_control(
+        &self,
+        _index: &str,
+        _limits: input::CatalogInputLimits,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<Option<uqa_core::memory::Budgeted<String>>> {
+        control.check()?;
+        Err(StorageBackendError::Other(
+            "controlled path-index owner reads are not supported".into(),
+        ))
     }
 
     /// Drop this graph's path definitions within the enclosing graph mutation.
