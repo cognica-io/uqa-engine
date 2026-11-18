@@ -174,3 +174,48 @@ fn stored_relations_borrow_large_payloads_and_reject_unsupported_commands() {
             .is_err()
     );
 }
+
+#[test]
+fn runtime_calls_keep_placement_and_ignore_selected_builtins() {
+    use crate::ast::FunctionBinding;
+    use StoredFunctionSite::{Expression, From, Window};
+
+    let mut stored = plan("WITH q AS (SELECT source_scalar(1) AS n) SELECT fixed(n), window_total(n) OVER () FROM q CROSS JOIN ROWS FROM(rows_a(outer_scalar(1)), rows_b())");
+    stored.rewrite_scalar_expressions(&mut |expression| {
+        if let crate::ScalarExpr::Func { name, binding, .. } = expression {
+            if name == "fixed" {
+                *binding = Some(
+                    FunctionBinding::builtin_by_name_with_control(
+                        "fixed",
+                        None,
+                        &ProductionControl::uncontrolled(),
+                    )
+                    .unwrap()
+                    .into_uncontrolled()
+                    .unwrap(),
+                );
+            }
+        }
+    });
+    let mut found = Vec::new();
+    visit_stored_runtime_calls(
+        (&stored).into(),
+        &ProductionControl::uncontrolled(),
+        &mut |name, site| {
+            found.push((name.to_owned(), site));
+            Ok(())
+        },
+    )
+    .unwrap();
+    found.sort_by(|left, right| left.0.cmp(&right.0));
+    assert_eq!(
+        found,
+        [
+            ("outer_scalar".into(), Expression),
+            ("rows_a".into(), From),
+            ("rows_b".into(), From),
+            ("source_scalar".into(), Expression),
+            ("window_total".into(), Window),
+        ]
+    );
+}

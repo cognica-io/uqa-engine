@@ -69,6 +69,53 @@ pub(crate) fn visit_table_function_calls(
     })
 }
 
+/// The stored placement determines which application registry can supply an unresolved call.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StoredFunctionSite {
+    Expression,
+    Window,
+    From,
+}
+
+/// Visit calls whose stored selection still permits runtime lookup. A selected SQL object, builtin, structural operation or retained resolution error keeps its original authority. Window calls and FROM items keep their distinct SQL placement; scalar arguments are visited by the ordinary plan expression walker.
+pub fn visit_stored_runtime_calls(
+    plan: PlanRef<'_>,
+    control: &ProductionControl<'_>,
+    visit: &mut impl FnMut(&str, StoredFunctionSite) -> Result<(), SQLError>,
+) -> Result<(), SQLError> {
+    let mut unbound = |name: &str, binding: Option<&crate::ast::FunctionBinding>, site| {
+        control.check()?;
+        if binding.is_none_or(|binding| {
+            binding.object_id.is_none()
+                && !binding.builtin
+                && binding.dispatch.is_none()
+                && binding.value_binding.is_none()
+                && binding.resolution_error.is_none()
+        }) {
+            visit(name, site)?;
+        }
+        Ok::<_, SQLError>(())
+    };
+    plan.try_visit_scalar_expressions(&mut |root| {
+        root.try_visit(&mut |expression| {
+            control.check()?;
+            match expression {
+                crate::ScalarExpr::Func { name, binding, .. } => {
+                    unbound(name, binding.as_ref(), StoredFunctionSite::Expression)?;
+                }
+                crate::ScalarExpr::WindowCall { name, .. } => {
+                    unbound(name, None, StoredFunctionSite::Window)?;
+                }
+                _ => (),
+            }
+            Ok::<_, SQLError>(true)
+        })
+    })?;
+    visit_table_function_calls(plan, control, &mut |name, binding| {
+        unbound(name, binding, StoredFunctionSite::From)
+    })
+}
+
 /// Visit table-function declarations and retained VALUES types through the same admitted scopes as stored relation references.
 pub fn visit_stored_plan_output_types(
     plan: PlanRef<'_>,
