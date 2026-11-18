@@ -61,6 +61,7 @@ impl SessionNamespace {
         )
     }
 
+    #[cfg(any(test, windows, all(unix, not(target_os = "emscripten"))))]
     pub(crate) async fn capture_from_input(
         &self,
         control: &ProductionControl<'_>,

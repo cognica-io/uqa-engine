@@ -24,7 +24,7 @@ fn reach_routines(input: &mut PersistentEngineInput) {
 fn compiling(input: &PersistentEngineInput) -> bool {
     matches!(
         input.candidate.as_ref().unwrap().stage,
-        Stage::RoutineBodies(_)
+        Stage::Registries(RegistryInput::Bodies(_))
     )
 }
 

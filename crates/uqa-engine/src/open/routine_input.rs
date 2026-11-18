@@ -7,18 +7,11 @@
 //! Select the private session's catalog and namespace for stored routine signatures.
 
 use super::Engine;
-use crate::state::{SessionNamespace, TableRegistryMap};
+use crate::{capabilities::RestoreCatalogSelection, state::SessionNamespace};
 use std::sync::Arc;
-use uqa_core::{
-    image_io::AsyncImageInput,
-    memory::{ProductionControl, RetainedValue},
-    CancellationToken,
-};
-use uqa_execution::{
-    catalog::CatalogReadCapture,
-    routines::catalog::input::{
-        RoutineCatalogPlaceholderInput, RoutineCatalogTypeNames, RoutineRestoreSchemaInput,
-    },
+use uqa_core::{image_io::AsyncImageInput, memory::ProductionControl, CancellationToken};
+use uqa_execution::routines::catalog::input::{
+    RoutineCatalogPlaceholderInput, RoutineCatalogTypeNames, RoutineRestoreSchemaInput,
 };
 use uqa_sql::{
     ast::UserTypeIdentity, catalog::security::schema_registry::SchemaRegistry,
@@ -30,8 +23,7 @@ use uqa_storage::{
 };
 
 struct SelectedCatalog {
-    catalog: CatalogReadCapture,
-    tables: RetainedValue<TableRegistryMap>,
+    catalog: RestoreCatalogSelection,
     namespace: SessionNamespace,
 }
 
@@ -62,11 +54,7 @@ impl RoutineTypeIdentityInput for RoutineNames {
         if let Some(selected) = self.selected.take() {
             let catalog = selected
                 .catalog
-                .capture_from_input(
-                    selected
-                        .tables
-                        .iter()
-                        .map(crate::TableState::catalog_snapshot_entry),
+                .read(
                     control.budget().expect("native routine catalog"),
                     &self.original,
                     input,
@@ -105,8 +93,7 @@ impl Engine {
         let names = RoutineNames {
             schemas: (*durable.schemas).clone(),
             selected: Some(SelectedCatalog {
-                catalog: self.catalog_read_capture(&durable, None),
-                tables: self.storage.tables.live_snapshot(),
+                catalog: self.select_restore_catalog(&durable),
                 namespace: self.session.namespace_snapshot(self.session_id),
             }),
             names: None,

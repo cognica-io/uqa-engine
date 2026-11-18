@@ -9,6 +9,7 @@
 use super::{
     memory::restore::database::{Input, MemoryState},
     start_error,
+    validation::CatalogValidation,
 };
 use crate::{Engine, SQLError};
 use std::{fmt, mem, ops::Deref, path::PathBuf, sync::Arc};
@@ -88,7 +89,8 @@ impl Deref for RestoredEngine {
 
 enum State<'a> {
     Reading(Budgeted<Box<Input<'a>>>),
-    Validating(Budgeted<Box<MemoryState>>),
+    Decoded(Budgeted<Box<MemoryState>>),
+    Validating(RestoredEngine, CatalogValidation),
     Persistent(Budgeted<Box<persistent::Persistent<'a>>>),
     Prepared(RestoredEngine),
     Complete(RestoredEngine),
@@ -296,7 +298,7 @@ impl RestoreJob<'_> {
     pub fn phase(&self) -> RestorePhase {
         match self.state {
             State::Reading(_) => RestorePhase::Reading,
-            State::Validating(_) => RestorePhase::Validating,
+            State::Decoded(_) | State::Validating(_, _) => RestorePhase::Validating,
             State::Persistent(ref candidate) => candidate.phase(),
             State::Prepared(_) => RestorePhase::Prepared,
             State::Complete(_) => RestorePhase::Complete,
@@ -305,7 +307,7 @@ impl RestoreJob<'_> {
         }
     }
 
-    /// Advance repository verification and native input under their byte/poll windows. Persistent tables retain one read snapshot across calls. Remaining registry loading, assembled validation and published-runtime activation are whole operations.
+    /// Advance repository input, catalog capture or one ordered catalog predicate. A persistent candidate retains its private read transaction until validation completes.
     pub fn advance(&mut self, maximum_object_bytes: usize) -> BackupResult<RestorePhase> {
         match self.phase() {
             RestorePhase::Prepared | RestorePhase::Complete => return Ok(self.phase()),
@@ -322,18 +324,24 @@ impl RestoreJob<'_> {
                 Some(candidate) => {
                     drop(input);
                     let memory = self.control.memory().reserve(size_of::<MemoryState>())?;
-                    State::Validating(Budgeted::new(Box::new(candidate), memory))
+                    State::Decoded(Budgeted::new(Box::new(candidate), memory))
                 }
                 None => State::Reading(input),
             },
-            State::Validating(candidate) => {
+            State::Decoded(candidate) => {
                 let (candidate, memory) = candidate.into_parts();
-                let engine = candidate.into_private_engine(self.retained.clone(), &self.control)?;
+                let engine = candidate.assemble(self.retained.clone(), &self.control)?;
                 drop(memory);
-                State::Prepared(RestoredEngine(RetainedValue::with_budget(
-                    engine,
-                    self.control.memory(),
-                )?))
+                let engine =
+                    RestoredEngine(RetainedValue::with_budget(engine, self.control.memory())?);
+                let checks = CatalogValidation::begin(&engine, &self.control)?;
+                State::Validating(engine, checks)
+            }
+            State::Validating(engine, checks) => {
+                match checks.advance(&engine, &self.control, 64)? {
+                    Some(checks) => State::Validating(engine, checks),
+                    None => State::Prepared(engine),
+                }
             }
             State::Persistent(mut candidate) => {
                 candidate.as_mut().advance(maximum_object_bytes)?;

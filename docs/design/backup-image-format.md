@@ -3572,6 +3572,12 @@ Every allocation introduced by M belongs to the invoking native allowance. H res
 
 Owning-crate regressions cover long decoded table identities, full definition-root identity, maximum session-number spelling, failed empty-view header allocation and every suspended cancellation/drop prefix. Engine cases move the private Engine into the capture continuation on all four providers, so the selected source cannot execute DDL while capture is suspended. After completion, the cases alter a table, remove a view and domain, add membership and close the source. Their comparison covers every retained definition root, table and temporary namespace. Native routine input publication, body finalization and the enclosing Engine restore remain separate delivery requirements.
 
+### Private catalog relationship validation
+
+Memory and persistent restore select the definition and table roots before the first capture step. Execution builds its ordinary catalog read view from these roots in the supplied work window. Both restore paths run the same ordered relationship predicates as synchronous catalog verification. After any successful prefix, the private candidate has passed exactly those predicates against the captured view. The next call either extends the prefix by one or returns the first failing predicate's diagnostic. Completing the last predicate makes the candidate eligible for publication. Each predicate retains its own traversal and cancellation behavior.
+
+A persistent restore keeps the provider read transaction open from catalog loading through the final predicate. Completion closes it before filesystem publication. Cancellation, failure and abandonment retire the private view and transaction. Memory restore holds its assembled Engine privately throughout validation and transfers it to the published handle only after success.
+
 ### Retained routine type copies
 
 SQL owns a single node-construction kernel for inline and retained copies of `ColumnType`. Its input is an immutable source type, its output is an independently owned equal type, and it does not resolve names, read catalog state, execute input functions or change a routine definition. The source remains owned throughout the continuation. Names, type OIDs, array OIDs, relation OIDs, domain collations, range alignment and scalar modifiers are copied without reinterpretation.

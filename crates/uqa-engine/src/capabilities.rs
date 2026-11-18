@@ -352,6 +352,10 @@ pub(crate) fn validate_stored_schema_name(name: &str) -> StorageBackendResult<()
 mod tests;
 
 mod catalog_execution;
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+mod restore_catalog;
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+pub(crate) use restore_catalog::RestoreCatalogSelection;
 
 pub(crate) mod session_parameters;
 
@@ -575,7 +579,7 @@ impl Engine {
         self.with_sequence_positions_with_control(view, control)
     }
 
-    fn with_sequence_positions_with_control(
+    pub(crate) fn with_sequence_positions_with_control(
         &self,
         view: CatalogReadView,
         control: &uqa_core::memory::ProductionControl<'_>,
@@ -600,6 +604,17 @@ impl Engine {
             .with_graph_overlay(graph_overlay)
             .with_temporary_namespace(self.session_id, self.temporary_namespace_oids())
             .with_prepared_catalog(self.storage.catalog.clone())
+    }
+
+    #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+    pub(crate) fn select_restore_catalog(
+        &self,
+        durable: &DurableCatalogSnapshot,
+    ) -> RestoreCatalogSelection {
+        RestoreCatalogSelection {
+            definitions: self.catalog_read_capture(durable, None),
+            tables: self.storage.tables.live_snapshot(),
+        }
     }
 
     fn catalog_read_view_from_with_control(

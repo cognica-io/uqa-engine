@@ -379,31 +379,66 @@ impl BackupImageValidator for Validator {
         control: &StorageReadControl,
     ) -> BackupResult<OwnedBackupImageValidation> {
         OwnedBackupImageValidation::create(control, || {
-            Ok(Validation {
-                input: crate::open::PersistentEngineInput::new(
-                    provider,
-                    self.retention.clone(),
-                    self.limits,
-                    control,
-                )?,
-                control: control.clone(),
-            })
+            Validation::new(provider, self.retention.clone(), self.limits, control)
         })
     }
 }
 
 struct Validation {
-    input: crate::open::PersistentEngineInput,
+    stage: Option<ValidationStage>,
     control: StorageReadControl,
+}
+
+enum ValidationStage {
+    Catalog(crate::open::PersistentEngineInput),
+    Relationships(
+        crate::open::PersistentEngineState,
+        crate::backup::validation::CatalogValidation,
+    ),
+}
+
+impl Validation {
+    fn new(
+        provider: Arc<dyn PersistentStorageProvider>,
+        retention: MemoryBudget,
+        limits: CatalogInputLimits,
+        control: &StorageReadControl,
+    ) -> BackupResult<Self> {
+        let input = crate::open::PersistentEngineInput::new(provider, retention, limits, control)?;
+        Ok(Self {
+            stage: Some(ValidationStage::Catalog(input)),
+            control: control.clone(),
+        })
+    }
 }
 
 impl BackupImageValidationWork for Validation {
     fn advance(&mut self, maximum_steps: usize) -> BackupResult<BackupImageValidationStep> {
-        let Some(session) = self.input.advance(maximum_steps)? else {
-            return Ok(BackupImageValidationStep::Pending);
+        let next = match self.stage.take().expect("active private validation") {
+            ValidationStage::Catalog(mut input) => match input.advance(maximum_steps)? {
+                Some(session) => {
+                    let checks = crate::backup::validation::CatalogValidation::begin(
+                        session.engine(),
+                        &self.control,
+                    )?;
+                    ValidationStage::Relationships(session, checks)
+                }
+                None => ValidationStage::Catalog(input),
+            },
+            ValidationStage::Relationships(session, checks) => {
+                let Some(checks) =
+                    checks.advance(session.engine(), &self.control, maximum_steps)?
+                else {
+                    drop(session.finish()?);
+                    return Ok(BackupImageValidationStep::Complete);
+                };
+                ValidationStage::Relationships(session, checks)
+            }
         };
-        crate::backup::validation::validate(session.engine(), &self.control)?;
-        drop(session.finish()?);
-        Ok(BackupImageValidationStep::Complete)
+        self.stage = Some(next);
+        Ok(BackupImageValidationStep::Pending)
     }
 }
+
+#[cfg(test)]
+mod tests;

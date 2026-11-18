@@ -36,8 +36,8 @@ pub(in crate::backup) struct MemoryState {
 }
 
 impl MemoryState {
-    /// Construct an unpublished session through the ordinary runtime owner and check native authority, declared types and stored-plan relations. Complete dependency validation still precedes public activation.
-    pub(in crate::backup) fn into_private_engine(
+    /// Construct a private runtime against its restored membership. The restore job owns it through catalog validation.
+    pub(in crate::backup) fn assemble(
         self,
         retention: MemoryBudget,
         control: &StorageReadControl,
@@ -46,10 +46,12 @@ impl MemoryState {
         let counter = uqa_execution::catalog::identity::CatalogOidCounter::from_position(
             self.header.catalog_oid_position,
         )?;
-        let engine =
-            crate::Engine::from_memory_state(self.storage, self.durable, counter, retention);
-        crate::backup::validation::validate(&engine, control)?;
-        Ok(engine)
+        Ok(crate::Engine::from_memory_state(
+            self.storage,
+            self.durable,
+            counter,
+            retention,
+        ))
     }
 }
 

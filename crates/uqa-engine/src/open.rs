@@ -26,6 +26,7 @@ mod lifecycle;
 #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 mod persistent_input;
 mod registries;
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 mod routine_input;
 mod session_seed;
 mod statistics;
@@ -34,7 +35,7 @@ mod table_input;
 #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 mod type_input;
 #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
-pub(crate) use persistent_input::PersistentEngineInput;
+pub(crate) use persistent_input::{PersistentEngineInput, PersistentEngineState};
 mod table_restore;
 mod value_restoration;
 

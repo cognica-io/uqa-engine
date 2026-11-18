@@ -173,16 +173,34 @@ fn memory_restore_job_cancel_drop_and_failed_steps_retire_unpublished_state() {
         .unwrap();
     let root = capture(&source, &repository, None);
     drop(source);
-    for mode in ["drop", "cancel", "prepared", "token", "invalid_window"] {
+    for mode in [
+        "drop",
+        "cancel",
+        "prepared",
+        "token",
+        "invalid_window",
+        "catalog_cancel",
+        "catalog_drop",
+    ] {
         let control = StorageReadControl::with_limit(32 << 20);
         let mut job = begin(&repository, root, &control);
         for _ in 0..4 {
             job.advance(1024).unwrap();
         }
         assert!(control.memory().used() > 0);
+        if matches!(mode, "catalog_cancel" | "catalog_drop") {
+            while !matches!(
+                job.state,
+                State::Validating(_, CatalogValidation::Relationships(_))
+            ) {
+                assert_ne!(job.advance(1024).unwrap(), RestorePhase::Prepared);
+            }
+            assert_eq!(job.advance(1024).unwrap(), RestorePhase::Validating);
+            assert!(matches!(job.publish(), Err(BackupError::Finished)));
+        }
         match mode {
-            "drop" => (),
-            "cancel" | "prepared" => {
+            "drop" | "catalog_drop" => (),
+            "cancel" | "prepared" | "catalog_cancel" => {
                 if mode == "prepared" {
                     prepare(&mut job);
                 }
@@ -232,7 +250,16 @@ fn memory_restore_job_validation_failure_retires_the_candidate_and_archive_lease
         job.advance(1024).unwrap();
     }
     assert_eq!(job.phase(), RestorePhase::Validating);
-    let error = job.advance(1024).unwrap_err();
+    assert_eq!(job.advance(1024).unwrap(), RestorePhase::Validating);
+    let error = loop {
+        match job.advance(1024) {
+            Ok(RestorePhase::Validating) => {
+                assert!(matches!(job.publish(), Err(BackupError::Finished)))
+            }
+            Ok(phase) => panic!("unresolved view reached {phase:?}"),
+            Err(error) => break error,
+        }
+    };
     assert!(
         error.to_string().contains("missing native plan relation"),
         "{error}"

@@ -11,7 +11,7 @@ use uqa_core::{memory::MemoryBudget, CancellationToken};
 use uqa_sql::{catalog::security::authority::AuthorityCatalog, SQLError};
 
 mod relationships;
-pub use relationships::validate as validate_relationships;
+pub use relationships::{validate as validate_relationships, RelationshipValidation};
 mod type_dependencies;
 pub use type_dependencies::validate as validate_types;
 mod plan_dependencies;

@@ -4,32 +4,90 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! One immutable catalog view connects native image validation to every Engine destination.
+//! Memory and persistent restore validate the same immutable catalog before publication.
 
 use crate::Engine;
-use uqa_storage::{backup::BackupResult, read_control::StorageReadControl, StorageBackendError};
+use uqa_core::{
+    image_io::{ImageDecodeWindow, ImageDecoder},
+    memory::ProductionControl,
+};
+use uqa_execution::catalog::{image_validation::RelationshipValidation, CatalogReadView};
+use uqa_storage::{read_control::StorageReadControl, StorageBackendError, StorageBackendResult};
 
-pub(super) fn validate(engine: &Engine, control: &StorageReadControl) -> BackupResult<()> {
-    let production = uqa_core::memory::ProductionControl::new(
-        control.memory(),
-        control.cancellation(),
-        control.cancellation(),
-    );
-    let catalog = engine
-        .restored_catalog_read_view_with_control(&production)
-        .map_err(sql_error)?;
-    uqa_execution::catalog::image_validation::validate_relationships(
-        &catalog,
-        engine,
-        engine,
-        control.memory(),
-        control.cancellation(),
-    )
-    .map_err(sql_error)?;
-    control.check()?;
-    Ok(())
+pub(super) enum CatalogValidation {
+    Capture(ImageDecoder<CatalogReadView, StorageBackendError>),
+    Relationships(RelationshipValidation),
+}
+
+impl CatalogValidation {
+    pub(super) fn begin(
+        engine: &Engine,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Self> {
+        control.check()?;
+        let selected = engine.select_restore_catalog(&engine.durable.snapshot());
+        let retained = control.clone();
+        let input = ImageDecoder::new(
+            control.memory(),
+            control.cancellation(),
+            |mut reader| async move {
+                selected
+                    .read(
+                        retained.memory(),
+                        retained.cancellation(),
+                        &mut reader.input(),
+                    )
+                    .await
+                    .map_err(sql_error)
+            },
+        )?;
+        Ok(Self::Capture(input))
+    }
+
+    /// Advance table capture through its work window, or run one predicate on the assembled view.
+    pub(super) fn advance(
+        self,
+        engine: &Engine,
+        control: &StorageReadControl,
+        steps: usize,
+    ) -> StorageBackendResult<Option<Self>> {
+        control.check()?;
+        match self {
+            Self::Capture(mut input) => {
+                let Some(catalog) =
+                    input.advance(&mut std::io::empty(), ImageDecodeWindow { bytes: 1, steps })?
+                else {
+                    return Ok(Some(Self::Capture(input)));
+                };
+                let production = ProductionControl::new(
+                    control.memory(),
+                    control.cancellation(),
+                    control.cancellation(),
+                );
+                let catalog = engine
+                    .with_sequence_positions_with_control(catalog, &production)
+                    .map_err(sql_error)?;
+                Ok(Some(Self::Relationships(RelationshipValidation::new(
+                    catalog,
+                    control.memory(),
+                    control.cancellation(),
+                ))))
+            }
+            Self::Relationships(checks) => {
+                let next = checks.advance(engine, engine).map_err(sql_error)?;
+                control.check()?;
+                Ok(next.map(Self::Relationships))
+            }
+        }
+    }
 }
 
 fn sql_error(error: uqa_sql::SQLError) -> StorageBackendError {
-    StorageBackendError::backend("backup catalog validation", error)
+    match error.primary() {
+        uqa_sql::SQLError::Cancelled(reason) => (*reason).into(),
+        _ => StorageBackendError::backend("backup catalog validation", error),
+    }
 }
+
+#[cfg(test)]
+mod tests;

@@ -62,9 +62,7 @@ enum Stage {
     NamedAnalyzers(NamedAnalyzers),
     GinAnalyzers(GinAnalyzers),
     FieldAnalyzers(FieldAnalyzers),
-    Registries(RestoredAuthorities),
-    RoutineBodies(RestoredAuthorities),
-    DependentRegistries(uqa_execution::catalog::domain::DomainRestoreState),
+    Registries(RegistryInput),
     Caches(CacheInput),
 }
 
@@ -168,7 +166,7 @@ impl FieldAnalyzers {
             } => match input.advance(1)? {
                 Some(fields) => {
                     *engine.durable.table_field_analyzers.write() = fields;
-                    Ok(Stage::Registries(retained))
+                    Ok(Stage::Registries(RegistryInput::Relations(retained)))
                 }
                 None => Ok(Stage::FieldAnalyzers(Self::Installation {
                     input,
@@ -176,6 +174,42 @@ impl FieldAnalyzers {
                 })),
             },
         }
+    }
+}
+
+enum RegistryInput {
+    Relations(RestoredAuthorities),
+    Bodies(RestoredAuthorities),
+    Dependents(uqa_execution::catalog::domain::DomainRestoreState),
+}
+
+impl RegistryInput {
+    fn advance(
+        self,
+        session: &PersistentEngineState,
+        catalog: &dyn uqa_storage::CatalogFacade,
+    ) -> StorageBackendResult<Stage> {
+        let engine = session.engine();
+        let next = match self {
+            Self::Relations(retained) => {
+                engine.restore_relations_before_routine_bodies(
+                    catalog,
+                    CatalogRestoreMode::LoadOnly,
+                )?;
+                Self::Bodies(retained)
+            }
+            Self::Bodies(RestoredAuthorities { domains, routines }) => {
+                match routines.advance(&engine.routine_restore_context())? {
+                    Some(routines) => Self::Bodies(RestoredAuthorities { domains, routines }),
+                    None => Self::Dependents(domains),
+                }
+            }
+            Self::Dependents(domains) => {
+                session.restore_remaining_registries(catalog, domains)?;
+                return Ok(Stage::Caches(CacheInput::Models));
+            }
+        };
+        Ok(Stage::Registries(next))
     }
 }
 
@@ -355,26 +389,7 @@ impl Candidate {
             Stage::NamedAnalyzers(input) => input.advance(engine, self.limits, control)?,
             Stage::GinAnalyzers(input) => input.advance(engine, self.limits, control)?,
             Stage::FieldAnalyzers(input) => input.advance(engine, control)?,
-            Stage::Registries(retained) => {
-                engine.restore_relations_before_routine_bodies(
-                    catalog.as_ref(),
-                    CatalogRestoreMode::LoadOnly,
-                )?;
-                Stage::RoutineBodies(retained)
-            }
-            Stage::RoutineBodies(RestoredAuthorities { domains, routines }) => {
-                match routines.advance(&engine.routine_restore_context())? {
-                    Some(routines) => {
-                        Stage::RoutineBodies(RestoredAuthorities { domains, routines })
-                    }
-                    None => Stage::DependentRegistries(domains),
-                }
-            }
-            Stage::DependentRegistries(domains) => {
-                self.session
-                    .restore_remaining_registries(catalog.as_ref(), domains)?;
-                Stage::Caches(CacheInput::Models)
-            }
+            Stage::Registries(input) => input.advance(&self.session, catalog.as_ref())?,
             Stage::Caches(input) => return input.advance(self.session, self.limits, control),
         };
         Ok(Progress::Pending(self))

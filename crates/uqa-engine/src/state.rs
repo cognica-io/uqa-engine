@@ -28,6 +28,7 @@ pub(crate) use generation_sources::SnapshotCut;
 pub(crate) use generation_sources::SnapshotSources;
 mod resource_capture;
 mod session_namespace;
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 pub(crate) use session_namespace::SessionNamespace;
 mod table_assembly;
 mod table_capture;

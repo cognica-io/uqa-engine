@@ -24,6 +24,23 @@ mod sequence_functions;
 mod text_input;
 mod vector_input;
 
+impl MemoryState {
+    fn into_private_engine(
+        self,
+        retention: MemoryBudget,
+        control: &StorageReadControl,
+    ) -> BackupResult<Engine> {
+        let engine = self.assemble(retention, control)?;
+        let mut validation = Some(crate::backup::validation::CatalogValidation::begin(
+            &engine, control,
+        )?);
+        while let Some(work) = validation {
+            validation = work.advance(&engine, control, 64)?;
+        }
+        Ok(engine)
+    }
+}
+
 fn source() -> Engine {
     let engine = Engine::new();
     engine.sql("CREATE TYPE mood AS ENUM('low','high'); COMMENT ON TYPE mood IS 'saved'; CREATE SEQUENCE ticket START 41; CREATE TABLE items(id integer PRIMARY KEY, body text, embedding vector(2), ticket bigint DEFAULT nextval('ticket')); CREATE INDEX text_index ON items USING gin(body); CREATE INDEX vector_index ON items USING hnsw(embedding); CREATE INDEX value_index ON items(lower(body)); INSERT INTO items(id,body,embedding) VALUES(1,'Cats DOGS',ARRAY[1.0,0.0]),(2,'birds',ARRAY[0.0,1.0]); CREATE TABLE empty(id integer); CREATE UNLOGGED TABLE unlogged(value integer); INSERT INTO unlogged VALUES(17); CREATE TEMP TABLE transient(value integer); INSERT INTO transient VALUES(99); CREATE VIEW visible AS SELECT id,body FROM items; CREATE FUNCTION increment(n integer) RETURNS integer LANGUAGE SQL AS 'SELECT n+1'", &[]).unwrap();

@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Compose native relationship predicates against one retained catalog view.
+//! Ordered native relationship checks against one immutable catalog view.
 
 use super::{
     validate_authority, validate_constraint_bindings, validate_constraints,
@@ -13,7 +13,7 @@ use super::{
     validate_plan_relations, validate_routine_bindings, validate_routine_declarations,
     validate_routines, validate_sequence_functions, validate_sequences, validate_types,
 };
-use crate::catalog::CatalogReadView;
+use crate::catalog::{CatalogReadSnapshot, CatalogReadView};
 use uqa_core::{
     memory::{MemoryBudget, ProductionControl},
     CancellationToken,
@@ -23,6 +23,122 @@ use uqa_sql::{
     SQLError,
 };
 
+struct Inputs<'a> {
+    view: &'a CatalogReadView,
+    snapshot: &'a CatalogReadSnapshot,
+    routines: &'a dyn RoutineResolution,
+    types: &'a dyn RoutineTypeCatalog,
+    memory: &'a MemoryBudget,
+    cancellation: &'a CancellationToken,
+    production: ProductionControl<'a>,
+}
+
+type Predicate = fn(&Inputs<'_>) -> Result<(), SQLError>;
+
+const PREDICATES: &[Predicate] = &[
+    |input| validate_namespaces(input.view, &input.production),
+    |input| validate_name_uniqueness(input.snapshot, input.memory, input.cancellation),
+    |input| validate_authority(input.snapshot, input.memory, input.cancellation),
+    |input| {
+        crate::catalog::foreign::reference::validate_live_wrappers(
+            &input.snapshot.definitions.foreign_servers,
+            &input.snapshot.definitions.foreign_wrappers,
+            &input.production,
+        )
+    },
+    |input| {
+        crate::catalog::foreign::wrappers::validate_callback_bindings(
+            input.snapshot,
+            &input.production,
+        )
+    },
+    |input| {
+        crate::catalog::foreign::reference::validate_live_servers(
+            input.snapshot.definitions.foreign_tables.values(),
+            &input.snapshot.definitions.foreign_servers,
+            &input.production,
+        )
+    },
+    |input| validate_types(input.snapshot, input.memory, input.cancellation),
+    |input| validate_plan_relations(input.view, &input.production),
+    |input| validate_routine_declarations(input.snapshot, input.types, &input.production),
+    |input| validate_hierarchies(input.snapshot, input.memory, input.cancellation),
+    |input| validate_sequences(input.snapshot, input.memory, input.cancellation),
+    |input| validate_indexes(input.snapshot, input.memory, input.cancellation),
+    |input| validate_constraints(input.snapshot, input.memory, input.cancellation),
+    |input| {
+        validate_constraint_bindings(input.view, input.routines, input.memory, input.cancellation)
+    },
+    |input| validate_index_bindings(input.view, input.routines, input.memory, input.cancellation),
+    |input| {
+        validate_partition_bindings(input.view, input.routines, input.memory, input.cancellation)
+    },
+    |input| validate_routines(input.snapshot, input.memory, input.cancellation),
+    |input| {
+        validate_routine_bindings(
+            input.view,
+            input.routines,
+            input.types,
+            input.memory,
+            input.cancellation,
+        )
+    },
+    |input| validate_event_bindings(input.view, input.routines, input.memory, input.cancellation),
+    |input| validate_sequence_functions(input.view, &input.production),
+];
+
+/// The outstanding predicates of an unpublished catalog. Each advance borrows the private
+/// session only for its own call and preserves the same first error as synchronous validation.
+pub struct RelationshipValidation {
+    catalog: CatalogReadView,
+    memory: MemoryBudget,
+    cancellation: CancellationToken,
+    remaining: &'static [Predicate],
+}
+
+impl RelationshipValidation {
+    pub fn new(
+        catalog: CatalogReadView,
+        memory: &MemoryBudget,
+        cancellation: &CancellationToken,
+    ) -> Self {
+        Self {
+            catalog,
+            memory: memory.clone(),
+            cancellation: cancellation.clone(),
+            remaining: PREDICATES,
+        }
+    }
+
+    pub fn advance(
+        mut self,
+        routines: &dyn RoutineResolution,
+        types: &dyn RoutineTypeCatalog,
+    ) -> Result<Option<Self>, SQLError> {
+        self.cancellation.check()?;
+        let (predicate, remaining) = self
+            .remaining
+            .split_first()
+            .expect("active catalog validation");
+        predicate(&Inputs {
+            view: &self.catalog,
+            snapshot: self.catalog.snapshot(),
+            routines,
+            types,
+            memory: &self.memory,
+            cancellation: &self.cancellation,
+            production: ProductionControl::new(
+                &self.memory,
+                &self.cancellation,
+                &self.cancellation,
+            ),
+        })?;
+        self.cancellation.check()?;
+        self.remaining = remaining;
+        Ok((!remaining.is_empty()).then_some(self))
+    }
+}
+
 pub fn validate(
     catalog: &CatalogReadView,
     routines: &dyn RoutineResolution,
@@ -30,34 +146,13 @@ pub fn validate(
     memory: &MemoryBudget,
     cancellation: &CancellationToken,
 ) -> Result<(), SQLError> {
-    let production = ProductionControl::new(memory, cancellation, cancellation);
-    let snapshot = catalog.snapshot();
-    validate_namespaces(catalog, &production)?;
-    validate_name_uniqueness(snapshot, memory, cancellation)?;
-    validate_authority(snapshot, memory, cancellation)?;
-    crate::catalog::foreign::reference::validate_live_wrappers(
-        &snapshot.definitions.foreign_servers,
-        &snapshot.definitions.foreign_wrappers,
-        &production,
-    )?;
-    crate::catalog::foreign::wrappers::validate_callback_bindings(snapshot, &production)?;
-    crate::catalog::foreign::reference::validate_live_servers(
-        snapshot.definitions.foreign_tables.values(),
-        &snapshot.definitions.foreign_servers,
-        &production,
-    )?;
-    validate_types(snapshot, memory, cancellation)?;
-    validate_plan_relations(catalog, &production)?;
-    validate_routine_declarations(snapshot, types, &production)?;
-    validate_hierarchies(snapshot, memory, cancellation)?;
-    validate_sequences(snapshot, memory, cancellation)?;
-    validate_indexes(snapshot, memory, cancellation)?;
-    validate_constraints(snapshot, memory, cancellation)?;
-    validate_constraint_bindings(catalog, routines, memory, cancellation)?;
-    validate_index_bindings(catalog, routines, memory, cancellation)?;
-    validate_partition_bindings(catalog, routines, memory, cancellation)?;
-    validate_routines(snapshot, memory, cancellation)?;
-    validate_routine_bindings(catalog, routines, types, memory, cancellation)?;
-    validate_event_bindings(catalog, routines, memory, cancellation)?;
-    validate_sequence_functions(catalog, &production)
+    let mut remaining = Some(RelationshipValidation::new(
+        catalog.clone(),
+        memory,
+        cancellation,
+    ));
+    while let Some(checks) = remaining {
+        remaining = checks.advance(routines, types)?;
+    }
+    Ok(())
 }
