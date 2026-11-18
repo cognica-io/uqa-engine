@@ -510,6 +510,19 @@ impl PersistentEngineState {
         &self.engine
     }
 
+    pub(crate) fn activate(self) -> StorageBackendResult<Engine> {
+        let mut engine = self.finish()?;
+        let provider = Arc::clone(
+            engine
+                .storage
+                .provider
+                .as_ref()
+                .expect("persistent provider"),
+        );
+        engine.activate_persistent_provider(&provider)?;
+        Ok(engine)
+    }
+
     pub(crate) fn finish(self) -> StorageBackendResult<Engine> {
         let engine = &self.engine;
         let catalog = engine.storage.catalog.as_ref().expect("persistent catalog");
@@ -538,25 +551,6 @@ impl PersistentEngineState {
         }
         let (engine, _memory) = self.engine.into_parts();
         Ok(*engine)
-    }
-}
-
-impl Engine {
-    pub(crate) fn from_restored_persistent_provider(
-        provider: &Arc<dyn PersistentStorageProvider>,
-        retention: MemoryBudget,
-        limits: CatalogInputLimits,
-        control: &StorageReadControl,
-    ) -> StorageBackendResult<Self> {
-        let mut input =
-            PersistentEngineInput::new(Arc::clone(provider), retention, limits, control)?;
-        let mut engine = loop {
-            if let Some(session) = input.advance(64)? {
-                break session.finish()?;
-            }
-        };
-        engine.activate_persistent_provider(provider)?;
-        Ok(engine)
     }
 }
 

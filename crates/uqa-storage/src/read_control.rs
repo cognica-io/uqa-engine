@@ -42,6 +42,14 @@ impl StorageReadControl {
         &self.cancellation
     }
 
+    /// Resolve an already durable operation after a lost reply or cancellation. Completion keeps the original memory and temporary-file allowances.
+    pub fn for_durable_completion(&self) -> Self {
+        Self {
+            cancellation: CancellationToken::new(),
+            ..self.clone()
+        }
+    }
+
     /// Attach a new physical ciphertext allowance to temporary files created by controlled image validation. Clones share this allowance, memory and cancellation; already retained source files keep their existing owner. Without this option, the existing standalone validation has no temporary-file quota.
     pub fn with_temporary_limit(&self, maximum_bytes: u64) -> Self {
         self.with_file_budget(&crate::temporary_file::FileBudget::new(maximum_bytes))
@@ -82,5 +90,27 @@ impl StorageReadControl {
             .into());
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn durable_completion_keeps_both_allowances_after_the_request_is_cancelled() {
+        let original = StorageReadControl::with_limit(16).with_temporary_limit(127);
+        let allocation = original.memory().reserve(11).unwrap();
+        let completion = original.for_durable_completion();
+        original.cancellation().cancel();
+        assert!(original.check().is_err());
+        completion.check().unwrap();
+        assert_eq!(completion.memory().available(), 5);
+        assert!(original
+            .file_budget()
+            .unwrap()
+            .shares_allowance(completion.file_budget().unwrap()));
+        drop(allocation);
+        assert_eq!(completion.memory().available(), 16);
     }
 }

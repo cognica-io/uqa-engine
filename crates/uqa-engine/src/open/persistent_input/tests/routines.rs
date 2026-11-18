@@ -89,7 +89,7 @@ fn persistent_routines_publish_complete_placeholders_and_finalize_after_views(
         .read()
         .clone();
     assert!(!placeholders.contains_key("public.added_later"));
-    for (name, group) in original.iter() {
+    for (name, group) in &original {
         let restored = &placeholders[name.as_str()];
         assert_eq!(restored.len(), group.len());
         for (placeholder, expected) in restored.iter().zip(group) {
@@ -113,7 +113,7 @@ fn persistent_routines_publish_complete_placeholders_and_finalize_after_views(
             .durable
             .sql_user_functions
             .read();
-        for (name, group) in placeholders.iter() {
+        for (name, group) in &placeholders {
             assert!(functions[name.as_str()]
                 .iter()
                 .zip(group)

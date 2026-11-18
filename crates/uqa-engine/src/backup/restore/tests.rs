@@ -254,7 +254,7 @@ fn memory_restore_job_validation_failure_retires_the_candidate_and_archive_lease
     let error = loop {
         match job.advance(1024) {
             Ok(RestorePhase::Validating) => {
-                assert!(matches!(job.publish(), Err(BackupError::Finished)))
+                assert!(matches!(job.publish(), Err(BackupError::Finished)));
             }
             Ok(phase) => panic!("unresolved view reached {phase:?}"),
             Err(error) => break error,

@@ -53,7 +53,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         &control,
     )?;
     while job.advance(16 << 10)? != RestorePhase::Prepared {}
-    let restored = job.publish()?;
+    let restored = loop {
+        if let Some(engine) = job.advance_publication(64)? {
+            break engine;
+        }
+    };
     drop(job);
     for row in restored
         .sql("SELECT body FROM notes ORDER BY id", &[])?

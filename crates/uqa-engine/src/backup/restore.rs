@@ -71,6 +71,8 @@ pub enum RestorePhase {
     Reading,
     Validating,
     Prepared,
+    /// Publication has started, and the persistent runtime is still opening.
+    Publishing,
     Complete,
     Cancelled,
     Failed,
@@ -93,6 +95,7 @@ enum State<'a> {
     Validating(RestoredEngine, CatalogValidation),
     Persistent(Budgeted<Box<persistent::Persistent<'a>>>),
     Prepared(RestoredEngine),
+    Opening(persistent::PublishedInput),
     Complete(RestoredEngine),
     Cancelled,
     Failed,
@@ -301,6 +304,7 @@ impl RestoreJob<'_> {
             State::Decoded(_) | State::Validating(_, _) => RestorePhase::Validating,
             State::Persistent(ref candidate) => candidate.phase(),
             State::Prepared(_) => RestorePhase::Prepared,
+            State::Opening(_) => RestorePhase::Publishing,
             State::Complete(_) => RestorePhase::Complete,
             State::Cancelled => RestorePhase::Cancelled,
             State::Failed => RestorePhase::Failed,
@@ -311,6 +315,10 @@ impl RestoreJob<'_> {
     pub fn advance(&mut self, maximum_object_bytes: usize) -> BackupResult<RestorePhase> {
         match self.phase() {
             RestorePhase::Prepared | RestorePhase::Complete => return Ok(self.phase()),
+            RestorePhase::Publishing => {
+                self.advance_publication(maximum_object_bytes.min(64))?;
+                return Ok(self.phase());
+            }
             RestorePhase::Cancelled | RestorePhase::Failed => return Err(BackupError::Finished),
             _ => (),
         }
@@ -352,36 +360,62 @@ impl RestoreJob<'_> {
         Ok(self.phase())
     }
 
-    /// Publish the prepared owner once; repeated publication returns the same runtime without replaying input or losing later writes.
-    pub fn publish(&mut self) -> BackupResult<RestoredEngine> {
+    /// Explicitly publish a prepared restore and open its writable runtime. Each call performs a publication transition or advances at most `maximum_steps` catalog steps. Filesystem synchronization may block. After durable installation the request remains recoverable even if activation is interrupted.
+    pub fn advance_publication(
+        &mut self,
+        maximum_steps: usize,
+    ) -> BackupResult<Option<RestoredEngine>> {
         if let State::Complete(engine) = &self.state {
-            return Ok(engine.clone());
+            return Ok(Some(engine.clone()));
         }
-        if self.phase() != RestorePhase::Prepared {
+        if !matches!(
+            self.phase(),
+            RestorePhase::Prepared | RestorePhase::Publishing
+        ) {
             return Err(BackupError::Finished);
         }
-        let engine = match mem::replace(&mut self.state, State::Failed) {
+        if maximum_steps == 0 {
+            return Err(BackupError::Invalid("zero restore publication step limit"));
+        }
+        self.state = match mem::replace(&mut self.state, State::Failed) {
             State::Prepared(engine) => {
                 self.control.check()?;
-                engine
+                State::Complete(engine)
             }
             State::Persistent(mut candidate) => {
-                let engine = candidate
+                let input = candidate
                     .as_mut()
-                    .publish(self.retained.clone(), &self.control)?;
-                drop(candidate);
-                engine
+                    .begin_publication(self.retained.clone(), &self.control)?;
+                State::Opening(input)
             }
-            _ => unreachable!(),
+            State::Opening(mut input) => match input.advance(maximum_steps)? {
+                Some(engine) => State::Complete(engine),
+                None => State::Opening(input),
+            },
+            _ => unreachable!("admitted restore publication"),
         };
-        self.state = State::Complete(engine.clone());
-        Ok(engine)
+        match &self.state {
+            State::Complete(engine) => Ok(Some(engine.clone())),
+            _ => Ok(None),
+        }
+    }
+
+    /// Publish and open the runtime to completion. Repeated publication returns the same Engine and preserves later writes.
+    pub fn publish(&mut self) -> BackupResult<RestoredEngine> {
+        loop {
+            if let Some(engine) = self.advance_publication(64)? {
+                return Ok(engine);
+            }
+        }
     }
 
     /// Retire an unpublished candidate. A completed result remains authoritative after late cancellation. A failed persistent job has already closed its files; its durable identity remains available to `Engine::resume_restore` and `Engine::cancel_restore`.
     pub fn cancel(&mut self) -> BackupResult<Option<RestoredEngine>> {
         if let State::Complete(engine) = &self.state {
             return Ok(Some(engine.clone()));
+        }
+        if matches!(self.state, State::Opening(_)) {
+            return self.publish().map(Some);
         }
         if matches!(self.state, State::Failed | State::Cancelled) {
             return Ok(None);

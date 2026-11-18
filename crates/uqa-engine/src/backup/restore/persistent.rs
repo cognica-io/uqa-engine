@@ -7,12 +7,11 @@
 //! Storage owns durable admission and publication; Engine supplies immutable catalog validation and fresh runtime activation.
 
 use super::{RestoreOptions, RestorePhase, RestoredEngine};
-use crate::Engine;
 use std::{
     path::{Path, PathBuf},
     sync::Arc,
 };
-use uqa_core::memory::{Budgeted, MemoryBudget, RetainedValue};
+use uqa_core::memory::{Budgeted, MemoryBudget};
 use uqa_storage::{
     backup::{
         BackupId, BackupImageImportStep, BackupImageValidationStep, BackupImageValidationWork,
@@ -23,9 +22,12 @@ use uqa_storage::{
     },
     catalog::input::CatalogInputLimits,
     mvcc::DatabaseRestore,
-    read_control::{CancellationToken, StorageReadControl},
+    read_control::StorageReadControl,
     PersistentStorageProvider,
 };
+
+mod activation;
+pub(super) use activation::PublishedInput;
 
 pub(super) struct Persistent<'a> {
     execution: Execution<'a>,
@@ -149,11 +151,11 @@ impl<'a> Persistent<'a> {
         Ok(())
     }
 
-    pub(super) fn publish(
+    pub(super) fn begin_publication(
         &mut self,
         retained: MemoryBudget,
         control: &StorageReadControl,
-    ) -> BackupResult<RestoredEngine> {
+    ) -> BackupResult<PublishedInput> {
         self.durable_publish()?;
         self.open_published(retained, control)
     }
@@ -169,7 +171,7 @@ impl<'a> Persistent<'a> {
             Execution::Failed => return Err(uqa_storage::backup::BackupError::Finished),
         };
         if completed.is_some() {
-            self.open_published(retained, control).map(Some)
+            self.open_published(retained, control)?.finish().map(Some)
         } else {
             Ok(None)
         }
@@ -179,8 +181,8 @@ impl<'a> Persistent<'a> {
         &self,
         retained: MemoryBudget,
         control: &StorageReadControl,
-    ) -> BackupResult<RestoredEngine> {
-        open_published(
+    ) -> BackupResult<PublishedInput> {
+        PublishedInput::open(
             self.target.as_ref(),
             self.directory.as_path(),
             self.request,
@@ -204,38 +206,16 @@ pub(super) fn cancel(
     if operation.completed().is_none() {
         return Ok(None);
     }
-    open_published(
+    PublishedInput::open(
         target,
         directory,
         request,
         options,
         MemoryBudget::new(options.retained_bytes),
         control,
-    )
+    )?
+    .finish()
     .map(Some)
-}
-
-fn open_published(
-    target: &dyn PersistentBackupTarget,
-    directory: &std::path::Path,
-    request: DatabaseRestore,
-    options: RestoreOptions,
-    retained: MemoryBudget,
-    control: &StorageReadControl,
-) -> BackupResult<RestoredEngine> {
-    // A durable completion remains authoritative after cancellation or a lost reply. Opening resolves that exact request and never recreates a missing destination or replays history.
-    let completion = StorageReadControl::new(control.memory(), &CancellationToken::new());
-    let provider = target.open(directory, request, &completion)?;
-    let engine = Engine::from_restored_persistent_provider(
-        &provider,
-        retained,
-        catalog_limits(options),
-        &completion,
-    )?;
-    Ok(RestoredEngine(RetainedValue::with_budget(
-        engine,
-        control.memory(),
-    )?))
 }
 
 struct Factory {

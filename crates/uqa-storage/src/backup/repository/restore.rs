@@ -24,7 +24,7 @@ use cap_std::fs::Dir;
 use crate::backup::{BackupError, BackupId, BackupResult, FrameKind, ImageDigest, RestoreId};
 use crate::mvcc::{DatabaseId, DatabaseRestore};
 use crate::native_file::directory as native;
-use crate::read_control::{CancellationToken, StorageReadControl};
+use crate::read_control::StorageReadControl;
 
 use super::{directory, BackupLease, LocalRepository};
 use target::Destination;
@@ -294,7 +294,7 @@ impl LocalRepository {
             backup: Some(backup),
             state: State::New,
             control: control.clone(),
-            completion: StorageReadControl::new(control.memory(), &CancellationToken::new()),
+            completion: control.for_durable_completion(),
         })
     }
 
@@ -328,7 +328,7 @@ impl LocalRepository {
         path: &Path,
         control: &StorageReadControl,
     ) -> BackupResult<BackupRestoreOperation<'_>> {
-        let completion = StorageReadControl::new(control.memory(), &CancellationToken::new());
+        let completion = control.for_durable_completion();
         let restores = self.restore_directory(false, &completion)?;
         let name = directory::name(id.as_bytes());
         let operation = directory::child(&restores, directory::text(&name).as_ref())?;

@@ -4,6 +4,34 @@
     {
       "package": "uqa-engine",
       "kind": "lib",
+      "test": "persistent_publication_opens_in_windows_and_resumes_after_runtime_abandonment",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/backup/restore/tests/persistent.rs",
+      "capability": "Persistent restore activation",
+      "workload": "Publish in one-step windows, abandon an installed database before its runtime opens, remove its archive and resume the same request on each persistent provider.",
+      "invariant": "The target stays absent until explicit publication. Subsequent steps yield while opening the catalog. Recovery, cancellation after installation and repeated publication preserve later writes and release every private handle.",
+      "case_names": [
+        "case_1_sqlite_native",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "durable_completion_keeps_both_allowances_after_the_request_is_cancelled",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/read_control.rs",
+      "capability": "Durable restore resources",
+      "workload": "Reserve memory under a restore request, then cancel it while its durable completion retains the original file and memory budgets.",
+      "invariant": "The completion remains active and accounts against both original allowances.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
       "test": "catalog_validation_returns_the_original_cancellation_reason_from_sql",
       "cases": 1,
       "source": "crates/uqa-engine/src/backup/validation/tests.rs",
