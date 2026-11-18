@@ -12,7 +12,7 @@ use crate::routines::{dependencies::RoutineDeclaration, SQLRoutine};
 use uqa_core::memory::{BudgetedVec, MemoryError, MemoryReservation, Produced, ProductionControl};
 
 mod header;
-pub(super) use header::Lists;
+pub(super) use header::HeaderCopy;
 use header::{continue_text, start_text, Header};
 
 #[derive(Clone, Copy)]
@@ -28,7 +28,7 @@ impl Field {
         copying: &mut Copying<'_>,
     ) -> Result<Vec<T>> {
         fields.reserve(count)?;
-        Lists::reserve(count, copying)
+        HeaderCopy::reserve(count, copying)
     }
 
     fn append<T: SyntaxCopy>(
@@ -88,7 +88,7 @@ impl StoredRoutineDefinition {
         let mut copying = Copying::capture(*control, CopyPurpose::Stored);
         let definition = source.copy_definition_with(
             &mut copying,
-            Lists::Retained,
+            HeaderCopy::Retained,
             |copying| Field::slots(source.params.len(), &mut parameters, copying),
             |copying| match &source.body {
                 FunctionBody::Source(text) => Ok(FunctionBody::Source(

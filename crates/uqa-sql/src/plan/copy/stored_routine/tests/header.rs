@@ -5,7 +5,7 @@
 //
 
 use super::*;
-use crate::ast::RoutineAclEntry;
+use crate::ast::{FunctionReturns, RoutineAclEntry};
 use uqa_core::catalog_role::RoleIdentity;
 
 fn declaration() -> CreateFunction {
@@ -190,5 +190,78 @@ fn stored_routine_catalog_lists_preserve_the_ordinary_peak_and_optional_acl() {
         drop((result, reference));
         assert_eq!(memory.used(), 0);
         assert_eq!(ordinary.used(), 0);
+    }
+}
+
+#[test]
+fn stored_result_type_names_resume_at_utf8_boundaries_with_the_original_allowance() {
+    let text = format!("{}{}", "n".repeat(4095), "𐐷字".repeat(8192));
+    for returns in [
+        FunctionReturns::Scalar {
+            type_name: text.clone(),
+        },
+        FunctionReturns::SetOf {
+            type_name: text.clone(),
+        },
+        FunctionReturns::None,
+        FunctionReturns::Table,
+    ] {
+        let mut definition = routine(0, false, "").def.clone();
+        definition.returns = returns;
+        definition.body = FunctionBody::Source("b".repeat(8192));
+        let source = SQLUserFunction::new(definition, RoutineBody::Source).shared();
+        let token = CancellationToken::new();
+        let reference_memory = MemoryBudget::new(1 << 20);
+        let reference_control = ProductionControl::new(&reference_memory, &token, &token);
+        let (expected, children) =
+            capture_stored_with_footprint(&source.def, &reference_control).unwrap();
+        let memory = MemoryBudget::new(reference_memory.peak());
+        let control = ProductionControl::new(&memory, &token, &token);
+        let mut input = StoredRoutineDefinition::new(source.clone(), &control).unwrap();
+        let mut previous = 0;
+        while let FunctionReturns::Scalar { type_name } | FunctionReturns::SetOf { type_name } =
+            &input.declaration().returns
+        {
+            assert!(text.starts_with(type_name));
+            assert!((1..=4096).contains(&(type_name.len() - previous)));
+            if type_name.len() == text.len() {
+                break;
+            }
+            previous = type_name.len();
+            input.copy_next_field(&control).unwrap();
+        }
+        while !input.copy_next_field(&control).unwrap() {}
+        let (actual, held) = input.into_definition(&control).unwrap();
+        assert_eq!(
+            serde_json::to_value(&actual.returns).unwrap(),
+            serde_json::to_value(&expected.returns).unwrap()
+        );
+        assert_eq!(
+            (actual.reserved_bytes(), held),
+            (expected.reserved_bytes(), children)
+        );
+        drop((actual, expected));
+        assert_eq!(memory.used(), 0);
+        if previous != 0 {
+            let denied = MemoryBudget::new(4096);
+            let denied_control = ProductionControl::new(&denied, &token, &token);
+            let error = StoredRoutineDefinition::new(source.clone(), &denied_control)
+                .err()
+                .unwrap();
+            let ordinary = capture_stored_with_footprint(&source.def, &denied_control)
+                .err()
+                .unwrap();
+            assert_eq!(error.sqlstate(), Some("53200"));
+            assert_eq!(error.to_string(), ordinary.to_string());
+            assert_eq!(denied.used(), 0);
+            let mut partial = StoredRoutineDefinition::new(source, &control).unwrap();
+            token.cancel();
+            assert_eq!(
+                partial.copy_next_field(&control).unwrap_err().sqlstate(),
+                Some("57014")
+            );
+            drop(partial);
+            assert_eq!(memory.used(), 0);
+        }
     }
 }

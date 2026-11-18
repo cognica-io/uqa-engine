@@ -4,10 +4,10 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Retain the declared search path, settings and explicit execution privileges before binding.
+//! Retain result type names, the search path, settings and execution privileges before binding.
 
 use super::{Copying, CreateFunction, Result, SyntaxCopy};
-use crate::ast::RoutineAclEntry;
+use crate::ast::{FunctionReturns, RoutineAclEntry};
 use uqa_core::memory::{BudgetedVec, Produced, ProductionControl, ProductionString};
 
 /// Both the inline syntax copier and a retained declaration construct the same list item.
@@ -52,12 +52,12 @@ impl Item for RoutineAclEntry {
 }
 
 #[derive(Clone, Copy)]
-pub(in crate::plan::copy) enum Lists {
+pub(in crate::plan::copy) enum HeaderCopy {
     Inline,
     Retained,
 }
 
-impl Lists {
+impl HeaderCopy {
     pub(in crate::plan::copy) fn copy<T: Item>(
         self,
         source: &[T],
@@ -95,6 +95,7 @@ enum List {
 
 #[derive(Default)]
 pub(super) struct Header {
+    result_complete: bool,
     list: List,
     position: usize,
 }
@@ -122,13 +123,33 @@ impl Header {
         }
     }
 
-    /// Short declarations complete in the constructor. Each unit visits one grant or at most one UTF-8 chunk, even when a single setting has a large value.
+    /// Copy one result-type chunk per window. Once it is complete, the window can also advance up to eight list items or text chunks.
     pub(super) fn copy_window(
         &mut self,
         source: &CreateFunction,
         output: &mut CreateFunction,
         copying: &mut Copying<'_>,
     ) -> Result<()> {
+        if !self.result_complete {
+            match (&source.returns, &mut output.returns) {
+                (
+                    FunctionReturns::Scalar { type_name },
+                    FunctionReturns::Scalar { type_name: value },
+                )
+                | (
+                    FunctionReturns::SetOf { type_name },
+                    FunctionReturns::SetOf { type_name: value },
+                ) => {
+                    if !copy_text(type_name, value, copying)? {
+                        return copying.check();
+                    }
+                }
+                (FunctionReturns::None, FunctionReturns::None)
+                | (FunctionReturns::Table, FunctionReturns::Table) => {}
+                _ => unreachable!("the stored result retains its declared shape"),
+            }
+            self.result_complete = true;
+        }
         self.select(source);
         for _ in 0..8 {
             copying.check()?;
@@ -165,7 +186,7 @@ fn advance<T: Item>(
     copying: &mut Copying<'_>,
 ) -> Result<bool> {
     if values.capacity() == 0 {
-        *values = Lists::reserve(source.len(), copying)?;
+        *values = HeaderCopy::reserve(source.len(), copying)?;
     }
     let item = &source[i];
     if values.len() == i {

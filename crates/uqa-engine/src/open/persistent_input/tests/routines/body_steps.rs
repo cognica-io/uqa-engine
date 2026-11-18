@@ -20,6 +20,10 @@ fn routine(source: &Engine, statements: usize) {
 }
 
 fn body_steps(source: &Engine, answer: i64) -> usize {
+    query_steps(source, "SELECT stepped_body() AS v", &Value::Int(answer))
+}
+
+fn query_steps(source: &Engine, query: &str, answer: &Value) -> usize {
     let control = StorageReadControl::with_limit(32 << 20);
     let mut candidate = input(source, &control);
     reach_bodies(&mut candidate);
@@ -29,13 +33,7 @@ fn body_steps(source: &Engine, answer: i64) -> usize {
         steps += 1;
     }
     let restored = finish(&mut candidate).finish().unwrap();
-    assert_eq!(
-        restored
-            .sql("SELECT stepped_body() AS v", &[])
-            .unwrap()
-            .rows[0]["v"],
-        Value::Int(answer)
-    );
+    assert_eq!(&restored.sql(query, &[]).unwrap().rows[0]["v"], answer);
     drop((restored, candidate));
     assert_eq!(control.memory().used(), 0);
     steps
@@ -81,6 +79,33 @@ fn restored_routine_configuration_advances_through_large_effective_values(
         wide >= short + 4,
         "{provider:?}: {short} short versus {wide} wide body steps"
     );
+}
+
+#[rstest::rstest]
+#[case::sqlite_native(Provider::SQLiteNative)]
+#[case::sqlite_kv(Provider::SQLiteKeyValue)]
+#[case::redb(Provider::Redb)]
+fn persistent_routine_result_type_names_yield_before_binding(#[case] provider: Provider) {
+    let directory = tempfile::tempdir().unwrap();
+    for (form, body, query) in [
+        ("", "RETURN NULL", "SELECT saved() IS NULL AS v"),
+        ("SETOF ", "RETURN", "SELECT count(*) = 0 AS v FROM saved()"),
+    ] {
+        let measure = |dimensions| {
+            let source = provider.open(&directory.path().join(format!("{form}{dimensions}")));
+            let brackets = "[]".repeat(dimensions);
+            source.sql(&format!(
+                "CREATE FUNCTION saved() RETURNS {form}integer{brackets} LANGUAGE plpgsql AS $$BEGIN {body}; END;$$"
+            ), &[]).unwrap();
+            query_steps(&source, query, &Value::Bool(true))
+        };
+        let short = measure(1);
+        let wide = measure(4096);
+        assert!(
+            wide > short,
+            "{provider:?} {form} short={short} wide={wide}"
+        );
+    }
 }
 
 #[rstest::rstest]

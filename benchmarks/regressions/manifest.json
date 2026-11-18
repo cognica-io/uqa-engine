@@ -51511,6 +51511,34 @@
     {
       "package": "uqa-sql",
       "kind": "lib",
+      "test": "stored_result_type_names_resume_at_utf8_boundaries_with_the_original_allowance",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/stored_routine/tests/header.rs",
+      "capability": "Bounded stored routine catalog headers",
+      "workload": "Copy long UTF-8 scalar and set-returning type names, preserve table and absent results, and stop a partial copy.",
+      "invariant": "Each call copies at most 4,096 result-type bytes. The original allowance covers the final representation and is released after cancellation or denial.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "persistent_routine_result_type_names_yield_before_binding",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/open/persistent_input/tests/routines/body_steps.rs",
+      "capability": "Bounded stored routine catalog headers",
+      "workload": "Create, reload and invoke scalar and set-returning functions with one or 4,096 declared array dimensions on all three persistent providers.",
+      "invariant": "The longer stored result type takes additional work windows and preserves the callable result after loading.",
+      "case_names": [
+        "case_1_sqlite_native",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
       "test": "stored_routine_catalog_lists_bound_each_entry_and_text_chunk_before_binding",
       "cases": 1,
       "source": "crates/uqa-sql/src/plan/copy/stored_routine/tests/header.rs",
