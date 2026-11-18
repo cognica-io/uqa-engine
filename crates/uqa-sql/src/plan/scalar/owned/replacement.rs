@@ -126,6 +126,7 @@ where
 {
     control.check()?;
     let identity = E::identity(expression);
+    let selected = edit.select(expression)?;
     let owner = memory.as_mut().map(|owner| {
         std::mem::replace(
             *owner,
@@ -136,7 +137,10 @@ where
         std::mem::replace(expression, ScalarExpr::Literal(uqa_core::Value::Null)),
         owner,
     );
-    let output = input.edit_from(identity, control, work, edit).await?;
+    let output = selected
+        .unwrap_or(input)
+        .edit_from(identity, control, work, edit)
+        .await?;
     let (output, owner) = output.into_rewrite_parts();
     *expression = output;
     if let Some(memory) = memory {
@@ -170,18 +174,11 @@ impl EditIdentity for Replace<'_, '_> {
     type Identity = ();
     const BEFORE_CHILDREN: bool = true;
     fn identity(_: &ScalarExpr) {}
-}
-impl Edit<()> for Replace<'_, '_> {
-    fn apply(
-        &mut self,
-        (): (),
-        expression: OwnedScalarExpr,
-        _: &ProductionControl<'_>,
-        (): &mut (),
-    ) -> impl std::future::Future<Output = Result<OwnedScalarExpr, SQLError>> + Send {
-        std::future::ready((self.0)(&expression).map(|value| value.unwrap_or(expression)))
+    fn select(&mut self, expression: &ScalarExpr) -> Result<Option<OwnedScalarExpr>, SQLError> {
+        (self.0)(expression)
     }
 }
+impl Edit<()> for Replace<'_, '_> {}
 
 pub(super) fn visit_index(expression: &ScalarExpr, ordinal: usize, count: usize) -> usize {
     // Read-only/mutable syntax visitation places the window FILTER before its specification; constructor ownership stores it last.

@@ -17,6 +17,11 @@ pub(crate) trait EditIdentity {
 
     fn identity(expression: &ScalarExpr) -> Self::Identity;
 
+    /// Observe a borrowed node in its original slot before moving its payload into the editor.
+    fn select(&mut self, _expression: &ScalarExpr) -> Result<Option<OwnedScalarExpr>, SQLError> {
+        Ok(None)
+    }
+
     fn child_count(expression: &ScalarExpr) -> usize {
         children::count(expression)
     }
@@ -25,11 +30,13 @@ pub(crate) trait EditIdentity {
 pub(crate) trait Edit<W: Work>: EditIdentity {
     fn apply(
         &mut self,
-        identity: Self::Identity,
+        _identity: Self::Identity,
         expression: OwnedScalarExpr,
-        control: &ProductionControl<'_>,
-        work: &mut W,
-    ) -> impl Future<Output = Result<OwnedScalarExpr, SQLError>> + Send;
+        _control: &ProductionControl<'_>,
+        _work: &mut W,
+    ) -> impl Future<Output = Result<OwnedScalarExpr, SQLError>> + Send {
+        std::future::ready(Ok(expression))
+    }
 }
 
 struct Parent<I> {
@@ -68,19 +75,23 @@ impl OwnedScalarExpr {
             let count = E::child_count(&self);
             if ordinal < count {
                 let child = visit_index(&self, ordinal, count);
-                // Child slots remain in the original parent boxes/vectors; capture their analysis identity before moving the payload.
-                let child_identity = E::identity(
-                    children::get_mut(&mut self.expression, child).expect("scalar child"),
-                );
-                let value = self.take_child(child);
                 parents.push(Parent {
                     expression: self,
                     identity,
                     child,
                     next: ordinal + 1,
                 })?;
-                self = value;
-                identity = child_identity;
+                // Admit the parent before observing its child. The slot remains in the original
+                // box or vector until both its analysis identity and any replacement are selected.
+                control.check()?;
+                let parent = parents.last_mut().expect("admitted scalar parent");
+                let slot = children::get_mut(&mut parent.expression.expression, child)
+                    .expect("scalar child");
+                identity = E::identity(slot);
+                let selected = edit.select(slot)?;
+                let original = parent.expression.take_child(child);
+                self = selected.unwrap_or(original);
+                self.assert_owner(control);
                 ordinal = 0;
                 entering = true;
             } else {

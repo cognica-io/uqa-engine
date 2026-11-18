@@ -28,6 +28,23 @@ fn shared_scalar_edits_preserve_original_analysis_identities_and_replacement_ord
         .unwrap();
     assert_eq!(identities, expected);
     assert_eq!(*value, source);
+
+    let mut original_slots = Vec::new();
+    value
+        .expression
+        .visit(&mut |node| original_slots.push(std::ptr::NonNull::from(node)));
+    let mut selected_slots = Vec::new();
+    OwnedScalarExpr::replace_nodes_in_place(
+        &mut value.expression,
+        value.memory.as_mut(),
+        &control,
+        &mut |node| {
+            selected_slots.push(std::ptr::NonNull::from(node));
+            Ok(None)
+        },
+    )
+    .unwrap();
+    assert_eq!(selected_slots, original_slots);
     drop(value);
 
     let source = ScalarExpr::Array(vec![text(1), text(2)]);
