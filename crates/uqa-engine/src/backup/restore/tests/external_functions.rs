@@ -328,6 +328,9 @@ fn resumed_prepared_restore_checks_new_process_functions_before_publication(
     let error = missing.publish().err().unwrap();
     assert!(error.to_string().contains("external_scalar"), "{error}");
     drop(missing);
+    assert!(control.memory().used() > 0);
+    drop(error);
+    assert_eq!(control.memory().used(), 0);
     assert!(!target.exists());
     let current = Engine::new();
     let calls = install_scalar(&current, 31);

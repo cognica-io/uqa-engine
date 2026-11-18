@@ -77,6 +77,7 @@ pub(crate) struct Registry {
     pub(crate) table: Map<dyn SQLTableFunction>,
     pub(crate) aggregate: Map<dyn SQLAggregateFactory>,
     members: Mutex<Members>,
+    catalog_publication: RwLock<()>,
     revision: AtomicU64,
 }
 
@@ -87,6 +88,7 @@ impl Registry {
             table: RwLock::default(),
             aggregate: RwLock::default(),
             members: Mutex::default(),
+            catalog_publication: RwLock::default(),
             revision: AtomicU64::new(0),
         };
         registry.attach(session, gate);
@@ -95,6 +97,12 @@ impl Registry {
 
     pub(crate) fn revision(&self) -> u64 {
         self.revision.load(Ordering::Acquire)
+    }
+
+    /// Pin the installed declarations while a private maintenance session binds its stored catalog. The session never submits application statements or owns a foreground registration gate.
+    pub(crate) fn with_catalog_declarations<T>(&self, read: impl FnOnce() -> T) -> T {
+        let _declarations = self.catalog_publication.read();
+        read()
     }
 
     /// Keep registered names and implementations fixed while a restore prepares and publishes its private database.
@@ -126,6 +134,7 @@ impl Registry {
         // Keep even replaced callbacks alive while invalidation drops plans.
         // Host destructors run only after all registry/session locks are gone.
         let mut retained = Vec::new();
+        let _publication = self.catalog_publication.write();
         let mut members = self
             .members
             .try_lock()

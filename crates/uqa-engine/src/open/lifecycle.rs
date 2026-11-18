@@ -424,7 +424,7 @@ impl Engine {
         storage_session: PersistentStorageSession,
         provider: Option<Arc<dyn PersistentStorageProvider>>,
     ) -> StorageBackendResult<Self> {
-        Self::build_persistent_session(storage_session, provider, true, None)
+        Self::build_persistent_session(storage_session, provider, true, |_| {})
     }
 
     pub(crate) fn from_initialized_persistent_session(
@@ -432,7 +432,23 @@ impl Engine {
         provider: Option<Arc<dyn PersistentStorageProvider>>,
         extensions: Option<&crate::RuntimeExtensions>,
     ) -> StorageBackendResult<Self> {
-        Self::build_persistent_session(storage_session, provider, false, extensions)
+        Self::build_persistent_session(storage_session, provider, false, |session| {
+            if let Some(extensions) = extensions {
+                session.share_runtime_extensions(extensions);
+            }
+        })
+    }
+
+    pub(crate) fn from_maintenance_session(
+        storage_session: PersistentStorageSession,
+        provider: Arc<dyn PersistentStorageProvider>,
+        extensions: &crate::RuntimeExtensions,
+    ) -> StorageBackendResult<Self> {
+        extensions.functions.with_catalog_declarations(|| {
+            Self::build_persistent_session(storage_session, Some(provider), false, |session| {
+                session.extensions = crate::RuntimeExtensions::shared_from(extensions);
+            })
+        })
     }
 
     pub(super) fn share_runtime_extensions(&mut self, extensions: &crate::RuntimeExtensions) {
@@ -509,15 +525,13 @@ impl Engine {
         storage_session: PersistentStorageSession,
         provider: Option<Arc<dyn PersistentStorageProvider>>,
         initialize_catalog: bool,
-        extensions: Option<&crate::RuntimeExtensions>,
+        configure: impl FnOnce(&mut Self),
     ) -> StorageBackendResult<Self> {
         storage_session.validate_transaction_affinity()?;
         let restore_catalog = Arc::clone(&storage_session.catalog);
         let restore_backend = Arc::clone(&storage_session.backend);
         let mut engine = Self::empty_persistent_session(storage_session, provider);
-        if let Some(extensions) = extensions {
-            engine.share_runtime_extensions(extensions);
-        }
+        configure(&mut engine);
         let own_read = !initialize_catalog && !restore_backend.in_transaction();
         let version_before_read = if own_read {
             let version = restore_backend.change_version()?;

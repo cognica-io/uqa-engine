@@ -44,6 +44,38 @@ fn manual_worker(engine: &Engine) {
 }
 
 #[test]
+fn private_maintenance_keeps_registered_declarations_without_holding_application_gates() {
+    let directory = tempfile::tempdir().unwrap();
+    let engine = persistent(0, &directory.path().join("functions.db"));
+    manual_worker(&engine);
+    engine
+        .register_scalar_function("catalog_value", |_: &[crate::Value]| {
+            Ok(crate::Value::Int(5))
+        })
+        .unwrap();
+    engine.sql("CREATE FUNCTION stored_value() RETURNS integer LANGUAGE SQL BEGIN ATOMIC SELECT catalog_value()::integer; END", &[]).unwrap();
+    let provider = engine.storage.provider.as_ref().unwrap();
+    let worker = Engine::from_maintenance_session(
+        provider.open_session().unwrap(),
+        Arc::clone(provider),
+        &engine.extensions,
+    )
+    .unwrap();
+    let _active = worker.lock_statement_gate();
+    assert!(worker.has_registered_scalar_function("catalog_value"));
+    let mut handle = engine
+        .register_scalar_function_retained(
+            "application_value",
+            crate::SQLFunctionOptions::default(),
+            |_: &[crate::Value]| Ok(crate::Value::Int(7)),
+        )
+        .unwrap();
+    assert!(worker.has_registered_scalar_function("application_value"));
+    handle.unregister().unwrap();
+    assert!(!worker.has_registered_scalar_function("application_value"));
+}
+
+#[test]
 fn session_admission_commits_and_policy_changes_do_not_signal_an_existing_worker() {
     let directory = tempfile::tempdir().unwrap();
     let engine = persistent(0, &directory.path().join("admission.db"));
