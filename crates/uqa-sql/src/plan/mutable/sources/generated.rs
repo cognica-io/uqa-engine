@@ -28,7 +28,7 @@ impl MutableSourcePlan {
             let source = copying.table_source(name, qualifier, alias, include_descendants)?;
             return Ok(Self {
                 source,
-                memory: Some(copying.into_rewrite_memory()),
+                memory: Some(copying.into_rewrite_memory()).into(),
             });
         }
         Ok(Self {
@@ -41,7 +41,7 @@ impl MutableSourcePlan {
                 bound_columns: None,
                 include_descendants,
             },
-            memory: None,
+            memory: None.into(),
         })
     }
 
@@ -55,7 +55,7 @@ impl MutableSourcePlan {
             let source = copying.captured_values_source(values, relation)?;
             return Ok(Self {
                 source,
-                memory: Some(copying.into_rewrite_memory()),
+                memory: Some(copying.into_rewrite_memory()).into(),
             });
         }
         let mut row = Vec::with_capacity(values.len());
@@ -77,7 +77,7 @@ impl MutableSourcePlan {
                 column_aliases: Vec::new(),
                 internal_relation: Some(relation),
             },
-            memory: None,
+            memory: None.into(),
         })
     }
 
@@ -92,7 +92,7 @@ impl MutableSourcePlan {
             let source = copying.cross_join_source(left, right, lateral)?;
             return Ok(Self {
                 source,
-                memory: Some(copying.into_rewrite_memory()),
+                memory: Some(copying.into_rewrite_memory()).into(),
             });
         }
         let (left, left_owner) = left.into_rewrite_parts(control)?;
@@ -115,7 +115,7 @@ impl MutableSourcePlan {
                 lateral,
                 strategy: JoinExecutionStrategy::Auto,
             },
-            memory: None,
+            memory: None.into(),
         })
     }
 }

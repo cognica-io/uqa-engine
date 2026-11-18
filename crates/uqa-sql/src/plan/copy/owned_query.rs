@@ -177,11 +177,12 @@ impl Copying<'_> {
             "new field destination"
         );
         let crate::plan::mutable::field_vectors::OwnedFields { value, memory } = input;
-        let super::RewriteMemory::Fields { direct, fields } =
+        let super::RewriteMemory::Fields { mut direct, fields } =
             memory.expect("controlled field owner")
         else {
             unreachable!("metadata field constructor");
         };
+        let fields = fields.into_budgeted(&mut direct);
         self.absorb(Some(direct));
         self.fields = Some(fields);
         Ok(value)

@@ -9,14 +9,17 @@
 use super::super::scalar::ScalarMemory;
 use uqa_core::memory::{BudgetedVec, MemoryReservation};
 
+mod footprint;
 mod retirement;
+pub(super) use footprint::{RewriteFields, RootMemory};
 pub(super) use retirement::Folding;
 
 #[derive(Debug)]
 pub(crate) enum RewriteMemory {
     Fields {
+        // The direct reservation includes this field buffer. Drop its storage before releasing the lease.
+        fields: RewriteFields,
         direct: MemoryReservation,
-        fields: BudgetedVec<RewriteField>,
     },
     Scalars {
         direct: MemoryReservation,
@@ -32,8 +35,31 @@ pub(crate) struct RewriteField {
 }
 
 impl RewriteMemory {
-    pub(super) fn reserved_bytes(&self) -> usize {
-        match self {
+    pub(crate) fn fields(mut direct: MemoryReservation, fields: BudgetedVec<RewriteField>) -> Self {
+        let (fields, buffer) = fields.into_parts();
+        direct.absorb(buffer);
+        Self::Fields {
+            fields: RewriteFields::new(fields),
+            direct,
+        }
+    }
+
+    pub(super) fn direct(direct: MemoryReservation) -> Self {
+        let fields = BudgetedVec::new(direct.budget());
+        Self::fields(direct, fields)
+    }
+
+    pub(super) fn reserved_bytes(&mut self) -> usize {
+        if let Self::Fields { direct, fields } = self {
+            direct.bytes() + fields.child_bytes()
+        } else {
+            self.known_bytes().expect("scalar footprint")
+        }
+    }
+
+    fn known_bytes(&self) -> Option<usize> {
+        Some(match self {
+            Self::Fields { direct, fields } => direct.bytes() + fields.known_child_bytes()?,
             Self::Scalar(memory) => memory.as_ref().map_or(0, ScalarMemory::reserved_bytes),
             Self::Scalars { direct, items } => {
                 direct.bytes()
@@ -44,16 +70,7 @@ impl RewriteMemory {
                         .map(ScalarMemory::reserved_bytes)
                         .sum::<usize>()
             }
-            Self::Fields { direct, fields } => {
-                direct.bytes()
-                    + fields.capacity() * size_of::<RewriteField>()
-                    + fields
-                        .iter()
-                        .filter_map(|field| field.memory.as_ref())
-                        .map(Self::reserved_bytes)
-                        .sum::<usize>()
-            }
-        }
+        })
     }
 
     pub(crate) fn into_reservation(self) -> Option<MemoryReservation> {
@@ -64,11 +81,11 @@ impl RewriteMemory {
         let Self::Fields { fields, .. } = self else {
             panic!("scalar ownership has no named plan fields");
         };
-        &mut fields
-            .iter_mut()
-            .find(|field| field.name == name)
-            .expect("copied plan field")
-            .memory
+        let index = fields
+            .iter()
+            .position(|field| field.name == name)
+            .expect("copied plan field");
+        &mut fields.edit_item(index).memory
     }
 
     /// Lend disjoint constructor fields together while keeping their payloads and reservations in the original owner.
@@ -93,7 +110,7 @@ impl RewriteMemory {
         let Self::Fields { fields, .. } = self else {
             panic!("scalar ownership has no plan items");
         };
-        &mut fields[index].memory
+        &mut fields.edit_item(index).memory
     }
 
     pub(super) fn scalar_mut(&mut self) -> &mut Option<ScalarMemory> {

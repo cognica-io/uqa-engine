@@ -14,7 +14,7 @@ use crate::{
     SQLError, ScalarExpr,
 };
 use uqa_core::{
-    memory::{BudgetedVec, OwnedSet, Produced, ProductionControl},
+    memory::{OwnedSet, Produced, ProductionControl},
     Value,
 };
 
@@ -33,7 +33,7 @@ impl MutableQueryPlan {
         };
         block.limit = None;
         block.offset = None;
-        if let Some(memory) = &mut self.memory {
+        if let Some(memory) = self.memory.as_mut() {
             let block = block_memory(memory);
             *block.field_mut("limit") = None;
             *block.field_mut("offset") = None;
@@ -109,7 +109,7 @@ impl MutableQueryPlan {
             )
         };
         self.query.relation_privilege_subject = subject;
-        if let Some(memory) = &mut self.memory {
+        if let Some(memory) = self.memory.as_mut() {
             *memory.field_mut("relation_privilege_subject") = owner;
         }
         Ok(self)
@@ -127,7 +127,7 @@ impl MutableQueryPlan {
             ));
         };
         block.privilege_columns.clear();
-        if let Some(memory) = &mut self.memory {
+        if let Some(memory) = self.memory.as_mut() {
             let owner = memory
                 .field_mut("root")
                 .as_mut()
@@ -161,7 +161,7 @@ impl MutableQueryPlan {
         let (identity, payload) = identity.into_parts();
         let memory = control.combine(payload, node);
         block.privilege_columns.insert(identity);
-        if let Some(owner) = &mut self.memory {
+        if let Some(owner) = self.memory.as_mut() {
             let RewriteMemory::Fields { direct, .. } = block_memory(owner)
                 .field_mut("privilege_columns")
                 .as_mut()
@@ -266,12 +266,9 @@ impl MutableQueryPlan {
         // Construct the replacement owner before replacing any old payload, including if a mismatched allowance panics.
         let replacement = control.finish(alias, reservation)?;
         let (alias, reservation) = replacement.into_parts();
-        let memory = reservation.map(|direct| RewriteMemory::Fields {
-            fields: BudgetedVec::new(direct.budget()),
-            direct,
-        });
+        let memory = reservation.map(RewriteMemory::direct);
         block.projections[index].alias = alias;
-        if let Some(owner) = &mut self.memory {
+        if let Some(owner) = self.memory.as_mut() {
             *projection_memory(owner, index).field_mut("alias") = memory;
         }
         Ok(self)

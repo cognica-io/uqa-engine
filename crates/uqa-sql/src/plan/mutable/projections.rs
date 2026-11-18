@@ -26,7 +26,7 @@ impl Iterator for OwnedProjectionIter {
 
     fn next(&mut self) -> Option<OwnedProjection> {
         let projection = self.projections.next()?;
-        let (scalar, alias) = if let Some(memory) = &mut self.memory {
+        let (scalar, alias) = if let Some(memory) = self.memory.as_mut() {
             let mut item = memory
                 .item_mut(self.index)
                 .take()
@@ -155,7 +155,7 @@ impl MutableQueryPlan {
             ));
         };
         block.projections = replacement.projections;
-        if let Some(memory) = &mut self.memory {
+        if let Some(memory) = self.memory.as_mut() {
             *projection_memory(memory) = replacement.memory;
         }
         control.check()?;

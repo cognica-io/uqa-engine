@@ -39,12 +39,9 @@ impl MutableCommandPlan {
             None => (None, control.empty_reservation()),
         };
         let (parameters, memory) = control.finish(parameters, memory)?.into_parts();
-        let replacement = memory.map(|direct| RewriteMemory::Fields {
-            fields: uqa_core::memory::BudgetedVec::new(direct.budget()),
-            direct,
-        });
+        let replacement = memory.map(RewriteMemory::direct);
         *unbound_parameters = parameters;
-        if let Some(memory) = &mut self.memory {
+        if let Some(memory) = self.memory.as_mut() {
             *memory.field_mut("unbound_parameters") = replacement;
         }
         Ok(self)

@@ -63,14 +63,16 @@ impl MutableSourcePlan {
             memory: self
                 .memory
                 .as_mut()
-                .and_then(|memory| SourceChildSlot::Left.memory_mut(memory).take()),
+                .and_then(|memory| SourceChildSlot::Left.memory_mut(memory).take())
+                .into(),
         };
         let right = MutableSourcePlan {
             source: std::mem::replace(right.as_mut(), empty_source()),
             memory: self
                 .memory
                 .as_mut()
-                .and_then(|memory| SourceChildSlot::Right.memory_mut(memory).take()),
+                .and_then(|memory| SourceChildSlot::Right.memory_mut(memory).take())
+                .into(),
         };
         let predicate_slot = on.is_some();
         let on = on.take().map(|expression| {
@@ -142,9 +144,9 @@ impl MutableJoinShell {
         *comma = false;
         *kind = JoinKind::Inner;
         *selected = strategy;
-        if let Some(memory) = &mut self.source.memory {
-            *SourceChildSlot::Left.memory_mut(memory) = left.memory;
-            *SourceChildSlot::Right.memory_mut(memory) = right.memory;
+        if let Some(memory) = self.source.memory.as_mut() {
+            *SourceChildSlot::Left.memory_mut(memory) = left.memory.into_parts();
+            *SourceChildSlot::Right.memory_mut(memory) = right.memory.into_parts();
             if self.predicate_slot {
                 *SourceScalarSlot::JoinOn.memory_mut(memory) = scalar_owner;
             } else if let Some(owner) = new_predicate_owner {

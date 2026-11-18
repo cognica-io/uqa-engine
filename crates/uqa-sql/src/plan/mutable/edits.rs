@@ -136,11 +136,11 @@ macro_rules! plan {
             fn from_parts(value: Self::Value, memory: Option<Self::Memory>) -> Self {
                 Self {
                     $field: value,
-                    memory,
+                    memory: memory.into(),
                 }
             }
             fn into_parts(self) -> (Self::Value, Option<Self::Memory>) {
-                (self.$field, self.memory)
+                (self.$field, self.memory.into_parts())
             }
         }
         impl Root for $mutable {

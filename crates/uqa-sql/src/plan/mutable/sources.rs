@@ -28,7 +28,7 @@ pub use joins::{MutableJoinParts, MutableJoinShell};
 #[derive(Debug)]
 pub struct MutableSourcePlan {
     pub(super) source: SourcePlan,
-    pub(super) memory: Option<RewriteMemory>,
+    pub(super) memory: super::RootMemory,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -84,9 +84,7 @@ impl MutableQueryPlan {
 
 impl MutableSourcePlan {
     pub fn reserved_bytes(&self) -> usize {
-        self.memory
-            .as_ref()
-            .map_or(0, RewriteMemory::reserved_bytes)
+        self.memory.reserved_bytes()
     }
 
     /// Rewrite a derived or attached table query while keeping its original source box and namespace metadata.
@@ -204,11 +202,14 @@ impl MutableSourcePlan {
             .as_mut()
             .and_then(|memory| slot.memory_mut(memory).take());
         drop(self);
-        Ok(Self { source, memory })
+        Ok(Self {
+            source,
+            memory: memory.into(),
+        })
     }
 
     pub(super) fn assert_owner(&self, control: &ProductionControl<'_>) {
-        match (&self.memory, control.budget()) {
+        match (self.memory.read().as_ref(), control.budget()) {
             (Some(RewriteMemory::Fields { direct, .. }), Some(budget)) => assert!(
                 direct.budget().shares_allowance(budget),
                 "source rewrite preserves its constructor allowance"

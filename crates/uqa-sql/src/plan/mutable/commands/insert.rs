@@ -8,7 +8,7 @@
 
 use super::{CommandPlan, MutableCommandPlan, MutableQueryPlan, RewriteMemory, SQLError};
 use crate::plan::{copy::Copying, InsertPlan, QueryPlan, RelationalPlan, RuleValuesInput};
-use uqa_core::memory::{BudgetedVec, Produced, ProductionControl};
+use uqa_core::memory::{Produced, ProductionControl};
 
 impl InsertPlan {
     /// Copy one rule relation without a source or nested view schedule. The first VALUES layer alone retains rows; later layers receive an independently owned input query.
@@ -81,26 +81,30 @@ impl MutableCommandPlan {
         };
         let source = plan.source.as_mut().map(|query| MutableQueryPlan {
             query: std::mem::replace(query.as_mut(), super::super::queries::empty_query()),
-            memory: self.memory.as_mut().and_then(|memory| {
-                body(memory)
-                    .field_mut("source")
-                    .as_mut()
-                    .expect("INSERT source box")
-                    .field_mut("query")
-                    .take()
-            }),
+            memory: self
+                .memory
+                .as_mut()
+                .and_then(|memory| {
+                    body(memory)
+                        .field_mut("source")
+                        .as_mut()
+                        .expect("INSERT source box")
+                        .field_mut("query")
+                        .take()
+                })
+                .into(),
         });
         let query = map(plan, source)?;
         query.assert_owner(control);
         control.check()?;
         if let Some(source) = &mut plan.source {
             **source = query.query;
-            if let Some(memory) = &mut self.memory {
+            if let Some(memory) = self.memory.as_mut() {
                 *body(memory)
                     .field_mut("source")
                     .as_mut()
                     .expect("INSERT source box")
-                    .field_mut("query") = query.memory;
+                    .field_mut("query") = query.memory.into_parts();
             }
         } else {
             let (source, memory) = if let Some(mut copying) = Copying::for_rewrite(*control) {
@@ -110,7 +114,7 @@ impl MutableCommandPlan {
                 (Box::new(query.query), None)
             };
             plan.source = Some(source);
-            if let Some(owner) = &mut self.memory {
+            if let Some(owner) = self.memory.as_mut() {
                 *body(owner).field_mut("source") = memory;
             }
         }
@@ -142,7 +146,7 @@ impl MutableCommandPlan {
             )
         };
         plan.columns = columns;
-        if let Some(owner) = &mut self.memory {
+        if let Some(owner) = self.memory.as_mut() {
             *body(owner).field_mut("columns") = memory;
         }
         Ok(self)
@@ -163,12 +167,8 @@ impl MutableCommandPlan {
         let (input, memory) = input.into_parts();
         let (input, memory) = control.finish(input, memory)?.into_parts();
         plan.rule_values_input = Some(input);
-        if let Some(owner) = &mut self.memory {
-            *body(owner).field_mut("rule_values_input") =
-                memory.map(|direct| RewriteMemory::Fields {
-                    fields: BudgetedVec::new(direct.budget()),
-                    direct,
-                });
+        if let Some(owner) = self.memory.as_mut() {
+            *body(owner).field_mut("rule_values_input") = memory.map(RewriteMemory::direct);
         }
         Ok(self)
     }

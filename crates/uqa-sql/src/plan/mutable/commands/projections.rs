@@ -7,7 +7,7 @@
 //! RETURNING names retain their independently admitted payload when scalar values change.
 
 use super::{item, CommandPlan, MutableCommandPlan, RewriteMemory, SQLError};
-use uqa_core::memory::{BudgetedVec, Produced, ProductionControl};
+use uqa_core::memory::{Produced, ProductionControl};
 
 impl MutableCommandPlan {
     pub fn replace_returning_alias(
@@ -37,12 +37,9 @@ impl MutableCommandPlan {
             None => (None, control.empty_reservation()),
         };
         let (alias, reservation) = control.finish(alias, reservation)?.into_parts();
-        let memory = reservation.map(|direct| RewriteMemory::Fields {
-            fields: BudgetedVec::new(direct.budget()),
-            direct,
-        });
+        let memory = reservation.map(RewriteMemory::direct);
         projections[index].alias = alias;
-        if let Some(owner) = &mut self.memory {
+        if let Some(owner) = self.memory.as_mut() {
             let body = owner.field_mut("value0").as_mut().expect("mutation body");
             *item(body, "returning", index).field_mut("alias") = memory;
         }
@@ -81,7 +78,7 @@ impl MutableCommandPlan {
         let mut arena = self.take_mutation_arena()?;
         let replacement = ProjectionVector::new(map(&self.command, inputs, &mut arena)?, control)?;
         *returning(&mut self.command)? = replacement.projections;
-        if let Some(memory) = &mut self.memory {
+        if let Some(memory) = self.memory.as_mut() {
             *memory
                 .field_mut("value0")
                 .as_mut()

@@ -6,7 +6,7 @@
 
 //! Existing field slots retain ancestor links while constructor records retire. Immediate and suspended folds share each transition without allocation or recursive cleanup.
 
-use super::{MemoryReservation, RewriteField, RewriteMemory};
+use super::{footprint::FieldPath, MemoryReservation, RewriteField, RewriteMemory};
 use crate::{catalog::work::Work, plan::scalar::ScalarMemoryFolding, SQLError};
 use uqa_core::memory::ProductionControl;
 
@@ -32,7 +32,7 @@ enum Step {
 
 pub(in crate::plan::mutable) struct Folding {
     current: Option<RewriteMemory>,
-    pending: Option<RewriteMemory>,
+    path: FieldPath,
     scalar: Option<ScalarMemoryFolding>,
     retained: Option<MemoryReservation>,
     step: Step,
@@ -42,7 +42,7 @@ impl Folding {
     pub(in crate::plan::mutable) fn new(memory: RewriteMemory) -> Self {
         Self {
             current: Some(memory),
-            pending: None,
+            path: FieldPath::default(),
             scalar: None,
             retained: None,
             step: Step::Descend,
@@ -80,9 +80,8 @@ impl Folding {
         match self.step {
             Step::Descend => {
                 if let Some(RewriteMemory::Fields { fields, .. }) = &mut self.current {
-                    if let Some(first) = fields.first_mut() {
-                        std::mem::swap(&mut first.memory, &mut self.pending);
-                        std::mem::swap(&mut self.current, &mut self.pending);
+                    if !fields.is_empty() {
+                        self.path.descend(&mut self.current, 0);
                         return false;
                     }
                 }
@@ -107,7 +106,8 @@ impl Folding {
                         drop(items);
                         Some(direct)
                     }
-                    RewriteMemory::Fields { direct, fields } => {
+                    RewriteMemory::Fields { mut direct, fields } => {
+                        let fields = fields.into_budgeted(&mut direct);
                         debug_assert!(
                             fields.len() <= 1 && fields.iter().all(|field| field.memory.is_none())
                         );
@@ -118,7 +118,7 @@ impl Folding {
                 self.step = Step::Ascend;
             }
             Step::Ascend => {
-                if let Some(RewriteMemory::Fields { fields, .. }) = &mut self.pending {
+                if let Some(RewriteMemory::Fields { fields, .. }) = &mut self.path.parent {
                     if fields.len() > 1 {
                         self.current = fields
                             .pop()
@@ -127,12 +127,11 @@ impl Folding {
                             .take();
                         self.step = Step::Descend;
                     } else {
-                        let previous = fields.first_mut().and_then(|field| field.memory.take());
-                        self.current = std::mem::replace(&mut self.pending, previous);
+                        self.path.ascend(&mut self.current, 0);
                         self.step = Step::Release;
                     }
                 } else {
-                    debug_assert!(self.pending.is_none());
+                    debug_assert!(self.path.parent.is_none());
                 }
             }
         }
@@ -150,7 +149,7 @@ impl Folding {
     }
 
     fn is_complete(&self) -> bool {
-        self.current.is_none() && self.pending.is_none() && self.scalar.is_none()
+        self.current.is_none() && self.path.parent.is_none() && self.scalar.is_none()
     }
 
     fn finish(mut self) -> Option<MemoryReservation> {

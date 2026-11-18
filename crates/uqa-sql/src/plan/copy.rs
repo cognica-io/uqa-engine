@@ -331,7 +331,7 @@ impl<'a> Copying<'a> {
                 .take()
                 .expect("scalar owner");
         }
-        RewriteMemory::Fields { direct, fields }
+        RewriteMemory::fields(direct, fields)
     }
 
     fn field<T>(

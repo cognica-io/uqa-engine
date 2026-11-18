@@ -28,13 +28,13 @@ impl QueryBlockPlan {
             query.root = RelationalPlan::QueryBlock(Box::new(self.clone()));
             return Ok(MutableQueryPlan {
                 query,
-                memory: None,
+                memory: None.into(),
             });
         };
         let query = copying.query_block_root(self)?;
         Ok(MutableQueryPlan {
             query,
-            memory: Some(copying.into_rewrite_memory()),
+            memory: Some(copying.into_rewrite_memory()).into(),
         })
     }
 }
@@ -75,7 +75,7 @@ impl MutableQueryPlan {
     ) -> Result<(QueryPlan, Option<RewriteMemory>), SQLError> {
         self.assert_owner(control);
         control.check()?;
-        Ok((self.query, self.memory))
+        Ok((self.query, self.memory.into_parts()))
     }
 
     /// Build a projection query from independently admitted scalar/name inputs. The query starts without FROM; callers attach a unit or relational source through the same owning boundary.
@@ -88,14 +88,14 @@ impl MutableQueryPlan {
             let query = copying.projected_query()?;
             Self {
                 query,
-                memory: Some(copying.into_rewrite_memory()),
+                memory: Some(copying.into_rewrite_memory()).into(),
             }
         } else {
             let mut query = empty_projection_query();
             query.root = RelationalPlan::QueryBlock(Box::new(empty_projection_block()));
             Self {
                 query,
-                memory: None,
+                memory: None.into(),
             }
         };
         query.replace_projections(projections, control)
@@ -135,7 +135,7 @@ impl MutableQueryPlan {
             ),
         };
         block.r#where = expression;
-        if let Some(memory) = &mut self.memory {
+        if let Some(memory) = self.memory.as_mut() {
             *memory
                 .field_mut("root")
                 .as_mut()
@@ -167,7 +167,13 @@ impl MutableQueryPlan {
             .memory
             .as_mut()
             .and_then(|memory| super::sources::query_source_memory(memory).take());
-        Ok((self, Some(MutableSourcePlan { source, memory })))
+        Ok((
+            self,
+            Some(MutableSourcePlan {
+                source,
+                memory: memory.into(),
+            }),
+        ))
     }
 
     /// Replace FROM after admitting its new field records. The old source is destroyed before its constructor leases are retired.
@@ -198,7 +204,7 @@ impl MutableQueryPlan {
             ),
         };
         block.from = source;
-        if let Some(memory) = &mut self.memory {
+        if let Some(memory) = self.memory.as_mut() {
             *memory
                 .field_mut("root")
                 .as_mut()
@@ -221,13 +227,13 @@ impl SourcePlan {
         let Some(mut copying) = Copying::for_rewrite(*control) else {
             return Ok(MutableSourcePlan {
                 source: self.clone(),
-                memory: None,
+                memory: None.into(),
             });
         };
         let source = copying.source_fields(self)?;
         let output = MutableSourcePlan {
             source,
-            memory: Some(copying.into_rewrite_memory()),
+            memory: Some(copying.into_rewrite_memory()).into(),
         };
         control.check()?;
         Ok(output)
@@ -241,7 +247,7 @@ impl MutableSourcePlan {
     ) -> Result<(SourcePlan, Option<RewriteMemory>), SQLError> {
         self.assert_owner(control);
         control.check()?;
-        Ok((self.source, self.memory))
+        Ok((self.source, self.memory.into_parts()))
     }
 
     /// Construct the one-row zero-column relation used by a scalar projection.
@@ -258,13 +264,13 @@ impl MutableSourcePlan {
                     internal_column_types: Vec::new(),
                     internal_column_collations: Vec::new(),
                 },
-                memory: None,
+                memory: None.into(),
             });
         };
         let source = copying.unit_source()?;
         Ok(Self {
             source,
-            memory: Some(copying.into_rewrite_memory()),
+            memory: Some(copying.into_rewrite_memory()).into(),
         })
     }
 
@@ -283,7 +289,7 @@ impl MutableSourcePlan {
                 copying.subquery_source(query, alias, columns, captured_output, lateral)?;
             return Ok(Self {
                 source,
-                memory: Some(copying.into_rewrite_memory()),
+                memory: Some(copying.into_rewrite_memory()).into(),
             });
         }
         let (query, _) = query.into_rewrite_parts(control)?;
@@ -297,7 +303,7 @@ impl MutableSourcePlan {
                     .into_uncontrolled()
                     .expect("ordinary source columns"),
             },
-            memory: None,
+            memory: None.into(),
         })
     }
 }
@@ -342,7 +348,7 @@ impl crate::plan::retirement::construction::Prefix<MutableQueryPlan> {
         let MutableQueryPlan { query, memory } = self.take();
         (
             context.retain(query),
-            memory.expect("retained query fields"),
+            memory.into_parts().expect("retained query fields"),
         )
     }
 }

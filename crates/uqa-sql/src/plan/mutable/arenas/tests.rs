@@ -105,7 +105,7 @@ fn native_query_compaction_keeps_namespaces_and_paired_constructor_owners() {
         let (buffer, capacity) = (arena.as_ptr(), arena.capacity());
         let fields = query_fields(pending.memory.as_mut().unwrap());
         let field_buffer = fields.as_ptr();
-        let retained = fields[1..].iter().map(|field| field.memory.as_ref().unwrap().reserved_bytes()).collect::<Vec<_>>();
+        let retained = fields[1..].iter_mut().map(|field| field.memory.as_mut().unwrap().reserved_bytes()).collect::<Vec<_>>();
         let before_bytes = pending.reserved_bytes();
         let (mut output, polls) = complete(&mut input(pending, &native, &work, &token, &token));
         assert!(polls > 1);
@@ -115,7 +115,7 @@ fn native_query_compaction_keeps_namespaces_and_paired_constructor_owners() {
         assert_eq!((arena.as_ptr(), arena.capacity()), (buffer, capacity));
         let fields = query_fields(output.memory.as_mut().unwrap());
         assert_eq!(fields.as_ptr(), field_buffer);
-        assert_eq!(fields.iter().map(|field| field.memory.as_ref().unwrap().reserved_bytes()).collect::<Vec<_>>(), retained);
+        assert_eq!(fields.iter_mut().map(|field| field.memory.as_mut().unwrap().reserved_bytes()).collect::<Vec<_>>(), retained);
         assert!(output.reserved_bytes() < before_bytes);
         assert_eq!(work.used(), 0);
         assert_eq!(allocation_counter::measure(|| drop(output)).count_total, 0);

@@ -29,7 +29,7 @@ impl MutableCommandPlan {
                 .and_then(|memory| super::children::source_memory(memory).take());
             MutableSourcePlan {
                 source: value,
-                memory,
+                memory: memory.into(),
             }
         });
         let output = map(input)?;
@@ -39,8 +39,8 @@ impl MutableCommandPlan {
             control.check()?;
             if let Some(source) = source(&mut self.command)?.as_mut() {
                 **source = output.source;
-                if let Some(memory) = &mut self.memory {
-                    *super::children::source_memory(memory) = output.memory;
+                if let Some(memory) = self.memory.as_mut() {
+                    *super::children::source_memory(memory) = output.memory.into_parts();
                 }
             } else {
                 let (value, memory) = if let Some(mut copying) = Copying::for_rewrite(*control) {
@@ -51,13 +51,13 @@ impl MutableCommandPlan {
                     (Box::new(value), None)
                 };
                 *source(&mut self.command)? = Some(value);
-                if let Some(owner) = &mut self.memory {
+                if let Some(owner) = self.memory.as_mut() {
                     *body(owner).field_mut("source") = memory;
                 }
             }
         } else {
             *source(&mut self.command)? = None;
-            if let Some(memory) = &mut self.memory {
+            if let Some(memory) = self.memory.as_mut() {
                 *body(memory).field_mut("source") = None;
             }
         }
@@ -117,7 +117,7 @@ impl MutableCommandPlan {
         let (predicate, queries) = predicate_and_queries(&mut self.command)?;
         *predicate = output;
         *queries = arena.queries;
-        if let Some(owner) = &mut self.memory {
+        if let Some(owner) = self.memory.as_mut() {
             let body = body(owner);
             *body.field_mut(field) = memory;
             *body.field_mut("subqueries") = arena.memory;

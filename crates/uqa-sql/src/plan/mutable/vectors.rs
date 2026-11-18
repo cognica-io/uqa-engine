@@ -62,7 +62,7 @@ impl MutableQueryPlan {
             ));
         };
         block.group_by = replacement.values;
-        if let Some(memory) = &mut self.memory {
+        if let Some(memory) = self.memory.as_mut() {
             let block = memory
                 .field_mut("root")
                 .as_mut()

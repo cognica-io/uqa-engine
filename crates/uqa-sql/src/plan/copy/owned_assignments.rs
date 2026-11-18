@@ -16,7 +16,7 @@ use uqa_core::{memory::ProductionControl, Value};
 
 impl Copying<'_> {
     fn adopt_fields(&mut self, memory: RewriteMemory) {
-        let RewriteMemory::Fields { direct, fields } = memory else {
+        let RewriteMemory::Fields { mut direct, fields } = memory else {
             unreachable!("structural constructor")
         };
         assert!(
@@ -37,6 +37,7 @@ impl Copying<'_> {
             self.fields.as_ref().is_some_and(|fields| fields.is_empty()),
             "destination constructor has no prior fields"
         );
+        let fields = fields.into_budgeted(&mut direct);
         self.memory = Some(direct);
         self.fields = Some(fields);
     }

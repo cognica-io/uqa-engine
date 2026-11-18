@@ -124,7 +124,7 @@ impl MutableQueryPlan {
             unreachable!()
         };
         *output = rows;
-        if let Some(owner) = &mut self.memory {
+        if let Some(owner) = self.memory.as_mut() {
             *owner
                 .field_mut("root")
                 .as_mut()
@@ -198,7 +198,7 @@ impl MutableQueryPlan {
                 let source = copying.captured_rows_source(rows, relation, width)?;
                 MutableSourcePlan {
                     source,
-                    memory: Some(copying.into_rewrite_memory()),
+                    memory: Some(copying.into_rewrite_memory()).into(),
                 }
             } else {
                 MutableSourcePlan {
@@ -211,13 +211,13 @@ impl MutableQueryPlan {
                         internal_column_types: vec![None; width],
                         internal_column_collations: vec![None; width],
                     },
-                    memory: None,
+                    memory: None.into(),
                 }
             };
             query.replace_source(Some(source), control)?
         };
         std::mem::swap(&mut self.query.root, &mut generated.query.root);
-        if let Some(memory) = &mut self.memory {
+        if let Some(memory) = self.memory.as_mut() {
             *memory.field_mut("root") = generated
                 .memory
                 .as_mut()
