@@ -79,6 +79,33 @@ fn current_server_references_do_not_rebind_absent_or_recreated_servers() {
 }
 
 #[test]
+fn live_server_validation_preserves_historical_references_and_retires_private_storage() {
+    use uqa_core::{memory::MemoryBudget, CancellationToken};
+    let server = definition();
+    let mut table = table();
+    table.server_reference = Some(ForeignServerReference::from(&server));
+    let servers = ForeignServers::try_from_iter([(server.name.clone(), server)]).unwrap();
+    let memory = MemoryBudget::new(4096);
+    let original = CancellationToken::new();
+    let invoking = CancellationToken::new();
+    let control = ProductionControl::new(&memory, &original, &invoking);
+    validate_live_servers([&table].into_iter(), &servers, &control).unwrap();
+    validate_live_servers([&table].into_iter(), &ForeignServers::new(), &control).unwrap();
+    assert_eq!(memory.used(), 0);
+
+    let occupied = memory.reserve(memory.available()).unwrap();
+    validate_live_servers([&table].into_iter(), &servers, &control).unwrap();
+    table.server_name = "other".into();
+    let error = validate_live_servers([&table].into_iter(), &servers, &control).unwrap_err();
+    assert_eq!(error.sqlstate(), Some("53200"));
+    drop(occupied);
+    invoking.cancel();
+    let error = validate_live_servers([&table].into_iter(), &servers, &control).unwrap_err();
+    assert_eq!(error.sqlstate(), Some("57014"));
+    assert_eq!(memory.used(), 0);
+}
+
+#[test]
 fn current_foreign_schema_requires_a_valid_versioned_reference() {
     let mut table = table();
     table.server_reference = Some(ForeignServerReference::from(&definition()));

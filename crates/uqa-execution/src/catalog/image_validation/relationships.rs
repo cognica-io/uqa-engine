@@ -35,6 +35,11 @@ pub fn validate(
     validate_namespaces(catalog, &production)?;
     validate_name_uniqueness(snapshot, memory, cancellation)?;
     validate_authority(snapshot, memory, cancellation)?;
+    crate::catalog::foreign::reference::validate_live_servers(
+        snapshot.definitions.foreign_tables.values(),
+        &snapshot.definitions.foreign_servers,
+        &production,
+    )?;
     validate_types(snapshot, memory, cancellation)?;
     validate_plan_relations(catalog, &production)?;
     validate_routine_declarations(snapshot, types, &production)?;

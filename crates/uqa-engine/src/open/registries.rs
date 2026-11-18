@@ -156,6 +156,7 @@ impl Engine {
                 schema: self.foreign_schema_context(),
                 sequences: self.sequence_owner_publication_context(),
                 roles: self,
+                cancellation: &self.runtime.cancellation,
             },
             catalog,
             mode.allows_migration(),
