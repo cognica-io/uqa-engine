@@ -6,8 +6,8 @@
 
 use super::{providers::destination, *};
 use crate::{
-    tests::providers::Provider, SQLFunctionOptions, SQLFunctionRegistrationError, SQLTableFunction,
-    SQLTableFunctionResult,
+    tests::providers::Provider, SQLAggregateState, SQLFunctionOptions,
+    SQLFunctionRegistrationError, SQLTableFunction, SQLTableFunctionResult,
 };
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -194,29 +194,39 @@ fn restore_preserves_recursive_views_and_deferred_function_resolution(#[case] pr
     let files = tempfile::tempdir().unwrap();
     let repository = repository(&files.path().join("repository"));
     let source = provider.open(&files.path().join("source"));
+    install_scalar(&source, 17);
     source
         .sql(
             "CREATE VIEW circular AS SELECT 1 AS v;
         CREATE OR REPLACE VIEW circular AS SELECT abs(v) AS v FROM circular;
+        CREATE VIEW external_cycle AS SELECT 1 AS v;
+        CREATE OR REPLACE VIEW external_cycle AS SELECT external_scalar(v)::integer AS v FROM external_cycle;
         SET check_function_bodies = off;
         CREATE FUNCTION lazy_external() RETURNS integer LANGUAGE SQL AS 'SELECT missing_later(1)';
         CREATE VIEW delayed AS SELECT lazy_external() AS v",
             &[],
         )
         .unwrap();
-    let expected = ["SELECT v FROM circular", "SELECT v FROM delayed"].map(|sql| {
+    let expected = [
+        "SELECT v FROM circular",
+        "SELECT v FROM delayed",
+        "SELECT v FROM external_cycle",
+    ]
+    .map(|sql| {
         let error = source.sql(sql, &[]).unwrap_err();
         (sql, error.sqlstate().unwrap().to_owned(), error.to_string())
     });
     let root = capture(&source, &repository, None);
     drop(source);
+    let application = Engine::new();
+    install_scalar(&application, 23);
     let control = StorageReadControl::with_limit(32 << 20);
     let mut job = Engine::new()
         .begin_restore(
             &repository,
             root.backup(),
             destination(provider, &files.path().join("restored")),
-            RestoreOptions::new(16 << 20, 8 << 20),
+            RestoreOptions::new(16 << 20, 8 << 20).with_registered_functions(&application),
             &control,
         )
         .unwrap();
@@ -266,6 +276,142 @@ fn restore_resolves_function_calls_in_stored_views_and_defaults(#[case] provider
         assert_eq!(restored.sql(exercise, &[]).unwrap().rows[0]["v"], Value::Int(23));
         drop((restored, job));
         assert_eq!(control.memory().used(), 0);
+    }
+    verify_declared_view_calls(provider, files.path(), &repository, &control, limits);
+}
+
+struct Total(i64);
+
+impl SQLAggregateState for Total {
+    fn observe(&mut self, _: &[Value]) -> Result<(), SQLError> {
+        Ok(())
+    }
+
+    fn finish(&self) -> Result<Value, SQLError> {
+        Ok(Value::Int(self.0))
+    }
+}
+
+const DECLARED_VIEW_CALLS: [(&str, &str, &str, &str); 5] = [
+    (
+        "VIEW",
+        "SELECT entry::integer AS v FROM external_rows()",
+        "external_rows",
+        "entry",
+    ),
+    (
+        "MATERIALIZED VIEW",
+        "SELECT entry::integer AS v FROM external_rows()",
+        "external_rows",
+        "entry",
+    ),
+    (
+        "VIEW",
+        "SELECT entry::integer AS v FROM ROWS FROM(external_rows())",
+        "external_rows",
+        "entry",
+    ),
+    (
+        "VIEW",
+        "SELECT external_total(DISTINCT n)::integer AS v FROM (VALUES (1),(3)) q(n)",
+        "external_total",
+        "aggregate",
+    ),
+    (
+        "VIEW",
+        "SELECT external_total(n) OVER ()::integer AS v FROM (VALUES (1),(3)) q(n)",
+        "external_total",
+        "aggregate",
+    ),
+];
+
+fn verify_declared_view_calls(
+    provider: Provider,
+    path: &std::path::Path,
+    repository: &LocalRepository,
+    control: &StorageReadControl,
+    limits: RestoreOptions,
+) {
+    let authority = Engine::new();
+    let application = Engine::new();
+    let wrong = Engine::new();
+    let (_, table_calls) = install_rows(&application, "entry", 23);
+    let (_, wrong_calls) = install_rows(&wrong, "other", 99);
+    let aggregate_calls = Arc::new(AtomicUsize::new(0));
+    let observed = Arc::clone(&aggregate_calls);
+    application
+        .register_aggregate_function("external_total", move || {
+            observed.fetch_add(1, Ordering::SeqCst);
+            Total(23)
+        })
+        .unwrap();
+    wrong
+        .register_scalar_function("external_total", |_: &[Value]| Ok(Value::Int(99)))
+        .unwrap();
+    for (index, (kind, query, name, mismatch)) in DECLARED_VIEW_CALLS.into_iter().enumerate() {
+        let source = provider.open(&path.join(format!("view-source-{index}")));
+        install_rows(&source, "entry", 17);
+        source
+            .register_aggregate_function("external_total", || Total(17))
+            .unwrap();
+        source
+            .sql(&format!("CREATE {kind} saved AS {query}"), &[])
+            .unwrap();
+        assert_eq!(
+            source.sql("SELECT v FROM saved", &[]).unwrap().rows[0]["v"],
+            Value::Int(17)
+        );
+        let root = capture(&source, repository, None);
+        drop(source);
+        let target = path.join(format!("view-destination-{index}"));
+        for (configuration, expected) in [
+            (limits.into(), name),
+            (limits.with_registered_functions(&wrong), mismatch),
+        ] {
+            let job = authority
+                .begin_restore(
+                    repository,
+                    root.backup(),
+                    destination(provider, &target),
+                    configuration,
+                    control,
+                )
+                .unwrap();
+            assert_unusable(job, expected);
+            assert!(!target.exists());
+        }
+        let before = (
+            table_calls.load(Ordering::SeqCst),
+            aggregate_calls.load(Ordering::SeqCst),
+        );
+        let mut job = authority
+            .begin_restore(
+                repository,
+                root.backup(),
+                destination(provider, &target),
+                limits.with_registered_functions(&application),
+                control,
+            )
+            .unwrap();
+        prepare(&mut job);
+        let restored = job.publish().unwrap();
+        assert_eq!(
+            before,
+            (
+                table_calls.load(Ordering::SeqCst),
+                aggregate_calls.load(Ordering::SeqCst)
+            )
+        );
+        if kind == "MATERIALIZED VIEW" {
+            restored
+                .sql("REFRESH MATERIALIZED VIEW saved", &[])
+                .unwrap();
+        }
+        assert_eq!(
+            restored.sql("SELECT v FROM saved", &[]).unwrap().rows[0]["v"],
+            Value::Int(23)
+        );
+        assert_eq!(wrong_calls.load(Ordering::SeqCst), 0);
     }
 }
 

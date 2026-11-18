@@ -27,6 +27,19 @@ mod resolution;
 pub use names::{BindingIter, BindingMap, BindingNameSet};
 pub use resolution::BindingResolution;
 
+/// Bind application references inside a stored view. A cyclic view can be declared and fail only when queried; its persisted output names still define a relation for checking the rest of the query.
+pub(crate) fn validate_stored_view_calls(
+    routines: &dyn crate::routines::RoutineResolution,
+    query: &QueryPlan,
+    binding: ControlledBindingContext<'_>,
+    control: &ProductionControl<'_>,
+) -> Result<(), SQLError> {
+    let _stored = crate::semantics::sets::placement_scope::SetPlacementScope::stored_definition();
+    let mut scope = SchemaScope::for_analysis_with_control(binding, control)?;
+    scope.recursive_view = super::RecursiveViewBinding::DeclaredColumns;
+    scope.bind_query(routines, query, &[], None).map(drop)
+}
+
 pub struct ControlledBindingSnapshot {
     pub catalog: CatalogReadView,
     pub resolution: BindingResolution,
@@ -177,6 +190,7 @@ impl SchemaScope {
             non_returning_ctes: binding.non_returning_ctes,
             production: control.capture(),
             visiting_views: BindingNameSet::new(),
+            recursive_view: super::RecursiveViewBinding::Reject,
             validate_references: false,
             stored_expression_outer: None,
             rule_condition_event: None,

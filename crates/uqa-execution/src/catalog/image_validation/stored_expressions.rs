@@ -30,7 +30,7 @@ pub fn validate(
     for view in snapshot.definitions.views.values() {
         control.check()?;
         view.rewrite_definition_ref()
-            .validate_function_names_with_control(
+            .validate_function_calls_with_control(
                 routines,
                 scalar.binding.copy_with_control(&control)?,
                 &control,

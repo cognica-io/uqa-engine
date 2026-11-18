@@ -140,6 +140,11 @@ enum ScalarBindingMode {
     CompositeInputs,
 }
 
+enum RecursiveViewBinding {
+    Reject,
+    DeclaredColumns,
+}
+
 struct SchemaScope {
     execution_sources: Option<execution::CapturedSources>,
     collations: preparation::PendingCollations,
@@ -150,6 +155,7 @@ struct SchemaScope {
     non_returning_ctes: production::BindingNameSet,
     production: uqa_core::memory::OwnedProductionControl,
     visiting_views: production::BindingNameSet,
+    recursive_view: RecursiveViewBinding,
     validate_references: bool,
     stored_expression_outer: Option<RowSchema>,
     rule_condition_event: Option<crate::ast::RuleEvent>,

@@ -47,20 +47,17 @@ impl crate::catalog::stored_view::StoredViewDefinition {
 }
 
 impl ViewRewriteDefinitionRef<'_> {
-    /// Resolve names whose definitions are supplied by the destination runtime. A stored view can intentionally raise an error only when queried, including a recursive relation reference.
-    pub fn validate_function_names_with_control(
+    /// Bind calls whose declarations depend on the destination runtime, including the named output of table functions and the required kind of aggregate and window calls.
+    pub fn validate_function_calls_with_control(
         self,
         routines: &dyn crate::routines::RoutineResolution,
         scope: crate::binding::production::ControlledBindingContext<'_>,
         control: &ProductionControl<'_>,
     ) -> Result<(), SQLError> {
-        let mut unresolved = false;
-        let mut observe = |name: &str,
-                           binding: Option<&crate::ast::FunctionBinding>,
-                           from: bool|
-         -> Result<(), SQLError> {
+        let mut needs_binding = false;
+        let mut observe = |name: &str, binding: Option<&crate::ast::FunctionBinding>| {
             control.check()?;
-            if unresolved
+            if needs_binding
                 || binding.is_some_and(|binding| {
                     binding.object_id.is_some()
                         || binding.builtin
@@ -76,22 +73,21 @@ impl ViewRewriteDefinitionRef<'_> {
             if crate::semantics::is_pg_catalog_function_name(&name)
                 || crate::semantics::is_builtin_table_function(&name)
                 || routines.has_visible_sql_functions_with_control(&name, control)?
-                || routines.has_registered_table_function_with_control(&name, control)?
-                || (!from
-                    && (routines.has_registered_scalar_function_with_control(&name, control)?
-                        || routines
-                            .has_registered_aggregate_function_with_control(&name, control)?))
             {
                 return Ok(());
             }
-            unresolved = true;
+            needs_binding = true;
             Ok(())
         };
         self.query.try_visit_scalar_expressions(&mut |root| {
             root.try_visit(&mut |expression| {
                 control.check()?;
-                if let crate::ScalarExpr::Func { name, binding, .. } = expression {
-                    observe(name, binding.as_ref(), false)?;
+                match expression {
+                    crate::ScalarExpr::Func { name, binding, .. } => {
+                        observe(name, binding.as_ref())?;
+                    }
+                    crate::ScalarExpr::WindowCall { name, .. } => observe(name, None)?,
+                    _ => (),
                 }
                 Ok::<_, SQLError>(true)
             })
@@ -99,10 +95,12 @@ impl ViewRewriteDefinitionRef<'_> {
         crate::binding::view_dependencies::visit_table_function_calls(
             crate::plan::PlanRef::Query(self.query),
             control,
-            &mut |name, binding| observe(name, binding, true),
+            &mut observe,
         )?;
-        if unresolved {
-            self.query_schema_with_control(routines, scope, control)?;
+        if needs_binding {
+            crate::binding::production::validate_stored_view_calls(
+                routines, self.query, scope, control,
+            )?;
         }
         Ok(())
     }
