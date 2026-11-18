@@ -177,23 +177,30 @@ fn standalone_restore_preserves_the_function_selected_at_the_source_cut(
 }
 
 #[rstest::rstest]
-#[case::sqlite_native(Provider::SQLiteNative)]
-#[case::sqlite_kv(Provider::SQLiteKeyValue)]
-#[case::redb(Provider::Redb)]
+#[case::sqlite_native(Provider::SQLiteNative, true)]
+#[case::sqlite_kv(Provider::SQLiteKeyValue, true)]
+#[case::redb(Provider::Redb, true)]
+#[case::sqlite_native_builtin(Provider::SQLiteNative, false)]
+#[case::sqlite_kv_builtin(Provider::SQLiteKeyValue, false)]
+#[case::redb_builtin(Provider::Redb, false)]
 fn prepared_restore_keeps_the_function_requirement_after_archive_removal(
     #[case] provider: Provider,
+    #[case] requires_registration: bool,
 ) {
     let files = tempfile::tempdir().unwrap();
     let store = repository(&files.path().join("archive"));
     let source = provider.open(&files.path().join("source"));
-    let registered = source_views(&source);
+    let (mut registered, _) = source_views(&source);
+    if !requires_registration {
+        registered.unregister().unwrap();
+    }
     let root = capture(&source, &store, None);
     drop((registered, source));
     let limits = RestoreOptions::new(16 << 20, 8 << 20);
     let control = StorageReadControl::with_limit(32 << 20);
     let target = files.path().join("restored");
     let previous = Engine::new();
-    let (_binding, calls) = register_abs(&previous, 23);
+    let previous_binding = requires_registration.then(|| register_abs(&previous, 23));
     let mut job = previous
         .begin_restore(
             &store,
@@ -205,30 +212,37 @@ fn prepared_restore_keeps_the_function_requirement_after_archive_removal(
         .unwrap();
     prepare(&mut job);
     let request = job.id().unwrap();
-    assert_eq!(calls.load(Ordering::SeqCst), 0);
-    drop((job, previous));
+    if let Some((_, calls)) = &previous_binding {
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+    }
+    drop((job, previous_binding, previous));
     store.remove_backup(root.backup(), &control).unwrap();
 
-    let next = Engine::new();
-    let mut missing = next
+    let incompatible = Engine::new();
+    let conflicting = (!requires_registration).then(|| register_abs(&incompatible, 29));
+    let mut rejected = incompatible
         .resume_restore(
             &store,
             request,
             destination(provider, &target),
-            limits,
+            limits.with_registered_functions(&incompatible),
             &control,
         )
         .unwrap();
-    let failure = missing.publish().err().expect("missing source function");
+    let failure = rejected.publish().err().expect("incompatible registration");
     let diagnostic = failure.to_string();
     assert!(
         diagnostic.contains("function") || diagnostic.contains("abs"),
         "{diagnostic}"
     );
-    drop((failure, missing));
+    if let Some((_, calls)) = &conflicting {
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+    }
+    drop((failure, rejected, conflicting, incompatible));
     assert!(!target.exists());
     assert_eq!(control.memory().used(), 0);
-    let (_current, calls) = register_abs(&next, 47);
+    let next = Engine::new();
+    let current = requires_registration.then(|| register_abs(&next, 47));
     let mut job = next
         .resume_restore(
             &store,
@@ -239,8 +253,11 @@ fn prepared_restore_keeps_the_function_requirement_after_archive_removal(
         )
         .unwrap();
     let engine = job.publish().unwrap();
-    assert_eq!(calls.load(Ordering::SeqCst), 0);
-    assert_eq!(values(&engine), (Value::Int(5), Value::Int(47)));
+    if let Some((_, calls)) = &current {
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+    }
+    let expected = if requires_registration { 47 } else { 5 };
+    assert_eq!(values(&engine), (Value::Int(5), Value::Int(expected)));
     drop((engine, job));
     assert_eq!(control.memory().used(), 0);
 }

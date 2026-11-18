@@ -62726,15 +62726,18 @@
       "package": "uqa-engine",
       "kind": "lib",
       "test": "prepared_restore_keeps_the_function_requirement_after_archive_removal",
-      "cases": 3,
+      "cases": 6,
       "source": "crates/uqa-engine/src/backup/restore/tests/function_origins.rs",
       "capability": "Application function references in backups",
       "workload": "Prepare a persistent target, remove the archive and reopen the restore request in a process with different function registrations.",
-      "invariant": "A missing callback leaves the target private and releases its memory. A matching registration takes effect on the first application query.",
+      "invariant": "Both an absent required registration and a registration conflicting with the captured builtin fallback keep the target private. Matching registrations open the restored views without calling application functions until query execution.",
       "case_names": [
         "case_1_sqlite_native",
         "case_2_sqlite_kv",
-        "case_3_redb"
+        "case_3_redb",
+        "case_4_sqlite_native_builtin",
+        "case_5_sqlite_kv_builtin",
+        "case_6_redb_builtin"
       ]
     },
     {
@@ -62751,6 +62754,124 @@
         "case_2_sqlite_native",
         "case_3_sqlite_kv",
         "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "query_projection_preserves_original_bytes_across_escapes_and_previous_nested_fields",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/view_queries/tests.rs",
+      "capability": "Application function references in backups",
+      "workload": "Read escaped query text from a physical view definition one byte at a time.",
+      "invariant": "The extracted query retains its original bytes across escape sequences, nested fields and split Unicode.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "legacy_queries_keep_their_representation_and_missing_fields_retire_the_input",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/view_queries/tests.rs",
+      "capability": "Application function references in backups",
+      "workload": "Read a standalone stored query and a view definition missing its query.",
+      "invariant": "The original query representation is retained and a failed input releases its memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "stored_view_queries_read_the_original_physical_cut",
+      "cases": 2,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/backup_target.rs",
+      "capability": "Application function references in backups",
+      "workload": "Replace a view after capture and read its definition from a database with a large materialized row.",
+      "invariant": "The cursor yields the original query within its read allowance, counts physical bytes and checks cancellation.",
+      "case_names": [
+        "mapping_1_SQLiteBackupMapping__Native",
+        "mapping_2_SQLiteBackupMapping__KeyValue"
+      ]
+    },
+    {
+      "package": "uqa-storage-redb",
+      "kind": "lib",
+      "test": "stored_view_queries_read_the_original_physical_cut",
+      "cases": 1,
+      "source": "crates/uqa-storage-redb/src/backup_target.rs",
+      "capability": "Application function references in backups",
+      "workload": "Replace a view after capture and read a stored query alongside a 256 KiB materialized value.",
+      "invariant": "The reader exposes the captured query and keeps input for the evaluated row outside its working set.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "full_incremental_and_reprotected_copies_preserve_only_the_selected_root_declarations",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/tests/functions.rs",
+      "capability": "Application function references in backups",
+      "workload": "Read application bindings from a full root, a standalone child and a copy in another protection domain.",
+      "invariant": "Each root exposes its own ordered declarations, including after removal of its parent.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "long_shared_prefixes_and_split_utf8_resume_under_single_byte_windows",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/tests/functions.rs",
+      "capability": "Application function references in backups",
+      "workload": "Read declarations with a long shared prefix and split Unicode using one-byte windows.",
+      "invariant": "Reading advances within the window and preserves declaration order, digest and memory ownership.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "malformed_or_contradictory_declarations_fail_before_publication",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/tests/functions.rs",
+      "capability": "Application function references in backups",
+      "workload": "Capture invalid, repeated and contradictory function requirements.",
+      "invariant": "Malformed requirements prevent publication and the operation releases its private state.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "independently_encoded_function_sections_reject_invalid_versions_utf8_lengths_and_trailing_bytes",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/tests/functions.rs",
+      "capability": "Application function references in backups",
+      "workload": "Decode independently assembled sections with invalid headers, truncated records, split UTF-8 and extra bytes.",
+      "invariant": "Malformed sections fail before their bindings can be installed. A valid independently encoded section yields its canonical references.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "durable_prepared_receipts_keep_legacy_empty_and_populated_requirements_after_collection",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/tests/functions.rs",
+      "capability": "Application function references in backups",
+      "workload": "Prepare private restore requests from legacy, empty and populated roots and remove those roots.",
+      "invariant": "Prepared requests retain exactly their original binding digest independently of the collected archive.",
+      "case_names": [
+        ""
       ]
     },
     {
