@@ -53415,6 +53415,32 @@
     {
       "package": "uqa-execution",
       "kind": "lib",
+      "test": "type_claims_yield_before_checking_the_last_column_and_retire_on_every_exit",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/type_dependencies/tests.rs",
+      "capability": "Bounded native type identity validation",
+      "workload": "Read 4,096 native type declarations and a final invalid column in one-step and 32-step windows. Cancel, abandon and exhaust the working allowance on separate reads.",
+      "invariant": "Both window sizes return the original enum array error. Terminal paths retire privately owned type claims and denied admission returns SQLSTATE 53200.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "type_membership_yields_for_each_edge_and_during_successful_claim_retirement",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/type_dependencies/tests.rs",
+      "capability": "Bounded native type reference validation",
+      "workload": "Resolve 4,096 type references and retire the valid declaration index using one-step and 31-step windows.",
+      "invariant": "Each reference contributes bounded work. Batching preserves the result, and successful validation releases individual claim nodes through the original allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
       "test": "one_step_relationship_validation_reaches_last_missing_routine_owner_in_order",
       "cases": 1,
       "source": "crates/uqa-execution/src/catalog/image_validation/relationships/authority_tests.rs",

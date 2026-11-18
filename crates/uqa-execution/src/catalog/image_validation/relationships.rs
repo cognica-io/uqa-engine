@@ -46,6 +46,7 @@ enum Scheduled {
     Names,
     Authority,
     Foreign,
+    Types,
 }
 
 const ORDERED: &[Predicate] = &[
@@ -53,7 +54,7 @@ const ORDERED: &[Predicate] = &[
     Predicate::Scheduled(Scheduled::Names),
     Predicate::Scheduled(Scheduled::Authority),
     Predicate::Scheduled(Scheduled::Foreign),
-    Predicate::Direct(|input| validate_types(input.snapshot, input.memory, input.cancellation)),
+    Predicate::Scheduled(Scheduled::Types),
     Predicate::Direct(|input| validate_plan_relations(input.view, &input.production)),
     Predicate::Direct(|input| {
         super::validate_stored_expressions(
@@ -200,7 +201,7 @@ impl RelationshipValidation {
 impl Scheduled {
     fn applies(self, snapshot: &CatalogReadSnapshot) -> bool {
         match self {
-            Self::Namespaces | Self::Names | Self::Authority => true,
+            Self::Namespaces | Self::Names | Self::Authority | Self::Types => true,
             Self::Foreign => foreign::has_bindings(snapshot),
         }
     }
@@ -233,6 +234,7 @@ impl Scheduled {
             ),
             Self::Names => validate_name_uniqueness(catalog.snapshot(), memory, cancellation),
             Self::Authority => validate_authority(catalog.snapshot(), memory, cancellation),
+            Self::Types => validate_types(catalog.snapshot(), memory, cancellation),
             Self::Foreign => decode_image(
                 &mut std::io::empty(),
                 memory,
@@ -256,6 +258,9 @@ impl Scheduled {
                     .await
             }
             Self::Foreign => foreign::validate(catalog.snapshot(), cancellation, input).await,
+            Self::Types => {
+                super::type_dependencies::from_input(catalog.snapshot(), cancellation, input).await
+            }
         }
     }
 }
