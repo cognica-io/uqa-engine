@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use super::{sql_error, StoredFunctionSite};
+use super::{routines, sql_error, tables::Tables, StoredFunctionSite};
 use crate::{Engine, SQLError};
 use parking_lot::Mutex;
 use std::sync::Arc;
@@ -12,7 +12,10 @@ use uqa_core::{
     image_io::AsyncImageInput,
     memory::{Budgeted, Produced, ProductionControl},
 };
-use uqa_execution::catalog::domain::{read_stored_domain_declaration, DOMAIN_RECORD_PREFIX};
+use uqa_execution::catalog::{
+    domain::{read_stored_domain_declaration, DOMAIN_RECORD_PREFIX},
+    table_capture::visit_stored_table_functions,
+};
 use uqa_sql::{
     binding::view_dependencies::{
         visit_stored_query_json_runtime_calls, visit_stored_runtime_calls_from,
@@ -22,11 +25,12 @@ use uqa_sql::{
         type_definitions::CapturedTypeDefinitions,
     },
     plan::PlanRef,
+    routines::registry::CapturedRoutines,
 };
 use uqa_storage::{
     backup::{
-        BackupCatalogTextInput, BackupError, BackupImageSource, BackupResult,
-        BackupSourceStatistics,
+        BackupCatalogField, BackupCatalogTextInput, BackupError, BackupImageSource, BackupResult,
+        BackupSourceStatistics, BackupTableField,
     },
     catalog::input::{CatalogInputLimits, CatalogInputStep},
     memory_capture::CapturedMemoryValue,
@@ -38,10 +42,14 @@ pub(in crate::backup) enum Catalogs {
     Native {
         views: Native<CapturedViewDefinitions>,
         domains: Native<CapturedTypeDefinitions<StoredDomain>>,
+        tables: Tables,
+        routines: Native<CapturedRoutines>,
     },
     Provider {
         views: BackupCatalogTextInput,
         domains: BackupCatalogTextInput,
+        tables: [BackupCatalogTextInput; 2],
+        routines: BackupCatalogTextInput,
     },
 }
 
@@ -64,6 +72,8 @@ impl Catalogs {
         Ok(Self::Native {
             views: Native::Memory(cut.catalogs.views.captured(&cut.cut)?),
             domains: Native::Memory(cut.catalogs.domains.captured(&cut.cut)?),
+            tables: Tables::Memory(cut.tables.clone()),
+            routines: Native::Memory(cut.catalogs.sql_user_functions.captured(&cut.cut)?),
         })
     }
 
@@ -74,6 +84,8 @@ impl Catalogs {
         Ok(Self::Native {
             views: Native::Staged(engine.durable.views.read().capture(control)?),
             domains: Native::Staged(engine.durable.domains.read().capture(control)?),
+            tables: Tables::Staged(engine.storage.tables.live_snapshot()),
+            routines: Native::Staged(engine.durable.sql_user_functions.read().capture(control)?),
         })
     }
 
@@ -82,15 +94,26 @@ impl Catalogs {
         limits: CatalogInputLimits,
         control: &StorageReadControl,
     ) -> BackupResult<Option<Self>> {
-        let views = image.stored_view_queries(limits, control)?;
-        let domains = image.stored_metadata_values(DOMAIN_RECORD_PREFIX, limits, control)?;
-        match (views, domains) {
-            (Some(views), Some(domains)) => Ok(Some(Self::Provider { views, domains })),
-            (None, None) => Ok(None),
-            _ => Err(BackupError::Unsupported(
+        let open = |field| image.stored_catalog_text(field, limits, control);
+        let Some(views) = open(BackupCatalogField::ViewQuery)? else {
+            return Ok(None);
+        };
+        let required = |field| {
+            open(field)?.ok_or(BackupError::Unsupported(
                 "incomplete catalog function-reference projection",
-            )),
-        }
+            ))
+        };
+        Ok(Some(Self::Provider {
+            views,
+            domains: required(BackupCatalogField::MetadataPrefix(DOMAIN_RECORD_PREFIX))?,
+            tables: [
+                required(BackupCatalogField::Table(BackupTableField::Columns))?,
+                required(BackupCatalogField::Table(BackupTableField::Constraints))?,
+            ],
+            routines: required(BackupCatalogField::Metadata(
+                uqa_execution::routines::catalog::FUNCTIONS_METADATA_KEY,
+            ))?,
+        }))
     }
 
     pub(super) async fn visit(
@@ -103,7 +126,12 @@ impl Catalogs {
         let production =
             ProductionControl::new(source.memory(), source.cancellation(), work.cancellation);
         match self {
-            Self::Native { views, domains } => {
+            Self::Native {
+                views,
+                domains,
+                tables,
+                routines,
+            } => {
                 for (_, view) in views.get()? {
                     work.checkpoint().await?;
                     counts.lock().visited_positions += 1;
@@ -125,11 +153,23 @@ impl Catalogs {
                         .await
                         .map_err(sql_error)?;
                 }
+                tables.visit(source, work, counts, visit).await?;
+                routines::native(routines.get()?, source, work, counts, visit).await?;
             }
-            Self::Provider { views, domains } => {
-                for (kind, mut records) in
-                    [(Definition::View, views), (Definition::Domain, domains)]
-                {
+            Self::Provider {
+                views,
+                domains,
+                tables,
+                routines,
+            } => {
+                let [columns, checks] = tables;
+                for (kind, mut records) in [
+                    (Definition::View, views),
+                    (Definition::Domain, domains),
+                    (Definition::Table(BackupTableField::Columns), columns),
+                    (Definition::Table(BackupTableField::Constraints), checks),
+                    (Definition::Routines, routines),
+                ] {
                     let before = *counts.lock();
                     loop {
                         work.checkpoint().await?;
@@ -139,6 +179,13 @@ impl Catalogs {
                             CatalogInputStep::Complete => break,
                             CatalogInputStep::Pending => (),
                             CatalogInputStep::Row(bytes) => match kind {
+                                Definition::Routines => {
+                                    routines::record(&bytes, source, work, visit).await?;
+                                }
+                                Definition::Table(field) => {
+                                    visit_stored_table_functions(&bytes, field, source, work, visit)
+                                        .await?;
+                                }
                                 Definition::View => visit_stored_query_json_runtime_calls(
                                     &bytes,
                                     &production,
@@ -173,6 +220,8 @@ impl Catalogs {
 enum Definition {
     View,
     Domain,
+    Table(BackupTableField),
+    Routines,
 }
 
 fn source_error(error: BackupError) -> StorageBackendError {

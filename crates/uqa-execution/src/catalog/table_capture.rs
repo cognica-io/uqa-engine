@@ -6,6 +6,9 @@
 
 //! Original relation membership selects its index metadata and resolved analyzer revisions.
 
+mod expressions;
+pub use expressions::{visit_stored_table_functions, visit_table_functions};
+
 use uqa_core::memory::Budgeted;
 use uqa_core::memory::RetainedValue;
 use uqa_storage::{

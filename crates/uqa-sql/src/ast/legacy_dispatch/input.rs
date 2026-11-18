@@ -38,6 +38,30 @@ impl CreateFunction {
 }
 
 impl Expr {
+    /// Observe the scalar registry lookups of a stored schema expression. An explicit stored binding keeps its selected implementation.
+    pub async fn visit_runtime_scalar_calls<'a, 'input: 'a, F>(
+        &'a self,
+        original: &'a CancellationToken,
+        input: &'a mut AsyncImageInput<'input>,
+        visit: &'a mut F,
+    ) -> Result<(), crate::SQLError>
+    where
+        F: FnMut(
+                &str,
+                crate::binding::view_dependencies::StoredFunctionSite,
+            ) -> Result<(), crate::SQLError>
+            + Send,
+    {
+        use crate::binding::view_dependencies::StoredFunctionSite;
+        self.visit_stored_scalar_calls_from_input(original, input, &mut |name, binding| {
+            if let Some(site) = StoredFunctionSite::ScalarOnly.with_stored_binding(binding) {
+                visit(name, site)?;
+            }
+            Ok(())
+        })
+        .await
+    }
+
     /// Visit scalar function calls in stored syntax without evaluating them or copying their children. The original and invoking controls govern every traversal frame.
     pub(crate) async fn visit_stored_scalar_calls_from_input(
         &self,

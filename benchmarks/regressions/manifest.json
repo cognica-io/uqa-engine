@@ -62995,6 +62995,46 @@
       ]
     },
     {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "restored_table_preserves_functions_in_defaults_and_checks",
+      "cases": 8,
+      "source": "crates/uqa-engine/src/backup/restore/tests/function_origins.rs",
+      "capability": "Application function references in backups",
+      "workload": "Capture a stored table CHECK or column default with scalar, table and aggregate registrations named abs. Retire the source registration and remove the archive before recovering persistent targets.",
+      "invariant": "A missing scalar rejects publication. The original scalar preserves values and constraints independently of same-name table or aggregate registrations.",
+      "case_names": [
+        "case_1_memory::column_default_1_false",
+        "case_1_memory::column_default_2_true",
+        "case_2_sqlite_native::column_default_1_false",
+        "case_2_sqlite_native::column_default_2_true",
+        "case_3_sqlite_kv::column_default_1_false",
+        "case_3_sqlite_kv::column_default_2_true",
+        "case_4_redb::column_default_1_false",
+        "case_4_redb::column_default_2_true"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "restored_routines_preserve_functions_in_defaults_and_eager_bodies",
+      "cases": 8,
+      "source": "crates/uqa-engine/src/backup/restore/tests/function_origins.rs",
+      "capability": "Application function references in backups",
+      "workload": "Capture a stored SQL routine with an application scalar in its argument default or eager statement body. Check fresh and archive-free prepared targets before invoking the routine.",
+      "invariant": "A missing registration rejects publication and the supplied scalar preserves the original routine result without executing callbacks while restoring.",
+      "case_names": [
+        "case_1_memory::argument_default_1_false",
+        "case_1_memory::argument_default_2_true",
+        "case_2_sqlite_native::argument_default_1_false",
+        "case_2_sqlite_native::argument_default_2_true",
+        "case_3_sqlite_kv::argument_default_1_false",
+        "case_3_sqlite_kv::argument_default_2_true",
+        "case_4_redb::argument_default_1_false",
+        "case_4_redb::argument_default_2_true"
+      ]
+    },
+    {
       "package": "uqa-execution",
       "kind": "lib",
       "test": "backup_domain_declarations_select_named_and_positional_records_with_bounded_work",

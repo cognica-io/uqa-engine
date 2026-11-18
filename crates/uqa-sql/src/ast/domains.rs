@@ -37,22 +37,15 @@ impl CreateDomain {
             ) -> Result<(), crate::SQLError>
             + Send,
     {
-        use crate::binding::view_dependencies::StoredFunctionSite;
-        let mut observe = |name: &str, binding: Option<&super::FunctionBinding>| {
-            if let Some(site) = StoredFunctionSite::Domain.with_stored_binding(binding) {
-                visit(name, site)?;
-            }
-            Ok(())
-        };
         if let Some(default) = &self.default {
             default
-                .visit_stored_scalar_calls_from_input(original, input, &mut observe)
+                .visit_runtime_scalar_calls(original, input, visit)
                 .await?;
         }
         for check in &self.checks {
             check
                 .expression
-                .visit_stored_scalar_calls_from_input(original, input, &mut observe)
+                .visit_runtime_scalar_calls(original, input, visit)
                 .await?;
         }
         Ok(())

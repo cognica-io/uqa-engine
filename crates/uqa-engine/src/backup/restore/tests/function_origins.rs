@@ -331,10 +331,6 @@ fn restored_domain_preserves_functions_in_defaults_and_checks(
     #[case] provider: Provider,
     #[values(false, true)] domain_default: bool,
 ) {
-    let files = tempfile::tempdir().unwrap();
-    let store = repository(&files.path().join("archive"));
-    let source = provider.open(&files.path().join("source"));
-    let (mut registered, source_calls) = register_abs(&source, 17);
     let (definition, query, expected) = if domain_default {
         ("CREATE DOMAIN saved_domain AS integer DEFAULT abs(-5)::integer; CREATE TABLE use_domain(v saved_domain)",
          "INSERT INTO use_domain DEFAULT VALUES RETURNING v", 17)
@@ -345,8 +341,83 @@ fn restored_domain_preserves_functions_in_defaults_and_checks(
             -5,
         )
     };
+    check_stored_scalar_function(provider, definition, query, expected, true, |source| {
+        if domain_default {
+            assert_eq!(source.sql(query, &[]).unwrap().rows[0]["v"], Value::Int(5));
+        } else {
+            assert_eq!(
+                source.sql(query, &[]).unwrap_err().sqlstate(),
+                Some("23514")
+            );
+        }
+    });
+}
+
+#[rstest::rstest]
+#[case::memory(Provider::Memory)]
+#[case::sqlite_native(Provider::SQLiteNative)]
+#[case::sqlite_kv(Provider::SQLiteKeyValue)]
+#[case::redb(Provider::Redb)]
+fn restored_table_preserves_functions_in_defaults_and_checks(
+    #[case] provider: Provider,
+    #[values(false, true)] column_default: bool,
+) {
+    let (definition, query, expected) = if column_default {
+        (
+            "CREATE TABLE saved(v integer DEFAULT abs(-5)::integer)",
+            "INSERT INTO saved DEFAULT VALUES RETURNING v",
+            17,
+        )
+    } else {
+        (
+            "CREATE TABLE saved(v integer, CONSTRAINT saved_check CHECK (abs(v) = 17))",
+            "INSERT INTO saved VALUES(-5) RETURNING v",
+            -5,
+        )
+    };
+    check_stored_scalar_function(provider, definition, query, expected, true, |_| {});
+}
+
+#[rstest::rstest]
+#[case::memory(Provider::Memory)]
+#[case::sqlite_native(Provider::SQLiteNative)]
+#[case::sqlite_kv(Provider::SQLiteKeyValue)]
+#[case::redb(Provider::Redb)]
+fn restored_routines_preserve_functions_in_defaults_and_eager_bodies(
+    #[case] provider: Provider,
+    #[values(false, true)] argument_default: bool,
+) {
+    let definition = if argument_default {
+        "CREATE FUNCTION saved(v integer DEFAULT abs(-5)::integer) RETURNS integer LANGUAGE SQL RETURN v"
+    } else {
+        "CREATE FUNCTION saved() RETURNS integer LANGUAGE SQL BEGIN ATOMIC SELECT abs(-5)::integer; END"
+    };
+    check_stored_scalar_function(
+        provider,
+        definition,
+        "SELECT saved() AS v",
+        17,
+        false,
+        |_| {},
+    );
+}
+
+fn check_stored_scalar_function(
+    provider: Provider,
+    definition: &str,
+    query: &str,
+    expected: i64,
+    other_kinds: bool,
+    after_retirement: impl FnOnce(&Engine),
+) {
+    let files = tempfile::tempdir().unwrap();
+    let store = repository(&files.path().join("archive"));
+    let source = provider.open(&files.path().join("source"));
+    let (mut registered, source_calls) = register_abs(&source, 17);
     source.sql(definition, &[]).unwrap();
-    register_non_scalar_abs(&source);
+    if other_kinds {
+        register_non_scalar_abs(&source);
+    }
     assert_eq!(
         source.sql(query, &[]).unwrap().rows[0]["v"],
         Value::Int(expected)
@@ -359,14 +430,7 @@ fn restored_domain_preserves_functions_in_defaults_and_checks(
     registered.unregister().unwrap();
     let root = finish_capture(pending);
     assert_eq!(source_calls.load(Ordering::SeqCst), called);
-    if domain_default {
-        assert_eq!(source.sql(query, &[]).unwrap().rows[0]["v"], Value::Int(5));
-    } else {
-        assert_eq!(
-            source.sql(query, &[]).unwrap_err().sqlstate(),
-            Some("23514")
-        );
-    }
+    after_retirement(&source);
     drop(source);
 
     let target = files.path().join("restored");

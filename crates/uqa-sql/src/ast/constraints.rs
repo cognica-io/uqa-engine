@@ -114,6 +114,18 @@ pub struct ColumnDef {
 }
 
 impl ColumnDef {
+    /// Return the expressions that can run against a newly inserted or updated row.
+    pub fn stored_value_expressions(&self) -> impl Iterator<Item = &Expr> {
+        self.default
+            .iter()
+            .chain(
+                self.generated
+                    .iter()
+                    .map(|column| column.expression.as_ref()),
+            )
+            .chain(self.check.iter())
+    }
+
     /// A nullable column without a default, generation expression, identity or constraint.
     #[must_use]
     pub fn nullable(name: impl Into<String>, ty: ColumnType) -> Self {
