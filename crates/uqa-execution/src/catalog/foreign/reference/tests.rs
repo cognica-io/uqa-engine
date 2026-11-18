@@ -80,7 +80,11 @@ fn current_server_references_do_not_rebind_absent_or_recreated_servers() {
 
 #[test]
 fn live_server_validation_preserves_historical_references_and_retires_private_storage() {
-    use uqa_core::{memory::MemoryBudget, CancellationToken};
+    use uqa_core::{
+        memory::{MemoryBudget, ProductionControl},
+        CancellationToken,
+    };
+    use uqa_sql::catalog::foreign_server::ForeignServers;
     let server = definition();
     let mut table = table();
     table.server_reference = Some(ForeignServerReference::from(&server));

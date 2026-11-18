@@ -8,13 +8,11 @@
 
 use super::StoredForeignTable;
 mod input;
+mod live;
 pub(crate) use input::check_format_with_control;
+pub(crate) use live::{validate_live_servers, validate_live_wrappers};
 use serde::{Deserialize, Serialize};
-use uqa_core::memory::{ProductionControl, ProductionMap};
-use uqa_sql::{
-    catalog::foreign_server::{ForeignServerDefinition, ForeignServers},
-    SQLError,
-};
+use uqa_sql::{catalog::foreign_server::ForeignServerDefinition, SQLError};
 use uqa_storage::{CatalogFacade, StorageBackendError, StorageBackendResult};
 
 const FORMAT_KEY: &str = "foreign-table-server-reference-format";
@@ -37,11 +35,6 @@ impl From<&ForeignServerDefinition> for ForeignServerReference {
 }
 
 impl StoredForeignTable {
-    fn selects_server(&self, server: &ForeignServerDefinition) -> bool {
-        self.server_name == server.name
-            && self.server_reference == Some(ForeignServerReference::from(server))
-    }
-
     pub fn server_oid(&self) -> Result<u32, SQLError> {
         self.server_reference
             .map(|reference| reference.oid)
@@ -68,53 +61,6 @@ impl StoredForeignTable {
                 message: format!("cache lookup failed for foreign server {oid}"),
             })
     }
-}
-
-/// A deleted server remains a valid historical binding. When its incarnation is live, its recorded name and OID must select that same server.
-pub(crate) fn validate_live_servers<'a>(
-    tables: impl Iterator<Item = &'a StoredForeignTable>,
-    servers: &ForeignServers,
-    control: &ProductionControl<'_>,
-) -> Result<(), SQLError> {
-    control.check()?;
-    let mut unresolved = ProductionMap::new(*control);
-    for table in tables {
-        control.check()?;
-        let Some(reference) = table.server_reference else {
-            continue;
-        };
-        match servers.get(&table.server_name) {
-            Some(server) if reference.object_id == server.metadata.object_id => {
-                if !table.selects_server(server) {
-                    return inconsistent_server(&table.name, server, control);
-                }
-            }
-            _ => {
-                unresolved.insert_copy(reference.object_id, table.name.as_str())?;
-            }
-        }
-    }
-    if !unresolved.is_empty() {
-        for server in servers.values() {
-            control.check()?;
-            if let Some(table) = unresolved.get(&server.metadata.object_id) {
-                return inconsistent_server(table, server, control);
-            }
-        }
-    }
-    Ok(())
-}
-
-fn inconsistent_server(
-    table: &str,
-    server: &ForeignServerDefinition,
-    control: &ProductionControl<'_>,
-) -> Result<(), SQLError> {
-    let message = control.format(format_args!(
-        "foreign table `{table}` has an inconsistent binding to live foreign server `{}`",
-        server.name
-    ))?;
-    Err(SQLError::Internal(message.into_parts().0))
 }
 
 pub fn validate_query_source(

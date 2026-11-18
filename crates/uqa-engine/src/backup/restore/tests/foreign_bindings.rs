@@ -87,24 +87,44 @@ fn restore_rejects_a_live_foreign_server_bound_to_a_different_oid_or_name(
     let repository = repository(&files.path().join("repository"));
     let (root, _) = archive(provider, &files.path().join("source"), &repository, binding);
     let target = files.path().join("restored");
-    let control = StorageReadControl::with_limit(32 << 20);
-    let mut job = Engine::new()
+    assert_rejected(provider, &repository, root, &target, "foreign server");
+}
+
+fn begin_provider<'a>(
+    provider: Provider,
+    repository: &'a LocalRepository,
+    root: BackupRoot,
+    target: &Path,
+    control: &StorageReadControl,
+) -> RestoreJob<'a> {
+    Engine::new()
         .begin_restore(
-            &repository,
+            repository,
             root.backup(),
-            destination(provider, &target),
+            destination(provider, target),
             RestoreOptions::new(16 << 20, 8 << 20),
-            &control,
+            control,
         )
-        .unwrap();
+        .unwrap()
+}
+
+fn assert_rejected(
+    provider: Provider,
+    repository: &LocalRepository,
+    root: BackupRoot,
+    target: &Path,
+    expected: &str,
+) {
+    let control = StorageReadControl::with_limit(32 << 20);
+    let mut job = begin_provider(provider, repository, root, target, &control);
     let error = loop {
         match job.advance(4096) {
             Err(error) => break error,
             Ok(RestorePhase::Reading | RestorePhase::Validating) => (),
-            Ok(phase) => panic!("{provider:?}: inconsistent foreign server reached {phase:?}"),
+            Ok(phase) => panic!("{provider:?}: inconsistent {expected} reached {phase:?}"),
         }
     };
-    assert!(error.to_string().contains("foreign server"), "{error}");
+    assert!(error.to_string().contains(expected), "{error}");
     assert_eq!(job.phase(), RestorePhase::Failed);
     assert!(matches!(job.publish(), Err(BackupError::Finished)));
     assert!(!target.exists());
@@ -127,15 +147,7 @@ fn restore_preserves_live_and_historical_foreign_server_bindings(#[case] provide
     );
     let target = files.path().join("restored");
     let control = StorageReadControl::with_limit(32 << 20);
-    let mut job = Engine::new()
-        .begin_restore(
-            &repository,
-            root.backup(),
-            destination(provider, &target),
-            RestoreOptions::new(16 << 20, 8 << 20),
-            &control,
-        )
-        .unwrap();
+    let mut job = begin_provider(provider, &repository, root, &target, &control);
     prepare(&mut job);
     let restored = job.publish().unwrap();
     drop(job);
@@ -151,6 +163,136 @@ fn restore_preserves_live_and_historical_foreign_server_bindings(#[case] provide
         format!("cache lookup failed for foreign server {historical_oid}")
     );
     restored.sql("DROP FOREIGN TABLE target", &[]).unwrap();
+    drop(restored);
+    assert_eq!(control.memory().used(), 0);
+}
+
+fn wrapper_archive(
+    provider: Provider,
+    path: &Path,
+    repository: &LocalRepository,
+    binding: Binding,
+) -> (BackupRoot, u32) {
+    let source = provider.open(path);
+    let oracle: serde_json::Value = serde_json::from_str(include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../tests/parity/pg18/foreign_wrapper_oracle.expected.json"
+    )))
+    .unwrap();
+    let declaration = oracle["cases"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|case| case["id"] == "server_callback_removes_wrapper")
+        .unwrap();
+    assert!(declaration["error"].is_null());
+    source
+        .sql(declaration["sql"].as_str().unwrap(), &[])
+        .unwrap();
+    let historical = source.durable.foreign_servers.read()["orphaned_server"]
+        .metadata
+        .wrapper_reference
+        .unwrap();
+    source
+        .sql(
+            "CREATE FOREIGN DATA WRAPPER orphaned_fdw HANDLER memory_fdw_handler;
+                CREATE FOREIGN DATA WRAPPER other_fdw HANDLER memory_fdw_handler;
+                CREATE SERVER intact FOREIGN DATA WRAPPER orphaned_fdw;
+                CREATE FOREIGN TABLE live_target(id integer) SERVER intact",
+            &[],
+        )
+        .unwrap();
+    let mut server = source.durable.foreign_servers.read()["intact"].clone();
+    let live = server.metadata.wrapper_reference.as_mut().unwrap();
+    assert_ne!(historical.object_id, live.object_id);
+    assert_ne!(historical.oid, live.oid);
+    match binding {
+        Binding::WrongOid => live.oid = historical.oid,
+        Binding::WrongName => server.fdw_type = "other_fdw".into(),
+        Binding::Historical => return (capture(&source, repository, None), historical.oid),
+    }
+    let root = if let Some(persistent) = source.storage.provider.clone() {
+        drop(source);
+        let session = persistent.open_session().unwrap();
+        let row = uqa_execution::catalog::foreign::servers::catalog_row(&server).unwrap();
+        session.catalog.save_foreign_server_row(&row).unwrap();
+        drop(session);
+        capture_provider(persistent.as_ref(), repository)
+    } else {
+        source
+            .durable
+            .foreign_servers
+            .write()
+            .insert(server.name.clone(), server)
+            .unwrap();
+        capture(&source, repository, None)
+    };
+    (root, historical.oid)
+}
+
+#[rstest::rstest]
+#[case::memory(Provider::Memory)]
+#[case::sqlite_native(Provider::SQLiteNative)]
+#[case::sqlite_kv(Provider::SQLiteKeyValue)]
+#[case::redb(Provider::Redb)]
+fn restore_rejects_a_live_foreign_wrapper_bound_to_a_different_oid_or_name(
+    #[case] provider: Provider,
+    #[values(Binding::WrongOid, Binding::WrongName)] binding: Binding,
+) {
+    let files = tempfile::tempdir().unwrap();
+    let repository = repository(&files.path().join("repository"));
+    let (root, _) = wrapper_archive(provider, &files.path().join("source"), &repository, binding);
+    assert_rejected(
+        provider,
+        &repository,
+        root,
+        &files.path().join("restored"),
+        "foreign-data wrapper",
+    );
+}
+
+#[rstest::rstest]
+#[case::memory(Provider::Memory)]
+#[case::sqlite_native(Provider::SQLiteNative)]
+#[case::sqlite_kv(Provider::SQLiteKeyValue)]
+#[case::redb(Provider::Redb)]
+fn restore_preserves_a_server_whose_validator_deleted_its_foreign_wrapper(
+    #[case] provider: Provider,
+) {
+    let files = tempfile::tempdir().unwrap();
+    let repository = repository(&files.path().join("repository"));
+    let (root, historical_oid) = wrapper_archive(
+        provider,
+        &files.path().join("source"),
+        &repository,
+        Binding::Historical,
+    );
+    let control = StorageReadControl::with_limit(32 << 20);
+    let mut job = begin_provider(
+        provider,
+        &repository,
+        root,
+        &files.path().join("restored"),
+        &control,
+    );
+    prepare(&mut job);
+    let restored = job.publish().unwrap();
+    drop(job);
+    restored
+        .sql("EXPLAIN SELECT * FROM live_target", &[])
+        .unwrap();
+    let error = restored
+        .sql(
+            "CREATE FOREIGN TABLE orphaned_rows(id integer) SERVER orphaned_server",
+            &[],
+        )
+        .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("XX000"));
+    assert_eq!(
+        error.to_string(),
+        format!("cache lookup failed for foreign-data wrapper {historical_oid}")
+    );
+    restored.sql("DROP SERVER orphaned_server", &[]).unwrap();
     drop(restored);
     assert_eq!(control.memory().used(), 0);
 }

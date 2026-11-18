@@ -220,11 +220,18 @@ fn restore_wrappers(
     servers: &mut uqa_sql::catalog::foreign_server::ForeignServers,
     allow_migration: bool,
 ) -> StorageBackendResult<super::wrappers::RestoredWrappers> {
+    let memory = context.publication.foreign_catalog().budget().clone();
+    let control = uqa_core::memory::ProductionControl::new(
+        &memory,
+        context.cancellation,
+        context.cancellation,
+    );
     let restored = super::wrappers::restore(
         catalog,
         &context.roles.role_definitions(),
         servers,
         allow_migration,
+        &control,
     )?;
     uqa_sql::catalog::foreign_wrapper::validate_functions(
         &restored.definitions,
