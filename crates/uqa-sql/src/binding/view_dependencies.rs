@@ -15,11 +15,13 @@ use uqa_core::{RelationIdentity, Value};
 
 pub(crate) mod owned;
 mod references;
+mod stored_query;
 pub(crate) use owned::bind_query_relation_targets_owned;
 pub use references::{
     visit_stored_plan_function_bindings, visit_stored_plan_output_types,
     visit_stored_plan_relation_references, visit_stored_runtime_calls, StoredFunctionSite,
 };
+pub use stored_query::visit_stored_query_json_runtime_calls;
 
 pub fn canonical_virtual_relation_reference(reference: &str) -> Option<String> {
     crate::catalog::resolve_virtual_relation(&[], reference)
