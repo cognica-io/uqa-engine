@@ -740,6 +740,11 @@ impl<I: LiteralInput> ParameterTypes<'_, I> {
     }
 
     pub(super) fn reference(&mut self, number: usize) -> Result<ExpressionType, SQLError> {
+        let count = self.fixed_values.map_or(self.types.len(), <[_]>::len);
+        let index = number
+            .checked_sub(1)
+            .filter(|index| *index < count)
+            .ok_or_else(|| error("42P02", format!("there is no parameter ${number}")))?;
         if let Some(values) = self.fixed_values {
             let parameter = ScalarExpr::Param(number);
             let control = self.control();
@@ -763,18 +768,9 @@ impl<I: LiteralInput> ParameterTypes<'_, I> {
             let mut value = ExpressionType::resolved_produced(ty, &control)?;
             value.initial_collation =
                 u32::try_from(value.derivation.oid()).expect("parameter collation OID");
-            if number
-                .checked_sub(1)
-                .is_some_and(|index| index < values.len())
-            {
-                value.unknown = UnknownOrigin::Parameter;
-            }
+            value.unknown = UnknownOrigin::Parameter;
             return Ok(value);
         }
-        let index = number
-            .checked_sub(1)
-            .filter(|index| *index < self.types.len())
-            .ok_or_else(|| error("42P02", format!("there is no parameter ${number}")))?;
         let control = self.control.control();
         let ty = self.types[index]
             .as_deref()
