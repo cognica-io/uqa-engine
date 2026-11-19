@@ -7,6 +7,8 @@
 use super::*;
 use std::cell::Cell;
 
+mod defaults;
+
 #[derive(Default)]
 struct Roles {
     reads: Cell<usize>,

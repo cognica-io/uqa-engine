@@ -12,7 +12,7 @@ use crate::{
     expr::EngineHook,
     ir::observation::ScalarObserver,
     plan::{visit_stored_definition_scalars, PlanRef, QueryPlan, UnifiedPlan},
-    type_resolution::{base_type, base_type_with_work},
+    type_resolution::base_type_with_work,
     SQLError, ScalarExpr,
 };
 use uqa_core::{
@@ -32,10 +32,6 @@ impl<T: EngineHook + ?Sized> StoredRegroleResolver for T {
     }
 }
 
-fn scalar_regrole_type(ty: &ColumnType) -> bool {
-    matches!(base_type(ty), ColumnType::Regrole)
-}
-
 pub(crate) fn regrole_constant_error() -> SQLError {
     SQLError::Routine {
         sqlstate: "0A000".into(),
@@ -48,36 +44,52 @@ enum Constant<'a> {
     Bound,
 }
 
-impl<'a> Constant<'a> {
-    async fn at<W: Work + Send>(
-        expression: &'a ScalarExpr,
-        control: &ProductionControl<'_>,
-        work: &mut W,
-    ) -> Result<Option<Self>, SQLError> {
-        let mut work = ReferenceWork { control, work };
-        let (constant, name) = match expression {
-            ScalarExpr::Cast { expr, ty, .. } => match expr.as_ref() {
-                ScalarExpr::Literal(Value::Str(input)) => (Self::Input(input), ty),
-                _ => return Ok(None),
+enum Node<'a> {
+    Syntax(&'a Expr),
+    Scalar(&'a ScalarExpr),
+}
+
+impl<'a> Node<'a> {
+    fn constant(self) -> Option<(Constant<'a>, &'a str, Option<&'a ColumnType>)> {
+        match self {
+            Self::Syntax(Expr::Cast { expr, ty, .. }) => match expr.as_ref() {
+                Expr::Literal(Value::Str(input)) => Some((Constant::Input(input), ty, None)),
+                _ => None,
             },
-            ScalarExpr::TypedLiteral {
+            Self::Scalar(ScalarExpr::Cast { expr, ty, .. }) => match expr.as_ref() {
+                ScalarExpr::Literal(Value::Str(input)) => Some((Constant::Input(input), ty, None)),
+                _ => None,
+            },
+            Self::Syntax(Expr::TypedLiteral { value, ty, .. }) if !matches!(value, Value::Null) => {
+                Some((Constant::Bound, ty, None))
+            }
+            Self::Scalar(ScalarExpr::TypedLiteral {
                 value,
                 ty,
                 bound_type,
                 ..
-            } if !matches!(value, Value::Null) => {
-                if let Some(bound) = bound_type {
-                    if matches!(
-                        base_type_with_work(bound, control, &mut work).await?,
-                        ColumnType::Regrole
-                    ) {
-                        return Ok(Some(Self::Bound));
-                    }
-                }
-                (Self::Bound, ty)
-            }
-            _ => return Ok(None),
+            }) if !matches!(value, Value::Null) => Some((Constant::Bound, ty, bound_type.as_ref())),
+            _ => None,
+        }
+    }
+
+    async fn dependency<W: Work + Send>(
+        self,
+        control: &ProductionControl<'_>,
+        work: &mut W,
+    ) -> Result<Option<Constant<'a>>, SQLError> {
+        let Some((constant, name, binding)) = self.constant() else {
+            return Ok(None);
         };
+        let mut work = ReferenceWork { control, work };
+        if let Some(bound) = binding {
+            if matches!(
+                base_type_with_work(bound, control, &mut work).await?,
+                ColumnType::Regrole
+            ) {
+                return Ok(Some(constant));
+            }
+        }
         match ColumnType::from_sql_name_with_input_work(name, control, &mut work).await {
             Ok(ty)
                 if matches!(
@@ -99,19 +111,38 @@ pub struct StoredRegroleConstants {
     has_bound_constant: bool,
 }
 
-struct PlanConstants<'a> {
+struct Collector<'a> {
     inputs: ProductionVec<'a, String>,
     has_bound_constant: bool,
     control: ProductionControl<'a>,
 }
 
-impl ScalarObserver for PlanConstants<'_> {
-    async fn scalar<W: Work + Send>(
+impl<'a> Collector<'a> {
+    fn new(control: &ProductionControl<'a>) -> Self {
+        Self {
+            inputs: ProductionVec::new(*control),
+            has_bound_constant: false,
+            control: *control,
+        }
+    }
+
+    fn finish(self) -> Result<Produced<StoredRegroleConstants>, SQLError> {
+        let (inputs, memory) = self.inputs.finish()?.into_parts();
+        Ok(self.control.finish(
+            StoredRegroleConstants {
+                inputs,
+                has_bound_constant: self.has_bound_constant,
+            },
+            memory,
+        )?)
+    }
+
+    async fn observe(
         &mut self,
-        value: &ScalarExpr,
-        work: &mut W,
+        node: Node<'_>,
+        work: &mut (impl Work + Send),
     ) -> Result<(), SQLError> {
-        match Constant::at(value, &self.control, work).await? {
+        match node.dependency(&self.control, work).await? {
             Some(Constant::Input(name)) => {
                 self.inputs
                     .push_produced(work.text(name, &self.control).await?)?;
@@ -120,6 +151,16 @@ impl ScalarObserver for PlanConstants<'_> {
             None => (),
         }
         Ok(())
+    }
+}
+
+impl ScalarObserver for Collector<'_> {
+    async fn scalar<W: Work + Send>(
+        &mut self,
+        value: &ScalarExpr,
+        work: &mut W,
+    ) -> Result<(), SQLError> {
+        self.observe(Node::Scalar(value), work).await
     }
 }
 
@@ -155,13 +196,38 @@ impl StoredRegroleConstants {
         expression: &Expr,
         assignment_target: Option<&ColumnType>,
     ) {
-        if assignment_target.is_some_and(scalar_regrole_type) {
-            if let Expr::Literal(Value::Str(input)) = expression {
-                self.inputs.push(input.clone());
+        let output = inline(Self::from_expression(
+            expression,
+            assignment_target,
+            &ProductionControl::uncontrolled(),
+            &mut (),
+        ))
+        .expect("ordinary stored expression collection has no resource limit");
+        self.append(output);
+    }
+
+    pub(crate) async fn from_expression(
+        expression: &Expr,
+        assignment_target: Option<&ColumnType>,
+        control: &ProductionControl<'_>,
+        work: &mut (impl Work + Send),
+    ) -> Result<Produced<Self>, SQLError> {
+        let mut collector = Collector::new(control);
+        if let (Expr::Literal(Value::Str(input)), Some(ty)) = (expression, assignment_target) {
+            if matches!(
+                base_type_with_work(ty, control, &mut ReferenceWork { control, work }).await?,
+                ColumnType::Regrole
+            ) {
+                collector
+                    .inputs
+                    .push_produced(work.text(input, control).await?)?;
             }
         }
-        let scalar = crate::plan::ExpressionPlan::lower(expression.clone()).scalar;
-        self.collect_scalar_expression(&scalar);
+        let mut nodes = expression.stored_nodes_with_budget(control.budget())?;
+        while let Some(node) = nodes.next_scalar(control, work).await? {
+            collector.observe(Node::Syntax(node), work).await?;
+        }
+        collector.finish()
     }
 
     /// Keep dependency identity before a caller replaces an expression by its optimized form.
@@ -170,11 +236,9 @@ impl StoredRegroleConstants {
     }
 
     fn collect_scalar(&mut self, expression: &ScalarExpr) {
-        match inline(Constant::at(
-            expression,
-            &ProductionControl::uncontrolled(),
-            &mut (),
-        ))
+        match inline(
+            Node::Scalar(expression).dependency(&ProductionControl::uncontrolled(), &mut ()),
+        )
         .expect("ordinary scalar classification has no resource limit")
         {
             Some(Constant::Input(name)) => self.inputs.push(name.to_owned()),
@@ -192,14 +256,19 @@ impl StoredRegroleConstants {
     }
 
     fn append_plan(&mut self, plan: PlanRef<'_>) {
-        let mut constants = inline(Self::from_plan(
+        let output = inline(Self::from_plan(
             plan,
             &ProductionControl::uncontrolled(),
             &mut (),
         ))
-        .expect("ordinary plan collection has no resource limit")
-        .into_uncontrolled()
-        .expect("ordinary role names have no reservation");
+        .expect("ordinary plan collection has no resource limit");
+        self.append(output);
+    }
+
+    fn append(&mut self, output: Produced<Self>) {
+        let mut constants = output
+            .into_uncontrolled()
+            .expect("ordinary role names have no reservation");
         self.has_bound_constant |= constants.has_bound_constant;
         if self.inputs.is_empty() {
             self.inputs = constants.inputs;
@@ -213,21 +282,10 @@ impl StoredRegroleConstants {
         control: &ProductionControl<'_>,
         work: &mut (impl Work + Send),
     ) -> Result<Produced<Self>, SQLError> {
-        let mut constants = PlanConstants {
-            inputs: ProductionVec::new(*control),
-            has_bound_constant: false,
-            control: *control,
-        };
+        let mut constants = Collector::new(control);
         // A dependency is either a leaf or a cast of a string literal. No such node contains another dependency, so their order is also the rewrite's post-order.
         visit_stored_definition_scalars(plan, control, work, &mut constants).await?;
-        let (inputs, memory) = constants.inputs.finish()?.into_parts();
-        Ok(control.finish(
-            Self {
-                inputs,
-                has_bound_constant: constants.has_bound_constant,
-            },
-            memory,
-        )?)
+        constants.finish()
     }
 
     pub fn validate_inputs(&self, context: &dyn EngineHook) -> Result<(), SQLError> {

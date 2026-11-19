@@ -76161,6 +76161,19 @@
     {
       "package": "uqa-sql",
       "kind": "lib",
+      "test": "wide_stored_parameter_role_observation_borrows_the_original_default",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/regrole_dependencies/tests/defaults.rs",
+      "capability": "Stored SQL parameter role dependencies",
+      "workload": "Inspect an array of 4,096 expressions with a role cast in its final position.",
+      "invariant": "The final role is collected with less than 16 KiB allocated for the entire observation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
       "test": "stored_role_collection_yields_inside_names_and_releases_original_allowance",
       "cases": 1,
       "source": "crates/uqa-sql/src/catalog/regrole_dependencies/tests.rs",

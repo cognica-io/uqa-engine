@@ -46,9 +46,31 @@ impl<'a> StoredExpressionNodes<'a> {
         control: &ProductionControl<'_>,
         work: &mut impl crate::catalog::work::Work,
     ) -> Result<Option<&'a Expr>, ImageIoError> {
+        self.next_expression(control, work, true).await
+    }
+
+    /// A lowered scalar owns its original operands. Relational subqueries have a separate arena.
+    pub(crate) async fn next_scalar(
+        &mut self,
+        control: &ProductionControl<'_>,
+        work: &mut impl crate::catalog::work::Work,
+    ) -> Result<Option<&'a Expr>, ImageIoError> {
+        self.next_expression(control, work, false).await
+    }
+
+    async fn next_expression(
+        &mut self,
+        control: &ProductionControl<'_>,
+        work: &mut impl crate::catalog::work::Work,
+        include_subqueries: bool,
+    ) -> Result<Option<&'a Expr>, ImageIoError> {
         while let Some(node) = self.0.next_with_work(control, work).await? {
-            if let Node::Expression(expression) = node {
-                return Ok(Some(expression));
+            match node {
+                Node::Expression(expression) => return Ok(Some(expression)),
+                Node::Select(_) if !include_subqueries => {
+                    self.0.frames.pop();
+                }
+                _ => (),
             }
         }
         Ok(None)
