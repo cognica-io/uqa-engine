@@ -835,6 +835,22 @@
     {
       "package": "uqa-engine",
       "kind": "lib",
+      "test": "public_restore_uses_the_requested_window_for_catalog_validation",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/backup/restore/tests/providers.rs",
+      "capability": "Private restore validation",
+      "workload": "Restore the same table twice on each provider and request one or 64 catalog steps per call.",
+      "invariant": "The one-step restore takes more validation calls. Both publish the same rows, preserve target privacy until publication and release the job allowance.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
       "test": "catalog_validation_keeps_the_selected_missing_namespace_after_the_live_table_is_removed",
       "cases": 4,
       "source": "crates/uqa-engine/src/backup/validation/tests.rs",

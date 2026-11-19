@@ -115,7 +115,7 @@ impl<'a> Input<'a> {
         })
     }
 
-    /// One repository verification step, a catalog byte/poll window or one complete native component. Remaining component codecs and post-input validation still require resumable scheduling; this is not a fully bounded public restore job.
+    /// Advance repository input or the active native image component within the requested window.
     pub(in crate::backup) fn advance(
         &mut self,
         maximum_object_bytes: usize,
@@ -138,10 +138,9 @@ impl<'a> Input<'a> {
                                 &self.temporary,
                                 DecodeLimits {
                                     value_bytes: self.maximum_value_bytes,
-                                    window: ImageDecodeWindow {
-                                        bytes: maximum_object_bytes,
-                                        steps: 64,
-                                    },
+                                    window: crate::backup::restore::input_window(
+                                        maximum_object_bytes,
+                                    ),
                                 },
                                 &self.control,
                             )

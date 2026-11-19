@@ -346,7 +346,10 @@ impl Work<'_> {
                 BackupImageImportStep::Imported => Stage::Validating(input),
             },
             Stage::Validating(mut input) => {
-                match input.advance_validation(&mut self.validator, 1)? {
+                match input.advance_validation(
+                    &mut self.validator,
+                    super::input_window(maximum_object_bytes).steps,
+                )? {
                     BackupImageValidationStep::Pending => Stage::Validating(input),
                     BackupImageValidationStep::Complete => Stage::Complete,
                 }
