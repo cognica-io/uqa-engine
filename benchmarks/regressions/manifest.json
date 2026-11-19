@@ -76453,6 +76453,19 @@
     {
       "package": "uqa-sql",
       "kind": "lib",
+      "test": "wildcard_metadata_schedules_each_visible_field_and_retires_qualified_sort_scratch",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/production/wildcards/tests.rs",
+      "capability": "Stored SQL wildcard projection",
+      "workload": "Expand a bare or qualified wildcard over 2 and 32 visible fields and a reordered layout with a hidden alias and an absent physical attribute.",
+      "invariant": "One-step work emits at most one field. Qualified collection and ordering advance before publication, preserve physical field order and release all scratch after cancellation or denial.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
       "test": "stored_projection_selection_bounds_written_fields_and_preserves_star_and_error_order",
       "cases": 1,
       "source": "crates/uqa-sql/src/binding/preparation/tests/projections.rs",

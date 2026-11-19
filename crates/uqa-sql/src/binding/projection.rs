@@ -315,9 +315,30 @@ pub(super) fn visit_projection_star_metadata<'a>(
     control: &uqa_core::memory::ProductionControl<'_>,
     observe: &mut dyn FnMut(crate::semantics::ProjectionStarMetadata<'a>) -> Result<(), SQLError>,
 ) -> Result<bool, SQLError> {
-    crate::semantics::visit_bound_projection_star_metadata(
-        expression, schema, schema, control, observe,
+    crate::catalog::work::inline(visit_projection_star_metadata_with_work(
+        expression,
+        schema,
+        control,
+        &mut (),
+        observe,
+    ))
+}
+
+pub(super) async fn visit_projection_star_metadata_with_work<
+    'a,
+    W: crate::catalog::work::Work + Send,
+>(
+    expression: &'a ScalarExpr,
+    schema: &'a RowSchema,
+    control: &uqa_core::memory::ProductionControl<'_>,
+    work: &mut W,
+    observe: &mut (impl FnMut(crate::semantics::ProjectionStarMetadata<'a>) -> Result<(), SQLError>
+              + ?Sized),
+) -> Result<bool, SQLError> {
+    crate::semantics::visit_bound_projection_star_metadata_from(
+        expression, schema, schema, control, work, observe,
     )
+    .await
     .map_err(|error| error.at_position(expression.reference_position()))
 }
 

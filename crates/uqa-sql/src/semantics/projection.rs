@@ -20,11 +20,11 @@ pub use labels::{
     visit_query_output_columns, with_projection_label, ProjectionLabels,
 };
 pub use mutation::{mutation_clause_schema_with_control, returning_expression_schema_with_control};
-pub(crate) use stars::row_star_fields_with_control;
 pub use stars::{
     bound_projection_expression_with_control, visit_bound_projection_star_fields,
     ProjectionFieldVisitor,
 };
+pub(crate) use stars::{row_star_fields_with_control, visit_bound_projection_star_metadata_from};
 pub use stars::{visit_bound_projection_star_metadata, ProjectionStarMetadata};
 
 pub fn projection_columns(projections: &[ProjectionPlan]) -> Vec<String> {

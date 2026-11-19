@@ -702,10 +702,11 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
             } else {
                 source
             };
-            if super::super::projection::visit_projection_star_metadata(
+            if super::super::projection::visit_projection_star_metadata_with_work(
                 &projection.expr,
                 expansion,
                 &control,
+                input_work.work,
                 &mut |field| {
                     output
                         .columns
@@ -730,7 +731,9 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
                     output.types.push(value, &control)?;
                     Ok(())
                 },
-            )? {
+            )
+            .await?
+            {
                 output.open |= match &projection.expr {
                     ScalarExpr::QualifiedStar(qualifier) => {
                         expansion.columns_are_open(Some(qualifier))
