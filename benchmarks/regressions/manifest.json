@@ -76414,6 +76414,32 @@
     {
       "package": "uqa-sql",
       "kind": "lib",
+      "test": "stored_projection_selection_bounds_written_fields_and_preserves_star_and_error_order",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/preparation/tests/projections.rs",
+      "capability": "Stored SQL projection analysis",
+      "workload": "Select 2 or 32 aliases, expand qualified and bare stars, move a missing qualifier from first to last and interrupt a pending selection.",
+      "invariant": "One-step work visits at most one written target. Target order and diagnostics match batched work, and cancellation or memory denial releases all native and input reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_output_keys_schedule_ordering_distinct_positions_and_equality_in_written_order",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/preparation/tests/projections.rs",
+      "capability": "Stored SQL output ordering and equality",
+      "workload": "Move an out-of-range ORDER BY or DISTINCT ON position, or a JSON output without equality, from first to last among 32 output keys.",
+      "invariant": "One-step work reaches the final invalid key at least 31 steps after the first. Batching preserves each clause's original PostgreSQL diagnostic.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
       "test": "grouped_validation_schedules_identities_and_projection_errors_in_original_order",
       "cases": 1,
       "source": "crates/uqa-sql/src/semantics/grouping_sets/tests/ownership.rs",

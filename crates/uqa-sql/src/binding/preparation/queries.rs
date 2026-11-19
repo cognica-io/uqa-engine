@@ -462,7 +462,9 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
         BLOCK_ANALYSES.with(|count| count.set(count.get() + 1));
         let input = overlay_outer_schema_with_control(source, outer, &self.scope.control())?;
         let input = self.scope.with_stored_outer_internal_aliases(&input)?;
-        let mut output = self.projections(&block.projections, source, &input, &block.subqueries)?;
+        let mut output = self
+            .projections_with_work(&block.projections, source, &input, &block.subqueries, work)
+            .await?;
         if let Some(predicate) = &block.r#where {
             self.in_placement(SetPlacement::Where, |analysis| {
                 analysis.require_boolean(predicate, &input, &block.subqueries, "WHERE")
@@ -473,36 +475,46 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
                 analysis.require_boolean(having, &input, &block.subqueries, "HAVING")
             })?;
         }
-        let projected = output.schema(&self.scope.control())?;
+        let owner = self.scope.control().capture();
+        let control = owner.control();
+        let projected = output.schema(&control)?;
+        let mut input_work = ReferenceWork {
+            control: &control,
+            work,
+        };
         for order in &block.order_by {
-            let value = self.alias_expression(
-                &order.expr,
-                &output,
-                &projected,
-                &input,
-                &block.subqueries,
-                "ORDER BY",
-            )?;
+            input_work.checkpoint().await?;
+            let value = self
+                .alias_expression_with_work(
+                    &order.expr,
+                    &output,
+                    (&projected, &input),
+                    &block.subqueries,
+                    "ORDER BY",
+                    input_work.work,
+                )
+                .await?;
             if let Some(ty) = &value.ty {
                 crate::type_resolution::ComparisonSupport::Ordering
                     .require_in_catalog(ty, self.routines)?;
             }
             self.query_key(&order.expr, value.derivation, block, &input)?;
         }
-        let owner = self.scope.control().capture();
-        let control = owner.control();
         let grouping_inputs = self
-            .grouping_inputs(block, source, &input, outer, &projected, work)
+            .grouping_inputs(block, source, &input, outer, &projected, input_work.work)
             .await?;
         for expression in &block.distinct_on {
-            let value = self.alias_expression(
-                expression,
-                &output,
-                &projected,
-                &input,
-                &block.subqueries,
-                "DISTINCT ON",
-            )?;
+            input_work.checkpoint().await?;
+            let value = self
+                .alias_expression_with_work(
+                    expression,
+                    &output,
+                    (&projected, &input),
+                    &block.subqueries,
+                    "DISTINCT ON",
+                    input_work.work,
+                )
+                .await?;
             if let Some(ty) = &value.ty {
                 crate::type_resolution::ComparisonSupport::Equality
                     .require_in_catalog(ty, self.routines)?;
@@ -511,6 +523,7 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
         }
         if block.distinct && block.distinct_on.is_empty() {
             for (position, value) in output.types.iter().enumerate() {
+                input_work.checkpoint().await?;
                 if let Some(ty) = &value.ty {
                     crate::type_resolution::ComparisonSupport::Equality
                         .require_in_catalog(ty, self.routines)?;
@@ -534,10 +547,7 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
             outer,
             &self.parameters.values()?,
             grouping_inputs.iter().copied(),
-            &mut ReferenceWork {
-                control: &control,
-                work,
-            },
+            &mut input_work,
         )
         .await?;
         self.parameters
@@ -667,10 +677,26 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
         input: &RowSchema,
         subqueries: &[QueryPlan],
     ) -> Result<QueryOutput, SQLError> {
+        inline(self.projections_with_work(projections, source, input, subqueries, &mut ()))
+    }
+
+    pub(super) async fn projections_with_work<'a, W: Work + Send>(
+        &mut self,
+        projections: impl IntoIterator<Item = &'a ProjectionPlan>,
+        source: &RowSchema,
+        input: &RowSchema,
+        subqueries: &[QueryPlan],
+        work: &mut W,
+    ) -> Result<QueryOutput, SQLError> {
         let owner = self.scope.control().capture();
         let control = owner.control();
+        let mut input_work = ReferenceWork {
+            control: &control,
+            work,
+        };
         let mut output = QueryOutput::new(&control);
         for projection in projections {
+            input_work.checkpoint().await?;
             let expansion = if matches!(projection.expr, ScalarExpr::QualifiedStar(_)) {
                 input
             } else {
@@ -712,7 +738,9 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
                     _ => expansion.columns_are_open(None),
                 };
             } else {
-                let mut value = self.expression(&projection.expr, input, subqueries)?;
+                let mut value = self
+                    .expression_with_work(&projection.expr, input, subqueries, input_work.work)
+                    .await?;
                 if matches!(value.ty.as_deref(), Some(ColumnType::Composite(_))) {
                     value.record_fields = self.scope.bind_record_fields(
                         self.routines,
@@ -852,6 +880,26 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
         subqueries: &[QueryPlan],
         clause: &str,
     ) -> Result<ExpressionType, SQLError> {
+        inline(self.alias_expression_with_work(
+            expression,
+            output,
+            (primary, fallback),
+            subqueries,
+            clause,
+            &mut (),
+        ))
+    }
+
+    async fn alias_expression_with_work<W: Work + Send>(
+        &mut self,
+        expression: &ScalarExpr,
+        output: &QueryOutput,
+        schemas: (&RowSchema, &RowSchema),
+        subqueries: &[QueryPlan],
+        clause: &str,
+        work: &mut W,
+    ) -> Result<ExpressionType, SQLError> {
+        let (primary, fallback) = schemas;
         let site_output = self.scope.variable_sites.as_mut().and_then(|sites| {
             let site = sites.site(expression)?;
             let name = sites.bare_name(site)?;
@@ -884,9 +932,11 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
         let mut value = if matches!(expression, ScalarExpr::Column(_) | ScalarExpr::Position(_)) {
             let input =
                 overlay_outer_schema_with_control(primary, Some(fallback), &self.scope.control())?;
-            self.expression(expression, &input, subqueries)?
+            self.expression_with_work(expression, &input, subqueries, work)
+                .await?
         } else {
-            self.expression(expression, fallback, subqueries)?
+            self.expression_with_work(expression, fallback, subqueries, work)
+                .await?
         };
         self.parameters
             .coerce_unknown(&mut value, &ColumnType::Text)?;
