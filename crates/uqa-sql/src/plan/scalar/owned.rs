@@ -31,6 +31,7 @@ mod literals;
 mod metadata;
 pub(in crate::plan::scalar) mod publication;
 mod query_ids;
+pub(crate) use query_ids::QueryIndexInput;
 mod references;
 mod replacement;
 mod selection;

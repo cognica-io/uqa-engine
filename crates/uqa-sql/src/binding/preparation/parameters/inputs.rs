@@ -21,12 +21,23 @@ impl<I: super::LiteralInput> ParameterTypes<'_, I> {
         let owner = self.control.clone();
         let control = owner.control();
         let input_type = crate::type_resolution::literal_input_type_with_control(target, &control)?;
-        if self.input_constants.as_ref().is_some_and(|constants| {
-            constants.0.get(&origin).is_some_and(|constant| {
-                matches!(&*constant.expression, ScalarExpr::TypedLiteral { bound_type: Some(ty), .. } if *ty == *input_type)
-            })
-        }) {
-            return Ok(());
+        if let Some(previous) = self
+            .input_constants
+            .as_ref()
+            .and_then(|constants| constants.0.get(&origin))
+        {
+            if let ScalarExpr::TypedLiteral { ty, bound_type, .. } = &*previous.expression {
+                let same = match bound_type {
+                    Some(previous) => previous == &*input_type,
+                    None if self.stored_literal_syntax => {
+                        ty == &*input_type.catalog_name_with_control(&control)?
+                    }
+                    None => false,
+                };
+                if same {
+                    return Ok(());
+                }
+            }
         }
         if let Some(input) = self.input_value(text, &input_type)? {
             if let Some(constants) = &mut self.input_constants {
@@ -34,7 +45,7 @@ impl<I: super::LiteralInput> ParameterTypes<'_, I> {
                 let expression = OwnedScalarExpr::typed_literal(
                     input.value,
                     name,
-                    Some(input_type),
+                    (!self.stored_literal_syntax).then_some(input_type),
                     None,
                     None,
                     &control,

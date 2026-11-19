@@ -65,28 +65,44 @@ impl SchemaScope {
     }
 }
 
-fn canonical_type(
+pub(in crate::binding) fn canonical_type(
     expression: OwnedScalarExpr,
     resolver: &dyn FunctionTypeResolver,
     control: &ProductionControl<'_>,
 ) -> Result<OwnedScalarExpr, SQLError> {
-    let name = match &*expression {
-        ScalarExpr::Cast { ty, .. }
-        | ScalarExpr::TypedLiteral { ty, .. }
-        | ScalarExpr::CompositeRow {
-            binding: crate::ast::CompositeRowBinding { ty, .. },
-            ..
-        } => ty,
-        _ => return Ok(expression),
+    crate::catalog::work::inline(canonical_type_from(expression, resolver, control, &mut ()))
+}
+
+pub(in crate::binding) async fn canonical_type_from<W: crate::catalog::work::Work + Send>(
+    expression: OwnedScalarExpr,
+    resolver: &dyn FunctionTypeResolver,
+    control: &ProductionControl<'_>,
+    work: &mut W,
+) -> Result<OwnedScalarExpr, SQLError> {
+    use crate::catalog::work::{compare_text, ReferenceWork};
+    let Some(name) = expression.written_type_name() else {
+        return Ok(expression);
     };
-    if UserTypeIdentity::parse(name).is_some() {
+    let mut input = ReferenceWork { control, work };
+    if UserTypeIdentity::parse_with_type_work(name, control, &mut input)
+        .await?
+        .is_some()
+    {
         return Ok(expression);
     }
     let Some(ty) = resolver.resolve_type_name_with_control(name, control)? else {
         return Ok(expression);
     };
-    let selected = ty.catalog_name_with_control(control)?;
-    if selected.as_str() == name {
+    let (ty, lease) = ty.into_parts();
+    let ty = crate::plan::retirement::Pending::new(ty);
+    let selected = ty.catalog_name_with_input_work(control, &mut input).await?;
+    crate::plan::retirement::retire_produced_from(ty.finish(lease, control)?, control, &mut input)
+        .await?;
+    if selected.len() == name.len()
+        && compare_text(input.work, &selected, name, control)
+            .await?
+            .is_eq()
+    {
         return Ok(expression);
     }
     Ok(expression.replace_type_name(selected, control)?)

@@ -15,7 +15,9 @@ use crate::plan::mutable::nodes::{roots, transformation::input::Input as Structu
 use crate::semantics::view_rewrite::DeferredOuterRewrite;
 use std::future::{ready, Future};
 
-pub(super) trait Input: StructuralInput + nodes::LocalSourceInput {
+pub(in crate::plan::mutable) trait Input:
+    StructuralInput + nodes::LocalSourceInput
+{
     fn enter_arena(&mut self, arena: ScalarQueryArena);
     fn leave_arena(&mut self) -> ScalarQueryArena;
     fn complete(

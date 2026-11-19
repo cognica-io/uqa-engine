@@ -57,6 +57,8 @@ mod retained_arena;
 pub use retained_arena::RetainedQueryArena;
 mod rewrite;
 mod scalar;
+pub(crate) use mutable::ArenaEdit;
+pub(crate) use scalar::QueryIndexInput;
 pub use scalar::{OwnedScalarChildren, OwnedScalarExpr, ScalarNodeTransform};
 pub(crate) use scalar::{ScalarEdit, ScalarEditIdentity, ScalarInputWork};
 mod scoped_visit;

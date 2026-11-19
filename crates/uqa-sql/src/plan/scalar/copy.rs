@@ -59,13 +59,6 @@ impl ScalarExpr {
 }
 
 impl Lowering<'_> {
-    pub(super) fn scalar_type_copy(
-        &mut self,
-        ty: Option<&crate::ast::ColumnType>,
-    ) -> Result<Option<crate::ast::ColumnType>> {
-        crate::catalog::work::inline(self.type_from(ty, &mut ()))
-    }
-
     async fn scalar_leaf_from<W: Work>(
         &mut self,
         expression: &ScalarExpr,

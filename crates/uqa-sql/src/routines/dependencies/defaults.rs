@@ -116,7 +116,7 @@ pub(crate) async fn bind_stored_parameter_default_from(
     let snapshot = catalog.binding_snapshot_with_control(control)?;
     let (bound, source) = bind_expression_plan_routines_for_storage_with_work(
         catalog,
-        lowered,
+        (lowered, workspace.as_ref()),
         &[],
         snapshot.context_with_control(control)?,
         &RowSchema::default(),

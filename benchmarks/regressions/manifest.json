@@ -41984,9 +41984,9 @@
       "test": "stored_scalar_analysis_pairs_the_original_syntax_in_admitted_work_windows",
       "cases": 1,
       "source": "crates/uqa-sql/src/binding/preparation/tests/defaults.rs",
-      "capability": "Stored scalar binding",
-      "workload": "Bind named arguments and scalar arrays of 1 and 4,096 elements with one and 32 work steps.",
-      "invariant": "Retained binding preserves ordinary coercions, call identities, and the first undefined name. Cancellation stops the current window and releases all admitted memory.",
+      "capability": "Stored routine default input application",
+      "workload": "Bind scalar defaults with IN, CASE, nested scalar queries and a 4,096-element array in one-step and batched work windows.",
+      "invariant": "Stored syntax, normalized input constants and result types agree with ordinary binding. A cancelled native binding releases its reservations.",
       "case_names": [
         ""
       ]
@@ -76339,6 +76339,19 @@
       "capability": "Shared selected scalar input application",
       "workload": "Render an 8192-level array type through ordinary and one-step work on a 256 KiB stack.",
       "invariant": "The same formatter retains the exact scalar spelling and every suffix while traversal and output consume bounded work.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_default_input_application_bounds_selected_membership_and_keeps_written_query_slots",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/preparation/parameters/application/stored/tests.rs",
+      "capability": "Stored routine default input application",
+      "workload": "Apply a selected 1,024-element membership to the same nested-query plan in one-step and batched windows, then interrupt the installation.",
+      "invariant": "Selected membership construction consumes work beyond the shared scan. Written subqueries preserve their original namespace and both cancellation tokens and memory denial release private state.",
       "case_names": [
         ""
       ]

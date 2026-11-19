@@ -55,6 +55,8 @@ pub use execution::{
     ControlledExecutionBlock, ExecutionBindingOptions, ExecutionQueryBlock,
     ExecutionSourceBindings, SharedExecutionSourceBindings,
 };
+pub use preparation::bind_expression_plan_routines_for_storage_owned;
+pub(crate) use preparation::bind_expression_plan_routines_for_storage_with_work;
 pub use preparation::{
     analyze_column_type_transform, assign_stored_query_input_collations,
     bind_routine_parameter_references_owned, infer_prepared_parameter_types,
@@ -70,10 +72,6 @@ pub(crate) use preparation::{
 pub(crate) use preparation::{
     analyze_domain_check, analyze_stored_expression_inputs, analyze_table_check,
     assign_stored_input_collations, read_prepared_inputs, retain_prepared_input_metadata,
-};
-pub use preparation::{
-    bind_expression_plan_routines_for_storage_owned,
-    bind_expression_plan_routines_for_storage_with_work,
 };
 
 #[cfg(test)]

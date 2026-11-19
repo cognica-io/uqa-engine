@@ -16,6 +16,13 @@ pub struct ScalarQueryArena {
     pub(in crate::plan::mutable) memory: Option<RewriteMemory>,
 }
 
+impl crate::plan::retirement::construction::Root for ScalarQueryArena {
+    fn retire(self, workspace: &mut crate::plan::retirement::construction::Workspace) {
+        self.queries.retire(workspace);
+        drop(self.memory);
+    }
+}
+
 impl ScalarQueryArena {
     pub(in crate::plan) fn from_rewrite_parts(
         queries: Vec<QueryPlan>,

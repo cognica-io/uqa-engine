@@ -231,14 +231,7 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
             }
             .checkpoint()
             .await?;
-            if self.scope.preserve_syntax_shape {
-                if let (Some(source), Some(target)) = (value.ty.as_deref(), element.as_ref()) {
-                    if !crate::type_resolution::common_input_keeps_type(source, target, &control)? {
-                        self.parameters
-                            .retain_input_coercion(expression, target.clone())?;
-                    }
-                }
-            }
+            self.retain_common_input(expression, &value, element.as_ref())?;
             derivation = derivation.combine(value.derivation);
         }
         let ty = element.map(|element| element.array(&control)).transpose()?;

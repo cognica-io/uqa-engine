@@ -191,6 +191,7 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
         }
         .checkpoint()
         .await?;
+        self.parameters.observe_written_type(expression);
         self.retain_stored_reference(expression, input)?;
         let value = if let Some(row) = self.scope.stored_whole_row(expression, input) {
             let owner = self.scope.control().capture();

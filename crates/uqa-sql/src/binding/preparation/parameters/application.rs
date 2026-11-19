@@ -19,6 +19,7 @@ use crate::{
 use uqa_core::memory::{Produced, ProductionControl, ProductionVec};
 
 mod layouts;
+mod stored;
 use layouts::QueryLayouts;
 
 impl<I: super::LiteralInput> ParameterTypes<'_, I> {
@@ -44,23 +45,70 @@ impl<I: super::LiteralInput> ParameterTypes<'_, I> {
 
 impl InputConstants {
     pub(in crate::binding::preparation) fn apply_owned(
-        mut self,
+        self,
         plan: &mut MutableExecutablePlan,
         routines: &dyn RoutineResolution,
         params: &[SQLParam],
         control: &ProductionControl<'_>,
     ) -> Result<(), SQLError> {
+        self.apply_with_membership(
+            plan,
+            routines,
+            params,
+            control,
+            |membership, value, arena| membership.apply_owned(value, arena, control),
+        )
+    }
+
+    pub(in crate::binding::preparation) fn apply_stored_inline(
+        self,
+        plan: &mut MutableExecutablePlan,
+        routines: &dyn RoutineResolution,
+        params: &[SQLParam],
+        control: &ProductionControl<'_>,
+    ) -> Result<(), SQLError> {
+        self.apply_with_membership(
+            plan,
+            routines,
+            params,
+            control,
+            |membership, value, arena| {
+                inline(membership.apply_stored_from(value, arena.queries().len(), control, &mut ()))
+            },
+        )
+    }
+
+    fn apply_with_membership(
+        mut self,
+        plan: &mut MutableExecutablePlan,
+        routines: &dyn RoutineResolution,
+        params: &[SQLParam],
+        control: &ProductionControl<'_>,
+        mut install: impl FnMut(
+            super::super::membership::MembershipAnalysis,
+            crate::plan::OwnedScalarExpr,
+            &mut crate::plan::ScalarQueryArena,
+        ) -> Result<crate::plan::OwnedScalarExpr, SQLError>,
+    ) -> Result<(), SQLError> {
         inline(self.apply_metadata_owned_from(plan, control, &mut ()))?;
         if self.is_consumed() {
             return Ok(control.check()?);
         }
+        let canonical_types = std::mem::take(&mut self.12);
         let mut groupings = std::mem::take(&mut self.8.groupings);
         plan.transform_scalar_arenas_with_metadata(
             control,
             &mut |identity, expression, arena| {
                 let identity = AnalysisIdentity::from(identity);
+                let expression = if canonical_types {
+                    crate::binding::composite_inputs::owned::canonical_type(
+                        expression, routines, control,
+                    )?
+                } else {
+                    expression
+                };
                 let expression = match self.2.remove(&identity) {
-                    Some(membership) => membership.apply_owned(expression, arena, control)?,
+                    Some(membership) => install(membership, expression, arena)?,
                     None => expression,
                 };
                 self.apply_node_owned(identity, expression, control)

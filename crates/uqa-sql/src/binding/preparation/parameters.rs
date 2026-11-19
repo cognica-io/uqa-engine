@@ -66,6 +66,7 @@ pub(super) struct ParameterTypes<'a, I = InputCatalogs<'a>> {
     occurrences: AnalysisVec<(usize, Option<Produced<ColumnType>>)>,
     input_constants: Option<InputConstants>,
     inputs: I,
+    stored_literal_syntax: bool,
     call_collations: Option<CallCollations>,
     query_schemas: Option<QuerySchemas>,
     /// Generated field references remain at stable addresses throughout analysis, including inference that does not retain an executable plan.
@@ -107,6 +108,8 @@ pub(super) struct InputConstants(
     RowExpansions,
     RewrittenBlocks,
     AnalysisMap<AnalysisIdentity<ScalarExpr>, usize>,
+    /// Stored type names are rebound after successful analysis, in the existing scalar visitor's child-first order.
+    bool,
 );
 
 impl Default for InputConstants {
@@ -130,6 +133,7 @@ impl InputConstants {
             RowExpansions::new(control),
             RewrittenBlocks::new(control),
             AnalysisMap::new(control),
+            false,
         )
     }
 }
@@ -240,9 +244,19 @@ impl<'a> ParameterTypes<'a, ()> {
         values: &'a [SQLParam],
         control: &ProductionControl<'_>,
     ) -> Result<Self, SQLError> {
+        Self::fixed_with_inputs(values, (), control)
+    }
+}
+
+impl<'a, I: LiteralInput> ParameterTypes<'a, I> {
+    pub(super) fn fixed_with_inputs(
+        values: &'a [SQLParam],
+        inputs: I,
+        control: &ProductionControl<'_>,
+    ) -> Result<Self, SQLError> {
         Ok(Self {
             fixed_values: Some(values),
-            ..Self::new_with_inputs(&[], (), control)?
+            ..Self::new_with_inputs(&[], inputs, control)?
         })
     }
 }
@@ -501,6 +515,7 @@ impl<I: LiteralInput> ParameterTypes<'_, I> {
             input_constants: None,
             collations: super::collations::PendingCollations::new(control),
             inputs,
+            stored_literal_syntax: false,
             call_collations: None,
             query_schemas: None,
             row_expansions: RowExpansions::new(control),
@@ -511,6 +526,15 @@ impl<I: LiteralInput> ParameterTypes<'_, I> {
             reference_inputs: None,
             control: control.capture(),
         })
+    }
+
+    pub(super) fn observe_written_type(&mut self, expression: &ScalarExpr) {
+        if self.stored_literal_syntax && expression.written_type_name().is_some() {
+            self.input_constants
+                .as_mut()
+                .expect("stored literal input selection")
+                .12 = true;
+        }
     }
 
     pub(super) fn control(&self) -> ProductionControl<'_> {
@@ -590,7 +614,8 @@ impl<I: LiteralInput> ParameterTypes<'_, I> {
         self.reference(number)
     }
 
-    pub(super) fn with_stored_inputs(mut self) -> Self {
+    pub(super) fn with_stored_inputs(mut self, stored_literal_syntax: bool) -> Self {
+        self.stored_literal_syntax = stored_literal_syntax;
         self.input_constants = Some(InputConstants::new(&self.control()));
         self
     }

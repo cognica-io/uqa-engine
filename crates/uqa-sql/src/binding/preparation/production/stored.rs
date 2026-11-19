@@ -12,10 +12,12 @@ use super::{
 };
 use crate::{plan::MutableExpressionPlan, RowSchema};
 
+use crate::plan::{copy::stored_plan::OriginalWorkspace, RetainedExecutablePlan};
+
 #[derive(Clone, Copy)]
 enum ExpressionDestination<'a> {
-    Executable(&'a RowSchema),
-    StoredSyntax(&'a RowSchema),
+    Executable,
+    StoredSyntax(Option<&'a OriginalWorkspace>),
 }
 
 pub fn bind_expression_plan_routines_for_storage_owned(
@@ -28,10 +30,10 @@ pub fn bind_expression_plan_routines_for_storage_owned(
 ) -> Result<MutableExpressionPlan, SQLError> {
     crate::catalog::work::inline(bind_expression_owned(
         routines,
-        expression,
+        (expression, ExpressionDestination::Executable),
         params,
         binding,
-        ExpressionDestination::Executable(input),
+        input,
         control,
         &mut (),
     ))
@@ -39,9 +41,9 @@ pub fn bind_expression_plan_routines_for_storage_owned(
 }
 
 /// Analyze a private stored expression under the original catalog and return both its selected plan and its owned result type.
-pub async fn bind_expression_plan_routines_for_storage_with_work(
+pub(crate) async fn bind_expression_plan_routines_for_storage_with_work(
     routines: &dyn RoutineResolution,
-    expression: MutableExpressionPlan,
+    expression: (MutableExpressionPlan, Option<&OriginalWorkspace>),
     params: &[SQLParam],
     binding: ControlledBindingContext<'_>,
     input: &RowSchema,
@@ -56,10 +58,13 @@ pub async fn bind_expression_plan_routines_for_storage_with_work(
 > {
     let (expression, ty) = bind_expression_owned(
         routines,
-        expression,
+        (
+            expression.0,
+            ExpressionDestination::StoredSyntax(expression.1),
+        ),
         params,
         binding,
-        ExpressionDestination::StoredSyntax(input),
+        input,
         control,
         work,
     )
@@ -70,10 +75,10 @@ pub async fn bind_expression_plan_routines_for_storage_with_work(
 
 async fn bind_expression_owned<W: crate::catalog::work::Work + Send>(
     routines: &dyn RoutineResolution,
-    expression: MutableExpressionPlan,
+    (expression, destination): (MutableExpressionPlan, ExpressionDestination<'_>),
     params: &[SQLParam],
     binding: ControlledBindingContext<'_>,
-    destination: ExpressionDestination<'_>,
+    input: &RowSchema,
     control: &ProductionControl<'_>,
     work: &mut W,
 ) -> Result<
@@ -83,17 +88,21 @@ async fn bind_expression_owned<W: crate::catalog::work::Work + Send>(
     ),
     SQLError,
 > {
-    let (ExpressionDestination::Executable(input) | ExpressionDestination::StoredSyntax(input)) =
-        destination;
     let mut plan = MutableExecutablePlan::Query(expression.into_projection_query(control)?);
     let mut scope = SchemaScope::for_analysis_with_control(binding, control)?;
     scope.preserve_syntax_shape = true;
     scope.stored_expression_outer = Some(input.clone());
+    let stored_syntax = matches!(destination, ExpressionDestination::StoredSyntax(_));
     let mut analysis = Preparation {
         bound_condition_queries: None,
         routines,
         scope: &mut scope,
-        parameters: ParameterTypes::fixed_with_control(params, control)?.with_stored_inputs(),
+        parameters: ParameterTypes::fixed_with_inputs(
+            params,
+            stored_syntax.then_some(routines),
+            control,
+        )?
+        .with_stored_inputs(stored_syntax),
         schema_expression: (),
     };
     let PlanRef::Query(query) = plan.as_plan_ref() else {
@@ -109,7 +118,22 @@ async fn bind_expression_owned<W: crate::catalog::work::Work + Send>(
         .expression_with_work(&block.projections[0].expr, input, &block.subqueries, work)
         .await?;
     let constants = analysis.parameters.take_input_constants();
-    constants.apply_owned(&mut plan, routines, params, control)?;
+    match destination {
+        ExpressionDestination::StoredSyntax(Some(workspace)) => {
+            let native = RetainedExecutablePlan::stored_projection(plan, workspace);
+            plan = constants
+                .apply_stored_from(native, routines, params, control, work)
+                .await?
+                .into_mutable()
+                .0;
+        }
+        ExpressionDestination::StoredSyntax(None) => {
+            constants.apply_stored_inline(&mut plan, routines, params, control)?;
+        }
+        ExpressionDestination::Executable => {
+            constants.apply_owned(&mut plan, routines, params, control)?;
+        }
+    }
     let MutableExecutablePlan::Query(query) = plan else {
         unreachable!()
     };

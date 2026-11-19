@@ -22,12 +22,12 @@ mod membership;
 mod ownership;
 mod parameters;
 mod production;
+pub(crate) use production::bind_expression_plan_routines_for_storage_with_work;
 pub(in crate::binding) use production::bind_routine_parameter_references;
 pub(crate) use production::bind_rule_inputs_owned;
 pub(in crate::binding) use production::retain_input_metadata_owned;
 pub use production::{
-    bind_expression_plan_routines_for_storage_owned,
-    bind_expression_plan_routines_for_storage_with_work, resolve_variable_sites_owned,
+    bind_expression_plan_routines_for_storage_owned, resolve_variable_sites_owned,
 };
 pub use production::{
     bind_routine_parameter_references_owned, parameter_input_types_with_control,

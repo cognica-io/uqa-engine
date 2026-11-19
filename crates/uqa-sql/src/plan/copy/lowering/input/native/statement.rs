@@ -110,6 +110,30 @@ impl RetainedExecutablePlan {
         Ok(plan)
     }
 
+    pub(crate) fn stored_projection(
+        plan: MutableExecutablePlan,
+        workspace: &crate::plan::copy::stored_plan::OriginalWorkspace,
+    ) -> Self {
+        Self(workspace.0.retain(plan))
+    }
+
+    pub(crate) async fn edit_stored_scalars_from<E, I>(
+        self,
+        edit: E,
+        control: &ProductionControl<'_>,
+        input: &mut (impl crate::catalog::work::Work + Send),
+    ) -> Result<(Self, E)>
+    where
+        E: crate::plan::ArenaEdit + for<'w> ScalarEdit<construction::Work<'w>, Identity = I> + Send,
+        I: Copy + Send,
+    {
+        let (plan, edit) = self
+            .0
+            .edit_stored_scalars_from(edit, control, input)
+            .await?;
+        Ok((Self(plan), edit))
+    }
+
     /// Share the native structural and scalar traversal while preserving each original scalar selection identity.
     pub(in crate::plan) async fn edit_scalars_from_input<E, I>(
         self,

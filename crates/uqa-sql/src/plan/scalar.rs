@@ -26,6 +26,7 @@ pub(in crate::plan) use lowering::ScalarQueryInput;
 pub(crate) use resources::input::Work as ScalarInputWork;
 mod owned;
 pub(in crate::plan) use owned::windows::OwnedWindowSpec;
+pub(crate) use owned::QueryIndexInput;
 pub(crate) use owned::ScalarMemory;
 pub(in crate::plan) use owned::ScalarMemoryFolding;
 pub(in crate::plan) use owned::SequenceBinding;

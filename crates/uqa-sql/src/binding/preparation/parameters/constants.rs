@@ -146,6 +146,7 @@ impl InputConstants {
             && self.9.is_empty()
             && self.10.is_empty()
             && self.11.is_empty()
+            && !self.12
     }
 
     fn apply_query(&mut self, query: &mut crate::plan::QueryPlan) -> Result<(), SQLError> {

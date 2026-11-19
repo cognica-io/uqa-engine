@@ -116,6 +116,27 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
         Ok(result)
     }
 
+    pub(super) fn retain_common_input(
+        &mut self,
+        expression: &ScalarExpr,
+        value: &ExpressionType,
+        target: Option<&super::ownership::AnalysisType>,
+    ) -> Result<(), SQLError> {
+        if self.scope.preserve_syntax_shape {
+            if let (Some(source), Some(target)) = (value.ty.as_deref(), target) {
+                if !crate::type_resolution::common_input_keeps_type(
+                    source,
+                    target,
+                    &self.scope.control(),
+                )? {
+                    self.parameters
+                        .retain_input_coercion(expression, target.clone())?;
+                }
+            }
+        }
+        Ok(())
+    }
+
     pub(super) fn case_expression(
         &mut self,
         base: Option<&ScalarExpr>,
@@ -179,6 +200,13 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
                 .is_some_and(|(position, _)| *position == index)
             {
                 selected = selected.combine(conditions.next().unwrap().1);
+            }
+            if let Some(expression) = when
+                .get(index)
+                .map(|(_, expression)| expression)
+                .or(else_branch)
+            {
+                self.retain_common_input(expression, value, ty.as_ref())?;
             }
             selected = selected.combine(value.derivation);
         }

@@ -186,7 +186,7 @@ fn input(
         let mut driver = construction::Driver::new(control)?;
         let owner = control.capture();
         let output = driver.work().submit(move |work| async move {
-            apply_node(constants, identity, row, owner, work)?.await
+            apply_node(constants, None, identity, row, owner, work)?.await
         })?;
         while driver.advance().await? {
             input.checkpoint().await?;
