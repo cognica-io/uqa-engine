@@ -14,10 +14,12 @@ use crate::{
     ast::{CreateFunction, FunctionBody, Statement},
     binding::RoutineParameterScope,
     catalog::regrole_dependencies::{regrole_constant_error, StoredRegroleConstants},
-    plan::{copy::capture_stored_with_footprint, UnifiedPlan},
+    plan::{copy::stored_plan::BoundPlan, UnifiedPlan},
     routines::{CompiledFunctionBody, RetainedRoutineValue, SharedRoutineBody},
     SQLError, SQLParam,
 };
+
+mod retention;
 use uqa_core::memory::{
     MemoryError, MemoryReservation, Produced, ProductionControl, ProductionVec,
 };
@@ -104,6 +106,7 @@ pub struct SQLStandardBodyCompilation {
     compiler: StatementCompiler,
     lowering: SQLRoutineLowering,
     statement_count: usize,
+    pending: Option<retention::Statement>,
     plans: Vec<UnifiedPlan>,
     memory: Option<MemoryReservation>,
     children: usize,
@@ -137,6 +140,7 @@ impl SQLStandardBodyCompilation {
                 preserve_target_expressions: false,
             },
             statement_count: statements.len(),
+            pending: None,
             plans,
             memory,
             children: 0,
@@ -155,20 +159,26 @@ impl SQLStandardBodyCompilation {
         control: &ProductionControl<'_>,
     ) -> Result<(), SQLError> {
         if roles.has_constants() {
-            if self.roles.is_empty() {
-                let count = self
-                    .statement_count
-                    .checked_add(1)
-                    .ok_or(MemoryError::SizeOverflow)?;
-                (self.roles, self.role_memory) = slots(count, control)?;
-            }
+            self.reserve_roles(control)?;
             self.roles.push(roles.retain(control)?);
         }
         Ok(())
     }
 
+    fn reserve_roles(&mut self, control: &ProductionControl<'_>) -> Result<(), SQLError> {
+        if self.roles.is_empty() {
+            let count = self
+                .statement_count
+                .checked_add(1)
+                .ok_or(MemoryError::SizeOverflow)?;
+            (self.roles, self.role_memory) = slots(count, control)?;
+        }
+        Ok(())
+    }
+
     pub fn next_statement(&self) -> Option<usize> {
-        (self.plans.len() < self.statement_count).then_some(self.plans.len())
+        (self.pending.is_none() && self.plans.len() < self.statement_count)
+            .then_some(self.plans.len())
     }
 
     /// Complete the ordinary binding and stored projection of the privately constructed statement. The original constructor allowance remains attached until that projection is installed.
@@ -180,7 +190,8 @@ impl SQLStandardBodyCompilation {
     ) -> Result<(), SQLError> {
         use crate::plan::MutableExecutablePlan;
         control.check()?;
-        let plan = match plan.into_mutable() {
+        let (plan, workspace) = plan.into_mutable();
+        let plan = match plan {
             MutableExecutablePlan::Query(query) => {
                 let namespace = context.catalog.stored_query_namespace();
                 let names = super::StoredQueryBindingContext {
@@ -216,35 +227,64 @@ impl SQLStandardBodyCompilation {
             &self.compiler.parameters,
             control,
         )?;
-        let (mut plan, lease) = plan.finish(control)?.into_parts();
-        let result = (|| {
-            self.compiler
-                .bind_calls(context, &mut plan, &binding, self.lowering)?;
-            self.record_plan(plan, control)
-        })();
-        drop(lease);
-        result
+        let mut plan = BoundPlan::new(plan.finish(control)?, Some(workspace));
+        self.compiler
+            .bind_calls(context, &mut plan, &binding, self.lowering)?;
+        self.record_plan(plan, control)
     }
 
     fn record_plan(
         &mut self,
-        mut plan: UnifiedPlan,
+        plan: BoundPlan,
         control: &ProductionControl<'_>,
     ) -> Result<(), SQLError> {
-        let mut roles = StoredRegroleConstants::default();
-        roles.collect_plan(&mut plan);
-        self.collect_roles(roles, control)?;
         if control.budget().is_some() {
-            let (retained, children) = capture_stored_with_footprint(&plan, control)?;
-            self.children = self
-                .children
-                .checked_add(children)
-                .ok_or(MemoryError::SizeOverflow)?;
-            let (retained, memory) = retained.into_parts();
-            self.memory = control.combine(self.memory.take(), memory);
-            plan = retained;
+            self.pending = Some(retention::Statement::new(
+                plan,
+                retention::Stage::Roles,
+                control,
+            )?);
+        } else {
+            let roles = crate::catalog::work::inline(StoredRegroleConstants::from_plan(
+                (&*plan).into(),
+                control,
+                &mut (),
+            ))?;
+            if roles.has_constants() {
+                self.reserve_roles(control)?;
+                self.roles.push(roles);
+            }
+            self.plans.push(plan.into_ordinary());
         }
-        self.plans.push(plan);
+        Ok(())
+    }
+
+    fn advance_pending(&mut self, control: &ProductionControl<'_>) -> Result<(), SQLError> {
+        let pending = self.pending.as_mut().expect("accepted statement");
+        match pending.advance(control)? {
+            None => {}
+            Some(retention::Completed::Roles(roles, source)) => {
+                if roles.has_constants() {
+                    self.reserve_roles(control)?;
+                    self.roles.push(roles);
+                }
+                self.pending = Some(retention::Statement::new(
+                    source,
+                    retention::Stage::Fields,
+                    control,
+                )?);
+            }
+            Some(retention::Completed::Plan(plan, children)) => {
+                self.children = self
+                    .children
+                    .checked_add(children)
+                    .ok_or(MemoryError::SizeOverflow)?;
+                let (plan, memory) = plan.into_parts();
+                self.memory = control.combine(self.memory.take(), memory);
+                self.plans.push(plan);
+                self.pending = None;
+            }
+        }
         Ok(())
     }
 
@@ -261,11 +301,15 @@ impl SQLStandardBodyCompilation {
                 "routine statement list changed during compilation".into(),
             ));
         }
+        if self.pending.is_some() {
+            self.advance_pending(control)?;
+            return Ok(false);
+        }
         if let Some(statement) = statements.get(self.plans.len()) {
             let plan = self
                 .compiler
                 .compile(context, statement.clone(), self.lowering)?;
-            self.record_plan(plan, control)?;
+            self.record_plan(BoundPlan::new(plan.into(), None), control)?;
             return Ok(false);
         }
         if let Some(roles) = self.roles.get(self.checked_roles) {

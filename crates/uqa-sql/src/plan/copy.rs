@@ -22,6 +22,7 @@ mod query;
 mod retained;
 mod source;
 mod specialization;
+pub(crate) mod stored_plan;
 mod syntax;
 pub(crate) use production::{CollectSyntax, SyntaxProduction, SyntaxVector};
 pub(crate) use specialization::copy_specialized_function;

@@ -89,9 +89,7 @@ impl<'s, 'c> Frame<'s, 'c> {
         lowering.checkpoint(work).await?;
         let (parts, retained_children) = match (mode, source) {
             (CopyMode::Capture, ScalarExpr::RetainedLiteral(literal)) => {
-                let (literal, bytes) = literal
-                    .capture_with_footprint(&control)
-                    .map_err(CatalogRetentionError::from)?;
+                let (literal, bytes) = literal.capture_with_footprint_from(&control, work).await?;
                 (Parts::Leaf(ScalarExpr::RetainedLiteral(literal)), bytes)
             }
             _ => (Parts::new_from(source, &mut lowering, work).await?, 0),
@@ -259,35 +257,46 @@ pub(super) fn immutable(
     source: &ScalarExpr,
     control: ProductionControl<'_>,
 ) -> Result<Produced<ScalarExpr>> {
-    Ok(retained(source, control, CopyMode::Immutable)?.0)
+    Ok(copy(source, control, CopyMode::Immutable)?
+        .into_captured(&control)?
+        .0)
 }
 
 pub(super) fn capture(
     source: &ScalarExpr,
     control: ProductionControl<'_>,
 ) -> Result<(Produced<ScalarExpr>, usize)> {
-    retained(source, control, CopyMode::Capture)
+    copy(source, control, CopyMode::Capture)?.into_captured(&control)
 }
 
-fn retained(
+pub(super) async fn capture_from<W: Work>(
     source: &ScalarExpr,
     control: ProductionControl<'_>,
-    mode: CopyMode,
-) -> Result<(Produced<ScalarExpr>, usize)> {
-    let Copied {
-        expression,
-        memory,
-        retained_children,
-    } = copy(source, control, mode)?;
-    Ok((
-        expression.finish(
-            match memory {
-                Memory::Ordinary => None,
-                Memory::Immutable(memory) => Some(memory),
-                Memory::Mutable(_) => unreachable!("immutable copy output"),
-            },
-            &control,
-        )?,
-        retained_children,
-    ))
+    work: &mut W,
+) -> std::result::Result<(Produced<ScalarExpr>, usize), W::Error>
+where
+    W::Error: From<CatalogRetentionError>,
+{
+    Ok(copy_from::<_, 0>(source, control, CopyMode::Capture, work)
+        .await?
+        .into_captured(&control)?)
+}
+
+impl Copied {
+    fn into_captured(
+        self,
+        control: &ProductionControl<'_>,
+    ) -> Result<(Produced<ScalarExpr>, usize)> {
+        Ok((
+            self.expression.finish(
+                match self.memory {
+                    Memory::Ordinary => None,
+                    Memory::Immutable(memory) => Some(memory),
+                    Memory::Mutable(_) => unreachable!("immutable copy output"),
+                },
+                control,
+            )?,
+            self.retained_children,
+        ))
+    }
 }

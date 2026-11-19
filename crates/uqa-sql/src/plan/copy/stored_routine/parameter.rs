@@ -11,11 +11,6 @@ use crate::{
     construction,
     plan::copy::syntax::native::{Field, Input},
 };
-use std::{
-    future::Future,
-    pin::Pin,
-    task::{Context, Poll, Waker},
-};
 use uqa_core::memory::{Produced, ProductionControl};
 
 type Parameter = (Produced<FunctionParam>, usize);
@@ -38,21 +33,11 @@ impl Capture {
                 let value = parameter.copy_from(&mut fields).await?;
                 fields.finish(value)
             })?;
-            while driver.advance().await? {
-                construction::suspend().await;
-            }
-            construction::receive(output).await
+            driver.complete(output).await?
         })?))
     }
 
     pub(super) fn advance(&mut self, control: &ProductionControl<'_>) -> Result<Option<Parameter>> {
-        let mut context = Context::from_waker(Waker::noop());
-        for _ in 0..32 {
-            control.check()?;
-            if let Poll::Ready(value) = Pin::new(&mut self.0).poll(&mut context) {
-                return value.map(Some);
-            }
-        }
-        Ok(None)
+        self.0.advance_window(control, 32)
     }
 }

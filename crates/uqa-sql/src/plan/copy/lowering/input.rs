@@ -50,6 +50,16 @@ impl<'s> TextInput<&'s str> for () {
     }
 }
 
+impl TextInput<&str> for crate::construction::Work<'_> {
+    async fn text(
+        &mut self,
+        source: &str,
+        control: ProductionControl<'_>,
+    ) -> Result<Produced<String>> {
+        crate::catalog::work::copy_text(self, source, &control).await
+    }
+}
+
 pub(super) trait SourceMetadataInput<Type, Binding> {
     fn ty(
         &mut self,

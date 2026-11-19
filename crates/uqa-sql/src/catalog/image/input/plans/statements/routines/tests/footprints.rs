@@ -117,3 +117,39 @@ fn restored_routine_capture_admits_each_retained_literal_tree_once() {
         assert_eq!(memory.used(), 0);
     }
 }
+
+#[test]
+fn restored_native_parameter_literals_keep_their_independent_payload_across_windows() {
+    use crate::routines::dependencies::RoutineDeclaration;
+    let token = CancellationToken::new();
+    let memory = MemoryBudget::new(4 << 20);
+    let input_memory = MemoryBudget::new(4 << 20);
+    let mut counts = Vec::new();
+    for bytes in [8, 512 << 10] {
+        let archived = encode(&registry(bytes, 0));
+        let restored =
+            RoutineRegistry::read_image(&mut archived.as_slice(), &input_memory, &token).unwrap();
+        let control = ProductionControl::new(&memory, &token, &token);
+        let mut capture = crate::plan::copy::StoredRoutineDefinition::new(
+            restored["public.f"][0].clone(),
+            &control,
+        )
+        .unwrap();
+        let mut windows = 0;
+        while capture.declaration().params.is_empty() {
+            capture.copy_next_field(&control).unwrap();
+            windows += 1;
+        }
+        let Some(Expr::RetainedLiteral(literal)) = &capture.declaration().params[0].default else {
+            panic!("native parameter")
+        };
+        let Some(Value::Str(text)) = literal.0.value.resident_value() else {
+            panic!("captured native payload")
+        };
+        assert_eq!(text.len(), bytes);
+        drop((capture, restored));
+        assert_eq!((memory.used(), input_memory.used()), (0, 0));
+        counts.push(windows);
+    }
+    assert!(counts[1] > counts[0], "{counts:?}");
+}

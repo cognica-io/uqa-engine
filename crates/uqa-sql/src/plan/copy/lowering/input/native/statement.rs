@@ -72,8 +72,14 @@ mod tests;
 
 impl RetainedExecutablePlan {
     /// Transfer the complete constructor, including each field's allocation leases, to the next SQL analysis owner.
-    pub(crate) fn into_mutable(self) -> MutableExecutablePlan {
-        self.0.take()
+    pub(crate) fn into_mutable(
+        self,
+    ) -> (
+        MutableExecutablePlan,
+        crate::plan::copy::stored_plan::OriginalWorkspace,
+    ) {
+        let workspace = crate::plan::copy::stored_plan::OriginalWorkspace(self.0.context().clone());
+        (self.0.take(), workspace)
     }
 
     pub(crate) async fn bind_relation_names_from_input(

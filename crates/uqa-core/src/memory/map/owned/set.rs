@@ -72,6 +72,23 @@ impl<K: Ord> OwnedSet<K> {
         self.0.insert(key, ()).is_none()
     }
 
+    /// Insert a produced key using the caller's suspended comparison. An ordinary key leaves node admission to its enclosing owner, as in `insert`.
+    pub async fn insert_produced_key_from<C>(
+        &mut self,
+        key: crate::memory::Produced<K>,
+        input: &mut C,
+    ) -> Result<bool, C::Error>
+    where
+        C: crate::memory::MapKeyInput<K>,
+        C::Error: From<crate::memory::MemoryError>,
+    {
+        Ok(self
+            .0
+            .insert_produced_key_from(key, (), input)
+            .await?
+            .is_none())
+    }
+
     /// Admit a new set node before allocation; duplicate identities retain their existing owner.
     pub fn insert_budgeted(
         &mut self,

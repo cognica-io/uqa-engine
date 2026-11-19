@@ -32,6 +32,24 @@ pub(crate) struct RetainedFuture<F: Future + ?Sized> {
 
 pub(crate) type Read<'a, T> = RetainedFuture<dyn Future<Output = T> + Send + 'a>;
 
+impl<T, E: From<uqa_core::ValueRetentionError>> Read<'_, std::result::Result<T, E>> {
+    /// Poll a finite number of constructor steps with the active operation's cancellation.
+    pub(crate) fn advance_window(
+        &mut self,
+        control: &ProductionControl<'_>,
+        steps: usize,
+    ) -> std::result::Result<Option<T>, E> {
+        let mut context = std::task::Context::from_waker(std::task::Waker::noop());
+        for _ in 0..steps {
+            control.check()?;
+            if let Poll::Ready(value) = Pin::new(&mut *self).poll(&mut context) {
+                return value.map(Some);
+            }
+        }
+        Ok(None)
+    }
+}
+
 pub(crate) fn retain<F: Future>(
     control: ProductionControl<'_>,
     future: F,
@@ -194,6 +212,14 @@ impl<'a> Driver<'a> {
             queue: Arc::downgrade(&self.queue),
             control: self.control,
         }
+    }
+
+    /// Drive the original typed constructors on their caller's work windows and transfer the completed output.
+    pub(crate) async fn complete<T>(&mut self, output: Output<T>) -> Result<T> {
+        while self.advance().await? {
+            suspend().await;
+        }
+        Ok(receive(output).await)
     }
 
     /// Return at the next work boundary, or finish after every constructor has returned. The enclosing native input owns suspension, cancellation and operation publication.

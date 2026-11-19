@@ -30,6 +30,17 @@ impl ScalarExpr {
         iterative::capture(self, *control)
     }
 
+    pub(in crate::plan) async fn capture_with_footprint_from<W: Work>(
+        &self,
+        control: &ProductionControl<'_>,
+        work: &mut W,
+    ) -> std::result::Result<(Produced<Self>, usize), W::Error>
+    where
+        W::Error: From<crate::schema::retention::CatalogRetentionError>,
+    {
+        iterative::capture_from(self, *control, work).await
+    }
+
     /// Copy into a mutable scalar owner with independent direct and child reservations. Iterative constructors preserve field order, destination admission and query-arena identities in both ordinary and controlled modes.
     pub fn copy_for_rewrite(&self, control: &ProductionControl<'_>) -> Result<OwnedScalarExpr> {
         iterative::mutable(self, *control)

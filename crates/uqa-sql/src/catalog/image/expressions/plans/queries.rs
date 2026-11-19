@@ -11,58 +11,73 @@ use crate::plan::{
     TableFunctionPlan,
 };
 
-image_struct!(QueryPlan { relations_bound, ctes, root } skip {
+projected_struct!(recursive, QueryPlan { relations_bound, ctes, root } skip {
     analyzed_output, analyzed_source, analyzed_grouping, relation_privilege_subject,
 });
-image_struct!(QueryBlockPlan {
+projected_struct!(recursive, QueryBlockPlan {
     windows, projections, privilege_columns, from, r#where, compute,
     group_by, grouping_sets, group_distinct, having, order_by, limit,
     with_ties, offset, distinct, distinct_on, subqueries, access, locking,
 } skip { deferred_outer_rewrites });
-image_struct!(CtePlan {
-    name,
-    columns,
-    recursive,
-    materialization,
-    search,
-    cycle,
-    body
-});
-image_struct!(CteSearchPlan {
-    columns,
-    breadth_first,
-    sequence_column
-});
-image_struct!(CteCyclePlan {
-    columns,
-    mark_column,
-    mark_value,
-    mark_default,
-    path_column
-});
-image_struct!(ProjectionPlan { expr, alias });
-image_struct!(OrderPlan {
-    expr,
-    descending,
-    nulls
-});
+projected_struct!(
+    inline,
+    CtePlan {
+        name,
+        columns,
+        recursive,
+        materialization,
+        search,
+        cycle,
+        body
+    }
+);
+projected_struct!(
+    inline,
+    CteSearchPlan {
+        columns,
+        breadth_first,
+        sequence_column
+    }
+);
+projected_struct!(
+    inline,
+    CteCyclePlan {
+        columns,
+        mark_column,
+        mark_value,
+        mark_default,
+        path_column
+    }
+);
+projected_struct!(inline, ProjectionPlan { expr, alias });
+projected_struct!(
+    inline,
+    OrderPlan {
+        expr,
+        descending,
+        nulls
+    }
+);
 image_struct!(ExpressionPlan { scalar, subqueries });
-image_struct!(TableFunctionPlan {
-    name,
-    binding,
-    output_name,
-    relations,
-    args,
-    column_aliases,
-    column_types,
-});
+projected_struct!(
+    inline,
+    TableFunctionPlan {
+        name,
+        binding,
+        output_name,
+        relations,
+        args,
+        column_aliases,
+        column_types,
+    }
+);
 
-image_enum!(RelationalPlan {
+projected_enum!(inline, RelationalPlan {
     0 => QueryBlock(value),
     1 => SetOp { kind, all, left, right, order_by, limit, with_ties, offset, subqueries },
     2 => Values { rows, subqueries },
 });
-image_enum!(CtePlanBody { 0 => Query(value), 1 => Command(value) });
-image_enum!(AccessPathPlan { 0 => Row, 1 => OperatorTree { score_limit_pushdown }, 2 => Hybrid });
-image_enum!(ComputePlan { 0 => Project, 1 => Aggregate, 2 => Window });
-image_enum!(JoinExecutionStrategy { 0 => Auto, 1 => Hash });
+projected_enum!(inline, CtePlanBody { 0 => Query(value), 1 => Command(value) });
+projected_enum!(inline, AccessPathPlan { 0 => Row, 1 => OperatorTree { score_limit_pushdown }, 2 => Hybrid });
+projected_enum!(inline, ComputePlan { 0 => Project, 1 => Aggregate, 2 => Window });
+projected_enum!(inline, JoinExecutionStrategy { 0 => Auto, 1 => Hash });

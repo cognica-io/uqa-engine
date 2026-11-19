@@ -15,39 +15,51 @@ use crate::{
     ScalarFrameBound, ScalarOrder, ScalarWindowFrame, ScalarWindowSpec,
 };
 
-image_struct!(OperatorJoinRelations { left, right });
-image_struct!(JoinUsing { columns, alias });
-image_struct!(LockingClause {
-    strength,
-    wait,
-    relations
-});
+projected_struct!(inline, OperatorJoinRelations { left, right });
+projected_struct!(inline, JoinUsing { columns, alias });
+projected_struct!(
+    inline,
+    LockingClause {
+        strength,
+        wait,
+        relations
+    }
+);
 image_struct!(ReturningAliases {
     old,
     new,
     old_explicit,
     new_explicit
 });
-image_struct!(WindowDefinition<ScalarWindowSpec> { name, inherited, spec });
-image_struct!(ScalarWindowSpec {
-    definition,
-    partition_by,
-    order_by,
-    frame
-});
-image_struct!(ScalarOrder {
-    expr,
-    descending,
-    nulls
-});
-image_struct!(ScalarWindowFrame {
-    mode,
-    start,
-    end,
-    between,
-    exclusion
-});
-image_enum!(ScalarFrameBound {
+projected_struct!(inline, WindowDefinition<ScalarWindowSpec> { name, inherited, spec });
+projected_struct!(
+    inline,
+    ScalarWindowSpec {
+        definition,
+        partition_by,
+        order_by,
+        frame
+    }
+);
+projected_struct!(
+    inline,
+    ScalarOrder {
+        expr,
+        descending,
+        nulls
+    }
+);
+projected_struct!(
+    inline,
+    ScalarWindowFrame {
+        mode,
+        start,
+        end,
+        between,
+        exclusion
+    }
+);
+projected_enum!(inline, ScalarFrameBound {
     0 => UnboundedPreceding, 1 => UnboundedFollowing, 2 => CurrentRow,
     3 => Preceding(value), 4 => Following(value),
 });

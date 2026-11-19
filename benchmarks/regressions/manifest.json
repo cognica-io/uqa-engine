@@ -52063,6 +52063,58 @@
     {
       "package": "uqa-sql",
       "kind": "lib",
+      "test": "bound_routine_projection_copies_values_at_the_original_nested_source_and_mutation_slots",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/stored_plan/tests.rs",
+      "capability": "Stored routine restoration",
+      "workload": "Project two and 4,096 VALUES rows into stored nested queries and INSERT sources.",
+      "invariant": "Every group of construction steps bounds physical allocations, and stored output and its retained footprint match ordinary compilation within the original allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "bound_routine_projection_bounds_wide_mutation_assignments_and_merge_branches",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/stored_plan/tests.rs",
+      "capability": "Stored routine restoration",
+      "workload": "Project UPDATE statements with two and 1,024 columns and MERGE statements with two and 4,096 conditional branches in their stored order.",
+      "invariant": "Larger mutation fields consume separate work windows while each window bounds allocations above the final contiguous vector slots.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "bound_routine_projection_releases_original_literals_and_partial_fields_on_stop",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/stored_plan/tests.rs",
+      "capability": "Stored routine restoration",
+      "workload": "Interrupt canonical plan capture around a large natively retained literal by cancellation, memory denial and abandonment.",
+      "invariant": "The original retained input remains usable and each independently admitted unpublished field releases its memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "restored_native_parameter_literals_keep_their_independent_payload_across_windows",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/plans/statements/routines/tests/footprints.rs",
+      "capability": "Stored routine restoration",
+      "workload": "Capture two sizes of retained UTF-8 parameter literals decoded from native catalog input.",
+      "invariant": "A larger payload requires additional work windows and the completed declaration independently owns its exact text and retained footprint.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
       "test": "stored_parameter_default_copies_wide_and_nested_native_expressions_across_windows",
       "cases": 1,
       "source": "crates/uqa-sql/src/plan/copy/stored_routine/tests/defaults.rs",

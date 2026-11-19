@@ -39,17 +39,7 @@ impl Work<'_, '_, '_> {
         qualifier: &str,
         name: &str,
     ) -> Result<Produced<ColumnIdentity>, SQLError> {
-        let qualifier = self.boxed_text(qualifier).await?;
-        let name = self.boxed_text(name).await?;
-        let (qualifier, qualifier_memory) = qualifier.into_parts();
-        let (column, column_memory) = name.into_parts();
-        Ok(self.control.finish(
-            ColumnIdentity {
-                qualifier: Some(qualifier),
-                column,
-            },
-            self.control.combine(qualifier_memory, column_memory),
-        )?)
+        ColumnIdentity::copy_from_work(Some(qualifier), name, &self.control, self.input).await
     }
 
     pub async fn compare_text(&mut self, left: &str, right: &str) -> Result<Ordering, SQLError> {
@@ -113,17 +103,12 @@ impl MapKeyInput<ColumnIdentity> for Work<'_, '_, '_> {
         left: &ColumnIdentity,
         right: &ColumnIdentity,
     ) -> Result<Ordering, SQLError> {
-        self.checkpoint().await?;
-        let qualifier = match (left.qualifier(), right.qualifier()) {
-            (None, None) => Ordering::Equal,
-            (None, Some(_)) => Ordering::Less,
-            (Some(_), None) => Ordering::Greater,
-            (Some(left), Some(right)) => self.compare_text(left, right).await?,
-        };
-        if qualifier.is_ne() {
-            return Ok(qualifier);
+        crate::catalog::work::ReferenceWork {
+            control: &self.control,
+            work: self.input,
         }
-        self.compare_text(left.column(), right.column()).await
+        .compare(left, right)
+        .await
     }
 }
 
