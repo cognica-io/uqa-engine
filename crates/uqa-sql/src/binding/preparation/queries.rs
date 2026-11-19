@@ -742,12 +742,11 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
             columns.push(AnalysisVec::new(&control), &control)?;
         }
         let empty;
-        let input = match outer {
-            Some(row) => row,
-            None => {
-                empty = RowSchema::empty_with_control(&control)?;
-                &empty
-            }
+        let input = if let Some(row) = outer {
+            row
+        } else {
+            empty = RowSchema::empty_with_control(&control)?;
+            &empty
         };
         for row in rows {
             input_work.checkpoint().await?;

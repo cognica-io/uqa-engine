@@ -480,7 +480,6 @@ pub(crate) async fn validate_stored_rule_condition_with_work<
     scope.stored_expression_outer = Some(input.clone());
     scope.stored_whole_rows = whole_rows;
     let mut outputs = crate::production::Buffer::new(control);
-    let queries;
     let mut analysis = Preparation {
         routines,
         scope: &mut scope,
@@ -494,7 +493,7 @@ pub(crate) async fn validate_stored_rule_condition_with_work<
             control,
         )?;
     }
-    queries = super::type_resolution::BoundConditionQueries {
+    let queries = super::type_resolution::BoundConditionQueries {
         plans: &expression.subqueries,
         input,
         schemas: Some(&outputs),
