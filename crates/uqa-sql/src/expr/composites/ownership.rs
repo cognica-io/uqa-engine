@@ -55,20 +55,88 @@ impl std::ops::Deref for OwnedCompositeTypeDescriptor {
     }
 }
 
+/// A selected composite descriptor or the native field producer pinned to its source catalog.
+pub struct CompositeDescriptorInput<'a>(DescriptorInput<'a>);
+
+enum DescriptorInput<'a> {
+    Ready(Option<OwnedCompositeTypeDescriptor>),
+    Native(crate::construction::Read<'a, Result<Option<OwnedCompositeTypeDescriptor>, SQLError>>),
+}
+
+impl<'a> CompositeDescriptorInput<'a> {
+    pub fn ready(value: Option<OwnedCompositeTypeDescriptor>) -> Self {
+        Self(DescriptorInput::Ready(value))
+    }
+
+    /// Retain just the selected native reader, admitted under the caller's operation.
+    pub fn from_catalog<F>(
+        control: &ProductionControl<'_>,
+        create: impl FnOnce(crate::catalog::CatalogSteps) -> F,
+    ) -> Result<Self, SQLError>
+    where
+        F: std::future::Future<Output = Result<Option<OwnedCompositeTypeDescriptor>, SQLError>>
+            + Send
+            + 'a,
+    {
+        Ok(Self(DescriptorInput::Native(
+            crate::catalog::CatalogSteps::read(control, create)?,
+        )))
+    }
+
+    pub(crate) async fn required<W: crate::catalog::CatalogWork + Send>(
+        self,
+        type_oid: u32,
+        control: &ProductionControl<'_>,
+        work: &mut W,
+    ) -> Result<OwnedCompositeTypeDescriptor, SQLError> {
+        let value = match self.0 {
+            DescriptorInput::Ready(value) => value,
+            DescriptorInput::Native(mut reader) => loop {
+                if let Some(result) = reader.advance_window(control, 1)? {
+                    break result;
+                }
+                work.checkpoint().await?;
+            },
+        };
+        required(type_oid, value)
+    }
+}
+
+fn source(
+    catalog: Option<&dyn CompositeTypeCatalog>,
+) -> Result<&dyn CompositeTypeCatalog, SQLError> {
+    catalog.ok_or_else(|| SQLError::Internal("composite type catalog is unavailable".into()))
+}
+
+fn required(
+    type_oid: u32,
+    value: Option<OwnedCompositeTypeDescriptor>,
+) -> Result<OwnedCompositeTypeDescriptor, SQLError> {
+    value.ok_or_else(|| SQLError::Routine {
+        sqlstate: "42704".into(),
+        message: format!("type with OID {type_oid} does not exist"),
+    })
+}
+
+pub(crate) fn begin_descriptor<'a>(
+    catalog: Option<&'a dyn CompositeTypeCatalog>,
+    type_oid: u32,
+    control: &ProductionControl<'_>,
+) -> Result<CompositeDescriptorInput<'a>, SQLError> {
+    control.check()?;
+    source(catalog)?.begin_composite_type(type_oid, control)
+}
+
 pub fn descriptor_with_control(
     catalog: Option<&dyn CompositeTypeCatalog>,
     type_oid: u32,
     control: &ProductionControl<'_>,
 ) -> Result<OwnedCompositeTypeDescriptor, SQLError> {
     control.check()?;
-    let catalog = catalog
-        .ok_or_else(|| SQLError::Internal("composite type catalog is unavailable".into()))?;
-    catalog
-        .composite_type_with_control(type_oid, control)?
-        .ok_or_else(|| SQLError::Routine {
-            sqlstate: "42704".into(),
-            message: format!("type with OID {type_oid} does not exist"),
-        })
+    required(
+        type_oid,
+        source(catalog)?.composite_type_with_control(type_oid, control)?,
+    )
 }
 
 #[cfg(test)]

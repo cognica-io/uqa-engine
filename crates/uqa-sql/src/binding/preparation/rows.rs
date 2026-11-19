@@ -68,11 +68,21 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
         let ColumnType::Composite(reference) = base else {
             return Ok(());
         };
-        let descriptor = crate::expr::composites::descriptor_with_control(
-            self.routines.composite_types(),
-            reference.oid,
-            &self.scope.control(),
-        )?;
+        let descriptor = if W::MAY_SUSPEND {
+            crate::expr::composites::begin_descriptor(
+                self.routines.composite_types(),
+                reference.oid,
+                &control,
+            )?
+            .required(reference.oid, &control, input.work)
+            .await?
+        } else {
+            crate::expr::composites::descriptor_with_control(
+                self.routines.composite_types(),
+                reference.oid,
+                &control,
+            )?
+        };
         for (index, attribute) in descriptor.attributes.iter().enumerate() {
             input.checkpoint().await?;
             let Some(field) = fields.get_mut(index) else {

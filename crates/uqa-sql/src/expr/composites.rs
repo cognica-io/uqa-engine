@@ -30,7 +30,10 @@ pub(crate) mod retained;
 mod retention;
 pub use changes::{apply_attribute_change, type_contains_composite, AttributeChange};
 pub use input::parse_record_fields;
-pub use ownership::{descriptor_with_control, OwnedCompositeTypeDescriptor};
+pub(crate) use ownership::begin_descriptor;
+pub use ownership::{
+    descriptor_with_control, CompositeDescriptorInput, OwnedCompositeTypeDescriptor,
+};
 pub use retained::CompositeConstantSource;
 pub use retention::{flatten_value_with_control, retain_value_with_control};
 
@@ -142,6 +145,17 @@ impl CompositeTypeDescriptor {
 pub trait CompositeTypeCatalog {
     /// The attributes of one composite type, or `None` when the catalog has no such type.
     fn composite_type(&self, type_oid: u32) -> Result<Option<Arc<CompositeTypeDescriptor>>>;
+
+    /// Select the descriptor from this catalog generation for a caller that may suspend. An external catalog may return its existing controlled result immediately.
+    fn begin_composite_type(
+        &self,
+        type_oid: u32,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<CompositeDescriptorInput<'_>> {
+        Ok(CompositeDescriptorInput::ready(
+            self.composite_type_with_control(type_oid, control)?,
+        ))
+    }
 
     /// External catalogs own their callback construction; the default copies exposed metadata under the consumer's control. Native catalogs select existing retained descriptors or admit each selected field before construction.
     fn composite_type_with_control(

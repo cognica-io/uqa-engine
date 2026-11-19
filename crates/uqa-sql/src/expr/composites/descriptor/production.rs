@@ -19,18 +19,51 @@ impl CompositeTypeDescriptor {
         dropped: impl IntoIterator<Item = Result<DroppedCompositeAttribute, SQLError>>,
         control: &ProductionControl<'_>,
     ) -> Result<Produced<Self>, SQLError> {
+        crate::catalog::work::inline(Self::from_metadata_with_work(
+            type_oid,
+            relation_oid,
+            attributes,
+            dropped,
+            control,
+            &mut (),
+        ))
+    }
+
+    /// Copy dropped and live fields in catalog order, suspending before reading the next field.
+    pub async fn from_metadata_with_work<'a, W: crate::catalog::CatalogWork + Send>(
+        type_oid: u32,
+        relation_oid: u32,
+        attributes: impl IntoIterator<
+            Item = Result<(&'a str, &'a ColumnType, i16, Option<u32>), SQLError>,
+        >,
+        dropped: impl IntoIterator<Item = Result<DroppedCompositeAttribute, SQLError>>,
+        control: &ProductionControl<'_>,
+        work: &mut W,
+    ) -> Result<Produced<Self>, SQLError> {
         control.check()?;
         let mut removed = ProductionVec::new(*control);
-        for attribute in dropped {
-            control.check()?;
+        let mut input = crate::catalog::work::ReferenceWork { control, work };
+        let mut dropped = dropped.into_iter();
+        loop {
+            input.checkpoint().await?;
+            let Some(attribute) = dropped.next() else {
+                break;
+            };
             removed.push_copy(attribute?)?;
         }
         let mut fields = ProductionVec::new(*control);
-        for attribute in attributes {
-            control.check()?;
+        let mut attributes = attributes.into_iter();
+        loop {
+            input.checkpoint().await?;
+            let Some(attribute) = attributes.next() else {
+                break;
+            };
             let (name, ty, number, collation_oid) = attribute?;
-            let (name, name_memory) = control.copy_text(name)?.into_parts();
-            let (ty, type_memory) = ty.clone_with_control(control)?.into_parts();
+            let (name, name_memory) = input.work.text(name, control).await?.into_parts();
+            let (ty, type_memory) = ty
+                .clone_with_input_work(control, &mut input)
+                .await?
+                .into_parts();
             fields.push_produced(control.finish(
                 CompositeAttribute {
                     name,

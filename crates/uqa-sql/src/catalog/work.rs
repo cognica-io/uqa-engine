@@ -49,6 +49,22 @@ pub trait Work {
 /// Work checkpoints for a catalog operation that already owns its typed input.
 pub struct CatalogSteps(());
 
+impl CatalogSteps {
+    pub(crate) fn read<'a, T, F>(
+        control: &ProductionControl<'_>,
+        create: impl FnOnce(Self) -> F,
+    ) -> Result<crate::construction::Read<'a, Result<T, SQLError>>, SQLError>
+    where
+        F: Future<Output = Result<T, SQLError>> + Send + 'a,
+    {
+        control.check()?;
+        Ok(crate::construction::Read::with_constructor(
+            *control,
+            || create(Self(())),
+        )?)
+    }
+}
+
 impl Work for CatalogSteps {
     async fn checkpoint(&mut self) -> Result<(), ImageIoError> {
         crate::construction::suspend().await;
@@ -75,11 +91,7 @@ impl CatalogValidation {
     where
         F: Future<Output = Result<(), SQLError>> + Send + 'static,
     {
-        control.check()?;
-        Ok(Self(crate::construction::Read::with_constructor(
-            *control,
-            || create(CatalogSteps(())),
-        )?))
+        Ok(Self(CatalogSteps::read(control, create)?))
     }
 
     pub fn advance(
