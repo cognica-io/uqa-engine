@@ -27,12 +27,12 @@ pub fn validate_condition(
     ))
 }
 
-pub async fn validate_condition_with_work(
+pub async fn validate_condition_with_work<W: crate::catalog::CatalogWork + Send>(
     rule: &StoredRule,
     row: &RowSchema,
     context: &NativeScalarContext<'_, '_>,
     control: &ProductionControl<'_>,
-    work: &mut (impl crate::catalog::CatalogWork + Send),
+    work: &mut W,
 ) -> Result<(), SQLError> {
     control.check()?;
     let Some((plan, binding)) = super::condition_parts(rule)? else {
@@ -103,14 +103,22 @@ pub async fn validate_condition_with_work(
     {
         return Err(super::invalid("set-valued rule condition"));
     }
-    let whole_rows = if observer.whole_row {
-        [
-            binding.current_whole_row("old", &rule.definition.table, row, control)?,
-            binding.current_whole_row("new", &rule.definition.table, row, control)?,
-        ]
-    } else {
-        [None, None]
-    };
+    let mut whole_rows = [None, None];
+    if observer.whole_row {
+        for (result, side) in whole_rows.iter_mut().zip(["old", "new"]) {
+            *result = crate::catalog::work::nested!(
+                W::MAY_SUSPEND,
+                control,
+                binding.current_whole_row_with_work(
+                    side,
+                    &rule.definition.table,
+                    row,
+                    control,
+                    work
+                )
+            )?;
+        }
+    }
     crate::binding::validate_stored_rule_condition_with_work(
         context.routines,
         plan,

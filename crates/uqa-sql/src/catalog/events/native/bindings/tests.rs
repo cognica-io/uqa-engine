@@ -294,9 +294,14 @@ fn captured_rule_row_images_preserve_side_names_types_and_original_slots() {
     }
 }
 
-#[test]
-fn captured_rule_row_construction_yields_while_building_qualified_attributes() {
+enum CapturedRows {
+    QualifiedAttributes,
+    WholeRow,
+}
+
+fn check_row_windows(selected: CapturedRows) {
     use crate::{ast::RuleEvent, catalog::CatalogValidation};
+    let whole_row = matches!(selected, CapturedRows::WholeRow);
     let drive = |width: usize, stop: Option<usize>| {
         let columns: Vec<_> = (0..width).map(|idx| format!("field_{idx}")).collect();
         let ty = ColumnType::Integer;
@@ -312,6 +317,38 @@ fn captured_rule_row_construction_yields_while_building_qualified_attributes() {
         let control = ProductionControl::new(&memory, &token, &token);
         let owner = control.capture();
         let mut reader = CatalogValidation::new(&control, |mut work| async move {
+            if whole_row {
+                let current = binding
+                    .current_whole_row_with_work(
+                        "old",
+                        "public.items",
+                        &row,
+                        &owner.control(),
+                        &mut work,
+                    )
+                    .await?
+                    .expect("captured OLD row");
+                let ScalarExpr::Cast { expr, ty, .. } = &*current else {
+                    panic!("typed event row")
+                };
+                assert_eq!(ty, "public.items");
+                let ScalarExpr::Row(fields) = &**expr else {
+                    panic!("original fields")
+                };
+                assert_eq!(fields.len(), width);
+                for (name, field) in columns.iter().zip(fields) {
+                    assert_eq!(*field, ScalarExpr::qualified_column("old", name.clone()));
+                }
+                return current
+                    .retire_from(
+                        &owner.control(),
+                        &mut crate::catalog::work::ReferenceWork {
+                            control: &owner.control(),
+                            work: &mut work,
+                        },
+                    )
+                    .await;
+            }
             let image = binding
                 .captured_row_schema_with_work(&row, &owner.control(), &mut work)
                 .await?;
@@ -356,4 +393,17 @@ fn captured_rule_row_construction_yields_while_building_qualified_attributes() {
         "one column {short}, 64 columns {long}"
     );
     drive(64, Some((short + long) / 2));
+    if whole_row {
+        drive(64, Some(long - 2));
+    }
+}
+
+#[test]
+fn captured_rule_row_construction_yields_while_building_qualified_attributes() {
+    check_row_windows(CapturedRows::QualifiedAttributes);
+}
+
+#[test]
+fn captured_whole_rule_rows_retain_their_live_fields_across_work_windows() {
+    check_row_windows(CapturedRows::WholeRow);
 }

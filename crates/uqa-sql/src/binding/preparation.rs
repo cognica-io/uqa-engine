@@ -515,6 +515,18 @@ pub(crate) async fn validate_stored_rule_condition_with_work<
         .validate_expression_with_work(&expression.scalar, work)
         .await?;
     control.check()?;
+    drop(analysis);
+    for row in scope.stored_whole_rows.into_iter().flatten() {
+        let mut input = crate::catalog::work::ReferenceWork { control, work };
+        crate::catalog::work::nested!(
+            W::MAY_SUSPEND,
+            control,
+            row.retire_from(control, &mut input)
+        )?;
+    }
+    for output in outputs.into_iter().flatten() {
+        crate::catalog::work::nested!(W::MAY_SUSPEND, control, output.retire_from(control, work))?;
+    }
     Ok(())
 }
 

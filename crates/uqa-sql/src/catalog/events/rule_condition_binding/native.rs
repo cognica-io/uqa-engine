@@ -52,12 +52,13 @@ impl RuleConditionBinding {
         .await
     }
 
-    pub(crate) fn current_whole_row(
+    pub(crate) async fn current_whole_row_with_work<W: Work + Send>(
         &self,
         side: &str,
         table: &str,
         row: &RowSchema,
         control: &ProductionControl<'_>,
+        work: &mut W,
     ) -> Result<Option<OwnedScalarExpr>, SQLError> {
         let present = match side {
             "old" => self.old_relation.is_some(),
@@ -69,18 +70,25 @@ impl RuleConditionBinding {
         }
         let mut columns = crate::production::Buffer::new(control);
         for (index, name) in row.columns().iter().enumerate() {
+            work.checkpoint().await?;
             columns.push(
                 OwnedScalarExpr::column(
-                    control.copy_text(row.public_name(index).unwrap_or(name))?,
-                    Some(control.copy_text(side)?),
+                    work.text(row.public_name(index).unwrap_or(name), control)
+                        .await?,
+                    Some(work.text(side, control).await?),
                     control,
                 )?,
                 control,
             )?;
         }
         Ok(Some(OwnedScalarExpr::cast(
-            OwnedScalarExpr::row(columns.into_iter(), control)?,
-            control.copy_text(table)?,
+            OwnedScalarExpr::row_from(
+                columns.into_iter(),
+                control,
+                &mut ReferenceWork { control, work },
+            )
+            .await?,
+            work.text(table, control).await?,
             false,
             control,
         )?))
