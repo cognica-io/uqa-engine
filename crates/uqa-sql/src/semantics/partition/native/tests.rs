@@ -309,6 +309,15 @@ fn native_partition_constant_carriers_keep_array_rank_and_original_domains() {
     let memory = MemoryBudget::new(1 << 20);
     let token = CancellationToken::new();
     let control = ProductionControl::new(&memory, &token, &token);
+    let validate = |value: &Value, ty: &ColumnType| {
+        crate::catalog::work::inline(super::values::validate(
+            value,
+            ty,
+            &|| None,
+            &control,
+            &mut (),
+        ))
+    };
     let leaf = || {
         Value::Array(
             uqa_core::ArrayValue::with_lower_bounds(vec![Value::Int(1), Value::Null], vec![3])
@@ -321,7 +330,7 @@ fn native_partition_constant_carriers_keep_array_rank_and_original_domains() {
             .with_element_type_oid(Some(23)),
     );
     let ty = ColumnType::Array(Box::new(ColumnType::Integer));
-    super::values::validate(&matrix, &ty, None, &control).unwrap();
+    validate(&matrix, &ty).unwrap();
     let domain = ColumnType::Domain {
         schema: "public".into(),
         name: "array_domain".into(),
@@ -335,17 +344,11 @@ fn native_partition_constant_carriers_keep_array_rank_and_original_domains() {
             .unwrap()
             .with_element_type_oid(Some(50000)),
     );
-    super::values::validate(
-        &atomic,
-        &ColumnType::Array(Box::new(domain)),
-        None,
-        &control,
-    )
-    .unwrap();
-    assert!(super::values::validate(&atomic, &ty, None, &control).is_err());
+    validate(&atomic, &ColumnType::Array(Box::new(domain))).unwrap();
+    assert!(validate(&atomic, &ty).is_err());
     let wrong_rank =
         Value::Array(uqa_core::ArrayValue::with_lower_bounds(vec![leaf()], vec![1]).unwrap());
-    assert!(super::values::validate(&wrong_rank, &ty, None, &control).is_err());
+    assert!(validate(&wrong_rank, &ty).is_err());
     assert_eq!(memory.used(), 0);
 }
 
