@@ -9,8 +9,8 @@
 use crate::{
     ast::ColumnDef,
     catalog::{
-        regobject::{numeric_regobject_oid, NumericRegobjectOid},
-        resolution::{bound_relation_identity_with_control, bound_relation_identity_with_work},
+        regobject::{numeric_regobject_oid_with_work, NumericRegobjectOid},
+        resolution::bound_relation_identity_with_work,
         work::{inline, retire_entries, ReferenceWork, Work},
     },
     SQLError,
@@ -28,14 +28,25 @@ pub fn function_relation(
     reference: &str,
     control: &ProductionControl<'_>,
 ) -> Result<Option<Produced<RelationIdentity>>, SQLError> {
+    inline(function_relation_with_work(reference, control, &mut ()))
+}
+
+/// Read the same numeric input or canonical named relation under the invoking work window.
+pub async fn function_relation_with_work(
+    reference: &str,
+    control: &ProductionControl<'_>,
+    work: &mut (impl Work + Send),
+) -> Result<Option<Produced<RelationIdentity>>, SQLError> {
     control.check()?;
     if matches!(
-        numeric_regobject_oid(reference),
+        numeric_regobject_oid_with_work(reference, control, work).await?,
         NumericRegobjectOid::Valid(_)
     ) {
         Ok(None)
     } else {
-        bound_relation_identity_with_control(reference, control).map(Some)
+        bound_relation_identity_with_work(reference, control, work)
+            .await
+            .map(Some)
     }
 }
 

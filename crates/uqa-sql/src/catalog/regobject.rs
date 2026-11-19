@@ -16,24 +16,52 @@ pub enum NumericRegobjectOid {
 
 /// `parseDashOrOid` recognizes `-` and digit strings before name lookup. Digit strings retain `oidin`'s radix and uint32 range; signs and whitespace belong to the name path.
 pub fn numeric_regobject_oid(input: &str) -> NumericRegobjectOid {
+    super::work::inline(numeric_regobject_oid_with_work(
+        input,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+        &mut (),
+    ))
+    .expect("ordinary OID parsing has no cancellation or allocation")
+}
+
+pub(crate) async fn numeric_regobject_oid_with_work(
+    input: &str,
+    control: &uqa_core::memory::ProductionControl<'_>,
+    work: &mut (impl super::work::Work + Send),
+) -> Result<NumericRegobjectOid, crate::SQLError> {
     if input == "-" {
-        return NumericRegobjectOid::Valid(0);
+        return Ok(NumericRegobjectOid::Valid(0));
     }
-    if input.is_empty() || !input.bytes().all(|byte| byte.is_ascii_digit()) {
-        return NumericRegobjectOid::NotNumeric;
+    if input.is_empty() {
+        return Ok(NumericRegobjectOid::NotNumeric);
+    }
+    let mut leading_zeros = 0;
+    let mut offset = 0;
+    for part in input.as_bytes().chunks(4096) {
+        work.checkpoint().await?;
+        control.check()?;
+        if !part.iter().all(u8::is_ascii_digit) {
+            return Ok(NumericRegobjectOid::NotNumeric);
+        }
+        if leading_zeros == offset {
+            leading_zeros += part.iter().take_while(|byte| **byte == b'0').count();
+        }
+        offset += part.len();
     }
     let radix = if input.len() > 1 && input.starts_with('0') {
         8
     } else {
         10
     };
-    match u32::from_str_radix(input, radix) {
+    // Without the leading zeros the standard parser reaches a value, invalid digit or u32 overflow within its fixed precision.
+    let significant = &input[leading_zeros.min(input.len() - 1)..];
+    Ok(match u32::from_str_radix(significant, radix) {
         Ok(oid) => NumericRegobjectOid::Valid(i64::from(oid)),
         Err(error) if matches!(error.kind(), std::num::IntErrorKind::InvalidDigit) => {
             NumericRegobjectOid::InvalidSyntax
         }
         Err(_) => NumericRegobjectOid::OutOfRange,
-    }
+    })
 }
 
 #[cfg(test)]

@@ -54094,6 +54094,58 @@
     {
       "package": "uqa-execution",
       "kind": "lib",
+      "test": "private_catalog_validation_yields_within_named_sequence_function_defaults",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/relationships/table_tests.rs",
+      "capability": "Stored sequence function references",
+      "workload": "Place a missing named sequence at the second and last elements of one stored array default containing 4,096 elements.",
+      "invariant": "One-step and 64-step windows reach the late element after the early one. Both release the complete allowance and report the same missing relation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "a_small_named_sequence_predicate_fits_a_16_kib_allowance",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/relationships/table_tests.rs",
+      "capability": "Stored sequence function references",
+      "workload": "Reach the stored sequence-function predicate in catalog order, then validate a table default containing a named regclass reference with 16 KiB available.",
+      "invariant": "The private relation check resolves the original table and releases its complete allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "sequence_function_validation_suspends_in_a_single_reference_and_releases_interrupted_work",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/sequence_functions/tests.rs",
+      "capability": "Stored sequence function references",
+      "workload": "Read a 192 KiB numeric OID and a quoted 192 KiB UTF-8 relation name in individual work steps, then cancel or exhaust memory during the same read.",
+      "invariant": "Numeric OIDs remain late-bound, the named reference reaches the catalog, and either terminal interruption returns the allowance to zero.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_sequence_function_observation_yields_within_native_scalars_and_plans",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/dependencies/rewrites/production/tests.rs",
+      "capability": "Stored sequence function references",
+      "workload": "Move an absent selected sequence from the second to the last of 4,096 array arguments in one native plan and its standalone scalar root.",
+      "invariant": "The same first reference stops both walks. Later references take additional one- and 64-step calls and terminal errors release their scratch storage.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
       "test": "private_catalog_validation_yields_between_index_columns",
       "cases": 1,
       "source": "crates/uqa-execution/src/catalog/image_validation/relationships/table_tests.rs",

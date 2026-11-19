@@ -18,7 +18,7 @@ use super::{
 };
 use crate::catalog::{foreign::relationships as foreign, CatalogReadSnapshot, CatalogReadView};
 use uqa_core::{
-    image_io::{decode_image, AsyncImageInput, ImageDecodeWindow, ImageDecoder},
+    image_io::{decode_image, ImageDecodeWindow, ImageDecoder},
     memory::{Budgeted, MemoryBudget, ProductionControl},
     CancellationToken,
 };
@@ -55,6 +55,7 @@ enum Scheduled {
     Sequences,
     Indexes,
     Constraints,
+    SequenceFunctions,
 }
 
 const ORDERED: &[Predicate] = &[
@@ -99,7 +100,7 @@ const ORDERED: &[Predicate] = &[
     Predicate::Direct(|input| {
         validate_event_bindings(input.view, input.routines, input.memory, input.cancellation)
     }),
-    Predicate::Direct(|input| validate_sequence_functions(input.view, &input.production)),
+    Predicate::Scheduled(Scheduled::SequenceFunctions),
 ];
 
 /// The outstanding predicates of an unpublished catalog. Each advance borrows the private
@@ -279,6 +280,16 @@ impl Scheduled {
                     || !snapshot.definitions.triggers.is_empty()
                     || !snapshot.definitions.catalog_indexes.is_empty()
             }
+            Self::SequenceFunctions => {
+                let d = &snapshot.definitions;
+                !snapshot.tables.is_empty()
+                    || !d.foreign_tables.is_empty()
+                    || !d.domains.is_empty()
+                    || !d.views.is_empty()
+                    || !d.sql_user_functions.is_empty()
+                    || !d.triggers.is_empty()
+                    || !d.rules.is_empty()
+            }
         }
     }
 
@@ -291,9 +302,49 @@ impl Scheduled {
         let header = memory.reserve(size_of::<ImageDecoder<(), SQLError>>())?;
         let catalog = catalog.clone();
         let original = cancellation.clone();
-        let input = ImageDecoder::new(memory, cancellation, |mut reader| async move {
-            self.read(&catalog, &original, &mut reader.input()).await
-        })?;
+        // Select the actual continuation before admitting its frame. A match inside the future would reserve the largest unrelated predicate on every step.
+        macro_rules! reader {
+            ($input:ident => $read:expr) => {
+                ImageDecoder::new(memory, cancellation, |mut reader| async move {
+                    let $input = &mut reader.input();
+                    $read.await
+                })
+            };
+        }
+        let input = match self {
+            Self::Namespaces => {
+                reader!(input => super::namespaces::from_input(&catalog, &original, input))
+            }
+            Self::Names => {
+                reader!(input => super::name_claims::from_input(&catalog, &original, input))
+            }
+            Self::Authority => {
+                reader!(input => super::authority::validate(catalog.snapshot(), input.memory, &original, input))
+            }
+            Self::Foreign => {
+                reader!(input => foreign::validate(catalog.snapshot(), &original, input))
+            }
+            Self::Types => {
+                reader!(input => super::type_dependencies::from_input(catalog.snapshot(), &original, input))
+            }
+            Self::Hierarchies => {
+                reader!(input => super::validate_hierarchies_with_work(catalog.snapshot(), input.memory, &original, input))
+            }
+            Self::Sequences => {
+                reader!(input => super::validate_sequences_with_work(catalog.snapshot(), input.memory, &original, input))
+            }
+            Self::Indexes => {
+                reader!(input => super::validate_indexes_with_work(catalog.snapshot(), input.memory, &original, input))
+            }
+            Self::Constraints => {
+                reader!(input => super::validate_constraints_with_work(catalog.snapshot(), input.memory, &original, input))
+            }
+            Self::SequenceFunctions => {
+                reader!(input => super::sequence_functions::validate_with_work(
+                    &catalog, &ProductionControl::new(input.memory, &original, input.cancellation), input
+                ))
+            }
+        }?;
         Ok(Budgeted::new(Box::new(input), header))
     }
 
@@ -315,68 +366,18 @@ impl Scheduled {
             Self::Sequences => validate_sequences(catalog.snapshot(), memory, cancellation),
             Self::Indexes => validate_indexes(catalog.snapshot(), memory, cancellation),
             Self::Constraints => validate_constraints(catalog.snapshot(), memory, cancellation),
+            Self::SequenceFunctions => validate_sequence_functions(
+                catalog,
+                &ProductionControl::new(memory, cancellation, cancellation),
+            ),
             Self::Foreign => decode_image(
                 &mut std::io::empty(),
                 memory,
                 cancellation,
-                async |mut input| self.read(catalog, cancellation, &mut input).await,
+                async |mut input| {
+                    foreign::validate(catalog.snapshot(), cancellation, &mut input).await
+                },
             ),
-        }
-    }
-
-    async fn read(
-        self,
-        catalog: &CatalogReadView,
-        cancellation: &CancellationToken,
-        input: &mut AsyncImageInput<'_>,
-    ) -> Result<(), SQLError> {
-        match self {
-            Self::Namespaces => super::namespaces::from_input(catalog, cancellation, input).await,
-            Self::Names => super::name_claims::from_input(catalog, cancellation, input).await,
-            Self::Authority => {
-                super::authority::validate(catalog.snapshot(), input.memory, cancellation, input)
-                    .await
-            }
-            Self::Foreign => foreign::validate(catalog.snapshot(), cancellation, input).await,
-            Self::Types => {
-                super::type_dependencies::from_input(catalog.snapshot(), cancellation, input).await
-            }
-            Self::Hierarchies => {
-                super::validate_hierarchies_with_work(
-                    catalog.snapshot(),
-                    input.memory,
-                    cancellation,
-                    input,
-                )
-                .await
-            }
-            Self::Sequences => {
-                super::validate_sequences_with_work(
-                    catalog.snapshot(),
-                    input.memory,
-                    cancellation,
-                    input,
-                )
-                .await
-            }
-            Self::Indexes => {
-                super::validate_indexes_with_work(
-                    catalog.snapshot(),
-                    input.memory,
-                    cancellation,
-                    input,
-                )
-                .await
-            }
-            Self::Constraints => {
-                super::validate_constraints_with_work(
-                    catalog.snapshot(),
-                    input.memory,
-                    cancellation,
-                    input,
-                )
-                .await
-            }
         }
     }
 }

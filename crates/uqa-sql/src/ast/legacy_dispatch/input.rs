@@ -13,7 +13,7 @@ use crate::ast::{
 };
 use uqa_core::{
     image_io::{AsyncImageInput, ImageIoError},
-    memory::{BudgetedSmallVec, MemoryBudget, MemoryError, ProductionControl},
+    memory::{MemoryBudget, MemoryError, ProductionControl},
     CancellationToken,
 };
 
@@ -59,6 +59,13 @@ impl Expr {
     pub(crate) fn stored_nodes(
         &self,
         memory: &MemoryBudget,
+    ) -> Result<StoredExpressionNodes<'_>, MemoryError> {
+        self.stored_nodes_with_budget(Some(memory))
+    }
+
+    pub(crate) fn stored_nodes_with_budget(
+        &self,
+        memory: Option<&MemoryBudget>,
     ) -> Result<StoredExpressionNodes<'_>, MemoryError> {
         Ok(StoredExpressionNodes(BorrowedNodes::root(
             Node::Expression(self),
@@ -203,7 +210,7 @@ fn item<'a, T>(
 }
 
 struct BorrowedNodes<'a> {
-    frames: BudgetedSmallVec<[Frame<'a>; 4]>,
+    frames: crate::construction::Stack<Frame<'a>, 4>,
     entering: bool,
 }
 
@@ -216,12 +223,12 @@ impl<'a> BorrowedNodes<'a> {
         original.check()?;
         input.checkpoint().await?;
         original.check()?;
-        Ok(Self::root(root, input.memory)?)
+        Ok(Self::root(root, Some(input.memory))?)
     }
 
-    fn root(root: Node<'a>, memory: &MemoryBudget) -> Result<Self, MemoryError> {
-        let mut frames = BudgetedSmallVec::new(memory);
-        frames.push(Frame {
+    fn root(root: Node<'a>, memory: Option<&MemoryBudget>) -> Result<Self, MemoryError> {
+        let mut frames = crate::construction::Stack::with_budget(memory);
+        frames.try_push(Frame {
             node: root,
             position: 0,
         })?;
@@ -259,7 +266,7 @@ impl<'a> BorrowedNodes<'a> {
             frame.position += 1;
             match child {
                 Child::Node(node) => {
-                    self.frames.push(Frame { node, position: 0 })?;
+                    self.frames.try_push(Frame { node, position: 0 })?;
                     self.entering = true;
                 }
                 Child::Skip => {}

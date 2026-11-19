@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use super::RelationshipValidation;
+use super::{Predicate, RelationshipValidation, Scheduled};
 use crate::catalog::{
     image_validation::tests::snapshot,
     test_support::{table_snapshot, NoRoutines},
@@ -24,6 +24,81 @@ use uqa_sql::{
 };
 
 const WIDTH: usize = 256;
+
+const EXPRESSION_WIDTH: usize = 4096;
+
+fn sequence_function_default(relation: &str, width: usize, position: usize) -> CatalogReadView {
+    use uqa_sql::ast::{Expr, Statement};
+    let Statement::CreateTable(mut table) = uqa_sql::compile(&format!(
+        "CREATE TABLE items(value bigint[] DEFAULT ARRAY[nextval('{relation}')])"
+    ))
+    .unwrap()
+    .remove(0) else {
+        unreachable!("table")
+    };
+    let Some(Expr::Array(items)) = &mut table.columns[0].default else {
+        unreachable!("array default")
+    };
+    let reference = items.pop().unwrap();
+    items.resize(width, Expr::Literal(uqa_core::Value::Int(7)));
+    items[position] = reference;
+    let mut catalog = snapshot();
+    catalog.tables.insert(
+        RelationIdentity::new("public", "items"),
+        table_snapshot([1; 16], table.columns, TableConstraintSet::default()),
+    );
+    CatalogReadView::new(catalog)
+}
+
+#[test]
+fn private_catalog_validation_yields_within_named_sequence_function_defaults() {
+    let early = sequence_function_default("public.absent", EXPRESSION_WIDTH, 1);
+    let late = sequence_function_default("public.absent", EXPRESSION_WIDTH, EXPRESSION_WIDTH - 1);
+    for steps in [1, 64] {
+        let diagnostic = "missing native sequence function relation";
+        let first = windows_until_rejected(&early, steps, diagnostic);
+        let last = windows_until_rejected(&late, steps, diagnostic);
+        eprintln!("{steps} steps per call: second argument failed on {first}, last on {last}");
+        assert!(
+            last >= first + (EXPRESSION_WIDTH - 2) / steps,
+            "{steps} steps per call: second argument failed on {first}, last on {last}"
+        );
+    }
+}
+
+#[test]
+fn a_small_named_sequence_predicate_fits_a_16_kib_allowance() {
+    let memory = MemoryBudget::new(64 << 10);
+    let token = CancellationToken::new();
+    let view = sequence_function_default("public.items", 1, 0);
+    let mut cursor = RelationshipValidation::new(view, &memory, &token);
+    while !matches!(
+        cursor.remaining.first(),
+        Some(Predicate::Scheduled(Scheduled::SequenceFunctions))
+    ) {
+        cursor = cursor
+            .advance_with_steps(&NoRoutines, &NoRoutines, 16)
+            .unwrap()
+            .expect("sequence functions follow the earlier catalog checks");
+    }
+    assert_eq!(memory.used(), 0);
+    let held = memory.reserve(48 << 10).unwrap();
+    assert_eq!(memory.available(), 16 << 10);
+    while let Some(next) = cursor
+        .advance_with_steps(&NoRoutines, &NoRoutines, 1)
+        .unwrap()
+    {
+        if !matches!(
+            next.remaining.first(),
+            Some(Predicate::Scheduled(Scheduled::SequenceFunctions))
+        ) {
+            break;
+        }
+        cursor = next;
+    }
+    drop(held);
+    assert_eq!(memory.used(), 0);
+}
 
 fn inheritance(missing: usize) -> CatalogReadView {
     let mut catalog = snapshot();
