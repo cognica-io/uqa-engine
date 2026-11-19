@@ -69,6 +69,8 @@ impl From<SchemaIndex> for Fields {
 }
 impl Fields {
     fn next(&mut self) -> Option<Field> {
+        #[cfg(test)]
+        super::tests::FIELD_VISITS.with(|count| count.set(count.get() + 1));
         let SchemaIndex {
             columns,
             identities,
