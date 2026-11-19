@@ -11,6 +11,7 @@ macro_rules! read_field {
         $expression
     };
 }
+// Pin each field in its parent continuation so polling does not move large decoder futures onto the caller’s stack.
 macro_rules! await_field {
     ($expression:expr) => {{
         let future = std::pin::pin!($expression);

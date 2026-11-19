@@ -200,9 +200,25 @@ fn native_column_images_reconstruct_deep_defaults_without_recursive_retirement()
     std::thread::Builder::new()
         .stack_size(128 * 1024)
         .spawn(|| {
-            let mut expression = Expr::Star;
-            for _ in 0..10000 {
-                expression = Expr::Not(Box::new(expression));
+            let mut expression = Expr::Literal(Value::Bool(true));
+            for depth in 0..10_000 {
+                expression = match depth % 4 {
+                    0 => Expr::Not(Box::new(expression)),
+                    1 => Expr::IsNull {
+                        expr: Box::new(expression),
+                        negated: false,
+                    },
+                    2 => Expr::Cast {
+                        expr: Box::new(expression),
+                        ty: "boolean".into(),
+                        implicit: false,
+                    },
+                    _ => Expr::Binary {
+                        op: crate::ast::BinaryOp::Equal,
+                        lhs: Box::new(expression),
+                        rhs: Box::new(Expr::Literal(Value::Bool(true))),
+                    },
+                };
             }
             let mut column = ColumnDef::nullable("v", ColumnType::Integer);
             column.default = Some(expression);

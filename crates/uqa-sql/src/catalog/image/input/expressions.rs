@@ -46,16 +46,16 @@ impl Fields<'_> {
             value: Expr::Star,
             cursor: 0,
         };
-        self.expression_node(&mut memory, &mut frame.value).await?;
+        await_field!(self.expression_node(&mut memory, &mut frame.value))?;
         loop {
             self.binary.checkpoint().await?;
-            if frame.prepare_child(self).await? {
+            if await_field!(frame.prepare_child(self))? {
                 parents.push(frame)?;
                 frame = Frame {
                     value: Expr::Star,
                     cursor: 0,
                 };
-                self.expression_node(&mut memory, &mut frame.value).await?;
+                await_field!(self.expression_node(&mut memory, &mut frame.value))?;
             } else if let Some(mut parent) = parents.pop() {
                 *parent.child().expect("suspended scalar child") = frame.value;
                 parent.cursor += 1;
@@ -101,7 +101,7 @@ impl Fields<'_> {
         if self.header(super::super::expressions::MAGIC).await? != 1 {
             return Err(invalid("stored scalar count"));
         }
-        let value = self.expression().await?;
+        let value = await_field!(self.expression())?;
         self.binary.end().await?;
         Ok(value)
     }
