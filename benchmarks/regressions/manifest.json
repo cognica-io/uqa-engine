@@ -76359,6 +76359,45 @@
     {
       "package": "uqa-sql",
       "kind": "lib",
+      "test": "stored_rule_whole_row_cast_visits_each_declared_field_before_reporting_its_error",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/preparation/tests/comparison_capabilities.rs",
+      "capability": "Stored composite casts",
+      "workload": "Validate a stored rule casting a 64-column row to a named composite, with an incompatible attribute at the first or last position and interruption between them.",
+      "invariant": "The attribute position determines how many work windows elapse. Type errors retain SQLSTATE 42846 and the original column detail. Cancellation returns 57014 and releases the full allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_default_application_calls_the_catalog_input_once_and_keeps_the_canonical_datum",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/statements/tests.rs",
+      "capability": "Stored routine parameter defaults",
+      "workload": "Bind a stored default casting an array literal to an array of a user-defined domain with its catalog input callback.",
+      "invariant": "Restoration calls the input function once, preserves the same typed scalar as ordinary binding and returns all reserved memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "typed_replacements_and_casts_preserve_exact_live_constructor_ownership",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/scalar/owned/constructors.rs",
+      "capability": "Stored scalar type identity",
+      "workload": "Replace the type label of a retained, typed scalar with a large string payload and release the enclosing cast.",
+      "invariant": "The value retains its original allocation, changing the label does not allocate, and the original allowance matches the live owner.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
       "test": "selected_input_application_preserves_order_and_every_suspended_owner",
       "cases": 1,
       "source": "crates/uqa-sql/src/binding/preparation/parameters/selection/tests.rs",
