@@ -14,7 +14,7 @@ use uqa_sql::{
     binding::stored_columns::StoredSourceCatalog,
     routines::{
         compilation::{
-            compile_function_body, defer_function_body, with_parser_context,
+            compile_function_body, defer_function_body, with_routine_parser_settings,
             SQLStandardBodyCompilation,
         },
         dependencies::{RoutineCompilationMode, RoutineDeclaration, RoutineDefinitionDependencies},
@@ -202,24 +202,67 @@ impl CatalogRoutineBinding {
         ) -> Result<StatementStep, SQLError>,
     ) -> Result<BindingStep, SQLError> {
         control.check()?;
+        let scope = self.scope(def.declaration());
+        scope.run(context, || {
+            self.advance_scoped(context, def, control, statement)
+        })
+    }
+
+    fn scope(&self, def: &CreateFunction) -> BindingScope {
         let stored = self.bodies == RoutineBodyCompilation::Stored;
-        let _placement = stored.then(SetPlacementScope::stored_definition);
+        let standard = matches!(def.body, FunctionBody::Statements(_));
         let needs_path = match self.stage {
             Stage::Regclasses(_) => true,
             Stage::Dependencies(_) => !self.search_path.is_empty(),
             Stage::Compile | Stage::Statements(_) => {
-                stored
-                    && !self.search_path.is_empty()
-                    && matches!(def.declaration().body, FunctionBody::Statements(_))
+                stored && standard && !self.search_path.is_empty()
             }
             Stage::Finished => false,
         };
-        let session = context.compilation.session;
-        let _path = needs_path.then(|| SearchPath {
-            session,
-            previous: Some(session.replace_shared_routine_search_path(self.search_path.clone())),
-        });
+        BindingScope {
+            stored,
+            search_path: needs_path.then(|| Arc::clone(&self.search_path)),
+            parser: matches!(self.stage, Stage::Statements(_))
+                || matches!(self.stage, Stage::Compile) && standard,
+        }
+    }
+
+    /// The deferred operation enters its defining namespace anew for each poll.
+    pub(super) fn retained_scope(&self, def: &CreateFunction) -> Option<BindingScope> {
+        (matches!(self.stage, Stage::Compile) && matches!(def.body, FunctionBody::Statements(_)))
+            .then(|| self.scope(def))
+    }
+
+    pub(super) async fn advance_input<R: uqa_sql::routines::compilation::StoredRoutineCatalog>(
+        &mut self,
+        catalog: &R,
+        def: &mut StoredRoutineDefinition,
+        control: &ProductionControl<'_>,
+        input: &mut uqa_core::image_io::AsyncImageInput<'_>,
+    ) -> Result<(), SQLError> {
+        let Stage::Compile = self.stage else {
+            unreachable!("selected stored compilation");
+        };
+        self.stage = Stage::Statements(
+            SQLStandardBodyCompilation::new_from_input(catalog, def.declaration(), control, input)
+                .await?,
+        );
+        Ok(())
+    }
+
+    fn advance_scoped<D: RoutineDeclaration>(
+        &mut self,
+        context: &RoutineDefinitionContext<'_>,
+        def: &mut D,
+        control: &ProductionControl<'_>,
+        statement: impl FnOnce(
+            &mut SQLStandardBodyCompilation,
+            &mut D,
+            &uqa_sql::routines::compilation::RoutineCompilationContext<'_>,
+        ) -> Result<StatementStep, SQLError>,
+    ) -> Result<BindingStep, SQLError> {
         let analysis = &context.compilation.analysis;
+        let stored = self.bodies == RoutineBodyCompilation::Stored;
         match &mut self.stage {
             Stage::Dependencies(input) => {
                 if let Some(changed) = input.advance(
@@ -238,9 +281,9 @@ impl CatalogRoutineBinding {
             Stage::Compile => {
                 let def = def.declaration();
                 if matches!(def.body, FunctionBody::Statements(_)) {
-                    self.stage = Stage::Statements(with_parser_context(analysis.parsers, || {
-                        SQLStandardBodyCompilation::new(analysis, def, stored, control)
-                    })?);
+                    self.stage = Stage::Statements(SQLStandardBodyCompilation::new(
+                        analysis, def, stored, control,
+                    )?);
                 } else {
                     self.validated = match self.bodies {
                         RoutineBodyCompilation::Checked => Some(
@@ -255,21 +298,19 @@ impl CatalogRoutineBinding {
                     self.compiled_stage();
                 }
             }
-            Stage::Statements(input) => {
-                match with_parser_context(analysis.parsers, || statement(input, def, analysis))? {
-                    StatementStep::Lower(source) => return Ok(BindingStep::Statement(source)),
-                    StatementStep::Progress(false) => {}
-                    StatementStep::Progress(true) => {
-                        let Stage::Statements(input) =
-                            std::mem::replace(&mut self.stage, Stage::Finished)
-                        else {
-                            unreachable!()
-                        };
-                        self.compiled = Some(RoutineBody::Bound(input.into_shared(control)?));
-                        self.compiled_stage();
-                    }
+            Stage::Statements(input) => match statement(input, def, analysis)? {
+                StatementStep::Lower(source) => return Ok(BindingStep::Statement(source)),
+                StatementStep::Progress(false) => {}
+                StatementStep::Progress(true) => {
+                    let Stage::Statements(input) =
+                        std::mem::replace(&mut self.stage, Stage::Finished)
+                    else {
+                        unreachable!()
+                    };
+                    self.compiled = Some(RoutineBody::Bound(input.into_shared(control)?));
+                    self.compiled_stage();
                 }
-            }
+            },
             Stage::Regclasses(input) => {
                 if let Some(changed) =
                     input.advance(analysis.types, context.regclasses, def, control)?
@@ -302,6 +343,32 @@ impl CatalogRoutineBinding {
         } else {
             Stage::Regclasses(RoutineRegclassBinding::default())
         };
+    }
+}
+
+pub(super) struct BindingScope {
+    stored: bool,
+    search_path: Option<Arc<Vec<String>>>,
+    parser: bool,
+}
+
+impl BindingScope {
+    pub(super) fn run<T>(
+        &self,
+        context: &RoutineDefinitionContext<'_>,
+        operation: impl FnOnce() -> T,
+    ) -> T {
+        let _placement = self.stored.then(SetPlacementScope::stored_definition);
+        let session = context.compilation.session;
+        let _path = self.search_path.as_ref().map(|path| SearchPath {
+            session,
+            previous: Some(session.replace_shared_routine_search_path(Arc::clone(path))),
+        });
+        if self.parser {
+            with_routine_parser_settings(context.compilation.analysis.parsers, operation)
+        } else {
+            operation()
+        }
     }
 }
 

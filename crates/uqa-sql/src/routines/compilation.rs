@@ -201,7 +201,15 @@ pub fn with_parser_context<T>(
     parsers: &dyn RoutineParserCatalog,
     compile: impl FnOnce() -> Result<T, SQLError>,
 ) -> Result<T, SQLError> {
-    let (result, metadata) = crate::parser::with_settings(parsers.parser_settings(), compile);
+    with_routine_parser_settings(parsers, compile)
+}
+
+/// Apply the defining parser settings to one step and forward the notices produced by that step.
+pub fn with_routine_parser_settings<T>(
+    parsers: &dyn RoutineParserCatalog,
+    action: impl FnOnce() -> T,
+) -> T {
+    let (result, metadata) = crate::parser::in_settings_scope(parsers.parser_settings(), action);
     for notice in metadata.notices.iter() {
         parsers.parser_notice(notice.clone());
     }

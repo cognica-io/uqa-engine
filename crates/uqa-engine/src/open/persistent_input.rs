@@ -202,7 +202,11 @@ impl RegistryInput {
                 Self::Bodies(retained)
             }
             Self::Bodies(RestoredAuthorities { domains, routines }) => {
-                match routines.advance(&engine.routine_restore_context())? {
+                match routines.advance_with_routines(
+                    &engine.routine_restore_context(),
+                    owner,
+                    |private| -> &Engine { private },
+                )? {
                     Some(routines) => Self::Bodies(RestoredAuthorities { domains, routines }),
                     None => Self::Dependents(domains),
                 }

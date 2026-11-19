@@ -53,6 +53,11 @@ enum Stage {
         Bodies,
         ImageDecoder<(Budgeted<Box<Declaration>>, RetainedExecutablePlan), StorageBackendError>,
     ),
+    Analysis(
+        Bodies,
+        super::super::definition::BindingScope,
+        ImageDecoder<Budgeted<Box<Declaration>>, StorageBackendError>,
+    ),
     Group(ImageDecoder<Bodies, StorageBackendError>),
 }
 
@@ -108,8 +113,74 @@ impl RetainedRoutineFinalization {
     /// The compiler borrows the Engine only during that call. The owning private session retires
     /// both the placeholders and the saved predecessor if an open operation is abandoned.
     pub fn advance(
+        self,
+        context: &RoutineRestoreContext<'_>,
+    ) -> StorageBackendResult<Option<Self>> {
+        self.advance_using(context, Bodies::advance_declaration)
+    }
+
+    /// Keep the original catalog session available throughout a stored definition's binding work.
+    pub fn advance_with_routines<S, R>(
+        self,
+        context: &RoutineRestoreContext<'_>,
+        services: &S,
+        catalog: fn(&S) -> &R,
+    ) -> StorageBackendResult<Option<Self>>
+    where
+        S: Clone + Send + Sync + 'static,
+        R: uqa_sql::routines::compilation::StoredRoutineCatalog + 'static,
+    {
+        self.advance_using(
+            context,
+            |bodies, mut declaration, lowered, context, read, aggregates| {
+                let scope = declaration.binding.as_ref().and_then(|binding| {
+                    binding.retained_scope(declaration.definition.declaration())
+                });
+                if let Some(scope) = scope {
+                    debug_assert!(lowered.is_none());
+                    let services = services.clone();
+                    let original = read.cancellation().clone();
+                    let analysis = ImageDecoder::new(
+                        read.memory(),
+                        read.cancellation(),
+                        |mut reader| async move {
+                            let mut input = reader.input();
+                            let control =
+                                ProductionControl::new(input.memory, &original, input.cancellation);
+                            let record = declaration.as_mut();
+                            record
+                                .binding
+                                .as_mut()
+                                .expect("selected catalog compilation")
+                                .advance_input(
+                                    catalog(&services),
+                                    &mut record.definition,
+                                    &control,
+                                    &mut input,
+                                )
+                                .await
+                                .map_err(|error| catalog_message(error, &control))?;
+                            Ok(declaration)
+                        },
+                    )?;
+                    return Ok(Stage::Analysis(bodies, scope, analysis));
+                }
+                bodies.advance_declaration(declaration, lowered, context, read, aggregates)
+            },
+        )
+    }
+
+    fn advance_using(
         mut self,
         context: &RoutineRestoreContext<'_>,
+        declaration: impl FnOnce(
+            Bodies,
+            Budgeted<Box<Declaration>>,
+            Option<RetainedExecutablePlan>,
+            &RoutineRestoreContext<'_>,
+            &StorageReadControl,
+            &Arc<dyn AggregateClassifier + Send + Sync>,
+        ) -> StorageBackendResult<Stage>,
     ) -> StorageBackendResult<Option<Self>> {
         let Finalization {
             previous,
@@ -132,7 +203,7 @@ impl RetainedRoutineFinalization {
             }
             (Ok(()), Stage::Bind(bodies)) => bodies.advance(read),
             (Ok(()), Stage::Declaration(bodies, input)) => {
-                bodies.advance_declaration(input, None, context, read, aggregates)
+                declaration(bodies, input, None, context, read, aggregates)
             }
             (Ok(()), Stage::Statement(bodies, mut input)) => {
                 let lowered = {
@@ -140,17 +211,19 @@ impl RetainedRoutineFinalization {
                     advance_one(&mut input)
                 };
                 match lowered {
-                    Ok(Some((declaration, plan))) => bodies.advance_declaration(
-                        declaration,
-                        Some(plan),
-                        context,
-                        read,
-                        aggregates,
-                    ),
+                    Ok(Some((value, plan))) => {
+                        declaration(bodies, value, Some(plan), context, read, aggregates)
+                    }
                     Ok(None) => Ok(Stage::Statement(bodies, input)),
                     Err(error) => Err(error),
                 }
             }
+            (Ok(()), Stage::Analysis(bodies, scope, mut input)) => scope
+                .run(&context.definition, || advance_one(&mut input))
+                .map(|record| match record {
+                    Some(record) => Stage::Declaration(bodies, record),
+                    None => Stage::Analysis(bodies, scope, input),
+                }),
             (Ok(()), Stage::Group(mut input)) => {
                 advance_one(&mut input).map(|bodies| match bodies {
                     Some(bodies) => Stage::Bind(bodies),

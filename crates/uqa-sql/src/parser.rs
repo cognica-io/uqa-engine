@@ -87,13 +87,21 @@ pub fn with_settings<T>(
     settings: ParserSettings,
     compile: impl FnOnce() -> Result<T, SQLError>,
 ) -> (Result<T, SQLError>, ParserMetadata) {
+    in_settings_scope(settings, compile)
+}
+
+/// Install the session parser state while a caller owns the current operation and its return type.
+pub(crate) fn in_settings_scope<T>(
+    settings: ParserSettings,
+    run: impl FnOnce() -> T,
+) -> (T, ParserMetadata) {
     let notices = Rc::new(RefCell::new(Vec::new()));
     let _scope = Scope::enter(Context {
         settings,
         notices: Rc::clone(&notices),
         report: true,
     });
-    let result = compile();
+    let result = run();
     let notices = std::mem::take(&mut *notices.borrow_mut()).into();
     (result, ParserMetadata { settings, notices })
 }
