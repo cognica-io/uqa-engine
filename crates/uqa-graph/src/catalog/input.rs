@@ -7,7 +7,7 @@
 //! Native graph input owns decoding, name adoption and writable destination publication.
 
 use super::GraphCatalog;
-use crate::MemoryGraphStore;
+use crate::{image_work::CatalogNames, MemoryGraphStore};
 use uqa_core::memory::{Budgeted, MemoryBudget, MemoryError, Produced};
 use uqa_storage::{read_control::StorageReadControl, StorageBackendError, StorageBackendResult};
 
@@ -41,7 +41,11 @@ impl GraphCatalog {
         if !name.budget().shares_allowance(control.memory())
             || !self.graphs.budget().shares_allowance(control.memory())
             || name.reserved_bytes() < name.capacity()
-            || self.contains_key(name.as_str())
+            || self
+                .graphs
+                .get_from(name.as_str(), &mut CatalogNames(input))
+                .await?
+                .is_some()
         {
             return Err(StorageBackendError::Other(
                 "invalid graph image admission or identity".into(),
@@ -55,7 +59,10 @@ impl GraphCatalog {
             .capacity()
             .checked_add(graph.image_retained_bytes()?)
             .ok_or(MemoryError::SizeOverflow)?;
-        self.graphs.insert(Produced::from(name), graph, bytes)?;
+        self.graphs
+            .prepare_insert_from(Produced::from(name), bytes, &mut CatalogNames(input))
+            .await?
+            .publish(graph);
         input.checkpoint().await?;
         Ok(self)
     }
@@ -65,5 +72,19 @@ impl GraphCatalog {
             graphs: self.graphs.into_mutation_budget(memory),
             ..self
         }
+    }
+}
+
+impl uqa_storage::catalog::path_index::PathIndexGraphs for GraphCatalog {
+    async fn contains_from(
+        &self,
+        graph: &str,
+        input: &mut uqa_core::image_io::AsyncImageInput<'_>,
+    ) -> StorageBackendResult<bool> {
+        Ok(self
+            .graphs
+            .get_from(graph, &mut CatalogNames(input))
+            .await?
+            .is_some())
     }
 }

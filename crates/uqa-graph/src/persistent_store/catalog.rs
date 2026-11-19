@@ -74,14 +74,9 @@ impl GraphStorage for CatalogGraphStorage {
         Ok(self.catalog.save_named_graph(graph)?)
     }
     fn delete_graph(&self, graph: &str) -> GraphStoreResult<()> {
+        self.catalog.drop_graph_path_indexes(graph)?;
         self.catalog.drop_named_graph(graph)?;
         self.catalog.set_metadata(&registry_key(graph), "")?;
-        let prefix = format!("{graph}::");
-        for (key, _) in self.catalog.load_path_indexes()? {
-            if key.starts_with(&prefix) {
-                self.catalog.drop_path_index(&key)?;
-            }
-        }
         Ok(())
     }
     fn registry(&self, graph: &str) -> GraphStoreResult<GraphLabelRegistry> {

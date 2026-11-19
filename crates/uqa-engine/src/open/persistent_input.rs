@@ -181,19 +181,21 @@ enum RegistryInput {
     Relations(RestoredAuthorities),
     Bodies(RestoredAuthorities),
     Dependents(uqa_execution::catalog::domain::DomainRestoreState),
+    PathIndexes(uqa_graph::PathIndexCatalogInput),
 }
 
 impl RegistryInput {
     fn advance(
         self,
-        session: &PersistentEngineState,
-        catalog: &dyn uqa_storage::CatalogFacade,
+        engine: &Engine,
+        catalog: Arc<dyn uqa_storage::CatalogFacade>,
+        limits: CatalogInputLimits,
+        control: &StorageReadControl,
     ) -> StorageBackendResult<Stage> {
-        let engine = session.engine();
         let next = match self {
             Self::Relations(retained) => {
                 engine.restore_relations_before_routine_bodies(
-                    catalog,
+                    catalog.as_ref(),
                     CatalogRestoreMode::LoadOnly,
                 )?;
                 Self::Bodies(retained)
@@ -205,9 +207,30 @@ impl RegistryInput {
                 }
             }
             Self::Dependents(domains) => {
-                session.restore_remaining_registries(catalog, domains)?;
-                return Ok(Stage::Caches(CacheInput::Models));
+                engine.restore_registries_after_routine_bodies(
+                    catalog.as_ref(),
+                    CatalogRestoreMode::LoadOnly,
+                    domains,
+                )?;
+                Self::PathIndexes(uqa_graph::PathIndexCatalogInput::new(
+                    engine.durable.graphs.read().clone(),
+                    catalog,
+                    Arc::clone(engine.storage.backend.as_ref().expect("persistent backend")),
+                    engine.durable.path_indexes.read().budget().clone(),
+                    limits,
+                    control,
+                )?)
             }
+            Self::PathIndexes(mut input) => match input.advance(1)? {
+                Some(paths) => {
+                    *engine.durable.path_indexes.write() = paths;
+                    uqa_execution::schema::types::relation_arrays::restoration::validate(
+                        &engine.restored_catalog_read_view(),
+                    )?;
+                    return Ok(Stage::Caches(CacheInput::Models));
+                }
+                None => Self::PathIndexes(input),
+            },
         };
         Ok(Stage::Registries(next))
     }
@@ -269,7 +292,7 @@ impl PersistentEngineInput {
         })
     }
 
-    /// Read declarations and assemble overload groups across polls. Each compilation step binds one routine against the complete placeholder namespace. Individual bodies and the remaining registry validations still run synchronously. A failure or unwind retires the private session and its read transaction.
+    /// Read stored routines and graph path indexes across work windows and publish each complete registry in dependency order. A failure or unwind retires the private session and its read transaction.
     pub(crate) fn advance(
         &mut self,
         maximum_steps: usize,
@@ -391,7 +414,7 @@ impl Candidate {
             Stage::NamedAnalyzers(input) => input.advance(engine, self.limits, control)?,
             Stage::GinAnalyzers(input) => input.advance(engine, self.limits, control)?,
             Stage::FieldAnalyzers(input) => input.advance(engine, control)?,
-            Stage::Registries(input) => input.advance(&self.session, catalog.as_ref())?,
+            Stage::Registries(input) => input.advance(engine, catalog, self.limits, control)?,
             Stage::Caches(input) => return input.advance(self.session, self.limits, control),
         };
         Ok(Progress::Pending(self))
@@ -491,21 +514,6 @@ impl PersistentEngineState {
     fn complete_catalog(self, control: &StorageReadControl) -> StorageBackendResult<Progress> {
         control.check()?;
         Ok(Progress::Complete(self))
-    }
-
-    fn restore_remaining_registries(
-        &self,
-        catalog: &dyn uqa_storage::CatalogFacade,
-        domains: uqa_execution::catalog::domain::DomainRestoreState,
-    ) -> StorageBackendResult<()> {
-        self.engine.restore_registries_after_routine_bodies(
-            catalog,
-            CatalogRestoreMode::LoadOnly,
-            domains,
-        )?;
-        uqa_execution::schema::types::relation_arrays::restoration::validate(
-            &self.engine.restored_catalog_read_view(),
-        )
     }
 
     pub(crate) fn engine(&self) -> &Engine {

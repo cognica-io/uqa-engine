@@ -52,7 +52,7 @@ pub use handle::{GraphImageSnapshot, GraphStoreHandle};
 pub use incremental_match::{implicated_vertices, IncrementalPatternMatcher};
 pub use index::{
     CapturedPath, CapturedPathIndex, CapturedPathIndexes, LabelIndex, PathIndex, PathIndexCatalog,
-    PathIndexImageSnapshot, VertexPropertyIndex,
+    PathIndexCatalogInput, PathIndexImageSnapshot, VertexPropertyIndex,
 };
 pub use memory_store::{
     graphid_label_id, graphid_sequence, make_graphid, GraphLabelInfo, GraphLabelRegistry,

@@ -30,17 +30,7 @@ impl KeyValueCatalog {
     pub(super) fn save_named_graph_impl(&self, name: &str) -> StorageBackendResult<()> {
         self.with_graph_mutation(|read, batch| {
             read.guard_definition(batch, None)?;
-            let key = single_str_key(TAG_NAMED_GRAPH, name)?;
-            if read.read.get(&key)?.is_none() {
-                read.observe_definition_change(
-                    batch,
-                    GraphDefinitionKind::NamedGraph,
-                    name,
-                    Some(&[]),
-                )?;
-                batch.put(&key, &[])?;
-            }
-            Ok(())
+            read.write_named_graph(batch, name, false)
         })
     }
 
@@ -213,13 +203,7 @@ impl KeyValueCatalog {
                 selected.binary_search_by_key(&id, |entry| entry.0).is_ok()
             };
             read.fence_definition(batch, graph)?;
-            read.observe_definition_change(
-                batch,
-                GraphDefinitionKind::NamedGraph,
-                graph,
-                Some(&[]),
-            )?;
-            batch.put(&single_str_key(TAG_NAMED_GRAPH, graph)?, &[])?;
+            read.write_named_graph(batch, graph, true)?;
             read.delete_graph_memberships_into(batch, graph, |kind, id| match kind {
                 "vertex" => keep(GraphEntityKind::Vertex, id),
                 "edge" => keep(GraphEntityKind::Edge, id),
@@ -288,6 +272,24 @@ impl KeyValueCatalog {
 }
 
 impl GraphRead<'_> {
+    fn write_named_graph(
+        &self,
+        batch: &mut dyn KeyValueBatch,
+        graph: &str,
+        replace: bool,
+    ) -> StorageBackendResult<()> {
+        let key = single_str_key(TAG_NAMED_GRAPH, graph)?;
+        if self.contains(&key)? {
+            if !replace {
+                return Ok(());
+            }
+        } else {
+            self.retain_path_owners(batch, graph)?;
+        }
+        self.observe_definition_change(batch, GraphDefinitionKind::NamedGraph, graph, Some(&[]))?;
+        batch.put(&key, &[])
+    }
+
     fn save_vertex(
         &self,
         batch: &mut dyn KeyValueBatch,
@@ -418,13 +420,24 @@ impl GraphRead<'_> {
         Ok(())
     }
 
-    fn remove_paths(&self, batch: &mut dyn KeyValueBatch, graph: &str) -> StorageBackendResult<()> {
+    pub(super) fn remove_paths(
+        &self,
+        batch: &mut dyn KeyValueBatch,
+        graph: &str,
+    ) -> StorageBackendResult<()> {
         for_each_key(self.read, &[TAG_PATH_INDEX], &mut |key| {
             let name = read_str(key, &mut 1)?;
-            if name
-                .strip_prefix(graph)
-                .is_some_and(|suffix| suffix.starts_with("::"))
-            {
+            if crate::catalog::path_index::belongs_to(
+                &name,
+                graph,
+                || KeyValueCatalog::path_index_graph_from(self.read, &name),
+                |candidate| {
+                    Ok(self
+                        .read
+                        .get(&single_str_key(TAG_NAMED_GRAPH, candidate)?)?
+                        .is_some())
+                },
+            )? {
                 KeyValueCatalog::clear_path_index_data_into(self.read, batch, &name)?;
                 self.observe_definition_change(batch, GraphDefinitionKind::PathIndex, &name, None)?;
                 batch.delete(key)?;

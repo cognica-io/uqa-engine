@@ -16,6 +16,14 @@ pub async fn compare_names(
     right: &str,
     progress: &mut AsyncImageInput<'_>,
 ) -> StorageBackendResult<Ordering> {
+    compare_with(left, right, progress).await
+}
+
+pub(super) async fn compare_with(
+    left: &str,
+    right: &str,
+    progress: &mut impl crate::image_io::work::Work,
+) -> StorageBackendResult<Ordering> {
     for (left, right) in left
         .as_bytes()
         .chunks(4096)

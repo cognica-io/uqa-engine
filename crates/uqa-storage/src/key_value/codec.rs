@@ -250,9 +250,18 @@ pub(super) fn single_str_key_prefix(
     key_bytes: usize,
     budget: &uqa_core::memory::MemoryBudget,
 ) -> StorageBackendResult<uqa_core::memory::BudgetedVec<u8>> {
+    tagged_str_key_prefix(&[tag], prefix, key_bytes, budget)
+}
+
+pub(super) fn tagged_str_key_prefix(
+    tags: &[u8],
+    prefix: &str,
+    key_bytes: usize,
+    budget: &uqa_core::memory::MemoryBudget,
+) -> StorageBackendResult<uqa_core::memory::BudgetedVec<u8>> {
     let length = key_segment_length(key_bytes)?;
     let mut key = uqa_core::memory::BudgetedVec::new(budget);
-    key.push(tag)?;
+    key.extend_from_slice(tags)?;
     key.extend_from_slice(&length.to_be_bytes())?;
     key.extend_from_slice(prefix.as_bytes())?;
     Ok(key)
@@ -262,10 +271,7 @@ pub(super) fn push_u64(key: &mut Vec<u8>, value: u64) {
     key.extend_from_slice(&value.to_be_bytes());
 }
 
-pub(super) fn read_segment<'a>(
-    key: &'a [u8],
-    offset: &mut usize,
-) -> StorageBackendResult<&'a [u8]> {
+pub(super) fn read_segment_length(key: &[u8], offset: &mut usize) -> StorageBackendResult<u32> {
     let end = offset
         .checked_add(4)
         .ok_or_else(|| other_error("KeyValue key offset overflow"))?;
@@ -275,7 +281,14 @@ pub(super) fn read_segment<'a>(
         .try_into()
         .map_err(|_| other_error("invalid KeyValue key segment length"))?;
     *offset = end;
-    let len = usize::try_from(u32::from_be_bytes(len_bytes))
+    Ok(u32::from_be_bytes(len_bytes))
+}
+
+pub(super) fn read_segment<'a>(
+    key: &'a [u8],
+    offset: &mut usize,
+) -> StorageBackendResult<&'a [u8]> {
+    let len = usize::try_from(read_segment_length(key, offset)?)
         .map_err(|_| other_error("KeyValue key segment length exceeds usize"))?;
     let end = offset
         .checked_add(len)

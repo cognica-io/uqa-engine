@@ -531,6 +531,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Preserve application function selection in views, materialized view refreshes, domain defaults and domain `CHECK` constraints when an application and a builtin share a name. Full and standalone incremental restores check the captured selection before publishing the destination.
 
 - Retire obsolete source layouts when reanalyzing an owned query, including queries without a FROM clause. Complete layout observations replace both optional descriptors through the same installer as ordinary analysis, releasing superseded descriptor handles before publication.
+
+- Preserve graph ownership when path index names contain double colons or meet at a colon. Distinct graph and index names retain their own reachability pairs across graph edits, repeatable reads, cold opens and backup restores. Creating a graph that could also match an older index name records the index's original graph in the same transaction.
+
+- Restore persistent graph path indexes within the backup job's work and memory limits. A restore reads registrations from its selected transaction and installs them together, so cancellation can interrupt a large registry before publication.
+
 - Make `pg_catalog.pg_shadow` queryable through the existing login-role projection, retaining its private table and column permissions, catalog identity and view locks.
 
 - Include retained routine defaults and bound scalar literals in independent catalog capture limits, including restored owners and reused SQL bodies.

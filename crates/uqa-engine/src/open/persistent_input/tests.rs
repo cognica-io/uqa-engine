@@ -13,6 +13,7 @@ mod authority;
 mod field_analyzers;
 mod gin_analyzers;
 mod graph_oids;
+mod graph_paths;
 mod graphs;
 mod models;
 mod routines;

@@ -7,6 +7,21 @@
 use super::*;
 
 #[test]
+fn redb_path_index_owner_reads_bound_physical_rows_and_preserve_private_state() {
+    let directory = tempfile::tempdir().unwrap();
+    let provider = RedbStorage::open(directory.path().join("path-owner.redb")).unwrap();
+    let physical = uqa_storage::key_value::conformance::verify_controlled_path_index_owner_reads(
+        provider.open_session().unwrap(),
+        false,
+    )
+    .unwrap();
+    eprintln!(
+        "physical path owner key {} bytes, value {} bytes",
+        physical.maximum_key_bytes, physical.maximum_value_bytes
+    );
+}
+
+#[test]
 fn redb_analyzer_input_preserves_bindings_labels_and_selected_generations() {
     let directory = tempfile::tempdir().unwrap();
     let provider = RedbStorage::open(directory.path().join("analyzer-input.redb")).unwrap();

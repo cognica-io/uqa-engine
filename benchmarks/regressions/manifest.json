@@ -2,6 +2,382 @@
   "schema_version": 1,
   "checks": [
     {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "a_single_wide_path_definition_yields_for_sequences_labels_and_utf8_fragments",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/index/path_index/catalog/persistent/definition/tests.rs",
+      "capability": "Persistent graph path-index restoration",
+      "workload": "Read large nested sequence lists, wide lists of labels and long escaped UTF-8 strings with single-step windows.",
+      "invariant": "Definition input yields within each shape, keeps the compact physical spelling and releases partial allocations after interruption.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "stored_path_sequences_preserve_compact_serde_spelling_and_diagnostics",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/index/path_index/catalog/persistent/definition/tests.rs",
+      "capability": "Persistent graph path-index restoration",
+      "workload": "Read valid and malformed stored declarations and compare results to the original typed JSON decoder.",
+      "invariant": "Valid sequences retain their compact JSON and malformed input reports the original error and position.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "test",
+      "test": "private_durable_path_catalog_binds_complete_generations_in_bounded_windows",
+      "cases": 1,
+      "source": "crates/uqa-graph/tests/embedding_index/paths/registry.rs",
+      "capability": "Persistent graph path-index restoration",
+      "workload": "Reconstruct a 4,096-definition registry in small windows across an independent committed edit and interrupt partial inputs.",
+      "invariant": "The complete selected generation retains its original physical handles. Cancellation and admission denial release partial bindings and preserve the caller-owned transaction.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "retained_registration_resolves_the_recorded_graph_in_windows_and_transfers_both_outputs",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/path_index/tests.rs",
+      "capability": "Persistent graph path-index restoration",
+      "workload": "Resolve the recorded owner of a wide legacy key using a single-step window and exhaust the input allowance.",
+      "invariant": "Both the canonical key and the graph identity preserve their complete text and storage reservations and retire on failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "sqlite_native_path_index_owner_reads_bound_physical_rows_and_preserve_private_state",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/catalog/tests/text_input.rs",
+      "capability": "Persistent graph path-index restoration",
+      "workload": "Point-read the recorded path owner and test key and value size limits, memory denial and cancellation in the native SQLite session.",
+      "invariant": "The provider charges the encoded state row and exact key before returning an owner and retains the selected transaction.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "sqlite_key_value_path_index_owner_reads_bound_physical_rows_and_preserve_private_state",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/catalog/tests/text_input.rs",
+      "capability": "Persistent graph path-index restoration",
+      "workload": "Point-read the recorded path owner at the encoded key and exercise exact bounds in a SQLite KV session.",
+      "invariant": "The six-byte key prefix and owner value are charged at the physical boundary. Failure leaves the selected state intact.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-redb",
+      "kind": "test",
+      "test": "redb_path_index_owner_reads_bound_physical_rows_and_preserve_private_state",
+      "cases": 1,
+      "source": "crates/uqa-storage-redb/tests/store_contract/catalog_text_input.rs",
+      "capability": "Persistent graph path-index restoration",
+      "workload": "Point-read the recorded path owner at the encoded key and exercise exact bounds in a redb session.",
+      "invariant": "The six-byte key prefix and owner value are charged at the physical boundary. Failure leaves the selected state intact.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "persistent_path_registries_yield_between_definitions_before_publication",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/open/persistent_input/tests/graph_paths.rs",
+      "capability": "Persistent graph path-index restoration",
+      "workload": "Build one and 33 path indexes on a graph with a real edge. Reconstruct each registry one step at a time and query the published index.",
+      "invariant": "Each additional registration requires a later step. The private Engine installs the complete registry together and the resulting index returns the original vertex pair.",
+      "case_names": [
+        "case_1_sqlite_native",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "persistent_path_registries_keep_selected_pairs_and_then_accept_later_writes",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/open/persistent_input/tests/graph_paths.rs",
+      "capability": "Persistent graph path-index restoration",
+      "workload": "Change the source after a private registry has started. Read the selected definition and reachability pair, finish the session and then register another index.",
+      "invariant": "The private transaction keeps the old materialization. The activated engine sees later commits and admits a new index after the restore allowance is occupied and its token cancelled.",
+      "case_names": [
+        "case_1_sqlite_native",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "persistent_path_registries_release_partial_bindings_and_the_read_transaction",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/open/persistent_input/tests/graph_paths.rs",
+      "capability": "Persistent graph path-index restoration",
+      "workload": "Interrupt a private path catalog after input has started using cancellation or allocation denial. Resume ordinary writes against the same provider.",
+      "invariant": "Both failures preserve the published catalog, retire the read transaction and release the restore allowance.",
+      "case_names": [
+        "case_1_sqlite_native",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "empty_path_index_names_and_adjacent_colons_round_trip",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/backup/restore/tests/graph_path_indexes.rs",
+      "capability": "Graph path-index ownership across restore",
+      "workload": "Build an empty index name, an ordinary index, and two registrations with a triple colon at their historical boundary. Reopen the source and restore a full backup.",
+      "invariant": "All four registrations keep their original graph's vertex pairs and the empty and ordinary keys keep their historical spelling.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "graph_path_removal_preserves_literal_encoded_prefixes_and_distinct_owners",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/index/path_index/catalog/tests/ownership.rs",
+      "capability": "Graph path-index ownership",
+      "workload": "Register overlapping ordinary and encoded prefixes in a retained catalog, then remove each graph and read the earlier snapshot.",
+      "invariant": "Removal affects exactly the selected graph and leaves every neighboring key and the original catalog readable.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "restored_path_images_resolve_legacy_names_against_the_original_graphs",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/index/path_index/catalog/tests/ownership.rs",
+      "capability": "Graph path-index ownership",
+      "workload": "Restore an evaluated memory path sequence to catalogs with one, two or no plausible graph owners.",
+      "invariant": "Unique ownership preserves the materialization. Ambiguity, missing graphs and invalid keys are rejected with all memory released.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "path_owner_resolution_yields_and_retires_after_cancellation_or_denial",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/index/path_index/catalog/tests/ownership.rs",
+      "capability": "Graph path-index ownership",
+      "workload": "Restore a wide path name with a single-step work window, then cancel or deny memory while validating its owner.",
+      "invariant": "Ownership resolution yields before completion, and a discarded or rejected continuation releases its allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "canonical_pairs_preserve_simple_keys_and_distinguish_overlapping_delimiters",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/path_index/tests.rs",
+      "capability": "Graph path-index ownership",
+      "workload": "Encode and decode ordinary, empty, Unicode and overlapping-delimiter graph and index names.",
+      "invariant": "Each decoded key gives its original name pair and ordinary keys keep their spelling.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "graph_creation_preserves_only_preexisting_unrecorded_path_owners",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/path_index/tests.rs",
+      "capability": "Graph path-index ownership",
+      "workload": "Add a competing graph name to historical keys with overlapping separators, known owners and unrelated prefixes.",
+      "invariant": "Only a previously unique graph can acquire an owner record. Opaque and unrelated keys require no catalog reads.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "new_graph_preserves_historical_owners_and_raw_cache_state_in_the_same_batch",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/key_value/catalog/path_index_data.rs",
+      "capability": "Graph path-index ownership",
+      "workload": "Add and replace a graph whose stored prefix matches historical path keys of several byte lengths, including an empty index name.",
+      "invariant": "The forward and reverse owner records commit with the graph. Rollback preserves the earlier membership, stored pairs and materialization state.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "historical_owners_require_unique_catalog_evidence_and_scope_destructive_selection",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/path_index/tests.rs",
+      "capability": "Graph path-index ownership",
+      "workload": "Resolve historical and opaque path keys against a recorded owner and the available graph names.",
+      "invariant": "A mutation selects only its owning graph, and an ambiguous historical address fails before deletion.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "retained_legacy_conversion_limits_work_and_preserves_admission_and_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/path_index/tests.rs",
+      "capability": "Graph path-index ownership",
+      "workload": "Canonicalize an admitted historical name across small work windows and exercise insufficient memory and cancellation.",
+      "invariant": "Each output retains its own allocation and earlier private buffers retire on interruption.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "graph_registration_retains_only_unrecorded_legacy_owners_across_rollback_and_reopen",
+      "cases": 2,
+      "source": "crates/uqa-storage-sqlite/src/catalog/tests/graph_path_owners.rs",
+      "capability": "Graph path-index ownership",
+      "workload": "Register, roll back and replace a graph in standalone and native SQLite beside invalid and materialized historical path indexes.",
+      "invariant": "Cold reopening preserves the original owner, definition, validity and stored pairs. Rolling back leaves the original catalog intact.",
+      "case_names": [
+        "case_1_sqlite",
+        "case_2_native"
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "ambiguous_legacy_owner_aborts_graph_creation_and_earlier_owner_changes",
+      "cases": 2,
+      "source": "crates/uqa-storage-sqlite/src/catalog/tests/graph_path_owners.rs",
+      "capability": "Graph path-index ownership",
+      "workload": "Create a graph alongside two historical path indexes, including one that already matches multiple graph names.",
+      "invariant": "A failed creation rolls back the graph and any owner records staged for earlier keys.",
+      "case_names": [
+        "case_1_sqlite",
+        "case_2_native"
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "concurrent_native_removal_cannot_publish_a_stale_legacy_owner",
+      "cases": 2,
+      "source": "crates/uqa-storage-sqlite/src/catalog/tests/graph_path_owners.rs",
+      "capability": "Graph path-index ownership",
+      "workload": "Register a graph while a second native SQLite session removes its matching path definition or the definition's original owner.",
+      "invariant": "Committing the stale registration fails. The competing deletion remains visible and no stale owner record survives rollback.",
+      "case_names": [
+        "case_1_index",
+        "case_2_owner"
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "test",
+      "test": "graph_scoped_removal_uses_recorded_owners_and_rolls_back_ambiguous_legacy_changes",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/tests/cases/persistent_graph/path_ownership.rs",
+      "capability": "Graph path-index ownership",
+      "workload": "Exercise deletion and rollback on physical definitions in standalone SQLite, native SQLite, SQLite KV and in-memory KV.",
+      "invariant": "A recorded owner survives invalidation, unowned physical keys are preserved, and an ambiguous deletion rolls back the whole mutation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "graph_path_indexes_preserve_their_owners_after_source_retirement",
+      "cases": 8,
+      "source": "crates/uqa-engine/src/backup/restore/tests/graph_path_indexes.rs",
+      "capability": "Graph path-index ownership across restore",
+      "workload": "Restore two graph and index pairs with the same historical spelling from full and standalone incremental backups after deleting the source and collecting the ancestor.",
+      "invariant": "Each index returns its original vertex pairs in ordinary and repeatable reads. A write or deletion in one graph preserves the other registration, including after cold reopen.",
+      "case_names": [
+        "case_1_memory::incremental_1_false",
+        "case_1_memory::incremental_2_true",
+        "case_2_sqlite_native::incremental_1_false",
+        "case_2_sqlite_native::incremental_2_true",
+        "case_3_sqlite_kv::incremental_1_false",
+        "case_3_sqlite_kv::incremental_2_true",
+        "case_4_redb::incremental_1_false",
+        "case_4_redb::incremental_2_true"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "legacy_path_indexes_reopen_restore_and_write_to_the_original_owner",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/backup/restore/tests/legacy_graph_path_indexes.rs",
+      "capability": "Graph path-index ownership across restore",
+      "workload": "Open and restore legacy definitions with either recorded materialization owner or one possible catalog graph. Replace the sequence and reopen before dropping the index.",
+      "invariant": "The original graph supplies the exact reachability pairs in a selected snapshot. Replacement and deletion affect the same physical registration.",
+      "case_names": [
+        "case_1_sqlite_native",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "restored_legacy_path_index_keeps_its_owner_when_a_second_graph_is_created",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/backup/restore/tests/legacy_graph_path_indexes.rs",
+      "capability": "Graph path-index ownership across restore",
+      "workload": "Restore a database with a legacy path definition, roll back and then commit creation of a graph whose name also matches. Back up and restore the two independent indexes.",
+      "invariant": "Both graphs preserve their own vertex pairs across cold opens after the source and each selected archive have been removed.",
+      "case_names": [
+        "case_1_sqlite_native",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "legacy_path_indexes_reject_unresolvable_owners_before_publication",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/backup/restore/tests/legacy_graph_path_indexes.rs",
+      "capability": "Graph path-index ownership across restore",
+      "workload": "Open and restore historical definitions with competing, missing and contradictory graph owners.",
+      "invariant": "Cold open and restore diagnose the invalid ownership. A failed restore releases its memory and keeps the destination private.",
+      "case_names": [
+        "case_1_sqlite_native",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
+    },
+    {
       "package": "uqa-sql",
       "kind": "lib",
       "test": "persisted_call_sites_preserve_runtime_fallback_and_require_concrete_function_identities",

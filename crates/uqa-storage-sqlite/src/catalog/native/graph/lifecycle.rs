@@ -84,19 +84,74 @@ pub(in crate::catalog) fn purge(
     Ok(())
 }
 
-fn remove_paths(
+pub(in crate::catalog) fn remove_paths(
     snapshot: &NativeSnapshot,
     batch: &mut dyn KeyValueBatch,
     graph: &str,
 ) -> Result<()> {
     let prefix = NativeRecordIdentity::new(Family::PathIndexes, owner(snapshot))?
         .encode_prefix(&[], &snapshot.control)?;
+    visit_path_keys(snapshot, &prefix, |_, name| {
+        if uqa_storage::catalog::path_index::belongs_to(
+            name,
+            graph,
+            || paths::recorded_graph(snapshot, name).map_err(Into::into),
+            |candidate| super::named_graph_exists(snapshot, candidate).map_err(Into::into),
+        )? {
+            paths::definition(snapshot, batch, name, None)?;
+        }
+        Ok(())
+    })
+}
+
+pub(super) fn retain_path_owners(
+    snapshot: &NativeSnapshot,
+    batch: &mut dyn KeyValueBatch,
+    graph: &str,
+) -> Result<()> {
+    let mut legacy_prefix =
+        crate::read_control::copy_bytes(graph.as_bytes(), 2, &snapshot.control)?;
+    legacy_prefix.extend_from_slice(b"::")?;
+    let prefix = NativeRecordIdentity::new(Family::PathIndexes, owner(snapshot))?
+        .encode_text_prefix(&legacy_prefix, &snapshot.control)?;
+    visit_path_keys(snapshot, &prefix, |key, name| {
+        if let Some(previous) = uqa_storage::catalog::path_index::owner_before_graph_creation(
+            name,
+            graph,
+            || {
+                snapshot
+                    .contains_row(Family::GraphPathIndexState, owner(snapshot), &[text(name)])
+                    .map_err(Into::into)
+            },
+            |candidate| super::named_graph_exists(snapshot, candidate).map_err(Into::into),
+        )? {
+            batch.require_unchanged(key)?;
+            let registration = NativeRecordIdentity::new(Family::NamedGraphs, owner(snapshot))?
+                .encode_key(&[text(previous)], &snapshot.control)?;
+            batch.require_unchanged(&registration)?;
+            snapshot.replace_graph_row(
+                batch,
+                Family::GraphPathIndexState,
+                &[text(name)],
+                Some(&[text(name), text(previous), text("[]"), ValueRef::Integer(0)]),
+                false,
+            )?;
+        }
+        Ok(())
+    })
+}
+
+fn visit_path_keys(
+    snapshot: &NativeSnapshot,
+    prefix: &[u8],
+    mut visit: impl FnMut(&[u8], &str) -> Result<()>,
+) -> Result<()> {
     let mut after = BudgetedVec::new(snapshot.control.memory());
     loop {
         let mut keys = BudgetedVec::new(snapshot.control.memory());
         let mut last = BudgetedVec::new(snapshot.control.memory());
         snapshot.view.visit_keys(
-            &prefix,
+            prefix,
             (!after.is_empty()).then_some(&*after),
             64,
             &snapshot.control,
@@ -122,14 +177,8 @@ fn remove_paths(
                         "native path definition identity is not text",
                     )
                 })?;
-                if name
-                    .strip_prefix(graph)
-                    .is_some_and(|suffix| suffix.starts_with("::"))
-                {
-                    paths::definition(snapshot, batch, name, None)
-                        .map_err(|error| uqa_storage::mvcc::VersionError::Storage(error.into()))?;
-                }
-                Ok(())
+                visit(key, name)
+                    .map_err(|error| uqa_storage::mvcc::VersionError::Storage(error.into()))
             })?;
         }
     }

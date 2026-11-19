@@ -6,6 +6,7 @@
 
 use super::{BTreeMap, Engine, RelationIdentity, StorageBackendResult, Value};
 use uqa_graph::GraphStore as _;
+use uqa_storage::catalog::path_index;
 
 mod catalog_oids;
 mod snapshots;
@@ -378,7 +379,7 @@ impl Engine {
             uqa_storage::catalog::graph_observations::GraphDefinitionKind::NamedGraph,
             Some(graph),
         )?;
-        let key = format!("{graph}::{name}");
+        let key = path_index::key(graph, name);
         let indexes = {
             let graphs = self.durable.graphs.read();
             let Some(store) = graphs.get(graph) else {
@@ -419,18 +420,23 @@ impl Engine {
 
     fn drop_path_index_inner(&self, name: &str, graph: &str) -> StorageBackendResult<bool> {
         self.synchronize_catalog_registries()?;
-        let key = format!("{graph}::{name}");
+        let key = path_index::key(graph, name);
+        let mut indexes = self.durable.path_indexes.read().clone();
+        let index = indexes.get(&key).cloned();
+        let physical = index
+            .as_ref()
+            .and_then(uqa_graph::PathIndex::physical_key)
+            .unwrap_or(&key);
         self.observe_graph_definition(
             uqa_storage::catalog::graph_observations::GraphDefinitionKind::PathIndex,
-            Some(&key),
+            Some(physical),
         )?;
-        if !self.durable.path_indexes.read().contains_key(&key) {
+        if index.is_none() {
             return Ok(false);
         }
-        let mut indexes = self.durable.path_indexes.read().clone();
         let removed = indexes.remove(&key)?;
         if let Some(catalog) = self.storage.catalog.as_ref() {
-            catalog.drop_path_index(&key)?;
+            catalog.drop_path_index(physical)?;
         }
         *self.durable.path_indexes.write() = indexes;
         if removed {
@@ -454,15 +460,19 @@ impl Engine {
         name: &str,
         graph: &str,
     ) -> StorageBackendResult<Option<uqa_graph::PathIndex>> {
-        let key = format!("{graph}::{name}");
-        self.observe_graph_definition(
-            uqa_storage::catalog::graph_observations::GraphDefinitionKind::PathIndex,
-            Some(&key),
-        )?;
+        let key = path_index::key(graph, name);
         let index = self.query_catalog_snapshot.as_ref().map_or_else(
             || self.durable.path_indexes.read().get(&key).cloned(),
             |snapshot| snapshot.path_indexes.get(&key).cloned(),
         );
+        let physical = index
+            .as_ref()
+            .and_then(uqa_graph::PathIndex::physical_key)
+            .unwrap_or(&key);
+        self.observe_graph_definition(
+            uqa_storage::catalog::graph_observations::GraphDefinitionKind::PathIndex,
+            Some(physical),
+        )?;
         if self.query_catalog_snapshot.is_some()
             || self.session.state.read().graph_overlay.is_some()
         {
@@ -476,8 +486,7 @@ impl Engine {
         Ok(index)
     }
 
-    /// Sorted list of registered path index keys. Each key has the
-    /// shape `<graph>::<name>` so the caller can split as needed.
+    /// Sorted, reversible path index keys. Unambiguous names retain `<graph>::<name>`.
     pub fn list_path_indexes(&self) -> StorageBackendResult<Vec<String>> {
         self.with_graph_read_snapshot(|engine| {
             engine.observe_graph_definition(
@@ -746,15 +755,10 @@ impl Engine {
     }
 
     fn invalidate_graph_path_indexes(&self, graph: &str) -> StorageBackendResult<()> {
-        let prefix = format!("{graph}::");
         let mut indexes = self.durable.path_indexes.read().clone();
-        indexes.remove_prefix(&prefix)?;
+        indexes.remove_graph(graph)?;
         if let Some(catalog) = &self.storage.catalog {
-            for (key, _) in catalog.load_path_indexes()? {
-                if key.starts_with(&prefix) {
-                    catalog.drop_path_index(&key)?;
-                }
-            }
+            catalog.drop_graph_path_indexes(graph)?;
         }
         *self.durable.path_indexes.write() = indexes;
         Ok(())

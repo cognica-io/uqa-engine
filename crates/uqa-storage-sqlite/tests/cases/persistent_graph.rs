@@ -660,3 +660,6 @@ fn allocated_ids_and_age_label_tombstones_survive_handle_reconstruction() {
         assert_eq!(graph.edges_in_graph("test_graph").unwrap().len(), 1);
     }
 }
+
+#[path = "persistent_graph/path_ownership.rs"]
+mod path_ownership;

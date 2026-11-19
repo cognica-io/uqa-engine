@@ -259,7 +259,7 @@ impl Engine {
                 // regnamespace/regclass output, independently of SQL DDL.
                 self.clear_regtype_output_cache();
             }
-            self.refresh_changed_graph_path_indexes(catalog.as_ref(), &changed)?;
+            self.restore_path_indexes(Some(&changed))?;
         }
         // Physical indexes and analyzer bindings belong to the same committed revision. Restore changed registries before reopening data stores, so an old cached binding never meets newly committed occurrence metadata.
         if !catalog_changed {

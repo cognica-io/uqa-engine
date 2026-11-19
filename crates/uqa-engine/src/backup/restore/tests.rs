@@ -32,6 +32,17 @@ fn finish_capture(mut job: crate::backup::BackupJob<'_>) -> BackupRoot {
     job.publish().unwrap()
 }
 
+fn retire_ancestor(repository: &LocalRepository, parent: BackupRoot, control: &StorageReadControl) {
+    repository.remove_backup(parent.backup(), control).unwrap();
+    for _ in 0..100 {
+        let report = repository.collect_garbage(16, 16 << 20, control).unwrap();
+        if report.remaining_files == 0 {
+            return;
+        }
+    }
+    panic!("ancestor collection did not finish");
+}
+
 fn begin<'a>(
     repository: &'a LocalRepository,
     root: BackupRoot,
@@ -102,14 +113,7 @@ fn memory_restore_job_activates_full_and_incremental_images_after_source_retirem
             .rows;
         if incremental {
             let cleanup = StorageReadControl::with_limit(32 << 20);
-            repository.remove_backup(parent.backup(), &cleanup).unwrap();
-            for attempt in 0..100 {
-                let report = repository.collect_garbage(16, 16 << 20, &cleanup).unwrap();
-                if report.remaining_files == 0 {
-                    break;
-                }
-                assert!(attempt < 99, "ancestor collection did not finish");
-            }
+            retire_ancestor(&repository, parent, &cleanup);
             assert_eq!(cleanup.memory().used(), 0);
         }
         let control = StorageReadControl::with_limit(32 << 20);
@@ -348,7 +352,9 @@ mod external_functions;
 mod foreign_bindings;
 mod foreign_callbacks;
 mod function_origins;
+mod graph_path_indexes;
 mod index_bindings;
+mod legacy_graph_path_indexes;
 mod models;
 mod partition_bindings;
 mod persistent;
