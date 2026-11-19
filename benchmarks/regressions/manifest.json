@@ -76385,6 +76385,19 @@
     {
       "package": "uqa-sql",
       "kind": "lib",
+      "test": "cold_descriptor_input_reads_each_native_field_in_its_own_window",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/composites/ownership/tests.rs",
+      "capability": "Restored composite type descriptors",
+      "workload": "Read 128 attributes from a cold type descriptor with one work step per advance, and cancel after attribute 64.",
+      "invariant": "Each advance visits at most one source attribute. Complete output preserves all attribute numbers. Interruption returns SQLSTATE 57014 and both outcomes release the allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
       "test": "stored_default_application_calls_the_catalog_input_once_and_keeps_the_canonical_datum",
       "cases": 1,
       "source": "crates/uqa-sql/src/binding/statements/tests.rs",
