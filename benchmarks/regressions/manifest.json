@@ -7349,6 +7349,19 @@
     {
       "package": "uqa-sql",
       "kind": "lib",
+      "test": "captured_rule_boolean_analysis_uses_each_selected_subquery_output_once",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/tests/repeated_query_binding.rs",
+      "capability": "Captured rule condition validation",
+      "workload": "Validate an UPDATE rule with an EXISTS condition and a scalar Boolean subquery.",
+      "invariant": "Each query block is analyzed exactly once and the validation releases all reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
       "test": "retained_query_results_require_the_complete_outer_descriptor",
       "cases": 1,
       "source": "crates/uqa-sql/src/binding/tests/repeated_query_binding.rs",
@@ -11897,6 +11910,19 @@
       "capability": "Analyzed collation observation",
       "workload": "Thirteen independent PostgreSQL expressions cover unknown and typed NULLs, scalar and array types, explicit selection and signature errors.",
       "invariant": "Original analysis, ordinary and controlled rebinding, codec restoration and value observation preserve exact results and diagnostics."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "pending_scalar_collations_report_the_first_conflict_in_source_order_across_windows",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/preparation/tests/collation_observation.rs",
+      "capability": "Stored scalar collations",
+      "workload": "Move conflicting explicit collations within a 512-element expression and interrupt the traversal before the late conflict.",
+      "invariant": "The first conflict returns 42P21 in the original order and cancellation returns 57014 with the full allowance released.",
+      "case_names": [
+        ""
+      ]
     },
     {
       "package": "uqa-sql",
@@ -54370,6 +54396,19 @@
     {
       "package": "uqa-execution",
       "kind": "lib",
+      "test": "a_small_subquery_rule_fits_the_ordinary_catalog_validation_allowance",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/tests.rs",
+      "capability": "Private restore validation",
+      "workload": "Restore a one-column table and an UPDATE rule whose predicate uses EXISTS over a single VALUES row.",
+      "invariant": "The rule and table fit the ordinary 20 KiB catalog validation allowance and release it on completion.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
       "test": "retained_partition_row_types_yield_between_parent_and_child_columns",
       "cases": 1,
       "source": "crates/uqa-execution/src/catalog/image_validation/tests/partitions.rs",
@@ -54389,6 +54428,19 @@
       "capability": "Private restore validation",
       "workload": "Validate a 512-element stored column default with an invalid scalar at its first or last position.",
       "invariant": "A late error requires more work windows, a valid default passes, and denied allocation releases the private catalog.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "retained_table_checks_coerce_each_boolean_operand_in_its_original_position",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/tests.rs",
+      "capability": "Stored CHECK expression validation",
+      "workload": "Validate 256 operands in an AND or OR condition with a nonboolean first or last operand using one- and 32-step windows.",
+      "invariant": "The original 42804 error follows the preceding operands, cancellation interrupts the scan and all reservations retire.",
       "case_names": [
         ""
       ]
@@ -71933,6 +71985,58 @@
       "capability": "Captured rule condition validation",
       "workload": "Move a duplicate captured column or an invalid scalar reference from the second to the last position of 128 stored fields.",
       "invariant": "Validation consumes the intervening fields in one- and 32-step windows, reports the original diagnostic and releases its allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "captured_rule_conditions_yield_inside_a_values_subquery_before_a_late_unknown_column",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/events/native/bindings/tests.rs",
+      "capability": "Captured rule condition validation",
+      "workload": "Validate an EXISTS rule containing a 256-row VALUES list, moving an unknown column from the first to last row.",
+      "invariant": "Late failure takes additional work calls, preserves the original undefined-column diagnostic and releases the captured fields.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "captured_rule_row_images_preserve_side_names_types_and_original_slots",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/events/native/bindings/tests.rs",
+      "capability": "Captured rule row validation",
+      "workload": "Reconstruct OLD, NEW and combined row schemas after columns were reordered, added or removed.",
+      "invariant": "Both row images retain original captured positions and current field types and collations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "captured_rule_row_construction_yields_while_building_qualified_attributes",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/events/native/bindings/tests.rs",
+      "capability": "Captured rule row validation",
+      "workload": "Build the qualified attributes of narrow and wide OLD and NEW schemas across work windows, including interruption during construction.",
+      "invariant": "Wider schemas take additional work calls and keep their field identities and original cancellation result.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "captured_whole_rule_rows_retain_their_live_fields_across_work_windows",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/events/native/bindings/tests.rs",
+      "capability": "Captured rule row validation",
+      "workload": "Construct typed whole OLD and NEW rows from a changing restored table with narrow and wide descriptors.",
+      "invariant": "Each selected live field participates in the work limit, and interruption releases the partial row.",
       "case_names": [
         ""
       ]

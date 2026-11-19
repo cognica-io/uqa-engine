@@ -368,10 +368,12 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
             }
             ScalarExpr::Not(inner) => self.not_expression(inner, input, subqueries),
             ScalarExpr::And(items) => {
-                self.boolean_chain_expression(items, "AND", input, subqueries, work).await
+                self.boolean_chain_expression(items, "AND", input, subqueries, work)
+                    .await
             }
             ScalarExpr::Or(items) => {
-                self.boolean_chain_expression(items, "OR", input, subqueries, work).await
+                self.boolean_chain_expression(items, "OR", input, subqueries, work)
+                    .await
             }
             ScalarExpr::IsNull { expr, .. } => self.null_test_expression(expr, input, subqueries),
             ScalarExpr::UnaryMinus(inner) => {
