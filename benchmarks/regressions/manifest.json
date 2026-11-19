@@ -71675,6 +71675,19 @@
     {
       "package": "uqa-sql",
       "kind": "lib",
+      "test": "captured_rule_conditions_yield_within_column_names_and_scalar_nodes",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/events/native/tests/conditions.rs",
+      "capability": "Captured rule condition validation",
+      "workload": "Move a duplicate captured column or an invalid scalar reference from the second to the last position of 128 stored fields.",
+      "invariant": "Validation consumes the intervening fields in one- and 32-step windows, reports the original diagnostic and releases its allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
       "test": "native_rule_conditions_require_complete_distinct_event_row_bindings",
       "cases": 1,
       "source": "crates/uqa-sql/src/catalog/events/native/tests/conditions.rs",

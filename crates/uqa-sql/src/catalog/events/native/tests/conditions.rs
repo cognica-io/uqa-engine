@@ -27,6 +27,70 @@ fn captured() -> StoredRule {
 }
 
 #[test]
+fn captured_rule_conditions_yield_within_column_names_and_scalar_nodes() {
+    use uqa_core::image_io::{ImageDecodeWindow, ImageDecoder};
+
+    const WIDTH: usize = 128;
+    for steps in [1, 32] {
+        for (duplicate, diagnostic) in [
+            (true, "duplicate captured column"),
+            (false, "external parameter"),
+        ] {
+            let calls = [1, WIDTH - 1].map(|position| {
+                let mut rule = captured();
+                let mut columns: Vec<_> = (0..WIDTH).map(|i| format!("attribute_{i}")).collect();
+                columns[0] = "id".into();
+                if duplicate {
+                    columns[position] = columns[0].clone();
+                }
+                let binding = RuleConditionBinding::for_event(&columns, rule.definition.event);
+                if !duplicate {
+                    let mut fields =
+                        vec![ScalarExpr::InternalColumn(binding.old_column("id").unwrap()); WIDTH];
+                    fields[position] = ScalarExpr::Param(1);
+                    rule.condition_plan.as_mut().unwrap().scalar = ScalarExpr::Row(fields);
+                }
+                rule.condition_binding = Some(binding);
+                let rules = rules(rule);
+                let memory = MemoryBudget::new(2 << 20);
+                let token = CancellationToken::new();
+                let mut input = ImageDecoder::new(&memory, &token, |mut reader| async move {
+                    let mut work = reader.input();
+                    let control =
+                        ProductionControl::new(work.memory, work.cancellation, work.cancellation);
+                    validate_with_work(
+                        &TriggerCatalog::new(),
+                        &rules,
+                        &Catalog,
+                        &control,
+                        &mut work,
+                    )
+                    .await
+                })
+                .unwrap();
+                let mut count = 0;
+                loop {
+                    count += 1;
+                    match input
+                        .advance(&mut std::io::empty(), ImageDecodeWindow { bytes: 1, steps })
+                    {
+                        Ok(None) => (),
+                        Ok(Some(())) => panic!("accepted invalid captured rule condition"),
+                        Err(error) => {
+                            assert!(error.to_string().contains(diagnostic), "{error}");
+                            break;
+                        }
+                    }
+                }
+                assert_eq!(memory.used(), 0);
+                count
+            });
+            assert!(calls[1] >= calls[0] + (WIDTH - 2) / steps, "{calls:?}");
+        }
+    }
+}
+
+#[test]
 fn native_rule_conditions_reject_unowned_captured_row_references() {
     for (relation, attribute, valid) in [
         (101, 0, true),

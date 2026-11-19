@@ -89,7 +89,7 @@ pub async fn validate_with_work<W: Work + Send>(
             if !matches!(relation(catalog, owner, control)?, "table" | "view") {
                 return Err(invalid("rule owning relation kind"));
             }
-            condition(rule, owner, catalog, control)?;
+            condition(rule, owner, catalog, control, work).await?;
             if let Some(dependencies) = &rule.dependencies {
                 for dependency in &dependencies.relations {
                     work.checkpoint().await?;
@@ -150,16 +150,23 @@ fn live_column(
     Ok(())
 }
 
-fn condition(
+async fn condition(
     rule: &StoredRule,
     owner: &RelationIdentity,
     catalog: &impl NativeEventCatalog,
     control: &ProductionControl<'_>,
+    work: &mut (impl Work + Send),
 ) -> Result<(), SQLError> {
     if let Some((plan, binding)) = condition_parts(rule)? {
-        binding.validate_captured(rule.definition.event, plan, control, &mut |column| {
-            live_column(catalog, owner, column, control)
-        })?;
+        binding
+            .validate_captured_with_work(
+                rule.definition.event,
+                plan,
+                control,
+                work,
+                &mut |column| live_column(catalog, owner, column, control),
+            )
+            .await?;
     }
     Ok(())
 }
