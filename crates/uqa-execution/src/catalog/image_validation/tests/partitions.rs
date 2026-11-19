@@ -117,3 +117,61 @@ fn native_partition_catalog_validation_retires_denied_and_cancelled_metadata() {
     assert!(validate_partition_bindings(&catalog, &NoRoutines, &memory, &token).is_err());
     assert_eq!(memory.used(), 0);
 }
+
+#[test]
+fn retained_partition_bindings_yield_between_list_datum_comparisons() {
+    const WIDTH: usize = 96;
+    let input = |duplicate: Option<usize>| {
+        let mut snapshot = catalog();
+        let child = snapshot
+            .tables
+            .get_mut(&RelationIdentity::new("public", "child"))
+            .unwrap();
+        let mut hierarchy = (*child.hierarchy).clone();
+        let mut entries = (0..WIDTH)
+            .map(|value| Expr::Literal(uqa_core::Value::Int(i64::try_from(value).unwrap())))
+            .collect::<Vec<_>>();
+        if let Some(position) = duplicate {
+            entries[position] = entries[0].clone();
+        }
+        hierarchy.partition_bound = Some(PartitionBound::List(entries));
+        child.hierarchy = hierarchy.into();
+        CatalogReadView::new(snapshot)
+    };
+    let memory = MemoryBudget::new(2 << 20);
+    let drive = |duplicate, steps, cancel| {
+        retained_binding_windows(
+            &input(duplicate),
+            &memory,
+            &CancellationToken::new(),
+            steps,
+            cancel,
+        )
+    };
+    for steps in [1, 31] {
+        let (first, error) = drive(Some(1), steps, None);
+        assert!(error
+            .unwrap_err()
+            .to_string()
+            .contains("duplicate LIST datum"));
+        let (last, error) = drive(Some(WIDTH - 1), steps, None);
+        assert!(error
+            .unwrap_err()
+            .to_string()
+            .contains("duplicate LIST datum"));
+        let comparisons = (WIDTH - 2) * (WIDTH - 1) / 2;
+        eprintln!(
+            "LIST partition, {steps} steps: first {first}, last {last}, peak {}",
+            memory.peak()
+        );
+        assert!(
+            last >= first + comparisons / steps,
+            "{steps} steps: first {first}, last {last}"
+        );
+        let (_, cancelled) = drive(None, steps, Some(first + comparisons / (2 * steps)));
+        assert_eq!(cancelled.unwrap_err().sqlstate(), Some("57014"));
+        assert_eq!(memory.used(), 0);
+    }
+    drive(None, 64, None).1.unwrap();
+    assert_eq!(memory.used(), 0);
+}

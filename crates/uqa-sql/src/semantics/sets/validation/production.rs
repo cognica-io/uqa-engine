@@ -149,16 +149,37 @@ pub fn expression_may_return_set_with_control(
     params: &[SQLParam],
     control: &ProductionControl<'_>,
 ) -> Result<bool, SQLError> {
-    control.check()?;
-    match expression {
-        ScalarExpr::Func {
+    crate::catalog::work::inline(expression_may_return_set_with_work(
+        engine,
+        resolver,
+        expression,
+        schema,
+        params,
+        control,
+        &mut (),
+    ))
+}
+
+/// Window arguments have their own placement rules. Ordinary scalar arguments, call ordering and filters retain their original first-match precedence.
+pub(crate) async fn expression_may_return_set_with_work(
+    engine: &dyn RoutineResolution,
+    resolver: &dyn FunctionTypeResolver,
+    expression: &ScalarExpr,
+    schema: &RowSchema,
+    params: &[SQLParam],
+    control: &ProductionControl<'_>,
+    work: &mut (impl crate::catalog::work::Work + Send),
+) -> Result<bool, SQLError> {
+    use crate::ir::observation::{visit, Decision};
+    visit(expression, control, work, true, &mut |node| {
+        control.check()?;
+        if let ScalarExpr::Func {
             name,
             binding,
             args,
-            order_by,
-            filter,
             ..
-        } => {
+        } = node
+        {
             if function_may_return_set_with_control(
                 SetFunctionAnalysis {
                     routines: engine,
@@ -170,106 +191,13 @@ pub fn expression_may_return_set_with_control(
                 schema,
                 params,
                 control,
-            )? || expressions_may_return_set_with_control(
-                engine, resolver, args, schema, params, control,
-            )? || expressions_may_return_set_with_control(
-                engine,
-                resolver,
-                order_by.iter().map(|order| &order.expr),
-                schema,
-                params,
-                control,
             )? {
-                return Ok(true);
+                return Ok(Decision::Stop);
             }
-            filter.as_deref().map_or(Ok(false), |filter| {
-                expression_may_return_set_with_control(
-                    engine, resolver, filter, schema, params, control,
-                )
-            })
         }
-        ScalarExpr::Array(items)
-        | ScalarExpr::Row(items)
-        | ScalarExpr::CompositeRow { items, .. }
-        | ScalarExpr::And(items)
-        | ScalarExpr::Or(items) => expressions_may_return_set_with_control(
-            engine, resolver, items, schema, params, control,
-        ),
-        ScalarExpr::Binary { lhs, rhs, .. } => Ok(expression_may_return_set_with_control(
-            engine, resolver, lhs, schema, params, control,
-        )? || expression_may_return_set_with_control(
-            engine, resolver, rhs, schema, params, control,
-        )?),
-        ScalarExpr::Not(inner)
-        | ScalarExpr::UnaryMinus(inner)
-        | ScalarExpr::IsNull { expr: inner, .. }
-        | ScalarExpr::Cast { expr: inner, .. }
-        | ScalarExpr::Collated { expr: inner, .. } => {
-            expression_may_return_set_with_control(engine, resolver, inner, schema, params, control)
-        }
-        ScalarExpr::Between { expr, low, high } => {
-            Ok(expression_may_return_set_with_control(
-                engine, resolver, expr, schema, params, control,
-            )? || expression_may_return_set_with_control(
-                engine, resolver, low, schema, params, control,
-            )? || expression_may_return_set_with_control(
-                engine, resolver, high, schema, params, control,
-            )?)
-        }
-        ScalarExpr::InList { expr, list, .. } => Ok(expression_may_return_set_with_control(
-            engine, resolver, expr, schema, params, control,
-        )? || expressions_may_return_set_with_control(
-            engine, resolver, list, schema, params, control,
-        )?),
-        // A window call returns one value per row: its arguments, FILTER and frame admit no set-returning call, and its partition and ordering keys expand the rows below the window, as `expression_returns_set` treats `WindowFunc`.
-        ScalarExpr::WindowCall { .. } => Ok(false),
-        ScalarExpr::Case {
-            base,
-            when,
-            else_branch,
-        } => {
-            if let Some(base) = base {
-                if expression_may_return_set_with_control(
-                    engine, resolver, base, schema, params, control,
-                )? {
-                    return Ok(true);
-                }
-            }
-            for (condition, result) in when {
-                if expression_may_return_set_with_control(
-                    engine, resolver, condition, schema, params, control,
-                )? || expression_may_return_set_with_control(
-                    engine, resolver, result, schema, params, control,
-                )? {
-                    return Ok(true);
-                }
-            }
-            if let Some(branch) = else_branch {
-                if expression_may_return_set_with_control(
-                    engine, resolver, branch, schema, params, control,
-                )? {
-                    return Ok(true);
-                }
-            }
-            Ok(false)
-        }
-        ScalarExpr::InSubquery { expr, .. } => {
-            expression_may_return_set_with_control(engine, resolver, expr, schema, params, control)
-        }
-        ScalarExpr::Default
-        | ScalarExpr::Star
-        | ScalarExpr::QualifiedStar(_)
-        | ScalarExpr::Column(_)
-        | ScalarExpr::Position(_)
-        | ScalarExpr::InternalColumn(_)
-        | ScalarExpr::QualifiedColumn { .. }
-        | ScalarExpr::Literal(_)
-        | ScalarExpr::TypedLiteral { .. }
-        | ScalarExpr::RetainedLiteral(_)
-        | ScalarExpr::Param(_)
-        | ScalarExpr::ScalarSubquery(_)
-        | ScalarExpr::Exists { .. } => Ok(false),
-    }
+        Ok(Decision::Descend)
+    })
+    .await
 }
 
 pub fn expressions_may_return_set_with_control<'a>(

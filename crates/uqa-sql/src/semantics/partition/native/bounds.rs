@@ -4,21 +4,24 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use super::{invalid, values, NativePartitionContext};
+use super::{invalid, values};
 use crate::{
     ast::{Expr, PartitionBound, PartitionRangeDatum, PartitionSpec, PartitionStrategy},
-    catalog::scalar_bindings::expression_type,
+    catalog::scalar_bindings::expression_type_with_work,
     ColumnType, RowSchema, SQLError,
 };
+use crate::{catalog::scalar_bindings::NativeScalarContext, expr::SQLValueCatalog};
 use std::cmp::Ordering;
 use uqa_core::{memory::ProductionControl, Value};
 
-pub(super) fn validate(
+pub(super) async fn validate<'v>(
     spec: &PartitionSpec,
     types: &[ColumnType],
     bound: &PartitionBound,
-    context: &NativePartitionContext<'_, '_>,
+    context: &NativeScalarContext<'_, '_>,
+    values: &impl Fn() -> Option<&'v dyn SQLValueCatalog>,
     control: &ProductionControl<'_>,
+    work: &mut (impl crate::catalog::CatalogWork + Send),
 ) -> Result<(), SQLError> {
     control.check()?;
     match (spec.strategy, bound) {
@@ -34,13 +37,15 @@ pub(super) fn validate(
                 return Err(invalid("empty LIST bound"));
             }
             for (position, entry) in entries.iter().enumerate() {
-                let value = constant(entry, ty, context, control)?;
+                work.checkpoint().await?;
+                let value = constant(entry, ty, context, values, control, work).await?;
                 for previous in &entries[..position] {
+                    work.checkpoint().await?;
                     if compare(
                         super::super::stored_datum(previous)?,
                         value,
                         ty,
-                        context,
+                        values(),
                         control,
                     )?
                     .is_eq()
@@ -52,9 +57,14 @@ pub(super) fn validate(
             Ok(())
         }
         (PartitionStrategy::Range, PartitionBound::Range { lower, upper }) => {
-            range(lower, types, context, control)?;
-            range(upper, types, context, control)?;
-            if range_order(lower, upper, types, context, control)? != Ordering::Less {
+            range(lower, types, context, values, control, work).await?;
+            range(upper, types, context, values, control, work).await?;
+            if super::super::comparison::range_points_with_work(
+                lower, upper, types, values, control, work,
+            )
+            .await?
+                != Ordering::Less
+            {
                 return Err(invalid("empty RANGE bound"));
             }
             Ok(())
@@ -63,19 +73,27 @@ pub(super) fn validate(
     }
 }
 
-fn constant<'a>(
+async fn constant<'a, 'v>(
     expression: &'a Expr,
     ty: &ColumnType,
-    context: &NativePartitionContext<'_, '_>,
+    context: &NativeScalarContext<'_, '_>,
+    values: &impl Fn() -> Option<&'v dyn SQLValueCatalog>,
     control: &ProductionControl<'_>,
+    work: &mut (impl crate::catalog::CatalogWork + Send),
 ) -> Result<&'a Value, SQLError> {
     control.check()?;
     let value = match expression {
         Expr::Literal(value) => value,
         Expr::TypedLiteral { value, .. } => {
-            let declared =
-                expression_type(expression, &RowSchema::default(), &context.scalar, control)?
-                    .ok_or_else(|| invalid("unresolved constant annotation"))?;
+            let declared = expression_type_with_work(
+                expression,
+                &RowSchema::default(),
+                context,
+                control,
+                work,
+            )
+            .await?
+            .ok_or_else(|| invalid("unresolved constant annotation"))?;
             if crate::catalog::type_metadata::pg_type_oid(&declared)
                 != crate::catalog::type_metadata::pg_type_oid(ty)
             {
@@ -85,27 +103,33 @@ fn constant<'a>(
         }
         _ => return Err(invalid("bound is not a stored constant")),
     };
-    values::validate(value, ty, context.values, control)?;
+    values::validate(value, ty, values, control, work).await?;
     Ok(value)
 }
 
-fn range(
+async fn range<'v>(
     point: &[PartitionRangeDatum],
     types: &[ColumnType],
-    context: &NativePartitionContext<'_, '_>,
+    context: &NativeScalarContext<'_, '_>,
+    values: &impl Fn() -> Option<&'v dyn SQLValueCatalog>,
     control: &ProductionControl<'_>,
+    work: &mut (impl crate::catalog::CatalogWork + Send),
 ) -> Result<(), SQLError> {
     if point.len() != types.len() {
         return Err(invalid("RANGE bound width"));
     }
     let mut infinite = None;
     for (datum, ty) in point.iter().zip(types) {
+        work.checkpoint().await?;
         control.check()?;
         let direction = match datum {
             PartitionRangeDatum::MinValue => Some(false),
             PartitionRangeDatum::MaxValue => Some(true),
             PartitionRangeDatum::Value(expression) => {
-                if matches!(constant(expression, ty, context, control)?, Value::Null) {
+                if matches!(
+                    constant(expression, ty, context, values, control, work).await?,
+                    Value::Null
+                ) {
                     return Err(invalid("NULL in RANGE bound"));
                 }
                 None
@@ -119,12 +143,13 @@ fn range(
     Ok(())
 }
 
-pub(super) fn disjoint(
+pub(super) async fn disjoint<'v>(
     left: &PartitionBound,
     right: &PartitionBound,
     types: &[ColumnType],
-    context: &NativePartitionContext<'_, '_>,
+    values: &impl Fn() -> Option<&'v dyn SQLValueCatalog>,
     control: &ProductionControl<'_>,
+    work: &mut (impl crate::catalog::CatalogWork + Send),
 ) -> Result<(), SQLError> {
     control.check()?;
     let overlaps = match (left, right) {
@@ -136,11 +161,12 @@ pub(super) fn disjoint(
             };
             for left in left {
                 for right in right {
+                    work.checkpoint().await?;
                     if compare(
                         super::super::stored_datum(left)?,
                         super::super::stored_datum(right)?,
                         ty,
-                        context,
+                        values(),
                         control,
                     )?
                     .is_eq()
@@ -161,8 +187,26 @@ pub(super) fn disjoint(
                 upper: right_upper,
             },
         ) => {
-            range_order(left_lower, right_upper, types, context, control)? == Ordering::Less
-                && range_order(right_lower, left_upper, types, context, control)? == Ordering::Less
+            super::super::comparison::range_points_with_work(
+                left_lower,
+                right_upper,
+                types,
+                values,
+                control,
+                work,
+            )
+            .await?
+                == Ordering::Less
+                && super::super::comparison::range_points_with_work(
+                    right_lower,
+                    left_upper,
+                    types,
+                    values,
+                    control,
+                    work,
+                )
+                .await?
+                    == Ordering::Less
         }
         (
             PartitionBound::Hash {
@@ -199,25 +243,8 @@ fn compare(
     left: &Value,
     right: &Value,
     ty: &ColumnType,
-    context: &NativePartitionContext<'_, '_>,
+    values: Option<&dyn SQLValueCatalog>,
     control: &ProductionControl<'_>,
 ) -> Result<Ordering, SQLError> {
-    crate::expr::compare_selected_values_with_catalog(
-        left,
-        right,
-        Some(ty),
-        control,
-        context.values,
-        None,
-    )
-}
-
-fn range_order(
-    left: &[PartitionRangeDatum],
-    right: &[PartitionRangeDatum],
-    types: &[ColumnType],
-    context: &NativePartitionContext<'_, '_>,
-    control: &ProductionControl<'_>,
-) -> Result<Ordering, SQLError> {
-    super::super::comparison::range_points(left, right, types, context.values, control)
+    crate::expr::compare_selected_values_with_catalog(left, right, Some(ty), control, values, None)
 }

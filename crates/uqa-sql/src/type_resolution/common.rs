@@ -709,6 +709,7 @@ pub(super) fn numeric_rank(ty: &ColumnType) -> Option<u8> {
 }
 
 mod operator_type;
+pub(crate) use operator_type::same_declaration_with_work;
 pub(super) use operator_type::{same_operator_type_with_control, same_operator_type_with_work};
 
 #[cfg(test)]

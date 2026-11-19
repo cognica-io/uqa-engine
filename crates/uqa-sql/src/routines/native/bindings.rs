@@ -8,7 +8,7 @@
 
 use crate::{
     ast::FunctionBody,
-    catalog::scalar_bindings::{expression_type, NativeScalarContext},
+    catalog::scalar_bindings::{expression_type_with_work, NativeScalarContext},
     plan::{PlanRef, UnifiedPlan},
     routines::{
         body_parameters::sql_body_parameter_scope_with_control,
@@ -28,13 +28,32 @@ pub fn validate_captured_bindings(
     context: &NativeScalarContext<'_, '_>,
     control: &ProductionControl<'_>,
 ) -> Result<(), SQLError> {
+    crate::catalog::work::inline(validate_captured_bindings_with_work(
+        routine,
+        || types,
+        context,
+        control,
+        &mut (),
+    ))
+}
+
+pub async fn validate_captured_bindings_with_work<'a>(
+    routine: &SQLUserFunction,
+    types: impl Fn() -> &'a dyn RoutineTypeCatalog,
+    context: &NativeScalarContext<'_, '_>,
+    control: &ProductionControl<'_>,
+    work: &mut (impl crate::catalog::CatalogWork + Send),
+) -> Result<(), SQLError> {
     control.check()?;
     let definition = &routine.def;
     for parameter in &definition.params {
+        work.checkpoint().await?;
         control.check()?;
         if let Some(default) = &parameter.default {
-            let actual = expression_type(default, &RowSchema::default(), context, control)?;
-            let expected = types
+            let actual =
+                expression_type_with_work(default, &RowSchema::default(), context, control, work)
+                    .await?;
+            let expected = types()
                 .resolve_catalog_column_type_name_with_control(&parameter.type_name, control)?;
             if let Some(actual) = actual {
                 if !assignment_type_compatible_with_control(&actual, &expected, control)? {
@@ -58,7 +77,7 @@ pub fn validate_captured_bindings(
             "native routine has a session body".into(),
         ));
     };
-    let params = routine_parameter_values_with_control(types, definition, control)?;
+    let params = routine_parameter_values_with_control(types(), definition, control)?;
     let parameters = sql_body_parameter_scope_with_control(definition, &params, control)?;
     let inspect = |plan: PlanRef<'_>, original: bool| {
         crate::binding::analyze_stored_routine_statement(
@@ -73,16 +92,18 @@ pub fn validate_captured_bindings(
     let mut last = None;
     for statement in statements {
         control.check()?;
-        let plan = UnifiedPlan::lower_borrowed_for_rewrite(statement, &|_: &str| false, control)?;
+        let plan = UnifiedPlan::lower_stored_statement_with_work(statement, control, work).await?;
         last = Some(inspect(plan.as_plan_ref(), true)?);
+        plan.retire(control, work).await?;
     }
-    sql_function_result_layout_with_control(types, definition, last.as_ref(), control)?;
+    sql_function_result_layout_with_control(types(), definition, last.as_ref(), control)?;
     last = None;
     for plan in plans {
+        work.checkpoint().await?;
         control.check()?;
         last = Some(inspect(plan.into(), false)?);
     }
-    sql_function_result_layout_with_control(types, definition, last.as_ref(), control)?;
+    sql_function_result_layout_with_control(types(), definition, last.as_ref(), control)?;
     Ok(control.check()?)
 }
 

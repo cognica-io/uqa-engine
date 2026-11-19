@@ -16,7 +16,7 @@ fn catalog_validation_keeps_the_selected_missing_namespace_after_the_live_table_
     #[case] provider: Provider,
 ) {
     let directory = tempfile::tempdir().unwrap();
-    let engine = provider.open(&directory.path().join("selection"));
+    let engine = std::sync::Arc::new(provider.open(&directory.path().join("selection")));
     engine.sql("CREATE SCHEMA original; CREATE TABLE original.item(id integer); CREATE TABLE keep(id integer)", &[]).unwrap();
     let complete = engine.durable.schemas.read().clone();
     assert!(engine.durable.schemas.write().remove("original").unwrap());
@@ -27,12 +27,15 @@ fn catalog_validation_keeps_the_selected_missing_namespace_after_the_live_table_
 
     let mut polls = 0;
     while matches!(checks, CatalogValidation::Capture(_)) {
-        checks = checks.advance(&engine, &control, 1).unwrap().unwrap();
+        checks = checks
+            .advance(&engine, |owner| owner, &control, 1)
+            .unwrap()
+            .unwrap();
         polls += 1;
     }
     assert!(polls > 2);
     let error = loop {
-        match checks.advance(&engine, &control, 1) {
+        match checks.advance(&engine, |owner| owner, &control, 1) {
             Ok(Some(next)) => checks = next,
             Ok(None) => panic!("validation accepted the original table without its schema"),
             Err(error) => break error,
@@ -48,7 +51,7 @@ fn catalog_validation_keeps_the_selected_missing_namespace_after_the_live_table_
 
     let mut remaining = Some(CatalogValidation::begin(&engine, &control).unwrap());
     while let Some(work) = remaining {
-        remaining = work.advance(&engine, &control, 64).unwrap();
+        remaining = work.advance(&engine, |owner| owner, &control, 64).unwrap();
     }
     assert_eq!(control.memory().used(), 0);
 }

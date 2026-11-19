@@ -21,7 +21,7 @@ pub use bodies::{validate_captured_body, validate_captured_body_with_work};
 mod runtime_calls;
 pub use runtime_calls::visit_stored_routine_runtime_calls;
 mod bindings;
-pub use bindings::validate_captured_bindings;
+pub use bindings::{validate_captured_bindings, validate_captured_bindings_with_work};
 mod references;
 pub use references::StoredRoutineReference;
 mod trigger_names;

@@ -34,13 +34,13 @@ pub(in crate::type_resolution) async fn same_operator_type_with_work<W: ColumnTy
     };
     let left = left.without_modifiers_with_work(control, work).await?;
     let right = right.without_modifiers_with_work(control, work).await?;
-    let matches = same_declaration(&left, &right, control, work).await?;
+    let matches = same_declaration_with_work(&left, &right, control, work).await?;
     ColumnType::retire_with_work(left, control, work).await?;
     ColumnType::retire_with_work(right, control, work).await?;
     Ok(matches)
 }
 
-async fn same_declaration<W: ColumnTypeInputWork>(
+pub(crate) async fn same_declaration_with_work<W: ColumnTypeInputWork>(
     mut left: &ColumnType,
     mut right: &ColumnType,
     control: &ProductionControl<'_>,

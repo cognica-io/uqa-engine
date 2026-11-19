@@ -10,11 +10,10 @@ use super::routine_declarations::{
     BorrowedTypes, Cursor as DeclarationCursor, DeclarationTypeLookup,
 };
 use super::{
-    validate_authority, validate_constraint_bindings, validate_constraints,
-    validate_event_bindings, validate_hierarchies, validate_index_bindings, validate_indexes,
-    validate_name_uniqueness, validate_namespaces, validate_partition_bindings,
-    validate_plan_relations, validate_routine_bindings, validate_routine_declarations,
-    validate_routines, validate_sequence_functions, validate_sequences, validate_types,
+    validate_authority, validate_constraints, validate_hierarchies, validate_indexes,
+    validate_name_uniqueness, validate_namespaces, validate_plan_relations,
+    validate_routine_declarations, validate_routines, validate_sequence_functions,
+    validate_sequences, validate_types,
 };
 use crate::catalog::{foreign::relationships as foreign, CatalogReadSnapshot, CatalogReadView};
 use uqa_core::{
@@ -27,6 +26,13 @@ use uqa_sql::{
     SQLError,
 };
 
+mod bindings;
+use bindings::Binding;
+
+type CatalogReader = Budgeted<Box<ImageDecoder<(), SQLError>>>;
+type OpenBinding<'a> =
+    dyn Fn(Binding, &RelationshipValidation) -> Result<CatalogReader, SQLError> + 'a;
+
 struct Inputs<'a> {
     view: &'a CatalogReadView,
     routines: &'a dyn RoutineResolution,
@@ -37,7 +43,7 @@ struct Inputs<'a> {
 
 #[derive(Clone, Copy)]
 enum Predicate {
-    Direct(fn(&Inputs<'_>) -> Result<(), SQLError>),
+    Binding(Binding),
     Scheduled(Scheduled),
     Declarations,
 }
@@ -65,46 +71,22 @@ const ORDERED: &[Predicate] = &[
     Predicate::Scheduled(Scheduled::Foreign),
     Predicate::Scheduled(Scheduled::Types),
     Predicate::Scheduled(Scheduled::PlanRelations),
-    Predicate::Direct(|input| {
-        super::validate_stored_expressions(
-            input.view,
-            input.routines,
-            input.memory,
-            input.cancellation,
-        )
-    }),
+    Predicate::Binding(Binding::Expressions),
     Predicate::Declarations,
     Predicate::Scheduled(Scheduled::Hierarchies),
     Predicate::Scheduled(Scheduled::Sequences),
     Predicate::Scheduled(Scheduled::Indexes),
     Predicate::Scheduled(Scheduled::Constraints),
-    Predicate::Direct(|input| {
-        validate_constraint_bindings(input.view, input.routines, input.memory, input.cancellation)
-    }),
-    Predicate::Direct(|input| {
-        validate_index_bindings(input.view, input.routines, input.memory, input.cancellation)
-    }),
-    Predicate::Direct(|input| {
-        validate_partition_bindings(input.view, input.routines, input.memory, input.cancellation)
-    }),
+    Predicate::Binding(Binding::Constraints),
+    Predicate::Binding(Binding::Indexes),
+    Predicate::Binding(Binding::Partitions),
     Predicate::Scheduled(Scheduled::Routines),
-    Predicate::Direct(|input| {
-        validate_routine_bindings(
-            input.view,
-            input.routines,
-            input.types,
-            input.memory,
-            input.cancellation,
-        )
-    }),
-    Predicate::Direct(|input| {
-        validate_event_bindings(input.view, input.routines, input.memory, input.cancellation)
-    }),
+    Predicate::Binding(Binding::Routines),
+    Predicate::Binding(Binding::Events),
     Predicate::Scheduled(Scheduled::SequenceFunctions),
 ];
 
-/// The outstanding predicates of an unpublished catalog. Each advance borrows the private
-/// session only for its own call and preserves the same first error as synchronous validation.
+/// Ordered predicates of one immutable unpublished catalog. Retained binding validation keeps the original lookup session until the predicate completes.
 pub struct RelationshipValidation {
     catalog: CatalogReadView,
     memory: MemoryBudget,
@@ -114,7 +96,7 @@ pub struct RelationshipValidation {
 }
 
 enum Reading {
-    Catalog(Budgeted<Box<ImageDecoder<(), SQLError>>>),
+    Catalog(CatalogReader),
     Declarations(Budgeted<Box<DeclarationCursor>>),
 }
 
@@ -158,12 +140,49 @@ impl RelationshipValidation {
         declarations: &dyn DeclarationTypeLookup,
         steps: usize,
     ) -> Result<Option<Self>, SQLError> {
-        if steps == 0 {
-            return Err(SQLError::Internal(
-                "catalog validation requires a nonzero work window".into(),
-            ));
+        self.next(routines, types, declarations, Some(steps), None)
+    }
+
+    /// Retain the private session serving captured routine and type lookups while a binding crosses work windows.
+    pub fn advance_with_retained_services<S, R>(
+        self,
+        owner: &S,
+        services: fn(&S) -> &R,
+        declarations: &dyn DeclarationTypeLookup,
+        steps: usize,
+    ) -> Result<Option<Self>, SQLError>
+    where
+        S: Clone + Send + Sync + 'static,
+        R: RoutineResolution + RoutineTypeCatalog + Send + Sync + 'static,
+    {
+        let begin = |binding: Binding, state: &Self| binding.begin(state, owner.clone(), services);
+        self.next(
+            services(owner),
+            services(owner),
+            declarations,
+            Some(steps),
+            Some(&begin),
+        )
+    }
+
+    fn advance_catalog(
+        &mut self,
+        steps: usize,
+        begin: impl FnOnce(&Self) -> Result<CatalogReader, SQLError>,
+    ) -> Result<bool, SQLError> {
+        let mut reading = match self.reading.take() {
+            Some(Reading::Catalog(reading)) => reading,
+            Some(Reading::Declarations(_)) => unreachable!("catalog predicate owns its reader"),
+            None => begin(self)?,
+        };
+        let complete = reading
+            .as_mut()
+            .advance(&mut std::io::empty(), ImageDecodeWindow { bytes: 1, steps })?
+            .is_some();
+        if !complete {
+            self.reading = Some(Reading::Catalog(reading));
         }
-        self.next(routines, types, declarations, Some(steps))
+        Ok(complete)
     }
 
     fn next(
@@ -172,20 +191,37 @@ impl RelationshipValidation {
         types: &dyn RoutineTypeCatalog,
         declarations: &dyn DeclarationTypeLookup,
         steps: Option<usize>,
+        bindings: Option<&OpenBinding<'_>>,
     ) -> Result<Option<Self>, SQLError> {
+        if steps == Some(0) {
+            return Err(SQLError::Internal(
+                "catalog validation requires a nonzero work window".into(),
+            ));
+        }
         self.cancellation.check()?;
         let (predicate, remaining) = self
             .remaining
             .split_first()
             .expect("active relationship predicate");
         match *predicate {
-            Predicate::Direct(predicate) => predicate(&Inputs {
-                view: &self.catalog,
-                routines,
-                types,
-                memory: &self.memory,
-                cancellation: &self.cancellation,
-            })?,
+            Predicate::Binding(binding) => {
+                if let Some(steps) = steps.filter(|_| self.reading.is_some() || bindings.is_some())
+                {
+                    if !self.advance_catalog(steps, |state| {
+                        bindings.expect("new binding owns its lookup services")(binding, state)
+                    })? {
+                        return Ok(Some(self));
+                    }
+                } else {
+                    binding.inline(&Inputs {
+                        view: &self.catalog,
+                        routines,
+                        types,
+                        memory: &self.memory,
+                        cancellation: &self.cancellation,
+                    })?;
+                }
+            }
             Predicate::Declarations
                 if !self
                     .catalog
@@ -226,19 +262,9 @@ impl RelationshipValidation {
             }
             Predicate::Scheduled(check) if check.applies(self.catalog.snapshot()) => {
                 if let Some(steps) = steps {
-                    let mut reading = match self.reading.take() {
-                        Some(Reading::Catalog(reading)) => reading,
-                        Some(Reading::Declarations(_)) => {
-                            unreachable!("catalog predicate owns its reader")
-                        }
-                        None => check.begin(&self.catalog, &self.memory, &self.cancellation)?,
-                    };
-                    if reading
-                        .as_mut()
-                        .advance(&mut std::io::empty(), ImageDecodeWindow { bytes: 1, steps })?
-                        .is_none()
-                    {
-                        self.reading = Some(Reading::Catalog(reading));
+                    if !self.advance_catalog(steps, |state| {
+                        check.begin(&state.catalog, &state.memory, &state.cancellation)
+                    })? {
                         return Ok(Some(self));
                     }
                 } else {
@@ -411,7 +437,7 @@ pub fn validate(
         cancellation,
     ));
     while let Some(checks) = remaining {
-        remaining = checks.next(routines, types, &BorrowedTypes(types), None)?;
+        remaining = checks.next(routines, types, &BorrowedTypes(types), None, None)?;
     }
     Ok(())
 }

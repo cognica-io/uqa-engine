@@ -7,6 +7,7 @@
 //! Set-returning expression detection and SQL context validation.
 
 mod production;
+pub(crate) use production::expression_may_return_set_with_work;
 pub use production::{
     expression_may_return_set_with_control, expressions_may_return_set_with_control,
     function_may_return_set_with_control, SetFunctionAnalysis,

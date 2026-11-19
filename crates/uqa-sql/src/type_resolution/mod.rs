@@ -116,6 +116,7 @@ pub(crate) use cast_compatibility::{cast_catalog_entry_with_control, preserves_r
 #[doc(hidden)]
 pub use checksum::{resolve_checksum_overload, ResolvedChecksumOverload};
 pub(crate) use common::effective_overload_argument_type_ref_with_params;
+pub(crate) use common::same_declaration_with_work;
 pub use common::{
     common_context_expression_type, common_type, common_type_in, common_type_in_with_control,
     effective_overload_argument_type, effective_overload_argument_type_with_params,

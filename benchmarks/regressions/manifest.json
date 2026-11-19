@@ -54227,6 +54227,32 @@
     {
       "package": "uqa-execution",
       "kind": "lib",
+      "test": "retained_default_binding_reaches_late_scalar_nodes_and_releases_the_session",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/tests.rs",
+      "capability": "Private restore validation",
+      "workload": "Validate a 512-element stored column default with an invalid scalar at its first or last position.",
+      "invariant": "A late error requires more work windows, a valid default passes, and denied allocation releases the private catalog.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "retained_partition_bindings_yield_between_list_datum_comparisons",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/tests/partitions.rs",
+      "capability": "Private restore validation",
+      "workload": "Validate a LIST partition with 96 datums and a duplicate near the beginning or end.",
+      "invariant": "Validation yields between comparisons, preserves the first duplicate diagnostic and releases the private state on cancellation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
       "test": "original_routine_reference_validation_yields_inside_a_single_selected_signature",
       "cases": 1,
       "source": "crates/uqa-execution/src/catalog/image_validation/routine_dependencies/tests/windows.rs",

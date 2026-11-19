@@ -24,7 +24,7 @@ use uqa_core::{
 };
 
 mod expressions;
-pub use expressions::{validate_bindings, IndexBindingContext};
+pub use expressions::{validate_bindings, validate_bindings_with_work, IndexBindingContext};
 
 #[derive(Clone, Copy)]
 pub struct NativeIndexTable<'a> {

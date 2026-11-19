@@ -210,6 +210,44 @@ impl<W: Work + Send> crate::ast::ColumnTypeInputWork for ReferenceWork<'_, '_, W
     }
 }
 
+impl<W: Work + Send> uqa_core::ValueCopyWork for ReferenceWork<'_, '_, W> {
+    async fn checkpoint(&mut self) -> Result<(), uqa_core::ValueRetentionError> {
+        Ok(self.work.checkpoint().await?)
+    }
+}
+
+impl<W: Work + Send> crate::plan::ScalarInputWork for ReferenceWork<'_, '_, W> {
+    type Error = SQLError;
+
+    async fn checkpoint(&mut self) -> Result<(), SQLError> {
+        ReferenceWork::checkpoint(self).await
+    }
+
+    async fn text(
+        &mut self,
+        value: &str,
+        control: &ProductionControl<'_>,
+    ) -> Result<Produced<String>, SQLError> {
+        self.work.text(value, control).await
+    }
+
+    async fn ty(
+        &mut self,
+        value: &crate::ColumnType,
+        control: &ProductionControl<'_>,
+    ) -> Result<Produced<crate::ColumnType>, SQLError> {
+        value.clone_with_input_work(control, self).await
+    }
+
+    async fn value(
+        &mut self,
+        value: &uqa_core::Value,
+        control: &ProductionControl<'_>,
+    ) -> Result<Produced<uqa_core::Value>, SQLError> {
+        Ok(value.clone_from_input(control, self).await?)
+    }
+}
+
 impl<Q: Borrow<RelationIdentity> + Sync, W: Work + Send> MapKeyInput<Q, &RelationIdentity>
     for ReferenceWork<'_, '_, W>
 {

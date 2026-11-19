@@ -7,7 +7,8 @@
 //! Request-owned value metadata for captured partition comparison; no runtime cache is populated.
 
 use crate::catalog::CatalogReadView;
-use std::{cell::RefCell, sync::Arc};
+use parking_lot::Mutex;
+use std::sync::Arc;
 use uqa_core::memory::{BudgetedMap, Produced, ProductionControl, ProductionVec};
 use uqa_sql::{
     expr::{
@@ -20,16 +21,16 @@ use uqa_sql::{
 /// Arc-returning value interfaces are borrowed only during native validation. These private maps retain each admitted payload until the complete comparison finishes; no returned Arc escapes the validation call.
 pub(super) struct PartitionValues<'a> {
     catalog: &'a CatalogReadView,
-    metadata: Option<&'a dyn SQLValueCatalog>,
-    enums: RefCell<BudgetedMap<u32, Produced<Arc<EnumTypeLabels>>>>,
-    ranges: RefCell<BudgetedMap<u32, Produced<Arc<RangeValueDescriptor>>>>,
+    metadata: Option<&'a dyn uqa_sql::routines::RoutineResolution>,
+    enums: Mutex<BudgetedMap<u32, Produced<Arc<EnumTypeLabels>>>>,
+    ranges: Mutex<BudgetedMap<u32, Produced<Arc<RangeValueDescriptor>>>>,
     control: ProductionControl<'a>,
 }
 
 impl<'a> PartitionValues<'a> {
     pub fn new(
         catalog: &'a CatalogReadView,
-        metadata: Option<&'a dyn SQLValueCatalog>,
+        metadata: Option<&'a dyn uqa_sql::routines::RoutineResolution>,
         control: ProductionControl<'a>,
     ) -> Self {
         let memory = control
@@ -38,8 +39,8 @@ impl<'a> PartitionValues<'a> {
         Self {
             catalog,
             metadata,
-            enums: RefCell::new(BudgetedMap::new(memory)),
-            ranges: RefCell::new(BudgetedMap::new(memory)),
+            enums: Mutex::new(BudgetedMap::new(memory)),
+            ranges: Mutex::new(BudgetedMap::new(memory)),
             control,
         }
     }
@@ -56,7 +57,7 @@ impl<'a> PartitionValues<'a> {
 impl SQLValueCatalog for PartitionValues<'_> {
     fn enum_type_labels(&self, oid: u32) -> Result<Option<Arc<EnumTypeLabels>>, SQLError> {
         self.control.check()?;
-        if let Some(labels) = self.enums.borrow().get(&oid) {
+        if let Some(labels) = self.enums.lock().get(&oid) {
             return Ok(Some(Arc::clone(labels)));
         }
         for definition in self.catalog.enums() {
@@ -90,7 +91,7 @@ impl SQLValueCatalog for PartitionValues<'_> {
                 memory,
             )?)?;
             let result = Arc::clone(&labels);
-            self.enums.borrow_mut().insert(oid, labels)?;
+            self.enums.lock().insert(oid, labels)?;
             return Ok(Some(result));
         }
         Ok(None)
@@ -126,6 +127,7 @@ impl SQLValueCatalog for PartitionValues<'_> {
     ) -> Result<Option<Produced<uqa_sql::ColumnType>>, SQLError> {
         self.control.check()?;
         self.metadata
+            .and_then(|routines| routines.enum_labels())
             .map(|metadata| metadata.value_type_by_oid_with_control(oid, control))
             .transpose()
             .map(Option::flatten)
@@ -138,6 +140,7 @@ impl SQLValueCatalog for PartitionValues<'_> {
     ) -> Result<Option<uqa_sql::expr::composites::OwnedCompositeTypeDescriptor>, SQLError> {
         self.control.check()?;
         self.metadata
+            .and_then(|routines| routines.enum_labels())
             .map(|metadata| metadata.value_composite_type_with_control(oid, control))
             .transpose()
             .map(Option::flatten)
@@ -169,7 +172,7 @@ impl SQLValueCatalog for PartitionValues<'_> {
 
     fn value_range_type(&self, oid: u32) -> Result<Option<Arc<RangeValueDescriptor>>, SQLError> {
         self.control.check()?;
-        if let Some(descriptor) = self.ranges.borrow().get(&oid) {
+        if let Some(descriptor) = self.ranges.lock().get(&oid) {
             return Ok(Some(Arc::clone(descriptor)));
         }
         for definition in self.catalog.ranges() {
@@ -190,7 +193,7 @@ impl SQLValueCatalog for PartitionValues<'_> {
                 memory,
             )?)?;
             let result = Arc::clone(&descriptor);
-            self.ranges.borrow_mut().insert(oid, descriptor)?;
+            self.ranges.lock().insert(oid, descriptor)?;
             return Ok(Some(result));
         }
         Ok(None)

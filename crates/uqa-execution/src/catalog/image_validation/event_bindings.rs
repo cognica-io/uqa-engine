@@ -13,7 +13,10 @@ use uqa_core::{
     CancellationToken,
 };
 use uqa_sql::{
-    catalog::{events::native::bindings::validate_condition, scalar_bindings::NativeScalarContext},
+    catalog::{
+        events::native::bindings::validate_condition_with_work,
+        scalar_bindings::NativeScalarContext,
+    },
     routines::RoutineResolution,
     RowSchema, SQLError,
 };
@@ -24,8 +27,24 @@ pub fn validate(
     memory: &MemoryBudget,
     cancellation: &CancellationToken,
 ) -> Result<(), SQLError> {
+    crate::catalog::selection_work::inline(validate_with_work(
+        catalog,
+        routines,
+        memory,
+        cancellation,
+        &mut (),
+    ))
+}
+
+pub(super) async fn validate_with_work(
+    catalog: &CatalogReadView,
+    routines: &dyn RoutineResolution,
+    memory: &MemoryBudget,
+    cancellation: &CancellationToken,
+    work: &mut (impl uqa_sql::catalog::CatalogWork + Send),
+) -> Result<(), SQLError> {
     let control = ProductionControl::new(memory, cancellation, cancellation);
-    let scalar = ScalarBindings::new(catalog, memory, cancellation)?;
+    let scalar = ScalarBindings::with_work(catalog, memory, cancellation, work).await?;
     let context = NativeScalarContext {
         subject: "rule condition",
         routines,
@@ -35,6 +54,7 @@ pub fn validate(
     };
     let snapshot = catalog.snapshot();
     for (owner, rules) in snapshot.definitions.rules.iter() {
+        work.checkpoint().await?;
         control.check()?;
         let row = if let Some(table) = snapshot.tables.get(owner) {
             RowSchema::with_column_metadata_with_control(
@@ -57,7 +77,8 @@ pub fn validate(
             ));
         };
         for rule in rules.values() {
-            validate_condition(rule, &row, &context, &control)?;
+            work.checkpoint().await?;
+            validate_condition_with_work(rule, &row, &context, &control, work).await?;
             uqa_sql::catalog::events::native::dependencies::validate(
                 rule,
                 catalog,
@@ -67,7 +88,7 @@ pub fn validate(
         }
     }
     control.check()?;
-    Ok(())
+    scalar.retire(work).await
 }
 
 #[cfg(test)]

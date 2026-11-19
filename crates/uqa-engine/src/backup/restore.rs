@@ -393,6 +393,7 @@ impl RestoreJob<'_> {
             State::Validating(engine, checks, bindings) => {
                 match checks.advance(
                     &engine,
+                    |restored| restored,
                     &self.control,
                     input_window(maximum_object_bytes).steps,
                 )? {

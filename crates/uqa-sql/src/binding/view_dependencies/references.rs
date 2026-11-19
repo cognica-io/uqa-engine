@@ -206,7 +206,7 @@ pub fn visit_stored_runtime_calls(
 pub async fn visit_stored_runtime_calls_from(
     plan: PlanRef<'_>,
     control: &ProductionControl<'_>,
-    input: &mut uqa_core::image_io::AsyncImageInput<'_>,
+    input: &mut (impl crate::catalog::CatalogWork + Send),
     visit: &mut (impl FnMut(&str, StoredFunctionSite) -> Result<(), SQLError> + Send),
 ) -> Result<(), SQLError> {
     runtime_calls(plan, control, input, visit).await

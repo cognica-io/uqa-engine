@@ -15,7 +15,7 @@ use uqa_core::{
 use uqa_sql::{
     catalog::{relation_oids::RelationCatalogOids, scalar_bindings::NativeScalarContext},
     routines::RoutineResolution,
-    schema::constraints::native::bindings::{validate_domain, validate_table},
+    schema::constraints::native::bindings::{validate_domain_with_work, validate_table_with_work},
     ColumnType, SQLError,
 };
 
@@ -25,8 +25,24 @@ pub fn validate(
     memory: &MemoryBudget,
     cancellation: &CancellationToken,
 ) -> Result<(), SQLError> {
+    crate::catalog::selection_work::inline(validate_with_work(
+        catalog,
+        routines,
+        memory,
+        cancellation,
+        &mut (),
+    ))
+}
+
+pub(super) async fn validate_with_work(
+    catalog: &CatalogReadView,
+    routines: &dyn RoutineResolution,
+    memory: &MemoryBudget,
+    cancellation: &CancellationToken,
+    work: &mut (impl uqa_sql::catalog::CatalogWork + Send),
+) -> Result<(), SQLError> {
     let control = ProductionControl::new(memory, cancellation, cancellation);
-    let scalar = ScalarBindings::new(catalog, memory, cancellation)?;
+    let scalar = ScalarBindings::with_work(catalog, memory, cancellation, work).await?;
     let context = NativeScalarContext {
         subject: "constraint",
         routines,
@@ -56,22 +72,26 @@ pub fn validate(
             )
         });
     for (name, columns, checks, oids) in ordinary.chain(foreign) {
+        work.checkpoint().await?;
         control.check()?;
         let row_type = row_type(name, oids, &control)?;
-        validate_table(
+        validate_table_with_work(
             name,
             columns,
             checks,
             row_type.as_deref(),
             &context,
             &control,
-        )?;
+            work,
+        )
+        .await?;
     }
     for domain in snapshot.definitions.domains.values() {
-        validate_domain(&domain.definition, &context, &control)?;
+        work.checkpoint().await?;
+        validate_domain_with_work(&domain.definition, &context, &control, work).await?;
     }
     control.check()?;
-    Ok(())
+    scalar.retire(work).await
 }
 
 fn row_type(

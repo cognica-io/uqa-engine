@@ -13,7 +13,7 @@ use uqa_core::{
     CancellationToken,
 };
 use uqa_sql::{
-    catalog::scalar_bindings::{expression_type, NativeScalarContext},
+    catalog::scalar_bindings::{expression_type_with_work, NativeScalarContext},
     routines::RoutineResolution,
     RowSchema, SQLError,
 };
@@ -24,17 +24,36 @@ pub fn validate(
     memory: &MemoryBudget,
     cancellation: &CancellationToken,
 ) -> Result<(), SQLError> {
+    crate::catalog::selection_work::inline(validate_with_work(
+        catalog,
+        routines,
+        memory,
+        cancellation,
+        &mut (),
+    ))
+}
+
+pub(super) async fn validate_with_work(
+    catalog: &CatalogReadView,
+    routines: &dyn RoutineResolution,
+    memory: &MemoryBudget,
+    cancellation: &CancellationToken,
+    work: &mut (impl uqa_sql::catalog::CatalogWork + Send),
+) -> Result<(), SQLError> {
     let control = ProductionControl::new(memory, cancellation, cancellation);
-    let scalar = ScalarBindings::new(catalog, memory, cancellation)?;
+    let scalar = ScalarBindings::with_work(catalog, memory, cancellation, work).await?;
     let snapshot = catalog.snapshot();
     for view in snapshot.definitions.views.values() {
+        work.checkpoint().await?;
         control.check()?;
         view.rewrite_definition_ref()
-            .validate_function_calls_with_control(
+            .validate_function_calls_with_work(
                 routines,
                 scalar.binding.copy_with_control(&control)?,
                 &control,
-            )?;
+                work,
+            )
+            .await?;
     }
 
     let context = NativeScalarContext {
@@ -57,19 +76,22 @@ pub fn validate(
                 .map(|table| table.columns.as_slice()),
         );
     for columns in tables {
+        work.checkpoint().await?;
         control.check()?;
         for column in columns {
+            work.checkpoint().await?;
             control.check()?;
             if let Some(default) = &column.default {
-                expression_type(default, &empty_row, &context, &control)?;
+                expression_type_with_work(default, &empty_row, &context, &control, work).await?;
             }
         }
     }
     for domain in snapshot.definitions.domains.values() {
+        work.checkpoint().await?;
         control.check()?;
         if let Some(default) = &domain.definition.default {
-            expression_type(default, &empty_row, &context, &control)?;
+            expression_type_with_work(default, &empty_row, &context, &control, work).await?;
         }
     }
-    Ok(())
+    scalar.retire(work).await
 }

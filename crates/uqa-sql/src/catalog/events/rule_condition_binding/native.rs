@@ -92,6 +92,7 @@ impl RuleConditionBinding {
         )?))
     }
 
+    #[cfg(test)]
     pub(crate) fn validate_captured(
         &self,
         event: RuleEvent,

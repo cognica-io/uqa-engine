@@ -15,7 +15,7 @@ use uqa_core::{
 use uqa_sql::{
     catalog::scalar_bindings::NativeScalarContext,
     routines::RoutineResolution,
-    semantics::partition::native::{self, NativePartitionContext, NativePartitionTable},
+    semantics::partition::native::{self, NativePartitionTable},
     SQLError,
 };
 
@@ -27,8 +27,24 @@ pub fn validate(
     memory: &MemoryBudget,
     cancellation: &CancellationToken,
 ) -> Result<(), SQLError> {
-    let scalar = ScalarBindings::new(catalog, memory, cancellation)?;
-    let scalar = NativeScalarContext {
+    crate::catalog::selection_work::inline(validate_with_work(
+        catalog,
+        routines,
+        memory,
+        cancellation,
+        &mut (),
+    ))
+}
+
+pub(super) async fn validate_with_work(
+    catalog: &CatalogReadView,
+    routines: &dyn RoutineResolution,
+    memory: &MemoryBudget,
+    cancellation: &CancellationToken,
+    work: &mut (impl uqa_sql::catalog::CatalogWork + Send),
+) -> Result<(), SQLError> {
+    let scalar = ScalarBindings::with_work(catalog, memory, cancellation, work).await?;
+    let context = NativeScalarContext {
         subject: "partition",
         routines,
         references: &scalar.references,
@@ -37,14 +53,10 @@ pub fn validate(
     };
     let values = values::PartitionValues::new(
         catalog,
-        routines.enum_labels(),
+        Some(routines),
         ProductionControl::new(memory, cancellation, cancellation),
     );
-    let context = NativePartitionContext {
-        scalar,
-        values: Some(&values),
-    };
-    native::validate(
+    native::validate_with_work(
         catalog
             .snapshot()
             .tables
@@ -56,7 +68,11 @@ pub fn validate(
                 checks: &table.checks,
             }),
         &context,
+        || Some(&values),
         memory,
         cancellation,
+        work,
     )
+    .await?;
+    scalar.retire(work).await
 }

@@ -58,7 +58,7 @@ pub fn validate(
 fn declaration(function: &uqa_sql::routines::SQLRoutine) -> &uqa_sql::ast::CreateFunction {
     &function.def
 }
-fn group(
+pub(super) fn group(
     routines: &[uqa_sql::routines::SQLRoutine],
 ) -> impl Iterator<Item = &uqa_sql::ast::CreateFunction> {
     routines.iter().map(declaration)
