@@ -154,20 +154,32 @@ pub fn bind_grouping_names(
     outer: Option<&RowSchema>,
     params: &[SQLParam],
 ) -> Result<bool, SQLError> {
+    bind_grouping_items(
+        routines,
+        statement
+            .group_by
+            .iter_mut()
+            .chain(statement.grouping_sets.iter_mut().flatten()),
+        &statement.projections,
+        schema,
+        outer,
+        params,
+    )
+}
+
+pub(crate) fn bind_grouping_items<'a>(
+    routines: &dyn RoutineResolution,
+    items: impl Iterator<Item = &'a mut ScalarExpr>,
+    projections: &[ProjectionPlan],
+    schema: &RowSchema,
+    outer: Option<&RowSchema>,
+    params: &[SQLParam],
+) -> Result<bool, SQLError> {
     let mut changed = false;
-    for expression in statement
-        .group_by
-        .iter_mut()
-        .chain(statement.grouping_sets.iter_mut().flatten())
-    {
-        if let Cow::Owned(resolved) = resolve_grouping_expression(
-            routines,
-            expression,
-            &statement.projections,
-            schema,
-            outer,
-            params,
-        )? {
+    for expression in items {
+        if let Cow::Owned(resolved) =
+            resolve_grouping_expression(routines, expression, projections, schema, outer, params)?
+        {
             *expression = resolved;
             changed = true;
         }

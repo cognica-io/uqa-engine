@@ -176,6 +176,14 @@ impl ExpressionType {
         Ok(output)
     }
 
+    /// Common VALUES typing, collation and record-field selection need one observation per run of equivalent resolved inputs. SQL unknowns retain their individual coercion sites.
+    pub(in crate::binding::preparation) fn same_resolved_values_input(&self, other: &Self) -> bool {
+        self.ty.is_some()
+            && self.ty == other.ty
+            && self.derivation == other.derivation
+            && self.record_fields == other.record_fields
+    }
+
     pub(in crate::binding::preparation) fn is_deferred(&self) -> bool {
         self.ty.is_none() && self.unknown == UnknownOrigin::Deferred
     }

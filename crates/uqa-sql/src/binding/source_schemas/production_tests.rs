@@ -15,6 +15,42 @@ use uqa_core::{
 };
 
 #[test]
+fn values_schema_retains_one_observation_per_equivalent_resolved_run() {
+    let memory = MemoryBudget::new(32 << 10);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&memory, &token, &token);
+    let mut scope = SchemaScope::from_context_with_control(
+        empty_binding_context().copy_with_control(&control).unwrap(),
+        &control,
+    )
+    .unwrap();
+    let mut rows = (0..4096)
+        .map(|value| vec![ScalarExpr::Literal(uqa_core::Value::Int(value))])
+        .collect::<Vec<_>>();
+    let first = scope
+        .bind_values_schema(&NoRoutines, &rows[..1], &[], None, &[])
+        .unwrap();
+    let all = scope
+        .bind_values_schema(&NoRoutines, &rows, &[], None, &[])
+        .unwrap();
+    assert_eq!(all.columns(), first.columns());
+    assert_eq!(all.column_types(), first.column_types());
+
+    rows.last_mut().unwrap()[0] = ScalarExpr::Literal(uqa_core::Value::Bool(true));
+    let error = scope
+        .bind_values_schema(&NoRoutines, &rows, &[], None, &[])
+        .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("42804"));
+    rows.push(Vec::new());
+    let error = scope
+        .bind_values_schema(&NoRoutines, &rows, &[], None, &[])
+        .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("42601"));
+    drop((first, all, scope));
+    assert_eq!(memory.used(), 0);
+}
+
+#[test]
 fn controlled_join_output_binding_rejects_wide_metadata_before_copying() {
     let input = |qualifier| {
         RowSchema::with_qualified_types(

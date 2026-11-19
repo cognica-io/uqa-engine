@@ -109,6 +109,9 @@ impl InputConstants {
         }
         // Source selections are consumed before expression rewrites can move their enclosing nodes.
         plan.visit_sources_mut(&mut |source| self.apply_source(source));
+        if self.is_consumed() {
+            return Ok(());
+        }
         // Consume all selected inputs at their original address before a parent transfers its children.
         let mut groupings = std::mem::take(&mut self.8.groupings);
         crate::plan::subqueries::rewrite_with_arenas_and_metadata(

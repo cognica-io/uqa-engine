@@ -51,6 +51,9 @@ impl InputConstants {
         control: &ProductionControl<'_>,
     ) -> Result<(), SQLError> {
         inline(self.apply_metadata_owned_from(plan, control, &mut ()))?;
+        if self.is_consumed() {
+            return Ok(control.check()?);
+        }
         let mut groupings = std::mem::take(&mut self.8.groupings);
         plan.transform_scalar_arenas_with_metadata(
             control,

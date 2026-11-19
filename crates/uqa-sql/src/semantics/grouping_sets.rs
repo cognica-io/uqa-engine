@@ -21,7 +21,7 @@ pub(crate) use production::{
     analyze_distinct_grouping_with_control, expression_identity_with_control,
 };
 mod names;
-pub(crate) use names::resolve_grouping_expression_reference_with_control;
+pub(crate) use names::{bind_grouping_items, resolve_grouping_expression_reference_with_control};
 pub use names::{
     bind_grouping_names, bind_grouping_names_owned, grouping_output_name,
     resolve_grouping_expression,

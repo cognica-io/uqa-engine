@@ -41275,6 +41275,19 @@
     {
       "package": "uqa-sql",
       "kind": "lib",
+      "test": "values_schema_retains_one_observation_per_equivalent_resolved_run",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/source_schemas/production_tests.rs",
+      "capability": "VALUES column analysis",
+      "workload": "Bind 4,096 rows under 32 KiB, then change the last value's type and append an empty row.",
+      "invariant": "Equivalent concrete inputs produce the original schema within the allowance. A late incompatible type reports 42804. A malformed row reports 42601 before column coercion.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
       "test": "controlled_join_output_binding_rejects_wide_metadata_before_copying",
       "cases": 1,
       "source": "crates/uqa-sql/src/binding/source_schemas/production_tests.rs",

@@ -265,12 +265,11 @@ impl SchemaScope {
                         message: "SELECT * with no tables specified is not valid".into(),
                     });
                 }
-                let source_schema = block.from.as_ref().map_or_else(
+                let source = block.from.as_ref().map_or_else(
                     || Ok(RowSchema::default()),
                     |source| self.bind_source(routines, source, &block.subqueries, params, outer),
                 )?;
-                let source_schema =
-                    super::analysis::with_query_source_columns(&source_schema, block);
+                let source_schema = super::analysis::with_query_source_columns(&source, block);
                 let expression_schema = overlay_outer_schema(&source_schema, outer);
                 if let Some(filter) = block.r#where.as_mut() {
                     self.bind_scalar_routines_for_storage(
@@ -292,38 +291,38 @@ impl SchemaScope {
                     )?;
                 }
                 super::routine_parameters::keep_column_labels(&mut block.projections, labels);
-                if self.preserve_syntax_shape {
-                    // Stored syntax keeps `*` and output-name references as written; expanding a copy still reports their errors.
-                    let mut expanded = (**block).clone();
-                    expanded.projections =
-                        crate::semantics::expand_bound_projection_stars_in_scope(
-                            &block.projections,
-                            &source_schema,
-                            &expression_schema,
-                        )?;
-                    self.bind_grouping_variable_sites(&mut expanded, &source_schema);
-                    crate::semantics::grouping_sets::bind_grouping_names(
-                        routines,
-                        &mut expanded,
-                        &source_schema,
-                        None,
-                        params,
-                    )?;
+                let expanded = crate::semantics::expand_bound_projection_stars_in_scope(
+                    &block.projections,
+                    &source_schema,
+                    &expression_schema,
+                )?;
+                // Stored syntax keeps grouping names and stars as written. Only the grouping inputs and expanded projections participate in this validation.
+                let (mut groups, mut sets);
+                let (projections, groups, sets) = if self.preserve_syntax_shape {
+                    groups = block.group_by.clone();
+                    sets = block.grouping_sets.clone();
+                    (&expanded, &mut groups, &mut sets)
                 } else {
-                    block.projections = crate::semantics::expand_bound_projection_stars_in_scope(
+                    block.projections = expanded;
+                    (
                         &block.projections,
-                        &source_schema,
-                        &expression_schema,
-                    )?;
-                    self.bind_grouping_variable_sites(block, &source_schema);
-                    crate::semantics::grouping_sets::bind_grouping_names(
-                        routines,
-                        block,
-                        &source_schema,
-                        None,
-                        params,
-                    )?;
-                }
+                        &mut block.group_by,
+                        &mut block.grouping_sets,
+                    )
+                };
+                self.bind_grouping_variable_sites(
+                    groups.iter_mut().chain(sets.iter_mut().flatten()),
+                    projections,
+                    &source_schema,
+                );
+                crate::semantics::grouping_sets::bind_grouping_items(
+                    routines,
+                    groups.iter_mut().chain(sets.iter_mut().flatten()),
+                    projections,
+                    &source_schema,
+                    None,
+                    params,
+                )?;
                 let output_names = self.output_names(&block.projections);
                 for expression in block
                     .group_by
@@ -419,6 +418,10 @@ impl SchemaScope {
                         &block.subqueries,
                         params,
                     )?;
+                }
+                // FROM and its scalar subqueries have their final bindings. A deferred view rewrite can change the source and its outer namespace before output analysis.
+                if block.from.is_some() && block.deferred_outer_rewrites.is_empty() {
+                    return self.bind_query_block_output(routines, block, source, params, outer);
                 }
             }
             RelationalPlan::SetOp {

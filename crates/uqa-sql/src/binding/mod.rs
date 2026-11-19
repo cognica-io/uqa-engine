@@ -324,6 +324,19 @@ impl SchemaScope {
                 &control,
             )?,
         };
+        self.bind_query_block_output(routines, block, source, params, outer)
+    }
+
+    fn bind_query_block_output(
+        &mut self,
+        routines: &dyn RoutineResolution,
+        block: &QueryBlockPlan,
+        source: RowSchema,
+        params: &[SQLParam],
+        outer: Option<&RowSchema>,
+    ) -> Result<RowSchema, SQLError> {
+        let production = self.production.clone();
+        let control = production.control();
         if let Some(sources) = &mut self.execution_sources {
             sources.record(block, &source, outer);
         }

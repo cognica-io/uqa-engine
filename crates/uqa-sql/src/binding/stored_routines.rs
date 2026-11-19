@@ -16,6 +16,7 @@ use crate::SQLError;
 use crate::{RowSchema, ScalarExpr};
 
 use crate::{binding::context::BindingContext, routines::RoutineResolution};
+use std::borrow::Cow;
 use uqa_core::Value;
 
 /// Routine metadata and immutable namespace inputs for a stored statement.
@@ -130,23 +131,24 @@ pub(super) fn bind_catalog_statement_composite_inputs(
     })
 }
 
+fn catalog_query<'a>(
+    context: &CatalogRoutineContext<'_, '_>,
+    plan: &'a UnifiedPlan,
+) -> Result<Option<(Cow<'a, QueryPlan>, Option<RowSchema>)>, SQLError> {
+    match plan {
+        UnifiedPlan::Query(query) => Ok(Some((Cow::Borrowed(query), None))),
+        UnifiedPlan::Command(command) => Ok(command_statement_query(context, command)?
+            .map(|(query, outer)| (Cow::Owned(query), outer))),
+    }
+}
+
 fn bind_catalog_statement(
     context: &CatalogRoutineContext<'_, '_>,
     plan: &UnifiedPlan,
     prepared: Option<&UnifiedPlan>,
     bind: impl FnOnce(&mut QueryPlan, Option<&RowSchema>) -> Result<RowSchema, SQLError>,
 ) -> Result<BoundStatementRoutines, SQLError> {
-    let lower = |plan: &UnifiedPlan| -> Result<_, SQLError> {
-        match plan {
-            UnifiedPlan::Query(query) => {
-                let mut query = (**query).clone();
-                mark_query_relations_bound(&mut query);
-                Ok(Some((query, None)))
-            }
-            UnifiedPlan::Command(command) => command_statement_query(context, command),
-        }
-    };
-    let lowered = lower(plan)?;
+    let lowered = catalog_query(context, plan)?;
     let Some((lowered, outer)) = lowered else {
         return Ok(BoundStatementRoutines {
             query: None,
@@ -155,17 +157,20 @@ fn bind_catalog_statement(
         });
     };
     let mut query = match prepared {
-        Some(prepared) => {
-            lower(prepared)?
-                .ok_or_else(|| {
-                    SQLError::Internal(
-                        "prepared catalog statement lost its analyzed expressions".into(),
-                    )
-                })?
-                .0
-        }
-        None => lowered.clone(),
+        Some(prepared) => catalog_query(context, prepared)?
+            .ok_or_else(|| {
+                SQLError::Internal(
+                    "prepared catalog statement lost its analyzed expressions".into(),
+                )
+            })?
+            .0
+            .into_owned(),
+        None => lowered.as_ref().clone(),
     };
+    // Syntax sites read the unchanged scalar positions. Only the private query being analyzed needs the stored relation lookup mode.
+    if matches!(prepared.unwrap_or(plan), UnifiedPlan::Query(_)) {
+        mark_query_relations_bound(&mut query);
+    }
     let output = bind(&mut query, outer.as_ref())?;
     let sites = if matches!(plan, UnifiedPlan::Command(_)) {
         super::syntax_sites::command_query_syntax_sites(&lowered, &query)?

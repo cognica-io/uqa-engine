@@ -668,7 +668,11 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
                     analysis.expression(expression, input, subqueries)
                 })?;
                 if let Some(column) = columns.get_mut(position) {
-                    column.push(value, &control)?;
+                    if !column.last().is_some_and(|previous: &ExpressionType| {
+                        previous.same_resolved_values_input(&value)
+                    }) {
+                        column.push(value, &control)?;
+                    }
                 }
             }
             if row.len() != width {
