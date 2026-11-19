@@ -186,13 +186,13 @@ fn byte_chunks<'a, 'b>(
     left.chunks(4096).zip(right.chunks(4096))
 }
 
-pub(crate) async fn compare_text<W: Work>(
-    work: &mut W,
-    left: &str,
-    right: &str,
-    control: &ProductionControl<'_>,
-) -> Result<std::cmp::Ordering, SQLError> {
-    compare_bytes(work, left.as_bytes(), right.as_bytes(), control).await
+pub(crate) fn compare_text<'a, W: Work>(
+    work: &'a mut W,
+    left: &'a str,
+    right: &'a str,
+    control: &'a ProductionControl<'a>,
+) -> impl Future<Output = Result<Ordering, SQLError>> + 'a {
+    compare_bytes(work, left.as_bytes(), right.as_bytes(), control)
 }
 
 pub(crate) async fn compare_bytes<W: Work>(
