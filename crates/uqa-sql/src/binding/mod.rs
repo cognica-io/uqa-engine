@@ -372,8 +372,13 @@ impl SchemaScope {
                 &control,
             )?,
         };
-        self.bind_query_block_output(routines, block, source, params, outer, work)
-            .await
+        // Output analysis starts after FROM is bound. A parent waiting on a derived source has no output state to retain.
+        let output = || self.bind_query_block_output(routines, block, source, params, outer, work);
+        if W::MAY_SUSPEND {
+            crate::construction::Read::with_constructor(control, output)?.await
+        } else {
+            crate::catalog::work::inline_with(output)
+        }
     }
 
     async fn bind_query_block_output<W: crate::catalog::work::Work + Send>(
