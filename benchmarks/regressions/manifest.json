@@ -71688,6 +71688,19 @@
     {
       "package": "uqa-sql",
       "kind": "lib",
+      "test": "small_rule_catalogs_retain_only_the_work_their_conditions_need",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/events/native/tests/conditions.rs",
+      "capability": "Captured rule condition validation",
+      "workload": "Validate an empty catalog, a rule without a condition and a rule with one captured condition under small restore allowances.",
+      "invariant": "The empty and unconditional catalogs fit 12 KiB. The single captured condition fits 16 KiB and all reservations retire.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
       "test": "native_rule_conditions_require_complete_distinct_event_row_bindings",
       "cases": 1,
       "source": "crates/uqa-sql/src/catalog/events/native/tests/conditions.rs",

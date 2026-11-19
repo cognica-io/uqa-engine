@@ -102,12 +102,12 @@ impl RuleConditionBinding {
         inline(self.validate_captured_with_work(event, plan, control, &mut (), column))
     }
 
-    pub(crate) async fn validate_captured_with_work(
+    pub(crate) async fn validate_captured_with_work<W: Work + Send>(
         &self,
         event: RuleEvent,
         plan: &ExpressionPlan,
         control: &ProductionControl<'_>,
-        work: &mut (impl Work + Send),
+        work: &mut W,
         column: &mut impl FnMut(&str) -> Result<(), SQLError>,
     ) -> Result<(), SQLError> {
         control.check()?;
@@ -143,8 +143,13 @@ impl RuleConditionBinding {
         };
         visit_all(&plan.scalar, control, work, &mut observer).await?;
         for query in &plan.subqueries {
-            visit_scalar_nodes_with_work(PlanRef::Query(query), control, work, &mut observer)
-                .await?;
+            let read =
+                visit_scalar_nodes_with_work(PlanRef::Query(query), control, work, &mut observer);
+            if W::MAY_SUSPEND {
+                crate::construction::retain(*control, read)?.await?;
+            } else {
+                inline(read)?;
+            }
         }
         retire_entries(names.into_iter(), control, work).await?;
         control.check()?;
