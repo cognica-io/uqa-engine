@@ -55964,6 +55964,19 @@
       ]
     },
     {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "ordinary_rule_validation_fits_its_statement_budget",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/events/native/tests.rs",
+      "capability": "Native event relation closure",
+      "workload": "Validate a stored one-row INSERT rule through the synchronous catalog entry point.",
+      "invariant": "The complete rule fits its 8 KiB statement allowance and releases it on return.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
       "package": "uqa-execution",
       "kind": "lib",
       "test": "native_event_dependencies_use_captured_table_view_foreign_system_and_graph_columns",

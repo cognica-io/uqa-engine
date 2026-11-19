@@ -267,6 +267,23 @@ fn native_rule_conditions_preserve_legacy_and_bound_reference_validation() {
 }
 
 #[test]
+fn ordinary_rule_validation_fits_its_statement_budget() {
+    let rules = rules(rule(
+        "CREATE RULE saved AS ON INSERT TO public.items DO ALSO INSERT INTO public.items VALUES (1)",
+    ));
+    let memory = MemoryBudget::new(8 * 1024);
+    let token = CancellationToken::new();
+    validate(
+        &TriggerCatalog::new(),
+        &rules,
+        &Catalog,
+        &ProductionControl::new(&memory, &token, &token),
+    )
+    .unwrap();
+    assert_eq!(memory.used(), 0);
+}
+
+#[test]
 fn native_event_reference_work_retires_original_admission_on_failure_and_cancellation() {
     let rules = rules(rule("CREATE RULE saved AS ON INSERT TO public.items DO ALSO INSERT INTO public.target VALUES (new.id)"));
     let triggers = TriggerCatalog::new();

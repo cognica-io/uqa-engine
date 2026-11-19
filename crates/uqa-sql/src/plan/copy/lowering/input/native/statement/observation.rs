@@ -71,7 +71,7 @@ impl UnifiedPlan {
         control: &ProductionControl<'_>,
         work: &mut W,
     ) -> Result<StoredStatementPlan, SQLError> {
-        if control.budget().is_none() {
+        if !W::MAY_SUSPEND || control.budget().is_none() {
             return Self::lower_borrowed_for_rewrite(statement, &|_: &str| false, control)
                 .map(StoredStatementPlan::Ordinary);
         }
