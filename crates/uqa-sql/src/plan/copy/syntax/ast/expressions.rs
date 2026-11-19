@@ -5,6 +5,37 @@
 //
 
 use super::{Copying, Result, SyntaxCopy};
+use crate::{
+    ast::Expr,
+    construction,
+    plan::copy::syntax::native::{Field, Input},
+};
+use uqa_core::{
+    memory::{Produced, ProductionControl},
+    Value,
+};
+
+type StoredExpression = construction::Output<Result<(Produced<Expr>, usize)>>;
+
+impl Field for Expr {
+    async fn copy_from<'s>(&'s self, parent: &mut Input<'s>) -> Result<Self> {
+        if matches!(
+            self,
+            Self::Star
+                | Self::Default
+                | Self::Param(_)
+                | Self::InternalColumn(_)
+                | Self::Literal(
+                    Value::Void | Value::Null | Value::Bool(_) | Value::Int(_) | Value::Float(_)
+                )
+        ) {
+            return parent.inline(self);
+        }
+        // The driver polls each recursive expression constructor independently of its parent.
+        let output = self.submit_stored_fields(parent.control(), &mut parent.work)?;
+        parent.take_child(construction::receive(output).await?)
+    }
+}
 
 syntax_enum!(crate::ast::BinaryOp {
     Equal,
@@ -19,8 +50,27 @@ syntax_enum!(crate::ast::BinaryOp {
     Divide
 });
 
+macro_rules! expression_fields {
+    ($source:expr, $input:ident, $field:ident; $($variant:ident $(($($item:ident),+))? $({$($member:ident),*})?),* $(,)?) => {
+        match $source {
+            $(Self::$variant $(($($item),+))? $({$($member),*})? =>
+                Self::$variant $(($($field!($input, $item)),+))? $({$($member: $field!($input, $member)),*})?),*
+        }
+    };
+}
+macro_rules! inline_field {
+    ($input:ident, $field:ident) => {
+        $input.field(stringify!($field), |copying| $field.copy_syntax(copying))?
+    };
+}
+macro_rules! native_field {
+    ($input:ident, $field:ident) => {
+        $input.field($field).await?
+    };
+}
+
 macro_rules! syntax_expression {
-    ($($variant:ident $(($($item:ident),+))? $({$($field:ident),*})?),* $(,)?) => {
+    ($($shape:tt)*) => {
         impl SyntaxCopy for crate::ast::Expr {
             fn copy_syntax(&self, copying: &mut Copying<'_>) -> Result<Self> {
                 copying.check()?;
@@ -28,10 +78,19 @@ macro_rules! syntax_expression {
                     return Err(crate::SQLError::Internal("stored definition contains a query or window expression".into()));
                 }
                 if let Some(number) = copying.parameters.and_then(|parameters| parameters(self)) { return Ok(Self::Param(number)); }
-                Ok(match self {
-                    $(Self::$variant $(($($item),+))? $({$($field),*})? =>
-                        Self::$variant $(($(copying.field(stringify!($item), |copying| $item.copy_syntax(copying))?),+))? $({$($field: copying.field(stringify!($field), |copying| $field.copy_syntax(copying))?),*})?),*
-                })
+                Ok(expression_fields!(self, copying, inline_field; $($shape)*))
+            }
+        }
+
+        impl Expr {
+            fn submit_stored_fields<'s>(
+                &'s self, control: ProductionControl<'s>, work: &mut construction::Work<'s>,
+            ) -> Result<StoredExpression> {
+                Ok(work.submit(move |work| async move {
+                    let mut input = Input::new(control, work);
+                    let value = expression_fields!(self, input, native_field; $($shape)*);
+                    input.finish(value)
+                })?)
             }
         }
     };
@@ -91,7 +150,7 @@ syntax_enum!(crate::ast::FrameMode {
 
 syntax_enum!(crate::ast::NullsOrder { First, Last });
 
-syntax_struct!(crate::ast::OrderBy {
+native_struct!(crate::ast::OrderBy {
     expr,
     descending,
     nulls

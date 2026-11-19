@@ -143,17 +143,22 @@ impl<'a> Work<'a> {
             );
             queue.checkpoint = true;
         }
-        let mut suspended = false;
-        poll_fn(|_| {
-            if suspended {
-                Poll::Ready(())
-            } else {
-                suspended = true;
-                Poll::Pending
-            }
-        })
-        .await;
+        suspend().await;
     }
+}
+
+/// Yield once to an externally polled native construction owner.
+pub(crate) async fn suspend() {
+    let mut suspended = false;
+    poll_fn(|_| {
+        if suspended {
+            Poll::Ready(())
+        } else {
+            suspended = true;
+            Poll::Pending
+        }
+    })
+    .await
 }
 
 enum Step<'a> {

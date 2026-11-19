@@ -14,6 +14,7 @@ use crate::routines::{dependencies::RoutineDeclaration, SQLRoutine};
 use uqa_core::memory::{BudgetedVec, MemoryError, MemoryReservation, Produced, ProductionControl};
 
 mod header;
+mod parameter;
 pub(super) use header::HeaderCopy;
 use header::{continue_text, start_text, Header};
 
@@ -31,7 +32,7 @@ impl<MergeTargets> Field<MergeTargets> {
         copying: &mut Copying<'_>,
     ) -> Result<Vec<T>> {
         fields.reserve(count)?;
-        HeaderCopy::reserve(count, copying)
+        copying.reserve_slots(count)
     }
 
     fn append<T: SyntaxCopy>(
@@ -44,6 +45,18 @@ impl<MergeTargets> Field<MergeTargets> {
         merge_targets: impl FnOnce(&Copying<'_>) -> MergeTargets,
     ) -> Result<()> {
         let (value, lease, field) = Self::capture(source, control, merge_targets)?;
+        Self::install(value, lease, field, values, fields, direct, children)
+    }
+
+    fn install<T>(
+        value: T,
+        lease: MemoryReservation,
+        field: Self,
+        values: &mut Vec<T>,
+        fields: &mut BudgetedVec<Self>,
+        direct: &mut MemoryReservation,
+        children: &mut usize,
+    ) -> Result<()> {
         let next = children
             .checked_add(field.children)
             .ok_or(MemoryError::SizeOverflow)?;
@@ -77,6 +90,7 @@ pub struct StoredRoutineDefinition {
     source: SQLRoutine,
     definition: CreateFunction,
     header: Header,
+    pending_parameter: Option<parameter::Capture>,
     parameters: BudgetedVec<Field>,
     statements: BudgetedVec<Field<bool>>,
     children: usize,
@@ -175,6 +189,7 @@ impl StoredRoutineDefinition {
             source: routine,
             definition,
             header: Header::default(),
+            pending_parameter: None,
             parameters,
             statements,
             children,
@@ -201,6 +216,7 @@ impl StoredRoutineDefinition {
 
     /// Advance the captured header, source text, parameters and body of the immutable placeholder before binding its private declaration.
     pub fn copy_next_field(&mut self, control: &ProductionControl<'_>) -> Result<bool> {
+        let pending = self.pending_parameter.take();
         control.check()?;
         if !self.header.complete() {
             self.copy_header(control)?;
@@ -216,14 +232,37 @@ impl StoredRoutineDefinition {
             }
         }
         if let Some(parameter) = self.source.def.params.get(self.parameters.len()) {
-            Field::append(
-                parameter,
+            let (value, lease, field) = if parameter.default.is_some() {
+                let mut capture = match pending {
+                    Some(capture) => capture,
+                    None => parameter::Capture::new(
+                        self.source.clone(),
+                        self.parameters.len(),
+                        control,
+                    )?,
+                };
+                let Some((produced, children)) = capture.advance(control)? else {
+                    self.pending_parameter = Some(capture);
+                    return Ok(false);
+                };
+                let field = Field {
+                    direct: produced.reserved_bytes(),
+                    children,
+                    has_merge_targets: (),
+                };
+                let (value, lease) = produced.into_parts();
+                (value, lease.expect("admitted parameter"), field)
+            } else {
+                Field::capture(parameter, control, |_| ())?
+            };
+            Field::install(
+                value,
+                lease,
+                field,
                 &mut self.definition.params,
                 &mut self.parameters,
                 &mut self.direct,
                 &mut self.children,
-                control,
-                |_| (),
             )?;
         } else if let (FunctionBody::Statements(source), FunctionBody::Statements(values)) =
             (&self.source.def.body, &mut self.definition.body)

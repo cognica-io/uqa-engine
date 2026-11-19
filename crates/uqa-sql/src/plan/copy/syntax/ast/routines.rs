@@ -93,7 +93,7 @@ syntax_enum!(crate::ast::FunctionBody {
     Statements(value0)
 });
 
-syntax_struct!(crate::ast::FunctionParam {
+native_struct!(crate::ast::FunctionParam {
     name,
     type_name,
     type_reference,
@@ -124,13 +124,13 @@ syntax_enum!(crate::ast::FunctionVolatility {
     Volatile
 });
 
-syntax_struct!(crate::ast::RoutineColumnTypeReference {
+native_struct!(crate::ast::RoutineColumnTypeReference {
     schema,
     relation,
     column
 });
 
-syntax_enum!(crate::ast::RoutineDefaultType {
+native_enum!(crate::ast::RoutineDefaultType {
     Concrete(value0),
     Polymorphic(value0)
 });

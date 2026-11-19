@@ -9,6 +9,8 @@
 use super::{Copying, Result};
 use uqa_core::memory::{OwnedMap, OwnedSet};
 
+pub(in crate::plan::copy) mod native;
+
 pub(crate) trait SyntaxCopy: Sized {
     fn copy_syntax(&self, copying: &mut Copying<'_>) -> Result<Self>;
 }
@@ -46,6 +48,29 @@ macro_rules! syntax_enum {
                     $(Self::$variant $(($($item),+))? $({$($field),*})? =>
                         Self::$variant $(($(copying.field(stringify!($item), |copying| $item.copy_syntax(copying))?),+))? $({$($field: copying.field(stringify!($field), |copying| syntax_field!(copying, $field $(, $stored)?))?),*})?),*
                 })
+            }
+        }
+    };
+}
+
+/// The native field list is shared with the synchronous syntax projection, including allocation and diagnostic order.
+macro_rules! native_struct {
+    ($ty:ty { $($field:ident),* $(,)? }) => {
+        syntax_struct!($ty { $($field),* });
+        impl crate::plan::copy::syntax::native::Field for $ty {
+            async fn copy_from<'s>(&'s self, input: &mut crate::plan::copy::syntax::native::Input<'s>) -> Result<Self> {
+                Ok(Self { $($field: input.field(&self.$field).await?),* })
+            }
+        }
+    };
+}
+
+macro_rules! native_enum {
+    ($ty:ty { $($variant:ident($field:ident)),* $(,)? }) => {
+        syntax_enum!($ty { $($variant($field)),* });
+        impl crate::plan::copy::syntax::native::Field for $ty {
+            async fn copy_from<'s>(&'s self, input: &mut crate::plan::copy::syntax::native::Input<'s>) -> Result<Self> {
+                Ok(match self { $(Self::$variant($field) => Self::$variant(input.field($field).await?)),* })
             }
         }
     };
@@ -254,7 +279,7 @@ syntax_struct!(crate::ast::ObjectAclEntry {
     grantor,
     grant_option
 });
-syntax_struct!(crate::expr::composites::CompositeConstantSource { value, descriptors });
+native_struct!(crate::expr::composites::CompositeConstantSource { value, descriptors });
 syntax_struct!(crate::explain::ExplainOptions { options });
 syntax_struct!(crate::explain::ExplainOption { name, value });
 syntax_enum!(crate::explain::ExplainOptionValue { Boolean(value), Integer(value), Float(value), String(value) });

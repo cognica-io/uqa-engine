@@ -52050,6 +52050,32 @@
     {
       "package": "uqa-sql",
       "kind": "lib",
+      "test": "stored_parameter_default_copies_wide_and_nested_native_expressions_across_windows",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/stored_routine/tests/defaults.rs",
+      "capability": "Stored routine restoration",
+      "workload": "Copy one declared default with two or 4,096 array entries and one or 32 nested scalar calls.",
+      "invariant": "Wider and deeper defaults require more bounded advances while the complete syntax, retained payload and allocation match the ordinary captured declaration.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_parameter_default_abandonment_denial_and_cancellation_release_private_fields",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/stored_routine/tests/defaults.rs",
+      "capability": "Stored routine restoration",
+      "workload": "Interrupt a partially copied single parameter with a late oversized array element, either cancellation scope or abandonment.",
+      "invariant": "No parameter becomes visible before completion. Cancellation and memory denial return their SQLSTATE and all private reservations are released.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
       "test": "stored_routine_parameters_and_statements_are_copied_in_separate_windows",
       "cases": 1,
       "source": "crates/uqa-sql/src/plan/copy/stored_routine/tests.rs",

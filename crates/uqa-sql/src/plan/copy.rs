@@ -396,6 +396,14 @@ impl<'a> Copying<'a> {
         value
     }
 
+    fn reserve_slots<T>(&mut self, len: usize) -> Result<Vec<T>> {
+        let mut slots = BudgetedVec::new(self.control.budget().expect("stored definition"));
+        slots.reserve(len)?;
+        let (slots, lease) = slots.into_parts();
+        self.absorb(Some(lease));
+        Ok(slots)
+    }
+
     pub(crate) fn map<I: ExactSizeIterator, T>(
         &mut self,
         items: I,

@@ -12,7 +12,7 @@ use crate::ast::{
     RoutineTransformType,
 };
 use crate::plan::copy::HeaderText;
-use uqa_core::memory::{BudgetedVec, Produced, ProductionControl, ProductionString};
+use uqa_core::memory::{Produced, ProductionControl, ProductionString};
 
 /// Both the inline syntax copier and a retained declaration construct the same list item.
 pub(in crate::plan::copy) trait Item: Sized {
@@ -133,14 +133,6 @@ impl HeaderCopy {
             }),
             Self::Retained => Ok(Vec::new()),
         }
-    }
-
-    pub(super) fn reserve<T>(len: usize, copying: &mut Copying<'_>) -> Result<Vec<T>> {
-        let mut slots = BudgetedVec::new(copying.control.budget().expect("stored definition"));
-        slots.reserve(len)?;
-        let (slots, lease) = slots.into_parts();
-        copying.absorb(Some(lease));
-        Ok(slots)
     }
 }
 
@@ -352,7 +344,7 @@ fn advance<T: Item>(
     copying: &mut Copying<'_>,
 ) -> Result<bool> {
     if values.capacity() == 0 {
-        *values = HeaderCopy::reserve(source.len(), copying)?;
+        *values = copying.reserve_slots(source.len())?;
     }
     let item = &source[i];
     if values.len() == i {

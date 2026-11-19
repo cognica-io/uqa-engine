@@ -12,6 +12,7 @@ use uqa_core::{
     CancellationToken,
 };
 
+mod defaults;
 mod header;
 
 #[test]
