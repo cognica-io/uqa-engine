@@ -59,7 +59,7 @@ pub fn transform_partition_bound(
                 // Equal constants appear once, as `transformPartitionBound` removes duplicates.
                 let mut duplicate = false;
                 for existing in &transformed {
-                    if super::compare_values(context, existing, &value)?.is_eq() {
+                    if super::compare_values(context, existing, &value, &key.ty)?.is_eq() {
                         duplicate = true;
                         break;
                     }

@@ -14,17 +14,17 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     sync::Arc,
 };
-use uqa_core::{RelationIdentity, Value};
+use uqa_core::memory::RetainedValue;
+use uqa_core::Value;
 use uqa_sql::{
     ast::{ColumnDef, IndexKey, TableKeyConstraint},
     SQLError,
 };
 use uqa_storage::{
-    document_store::Document, CatalogIndexRow, StorageBackendError, StorageBackendResult,
-    ValueIndexKey,
+    document_store::Document, StorageBackendError, StorageBackendResult, ValueIndexKey,
 };
 
-type IndexRows = BTreeMap<RelationIdentity, CatalogIndexRow>;
+type IndexRows = crate::catalog::index::registry::CatalogIndexes;
 
 pub fn column_value<'a>(document: &'a Document, column: &str) -> &'a Value {
     document.get(column).unwrap_or(&Value::Null)
@@ -43,7 +43,7 @@ pub struct PhysicalIndexDefinitions {
 }
 
 struct CacheEntry {
-    source: Arc<IndexRows>,
+    source: RetainedValue<IndexRows>,
     prepared: Arc<PhysicalIndexDefinitions>,
 }
 
@@ -56,12 +56,12 @@ pub struct PhysicalIndexCache {
 impl PhysicalIndexCache {
     pub fn bind(
         &self,
-        source: Arc<IndexRows>,
+        source: RetainedValue<IndexRows>,
     ) -> StorageBackendResult<Arc<PhysicalIndexDefinitions>> {
         let mut retained = self.entry.lock();
         if let Some(entry) = retained
             .as_ref()
-            .filter(|entry| Arc::ptr_eq(&entry.source, &source))
+            .filter(|entry| RetainedValue::ptr_eq(&entry.source, &source))
         {
             return Ok(entry.prepared.clone());
         }

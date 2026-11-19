@@ -1,5 +1,7 @@
 # Implementation plans
 
+The [online and incremental backup plan](0031-online-and-incremental-backup.md) tracks independent delivery of online full backup and restore, followed by incremental inventory comparison and fingerprint acceleration in [#1322](https://github.com/cognica-io/uqa-engine/issues/1322). Common Storage image/repository codecs are in implementation and qualification. Actual memory, native SQLite, SQLite KV and redb capture/import, repository publication and public operations remain outstanding; replication and CDC are not prerequisites.
+
 The [replication and change data capture plan](0030-replication-and-change-data-capture.md) proposes a transport-independent core. It records owner-based delivery units, journal and snapshot contracts, and four-provider source/sixteen-pair replication acceptance. Implementation has not started; networking and distributed failover remain separate work.
 
 The [embedded C binding implementation](0028-c-bindings.md) is in progress. Its ledger preserves the full approved ABI scope, native multi-statement execution, ownership boundaries, and remaining implementation and qualification work.

@@ -9,7 +9,7 @@
 mod cache;
 mod coordinator;
 pub(crate) use coordinator::{shared_statistics, StatisticsCoordinator};
-pub(crate) mod value_size;
+pub(crate) use uqa_planner::stored_column_statistics::limits as value_size;
 mod worker;
 pub(crate) use cache::StatisticsSnapshots;
 
@@ -121,7 +121,7 @@ impl Engine {
                 .values()
                 .next()
                 .map(|stats| stats.row_count);
-            return table.statistics_maintenance.lock().record_changes(
+            return table.statistics_maintenance.write().record_changes(
                 table.object_id(),
                 count,
                 previous_rows,
@@ -209,7 +209,7 @@ impl Engine {
                 if stale_sample && !state.dirty() {
                     state.record_changes(change.object_id, 1, None, now)?;
                     state.save(catalog, name)?;
-                    table.column_stats_dirty.store(true, Ordering::Release);
+                    *table.column_stats_dirty.write() = true;
                     settlement.recorded.push(name.clone());
                 }
                 if change.count == 0 {

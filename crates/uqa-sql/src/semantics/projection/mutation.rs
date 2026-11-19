@@ -58,12 +58,16 @@ fn mutation_target_schema(
     });
     let doc_id = (!target.columns().iter().any(|name| name == DOC_ID_COLUMN)).then_some((
         DOC_ID_COLUMN,
-        Some(&ColumnType::BigInteger),
+        Some(const { &ColumnType::BigInteger }),
         None,
     ));
     let system = [
-        (TABLE_OID_COLUMN, Some(&ColumnType::Oid), None),
-        (crate::semantics::XMIN_COLUMN, Some(&ColumnType::Xid), None),
+        (TABLE_OID_COLUMN, Some(const { &ColumnType::Oid }), None),
+        (
+            crate::semantics::XMIN_COLUMN,
+            Some(const { &ColumnType::Xid }),
+            None,
+        ),
     ];
     let schema = RowSchema::with_column_metadata_with_control(
         Some(qualifier),

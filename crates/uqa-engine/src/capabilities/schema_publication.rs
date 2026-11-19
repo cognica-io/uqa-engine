@@ -101,9 +101,14 @@ impl TableSchemaState for SchemaTableBinding<'_> {
             dropped_attributes: self.state.dropped_attributes.read().clone(),
         }
     }
-    fn publish_expressions(&self, columns: &[ColumnDef], checks: &[uqa_sql::ast::TableCheck]) {
-        columns.clone_into(&mut *self.state.columns.write());
-        checks.clone_into(&mut *self.state.table_checks.write());
+    fn publish_expressions(
+        &self,
+        columns: &[ColumnDef],
+        checks: &[uqa_sql::ast::TableCheck],
+    ) -> StorageBackendResult<()> {
+        self.state.columns.write().publish(columns.to_vec())?;
+        self.state.table_checks.write().publish(checks.to_vec())?;
+        Ok(())
     }
 
     fn write_columns(
@@ -129,14 +134,25 @@ impl TableSchemaState for SchemaTableBinding<'_> {
             ..TableConstraintSet::default()
         }
     }
-    fn publish_constraints(&self, columns: Vec<ColumnDef>, constraints: TableConstraintSet) {
+    fn publish_constraints(
+        &self,
+        columns: Vec<ColumnDef>,
+        constraints: TableConstraintSet,
+    ) -> StorageBackendResult<()> {
         *self.state.row_type_array_name.write() = constraints.row_type_array_name;
         *self.state.dropped_attributes.write() = constraints.dropped_attributes;
-        *self.state.columns.write() = columns;
-        *self.state.table_checks.write() = constraints.checks;
+        self.state.columns.write().publish(columns)?;
+        self.state
+            .table_checks
+            .write()
+            .publish(constraints.checks)?;
         *self.state.foreign_keys.write() = constraints.foreign_keys;
         *self.state.key_constraints.write() = constraints.key_constraints;
-        *self.state.hierarchy.write() = constraints.hierarchy;
+        self.state
+            .hierarchy
+            .write()
+            .publish(constraints.hierarchy)?;
+        Ok(())
     }
 
     fn key_constraints(&self) -> Vec<uqa_sql::ast::TableKeyConstraint> {
@@ -145,8 +161,12 @@ impl TableSchemaState for SchemaTableBinding<'_> {
     fn hierarchy(&self) -> uqa_sql::ast::TableHierarchy {
         self.state.hierarchy.read().clone()
     }
-    fn publish_hierarchy(&self, hierarchy: uqa_sql::ast::TableHierarchy) {
-        *self.state.hierarchy.write() = hierarchy;
+    fn publish_hierarchy(
+        &self,
+        hierarchy: uqa_sql::ast::TableHierarchy,
+    ) -> StorageBackendResult<()> {
+        self.state.hierarchy.write().publish(hierarchy)?;
+        Ok(())
     }
     fn columns(&self) -> Vec<ColumnDef> {
         self.state.columns.read().clone()
@@ -230,14 +250,18 @@ impl TableSchemaState for SchemaTableBinding<'_> {
         columns_declared: bool,
         columns: Vec<ColumnDef>,
         constraints: TableConstraintSet,
-    ) {
+    ) -> StorageBackendResult<()> {
         *self.state.row_type_array_name.write() = constraints.row_type_array_name;
         *self.state.dropped_attributes.write() = constraints.dropped_attributes;
         *self.state.columns_declared.write() = columns_declared;
-        *self.state.columns.write() = columns;
-        *self.state.table_checks.write() = constraints.checks;
+        self.state.columns.write().publish(columns)?;
+        self.state
+            .table_checks
+            .write()
+            .publish(constraints.checks)?;
         *self.state.foreign_keys.write() = constraints.foreign_keys;
         *self.state.key_constraints.write() = constraints.key_constraints;
+        Ok(())
     }
     fn persist_next_id(&self) -> StorageBackendResult<()> {
         self.engine.persist_next_id(&self.name)
@@ -262,14 +286,14 @@ impl uqa_execution::schema::publication::SchemaWriteTransaction for Engine {
 }
 
 struct SchemaColumnWrite<'a> {
-    columns: parking_lot::MappedRwLockWriteGuard<'a, Vec<ColumnDef>>,
+    columns: crate::state::TableDefinitionWrite<'a, Vec<ColumnDef>>,
 }
 impl uqa_execution::schema::publication::columns::ColumnSchemaWrite for SchemaColumnWrite<'_> {
     fn columns(&self) -> &[ColumnDef] {
         &self.columns
     }
-    fn publish(&mut self, columns: Vec<ColumnDef>) {
-        *self.columns = columns;
+    fn publish(&mut self, columns: Vec<ColumnDef>) -> StorageBackendResult<()> {
+        self.columns.publish(columns)
     }
 }
 
@@ -305,13 +329,8 @@ impl uqa_execution::schema::publication::dependencies::LoadedTableSchemas for En
     }
 }
 impl uqa_execution::schema::publication::dependencies::ForeignSchemaPublication for Engine {
-    fn foreign_tables(
-        &self,
-    ) -> std::collections::BTreeMap<
-        uqa_core::RelationIdentity,
-        uqa_execution::catalog::foreign::StoredForeignTable,
-    > {
-        self.durable.foreign_tables.read().clone()
+    fn foreign_catalog(&self) -> uqa_execution::catalog::foreign::ForeignCatalog {
+        self.durable.foreign_catalog.read().clone()
     }
     fn persist_foreign_table(
         &self,
@@ -323,19 +342,19 @@ impl uqa_execution::schema::publication::dependencies::ForeignSchemaPublication 
     }
     fn publish_foreign_tables(
         &self,
+        catalog: uqa_execution::catalog::foreign::ForeignCatalog,
         updates: Vec<(
             uqa_core::RelationIdentity,
             uqa_execution::catalog::foreign::StoredForeignTable,
         )>,
     ) {
-        let mut tables = self.durable.foreign_tables.write();
-        for (relation, table) in updates {
+        *self.durable.foreign_catalog.write() = catalog;
+        for (_, table) in updates {
             self.note_prepared_catalog_change(
                 uqa_execution::statement::prepared::invalidation::PreparedCatalogChange::Relation(
                     table.relation_oids().relation,
                 ),
             );
-            tables.insert(relation, table);
         }
     }
 }
@@ -382,13 +401,7 @@ impl uqa_execution::schema::sequences::dependencies::ViewCatalogPublication for 
     fn save_view_row(&self, row: &uqa_storage::ViewRow) -> StorageBackendResult<()> {
         uqa_execution::catalog::view::ViewPublication::save_view(self, row)
     }
-    fn publish_views(
-        &self,
-        updates: Vec<(
-            uqa_core::RelationIdentity,
-            uqa_sql::catalog::stored_view::StoredView,
-        )>,
-    ) {
-        self.durable.views.write().extend(updates);
+    fn publish_views(&self, next: uqa_sql::catalog::stored_view::ViewDefinitions) {
+        *self.durable.views.write() = next;
     }
 }

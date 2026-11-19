@@ -10,11 +10,11 @@ use super::{
 };
 use crate::{
     schema::{
-        ColumnIdentity, ColumnType, RowSchema, SchemaBuildMetadata, SchemaColdMetadata, SchemaIndex,
+        retirement::IndexOwner, ColumnIdentity, ColumnType, RowSchema, SchemaBuildMetadata,
+        SchemaColdMetadata, SchemaIndex,
     },
     SQLError,
 };
-use std::sync::Arc;
 use uqa_core::memory::{Produced, ProductionControl};
 
 pub(super) fn produce(
@@ -36,6 +36,43 @@ pub(super) fn produce(
             .iter()
             .enumerate()
             .all(|(position, slot)| position == *slot);
+    publish(
+        columns,
+        identities,
+        types,
+        slots,
+        Publication {
+            physical_width,
+            metadata,
+            indexes,
+            identity_layout,
+        },
+        control,
+    )
+}
+
+pub(super) struct Publication {
+    pub physical_width: usize,
+    pub metadata: SchemaBuildMetadata,
+    pub indexes: indexes::Indexes,
+    pub identity_layout: bool,
+}
+
+pub(super) fn publish(
+    columns: Produced<Vec<String>>,
+    identities: Produced<Vec<ColumnIdentity>>,
+    types: Produced<Vec<Option<ColumnType>>>,
+    slots: Produced<Vec<usize>>,
+    publication: Publication,
+    control: &ProductionControl<'_>,
+) -> Result<RowSchema, SQLError> {
+    control.check()?;
+    let Publication {
+        physical_width,
+        metadata,
+        indexes,
+        identity_layout,
+    } = publication;
     let columns = boxed_slice(columns, control)?;
     let identities = boxed_slice(identities, control)?;
     let types = boxed_slice(types, control)?;
@@ -104,7 +141,7 @@ pub(super) fn produce(
         _memory: SchemaMemory::new(control.combine(memory, metadata_memory.into_reservation())),
     };
     let schema = RowSchema {
-        index: Arc::new(index),
+        index: IndexOwner::new(index),
     };
     control.check()?;
     Ok(schema)

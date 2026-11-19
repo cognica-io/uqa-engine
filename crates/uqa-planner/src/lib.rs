@@ -62,11 +62,12 @@ pub mod statement_planning;
 pub mod text_top_k;
 pub mod unified_plan;
 
+pub use cardinality::stored_column_statistics;
 pub use cardinality::{
     column_entropy, entropy_cardinality_lower_bound, mutual_information_estimate, AccessParadigm,
-    CardinalityEstimator, ColumnStatistics, ColumnStats, EdgeSample, GraphStats, GraphStoreSampler,
-    LocalAccessEstimate, RelationStats, Selectivity, GRAPH_AVG_DEGREE_DEFAULT,
-    JACCARD_JOIN_SELECTIVITY,
+    CardinalityEstimator, ColumnStatistics, ColumnStatisticsImageReader, ColumnStats, EdgeSample,
+    GraphStats, GraphStoreSampler, LocalAccessEstimate, RelationStats, Selectivity,
+    GRAPH_AVG_DEGREE_DEFAULT, JACCARD_JOIN_SELECTIVITY,
 };
 pub use cost_model::{CostEstimator, OperatorCost, OperatorKind};
 pub use join_enumerator::{

@@ -85,6 +85,6 @@ impl<'a, S: Clone + 'static> MutationPredicate<'a, S> {
             self.params,
             None,
         )
-        .map(|value| uqa_sql::expr::truthy(&value))
+        .and_then(|value| uqa_sql::expr::truthy(&value))
     }
 }

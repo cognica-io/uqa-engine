@@ -5,6 +5,7 @@
 //
 
 use super::*;
+use crate::catalog::sequence::{registry::SequenceRecord, SequenceState};
 use crate::catalog::{
     foreign::StoredForeignTable, test_support::empty_catalog, RelationLookupMode,
 };
@@ -12,6 +13,7 @@ use uqa_core::{
     memory::{MemoryBudget, ProductionControl},
     CancellationToken, RelationIdentity,
 };
+use uqa_sql::ast::SequenceDataType;
 use uqa_sql::{
     ast::{ColumnDef, RelationPersistence},
     catalog::{
@@ -30,27 +32,29 @@ fn fixture() -> CatalogReadView {
     ) else {
         panic!("query")
     };
-    Arc::make_mut(&mut snapshot.definitions.views).insert(
-        RelationIdentity::new("public", "v"),
-        StoredView {
-            security: BoundTableSecurity::owner(RoleIdentity::BOOTSTRAP),
-            definition: StoredViewDefinition {
-                object_id: [3; 16],
-                query: *query,
-                output_columns: Some(vec!["n".into()]),
-                persistence: RelationPersistence::Permanent,
-                options: vec![("opaque".into(), "x".repeat(4 << 20))],
-                kind: crate::catalog::view::StoredViewKind::View,
-                materialized_rows: vec![],
-                materialized_column_types: vec![],
-                materialized_column_collations: None,
-                populated: true,
-                catalog_oids: None,
-                row_type_array_name: None,
+    uqa_core::memory::RetainedValue::make_mut(&mut snapshot.definitions.views)
+        .insert(
+            RelationIdentity::new("public", "v"),
+            StoredView {
+                security: BoundTableSecurity::owner(RoleIdentity::BOOTSTRAP),
+                definition: StoredViewDefinition {
+                    object_id: [3; 16],
+                    query: *query,
+                    output_columns: Some(vec!["n".into()]),
+                    persistence: RelationPersistence::Permanent,
+                    options: vec![("opaque".into(), "x".repeat(4 << 20))],
+                    kind: crate::catalog::view::StoredViewKind::View,
+                    materialized_rows: vec![],
+                    materialized_column_types: vec![],
+                    materialized_column_collations: None,
+                    populated: true,
+                    catalog_oids: None,
+                    row_type_array_name: None,
+                },
             },
-        },
-    );
-    Arc::make_mut(&mut snapshot.definitions.foreign_tables).insert(
+        )
+        .unwrap();
+    snapshot.definitions.foreign_tables = crate::catalog::test_support::foreign_tables([(
         RelationIdentity::new("public", "remote"),
         StoredForeignTable {
             name: "public.remote".into(),
@@ -64,9 +68,11 @@ fn fixture() -> CatalogReadView {
             dropped_attributes: vec![],
             checks: vec![],
             option_order: vec!["opaque".into()],
-            options: [("opaque".into(), "x".repeat(4 << 20))].into(),
+            options: [("opaque".into(), "x".repeat(4 << 20))]
+                .into_iter()
+                .collect(),
         },
-    );
+    )]);
     CatalogReadView::new(snapshot)
 }
 
@@ -179,11 +185,13 @@ fn source_view_context(
     query: uqa_sql::plan::QueryPlan,
 ) -> uqa_sql::binding::BindingContext<'static> {
     let mut snapshot = fixture().snapshot().clone();
-    Arc::make_mut(&mut snapshot.definitions.views)
-        .get_mut(&RelationIdentity::new("public", "v"))
+    uqa_core::memory::RetainedValue::make_mut(&mut snapshot.definitions.views)
+        .edit(&RelationIdentity::new("public", "v"), |view| {
+            view.definition.query = query;
+            Ok(())
+        })
         .unwrap()
-        .definition
-        .query = query;
+        .unwrap();
     uqa_sql::binding::BindingContext {
         catalog: Arc::new(CatalogReadView::new(snapshot)),
         resolution: namespace(),
@@ -296,14 +304,20 @@ fn source_schema_binding_borrows_retained_view_payloads_instead_of_cloning_them(
 #[test]
 fn admitted_source_catalog_adapters_preserve_shadowing_row_type_identity_and_cleanup() {
     let mut snapshot = fixture().snapshot().clone();
-    Arc::make_mut(&mut snapshot.definitions.sequences).insert(
-        RelationIdentity::new("later", "v"),
-        crate::catalog::sequence::SequenceState::initial(
-            1,
-            1,
-            uqa_sql::ast::SequenceDataType::BigInt,
-        ),
-    );
+    uqa_core::memory::RetainedValue::make_mut(&mut snapshot.definitions.sequences)
+        .insert(
+            RelationIdentity::new("later", "v"),
+            SequenceRecord {
+                state: SequenceState::initial(1, 1, SequenceDataType::BigInt),
+                object_id: [1; 16],
+                persistence: uqa_sql::ast::RelationPersistence::Permanent,
+                catalog_oid: None,
+            },
+            uqa_sql::catalog::security::BoundSequenceSecurity::owner(
+                uqa_core::catalog_role::RoleIdentity::BOOTSTRAP,
+            ),
+        )
+        .unwrap();
     let catalog = CatalogReadView::new(snapshot);
     let mut namespace = namespace();
     namespace.search_path.push("later".into());

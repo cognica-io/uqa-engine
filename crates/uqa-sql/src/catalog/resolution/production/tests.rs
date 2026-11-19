@@ -9,6 +9,8 @@ use crate::catalog::roles::{identity::RoleBinding, RoleDefinition};
 use std::sync::Arc;
 use uqa_core::{memory::MemoryBudget, CancellationToken};
 
+mod input;
+
 #[test]
 fn namespace_capture_owns_exact_buffers_and_retains_bound_role_identity() {
     let budget = MemoryBudget::new(1 << 20);

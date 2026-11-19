@@ -13,6 +13,9 @@ use uqa_storage::mvcc::{IdentifierAllocator, IdentifierRequest};
 
 pub use uqa_sql::catalog::oids::FIRST_NORMAL_OBJECT_ID;
 
+mod capture;
+pub use capture::CapturedCatalogOidPosition;
+
 /// The storage namespace that keeps the counter's position.
 const COUNTER_NAMESPACE: &[u8] = b"catalog-oid\x01";
 

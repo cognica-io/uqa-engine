@@ -6,11 +6,12 @@
 
 //! Shared command authority while constructing user and builtin routine ACL candidates.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use uqa_core::{catalog_acl::AclGrantee, catalog_role::RoleIdentity};
+use uqa_sql::catalog::roles::{RoleDefinitions, RoleMemberships};
 use uqa_sql::{
     ast::{GrantRoutineStmt, RoutineRevokeBehavior},
-    catalog::roles::{RoleDefinition, RoleMembership, RoleMembershipKey, RoleReference},
+    catalog::roles::RoleReference,
     routines::{lifecycle::RoutineRegistry, security as analysis},
     SQLError, SQLNotice,
 };
@@ -18,8 +19,8 @@ use uqa_sql::{
 pub(super) struct GrantCandidateContext<'a> {
     pub(super) statement: &'a GrantRoutineStmt,
     pub(super) current_user: &'a RoleReference,
-    pub(super) roles: &'a BTreeMap<String, RoleDefinition>,
-    pub(super) memberships: &'a BTreeMap<RoleMembershipKey, RoleMembership>,
+    pub(super) roles: &'a RoleDefinitions,
+    pub(super) memberships: &'a RoleMemberships,
     pub(super) grantees: &'a [AclGrantee],
     pub(super) bound_grantees: &'a [Option<RoleIdentity>],
     pub(super) notices: &'a mut Vec<SQLNotice>,
@@ -78,8 +79,12 @@ impl GrantCandidateContext<'_> {
             self.dependencies,
         )?;
         // `ExecGrant_common` stores a new catalog tuple even when its ACL is unchanged.
-        next.get_mut(name).expect("resolved routine key")[position] =
-            super::super::catalog::revision::replacement(def, existing.body.clone())?;
+        next.edit(name, |overloads| {
+            overloads[position] =
+                super::super::catalog::revision::replacement(def, existing.body.clone())?;
+            Ok(())
+        })?
+        .expect("resolved routine key");
         Ok(())
     }
 }

@@ -63,7 +63,7 @@ fn expression_definition() -> PhysicalIndexDefinitions {
             .unwrap(),
         ),
     };
-    PhysicalIndexDefinitions::prepare(&BTreeMap::from([(row.relation.clone(), row)])).unwrap()
+    PhysicalIndexDefinitions::prepare(&crate::catalog::test_support::index_rows([row])).unwrap()
 }
 
 #[test]

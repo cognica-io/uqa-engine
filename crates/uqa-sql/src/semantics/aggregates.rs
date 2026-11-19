@@ -82,6 +82,7 @@ pub fn aggregate_targets<'a>(
 }
 
 mod observation;
+pub(crate) use observation::contains_with_work;
 pub use observation::{
     contains_aggregate_with_control, has_aggregate_with_control, is_aggregate_with_control,
     visit_aggregate_exprs_with_control,

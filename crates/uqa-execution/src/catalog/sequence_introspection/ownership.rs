@@ -13,8 +13,8 @@ pub fn sequence_names_owned_by_tables(
 ) -> StorageBackendResult<std::collections::BTreeSet<String>> {
     sequences.refresh_sequences()?;
     Ok(sequences
+        .registry()
         .states()
-        .iter()
         .filter(|(_, state)| {
             state
                 .owner
@@ -30,8 +30,8 @@ pub fn sequence_names_owned_by_column(
 ) -> StorageBackendResult<std::collections::BTreeSet<String>> {
     sequences.refresh_sequences()?;
     Ok(sequences
+        .registry()
         .states()
-        .iter()
         .filter(|(_, state)| {
             state.owner.is_some_and(|owner| {
                 owner.table_object_id == table_object_id

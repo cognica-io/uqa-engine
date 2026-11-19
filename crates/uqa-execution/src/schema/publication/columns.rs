@@ -16,7 +16,7 @@ use uqa_storage::{StorageBackendError, StorageBackendResult};
 /// A retained column write guard; candidate persistence runs before its value is replaced.
 pub trait ColumnSchemaWrite {
     fn columns(&self) -> &[ColumnDef];
-    fn publish(&mut self, columns: Vec<ColumnDef>);
+    fn publish(&mut self, columns: Vec<ColumnDef>) -> StorageBackendResult<()>;
 }
 
 pub fn set_column_default(
@@ -132,7 +132,7 @@ fn set_column_property(
         .default_catalog_oid = default_catalog_oid;
     state.mark_statistics_dirty()?;
     state.persist_columns(&next)?;
-    guard.publish(next);
+    guard.publish(next)?;
     Ok(true)
 }
 pub fn set_column_not_null(
@@ -161,7 +161,7 @@ pub fn set_column_not_null(
     let state = super::current_table_state(context.catalog, &table_name, state.as_ref())?;
     state.mark_statistics_dirty()?;
     state.persist_candidate(&next, &constraints)?;
-    state.publish_constraints(next, constraints);
+    state.publish_constraints(next, constraints)?;
     indexes.publish(&context.indexes)?;
     Ok(true)
 }
@@ -226,7 +226,7 @@ pub fn register_table_constraints(
     )?;
     let state = super::current_table_state(context.catalog, &table_name, state.as_ref())?;
     state.persist_candidate(&columns, &constraints)?;
-    state.publish_constraints(columns, constraints);
+    state.publish_constraints(columns, constraints)?;
     indexes.publish(&context.indexes)?;
     Ok(())
 }

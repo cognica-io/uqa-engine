@@ -162,8 +162,8 @@ impl EventRelationPersistence for Engine {
                 .is_some_and(|view| view.persistence == RelationPersistence::Temporary)
             || self
                 .durable
-                .foreign_tables
-                .read()
+                .foreign_catalog
+                .tables()
                 .get(relation)
                 .is_some_and(|table| table.persistence == RelationPersistence::Temporary)
     }
@@ -185,8 +185,8 @@ impl EventRelationPersistence for Engine {
             })
             .or_else(|| {
                 self.durable
-                    .foreign_tables
-                    .read()
+                    .foreign_catalog
+                    .tables()
                     .get(relation)
                     .map(|table| table.persistence)
             })

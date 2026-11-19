@@ -5,22 +5,26 @@
 //
 
 use super::*;
+use crate::catalog::roles::RoleDefinition;
+use crate::catalog::roles::{RoleDefinitions, RoleMemberships};
 use crate::catalog::security::{
     table::{self, TableAclPrivilege},
     TablePrivileges,
 };
 use uqa_core::{memory::MemoryBudget, CancellationToken};
 
-fn roles() -> BTreeMap<String, RoleDefinition> {
+fn roles() -> RoleDefinitions {
     let mut reader = RoleDefinition::bootstrap();
     reader.name = "reader".into();
     reader.oid = 41;
     reader.object_id = [41; 16];
     reader.attributes.clear();
-    [RoleDefinition::bootstrap(), reader]
-        .into_iter()
-        .map(|role| (role.name.clone(), role))
-        .collect()
+    RoleDefinitions::try_from_iter(
+        [RoleDefinition::bootstrap(), reader]
+            .into_iter()
+            .map(|role| (role.name.clone(), role)),
+    )
+    .unwrap()
 }
 
 fn entry(role: Option<RoleIdentity>, select: bool) -> BoundTableAclEntry {
@@ -38,7 +42,7 @@ fn entry(role: Option<RoleIdentity>, select: bool) -> BoundTableAclEntry {
 #[test]
 fn bound_selection_preserves_table_column_and_system_acl_decisions() {
     let roles = roles();
-    let memberships = BTreeMap::new();
+    let memberships = RoleMemberships::new();
     let budget = MemoryBudget::new(1 << 20);
     let token = CancellationToken::new();
     let control = ProductionControl::new(&budget, &token, &token);
@@ -106,7 +110,7 @@ fn bound_selection_preserves_table_column_and_system_acl_decisions() {
 #[test]
 fn unselected_acl_bindings_are_validated_before_a_superuser_grant() {
     let roles = roles();
-    let memberships = BTreeMap::new();
+    let memberships = RoleMemberships::new();
     let subject = RoleReference::from("uqa");
     let check = SelectPrivileges {
         subject: &subject,
@@ -131,7 +135,7 @@ fn unselected_acl_bindings_are_validated_before_a_superuser_grant() {
 #[test]
 fn borrowed_acl_validation_does_not_copy_wide_column_metadata() {
     let roles = roles();
-    let memberships = BTreeMap::new();
+    let memberships = RoleMemberships::new();
     let subject = RoleReference::from("reader");
     let mut security = BoundTableSecurity::owner(RoleIdentity::BOOTSTRAP);
     security.acl = Some(vec![entry(None, true)]);
@@ -174,7 +178,7 @@ fn borrowed_acl_validation_does_not_copy_wide_column_metadata() {
 #[test]
 fn bound_relation_checks_preserve_every_table_and_column_privilege() {
     let roles = roles();
-    let memberships = BTreeMap::new();
+    let memberships = RoleMemberships::new();
     let budget = MemoryBudget::new(1 << 20);
     let token = CancellationToken::new();
     let control = ProductionControl::new(&budget, &token, &token);

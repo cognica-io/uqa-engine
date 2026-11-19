@@ -10,10 +10,11 @@ use crate::ast::{ColumnDef, ForeignKey, TableKeyConstraint};
 use crate::{ColumnType, SQLError};
 
 mod checks;
+pub mod native;
 mod references;
 pub use checks::{
-    bind_stored_check_expression, check_row_schema, validate_check_expression,
-    validate_check_expression_with_type,
+    bind_stored_check_expression, check_row_schema, check_row_schema_with_control,
+    validate_check_expression, validate_check_expression_with_type,
 };
 pub use references::{check_references, CheckReference};
 

@@ -13,25 +13,38 @@ pub(crate) trait SyntaxCopy: Sized {
     fn copy_syntax(&self, copying: &mut Copying<'_>) -> Result<Self>;
 }
 
+macro_rules! syntax_field {
+    ($copying:ident, $value:expr) => {
+        $value.copy_syntax($copying)
+    };
+    ($copying:ident, $value:expr, $stored:expr) => {
+        if $copying.purpose == crate::plan::copy::CopyPurpose::Stored {
+            Ok($stored)
+        } else {
+            $value.copy_syntax($copying)
+        }
+    };
+}
+
 macro_rules! syntax_struct {
-    ($ty:ty { $($field:ident),* $(,)? }) => {
+    ($ty:ty { $($field:ident $(= $stored:expr)?),* $(,)? }) => {
         impl SyntaxCopy for $ty {
             fn copy_syntax(&self, copying: &mut Copying<'_>) -> Result<Self> {
                 copying.check()?;
-                Ok(Self { $($field: copying.field(stringify!($field), |copying| self.$field.copy_syntax(copying))?),* })
+                Ok(Self { $($field: copying.field(stringify!($field), |copying| syntax_field!(copying, self.$field $(, $stored)?))?),* })
             }
         }
     };
 }
 
 macro_rules! syntax_enum {
-    ($ty:ty { $($variant:ident $(($($item:ident),+))? $({$($field:ident),*})?),* $(,)? }) => {
+    ($ty:ty { $($variant:ident $(($($item:ident),+))? $({$($field:ident $(= $stored:expr)?),*})?),* $(,)? }) => {
         impl SyntaxCopy for $ty {
             fn copy_syntax(&self, copying: &mut Copying<'_>) -> Result<Self> {
                 copying.check()?;
                 Ok(match self {
                     $(Self::$variant $(($($item),+))? $({$($field),*})? =>
-                        Self::$variant $(($(copying.field(stringify!($item), |copying| $item.copy_syntax(copying))?),+))? $({$($field: copying.field(stringify!($field), |copying| $field.copy_syntax(copying))?),*})?),*
+                        Self::$variant $(($(copying.field(stringify!($item), |copying| $item.copy_syntax(copying))?),+))? $({$($field: copying.field(stringify!($field), |copying| syntax_field!(copying, $field $(, $stored)?))?),*})?),*
                 })
             }
         }
@@ -66,6 +79,7 @@ copy_inline!(
     crate::catalog::collations::CollationSelection,
     uqa_core::catalog_identity::CatalogObjectIdentity,
     uqa_core::catalog_role::RoleIdentity,
+    uqa_core::catalog_acl::TablePrivileges,
     std::num::NonZeroU32
 );
 
@@ -111,7 +125,7 @@ impl<K: SyntaxCopy + Ord, V: SyntaxCopy> SyntaxCopy for OwnedMap<K, V> {
         let mut output = Self::new();
         for (key, value) in self {
             copying.check()?;
-            copying.memory.grow(Self::entry_bytes())?;
+            copying.reserve(Self::entry_bytes())?;
             output.insert(key.copy_syntax(copying)?, value.copy_syntax(copying)?);
         }
         Ok(output)
@@ -182,12 +196,32 @@ macro_rules! share_input {
     )+};
 }
 // These immutable descriptors already retain their payload owners; cloning only shares those handles.
-share_input!(
-    crate::ast::RetainedRowSource,
-    crate::ast::RetainedInputLiteral,
-    crate::ast::WindowDefinitionSyntax,
-    crate::RowSchema
-);
+share_input!(crate::ast::WindowDefinitionSyntax, crate::RowSchema);
+
+impl SyntaxCopy for crate::ast::RetainedRowSource {
+    fn copy_syntax(&self, copying: &mut Copying<'_>) -> Result<Self> {
+        if copying.purpose == super::CopyPurpose::Stored {
+            return Err(crate::SQLError::Internal(
+                "stored syntax contains an execution-scoped row source".into(),
+            ));
+        }
+        Ok(self.clone())
+    }
+}
+
+impl SyntaxCopy for crate::ast::RetainedInputLiteral {
+    fn copy_syntax(&self, copying: &mut Copying<'_>) -> Result<Self> {
+        if copying.purpose == super::CopyPurpose::Executable {
+            return Ok(self.clone());
+        }
+        let (literal, bytes) = self.0.capture_with_footprint(&copying.control)?;
+        copying.retained_children = copying
+            .retained_children
+            .checked_add(bytes)
+            .ok_or(uqa_core::memory::MemoryError::SizeOverflow)?;
+        Ok(Self(literal))
+    }
+}
 
 syntax_enum!(crate::SQLParam {
     Scalar(value), TypedScalar { value, ty }, DeferredError { ty, error },
@@ -195,6 +229,12 @@ syntax_enum!(crate::SQLParam {
 });
 
 mod ast;
+mod catalog_authority;
+mod catalog_events;
+mod catalog_foreign;
+mod catalog_graphs;
+mod catalog_types;
+mod catalog_views;
 mod command;
 
 syntax_struct!(crate::ast::ObjectAclEntry {

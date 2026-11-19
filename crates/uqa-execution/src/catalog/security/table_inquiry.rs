@@ -8,7 +8,6 @@
 
 use crate::catalog::{
     context::CatalogContext,
-    foreign::StoredForeignTable,
     projection::{
         foreign_table_relation_oid, resolve_regclass_kind_by_oid, snapshot_table_relation_oid,
         view_relation_oid,
@@ -16,14 +15,13 @@ use crate::catalog::{
     sequence::snapshot::{SequenceReadSnapshot, SequenceSnapshotSource},
     view::StoredView,
 };
-use std::{cell::RefCell, collections::BTreeMap, ops::Deref, sync::Arc};
+use std::{cell::RefCell, ops::Deref, sync::Arc};
 use uqa_core::{RelationIdentity, Value};
+use uqa_sql::catalog::roles::RoleDefinitions;
 use uqa_sql::{
     catalog::{
         resolution::RelationResolution,
-        roles::{
-            guards::RoleCatalogGuards, identity::RoleSubject, RoleDefinition, RoleReferenceNames,
-        },
+        roles::{guards::RoleCatalogGuards, identity::RoleSubject, RoleReferenceNames},
         security::{
             sequence_inquiry::{SequencePrivilegeInquiry, SequenceTablePrivilegeInquiry},
             table::TablePrivilegeCheck,
@@ -47,11 +45,16 @@ pub trait TablePrivilegeState {
     fn security_snapshot_with_control(
         &self,
         control: &uqa_core::memory::ProductionControl<'_>,
-    ) -> Result<uqa_core::memory::Produced<Arc<BoundTableSecurity>>, SQLError> {
+    ) -> Result<
+        uqa_core::memory::Produced<
+            uqa_sql::catalog::table_metadata::SharedTableMetadata<BoundTableSecurity>,
+        >,
+        SQLError,
+    > {
         control.check()?;
         let security = self.security();
         let memory = control.reserve(size_of::<BoundTableSecurity>())?;
-        Ok(control.finish(Arc::new(security), memory)?)
+        Ok(control.finish(security.into(), memory)?)
     }
     /// Keep the selected table's declaration guard only while the consumer observes its columns.
     fn with_columns_with_control(
@@ -75,11 +78,12 @@ pub trait TablePrivilegeRead {
     fn retained(&self, relation: &RelationIdentity) -> Option<Arc<dyn TablePrivilegeState>>;
 }
 pub type PrivilegeViewsRead<'a> =
-    Box<dyn Deref<Target = BTreeMap<RelationIdentity, StoredView>> + 'a>;
+    Box<dyn Deref<Target = uqa_sql::catalog::stored_view::ViewDefinitions> + 'a>;
 pub type PrivilegeForeignTablesRead<'a> =
-    Box<dyn Deref<Target = BTreeMap<RelationIdentity, StoredForeignTable>> + 'a>;
-pub type PrivilegeForeignSecurityRead<'a> =
-    Box<dyn Deref<Target = BTreeMap<RelationIdentity, BoundTableSecurity>> + 'a>;
+    Box<dyn Deref<Target = crate::catalog::foreign::ForeignTables> + 'a>;
+pub type PrivilegeForeignSecurityRead<'a> = Box<
+    dyn Deref<Target = uqa_sql::catalog::security::foreign_tables::ForeignTableSecurities> + 'a,
+>;
 pub trait TablePrivilegeRegistry:
     uqa_sql::catalog::security::system_relations::SystemRelationSecurityCatalog
 {
@@ -96,6 +100,7 @@ pub trait TablePrivilegeRegistry:
     }
     fn tables(&self) -> Box<dyn TablePrivilegeRead + '_>;
     fn views(&self) -> PrivilegeViewsRead<'_>;
+    fn foreign_catalog(&self) -> crate::catalog::foreign::reads::ForeignCatalogRead<'_>;
     fn foreign_tables(&self) -> PrivilegeForeignTablesRead<'_>;
     fn foreign_security(&self) -> PrivilegeForeignSecurityRead<'_>;
 }
@@ -167,7 +172,7 @@ impl SequenceTablePrivilegeInquiry for InquiryRead<'_, '_> {
         checks: &[TablePrivilegeCheck],
     ) -> Result<bool, SQLError> {
         let snapshot = self.sequence_snapshot()?;
-        if !snapshot.object_ids.contains_key(relation) {
+        if !snapshot.catalog.contains_key(relation) {
             return Err(
                 uqa_sql::catalog::security::sequence_inquiry::missing_sequence(
                     &relation.qualified_name(),
@@ -190,7 +195,7 @@ impl TablePrivilegeCatalog for InquiryRead<'_, '_> {
     fn table_privilege_security(
         &self,
         target: &ResolvedTablePrivilegeTarget,
-        roles: &BTreeMap<String, RoleDefinition>,
+        roles: &RoleDefinitions,
     ) -> Result<TableSecurity, SQLError> {
         match target {
             ResolvedTablePrivilegeTarget::System(relation) => self
@@ -235,7 +240,7 @@ impl TablePrivilegeCatalog for InquiryRead<'_, '_> {
     fn column_privilege_relation(
         &self,
         target: &ResolvedTablePrivilegeTarget,
-        roles: &BTreeMap<String, RoleDefinition>,
+        roles: &RoleDefinitions,
     ) -> Result<ColumnPrivilegeRelation, SQLError> {
         match target {
             ResolvedTablePrivilegeTarget::System(relation) => Ok(ColumnPrivilegeRelation {

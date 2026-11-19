@@ -11,15 +11,15 @@ use super::database::{
     BoundDatabaseSecurity, DatabaseAclPrivilege,
 };
 use crate::catalog::roles::identity::RoleSubject;
+use crate::catalog::roles::RoleDefinitions;
 use crate::catalog::roles::RoleReference;
 use crate::{
     catalog::{
-        roles::{guards::RoleCatalogGuards, RoleDefinition, RoleReferenceNames},
+        roles::{guards::RoleCatalogGuards, RoleReferenceNames},
         DATABASE_NAME, DATABASE_OID,
     },
     SQLError,
 };
-use std::collections::BTreeMap;
 use uqa_core::Value;
 
 pub type DatabaseSecurityRead<'a> = Box<dyn std::ops::Deref<Target = BoundDatabaseSecurity> + 'a>;
@@ -147,7 +147,7 @@ fn resolve_database_privilege_target(value: &Value) -> Result<bool, SQLError> {
 
 fn resolve_database_privilege_role(
     value: &Value,
-    roles: &BTreeMap<String, RoleDefinition>,
+    roles: &RoleDefinitions,
 ) -> Result<Option<String>, SQLError> {
     match value {
         Value::Str(name) | Value::FixedChar(name) => {

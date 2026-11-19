@@ -6,15 +6,14 @@
 
 use super::{
     analyzer_registry, normalize_analyzer_phase, parse_analyzer_config, AnalyzerPhase, Arc, Engine,
-    TableState,
 };
 use uqa_execution::storage_errors::storage_error;
-use uqa_sql::ast::ColumnType;
 use uqa_sql::SQLError;
 use uqa_storage::{
     AnalyzerBindingOwner, FieldAnalyzerBinding, StorageBackendError, StorageBackendResult,
 };
 
+mod field_restoration;
 mod persistence;
 
 impl Engine {
@@ -22,23 +21,10 @@ impl Engine {
         &self,
         name: &str,
     ) -> StorageBackendResult<Arc<uqa_analysis::CompiledAnalyzer>> {
-        let name = name.trim();
-        if name.is_empty() {
-            return Err(StorageBackendError::Other(
-                "analyzer name cannot be empty".into(),
-            ));
-        }
-        if let Ok(analyzer) = analyzer_registry::get_analyzer(name) {
-            return Ok(analyzer.compile()?);
-        }
-        self.durable
-            .named_analyzers
-            .read()
-            .get(name)
-            .cloned()
-            .ok_or_else(|| {
-                StorageBackendError::Other(format!("analyzer `{name}` is not registered"))
-            })
+        uqa_execution::catalog::analyzers::fields::installation::resolve_analyzer_revision(
+            name,
+            |name| self.durable.named_analyzers.read().get(name).cloned(),
+        )
     }
 
     pub fn register_named_analyzer(
@@ -73,6 +59,10 @@ impl Engine {
         )
         .map_err(|error| error.to_string())?;
         let mut analyzers = self.durable.named_analyzers.write();
+        let mut candidate = analyzers.clone();
+        candidate
+            .insert_with_cancellation(name, compiled.clone(), &self.runtime.cancellation)
+            .map_err(|error| error.to_string())?;
         if let Some(catalog) = self.storage.catalog.as_ref() {
             catalog
                 .save_analyzer_revision(
@@ -82,7 +72,7 @@ impl Engine {
                 )
                 .map_err(|err| format!("persist analyzer `{name}`: {err}"))?;
         }
-        analyzers.insert(name.to_owned(), compiled);
+        *analyzers = candidate;
         drop(analyzers);
         self.note_catalog_registry_changed();
         Ok(())
@@ -131,12 +121,14 @@ impl Engine {
         if !analyzers.contains_key(name) {
             return Ok(false);
         }
+        let mut candidate = analyzers.clone();
+        let removed = candidate.remove(name).map_err(|error| error.to_string())?;
         if let Some(catalog) = self.storage.catalog.as_ref() {
             catalog
                 .drop_analyzer(name)
                 .map_err(|err| format!("drop analyzer `{name}`: {err}"))?;
         }
-        let removed = analyzers.remove(name).is_some();
+        *analyzers = candidate;
         drop(analyzers);
         if removed {
             self.note_catalog_registry_changed();
@@ -236,6 +228,15 @@ impl Engine {
             phase,
             AnalyzerBindingOwner::Field,
         );
+        let mut bindings = self.durable.table_field_analyzers.read().clone();
+        bindings
+            .insert(
+                &(table_name.clone(), field.to_owned()),
+                candidate.clone(),
+                t.persistence == uqa_sql::ast::RelationPersistence::Temporary,
+                &self.runtime.cancellation,
+            )
+            .map_err(|error| storage_error("prepare field analyzer publication", &error))?;
         let rebuild = matches!(phase, AnalyzerPhase::Index | AnalyzerPhase::Both)
             && t.fts_fields().iter().any(|f| f == field);
         if rebuild {
@@ -267,48 +268,10 @@ impl Engine {
                 storage_error("persist table analyzer", &error),
             ));
         }
-        self.durable
-            .table_field_analyzers
-            .write()
-            .insert((table_name, field.to_owned()), candidate);
+        *self.durable.table_field_analyzers.write() = bindings;
         if self.is_persistent() {
             self.note_table_catalog_changed();
             self.note_catalog_registry_changed();
-        }
-        Ok(())
-    }
-
-    /// A per-field analyzer is meaningful only for a real text column that is
-    /// already part of the table's physical FTS index.  Enforce the same
-    /// invariant both when accepting a new assignment and while hydrating
-    /// persisted assignments on reopen.
-    pub(crate) fn validate_table_analyzer_field(
-        table_name: &str,
-        table: &Arc<TableState>,
-        field: &str,
-    ) -> Result<(), String> {
-        let column_type = table
-            .columns
-            .read()
-            .iter()
-            .find(|column| column.name == field)
-            .map(|column| column.ty.clone())
-            .ok_or_else(|| {
-                format!("set_table_analyzer: column `{table_name}`.`{field}` does not exist")
-            })?;
-        if column_type != ColumnType::Text {
-            return Err(format!(
-                "set_table_analyzer: column `{table_name}`.`{field}` must be TEXT, got {column_type:?}"
-            ));
-        }
-        if !table
-            .fts_fields()
-            .iter()
-            .any(|candidate| candidate == field)
-        {
-            return Err(format!(
-                "set_table_analyzer: field `{table_name}`.`{field}` is not registered in the physical FTS index"
-            ));
         }
         Ok(())
     }

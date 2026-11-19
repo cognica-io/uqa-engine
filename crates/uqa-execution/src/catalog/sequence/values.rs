@@ -48,31 +48,85 @@ impl SequenceValueContext<'_> {
                     })?;
             }
             let mut caches = self.runtime.caches();
-            if let Some((current, autonomous)) = Self::take_cached_nextval(&target, &mut caches)? {
+            if Self::has_cached_nextval(&target, &caches) {
+                let result = self.runtime.with_sequence_histories(Box::new(|histories| {
+                    let prepared = prepare_histories(histories, &target)?;
+                    let (current, autonomous) = Self::take_cached_nextval(&target, &mut caches)?
+                        .expect("selected sequence cache remains locked");
+                    drop(caches);
+                    self.complete_nextval(&target.relation, target.object_id, current);
+                    publish_histories(
+                        prepared,
+                        &target,
+                        target.state,
+                        autonomous,
+                        Some(SessionSequenceValue {
+                            object_id: target.object_id,
+                            value: current,
+                        }),
+                        true,
+                    );
+                    Ok(Some(current))
+                }))?;
+                return Ok(result.expect("cached sequence operation returns a value"));
+            }
+            let storage = self.value_storage(&target)?;
+            let result = self.runtime.with_sequence_histories(Box::new(|histories| {
+                let prepared = prepare_histories(histories, &target)?;
+                let mut catalog = self.runtime.states_write();
+                let existed = catalog.contains_key(&target.relation);
+                let position = catalog.prepare_position(
+                    &target.relation,
+                    target.object_id,
+                    target.state.definition_generation,
+                )?;
+                if position.is_none() && !storage.persistent() {
+                    return if existed {
+                        Ok(None)
+                    } else {
+                        Err(SequenceValueError::Undefined(target.name.clone()))
+                    };
+                }
+                let state = position.as_ref().map_or(
+                    target.state,
+                    super::registry::PreparedSequencePosition::state,
+                );
+                let Some(block) = self.reserve_nextval_block(&target, &storage, state)? else {
+                    return Ok(None);
+                };
+                let physical = Self::install_nextval_reservation(&target, block, &mut caches)?;
+                if let Some(position) = position {
+                    if !block.positioned {
+                        position.publish(uqa_storage::SequenceValuePosition {
+                            current: physical.current,
+                            called: physical.called,
+                            log_count: physical.log_count,
+                        });
+                    }
+                }
+                drop(catalog);
                 drop(caches);
                 self.complete_nextval(
                     &target.relation,
                     target.object_id,
-                    current,
-                    target.state,
-                    autonomous,
+                    block.reservation.first_value,
                 );
-                return Ok(current);
+                publish_histories(
+                    prepared,
+                    &target,
+                    physical,
+                    block.autonomous,
+                    Some(SessionSequenceValue {
+                        object_id: target.object_id,
+                        value: block.reservation.first_value,
+                    }),
+                    true,
+                );
+                Ok(Some(block.reservation.first_value))
+            }))?;
+            if let Some(value) = result {
+                return Ok(value);
             }
-            let Some(block) = self.reserve_nextval_block(&target)? else {
-                drop(caches);
-                continue;
-            };
-            let physical = self.install_nextval_reservation(&target, block, &mut caches)?;
-            drop(caches);
-            self.complete_nextval(
-                &target.relation,
-                target.object_id,
-                block.reservation.first_value,
-                physical,
-                block.autonomous,
-            );
-            return Ok(block.reservation.first_value);
         }
     }
     pub fn currval(&self, name: &str) -> Result<i64, SequenceValueError> {
@@ -109,8 +163,8 @@ impl SequenceValueContext<'_> {
             .ok_or(SequenceValueError::LastvalUndefined)?;
         drop(session);
         let relation = snapshot
-            .object_ids
-            .iter()
+            .catalog
+            .object_ids()
             .find_map(|(relation, candidate)| (*candidate == object_id).then(|| relation.clone()))
             .ok_or(SequenceValueError::LastvalUndefined)?;
         self.lock_sequence_value_target(
@@ -172,84 +226,129 @@ impl SequenceValueContext<'_> {
         value: i64,
         is_called: bool,
     ) -> Result<Option<i64>, SequenceValueError> {
-        let private = self.sequence_value_is_private(
-            target.temporary,
-            target.object_id,
-            target.state.definition_generation,
-        )?;
-        // The assigned value replaces the position, which no session may advance meanwhile.
-        let mut position = self.discard_position(&target)?;
-        let NextvalTarget {
-            name,
-            relation,
-            object_id,
-            state: previous,
-            temporary,
-        } = target;
-        let persisted = self.mutate_persistent_value(
-            temporary,
-            private,
-            "persist sequence value",
-            |catalog| {
-                catalog.set_sequence_value(
-                    &name,
-                    object_id,
-                    previous.definition_generation,
-                    value,
-                    is_called,
-                    0,
-                )
-            },
-        )?;
-        let autonomous = match persisted {
-            Some((uqa_storage::SequenceSetValueResult::Set(_), autonomous)) => {
-                if let Some(position) = position.as_mut() {
-                    position.discard()?;
+        let storage = self.value_storage(&target)?;
+        let mut caches = self.runtime.caches();
+        self.runtime.with_sequence_histories(Box::new(|histories| {
+            let prepared = prepare_histories(histories, &target)?;
+            let mut catalog = self.runtime.states_write();
+            let existed = catalog.contains_key(&target.relation);
+            let native = catalog.prepare_position(
+                &target.relation,
+                target.object_id,
+                target.state.definition_generation,
+            )?;
+            if native.is_none() && !storage.persistent() {
+                return if existed {
+                    Ok(None)
+                } else {
+                    Err(SequenceValueError::Undefined(target.name.clone()))
+                };
+            }
+            // Hold the shared position until its replacement record is durable, so another allocator cannot continue the old log.
+            let mut position = self.discard_position(&target)?;
+            let persisted = storage.mutate(
+                self.runtime.cancellation(),
+                "persist sequence value",
+                |storage| {
+                    storage.set_sequence_value(
+                        &target.name,
+                        target.object_id,
+                        target.state.definition_generation,
+                        value,
+                        is_called,
+                        0,
+                    )
+                },
+            )?;
+            let autonomous = match persisted {
+                Some((uqa_storage::SequenceSetValueResult::Set(_), autonomous)) => {
+                    if let Some(position) = position.as_mut() {
+                        position.discard()?;
+                    }
+                    autonomous
                 }
-                Some(autonomous)
+                Some((uqa_storage::SequenceSetValueResult::DefinitionChanged, _)) => {
+                    return Ok(None)
+                }
+                Some((uqa_storage::SequenceSetValueResult::Missing, _)) => {
+                    return Err(SequenceValueError::Undefined(target.name.clone()))
+                }
+                None => false,
+            };
+            drop(position);
+            let mut physical = target.state;
+            physical.current = value;
+            physical.called = is_called;
+            physical.log_count = 0;
+            if let Some(native) = native {
+                native.publish(uqa_storage::SequenceValuePosition {
+                    current: value,
+                    called: is_called,
+                    log_count: 0,
+                });
             }
-            Some((uqa_storage::SequenceSetValueResult::DefinitionChanged, _)) => return Ok(None),
-            Some((uqa_storage::SequenceSetValueResult::Missing, _)) => {
-                return Err(SequenceValueError::Undefined(name))
+            drop(catalog);
+            caches.retain(|_, cache| cache.object_id != target.object_id);
+            drop(caches);
+            if is_called {
+                let mut session = self.runtime.session_write();
+                session
+                    .currvals_mut()
+                    .retain(|_, current| current.object_id != target.object_id);
+                session.currvals_mut().insert(
+                    target.relation.clone(),
+                    SessionSequenceValue {
+                        object_id: target.object_id,
+                        value,
+                    },
+                );
             }
-            None => None,
-        };
-        drop(position);
-        let mut seqs = self.runtime.states_write();
-        match seqs.get_mut(&relation) {
-            Some(seq) if seq.definition_generation == previous.definition_generation => {
-                seq.current = value;
-                seq.called = is_called;
-                seq.log_count = 0;
-            }
-            _ if autonomous.is_some() => {}
-            Some(_) => return Ok(None),
-            None => return Err(SequenceValueError::Undefined(name)),
-        }
-        drop(seqs);
-        self.runtime
-            .caches()
-            .retain(|_, cache| cache.object_id != object_id);
-        if is_called {
-            let mut session = self.runtime.session_write();
-            session
-                .currvals_mut()
-                .retain(|_, current| current.object_id != object_id);
-            session
-                .currvals_mut()
-                .insert(relation.clone(), SessionSequenceValue { object_id, value });
-        }
-        self.runtime.record_nontransactional_sequence_value(
-            previous.definition_generation,
+            let currval = self
+                .runtime
+                .session_read()
+                .currvals()
+                .values()
+                .find(|current| current.object_id == target.object_id)
+                .copied();
+            publish_histories(prepared, &target, physical, autonomous, currval, false);
+            Ok(Some(value))
+        }))
+    }
+}
+
+fn prepare_histories<'a>(
+    histories: &'a mut [context::SequenceHistoryWrite<'_>],
+    target: &NextvalTarget,
+) -> Result<Vec<super::session::PreparedSequenceHistory<'a>>, SequenceValueError> {
+    histories
+        .iter_mut()
+        .map(|history| {
+            history
+                .prepare(target.object_id, target.state.definition_generation)
+                .map_err(SequenceValueError::from)
+        })
+        .collect()
+}
+
+fn publish_histories(
+    prepared: Vec<super::session::PreparedSequenceHistory<'_>>,
+    target: &NextvalTarget,
+    physical: SequenceState,
+    autonomous: bool,
+    currval: Option<SessionSequenceValue>,
+    defines_lastval: bool,
+) {
+    for history in prepared {
+        history.publish(
             NontransactionalSequenceValue {
-                object_id,
-                current: value,
-                called: is_called,
-                log_count: 0,
-                autonomous: autonomous.unwrap_or(false),
+                object_id: target.object_id,
+                current: physical.current,
+                called: physical.called,
+                log_count: physical.log_count,
+                autonomous,
             },
-            false,
+            currval,
+            defines_lastval,
         );
-        Ok(Some(value))
     }
 }

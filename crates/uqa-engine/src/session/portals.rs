@@ -80,14 +80,14 @@ impl Engine {
         let table_snapshots =
             self.detach_session_portal_table_snapshots(table_sources, transaction_overlay)?;
         let catalog_snapshot = self.capture_session_portal_catalog_snapshot(&table_dependencies)?;
-        let view_snapshots = std::sync::Arc::clone(&catalog_snapshot.views);
-        let sql_function_snapshots = std::sync::Arc::clone(&catalog_snapshot.sql_user_functions);
+        let view_snapshots = catalog_snapshot.views.clone();
+        let sql_function_snapshots = catalog_snapshot.sql_user_functions.clone();
         let restart = holdable.then(|| SessionPortalRestart {
             query: query.clone(),
             params: params.clone(),
             table_snapshots: std::sync::Arc::clone(&table_snapshots),
-            view_snapshots: std::sync::Arc::clone(&view_snapshots),
-            sql_function_snapshots: std::sync::Arc::clone(&sql_function_snapshots),
+            view_snapshots: view_snapshots.clone(),
+            sql_function_snapshots: sql_function_snapshots.clone(),
             catalog_snapshot: std::sync::Arc::clone(&catalog_snapshot),
         });
         let transaction_origin = self.allocate_session_portal_transaction_origin();
@@ -358,7 +358,7 @@ impl Engine {
         sources: Vec<SessionPortalTableSource>,
         mut transaction_overlay: std::collections::BTreeMap<String, DocumentChanges>,
     ) -> Result<SessionPortalTableSnapshots, SQLError> {
-        let mut snapshots = std::collections::BTreeMap::new();
+        let mut snapshots = crate::state::TableRegistryMap::new();
         for (relation, data, metadata) in sources {
             let canonical = relation.qualified_name();
             // A live source already includes this session's evaluated private writes.
@@ -380,7 +380,7 @@ impl Engine {
     pub(crate) fn capture_detached_fixed_transaction_snapshot(
         &self,
     ) -> Result<SessionPortalTableSnapshots, SQLError> {
-        let mut snapshots = std::collections::BTreeMap::new();
+        let mut snapshots = crate::state::TableRegistryMap::new();
         let live_tables = self
             .storage
             .tables

@@ -2,6 +2,21 @@
 
 This document records dated UQA Engine measurements, including controlled CI qualification and historical developer-machine comparisons. Each section identifies its source and measurement boundary; absolute times remain specific to the measured host. Controlled qualification uses independently authenticated host control and reference-only noise calibration. Unless a section explicitly compares another engine, its ratios compare UQA revisions. Measurements use the `bench` profile (release + debug symbols, thin LTO, `codegen-units = 1`) unless a section explicitly records a package-scoped `release` runner or a published package.
 
+## Controlled cursor regression (2026-11-15 UTC)
+
+Automatic [run 43754562077](https://github.com/cognica-io/uqa-engine/actions/runs/43754562077), attempt 1, measures main `6d0a1ed49690e8c5c353fcc7916557470f221675` against analytical reference `0e8be6892340b2d1892e0abf68c2a9ad046f49d5`. Cursor result scan fails the existing 1.15 regression limit: its complete independently calibrated interval remains above that limit. Q1, Q6, materialized scan and all sixteen claim comparisons are accepted. This source does not have overall timing acceptance. [#653](https://github.com/cognica-io/uqa-engine/issues/653) retains the preceding cursor regressions and the unresolved cause, correction and corrected-source qualification.
+
+Times are medians of eight Criterion slope estimates; qualification uses the median of eight counterbalanced head/reference ratios. The analytical control and independent-calibration bindings verify at confidence 0.9904803589014115. Rounded values below do not replace the complete signed observations or change the workload, references or limits.
+
+| Workload | Reference ms | Head ms | Paired ratio | Qualified head/reference interval | Limit | Decision |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| Q1 grouped aggregate | 3.848745 | 4.110010 | 1.067870 | 1.061104–1.074679 | 1.10 | accepted |
+| Q6 filtered aggregate | 3.554827 | 2.817452 | 0.790837 | 0.785826–0.795879 | 1.10 | accepted |
+| Materialized result scan | 9.886624 | 9.374453 | 0.947216 | 0.938433–0.956082 | 1.15 | accepted |
+| Cursor result scan | 4.874539 | 5.722607 | 1.175380 | 1.167094–1.183724 | 1.15 | regression |
+
+[Artifact 14179466884](https://github.com/cognica-io/uqa-engine/actions/runs/43754562077/artifacts/14179466884), SHA-256 `f3b9009dadd3cdd90de59c8c1aad5bb57ef8df9eb8207bcd1139593ac667d29d`, retains the original observations and signed evidence. Seven result/report/run/calibration signatures verify, and all twenty paired medians and outward-rounded ratio decisions reproduce the reports. Analytical report SHA-256 is `0947e99c360b57040e2af6970addd0cf73fc37901a00d5aaefb121d66aeeed08`; claims report SHA-256 is `4861d28f603e64d1f7ae5c6feaaffa67a3a023e869a4fb839da8be954f47f888`. EC2 stop and artifact retention completed. The dated accepted source below retains its original result and does not qualify this later source.
+
 ## Controlled analytical and claim qualification (2026-11-01)
 
 Automatic [run 41282309353](https://github.com/cognica-io/uqa-engine/actions/runs/41282309353), attempt 1, measured source `e8abe2c88cc2ea442e7e886e5c917a2ea14cb186` after [PR #1315](https://github.com/cognica-io/uqa-engine/pull/1315). All twenty comparisons are accepted: four analytical workloads and sixteen claim case/phase comparisons. This is qualification of that source against the fixed UQA references; the separate PostgreSQL, SQLite and DuckDB comparisons below retain their dated results.
@@ -19,7 +34,7 @@ The unchanged [analytical fixture](../../benchmarks/analytical/manifest.json) lo
 | Materialized result scan | 9.932089 | 8.778254 | 0.884942 | 0.866155–0.904135 | 1.15 |
 | Cursor result scan | 4.877156 | 5.190406 | 1.068569 | 1.053854–1.083489 | 1.15 |
 
-The preceding [run 41272199984](https://github.com/cognica-io/uqa-engine/actions/runs/41272199984) at `227b929c213f255e3a86cd0e37177e23e33d52a5` was inconclusive for Q1: ratio 1.106413040926809 and interval [1.0991193916759792, 1.113755090123811] crossed the unchanged 1.10 limit. PR #1315 removes metadata-value construction and destruction from every projected aggregate input row by reusing those scalar carriers within each batch. Its deterministic 2,051-row regression falls from 2,051 preparations to at most four while retaining metadata values, stored-column precedence and predicate/error order. The current Q1 interval lies wholly below 1.10. Reference executables, workload identities, inputs, limits and calibration rules are unchanged; every earlier run keeps its original decision. [#653](https://github.com/cognica-io/uqa-engine/issues/653) records current Q1 completion and retains the separate historical instruction-throughput attribution requirement.
+The preceding [run 41272199984](https://github.com/cognica-io/uqa-engine/actions/runs/41272199984) at `227b929c213f255e3a86cd0e37177e23e33d52a5` was inconclusive for Q1: ratio 1.106413040926809 and interval [1.0991193916759792, 1.113755090123811] crossed the unchanged 1.10 limit. PR #1315 removes metadata-value construction and destruction from every projected aggregate input row by reusing those scalar carriers within each batch. Its deterministic 2,051-row regression falls from 2,051 preparations to at most four while retaining metadata values, stored-column precedence and predicate/error order. That source's Q1 interval lies wholly below 1.10. Reference executables, workload identities, inputs, limits and calibration rules are unchanged; every earlier run keeps its original decision. [#653](https://github.com/cognica-io/uqa-engine/issues/653) records that Q1 correction, the later cursor regression and the separate historical instruction-throughput attribution requirement.
 
 ### Independent-process claim results
 

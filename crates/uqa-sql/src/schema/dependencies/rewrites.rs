@@ -7,7 +7,12 @@
 //! Rewrite stored relation, column, and literal sequence references in SQL schema expressions.
 use super::walk_schema_expr_mut;
 mod production;
-pub use production::visit_sequence_function_references_with_control;
+mod restoration;
+pub use production::{
+    visit_scalar_sequence_function_references_with_control,
+    visit_sequence_function_references_with_control,
+};
+pub use restoration::has_legacy_schema_function_dispatches_with_control;
 use uqa_core::{RelationIdentity, Value};
 
 pub fn stored_relation_reference_matches(reference: &str, target: &RelationIdentity) -> bool {
@@ -153,9 +158,10 @@ pub fn rename_schema_expr_relation(
     walk_schema_expr_mut(expression, &mut |node| {
         match node {
             crate::ast::Expr::QualifiedColumn { qualifier, .. }
-                if stored_relation_reference_matches(qualifier, from) =>
+                if qualifier == &from.name
+                    || stored_relation_reference_matches(qualifier, from) =>
             {
-                *qualifier = to.to_string();
+                *qualifier = RelationIdentity::parse_reference(to)?.1;
             }
             crate::ast::Expr::QualifiedStar(qualifier)
                 if qualifier == &from.name

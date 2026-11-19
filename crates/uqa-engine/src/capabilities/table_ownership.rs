@@ -8,16 +8,12 @@
 use crate::{Engine, TableState};
 use std::sync::Arc;
 use uqa_core::RelationIdentity;
-use uqa_execution::{
-    catalog::security::{
-        table_grants::context::TableSecurityWrite,
-        table_inquiry::{TableColumnsRead, TablePrivilegeState},
-        table_ownership::{
-            TableOwnerPublication, TableOwnerRegistry, TableOwnerSchema, TableOwnerState,
-            TableOwnershipContext,
-        },
+use uqa_execution::catalog::security::{
+    table_grants::context::TableSecurityWrite,
+    table_inquiry::{TableColumnsRead, TablePrivilegeState},
+    table_ownership::{
+        TableOwnerRegistry, TableOwnerSchema, TableOwnerState, TableOwnershipContext,
     },
-    schema::sequences::role_ownership::OwnedSequenceSecurityWrite,
 };
 use uqa_sql::{ast::RelationPersistence, catalog::security::BoundTableSecurity};
 use uqa_storage::StorageBackendResult;
@@ -100,11 +96,6 @@ impl TableOwnerState for OwnedTable<'_> {
         Box::new(self.state.security.write())
     }
 }
-impl TableOwnerPublication for Engine {
-    fn sequence_security_write(&self) -> OwnedSequenceSecurityWrite<'_> {
-        Box::new(self.durable.sequence_security.write())
-    }
-}
 impl Engine {
     pub(crate) fn table_ownership_context(&self) -> TableOwnershipContext<'_> {
         TableOwnershipContext {
@@ -113,7 +104,6 @@ impl Engine {
             roles: self.role_transfer_context(),
             owned_sequences: self,
             sequences: self,
-            publication: self,
             changes: self,
         }
     }

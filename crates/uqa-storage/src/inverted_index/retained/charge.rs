@@ -7,10 +7,10 @@
 //! Transfer admitted retained nodes and payloads; projection/counter scratch and duplicate keys are released.
 
 use super::{
-    DocId, FieldName, IndexedFieldMetadata, MemoryIndexState, MemoryReplacementPlan,
-    StagedMemoryDocument, StorageBackendResult, StorageReadControl,
+    DocId, FieldName, IndexedFieldMetadata, MemoryIndexState, StagedMemoryDocument,
+    StorageBackendResult, StorageReadControl,
 };
-use crate::inverted_index::{MemoryDocument, MemoryPosting, PostingKey};
+use crate::inverted_index::{MemoryDocument, MemoryPosting, MemoryReplacementPlan, PostingKey};
 use uqa_core::memory::{MemoryError, OwnedMap};
 
 pub(super) struct Charge {
@@ -39,11 +39,12 @@ impl Charge {
     }
 }
 
-pub(super) fn new_document(
+pub(super) async fn new_document_from(
     state: &MemoryIndexState,
     staged: &StagedMemoryDocument,
     plan: &MemoryReplacementPlan,
     control: &StorageReadControl,
+    work: &mut impl crate::image_io::work::Work,
 ) -> StorageBackendResult<Charge> {
     let mut charge = Charge {
         retained: 0,
@@ -51,6 +52,7 @@ pub(super) fn new_document(
     };
     charge.entries::<DocId, MemoryDocument>(1)?;
     for field in staged.fields.keys() {
+        work.checkpoint().await?;
         control.check()?;
         charge.keep(OwnedMap::<FieldName, IndexedFieldMetadata>::entry_bytes())?;
         charge.keep(field.capacity())?;
@@ -63,11 +65,13 @@ pub(super) fn new_document(
             .ok_or(MemoryError::SizeOverflow)?,
     )?;
     for (field, term) in &staged.terms {
+        work.checkpoint().await?;
         control.check()?;
         charge.keep(field.capacity())?;
         charge.keep(term.allocated_bytes())?;
     }
     for (key, posting) in &staged.postings {
+        work.checkpoint().await?;
         control.check()?;
         charge.entries::<DocId, MemoryPosting>(1)?;
         charge.keep(
@@ -81,6 +85,7 @@ pub(super) fn new_document(
         }
     }
     for field in plan.field_counters.keys() {
+        work.checkpoint().await?;
         control.check()?;
         if !state.field_counters.contains_key(field) {
             charge.entries::<FieldName, super::super::MemoryFieldCounters>(1)?;

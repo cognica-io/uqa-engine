@@ -13,7 +13,12 @@ fn kuromoji_sql_controls_preserve_errors_results_and_recovery() {
     if uqa_analysis::get_analyzer("kuromoji").is_err() {
         return;
     }
-    for backend in [Backend::Memory, Backend::SQLite, Backend::Redb] {
+    for backend in [
+        Backend::Memory,
+        Backend::SQLite,
+        Backend::SQLiteKeyValue,
+        Backend::Redb,
+    ] {
         let directory = TempDir::new().unwrap();
         let engine = backend.open(&directory.path().join("controls.db"));
         let cancellation = engine.cancellation_token();
@@ -80,7 +85,7 @@ fn kuromoji_bindings_refresh_sibling_sessions_after_commit_and_rollback() {
     if uqa_analysis::get_analyzer("kuromoji").is_err() {
         return;
     }
-    for backend in [Backend::SQLite, Backend::Redb] {
+    for backend in [Backend::SQLite, Backend::SQLiteKeyValue, Backend::Redb] {
         let directory = TempDir::new().unwrap();
         let engine = backend.open(&directory.path().join("sessions.db"));
         fixture(&engine);

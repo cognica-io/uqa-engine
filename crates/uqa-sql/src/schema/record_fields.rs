@@ -9,9 +9,10 @@
 use super::{Arc, ColumnType, RowSchema, SchemaMap};
 
 /// A record's analyzed field types. Runtime values cannot distinguish SQL integer widths or a NULL field's declared type.
-mod ownership;
+pub(super) mod ownership;
 #[cfg(test)]
 mod ownership_tests;
+mod retirement;
 pub use ownership::RecordFields;
 
 /// Comparison field types and a selectable tuple descriptor are independent. A set operation can select fields through its left input even when its rows do not share field types.

@@ -6,19 +6,15 @@
 
 use super::*;
 use uqa_sql::catalog::roles::RoleDefinition;
+use uqa_sql::catalog::roles::RoleDefinitions;
 use uqa_storage::SequenceSecurityRow;
 
 fn empty() -> RestoredSequenceRegistry {
-    RestoredSequenceRegistry {
-        sequences: BTreeMap::new(),
-        object_ids: BTreeMap::new(),
-        persistence: BTreeMap::new(),
-        security: BTreeMap::new(),
-    }
+    RestoredSequenceRegistry::default()
 }
 
-fn roles() -> BTreeMap<String, RoleDefinition> {
-    BTreeMap::from([("uqa".into(), RoleDefinition::bootstrap())])
+fn roles() -> RoleDefinitions {
+    RoleDefinitions::try_from_iter([("uqa".into(), RoleDefinition::bootstrap())]).unwrap()
 }
 
 #[test]
@@ -40,11 +36,11 @@ fn legacy_sequence_conversion_is_prepared_without_catalog_access_and_rejected_by
     expected.security = SequenceSecurityRow::bootstrap();
     assert_eq!(conversions[0], expected);
     assert_eq!(
-        registry.security[&legacy.relation].role_owner,
+        registry.security()[&legacy.relation].role_owner,
         uqa_core::catalog_role::RoleIdentity::BOOTSTRAP
     );
     assert_eq!(
-        registry.sequences[&legacy.relation],
+        *registry.state(&legacy.relation).unwrap(),
         sequence_state_from_row(expected).unwrap().1
     );
     let (_, repeated) =
@@ -82,7 +78,13 @@ fn later_invalid_sequence_prevents_a_prepared_conversion_batch() {
 fn initial_migration_never_repairs_a_current_sequence_owner_from_a_reused_name_or_oid() {
     let current = row();
     let mut replacement = roles();
-    replacement.get_mut("uqa").unwrap().object_id = [99; 16];
+    replacement
+        .edit("uqa", |value| {
+            value.object_id = [99; 16];
+            Ok(())
+        })
+        .unwrap()
+        .unwrap();
     for migration in [false, true] {
         let error = prepare_sequence_rows_with_migration(
             empty(),

@@ -64,7 +64,7 @@ impl SQLiteInvertedIndex {
             for chunk in unique.chunks(900) {
                 let placeholders = std::iter::repeat_n("?", chunk.len()).collect::<Vec<_>>().join(", ");
                 let sql = format!("SELECT term, cluster_id, posting_count, score_blob, positions_blob FROM _occurrence_clusters WHERE table_name = ? AND field = ? AND term IN ({placeholders}) ORDER BY term, cluster_id");
-                let mut values = vec![SqlValue::Text(self.table.clone()), SqlValue::Text(field.into())];
+                let mut values = vec![SqlValue::Text(self.table.as_str().to_owned()), SqlValue::Text(field.into())];
                 values.extend(chunk.iter().map(|term| SqlValue::Blob(term.as_bytes().to_vec())));
                 let mut statement = conn.prepare(&sql)?;
                 let rows = statement.query_map(params_from_iter(values), |row| Ok((row.get::<_, Vec<u8>>(0)?, row.get::<_, i64>(1)?, row.get::<_, i64>(2)?, row.get::<_, Vec<u8>>(3)?, row.get::<_, Vec<u8>>(4)?)))?;
@@ -94,7 +94,7 @@ impl SQLiteInvertedIndex {
         Ok(self.conn.with(|conn| {
             self.require_graph_format_on(conn)?;
             let mut statement = conn.prepare_cached("SELECT cluster_id, posting_count, score_blob FROM _occurrence_clusters WHERE table_name = ?1 AND field = ?2 AND term = ?3 ORDER BY cluster_id")?;
-            let rows = statement.query_map(params![self.table, field, term.as_bytes()], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?, row.get::<_, Vec<u8>>(2)?)))?.collect::<Result<Vec<_>, _>>()?;
+            let rows = statement.query_map(params![self.table.as_str(), field, term.as_bytes()], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?, row.get::<_, Vec<u8>>(2)?)))?.collect::<Result<Vec<_>, _>>()?;
             posting_cursor_from_rows(rows)
         })?)
     }
@@ -116,7 +116,7 @@ impl SQLiteInvertedIndex {
             for chunk in unique.chunks(900) {
                 let placeholders = std::iter::repeat_n("?", chunk.len()).collect::<Vec<_>>().join(", ");
                 let sql = format!("SELECT term, cluster_id, posting_count, score_blob FROM _occurrence_clusters WHERE table_name = ? AND field = ? AND term IN ({placeholders}) ORDER BY term, cluster_id");
-                let mut values = vec![SqlValue::Text(self.table.clone()), SqlValue::Text(field.into())];
+                let mut values = vec![SqlValue::Text(self.table.as_str().to_owned()), SqlValue::Text(field.into())];
                 values.extend(chunk.iter().map(|term| SqlValue::Blob(term.as_bytes().to_vec())));
                 let mut statement = conn.prepare(&sql)?;
                 let rows = statement.query_map(params_from_iter(values), |row| Ok((row.get::<_, Vec<u8>>(0)?, row.get::<_, i64>(1)?, row.get::<_, i64>(2)?, row.get::<_, Vec<u8>>(3)?)))?;
@@ -142,7 +142,7 @@ impl SQLiteInvertedIndex {
     ) -> SQLiteResult<BTreeMap<(String, TokenTermKey), u64>> {
         self.require_graph_format_on(conn)?;
         let mut statement = conn.prepare("SELECT field, term, cluster_id, posting_count, score_blob FROM _occurrence_clusters WHERE table_name = ?1 AND (?2 IS NULL OR field = ?2) ORDER BY field, term, cluster_id")?;
-        let rows = statement.query_map(params![self.table, field], |row| {
+        let rows = statement.query_map(params![self.table.as_str(), field], |row| {
             Ok((
                 row.get::<_, String>(0)?,
                 row.get::<_, Vec<u8>>(1)?,

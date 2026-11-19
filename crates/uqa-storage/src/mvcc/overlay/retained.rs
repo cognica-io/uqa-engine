@@ -56,10 +56,11 @@ impl PrivateRecordChanges {
         let records = state
             .records
             .with_insert(key.clone(), Change { write, identity })?;
-        let sources = state.sources.with_insert(key, Some(source))?;
+        let mut sources = state.source_writes();
+        sources.try_insert(key, Some(source))?;
         control.check()?;
         state.records = records;
-        state.sources = sources;
+        state.sources = sources.snapshot();
         state.policy.restore_scopes(scopes);
         state.resident = resident;
         state.revision = Some(identity);
@@ -85,7 +86,7 @@ impl PrivateRecordChanges {
             )
         };
         let mut state = self.owner.state.lock();
-        let mut sources = state.sources.clone();
+        let mut sources = state.source_writes();
         for (key, source) in &previous_sources {
             control.check()?;
             let Some(source) = source else { continue };
@@ -104,7 +105,7 @@ impl PrivateRecordChanges {
             }
         }
         control.check()?;
-        state.sources = sources;
+        state.sources = sources.snapshot();
         Ok(())
     }
 }

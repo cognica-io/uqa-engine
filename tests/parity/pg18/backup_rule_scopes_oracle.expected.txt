@@ -1,0 +1,15 @@
+alias:1
+alias:2
+correlated:42
+dotted:7
+escaped:9
+input:1
+input:1
+spaced:8
+aliased:target.a
+correlated:outer_items.id
+dotted:a.b.id
+escaped:a"b.id
+qualified:target.a
+qualified:target.b
+spaced:My Table.id

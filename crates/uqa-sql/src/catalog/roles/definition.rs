@@ -12,15 +12,14 @@ use super::{
         insufficient_privilege, require_role_attribute_authority, role_has_transitive_admin,
         role_is_superuser,
     },
-    RoleDefinition, RoleIdentity, RoleMembership, RoleMembershipKey, RoleReference,
-    RoleReferenceNames,
+    RoleDefinition, RoleIdentity, RoleReference, RoleReferenceNames,
 };
 use crate::catalog::roles::identity::{RoleBinding, RoleSubject};
+use crate::catalog::roles::{RoleDefinitions, RoleMemberships};
 use crate::{
     ast::{AlterRoleStmt, RoleAttribute, RoleSpecification},
     SQLError,
 };
-use std::collections::BTreeMap;
 
 pub trait RoleNotices {
     fn notice(&self, notice: crate::SQLNotice);
@@ -39,7 +38,7 @@ pub fn require_role_creation(context: &RoleValidationContext<'_>) -> Result<(), 
 }
 
 fn require_createrole(
-    roles: &BTreeMap<String, RoleDefinition>,
+    roles: &RoleDefinitions,
     current: &(impl RoleSubject + ?Sized),
     action: &str,
 ) -> Result<(), SQLError> {
@@ -57,7 +56,7 @@ fn require_createrole(
 
 pub fn require_role_administration_for(
     catalog: &dyn RoleCatalogGuards,
-    roles: &BTreeMap<String, RoleDefinition>,
+    roles: &RoleDefinitions,
     current: &(impl RoleSubject + ?Sized),
     target: &str,
     action: &str,
@@ -86,10 +85,10 @@ pub fn require_role_administration_for(
 }
 
 pub fn create_role_candidate(
-    roles: &BTreeMap<String, RoleDefinition>,
+    roles: &RoleDefinitions,
     current: &(impl RoleSubject + ?Sized),
     definition: RoleDefinition,
-) -> Result<(BTreeMap<String, RoleDefinition>, bool), SQLError> {
+) -> Result<(RoleDefinitions, bool), SQLError> {
     if roles.contains_key(&definition.name) {
         return Err(SQLError::Routine {
             sqlstate: "42710".into(),
@@ -98,17 +97,17 @@ pub fn create_role_candidate(
     }
     let current_is_superuser = role_is_superuser(roles, current);
     let mut next_roles = roles.clone();
-    next_roles.insert(definition.name.clone(), definition);
+    next_roles.insert(definition.name.clone(), definition)?;
     Ok((next_roles, current_is_superuser))
 }
 
 pub fn alter_role_candidate(
     context: &RoleValidationContext<'_>,
-    roles: &BTreeMap<String, RoleDefinition>,
+    roles: &RoleDefinitions,
     current: &(impl RoleSubject + ?Sized),
     name: String,
     statement: &AlterRoleStmt,
-) -> Result<BTreeMap<String, RoleDefinition>, SQLError> {
+) -> Result<RoleDefinitions, SQLError> {
     let existing = roles.get(&name).cloned().ok_or_else(|| SQLError::Routine {
         sqlstate: "42704".into(),
         message: format!("role \"{name}\" does not exist"),
@@ -144,7 +143,7 @@ pub fn alter_role_candidate(
     }
     updated.advance_revision()?;
     let mut next = roles.clone();
-    next.insert(name, updated);
+    next.insert(name, updated)?;
     Ok(next)
 }
 
@@ -158,7 +157,7 @@ impl RoleDropAuthority {
     pub fn new(
         current: RoleReference,
         session: RoleReference,
-        roles: &BTreeMap<String, RoleDefinition>,
+        roles: &RoleDefinitions,
     ) -> Result<Self, SQLError> {
         require_createrole(roles, &current, "drop role")?;
         let session = match session {
@@ -179,7 +178,7 @@ impl RoleDropAuthority {
         context: &RoleValidationContext<'_>,
         requested: &RoleSpecification,
         if_exists: bool,
-        roles: &BTreeMap<String, RoleDefinition>,
+        roles: &RoleDefinitions,
     ) -> Result<Option<RoleBinding>, SQLError> {
         // PostgreSQL treats the exact lowercase name public as a role specifier even when quoted.
         let name = match requested {
@@ -209,21 +208,19 @@ impl RoleDropAuthority {
 }
 
 pub fn role_drop_memberships_candidate(
-    memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
+    memberships: &RoleMemberships,
     removed: RoleIdentity,
-) -> BTreeMap<RoleMembershipKey, RoleMembership> {
-    memberships
-        .iter()
-        .filter(|(_, membership)| {
-            membership.role.identity() != removed && membership.member.identity() != removed
-        })
-        .map(|(key, membership)| (*key, membership.clone()))
-        .collect()
+) -> Result<RoleMemberships, SQLError> {
+    let mut retained = memberships.clone();
+    retained.retain(|_, membership| {
+        membership.role.identity() != removed && membership.member.identity() != removed
+    })?;
+    Ok(retained)
 }
 
 fn require_role_drop_authority(
     context: &RoleValidationContext<'_>,
-    roles: &BTreeMap<String, RoleDefinition>,
+    roles: &RoleDefinitions,
     current: &(impl RoleSubject + ?Sized),
     session: &(impl RoleSubject + ?Sized),
     name: &str,

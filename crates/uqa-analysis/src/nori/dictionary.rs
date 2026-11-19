@@ -10,10 +10,10 @@ use std::ops::Range;
 use std::sync::Arc;
 
 use super::error::invalid;
-use super::frame::{self, Section};
+use super::frame;
 use super::morphology::{self, DictionaryWord, Morphology, WordEntry};
 use super::{DictionaryId, DictionaryResult};
-use crate::morphology::io::Reader;
+use crate::morphology::frame::take_section;
 use crate::morphology::lexicon::Lexicon;
 use crate::morphology::unicode::{UnicodeProperties, UnicodeTable};
 
@@ -56,45 +56,84 @@ impl std::fmt::Debug for NoriDictionary {
 impl NoriDictionary {
     /// Decode, validate, and publish one immutable model; no files or network resources are resolved.
     pub fn from_bytes(bytes: &[u8], limits: DictionaryLimits) -> DictionaryResult<Arc<Self>> {
-        let (id, mut sections) = frame::decode(bytes, limits)?;
+        crate::morphology::work::inline(Self::from_bytes_with(bytes, limits, &mut ()))
+    }
+
+    pub(crate) async fn from_bytes_with(
+        bytes: &[u8],
+        limits: DictionaryLimits,
+        work: &mut impl crate::morphology::work::Work,
+    ) -> DictionaryResult<Arc<Self>> {
+        let (id, mut sections) = frame::decode_with(bytes, limits, work).await?;
+        work.checkpoint().await?;
         let manifest = sections
             .pop()
             .ok_or_else(|| invalid("bundle", "missing provenance"))?;
-        let provenance = read_section(manifest, |reader| {
-            let bytes = reader.take(reader.remaining())?;
-            Ok((Provenance::decode(bytes, limits.max_manifest_bytes)?, 1))
-        })?;
-        let matrix = take_section(&mut sections, 4, |reader| {
-            let matrix = Matrix::decode(reader)?;
-            let count = matrix.costs.len();
-            Ok((matrix, count))
-        })?;
-        let morphology = take_section(&mut sections, 3, |reader| {
-            let morphology = Morphology::decode(reader, limits.max_strings, limits.max_text_utf16)?;
-            let count = morphology.morphemes.len();
-            Ok((morphology, count))
-        })?;
-        let (known_words, words) = take_section(&mut sections, 2, |reader| {
-            let words =
-                morphology::decode_words(reader, &morphology, matrix.forward, matrix.backward)?;
-            let count = words.1.len();
-            Ok((words, count))
-        })?;
-        let (lexicon, surfaces) = take_section(&mut sections, 1, |reader| {
-            let (lexicon, surfaces) =
-                crate::morphology::surfaces::decode(reader, limits.max_text_utf16, known_words)?;
-            let count = surfaces.len();
-            Ok(((lexicon, surfaces), count))
-        })?;
-        let characters = take_section(&mut sections, 5, |reader| {
-            let characters = Characters::decode(reader, known_words, words.len())?;
-            let count = characters.values.len();
-            Ok((characters, count))
-        })?;
-        let unicode = take_section(&mut sections, 6, |reader| {
-            let unicode = UnicodeTable::decode(reader, provenance.scripts.len())?;
-            Ok((unicode, crate::morphology::unicode::CODE_POINTS as usize))
-        })?;
+        let provenance =
+            Provenance::from_section(manifest, limits.max_manifest_bytes, work).await?;
+        let matrix = {
+            let section = take_section(&mut sections, 4)?;
+            let mut reader = section.reader();
+            let matrix = Matrix::decode_with(&mut reader, work).await?;
+            section.finish(reader, matrix.costs.len())?;
+            matrix
+        };
+        let morphology = {
+            let section = take_section(&mut sections, 3)?;
+            let mut reader = section.reader();
+            let morphology = Morphology::decode_with(
+                &mut reader,
+                limits.max_strings,
+                limits.max_text_utf16,
+                work,
+            )
+            .await?;
+            section.finish(reader, morphology.morphemes.len())?;
+            morphology
+        };
+        let (known_words, words) = {
+            let section = take_section(&mut sections, 2)?;
+            let mut reader = section.reader();
+            let words = morphology::decode_words_with(
+                &mut reader,
+                &morphology,
+                matrix.forward,
+                matrix.backward,
+                work,
+            )
+            .await?;
+            section.finish(reader, words.1.len())?;
+            words
+        };
+        let (lexicon, surfaces) = {
+            let section = take_section(&mut sections, 1)?;
+            let mut reader = section.reader();
+            let value = crate::morphology::surfaces::decode_with(
+                &mut reader,
+                limits.max_text_utf16,
+                known_words,
+                work,
+            )
+            .await?;
+            section.finish(reader, value.1.len())?;
+            value
+        };
+        let characters = {
+            let section = take_section(&mut sections, 5)?;
+            let mut reader = section.reader();
+            let characters =
+                Characters::decode_with(&mut reader, known_words, words.len(), work).await?;
+            section.finish(reader, characters.values.len())?;
+            characters
+        };
+        let unicode = {
+            let section = take_section(&mut sections, 6)?;
+            let mut reader = section.reader();
+            let unicode =
+                UnicodeTable::decode_with(&mut reader, provenance.scripts.len(), work).await?;
+            section.finish(reader, crate::morphology::unicode::CODE_POINTS as usize)?;
+            unicode
+        };
         let dictionary = Self {
             id,
             known_words,
@@ -108,6 +147,7 @@ impl NoriDictionary {
             provenance,
         };
         dictionary.provenance.validate_counts(&dictionary)?;
+        work.checkpoint().await?;
         Ok(Arc::new(dictionary))
     }
 
@@ -182,19 +222,4 @@ impl NoriDictionary {
             .get(script as usize)
             .map(String::as_str)
     }
-}
-
-fn take_section<T>(
-    sections: &mut Vec<Section>,
-    kind: u32,
-    decode: impl FnOnce(&mut Reader<'_>) -> DictionaryResult<(T, usize)>,
-) -> DictionaryResult<T> {
-    crate::morphology::frame::take_section(sections, kind, decode)
-}
-
-fn read_section<T>(
-    section: Section,
-    decode: impl FnOnce(&mut Reader<'_>) -> DictionaryResult<(T, usize)>,
-) -> DictionaryResult<T> {
-    crate::morphology::frame::read_section(section, decode)
 }

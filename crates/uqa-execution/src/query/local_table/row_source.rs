@@ -142,10 +142,7 @@ impl LocalTableRowSource {
                     }
                     rows.push(self.with_lock_identity(
                         match shared {
-                            Some(shared) => {
-                                let (values, projection) = shared.into_parts();
-                                crate::PhysicalRow::from_shared_values(values, projection)
-                            }
+                            Some(shared) => crate::PhysicalRow::from_document_row(shared),
                             None => crate::PhysicalRow::nulls(fields.len()),
                         },
                         doc_id,

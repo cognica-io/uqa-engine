@@ -6,6 +6,7 @@
 
 //! `PostgreSQL` ACL text rendering helpers.
 
+use uqa_sql::catalog::roles::RoleDefinitions;
 pub fn acl_identifier(name: &str) -> String {
     if name.bytes().enumerate().all(|(index, byte)| {
         byte == b'_' || byte.is_ascii_lowercase() || index > 0 && byte.is_ascii_digit()
@@ -18,7 +19,7 @@ pub fn acl_identifier(name: &str) -> String {
 
 /// `aclitem` text of an ACL with one grantable privilege, such as a routine's `X` or a type's `U`: `grantee=P[*]/grantor`, with PUBLIC as an empty grantee.
 pub fn object_acl_items(
-    roles: &std::collections::BTreeMap<String, uqa_sql::catalog::roles::RoleDefinition>,
+    roles: &RoleDefinitions,
     acl: &[uqa_sql::ast::ObjectAclEntry],
     privilege: char,
     object_kind: &str,

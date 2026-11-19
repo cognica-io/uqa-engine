@@ -210,8 +210,7 @@ class CLIReleaseTest(unittest.TestCase):
     def test_posix_installer_selects_every_target_and_preserves_install_on_bad_checksum(self):
         for system, machine, target in (("Linux", "x86_64", CLI.TARGETS[0]),
                                          ("Linux", "aarch64", CLI.TARGETS[1]),
-                                         ("Darwin", "x86_64", CLI.TARGETS[2]),
-                                         ("Darwin", "arm64", CLI.TARGETS[3])):
+                                         ("Darwin", "arm64", CLI.TARGETS[2])):
             with self.subTest(target=target), tempfile.TemporaryDirectory() as temporary:
                 work = pathlib.Path(temporary)
                 archive_dir = work / "downloaded assets"
@@ -239,7 +238,7 @@ class CLIReleaseTest(unittest.TestCase):
     def test_native_windows_installer_preserves_install_on_bad_checksum(self):
         # Both Windows architectures run this test natively. Windows may reset
         # architecture environment variables when starting a child process.
-        target = {"amd64": CLI.TARGETS[4], "arm64": CLI.TARGETS[5]}[platform.machine().lower()]
+        target = {"amd64": CLI.TARGETS[3], "arm64": CLI.TARGETS[4]}[platform.machine().lower()]
         with tempfile.TemporaryDirectory() as temporary:
             work = pathlib.Path(temporary)
             archive_dir = work / "downloaded assets"
@@ -285,6 +284,12 @@ cp "$ASSET_SOURCE/${url##*/}" "$destination"
             base = f"https://github.com/cognica-io/uqa-engine/releases/download/v{CLI.version()}/"
             asset = CLI.asset_name(CLI.TARGETS[0])
             self.assertEqual((work / "urls").read_text().splitlines(), [base + asset, base + asset + ".sha256"])
+            uname.write_text('#!/bin/sh\ncase "$1" in -s) echo Darwin;; -m) echo x86_64;; esac\n')
+            failed = subprocess.run(command, env=env, capture_output=True)
+            self.assertNotEqual(failed.returncode, 0)
+            self.assertIn(b"macOS requires ARM64", failed.stderr)
+            self.assertEqual((work / "urls").read_text().splitlines(), [base + asset, base + asset + ".sha256"])
+            self.assertEqual((work / "bin/usql").read_bytes(), self.payload + CLI.TARGETS[0].encode())
             uname.write_text('#!/bin/sh\necho unsupported\n')
             failed = subprocess.run(command, env=env, capture_output=True)
             self.assertNotEqual(failed.returncode, 0)

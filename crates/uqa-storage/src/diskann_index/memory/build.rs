@@ -8,7 +8,7 @@ use super::{source::Canonical, DiskANNMemoryOptions};
 use crate::diskann_index::{
     build::{DiskANNBuildCapture, DiskANNTemporaryBudget},
     format::DiskANNGeneration,
-    pages::DiskANNMemoryBuilder,
+    pages::{DiskANNMemoryBuilder, DiskANNMemorySource},
     RetainedDiskANNIndex,
 };
 use crate::{read_control::StorageReadControl, StorageBackendError, StorageBackendResult};
@@ -20,7 +20,7 @@ pub(super) fn prepare(
     options: DiskANNMemoryOptions,
     temporary: &DiskANNTemporaryBudget,
     control: &StorageReadControl,
-) -> StorageBackendResult<RetainedDiskANNIndex<Canonical>> {
+) -> StorageBackendResult<(RetainedDiskANNIndex<Canonical>, DiskANNMemorySource)> {
     control.check()?;
     let directory =
         tempfile::tempdir().map_err(|error| StorageBackendError::Other(error.to_string()))?;
@@ -36,11 +36,12 @@ pub(super) fn prepare(
     let physical = sink.finish(manifest, control)?;
     drop(capture.finish(&manifest, control)?);
     // Clear only the candidate's changes after complete construction and sealing. A failure before replacement leaves the live root and every earlier reader intact.
-    RetainedDiskANNIndex::open(
+    let index = RetainedDiskANNIndex::open(
         source.covered(generation),
-        Arc::new(physical),
+        Arc::new(physical.clone()),
         options.parameters,
         options.read,
         control,
-    )
+    )?;
+    Ok((index, physical))
 }

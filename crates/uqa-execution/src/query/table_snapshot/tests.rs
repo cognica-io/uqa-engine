@@ -56,7 +56,7 @@ fn document(values: &[(&str, Value)], xmin: u32) -> StoredDocument {
 
 fn schema<'a>(columns: &'a [ColumnDef], index: &'a dyn InvertedIndex) -> SnapshotSchema<'a> {
     SnapshotSchema {
-        columns: Arc::new(columns.to_vec()),
+        columns: Arc::new(columns.to_vec()).into(),
         text_fields: &[],
         text_revisions: index,
         vector_dimensions: {

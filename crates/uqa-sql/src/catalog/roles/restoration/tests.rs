@@ -5,30 +5,38 @@
 //
 
 use super::*;
+use crate::catalog::roles::RoleDefinitions;
 
-fn roles() -> BTreeMap<String, RoleDefinition> {
-    BTreeMap::from([("uqa".into(), RoleDefinition::bootstrap())])
+fn roles() -> RoleDefinitions {
+    RoleDefinitions::try_from_iter([("uqa".into(), RoleDefinition::bootstrap())]).unwrap()
 }
 
 #[test]
 fn restoration_validates_bootstrap_identity_independently_from_its_current_name() {
     let mut catalog = roles();
-    let mut bootstrap = catalog.remove("uqa").unwrap();
+    let mut bootstrap = catalog.get("uqa").unwrap().clone();
+    catalog.remove("uqa").unwrap();
     bootstrap.name = "renamed".into();
     bootstrap.advance_revision().unwrap();
-    catalog.insert(bootstrap.name.clone(), bootstrap);
+    catalog.insert(bootstrap.name.clone(), bootstrap).unwrap();
     restore_role_definitions(&mut catalog).unwrap();
     validate_role_identities(&catalog).unwrap();
     assert!(!catalog.contains_key("uqa"));
     let mut replacement = RoleDefinition::bootstrap();
     replacement.oid = 20_001;
     replacement.object_id = [1; 16];
-    catalog.insert("uqa".into(), replacement);
+    catalog.insert("uqa".into(), replacement).unwrap();
     restore_role_definitions(&mut catalog).unwrap();
     validate_role_identities(&catalog).unwrap();
     assert_eq!(catalog["renamed"].oid, 10);
     assert_eq!(catalog["uqa"].oid, 20_001);
-    catalog.get_mut("renamed").unwrap().object_id = [2; 16];
+    catalog
+        .edit("renamed", |value| {
+            value.object_id = [2; 16];
+            Ok(())
+        })
+        .unwrap()
+        .unwrap();
     assert_eq!(
         validate_role_identities(&catalog).unwrap_err(),
         "persisted bootstrap role has an invalid object identity"
@@ -41,19 +49,37 @@ fn role_incarnations_reject_missing_duplicate_and_replaced_bootstrap_identities(
     let mut stored = RoleDefinition::bootstrap();
     stored.name = "stored".into();
     stored.oid = 20_001;
-    roles.insert(stored.name.clone(), stored);
+    roles.insert(stored.name.clone(), stored).unwrap();
     assert_eq!(
         validate_role_identities(&roles).unwrap_err(),
         "persisted role object identity is duplicated"
     );
-    roles.get_mut("stored").unwrap().object_id = [0; 16];
+    roles
+        .edit("stored", |value| {
+            value.object_id = [0; 16];
+            Ok(())
+        })
+        .unwrap()
+        .unwrap();
     assert_eq!(
         validate_role_identities(&roles).unwrap_err(),
         "persisted role `stored` has no object identity"
     );
-    roles.get_mut("stored").unwrap().object_id = [1; 16];
+    roles
+        .edit("stored", |value| {
+            value.object_id = [1; 16];
+            Ok(())
+        })
+        .unwrap()
+        .unwrap();
     validate_role_identities(&roles).unwrap();
-    roles.get_mut("uqa").unwrap().object_id = [2; 16];
+    roles
+        .edit("uqa", |value| {
+            value.object_id = [2; 16];
+            Ok(())
+        })
+        .unwrap()
+        .unwrap();
     assert_eq!(
         validate_role_identities(&roles).unwrap_err(),
         "persisted bootstrap role has an invalid object identity"
@@ -73,12 +99,21 @@ fn membership(oid: i64) -> NamedRoleMembership {
 
 #[test]
 fn restored_role_keys_are_validated_after_bootstrap_insertion() {
-    let mut catalog = BTreeMap::from([("wrong".into(), RoleDefinition::bootstrap())]);
+    let mut catalog =
+        RoleDefinitions::try_from_iter([("wrong".into(), RoleDefinition::bootstrap())]).unwrap();
     assert_eq!(
         restore_role_definitions(&mut catalog).unwrap_err(),
         "persisted role key `wrong` does not match role name `uqa`"
     );
     assert_eq!(catalog["uqa"], RoleDefinition::bootstrap());
+    let mut malformed = RoleDefinition::bootstrap();
+    malformed.name = "wrong".into();
+    let mut existing = RoleDefinitions::try_from_iter([("uqa".into(), malformed.clone())]).unwrap();
+    assert_eq!(
+        restore_role_definitions(&mut existing).unwrap_err(),
+        "persisted role key `uqa` does not match role name `wrong`"
+    );
+    assert_eq!(existing["uqa"], malformed);
 }
 
 #[test]
@@ -116,23 +151,41 @@ fn restored_role_oids_preserve_stored_identity_and_reject_invalid_or_duplicate_v
     stored.name = "stored".into();
     stored.oid = 4_000_000_001;
     let mut catalog = roles();
-    catalog.insert(stored.name.clone(), stored.clone());
+    catalog.insert(stored.name.clone(), stored.clone()).unwrap();
     restore_role_definitions(&mut catalog).unwrap();
     assert_eq!(catalog["stored"], stored);
     for oid in [0, -1, i64::from(u32::MAX) + 1] {
-        catalog.get_mut("stored").unwrap().oid = oid;
+        catalog
+            .edit("stored", |value| {
+                value.oid = oid;
+                Ok(())
+            })
+            .unwrap()
+            .unwrap();
         assert_eq!(
             restore_role_definitions(&mut catalog).unwrap_err(),
             format!("persisted role `stored` has an invalid OID {oid}")
         );
     }
-    catalog.get_mut("stored").unwrap().oid = 10;
+    catalog
+        .edit("stored", |value| {
+            value.oid = 10;
+            Ok(())
+        })
+        .unwrap()
+        .unwrap();
     assert_eq!(
         restore_role_definitions(&mut catalog).unwrap_err(),
         "persisted role OID 10 is duplicated"
     );
-    catalog.remove("stored");
-    catalog.get_mut("uqa").unwrap().oid = 16_384;
+    catalog.remove("stored").unwrap();
+    catalog
+        .edit("uqa", |value| {
+            value.oid = 16_384;
+            Ok(())
+        })
+        .unwrap()
+        .unwrap();
     assert_eq!(
         restore_role_definitions(&mut catalog).unwrap_err(),
         "persisted bootstrap role must have OID 10"
@@ -155,7 +208,9 @@ fn membership_restoration_keeps_deleted_endpoint_identities_through_oid_and_name
         replacement.name = endpoint.name.clone();
         replacement.oid = i64::from(endpoint.oid);
         replacement.object_id = [endpoint.object_id[0] + 2; 16];
-        catalog.insert(replacement.name.clone(), replacement);
+        catalog
+            .insert(replacement.name.clone(), replacement)
+            .unwrap();
     }
     for catalog in [roles(), catalog] {
         let restored = restore_role_memberships(&catalog, vec![membership.clone()]).unwrap();
@@ -194,7 +249,7 @@ fn membership_restoration_resolves_a_renamed_grantor_by_captured_identity() {
     let mut membership = bound_membership();
     membership.grantor = RoleBinding::from_definition(&grantor).unwrap();
     membership.grantor.name = "old_name".into();
-    catalog.insert(grantor.name.clone(), grantor);
+    catalog.insert(grantor.name.clone(), grantor).unwrap();
     assert_eq!(
         restore_role_memberships(&catalog, vec![membership.clone()]).unwrap()[&membership.key()],
         membership

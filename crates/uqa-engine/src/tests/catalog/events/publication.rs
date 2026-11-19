@@ -5,7 +5,7 @@
 //
 
 use crate::Engine;
-use parking_lot::{MappedRwLockWriteGuard, Mutex};
+use parking_lot::Mutex;
 use std::{
     cell::Cell,
     ops::{Deref, DerefMut},
@@ -25,6 +25,7 @@ use uqa_sql::{
     },
     SQLError,
 };
+use uqa_storage::memory_capture::MemoryCaptureWriteGuard;
 
 struct Publication<'a> {
     engine: &'a Engine,
@@ -45,7 +46,7 @@ impl Publication<'_> {
 }
 // Track the lifetime of the real Engine write guards without changing CatalogCell's API.
 struct TrackedWrite<'a, T> {
-    guard: Option<MappedRwLockWriteGuard<'a, T>>,
+    guard: Option<MemoryCaptureWriteGuard<'a, T>>,
     held: &'a Cell<bool>,
 }
 impl<T> Deref for TrackedWrite<'_, T> {
@@ -230,12 +231,15 @@ fn invalid_event_column_rewrite_preserves_registry_before_any_persistence() {
         .durable
         .triggers
         .write()
-        .get_mut(&relation)
+        .edit(&relation, |entries| {
+            entries.edit("dependency_check", |trigger| {
+                trigger.definition.when = Some(uqa_sql::ast::Expr::Star);
+                Ok(())
+            })
+        })
         .unwrap()
-        .get_mut("dependency_check")
         .unwrap()
-        .definition
-        .when = Some(uqa_sql::ast::Expr::Star);
+        .unwrap();
     let before = serde_json::to_string(&engine.event_lookup_context().list_triggers()).unwrap();
     let observer = Publication {
         engine: &engine,

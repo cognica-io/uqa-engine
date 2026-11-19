@@ -10,7 +10,10 @@ use serde::{Deserialize, Serialize};
 
 mod borrowed;
 mod production;
-pub use borrowed::{RelationName, RelationReference, RelationReferenceError};
+pub use borrowed::{
+    RelationName, RelationReference, RelationReferenceError, RelationReferenceInputError,
+    RelationReferenceWork,
+};
 #[cfg(test)]
 mod tests;
 
@@ -49,6 +52,33 @@ impl RelationIdentity {
             name: RelationName::decoded(&self.name),
         }
         .render_with_control(control)
+    }
+
+    /// Retain canonical schema/name rendering under the current input's work and allocation allowance.
+    pub async fn qualified_name_from(
+        &self,
+        input: &mut crate::image_io::AsyncImageInput<'_>,
+    ) -> Result<crate::memory::Budgeted<String>, crate::ValueRetentionError> {
+        RelationReference {
+            schema: Some(RelationName::decoded(&self.schema)),
+            name: RelationName::decoded(&self.name),
+        }
+        .render_from(input)
+        .await
+    }
+
+    /// Render the canonical name under its native production allowance while borrowing a separate input continuation.
+    pub async fn qualified_name_from_input(
+        &self,
+        control: &crate::memory::ProductionControl<'_>,
+        input: &mut crate::image_io::AsyncImageInput<'_>,
+    ) -> Result<crate::memory::Produced<String>, crate::ValueRetentionError> {
+        RelationReference {
+            schema: Some(RelationName::decoded(&self.schema)),
+            name: RelationName::decoded(&self.name),
+        }
+        .render_from_input(control, input)
+        .await
     }
 
     /// Physical owner keys that can refer to this relation. New writes use

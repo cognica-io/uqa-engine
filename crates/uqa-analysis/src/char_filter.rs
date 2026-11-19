@@ -145,11 +145,29 @@ const HTML_ENTITIES: &[(&str, &str)] = &[
 
 /// Order mapping entries longest-key-first so that, e.g., the rule
 /// `aa -> X` fires before `a -> Y`.
-fn mapping_longest_first(m: &BTreeMap<String, String>) -> Vec<(String, String)> {
-    let mut entries: Vec<(String, String)> =
-        m.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
-    entries.sort_by(|a, b| b.0.len().cmp(&a.0.len()).then_with(|| a.0.cmp(&b.0)));
-    entries
+async fn mapping_longest_first(
+    mapping: &BTreeMap<String, String>,
+    work: &mut impl crate::work::Work<crate::AnalysisError>,
+) -> AnalysisResult<Vec<(String, String)>> {
+    // Native key traversal is already lexical, so each length bucket retains the tie order.
+    let mut lengths: BTreeMap<std::cmp::Reverse<usize>, Vec<(&str, &str)>> = BTreeMap::new();
+    for (index, (key, value)) in mapping.iter().enumerate() {
+        work.records(index).await?;
+        lengths
+            .entry(std::cmp::Reverse(key.len()))
+            .or_default()
+            .push((key, value));
+    }
+    let mut entries = Vec::with_capacity(mapping.len());
+    for bucket in lengths.into_values() {
+        for (key, value) in bucket {
+            entries.push((
+                crate::work::copy_text(key, work).await?,
+                crate::work::copy_text(value, work).await?,
+            ));
+        }
+    }
+    Ok(entries)
 }
 
 #[cfg(test)]

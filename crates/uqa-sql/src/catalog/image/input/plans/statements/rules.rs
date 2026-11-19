@@ -1,0 +1,231 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
+//! Rule declarations and bound conditions keep independent iterative destruction forests.
+
+use super::{
+    super::{Kind as PlanKind, Node as PlanNode, Owner},
+    invalid, Body, Empty, Field, Fields, Input, Kind, Node, PlanMemory, SQLError, Step,
+};
+use crate::{
+    ast::{CreateRule, EventEnableMode, RuleEvent},
+    catalog::{
+        events::{EventDefinitions, RuleCatalog, StoredRule},
+        image::input::metadata::Identities,
+        named_definitions::DefinitionImage,
+    },
+};
+use std::{cmp::Ordering, io::Read};
+use uqa_core::{
+    image_io::ImageDecoder,
+    memory::{MemoryBudget, MemoryError, MemoryReservation},
+    CancellationToken, RelationIdentity, RelationName,
+};
+
+mod metadata;
+#[cfg(test)]
+mod tests;
+
+empty! { RuleEvent => RuleEvent::Select }
+leaf!(RuleEvent, |input, _memory, read| Ok::<_, SQLError>(
+    match read!(input.binary.array::<1>())?[0] {
+        0 => Self::Select,
+        1 => Self::Insert,
+        2 => Self::Update,
+        3 => Self::Delete,
+        _ => return Err(invalid("rule event")),
+    }
+));
+syntax_struct!(CreateRule {
+    name,
+    table,
+    event,
+    instead,
+    condition,
+    actions,
+    or_replace
+});
+
+struct RuleImage {
+    value: StoredRule,
+    definition: Owner<Node>,
+    condition: Option<Owner>,
+    memory: MemoryReservation,
+}
+
+impl Drop for RuleImage {
+    fn drop(&mut self) {
+        let Node::Rule(definition) = &mut self.definition.tree.root else {
+            unreachable!("native rule definition owner")
+        };
+        std::mem::swap(definition, &mut self.value.definition);
+        if let Some(owner) = &mut self.condition {
+            let PlanNode::Expression(condition) = &mut owner.tree.root else {
+                unreachable!("native rule condition owner")
+            };
+            std::mem::swap(
+                condition,
+                self.value
+                    .condition_plan
+                    .as_mut()
+                    .expect("paired native rule condition"),
+            );
+        }
+    }
+}
+
+impl DefinitionImage<StoredRule> for RuleImage {
+    fn definition(&self) -> &StoredRule {
+        &self.value
+    }
+    fn budget(&self) -> &MemoryBudget {
+        self.memory.budget()
+    }
+    fn retained_bytes(&self) -> Result<usize, MemoryError> {
+        let condition = self
+            .condition
+            .as_ref()
+            .map_or(Ok(0), Owner::retained_bytes)?;
+        self.memory
+            .bytes()
+            .checked_add(self.definition.retained_bytes()?)
+            .and_then(|bytes| bytes.checked_add(condition))
+            .ok_or(MemoryError::SizeOverflow)
+    }
+}
+
+macro_rules! rule_input {
+    ($input:ident, $read:ident $(, $async:ident)?) => {
+        impl $input<'_> {
+            $($async)? fn rule(
+                &mut self,
+                key: &str,
+                relation: &RelationIdentity,
+                identities: &mut Identities,
+            ) -> Result<RuleImage, SQLError> {
+                let mut definition = $read!(self.native_tree::<Node>(Kind::Rule))?;
+                let Node::Rule(value) = &mut definition.tree.root else {
+                    unreachable!("native rule declaration")
+                };
+                let value = std::mem::replace(value, <CreateRule as Empty>::empty());
+                let mut image = RuleImage {
+                    value: StoredRule {
+                        definition: value,
+                        enabled: EventEnableMode::Origin,
+                        condition_plan: None,
+                        condition_binding: None,
+                        dependencies: None,
+                        catalog_oid: None,
+                    },
+                    definition,
+                    condition: None,
+                    memory: self.binary.memory.empty_reservation(),
+                };
+                if image.value.definition.name.contains('\0')
+                    || $read!(self.compare_text(&image.value.definition.name, key))?
+                        != Ordering::Equal
+                {
+                    return Err(invalid("rule declaration key"));
+                }
+                let reference = RelationIdentity::borrowed_reference(&image.value.definition.table)
+                    .ok_or_else(|| invalid("rule declaration relation"))?;
+                if reference.schema.unwrap_or(RelationName::decoded("public"))
+                    != RelationName::decoded(&relation.schema)
+                    || reference.name != RelationName::decoded(&relation.name)
+                {
+                    return Err(invalid("rule declaration relation"));
+                }
+                image.value.enabled = match $read!(self.binary.array::<1>())?[0] {
+                    0 => EventEnableMode::Origin,
+                    1 => EventEnableMode::Disabled,
+                    2 => EventEnableMode::Replica,
+                    3 => EventEnableMode::Always,
+                    _ => return Err(invalid("rule enable mode")),
+                };
+                if $read!(self.flag())? {
+                    let mut owner = $read!(self.native_plan(PlanKind::Expression))?;
+                    let PlanNode::Expression(condition) = &mut owner.tree.root else {
+                        unreachable!("native rule condition")
+                    };
+                    let value = std::mem::replace(
+                        condition,
+                        crate::plan::ExpressionPlan {
+                            scalar: crate::ScalarExpr::Star,
+                            subqueries: Vec::new(),
+                        },
+                    );
+                    image.value.condition_plan = Some(value);
+                    image.condition = Some(owner);
+                }
+                image.value.condition_binding = $read!(self.rule_binding(&mut image.memory))?;
+                image.value.dependencies = $read!(self.rule_dependencies(&mut image.memory))?;
+                image.value.catalog_oid = if $read!(self.flag())? {
+                    let oid = $read!(self.oid())?;
+                    identities.oid(oid as u32)?;
+                    Some(oid)
+                } else {
+                    None
+                };
+                Ok(image)
+            }
+            $($async)? fn rule_catalog(&mut self, mutations: &MemoryBudget) -> Result<RuleCatalog, SQLError> {
+                let memory = self.binary.memory;
+                let count = $read!(self.header(*b"UQARUL01"))?;
+                let mut result = RuleCatalog::with_budget(memory);
+                let mut identities = Identities::new(memory);
+                for _ in 0..count {
+                    $read!(self.checkpoint())?;
+                    let relation = $read!(self.event_relation(result.last_durable_key()))?;
+                    let count = $read!(self.binary.count())?;
+                    let mut entries = EventDefinitions::with_budget(memory);
+                    for _ in 0..count {
+                        $read!(self.checkpoint())?;
+                        let key = $read!(self.ordered_name(entries.last_key()))?;
+                        let value = $read!(self.rule(&key, &relation, &mut identities))?;
+                        entries.insert_owned_image(key, value)?;
+                    }
+                    result.insert_image_entry(relation, entries.into_mutation_budget(mutations))?;
+                }
+                $read!(self.binary.end())?;
+                Ok(result.into_mutation_budget(mutations))
+            }
+        }
+    };
+}
+rule_input!(Input, read_field);
+rule_input!(Fields, await_field, async);
+
+pub(in crate::catalog::image) fn read(
+    reader: &mut dyn Read,
+    memory: &MemoryBudget,
+    mutations: &MemoryBudget,
+    cancellation: &CancellationToken,
+) -> Result<RuleCatalog, SQLError> {
+    Input::new(reader, memory, cancellation).rule_catalog(mutations)
+}
+
+impl RuleCatalog {
+    /// Retain original rule declarations, bound conditions, actions and dependency identities across byte and poll windows. Future relation and rule edits use the destination allowance.
+    pub fn image_input(
+        memory: &MemoryBudget,
+        mutations: &MemoryBudget,
+        cancellation: &CancellationToken,
+    ) -> Result<ImageDecoder<Self, SQLError>, SQLError> {
+        let mutations = mutations.clone();
+        Ok(ImageDecoder::new(
+            memory,
+            cancellation,
+            |mut reader| async move {
+                let mut retained_children = 0;
+                let mut input = Fields {
+                    binary: reader.input(),
+                    retained_children: &mut retained_children,
+                };
+                await_field!(input.rule_catalog(&mutations))
+            },
+        )?)
+    }
+}

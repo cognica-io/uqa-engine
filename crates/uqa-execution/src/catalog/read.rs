@@ -13,10 +13,8 @@ mod production;
 #[cfg(test)]
 mod tests;
 
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    sync::Arc,
-};
+use std::{collections::BTreeSet, sync::Arc};
+use uqa_core::memory::RetainedValue;
 use uqa_sql::catalog::roles::identity::RoleSubject;
 use uqa_sql::catalog::roles::RoleReference;
 
@@ -223,7 +221,7 @@ impl CatalogReadView {
     /// The `pg_class` OID of the sequence with the object identity.
     pub fn sequence_catalog_oid(&self, object_id: &[u8; 16]) -> i64 {
         super::sequence::catalog_oids::sequence_catalog_oid(
-            &self.snapshot.definitions.sequence_catalog_oids,
+            self.snapshot.definitions.sequences.catalog_oids(),
             object_id,
         )
     }
@@ -238,14 +236,13 @@ impl CatalogReadView {
                     identity.qualified_name(),
                     self.snapshot
                         .definitions
-                        .sequence_persistence
-                        .get(identity)
-                        .copied()
+                        .sequences
+                        .persistence(identity)
                         .unwrap_or_default(),
                     self.snapshot
                         .definitions
-                        .sequence_object_ids
-                        .get(identity)
+                        .sequences
+                        .object_id(identity)
                         .copied()
                         .unwrap_or_default(),
                     self.sequence_security(identity)?,
@@ -269,16 +266,15 @@ impl CatalogReadView {
         self.snapshot
             .definitions
             .sequences
-            .iter()
+            .states()
             .map(|(identity, state)| {
                 Ok((
                     identity.clone(),
                     *state,
                     self.snapshot
                         .definitions
-                        .sequence_persistence
-                        .get(identity)
-                        .copied()
+                        .sequences
+                        .persistence(identity)
                         .unwrap_or_default(),
                     self.sequence_security(identity)?,
                 ))
@@ -303,13 +299,13 @@ impl CatalogReadView {
             None => std::collections::HashMap::new(),
         };
         let records = self.latest_sequence_records()?;
-        let object_ids = &self.snapshot.definitions.sequence_object_ids;
+        let sequences = &self.snapshot.definitions.sequences;
         Ok(self
             .sequence_definitions()?
             .into_iter()
             .map(|(identity, state, persistence, security)| {
-                let key = object_ids
-                    .get(&identity)
+                let key = sequences
+                    .object_id(&identity)
                     .map(|object_id| state.position_key(*object_id));
                 let state = state
                     .with_record(key.and_then(|key| records.get(&key)))
@@ -325,7 +321,7 @@ impl CatalogReadView {
         relation: &uqa_core::RelationIdentity,
         state: crate::catalog::sequence::SequenceState,
     ) -> Result<crate::catalog::sequence::SequenceState, SQLError> {
-        let Some(object_id) = self.snapshot.definitions.sequence_object_ids.get(relation) else {
+        let Some(object_id) = self.snapshot.definitions.sequences.object_id(relation) else {
             return Ok(state);
         };
         let key = state.position_key(*object_id);
@@ -362,7 +358,8 @@ impl CatalogReadView {
     ) -> Result<crate::catalog::security::SequenceSecurity, SQLError> {
         self.snapshot
             .definitions
-            .sequence_security
+            .sequences
+            .security()
             .get(relation)
             .ok_or_else(|| {
                 SQLError::Internal(format!(
@@ -419,7 +416,7 @@ impl CatalogReadView {
         name: &str,
     ) -> Result<Option<CatalogSequenceSnapshot>, SQLError> {
         for relation in self.relation_lookup_candidates(resolution, name)? {
-            if let Some(state) = self.snapshot.definitions.sequences.get(&relation) {
+            if let Some(state) = self.snapshot.definitions.sequences.state(&relation) {
                 return Ok(Some(CatalogSequenceSnapshot {
                     state: self.sequence_state_at_position(&relation, *state)?,
                     security: self.sequence_security(&relation)?,
@@ -542,7 +539,11 @@ impl CatalogReadView {
     }
 
     /// Share the captured domain allocation with static signature analysis.
-    pub fn domain_snapshot(&self) -> Arc<BTreeMap<String, uqa_sql::catalog::domain::StoredDomain>> {
+    pub fn domain_snapshot(
+        &self,
+    ) -> RetainedValue<
+        uqa_sql::catalog::type_definitions::TypeDefinitions<uqa_sql::catalog::domain::StoredDomain>,
+    > {
         self.snapshot.definitions.domains.clone()
     }
 
@@ -587,7 +588,7 @@ impl CatalogReadView {
         &self,
         resolution: &RelationNameResolution,
         name: &str,
-    ) -> Result<Option<Vec<std::sync::Arc<uqa_sql::routines::SQLUserFunction>>>, SQLError> {
+    ) -> Result<Option<Vec<uqa_sql::routines::SQLRoutine>>, SQLError> {
         let (schema, local_name) =
             uqa_core::RelationIdentity::parse_reference(name).map_err(|error| {
                 SQLError::Routine {
@@ -626,7 +627,7 @@ impl CatalogReadView {
         Ok((!visible.is_empty()).then_some(visible))
     }
 
-    pub fn all_sql_functions(&self) -> Vec<std::sync::Arc<uqa_sql::routines::SQLUserFunction>> {
+    pub fn all_sql_functions(&self) -> Vec<uqa_sql::routines::SQLRoutine> {
         self.snapshot
             .definitions
             .sql_user_functions
@@ -775,43 +776,17 @@ impl CatalogReadView {
         resolution: &RelationNameResolution,
         name: &str,
     ) -> Result<Vec<uqa_core::RelationIdentity>, SQLError> {
-        let mut current = self
+        let current = self
             .relation_lookup_candidates(resolution, name)?
             .into_iter()
             .find(|relation| self.snapshot.tables.contains_key(relation))
             .ok_or_else(|| SQLError::UnknownTable(name.to_string()))?;
-        let mut sources = Vec::new();
-        let mut visited = BTreeSet::new();
-        loop {
-            if !visited.insert(current.clone()) {
-                return Err(SQLError::Internal(format!(
-                    "trigger partition hierarchy contains a cycle at `{}`",
-                    current.qualified_name()
-                )));
-            }
-            sources.push(current.clone());
-            let hierarchy = &self
-                .snapshot
+        super::hierarchy::partition_trigger_sources(current, |relation| {
+            self.snapshot
                 .tables
-                .get(&current)
-                .ok_or_else(|| SQLError::UnknownTable(current.qualified_name()))?
-                .hierarchy;
-            if hierarchy.partition_bound.is_none() {
-                break;
-            }
-            let Some(parent) = hierarchy.parents.first() else {
-                return Err(SQLError::Internal(format!(
-                    "partition `{}` has no parent",
-                    current.qualified_name()
-                )));
-            };
-            current = uqa_core::RelationIdentity::from_legacy_name(parent).map_err(|error| {
-                SQLError::Internal(format!(
-                    "decode query trigger partition parent `{parent}`: {error}"
-                ))
-            })?;
-        }
-        Ok(sources)
+                .get(relation)
+                .map(|table| &*table.hierarchy)
+        })
     }
 
     pub fn view_resolved(

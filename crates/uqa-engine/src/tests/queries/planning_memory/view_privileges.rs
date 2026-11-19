@@ -86,6 +86,9 @@ fn native_view_authorization_borrows_definitions_and_arenas_and_retains_the_requ
         panic!("block")
     };
     block.projections[0].expr = uqa_sql::ScalarExpr::Literal(Value::Str(large));
+    // Authorization borrows the statement's admitted snapshot, including when independent statistics commit during its reads.
+    engine.sql("BEGIN", &[]).unwrap();
+    commit_statistics_after_snapshot(&engine);
     let retained = engine.query_retention_control().unwrap();
     let memory = retained.memory();
     let invoking = CancellationToken::new();
@@ -131,6 +134,7 @@ fn native_view_authorization_borrows_definitions_and_arenas_and_retains_the_requ
     drop(occupied);
     drop(authorize(&engine, &wide, &control).unwrap());
     assert_eq!(memory.used(), before);
+    engine.sql("ROLLBACK", &[]).unwrap();
     engine
         .sql(
             "INSERT INTO v(id) VALUES(1); UPDATE v SET amount = 7 WHERE id = 1",
@@ -147,6 +151,26 @@ fn native_view_authorization_borrows_definitions_and_arenas_and_retains_the_requ
     engine.close().unwrap();
     drop(engine);
     assert_eq!(memory.used(), 0);
+}
+
+fn commit_statistics_after_snapshot(engine: &Engine) {
+    let Some(backend) = engine.storage.backend.as_ref() else {
+        return;
+    };
+    let before = backend.read_view_revision().unwrap().unwrap();
+    let peer = engine.new_session().unwrap();
+    peer.sql("ANALYZE items", &[]).unwrap();
+    let committed = peer
+        .storage
+        .backend
+        .as_ref()
+        .unwrap()
+        .read_view_revision()
+        .unwrap()
+        .unwrap();
+    assert!(!committed.same_committed_state(&before));
+    assert!(backend.read_view_revision().unwrap().as_ref() == Some(&before));
+    peer.close().unwrap();
 }
 
 #[rstest::rstest]

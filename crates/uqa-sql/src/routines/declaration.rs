@@ -8,15 +8,31 @@
 
 use crate::{
     ast::{
-        AlterRoutineStmt, ColumnDef, ColumnType, CreateFunction, FunctionBody, FunctionParamMode,
-        FunctionReturns, RoutineColumnTypeReference,
+        AlterRoutineStmt, ColumnDef, ColumnType, CreateFunction, FunctionReturns,
+        RoutineColumnTypeReference,
     },
     type_resolution::canonical_routine_type_name,
     SQLError,
 };
 
+mod validation;
+pub use validation::validate_routine_declaration_from_input;
+mod captured;
+mod parameters;
+pub use captured::validate_captured_declaration;
+pub(super) use captured::validate_language as validate_routine_language;
+
 mod shells;
 pub use shells::RoutineShellTypes;
+
+/// `PostgreSQL` identifies a trigger handler by its result type, including a declaration that retains the `SETOF` flag.
+pub fn routine_returns_trigger(definition: &CreateFunction) -> bool {
+    matches!(
+        &definition.returns,
+        FunctionReturns::Scalar { type_name } | FunctionReturns::SetOf { type_name }
+            if canonical_routine_type_name(type_name) == "trigger"
+    )
+}
 
 pub trait RoutineTypeCatalog {
     /// Resolve an undefined type without inventing a value layout.
@@ -152,8 +168,7 @@ fn resolve_parameter_type_references(
     shells: &mut RoutineShellTypes,
 ) -> Result<(), SQLError> {
     let catalog = context.types;
-    let mut have_defaults = false;
-    let mut after_variadic = false;
+    let mut layout = parameters::ParameterLayout::default();
     for index in 0..def.params.len() {
         let (previous, rest) = def.params.split_at_mut(index);
         let parameter = &mut rest[0];
@@ -175,80 +190,29 @@ fn resolve_parameter_type_references(
             )?;
         }
         parameter.type_reference = None;
-        let input = !matches!(
-            parameter.mode,
-            FunctionParamMode::Out | FunctionParamMode::Table
-        );
-        let output = !matches!(
-            parameter.mode,
-            FunctionParamMode::In | FunctionParamMode::Variadic
-        );
-        if input && after_variadic {
-            return Err(routine_definition_error(
-                "VARIADIC parameter must be the last input parameter",
-            ));
-        }
-        if output && def.is_procedure && after_variadic {
-            return Err(routine_definition_error(
-                "VARIADIC parameter must be the last parameter",
-            ));
-        }
-        if parameter.mode == FunctionParamMode::Variadic {
-            after_variadic = true;
-            if !variadic_type_is_array(catalog, &parameter.type_name) {
-                return Err(routine_definition_error(
-                    "VARIADIC parameter must be an array",
-                ));
-            }
-        }
-        if !parameter.name.is_empty()
-            && previous.iter().any(|earlier| {
-                earlier.name == parameter.name
-                    && parameter_names_conflict(parameter.mode, earlier.mode)
-            })
-        {
-            return Err(routine_definition_error(format!(
-                "parameter name \"{}\" used more than once",
-                parameter.name
-            )));
-        }
+        layout.visit(
+            previous,
+            parameter,
+            def.is_procedure,
+            || {
+                captured::variadic_array(
+                    catalog,
+                    &parameter.type_name,
+                    &uqa_core::memory::ProductionControl::uncontrolled(),
+                )
+            },
+            &uqa_core::memory::ProductionControl::uncontrolled(),
+        )?;
         if let Some(default) = &mut parameter.default {
-            if !input {
-                return Err(routine_definition_error(
-                    "only input parameters can have default values",
-                ));
-            }
             parameter.default_type = super::defaults::analyze_parameter_default(
                 context,
                 default,
                 &parameter.type_name,
                 shell_oid,
             )?;
-            have_defaults = true;
-        } else if input && have_defaults {
-            return Err(routine_definition_error(
-                "input parameters after one with a default value must also have defaults",
-            ));
-        } else if def.is_procedure && have_defaults {
-            return Err(routine_definition_error(
-                "procedure OUT parameters cannot appear after one with a default value",
-            ));
         }
     }
     Ok(())
-}
-
-/// Whether two parameters of these modes may not share a name: a pure input never conflicts with a pure output.
-fn parameter_names_conflict(current: FunctionParamMode, earlier: FunctionParamMode) -> bool {
-    let pure_input = |mode| matches!(mode, FunctionParamMode::In | FunctionParamMode::Variadic);
-    let pure_output = |mode| matches!(mode, FunctionParamMode::Out | FunctionParamMode::Table);
-    !(pure_input(current) && pure_output(earlier) || pure_input(earlier) && pure_output(current))
-}
-
-/// Whether a VARIADIC argument's type is one `interpret_function_parameter_list` accepts: an array, `anyarray`, `anycompatiblearray` or `"any"`.
-fn variadic_type_is_array(catalog: &dyn RoutineTypeCatalog, type_name: &str) -> bool {
-    canonical_routine_type_name(type_name) == "any"
-        || routine_declaration_is_array(catalog, type_name)
 }
 
 /// How a missing declared type is reported: `interpret_function_parameter_list` names an argument's type unquoted, `compute_return_type` quotes the result type, each as the statement wrote it.
@@ -542,13 +506,7 @@ pub fn resolve_plpgsql_datum_types(
 }
 
 pub(super) fn validate_routine_declaration(def: &CreateFunction) -> Result<(), SQLError> {
-    let inputs = validate_routine_input_types(def)?;
-    if matches!(def.body, FunctionBody::Statements(_)) && inputs.any {
-        return Err(routine_definition_error(
-            "SQL function with unquoted function body cannot have polymorphic arguments",
-        ));
-    }
-    validate_routine_output_types(def, &inputs)
+    validation::validate_inline(def)
 }
 
 pub(super) fn routine_parameter_regrole_constants(
@@ -566,151 +524,6 @@ pub(super) fn routine_parameter_regrole_constants(
         constants.collect_expression(default, target.as_ref());
     }
     constants
-}
-
-#[derive(Default)]
-struct PolymorphicInputs {
-    simple: bool,
-    compatible: bool,
-    any: bool,
-}
-
-fn validate_routine_input_types(def: &CreateFunction) -> Result<PolymorphicInputs, SQLError> {
-    let mut inputs = PolymorphicInputs::default();
-    for parameter in &def.params {
-        let type_name = canonical_routine_type_name(&parameter.type_name);
-        let is_input = matches!(
-            parameter.mode,
-            FunctionParamMode::In | FunctionParamMode::InOut | FunctionParamMode::Variadic
-        );
-        if let Some(family) = polymorphic_family(&type_name) {
-            inputs.any |= is_input;
-            if is_input {
-                match family {
-                    RoutinePolymorphicFamily::Simple => inputs.simple = true,
-                    RoutinePolymorphicFamily::Compatible => inputs.compatible = true,
-                }
-            }
-            continue;
-        }
-        if ROUTINE_PARAMETER_PSEUDO_TYPES.contains(&type_name.as_str()) {
-            let supported = match type_name.as_str() {
-                "record" => !is_input || def.language == "plpgsql",
-                "refcursor" => true,
-                _ => false,
-            };
-            if !supported {
-                return Err(pseudo_type_error(
-                    def,
-                    format!("cannot have arguments of type {type_name}"),
-                    format!("cannot accept type {type_name}"),
-                ));
-            }
-        }
-    }
-    Ok(inputs)
-}
-
-fn validate_routine_output_types(
-    def: &CreateFunction,
-    inputs: &PolymorphicInputs,
-) -> Result<(), SQLError> {
-    let declared = match &def.returns {
-        FunctionReturns::Scalar { type_name } | FunctionReturns::SetOf { type_name } => {
-            Some(type_name.as_str())
-        }
-        _ => None,
-    };
-    let output_types = def
-        .output_params()
-        .map(|parameter| parameter.type_name.as_str())
-        .chain(declared);
-    for output_type in output_types {
-        let type_name = canonical_routine_type_name(output_type);
-        match polymorphic_family(&type_name) {
-            Some(RoutinePolymorphicFamily::Simple) if !inputs.simple => {
-                return Err(polymorphic_result_error(
-                    &type_name,
-                    "anyelement, anyarray, anynonarray, anyenum, anyrange, or anymultirange",
-                ));
-            }
-            Some(RoutinePolymorphicFamily::Compatible) if !inputs.compatible => {
-                return Err(polymorphic_result_error(&type_name, "anycompatible, anycompatiblearray, anycompatiblenonarray, anycompatiblerange, or anycompatiblemultirange"));
-            }
-            None if ROUTINE_RESULT_PSEUDO_TYPES.contains(&type_name.as_str())
-                && !matches!(type_name.as_str(), "record" | "refcursor" | "void")
-                && !(type_name == "trigger"
-                    && def.language == "plpgsql"
-                    && !def.is_procedure
-                    && matches!(def.returns, FunctionReturns::Scalar { .. })) =>
-            {
-                let message = format!("cannot return type {type_name}");
-                return Err(pseudo_type_error(def, message.clone(), message));
-            }
-            Some(_) | None => {}
-        }
-    }
-    Ok(())
-}
-
-fn polymorphic_result_error(result: &str, inputs: &str) -> SQLError {
-    SQLError::Diagnostic {
-        sqlstate: "42P13".into(),
-        message: "cannot determine result data type".into(),
-        detail: Some(format!(
-            "A result of type {result} requires at least one input of type {inputs}."
-        )),
-        hint: None,
-    }
-}
-
-/// A pseudo-type the routine's language rejects, reported as its validator reports it: `fmgr_sql_validator` as an invalid definition, and `plpgsql_validator` as an unsupported feature.
-fn pseudo_type_error(def: &CreateFunction, sql: String, plpgsql: String) -> SQLError {
-    if def.language == "plpgsql" {
-        SQLError::Routine {
-            sqlstate: "0A000".into(),
-            message: format!("PL/pgSQL functions {plpgsql}"),
-        }
-    } else {
-        routine_definition_error(format!("SQL functions {sql}"))
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum RoutinePolymorphicFamily {
-    Simple,
-    Compatible,
-}
-
-fn polymorphic_family(type_name: &str) -> Option<RoutinePolymorphicFamily> {
-    if !POLYMORPHIC_PSEUDO_TYPES.contains(&type_name) {
-        return None;
-    }
-    Some(if type_name.starts_with("anycompatible") {
-        RoutinePolymorphicFamily::Compatible
-    } else {
-        RoutinePolymorphicFamily::Simple
-    })
-}
-
-fn routine_declaration_is_array(catalog: &dyn RoutineTypeCatalog, type_name: &str) -> bool {
-    let canonical = canonical_routine_type_name(type_name);
-    canonical.ends_with("[]")
-        || matches!(
-            canonical.as_str(),
-            "anyarray" | "anycompatiblearray" | "int2vector" | "oidvector"
-        )
-        || catalog
-            .resolve_catalog_column_type(&canonical)
-            .is_some_and(|ty| routine_column_type_is_array(&ty))
-}
-
-fn routine_column_type_is_array(ty: &ColumnType) -> bool {
-    match ty {
-        ColumnType::Array(_) | ColumnType::AnyArray => true,
-        ColumnType::Domain { base, .. } => routine_column_type_is_array(base),
-        _ => false,
-    }
 }
 
 pub(super) fn routine_definition_error(message: impl Into<String>) -> SQLError {

@@ -52,7 +52,8 @@ class OwnershipTests(unittest.TestCase):
                          "crates/uqa-ffi/src/tests/allocator.rs", "examples/c/transactions.c",
                          "Cargo.toml", "Cargo.lock", "build.rs", "rust-toolchain", "rust-toolchain.toml",
                          "crates/uqa-pg-query/build.rs", "crates/uqa-sql/build.rs",
-                         "crates/uqa-storage/Cargo.toml", ".cargo/config.toml"):
+                         "crates/uqa-storage/Cargo.toml", ".cargo/config.toml",
+                         ".github/actions/setup-python/action.yml"):
                 with self.subTest(kind=kind, path=path):
                     self.assertTrue(SCOPE.affected(kind, path))
 
@@ -61,14 +62,16 @@ class OwnershipTests(unittest.TestCase):
                      "crates/uqa-storage/src/test_support/fixtures.rs",
                      "crates/uqa-storage/src/test_support/tests.rs",
                      "crates/uqa-storage/src/test_support/tests/fixtures.rs",
-                     "scripts/verify-c-clients.py", ".github/scripts/c-sanitizer-cc.sh"):
+                     "scripts/verify-c-clients.py", "scripts/verify-c-configurations.py",
+                     "scripts/c_consumer_execution.py", "scripts/tests/test_c_consumer_execution.py",
+                     "scripts/tests/test_c_configurations.py", ".github/scripts/c-sanitizer-cc.sh"):
             with self.subTest(path=path):
                 self.assertTrue(SCOPE.affected("bindings", path))
                 self.assertFalse(SCOPE.affected("packages", path))
 
     def test_distribution_and_license_inputs_schedule_packages(self):
         for path in ("scripts/build-c-bindings.py", "scripts/c-bindings-metadata.py",
-                     "scripts/c-bindings-release.py", "scripts/c_bindings_licenses.py",
+                     "scripts/c-bindings-release.py", "scripts/c_bindings_licenses.py", "scripts/c_bindings_native.py",
                      "scripts/c-bindings/licenses/sources.json", "scripts/verify-c-package.py",
                      "scripts/tests/test_c_bindings_package.py", "LICENSE", "NOTICE"):
             with self.subTest(path=path):
@@ -87,7 +90,7 @@ class OwnershipTests(unittest.TestCase):
             for before, after in ((b"cargo test --locked", b"cargo test --release --locked"),
                                   (b"[minimal, default]", b"[minimal, arrow]"),
                                   (b"CARGO_INCREMENTAL: '0'", b"CARGO_INCREMENTAL: '1'"),
-                                  (b"ubuntu-24.04", b"macos-15")):
+                                  (b"ubuntu-24.04", b"macos-26-arm64")):
                 with self.subTest(kind=kind, change=after):
                     self.assertNotEqual(expected, SCOPE.execution_definition(kind, original.replace(before, after)))
 
@@ -188,6 +191,15 @@ class GitSelectionTests(unittest.TestCase):
         for kind in SCOPE.WORKFLOWS:
             self.assertFalse(self.select(kind)["required"])
 
+    def test_scheduling_changes_do_not_rebuild_unchanged_c_artifacts(self):
+        for policy in ("false", "${{ github.event_name == 'pull_request' && github.event.action == 'ready_for_review' }}"):
+            for kind, path in SCOPE.WORKFLOWS.items():
+                changed = workflow(kind).replace(b"env:\n", ("concurrency:\n  group: fixture\n  cancel-in-progress: " + policy + "\nenv:\n").encode())
+                self.write(path, changed)
+            self.commit()
+            for kind in SCOPE.WORKFLOWS:
+                self.assertFalse(self.select(kind)["required"])
+
     def test_actual_workflow_execution_changes_select_the_affected_surface(self):
         for kind, path in SCOPE.WORKFLOWS.items():
             with self.subTest(kind=kind):
@@ -205,13 +217,14 @@ class WorkflowContractTests(unittest.TestCase):
     def test_scopes_gate_all_heavy_jobs_and_full_callers_are_preserved(self):
         for kind, path in SCOPE.WORKFLOWS.items():
             source = (ROOT / path).read_text()
+            self.assertIn("cancel-in-progress: ${{ github.event_name == 'pull_request' && github.event.action == 'ready_for_review' }}", source)
             self.assertIn("force_all:\n", source)
             self.assertIn("        default: true\n", source)
             self.assertIn("C_VALIDATION_FORCE_ALL: ${{ inputs.force_all }}", source)
             self.assertIn("run: python3 scripts/c_validation.py --kind " + kind, source)
             self.assertIn("-p test_c_validation.py", source)
             self.assertEqual(source.count("    needs: scope\n"), len(SCOPE.JOBS[kind]))
-            self.assertEqual(source.count("    if: needs.scope.outputs.required == 'true'\n"), len(SCOPE.JOBS[kind]))
+            self.assertEqual(source.count("    if: needs.scope.outputs.required == 'true'"), len(SCOPE.JOBS[kind]))
             self.assertNotIn("    paths:\n", source)
             SCOPE.execution_definition(kind, source.encode())
 

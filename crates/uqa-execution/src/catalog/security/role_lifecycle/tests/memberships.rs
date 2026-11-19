@@ -9,7 +9,8 @@ use crate::{
     catalog::security::{role_lifecycle::identity, roles::locking::ROLE_CATALOG_CLASS_ID},
     row_locks::{shared_objects::SharedCatalogLock, RelationLockMode},
 };
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
+use uqa_sql::catalog::roles::RoleMemberships;
 
 fn catalog() -> Catalog {
     let catalog = Catalog::new();
@@ -39,9 +40,9 @@ fn grant_captures_authority_before_wait_and_locks_only_target_oid_and_new_granto
     catalog
         .refreshed_memberships
         .borrow_mut()
-        .push_back(BTreeMap::new());
+        .push_back(RoleMemberships::new());
     let mut fresh = roles.clone();
-    fresh.remove("target");
+    fresh.remove("target").unwrap();
     catalog.refreshed_roles.borrow_mut().push_back(fresh);
     grant_roles(&catalog.context(), &statement()).unwrap();
     let memberships = catalog.memberships.borrow();
@@ -84,7 +85,8 @@ fn new_member_inherit_reads_current_attributes_but_does_not_rebind_replacements(
             let catalog = catalog();
             let mut roles = catalog.roles.borrow().clone();
             let original = roles["member"].identity();
-            let mut member = roles.remove("member").unwrap();
+            let mut member = roles.get("member").unwrap().clone();
+            roles.remove("member").unwrap();
             match change {
                 "attributes" => {
                     member.attributes.remove(&RoleAttribute::Inherit);
@@ -95,7 +97,7 @@ fn new_member_inherit_reads_current_attributes_but_does_not_rebind_replacements(
                 _ => unreachable!(),
             }
             if change != "dropped" {
-                roles.insert(member.name.clone(), member);
+                roles.insert(member.name.clone(), member).unwrap();
             }
             catalog.refreshed_roles.borrow_mut().push_back(roles);
             let mut statement = statement();
@@ -123,11 +125,12 @@ fn new_grantor_dependency_rejects_original_incarnation_removed_during_wait() {
     for replace in [false, true] {
         let catalog = catalog();
         let mut roles = catalog.roles.borrow().clone();
-        let grantor = roles.remove("grantor").unwrap();
+        let grantor = roles.get("grantor").unwrap().clone();
+        roles.remove("grantor").unwrap();
         if replace {
             let mut replacement = grantor.clone();
             replacement.object_id = [99; 16];
-            roles.insert(replacement.name.clone(), replacement);
+            roles.insert(replacement.name.clone(), replacement).unwrap();
         }
         catalog.refreshed_roles.borrow_mut().push_back(roles);
         let before = catalog.memberships.borrow().clone();
@@ -151,7 +154,14 @@ fn new_grantor_dependency_rejects_original_incarnation_removed_during_wait() {
 fn membership_oid_retries_committed_and_staged_collisions_and_releases_losing_lock() {
     let catalog = catalog();
     let mut fresh = catalog.memberships.borrow().clone();
-    fresh.values_mut().next().unwrap().oid = 36_000;
+    let key = *fresh.keys().next().unwrap();
+    fresh
+        .edit(&key, |membership| {
+            membership.oid = 36_000;
+            Ok(())
+        })
+        .unwrap()
+        .unwrap();
     catalog.refreshed_memberships.borrow_mut().push_back(fresh);
     let mut candidates = [36_002, 36_000, 36_001].into_iter();
     let oid =
@@ -202,7 +212,8 @@ fn unchanged_grant_and_missing_revoke_emit_notices_after_guards_without_allocati
     catalog
         .memberships
         .borrow_mut()
-        .retain(|_, row| row.member.name != "member");
+        .retain(|_, row| row.member.name != "member")
+        .unwrap();
     let mut statement = statement();
     statement.is_grant = false;
     grant_roles(&catalog.context(), &statement).unwrap();
@@ -254,9 +265,14 @@ fn writer_refresh_cannot_resurrect_or_overwrite_a_concurrently_changed_membershi
             .unwrap()
             .key();
         if remove {
-            peer.remove(&key);
+            peer.remove(&key).unwrap();
         } else {
-            peer.get_mut(&key).unwrap().inherit_option = true;
+            peer.edit(&key, |value| {
+                value.inherit_option = true;
+                Ok(())
+            })
+            .unwrap()
+            .unwrap();
         }
         *catalog.writer_memberships.borrow_mut() = Some(peer.clone());
         let mut statement = statement();

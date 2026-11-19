@@ -204,14 +204,15 @@ fn restore(
     let mut header = before.clone();
     header.centroids.clear();
     header.assignments.clear();
-    let mut builder = IVFRestoreBuilder::new(expected.dimensions, params, header, control).unwrap();
+    let mut builder =
+        IVFRestoreBuilder::new(expected.dimensions(), params, header, control).unwrap();
     for (id, centroid) in before.centroids.iter().enumerate() {
         builder.centroid(id, centroid).unwrap();
     }
     for &(document, ordinal, centroid) in &before.assignments {
         builder.assignment(document, ordinal, centroid).unwrap();
     }
-    for vector in expected.vectors.lock().values() {
+    for vector in expected.data.read().vectors.values() {
         builder
             .vector(vector.doc_id, vector.vector_ordinal, &vector.raw_vector)
             .unwrap();

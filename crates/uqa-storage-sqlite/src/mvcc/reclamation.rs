@@ -16,6 +16,7 @@ pub(super) fn reclaim(
     identity: DatabaseId,
     mapped: Option<native::NativeRecordNamespace>,
     oldest: Option<CommitSequence>,
+    metadata_oldest: Option<uqa_storage::mvcc::MetadataEpoch>,
     control: &StorageReadControl,
 ) -> PhysicalResult<u64> {
     let _permit = admission::permit(connection, control)?;
@@ -74,6 +75,7 @@ pub(super) fn reclaim(
         })?;
     }
     super::runs::compact(&transaction, horizon.sequence(), control)?;
+    super::backup_metadata::reclaim(&transaction, metadata_oldest, control)?;
     admission::commit(transaction, control)?;
     Ok(removed)
 }

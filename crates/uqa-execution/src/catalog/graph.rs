@@ -154,7 +154,7 @@ pub fn age_label_relation_schema_with_control(
     Ok(Some(output.finish()?))
 }
 
-fn age_columns(kind: LabelKind) -> &'static [&'static str] {
+pub(in crate::catalog) fn age_columns(kind: LabelKind) -> &'static [&'static str] {
     match kind {
         LabelKind::Vertex => &["id", "properties"],
         LabelKind::Edge => &["id", "start_id", "end_id", "properties"],

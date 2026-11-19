@@ -6,6 +6,20 @@
 
 use super::{Copying, Result, SyntaxCopy};
 
+syntax_struct!(crate::catalog::relation_attributes::DroppedAttribute {
+    number,
+    type_length,
+    type_modifier,
+    dimensions,
+    by_value,
+    alignment,
+    storage,
+    collation,
+    identity,
+    is_local,
+    inheritance_count
+});
+
 syntax_struct!(crate::ast::ColumnClause {
     kind,
     name,

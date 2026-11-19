@@ -31,7 +31,7 @@ pub fn bind_direct_table_read<T>(
 /// Only column definitions, shared document reads and the stored values that indexes hold are exposed. A scan cannot mutate catalog state, obtain an engine, or acquire a storage write guard.
 pub trait TableRead: Send + Sync {
     fn column_definitions(&self) -> Vec<ColumnDef>;
-    fn read_documents(&self) -> RwLockReadGuard<'_, Box<dyn DocumentStore>>;
+    fn read_documents(&self) -> RwLockReadGuard<'_, uqa_storage::StorageHandle<dyn DocumentStore>>;
     /// Whether the table's single integer primary key, if it has one, names its rows' identities: every row whose key lies below `KEY_IDENTITY_LIMIT` has the identity equal to its key, and no other row has an identity below the limit. A table that does not keep this resolves its keys through the key's index.
     fn maps_integer_keys(&self) -> bool;
 

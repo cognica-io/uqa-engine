@@ -6,7 +6,7 @@
 
 //! Select stored view dependencies and rewrite exact routine identities in their bound plans.
 
-use super::StoredView;
+use super::{StoredView, ViewDefinitions};
 use crate::{
     ast::FunctionBinding,
     binding::view_dependencies::{
@@ -14,12 +14,12 @@ use crate::{
         query_plan_references_sequence, rewrite_query_plan_routine_identity,
     },
 };
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use uqa_core::RelationIdentity;
 
 /// Canonical bound sources make dependency checks exact; malformed in-memory plans remain conservative to prevent dangling DDL.
 pub fn views_depending_on_relation(
-    views: &BTreeMap<RelationIdentity, StoredView>,
+    views: &impl crate::catalog::named_definitions::NamedDefinitionView<StoredView, RelationIdentity>,
     target: &RelationIdentity,
 ) -> Vec<String> {
     let empty_ctes = BTreeSet::new();
@@ -35,7 +35,7 @@ pub fn views_depending_on_relation(
 }
 
 pub fn views_depending_on_sequence(
-    views: &BTreeMap<RelationIdentity, StoredView>,
+    views: &impl crate::catalog::named_definitions::NamedDefinitionView<StoredView, RelationIdentity>,
     target: &RelationIdentity,
 ) -> Vec<String> {
     let mut dependents = views
@@ -49,7 +49,7 @@ pub fn views_depending_on_sequence(
 
 /// Return type is excluded from the exact non-builtin routine identity.
 pub fn views_depending_on_function(
-    views: &BTreeMap<RelationIdentity, StoredView>,
+    views: &impl crate::catalog::named_definitions::NamedDefinitionView<StoredView, RelationIdentity>,
     target: &FunctionBinding,
 ) -> Vec<String> {
     let mut dependents = views
@@ -63,12 +63,17 @@ pub fn views_depending_on_function(
 
 /// Give the bound types that views embed, in typed constants and materialized column types, the current name of the user-defined type `oid`. Returns the views that changed.
 pub fn rewrite_view_type_references(
-    views: &mut BTreeMap<RelationIdentity, StoredView>,
+    views: &mut ViewDefinitions,
     oid: u32,
     identity: &RelationIdentity,
-) -> Vec<RelationIdentity> {
+) -> Result<Vec<RelationIdentity>, crate::SQLError> {
     let mut changed = Vec::new();
-    for (relation, view) in views {
+    let mut next = views.clone();
+    for (relation, view) in views.iter() {
+        if !view_references_type(view, oid) {
+            continue;
+        }
+        let mut view = view.clone();
         let mut view_changed = false;
         view.query.rewrite_scalar_expressions(&mut |expression| {
             if let crate::ir::ScalarExpr::TypedLiteral {
@@ -84,22 +89,52 @@ pub fn rewrite_view_type_references(
             view_changed |= ty.rename_user_type(oid, identity);
         }
         if view_changed {
+            next.insert(relation.clone(), view)?;
             changed.push(relation.clone());
         }
     }
-    changed
+    *views = next;
+    Ok(changed)
 }
 
 pub fn rewrite_view_routine_identity(
-    views: &mut BTreeMap<RelationIdentity, StoredView>,
+    views: &mut ViewDefinitions,
     target: &FunctionBinding,
     new_name: &str,
-) -> Vec<RelationIdentity> {
+) -> Result<Vec<RelationIdentity>, crate::SQLError> {
     let mut changed = Vec::new();
-    for (relation, view) in views {
+    let mut next = views.clone();
+    for (relation, view) in views.iter() {
+        if !query_plan_references_function(&view.query, target) {
+            continue;
+        }
+        let mut view = view.clone();
         if rewrite_query_plan_routine_identity(&mut view.query, target, new_name) {
+            next.insert(relation.clone(), view)?;
             changed.push(relation.clone());
         }
     }
-    changed
+    *views = next;
+    Ok(changed)
+}
+
+fn view_references_type(view: &StoredView, oid: u32) -> bool {
+    let mut found = view
+        .materialized_column_types
+        .iter()
+        .flatten()
+        .any(|ty| ty.references_user_type(oid));
+    view.query.visit_scalar_expressions(&mut |root| {
+        root.visit(&mut |expression| {
+            if let crate::ir::ScalarExpr::TypedLiteral {
+                bound_type: Some(ty),
+                ..
+            }
+            | crate::ir::ScalarExpr::Collated { ty, .. } = expression
+            {
+                found |= ty.references_user_type(oid);
+            }
+        });
+    });
+    found
 }

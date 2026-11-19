@@ -57,19 +57,11 @@ fn definitions(
         )
 }
 
-fn column_type(identity: &RelationIdentity, oids: RelationCatalogOids) -> Option<ColumnType> {
-    oids.row_type_reference(identity).map(ColumnType::Composite)
-}
-
-pub(crate) fn by_oid(catalog: &CatalogReadView, oid: u32) -> Option<ColumnType> {
-    definitions(catalog).find_map(|(identity, oids, _)| {
-        if oids.row_type == Some(oid) {
-            column_type(identity, oids)
-        } else if oids.array_type == Some(oid) {
-            column_type(identity, oids).map(|ty| ColumnType::Array(Box::new(ty)))
-        } else {
-            None
-        }
+pub(crate) fn array_element(catalog: &CatalogReadView, oid: u32) -> Option<u32> {
+    definitions(catalog).find_map(|(_, oids, _)| {
+        (oids.array_type == Some(oid))
+            .then_some(oids.row_type)
+            .flatten()
     })
 }
 
@@ -120,40 +112,80 @@ pub(crate) fn by_name_with_control(
     name: &str,
     control: &uqa_core::memory::ProductionControl<'_>,
 ) -> Result<Option<uqa_core::memory::Produced<ColumnType>>, SQLError> {
-    for (identity, oids, array) in definitions(catalog) {
-        control.check()?;
-        if identity.schema != schema {
-            continue;
-        }
-        let array = if identity.name == name {
-            false
-        } else if oids.array_type.is_some()
-            && array.map_or_else(
-                || {
-                    uqa_sql::catalog::array_type_names::default_array_type_name_matches(
-                        &identity.name,
-                        name,
-                    )
-                },
-                |array| array == name,
-            )
-        {
-            true
-        } else {
-            continue;
-        };
-        let Some(reference) = oids.row_type_reference_with_control(identity, control)? else {
+    let selected = crate::catalog::selection_work::inline(select_name_from(
+        catalog,
+        schema,
+        name,
+        control,
+        &mut (),
+    ))?;
+    selected
+        .map(|selected| selected.project(control))
+        .transpose()
+        .map(Option::flatten)
+}
+
+pub(in crate::catalog) struct NamedRelationType<'a> {
+    pub identity: &'a RelationIdentity,
+    pub oids: RelationCatalogOids,
+    pub array: bool,
+}
+impl NamedRelationType<'_> {
+    pub(in crate::catalog) fn project(
+        &self,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<uqa_core::memory::Produced<ColumnType>>, SQLError> {
+        let Some(reference) = self
+            .oids
+            .row_type_reference_with_control(self.identity, control)?
+        else {
             return Ok(None);
         };
         let (reference, memory) = reference.into_parts();
         let ty = control.finish(ColumnType::Composite(reference), memory)?;
-        return if array {
+        if self.array {
             ColumnType::array_with_control(ty, control)
                 .map(Some)
                 .map_err(Into::into)
         } else {
             Ok(Some(ty))
+        }
+    }
+}
+
+pub(in crate::catalog) async fn select_name_from<'a>(
+    catalog: &'a CatalogReadView,
+    schema: &str,
+    name: &str,
+    control: &uqa_core::memory::ProductionControl<'_>,
+    work: &mut impl crate::catalog::selection_work::Work,
+) -> Result<Option<NamedRelationType<'a>>, SQLError> {
+    use crate::catalog::selection_work::{checkpoint, equal};
+    for (identity, oids, array) in definitions(catalog) {
+        checkpoint(control, work).await?;
+        if !equal(&identity.schema, schema, control, work).await? {
+            continue;
+        }
+        let array = if equal(&identity.name, name, control, work).await? {
+            false
+        } else if oids.array_type.is_some()
+            && match array {
+                Some(array) => equal(array, name, control, work).await?,
+                None => uqa_sql::catalog::array_type_names::default_array_type_name_matches(
+                    &identity.name,
+                    name,
+                ),
+            }
+        {
+            true
+        } else {
+            continue;
         };
+        return Ok(Some(NamedRelationType {
+            identity,
+            oids,
+            array,
+        }));
     }
     Ok(None)
 }
@@ -217,21 +249,22 @@ fn descriptor_in(
     catalog: &CatalogReadView,
     oid: u32,
 ) -> Result<Option<Arc<CompositeTypeDescriptor>>, SQLError> {
-    let Some(ColumnType::Composite(reference)) = by_oid(catalog, oid) else {
+    let Some((identity, oids, _)) =
+        definitions(catalog).find(|(_, oids, _)| oids.row_type == Some(oid))
+    else {
         return Ok(None);
     };
-    let identity = RelationIdentity::new(reference.schema, reference.name);
     let snapshot = catalog.snapshot();
     let dropped =
         snapshot
             .tables
-            .get(&identity)
+            .get(identity)
             .map(|table| table.dropped_attributes.as_slice())
             .or_else(|| {
                 snapshot
                     .definitions
                     .foreign_tables
-                    .get(&identity)
+                    .get(identity)
                     .map(|table| table.dropped_attributes.as_slice())
             })
             .unwrap_or_default()
@@ -248,13 +281,13 @@ fn descriptor_in(
             .collect::<Result<_, SQLError>>()?;
     let declared = snapshot
         .tables
-        .get(&identity)
+        .get(identity)
         .map(|table| table.columns.as_slice())
         .or_else(|| {
             snapshot
                 .definitions
                 .foreign_tables
-                .get(&identity)
+                .get(identity)
                 .map(|table| table.columns.as_slice())
         });
     let columns = if let Some(columns) = declared {
@@ -269,7 +302,7 @@ fn descriptor_in(
                 )
             })
             .collect::<Vec<_>>()
-    } else if let Some(view) = snapshot.definitions.views.get(&identity) {
+    } else if let Some(view) = snapshot.definitions.views.get(identity) {
         let schema = context.stored_view_schema_with_catalog(
             view,
             catalog.clone(),
@@ -312,7 +345,7 @@ fn descriptor_in(
     Ok(Some(Arc::new(CompositeTypeDescriptor {
         dropped,
         type_oid: oid,
-        relation_oid: reference.relation_oid,
+        relation_oid: oids.relation,
         attributes,
     })))
 }

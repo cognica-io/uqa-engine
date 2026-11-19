@@ -104,7 +104,11 @@ impl EventLookupContext<'_> {
         let triggers = self.registry.read_triggers();
         let mut candidates = BTreeMap::new();
         for source in relations {
-            for trigger in triggers.get(&source).into_iter().flat_map(BTreeMap::values) {
+            for trigger in triggers
+                .get(&source)
+                .into_iter()
+                .flat_map(|entries| entries.values())
+            {
                 let mut trigger = trigger.clone();
                 if source != *relation {
                     trigger.definition.table = relation.qualified_name();
@@ -175,14 +179,14 @@ impl EventLookupContext<'_> {
         if let Some(snapshot) = self.state.query_triggers() {
             return snapshot
                 .values()
-                .flat_map(BTreeMap::values)
+                .flat_map(|entries| entries.values())
                 .cloned()
                 .collect();
         }
         self.registry
             .read_triggers()
             .values()
-            .flat_map(BTreeMap::values)
+            .flat_map(|entries| entries.values())
             .cloned()
             .collect()
     }

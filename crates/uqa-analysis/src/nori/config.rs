@@ -23,11 +23,12 @@ pub struct NoriTokenizerConfig {
 
 impl Default for NoriTokenizerConfig {
     fn default() -> Self {
+        let options = NoriOptions::default();
         Self {
             dictionary: DEFAULT_NORI_DICTIONARY.into(),
-            decompound_mode: DecompoundMode::Discard,
-            output_unknown_unigrams: false,
-            discard_punctuation: true,
+            decompound_mode: options.decompound_mode,
+            output_unknown_unigrams: options.output_unknown_unigrams,
+            discard_punctuation: options.discard_punctuation,
             user_dictionary: None,
         }
     }

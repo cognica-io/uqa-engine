@@ -5,6 +5,7 @@
 //
 
 use super::*;
+use crate::catalog::roles::RoleDefinitions;
 use crate::catalog::roles::RoleReference;
 use crate::{
     catalog::roles::{
@@ -14,7 +15,6 @@ use crate::{
     plan::{CommandPlan, UnifiedPlan},
     Statement,
 };
-use std::collections::BTreeMap;
 
 #[test]
 fn schema_authorization_preserves_implicit_names_keywords_and_quoted_role_literals() {
@@ -76,7 +76,7 @@ fn pre_authorization_schema_ast_and_plan_json_keep_their_original_representation
     assert_eq!(serde_json::to_value(&plan).unwrap(), stored);
 }
 
-struct Catalog(BTreeMap<String, RoleDefinition>);
+struct Catalog(RoleDefinitions);
 impl RoleReferenceNames for Catalog {
     fn outer_role(&self) -> crate::catalog::roles::RoleReference {
         self.current_role()
@@ -100,17 +100,19 @@ impl RoleCatalogGuards for Catalog {
 #[test]
 fn schema_target_binding_distinguishes_named_roles_from_current_and_session_owners() {
     let catalog = Catalog(
-        ["active_owner", "session_owner", "CURRENT_USER"]
-            .into_iter()
-            .zip(1_u8..)
-            .map(|(name, identity)| {
-                let mut role = RoleDefinition::bootstrap();
-                role.name = name.into();
-                role.oid = 16_384 + i64::from(identity);
-                role.object_id = [identity; 16];
-                (name.into(), role)
-            })
-            .collect(),
+        RoleDefinitions::try_from_iter(
+            ["active_owner", "session_owner", "CURRENT_USER"]
+                .into_iter()
+                .zip(1_u8..)
+                .map(|(name, identity)| {
+                    let mut role = RoleDefinition::bootstrap();
+                    role.name = name.into();
+                    role.oid = 16_384 + i64::from(identity);
+                    role.object_id = [identity; 16];
+                    (name.into(), role)
+                }),
+        )
+        .unwrap(),
     );
     for (authorization, expected) in [
         (SchemaAuthorization::CurrentUser, "active_owner"),
@@ -165,7 +167,8 @@ fn schema_target_keeps_the_selected_incarnation_until_owner_locking() {
                 .unwrap()
                 .into(),
         );
-        let mut catalog = Catalog(BTreeMap::from([(role.name.clone(), role)]));
+        let mut catalog =
+            Catalog(RoleDefinitions::try_from_iter([(role.name.clone(), role)]).unwrap());
         let authorization = SchemaAuthorization::Role("uqa".into());
         let target = schema_creation_target(
             &catalog,
@@ -175,7 +178,14 @@ fn schema_target_keeps_the_selected_incarnation_until_owner_locking() {
             explicit_authorization.then_some(&authorization),
         )
         .unwrap();
-        catalog.0.get_mut("uqa").unwrap().object_id = [42; 16];
+        catalog
+            .0
+            .edit("uqa", |role| {
+                role.object_id = [42; 16];
+                Ok(())
+            })
+            .unwrap()
+            .unwrap();
         assert_eq!(
             target.role_owner.bind(&catalog.0).unwrap_err().sqlstate(),
             Some("42704")

@@ -17,7 +17,7 @@ pub fn removed_relation_events(
     triggers: &TriggerCatalog,
     rules: &RuleCatalog,
     relation: &RelationIdentity,
-) -> Result<Option<RemovedRelationEvents>, String> {
+) -> Result<Option<RemovedRelationEvents>, crate::catalog::events::EventChangeError> {
     let qualified = relation.qualified_name();
     let referenced_by_trigger = triggers.values().any(|entries| {
         entries.values().any(|trigger| {
@@ -42,14 +42,21 @@ pub fn removed_relation_events(
             }
         }
     }
-    next_triggers.remove(relation);
-    for entries in next_triggers.values_mut() {
+    next_triggers.remove(relation)?;
+    for (event_relation, original) in triggers {
+        if event_relation == relation {
+            continue;
+        }
+        let mut entries = original.clone();
         entries.retain(|_, trigger| {
             trigger.definition.referenced_table.as_deref() != Some(qualified.as_str())
-        });
+        })?;
+        if entries.len() != original.len() {
+            next_triggers.insert(event_relation.clone(), entries)?;
+        }
     }
-    next_triggers.retain(|_, entries| !entries.is_empty());
-    next_rules.remove(relation);
+    next_triggers.retain(|_, entries| !entries.is_empty())?;
+    next_rules.remove(relation)?;
 
     Ok(Some(RemovedRelationEvents {
         triggers: next_triggers,

@@ -7,20 +7,21 @@
 //! Retain selected clause identities and apply unknown-input coercions at their original plan addresses.
 
 use super::{
-    AnalysisMap, ColumnType, ConvertedInput, NonNull, OwnedScalarExpr, SQLError, ScalarExpr,
+    AnalysisIdentity, AnalysisMap, ColumnType, ConvertedInput, OwnedScalarExpr, SQLError,
+    ScalarExpr,
 };
 use crate::ast::{FunctionBinding, FunctionDispatch};
 use crate::catalog::collations::expression::scalar_clause;
 use uqa_core::memory::ProductionControl;
 
 struct ClauseInput {
-    inner: Option<NonNull<ScalarExpr>>,
+    inner: Option<AnalysisIdentity<ScalarExpr>>,
     oid: u32,
     retain: bool,
 }
 
 #[derive(Default)]
-pub(super) struct CollationInputs(AnalysisMap<NonNull<ScalarExpr>, ClauseInput>);
+pub(super) struct CollationInputs(AnalysisMap<AnalysisIdentity<ScalarExpr>, ClauseInput>);
 
 impl CollationInputs {
     pub(super) fn new(control: &uqa_core::memory::ProductionControl<'_>) -> Self {
@@ -32,8 +33,8 @@ impl CollationInputs {
 
     pub(super) fn select(
         &mut self,
-        origin: NonNull<ScalarExpr>,
-        inner: Option<NonNull<ScalarExpr>>,
+        origin: AnalysisIdentity<ScalarExpr>,
+        inner: Option<AnalysisIdentity<ScalarExpr>>,
         oid: u32,
     ) -> Result<(), SQLError> {
         self.0.insert_if_missing(origin, || {
@@ -47,7 +48,7 @@ impl CollationInputs {
 
     pub(super) fn coerce(
         &mut self,
-        mut origin: Option<NonNull<ScalarExpr>>,
+        mut origin: Option<AnalysisIdentity<ScalarExpr>>,
         target: &ColumnType,
     ) -> Result<(), SQLError> {
         let mut retain = crate::schema::composites::type_is_collatable(target);
@@ -62,19 +63,24 @@ impl CollationInputs {
         Ok(())
     }
 
-    pub(super) fn apply_owned(
+    pub(super) async fn apply_owned_from<W: crate::plan::ScalarInputWork>(
         &mut self,
-        identity: NonNull<ScalarExpr>,
+        identity: AnalysisIdentity<ScalarExpr>,
         expression: OwnedScalarExpr,
         control: &ProductionControl<'_>,
-    ) -> Result<OwnedScalarExpr, SQLError> {
+        work: &mut W,
+    ) -> Result<OwnedScalarExpr, W::Error>
+    where
+        W::Error: From<SQLError> + From<crate::schema::retention::CatalogRetentionError>,
+    {
         let Some(clause) = self.0.remove(&identity) else {
             return Ok(expression);
         };
         if scalar_clause(&expression)?.is_none() {
             return Err(SQLError::Internal(
                 "retained collation no longer matches its syntax".into(),
-            ));
+            )
+            .into());
         }
         if clause.retain {
             let binding = FunctionBinding::dispatched_with_control(
@@ -83,9 +89,11 @@ impl CollationInputs {
                 },
                 control,
             )?;
-            Ok(expression.replace_call_binding(Some(binding), control)?)
+            expression
+                .replace_call_binding_from(Some(binding), control, work)
+                .await
         } else {
-            Ok(expression.select_child(0))
+            expression.select_child_from(0, control, work).await
         }
     }
 
@@ -93,7 +101,7 @@ impl CollationInputs {
     pub(super) fn take_literal(
         &self,
         expression: &ScalarExpr,
-        literals: &mut AnalysisMap<NonNull<ScalarExpr>, ConvertedInput>,
+        literals: &mut AnalysisMap<AnalysisIdentity<ScalarExpr>, ConvertedInput>,
         control: &ProductionControl<'_>,
     ) -> Result<Option<ConvertedInput>, SQLError> {
         let mut bare = expression;
@@ -103,13 +111,13 @@ impl CollationInputs {
         let Some(ConvertedInput {
             expression: literal,
             session_dependent,
-        }) = literals.remove(&NonNull::from(bare))
+        }) = literals.remove(&AnalysisIdentity::from(bare))
         else {
             return Ok(None);
         };
         let Some(clause) = self
             .0
-            .get(&NonNull::from(expression))
+            .get(&AnalysisIdentity::from(expression))
             .filter(|clause| clause.retain)
         else {
             return Ok(Some(ConvertedInput {

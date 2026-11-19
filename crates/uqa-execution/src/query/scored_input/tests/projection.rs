@@ -14,7 +14,7 @@ use uqa_storage::{DocumentMetadata, DocumentStore, MemoryDocumentStore, StoredDo
 
 struct Table {
     definitions: Vec<ColumnDef>,
-    documents: RwLock<Box<dyn DocumentStore>>,
+    documents: RwLock<uqa_storage::StorageHandle<dyn DocumentStore>>,
 }
 
 impl TableRead for Table {
@@ -22,7 +22,7 @@ impl TableRead for Table {
         self.definitions.clone()
     }
 
-    fn read_documents(&self) -> RwLockReadGuard<'_, Box<dyn DocumentStore>> {
+    fn read_documents(&self) -> RwLockReadGuard<'_, uqa_storage::StorageHandle<dyn DocumentStore>> {
         self.documents.read()
     }
 
@@ -54,7 +54,7 @@ fn source(declaration: &str, fields: &[&str]) -> ScoredDocumentSource {
         "t",
         Arc::new(Table {
             definitions: table.columns,
-            documents: RwLock::new(Box::new(documents)),
+            documents: RwLock::new(uqa_storage::StorageHandle::new(Box::new(documents))),
         }),
         ScoredInput::All,
         fields.iter().map(|field| (*field).into()).collect(),

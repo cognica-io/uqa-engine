@@ -26,7 +26,7 @@ const GRAPH: &str = "bench";
 
 fn build_graph(n: u64) -> MemoryGraphStore {
     let mut g = MemoryGraphStore::new();
-    g.create_graph(GRAPH);
+    g.create_graph(GRAPH).unwrap();
     for id in 0..n {
         let mut vertex = Vertex::new(
             id + 1,
@@ -74,7 +74,7 @@ fn build_graph(n: u64) -> MemoryGraphStore {
 
 fn build_named_chain(n: u64) -> MemoryGraphStore {
     let mut store = MemoryGraphStore::new();
-    store.create_graph(GRAPH);
+    store.create_graph(GRAPH).unwrap();
     for id in 1..=n {
         let mut vertex = Vertex::new(id, "node");
         vertex
@@ -92,8 +92,8 @@ fn build_named_chain(n: u64) -> MemoryGraphStore {
 
 fn build_overlapping_graphs() -> MemoryGraphStore {
     let mut store = MemoryGraphStore::new();
-    store.create_graph("alpha");
-    store.create_graph("beta");
+    store.create_graph("alpha").unwrap();
+    store.create_graph("beta").unwrap();
     for id in 1..=750 {
         let mut vertex = Vertex::new(id, "node");
         vertex
@@ -200,7 +200,7 @@ fn bench_graph_store_and_traversal(c: &mut Criterion) {
     c.bench_function("graph_store_add_vertices_1000", |bencher| {
         bencher.iter(|| {
             let mut g = MemoryGraphStore::new();
-            g.create_graph(GRAPH);
+            g.create_graph(GRAPH).unwrap();
             for id in 0..1_000 {
                 g.add_vertex(Vertex::new(id + 1, "Person"), GRAPH).unwrap();
             }
@@ -211,7 +211,7 @@ fn bench_graph_store_and_traversal(c: &mut Criterion) {
     c.bench_function("graph_store_add_edges_1000", |bencher| {
         bencher.iter(|| {
             let mut g = MemoryGraphStore::new();
-            g.create_graph(GRAPH);
+            g.create_graph(GRAPH).unwrap();
             for id in 0..1_001 {
                 g.add_vertex(Vertex::new(id + 1, "Person"), GRAPH).unwrap();
             }
@@ -468,7 +468,7 @@ fn bench_graph_delta(c: &mut Criterion) {
         delta_group.bench_with_input(BenchmarkId::from_parameter(size), &size, |bencher, size| {
             bencher.iter(|| {
                 let mut base = MemoryGraphStore::new();
-                base.create_graph(GRAPH);
+                base.create_graph(GRAPH).unwrap();
                 let mut versioned = VersionedGraphStore::new(&mut base, GRAPH);
                 let mut delta = GraphDelta::new();
                 for id in 0..*size {
@@ -489,7 +489,7 @@ fn bench_graph_delta(c: &mut Criterion) {
             |bencher, depth| {
                 bencher.iter(|| {
                     let mut base = MemoryGraphStore::new();
-                    base.create_graph(GRAPH);
+                    base.create_graph(GRAPH).unwrap();
                     let mut versioned = VersionedGraphStore::new(&mut base, GRAPH);
                     for version in 0..*depth {
                         let mut delta = GraphDelta::new();
@@ -758,7 +758,7 @@ fn bench_named_graph_creation(c: &mut Criterion) {
         bencher.iter(|| {
             let mut g = MemoryGraphStore::new();
             for i in 0..100 {
-                g.create_graph(&format!("g{i}"));
+                g.create_graph(&format!("g{i}")).unwrap();
             }
             black_box(g.graph_names().len())
         });

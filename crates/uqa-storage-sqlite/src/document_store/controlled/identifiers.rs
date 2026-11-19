@@ -41,7 +41,7 @@ impl SQLiteDocumentStore {
                 "SELECT doc_id FROM _documents WHERE table_name = ?1 ORDER BY doc_id LIMIT ?3"
             };
             let mut statement = connection.prepare_cached(sql)?;
-            let mut rows = statement.query(params![self.table, after, limit])?;
+            let mut rows = statement.query(params![self.table.as_str(), after, limit])?;
             let mut ids = BudgetedVec::new(control.memory());
             while let Some(row) = rows.next()? {
                 control.check()?;

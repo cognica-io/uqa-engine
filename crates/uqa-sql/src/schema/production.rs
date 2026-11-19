@@ -17,6 +17,7 @@ mod composition;
 pub(super) mod copy;
 mod identity_aliases;
 mod indexes;
+pub(in crate::schema) mod input;
 mod internal_aliases;
 mod internal_relations;
 pub(super) mod lease;

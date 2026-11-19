@@ -74,7 +74,7 @@ pub fn create_sequence(
     let relation = RelationIdentity::from_legacy_name(&name)
         .map_err(|error| SQLError::Internal(format!("resolve sequence `{name}`: {error}")))?;
     context.namespace.refresh_sequences().map_err(|error| {
-        SQLError::Internal(format!("load sequence catalog for `{name}`: {error}"))
+        crate::storage_errors::storage_error(&format!("load sequence catalog for `{name}`"), &error)
     })?;
     if context
         .namespace

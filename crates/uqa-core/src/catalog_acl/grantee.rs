@@ -8,6 +8,8 @@
 
 use serde::{Deserialize, Deserializer, Serialize};
 
+mod input;
+
 /// A named recipient can have any valid role spelling, including the quoted name `PUBLIC`.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(tag = "kind", content = "name", rename_all = "snake_case")]

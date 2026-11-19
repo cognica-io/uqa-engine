@@ -10,12 +10,16 @@ use uqa_core::Value;
 use uqa_sql::SQLParam;
 
 #[rstest::rstest]
-#[case::memory(crate::tests::providers::Provider::Memory)]
-#[case::sqlite_native(crate::tests::providers::Provider::SQLiteNative)]
-#[case::sqlite_kv(crate::tests::providers::Provider::SQLiteKeyValue)]
-#[case::redb(crate::tests::providers::Provider::Redb)]
+#[case::memory(crate::tests::providers::Provider::Memory, false)]
+#[case::sqlite_native(crate::tests::providers::Provider::SQLiteNative, false)]
+#[case::sqlite_kv(crate::tests::providers::Provider::SQLiteKeyValue, false)]
+#[case::redb(crate::tests::providers::Provider::Redb, false)]
+#[case::sqlite_native_maintenance(crate::tests::providers::Provider::SQLiteNative, true)]
+#[case::sqlite_kv_maintenance(crate::tests::providers::Provider::SQLiteKeyValue, true)]
+#[case::redb_maintenance(crate::tests::providers::Provider::Redb, true)]
 fn nested_cursors_bind_each_transition_relation_without_reusing_outer_analysis(
     #[case] provider: crate::tests::providers::Provider,
+    #[case] maintenance: bool,
 ) {
     const QUERY: &str =
         "SELECT id, payload, pg_typeof(payload)::text AS kind FROM changed_rows ORDER BY id";
@@ -47,6 +51,12 @@ fn nested_cursors_bind_each_transition_relation_without_reusing_outer_analysis(
     }
     let directory = tempfile::tempdir().unwrap();
     let engine = Arc::new(provider.open(&directory.path().join("nested-cursor-cache.db")));
+    // This schedule publishes maintenance explicitly so cache identity does not depend on the worker's one-second poll.
+    engine.release_automatic_statistics_client();
+    engine
+        .session
+        .statistics_worker
+        .store(true, std::sync::atomic::Ordering::Release);
     let captured = Arc::new(parking_lot::Mutex::new(Vec::new()));
     let output = Arc::clone(&captured);
     let weak = Arc::downgrade(&engine);
@@ -82,16 +92,45 @@ fn nested_cursors_bind_each_transition_relation_without_reusing_outer_analysis(
         Value::Str("boolean".into()),
     ]];
     assert_eq!(read(&engine, QUERY).unwrap(), ordinary);
-    let original = engine
+    let mut original = engine
         .cached_sql_analysis(QUERY)
         .expect("top-level analysis");
+    let mut refresh_after_maintenance = false;
+    if maintenance {
+        let worker = engine.new_session().unwrap();
+        worker.release_automatic_statistics_client();
+        worker
+            .session
+            .statistics_worker
+            .store(true, std::sync::atomic::Ordering::Release);
+        assert!(worker.run_automatic_analyze("public.changed_rows").unwrap());
+        refresh_after_maintenance = engine
+            .storage
+            .catalog
+            .as_ref()
+            .unwrap()
+            .cache_revisions()
+            .unwrap()
+            .is_none();
+    }
     for statement in [
         "INSERT INTO integer_rows VALUES(1,7)",
         "INSERT INTO text_rows VALUES('second',2)",
         "INSERT INTO integer_rows VALUES(3,11)",
     ] {
         engine.sql(statement, &[]).unwrap();
-        assert!(original.ptr_eq(&engine.cached_sql_analysis(QUERY).unwrap()));
+        if std::mem::take(&mut refresh_after_maintenance) {
+            // Without definition-specific generations, the external statistics commit requires conservative invalidation. Nested cursors may retain syntax, but cannot publish transition-relation analysis as the ordinary entry.
+            assert!(engine.cached_sql_analysis(QUERY).is_none());
+            assert_eq!(read(&engine, QUERY).unwrap(), ordinary);
+            let refreshed = engine
+                .cached_sql_analysis(QUERY)
+                .expect("ordinary analysis after maintenance");
+            assert!(!original.ptr_eq(&refreshed));
+            original = refreshed;
+        } else {
+            assert!(original.ptr_eq(&engine.cached_sql_analysis(QUERY).unwrap()));
+        }
     }
     assert_eq!(
         *captured.lock(),

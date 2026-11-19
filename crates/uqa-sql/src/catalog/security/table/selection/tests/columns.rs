@@ -5,11 +5,12 @@
 //
 
 use super::*;
+use crate::catalog::roles::RoleMemberships;
 
 #[test]
 fn any_column_authority_preserves_whole_table_demand_and_column_order() {
     let roles = roles();
-    let memberships = BTreeMap::new();
+    let memberships = RoleMemberships::new();
     let memory = MemoryBudget::new(16 << 10);
     let statement = CancellationToken::new();
     let session = CancellationToken::new();
@@ -47,7 +48,7 @@ fn any_column_authority_preserves_whole_table_demand_and_column_order() {
 #[test]
 fn any_column_authority_preserves_catalog_errors_before_superuser_and_column_shortcuts() {
     let roles = roles();
-    let memberships = BTreeMap::new();
+    let memberships = RoleMemberships::new();
     let memory = MemoryBudget::new(16 << 10);
     let token = CancellationToken::new();
     let control = ProductionControl::new(&memory, &token, &token);
@@ -76,7 +77,7 @@ fn any_column_authority_preserves_catalog_errors_before_superuser_and_column_sho
 #[test]
 fn any_column_authority_releases_partial_membership_work_on_cancel_and_unwind() {
     let roles = roles();
-    let memberships = BTreeMap::new();
+    let memberships = RoleMemberships::new();
     let security = BoundTableSecurity::owner(RoleIdentity::BOOTSTRAP);
     let subject = RoleReference::from("reader");
     for failure in 0..3 {

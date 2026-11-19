@@ -249,8 +249,8 @@ fn at(
     if snapshot.definitions.sequences.contains_key(&*identity) {
         return snapshot
             .definitions
-            .sequence_object_ids
-            .get(&*identity)
+            .sequences
+            .object_id(&*identity)
             .map(|identity| Some(catalog.sequence_catalog_oid(identity)))
             .ok_or_else(|| {
                 formatted(

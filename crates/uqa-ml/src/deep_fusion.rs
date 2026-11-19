@@ -244,6 +244,7 @@ use tensor_layers::{
     apply_signal, apply_softmax,
 };
 use validation::{validate_layers, validate_state};
+pub(crate) use validation::{validate_model, ModelValidation};
 
 #[cfg(test)]
 mod tests;

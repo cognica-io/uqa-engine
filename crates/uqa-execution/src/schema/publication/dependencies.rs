@@ -6,8 +6,7 @@
 
 //! Retained schema generations and catalog publication for stored dependency rewrites.
 use super::TableSchemaState;
-use crate::catalog::foreign::StoredForeignTable;
-use std::collections::BTreeMap;
+use crate::catalog::foreign::{ForeignCatalog, StoredForeignTable};
 use uqa_core::RelationIdentity;
 use uqa_storage::StorageBackendResult;
 
@@ -16,13 +15,17 @@ pub trait LoadedTableSchemas {
     fn table_schemas(&self) -> Vec<LoadedTableSchema<'_>>;
 }
 pub trait ForeignSchemaPublication {
-    fn foreign_tables(&self) -> BTreeMap<RelationIdentity, StoredForeignTable>;
+    fn foreign_catalog(&self) -> ForeignCatalog;
     fn persist_foreign_table(
         &self,
         relation: &RelationIdentity,
         table: &StoredForeignTable,
     ) -> StorageBackendResult<()>;
-    fn publish_foreign_tables(&self, updates: Vec<(RelationIdentity, StoredForeignTable)>);
+    fn publish_foreign_tables(
+        &self,
+        catalog: ForeignCatalog,
+        updates: Vec<(RelationIdentity, StoredForeignTable)>,
+    );
 }
 pub trait CatalogPublicationChanges {
     fn prepared_catalog_changed(

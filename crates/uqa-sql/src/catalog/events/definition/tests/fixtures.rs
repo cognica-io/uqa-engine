@@ -5,6 +5,7 @@
 //
 
 use super::*;
+use crate::catalog::roles::RoleDefinitions;
 use crate::catalog::roles::RoleReference;
 use crate::{
     ast::{ColumnDef, FunctionBinding, TableHierarchy},
@@ -39,7 +40,7 @@ pub(in crate::catalog::events::definition) struct Catalog {
     pub kind: &'static str,
     pub allow_owner: bool,
     pub allow_trigger: bool,
-    pub routines: Vec<Arc<SQLUserFunction>>,
+    pub routines: Vec<crate::routines::SQLRoutine>,
     pub columns: Option<Vec<ColumnDef>>,
 }
 impl Default for Catalog {
@@ -109,7 +110,7 @@ impl Catalog {
         }
     }
 }
-fn routine() -> Arc<SQLUserFunction> {
+fn routine() -> crate::routines::SQLRoutine {
     let Statement::CreateFunction(mut def) = crate::compile("CREATE FUNCTION public.handler() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NEW; END $$").unwrap().remove(0) else {panic!("expected routine")};
     def.owner = Some(crate::catalog::roles::RoleIdentity {
         oid: 42,
@@ -118,10 +119,7 @@ fn routine() -> Arc<SQLUserFunction> {
     let compiled = crate::routines::CompiledFunctionBody::PLpgSQL(
         crate::plpgsql::parse_function(&def).unwrap(),
     );
-    Arc::new(SQLUserFunction::new(
-        *def,
-        crate::routines::RoutineBody::Bound(Arc::new(compiled)),
-    ))
+    SQLUserFunction::new(*def, crate::routines::RoutineBody::Bound(compiled.shared())).shared()
 }
 impl EventRelationCatalog for Catalog {
     fn event_relation_owner(
@@ -220,18 +218,18 @@ impl RoutineResolution for Catalog {
     fn lookup_visible_sql_functions(
         &self,
         name: &str,
-    ) -> Result<Option<Vec<Arc<SQLUserFunction>>>, SQLError> {
+    ) -> Result<Option<Vec<crate::routines::SQLRoutine>>, SQLError> {
         self.record(format!("routine-visible:{name}"));
         Ok(Some(self.routines.clone()))
     }
-    fn lookup_bound_sql_functions(&self, name: &str) -> Option<Vec<Arc<SQLUserFunction>>> {
+    fn lookup_bound_sql_functions(&self, name: &str) -> Option<Vec<crate::routines::SQLRoutine>> {
         self.record(format!("routine-bound:{name}"));
         Some(self.routines.clone())
     }
     fn lookup_bound_sql_functions_by_binding(
         &self,
         binding: &FunctionBinding,
-    ) -> Option<Vec<Arc<SQLUserFunction>>> {
+    ) -> Option<Vec<crate::routines::SQLRoutine>> {
         self.record(format!("routine-id:{}", binding.name));
         None
     }
@@ -331,7 +329,7 @@ impl MutationPrivilegeCatalog for Catalog {
         privilege: TableAclPrivilege,
     ) -> Result<(), SQLError> {
         assert!(matches!(privilege, TableAclPrivilege::Trigger));
-        let subject = subject.catalog_name(&std::collections::BTreeMap::new())?;
+        let subject = subject.catalog_name(&RoleDefinitions::new())?;
         self.record(format!("trigger-privilege:{table}:{subject}"));
         if self.allow_trigger {
             Ok(())

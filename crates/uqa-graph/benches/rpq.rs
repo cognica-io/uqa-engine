@@ -20,7 +20,7 @@ const N: u64 = 1_000;
 
 fn chain_graph() -> MemoryGraphStore {
     let mut g = MemoryGraphStore::new();
-    g.create_graph("g");
+    g.create_graph("g").unwrap();
     for v in 1..=N {
         g.add_vertex(Vertex::new(v, "n"), "g").unwrap();
     }

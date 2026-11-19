@@ -26,14 +26,18 @@ pub fn remove_routine_registry_targets(
             )));
         }
     }
+    let mut removed = next.clone();
     for target in targets {
-        if let Some(overloads) = next.get_mut(&target.name) {
+        if let Some(mut overloads) = removed.get(&target.name).cloned() {
             overloads.retain(|function| !target.names(function));
             if overloads.is_empty() {
-                next.remove(&target.name);
+                removed.remove(&target.name)?;
+            } else {
+                removed.insert(target.name.clone(), overloads)?;
             }
         }
     }
+    *next = removed;
     Ok(())
 }
 

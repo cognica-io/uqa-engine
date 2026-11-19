@@ -29,6 +29,7 @@ mod retained_unicode;
 enum Backend {
     Memory,
     SQLite,
+    SQLiteKeyValue,
     Redb,
 }
 
@@ -37,6 +38,10 @@ impl Backend {
         match self {
             Self::Memory => Engine::new(),
             Self::SQLite => Engine::open(path).unwrap(),
+            Self::SQLiteKeyValue => Engine::from_persistent_provider(Arc::new(
+                uqa_storage_sqlite::SQLiteKeyValueStorage::open(path).unwrap(),
+            ))
+            .unwrap(),
             Self::Redb => {
                 Engine::from_persistent_provider(Arc::new(RedbStorage::open(path).unwrap()))
                     .unwrap()
@@ -86,7 +91,12 @@ fn fixture(engine: &Engine) {
 
 #[test]
 fn independent_analyzer_revisions_survive_files_names_renames_and_reopen() {
-    for backend in [Backend::Memory, Backend::SQLite, Backend::Redb] {
+    for backend in [
+        Backend::Memory,
+        Backend::SQLite,
+        Backend::SQLiteKeyValue,
+        Backend::Redb,
+    ] {
         let directory = TempDir::new().unwrap();
         let database = directory.path().join("revisions.db");
         let index_path = directory.path().join("index.txt");
@@ -177,7 +187,7 @@ fn independent_analyzer_revisions_survive_files_names_renames_and_reopen() {
 
 #[test]
 fn analyzer_bindings_rollback_with_postings_and_refresh_in_sibling_sessions() {
-    for backend in [Backend::SQLite, Backend::Redb] {
+    for backend in [Backend::SQLite, Backend::SQLiteKeyValue, Backend::Redb] {
         let directory = TempDir::new().unwrap();
         let engine = backend.open(&directory.path().join("transactions.db"));
         fixture(&engine);
@@ -227,7 +237,12 @@ fn analyzer_bindings_rollback_with_postings_and_refresh_in_sibling_sessions() {
 
 #[test]
 fn gin_analyzer_owner_survives_name_replacement_and_releases_to_remaining_plain_index() {
-    for backend in [Backend::Memory, Backend::SQLite, Backend::Redb] {
+    for backend in [
+        Backend::Memory,
+        Backend::SQLite,
+        Backend::SQLiteKeyValue,
+        Backend::Redb,
+    ] {
         let directory = TempDir::new().unwrap();
         let database = directory.path().join("owner.db");
         let mut engine = backend.open(&database);
@@ -284,7 +299,7 @@ fn gin_analyzer_owner_survives_name_replacement_and_releases_to_remaining_plain_
 
 #[test]
 fn a_named_analyzer_and_an_unnamed_table_default_both_freeze_synonym_files() {
-    for backend in [Backend::SQLite, Backend::Redb] {
+    for backend in [Backend::SQLite, Backend::SQLiteKeyValue, Backend::Redb] {
         let directory = TempDir::new().unwrap();
         let database = directory.path().join("default.db");
         let source = directory.path().join("default.txt");

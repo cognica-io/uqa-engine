@@ -7,7 +7,6 @@
 //! Bind physical scans to the selected table generation.
 
 use crate::TableState;
-use std::sync::atomic::Ordering;
 use uqa_execution::query::table_read::TableRead;
 impl TableRead for TableState {
     fn column_definitions(&self) -> Vec<uqa_sql::ast::ColumnDef> {
@@ -15,12 +14,13 @@ impl TableRead for TableState {
     }
     fn read_documents(
         &self,
-    ) -> parking_lot::RwLockReadGuard<'_, Box<dyn uqa_storage::DocumentStore>> {
+    ) -> parking_lot::RwLockReadGuard<'_, uqa_storage::StorageHandle<dyn uqa_storage::DocumentStore>>
+    {
         self.document_store.read()
     }
 
     fn maps_integer_keys(&self) -> bool {
-        self.maps_integer_keys.load(Ordering::Acquire)
+        *self.maps_integer_keys.read()
     }
 
     fn for_each_indexed_fields(
@@ -39,16 +39,13 @@ impl TableRead for TableState {
             return Ok(None);
         };
         // Every accelerator indexes every row, so without a field to project any of them tells whether a row exists.
-        let presence = if let Some(column) = columns.first() {
-            *column
-        } else {
-            let Some(index) = indexes.values().next() else {
-                return Ok(None);
-            };
-            index
+        let fallback = indexes.values().next();
+        let Some(presence) = columns.first().or(fallback.as_ref()) else {
+            return Ok(None);
         };
+        let borrowed: Vec<_> = columns.iter().map(|column| &**column).collect();
         uqa_execution::catalog::index::value::visit_stored_fields(
-            &columns, presence, ids, control, visitor,
+            &borrowed, presence, ids, control, visitor,
         )
         .map(Some)
     }

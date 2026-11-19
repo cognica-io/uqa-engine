@@ -6,11 +6,13 @@
 
 //! Set-operation sorting analyzes SQL92 output references before rejecting computed targets.
 
+use crate::binding::preparation::{LiteralInput, SchemaContext};
+
 use super::{error, Preparation, QueryOutput, QueryPlan, SQLError, ScalarExpr};
 use crate::plan::{OrderPlan, RelationalPlan};
 use uqa_core::Value;
 
-impl Preparation<'_> {
+impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
     pub(super) fn set_ordering(
         &mut self,
         order_by: &[OrderPlan],

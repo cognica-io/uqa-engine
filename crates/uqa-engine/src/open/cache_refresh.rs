@@ -241,13 +241,11 @@ impl Engine {
             || previous
                 .as_ref()
                 .is_none_or(|previous| previous.registries != current.registries);
-        if catalog_changed {
-            self.clear_persistent_table_bindings_for_catalog_reload();
-            self.reload_table_catalog(catalog_epoch)?;
-            self.synchronize_partition_identity_watermarks()?;
-        }
         if registries_changed {
-            self.reload_catalog_registries(registry_epoch)?;
+            self.reload_catalog_snapshot(
+                catalog_changed.then_some(catalog_epoch),
+                Some(registry_epoch),
+            )?;
         } else if let Some(graphs) = current.graphs.as_ref() {
             let changed = self.refresh_graph_handles(
                 catalog.as_ref(),
@@ -391,8 +389,8 @@ impl Engine {
                         load,
                     )?
                 };
-                table.column_stats.restore(&stats);
-                table.column_stats_loaded.store(true, Ordering::Release);
+                table.column_stats.restore(&stats.into());
+                *table.column_stats_loaded.write() = true;
             }
             let dirty = (table.column_stats.read().is_empty() && !table.columns.read().is_empty())
                 || crate::statistics::MaintenanceState::load_for(
@@ -401,7 +399,7 @@ impl Engine {
                     table.object_id(),
                 )?
                 .invalidates_existing_statistics();
-            table.column_stats_dirty.store(dirty, Ordering::Release);
+            *table.column_stats_dirty.write() = dirty;
         }
         if partition_watermarks_changed {
             self.synchronize_partition_identity_watermarks()?;

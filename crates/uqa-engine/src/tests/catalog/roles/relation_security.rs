@@ -104,9 +104,10 @@ fn memory_relation_acl_keeps_identity_after_role_names_are_reused() {
     sql(&engine, "GRANT SELECT(id) ON secured, secured_view, secured_mat, secured_foreign TO reader; BEGIN; SAVEPOINT before_rename");
     {
         let mut roles = engine.durable.roles.write();
-        let mut role = roles.remove("reader").unwrap();
+        let mut role = roles.get("reader").unwrap().clone();
+        roles.remove("reader").unwrap();
         role.name = "renamed".into();
-        roles.insert(role.name.clone(), role);
+        roles.insert(role.name.clone(), role).unwrap();
     }
     engine.note_catalog_registry_changed();
     sql(&engine, "CREATE ROLE reader");
@@ -132,9 +133,10 @@ fn relation_owners_and_delegated_grants_keep_identity_through_view_execution() {
     {
         let mut roles = engine.durable.roles.write();
         for name in ["object_owner", "delegate", "reader"] {
-            let mut role = roles.remove(name).unwrap();
+            let mut role = roles.get(name).unwrap().clone();
+            roles.remove(name).unwrap();
             role.name = format!("renamed_{name}");
-            roles.insert(role.name.clone(), role);
+            roles.insert(role.name.clone(), role).unwrap();
         }
     }
     engine.note_catalog_registry_changed();

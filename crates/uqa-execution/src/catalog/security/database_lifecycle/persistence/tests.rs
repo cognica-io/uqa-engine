@@ -6,14 +6,12 @@
 
 use super::*;
 use std::sync::Arc;
+use uqa_sql::catalog::roles::RoleDefinition;
+use uqa_sql::catalog::roles::RoleDefinitions;
 use uqa_sql::catalog::security::database::{DatabaseAclEntry, DatabasePrivileges};
 use uqa_storage::{KeyValueCatalog, MemoryKeyValueStore};
 
-fn fixture() -> (
-    KeyValueCatalog,
-    BTreeMap<String, RoleDefinition>,
-    DatabaseSecurity,
-) {
+fn fixture() -> (KeyValueCatalog, RoleDefinitions, DatabaseSecurity) {
     let catalog = KeyValueCatalog::new(Arc::new(MemoryKeyValueStore::new()));
     let bootstrap = RoleDefinition::bootstrap();
     let mut reader = bootstrap.clone();
@@ -21,10 +19,11 @@ fn fixture() -> (
     reader.oid = 20_001;
     reader.object_id = [1; 16];
     reader.attributes.clear();
-    let roles = BTreeMap::from([
+    let roles = RoleDefinitions::try_from_iter([
         (bootstrap.name.clone(), bootstrap),
         (reader.name.clone(), reader),
-    ]);
+    ])
+    .unwrap();
     let security = DatabaseSecurity {
         role_owner: "uqa".into(),
         acl: Some(vec![DatabaseAclEntry {
@@ -47,10 +46,12 @@ fn legacy_database_acl_is_bound_once_during_initial_restore() {
     catalog
         .set_metadata(DATABASE_SECURITY_METADATA_KEY, &before)
         .unwrap();
-    assert!(restore(&catalog, &roles, false)
-        .unwrap_err()
-        .to_string()
-        .contains("initial catalog migration"));
+    assert!(
+        restore(&catalog, &roles, false, &DatabaseAuthority::bootstrap())
+            .unwrap_err()
+            .to_string()
+            .contains("initial catalog migration")
+    );
     assert_eq!(
         catalog
             .get_metadata(DATABASE_SECURITY_METADATA_KEY)
@@ -58,7 +59,7 @@ fn legacy_database_acl_is_bound_once_during_initial_restore() {
             .as_deref(),
         Some(before.as_str())
     );
-    let restored = restore(&catalog, &roles, true).unwrap();
+    let restored = restore(&catalog, &roles, true, &DatabaseAuthority::bootstrap()).unwrap();
     let names = restored.resolve(&roles).unwrap();
     let acl = names.acl.as_ref().unwrap();
     assert_eq!(
@@ -72,8 +73,14 @@ fn legacy_database_acl_is_bound_once_during_initial_restore() {
         .unwrap()
         .unwrap();
     assert!(serde_json::from_str::<DatabaseSecurity>(&converted).is_err());
-    assert_eq!(restore(&catalog, &roles, false).unwrap(), restored);
-    assert_eq!(restore(&catalog, &roles, true).unwrap(), restored);
+    assert_eq!(
+        restore(&catalog, &roles, false, &DatabaseAuthority::bootstrap()).unwrap(),
+        restored
+    );
+    assert_eq!(
+        restore(&catalog, &roles, true, &DatabaseAuthority::bootstrap()).unwrap(),
+        restored
+    );
     assert_eq!(
         catalog
             .get_metadata(DATABASE_SECURITY_METADATA_KEY)
@@ -94,16 +101,17 @@ fn restoring_renamed_database_roles_does_not_rewrite_metadata_or_rebind_names() 
     catalog
         .set_metadata(DATABASE_SECURITY_METADATA_KEY, &stored)
         .unwrap();
-    let mut renamed = roles.remove("reader").unwrap();
+    let mut renamed = roles.get("reader").unwrap().clone();
+    roles.remove("reader").unwrap();
     renamed.name = "renamed".into();
     let mut replacement = renamed.clone();
     replacement.name = "reader".into();
     replacement.oid += 1;
     replacement.object_id = [2; 16];
-    roles.insert("reader".into(), replacement);
-    roles.insert("renamed".into(), renamed);
+    roles.insert("reader".into(), replacement).unwrap();
+    roles.insert("renamed".into(), renamed).unwrap();
     assert_eq!(
-        restore(&catalog, &roles, false)
+        restore(&catalog, &roles, false, &DatabaseAuthority::bootstrap())
             .unwrap()
             .resolve(&roles)
             .unwrap()
@@ -119,11 +127,19 @@ fn restoring_renamed_database_roles_does_not_rewrite_metadata_or_rebind_names() 
             .unwrap(),
         stored
     );
-    roles.get_mut("renamed").unwrap().object_id = [3; 16];
-    assert!(restore(&catalog, &roles, true)
-        .unwrap_err()
-        .to_string()
-        .contains("missing role incarnation"));
+    roles
+        .edit("renamed", |value| {
+            value.object_id = [3; 16];
+            Ok(())
+        })
+        .unwrap()
+        .unwrap();
+    assert!(
+        restore(&catalog, &roles, true, &DatabaseAuthority::bootstrap())
+            .unwrap_err()
+            .to_string()
+            .contains("missing role incarnation")
+    );
     assert_eq!(
         catalog
             .get_metadata(DATABASE_SECURITY_METADATA_KEY)
@@ -168,7 +184,7 @@ fn corrupt_database_security_never_falls_back_to_legacy_name_binding() {
             .set_metadata(DATABASE_SECURITY_METADATA_KEY, &json)
             .unwrap();
         for migration in [false, true] {
-            assert!(restore(&catalog, &roles, migration).is_err());
+            assert!(restore(&catalog, &roles, migration, &DatabaseAuthority::bootstrap()).is_err());
             assert_eq!(
                 catalog
                     .get_metadata(DATABASE_SECURITY_METADATA_KEY)
@@ -183,18 +199,21 @@ fn corrupt_database_security_never_falls_back_to_legacy_name_binding() {
 #[test]
 fn initial_default_security_and_invalid_legacy_references_preserve_atomic_validation() {
     let (catalog, mut roles, security) = fixture();
-    assert!(restore(&catalog, &roles, false).is_err());
+    assert!(restore(&catalog, &roles, false, &DatabaseAuthority::bootstrap()).is_err());
     assert!(catalog
         .get_metadata(DATABASE_SECURITY_METADATA_KEY)
         .unwrap()
         .is_none());
-    let default = restore(&catalog, &roles, true).unwrap();
-    assert_eq!(default, BoundDatabaseSecurity::bootstrap());
+    let default = restore(&catalog, &roles, true, &DatabaseAuthority::bootstrap()).unwrap();
+    assert_eq!(default.as_ref(), &BoundDatabaseSecurity::bootstrap());
     let encoded = catalog
         .get_metadata(DATABASE_SECURITY_METADATA_KEY)
         .unwrap()
         .unwrap();
-    assert_eq!(restore(&catalog, &roles, false).unwrap(), default);
+    assert_eq!(
+        restore(&catalog, &roles, false, &DatabaseAuthority::bootstrap()).unwrap(),
+        default
+    );
     assert_eq!(
         catalog
             .get_metadata(DATABASE_SECURITY_METADATA_KEY)
@@ -227,7 +246,7 @@ fn initial_default_security_and_invalid_legacy_references_preserve_atomic_valida
         catalog
             .set_metadata(DATABASE_SECURITY_METADATA_KEY, &invalid)
             .unwrap();
-        let error = restore(&catalog, &roles, true).unwrap_err();
+        let error = restore(&catalog, &roles, true, &DatabaseAuthority::bootstrap()).unwrap_err();
         assert!(matches!(error, StorageBackendError::Other(message) if message == expected));
         assert_eq!(
             catalog
@@ -241,8 +260,14 @@ fn initial_default_security_and_invalid_legacy_references_preserve_atomic_valida
     catalog
         .set_metadata(DATABASE_SECURITY_METADATA_KEY, &legacy)
         .unwrap();
-    roles.get_mut("uqa").unwrap().object_id = [0; 16];
-    assert!(restore(&catalog, &roles, true).is_err());
+    roles
+        .edit("uqa", |value| {
+            value.object_id = [0; 16];
+            Ok(())
+        })
+        .unwrap()
+        .unwrap();
+    assert!(restore(&catalog, &roles, true, &DatabaseAuthority::bootstrap()).is_err());
     assert_eq!(
         catalog
             .get_metadata(DATABASE_SECURITY_METADATA_KEY)
@@ -255,18 +280,67 @@ fn initial_default_security_and_invalid_legacy_references_preserve_atomic_valida
 #[test]
 fn missing_database_metadata_uses_the_bootstrap_identity_independently_of_its_name() {
     let (catalog, mut roles, _) = fixture();
-    let mut bootstrap = roles.remove("uqa").unwrap();
+    let mut bootstrap = roles.get("uqa").unwrap().clone();
+    roles.remove("uqa").unwrap();
     bootstrap.name = "renamed_bootstrap".into();
-    roles.insert(bootstrap.name.clone(), bootstrap);
+    roles.insert(bootstrap.name.clone(), bootstrap).unwrap();
     let mut replacement = roles["reader"].clone();
     replacement.name = "uqa".into();
-    roles.remove("reader");
-    roles.insert("uqa".into(), replacement);
-    let bound = restore(&catalog, &roles, true).unwrap();
-    assert_eq!(bound, BoundDatabaseSecurity::bootstrap());
+    roles.remove("reader").unwrap();
+    roles.insert("uqa".into(), replacement).unwrap();
+    let bound = restore(&catalog, &roles, true, &DatabaseAuthority::bootstrap()).unwrap();
+    assert_eq!(bound.as_ref(), &BoundDatabaseSecurity::bootstrap());
     assert_eq!(
         bound.resolve(&roles).unwrap().role_owner,
         "renamed_bootstrap"
     );
     assert!(!bound.depends_on(roles["uqa"].identity()));
+}
+
+#[test]
+fn database_authority_admission_precedes_legacy_metadata_migration() {
+    let (catalog, roles, legacy) = fixture();
+    let encoded = serde_json::to_string(&legacy).unwrap();
+    catalog
+        .set_metadata(DATABASE_SECURITY_METADATA_KEY, &encoded)
+        .unwrap();
+    let memory = uqa_core::memory::MemoryBudget::new(size_of::<
+        uqa_core::memory::Produced<BoundDatabaseSecurity>,
+    >());
+    let current =
+        DatabaseAuthority::with_budget(&BoundDatabaseSecurity::bootstrap(), &memory).unwrap();
+    let error = restore(&catalog, &roles, true, &current).unwrap_err();
+    let StorageBackendError::Backend { source, .. } = error else {
+        panic!("native admission failure must retain its SQL error");
+    };
+    assert_eq!(
+        source
+            .downcast_ref::<uqa_sql::SQLError>()
+            .unwrap()
+            .sqlstate(),
+        Some("53200")
+    );
+    assert_eq!(
+        catalog
+            .get_metadata(DATABASE_SECURITY_METADATA_KEY)
+            .unwrap()
+            .as_deref(),
+        Some(encoded.as_str())
+    );
+    assert_eq!(current.as_ref(), &BoundDatabaseSecurity::bootstrap());
+    let restored = restore(&catalog, &roles, true, &DatabaseAuthority::bootstrap()).unwrap();
+    assert!(
+        restored.resolve(&roles).unwrap().acl.unwrap()[0]
+            .privileges
+            .create
+    );
+    assert_ne!(
+        catalog
+            .get_metadata(DATABASE_SECURITY_METADATA_KEY)
+            .unwrap()
+            .as_deref(),
+        Some(encoded.as_str())
+    );
+    drop(current);
+    assert_eq!(memory.used(), 0);
 }

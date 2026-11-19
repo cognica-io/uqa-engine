@@ -5,17 +5,87 @@
 //
 
 use super::*;
+use crate::catalog::roles::RoleDefinition;
+use crate::catalog::roles::RoleDefinitions;
 use uqa_core::{
     memory::{MemoryBudget, ProductionControl},
     CancellationToken,
 };
 
 #[test]
+fn stored_table_security_adopts_original_acl_nodes_without_allocation() {
+    let roles = super::roles();
+    let mut row = super::security(&roles).row();
+    let acl = row.column_acls.remove("id").unwrap();
+    for index in 0..1024 {
+        row.column_acls
+            .insert(format!("column_{index:04}"), acl.clone());
+    }
+    row.acl_revisions.relation = Some([7; 16]);
+    row.acl_revisions.columns.insert("retired".into(), [8; 16]);
+    let nodes: Vec<_> = row
+        .column_acls
+        .iter()
+        .map(|(name, acl)| (name.as_ptr(), std::ptr::from_ref(acl), acl.as_ptr()))
+        .collect();
+    let expected = serde_json::to_vec(&row).unwrap();
+    let mut bound = None;
+    let allocations = allocation_counter::measure(|| {
+        bound = Some(BoundTableSecurity::from_row(row));
+    });
+    assert_eq!(allocations.count_total, 0, "{allocations:?}");
+    let mut bound = bound.unwrap();
+    assert_eq!(serde_json::to_vec(&bound.row()).unwrap(), expected);
+    for ((name, acl), (name_ptr, node_ptr, acl_ptr)) in bound.column_acls.iter().zip(nodes) {
+        assert_eq!(name.as_ptr(), name_ptr);
+        assert_eq!(std::ptr::from_ref(acl), node_ptr);
+        assert_eq!(acl.as_ptr(), acl_ptr);
+    }
+    assert_eq!(bound.acl_revisions.relation, Some([7; 16]));
+    assert_eq!(bound.acl_revisions.get(Some("retired")), Some([8; 16]));
+    let retained = bound.clone();
+    bound.remove_column_acl("column_0000");
+    bound.rename_column_acl("column_0001", "renamed");
+    assert!(retained.column_acls.contains_key("column_0000"));
+    assert!(retained.column_acls.contains_key("column_0001"));
+    assert!(!retained.column_acls.contains_key("renamed"));
+}
+
+#[test]
+fn stored_table_security_keeps_original_node_admission_until_retirement() {
+    let budget = MemoryBudget::new(1 << 20);
+    let sibling = budget.reserve(17).unwrap();
+    let mut row = uqa_core::catalog_acl::BoundRelationSecurity::owner(RoleIdentity::BOOTSTRAP);
+    for index in 0..32 {
+        row.column_acls
+            .insert_budgeted(format!("column_{index:02}"), Vec::new(), &budget)
+            .unwrap();
+    }
+    let node_bytes = OwnedMap::<String, Vec<BoundTableAclEntry>>::entry_bytes();
+    assert_eq!(budget.used(), sibling.bytes() + 32 * node_bytes);
+    let occupied = budget.reserve(budget.available()).unwrap();
+    let mut restored = None;
+    let allocations = allocation_counter::measure(|| {
+        restored = Some(BoundTableSecurity::from_row(row));
+    });
+    assert_eq!(allocations.count_total, 0, "{allocations:?}");
+    assert_eq!(budget.available(), 0);
+    let mut restored = restored.unwrap();
+    restored.remove_column_acl("column_00");
+    assert_eq!(budget.available(), node_bytes);
+    drop(restored);
+    assert_eq!(budget.used(), sibling.bytes() + occupied.bytes());
+    drop(occupied);
+    drop(sibling);
+    assert_eq!(budget.used(), 0);
+}
+
+#[test]
 fn captured_view_owners_admit_names_and_retain_the_selected_role_incarnation() {
     let mut role = RoleDefinition::bootstrap();
     role.name = "n".repeat(4 << 20);
     let identity = role.identity();
-    let mut roles = BTreeMap::from([(role.name.clone(), role)]);
+    let mut roles = RoleDefinitions::try_from_iter([(role.name.clone(), role)]).unwrap();
     let budget = MemoryBudget::new(8 << 20);
     let token = CancellationToken::new();
     let control = ProductionControl::new(&budget, &token, &token);
@@ -32,10 +102,11 @@ fn captured_view_owners_admit_names_and_retain_the_selected_role_incarnation() {
     let owner = owner_reference_with_control(identity, &roles, &control).unwrap();
     let shared = owner.clone();
     assert!(budget.used() >= before + (4 << 20));
-    let name = roles.first_key_value().unwrap().0.clone();
-    let mut renamed = roles.remove(&name).unwrap();
+    let name = roles.iter().next().unwrap().0.clone();
+    let mut renamed = roles.get(&name).unwrap().clone();
+    roles.remove(&name).unwrap();
     renamed.name = "renamed".into();
-    roles.insert("renamed".into(), renamed);
+    roles.insert("renamed".into(), renamed).unwrap();
     assert_eq!(owner.require_name(&roles).unwrap(), "renamed");
     drop(owner);
     assert!(budget.used() >= before + (4 << 20));
@@ -49,7 +120,7 @@ fn captured_view_owners_admit_names_and_retain_the_selected_role_incarnation() {
 fn captured_view_owner_diagnostics_and_both_cancellation_scopes_are_preserved() {
     let role = RoleDefinition::bootstrap();
     let identity = role.identity();
-    let roles = BTreeMap::from([(role.name.clone(), role)]);
+    let roles = RoleDefinitions::try_from_iter([(role.name.clone(), role)]).unwrap();
     let budget = MemoryBudget::new(1 << 20);
     for original_cancelled in [true, false] {
         let original = CancellationToken::new();

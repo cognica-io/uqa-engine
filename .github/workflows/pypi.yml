@@ -153,13 +153,16 @@ jobs:
           version="${RELEASE_TAG#v}"
           expected=(
             "uqa-${version}.tar.gz"
-            "uqa-${version}-cp38-abi3-macosx_10_12_x86_64.whl"
             "uqa-${version}-cp38-abi3-macosx_11_0_arm64.whl"
             "uqa-${version}-cp38-abi3-manylinux_2_28_aarch64.whl"
             "uqa-${version}-cp38-abi3-manylinux_2_28_x86_64.whl"
             "uqa-${version}-cp38-abi3-win_amd64.whl"
             "uqa-${version}-cp38-abi3-win_arm64.whl"
           )
+          macos_x86=$(python3 -c 'import json; print("true" if "x86_64-apple-darwin" in json.load(open("crates/uqa-node/package.json"))["napi"]["targets"] else "false")')
+          if [ "$macos_x86" = true ]; then
+            expected+=("uqa-${version}-cp38-abi3-macosx_10_12_x86_64.whl")
+          fi
           shopt -s nullglob
           actual=(dist/*)
           if [ "${#actual[@]}" -ne "${#expected[@]}" ]; then

@@ -17,6 +17,7 @@ use crate::{GraphLabelRegistry, GraphStoreError, GraphStoreResult};
 pub(super) struct CatalogGraphStorage {
     pub catalog: Arc<dyn CatalogFacade>,
     pub backend: Arc<dyn PersistentStorageBackend>,
+    pub _memory: Option<uqa_core::memory::MemoryReservation>,
 }
 
 fn registry_key(graph: &str) -> String {

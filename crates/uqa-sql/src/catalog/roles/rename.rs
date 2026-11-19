@@ -12,12 +12,12 @@ use super::{
     memberships::{insufficient_privilege, role_is_superuser},
     RoleDefinition,
 };
+use crate::catalog::roles::RoleDefinitions;
 use crate::{ast::RenameRoleStmt, SQLError};
-use std::collections::BTreeMap;
 
 pub fn rename_candidate(
     context: &RoleValidationContext<'_>,
-    roles: &BTreeMap<String, RoleDefinition>,
+    roles: &RoleDefinitions,
     statement: &RenameRoleStmt,
 ) -> Result<RoleDefinition, SQLError> {
     let existing = roles
@@ -68,7 +68,7 @@ pub fn rename_candidate(
 
 /// Initial duplicates precede authorization; a destination occupied during the mutation is a uniqueness violation.
 pub fn require_available_name(
-    roles: &BTreeMap<String, RoleDefinition>,
+    roles: &RoleDefinitions,
     name: &str,
     publication: bool,
 ) -> Result<(), SQLError> {

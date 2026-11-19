@@ -5,26 +5,22 @@
 //
 
 use super::{columns, sequence, table, SequenceSecurity, TableSecurity};
+use crate::catalog::roles::{RoleDefinitions, RoleMemberships};
 use crate::{
     ast::RoleAttribute,
-    catalog::roles::{identity::RoleBinding, RoleDefinition, RoleMembership, RoleMembershipKey},
+    catalog::roles::{identity::RoleBinding, RoleDefinition, RoleMembership},
 };
-use std::collections::{BTreeMap, BTreeSet};
 
-fn authority(
-    inherit: bool,
-) -> (
-    BTreeMap<String, RoleDefinition>,
-    BTreeMap<RoleMembershipKey, RoleMembership>,
-) {
-    let mut roles = BTreeMap::from([("uqa".into(), RoleDefinition::bootstrap())]);
+fn authority(inherit: bool) -> (RoleDefinitions, RoleMemberships) {
+    let mut roles =
+        RoleDefinitions::try_from_iter([("uqa".into(), RoleDefinition::bootstrap())]).unwrap();
     for (index, name) in ["owner", "member", "outsider"].into_iter().enumerate() {
         let mut role = RoleDefinition::bootstrap();
         role.name = name.into();
         role.oid = 20_000 + index as i64;
         role.object_id = [index as u8 + 1; 16];
-        role.attributes = BTreeSet::from([RoleAttribute::Inherit]);
-        roles.insert(name.into(), role);
+        role.attributes = uqa_core::memory::OwnedSet::from([RoleAttribute::Inherit]);
+        roles.insert(name.into(), role).unwrap();
     }
     let membership = RoleMembership {
         oid: 30_000,
@@ -35,7 +31,10 @@ fn authority(
         inherit_option: inherit,
         set_option: true,
     };
-    (roles, BTreeMap::from([(membership.key(), membership)]))
+    (
+        roles,
+        RoleMemberships::try_from_iter([(membership.key(), membership)]).unwrap(),
+    )
 }
 
 #[test]

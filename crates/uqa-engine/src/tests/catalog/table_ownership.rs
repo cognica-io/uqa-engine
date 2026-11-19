@@ -35,7 +35,14 @@ fn snapshot(engine: &Engine) -> SecuritySnapshot {
             .security()
             .resolve(&engine.durable.roles.read())
             .unwrap(),
-        sequences: engine.durable.sequence_security.read().clone(),
+        sequences: engine
+            .durable
+            .sequences
+            .read()
+            .security()
+            .iter()
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect(),
     }
 }
 fn schema(engine: &Engine) -> serde_json::Value {
@@ -261,7 +268,8 @@ impl TableOwnerRegistry for ReplacingTables<'_> {
             .tables
             .try_write()
             .expect("binding releases the real registry guard")
-            .insert(relation.clone(), self.replacement.clone());
+            .insert(relation.clone(), self.replacement.clone())
+            .unwrap();
         selected
     }
 }
@@ -271,8 +279,13 @@ fn owner_authorization_rebinds_after_retaining_the_table_generation() {
     let engine = Engine::new();
     engine.sql("CREATE ROLE target; CREATE TABLE items(id integer); CREATE TABLE replacement(other text); ALTER TABLE replacement OWNER TO target", &[]).unwrap();
     let retained = engine.storage.tables.read()[&RelationIdentity::new("public", "items")].clone();
-    let replacement =
-        engine.storage.tables.read()[&RelationIdentity::new("public", "replacement")].clone();
+    let replacement = engine
+        .storage
+        .tables
+        .write()
+        .remove(&RelationIdentity::new("public", "replacement"))
+        .unwrap()
+        .unwrap();
     let tables = ReplacingTables {
         engine: &engine,
         replacement,

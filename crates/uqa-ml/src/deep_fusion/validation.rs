@@ -6,48 +6,44 @@
 
 //! Model shape, weight, recurrent, and runtime-state validation.
 
-use super::{ForwardState, Layer, MLError, MLResult, StorageBackendError, StorageBackendResult};
+use super::{ForwardState, MLError, MLResult, StorageBackendError, StorageBackendResult};
 
-pub(super) fn validate_layers(layers: &[Layer], alpha: f64) -> MLResult<()> {
-    let Some(first) = layers.first() else {
-        return Err(MLError::InvalidModel(
-            "DeepFusionOperator requires at least one layer".into(),
-        ));
-    };
-    if !matches!(
-        first,
-        Layer::Signal(_) | Layer::Embed(_) | Layer::Input { .. }
-    ) {
-        return Err(MLError::InvalidModel(
-            "the first deep-fusion layer must be Signal, Embed, or Input".into(),
-        ));
-    }
-    if !alpha.is_finite() {
-        return Err(MLError::InvalidModel(format!(
-            "deep-fusion alpha must be finite, got {alpha}"
-        )));
-    }
+mod input;
+use input::ValidationLayer as Layer;
 
-    for (index, layer) in layers.iter().enumerate() {
-        validate_layer(index, layer)?;
-    }
-    Ok(())
+pub(super) fn validate_layers(layers: &[super::Layer], alpha: f64) -> MLResult<()> {
+    ModelValidation::new(Inputs::Runtime(layers.iter()), alpha)?.finish()
 }
 
-pub(super) fn validate_layer(index: usize, layer: &Layer) -> MLResult<()> {
-    let context = format!("deep-fusion layer {index}");
+pub(crate) fn validate_model(layers: &[crate::DeepLayerSpec], alpha: f64) -> MLResult<()> {
+    ModelValidation::model(layers, alpha)?.finish()
+}
+
+mod cursor;
+pub(crate) use cursor::ModelValidation;
+use cursor::{Inputs, LayerContext, Numbers};
+
+fn validate_layer<'a>(index: usize, layer: &Layer<'a>, numbers: &mut Numbers<'a>) -> MLResult<()> {
+    let context = LayerContext(index);
     match layer {
         Layer::Input { dimensions } => validate_input(index, *dimensions, &context),
-        Layer::Signal(signals) if signals.is_empty() => Err(MLError::InvalidModel(format!(
+        Layer::Signal(signals) if *signals == 0 => Err(MLError::InvalidModel(format!(
             "{context}: Signal requires at least one operator"
         ))),
-        Layer::Embed(values) => validate_embedding(index, values, &context),
+        Layer::Embed(values) => validate_embedding(index, values, &context, numbers),
         Layer::Dense {
             weights,
             bias,
             output_channels,
             input_channels,
-        } => validate_dense(weights, bias, *output_channels, *input_channels, &context),
+        } => validate_dense(
+            weights,
+            bias,
+            *output_channels,
+            *input_channels,
+            &context,
+            numbers,
+        ),
         Layer::BatchNorm { epsilon } if !epsilon.is_finite() || *epsilon <= 0.0 => {
             Err(MLError::InvalidModel(format!(
                 "{context}: epsilon must be finite and greater than zero"
@@ -58,24 +54,21 @@ pub(super) fn validate_layer(index: usize, layer: &Layer) -> MLResult<()> {
                 "{context}: dropout probability must be finite and in [0, 1]"
             )))
         }
-        Layer::CNN1D { .. } => validate_cnn_1d(layer, &context),
-        Layer::CNN2D { .. } => validate_cnn_2d(layer, &context),
-        Layer::Conv { hop_weights, .. } => validate_hop_weights(hop_weights, &context),
+        Layer::CNN1D { .. } => validate_cnn_1d(layer, &context, numbers),
+        Layer::CNN2D { .. } => validate_cnn_2d(layer, &context, numbers),
+        Layer::Conv { hop_weights, .. } => validate_hop_weights(hop_weights, &context, numbers),
         Layer::Pool { pool_size, .. } => require_nonzero(*pool_size, &context, "pool_size"),
-        Layer::RNN { .. } => validate_recurrent_spec(layer, 1, &context),
-        Layer::LSTM { .. } => validate_recurrent_spec(layer, 4, &context),
-        Layer::Signal(_)
-        | Layer::BatchNorm { .. }
-        | Layer::Dropout { .. }
-        | Layer::Propagate { .. }
-        | Layer::Flatten
-        | Layer::GlobalPool(_)
-        | Layer::Softmax
-        | Layer::Attention => Ok(()),
+        Layer::Recurrent { .. } => validate_recurrent_spec(layer, 1, &context, numbers),
+        Layer::LongShortTermMemory { .. } => validate_recurrent_spec(layer, 4, &context, numbers),
+        Layer::Signal(_) | Layer::BatchNorm { .. } | Layer::Dropout { .. } | Layer::Other => Ok(()),
     }
 }
 
-pub(super) fn validate_input(index: usize, dimensions: usize, context: &str) -> MLResult<()> {
+pub(super) fn validate_input(
+    index: usize,
+    dimensions: usize,
+    context: &(impl std::fmt::Display + ?Sized),
+) -> MLResult<()> {
     if index != 0 {
         return Err(MLError::InvalidModel(format!(
             "{context}: Input is only valid as the first layer"
@@ -84,7 +77,12 @@ pub(super) fn validate_input(index: usize, dimensions: usize, context: &str) -> 
     require_nonzero(dimensions, context, "dimensions")
 }
 
-pub(super) fn validate_embedding(index: usize, values: &[f64], context: &str) -> MLResult<()> {
+fn validate_embedding<'a>(
+    index: usize,
+    values: &'a [f64],
+    context: &(impl std::fmt::Display + ?Sized),
+    numbers: &mut Numbers<'a>,
+) -> MLResult<()> {
     if index != 0 {
         return Err(MLError::InvalidModel(format!(
             "{context}: Embed is only valid as the first layer"
@@ -95,15 +93,17 @@ pub(super) fn validate_embedding(index: usize, values: &[f64], context: &str) ->
             "{context}: embedding must not be empty"
         )));
     }
-    require_finite(values, context, "embedding")
+    numbers.push(values, "embedding");
+    Ok(())
 }
 
-pub(super) fn validate_dense(
-    weights: &[f64],
-    bias: &[f64],
+fn validate_dense<'a>(
+    weights: &'a [f64],
+    bias: &'a [f64],
     output_channels: usize,
     input_channels: usize,
-    context: &str,
+    context: &(impl std::fmt::Display + ?Sized),
+    numbers: &mut Numbers<'a>,
 ) -> MLResult<()> {
     require_nonzero(output_channels, context, "output_channels")?;
     require_nonzero(input_channels, context, "input_channels")?;
@@ -114,11 +114,16 @@ pub(super) fn validate_dense(
     )?;
     require_len(weights.len(), expected, context, "weights")?;
     require_len(bias.len(), output_channels, context, "bias")?;
-    require_finite(weights, context, "weights")?;
-    require_finite(bias, context, "bias")
+    numbers.push(weights, "weights");
+    numbers.push(bias, "bias");
+    Ok(())
 }
 
-pub(super) fn validate_cnn_1d(layer: &Layer, context: &str) -> MLResult<()> {
+fn validate_cnn_1d<'a>(
+    layer: &Layer<'a>,
+    context: &(impl std::fmt::Display + ?Sized),
+    numbers: &mut Numbers<'a>,
+) -> MLResult<()> {
     let Layer::CNN1D {
         weights,
         bias,
@@ -149,10 +154,14 @@ pub(super) fn validate_cnn_1d(layer: &Layer, context: &str) -> MLResult<()> {
         context,
         "CNN1D weight count",
     )?;
-    validate_weights_and_bias(weights, bias, expected, *output_channels, context)
+    validate_weights_and_bias(weights, bias, expected, *output_channels, context, numbers)
 }
 
-pub(super) fn validate_cnn_2d(layer: &Layer, context: &str) -> MLResult<()> {
+fn validate_cnn_2d<'a>(
+    layer: &Layer<'a>,
+    context: &(impl std::fmt::Display + ?Sized),
+    numbers: &mut Numbers<'a>,
+) -> MLResult<()> {
     let Layer::CNN2D {
         weights,
         bias,
@@ -205,44 +214,47 @@ pub(super) fn validate_cnn_2d(layer: &Layer, context: &str) -> MLResult<()> {
         context,
         "CNN2D weight count",
     )?;
-    validate_weights_and_bias(weights, bias, expected, *output_channels, context)
+    validate_weights_and_bias(weights, bias, expected, *output_channels, context, numbers)
 }
 
-pub(super) fn validate_weights_and_bias(
-    weights: &[f64],
-    bias: &[f64],
+fn validate_weights_and_bias<'a>(
+    weights: &'a [f64],
+    bias: &'a [f64],
     expected_weights: usize,
     output_channels: usize,
-    context: &str,
+    context: &(impl std::fmt::Display + ?Sized),
+    numbers: &mut Numbers<'a>,
 ) -> MLResult<()> {
     require_len(weights.len(), expected_weights, context, "weights")?;
     require_len(bias.len(), output_channels, context, "bias")?;
-    require_finite(weights, context, "weights")?;
-    require_finite(bias, context, "bias")
+    numbers.push(weights, "weights");
+    numbers.push(bias, "bias");
+    Ok(())
 }
 
-pub(super) fn validate_hop_weights(hop_weights: &[f64], context: &str) -> MLResult<()> {
+fn validate_hop_weights<'a>(
+    hop_weights: &'a [f64],
+    context: &(impl std::fmt::Display + ?Sized),
+    numbers: &mut Numbers<'a>,
+) -> MLResult<()> {
     if hop_weights.is_empty() {
         return Err(MLError::InvalidModel(format!(
             "{context}: graph convolution requires at least one hop weight"
         )));
     }
-    require_finite(hop_weights, context, "hop_weights")?;
-    let total_weight: f64 = hop_weights.iter().sum();
-    if hop_weights.iter().any(|weight| *weight < 0.0)
-        || !total_weight.is_finite()
-        || total_weight <= 0.0
-    {
-        return Err(MLError::InvalidModel(format!(
-            "{context}: hop_weights must be non-negative with a finite positive sum"
-        )));
-    }
+    numbers.push(hop_weights, "hop_weights");
+    numbers.hops = true;
     Ok(())
 }
 
-pub(super) fn validate_recurrent_spec(layer: &Layer, gates: usize, context: &str) -> MLResult<()> {
+fn validate_recurrent_spec<'a>(
+    layer: &Layer<'a>,
+    gates: usize,
+    context: &(impl std::fmt::Display + ?Sized),
+    numbers: &mut Numbers<'a>,
+) -> MLResult<()> {
     let (weights_input, weights_hidden, bias, hidden_channels, input_channels) = match layer {
-        Layer::RNN {
+        Layer::Recurrent {
             weights_input,
             weights_hidden,
             bias,
@@ -250,7 +262,7 @@ pub(super) fn validate_recurrent_spec(layer: &Layer, gates: usize, context: &str
             input_channels,
             ..
         }
-        | Layer::LSTM {
+        | Layer::LongShortTermMemory {
             weights_input,
             weights_hidden,
             bias,
@@ -270,26 +282,6 @@ pub(super) fn validate_recurrent_spec(layer: &Layer, gates: usize, context: &str
             )));
         }
     };
-    validate_recurrent_layer(
-        weights_input,
-        weights_hidden,
-        bias,
-        hidden_channels,
-        input_channels,
-        gates,
-        context,
-    )
-}
-
-pub(super) fn validate_recurrent_layer(
-    weights_input: &[f64],
-    weights_hidden: &[f64],
-    bias: &[f64],
-    hidden_channels: usize,
-    input_channels: usize,
-    gates: usize,
-    context: &str,
-) -> MLResult<()> {
     require_nonzero(hidden_channels, context, "hidden_channels")?;
     require_nonzero(input_channels, context, "input_channels")?;
     let gate_channels = checked_product(&[gates, hidden_channels], context, "gate channels")?;
@@ -311,12 +303,17 @@ pub(super) fn validate_recurrent_layer(
         "weights_hidden",
     )?;
     require_len(bias.len(), gate_channels, context, "bias")?;
-    require_finite(weights_input, context, "weights_input")?;
-    require_finite(weights_hidden, context, "weights_hidden")?;
-    require_finite(bias, context, "bias")
+    numbers.push(weights_input, "weights_input");
+    numbers.push(weights_hidden, "weights_hidden");
+    numbers.push(bias, "bias");
+    Ok(())
 }
 
-pub(super) fn require_nonzero(value: usize, context: &str, field: &str) -> MLResult<()> {
+pub(super) fn require_nonzero(
+    value: usize,
+    context: &(impl std::fmt::Display + ?Sized),
+    field: &str,
+) -> MLResult<()> {
     if value == 0 {
         Err(MLError::InvalidModel(format!(
             "{context}: {field} must be greater than zero"
@@ -329,7 +326,7 @@ pub(super) fn require_nonzero(value: usize, context: &str, field: &str) -> MLRes
 pub(super) fn require_len(
     actual: usize,
     expected: usize,
-    context: &str,
+    context: &(impl std::fmt::Display + ?Sized),
     field: &str,
 ) -> MLResult<()> {
     if actual == expected {
@@ -341,23 +338,9 @@ pub(super) fn require_len(
     }
 }
 
-pub(super) fn require_finite(values: &[f64], context: &str, field: &str) -> MLResult<()> {
-    if let Some((index, value)) = values
-        .iter()
-        .enumerate()
-        .find(|(_, value)| !value.is_finite())
-    {
-        Err(MLError::InvalidModel(format!(
-            "{context}: {field}[{index}] must be finite, got {value}"
-        )))
-    } else {
-        Ok(())
-    }
-}
-
 pub(super) fn checked_product(
     values: &[usize],
-    context: &str,
+    context: &(impl std::fmt::Display + ?Sized),
     description: &str,
 ) -> MLResult<usize> {
     values.iter().try_fold(1usize, |product, value| {

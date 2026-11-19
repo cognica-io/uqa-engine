@@ -23,7 +23,7 @@ impl RowInput<'_> {
         match self {
             Self::Unknown(_) => None,
             Self::Collated { argument, .. } => argument.ty(),
-            Self::Row(_) => Some(&ColumnType::Record),
+            Self::Row(_) => Some(const { &ColumnType::Record }),
             Self::Value(value) => value.ty.as_ref(),
         }
     }
@@ -104,7 +104,10 @@ pub(super) fn anonymous_row(fields: Vec<RowInput<'_>>) -> Result<TypedNode, SQLE
             "ROWEXPR",
             [
                 ("args", node_list(arguments)),
-                ("row_typeid", pg_type_oid(&ColumnType::Record).into()),
+                (
+                    "row_typeid",
+                    pg_type_oid(const { &ColumnType::Record }).into(),
+                ),
                 ("row_format", 2.into()),
                 ("colnames", node_list(names)),
                 ("location", (-1).into()),

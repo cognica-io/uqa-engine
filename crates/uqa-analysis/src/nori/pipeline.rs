@@ -8,6 +8,7 @@
 
 use std::{collections::BTreeMap, sync::Arc};
 
+pub(crate) use super::resources::preparation::Source;
 use super::{
     DictionaryRequest, KoreanFilter, KoreanTokenizer, NoriResources, NoriTokenizerConfig,
     ResolvedDictionary, ResourceHash, DEFAULT_STOP_TAGS,
@@ -25,22 +26,40 @@ pub(crate) use stages::PreparedNoriFilter;
 pub(crate) struct ResolvedNoriPipeline {
     pub tokenizer: Option<KoreanTokenizer>,
     pub normalizer: Option<Arc<ResolvedDictionary>>,
+    pub dictionaries: Vec<Arc<ResolvedDictionary>>,
     profiles: BTreeMap<String, Arc<ResolvedDictionary>>,
 }
 
 impl ResolvedNoriPipeline {
     pub fn resolve(config: &mut Analyzer, resources: &NoriResources) -> AnalysisResult<Self> {
+        crate::work::inline(Self::resolve_with(config, resources, &mut ()))
+    }
+
+    pub(crate) async fn resolve_with(
+        config: &mut Analyzer,
+        resources: &impl Source,
+        work: &mut impl crate::work::ResourceWork,
+    ) -> AnalysisResult<Self> {
         let mut resolved = Self::default();
         let mut snapshot = Snapshot::default();
         if let Tokenizer::Nori(tokenizer) = &mut config.tokenizer {
-            let dictionary = load(&mut snapshot, request(&tokenizer.dictionary)?, resources)?;
-            resolved.tokenizer = Some(prepare_tokenizer(tokenizer, &dictionary, resources)?);
+            let dictionary = load(
+                &mut snapshot,
+                request(&tokenizer.dictionary)?,
+                resources,
+                work,
+            )
+            .await?;
+            resolved.dictionaries.push(dictionary.clone());
+            resolved.tokenizer =
+                Some(prepare_tokenizer_with(tokenizer, &dictionary, resources, work).await?);
             tokenizer.dictionary = exact_name(dictionary.sha256());
             if config.normalization.is_none() {
                 resolved.normalizer = Some(dictionary);
             }
         }
-        for filter in &mut config.token_filters {
+        for (index, filter) in config.token_filters.iter_mut().enumerate() {
+            crate::work::Work::<crate::AnalysisError>::records(work, index).await?;
             if let TokenFilter::UnicodeSimpleLowercase(config) = filter {
                 if config.unicode_profile.nori_dictionary().is_none() {
                     continue;
@@ -49,8 +68,11 @@ impl ResolvedNoriPipeline {
                     &mut snapshot,
                     profile_request(&config.unicode_profile)?,
                     resources,
-                )?;
+                    work,
+                )
+                .await?;
                 let name = exact_name(profile.sha256());
+                resolved.dictionaries.push(profile.clone());
                 config
                     .unicode_profile
                     .nori_dictionary_mut()
@@ -64,11 +86,18 @@ impl ResolvedNoriPipeline {
             .as_mut()
             .and_then(|value| value.profile_mut())
         {
-            let profile = load(&mut snapshot, request(dictionary)?, resources)?;
+            let profile = load(&mut snapshot, request(dictionary)?, resources, work).await?;
+            resolved.dictionaries.push(profile.clone());
             *dictionary = exact_name(profile.sha256());
             resolved.normalizer = Some(profile);
         }
-        canonicalize(config);
+        canonicalize_with(config, work).await?;
+        crate::work::ordering::unique::<_, _, crate::AnalysisError>(
+            &mut resolved.dictionaries,
+            |item| item.sha256(),
+            work,
+        )
+        .await?;
         Ok(resolved)
     }
 
@@ -129,15 +158,16 @@ fn profile_request(profile: &UnicodeProfileSource) -> AnalysisResult<DictionaryR
     }
 }
 
-fn load(
+async fn load(
     snapshot: &mut Snapshot<DictionaryRequest, ResolvedDictionary>,
     request: DictionaryRequest,
-    resources: &NoriResources,
+    resources: &impl Source,
+    work: &mut impl crate::morphology::work::Work,
 ) -> AnalysisResult<Arc<ResolvedDictionary>> {
     Ok(snapshot.load(request,
         |request, dictionary| matches!(request, DictionaryRequest::Sha256(hash) if *hash == dictionary.sha256()),
-        |request| resources.load(request),
-    )?)
+        resources, work,
+    ).await?)
 }
 
 pub(crate) fn prepare_tokenizer(
@@ -145,16 +175,29 @@ pub(crate) fn prepare_tokenizer(
     dictionary: &ResolvedDictionary,
     resources: &NoriResources,
 ) -> AnalysisResult<KoreanTokenizer> {
-    let user = config
-        .user_dictionary
-        .as_deref()
-        .map(|source| resources.compile_user(source, dictionary.model()))
-        .transpose()?;
-    KoreanTokenizer::new(
-        dictionary.model().clone(),
-        user.as_ref().and_then(|user| user.dictionary().cloned()),
-        config.options(),
-    )
+    crate::work::inline(prepare_tokenizer_with(
+        config,
+        dictionary,
+        resources,
+        &mut (),
+    ))
+}
+
+async fn prepare_tokenizer_with(
+    config: &NoriTokenizerConfig,
+    dictionary: &ResolvedDictionary,
+    resources: &impl Source,
+    work: &mut impl crate::morphology::work::Work,
+) -> AnalysisResult<KoreanTokenizer> {
+    let user = match config.user_dictionary.as_deref() {
+        Some(source) => {
+            resources
+                .compile_user(source, dictionary.model(), work)
+                .await?
+        }
+        None => None,
+    };
+    KoreanTokenizer::new(dictionary.model().clone(), user, config.options())
 }
 
 pub(crate) fn korean_filter(filter: &TokenFilter) -> Option<KoreanFilter> {
@@ -174,24 +217,42 @@ pub(crate) fn korean_filter(filter: &TokenFilter) -> Option<KoreanFilter> {
 }
 
 pub(crate) fn canonicalize(config: &mut Analyzer) {
-    for filter in &mut config.token_filters {
+    crate::work::inline(canonicalize_with(config, &mut ()))
+        .expect("ordinary canonicalization cannot suspend or fail");
+}
+
+async fn canonicalize_with(
+    config: &mut Analyzer,
+    work: &mut impl crate::work::Work<crate::AnalysisError>,
+) -> AnalysisResult<()> {
+    for (index, filter) in config.token_filters.iter_mut().enumerate() {
+        work.records(index).await?;
         if let TokenFilter::NoriPartOfSpeech(config) = filter {
             let tags = config
                 .stop_tags
                 .get_or_insert_with(|| DEFAULT_STOP_TAGS.to_vec());
-            tags.sort_by_key(|tag| tag.ordinal());
-            tags.dedup();
+            crate::work::ordering::unique(tags, |tag| tag.ordinal(), work).await?;
         }
     }
+    Ok(())
 }
 
+#[cfg(test)]
 pub(crate) fn check_resolved(config: &Analyzer) -> AnalysisResult<()> {
+    crate::work::inline(check_resolved_with(config, &mut ()))
+}
+
+pub(crate) async fn check_resolved_with(
+    config: &Analyzer,
+    work: &mut impl crate::work::Work<AnalysisError>,
+) -> AnalysisResult<()> {
     fn exact(name: &str) -> AnalysisResult<()> {
-        let DictionaryRequest::Sha256(hash) = request(name)? else {
+        let Some(hash) = name.strip_prefix("sha256:") else {
             return Err(AnalysisError::Descriptor(
                 "resolved Korean resources require exact artifact hashes",
             ));
         };
+        let hash = hash.parse::<ResourceHash>()?;
         if exact_name(hash) != name {
             return Err(AnalysisError::Descriptor(
                 "noncanonical Korean resource hash",
@@ -209,7 +270,8 @@ pub(crate) fn check_resolved(config: &Analyzer) -> AnalysisResult<()> {
     if let Tokenizer::Nori(config) = &config.tokenizer {
         exact(&config.dictionary)?;
     }
-    for filter in &config.token_filters {
+    for (index, filter) in config.token_filters.iter().enumerate() {
+        work.records(index).await?;
         if let TokenFilter::UnicodeSimpleLowercase(config) = filter {
             if let Some(dictionary) = config.unicode_profile.nori_dictionary() {
                 exact(dictionary)?;

@@ -73,7 +73,7 @@ fn verify_contract(language: &str, fixture: &str, required: bool, restore_backup
         "an Engine built with {language} must register the bundled analyzer"
     );
     let mode = if enabled { "enabled" } else { "disabled" };
-    for backend in [Backend::SQLite, Backend::Redb] {
+    for backend in [Backend::SQLite, Backend::SQLiteKeyValue, Backend::Redb] {
         let mut directory = TempDir::new().unwrap();
         let mut database = directory.path().join(format!("{language}-bindings.db"));
         let mut engine = Some(backend.open(&database));

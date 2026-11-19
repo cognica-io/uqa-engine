@@ -56,9 +56,11 @@ pub fn displace_array_type(
         let before = registries.enums.enum_registry().clone();
         let mut registry = before.clone();
         registry
-            .get_mut(&holder)
-            .ok_or_else(|| SQLError::Internal("displaced enum array holder disappeared".into()))?
-            .array_name = moved;
+            .edit(&holder, |definition| {
+                definition.array_name = moved;
+                Ok(())
+            })?
+            .ok_or_else(|| SQLError::Internal("displaced enum array holder disappeared".into()))?;
         enum_type::publish(registries.enums, &before, registry)?;
         return Ok(true);
     }
@@ -75,9 +77,13 @@ pub fn displace_array_type(
         let before = registries.domains.domain_registry().clone();
         let mut registry = before.clone();
         registry
-            .get_mut(&holder)
-            .ok_or_else(|| SQLError::Internal("displaced domain array holder disappeared".into()))?
-            .array_name = Some(moved);
+            .edit(&holder, |definition| {
+                definition.array_name = Some(moved);
+                Ok(())
+            })?
+            .ok_or_else(|| {
+                SQLError::Internal("displaced domain array holder disappeared".into())
+            })?;
         domain::publish(registries.domains, &before, registry)?;
         return Ok(true);
     }
@@ -95,11 +101,13 @@ pub fn displace_array_type(
         let before = registries.composites.composite_registry().clone();
         let mut registry = before.clone();
         registry
-            .get_mut(&holder)
+            .edit(&holder, |definition| {
+                definition.array_name = moved;
+                Ok(())
+            })?
             .ok_or_else(|| {
                 SQLError::Internal("displaced composite array holder disappeared".into())
-            })?
-            .array_name = moved;
+            })?;
         composite_type::publish(registries.composites, &before, registry)?;
         return Ok(true);
     }

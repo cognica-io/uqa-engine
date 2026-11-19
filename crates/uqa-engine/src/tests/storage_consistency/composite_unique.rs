@@ -48,7 +48,7 @@ fn composite_unique_inserts_do_not_read_rows_sharing_the_leading_key(
             .unwrap()
             .unwrap()
             .document_store
-            .write() = Box::new(probe);
+            .write() = uqa_storage::StorageHandle::new(Box::new(probe));
         engine
             .sql(
                 "INSERT INTO items VALUES (1, $1, true, 'new item')",

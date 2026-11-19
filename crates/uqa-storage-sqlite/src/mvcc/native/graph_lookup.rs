@@ -16,6 +16,8 @@ use super::{physical, NativeRecord, NativeRecordFamily as Family, NativeRecordOw
 use crate::mvcc::PhysicalResult;
 
 pub(super) use migration::backfill;
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+pub(super) use validation::validate_image_source;
 pub(super) use validation::{validate_deletions, validate_row};
 
 pub(super) const SQL: &str = "CREATE TABLE _uqa_mvcc_native_graph_lookup (kind TEXT NOT NULL, text_key TEXT NOT NULL, integer_key INTEGER NOT NULL, entity_type TEXT NOT NULL, entity_id INTEGER NOT NULL, PRIMARY KEY(kind, text_key, integer_key, entity_type, entity_id)) WITHOUT ROWID";

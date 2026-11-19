@@ -13,6 +13,7 @@ use super::{
 use crate::{ast::InternalRelationId, SQLError, ScalarExpr};
 use uqa_core::memory::ProductionControl;
 
+#[derive(Debug)]
 pub(in crate::plan) struct OwnedRows {
     pub(in crate::plan) rows: Vec<Vec<ScalarExpr>>,
     pub(in crate::plan) memory: Option<RewriteMemory>,
@@ -43,7 +44,25 @@ impl Iterator for OwnedValueRow {
 }
 impl ExactSizeIterator for OwnedValueRow {}
 
+impl Drop for OwnedValueRow {
+    fn drop(&mut self) {
+        for value in self.values.as_mut_slice() {
+            crate::ir::ownership::retire(value);
+        }
+    }
+}
+
+impl Drop for OwnedRows {
+    fn drop(&mut self) {
+        crate::plan::retirement::Retire::retire(&mut self.rows);
+    }
+}
+
 impl OwnedRows {
+    pub(in crate::plan) fn into_parts(mut self) -> (Vec<Vec<ScalarExpr>>, Option<RewriteMemory>) {
+        (std::mem::take(&mut self.rows), self.memory.take())
+    }
+
     pub(in crate::plan) fn take_row(&mut self, index: usize) -> OwnedValueRow {
         OwnedValueRow {
             values: std::mem::take(&mut self.rows[index]).into_iter(),
@@ -185,7 +204,7 @@ impl MutableQueryPlan {
                 MutableSourcePlan {
                     source: crate::plan::SourcePlan::Values {
                         lateral: true,
-                        rows: rows.rows,
+                        rows: rows.into_parts().0,
                         alias: None,
                         column_aliases: Vec::new(),
                         internal_relation: Some(relation),

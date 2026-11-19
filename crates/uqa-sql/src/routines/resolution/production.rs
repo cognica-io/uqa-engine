@@ -279,7 +279,7 @@ fn resolve_return_type(
 
 pub(super) fn match_ordinary(
     catalog: &super::RoutineTypeSnapshot,
-    function: std::sync::Arc<crate::routines::SQLUserFunction>,
+    function: crate::routines::SQLRoutine,
     call: crate::type_resolution::RoutineCallDescriptor<'_>,
     kind: RoutineCallKind,
 ) -> Result<Option<crate::routines::StaticFunctionMatch>, RoutineSignatureMatchError> {

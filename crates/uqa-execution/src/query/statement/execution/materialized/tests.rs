@@ -186,12 +186,15 @@ fn stored_scan(count: usize) -> crate::TableScan {
     };
     use uqa_storage::{DocumentStore, MemoryDocumentStore};
 
-    struct Table(RwLock<Box<dyn DocumentStore>>);
+    struct Table(RwLock<uqa_storage::StorageHandle<dyn DocumentStore>>);
     impl TableRead for Table {
         fn column_definitions(&self) -> Vec<uqa_sql::ast::ColumnDef> {
             Vec::new()
         }
-        fn read_documents(&self) -> parking_lot::RwLockReadGuard<'_, Box<dyn DocumentStore>> {
+        fn read_documents(
+            &self,
+        ) -> parking_lot::RwLockReadGuard<'_, uqa_storage::StorageHandle<dyn DocumentStore>>
+        {
             self.0.read()
         }
         fn maps_integer_keys(&self) -> bool {
@@ -225,7 +228,9 @@ fn stored_scan(count: usize) -> crate::TableScan {
     .unwrap();
     let source = ScoredDocumentSource::new(
         "t",
-        Arc::new(Table(RwLock::new(Box::new(documents)))),
+        Arc::new(Table(RwLock::new(uqa_storage::StorageHandle::new(
+            Box::new(documents),
+        )))),
         ScoredInput::All,
         columns,
         Some("id".into()),

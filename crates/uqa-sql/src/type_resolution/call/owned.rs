@@ -162,12 +162,40 @@ impl OwnedBindingCall {
         binding: Produced<FunctionBinding>,
         control: &ProductionControl<'_>,
     ) -> Result<Self, SQLError> {
+        let binding = self.rebinding(binding, control)?;
+        self.replace_binding(Some(binding), control)
+    }
+
+    fn rebinding(
+        &self,
+        binding: Produced<FunctionBinding>,
+        control: &ProductionControl<'_>,
+    ) -> Result<Produced<FunctionBinding>, SQLError> {
         let input_collation = self.binding().and_then(|binding| binding.input_collation);
         let (mut binding, memory) = binding.into_parts();
         if binding.input_collation.is_none() {
             binding.input_collation = input_collation;
         }
-        self.replace_binding(Some(control.finish(binding, memory)?), control)
+        Ok(control.finish(binding, memory)?)
+    }
+
+    pub(crate) async fn replace_from<W: crate::plan::ScalarInputWork>(
+        self,
+        arguments: OwnedScalarExpr,
+        binding: Produced<FunctionBinding>,
+        control: &ProductionControl<'_>,
+        work: &mut W,
+    ) -> Result<Self, W::Error>
+    where
+        W::Error: From<SQLError> + From<crate::schema::retention::CatalogRetentionError>,
+    {
+        let binding = self.rebinding(binding, control).map_err(W::Error::from)?;
+        let name = work.text(self.name(), control).await?;
+        Ok(Self(
+            self.0
+                .replace_call_fields_from(name, Some(binding), Some(arguments), control, work)
+                .await?,
+        ))
     }
 
     pub fn set_dispatch(

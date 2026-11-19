@@ -9,6 +9,7 @@
 use crate::Engine;
 use uqa_core::memory::{Produced, ProductionControl};
 use uqa_execution::catalog::services::CatalogSession;
+use uqa_sql::catalog::table_definition::SharedTableDefinition;
 use uqa_sql::{
     catalog::resolution::{RelationLookupMode, RelationNameResolution, RelationResolution},
     SQLError,
@@ -165,7 +166,7 @@ impl Engine {
         &self,
         name: &str,
         control: &ProductionControl<'_>,
-    ) -> Result<Option<std::sync::Arc<Vec<uqa_sql::ast::ColumnDef>>>, SQLError> {
+    ) -> Result<Option<SharedTableDefinition<Vec<uqa_sql::ast::ColumnDef>>>, SQLError> {
         Ok(self
             .table_state_snapshot_with_control(name, control)?
             .map(|table| table.columns.snapshot()))

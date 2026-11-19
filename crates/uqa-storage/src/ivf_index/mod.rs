@@ -14,9 +14,11 @@
 #![allow(clippy::cast_lossless, clippy::similar_names)]
 
 mod canonical;
+pub(crate) mod image;
 mod index;
 mod math;
 mod mutation;
+mod owner;
 mod prepare;
 mod restore;
 mod search;
@@ -25,12 +27,16 @@ mod spill;
 mod state;
 mod training;
 
+pub use owner::IVFIndex;
 pub use prepare::IVFMutation;
 pub(crate) use spill::{IVFCanonicalBuilder, IVFReadIndex};
 pub use spill::{IVFPreparedMetadata, IVFRestoreBuilder};
+use state::IVFData;
 pub use state::IVFMetadataSnapshot;
-pub use state::{IVFIndex, IVFState};
+pub use state::IVFState;
 
+#[cfg(test)]
+mod capture_tests;
 #[cfg(test)]
 #[path = "tests/preparation.rs"]
 mod preparation_tests;

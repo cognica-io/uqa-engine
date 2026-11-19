@@ -12,6 +12,7 @@ use uqa_core::{DocId, ScoredEntry, Value};
 use uqa_graph::GraphStoreHandle;
 use uqa_operators::{base::ExecutionContext, TextTopKPlan};
 use uqa_scoring::{BayesianBM25Params, ScoringMode};
+use uqa_sql::catalog::table_definition::SharedTableDefinition;
 use uqa_sql::{
     ast::{ColumnDef, ColumnType},
     expr::EngineHook,
@@ -22,12 +23,13 @@ use uqa_storage::{
     document_store::Document, CatalogIndexRow, DocumentStore, InvertedIndex, StorageBackendResult,
 };
 
-pub type TextIndexRead<'a> = Box<dyn Deref<Target = Box<dyn InvertedIndex>> + 'a>;
+pub type TextIndexRead<'a> =
+    Box<dyn Deref<Target = uqa_storage::StorageHandle<dyn InvertedIndex>> + 'a>;
 pub type VectorIndexRead<'a> =
     Box<dyn Deref<Target = uqa_storage::vector_index::VectorIndexes> + 'a>;
 
 pub trait RetrievalIndexState: Send + Sync {
-    fn columns(&self) -> Arc<Vec<ColumnDef>>;
+    fn columns(&self) -> SharedTableDefinition<Vec<ColumnDef>>;
     fn inverted_index(&self) -> TextIndexRead<'_>;
     fn vector_indexes(&self) -> VectorIndexRead<'_>;
 }

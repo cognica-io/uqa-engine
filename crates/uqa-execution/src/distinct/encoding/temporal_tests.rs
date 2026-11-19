@@ -22,9 +22,9 @@ fn temporal_keys_and_hashes_match_postgresql_equality_and_index_order() {
     for group in fixture["types"].as_array().unwrap() {
         let time = group["kind"] == "time";
         let domain = ScalarIndexDomain::from_column_type(if time {
-            &ColumnType::Time
+            const { &ColumnType::Time }
         } else {
-            &ColumnType::TimeTz
+            const { &ColumnType::TimeTz }
         })
         .unwrap();
         let values: Vec<_> = group["values"]

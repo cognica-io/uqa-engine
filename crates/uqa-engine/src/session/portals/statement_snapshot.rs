@@ -55,8 +55,8 @@ impl Engine {
     ) -> Engine {
         self.session_portal_worker_engine(
             std::sync::Arc::clone(&snapshot.tables),
-            std::sync::Arc::clone(&snapshot.catalog.views),
-            std::sync::Arc::clone(&snapshot.catalog.sql_user_functions),
+            snapshot.catalog.views.clone(),
+            snapshot.catalog.sql_user_functions.clone(),
             std::sync::Arc::clone(&snapshot.catalog),
             snapshot.transaction_origin,
         )

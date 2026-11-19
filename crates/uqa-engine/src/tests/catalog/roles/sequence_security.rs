@@ -57,9 +57,10 @@ fn sequence_owner_and_delegated_grants_keep_identity_after_every_name_is_reused(
     {
         let mut roles = engine.durable.roles.write();
         for name in ["object_owner", "delegate", "reader"] {
-            let mut role = roles.remove(name).unwrap();
+            let mut role = roles.get(name).unwrap().clone();
+            roles.remove(name).unwrap();
             role.name = format!("renamed_{name}");
-            roles.insert(role.name.clone(), role);
+            roles.insert(role.name.clone(), role).unwrap();
         }
     }
     engine.note_catalog_registry_changed();
@@ -159,15 +160,15 @@ fn sequence_security_conversion_is_initial_only_and_rolls_back_with_later_catalo
             error.to_string().contains("initial catalog migration"),
             "{error}"
         );
-        let before = first.durable.sequence_security.snapshot();
+        let before = first.durable.sequences.snapshot();
         let error = first.refresh_sequences_from_catalog().unwrap_err();
         assert!(
             error.to_string().contains("initial catalog migration"),
             "{error}"
         );
-        assert!(Arc::ptr_eq(
+        assert!(uqa_core::memory::RetainedValue::ptr_eq(
             &before,
-            &first.durable.sequence_security.snapshot()
+            &first.durable.sequences.snapshot()
         ));
         raw.catalog.set_metadata("sql_triggers_json", "{").unwrap();
         drop(second);
@@ -217,15 +218,15 @@ fn sequence_authority_rejects_replaced_owner_grantee_and_grantor_on_refresh_and_
             identity.object_id = [42; 16];
             let corrupt = SequenceSecurityRow::Bound(bound);
             replace(raw.catalog.as_ref(), "secured", corrupt.clone());
-            let before = first.durable.sequence_security.snapshot();
+            let before = first.durable.sequences.snapshot();
             let error = first.refresh_sequences_from_catalog().unwrap_err();
             assert!(
                 error.to_string().contains("missing role incarnation"),
                 "{error}"
             );
-            assert!(Arc::ptr_eq(
+            assert!(uqa_core::memory::RetainedValue::ptr_eq(
                 &before,
-                &first.durable.sequence_security.snapshot()
+                &first.durable.sequences.snapshot()
             ));
             let Err(error) = first.new_session() else {
                 panic!("invalid endpoint accepted")

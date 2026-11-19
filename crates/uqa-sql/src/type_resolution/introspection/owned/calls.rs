@@ -23,7 +23,15 @@ impl OwnedBinder<'_> {
     ) -> Result<OwnedScalarExpr, SQLError> {
         let control = &self.context.control;
         let call = OwnedBindingCall::new(expression, control)?;
-        let mut call = call.map_arguments(control, |_, argument| self.bind(argument))?;
+        let call = call.map_arguments(control, |_, argument| self.bind(argument))?;
+        self.bind_call_after_arguments(call)
+    }
+
+    // Argument descent must not retain workspace for later metadata and coercion branches.
+    fn bind_call_after_arguments(
+        &self,
+        mut call: OwnedBindingCall,
+    ) -> Result<OwnedScalarExpr, SQLError> {
         let (next, selected) = self.bind_collation(call)?;
         call = next;
         if selected {
@@ -34,10 +42,20 @@ impl OwnedBinder<'_> {
         if selected {
             return Ok(call.into_expression());
         }
+        self.bind_call_modifiers(call)
+    }
+
+    fn bind_call_modifiers(&self, mut call: OwnedBindingCall) -> Result<OwnedScalarExpr, SQLError> {
+        let control = &self.context.control;
         for index in 0..call.order_by().len() {
             call = call.map_order(index, control, |expression| self.bind(expression))?;
         }
         call = call.map_filter(control, |expression| self.bind(expression))?;
+        self.bind_call_types(call)
+    }
+
+    fn bind_call_types(&self, mut call: OwnedBindingCall) -> Result<OwnedScalarExpr, SQLError> {
+        let control = &self.context.control;
         if matches!(
             call.binding().and_then(|binding| binding.dispatch),
             Some(

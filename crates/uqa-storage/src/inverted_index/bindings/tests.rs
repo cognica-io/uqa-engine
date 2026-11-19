@@ -7,6 +7,8 @@
 use super::*;
 use crate::{read_control::StorageReadControl, StorageBackendError};
 
+mod input;
+
 #[test]
 fn frozen_field_containers_keep_admission_and_revisions_until_the_last_reader() {
     let index = uqa_analysis::whitespace_analyzer().compile().unwrap();

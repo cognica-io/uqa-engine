@@ -6,12 +6,10 @@
 
 //! Prepared filters retain immutable lookup state and dispatch to their owning algorithms.
 
-use std::{borrow::Cow, collections::BTreeSet};
+use std::borrow::Cow;
 
-use super::{
-    builtin_stop_words, lowercase::prepare_with_profile, validate_gram_bounds, TokenFilter,
-};
-use crate::{AnalysisResult, AnalyzedText};
+use super::{lowercase::prepare_with_profile, validate_gram_bounds, TokenFilter};
+use crate::{AnalysisError, AnalysisResult, AnalyzedText};
 
 mod lookup;
 pub(super) use lookup::{find_word, PreparedSynonyms};
@@ -56,6 +54,15 @@ impl TokenFilter {
         &self,
         profile: crate::unicode::Profile,
     ) -> AnalysisResult<PreparedTokenFilter<'_>> {
+        crate::work::inline(self.prepare_with_profile_and_work(profile, &mut ()))
+    }
+
+    pub(crate) async fn prepare_with_profile_and_work(
+        &self,
+        profile: crate::unicode::Profile,
+        work: &mut impl crate::work::Work<AnalysisError>,
+    ) -> AnalysisResult<PreparedTokenFilter<'_>> {
+        work.checkpoint().await?;
         let filter = match self {
             #[cfg(feature = "kuromoji")]
             Self::KuromojiBaseForm(_)
@@ -111,12 +118,7 @@ impl TokenFilter {
                 language,
                 custom_words,
             } => {
-                let mut words: BTreeSet<_> = builtin_stop_words(language)
-                    .iter()
-                    .map(|word| Cow::Borrowed(*word))
-                    .collect();
-                words.extend(custom_words.iter().map(|word| Cow::Borrowed(word.as_str())));
-                PreparedCommonFilter::Stop(words.into_iter().collect())
+                PreparedCommonFilter::Stop(lookup::stop_words(language, custom_words, work).await?)
             }
             Self::PorterStem => PreparedCommonFilter::PorterStem,
             Self::ASCIIFolding => PreparedCommonFilter::ASCIIFolding,
@@ -125,7 +127,7 @@ impl TokenFilter {
                 synonyms_path,
             } => PreparedCommonFilter::Synonym(match synonyms_path {
                 Some(path) => PreparedSynonyms::owned(Self::parse_synonym_file(path)?),
-                None => PreparedSynonyms::borrowed(synonyms),
+                None => PreparedSynonyms::borrowed_with(synonyms, work).await?,
             }),
             Self::Ngram {
                 min_gram,
@@ -159,14 +161,19 @@ impl TokenFilter {
 }
 
 impl PreparedTokenFilter<'_> {
-    pub(crate) fn into_owned(self) -> PreparedTokenFilter<'static> {
-        match self {
+    pub(crate) async fn into_owned_with(
+        self,
+        work: &mut impl crate::work::Work<AnalysisError>,
+    ) -> AnalysisResult<PreparedTokenFilter<'static>> {
+        Ok(match self {
             #[cfg(feature = "nori")]
             Self::Nori(filter) => PreparedTokenFilter::Nori(filter),
             #[cfg(feature = "kuromoji")]
             Self::Kuromoji(filter) => PreparedTokenFilter::Kuromoji(filter),
-            Self::Common(filter) => PreparedTokenFilter::Common(filter.into_owned()),
-        }
+            Self::Common(filter) => {
+                PreparedTokenFilter::Common(filter.into_owned_with(work).await?)
+            }
+        })
     }
 
     pub(crate) fn filter_analyzed(&self, input: AnalyzedText) -> AnalysisResult<AnalyzedText> {
@@ -192,18 +199,24 @@ impl PreparedTokenFilter<'_> {
 }
 
 impl PreparedCommonFilter<'_> {
-    fn into_owned(self) -> PreparedCommonFilter<'static> {
-        match self {
+    async fn into_owned_with(
+        self,
+        work: &mut impl crate::work::Work<AnalysisError>,
+    ) -> AnalysisResult<PreparedCommonFilter<'static>> {
+        Ok(match self {
             Self::Lowercase(properties) => PreparedCommonFilter::Lowercase(properties),
-            Self::Stop(words) => PreparedCommonFilter::Stop(
-                words
-                    .into_iter()
-                    .map(|word| Cow::Owned(word.into_owned()))
-                    .collect(),
-            ),
+            Self::Stop(words) => {
+                let mut owned = Vec::with_capacity(words.len());
+                for word in words {
+                    owned.push(Cow::Owned(crate::work::own_text(word, work).await?));
+                }
+                PreparedCommonFilter::Stop(owned)
+            }
             Self::PorterStem => PreparedCommonFilter::PorterStem,
             Self::ASCIIFolding => PreparedCommonFilter::ASCIIFolding,
-            Self::Synonym(synonyms) => PreparedCommonFilter::Synonym(synonyms.into_owned()),
+            Self::Synonym(synonyms) => {
+                PreparedCommonFilter::Synonym(synonyms.into_owned_with(work).await?)
+            }
             Self::Ngram {
                 min_gram,
                 max_gram,
@@ -223,6 +236,6 @@ impl PreparedCommonFilter<'_> {
                 min_length,
                 max_length,
             },
-        }
+        })
     }
 }

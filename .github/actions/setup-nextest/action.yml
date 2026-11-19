@@ -20,7 +20,7 @@ runs:
         esac
         directory="$(mktemp -d "${RUNNER_TEMP}/nextest.XXXXXX")"
         archive="cargo-nextest-${version}-${platform}.tar.gz"
-        curl --fail --location --retry 2 \
+        curl --fail --location --retry 2 --retry-all-errors --connect-timeout 30 --max-time 180 \
           "https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-${version}/${archive}" \
           --output "${directory}/${archive}"
         (cd "$directory" && echo "${checksum}  ${archive}" | shasum -a 256 --check)

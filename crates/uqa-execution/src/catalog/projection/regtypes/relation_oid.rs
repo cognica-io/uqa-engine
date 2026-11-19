@@ -89,8 +89,8 @@ pub(crate) fn resolved_relation_oid(
         let object_id = catalog
             .snapshot()
             .definitions
-            .sequence_object_ids
-            .get(&relation)
+            .sequences
+            .object_id(&relation)
             .ok_or_else(|| {
                 SQLError::Internal(format!(
                     "resolved sequence `{canonical}` has no object identity"

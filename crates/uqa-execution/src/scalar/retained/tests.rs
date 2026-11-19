@@ -7,6 +7,67 @@
 use super::*;
 
 #[test]
+fn retained_constant_storage_retires_deep_inputs_before_failed_publication() {
+    std::thread::Builder::new()
+        .stack_size(256 * 1024)
+        .spawn(|| {
+            use uqa_core::{memory::MemoryBudget, CancellationToken};
+            for resident in [0, 2048] {
+                for failure in ["original", "invoking", "memory"] {
+                    let storage = RetainedConstants::new(resident);
+                    let previous = storage.retain(Value::Int(7)).unwrap();
+                    let disk_bytes = storage.source.rows.lock().spilled_bytes();
+                    let memory = MemoryBudget::new(64 << 20);
+                    let original = CancellationToken::new();
+                    let invoking = CancellationToken::new();
+                    let control = ProductionControl::new(&memory, &original, &invoking);
+                    let mut value = Value::Int(8);
+                    for _ in 0..8192 {
+                        value = Value::List(vec![value]);
+                    }
+                    let value = control.retain_external_value(value).unwrap();
+                    let pressure = if failure == "memory" {
+                        Some(memory.reserve(memory.available()).unwrap())
+                    } else {
+                        if failure == "original" {
+                            original.cancel();
+                        } else {
+                            invoking.cancel();
+                        }
+                        None
+                    };
+                    let error = storage.retain_produced(value, &control).unwrap_err();
+                    assert_eq!(
+                        error.sqlstate(),
+                        Some(if failure == "memory" {
+                            "53200"
+                        } else {
+                            "57014"
+                        })
+                    );
+                    assert_eq!(
+                        memory.used(),
+                        pressure
+                            .as_ref()
+                            .map_or(0, uqa_core::memory::MemoryReservation::bytes)
+                    );
+                    drop(pressure);
+                    assert_eq!(memory.used(), 0);
+                    assert_eq!(storage.source.rows.lock().len(), 1);
+                    assert_eq!(storage.source.rows.lock().spilled_bytes(), disk_bytes);
+                    assert_eq!(previous.read().unwrap(), Value::Int(7));
+                    let next = storage.retain(Value::Int(9)).unwrap();
+                    assert_eq!(next.read().unwrap(), Value::Int(9));
+                    assert_eq!(storage.source.rows.lock().len(), 2);
+                }
+            }
+        })
+        .unwrap()
+        .join()
+        .unwrap();
+}
+
+#[test]
 fn retained_constant_factory_keeps_source_and_adapter_leases_until_their_own_last_readers() {
     use uqa_core::{memory::MemoryBudget, CancellationToken};
     let memory = MemoryBudget::new(1 << 20);

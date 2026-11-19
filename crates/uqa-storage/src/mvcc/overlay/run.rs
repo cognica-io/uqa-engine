@@ -65,9 +65,33 @@ pub(in crate::mvcc) struct SpilledRun {
     /// One bit for each write kind code the run holds.
     kinds: u16,
     cache: Arc<RunCache>,
+    retained_bytes: Option<usize>,
 }
 
 impl SpilledRun {
+    /// Only the immutable run metadata belongs to retention. Decoded cache blocks are held by active readers and retire independently of a retained run.
+    pub(super) fn retained_bytes(&self) -> Option<usize> {
+        self.retained_bytes
+    }
+
+    fn count_retained_bytes(&self) -> Option<usize> {
+        let mut bytes = size_of::<Self>()
+            .checked_add(size_of::<RunCache>())?
+            .checked_add(self.entries.retained_bytes()?)?
+            .checked_add(self.values.retained_bytes()?)?
+            .checked_add(self.blocks.capacity().checked_mul(size_of::<RunBlock>())?)?
+            .checked_add(self.last.retained_bytes().ok()?)?;
+        for block in self.blocks.iter() {
+            bytes = bytes
+                .checked_add(block.first.retained_bytes().ok()?)?
+                .checked_add(block.last.retained_bytes().ok()?)?;
+        }
+        for filter in [&self.filter, &self.prefix_filter].into_iter().flatten() {
+            bytes = bytes.checked_add(filter.retained_bytes()?)?;
+        }
+        Some(bytes)
+    }
+
     #[cfg(test)]
     pub(in crate::mvcc) fn read_io_counts(&self) -> (usize, usize) {
         (

@@ -6,12 +6,14 @@
 
 use super::*;
 use std::sync::Arc;
+use uqa_sql::catalog::roles::RoleDefinition;
+use uqa_sql::catalog::roles::RoleDefinitions;
 use uqa_storage::{KeyValueCatalog, MemoryKeyValueStore};
 
-fn fixture() -> (KeyValueCatalog, BTreeMap<String, RoleDefinition>) {
+fn fixture() -> (KeyValueCatalog, RoleDefinitions) {
     (
         KeyValueCatalog::new(Arc::new(MemoryKeyValueStore::new())),
-        BTreeMap::from([("uqa".into(), RoleDefinition::bootstrap())]),
+        RoleDefinitions::try_from_iter([("uqa".into(), RoleDefinition::bootstrap())]).unwrap(),
     )
 }
 
@@ -29,16 +31,23 @@ fn schema_migration_binds_once_and_secondary_restore_never_writes() {
     assert_eq!(restored["public"], BoundSchemaSecurity::bootstrap("public"));
     let encoded = catalog.load_schema_rows().unwrap();
     assert!(matches!(encoded[0], SchemaRow::Bound(_)));
-    let mut owner = roles.remove("uqa").unwrap();
+    let mut owner = roles.get("uqa").unwrap().clone();
+    roles.remove("uqa").unwrap();
     owner.name = "renamed".into();
-    roles.insert(owner.name.clone(), owner);
+    roles.insert(owner.name.clone(), owner).unwrap();
     assert_eq!(restore(&catalog, &roles, false).unwrap(), restored);
     assert_eq!(catalog.load_schema_rows().unwrap(), encoded);
     assert_eq!(
         restored["public"].resolve(&roles).unwrap().role_owner,
         "renamed"
     );
-    roles.get_mut("renamed").unwrap().object_id = [9; 16];
+    roles
+        .edit("renamed", |value| {
+            value.object_id = [9; 16];
+            Ok(())
+        })
+        .unwrap()
+        .unwrap();
     assert!(restore(&catalog, &roles, true).is_err());
     assert_eq!(catalog.load_schema_rows().unwrap(), encoded);
 }
@@ -120,7 +129,7 @@ fn builtin_initialization_requires_initial_restore_and_preserves_existing_author
     owner.name = "namespace_owner".into();
     owner.oid = 20_000;
     owner.object_id = [7; 16];
-    roles.insert(owner.name.clone(), owner.clone());
+    roles.insert(owner.name.clone(), owner.clone()).unwrap();
     let mut customized = BoundSchemaSecurity::builtin("information_schema").unwrap();
     customized.role_owner = owner.identity();
     customized.acl = None;

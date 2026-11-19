@@ -6,6 +6,75 @@
 
 use super::*;
 
+fn admitted_key(text: &str, budget: &MemoryBudget) -> Budgeted<String> {
+    let mut name = crate::memory::BudgetedString::new(budget);
+    name.push_str(text).unwrap();
+    let (name, memory) = name.into_parts();
+    Budgeted::new(name, memory)
+}
+
+#[test]
+fn admitted_key_producers_observe_node_admission_and_preserve_replacement_ownership() {
+    let original = MemoryBudget::new(4096);
+    let replacement = MemoryBudget::new(4096);
+    let key = admitted_key("original", &original);
+    let pointer = key.as_ptr();
+    let bytes = key.capacity() + OwnedMap::<String, u32>::entry_bytes();
+    let mut map = OwnedMap::new();
+    map.insert_admitted_key_with(key, |key| -> Result<_, MemoryError> {
+        assert_eq!(key.as_ptr(), pointer);
+        assert_eq!(original.used(), bytes);
+        Ok(7_u32)
+    })
+    .unwrap();
+    let key = admitted_key("original", &replacement);
+    let occupied = replacement.reserve(replacement.available()).unwrap();
+    assert_eq!(
+        map.insert_admitted_key_with(key, |name| -> Result<_, MemoryError> {
+            assert_eq!(name, "original");
+            Ok(9)
+        })
+        .unwrap(),
+        Some(7)
+    );
+    assert_eq!(map.get_key_value("original").unwrap().0.as_ptr(), pointer);
+    assert_eq!(original.used(), bytes);
+    assert_eq!(replacement.used(), occupied.bytes());
+    drop((map, occupied));
+    assert_eq!((original.used(), replacement.used()), (0, 0));
+}
+
+#[test]
+fn admitted_key_producer_failures_and_unwinding_preserve_the_original_map() {
+    let mut map = OwnedMap::from_iter([("existing".to_owned(), 7_u32)]);
+    let denied = MemoryBudget::new(8);
+    let rejected = map.insert_admitted_key_with(
+        admitted_key("rejected", &denied),
+        |_| -> Result<u32, MemoryError> { panic!("node admission precedes production") },
+    );
+    assert!(rejected.is_err());
+    assert_eq!(denied.used(), 0);
+    for name in ["new", "existing"] {
+        let memory = MemoryBudget::new(4096);
+        let rejected = map.insert_admitted_key_with(
+            admitted_key(name, &memory),
+            |_| -> Result<u32, MemoryError> { Err(MemoryError::SizeOverflow) },
+        );
+        assert!(rejected.is_err());
+        assert_eq!(memory.used(), 0);
+        let unwind = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _ = map.insert_admitted_key_with(
+                admitted_key(name, &memory),
+                |_| -> Result<u32, MemoryError> { panic!("producer unwind") },
+            );
+        }));
+        assert!(unwind.is_err());
+        assert_eq!(memory.used(), 0);
+        assert_eq!(map.len(), 1);
+        assert_eq!(map.get("existing"), Some(&7));
+    }
+}
+
 #[test]
 fn mixed_allowances_retain_their_nodes_through_replacement_selection_and_move() {
     let first = MemoryBudget::new(4096);
@@ -94,4 +163,69 @@ fn node_admission_precedes_value_production_and_failed_producers_preserve_entrie
     assert!(unwind.is_err());
     assert_eq!(budget.used(), 0);
     assert!(map.is_empty());
+}
+
+#[test]
+fn admitted_keys_keep_original_buffers_and_leases_through_native_map_mutations() {
+    fn key(text: &str, memory: &MemoryBudget) -> Budgeted<String> {
+        let mut name = crate::memory::BudgetedString::new(memory);
+        name.push_str(text).unwrap();
+        let (name, memory) = name.into_parts();
+        Budgeted::new(name, memory)
+    }
+    let first = MemoryBudget::new(4096);
+    let second = MemoryBudget::new(4096);
+    let original = key("original", &first);
+    let pointer = original.as_ptr();
+    let expected = original.capacity() + OwnedMap::<String, u32>::entry_bytes();
+    let mut values = OwnedMap::new();
+    values.insert_admitted_key(original, 7_u32).unwrap();
+    assert_eq!(first.used(), expected);
+    assert_eq!(
+        values
+            .insert_admitted_key(key("original", &second), 9)
+            .unwrap(),
+        Some(7)
+    );
+    assert_eq!(second.used(), 0);
+    assert_eq!(
+        values.get_key_value("original").unwrap().0.as_ptr(),
+        pointer
+    );
+    values.insert("another".into(), 3);
+    let measured = allocation_counter::measure(|| {
+        let mut iter = values.iter_mut();
+        assert_eq!(iter.len(), 2);
+        let (name, value) = iter.next().unwrap();
+        assert_eq!(name, "another");
+        *value += 10;
+        assert_eq!(iter.len(), 1);
+        let (name, value) = iter.next().unwrap();
+        assert_eq!(name.as_ptr(), pointer);
+        *value += 20;
+        assert_eq!(iter.len(), 0);
+        assert!(iter.next().is_none());
+    });
+    assert_eq!(measured.count_total, 0);
+    assert_eq!(values.get("original"), Some(&29));
+    let original = values.extract("original");
+    drop(values);
+    assert_eq!(first.used(), expected);
+    drop(original);
+    assert_eq!(first.used(), 0);
+}
+
+#[test]
+fn admitted_key_node_rejection_releases_input_without_changing_the_map() {
+    let budget = MemoryBudget::new(8);
+    let mut text = crate::memory::BudgetedString::new(&budget);
+    text.push_str("rejected").unwrap();
+    let (text, memory) = text.into_parts();
+    let mut map = OwnedMap::from_iter([("existing".to_owned(), 1)]);
+    assert!(map
+        .insert_admitted_key(Budgeted::new(text, memory), 2)
+        .is_err());
+    assert_eq!(budget.used(), 0);
+    assert_eq!(map.len(), 1);
+    assert_eq!(map.get("existing"), Some(&1));
 }

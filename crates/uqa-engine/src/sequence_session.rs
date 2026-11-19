@@ -5,8 +5,23 @@
 //
 
 //! Own sequence discard state, transaction history and physical session selection.
-use crate::{Engine, NontransactionalSequenceValue, StorageBackendResult};
+use crate::{Engine, EngineDataSnapshot, NontransactionalSequenceSource, StorageBackendResult};
 impl Engine {
+    pub(super) fn transaction_sequence_values(
+        snapshot: Option<&EngineDataSnapshot>,
+    ) -> NontransactionalSequenceSource {
+        snapshot
+            .and_then(|snapshot| snapshot.data.sources.as_ref())
+            .map_or_else(
+                || {
+                    std::sync::Arc::new(uqa_storage::memory_capture::MemoryCaptureCell::new(
+                        uqa_execution::catalog::sequence::capture::SequenceCaptureSource::default(),
+                    ))
+                },
+                crate::state::SnapshotSources::sequence_history,
+            )
+    }
+
     pub(super) fn discard_sequence_session_values(&self) {
         self.session.sequence_caches.lock().clear();
         {
@@ -17,45 +32,10 @@ impl Engine {
             session.last_sequence = None;
         }
         for frame in self.session.transactions.lock().iter_mut() {
-            for history in frame.nontransactional_sequence_values.values_mut() {
-                history.session_currval = None;
-                history.defines_lastval = false;
-            }
-        }
-    }
-    pub(super) fn record_nontransactional_sequence_value(
-        &self,
-        definition_generation: [u8; 16],
-        value: NontransactionalSequenceValue,
-        defines_lastval: bool,
-    ) {
-        let session_currval = self
-            .session
-            .state
-            .read()
-            .sequence_currvals
-            .values()
-            .find(|current| current.object_id == value.object_id)
-            .copied();
-        let mut transactions = self.session.transactions.lock();
-        for frame in transactions.iter_mut() {
-            if defines_lastval {
-                for history in frame.nontransactional_sequence_values.values_mut() {
-                    history.defines_lastval = false;
-                }
-            }
-            let history = frame
+            frame
                 .nontransactional_sequence_values
-                .entry(value.object_id)
-                .or_default();
-            let preserves_lastval =
-                !defines_lastval && history.object_id == value.object_id && history.defines_lastval;
-            history
-                .values_by_definition
-                .insert(definition_generation, value);
-            history.object_id = value.object_id;
-            history.session_currval = session_currval;
-            history.defines_lastval = defines_lastval || preserves_lastval;
+                .write()
+                .discard_session_values();
         }
     }
     pub(super) fn open_independent_catalog_session(

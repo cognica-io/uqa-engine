@@ -70,20 +70,24 @@ fn event_row_columns_keep_both_images_and_lexical_masking_with_exact_owners() {
 fn event_row_names_reject_before_copying_and_preserve_sibling_allowances() {
     let catalog = super::super::owned::catalog_fixture();
     let mut rules = Rules::new(&["CREATE RULE r AS ON INSERT TO items DO ALSO SELECT NEW.a,NEW.b"]);
-    let rule = Arc::make_mut(
-        Arc::make_mut(&mut rules.0)
-            .get_mut(&RelationIdentity::new("public", "items"))
-            .unwrap(),
-    )
-    .get_mut("r")
-    .unwrap();
-    let Statement::Select(action) = &mut rule.definition.actions[0] else {
-        panic!("SELECT")
-    };
-    action.projections[1].expr = Expr::QualifiedColumn {
-        qualifier: "new".into(),
-        column: "x".repeat(4 << 20).into(),
-    };
+    Arc::make_mut(&mut rules.0)
+        .edit(&RelationIdentity::new("public", "items"), |entries| {
+            entries
+                .edit("r", |rule| {
+                    let Statement::Select(action) = &mut rule.definition.actions[0] else {
+                        panic!("SELECT")
+                    };
+                    action.projections[1].expr = Expr::QualifiedColumn {
+                        qualifier: "new".into(),
+                        column: "x".repeat(4 << 20).into(),
+                    };
+                    Ok(())
+                })?
+                .expect("rule");
+            Ok(())
+        })
+        .unwrap()
+        .expect("relation");
     let context = RuleAnalysisContext {
         rules: &rules,
         ..catalog.analysis()

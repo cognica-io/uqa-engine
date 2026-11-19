@@ -77,13 +77,16 @@ jobs:
           expected=(
             "cognica-io-uqa-linux-x64-gnu-${version}.tgz"
             "cognica-io-uqa-linux-arm64-gnu-${version}.tgz"
-            "cognica-io-uqa-darwin-x64-${version}.tgz"
             "cognica-io-uqa-darwin-arm64-${version}.tgz"
             "cognica-io-uqa-win32-x64-msvc-${version}.tgz"
             "cognica-io-uqa-win32-arm64-msvc-${version}.tgz"
             "cognica-io-uqa-${version}.tgz"
             "cognica-io-uqa-wasm-${version}.tgz"
           )
+          macos_x86=$(python3 -c 'import json; print("true" if "x86_64-apple-darwin" in json.load(open("crates/uqa-node/package.json"))["napi"]["targets"] else "false")')
+          if [ "$macos_x86" = true ]; then
+            expected+=("cognica-io-uqa-darwin-x64-${version}.tgz")
+          fi
           shopt -s nullglob
           actual=(dist/*.tgz)
           if [ "${#actual[@]}" -ne "${#expected[@]}" ]; then

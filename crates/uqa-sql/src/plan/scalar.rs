@@ -11,7 +11,7 @@ use super::{
     ScalarOrder, ScalarWindowFrame, ScalarWindowSpec, WindowSpec,
 };
 use crate::schema::retention::CatalogRetentionError;
-use resources::{Control, Lowering, Result};
+use resources::{Lowering, Result};
 use source::{Node, Source};
 use uqa_core::{
     memory::{Budgeted, MemoryBudget, Produced, ProductionControl},
@@ -22,10 +22,15 @@ mod binding;
 mod copy;
 mod lowering;
 pub(in crate::plan) use lowering::lower_scalar_with_arena;
+pub(in crate::plan) use lowering::ScalarQueryInput;
+pub(crate) use resources::input::Work as ScalarInputWork;
 mod owned;
 pub(in crate::plan) use owned::windows::OwnedWindowSpec;
 pub(crate) use owned::ScalarMemory;
+pub(in crate::plan) use owned::ScalarMemoryFolding;
+pub(in crate::plan) use owned::SequenceBinding;
 pub use owned::{OwnedScalarChildren, OwnedScalarExpr, ScalarNodeTransform};
+pub(crate) use owned::{ScalarEdit, ScalarEditIdentity};
 mod resources;
 mod source;
 mod window;
@@ -69,18 +74,7 @@ impl super::ExpressionPlan {
         expression: &Expr,
         control: &ProductionControl<'_>,
     ) -> Result<Produced<ScalarExpr>> {
-        control.check()?;
-        let mut lowering = Lowering {
-            control: control.budget().map(|_| Control::from_production(*control)),
-            owned_children: None,
-        };
-        let scalar = lowering.expression(
-            Source::Borrowed(expression),
-            &super::NoRegisteredAggregates,
-            &mut Vec::new(),
-        )?;
-        let memory = lowering.control.map(|control| control.memory);
-        Ok(control.finish(scalar, memory)?)
+        lowering::lower_immutable(expression, control)
     }
 
     /// Lower a borrowed, validated column expression directly into admitted scalar IR. Destination strings, value payloads, bindings, vector capacities and boxes acquire the supplied allowance before allocation, and the result retains those leases. Both the retained definition's original cancellation and the invoking reader's cancellation remain active during lowering. This controls AST-to-IR production only; subsequent type binding and evaluation require their own resource contracts. Query children violate the validated column-expression invariant.
@@ -90,16 +84,10 @@ impl super::ExpressionPlan {
         original: &CancellationToken,
         invoking: &CancellationToken,
     ) -> Result<Budgeted<ScalarExpr>> {
-        let mut lowering = Lowering {
-            control: Some(Control::new(budget, original, invoking)),
-            owned_children: None,
-        };
-        let scalar = lowering.expression(
-            Source::Borrowed(expression),
-            &super::NoRegisteredAggregates,
-            &mut Vec::new(),
-        )?;
-        lowering.finish(scalar)
+        let control = ProductionControl::new(budget, original, invoking);
+        Ok(Self::lower_scalar_with_control(expression, &control)?
+            .into_budgeted()
+            .expect("controlled column expression"))
     }
 }
 
@@ -157,10 +145,7 @@ impl Lowering<'_> {
             },
             Node::InternalColumn(column) => ScalarExpr::InternalColumn(column),
             Node::Literal(value) => ScalarExpr::Literal(self.value(value)?),
-            Node::RetainedLiteral(value) => match value {
-                Source::Owned(value) => ScalarExpr::RetainedLiteral(value.0),
-                Source::Borrowed(value) => ScalarExpr::RetainedLiteral(value.0.clone()),
-            },
+            Node::RetainedLiteral(value) => ScalarExpr::RetainedLiteral(value),
             Node::TypedLiteral {
                 value,
                 ty,
@@ -313,22 +298,22 @@ impl Lowering<'_> {
 
     fn child(
         &mut self,
-        expression: Source<'_, Box<Expr>>,
+        expression: Source<'_, Expr>,
         aggregates: &dyn AggregateClassifier,
         subqueries: &mut dyn QueryLowering,
     ) -> Result<Box<ScalarExpr>> {
-        self.boxed(|this| this.expression(expression.unbox(), aggregates, subqueries))
+        self.boxed(|this| this.expression(expression, aggregates, subqueries))
     }
 
     fn query(
         &self,
-        query: Source<'_, Box<crate::ast::SelectStmt>>,
+        query: Source<'_, crate::ast::SelectStmt>,
         aggregates: &dyn AggregateClassifier,
         subqueries: &mut dyn QueryLowering,
     ) -> Result<usize> {
         self.check()?;
         match query {
-            Source::Owned(query) => subqueries.append_owned(*query, aggregates),
+            Source::Owned(query) => subqueries.append_owned(query, aggregates),
             Source::Borrowed(query) => subqueries.append_borrowed(query, aggregates),
         }
     }

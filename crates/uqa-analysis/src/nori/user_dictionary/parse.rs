@@ -6,6 +6,7 @@
 
 //! Java `BufferedReader`, Pattern comment removal, trim, and ASCII whitespace splitting.
 
+use crate::morphology::work::{source, Work};
 use crate::nori::error::check_limit;
 use crate::nori::DictionaryResult;
 
@@ -17,10 +18,13 @@ pub(super) struct Entry<'a> {
     fields: Vec<Range<usize>>,
 }
 
-impl Entry<'_> {
-    pub fn surface(&self) -> &str {
+impl crate::morphology::work::ordering::Surface for Entry<'_> {
+    fn surface(&self) -> &str {
         &self.original[self.fields[0].clone()]
     }
+}
+
+impl Entry<'_> {
     pub fn labels(&self) -> impl ExactSizeIterator<Item = &str> {
         self.fields[1..]
             .iter()
@@ -36,42 +40,58 @@ fn line_terminator(c: char) -> bool {
 }
 
 // Java's default dot excludes Unicode line terminators, even inside a BufferedReader line.
-fn remove_comment(line: &str) -> Cow<'_, str> {
+async fn remove_comment<'a>(line: &'a str, work: &mut impl Work) -> DictionaryResult<Cow<'a, str>> {
     let effective_end = line
         .char_indices()
         .next_back()
         .filter(|(_, c)| line_terminator(*c))
         .map_or(line.len(), |(index, _)| index);
-    let suffix_start = line[..effective_end]
-        .char_indices()
-        .filter(|(_, c)| line_terminator(*c))
-        .map(|(index, c)| index + c.len_utf8())
-        .next_back()
-        .unwrap_or(0);
-    let Some(index) = line[suffix_start..effective_end]
-        .find('#')
-        .map(|index| suffix_start + index)
+    let mut suffix_start = 0;
+    for (count, (index, ch)) in line[..effective_end].char_indices().rev().enumerate() {
+        work.records(count).await?;
+        if line_terminator(ch) {
+            suffix_start = index + ch.len_utf8();
+            break;
+        }
+    }
+    let Some(index) = crate::work::find_byte::<crate::morphology::error::DictionaryError>(
+        &line[..effective_end],
+        suffix_start,
+        b'#',
+        work,
+    )
+    .await?
     else {
-        return Cow::Borrowed(line);
+        return Ok(Cow::Borrowed(line));
     };
     if effective_end == line.len() {
-        return Cow::Borrowed(&line[..index]);
+        return Ok(Cow::Borrowed(&line[..index]));
     }
-    Cow::Owned(format!("{}{}", &line[..index], &line[effective_end..]))
+    let mut output = String::new();
+    output.try_reserve_exact(index + line.len() - effective_end)?;
+    source::append(&mut output, &line[..index], work).await?;
+    source::append(&mut output, &line[effective_end..], work).await?;
+    Ok(Cow::Owned(output))
 }
 
-pub(super) fn entries(source: &str, maximum_entries: usize) -> DictionaryResult<Vec<Entry<'_>>> {
+pub(super) async fn entries<'a>(
+    source: &'a str,
+    maximum_entries: usize,
+    work: &mut impl Work,
+) -> DictionaryResult<Vec<Entry<'a>>> {
     let mut entries = Vec::new();
     // CRLF produces an additional empty slice; Java trim discards it just as an empty line.
-    for line in source.split(['\n', '\r']) {
-        let line = remove_comment(line);
-        if line.trim_matches(|c| c <= '\u{20}').is_empty() {
+    let mut lines = source::Lines::new(source);
+    while let Some(line) = lines.next(work).await? {
+        let line = remove_comment(line, work).await?;
+        if source::blank(&line, work).await? {
             continue;
         }
         let mut fields = Vec::new();
         let mut start = 0;
         let mut in_separator = false;
-        for (index, c) in line.char_indices() {
+        for (count, (index, c)) in line.char_indices().enumerate() {
+            work.records(count).await?;
             if whitespace(c) {
                 if !in_separator {
                     fields.try_reserve(1)?;

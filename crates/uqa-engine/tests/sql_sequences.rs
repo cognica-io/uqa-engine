@@ -63,7 +63,7 @@ fn default_sequence_reference(engine: &Engine, table: &str, column: &str) -> Str
         .column_default_expr(table, column)
         .unwrap()
         .expect("column default");
-    let Expr::Func { args, .. } = expression else {
+    let Expr::Func { args, .. } = &expression else {
         panic!("expected sequence function default, got {expression:?}");
     };
     let Some(reference) = args

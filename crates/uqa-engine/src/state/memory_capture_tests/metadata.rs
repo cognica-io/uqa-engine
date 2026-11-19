@@ -1,0 +1,745 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
+use super::{sql, Engine, StorageReadControl};
+use uqa_storage::memory_capture::{CapturedMemoryValue, MemoryCapture, MemoryCaptureKey};
+
+#[test]
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+fn committed_memory_table_names_and_constraints_capture_original_native_generations() {
+    let engine = Engine::new();
+    sql(&engine, "CREATE TABLE parent(id integer, PRIMARY KEY(id)); CREATE TABLE saved(id integer, old text, PRIMARY KEY(id), FOREIGN KEY(id) REFERENCES parent(id)); ALTER TABLE saved DROP COLUMN old");
+    let table = engine.table("saved").unwrap().unwrap();
+    *table.fts_fields.write() = vec!["x".repeat(1 << 20)];
+    *table.row_type_array_name.write() = Some("a".repeat(1 << 20));
+    table.foreign_keys.write()[0].name = Some("f".repeat(1 << 20));
+    table.key_constraints.write()[0].name = Some("k".repeat(1 << 20));
+    table.dropped_attributes.write()[0].identity = "d".repeat(1 << 20);
+    let names = std::ptr::from_ref(&*table.fts_fields.snapshot());
+    let array = std::ptr::from_ref(&*table.row_type_array_name.snapshot());
+    let foreign = std::ptr::from_ref(&*table.foreign_keys.snapshot());
+    let keys = std::ptr::from_ref(&*table.key_constraints.snapshot());
+    let dropped = std::ptr::from_ref(&*table.dropped_attributes.snapshot());
+    sql(&engine, "BEGIN");
+    table.fts_fields.write().clear();
+    *table.row_type_array_name.write() = None;
+    table.foreign_keys.write().clear();
+    table.key_constraints.write().clear();
+    table.dropped_attributes.write().clear();
+    let control = StorageReadControl::with_limit(8 << 20);
+    let mut retained = None;
+    let allocation = allocation_counter::measure(|| {
+        let cut = engine.capture_committed_memory(&control).unwrap();
+        retained = Some(
+            cut.table(&uqa_core::RelationIdentity::new("public", "saved"))
+                .unwrap(),
+        );
+    });
+    assert!(allocation.bytes_max < 64 << 10, "{allocation:?}");
+    assert!(control.memory().used() >= 5 << 20);
+    let retained = retained.unwrap();
+    assert_eq!(
+        std::ptr::from_ref(&*retained.fts_fields.get().unwrap().snapshot()),
+        names
+    );
+    assert_eq!(
+        std::ptr::from_ref(&*retained.row_type_array_name.get().unwrap().snapshot()),
+        array
+    );
+    assert_eq!(
+        std::ptr::from_ref(&*retained.foreign_keys.get().unwrap().snapshot()),
+        foreign
+    );
+    assert_eq!(
+        std::ptr::from_ref(&*retained.key_constraints.get().unwrap().snapshot()),
+        keys
+    );
+    assert_eq!(
+        std::ptr::from_ref(&*retained.dropped_attributes.get().unwrap().snapshot()),
+        dropped
+    );
+    sql(&engine, "ROLLBACK");
+    assert_eq!(std::ptr::from_ref(&*table.fts_fields.snapshot()), names);
+    assert_eq!(std::ptr::from_ref(&*table.foreign_keys.snapshot()), foreign);
+    table.fts_fields.write().clear();
+    *table.row_type_array_name.write() = None;
+    table.foreign_keys.write().clear();
+    table.key_constraints.write().clear();
+    table.dropped_attributes.write().clear();
+    drop((table, engine));
+    assert_eq!(retained.fts_fields.get().unwrap()[0].len(), 1 << 20);
+    assert_eq!(
+        retained
+            .row_type_array_name
+            .get()
+            .unwrap()
+            .as_deref()
+            .unwrap()
+            .len(),
+        1 << 20
+    );
+    assert_eq!(
+        retained.foreign_keys.get().unwrap()[0]
+            .name
+            .as_ref()
+            .unwrap()
+            .len(),
+        1 << 20
+    );
+    assert_eq!(
+        retained.key_constraints.get().unwrap()[0]
+            .name
+            .as_ref()
+            .unwrap()
+            .len(),
+        1 << 20
+    );
+    assert_eq!(
+        retained.dropped_attributes.get().unwrap()[0].identity.len(),
+        1 << 20
+    );
+    control.cancellation().cancel();
+    assert!(retained.fts_fields.get().is_err());
+    drop(retained);
+    assert_eq!(control.memory().used(), 0);
+}
+
+#[test]
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+fn committed_memory_analyzer_capture_shares_the_original_published_image() {
+    use uqa_analysis::{Analyzer, AnalyzerDefinition, Tokenizer};
+    let engine = Engine::new();
+    sql(&engine, "CREATE TABLE saved(body text)");
+    let table = engine.table("saved").unwrap().unwrap();
+    *table.analyzer.write() = AnalyzerDefinition::new(Analyzer {
+        tokenizer: Tokenizer::Pattern {
+            pattern: "x".repeat(1 << 20),
+        },
+        ..Analyzer::default()
+    });
+    let original = table
+        .analyzer
+        .read()
+        .capture_image(&uqa_core::memory::ProductionControl::uncontrolled())
+        .unwrap()
+        .as_ptr();
+    sql(&engine, "BEGIN");
+    *table.analyzer.write() = AnalyzerDefinition::new(uqa_analysis::keyword_analyzer());
+    let control = StorageReadControl::with_limit(8 << 20);
+    let mut retained = None;
+    let allocation = allocation_counter::measure(|| {
+        let cut = engine.capture_committed_memory(&control).unwrap();
+        retained = Some(
+            cut.table(&uqa_core::RelationIdentity::new("public", "saved"))
+                .unwrap(),
+        );
+    });
+    assert!(allocation.bytes_max < 64 << 10, "{allocation:?}");
+    assert!(control.memory().used() >= 1 << 20);
+    let retained = retained.unwrap();
+    assert_eq!(retained.analyzer.get().unwrap().as_ptr(), original);
+    sql(&engine, "ROLLBACK");
+    *table.analyzer.write() = AnalyzerDefinition::new(uqa_analysis::keyword_analyzer());
+    drop((table, engine));
+    let restored: Analyzer = serde_json::from_slice(retained.analyzer.get().unwrap()).unwrap();
+    assert!(
+        matches!(restored.tokenizer, Tokenizer::Pattern { ref pattern } if pattern == &"x".repeat(1 << 20))
+    );
+    control.cancellation().cancel();
+    assert!(retained.analyzer.get().is_err());
+    drop(retained);
+    assert_eq!(control.memory().used(), 0);
+}
+
+#[test]
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+fn committed_memory_statistics_capture_preserves_native_distributions_without_copying() {
+    let engine = Engine::new();
+    sql(&engine, "CREATE TABLE saved(payload text)");
+    let table = engine.table("saved").unwrap().unwrap();
+    *table.column_stats.write() = [(
+        "payload".into(),
+        uqa_planner::ColumnStats {
+            row_count: 2,
+            distinct_count: 1,
+            mcv_values: vec![crate::Value::Str("x".repeat(1 << 20))],
+            mcv_frequencies: vec![1.0],
+            ..Default::default()
+        },
+    )]
+    .into_iter()
+    .collect();
+    let original = {
+        let statistics = table.column_stats.read();
+        std::ptr::from_ref(&statistics["payload"])
+    };
+    let control = StorageReadControl::with_limit(8 << 20);
+    let mut retained = None;
+    let allocation = allocation_counter::measure(|| {
+        let cut = engine.capture_committed_memory(&control).unwrap();
+        retained = Some(
+            cut.table(&uqa_core::RelationIdentity::new("public", "saved"))
+                .unwrap(),
+        );
+    });
+    assert!(allocation.bytes_max < 64 << 10, "{allocation:?}");
+    assert!(control.memory().used() >= 1 << 20);
+    let retained = retained.unwrap();
+    assert_eq!(
+        &raw const retained.column_stats.get().unwrap()["payload"],
+        original
+    );
+    *table.column_stats.write() = uqa_planner::ColumnStatistics::default();
+    drop((table, engine));
+    let stats = retained.column_stats.get().unwrap();
+    assert_eq!(stats["payload"].mcv_frequencies, [1.0]);
+    let crate::Value::Str(value) = &stats["payload"].mcv_values[0] else {
+        panic!("original text")
+    };
+    assert_eq!(value.len(), 1 << 20);
+    control.cancellation().cancel();
+    assert!(retained.column_stats.get().is_err());
+    drop(retained);
+    assert_eq!(control.memory().used(), 0);
+}
+
+#[test]
+fn captured_table_statistics_images_keep_distributions_and_maintenance_after_retirement() {
+    use uqa_core::{memory::MemoryBudget, CancellationToken};
+    use uqa_planner::ColumnStatistics;
+    use uqa_storage::statistics_maintenance::StatisticsMaintenance;
+    let engine = Engine::new();
+    sql(&engine, "CREATE TABLE metrics(id integer, value text); INSERT INTO metrics VALUES(1,'old'),(2,'old'),(3,'last'); ANALYZE metrics; INSERT INTO metrics VALUES(4,'pending')");
+    let table = engine.table("metrics").unwrap().unwrap();
+    let expected = table.column_stats.snapshot();
+    assert!(!expected.is_empty());
+    let expected_maintenance = table.statistics_maintenance.snapshot();
+    assert!(expected_maintenance.dirty());
+    let statistics = table.column_stats.key().unwrap();
+    let maintenance = table.statistics_maintenance.key().unwrap();
+    let control = StorageReadControl::with_limit(4 << 20);
+    let cut = engine
+        .storage
+        .memory_capture
+        .as_ref()
+        .unwrap()
+        .capture(&control)
+        .unwrap();
+    sql(&engine, "BEGIN; UPDATE metrics SET value='private'; ANALYZE metrics; ROLLBACK; DROP TABLE metrics; CREATE TABLE metrics(replacement text)");
+    drop((table, engine));
+    let (stat_bytes, maintenance_bytes) = std::thread::spawn(move || {
+        let saved = statistics.retained(&cut).unwrap().unwrap();
+        let maintained = maintenance.retained(&cut).unwrap().unwrap();
+        drop(cut);
+        let memory = MemoryBudget::new(1 << 20);
+        let token = CancellationToken::new();
+        let mut stat_bytes = Vec::new();
+        saved
+            .get()
+            .unwrap()
+            .image_reader(&memory, &token)
+            .unwrap()
+            .write_to(&mut stat_bytes)
+            .unwrap();
+        assert_eq!(memory.used(), 0);
+        let mut maintenance_bytes = Vec::new();
+        maintained
+            .get()
+            .unwrap()
+            .image_reader(&token)
+            .unwrap()
+            .write_to(&mut maintenance_bytes)
+            .unwrap();
+        (stat_bytes, maintenance_bytes)
+    })
+    .join()
+    .unwrap();
+    assert_eq!(control.memory().used(), 0);
+    let memory = MemoryBudget::new(1 << 20);
+    let token = CancellationToken::new();
+    let restored =
+        ColumnStatistics::read_image(&mut stat_bytes.as_slice(), &memory, &token).unwrap();
+    let restored_maintenance =
+        StatisticsMaintenance::read_image(&mut maintenance_bytes.as_slice(), &memory, &token)
+            .unwrap();
+    assert_eq!(restored_maintenance, *expected_maintenance);
+    assert_column_statistics(&restored, &expected);
+    drop(restored);
+    assert_eq!(memory.used(), 0);
+}
+
+fn assert_column_statistics(
+    actual: &uqa_planner::ColumnStatistics,
+    expected: &uqa_planner::ColumnStatistics,
+) {
+    assert_eq!(actual.len(), expected.len());
+    for (name, expected) in expected.iter() {
+        let actual = actual.get(name).unwrap();
+        assert_eq!(
+            (actual.row_count, actual.null_count, actual.distinct_count),
+            (
+                expected.row_count,
+                expected.null_count,
+                expected.distinct_count
+            )
+        );
+        assert_eq!(
+            actual
+                .mcv_frequencies
+                .iter()
+                .map(|n| n.to_bits())
+                .collect::<Vec<_>>(),
+            expected
+                .mcv_frequencies
+                .iter()
+                .map(|n| n.to_bits())
+                .collect::<Vec<_>>()
+        );
+        for (actual, expected) in [
+            (&actual.min_value, &expected.min_value),
+            (&actual.max_value, &expected.max_value),
+        ] {
+            assert_eq!(actual.is_some(), expected.is_some());
+            if let (Some(actual), Some(expected)) = (actual, expected) {
+                assert!(actual.has_same_representation(expected));
+            }
+        }
+        for (actual, expected) in [
+            (&actual.histogram, &expected.histogram),
+            (&actual.mcv_values, &expected.mcv_values),
+        ] {
+            assert_eq!(actual.len(), expected.len());
+            assert!(actual
+                .iter()
+                .zip(expected)
+                .all(|(actual, expected)| actual.has_same_representation(expected)));
+        }
+    }
+}
+
+#[test]
+fn captured_table_authority_images_keep_acl_incarnations_after_engine_retirement() {
+    use uqa_core::{
+        memory::{MemoryBudget, ProductionControl},
+        CancellationToken,
+    };
+    use uqa_sql::catalog::security::table_binding::CapturedTableSecurity;
+    for mutate in [false, true] {
+        let engine = Engine::new();
+        sql(&engine,"CREATE ROLE reader; CREATE TABLE docs(id integer, payload text); GRANT SELECT ON docs TO reader WITH GRANT OPTION; GRANT UPDATE(payload) ON docs TO reader");
+        let table = engine.table("docs").unwrap().unwrap();
+        let expected = table
+            .security
+            .snapshot()
+            .capture_security(&ProductionControl::uncontrolled())
+            .unwrap()
+            .into_uncontrolled()
+            .unwrap();
+        assert!(expected.privileges.acl().is_some());
+        assert!(!expected.privileges.column_acls().is_empty());
+        let key = table.security.key().unwrap();
+        let control = StorageReadControl::with_limit(4 << 20);
+        let cut = engine
+            .storage
+            .memory_capture
+            .as_ref()
+            .unwrap()
+            .capture(&control)
+            .unwrap();
+        if mutate {
+            sql(&engine,"BEGIN; REVOKE SELECT ON docs FROM reader; ROLLBACK; DROP TABLE docs; DROP ROLE reader; CREATE ROLE reader; CREATE TABLE docs(replacement text)");
+        }
+        drop((table, engine));
+        let saved = key.retained(&cut).unwrap().unwrap();
+        drop(cut);
+        let bytes = std::thread::spawn(move || {
+            let token = CancellationToken::new();
+            let mut reader = saved.get().unwrap().image_reader(&token).unwrap();
+            let mut bytes = Vec::new();
+            let mut buffer = [0; 127];
+            loop {
+                let count = reader.read(&mut buffer).unwrap();
+                if count == 0 {
+                    break;
+                }
+                bytes.extend_from_slice(&buffer[..count]);
+            }
+            bytes
+        })
+        .join()
+        .unwrap();
+        assert_eq!(control.memory().used(), 0);
+        let memory = MemoryBudget::new(1 << 20);
+        let decoded = CapturedTableSecurity::read_image(
+            &mut bytes.as_slice(),
+            &memory,
+            &CancellationToken::new(),
+        )
+        .unwrap();
+        assert_eq!(*decoded, expected);
+        drop(decoded);
+        assert_eq!(memory.used(), 0);
+    }
+}
+
+#[test]
+fn captured_table_metadata_images_preserve_partition_constraints_after_retirement() {
+    use uqa_core::{memory::MemoryBudget, CancellationToken};
+    use uqa_sql::catalog::image;
+    for mutate in [false, true] {
+        let engine = Engine::new();
+        sql(&engine, "CREATE TABLE parent(id integer PRIMARY KEY); CREATE TABLE root(id integer PRIMARY KEY, ref integer, old text, CONSTRAINT valid_id CHECK(id>0), CONSTRAINT fk FOREIGN KEY(ref) REFERENCES parent(id) ON DELETE SET NULL) PARTITION BY RANGE(id); CREATE TABLE docs PARTITION OF root FOR VALUES FROM (1) TO (100); ALTER TABLE root DROP COLUMN old");
+        let table = engine.table("docs").unwrap().unwrap();
+        assert!(!table.table_checks.read().is_empty());
+        assert!(!table.foreign_keys.read().is_empty());
+        assert!(!table.key_constraints.read().is_empty());
+        assert!(table.hierarchy.read().partition_bound.is_some());
+        assert!(!table.dropped_attributes.read().is_empty());
+        macro_rules! remember {
+            ($($field:ident),*) => {$ (
+                let $field = (table.$field.key().unwrap(), serde_json::to_value(&*table.$field.snapshot()).unwrap());
+            )*};
+        }
+        remember!(
+            table_checks,
+            foreign_keys,
+            key_constraints,
+            hierarchy,
+            dropped_attributes
+        );
+        let control = StorageReadControl::with_limit(4 << 20);
+        let cut = engine
+            .storage
+            .memory_capture
+            .as_ref()
+            .unwrap()
+            .capture(&control)
+            .unwrap();
+        if mutate {
+            sql(&engine, "BEGIN; ALTER TABLE root RENAME COLUMN ref TO private; ROLLBACK; DROP TABLE root CASCADE; CREATE TABLE docs(replacement text)");
+        }
+        drop((table, engine));
+        std::thread::spawn(move || {
+            macro_rules! verify_image {
+                ($field:ident, $encode:ident, $decode:ident) => {{
+                    let saved = $field.0.retained(&cut).unwrap().unwrap();
+                    let memory = MemoryBudget::new(4 << 20);
+                    let token = CancellationToken::new();
+                    let mut reader = image::$encode(saved.get().unwrap(), &memory, &token).unwrap();
+                    let mut bytes = Vec::new();
+                    let mut buffer = [0; 127];
+                    loop {
+                        let count = reader.read(&mut buffer).unwrap();
+                        if count == 0 {
+                            break;
+                        }
+                        bytes.extend_from_slice(&buffer[..count]);
+                    }
+                    drop(reader);
+                    assert_eq!(memory.used(), 0);
+                    let restored = image::$decode(&mut bytes.as_slice(), &memory, &token).unwrap();
+                    assert_eq!(serde_json::to_value(&*restored).unwrap(), $field.1);
+                    drop(restored);
+                    assert_eq!(memory.used(), 0);
+                }};
+            }
+            verify_image!(
+                table_checks,
+                table_checks_image_reader,
+                read_table_checks_image
+            );
+            verify_image!(
+                foreign_keys,
+                foreign_keys_image_reader,
+                read_foreign_keys_image
+            );
+            verify_image!(
+                key_constraints,
+                table_keys_image_reader,
+                read_table_keys_image
+            );
+            verify_image!(
+                hierarchy,
+                table_hierarchy_image_reader,
+                read_table_hierarchy_image
+            );
+            verify_image!(
+                dropped_attributes,
+                dropped_attributes_image_reader,
+                read_dropped_attributes_image
+            );
+        })
+        .join()
+        .unwrap();
+        assert_eq!(control.memory().used(), 0);
+    }
+}
+
+#[test]
+fn captured_column_images_preserve_bound_defaults_and_generated_metadata_after_retirement() {
+    use uqa_core::{memory::MemoryBudget, CancellationToken};
+    use uqa_sql::catalog::image::{columns_image_reader, read_columns_image};
+    for mutate in [false, true] {
+        let engine = Engine::new();
+        sql(&engine, "CREATE FUNCTION saved_increment(x integer) RETURNS integer IMMUTABLE LANGUAGE SQL RETURN x+1; CREATE TABLE parent(id integer PRIMARY KEY); INSERT INTO parent VALUES(1); CREATE TABLE docs(id integer GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY, ref integer REFERENCES parent(id), generated integer GENERATED ALWAYS AS (saved_increment(id)) STORED); INSERT INTO docs(ref) VALUES(1); ALTER TABLE docs ADD COLUMN payload text DEFAULT 'original' NOT NULL; ALTER TABLE docs ADD COLUMN extra integer DEFAULT saved_increment(7)");
+        let table = engine.table("docs").unwrap().unwrap();
+        let original = table.columns.snapshot();
+        assert!(original[2]
+            .generated
+            .as_ref()
+            .is_some_and(|generated| { !generated.function_dependencies.is_empty() }));
+        assert!(original[3].missing_value.is_some());
+        assert!(original[0].auto_increment.is_some());
+        let key = table.columns.key().unwrap();
+        let control = StorageReadControl::with_limit(4 << 20);
+        let cut = engine
+            .storage
+            .memory_capture
+            .as_ref()
+            .unwrap()
+            .capture(&control)
+            .unwrap();
+        if mutate {
+            sql(&engine, "BEGIN; ALTER TABLE docs RENAME COLUMN payload TO private; SAVEPOINT saved; ALTER TABLE docs DROP COLUMN extra; ROLLBACK TO saved; ROLLBACK; DROP TABLE docs; DROP FUNCTION saved_increment(integer); CREATE FUNCTION saved_increment(x integer) RETURNS integer IMMUTABLE LANGUAGE SQL RETURN x+2; CREATE TABLE docs(replacement text)");
+        }
+        drop((table, engine));
+        let saved = key.retained(&cut).unwrap().unwrap();
+        drop(cut);
+        let image = std::thread::spawn(move || {
+            let memory = MemoryBudget::new(1 << 20);
+            let token = CancellationToken::new();
+            let mut reader = columns_image_reader(saved.get().unwrap(), &memory, &token).unwrap();
+            let mut bytes = Vec::new();
+            let mut buffer = [0; 127];
+            loop {
+                let count = reader.read(&mut buffer).unwrap();
+                if count == 0 {
+                    break;
+                }
+                bytes.extend_from_slice(&buffer[..count]);
+            }
+            drop(reader);
+            assert_eq!(memory.used(), 0);
+            bytes
+        })
+        .join()
+        .unwrap();
+        assert_eq!(control.memory().used(), 0);
+        let memory = MemoryBudget::new(4 << 20);
+        let decoded =
+            read_columns_image(&mut image.as_slice(), &memory, &CancellationToken::new()).unwrap();
+        assert_eq!(
+            serde_json::to_value(&*decoded).unwrap(),
+            serde_json::to_value(&*original).unwrap()
+        );
+        drop(decoded);
+        assert_eq!(memory.used(), 0);
+    }
+}
+
+fn verify<T: serde::Serialize + Send + Sync + 'static>(
+    saved: &(MemoryCaptureKey<CapturedMemoryValue<T>>, serde_json::Value),
+    cut: &MemoryCapture,
+) {
+    let captured = saved.0.retained(cut).unwrap().unwrap();
+    assert_eq!(
+        serde_json::to_value(captured.get().unwrap()).unwrap(),
+        saved.1
+    );
+}
+
+#[test]
+fn memory_table_definition_capture_preserves_ddl_rollback_and_unread_source_closure() {
+    for mutate in [false, true] {
+        let engine = Engine::new();
+        sql(&engine, "CREATE TABLE parent(id integer PRIMARY KEY); CREATE TABLE child(id integer PRIMARY KEY, ref integer REFERENCES parent(id), old text DEFAULT 'original', CONSTRAINT positive CHECK(id>0)); INSERT INTO parent VALUES(1); INSERT INTO child(id, ref) VALUES(7,1); ALTER TABLE child DROP COLUMN old");
+        let table = engine.table("child").unwrap().unwrap();
+        let analyzer = (
+            table.analyzer.key().unwrap(),
+            serde_json::to_value(&*table.analyzer.snapshot()).unwrap(),
+        );
+        macro_rules! remember {
+            ($($field:ident),*) => {$ (
+                let $field = (
+                    table.$field.key().unwrap(),
+                    serde_json::to_value(&*table.$field.snapshot()).unwrap(),
+                );
+            )*};
+        }
+        remember!(
+            columns,
+            table_checks,
+            foreign_keys,
+            key_constraints,
+            hierarchy,
+            fts_fields,
+            row_type_array_name,
+            dropped_attributes,
+            columns_declared,
+            storage_generation,
+            next_id,
+            maps_integer_keys,
+            column_stats_loaded,
+            column_stats_dirty,
+            statistics_maintenance
+        );
+        let control = StorageReadControl::with_limit(1 << 20);
+        let cut = engine
+            .storage
+            .memory_capture
+            .as_ref()
+            .unwrap()
+            .capture(&control)
+            .unwrap();
+        if mutate {
+            sql(&engine, "BEGIN; ALTER TABLE child ADD COLUMN private text DEFAULT 'private'; INSERT INTO child(id, ref) VALUES(9,1); SAVEPOINT saved; TRUNCATE child; ALTER TABLE child RENAME COLUMN id TO replaced; ROLLBACK TO saved; ROLLBACK");
+            sql(
+                &engine,
+                "DROP TABLE child; CREATE TABLE child(replacement text)",
+            );
+        }
+        drop((table, engine));
+        verify(&columns, &cut);
+        verify(&table_checks, &cut);
+        verify(&foreign_keys, &cut);
+        verify(&key_constraints, &cut);
+        verify(&hierarchy, &cut);
+        verify(&fts_fields, &cut);
+        verify(&row_type_array_name, &cut);
+        verify(&dropped_attributes, &cut);
+        verify(&columns_declared, &cut);
+        verify(&storage_generation, &cut);
+        verify(&next_id, &cut);
+        verify(&maps_integer_keys, &cut);
+        verify(&column_stats_loaded, &cut);
+        verify(&column_stats_dirty, &cut);
+        verify(&statistics_maintenance, &cut);
+        let encoded = analyzer.0.retained(&cut).unwrap().unwrap();
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(encoded.get().unwrap()).unwrap(),
+            analyzer.1
+        );
+        drop(encoded);
+        drop(cut);
+        assert_eq!(control.memory().used(), 0);
+    }
+}
+
+#[test]
+fn memory_table_definition_capture_failure_does_not_interrupt_schema_publication() {
+    let engine = Engine::new();
+    sql(&engine, "CREATE TABLE metadata(payload text)");
+    let table = engine.table("metadata").unwrap().unwrap();
+    table
+        .columns
+        .write()
+        .edit(|columns| {
+            columns[0].missing_value = Some(crate::Value::Str("x".repeat(1 << 20)));
+            Ok(())
+        })
+        .unwrap();
+    let key = table.columns.key().unwrap();
+    let registry = engine.storage.memory_capture.as_ref().unwrap();
+    let small = StorageReadControl::with_limit(32 << 10);
+    let good = StorageReadControl::with_limit(4 << 20);
+    let failed = registry.capture(&small).unwrap();
+    let cut = registry.capture(&good).unwrap();
+    sql(
+        &engine,
+        "ALTER TABLE metadata RENAME COLUMN payload TO changed",
+    );
+    assert!(failed.check().is_err());
+    assert_eq!(table.columns.read()[0].name, "changed");
+    let captured = key.retained(&cut).unwrap().unwrap();
+    assert_eq!(captured.get().unwrap()[0].name, "payload");
+    assert!(
+        matches!(&captured.get().unwrap()[0].missing_value, Some(crate::Value::Str(value)) if value.len() == 1 << 20)
+    );
+    drop((failed, cut, table, engine));
+    assert_eq!(small.memory().used(), 0);
+    assert!(good.memory().used() >= 1 << 20);
+    good.cancellation().cancel();
+    assert!(captured.get().is_err());
+    drop(captured);
+    assert_eq!(good.memory().used(), 0);
+}
+
+#[test]
+fn memory_table_capture_keeps_authority_and_statistics_before_later_publication() {
+    let engine = Engine::new();
+    sql(&engine, "CREATE ROLE reader; CREATE TABLE metrics(id integer, value text); INSERT INTO metrics VALUES (1,'old'), (2,'old'), (3,'last'); GRANT SELECT(id) ON metrics TO reader; ANALYZE metrics");
+    let table = engine.table("metrics").unwrap().unwrap();
+    let authority = table.security.snapshot();
+    let expected = authority
+        .capture_security(&uqa_core::memory::ProductionControl::uncontrolled())
+        .unwrap()
+        .into_uncontrolled()
+        .unwrap();
+    let before = table.column_stats.snapshot();
+    assert!(!before.is_empty());
+    let security = table.security.key().unwrap();
+    let statistics = table.column_stats.key().unwrap();
+    let control = StorageReadControl::with_limit(1 << 20);
+    let cut = engine
+        .storage
+        .memory_capture
+        .as_ref()
+        .unwrap()
+        .capture(&control)
+        .unwrap();
+    sql(
+        &engine,
+        "REVOKE SELECT(id) ON metrics FROM reader; UPDATE metrics SET value='new'; ANALYZE metrics",
+    );
+    drop((table, engine));
+    assert_eq!(
+        security.retained(&cut).unwrap().unwrap().get().unwrap(),
+        &expected
+    );
+    let retained = statistics.retained(&cut).unwrap().unwrap();
+    let captured = retained.get().unwrap();
+    assert_eq!(captured.len(), before.len());
+    for (name, old) in before.iter() {
+        let saved = captured.get(name).unwrap();
+        assert_eq!(
+            (saved.row_count, saved.null_count, saved.distinct_count),
+            (old.row_count, old.null_count, old.distinct_count)
+        );
+        assert_eq!(
+            saved
+                .mcv_frequencies
+                .iter()
+                .map(|n| n.to_bits())
+                .collect::<Vec<_>>(),
+            old.mcv_frequencies
+                .iter()
+                .map(|n| n.to_bits())
+                .collect::<Vec<_>>()
+        );
+        for (left, right) in [
+            (&saved.min_value, &old.min_value),
+            (&saved.max_value, &old.max_value),
+        ] {
+            assert_eq!(left.is_some(), right.is_some());
+            if let (Some(left), Some(right)) = (left, right) {
+                assert!(left.has_same_representation(right));
+            }
+        }
+        for (left, right) in [
+            (&saved.histogram, &old.histogram),
+            (&saved.mcv_values, &old.mcv_values),
+        ] {
+            assert_eq!(left.len(), right.len());
+            assert!(left
+                .iter()
+                .zip(right)
+                .all(|(left, right)| left.has_same_representation(right)));
+        }
+    }
+    drop(retained);
+    drop(cut);
+    assert_eq!(control.memory().used(), 0);
+}

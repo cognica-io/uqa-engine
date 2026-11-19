@@ -253,7 +253,7 @@ impl MutableCommandPlan {
                     relations_bound: plan.relations_bound,
                     ctes: Vec::new(),
                     root: RelationalPlan::Values {
-                        rows: rows.rows,
+                        rows: rows.into_parts().0,
                         subqueries: plan.subqueries.clone(),
                     },
                 },

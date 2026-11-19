@@ -7,36 +7,37 @@
 use super::*;
 use uqa_core::{memory::MemoryBudget, CancellationToken};
 
-fn function(sql: &str, id: u8) -> Arc<SQLUserFunction> {
+fn function(sql: &str, id: u8) -> crate::routines::SQLRoutine {
     let crate::Statement::CreateFunction(mut definition) = crate::compile(sql).unwrap().remove(0)
     else {
         panic!("function definition");
     };
     definition.object_id = Some([id; 16]);
-    Arc::new(SQLUserFunction::new(
+    SQLUserFunction::new(
         *definition,
-        crate::routines::RoutineBody::Bound(Arc::new(crate::routines::CompiledFunctionBody::SQL(
-            Vec::new(),
-        ))),
-    ))
+        crate::routines::RoutineBody::Bound(
+            crate::routines::CompiledFunctionBody::SQL(Vec::new()).shared(),
+        ),
+    )
+    .shared()
 }
 
 fn registry() -> RoutineRegistry {
-    RoutineRegistry::from([
+    RoutineRegistry::try_from_iter([
         ("first.f".into(), vec![function("CREATE FUNCTION first.f(integer) RETURNS integer IMMUTABLE LANGUAGE sql AS 'SELECT $1'", 1)]),
         ("second.f".into(), vec![
             function("CREATE FUNCTION second.f(integer) RETURNS integer VOLATILE LANGUAGE sql AS 'SELECT $1'", 2),
             function("CREATE FUNCTION second.f(text) RETURNS text STABLE LANGUAGE sql AS 'SELECT $1'", 3),
         ]),
-    ])
+    ]).unwrap()
 }
 
 #[test]
 fn set_returning_observation_applies_visible_signature_shadowing() {
-    let registry = RoutineRegistry::from([
+    let registry = RoutineRegistry::try_from_iter([
         ("first.f".into(), vec![function("CREATE FUNCTION first.f(integer) RETURNS integer LANGUAGE sql AS 'SELECT $1'", 1)]),
         ("second.f".into(), vec![function("CREATE FUNCTION second.f(integer) RETURNS SETOF integer LANGUAGE sql AS 'SELECT $1'", 2)]),
-    ]);
+    ]).unwrap();
     let memory = MemoryBudget::new(1 << 20);
     let token = CancellationToken::new();
     let control = ProductionControl::new(&memory, &token, &token);

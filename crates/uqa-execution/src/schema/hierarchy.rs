@@ -55,6 +55,7 @@ pub struct HierarchyContext<'a> {
 
 mod attached_indexes;
 pub mod detachment;
+pub mod watermarks;
 fn ddl_storage_error(action: &str, error: uqa_storage::StorageBackendError) -> SQLError {
     uqa_sql::catalog::errors::storage_error(action, &error)
 }

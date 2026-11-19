@@ -6,6 +6,7 @@
 
 //! Native catalog records use the managed session's committed/private view and atomic staging boundary.
 
+mod analyzer_input;
 mod analyzers;
 mod cache_revisions;
 mod columns;
@@ -13,12 +14,16 @@ pub(super) mod diskann;
 mod foreign;
 pub(super) mod graph;
 mod indexes;
+mod input;
 mod record_revisions;
 mod relation_acl;
 mod relations;
+mod sequence_input;
 mod sequences;
 mod stats;
+mod table_input;
 mod tables;
+mod text_input;
 mod validation;
 mod views;
 pub(super) use analyzers::FieldWrite;

@@ -35,13 +35,28 @@ pub use column_definitions::{
 };
 
 pub struct ResolvedUserTableFunction {
-    pub function: Arc<SQLUserFunction>,
+    pub function: crate::routines::SQLRoutine,
     pub binding: FunctionBinding,
 }
 
 /// Correct the old integer series declaration, which recorded a nonexistent default on the three-argument overload. This only accepts the exact builtin catalog shape; it never resolves a persisted call by its display name.
 pub(crate) fn upgrade_legacy_table_function_binding(
     binding: &mut Option<FunctionBinding>,
+    argument_count: usize,
+) -> bool {
+    if !has_legacy_table_function_binding(binding.as_ref(), argument_count) {
+        return false;
+    }
+    binding
+        .as_mut()
+        .expect("selected legacy table-function binding")
+        .argument_types
+        .truncate(2);
+    true
+}
+
+pub(crate) fn has_legacy_table_function_binding(
+    binding: Option<&FunctionBinding>,
     argument_count: usize,
 ) -> bool {
     let Some(binding) = binding else {
@@ -60,11 +75,7 @@ pub(crate) fn upgrade_legacy_table_function_binding(
     let [first, second, third] = binding.argument_types.as_slice() else {
         return false;
     };
-    if !matches!(first.as_str(), "integer" | "bigint") || first != second || first != third {
-        return false;
-    }
-    binding.argument_types.truncate(2);
-    true
+    matches!(first.as_str(), "integer" | "bigint") && first == second && first == third
 }
 
 pub fn user_function_output_columns_for(function: &SQLUserFunction) -> Option<Vec<String>> {
@@ -174,7 +185,7 @@ pub fn resolve_user_table_function(
 }
 
 pub struct ControlledUserTableFunction {
-    pub function: Arc<SQLUserFunction>,
+    pub function: crate::routines::SQLRoutine,
     pub binding: uqa_core::memory::Produced<FunctionBinding>,
 }
 

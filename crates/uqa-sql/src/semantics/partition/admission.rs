@@ -11,7 +11,7 @@ use super::datum_text::{range_bound_text, stored_datum};
 use super::PartitionContext;
 use crate::ast::{PartitionBound, PartitionRangeDatum};
 use crate::expr::EngineHook;
-use crate::SQLError;
+use crate::{ColumnType, SQLError};
 use std::cmp::Ordering;
 
 /// One existing partition of the parent with its stored bound.
@@ -28,6 +28,7 @@ pub fn validate_new_partition_bound(
     bound: &PartitionBound,
 ) -> Result<(), SQLError> {
     let (_, keys) = parent_partition_key(context, parent)?;
+    let types = keys.into_iter().map(|key| key.ty).collect::<Vec<_>>();
     let siblings = sibling_bounds(context, parent)?;
     let partition = local_relation_name(partition)?;
     let overlapping = match bound {
@@ -43,10 +44,9 @@ pub fn validate_new_partition_bound(
             }
             None
         }
-        PartitionBound::List(values) => list_overlap(context, values, &siblings)?,
+        PartitionBound::List(values) => list_overlap(context, values, &siblings, &types[0])?,
         PartitionBound::Range { lower, upper } => {
-            if compare_range_points(context, lower, upper)? != Ordering::Less {
-                let types = keys.iter().map(|key| key.ty.clone()).collect::<Vec<_>>();
+            if compare_range_points(context, lower, upper, &types)? != Ordering::Less {
                 let engine: &dyn EngineHook = context.assignment;
                 return Err(SQLError::Diagnostic {
                     sqlstate: "42P17".into(),
@@ -59,7 +59,7 @@ pub fn validate_new_partition_bound(
                     hint: None,
                 });
             }
-            range_overlap(context, lower, upper, &siblings)?
+            range_overlap(context, lower, upper, &siblings, &types)?
         }
         PartitionBound::Hash { modulus, remainder } => {
             hash_overlap(*modulus, *remainder, &siblings)?
@@ -95,6 +95,7 @@ fn list_overlap(
     context: &PartitionContext<'_>,
     values: &[crate::ast::Expr],
     siblings: &[Sibling],
+    ty: &ColumnType,
 ) -> Result<Option<String>, SQLError> {
     for value in values {
         let value = stored_datum(value)?;
@@ -103,7 +104,7 @@ fn list_overlap(
                 continue;
             };
             for candidate in existing {
-                if super::compare_values(context, stored_datum(candidate)?, value)?.is_eq() {
+                if super::compare_values(context, stored_datum(candidate)?, value, ty)?.is_eq() {
                     return Ok(Some(sibling.name.clone()));
                 }
             }
@@ -118,6 +119,7 @@ fn range_overlap(
     lower: &[PartitionRangeDatum],
     upper: &[PartitionRangeDatum],
     siblings: &[Sibling],
+    types: &[ColumnType],
 ) -> Result<Option<String>, SQLError> {
     let mut ranges = Vec::new();
     for sibling in siblings {
@@ -132,11 +134,11 @@ fn range_overlap(
     uqa_core::ordering::sort_by_with_control(
         &mut ranges,
         &mut || Ok::<_, SQLError>(()),
-        |left, right, _| compare_range_points(context, left.0, right.0),
+        |left, right, _| compare_range_points(context, left.0, right.0, types),
     )?;
     for (existing_lower, existing_upper, name) in ranges {
-        if compare_range_points(context, lower, existing_upper)? == Ordering::Less
-            && compare_range_points(context, existing_lower, upper)? == Ordering::Less
+        if compare_range_points(context, lower, existing_upper, types)? == Ordering::Less
+            && compare_range_points(context, existing_lower, upper, types)? == Ordering::Less
         {
             return Ok(Some(name.clone()));
         }
@@ -149,31 +151,15 @@ pub(super) fn compare_range_points(
     context: &PartitionContext<'_>,
     left: &[PartitionRangeDatum],
     right: &[PartitionRangeDatum],
+    types: &[ColumnType],
 ) -> Result<Ordering, SQLError> {
-    if left.len() != right.len() {
-        return Err(SQLError::Internal(
-            "partition range points have different widths".into(),
-        ));
-    }
-    for (left, right) in left.iter().zip(right) {
-        let ordering = match (left, right) {
-            (PartitionRangeDatum::MinValue, PartitionRangeDatum::MinValue)
-            | (PartitionRangeDatum::MaxValue, PartitionRangeDatum::MaxValue) => Ordering::Equal,
-            (PartitionRangeDatum::MinValue, _) | (_, PartitionRangeDatum::MaxValue) => {
-                Ordering::Less
-            }
-            (PartitionRangeDatum::MaxValue, _) | (_, PartitionRangeDatum::MinValue) => {
-                Ordering::Greater
-            }
-            (PartitionRangeDatum::Value(left), PartitionRangeDatum::Value(right)) => {
-                super::compare_values(context, stored_datum(left)?, stored_datum(right)?)?
-            }
-        };
-        if ordering != Ordering::Equal {
-            return Ok(ordering);
-        }
-    }
-    Ok(Ordering::Equal)
+    super::comparison::range_points(
+        left,
+        right,
+        types,
+        Some(&crate::expr::EngineValueCatalog(context.assignment)),
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
 }
 
 /// Check the modulus chain against the neighboring existing moduli, then report the first existing partition that covers a remainder the new partition would own.
@@ -230,23 +216,22 @@ fn hash_overlap(
         .map(|(modulus, _, _)| *modulus)
         .max()
         .unwrap_or(modulus);
-    let mut covered = if remainder >= greatest {
-        remainder % greatest
-    } else {
-        remainder
-    };
-    loop {
-        if let Some((_, _, name)) = existing
-            .iter()
-            .find(|(modulus, remainder, _)| covered % modulus == *remainder)
-        {
-            return Ok(Some((*name).clone()));
-        }
-        covered += modulus;
-        if covered >= greatest {
-            return Ok(None);
-        }
-    }
+    // The smallest shared residue is the first coverage position PostgreSQL checks.
+    // Equal positions retain the existing modulus/remainder order.
+    Ok(existing
+        .iter()
+        .filter_map(|(existing_modulus, existing_remainder, name)| {
+            super::comparison::first_shared_hash_residue(
+                modulus,
+                remainder,
+                *existing_modulus,
+                *existing_remainder,
+                greatest,
+            )
+            .map(|residue| (residue, *name))
+        })
+        .min_by_key(|(residue, _)| *residue)
+        .map(|(_, name)| name.clone()))
 }
 
 fn modulus_error(detail: String) -> SQLError {
@@ -307,5 +292,43 @@ mod tests {
             hash_overlap(16, 10, &existing).unwrap(),
             Some("mod8_r2".into())
         );
+    }
+
+    #[test]
+    fn hash_admission_preserves_coverage_order_without_remainder_enumeration() {
+        let existing = [hash("later", 8, 6), hash("earlier", 16, 2)];
+        assert_eq!(
+            hash_overlap(2, 0, &existing).unwrap(),
+            Some("earlier".into())
+        );
+        assert_eq!(
+            hash_overlap(i32::MAX, 1, &[hash("zero", i32::MAX, 0)]).unwrap(),
+            None
+        );
+        assert_eq!(
+            hash_overlap(2, 1, &[hash("zero", 1 << 30, 0)]).unwrap(),
+            None
+        );
+        for greatest in [2, 4, 8, 16, 32] {
+            for modulus in 1..=greatest {
+                if greatest % modulus != 0 {
+                    continue;
+                }
+                for remainder in 0..modulus {
+                    for existing_remainder in 0..greatest {
+                        let expected = (0..greatest).any(|value| {
+                            value % modulus == remainder && value == existing_remainder
+                        });
+                        let actual = hash_overlap(
+                            modulus,
+                            remainder,
+                            &[hash("existing", greatest, existing_remainder)],
+                        )
+                        .unwrap();
+                        assert_eq!(actual.is_some(), expected);
+                    }
+                }
+            }
+        }
     }
 }

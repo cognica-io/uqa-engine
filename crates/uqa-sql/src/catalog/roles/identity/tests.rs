@@ -5,6 +5,7 @@
 //
 
 use super::*;
+use crate::catalog::roles::{RoleDefinitions, RoleMemberships};
 use crate::{
     ast::RoleAttribute,
     catalog::{
@@ -27,10 +28,7 @@ fn actor() -> RoleDefinition {
     }
 }
 
-fn membership_catalog() -> (
-    BTreeMap<String, RoleDefinition>,
-    BTreeMap<super::super::RoleMembershipKey, RoleMembership>,
-) {
+fn membership_catalog() -> (RoleDefinitions, RoleMemberships) {
     let member = actor();
     let mut group = member.clone();
     group.name = "group".into();
@@ -46,11 +44,16 @@ fn membership_catalog() -> (
         inherit_option: true,
         set_option: true,
     };
-    let roles = [member, group, bootstrap]
-        .into_iter()
-        .map(|role| (role.name.clone(), role))
-        .collect();
-    (roles, BTreeMap::from([(membership.key(), membership)]))
+    let roles = RoleDefinitions::try_from_iter(
+        [member, group, bootstrap]
+            .into_iter()
+            .map(|role| (role.name.clone(), role)),
+    )
+    .unwrap();
+    (
+        roles,
+        RoleMemberships::try_from_iter([(membership.key(), membership)]).unwrap(),
+    )
 }
 
 #[test]
@@ -58,16 +61,23 @@ fn inherited_owner_identity_follows_rename_and_rejects_reused_names_and_oids() {
     let (mut roles, memberships) = membership_catalog();
     let owner = roles["group"].identity();
     assert!(role_inherits(&roles, &memberships, "actor", &owner));
-    let mut renamed = roles.remove("group").unwrap();
+    let mut renamed = roles.get("group").unwrap().clone();
+    roles.remove("group").unwrap();
     let mut replacement = renamed.clone();
     renamed.name = "renamed_group".into();
     replacement.oid += 100;
     replacement.object_id = [9; 16];
-    roles.insert(renamed.name.clone(), renamed);
-    roles.insert(replacement.name.clone(), replacement);
+    roles.insert(renamed.name.clone(), renamed).unwrap();
+    roles.insert(replacement.name.clone(), replacement).unwrap();
     assert!(role_inherits(&roles, &memberships, "actor", &owner));
     assert!(!role_inherits(&roles, &memberships, "actor", "group"));
-    roles.get_mut("renamed_group").unwrap().object_id = [8; 16];
+    roles
+        .edit("renamed_group", |value| {
+            value.object_id = [8; 16];
+            Ok(())
+        })
+        .unwrap()
+        .unwrap();
     assert!(!role_inherits(&roles, &memberships, "actor", &owner));
 }
 
@@ -75,18 +85,22 @@ fn inherited_owner_identity_follows_rename_and_rejects_reused_names_and_oids() {
 fn selected_role_follows_attributes_and_rename_but_not_name_or_oid_reuse() {
     let original = actor();
     let selected = RoleBinding::from_definition(&original).unwrap();
-    let mut roles = BTreeMap::from([(original.name.clone(), original.clone())]);
+    let mut roles =
+        RoleDefinitions::try_from_iter([(original.name.clone(), original.clone())]).unwrap();
     assert_eq!(selected.require_name(&roles).unwrap(), "actor");
     assert!(!role_is_superuser(&roles, &selected));
     roles
-        .get_mut("actor")
+        .edit("actor", |value| {
+            value.attributes.insert(RoleAttribute::Superuser);
+            Ok(())
+        })
         .unwrap()
-        .attributes
-        .insert(RoleAttribute::Superuser);
+        .unwrap();
     assert!(role_is_superuser(&roles, &selected));
-    let mut renamed = roles.remove("actor").unwrap();
+    let mut renamed = roles.get("actor").unwrap().clone();
+    roles.remove("actor").unwrap();
     renamed.name = "renamed".into();
-    roles.insert(renamed.name.clone(), renamed);
+    roles.insert(renamed.name.clone(), renamed).unwrap();
     assert_eq!(selected.require_name(&roles).unwrap(), "renamed");
     selected.revalidate(&roles).unwrap();
     assert!(role_is_superuser(&roles, &selected));
@@ -96,7 +110,8 @@ fn selected_role_follows_attributes_and_rename_but_not_name_or_oid_reuse() {
         replacement.oid = oid;
         replacement.object_id = object_id;
         replacement.attributes.insert(RoleAttribute::Superuser);
-        let roles = BTreeMap::from([(replacement.name.clone(), replacement)]);
+        let roles =
+            RoleDefinitions::try_from_iter([(replacement.name.clone(), replacement)]).unwrap();
         assert!(role_is_superuser(&roles, "actor"));
         assert!(!role_is_superuser(&roles, &selected));
         assert_eq!(
@@ -120,15 +135,16 @@ fn reused_original_name_does_not_override_a_renamed_role_identity() {
     replacement.oid += 1;
     replacement.object_id = [2; 16];
     replacement.attributes.insert(RoleAttribute::Superuser);
-    let mut roles = BTreeMap::from([
+    let mut roles = RoleDefinitions::try_from_iter([
         (renamed.name.clone(), renamed),
         (replacement.name.clone(), replacement),
-    ]);
+    ])
+    .unwrap();
     assert_eq!(selected.require_name(&roles).unwrap(), "renamed");
     assert!(!role_is_superuser(&roles, &selected));
     assert!(role_is_superuser(&roles, "actor"));
     selected.revalidate(&roles).unwrap();
-    roles.remove("renamed");
+    roles.remove("renamed").unwrap();
     assert_eq!(
         selected.revalidate(&roles).unwrap_err().sqlstate(),
         Some("42704")
@@ -146,10 +162,21 @@ fn deleted_role_cannot_inherit_or_set_replacement_memberships() {
     let selected = RoleBinding::from_definition(&roles["actor"]).unwrap();
     assert!(role_inherits(&roles, &memberships, &selected, "group"));
     assert!(role_can_set(&roles, &memberships, &selected, "group"));
-    roles.get_mut("actor").unwrap().object_id = [3; 16];
-    let (_, mut replacement_membership) = memberships.pop_first().unwrap();
+    roles
+        .edit("actor", |value| {
+            value.object_id = [3; 16];
+            Ok(())
+        })
+        .unwrap()
+        .unwrap();
+    let (key, membership) = memberships.iter().next().unwrap();
+    let key = *key;
+    let mut replacement_membership = membership.clone();
+    memberships.remove(&key).unwrap();
     replacement_membership.member = RoleBinding::from_definition(&roles["actor"]).unwrap();
-    memberships.insert(replacement_membership.key(), replacement_membership);
+    memberships
+        .insert(replacement_membership.key(), replacement_membership)
+        .unwrap();
     for target in ["actor", "group"] {
         assert!(!role_inherits(&roles, &memberships, &selected, target));
         assert!(!role_can_set(&roles, &memberships, &selected, target));
@@ -164,11 +191,16 @@ fn retained_memberships_never_authorize_recreated_endpoints_even_when_oids_match
     for endpoint in ["actor", "group"] {
         for reuse_oid in [false, true] {
             let (mut roles, memberships) = membership_catalog();
-            let replacement = roles.get_mut(endpoint).unwrap();
-            replacement.object_id = [3; 16];
-            if !reuse_oid {
-                replacement.oid += 100;
-            }
+            roles
+                .edit(endpoint, |replacement| {
+                    replacement.object_id = [3; 16];
+                    if !reuse_oid {
+                        replacement.oid += 100;
+                    }
+                    Ok(())
+                })
+                .unwrap()
+                .unwrap();
             assert!(!role_inherits(&roles, &memberships, "actor", "group"));
             assert!(!role_can_set(&roles, &memberships, "actor", "group"));
             for privilege in [RolePrivilegeCheck::Member, RolePrivilegeCheck::Admin] {
@@ -188,11 +220,12 @@ fn retained_memberships_never_authorize_recreated_endpoints_even_when_oids_match
 fn membership_keys_and_authority_follow_role_identity_across_name_changes() {
     let (mut roles, memberships) = membership_catalog();
     let original = memberships.values().next().unwrap();
-    let mut renamed = roles.remove("group").unwrap();
+    let mut renamed = roles.get("group").unwrap().clone();
+    roles.remove("group").unwrap();
     renamed.name = "renamed_group".into();
     let mut same_membership = original.clone();
     same_membership.role = RoleBinding::from_definition(&renamed).unwrap();
-    roles.insert(renamed.name.clone(), renamed);
+    roles.insert(renamed.name.clone(), renamed).unwrap();
     assert_eq!(original.key(), same_membership.key());
     assert!(role_inherits(
         &roles,
@@ -205,7 +238,7 @@ fn membership_keys_and_authority_follow_role_identity_across_name_changes() {
     replacement.name = "group".into();
     replacement.oid += 100;
     replacement.object_id = [3; 16];
-    roles.insert(replacement.name.clone(), replacement);
+    roles.insert(replacement.name.clone(), replacement).unwrap();
     assert!(!role_inherits(&roles, &memberships, "actor", "group"));
 }
 
@@ -283,11 +316,11 @@ impl Permissions {
     fn assert_privileges(
         &self,
         selected: &RoleBinding,
-        roles: &BTreeMap<String, RoleDefinition>,
+        roles: &RoleDefinitions,
         grant_option: bool,
         expected: bool,
     ) {
-        let memberships = BTreeMap::new();
+        let memberships = RoleMemberships::new();
         let check = table::TablePrivilegeCheck {
             privilege: table::TableAclPrivilege::Select,
             grant_option,
@@ -351,10 +384,10 @@ impl Permissions {
     fn assert_grantor(
         &self,
         selected: &RoleBinding,
-        roles: &BTreeMap<String, RoleDefinition>,
+        roles: &RoleDefinitions,
         expected: Option<String>,
     ) {
-        let memberships = BTreeMap::new();
+        let memberships = RoleMemberships::new();
         assert_eq!(
             table::select_acl_grantor(
                 &self.relation,
@@ -422,10 +455,10 @@ fn deleted_role_retains_public_access_without_replacement_acl_or_grant_options()
             let live = role
                 .as_ref()
                 .is_some_and(|role| role.object_id == original.object_id);
-            let roles = role
-                .into_iter()
-                .map(|role| (role.name.clone(), role))
-                .collect();
+            let roles = RoleDefinitions::try_from_iter(
+                role.into_iter().map(|role| (role.name.clone(), role)),
+            )
+            .unwrap();
             let grant = live && !public;
             permissions.assert_privileges(&selected, &roles, false, live || public);
             permissions.assert_privileges(&selected, &roles, true, grant);

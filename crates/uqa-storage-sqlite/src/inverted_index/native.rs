@@ -25,7 +25,7 @@ use read::NativeRead;
 
 struct NativeOccurrenceStorage {
     connection: ManagedConnection,
-    table: String,
+    table: uqa_storage::StorageName,
 }
 
 impl OccurrenceStorage for NativeOccurrenceStorage {
@@ -62,7 +62,7 @@ impl SQLiteInvertedIndex {
 
     pub(super) fn native_index(&self) -> Option<KeyValueInvertedIndex> {
         self.conn.is_native_record_session().then(|| {
-            KeyValueInvertedIndex::from_storage(
+            KeyValueInvertedIndex::from_storage_name(
                 Arc::new(NativeOccurrenceStorage {
                     connection: self.conn.clone(),
                     table: self.table.clone(),

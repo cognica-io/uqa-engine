@@ -93,81 +93,49 @@ fn visit<'a>(
     classify: &mut dyn FnMut(&ScalarExpr) -> Result<bool, SQLError>,
     observe: &mut dyn FnMut(&'a ScalarExpr) -> Result<(), SQLError>,
 ) -> Result<(), SQLError> {
-    control.check()?;
-    if classify(expr)? {
-        return observe(expr);
-    }
-    match expr {
-        ScalarExpr::Func { args, filter, .. } => {
-            for arg in args {
-                visit(arg, control, classify, observe)?;
-            }
-            if let Some(filter) = filter.as_deref() {
-                visit(filter, control, classify, observe)?;
-            }
+    crate::catalog::work::inline(visit_with_work(expr, control, &mut (), classify, observe))
+}
+
+async fn visit_with_work<'a, W, C, O>(
+    expr: &'a ScalarExpr,
+    control: &ProductionControl<'_>,
+    work: &mut W,
+    classify: &mut C,
+    observe: &mut O,
+) -> Result<(), SQLError>
+where
+    W: crate::catalog::work::Work,
+    C: FnMut(&ScalarExpr) -> Result<bool, SQLError> + ?Sized,
+    O: FnMut(&'a ScalarExpr) -> Result<(), SQLError> + ?Sized,
+{
+    use crate::ir::observation::Decision;
+    crate::ir::observation::visit(expr, control, work, false, &mut |expr| {
+        if classify(expr)? {
+            observe(expr)?;
+            Ok(Decision::Prune)
+        } else {
+            Ok(Decision::Descend)
         }
-        ScalarExpr::Array(items)
-        | ScalarExpr::Row(items)
-        | ScalarExpr::CompositeRow { items, .. }
-        | ScalarExpr::And(items)
-        | ScalarExpr::Or(items) => {
-            for item in items {
-                visit(item, control, classify, observe)?;
-            }
-        }
-        ScalarExpr::Binary { lhs, rhs, .. } => {
-            visit(lhs, control, classify, observe)?;
-            visit(rhs, control, classify, observe)?;
-        }
-        ScalarExpr::Not(inner)
-        | ScalarExpr::UnaryMinus(inner)
-        | ScalarExpr::Cast { expr: inner, .. }
-        | ScalarExpr::Collated { expr: inner, .. } => {
-            visit(inner, control, classify, observe)?;
-        }
-        ScalarExpr::IsNull { expr, .. } => visit(expr, control, classify, observe)?,
-        ScalarExpr::Between { expr, low, high } => {
-            visit(expr, control, classify, observe)?;
-            visit(low, control, classify, observe)?;
-            visit(high, control, classify, observe)?;
-        }
-        ScalarExpr::InList { expr, list, .. } => {
-            visit(expr, control, classify, observe)?;
-            for item in list {
-                visit(item, control, classify, observe)?;
-            }
-        }
-        ScalarExpr::Case {
-            base,
-            when,
-            else_branch,
-        } => {
-            if let Some(base) = base.as_deref() {
-                visit(base, control, classify, observe)?;
-            }
-            for (condition, result) in when {
-                visit(condition, control, classify, observe)?;
-                visit(result, control, classify, observe)?;
-            }
-            if let Some(else_branch) = else_branch.as_deref() {
-                visit(else_branch, control, classify, observe)?;
-            }
-        }
-        ScalarExpr::InSubquery { expr, .. } => visit(expr, control, classify, observe)?,
-        ScalarExpr::Default
-        | ScalarExpr::Star
-        | ScalarExpr::QualifiedStar(_)
-        | ScalarExpr::Column(_)
-        | ScalarExpr::Position(_)
-        | ScalarExpr::InternalColumn(_)
-        | ScalarExpr::QualifiedColumn { .. }
-        | ScalarExpr::Literal(_)
-        | ScalarExpr::TypedLiteral { .. }
-        | ScalarExpr::RetainedLiteral(_)
-        | ScalarExpr::Param(_)
-        | ScalarExpr::WindowCall { .. }
-        | ScalarExpr::ScalarSubquery(_)
-        | ScalarExpr::Exists { .. } => {}
-    }
+    })
+    .await?;
     Ok(())
+}
+
+pub(crate) async fn contains_with_work<W, C>(
+    expression: &ScalarExpr,
+    control: &ProductionControl<'_>,
+    work: &mut W,
+    classify: &mut C,
+) -> Result<bool, SQLError>
+where
+    W: crate::catalog::work::Work,
+    C: FnMut(&ScalarExpr) -> Result<bool, SQLError> + ?Sized,
+{
+    let mut found = false;
+    visit_with_work(expression, control, work, classify, &mut |_| {
+        found = true;
+        Ok(())
+    })
+    .await?;
+    Ok(found)
 }

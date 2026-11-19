@@ -9,10 +9,10 @@ use crate::catalog::{
     cache::RegtypeOutputCache,
     test_support::{empty_catalog, table_snapshot, CatalogServices},
 };
-use std::sync::Arc;
 use uqa_core::{
     catalog_identity::CatalogObjectIdentity, catalog_role::RoleIdentity, RelationIdentity, Value,
 };
+use uqa_sql::catalog::roles::RoleDefinitions;
 use uqa_sql::{ast::TableConstraintSet, catalog::domain::StoredDomain, Statement};
 
 mod domains;
@@ -24,12 +24,16 @@ fn table_name(position: usize) -> RelationIdentity {
 
 fn fixture(unrelated: usize) -> CatalogReadView {
     let mut snapshot = empty_catalog().snapshot().clone();
-    snapshot.definitions.schemas =
-        Arc::new(crate::catalog::security::BoundSchemaSecurity::initial_catalog());
-    snapshot.definitions.roles = Arc::new(BTreeMap::from([(
-        "uqa".into(),
-        uqa_sql::catalog::roles::RoleDefinition::bootstrap(),
-    )]));
+    snapshot.definitions.schemas = uqa_core::memory::RetainedValue::new(
+        crate::catalog::security::BoundSchemaSecurity::initial_catalog(),
+    );
+    snapshot.definitions.roles = uqa_core::memory::RetainedValue::new(
+        RoleDefinitions::try_from_iter([(
+            "uqa".into(),
+            uqa_sql::catalog::roles::RoleDefinition::bootstrap(),
+        )])
+        .unwrap(),
+    );
     for position in 0..=unrelated {
         let Statement::CreateTable(mut table) =
             uqa_sql::compile("CREATE TABLE items(id integer, CONSTRAINT positive CHECK(id > 0))")
@@ -138,7 +142,12 @@ fn retained_constraint_definitions_survive_rename_and_removal() {
         .unwrap();
     let mut snapshot = catalog.snapshot().clone();
     let table = snapshot.tables.get_mut(&table_name(0)).unwrap();
-    Arc::make_mut(&mut table.checks)[0].name = Some("renamed".into());
+    {
+        let target = &mut table.checks;
+        let mut value = (**target).clone();
+        value[0].name = Some("renamed".into());
+        *target = value.into();
+    }
     let current = CatalogReadView::new(snapshot.clone());
     let selected = constraint_catalog_row_by_oid(&current, &resolution, 70_000)
         .unwrap()
@@ -165,13 +174,22 @@ fn constraint_cache_keeps_complete_validation_order_and_retries_errors() {
     let resolution = CatalogServices::default().resolution;
     let mut snapshot = catalog.snapshot().clone();
     for table in snapshot.tables.values_mut() {
-        Arc::make_mut(&mut table.checks)[0].name = None;
+        {
+            let target = &mut table.checks;
+            let mut value = (**target).clone();
+            value[0].name = None;
+            *target = value.into();
+        }
     }
     let invalid = CatalogReadView::new(snapshot.clone());
     let error = constraint_catalog_row_by_oid(&invalid, &resolution, 70_000).unwrap_err();
     assert!(error.to_string().contains("public.items_000` has no name"));
-    Arc::make_mut(&mut snapshot.tables.get_mut(&table_name(0)).unwrap().checks)[0].name =
-        Some("positive".into());
+    {
+        let target = &mut snapshot.tables.get_mut(&table_name(0)).unwrap().checks;
+        let mut value = (**target).clone();
+        value[0].name = Some("positive".into());
+        *target = value.into();
+    }
     let invalid = CatalogReadView::new(snapshot);
     let before = TABLE_READS.get();
     for _ in 0..2 {
@@ -192,8 +210,12 @@ fn constraint_cache_keeps_complete_validation_order_and_retries_errors() {
 fn duplicate_constraint_oid_selects_the_first_validated_row() {
     let catalog = fixture(1);
     let mut snapshot = catalog.snapshot().clone();
-    Arc::make_mut(&mut snapshot.tables.get_mut(&table_name(1)).unwrap().checks)[0].catalog_oid =
-        Some(70_000);
+    {
+        let target = &mut snapshot.tables.get_mut(&table_name(1)).unwrap().checks;
+        let mut value = (**target).clone();
+        value[0].catalog_oid = Some(70_000);
+        *target = value.into();
+    }
     let catalog = CatalogReadView::new(snapshot);
     let resolution = CatalogServices::default().resolution;
     assert_eq!(

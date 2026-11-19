@@ -7,18 +7,28 @@
 //! Immutable evaluated constants share storage without retaining every decoded payload.
 
 pub(crate) mod observation;
+pub(crate) mod ownership;
+use ownership::ConstantSource;
 
 use std::{fmt, sync::Arc};
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use uqa_core::memory::{Produced, ProductionControl};
-use uqa_core::Value;
+use uqa_core::{OwnedValue, Value};
 
 use crate::{ast::ColumnType, SQLError};
 
 /// Storage for an already evaluated value. Reading must reproduce the original value without invoking SQL or changing it; implementations own their resource until the final shared handle is dropped.
 pub trait ConstantValueSource: fmt::Debug + Send + Sync {
-    fn read(&self, index: u64) -> Result<Value, SQLError>;
+    fn read(&self, index: u64) -> Result<Value, SQLError> {
+        let value = self.resident_value(index).ok_or_else(|| {
+            SQLError::Internal("retained constant index is outside its owner".into())
+        })?;
+        Ok(ProductionControl::uncontrolled()
+            .copy_value(value)?
+            .into_parts()
+            .0)
+    }
 
     /// Borrow a resident immutable value when its owner exposes one. This never reads or decodes a spill record.
     fn resident_value(&self, _index: u64) -> Option<&Value> {
@@ -52,23 +62,34 @@ pub trait ConstantValueSource: fmt::Debug + Send + Sync {
 /// An immutable positional value in a shared owner. Copying this handle never reads or copies the payload.
 #[derive(Clone)]
 pub struct RetainedConstantValue {
-    source: Arc<dyn ConstantValueSource>,
+    source: Option<ConstantSource>,
     index: u64,
 }
 
 impl RetainedConstantValue {
     pub fn new(source: Arc<dyn ConstantValueSource>, index: u64) -> Self {
-        Self { source, index }
+        Self {
+            source: Some(ConstantSource::External(source)),
+            index,
+        }
     }
 
     /// Compare immutable source identity without decoding either value.
     pub fn shares_value_with(&self, other: &Self) -> bool {
-        Arc::ptr_eq(&self.source, &other.source) && self.index == other.index
+        std::ptr::addr_eq(self.source(), other.source()) && self.index == other.index
+    }
+
+    fn source(&self) -> &dyn ConstantValueSource {
+        self.source.as_ref().expect("live retained constant").get()
     }
 
     pub fn read(&self) -> Result<Value, SQLError> {
+        self.read_owned().map(OwnedValue::into_inner)
+    }
+
+    fn read_owned(&self) -> Result<OwnedValue, SQLError> {
         crate::expr::check_statement_cancellation()?;
-        let value = self.source.read(self.index)?;
+        let value = OwnedValue::new(self.source().read(self.index)?);
         crate::expr::check_statement_cancellation()?;
         Ok(value)
     }
@@ -78,11 +99,26 @@ impl RetainedConstantValue {
         value: Produced<Value>,
         control: &ProductionControl<'_>,
     ) -> Result<Self, SQLError> {
-        Ok(Self::new(value.into_shared(control)?, 0))
+        Self::from_produced_with_footprint(value, control).map(|(value, _)| value)
+    }
+
+    fn from_produced_with_footprint(
+        value: Produced<Value>,
+        control: &ProductionControl<'_>,
+    ) -> Result<(Self, usize), SQLError> {
+        let value = value.into_owned_value().into_shared(control)?;
+        let bytes = value.reserved_bytes();
+        Ok((
+            Self {
+                source: Some(ConstantSource::Native(value)),
+                index: 0,
+            },
+            bytes,
+        ))
     }
 
     pub fn resident_value(&self) -> Option<&Value> {
-        self.source.resident_value(self.index)
+        self.source().resident_value(self.index)
     }
 
     pub fn read_with_control(
@@ -91,10 +127,27 @@ impl RetainedConstantValue {
     ) -> Result<Produced<Value>, SQLError> {
         crate::expr::check_statement_cancellation()?;
         control.check()?;
-        let value = self.source.read_with_control(self.index, control)?;
+        let value = self
+            .source()
+            .read_with_control(self.index, control)?
+            .into_owned_value();
         crate::expr::check_statement_cancellation()?;
         control.check()?;
-        Ok(value)
+        Ok(value.into_value())
+    }
+
+    /// Capture an evaluated payload with the capture owner's controls. An unrelated invoking SQL statement does not own catalog retention performed during mutation or rollback.
+    pub(crate) fn capture_with_control(
+        &self,
+        control: &ProductionControl<'_>,
+    ) -> Result<Produced<Value>, SQLError> {
+        control.check()?;
+        let value = self
+            .source()
+            .read_with_control(self.index, control)?
+            .into_owned_value();
+        control.check()?;
+        Ok(value.into_value())
     }
 }
 
@@ -115,7 +168,7 @@ impl PartialEq for RetainedConstantValue {
             return left.has_same_representation(right);
         }
         // IR representation comparison may conservatively decline a rewrite when a resource cannot be read. SQL evaluation retains the original fallible read and reports its error.
-        match (self.read(), other.read()) {
+        match (self.read_owned(), other.read_owned()) {
             (Ok(left), Ok(right)) => left.has_same_representation(&right),
             _ => false,
         }
@@ -124,7 +177,7 @@ impl PartialEq for RetainedConstantValue {
 
 impl Serialize for RetainedConstantValue {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        self.read()
+        self.read_owned()
             .map_err(serde::ser::Error::custom)?
             .serialize(serializer)
     }
@@ -133,44 +186,17 @@ impl Serialize for RetainedConstantValue {
 impl<'de> Deserialize<'de> for RetainedConstantValue {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let value = Value::deserialize(deserializer)?;
-        Ok(Self::new(Arc::new(OwnedConstant(value)), 0))
-    }
-}
-
-#[derive(Debug)]
-struct OwnedConstant(Value);
-
-impl ConstantValueSource for OwnedConstant {
-    fn resident_value(&self, index: u64) -> Option<&Value> {
-        (index == 0).then_some(&self.0)
-    }
-    fn observe_allocations<'a>(
-        &'a self,
-        observer: &mut uqa_core::memory::AllocationObserver<'a, '_>,
-    ) -> Result<(), uqa_core::ValueRetentionError> {
-        observer.allocation(size_of::<Self>(), size_of::<Self>())?;
-        observer.child(&self.0)
-    }
-
-    fn read(&self, index: u64) -> Result<Value, SQLError> {
-        if index != 0 {
-            return Err(SQLError::Internal(
-                "retained constant index is outside its owner".into(),
-            ));
-        }
-        Ok(self.0.clone())
+        let control = ProductionControl::uncontrolled();
+        let value = control
+            .finish(value, None)
+            .map_err(serde::de::Error::custom)?;
+        Self::from_produced(value, &control).map_err(serde::de::Error::custom)
     }
 }
 
 impl ConstantValueSource for Produced<Value> {
     fn resident_value(&self, index: u64) -> Option<&Value> {
         (index == 0).then_some(self)
-    }
-
-    fn read(&self, index: u64) -> Result<Value, SQLError> {
-        self.resident_value(index).cloned().ok_or_else(|| {
-            SQLError::Internal("retained constant index is outside its owner".into())
-        })
     }
 
     fn observe_allocations<'a>(
@@ -182,13 +208,27 @@ impl ConstantValueSource for Produced<Value> {
     }
 }
 
+impl ConstantValueSource for Produced<OwnedValue> {
+    fn resident_value(&self, index: u64) -> Option<&Value> {
+        (index == 0).then_some(self)
+    }
+
+    fn observe_allocations<'a>(
+        &'a self,
+        observer: &mut uqa_core::memory::AllocationObserver<'a, '_>,
+    ) -> Result<(), uqa_core::ValueRetentionError> {
+        observer.allocation(size_of::<Self>(), size_of::<Self>())?;
+        observer.child(&***self)
+    }
+}
+
 impl uqa_core::memory::ObserveAllocations for RetainedConstantValue {
     fn observe_allocations<'a>(
         &'a self,
         observer: &mut uqa_core::memory::AllocationObserver<'a, '_>,
     ) -> Result<(), uqa_core::ValueRetentionError> {
-        if observer.shared_owner(self.source.as_ref())? {
-            self.source.observe_allocations(observer)?;
+        if observer.shared_owner(self.source())? {
+            self.source().observe_allocations(observer)?;
         }
         Ok(())
     }
@@ -196,7 +236,7 @@ impl uqa_core::memory::ObserveAllocations for RetainedConstantValue {
 
 /// Selected result metadata shared with an already evaluated datum. Plan copies never duplicate its allocation or change its constructor lease.
 #[derive(Debug, Clone, PartialEq)]
-pub struct RetainedScalarLiteral(Arc<Produced<RetainedLiteralData>>);
+pub struct RetainedScalarLiteral(Option<Arc<Produced<RetainedLiteralData>>>);
 
 #[derive(Debug, PartialEq)]
 pub struct RetainedLiteralData {
@@ -209,7 +249,7 @@ pub struct RetainedLiteralData {
 impl std::ops::Deref for RetainedScalarLiteral {
     type Target = RetainedLiteralData;
     fn deref(&self) -> &Self::Target {
-        &self.0
+        self.0.as_deref().expect("live retained literal")
     }
 }
 
@@ -229,7 +269,7 @@ impl RetainedScalarLiteral {
         collation_oid: Option<u32>,
     ) -> Self {
         let control = ProductionControl::uncontrolled();
-        Self(
+        Self(Some(
             control
                 .finish(
                     RetainedLiteralData {
@@ -243,7 +283,7 @@ impl RetainedScalarLiteral {
                 .expect("ordinary constant metadata")
                 .into_shared(&control)
                 .expect("ordinary shared constant metadata"),
-        )
+        ))
     }
 
     /// The value source retains its own storage lease. Metadata constructors supply their existing leases and this owner admits the shared header before allocation.
@@ -274,11 +314,59 @@ impl RetainedScalarLiteral {
             declaration,
             collation_oid,
         };
-        Ok(Self(
+        Ok(Self(Some(
             control
                 .finish(data, control.combine(ty_memory, declaration_memory))?
                 .into_shared(control)?,
-        ))
+        )))
+    }
+
+    /// Copy an evaluated literal and its selected metadata into independent capture ownership without consulting an unrelated statement's cancellation.
+    pub(crate) fn capture_with_footprint(
+        &self,
+        control: &ProductionControl<'_>,
+    ) -> Result<(Self, usize), SQLError> {
+        let value = self.value.capture_with_control(control)?.into_owned_value();
+        let ty = self
+            .ty
+            .as_ref()
+            .map(|ty| ty.clone_with_control(control))
+            .transpose()?;
+        let declaration = self
+            .declaration
+            .as_ref()
+            .map(|name| control.copy_text(name))
+            .transpose()?;
+        Self::from_produced(
+            value.into_value(),
+            ty,
+            declaration,
+            self.collation_oid,
+            control,
+        )
+    }
+
+    /// Construct independent retained payload and metadata owners and report their complete admitted footprint without walking or decoding the completed value.
+    pub(crate) fn from_produced(
+        value: Produced<Value>,
+        ty: Option<Produced<ColumnType>>,
+        declaration: Option<Produced<String>>,
+        collation_oid: Option<u32>,
+        control: &ProductionControl<'_>,
+    ) -> Result<(Self, usize), SQLError> {
+        let (value, value_bytes) =
+            RetainedConstantValue::from_produced_with_footprint(value, control)?;
+        let literal = Self::with_control(value, ty, declaration, collation_oid, control)?;
+        let bytes = value_bytes
+            .checked_add(
+                literal
+                    .0
+                    .as_ref()
+                    .expect("live retained literal")
+                    .reserved_bytes(),
+            )
+            .ok_or(uqa_core::memory::MemoryError::SizeOverflow)?;
+        Ok((literal, bytes))
     }
 
     /// Materialize one value only at an interface that requires an owned literal. Cloning plans retains the shared owner instead.
@@ -303,7 +391,7 @@ impl uqa_core::memory::ObserveAllocations for RetainedScalarLiteral {
         &'a self,
         observer: &mut uqa_core::memory::AllocationObserver<'a, '_>,
     ) -> Result<(), uqa_core::ValueRetentionError> {
-        if observer.shared_owner(self.0.as_ref())? {
+        if observer.shared_owner(self.0.as_deref().expect("live retained literal"))? {
             observer.allocation(
                 size_of::<Produced<RetainedLiteralData>>(),
                 size_of::<Produced<RetainedLiteralData>>(),
@@ -326,9 +414,10 @@ pub trait ConstantValueStorage: fmt::Debug + Send + Sync {
         value: Produced<Value>,
         control: &ProductionControl<'_>,
     ) -> Result<RetainedConstantValue, SQLError> {
+        let value = value.into_owned_value();
         control.check()?;
         let (value, memory) = value.into_parts();
-        let retained = self.retain(value);
+        let retained = self.retain(value.into_inner());
         drop(memory);
         retained
     }

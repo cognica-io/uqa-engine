@@ -8,10 +8,15 @@
 
 use crate::{mvcc::PrivateRecordChanges, read_control::StorageReadControl, StorageBackendResult};
 use std::ops::Bound;
-use uqa_core::{memory::MemoryBudget, DocId, Value};
+use uqa_core::{
+    memory::{Budgeted, MemoryBudget},
+    DocId, Value,
+};
 
+mod capture;
 mod records;
 mod tree;
+pub use capture::RetainedValueIndexSnapshot;
 use records::Records;
 
 /// A physical value index whose ordered nodes and value chunks use the existing encrypted private-record runs. Core ordering is unchanged; SQL operator selection belongs to the caller. Each replacement publishes a new root only after all of its writes succeed. Cloning shares immutable runs and forks subsequent updates.
@@ -178,6 +183,18 @@ impl RetainedValueIndex {
         let _scope = records.read_scope()?;
         let snapshot = records.snapshot()?;
         records.visit_values(&snapshot, visit)
+    }
+
+    /// Transfer each decoded value together with its original invoking allowance. Private-run workspace keeps the index's separate fixed budget; decoded payloads never escape the caller's admission.
+    pub fn visit_values_owned(
+        &self,
+        control: &StorageReadControl,
+        visit: &mut dyn FnMut(DocId, Budgeted<Value>) -> StorageBackendResult<bool>,
+    ) -> StorageBackendResult<()> {
+        let records = Records::new(&self.records, &self.memory, control);
+        let _scope = records.read_scope()?;
+        let snapshot = records.snapshot()?;
+        records.visit_values_owned(&snapshot, visit)
     }
 }
 

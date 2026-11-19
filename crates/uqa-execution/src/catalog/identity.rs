@@ -17,7 +17,7 @@ pub use allocation::{
 };
 
 mod counter;
-pub use counter::{CatalogOidCounter, FIRST_NORMAL_OBJECT_ID};
+pub use counter::{CapturedCatalogOidPosition, CatalogOidCounter, FIRST_NORMAL_OBJECT_ID};
 
 pub fn allocate_catalog_oid(kind: &str) -> Result<i64, uqa_sql::SQLError> {
     loop {

@@ -6,17 +6,18 @@
 
 //! Bind catalog role references once and project names from their retained incarnations.
 
+use crate::catalog::roles::RoleDefinitions;
 use crate::{
     catalog::roles::{identity::RoleBinding, RoleDefinition, RoleIdentity, RoleReference},
     SQLError,
 };
-use std::{collections::BTreeMap, sync::Arc};
+use std::sync::Arc;
 use uqa_core::Value;
 
 /// PUBLIC and absent role OIDs have no role binding but still receive PUBLIC privileges.
 pub(super) fn bind_inquiry_subject(
     value: &Value,
-    roles: &BTreeMap<String, RoleDefinition>,
+    roles: &RoleDefinitions,
     function: &str,
 ) -> Result<Option<RoleReference>, SQLError> {
     let role = match value {
@@ -41,20 +42,18 @@ pub(super) fn bind_inquiry_subject(
 }
 
 pub(super) fn bind_role(
-    roles: &BTreeMap<String, RoleDefinition>,
+    roles: &RoleDefinitions,
     name: &str,
     catalog: &str,
 ) -> Result<RoleIdentity, String> {
     let role = roles
         .get(name)
         .ok_or_else(|| format!("persisted {catalog} privileges reference missing role `{name}`"))?;
-    RoleBinding::from_definition(role)
-        .map(|binding| binding.identity())
-        .map_err(|error| error.to_string())
+    RoleBinding::identity_from_definition(role).map_err(|error| error.to_string())
 }
 
 pub(super) fn role_name<'a>(
-    roles: &'a BTreeMap<String, RoleDefinition>,
+    roles: &'a RoleDefinitions,
     identity: RoleIdentity,
     catalog: &str,
 ) -> Result<&'a str, String> {
@@ -72,20 +71,35 @@ pub(super) fn role_name<'a>(
 }
 
 pub(super) fn role_definition_with_control<'a>(
-    roles: &'a BTreeMap<String, RoleDefinition>,
+    roles: &'a RoleDefinitions,
     identity: RoleIdentity,
     catalog: &str,
     control: &uqa_core::memory::ProductionControl<'_>,
 ) -> Result<&'a RoleDefinition, SQLError> {
-    use crate::catalog::roles::identity::RoleSubject;
+    crate::catalog::work::inline(role_definition_from(
+        roles,
+        identity,
+        catalog,
+        control,
+        &mut (),
+    ))
+}
+
+pub(super) async fn role_definition_from<'a>(
+    roles: &'a RoleDefinitions,
+    identity: RoleIdentity,
+    catalog: &str,
+    control: &uqa_core::memory::ProductionControl<'_>,
+    work: &mut impl crate::catalog::work::Work,
+) -> Result<&'a RoleDefinition, SQLError> {
     control.check()?;
     if !identity.is_valid() {
         return Err(SQLError::Internal(format!(
             "invalid persisted {catalog} role identity"
         )));
     }
-    identity
-        .role_definition_with_control(roles, control)?
+    crate::catalog::roles::identity::find_identity(identity, roles, control, work)
+        .await?
         .ok_or_else(|| {
             SQLError::Internal(format!(
                 "persisted {catalog} privileges reference missing role incarnation {}",

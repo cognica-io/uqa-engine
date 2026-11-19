@@ -6,7 +6,7 @@
 
 //! Constraint and partition indexes share creation reservations with every relation kind.
 
-use super::{BTreeMap, CatalogIndexRow, IndexRegistryContext, RelationIdentity};
+use super::IndexRegistryContext;
 use uqa_storage::{StorageBackendError, StorageBackendResult};
 
 pub(super) fn reserve_constraints(
@@ -38,8 +38,8 @@ pub(super) fn reserve_constraints(
 
 pub(super) fn reserve_new_names(
     context: &IndexRegistryContext<'_>,
-    previous: &BTreeMap<RelationIdentity, CatalogIndexRow>,
-    candidate: &BTreeMap<RelationIdentity, CatalogIndexRow>,
+    previous: &crate::catalog::index::registry::CatalogIndexes,
+    candidate: &crate::catalog::index::registry::CatalogIndexes,
 ) -> StorageBackendResult<()> {
     for relation in candidate
         .keys()

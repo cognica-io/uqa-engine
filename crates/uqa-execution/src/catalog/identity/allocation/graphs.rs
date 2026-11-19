@@ -6,7 +6,7 @@
 
 //! Apache AGE graph and label OIDs, drawn from the database's counter in the order AGE 1.8 creates the objects: `create_graph` creates the graph's schema and label id sequence and then the default vertex and edge labels, and `create_vlabel`, `create_elabel` and a Cypher write that names a new label create a label that inherits from its kind's default label.
 
-use std::collections::BTreeMap;
+use uqa_core::memory::OwnedMap;
 
 use uqa_core::RelationIdentity;
 use uqa_sql::catalog::graph_oids::{
@@ -47,7 +47,7 @@ impl ReservedCatalogIdentityAllocator<'_> {
                 &RelationIdentity::new(graph, LABEL_ID_SEQUENCE),
             )?
             .relation;
-        let mut labels = BTreeMap::new();
+        let mut labels = OwnedMap::new();
         for (id, label, edge) in [
             (DEFAULT_VERTEX_LABEL_ID, DEFAULT_VERTEX_LABEL, false),
             (DEFAULT_EDGE_LABEL_ID, DEFAULT_EDGE_LABEL, true),
@@ -94,7 +94,7 @@ impl ReservedCatalogIdentityAllocator<'_> {
         let (id_default, properties_default, not_null) = if shape.default {
             let id_default = self.allocate(CatalogOidClass::AttributeDefault)?;
             let properties_default = self.allocate(CatalogOidClass::AttributeDefault)?;
-            let mut not_null = BTreeMap::new();
+            let mut not_null = OwnedMap::new();
             for column in columns {
                 not_null.insert(
                     (*column).to_string(),
@@ -108,7 +108,7 @@ impl ReservedCatalogIdentityAllocator<'_> {
             let properties_default = self.allocate(CatalogOidClass::AttributeDefault)?;
             let mut names = columns.to_vec();
             names.sort_unstable();
-            let mut not_null = BTreeMap::new();
+            let mut not_null = OwnedMap::new();
             for column in names {
                 not_null.insert(
                     column.to_string(),

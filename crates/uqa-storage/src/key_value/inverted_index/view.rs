@@ -182,7 +182,7 @@ impl KeyValueInvertedIndex {
         memory.grow(size_of::<ReadOnlySnapshot<dyn InvertedIndex>>())?;
         let snapshot: Arc<dyn InvertedIndex> = Arc::new(Self {
             source: OccurrenceSource::Retained(source),
-            table,
+            table: table.into(),
             bindings,
         });
         let snapshot = ReadOnlySnapshot::with_retention(snapshot, memory)?

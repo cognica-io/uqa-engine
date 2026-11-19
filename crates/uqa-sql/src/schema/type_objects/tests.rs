@@ -18,6 +18,8 @@ struct Catalog {
     types: BTreeMap<Vec<String>, i64>,
     looked_up: RefCell<Vec<Vec<String>>>,
     temporary: Option<&'static str>,
+    row_types: BTreeMap<u32, RowTypeRelation>,
+    arrays: BTreeMap<u32, u32>,
 }
 
 impl DomainCatalog for Catalog {
@@ -52,12 +54,70 @@ impl TypeObjectCatalog for Catalog {
     fn composite_by_type_oid(&self, _: u32) -> Option<StoredComposite> {
         None
     }
-    fn user_array_element(&self, _: u32) -> Option<u32> {
-        None
+    fn user_array_element(&self, oid: u32) -> Option<u32> {
+        self.arrays.get(&oid).copied()
     }
-    fn row_type_relation(&self, _: u32) -> Option<RowTypeRelation> {
-        None
+    fn row_type_relation(&self, oid: u32) -> Option<RowTypeRelation> {
+        self.row_types.get(&oid).cloned()
     }
+}
+
+#[test]
+fn resolved_type_description_lifetime_follows_relations_and_array_elements() {
+    use crate::ast::RelationPersistence;
+    let mut catalog = Catalog::default();
+    for (oid, schema, persistence) in [
+        (20_001, "public", RelationPersistence::Temporary),
+        (20_002, "pg_temp_42", RelationPersistence::Permanent),
+        (20_003, "public", RelationPersistence::Unlogged),
+    ] {
+        let name = format!("row_{oid}");
+        let owner = RoleIdentity {
+            oid: i64::from(oid) + 50_000,
+            object_id: [7; 16],
+        };
+        catalog.types.insert(vec![name.clone()], i64::from(oid));
+        catalog.row_types.insert(
+            oid,
+            RowTypeRelation {
+                kind: "table",
+                name: name.clone(),
+                local_name: name.clone(),
+                owner,
+                schema: schema.into(),
+                persistence,
+            },
+        );
+        catalog
+            .types
+            .insert(vec![format!("array_{oid}")], i64::from(oid + 10));
+        catalog.arrays.insert(oid + 10, oid);
+        for name in [name, format!("array_{oid}")] {
+            assert_eq!(
+                resolve_type_object(&context(&catalog), &name)
+                    .unwrap()
+                    .owner(&context(&catalog)),
+                owner
+            );
+            assert_eq!(
+                resolve_type_object(&context(&catalog), &name)
+                    .unwrap()
+                    .persistence(&context(&catalog))
+                    .unwrap(),
+                persistence
+            );
+        }
+    }
+    catalog
+        .types
+        .insert(vec!["pg_catalog".into(), "int4".into()], 23);
+    assert_eq!(
+        resolve_type_object(&context(&catalog), "integer")
+            .unwrap()
+            .persistence(&context(&catalog))
+            .unwrap(),
+        RelationPersistence::Permanent
+    );
 }
 
 impl TypeObjectAuthority for Catalog {

@@ -331,7 +331,7 @@ impl AnalysisCatalog for CatalogReadView {
     ) -> Result<Option<TableDefinition>, SQLError> {
         CatalogReadView::foreign_table_resolved(self, resolution, name).map(|table| {
             table.map(|table| TableDefinition {
-                columns: Arc::new(table.columns.clone()),
+                columns: Arc::new(table.columns.clone()).into(),
                 columns_declared: true,
             })
         })
@@ -362,7 +362,7 @@ impl AnalysisCatalog for CatalogReadView {
         &self,
         resolution: &RelationNameResolution,
         name: &str,
-    ) -> Result<Option<Vec<Arc<uqa_sql::routines::SQLUserFunction>>>, SQLError> {
+    ) -> Result<Option<Vec<uqa_sql::routines::SQLRoutine>>, SQLError> {
         CatalogReadView::sql_functions(self, resolution, name)
     }
 

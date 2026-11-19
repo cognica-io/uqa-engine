@@ -9,8 +9,8 @@
 //! Memory snapshot acquisition is ordered by the statement gate, the table registry and its per-table state, the durable registries (`graphs`, `models`, `scoring_params`, `views`, `catalog_indexes`, `database_security`, `schemas`, `path_indexes`, `sequences`, `sequence_object_ids`, `sequence_persistence`, `sequence_security`, `named_analyzers`, `table_field_analyzers`, `foreign_wrappers`, `foreign_servers`, `foreign_tables`, `foreign_table_security`, `sql_user_functions`, `roles`, `role_memberships`, `triggers`, and `rules`), and finally in-memory FDW rows. Durable restore uses the same registry order. Callers must enter through this coordinator instead of holding an individual registry lock across snapshot or restore.
 
 use super::{
-    failed_transaction_error, BackendTransactionMode, ConstraintModeState, Engine,
-    EngineDataSnapshot, NontransactionalSequenceValues, SQLError, SessionStateSnapshot,
+    failed_transaction_error, snapshots::SnapshotBoundary, BackendTransactionMode,
+    ConstraintModeState, Engine, EngineDataSnapshot, SQLError, SessionStateSnapshot,
     StorageBackendError, StorageSavepointId, TransactionCharacteristicsState,
     TransactionDirtyState, TransactionFrame, TransactionFrameKind, TransactionIntent,
     TransactionStatus,
@@ -228,13 +228,9 @@ impl Engine {
         let read_only = read_only || characteristics.read_only;
         let outer = stack.is_empty();
         let started_at_micros = self.statement_timestamp_micros();
-        let session_snapshot = self.snapshot_session_state();
         let (storage_savepoint, data_snapshot, snapshot_change_baseline) = if outer {
-            let (data_snapshot, baseline) = self.begin_outer_transaction_with_notifications(
-                read_only,
-                defer_write_lock,
-                &session_snapshot,
-            )?;
+            let (data_snapshot, baseline) =
+                self.begin_outer_transaction_with_notifications(read_only, defer_write_lock)?;
             (None, data_snapshot, baseline)
         } else {
             let baseline = stack[0].snapshot_change_baseline.clone();
@@ -247,9 +243,12 @@ impl Engine {
                 }
                 (Some(savepoint), None, baseline)
             } else {
-                (Some(savepoint), self.snapshot_transaction_data()?, baseline)
+                let snapshot = self.snapshot_transaction_data(SnapshotBoundary::PrivateUndo)?;
+                (Some(savepoint), snapshot, baseline)
             }
         };
+        // Successful admission selects the rollback state from the same refreshed catalog as the data snapshot. The preceding state belongs only to failed-BEGIN recovery; retaining it would keep invalidated analysis alive and resurrect its cache on rollback.
+        let session_snapshot = self.snapshot_session_state();
         let (constraint_modes, deferred_foreign_key_checks, deferred_constraint_trigger_events) =
             stack.last().map_or_else(
                 || (ConstraintModeState::default(), Vec::new(), Vec::new()),
@@ -272,6 +271,8 @@ impl Engine {
             TransactionFrameKind::ImplicitStatement => (true, false),
             TransactionFrameKind::SimpleQuery => (false, false),
         };
+        let nontransactional_sequence_values =
+            Self::transaction_sequence_values(data_snapshot.as_deref());
         stack.push(TransactionFrame {
             started_at_micros,
             implicit_statement,
@@ -309,7 +310,7 @@ impl Engine {
             pending_notifications: Vec::new(),
             pending_notification_commit: parking_lot::Mutex::new(None),
             constraint_modes,
-            nontransactional_sequence_values: NontransactionalSequenceValues::new(),
+            nontransactional_sequence_values,
         });
         if let Some(savepoint) = storage_savepoint {
             super::fixed_identities::save_identities(stack, savepoint);
@@ -333,16 +334,16 @@ impl Engine {
         &self,
         read_only: bool,
         defer_write_lock: bool,
-        session_snapshot: &SessionStateSnapshot,
     ) -> Result<
         (
-            Option<EngineDataSnapshot>,
+            Option<std::sync::Arc<EngineDataSnapshot>>,
             crate::row_locks::RowChangeBaseline,
         ),
         SQLError,
     > {
+        let before_admission = self.snapshot_session_state();
         self.begin_notification_transaction()?;
-        self.begin_outer_transaction_snapshot(read_only, defer_write_lock, session_snapshot)
+        self.begin_outer_transaction_snapshot(read_only, defer_write_lock, &before_admission)
             .map_err(|error| match self.rollback_notification_state() {
                 Ok(()) => error,
                 Err(notification_error) => SQLError::Internal(format!(
@@ -380,7 +381,7 @@ impl Engine {
         session_snapshot: &SessionStateSnapshot,
     ) -> Result<
         (
-            Option<EngineDataSnapshot>,
+            Option<std::sync::Arc<EngineDataSnapshot>>,
             crate::row_locks::RowChangeBaseline,
         ),
         SQLError,
@@ -395,7 +396,10 @@ impl Engine {
                 .map_err(|err| Self::storage_tx_error("BEGIN table data refresh", &err))?;
             self.synchronize_catalog_registries()
                 .map_err(|err| Self::storage_tx_error("BEGIN registry refresh", &err))?;
-            return Ok((self.snapshot_transaction_data()?, snapshot_gate.baseline()?));
+            return Ok((
+                self.snapshot_transaction_data(SnapshotBoundary::CommittedOriginal)?,
+                snapshot_gate.baseline()?,
+            ));
         };
         let snapshot_gate = if backend.transaction_model().is_versioned() {
             let gate = self
@@ -451,7 +455,10 @@ impl Engine {
                 return Err(recovered);
             }
         };
-        Ok((self.snapshot_transaction_data()?, baseline))
+        Ok((
+            self.snapshot_transaction_data(SnapshotBoundary::CommittedOriginal)?,
+            baseline,
+        ))
     }
 
     /// Register the physical backend writer this session holds in the logical lock manager. Eager writer frames (typed `begin`, direct transactions) and promoted deferred frames must both hold the structural backend-writer lock, otherwise a writer blocked on a row lock is invisible to the deadlock detector and a promoting SQL session waits at the storage layer instead of reporting `40P01`.
@@ -471,22 +478,26 @@ impl Engine {
         session_snapshot: &SessionStateSnapshot,
         refresh_error: SQLError,
     ) -> SQLError {
-        let mut cleanup_errors = Vec::new();
-        if let Err(error) = backend.rollback_transaction() {
-            cleanup_errors.push(format!("storage rollback: {error}"));
+        let cleanup = if let Err(error) = backend.rollback_transaction() {
+            Some(Self::storage_tx_error("BEGIN refresh rollback", &error))
         } else {
             self.restore_graph_transaction_overlay(session_snapshot);
-            self.drop_persistent_value_indexes();
+            let mut cleanup_errors = Vec::new();
+            if let Err(error) = self.drop_persistent_value_indexes() {
+                cleanup_errors.push(format!("value-index retirement: {error}"));
+            }
             self.reload_catalogs_after_rollback(&mut cleanup_errors);
-        }
+            (!cleanup_errors.is_empty()).then(|| SQLError::Internal(cleanup_errors.join("; ")))
+        };
         self.restore_session_state(session_snapshot);
-        if cleanup_errors.is_empty() {
-            refresh_error
-        } else {
-            SQLError::Internal(format!(
-                "{refresh_error}; failed BEGIN refresh cleanup: {}",
-                cleanup_errors.join("; ")
-            ))
+        match cleanup {
+            Some(cleanup) => super::error::attach(
+                refresh_error,
+                cleanup,
+                "failed BEGIN refresh cleanup",
+                std::convert::identity,
+            ),
+            None => refresh_error,
         }
     }
     pub(super) fn storage_tx_error(action: &str, err: &StorageBackendError) -> SQLError {

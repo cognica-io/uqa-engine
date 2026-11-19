@@ -11,10 +11,31 @@ use crate::{
     CancellationToken, QueryCancelled,
 };
 
+mod diagnostics;
+mod document;
+pub use document::{JsonDocument, JsonValue, JsonValueKind};
+mod input;
 mod lexical;
+pub use diagnostics::{JsonPosition, JsonSyntaxError, JsonSyntaxKind};
+pub use input::{JsonDiagnostic, JsonInputError, JsonMessageFormat};
+mod object;
+mod raw;
 mod string;
+mod typed;
+mod value;
+pub use value::{
+    observe_json_text, observe_json_value, read_json_number_text, read_json_unsigned,
+    JsonFieldProjection, JsonScalarProtocol, JsonValueObservation,
+};
+mod work;
+pub use object::JsonObjectProjection;
+use work::Work;
+pub use work::Work as JsonReadWork;
 
-pub use string::{decode_json_string, decode_json_string_with_control};
+pub use string::{
+    decode_json_string, decode_json_string_from, decode_json_string_with_control,
+    decode_json_string_with_work,
+};
 
 #[derive(Debug, thiserror::Error)]
 pub enum JsonReadError {
@@ -30,10 +51,10 @@ pub enum JsonReadError {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum JsonToken<'a> {
+pub enum JsonToken<'a, N = &'a str> {
     Null,
     Bool(bool),
-    Number(&'a str),
+    Number(N),
     /// The validated token includes its quotes and escapes.
     String(&'a [u8]),
     Key(&'a [u8]),
@@ -44,8 +65,8 @@ pub enum JsonToken<'a> {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-pub struct JsonEvent<'a> {
-    pub token: JsonToken<'a>,
+pub struct JsonEvent<'a, N = &'a str> {
+    pub token: JsonToken<'a, N>,
     /// Byte offsets in the original text, including quotes or a container delimiter.
     pub range: std::ops::Range<usize>,
 }
@@ -72,6 +93,12 @@ enum Frame {
     ObjectKey,
     ObjectValue,
     ObjectAfter,
+}
+
+enum ReadStep<'a> {
+    End,
+    Event(JsonEvent<'a, &'a [u8]>),
+    Value,
 }
 
 /// Open containers. A bounded stack keeps ordinary nesting inline and charges only deeper nesting.
@@ -112,6 +139,9 @@ impl Stack {
 pub struct JsonReader<'a, 'c> {
     input: &'a [u8],
     position: usize,
+    line: usize,
+    line_start: usize,
+    syntax_error: Option<JsonSyntaxError>,
     stack: Stack,
     cancellation: Option<&'c CancellationToken>,
     production: Option<ProductionControl<'c>>,
@@ -139,6 +169,9 @@ impl<'a, 'c> JsonReader<'a, 'c> {
         Self {
             input,
             position: 0,
+            line: 1,
+            line_start: 0,
+            syntax_error: None,
             stack: Stack::Bounded(BudgetedSmallVec::new(memory)),
             cancellation: Some(cancellation),
             production: None,
@@ -154,6 +187,9 @@ impl<'a, 'c> JsonReader<'a, 'c> {
         Self {
             input: input.as_bytes(),
             position: 0,
+            line: 1,
+            line_start: 0,
+            syntax_error: None,
             stack: Stack::Unbounded(Vec::new()),
             cancellation: None,
             production: None,
@@ -168,8 +204,19 @@ impl<'a, 'c> JsonReader<'a, 'c> {
     /// Read the same borrowed grammar under an ordinary or controlled producer, preserving every active cancellation owner within token scans as well as between events.
     pub fn with_control(input: &'a str, control: &ProductionControl<'c>) -> Self {
         Self {
-            input: input.as_bytes(),
+            validated_utf8: true,
+            ..Self::from_slice_with_control(input.as_bytes(), control)
+        }
+    }
+
+    /// Read borrowed bytes under the original producer; UTF-8 is validated within reached string tokens.
+    pub fn from_slice_with_control(input: &'a [u8], control: &ProductionControl<'c>) -> Self {
+        Self {
+            input,
             position: 0,
+            line: 1,
+            line_start: 0,
+            syntax_error: None,
             stack: control.budget().map_or_else(
                 || Stack::Unbounded(Vec::new()),
                 |budget| Stack::Bounded(BudgetedSmallVec::new(budget)),
@@ -180,7 +227,7 @@ impl<'a, 'c> JsonReader<'a, 'c> {
             expected: JsonExpected::Value,
             depth_limit: None,
             ignored_string_escapes: false,
-            validated_utf8: true,
+            validated_utf8: false,
         }
     }
 
@@ -204,8 +251,47 @@ impl<'a, 'c> JsonReader<'a, 'c> {
     }
 
     pub fn next_event(&mut self) -> Result<Option<JsonEvent<'a>>, JsonReadError> {
+        work::inline(self.next_event_with_work(&mut ()))?
+            .map(JsonEvent::text_number)
+            .transpose()
+    }
+
+    /// Resume the same borrowed grammar through the original image work channel. Tokens keep their original source ranges; number tokens expose validated ASCII bytes so constructing a borrowed token never rescans an unbounded numeric literal. No source reads are performed.
+    pub async fn next_event_from(
+        &mut self,
+        input: &mut crate::image_io::AsyncImageInput<'_>,
+    ) -> Result<Option<JsonEvent<'a, &'a [u8]>>, JsonReadError> {
+        self.next_event_with_work(input).await
+    }
+
+    /// Resume borrowed token scanning with the enclosing operation's scheduler and error type.
+    pub async fn next_event_with_work<W: Work>(
+        &mut self,
+        work: &mut W,
+    ) -> Result<Option<JsonEvent<'a, &'a [u8]>>, W::Error> {
+        self.next_event_with_policy(work, false).await
+    }
+
+    async fn next_event_with_policy<W: Work>(
+        &mut self,
+        work: &mut W,
+        raw: bool,
+    ) -> Result<Option<JsonEvent<'a, &'a [u8]>>, W::Error> {
+        match self.next_step(work, raw).await? {
+            ReadStep::End => Ok(None),
+            ReadStep::Event(event) => Ok(Some(event)),
+            ReadStep::Value => self.value(work, raw).await.map(Some),
+        }
+    }
+
+    async fn next_step<W: Work>(
+        &mut self,
+        work: &mut W,
+        raw: bool,
+    ) -> Result<ReadStep<'a>, W::Error> {
+        work.checkpoint().await?;
         self.check()?;
-        self.skip_whitespace()?;
+        self.skip_whitespace(work).await?;
         let frame = self.stack.frames().last().copied();
         self.expected = match frame {
             None if self.root_started => JsonExpected::End,
@@ -220,82 +306,133 @@ impl<'a, 'c> JsonReader<'a, 'c> {
         match frame {
             None if self.root_started => {
                 return if self.position == self.input.len() {
-                    Ok(None)
+                    Ok(ReadStep::End)
                 } else {
-                    Err(JsonReadError::InvalidJson)
+                    Err(self.reject(JsonSyntaxKind::TrailingCharacters, true).into())
                 };
             }
             None => self.root_started = true,
-            Some(Frame::ArrayFirst) if self.peek() == Some(b']') => {
-                return self.close(JsonToken::EndArray)
+            Some(Frame::ArrayFirst | Frame::ArrayAfter) => {
+                if let Some(event) = self.array_step(work).await? {
+                    return Ok(ReadStep::Event(event));
+                }
             }
             Some(Frame::ObjectFirst) if self.peek() == Some(b'}') => {
-                return self.close(JsonToken::EndObject)
+                return self.close_step(JsonToken::EndObject).map_err(Into::into)
             }
-            Some(Frame::ArrayAfter) => match self.peek() {
-                Some(b']') => return self.close(JsonToken::EndArray),
-                Some(b',') => {
-                    self.advance()?;
-                    self.skip_whitespace()?;
-                    self.replace(Frame::ArrayValue);
-                    self.expected = JsonExpected::Value;
-                }
-                _ => return Err(JsonReadError::InvalidJson),
-            },
             Some(Frame::ObjectAfter) => match self.peek() {
-                Some(b'}') => return self.close(JsonToken::EndObject),
+                Some(b'}') => return self.close_step(JsonToken::EndObject).map_err(Into::into),
                 Some(b',') => {
-                    self.advance()?;
-                    self.skip_whitespace()?;
+                    self.advance(work).await?;
+                    self.skip_whitespace(work).await?;
                     self.replace(Frame::ObjectKey);
                     self.expected = JsonExpected::Key;
                 }
-                _ => return Err(JsonReadError::InvalidJson),
+                None => return Err(self.reject(JsonSyntaxKind::EndOfObject, false).into()),
+                _ => {
+                    return Err(self
+                        .reject(JsonSyntaxKind::ExpectedObjectSeparator, true)
+                        .into())
+                }
             },
             _ => {}
         }
         match self.stack.frames().last().copied() {
             Some(Frame::ObjectFirst | Frame::ObjectKey) => {
-                let start = self.position;
-                let key = self.string()?;
-                self.replace(Frame::ObjectValue);
-                return Ok(Some(self.event(start, JsonToken::Key(key))));
+                return self.key(work, raw).await.map(ReadStep::Event);
             }
             Some(Frame::ObjectValue) => {
-                self.consume(b':')?;
-                self.skip_whitespace()?;
+                if self.peek() != Some(b':') {
+                    let kind = if self.peek().is_none() {
+                        JsonSyntaxKind::EndOfObject
+                    } else {
+                        JsonSyntaxKind::ExpectedColon
+                    };
+                    return Err(self.reject(kind, true).into());
+                }
+                self.advance(work).await?;
+                self.skip_whitespace(work).await?;
                 self.replace(Frame::ObjectAfter);
                 self.expected = JsonExpected::Value;
+            }
+            Some(Frame::ArrayValue) if self.peek() == Some(b']') => {
+                let kind = if raw {
+                    JsonSyntaxKind::ExpectedValue
+                } else {
+                    JsonSyntaxKind::TrailingComma
+                };
+                return Err(self.reject(kind, true).into());
             }
             Some(Frame::ArrayFirst | Frame::ArrayValue) => self.replace(Frame::ArrayAfter),
             _ => {}
         }
-        self.value().map(Some)
+        Ok(ReadStep::Value)
     }
 
-    fn value(&mut self) -> Result<JsonEvent<'a>, JsonReadError> {
+    fn close_step(
+        &mut self,
+        token: JsonToken<'a, &'a [u8]>,
+    ) -> Result<ReadStep<'a>, JsonReadError> {
+        self.close(token)
+            .map(|event| ReadStep::Event(event.expect("closing delimiter event")))
+    }
+
+    async fn key<W: Work>(
+        &mut self,
+        work: &mut W,
+        raw: bool,
+    ) -> Result<JsonEvent<'a, &'a [u8]>, W::Error> {
+        if self.peek() != Some(b'"') {
+            let kind = match self.peek() {
+                None if self.expected == JsonExpected::Key && !raw => JsonSyntaxKind::EndOfValue,
+                None => JsonSyntaxKind::EndOfObject,
+                Some(b'}') if !raw => JsonSyntaxKind::TrailingComma,
+                _ => JsonSyntaxKind::ExpectedKey,
+            };
+            return Err(self.reject(kind, true).into());
+        }
         let start = self.position;
-        let token = match self.peek().ok_or(JsonReadError::InvalidJson)? {
+        let key = self
+            .string(work, raw || self.ignored_string_escapes)
+            .await?;
+        self.replace(Frame::ObjectValue);
+        Ok(self.event(start, JsonToken::Key(key)))
+    }
+
+    async fn value<W: Work>(
+        &mut self,
+        work: &mut W,
+        raw: bool,
+    ) -> Result<JsonEvent<'a, &'a [u8]>, W::Error> {
+        let start = self.position;
+        let Some(byte) = self.peek() else {
+            return Err(self.reject(JsonSyntaxKind::EndOfValue, false).into());
+        };
+        let token = match byte {
             b'n' => {
-                self.keyword(b"null")?;
+                self.keyword(b"null", work).await?;
                 JsonToken::Null
             }
             b't' => {
-                self.keyword(b"true")?;
+                self.keyword(b"true", work).await?;
                 JsonToken::Bool(true)
             }
             b'f' => {
-                self.keyword(b"false")?;
+                self.keyword(b"false", work).await?;
                 JsonToken::Bool(false)
             }
-            b'"' => JsonToken::String(self.string()?),
-            b'-' | b'0'..=b'9' => JsonToken::Number(self.number()?),
+            b'"' => JsonToken::String(
+                self.string(work, raw || self.ignored_string_escapes)
+                    .await?,
+            ),
+            b'-' | b'0'..=b'9' => JsonToken::Number(self.number_with_policy(work, raw).await?),
             b'[' | b'{' => {
-                if self
-                    .depth_limit
-                    .is_some_and(|limit| self.stack.frames().len() >= limit)
+                if !raw
+                    && self
+                        .depth_limit
+                        .is_some_and(|limit| self.stack.frames().len() >= limit)
                 {
-                    return Err(JsonReadError::InvalidJson);
+                    return Err(self.reject(JsonSyntaxKind::DepthLimit, true).into());
                 }
                 let array = self.peek() == Some(b'[');
                 self.stack.push(if array {
@@ -303,14 +440,14 @@ impl<'a, 'c> JsonReader<'a, 'c> {
                 } else {
                     Frame::ObjectFirst
                 })?;
-                self.advance()?;
+                self.advance(work).await?;
                 if array {
                     JsonToken::StartArray
                 } else {
                     JsonToken::StartObject
                 }
             }
-            _ => return Err(JsonReadError::InvalidJson),
+            _ => return Err(self.reject(JsonSyntaxKind::ExpectedValue, true).into()),
         };
         self.check()?;
         Ok(self.event(start, token))
@@ -320,14 +457,18 @@ impl<'a, 'c> JsonReader<'a, 'c> {
         *self.stack.frames().last_mut().expect("open JSON container") = frame;
     }
 
-    fn close(&mut self, token: JsonToken<'a>) -> Result<Option<JsonEvent<'a>>, JsonReadError> {
+    fn close(
+        &mut self,
+        token: JsonToken<'a, &'a [u8]>,
+    ) -> Result<Option<JsonEvent<'a, &'a [u8]>>, JsonReadError> {
         let start = self.position;
-        self.advance()?;
+        self.position += 1;
+        self.check()?;
         self.stack.pop();
         Ok(Some(self.event(start, token)))
     }
 
-    fn event(&self, start: usize, token: JsonToken<'a>) -> JsonEvent<'a> {
+    fn event(&self, start: usize, token: JsonToken<'a, &'a [u8]>) -> JsonEvent<'a, &'a [u8]> {
         JsonEvent {
             token,
             range: start..self.position,
@@ -342,6 +483,39 @@ impl<'a, 'c> JsonReader<'a, 'c> {
             production.check_cancellation()?;
         }
         Ok(())
+    }
+}
+
+impl<'a> JsonEvent<'a, &'a [u8]> {
+    fn text_number(self) -> Result<JsonEvent<'a>, JsonReadError> {
+        let token = match self.token {
+            JsonToken::Null => JsonToken::Null,
+            JsonToken::Bool(value) => JsonToken::Bool(value),
+            JsonToken::Number(value) => JsonToken::Number(
+                std::str::from_utf8(value).map_err(|_| JsonReadError::InvalidJson)?,
+            ),
+            JsonToken::String(value) => JsonToken::String(value),
+            JsonToken::Key(value) => JsonToken::Key(value),
+            JsonToken::StartArray => JsonToken::StartArray,
+            JsonToken::EndArray => JsonToken::EndArray,
+            JsonToken::StartObject => JsonToken::StartObject,
+            JsonToken::EndObject => JsonToken::EndObject,
+        };
+        Ok(JsonEvent {
+            token,
+            range: self.range,
+        })
+    }
+}
+
+impl From<crate::image_io::ImageIoError> for JsonReadError {
+    fn from(error: crate::image_io::ImageIoError) -> Self {
+        use crate::image_io::ImageIoError;
+        match error {
+            ImageIoError::Memory(error) => Self::Memory(error),
+            ImageIoError::Cancelled(error) => Self::Cancelled(error),
+            ImageIoError::Invalid | ImageIoError::Io(_) => Self::InvalidJson,
+        }
     }
 }
 

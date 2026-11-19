@@ -95,9 +95,10 @@ fn memory_system_acl_keeps_grantees_and_grantors_through_renamed_catalog_snapsho
     {
         let mut roles = engine.durable.roles.write();
         for name in ["grantor", "reader"] {
-            let mut role = roles.remove(name).unwrap();
+            let mut role = roles.get(name).unwrap().clone();
+            roles.remove(name).unwrap();
             role.name = format!("renamed_{name}");
-            roles.insert(role.name.clone(), role);
+            roles.insert(role.name.clone(), role).unwrap();
         }
     }
     engine.note_catalog_registry_changed();

@@ -15,6 +15,28 @@ pub(crate) use builder::Builder;
 #[cfg(any(test, feature = "nori-tools", feature = "kuromoji-tools"))]
 mod entries;
 
+pub(crate) async fn common_prefix_order(
+    mut left: impl Iterator<Item = u16> + Send,
+    mut right: impl Iterator<Item = u16> + Send,
+    work: &mut impl super::work::Work,
+) -> DictionaryResult<(usize, std::cmp::Ordering)> {
+    let mut common = 0;
+    loop {
+        work.records(common).await?;
+        let order = match (left.next(), right.next()) {
+            (Some(left), Some(right)) if left == right => {
+                common += 1;
+                continue;
+            }
+            (Some(left), Some(right)) => left.cmp(&right),
+            (None, Some(_)) => std::cmp::Ordering::Less,
+            (Some(_), None) => std::cmp::Ordering::Greater,
+            (None, None) => std::cmp::Ordering::Equal,
+        };
+        return Ok((common, order));
+    }
+}
+
 #[derive(Debug)]
 struct Node {
     first_arc: u32,
@@ -86,7 +108,16 @@ impl Lexicon {
         })
     }
 
+    #[cfg(test)]
     pub fn decode(reader: &mut Reader<'_>, maximum_word_length: usize) -> DictionaryResult<Self> {
+        super::work::inline(Self::decode_with(reader, maximum_word_length, &mut ()))
+    }
+
+    pub async fn decode_with(
+        reader: &mut Reader<'_>,
+        maximum_word_length: usize,
+        work: &mut impl super::work::Work,
+    ) -> DictionaryResult<Self> {
         let root = reader.u32()?;
         let node_count = reader.count(5)?;
         let arc_count = reader.count(6)?;
@@ -99,7 +130,8 @@ impl Lexicon {
         }
         let mut nodes: Vec<Node> = vector(node_count)?;
         let mut next_arc = 0_u32;
-        for _ in 0..node_count {
+        for index in 0..node_count {
+            work.records(index).await?;
             let count = reader.u32()?;
             let terminal = match reader.u8()? {
                 0 => false,
@@ -121,8 +153,10 @@ impl Lexicon {
         }
         let mut arcs = vector(arc_count)?;
         for index in 0..node_count {
+            work.records(index).await?;
             let mut suffixes = nodes[index].suffixes;
-            for _ in 0..nodes[index].arc_count {
+            for offset in 0..nodes[index].arc_count {
+                work.records(offset as usize).await?;
                 let label = reader.u16()?;
                 let target = reader.u32()?;
                 if target as usize >= index {
@@ -140,14 +174,19 @@ impl Lexicon {
             nodes[index].suffixes = suffixes;
         }
         let lexicon = Self { nodes, arcs, root };
-        lexicon.validate(maximum_word_length)?;
+        lexicon.validate_with(maximum_word_length, work).await?;
         Ok(lexicon)
     }
 
-    fn validate(&self, maximum_word_length: usize) -> DictionaryResult<()> {
+    async fn validate_with(
+        &self,
+        maximum_word_length: usize,
+        work: &mut impl super::work::Work,
+    ) -> DictionaryResult<()> {
         let mut next_arc = 0;
         let mut lengths: Vec<usize> = vector(self.nodes.len())?;
         for (index, node) in self.nodes.iter().enumerate() {
+            work.records(index).await?;
             if node.first_arc as usize != next_arc {
                 return Err(invalid(
                     "lexicon",
@@ -164,7 +203,8 @@ impl Lexicon {
             let mut suffixes = u32::from(node.terminal);
             let mut previous = None;
             let mut length = 0;
-            for arc in arcs {
+            for (offset, arc) in arcs.iter().enumerate() {
+                work.records(offset).await?;
                 if arc.target as usize >= index || previous.is_some_and(|label| arc.label <= label)
                 {
                     return Err(invalid("lexicon", "cyclic, unordered, or invalid arc"));
@@ -193,14 +233,18 @@ impl Lexicon {
             lengths[self.root as usize],
             maximum_word_length,
         )?;
-        self.validate_utf16()
+        self.validate_utf16(work).await
     }
 
-    fn validate_utf16(&self) -> DictionaryResult<()> {
+    async fn validate_utf16(&self, work: &mut impl super::work::Work) -> DictionaryResult<()> {
         let mut visited = vector(self.nodes.len())?;
-        visited.resize(self.nodes.len(), 0_u8);
+        while visited.len() < self.nodes.len() {
+            work.checkpoint().await?;
+            visited.resize((visited.len() + 4096).min(self.nodes.len()), 0_u8);
+        }
         let mut pending = vec![(self.root, false)];
         while let Some((index, low_required)) = pending.pop() {
+            work.checkpoint().await?;
             let mask = if low_required { 2 } else { 1 };
             if visited[index as usize] & mask != 0 {
                 continue;
@@ -211,7 +255,11 @@ impl Lexicon {
                 return Err(invalid("lexicon", "surface ends inside a surrogate pair"));
             }
             let start = node.first_arc as usize;
-            for arc in &self.arcs[start..start + node.arc_count as usize] {
+            for (offset, arc) in self.arcs[start..start + node.arc_count as usize]
+                .iter()
+                .enumerate()
+            {
+                work.records(offset).await?;
                 let next_low = match (low_required, arc.label) {
                     (true, 0xdc00..=0xdfff) => false,
                     (true, _) | (false, 0xdc00..=0xdfff) => {
@@ -224,8 +272,11 @@ impl Lexicon {
                 pending.push((arc.target, next_low));
             }
         }
-        if visited.contains(&0) {
-            return Err(invalid("lexicon", "unreachable states"));
+        for chunk in visited.chunks(4096) {
+            work.checkpoint().await?;
+            if chunk.contains(&0) {
+                return Err(invalid("lexicon", "unreachable states"));
+            }
         }
         Ok(())
     }

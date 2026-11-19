@@ -9,7 +9,7 @@
 use super::executable::StatementPlanningContext;
 use crate::optimizer::{optimize_scalar_expression, OptimizerConfig};
 use uqa_sql::{
-    ast::{ColumnDef, Expr, FunctionVolatility},
+    ast::{Expr, FunctionVolatility},
     schema::{
         expressions::{analyze_schema_expression, PlannedSchemaExpression},
         SchemaBindingContext, SchemaExpressionCatalog,
@@ -97,7 +97,7 @@ pub fn plan_schema_expression(
     context: &StatementPlanningContext<'_>,
     catalog: &dyn SchemaExpressionCatalog,
     expression: &Expr,
-    columns: &[ColumnDef],
+    schema: &uqa_sql::RowSchema,
 ) -> Result<PlannedSchemaExpression, SQLError> {
     let mut analyzed = None;
     context.analysis.scopes.with_scope(&mut |scope| {
@@ -107,7 +107,7 @@ pub fn plan_schema_expression(
                 binding: &scope.binding_context()?,
             },
             expression,
-            columns,
+            schema,
         )?);
         Ok(())
     })?;

@@ -184,7 +184,7 @@ impl<'a> Filter<'a> {
                     &batch.schema,
                     &row,
                     predicate.calls(),
-                )?),
+                )?)?,
                 FilterCondition::Row(predicate) => predicate.keep_physical(&batch.schema, &row)?,
                 FilterCondition::Unresolved(column) => {
                     return Err(ExecError::SQL(uqa_sql::SQLError::Internal(format!(

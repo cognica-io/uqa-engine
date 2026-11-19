@@ -17,9 +17,12 @@ use uqa_core::{DocId, PostingList};
 use crate::{StorageBackendError, StorageBackendResult};
 
 mod canonical;
+pub(crate) mod capture;
+pub use capture::VectorIndexCapture;
 mod collection;
 mod config;
 mod cosine;
+pub mod image;
 mod memory;
 mod memory_snapshot;
 mod memory_state;
@@ -33,7 +36,9 @@ pub(crate) use canonical::{
 };
 pub use canonical::{decode_vector_bytes, SelectedVectorRead, VectorRead, VectorReadSnapshot};
 pub use collection::{
-    RetainedVectorIndexesBuilder, VectorIndexSource, VectorIndexes, VectorIndexesIter,
+    CapturedVectorIndexes, LiveVectorIndexesMut, MemoryVectorIndexesBuilder,
+    PersistentVectorIndexesBuilder, RetainedVectorIndexesBuilder, VectorIndexSource, VectorIndexes,
+    VectorIndexesIter, VectorSourcePublication,
 };
 pub use config::{
     DiskANNAlpha, DiskANNIndexParams, HNSWIndexParams, IVFIndexParams, VectorIndexOpenMode,
@@ -56,27 +61,72 @@ pub fn validate_vector_values_controlled(
     vector: &[f32],
     control: Option<&crate::read_control::StorageReadControl>,
 ) -> StorageBackendResult<()> {
+    crate::image_io::work::inline(validate_vector_values_from(
+        dimensions,
+        vector,
+        control,
+        &mut (),
+    ))
+}
+
+pub(crate) async fn validate_vector_values_from(
+    dimensions: u32,
+    vector: &[f32],
+    control: Option<&crate::read_control::StorageReadControl>,
+    work: &mut (impl crate::image_io::work::Work + Send),
+) -> StorageBackendResult<()> {
     if let Some(control) = control {
         control.check()?;
     }
+    validate_vector_dimensions(dimensions, vector.len())?;
+    validate_vector_components_from(vector, 0, control, work).await
+}
+
+pub(crate) fn validate_vector_dimensions(
+    dimensions: u32,
+    length: usize,
+) -> StorageBackendResult<()> {
     let dimensions = usize::try_from(dimensions).map_err(|_| {
         StorageBackendError::Other(format!(
             "vector dimension {dimensions} exceeds the platform usize range"
         ))
     })?;
-    if vector.len() != dimensions {
+    if length != dimensions {
         return Err(StorageBackendError::Other(format!(
-            "vector dimension mismatch: expected {dimensions}, got {}",
-            vector.len()
+            "vector dimension mismatch: expected {dimensions}, got {length}"
         )));
     }
+    Ok(())
+}
+
+pub(crate) fn validate_vector_components_controlled(
+    vector: &[f32],
+    offset: usize,
+    control: Option<&crate::read_control::StorageReadControl>,
+) -> StorageBackendResult<()> {
+    crate::image_io::work::inline(validate_vector_components_from(
+        vector,
+        offset,
+        control,
+        &mut (),
+    ))
+}
+
+async fn validate_vector_components_from(
+    vector: &[f32],
+    offset: usize,
+    control: Option<&crate::read_control::StorageReadControl>,
+    work: &mut (impl crate::image_io::work::Work + Send),
+) -> StorageBackendResult<()> {
     for (index, value) in vector.iter().copied().enumerate() {
         if index.is_multiple_of(1024) {
+            work.checkpoint().await?;
             if let Some(control) = control {
                 control.check()?;
             }
         }
         if !value.is_finite() {
+            let index = offset + index;
             return Err(StorageBackendError::Other(format!(
                 "vector component {index} must be finite, got {value}"
             )));
@@ -150,6 +200,62 @@ pub(crate) fn cosine_similarity_with_norms(a: &[f32], b: &[f32], norm_a: f32, no
 }
 
 pub trait VectorIndex: Send + Sync {
+    /// Transfer a writable memory index into its owning capture boundary before publication. Each concrete owner selects admission appropriate to its interior mutations. Unsupported providers reject this capability without changing their state.
+    fn into_memory_capture(
+        self: Box<Self>,
+        _registry: &crate::memory_capture::MemoryCaptureRegistry,
+    ) -> StorageBackendResult<Box<dyn VectorIndex>> {
+        Err(StorageBackendError::Other(
+            "memory capture registration is not supported by this vector owner".into(),
+        ))
+    }
+
+    /// Register a private native image while admitting every new source allocation under its input allowance. The completed owner does not retain input cancellation for ordinary mutations.
+    fn into_memory_capture_with_control(
+        self: Box<Self>,
+        _registry: &crate::memory_capture::MemoryCaptureRegistry,
+        _control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<Box<dyn VectorIndex>> {
+        Err(StorageBackendError::Other(
+            "controlled memory capture registration is not supported by this vector owner".into(),
+        ))
+    }
+
+    fn memory_capture(&self) -> Option<&dyn VectorIndexCapture> {
+        None
+    }
+
+    /// Retain an export-only source. The returned type exposes no query that could retrain an IVF snapshot. The enclosing Engine owner still establishes the committed cut before this capture.
+    fn capture_image_with_control(
+        &self,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<image::VectorImageSnapshot> {
+        image::VectorImageSnapshot::from_index(self.snapshot_with_control(control)?, control)
+    }
+
+    /// Borrow a resumable evaluated image. Unsupported owners reject without buffering the synchronous writer or replaying source traversal. A captured owner must preserve its original cancellation throughout the reader's lifetime.
+    fn image_reader<'a>(
+        &'a self,
+        control: &'a crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<crate::image_io::ImageReader<'a>> {
+        control.check()?;
+        Err(StorageBackendError::Other(
+            "resumable vector image output is not supported by this backend".into(),
+        ))
+    }
+
+    /// Stream this selected memory index's evaluated image. Unsupported owners reject the capability before output. Committed source capture and complete database activation belong to the enclosing backup lifecycle.
+    fn write_image(
+        &self,
+        _output: &mut dyn std::io::Write,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<u64> {
+        control.check()?;
+        Err(StorageBackendError::Other(
+            "vector image output is not supported by this backend".into(),
+        ))
+    }
+
     fn dimensions(&self) -> u32;
     fn index_kind(&self) -> &'static str {
         "vector"

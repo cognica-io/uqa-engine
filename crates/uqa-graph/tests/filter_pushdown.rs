@@ -24,7 +24,7 @@ const LABEL: &str = "person";
 
 fn build_store(rows: &[(VertexId, &str, Option<i64>)]) -> MemoryGraphStore {
     let mut g = MemoryGraphStore::new();
-    g.create_graph(GRAPH);
+    g.create_graph(GRAPH).unwrap();
     for (id, label, salary) in rows {
         let mut v = Vertex::new(*id, *label);
         if let Some(s) = salary {

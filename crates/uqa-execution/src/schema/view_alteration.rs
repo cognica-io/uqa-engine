@@ -182,10 +182,13 @@ fn publish_altered_view(
     let change = crate::statement::prepared::invalidation::PreparedCatalogChange::Relation(
         view.relation_oids().relation,
     );
+    let mut next = (**context.publication.views_read()).clone();
+    next.insert(relation.clone(), view)?;
+    let view = &next[relation];
     if view.persistence != RelationPersistence::Temporary && context.publication.has_catalog() {
         context
             .publication
-            .save_view(&catalog_view_row(relation, &view).map_err(|error| {
+            .save_view(&catalog_view_row(relation, view).map_err(|error| {
                 SQLError::Internal(format!(
                     "serialize altered {expected_kind} `{canonical}`: {error}"
                 ))
@@ -196,10 +199,7 @@ fn publish_altered_view(
                 ))
             })?;
     }
-    context
-        .publication
-        .views_write()
-        .insert(relation.clone(), view);
+    **context.publication.views_write() = next;
     context.changes.prepared_catalog_changed(change);
     Ok(())
 }
@@ -336,6 +336,26 @@ fn rename_view_to(
         .catalog
         .persistence(relation)
         .is_some_and(|persistence| persistence != RelationPersistence::Temporary);
+    let mut views = context.publication.views_write();
+    if views.contains_key(&target) {
+        return Err(SQLError::Internal(format!(
+            "{expected_kind} rename target `{}` appeared after preflight",
+            target.qualified_name()
+        )));
+    }
+    let mut view = views.get(relation).cloned().ok_or_else(|| {
+        SQLError::Internal(format!(
+            "{expected_kind} `{}` disappeared during rename",
+            relation.qualified_name()
+        ))
+    })?;
+    view.row_type_array_name = array_name;
+    let change = crate::statement::prepared::invalidation::PreparedCatalogChange::Relation(
+        view.relation_oids().relation,
+    );
+    let mut next = (**views).clone();
+    next.remove(relation)?;
+    next.insert(target.clone(), view)?;
     if persistent
         && context
             .publication
@@ -354,35 +374,18 @@ fn rename_view_to(
             relation.qualified_name()
         )));
     }
-    let mut views = context.publication.views_write();
-    if views.contains_key(&target) {
-        return Err(SQLError::Internal(format!(
-            "{expected_kind} rename target `{}` appeared after preflight",
-            target.qualified_name()
-        )));
-    }
-    let mut view = views.remove(relation).ok_or_else(|| {
-        SQLError::Internal(format!(
-            "{expected_kind} `{}` disappeared during rename",
-            relation.qualified_name()
-        ))
-    })?;
-    view.row_type_array_name = array_name;
     if persistent {
         context
             .publication
             .save_view(
-                &crate::catalog::view::catalog_view_row(&target, &view)
+                &crate::catalog::view::catalog_view_row(&target, &next[&target])
                     .map_err(|error| SQLError::Internal(error.to_string()))?,
             )
             .map_err(|error| {
                 uqa_sql::catalog::errors::storage_error("view array rename", &error)
             })?;
     }
-    let change = crate::statement::prepared::invalidation::PreparedCatalogChange::Relation(
-        view.relation_oids().relation,
-    );
-    views.insert(target, view);
+    **views = next;
     drop(views);
     context.changes.catalog_registry_changed();
     context.changes.prepared_catalog_changed(change);

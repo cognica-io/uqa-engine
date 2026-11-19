@@ -10,23 +10,25 @@ use crate::routines::{
 };
 use std::sync::Arc;
 
-fn routine(sql: &str, identity: u8) -> Arc<SQLUserFunction> {
+fn routine(sql: &str, identity: u8) -> crate::routines::SQLRoutine {
     let crate::Statement::CreateFunction(mut definition) = crate::compile(sql).unwrap().remove(0)
     else {
         unreachable!("CREATE FUNCTION fixture")
     };
     definition.object_id = Some([identity; 16]);
-    Arc::new(SQLUserFunction::new(
+    SQLUserFunction::new(
         *definition,
-        RoutineBody::Bound(Arc::new(CompiledFunctionBody::SQL(Vec::new()))),
-    ))
+        RoutineBody::Bound(CompiledFunctionBody::SQL(Vec::new()).shared()),
+    )
+    .shared()
 }
 
-fn register(registry: &mut RoutineRegistry, routine: &Arc<SQLUserFunction>) {
+fn register(registry: &mut RoutineRegistry, routine: &crate::routines::SQLRoutine) {
+    let mut overloads = registry.get(&routine.def.name).cloned().unwrap_or_default();
+    overloads.push(Arc::clone(routine));
     registry
-        .entry(routine.def.name.clone())
-        .or_default()
-        .push(Arc::clone(routine));
+        .insert(routine.def.name.clone(), overloads)
+        .unwrap();
 }
 
 fn target(routine: &SQLUserFunction) -> RoutineDropTarget {

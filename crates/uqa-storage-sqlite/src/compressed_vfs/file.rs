@@ -7,8 +7,8 @@
 //! Uniform byte-file abstraction for compressed main files and plain auxiliaries.
 
 use super::{
-    c_int, ffi, fs, invalid_data, usize_to_u64, ContainerFile, OpenOptions, OpenOptionsEntry, Path,
-    PathBuf, PlainFile, Read, Seek, SeekFrom, VfsFile, Write,
+    c_int, ffi, fs, invalid_data, usize_to_u64, ContainerFile, OpenOptions, OpenOptionsEntry,
+    OpenScope, Path, PathBuf, PlainFile, Read, Seek, SeekFrom, VfsFile, Write,
 };
 
 impl VfsFile {
@@ -17,23 +17,35 @@ impl VfsFile {
         options: OpenOptionsEntry,
         flags: c_int,
         read_only: bool,
+        scope: OpenScope,
     ) -> std::io::Result<Self> {
         if options.key.is_none() && should_store_plain(flags, &path) {
             PlainFile::open(path, read_only, flags & ffi::SQLITE_OPEN_CREATE != 0).map(Self::Plain)
         } else {
-            let trusted_anchor = if flags & ffi::SQLITE_OPEN_MAIN_DB != 0 {
+            let live_anchor =
+                (flags & ffi::SQLITE_OPEN_MAIN_DB != 0).then(|| options.live_anchor.clone());
+            let current = live_anchor
+                .as_ref()
+                .map(|anchor| anchor.lock())
+                .transpose()
+                .map_err(|_| invalid_data("compressed container anchor poisoned"))?;
+            let initial_anchor = if matches!(scope, OpenScope::Registration)
+                && flags & ffi::SQLITE_OPEN_MAIN_DB != 0
+            {
                 options.trusted_anchor
             } else {
                 None
             };
-            ContainerFile::open(path, options)
-                .and_then(|file| {
-                    if let Some(trusted) = trusted_anchor {
-                        file.require_trusted_anchor(trusted)?;
-                    }
-                    Ok(Box::new(file))
-                })
-                .map(Self::Compressed)
+            let mut file = ContainerFile::open(path, options)?;
+            if let Some(trusted) = initial_anchor {
+                file.require_trusted_anchor(trusted)?;
+            }
+            if let Some(Some(trusted)) = current.as_deref() {
+                file.require_trusted_anchor(*trusted)?;
+            }
+            drop(current);
+            file.live_anchor = live_anchor;
+            Ok(Self::Compressed(Box::new(file)))
         }
     }
 

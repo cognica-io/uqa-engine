@@ -84,7 +84,7 @@ fn legacy_slice_upgrade_retains_supplied_expressions_before_constant_folding() {
         let Expr::Func {
             binding: Some(binding),
             ..
-        } = restored
+        } = &restored
         else {
             unreachable!()
         };
@@ -162,7 +162,7 @@ fn pre_evaluated_array_bounds_coerce_without_copying_unselected_input() {
                 ..
             },
             _,
-        ) = syntax(sql)
+        ) = &syntax(sql)
         else {
             unreachable!()
         };
@@ -188,7 +188,7 @@ fn pre_evaluated_array_bounds_coerce_without_copying_unselected_input() {
             ..
         },
         _,
-    ) = syntax("SELECT a[:1]")
+    ) = &syntax("SELECT a[:1]")
     else {
         unreachable!()
     };

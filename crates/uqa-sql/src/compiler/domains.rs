@@ -82,6 +82,13 @@ pub(super) fn compile_create_domain(statement: &CreateDomainStmt) -> Result<Crea
 
 pub(super) fn compile_alter_domain(statement: &AlterDomainStmt) -> Result<AlterDomain> {
     let action = match statement.subtype.as_str() {
+        "T" => AlterDomainAction::SetDefault {
+            expression: statement
+                .def
+                .as_ref()
+                .map(|node| compile_expr(node).map(Box::new))
+                .transpose()?,
+        },
         "C" => {
             let Some(NodeEnum::Constraint(constraint)) =
                 statement.def.as_ref().and_then(|node| node.node.as_ref())

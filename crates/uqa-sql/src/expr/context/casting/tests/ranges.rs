@@ -51,9 +51,12 @@ fn declared_range_cast_selection_keeps_binary_identity_lazy_and_input_effects_se
     let cast = |value: &Value, source| {
         super::super::ranges::cast(&engine, value, source, &target, &control)
     };
-    let input = cast(&Value::Str("[1,2]".into()), Some(&ColumnType::Text))
-        .unwrap()
-        .unwrap();
+    let input = cast(
+        &Value::Str("[1,2]".into()),
+        Some(const { &ColumnType::Text }),
+    )
+    .unwrap()
+    .unwrap();
     assert_eq!(engine.0.get(), 1);
     // The stored address is deliberately unreadable. Identity coercion must not inspect it or repeat input.
     let identity = cast(&input, Some(&target)).unwrap().unwrap();
@@ -86,8 +89,8 @@ fn declared_range_cast_selection_keeps_binary_identity_lazy_and_input_effects_se
     for case in reference["cases"].as_array().unwrap() {
         let source = match case["source"].as_str() {
             None => None,
-            Some("text") => Some(&ColumnType::Text),
-            Some("integer") => Some(&ColumnType::Integer),
+            Some("text") => Some(const { &ColumnType::Text }),
+            Some("integer") => Some(const { &ColumnType::Integer }),
             Some("r") => Some(&target),
             Some("other_r") => Some(&other),
             Some("wrapped_r") => Some(&domain),
@@ -133,7 +136,7 @@ fn declared_range_constants_and_arrays_select_catalog_input_without_native_alias
     let error = super::super::ranges::cast(
         &engine,
         &Value::Int(1),
-        Some(&ColumnType::Integer),
+        Some(const { &ColumnType::Integer }),
         &target,
         &control,
     )

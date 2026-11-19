@@ -79,41 +79,46 @@ fn concurrent_domains_preserve_the_winning_identity_and_fixed_data_snapshot() {
     }
 }
 
-#[test]
-fn domains_and_row_types_share_a_destination_in_both_creation_orders() {
-    for provider in 0..3 {
-        for relation in ROW_TYPES {
-            for (holder, worker) in [(DOMAIN, relation), (relation, DOMAIN)] {
-                for finish in ["COMMIT", "ROLLBACK"] {
-                    let (directory, first, second) = sessions(provider);
-                    sql(
-                        &first,
-                        "CREATE SERVER source FOREIGN DATA WRAPPER memory_fdw",
-                    );
-                    sql(&first, &format!("BEGIN; {holder}"));
-                    let (second, result) =
-                        after_shared_wait(&first, second, worker, reservation(), finish);
-                    if finish == "COMMIT" {
-                        assert_eq!(
-                            result.unwrap_err().sqlstate(),
-                            Some("23505"),
-                            "{provider}/{holder}/{worker}"
-                        );
-                    } else {
-                        result.unwrap();
-                    }
-                    drop((first, second));
-                    let engine = reopen(provider, &directory.path().join("table-locks.db"));
-                    let winner = if finish == "COMMIT" { holder } else { worker };
-                    assert_eq!(
-                        engine.durable.domains.read().contains_key("public.target"),
-                        winner == DOMAIN
-                    );
-                    error(&engine, DOMAIN, "42710");
-                }
-            }
-        }
+#[rstest::rstest]
+#[case::table(ROW_TYPES[0])]
+#[case::view(ROW_TYPES[1])]
+#[case::materialized_view(ROW_TYPES[2])]
+#[case::foreign_table(ROW_TYPES[3])]
+fn domains_and_row_types_share_a_destination_in_both_creation_orders(
+    #[values(0, 1, 2)] provider: usize,
+    #[case] relation: &str,
+    #[values(false, true)] domain_first: bool,
+    #[values("COMMIT", "ROLLBACK")] finish: &str,
+) {
+    let (holder, worker) = if domain_first {
+        (DOMAIN, relation)
+    } else {
+        (relation, DOMAIN)
+    };
+    let (directory, first, second) = sessions(provider);
+    sql(
+        &first,
+        "CREATE SERVER source FOREIGN DATA WRAPPER memory_fdw",
+    );
+    sql(&first, &format!("BEGIN; {holder}"));
+    let (second, result) = after_shared_wait(&first, second, worker, reservation(), finish);
+    if finish == "COMMIT" {
+        assert_eq!(
+            result.unwrap_err().sqlstate(),
+            Some("23505"),
+            "{provider}/{holder}/{worker}"
+        );
+    } else {
+        result.unwrap();
     }
+    drop((first, second));
+    let engine = reopen(provider, &directory.path().join("table-locks.db"));
+    let winner = if finish == "COMMIT" { holder } else { worker };
+    assert_eq!(
+        engine.durable.domains.read().contains_key("public.target"),
+        winner == DOMAIN
+    );
+    error(&engine, DOMAIN, "42710");
 }
 
 #[test]

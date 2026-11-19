@@ -328,20 +328,19 @@ impl uqa_sql::routines::resolution::RoutineOverloadCatalog for Catalog {
     fn lookup_sql_routine_candidates(
         &self,
         _: &str,
-    ) -> Result<Option<Vec<std::sync::Arc<uqa_sql::routines::SQLUserFunction>>>, uqa_sql::SQLError>
-    {
+    ) -> Result<Option<Vec<uqa_sql::routines::SQLRoutine>>, uqa_sql::SQLError> {
         panic!("query fixture does not resolve procedures");
     }
     fn lookup_bound_sql_routine_candidates_by_binding(
         &self,
         _: &uqa_sql::ast::FunctionBinding,
-    ) -> Option<Vec<std::sync::Arc<uqa_sql::routines::SQLUserFunction>>> {
+    ) -> Option<Vec<uqa_sql::routines::SQLRoutine>> {
         panic!("query fixture does not resolve procedures");
     }
     fn lookup_bound_sql_functions_by_binding(
         &self,
         _: &uqa_sql::ast::FunctionBinding,
-    ) -> Option<Vec<std::sync::Arc<uqa_sql::routines::SQLUserFunction>>> {
+    ) -> Option<Vec<uqa_sql::routines::SQLRoutine>> {
         panic!("query fixture does not resolve procedures");
     }
 }

@@ -7,8 +7,8 @@
 //! SQL savepoint state and backend savepoint coordination.
 
 use super::{
-    BackendTransactionMode, Engine, SQLError, StorageSavepointId, TransactionFrame,
-    TransactionSavepoint, TransactionStatus,
+    snapshots::SnapshotBoundary, BackendTransactionMode, Engine, SQLError, StorageSavepointId,
+    TransactionFrame, TransactionSavepoint, TransactionStatus,
 };
 
 impl Engine {
@@ -31,7 +31,7 @@ impl Engine {
             });
         }
         let session_snapshot = self.snapshot_session_state();
-        let data_snapshot = self.snapshot_transaction_data()?;
+        let data_snapshot = self.snapshot_transaction_data(SnapshotBoundary::PrivateUndo)?;
         let deferred = Self::backend_savepoints_deferred(stack);
         let storage_savepoint = StorageSavepointId::allocate();
         let frame = stack.last_mut().ok_or_else(|| {
@@ -134,7 +134,11 @@ impl Engine {
             sqlstate: "25P01".into(),
             message: "ROLLBACK TO SAVEPOINT can only be used in transaction blocks".into(),
         })?;
-        let nontransactional_sequence_values = frame.nontransactional_sequence_values.clone();
+        let nontransactional_sequence_values = frame
+            .nontransactional_sequence_values
+            .read()
+            .values()
+            .clone();
         let storage_savepoint = frame.savepoints[position].storage_savepoint;
         if let Some(backend) = self.storage.backend.as_ref().filter(|_| !deferred) {
             backend
@@ -150,7 +154,9 @@ impl Engine {
             }
         }
         self.restore_transaction_dirty_state(savepoint.dirty);
-        self.drop_persistent_value_indexes();
+        if let Err(error) = self.drop_persistent_value_indexes() {
+            cleanup_errors.push(format!("value-index retirement: {error}"));
+        }
         if self.storage.backend.is_some() {
             self.reload_catalogs_after_rollback(&mut cleanup_errors);
         }

@@ -6,15 +6,15 @@
 
 //! An ACL command binds its recipients once and projects those identities after catalog waits.
 
+use crate::catalog::roles::RoleDefinitions;
 use crate::{
     ast::{AclRoleSpecification, RoleSpecification},
     catalog::roles::{
         identity::RoleBinding, resolve_acl_role_specification, resolve_role_specification,
-        RoleDefinition, RoleReference, RoleReferenceNames,
+        RoleReference, RoleReferenceNames,
     },
     SQLError,
 };
-use std::collections::BTreeMap;
 use uqa_core::catalog_acl::AclGrantee;
 
 #[derive(Clone, Default)]
@@ -40,7 +40,7 @@ impl AclCommandRoles {
     pub fn resolve_validated(
         &mut self,
         names: &dyn RoleReferenceNames,
-        roles: &BTreeMap<String, RoleDefinition>,
+        roles: &RoleDefinitions,
         grantees: &[AclRoleSpecification],
         grantor: Option<&RoleSpecification>,
         validate: impl FnOnce(&ResolvedAclRoles) -> Result<(), SQLError>,
@@ -90,10 +90,7 @@ impl AclCommandRoles {
 }
 
 impl BoundAclRoles {
-    fn resolve(
-        &self,
-        roles: &BTreeMap<String, RoleDefinition>,
-    ) -> Result<ResolvedAclRoles, SQLError> {
+    fn resolve(&self, roles: &RoleDefinitions) -> Result<ResolvedAclRoles, SQLError> {
         let name = |binding: &RoleBinding| {
             binding.revalidate(roles)?;
             binding.require_name(roles).map(str::to_owned)

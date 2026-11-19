@@ -6,7 +6,6 @@
 
 use super::*;
 use crate::catalog::test_support::{empty_catalog, table_snapshot, CatalogServices};
-use std::sync::Arc;
 
 mod fixtures;
 mod lifecycle;
@@ -95,13 +94,16 @@ fn concurrent_event_inquiries_derive_each_collection_once() {
 fn trigger_lookup_preserves_the_first_address_error_after_earlier_matches() {
     let catalog = fixture(2);
     let mut snapshot = catalog.snapshot().clone();
-    let triggers = Arc::make_mut(&mut snapshot.definitions.triggers)
-        .get_mut(&RelationIdentity::new("public", "items"))
+    uqa_core::memory::RetainedValue::make_mut(&mut snapshot.definitions.triggers)
+        .rewrite(|_, name, trigger| {
+            let mut trigger = trigger.clone();
+            trigger.definition.table = "public.missing".into();
+            if name == "watch_001" {
+                trigger.catalog_oid = None;
+            }
+            Ok(Some(trigger))
+        })
         .unwrap();
-    for trigger in triggers.values_mut() {
-        trigger.definition.table = "public.missing".into();
-    }
-    triggers.get_mut("watch_001").unwrap().catalog_oid = None;
     let catalog = CatalogReadView::new(snapshot);
     let resolution = CatalogServices::default().resolution;
     let before = TRIGGER_ADDRESSES.get();
@@ -129,8 +131,12 @@ fn malformed_partition_collection_is_not_published() {
         .tables
         .get_mut(&RelationIdentity::new("public", "items"))
         .unwrap();
-    Arc::make_mut(&mut table.hierarchy).partition_bound =
-        Some(uqa_sql::ast::PartitionBound::Default);
+    {
+        let target = &mut table.hierarchy;
+        let mut value = (**target).clone();
+        value.partition_bound = Some(uqa_sql::ast::PartitionBound::Default);
+        *target = value.into();
+    }
     let invalid = CatalogReadView::new(snapshot);
     let resolution = CatalogServices::default().resolution;
     let before = TRIGGER_COPIES.get();

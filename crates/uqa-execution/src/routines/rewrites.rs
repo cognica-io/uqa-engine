@@ -75,9 +75,15 @@ pub fn publish_stored_routine_body_rewrites(
     let mut rewritten = context.registry.routine_snapshot();
     let previous = rewritten.clone();
     for definition in definitions {
-        let function = analysis::routine_body_rewrite_target(&mut rewritten, &definition)?;
+        let position = analysis::routine_body_rewrite_target(&rewritten, &definition)?;
         let body = persisted_routine_body(&context.compilation, &definition)?;
-        *function = super::catalog::revision::replacement(definition, body)?;
+        let name = definition.name.clone();
+        rewritten
+            .edit(&name, |overloads| {
+                overloads[position] = super::catalog::revision::replacement(definition, body)?;
+                Ok(())
+            })?
+            .expect("resolved body rewrite target");
     }
     context
         .publication

@@ -135,36 +135,39 @@ fn run_analyze_populates_column_stats() {
     // Register the columns directly through the table state so we
     // don't depend on the SQL DDL path here.
     if let Some(t) = eng.table("docs").unwrap() {
-        *t.columns.write() = vec![uqa_sql::ast::ColumnDef {
-            collation_oid: None,
-            name: "title".into(),
-            ty: uqa_sql::ast::ColumnType::Text,
-            object_id: None,
-            attribute_number: None,
-            missing_value: None,
-            primary_key: false,
-            not_null: false,
-            not_null_explicit: false,
-            not_null_name: None,
-            not_null_identity: None,
-            not_null_validated: true,
-            not_null_no_inherit: false,
-            not_null_is_local: true,
-            auto_increment: None,
-            unique: false,
-            default: None,
-            generated: None,
-            check: None,
-            check_name: None,
-            check_enforced: true,
-            check_validated: true,
-            check_no_inherit: false,
-            check_is_local: true,
-            check_object_id: None,
-            check_catalog_oid: None,
-            default_catalog_oid: None,
-            references: None,
-        }];
+        t.columns
+            .write()
+            .publish(vec![uqa_sql::ast::ColumnDef {
+                collation_oid: None,
+                name: "title".into(),
+                ty: uqa_sql::ast::ColumnType::Text,
+                object_id: None,
+                attribute_number: None,
+                missing_value: None,
+                primary_key: false,
+                not_null: false,
+                not_null_explicit: false,
+                not_null_name: None,
+                not_null_identity: None,
+                not_null_validated: true,
+                not_null_no_inherit: false,
+                not_null_is_local: true,
+                auto_increment: None,
+                unique: false,
+                default: None,
+                generated: None,
+                check: None,
+                check_name: None,
+                check_enforced: true,
+                check_validated: true,
+                check_no_inherit: false,
+                check_is_local: true,
+                check_object_id: None,
+                check_catalog_oid: None,
+                default_catalog_oid: None,
+                references: None,
+            }])
+            .unwrap();
     }
     eng.add_document("docs", 1, doc([("title", s("alpha"))]))
         .unwrap();

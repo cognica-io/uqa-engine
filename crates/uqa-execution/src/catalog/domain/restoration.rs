@@ -10,12 +10,10 @@ use super::{records, DomainRegistry};
 use crate::catalog::{projection, CatalogReadView, RelationNameResolution};
 use std::collections::{BTreeMap, BTreeSet};
 use uqa_core::RelationIdentity;
+use uqa_sql::catalog::roles::RoleDefinitions;
 use uqa_sql::{
     ast::ConstraintCatalogIdentity,
-    catalog::{
-        domain::{validate_domain_definitions, validate_domain_registry},
-        roles::RoleDefinition,
-    },
+    catalog::domain::{validate_domain_definitions, validate_domain_registry},
     schema::{
         constraint_metadata::{
             CatalogObjectAllocator, CatalogOidClass, ConstraintMetadataError,
@@ -36,10 +34,19 @@ pub struct RestoredDomains {
     pub state: DomainRestoreState,
 }
 
+impl RestoredDomains {
+    pub(super) fn current(registry: DomainRegistry) -> Self {
+        Self {
+            registry,
+            state: DomainRestoreState { current: true },
+        }
+    }
+}
+
 /// This read never writes conversion metadata; later relation restoration still needs these domain definitions for type binding.
 pub fn restore(
     storage: &dyn CatalogFacade,
-    roles: &BTreeMap<String, RoleDefinition>,
+    roles: &RoleDefinitions,
     allow_migration: bool,
 ) -> StorageBackendResult<RestoredDomains> {
     let (registry, current) = records::read(storage, roles, allow_migration)?;
@@ -91,7 +98,8 @@ pub fn finish_restore(
         resolution,
         assigned: BTreeSet::new(),
     };
-    for domain in registry.values_mut() {
+    for (name, original) in domains.iter() {
+        let mut domain = original.clone();
         let names = schemas
             .entry(domain.identity.schema.clone())
             .or_insert_with(|| {
@@ -116,6 +124,9 @@ pub fn finish_restore(
                 .filter_map(|constraint| constraint.name.clone()),
         );
         constraints::materialize(&mut domain.definition, &mut allocator).map_err(invalid)?;
+        registry
+            .insert(name.clone(), domain)
+            .map_err(|error| StorageBackendError::backend("domain restoration", error))?;
     }
     validate_domain_registry(&registry, roles).map_err(invalid)?;
     records::migrate(storage, &registry)?;
@@ -170,6 +181,6 @@ impl CatalogObjectAllocator for RestorationAllocator<'_> {
     }
 }
 
-fn invalid(error: impl std::fmt::Display) -> StorageBackendError {
+pub(super) fn invalid(error: impl std::fmt::Display) -> StorageBackendError {
     StorageBackendError::Other(format!("domain constraint catalog: {error}"))
 }

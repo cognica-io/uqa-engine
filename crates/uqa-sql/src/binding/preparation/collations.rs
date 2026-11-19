@@ -6,15 +6,16 @@
 
 //! Report collation conflicts only after the containing query has completed type analysis.
 
-use super::ownership::AnalysisMap;
+use super::ownership::{AnalysisIdentity, AnalysisMap};
 use crate::catalog::collations::derivation::Derivation;
 use crate::plan::{CommandPlan, QueryPlan, RelationalPlan};
 use crate::{SQLError, ScalarExpr};
-use std::ptr::NonNull;
 
 /// Only conflicting inputs retain diagnostic metadata. Addresses identify borrowed syntax and are never dereferenced or retained in an executable plan.
 #[derive(Default)]
-pub(in crate::binding) struct PendingCollations(AnalysisMap<NonNull<ScalarExpr>, Derivation>);
+pub(in crate::binding) struct PendingCollations(
+    AnalysisMap<AnalysisIdentity<ScalarExpr>, Derivation>,
+);
 
 impl PendingCollations {
     pub(in crate::binding) fn new(control: &uqa_core::memory::ProductionControl<'_>) -> Self {
@@ -29,7 +30,8 @@ impl PendingCollations {
         selected: Derivation,
     ) -> Result<(), SQLError> {
         if selected.error_only() != Derivation::None {
-            self.0.insert(NonNull::from(expression), selected)?;
+            self.0
+                .insert(AnalysisIdentity::from(expression), selected)?;
         }
         Ok(())
     }
@@ -41,14 +43,14 @@ impl PendingCollations {
     ) -> Result<(), SQLError> {
         if matches!(selected, Derivation::Conflict(..)) {
             self.0
-                .insert_if_missing(NonNull::from(expression), || Ok(selected))?;
+                .insert_if_missing(AnalysisIdentity::from(expression), || Ok(selected))?;
         }
         Ok(())
     }
 
     pub(super) fn indeterminate_target(&self, expression: &ScalarExpr) -> bool {
         matches!(
-            self.0.get(&NonNull::from(expression)),
+            self.0.get(&AnalysisIdentity::from(expression)),
             Some(Derivation::Conflict(..) | Derivation::InvalidImplicit(..))
         )
     }
@@ -61,7 +63,7 @@ impl PendingCollations {
         self.record(expression, selected.key())
     }
 
-    pub(super) fn require_key_at(&mut self, expression: NonNull<ScalarExpr>) {
+    pub(super) fn require_key_at(&mut self, expression: AnalysisIdentity<ScalarExpr>) {
         if let Some(selected) = self.0.get_mut(&expression) {
             *selected = selected.key();
         }
@@ -77,7 +79,7 @@ impl PendingCollations {
         let mut result = Ok(());
         expression.visit(&mut |node| {
             if result.is_ok() {
-                if let Some(selected) = self.0.get(&NonNull::from(node)) {
+                if let Some(selected) = self.0.get(&AnalysisIdentity::from(node)) {
                     result = selected.validate();
                 }
             }

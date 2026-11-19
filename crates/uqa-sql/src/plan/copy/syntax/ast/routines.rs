@@ -19,7 +19,7 @@ syntax_struct!(crate::ast::CreateFunction {
     return_written_type,
     language,
     body,
-    body_origin,
+    body_origin = None,
     sql_body_form,
     creation_search_path,
     volatility,

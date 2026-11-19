@@ -212,7 +212,9 @@ fn publish(
             state
                 .persist_candidate(&columns, &constraints)
                 .map_err(storage)?;
-            state.publish_constraints(columns, constraints);
+            state
+                .publish_constraints(columns, constraints)
+                .map_err(storage)?;
             context.changes.table_catalog_changed();
         }
         HolderKind::View => {
@@ -223,16 +225,19 @@ fn publish(
             }
             let mut view = current.clone();
             view.row_type_array_name = Some(name);
+            let mut next = (**views).clone();
+            next.insert(holder.relation.clone(), view)?;
+            let view = &next[&holder.relation];
             if view.persistence != uqa_sql::ast::RelationPersistence::Temporary {
                 context
                     .views
                     .save_view(
-                        &crate::catalog::view::catalog_view_row(&holder.relation, &view)
+                        &crate::catalog::view::catalog_view_row(&holder.relation, view)
                             .map_err(|error| SQLError::Internal(error.to_string()))?,
                     )
                     .map_err(storage)?;
             }
-            views.insert(holder.relation.clone(), view);
+            **views = next;
             drop(views);
             context.changes.catalog_registry_changed();
         }
@@ -241,18 +246,18 @@ fn publish(
                 .foreign
                 .security(&holder.relation)
                 .ok_or_else(changed)?;
-            let mut tables = context.foreign_publication.tables_write();
-            let current = tables.get(&holder.relation).ok_or_else(changed)?;
+            let mut next = context.foreign_publication.foreign_catalog();
+            let current = next.tables().get(&holder.relation).ok_or_else(changed)?;
             if current.object_id != holder.object_id {
                 return Err(changed());
             }
             let mut table = current.clone();
             table.row_type_array_name = Some(name);
+            next.insert(holder.relation.clone(), table.clone(), security.clone())?;
             table
                 .persist(context.storage, &holder.relation, &security)
                 .map_err(storage)?;
-            tables.insert(holder.relation.clone(), table);
-            drop(tables);
+            context.foreign_publication.publish_foreign_catalog(next);
             context.changes.catalog_registry_changed();
         }
     }

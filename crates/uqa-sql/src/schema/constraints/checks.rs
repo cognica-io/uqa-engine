@@ -8,8 +8,7 @@
 
 use crate::{
     ast::{ColumnDef, Expr},
-    plpgsql::{bind_expr, ResolvedVariable, VariableResolver},
-    schema::{ColumnIdentity, SchemaBindingContext},
+    schema::SchemaBindingContext,
     ColumnType, RowSchema, SQLError,
 };
 use uqa_core::Value;
@@ -20,21 +19,39 @@ pub fn check_row_schema(
     columns: &[ColumnDef],
     row_type: &ColumnType,
 ) -> Result<RowSchema, SQLError> {
-    let schema = RowSchema::with_column_definitions(Some(qualifier), columns)
-        .with_relation_row_type(qualifier, row_type.clone())?;
-    Ok(RowSchema::with_typed_virtual_identities(
+    check_row_schema_with_control(
+        qualifier,
+        columns,
+        Some(row_type),
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
+}
+
+/// Retain the same CHECK row namespace under the caller's original allocation and cancellation owners.
+pub fn check_row_schema_with_control(
+    qualifier: &str,
+    columns: &[ColumnDef],
+    row_type: Option<&ColumnType>,
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<RowSchema, SQLError> {
+    let mut schema = RowSchema::with_column_metadata_with_control(
+        Some(qualifier),
+        columns
+            .iter()
+            .map(|column| (column.name.as_str(), Some(&column.ty), column.collation_oid)),
+        control,
+    )?;
+    if let Some(row_type) = row_type {
+        schema = schema.with_relation_row_type_with_control(qualifier, row_type, control)?;
+    }
+    RowSchema::with_virtual_columns_with_control(
         &schema,
-        &[
-            (
-                ColumnIdentity::unqualified("tableoid"),
-                Some(ColumnType::Oid),
-            ),
-            (
-                ColumnIdentity::qualified(qualifier, "tableoid"),
-                Some(ColumnType::Oid),
-            ),
+        [
+            (None, "tableoid", Some(&ColumnType::Oid)),
+            (Some(qualifier), "tableoid", Some(&ColumnType::Oid)),
         ],
-    ))
+        control,
+    )
 }
 
 pub fn validate_check_expression(
@@ -61,14 +78,12 @@ pub fn bind_stored_check_expression(
         .ok_or_else(|| SQLError::UnknownTable(table.into()))?;
     let relation = crate::RelationIdentity::from_legacy_name(table).map_err(SQLError::Internal)?;
     let schema = check_row_schema(&relation.name, columns, &row_type)?;
-    let typed = bind_expr(
+    let typed = super::super::expressions::bind_relation_row_references(
         expression,
-        &mut RelationReferences {
-            table,
-            qualifier,
-            local: &relation.name,
-            columns,
-        },
+        table,
+        qualifier,
+        &relation.name,
+        columns,
     )?;
     crate::schema::defaults::bind_stored_schema_expression_with_schema(
         context, expression, typed, &schema,
@@ -86,14 +101,12 @@ pub fn validate_check_expression_with_type(
 ) -> Result<(), SQLError> {
     let relation = crate::RelationIdentity::from_legacy_name(table).map_err(SQLError::Internal)?;
     let schema = check_row_schema(&relation.name, columns, row_type)?;
-    *expression = bind_expr(
+    *expression = super::super::expressions::bind_relation_row_references(
         expression,
-        &mut RelationReferences {
-            table,
-            qualifier,
-            local: &relation.name,
-            columns,
-        },
+        table,
+        qualifier,
+        &relation.name,
+        columns,
     )?;
     bind_whole_row_fields(expression, &schema)?;
     let original = crate::plan::ExpressionPlan::lower(expression.clone());
@@ -174,62 +187,6 @@ fn require_boolean(
         };
     }
     Ok(())
-}
-
-/// Normalize known relation spellings without evaluating values or changing analysis error order. Unknown names remain for the ordered analyzer to reject.
-struct RelationReferences<'a> {
-    table: &'a str,
-    qualifier: &'a str,
-    local: &'a str,
-    columns: &'a [ColumnDef],
-}
-
-impl RelationReferences<'_> {
-    fn matches(&self, qualifier: &str) -> bool {
-        [self.table, self.qualifier, self.local].contains(&qualifier)
-    }
-}
-
-impl VariableResolver for RelationReferences<'_> {
-    fn resolve_name(&mut self, _: &str) -> Result<Option<ResolvedVariable>, SQLError> {
-        Ok(None)
-    }
-
-    fn resolve_qualified(
-        &mut self,
-        _: &str,
-        _: &str,
-    ) -> Result<Option<ResolvedVariable>, SQLError> {
-        Ok(None)
-    }
-
-    fn resolve_param(&mut self, _: usize) -> Result<Option<ResolvedVariable>, SQLError> {
-        Ok(None)
-    }
-
-    fn rewrite_name(&mut self, name: &str) -> Result<Option<Expr>, SQLError> {
-        Ok(
-            (self.matches(name) && !self.columns.iter().any(|column| column.name == name))
-                .then(|| Expr::QualifiedStar(self.local.into())),
-        )
-    }
-
-    fn rewrite_qualified(
-        &mut self,
-        qualifier: &str,
-        column: &str,
-    ) -> Result<Option<Expr>, SQLError> {
-        Ok(self.matches(qualifier).then(|| Expr::QualifiedColumn {
-            qualifier: self.local.into(),
-            column: column.into(),
-        }))
-    }
-
-    fn rewrite_qualified_whole_row(&mut self, qualifier: &str) -> Result<Option<Expr>, SQLError> {
-        Ok(self
-            .matches(qualifier)
-            .then(|| Expr::QualifiedStar(self.local.into())))
-    }
 }
 
 #[cfg(test)]

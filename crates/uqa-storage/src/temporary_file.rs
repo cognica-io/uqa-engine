@@ -6,6 +6,9 @@
 
 //! Ephemeral authenticated byte files with independent reader positions and bounded workspace.
 
+mod quota;
+pub(crate) use quota::{FileBudget, FileLimit};
+
 use std::io::{self, IoSlice, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -38,6 +41,7 @@ pub struct BlockTemporaryFile<const BYTES: usize> {
 
 struct Owner<const BYTES: usize> {
     file: tempfile::NamedTempFile,
+    space: Option<quota::Reservation>,
     cipher: XChaCha20Poly1305,
     length: u64,
     unpublished_tail: bool,
@@ -60,6 +64,13 @@ impl TemporaryFileMetadata {
 }
 
 impl<const BYTES: usize> BlockTemporaryFile<BYTES> {
+    /// Native file-owner layout and the exposed path capacity. Kernel state, allocator bookkeeping and dependency-private allocations are not estimated as owned payload.
+    pub(crate) fn retained_bytes(&self) -> Option<usize> {
+        size_of::<Mutex<Owner<BYTES>>>()
+            .checked_add(size_of::<PathBuf>())?
+            .checked_add(self.path.capacity())
+    }
+
     /// Ciphertext file length for a logical length, including both slots and complete block framing. This excludes filesystem allocation metadata.
     pub fn physical_len_for(logical_length: u64) -> io::Result<u64> {
         if BYTES == 0 || BYTES > BLOCK_BYTES {
@@ -79,6 +90,20 @@ impl<const BYTES: usize> BlockTemporaryFile<BYTES> {
         Self::from_file(tempfile::NamedTempFile::new_in(directory)?)
     }
 
+    pub(crate) fn with_file_budget(budget: &FileBudget) -> io::Result<Self> {
+        let file = Self::new()?;
+        file.owner.lock().space = Some(budget.reserve());
+        Ok(file)
+    }
+
+    pub(crate) fn file_budget(&self) -> Option<FileBudget> {
+        self.owner
+            .lock()
+            .space
+            .as_ref()
+            .map(quota::Reservation::budget)
+    }
+
     fn from_file(file: tempfile::NamedTempFile) -> io::Result<Self> {
         Self::physical_len_for(0)?;
         let mut key = [0_u8; 32];
@@ -89,6 +114,7 @@ impl<const BYTES: usize> BlockTemporaryFile<BYTES> {
         Ok(Self {
             owner: Arc::new(Mutex::new(Owner {
                 file,
+                space: None,
                 cipher,
                 length: 0,
                 unpublished_tail: false,
@@ -294,6 +320,9 @@ impl<const BYTES: usize> Owner<BYTES> {
         let observation =
             IOContext::block_operation(BlockClass::Temporary, BlockOperation::Write, 1);
         if !existing {
+            if let Some(space) = &mut self.space {
+                space.resize(record_offset::<BYTES>(block + 1)?)?;
+            }
             // The owner lock and logical length hide a fresh block until its entire extent succeeds. Its initial selector can accompany the ciphertext; there is no earlier slot to preserve. Keep the unused slot sparse instead of writing a whole block of padding.
             self.file
                 .as_file_mut()
@@ -359,6 +388,9 @@ impl<const BYTES: usize> Owner<BYTES> {
         #[cfg(test)]
         self.faults.before_truncate()?;
         self.file.as_file().set_len(length)?;
+        if let Some(space) = &mut self.space {
+            space.resize(length)?;
+        }
         self.unpublished_tail = false;
         Ok(())
     }

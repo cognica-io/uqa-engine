@@ -9,7 +9,7 @@
 use crate::ast::{ColumnType, InternalColumnRef};
 use std::collections::{HashMap, HashSet};
 
-/// Lookup maps keyed by column names and identities. Name binding constructs and probes these maps for every column of every bound schema, so they hash with `ahash` instead of the standard library's `SipHash` default.
+/// Lookup maps keyed by column names and identities. Ordinary binding uses `ahash`; retained parameter input freezes sorted admitted entries so name comparison can suspend during construction.
 pub(crate) use lookup_map::SchemaMap;
 pub(crate) use lookup_set::SchemaSet;
 use std::sync::Arc;
@@ -28,6 +28,7 @@ mod record_fields;
 mod relation_presence;
 mod relation_types;
 mod result_columns;
+pub(crate) mod retirement;
 mod schema_composition;
 mod schema_construction;
 mod schema_layout;
@@ -186,7 +187,7 @@ pub struct PhysicalLayout {
 /// to change row shape without moving any values.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RowSchema {
-    index: Arc<SchemaIndex>,
+    index: retirement::IndexOwner,
 }
 
 /// Physical source of one scalar-projection output. Direct input slots stay in the child row; only computed values extend its physical layout.

@@ -13,6 +13,13 @@ use redb::{backends::InMemoryBackend, StorageBackend};
 
 use super::*;
 
+mod backup_image;
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+mod backup_import;
+mod backup_metadata;
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+mod backup_restore;
+mod catalog_names;
 mod commit;
 mod diskann;
 mod identifiers;
@@ -22,8 +29,23 @@ mod occurrence_commits;
 mod read;
 mod receipts;
 mod reclamation;
+mod retained_handles;
 mod serializable;
 mod vector_spill;
+
+fn remove_backup_metadata_for_predecessor(transaction: &WriteTransaction) {
+    transaction
+        .delete_table(super::backup_metadata::BIRTHS)
+        .unwrap();
+    transaction
+        .delete_table(super::backup_metadata::HISTORY)
+        .unwrap();
+    transaction
+        .open_table(METADATA)
+        .unwrap()
+        .remove(super::backup_metadata::EPOCH)
+        .unwrap();
+}
 
 #[derive(Clone, Debug, Default)]
 struct FaultBackend {

@@ -158,62 +158,65 @@ impl Engine {
         doc_count_dirty: bool,
     ) -> std::sync::Arc<TableState> {
         std::sync::Arc::new(TableState {
+            _image_memory: None,
             lifecycle_id: std::sync::atomic::AtomicU64::new(metadata.lifecycle_id()),
             object_id: metadata.object_id(),
-            security: crate::state::CatalogCell::new(metadata.security()),
-            storage_generation: parking_lot::RwLock::new(metadata.storage_generation()),
-            document_store: parking_lot::RwLock::new(document_store),
-            inverted_index: parking_lot::RwLock::new(inverted_index),
-            vector_indexes: parking_lot::RwLock::new(vector_indexes),
-            fts_fields: crate::state::CatalogCell::from_snapshot(metadata.fts_fields.snapshot()),
-            columns: crate::state::CatalogCell::from_snapshot(metadata.columns.snapshot()),
+            security: crate::state::TableMetadataCell::new(metadata.security()),
+            storage_generation: crate::state::CatalogCell::new(metadata.storage_generation()),
+            document_store: uqa_storage::memory_capture::MemoryCaptureCell::new(
+                document_store.into(),
+            ),
+            inverted_index: uqa_storage::memory_capture::MemoryCaptureCell::new(
+                inverted_index.into(),
+            ),
+            vector_indexes: uqa_storage::memory_capture::MemoryCaptureCell::new(vector_indexes),
+            fts_fields: crate::state::TableMetadataCell::from_generation(
+                metadata.fts_fields.generation(),
+            ),
+            columns: crate::state::TableDefinitionCell::from_generation(
+                metadata.columns.generation(),
+            ),
             columns_declared: crate::state::CatalogCell::from_snapshot(
                 metadata.columns_declared.snapshot(),
             ),
-            next_id: parking_lot::Mutex::new(*metadata.next_id.lock()),
-            maps_integer_keys: std::sync::atomic::AtomicBool::new(
-                metadata
-                    .maps_integer_keys
-                    .load(std::sync::atomic::Ordering::Acquire),
-            ),
+            next_id: crate::state::CatalogCell::new(*metadata.next_id.read()),
+            maps_integer_keys: crate::state::CatalogCell::new(*metadata.maps_integer_keys.read()),
             analyzer: crate::state::CatalogCell::from_snapshot(metadata.analyzer.snapshot()),
             column_stats: crate::state::CatalogCell::from_snapshot(
                 metadata.column_stats.snapshot(),
             ),
-            column_stats_loaded: std::sync::atomic::AtomicBool::new(
-                metadata
-                    .column_stats_loaded
-                    .load(std::sync::atomic::Ordering::Acquire),
+            column_stats_loaded: crate::state::CatalogCell::new(
+                *metadata.column_stats_loaded.read(),
             ),
-            column_stats_dirty: std::sync::atomic::AtomicBool::new(
-                metadata
-                    .column_stats_dirty
-                    .load(std::sync::atomic::Ordering::Acquire),
+            column_stats_dirty: crate::state::CatalogCell::new(*metadata.column_stats_dirty.read()),
+            statistics_maintenance: crate::state::CatalogCell::new(
+                metadata.statistics_maintenance.read().clone(),
             ),
-            statistics_maintenance: parking_lot::Mutex::new(
-                metadata.statistics_maintenance.lock().clone(),
+            table_checks: crate::state::TableDefinitionCell::from_generation(
+                metadata.table_checks.generation(),
             ),
-            table_checks: crate::state::CatalogCell::from_snapshot(
-                metadata.table_checks.snapshot(),
+            foreign_keys: crate::state::TableMetadataCell::from_generation(
+                metadata.foreign_keys.generation(),
             ),
-            foreign_keys: crate::state::CatalogCell::from_snapshot(
-                metadata.foreign_keys.snapshot(),
+            key_constraints: crate::state::TableMetadataCell::from_generation(
+                metadata.key_constraints.generation(),
             ),
-            key_constraints: crate::state::CatalogCell::from_snapshot(
-                metadata.key_constraints.snapshot(),
+            hierarchy: crate::state::TableDefinitionCell::from_generation(
+                metadata.hierarchy.generation(),
             ),
-            hierarchy: crate::state::CatalogCell::from_snapshot(metadata.hierarchy.snapshot()),
-            value_indexes: parking_lot::RwLock::new(std::collections::BTreeMap::new()),
+            value_indexes: uqa_storage::memory_capture::MemoryCaptureCell::new(
+                uqa_execution::catalog::index::value::ValueIndexes::default(),
+            ),
             doc_count_cache: std::sync::atomic::AtomicU64::new(doc_count),
             doc_count_dirty: std::sync::atomic::AtomicBool::new(doc_count_dirty),
             persistence: metadata.persistence,
             on_commit: metadata.on_commit,
             catalog_oids: metadata.recorded_catalog_oids(),
-            row_type_array_name: crate::state::CatalogCell::from_snapshot(
-                metadata.row_type_array_name.snapshot(),
+            row_type_array_name: crate::state::TableMetadataCell::from_generation(
+                metadata.row_type_array_name.generation(),
             ),
-            dropped_attributes: crate::state::CatalogCell::from_snapshot(
-                metadata.dropped_attributes.snapshot(),
+            dropped_attributes: crate::state::TableMetadataCell::from_generation(
+                metadata.dropped_attributes.generation(),
             ),
         })
     }

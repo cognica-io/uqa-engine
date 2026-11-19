@@ -5,39 +5,45 @@
 //
 
 //! Remove physical column data through retained table generations and ordered catalog publication.
-use crate::catalog::index::index_references_column;
+use crate::catalog::index::{index_references_column, registry::CatalogIndexes};
 use crate::schema::{columns::removal::ColumnRemovalViews, constraints::ConstraintModes};
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::BTreeSet,
     ops::{Deref, DerefMut},
 };
+use uqa_core::memory::RetainedValue;
 use uqa_core::{DocId, RelationIdentity};
 use uqa_sql::{
     ast::{ColumnDef, ForeignKey, TableCheck, TableKeyConstraint},
     catalog::events::PreparedRuleColumnDrop,
     schema::columns::removal_metadata::{self, ColumnDependencyEntries, ColumnDependencyState},
 };
-use uqa_storage::{
-    document_store::Document, CatalogIndexRow, StorageBackendError, StorageBackendResult,
-};
+use uqa_storage::{document_store::Document, StorageBackendError, StorageBackendResult};
 pub type SchemaWrite<'a, T> = Box<dyn DerefMut<Target = Vec<T>> + 'a>;
+pub trait DefinitionWrite<T> {
+    fn value(&self) -> &T;
+    fn publish(&mut self, value: T) -> StorageBackendResult<()>;
+}
 pub type VectorIndexesWrite<'a> =
     Box<dyn DerefMut<Target = uqa_storage::vector_index::VectorIndexes> + 'a>;
 pub type IndexRowsRead<'a> =
-    Box<dyn Deref<Target = BTreeMap<RelationIdentity, CatalogIndexRow>> + 'a>;
+    Box<dyn Deref<Target = crate::catalog::index::registry::CatalogIndexes> + 'a>;
 pub type IndexRowsWrite<'a> =
-    Box<dyn DerefMut<Target = BTreeMap<RelationIdentity, CatalogIndexRow>> + 'a>;
+    Box<dyn DerefMut<Target = crate::catalog::index::registry::CatalogIndexes> + 'a>;
 /// One retained relation generation for the entire schema and physical-field removal.
 pub trait ColumnDropTable: ColumnDependencyState {
     fn object_id(&self) -> [u8; 16];
-    fn clear_value_indexes(&self);
-    fn write_columns(&self) -> SchemaWrite<'_, ColumnDef>;
+    fn clear_value_indexes(&self) -> StorageBackendResult<()>;
+    fn write_columns(&self) -> Box<dyn DefinitionWrite<Vec<ColumnDef>> + '_>;
     fn write_dropped_attributes(
         &self,
     ) -> SchemaWrite<'_, uqa_sql::catalog::relation_attributes::DroppedAttribute>;
     fn hierarchy(&self) -> uqa_sql::ast::TableHierarchy;
-    fn publish_hierarchy(&self, hierarchy: uqa_sql::ast::TableHierarchy);
-    fn write_checks(&self) -> SchemaWrite<'_, TableCheck>;
+    fn publish_hierarchy(
+        &self,
+        hierarchy: uqa_sql::ast::TableHierarchy,
+    ) -> StorageBackendResult<()>;
+    fn write_checks(&self) -> Box<dyn DefinitionWrite<Vec<TableCheck>> + '_>;
     fn write_keys(&self) -> SchemaWrite<'_, TableKeyConstraint>;
     fn write_foreign_keys(&self) -> SchemaWrite<'_, ForeignKey>;
     fn remove_column_acl(&self, column: &str);
@@ -62,7 +68,13 @@ pub trait ColumnDropIndexes {
         table: &str,
         key: &uqa_storage::ValueIndexKey,
     ) -> StorageBackendResult<()>;
-    fn remove_field_analyzer(&self, table: &str, column: &str);
+    fn field_analyzers(
+        &self,
+    ) -> RetainedValue<uqa_storage::analyzer_binding::registry::FieldAnalyzerCatalog>;
+    fn publish_field_analyzers(
+        &self,
+        catalog: uqa_storage::analyzer_binding::registry::FieldAnalyzerCatalog,
+    );
     fn refresh_value_indexes(&self, table: &str) -> StorageBackendResult<()>;
 }
 pub trait ColumnDropRows {
@@ -131,39 +143,43 @@ pub fn drop_column(
         )));
     }
     preflight_dependencies(context, &table_name, column)?;
+    let index_removal = prepare_index_removal(context.indexes, &table_name, column)?;
     let prepared_rule_drop = context.rules.prepare(&table_name, column)?;
+    let mut analyzers = context.indexes.field_analyzers().as_ref().clone();
+    analyzers.remove(&(table_name.clone(), column.to_owned()))?;
     crate::schema::indexes::diskann::retire_column(&context.registry, &table_name, column)?;
     let mut hierarchy = state.hierarchy();
     let dropped = dropped_attribute(context.catalog, state.as_ref(), column, &hierarchy)?;
-    state.clear_value_indexes();
+    state.clear_value_indexes()?;
     state.write_dropped_attributes().push(dropped);
     uqa_sql::schema::columns::publication::remove_local_column(&mut hierarchy, column);
-    state.publish_hierarchy(hierarchy);
-    let retained_checks =
-        removal_metadata::remove_column_declarations(&mut state.write_columns(), column);
+    state.publish_hierarchy(hierarchy)?;
+    let mut columns = state.write_columns();
+    let mut next_columns = columns.value().clone();
+    let retained_checks = removal_metadata::remove_column_declarations(&mut next_columns, column);
     {
         let mut checks = state.write_checks();
-        checks.extend(retained_checks);
-        removal_metadata::remove_column_checks(&mut checks, column);
+        let mut next_checks = checks.value().clone();
+        next_checks.extend(retained_checks);
+        removal_metadata::remove_column_checks(&mut next_checks, column);
+        checks.publish(next_checks)?;
     }
-    removal_metadata::remove_column_keys(
-        &mut state.write_columns(),
-        &mut state.write_keys(),
-        column,
-    );
+    removal_metadata::remove_column_keys(&mut next_columns, &mut state.write_keys(), column);
+    columns.publish(next_columns)?;
+    drop(columns);
     removal_metadata::remove_column_foreign_keys(&mut state.write_foreign_keys(), column);
     state.remove_column_acl(column);
     state.remove_text_field(column);
     {
         let mut vectors = state.write_vector_indexes();
-        if let Some(mut index) = vectors.live_mut()?.remove(column) {
+        if let Some(mut index) = vectors.live_mut()?.remove(column)? {
             if index.index_kind() != "diskann" {
                 index.clear()?;
             }
         }
     }
-    remove_catalog_indexes(context.indexes, &table_name, column)?;
-    context.indexes.remove_field_analyzer(&table_name, column);
+    index_removal.publish(context.indexes, &table_name)?;
+    context.indexes.publish_field_analyzers(analyzers);
     for id in state.doc_ids()? {
         let Some(mut document) = state.document(id)? else {
             continue;
@@ -251,32 +267,51 @@ pub fn preflight_dependencies(
     }
     Ok(())
 }
-pub fn remove_catalog_indexes(
+struct PreparedIndexRemoval {
+    rows: CatalogIndexes,
+    removals: Vec<(RelationIdentity, uqa_storage::ValueIndexKey)>,
+}
+
+fn prepare_index_removal(
     indexes: &dyn ColumnDropIndexes,
     table: &str,
     column: &str,
-) -> StorageBackendResult<()> {
-    let mut rows = indexes.write_indexes();
+) -> StorageBackendResult<PreparedIndexRemoval> {
+    let rows = indexes.read_indexes();
+    let mut candidate = rows.clone();
     let mut removals = Vec::new();
     for (name, row) in rows.iter() {
         if row.table_name == table && index_references_column(row, column)? {
-            removals.push(name.clone());
+            let definition = crate::catalog::index::index_definition(row)?;
+            let identity = definition.catalog.ok_or_else(|| {
+                StorageBackendError::Other(format!(
+                    "index `{}` has no physical identity",
+                    name.qualified_name()
+                ))
+            })?;
+            candidate.remove(name)?;
+            removals.push((
+                name.clone(),
+                uqa_storage::ValueIndexKey::Index(identity.physical_key),
+            ));
         }
     }
-    for name in removals {
-        let definition = crate::catalog::index::index_definition(&rows[&name])?;
-        let identity = definition.catalog.ok_or_else(|| {
-            StorageBackendError::Other(format!(
-                "index `{}` has no physical identity",
-                name.qualified_name()
-            ))
-        })?;
-        indexes.drop_catalog_index(&name)?;
-        indexes.remove_value_index(
-            table,
-            &uqa_storage::ValueIndexKey::Index(identity.physical_key),
-        )?;
-        rows.remove(&name);
+    Ok(PreparedIndexRemoval {
+        rows: candidate,
+        removals,
+    })
+}
+
+impl PreparedIndexRemoval {
+    fn publish(self, indexes: &dyn ColumnDropIndexes, table: &str) -> StorageBackendResult<()> {
+        if self.removals.is_empty() {
+            return Ok(());
+        }
+        for (name, physical_key) in self.removals {
+            indexes.drop_catalog_index(&name)?;
+            indexes.remove_value_index(table, &physical_key)?;
+        }
+        **indexes.write_indexes() = self.rows;
+        Ok(())
     }
-    Ok(())
 }

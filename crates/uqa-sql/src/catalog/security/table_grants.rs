@@ -16,15 +16,13 @@ use super::{
     BoundTableSecurity, TableSecurity,
 };
 use crate::catalog::roles::identity::RoleSubject;
-use crate::catalog::{
-    roles::{RoleDefinition, RoleMembership, RoleMembershipKey},
-    stored_view::StoredView,
-};
+use crate::catalog::roles::{RoleDefinitions, RoleMemberships};
+use crate::catalog::stored_view::StoredView;
 use crate::{
     ast::{GrantTableStmt, SequencePrivilege, TablePrivilege, TableRevokeBehavior},
     SQLError,
 };
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use uqa_core::catalog_acl::AclGrantee;
 use uqa_core::RelationIdentity;
 pub type ViewPrivilegeUpdate = (RelationIdentity, StoredView);
@@ -58,8 +56,8 @@ fn apply_table_acl(
     grantees: &[AclGrantee],
     privileges: &[TableAclPrivilege],
     current_user: &(impl RoleSubject + ?Sized),
-    roles: &BTreeMap<String, RoleDefinition>,
-    memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
+    roles: &RoleDefinitions,
+    memberships: &RoleMemberships,
     current: &TableSecurity,
 ) -> Result<(TableSecurity, usize), SQLError> {
     let grantors = privileges
@@ -182,8 +180,8 @@ pub struct TableGrantApplication<'a> {
     pub grantees: &'a [AclGrantee],
     pub requested: &'a RequestedTablePrivileges,
     pub current_user: &'a dyn RoleSubject,
-    pub roles: &'a BTreeMap<String, RoleDefinition>,
-    pub memberships: &'a BTreeMap<RoleMembershipKey, RoleMembership>,
+    pub roles: &'a RoleDefinitions,
+    pub memberships: &'a RoleMemberships,
 }
 
 impl TableGrantApplication<'_> {
@@ -400,7 +398,7 @@ pub fn validate_table_acl_roles(
     grantees: &[AclGrantee],
     requested_grantor: Option<&str>,
     current_user: &(impl RoleSubject + ?Sized),
-    roles: &BTreeMap<String, RoleDefinition>,
+    roles: &RoleDefinitions,
 ) -> Result<(), SQLError> {
     for role in grantees {
         if role

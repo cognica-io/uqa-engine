@@ -55,11 +55,11 @@ impl EventRelationCatalog for Engine {
                 },
             ));
         }
-        if self.durable.foreign_tables.read().contains_key(relation) {
+        if self.durable.foreign_catalog.tables().contains_key(relation) {
             let owner = self
                 .durable
-                .foreign_table_security
-                .read()
+                .foreign_catalog
+                .security()
                 .get(relation)
                 .map(|security| security.role_owner)
                 .ok_or_else(|| {
@@ -101,8 +101,8 @@ impl EventRelationCatalog for Engine {
     }
     fn foreign_columns(&self, relation: &RelationIdentity) -> Option<Vec<ColumnDef>> {
         self.durable
-            .foreign_tables
-            .read()
+            .foreign_catalog
+            .tables()
             .get(relation)
             .cloned()
             .map(|table| table.columns)

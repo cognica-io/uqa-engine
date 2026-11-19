@@ -75,6 +75,12 @@ impl DiskANNBuildProvenance {
     pub fn training(&self) -> PQTrainingOptions {
         self.training
     }
+    pub(in crate::diskann_index) fn partition_options(&self) -> DiskANNPartitionOptions {
+        self.partition_options
+    }
+    pub(in crate::diskann_index) fn merge_options(&self) -> DiskANNMergeOptions {
+        self.merge_options
+    }
     pub fn code_batch_nodes(&self) -> usize {
         self.code_batch_nodes
     }

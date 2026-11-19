@@ -4,298 +4,464 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Metadata traverses the original query and source containers without extracting their syntax.
+//! Ordered metadata work borrows disjoint original slots instead of moving syntax or recursing through the call stack.
 
-use super::super::{CommandQuerySlot, QueryChildSlot, SourceChildSlot};
-use super::{MutableExecutablePlan, QueryPlan, RewriteMemory, SQLError, SourcePlan, Walker};
-use crate::plan::{CommandPlan, CtePlan, CtePlanBody, RelationalPlan, UnifiedPlan};
+use super::{
+    install_aliases, install_source_updates, MetadataObserver, MutableExecutablePlan, QueryPlan,
+    RewriteMemory, SQLError, SourcePlan, Walker,
+};
+use crate::{
+    catalog::work::{inline, Work},
+    construction::Stack,
+    plan::{
+        retirement::construction::{Context, Prefix},
+        CommandPlan, CtePlan, CtePlanBody, ExpressionPlan, ProjectionPlan, RelationalPlan,
+        UnifiedPlan,
+    },
+};
+use std::slice::IterMut;
+use uqa_core::memory::ProductionControl;
 
-fn field<'a>(memory: Option<&'a mut RewriteMemory>, name: &str) -> Option<&'a mut RewriteMemory> {
+mod commands;
+
+type Memory<'a> = Option<&'a mut RewriteMemory>;
+type Result<T> = std::result::Result<T, SQLError>;
+
+fn field<'a>(memory: Memory<'a>, name: &str) -> Memory<'a> {
     memory.map(|memory| memory.field_mut(name).as_mut().expect("metadata field"))
 }
 
+fn fields<'a, const N: usize>(
+    memory: Memory<'a>,
+    names: [&str; N],
+) -> [Option<&'a mut Option<RewriteMemory>>; N] {
+    memory.map_or_else(
+        || std::array::from_fn(|_| None),
+        |memory| memory.fields_mut(names).map(Some),
+    )
+}
+
+fn present(memory: Option<&mut Option<RewriteMemory>>) -> Memory<'_> {
+    memory.map(|memory| memory.as_mut().expect("present metadata field"))
+}
+
+struct Elements<'a, T> {
+    values: IterMut<'a, T>,
+    memory: Option<IterMut<'a, super::super::memory::RewriteField>>,
+}
+
+impl<'a, T> Elements<'a, T> {
+    fn new(values: &'a mut [T], memory: Memory<'a>) -> Self {
+        let count = values.len();
+        let memory = memory.map(|memory| {
+            let RewriteMemory::Fields { fields, .. } = memory else {
+                panic!("metadata vector owns plan fields")
+            };
+            assert_eq!(count, fields.len(), "metadata vector matches its payload");
+            fields.iter_mut()
+        });
+        Self {
+            values: values.iter_mut(),
+            memory,
+        }
+    }
+
+    fn next(&mut self) -> Option<(&'a mut T, Memory<'a>)> {
+        let value = self.values.next()?;
+        let memory = self.memory.as_mut().map(|memory| {
+            memory
+                .next()
+                .expect("metadata vector item")
+                .memory
+                .as_mut()
+                .expect("owned metadata item")
+        });
+        Some((value, memory))
+    }
+}
+
+enum Node<'a> {
+    Executable(&'a mut UnifiedPlan, Memory<'a>),
+    Query(&'a mut QueryPlan, Memory<'a>),
+    Root(&'a mut RelationalPlan, Memory<'a>),
+    Source(&'a mut SourcePlan, Memory<'a>),
+    Command(&'a mut CommandPlan, Memory<'a>),
+    Projections(&'a mut [ProjectionPlan], Memory<'a>),
+    Ctes(Elements<'a, CtePlan>),
+    Queries(Elements<'a, QueryPlan>),
+    Expressions(Elements<'a, ExpressionPlan>),
+}
+
+struct Task<'a> {
+    node: Node<'a>,
+    cte_command: bool,
+}
+
+struct Tasks<'a> {
+    pending: Stack<(Task<'a>, usize), 4>,
+    depth: usize,
+}
+impl<'a> Tasks<'a> {
+    fn new(control: ProductionControl<'_>) -> Self {
+        Self {
+            pending: Stack::new(control),
+            depth: 0,
+        }
+    }
+    fn pop(&mut self) -> Option<Task<'a>> {
+        let (task, depth) = self.pending.pop()?;
+        self.depth = depth;
+        Some(task)
+    }
+}
+
+fn push<'a>(tasks: &mut Tasks<'a>, node: Node<'a>, cte_command: bool) -> Result<()> {
+    let depth = tasks
+        .depth
+        .checked_add(1)
+        .ok_or(uqa_core::memory::MemoryError::SizeOverflow)?;
+    Ok(tasks.pending.push((Task { node, cte_command }, depth))?)
+}
+
+fn resume<'a>(tasks: &mut Tasks<'a>, node: Node<'a>, cte_command: bool) -> Result<()> {
+    Ok(tasks
+        .pending
+        .push((Task { node, cte_command }, tasks.depth))?)
+}
+
 impl Walker<'_, '_> {
-    pub(super) fn plan(&mut self, plan: &mut MutableExecutablePlan) -> Result<(), SQLError> {
-        match plan {
-            MutableExecutablePlan::Query(query) => {
-                query.assert_owner(&self.control);
-                self.query(&mut query.query, query.memory.as_mut())
+    pub(super) fn plan(&mut self, plan: &mut MutableExecutablePlan) -> Result<()> {
+        let control = self.control;
+        inline(plan.apply_metadata_from(self, &control, &mut ()))
+    }
+
+    pub(super) fn executable(&mut self, plan: &mut UnifiedPlan, memory: Memory<'_>) -> Result<()> {
+        let control = self.control;
+        inline(walk(
+            Node::Executable(plan, memory),
+            None,
+            self,
+            &control,
+            &mut (),
+        ))
+    }
+}
+
+pub(crate) trait MetadataTarget {
+    fn apply_metadata_from<W: Work + Send, O: MetadataObserver<W>>(
+        &mut self,
+        observe: &mut O,
+        control: &ProductionControl<'_>,
+        work: &mut W,
+    ) -> impl std::future::Future<Output = Result<()>>;
+}
+
+impl MutableExecutablePlan {
+    fn metadata_root(&mut self, control: &ProductionControl<'_>) -> Node<'_> {
+        match self {
+            Self::Query(query) => {
+                query.assert_owner(control);
+                Node::Query(&mut query.query, query.memory.as_mut())
             }
-            MutableExecutablePlan::Command(command) => {
-                command.assert_owner(&self.control);
-                self.command(&mut command.command, command.memory.as_mut())
+            Self::Command(command) => {
+                command.assert_owner(control);
+                Node::Command(&mut command.command, command.memory.as_mut())
             }
         }
     }
+}
 
-    fn executable(
+impl MetadataTarget for MutableExecutablePlan {
+    fn apply_metadata_from<W: Work + Send, O: MetadataObserver<W>>(
         &mut self,
-        plan: &mut UnifiedPlan,
-        memory: Option<&mut RewriteMemory>,
-    ) -> Result<(), SQLError> {
-        match plan {
-            UnifiedPlan::Query(query) => self.query(query, field(memory, "query")),
-            UnifiedPlan::Command(command) => self.command(command, field(memory, "command")),
-        }
+        observe: &mut O,
+        control: &ProductionControl<'_>,
+        work: &mut W,
+    ) -> impl std::future::Future<Output = Result<()>> {
+        walk(self.metadata_root(control), None, observe, control, work)
     }
+}
 
-    pub(super) fn query(
+impl MetadataTarget for Prefix<MutableExecutablePlan> {
+    fn apply_metadata_from<W: Work + Send, O: MetadataObserver<W>>(
         &mut self,
-        query: &mut QueryPlan,
-        mut memory: Option<&mut RewriteMemory>,
-    ) -> Result<(), SQLError> {
-        self.install_query(query, memory.as_deref_mut())?;
-        self.ctes(&mut query.ctes, field(memory.as_deref_mut(), "ctes"))?;
-        match &mut query.root {
-            RelationalPlan::QueryBlock(block) => {
-                self.install_projection_aliases(
-                    &mut block.projections,
-                    field(
-                        field(field(memory.as_deref_mut(), "root"), "block"),
-                        "projections",
-                    ),
+        observe: &mut O,
+        control: &ProductionControl<'_>,
+        work: &mut W,
+    ) -> impl std::future::Future<Output = Result<()>> {
+        let context = self.context().clone();
+        walk(
+            self.metadata_root(control),
+            Some(context),
+            observe,
+            control,
+            work,
+        )
+    }
+}
+
+fn push_query<'a>(
+    tasks: &mut Tasks<'a>,
+    (query, memory): (&'a mut QueryPlan, Memory<'a>),
+    cte_command: bool,
+) -> Result<()> {
+    let [ctes, root] = fields(memory, ["ctes", "root"]);
+    push(
+        tasks,
+        Node::Root(&mut query.root, present(root)),
+        cte_command,
+    )?;
+    push(
+        tasks,
+        Node::Ctes(Elements::new(&mut query.ctes, present(ctes))),
+        cte_command,
+    )?;
+    Ok(())
+}
+
+async fn walk<W: Work + Send, O: MetadataObserver<W>>(
+    root: Node<'_>,
+    context: Option<Context>,
+    observe: &mut O,
+    control: &ProductionControl<'_>,
+    work: &mut W,
+) -> Result<()> {
+    let mut tasks = Tasks::new(*control);
+    push(&mut tasks, root, false)?;
+    while let Some(Task { node, cte_command }) = tasks.pop() {
+        control.check()?;
+        work.checkpoint().await?;
+        control.check()?;
+        match node {
+            Node::Executable(plan, memory) => {
+                let child = match plan {
+                    UnifiedPlan::Query(query) => Node::Query(query, field(memory, "query")),
+                    UnifiedPlan::Command(command) => {
+                        Node::Command(command, field(memory, "command"))
+                    }
+                };
+                push(&mut tasks, child, cte_command)?;
+            }
+            Node::Query(query, mut memory) => {
+                if observe.mark_relations() {
+                    query.relations_bound = true;
+                }
+                if let Some(update) = observe.query(query, control, work).await? {
+                    update
+                        .install_from(
+                            query,
+                            memory.as_deref_mut(),
+                            super::replacement::Scope {
+                                context: context.as_ref(),
+                                depth: tasks.depth,
+                            },
+                            control,
+                            work,
+                        )
+                        .await?;
+                }
+                push_query(&mut tasks, (query, memory), cte_command)?;
+            }
+            Node::Root(root, memory) => push_root(&mut tasks, root, memory, cte_command)?,
+            Node::Source(source, mut memory) => {
+                if let Some(replacement) = observe.source_replacement(source, control, work).await?
+                {
+                    if let Some(mut discarded) = replacement.install(
+                        source,
+                        memory.as_deref_mut(),
+                        super::replacement::Scope {
+                            context: context.as_ref(),
+                            depth: tasks.depth,
+                        },
+                        control,
+                    )? {
+                        discarded.retire_from(control, work).await?;
+                    }
+                }
+                if let Some(updates) = observe.source(source, control, work).await? {
+                    install_source_updates(source, memory.as_deref_mut(), updates, control, work)
+                        .await?;
+                }
+                push_source(
+                    &mut tasks,
+                    source,
+                    memory,
+                    cte_command,
+                    observe.visit_table_queries(),
                 )?;
-                if let Some(source) = &mut block.from {
-                    let memory = memory.as_deref_mut().map(|memory| {
-                        super::super::sources::query_source_memory(memory)
-                            .as_mut()
-                            .expect("query source")
-                    });
-                    self.source(source, memory)?;
+            }
+            Node::Command(command, memory) => {
+                commands::push_command(
+                    &mut tasks,
+                    command,
+                    memory,
+                    cte_command,
+                    observe.mark_relations(),
+                )?;
+            }
+            Node::Projections(projections, memory) => {
+                if let Some(aliases) = observe.projections(projections, control, work).await? {
+                    install_aliases(projections, memory, aliases, control, work).await?;
                 }
             }
-            RelationalPlan::SetOp { .. } => {
-                for slot in [QueryChildSlot::Left, QueryChildSlot::Right] {
-                    self.query(
-                        slot.query_mut(query),
-                        memory
-                            .as_deref_mut()
-                            .map(|memory| slot.memory_mut(memory).as_mut().expect("set query")),
+            Node::Ctes(items) => push_cte(&mut tasks, items, cte_command)?,
+            Node::Queries(items) => push_queries(&mut tasks, items, cte_command)?,
+            Node::Expressions(mut items) => {
+                if let Some((expression, memory)) = items.next() {
+                    resume(&mut tasks, Node::Expressions(items), cte_command)?;
+                    push(
+                        &mut tasks,
+                        Node::Queries(Elements::new(
+                            &mut expression.subqueries,
+                            field(memory, "subqueries"),
+                        )),
+                        cte_command,
                     )?;
                 }
             }
-            RelationalPlan::Values { .. } => {}
         }
-        let count = match &query.root {
-            RelationalPlan::QueryBlock(block) => block.subqueries.len(),
-            RelationalPlan::SetOp { subqueries, .. }
-            | RelationalPlan::Values { subqueries, .. } => subqueries.len(),
+    }
+    control.check().map_err(Into::into)
+}
+
+fn push_queries<'a>(
+    tasks: &mut Tasks<'a>,
+    mut items: Elements<'a, QueryPlan>,
+    cte_command: bool,
+) -> Result<()> {
+    if let Some((query, memory)) = items.next() {
+        resume(tasks, Node::Queries(items), cte_command)?;
+        push(
+            tasks,
+            Node::Query(query, field(memory, "query")),
+            cte_command,
+        )?;
+    }
+    Ok(())
+}
+
+fn push_cte<'a>(
+    tasks: &mut Tasks<'a>,
+    mut items: Elements<'a, CtePlan>,
+    cte_command: bool,
+) -> Result<()> {
+    if let Some((cte, memory)) = items.next() {
+        resume(tasks, Node::Ctes(items), cte_command)?;
+        let memory = field(memory, "body");
+        let (body, nested_command) = match &mut cte.body {
+            CtePlanBody::Query(query) => (Node::Query(query, field(memory, "query")), cte_command),
+            CtePlanBody::Command(command) => {
+                (Node::Command(command, field(memory, "command")), true)
+            }
         };
-        for index in 0..count {
-            let slot = QueryChildSlot::Subquery(index);
-            self.query(
-                slot.query_mut(query),
-                memory
-                    .as_deref_mut()
-                    .map(|memory| slot.memory_mut(memory).as_mut().expect("scalar query")),
-            )?;
-        }
-        Ok(())
+        push(tasks, body, nested_command)?;
     }
+    Ok(())
+}
 
-    fn source(
-        &mut self,
-        source: &mut SourcePlan,
-        mut memory: Option<&mut RewriteMemory>,
-    ) -> Result<(), SQLError> {
-        self.install_source(source, memory.as_deref_mut())?;
-        match source {
-            SourcePlan::Join { left, right, .. } => {
-                self.source(
-                    left,
-                    memory.as_deref_mut().map(|memory| {
-                        SourceChildSlot::Left
-                            .memory_mut(memory)
-                            .as_mut()
-                            .expect("left source")
-                    }),
-                )?;
-                self.source(
-                    right,
-                    memory.map(|memory| {
-                        SourceChildSlot::Right
-                            .memory_mut(memory)
-                            .as_mut()
-                            .expect("right source")
-                    }),
+fn push_root<'a>(
+    tasks: &mut Tasks<'a>,
+    root: &'a mut RelationalPlan,
+    memory: Memory<'a>,
+    cte_command: bool,
+) -> Result<()> {
+    match root {
+        RelationalPlan::QueryBlock(block) => {
+            let memory = field(memory, "block");
+            let [projections, source, subqueries] =
+                fields(memory, ["projections", "from", "subqueries"]);
+            push(
+                tasks,
+                Node::Queries(Elements::new(&mut block.subqueries, present(subqueries))),
+                cte_command,
+            )?;
+            if let Some(value) = &mut block.from {
+                push(
+                    tasks,
+                    Node::Source(value, field(present(source), "source")),
+                    cte_command,
                 )?;
             }
-            SourcePlan::Subquery { body, .. } => {
-                self.query(body, field(field(memory, "body"), "query"))?;
-            }
-            SourcePlan::Table {
-                executable_query: Some(body),
-                ..
-            } if self.query.is_some() || self.projections.is_some() => {
-                self.query(body, field(field(memory, "executable_query"), "query"))?;
-            }
-            _ => {}
-        }
-        Ok(())
-    }
-
-    fn ctes(
-        &mut self,
-        ctes: &mut [CtePlan],
-        mut memory: Option<&mut RewriteMemory>,
-    ) -> Result<(), SQLError> {
-        for (index, cte) in ctes.iter_mut().enumerate() {
-            self.control.check()?;
-            let body = memory.as_deref_mut().map(|memory| {
-                memory
-                    .item_mut(index)
-                    .as_mut()
-                    .expect("CTE item")
-                    .field_mut("body")
-                    .as_mut()
-                    .expect("CTE body")
-            });
-            match &mut cte.body {
-                CtePlanBody::Query(query) => self.query(query, field(body, "query"))?,
-                CtePlanBody::Command(command) => {
-                    let enclosing = self.cte_command;
-                    self.cte_command = true;
-                    self.command(command, field(body, "command"))?;
-                    self.cte_command = enclosing;
-                }
-            }
-        }
-        Ok(())
-    }
-
-    fn command_query(
-        &mut self,
-        command: &mut CommandPlan,
-        memory: Option<&mut RewriteMemory>,
-        slot: CommandQuerySlot,
-    ) -> Result<(), SQLError> {
-        if let Some(query) = slot.query_mut(command) {
-            self.query(
-                query,
-                memory.map(|memory| slot.memory_mut(memory).as_mut().expect("command query")),
+            push(
+                tasks,
+                Node::Projections(&mut block.projections, present(projections)),
+                cte_command,
             )?;
         }
-        Ok(())
+        RelationalPlan::SetOp {
+            left,
+            right,
+            subqueries,
+            ..
+        } => {
+            let [left_memory, right_memory, queries] =
+                fields(memory, ["left", "right", "subqueries"]);
+            push(
+                tasks,
+                Node::Queries(Elements::new(subqueries, present(queries))),
+                cte_command,
+            )?;
+            push(
+                tasks,
+                Node::Query(right, field(present(right_memory), "query")),
+                cte_command,
+            )?;
+            push(
+                tasks,
+                Node::Query(left, field(present(left_memory), "query")),
+                cte_command,
+            )?;
+        }
+        RelationalPlan::Values { subqueries, .. } => {
+            push(
+                tasks,
+                Node::Queries(Elements::new(subqueries, field(memory, "subqueries"))),
+                cte_command,
+            )?;
+        }
     }
+    Ok(())
+}
 
-    fn returning_aliases(
-        &mut self,
-        command: &mut CommandPlan,
-        memory: Option<&mut RewriteMemory>,
-    ) -> Result<(), SQLError> {
-        let returning = match command {
-            CommandPlan::Insert(plan) => Some(&mut plan.returning),
-            CommandPlan::Update(plan) => Some(&mut plan.returning),
-            CommandPlan::Delete(plan) => Some(&mut plan.returning),
-            CommandPlan::Merge(plan) => Some(&mut plan.returning),
-            _ => None,
-        };
-        if let Some(returning) = returning {
-            self.install_projection_aliases(
-                returning,
-                field(field(memory, "value0"), "returning"),
+fn push_source<'a>(
+    tasks: &mut Tasks<'a>,
+    source: &'a mut SourcePlan,
+    memory: Memory<'a>,
+    cte_command: bool,
+    visit_table_queries: bool,
+) -> Result<()> {
+    match source {
+        SourcePlan::Join { left, right, .. } => {
+            let [left_memory, right_memory] = fields(memory, ["left", "right"]);
+            push(
+                tasks,
+                Node::Source(right, field(present(right_memory), "source")),
+                cte_command,
+            )?;
+            push(
+                tasks,
+                Node::Source(left, field(present(left_memory), "source")),
+                cte_command,
             )?;
         }
-        Ok(())
+        SourcePlan::Subquery { body, .. } => {
+            push(
+                tasks,
+                Node::Query(body, field(field(memory, "body"), "query")),
+                cte_command,
+            )?;
+        }
+        SourcePlan::Table {
+            executable_query: Some(body),
+            ..
+        } if visit_table_queries => {
+            push(
+                tasks,
+                Node::Query(body, field(field(memory, "executable_query"), "query")),
+                cte_command,
+            )?;
+        }
+        _ => (),
     }
-
-    fn command(
-        &mut self,
-        command: &mut CommandPlan,
-        mut memory: Option<&mut RewriteMemory>,
-    ) -> Result<(), SQLError> {
-        self.control.check()?;
-        if self.mark_relations {
-            match command {
-                CommandPlan::Insert(plan) => {
-                    plan.relations_bound = true;
-                    if self.cte_command {
-                        plan.target_relation_bound = true;
-                    }
-                }
-                CommandPlan::Update(plan) => {
-                    plan.relations_bound = true;
-                    if self.cte_command {
-                        plan.target_relation_bound = true;
-                    }
-                }
-                CommandPlan::Delete(plan) => {
-                    plan.relations_bound = true;
-                    if self.cte_command {
-                        plan.target_relation_bound = true;
-                    }
-                }
-                _ => {}
-            }
-        }
-        match command {
-            CommandPlan::CreateView { .. }
-            | CommandPlan::CreateTableAs { .. }
-            | CommandPlan::CreateMaterializedView { .. }
-            | CommandPlan::DeclareCursor { .. } => {
-                return self.command_query(command, memory, CommandQuerySlot::Body);
-            }
-            CommandPlan::Explain { body, .. } | CommandPlan::Prepare { body, .. } => {
-                return self.executable(body, field(memory, "body"));
-            }
-            CommandPlan::Call { args, .. } => {
-                for argument in 0..args.len() {
-                    let CommandPlan::Call { args, .. } = command else {
-                        unreachable!()
-                    };
-                    for query in 0..args[argument].subqueries.len() {
-                        self.command_query(
-                            command,
-                            memory.as_deref_mut(),
-                            CommandQuerySlot::CallArgumentSubquery { argument, query },
-                        )?;
-                    }
-                }
-                return Ok(());
-            }
-            CommandPlan::Execute { params, .. } => {
-                for parameter in 0..params.len() {
-                    let CommandPlan::Execute { params, .. } = command else {
-                        unreachable!()
-                    };
-                    for query in 0..params[parameter].subqueries.len() {
-                        self.command_query(
-                            command,
-                            memory.as_deref_mut(),
-                            CommandQuerySlot::ExecuteParameterSubquery { parameter, query },
-                        )?;
-                    }
-                }
-                return Ok(());
-            }
-            _ => {}
-        }
-        self.returning_aliases(command, memory.as_deref_mut())?;
-        if let Some(ctes) = command.ctes_mut() {
-            self.ctes(ctes, field(field(memory.as_deref_mut(), "value0"), "ctes"))?;
-        }
-        if matches!(command, CommandPlan::Insert(_)) {
-            self.command_query(
-                command,
-                memory.as_deref_mut(),
-                CommandQuerySlot::InsertSource,
-            )?;
-        }
-        for index in 0..command.scalar_subqueries().len() {
-            self.command_query(
-                command,
-                memory.as_deref_mut(),
-                CommandQuerySlot::Subquery(index),
-            )?;
-        }
-        if let Some(source) = command.source_input_mut() {
-            let memory = memory.map(|memory| {
-                super::super::commands::children::source_memory(memory)
-                    .as_mut()
-                    .expect("command source")
-            });
-            self.source(source, memory)?;
-        }
-        Ok(())
-    }
+    Ok(())
 }

@@ -219,9 +219,7 @@ impl SchemaScope {
             crate::semantics::ColumnDefinitionRequest {
                 name,
                 binding: binding.as_ref(),
-                user_function: user_function
-                    .as_ref()
-                    .map(|resolved| resolved.function.as_ref()),
+                user_function: user_function.as_ref().map(|resolved| &**resolved.function),
                 user_invocation: user_function
                     .as_ref()
                     .and_then(|resolved| resolved.binding.invocation.as_deref()),
@@ -356,9 +354,7 @@ impl SchemaScope {
                 name,
                 binding: binding.as_ref(),
                 args,
-                user_function: user_function
-                    .as_ref()
-                    .map(|resolved| resolved.function.as_ref()),
+                user_function: user_function.as_ref().map(|resolved| &**resolved.function),
                 user_invocation: user_function
                     .as_ref()
                     .and_then(|resolved| resolved.binding.invocation.as_deref()),

@@ -5,27 +5,133 @@
 //
 
 use super::*;
+use crate::catalog::roles::RoleDefinition;
+use crate::catalog::roles::{RoleDefinitions, RoleMemberships};
 use crate::catalog::security::{
     columns::grant_column_acl,
     table::{grant_acl, role_has_column_privilege, TableAclPrivilege},
+    AclGrantee,
 };
 
-fn roles() -> BTreeMap<String, RoleDefinition> {
-    ["owner", "grantor", "reader"]
-        .into_iter()
-        .enumerate()
-        .map(|(index, name)| {
+#[test]
+fn named_relation_authority_adoption_keeps_original_nodes_and_path_buffers() {
+    use uqa_core::{catalog_acl::LegacyRelationSecurity, memory::Budgeted};
+
+    let memory = uqa_core::memory::MemoryBudget::new(65536);
+    let cancellation = uqa_core::CancellationToken::new();
+    let columns = uqa_core::catalog_acl::input::legacy_column_entries(
+        br#"{"field":[{"role":"reader","grantor":"owner"}]}"#,
+        &memory,
+        &cancellation,
+    )
+    .unwrap();
+    let (name, entries) = columns.iter().next().unwrap();
+    let original_node = std::ptr::from_ref(name) as usize;
+    let original_paths = entries.as_ptr();
+    let original_role = entries[0].role.role_name().unwrap().as_ptr();
+    let mut allowance = memory.reserve(5).unwrap();
+    let role_owner = "owner".to_owned();
+    let (column_acls, columns_memory) = columns.into_parts();
+    allowance.absorb(columns_memory);
+    let row = Budgeted::new(
+        LegacyRelationSecurity {
+            role_owner,
+            acl: None,
+            column_acls,
+        },
+        allowance,
+    );
+    let used = memory.used();
+    let mut result = None;
+    let measured = allocation_counter::measure(|| {
+        result = Some(
+            row.try_map(|row| Ok::<_, ()>(TableSecurity::from_legacy(row)))
+                .unwrap(),
+        );
+    });
+    assert_eq!(measured.count_total, 0);
+    let result = result.unwrap();
+    let (name, entries) = result.column_acls.iter().next().unwrap();
+    assert_eq!(std::ptr::from_ref(name) as usize, original_node);
+    assert_eq!(entries.as_ptr(), original_paths);
+    assert_eq!(entries[0].role.role_name().unwrap().as_ptr(), original_role);
+    assert_eq!(memory.used(), used);
+    drop(result);
+    assert_eq!(memory.used(), 0);
+}
+
+#[test]
+fn captured_table_security_keeps_full_acl_tuple_identity_and_releases_failed_copies() {
+    let roles = roles();
+    let mut source = security(&roles);
+    source.acl_revisions.relation = Some([7; 16]);
+    source.acl_revisions.columns.insert("id".into(), [8; 16]);
+    // A removed column ACL can still have a revision recording its deletion.
+    source
+        .acl_revisions
+        .columns
+        .insert("retired".into(), [9; 16]);
+    let memory = uqa_core::memory::MemoryBudget::new(1 << 20);
+    let cancellation = uqa_core::CancellationToken::new();
+    let control = uqa_core::memory::ProductionControl::new(&memory, &cancellation, &cancellation);
+    let captured = source
+        .capture_security(&control)
+        .unwrap()
+        .into_budgeted()
+        .unwrap();
+    assert_eq!(captured.privileges.role_owner, source.role_owner);
+    assert_eq!(captured.privileges.acl(), source.acl.as_deref());
+    assert_eq!(
+        captured.privileges.column_acls(),
+        &source
+            .column_acls
+            .iter()
+            .map(|(name, acl)| (name.clone(), acl.clone()))
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(captured.relation_revision, Some([7; 16]));
+    assert_eq!(
+        captured.column_revisions,
+        [("id".into(), [8; 16]), ("retired".into(), [9; 16])]
+    );
+    drop(source);
+    assert_eq!(
+        captured.privileges.resolve(&roles).unwrap().role_owner,
+        "owner"
+    );
+    drop(captured);
+    assert_eq!(memory.used(), 0);
+    let source = security(&roles);
+    for limit in [0, 32, 128] {
+        let memory = uqa_core::memory::MemoryBudget::new(limit);
+        let control =
+            uqa_core::memory::ProductionControl::new(&memory, &cancellation, &cancellation);
+        assert!(source.capture_security(&control).is_err());
+        assert_eq!(memory.used(), 0);
+    }
+    cancellation.cancel();
+    assert!(matches!(
+        source.capture_security(&control),
+        Err(crate::SQLError::Cancelled(_))
+    ));
+    assert_eq!(memory.used(), 0);
+}
+
+fn roles() -> RoleDefinitions {
+    RoleDefinitions::try_from_iter(["owner", "grantor", "reader"].into_iter().enumerate().map(
+        |(index, name)| {
             let mut role = RoleDefinition::bootstrap();
             role.name = name.into();
             role.oid = 20_001 + index as i64;
             role.object_id = [index as u8 + 1; 16];
             role.attributes.clear();
             (name.into(), role)
-        })
-        .collect()
+        },
+    ))
+    .unwrap()
 }
 
-fn security(roles: &BTreeMap<String, RoleDefinition>) -> BoundTableSecurity {
+fn security(roles: &RoleDefinitions) -> BoundTableSecurity {
     let mut named = TableSecurity::owner("owner");
     grant_acl(
         &mut named,
@@ -52,13 +158,14 @@ fn table_and_column_paths_keep_incarnations_when_all_endpoint_names_change() {
     let original = bound.clone();
     let owner = bound.owner_reference(&roles).unwrap();
     for name in ["owner", "grantor", "reader"] {
-        let mut role = roles.remove(name).unwrap();
+        let mut role = roles.get(name).unwrap().clone();
+        roles.remove(name).unwrap();
         let mut replacement = role.clone();
         replacement.oid += 100;
         replacement.object_id[0] += 100;
-        roles.insert(name.into(), replacement);
+        roles.insert(name.into(), replacement).unwrap();
         role.name = format!("renamed_{name}");
-        roles.insert(role.name.clone(), role);
+        roles.insert(role.name.clone(), role).unwrap();
     }
     bound.validate(Some(&["id".into()]), &roles).unwrap();
     let projected = bound.resolve(&roles).unwrap();
@@ -76,7 +183,7 @@ fn table_and_column_paths_keep_incarnations_when_all_endpoint_names_change() {
                 name,
                 TableAclPrivilege::Select,
                 &roles,
-                &BTreeMap::new()
+                &RoleMemberships::new()
             ),
             expected
         );
@@ -91,10 +198,11 @@ fn missing_or_reused_role_incarnations_cannot_rebind_any_table_acl_endpoint() {
     for name in ["owner", "grantor", "reader"] {
         let mut roles = roles();
         let bound = security(&roles);
-        let mut replacement = roles.remove(name).unwrap();
+        let mut replacement = roles.get(name).unwrap().clone();
+        roles.remove(name).unwrap();
         assert!(bound.resolve(&roles).is_err());
         replacement.object_id[0] += 100;
-        roles.insert(name.into(), replacement);
+        roles.insert(name.into(), replacement).unwrap();
         assert!(bound.resolve(&roles).is_err());
         assert!(bound.validate(Some(&["id".into()]), &roles).is_err());
     }
@@ -126,7 +234,9 @@ fn named_public_and_public_paths_bind_and_resolve_independently() {
     named_public.name = "PUBLIC".into();
     named_public.oid += 100;
     named_public.object_id = [9; 16];
-    roles.insert(named_public.name.clone(), named_public.clone());
+    roles
+        .insert(named_public.name.clone(), named_public.clone())
+        .unwrap();
     let mut named = TableSecurity::owner("owner");
     grant_acl(
         &mut named,
@@ -155,9 +265,11 @@ fn named_public_and_public_paths_bind_and_resolve_independently() {
     assert_eq!(bound.resolve(&roles).unwrap(), named);
     assert!(bound.depends_on(named_public.identity()));
 
-    roles.remove("PUBLIC");
+    roles.remove("PUBLIC").unwrap();
     named_public.name = "renamed_public".into();
-    roles.insert(named_public.name.clone(), named_public);
+    roles
+        .insert(named_public.name.clone(), named_public)
+        .unwrap();
     let restored = bound.resolve(&roles).unwrap();
     let acl = restored.acl.as_ref().unwrap();
     assert!(acl.iter().any(|entry| entry.role == AclGrantee::Public));
@@ -173,3 +285,6 @@ fn named_public_and_public_paths_bind_and_resolve_independently() {
 }
 
 mod production;
+
+mod continuation;
+mod validation;

@@ -93,19 +93,19 @@ pub struct AlterForeignTableStmt {
 }
 
 #[derive(Serialize, Deserialize)]
-struct AlterForeignTableStmtSerde {
-    name: String,
-    if_exists: bool,
+pub(in crate::ast) struct AlterForeignTableStmtSerde {
+    pub(in crate::ast) name: String,
+    pub(in crate::ast) if_exists: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    owner: Option<RoleSpecification>,
+    pub(in crate::ast) owner: Option<RoleSpecification>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    rename_to: Option<String>,
+    pub(in crate::ast) rename_to: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    set_schema: Option<String>,
+    pub(in crate::ast) set_schema: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    drop_columns: Option<Vec<DropColumnAction>>,
+    pub(in crate::ast) drop_columns: Option<Vec<DropColumnAction>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    drop_constraints: Option<Vec<DropConstraintAction>>,
+    pub(in crate::ast) drop_constraints: Option<Vec<DropConstraintAction>>,
 }
 
 impl Serialize for AlterForeignTableStmt {
@@ -143,6 +143,14 @@ impl<'de> Deserialize<'de> for AlterForeignTableStmt {
         D: serde::Deserializer<'de>,
     {
         let value = AlterForeignTableStmtSerde::deserialize(deserializer)?;
+        Self::try_from(value).map_err(serde::de::Error::custom)
+    }
+}
+
+impl TryFrom<AlterForeignTableStmtSerde> for AlterForeignTableStmt {
+    type Error = &'static str;
+
+    fn try_from(value: AlterForeignTableStmtSerde) -> Result<Self, Self::Error> {
         let action = match (
             value.owner,
             value.rename_to,
@@ -160,14 +168,10 @@ impl<'de> Deserialize<'de> for AlterForeignTableStmt {
                 AlterForeignTableAction::DropConstraints(constraints)
             }
             (Some(_), Some(_), None, None, None) => {
-                return Err(serde::de::Error::custom(
-                    "ALTER FOREIGN TABLE cannot contain both owner and rename_to",
-                ));
+                return Err("ALTER FOREIGN TABLE cannot contain both owner and rename_to");
             }
             _ => {
-                return Err(serde::de::Error::custom(
-                    "ALTER FOREIGN TABLE requires exactly one of owner, rename_to, set_schema or a nonempty drop_columns/drop_constraints list",
-                ));
+                return Err("ALTER FOREIGN TABLE requires exactly one of owner, rename_to, set_schema or a nonempty drop_columns/drop_constraints list");
             }
         };
         Ok(Self {

@@ -78,7 +78,12 @@ fn copied_view_shares_selected_defaults_and_preserves_private_tuple_metadata() {
     target.push(added);
     let text = MemoryInvertedIndex::new(uqa_analysis::whitespace_analyzer());
     let schema = schema(&target, &text);
-    let definitions = Arc::downgrade(&schema.columns);
+    let uqa_sql::catalog::table_definition::SharedTableDefinition::External(definitions) =
+        &schema.columns
+    else {
+        panic!("external fixture columns")
+    };
+    let definitions = Arc::downgrade(definitions);
     let control = StorageReadControl::with_limit(128 * 1024);
     let admitted =
         RetainedColumns::capture(&schema.columns, control.memory(), control.cancellation())

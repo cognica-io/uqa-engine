@@ -9,6 +9,8 @@
 mod path_watch;
 pub use path_watch::PathChangeWatch;
 
+pub(crate) mod directory;
+
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 mod shared_mapping;
 #[cfg(any(target_os = "linux", target_os = "macos"))]

@@ -5,7 +5,10 @@
 //
 
 use super::*;
+use crate::catalog::roles::RoleDefinition;
+use crate::catalog::roles::RoleDefinitions;
 use crate::catalog::type_metadata::{builtin_type_name, pg_type_name, pg_type_oid};
+use std::collections::BTreeMap;
 
 fn definition() -> StoredRange {
     StoredRange {
@@ -66,7 +69,8 @@ fn declared_range_type_names_preserve_identity_across_independent_namespaces() {
 
 #[test]
 fn range_registry_rejects_aliasing_names_oids_and_retired_role_incarnations() {
-    let roles = BTreeMap::from([("uqa".into(), RoleDefinition::bootstrap())]);
+    let roles =
+        RoleDefinitions::try_from_iter([("uqa".into(), RoleDefinition::bootstrap())]).unwrap();
     let range = definition();
     validate_range_registry(
         &BTreeMap::from([("public.r".into(), range.clone())]),
@@ -118,4 +122,72 @@ fn range_registry_rejects_aliasing_names_oids_and_retired_role_incarnations() {
         )
         .is_err());
     }
+}
+
+#[test]
+fn range_subtypes_preserve_each_domain_and_array_identity_without_recursive_work() {
+    std::thread::Builder::new()
+        .stack_size(256 * 1024)
+        .spawn(|| {
+            let domain = |oid, array_oid, base| ColumnType::Domain {
+                schema: "public".into(),
+                name: "d".into(),
+                oid,
+                array_oid,
+                collation_oid: None,
+                base: Box::new(base),
+            };
+            for (leaf, valid, oid) in [
+                (ColumnType::Integer, true, Some(1007)),
+                (ColumnType::Named("unresolved".into()), false, None),
+                (ColumnType::Void, false, Some(0)),
+                (
+                    domain(70_000, Some(70_001), ColumnType::Integer),
+                    true,
+                    Some(70_001),
+                ),
+                (
+                    domain(70_000, None, ColumnType::Integer),
+                    true,
+                    Some(crate::catalog::type_metadata::pg_domain_array_oid(
+                        70_000, None,
+                    )),
+                ),
+                (
+                    domain(0, Some(70_001), ColumnType::Integer),
+                    false,
+                    Some(70_001),
+                ),
+                (domain(70_000, Some(0), ColumnType::Integer), false, Some(0)),
+                (
+                    domain(
+                        70_000,
+                        Some(70_001),
+                        domain(0, Some(70_003), ColumnType::Integer),
+                    ),
+                    false,
+                    Some(70_001),
+                ),
+                (
+                    domain(70_000, Some(70_001), ColumnType::Named("unresolved".into())),
+                    false,
+                    Some(70_001),
+                ),
+            ] {
+                let mut ty = leaf;
+                for _ in 0..10_000 {
+                    ty = ColumnType::Array(Box::new(ty));
+                }
+                let allocations = allocation_counter::measure(|| {
+                    assert_eq!(resolved_subtype(&ty), valid);
+                    if let Some(oid) = oid {
+                        assert_eq!(pg_type_oid(&ty), oid);
+                    }
+                });
+                assert_eq!(allocations.count_total, 0);
+            }
+        })
+        .unwrap()
+        .join()
+        .unwrap();
 }

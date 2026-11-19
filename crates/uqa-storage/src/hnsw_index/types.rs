@@ -7,7 +7,11 @@
 //! HNSW graph state and construction parameters.
 
 use super::store::Map;
-use uqa_core::{memory::MemoryBudget, DocId};
+use std::sync::Arc;
+use uqa_core::{
+    memory::{MemoryBudget, MemoryReservation},
+    DocId,
+};
 
 use crate::vector_index::HNSWIndexParams;
 use crate::StorageBackendResult;
@@ -72,6 +76,7 @@ pub struct HNSWIndex {
     pub(super) dirty_nodes: Map<u64>,
     pub(super) full_rewrite: bool,
     pub(super) memory: MemoryBudget,
+    pub(super) image_memory: Option<Arc<MemoryReservation>>,
 }
 
 impl HNSWIndex {
@@ -108,11 +113,30 @@ impl HNSWIndex {
             dirty_nodes: Map::new(memory, memory.limit() / 32),
             full_rewrite: true,
             memory: memory.clone(),
+            image_memory: None,
         })
     }
 
     pub fn params(&self) -> HNSWIndexParams {
         self.params
+    }
+
+    pub(super) fn into_mutation_budget(mut self, memory: &MemoryBudget) -> Self {
+        self.nodes = self.nodes.into_mutation_budget(memory, memory.limit() / 16);
+        self.raw_vectors = self
+            .raw_vectors
+            .into_mutation_budget(memory, memory.limit() / 32);
+        self.normalized_vectors = self
+            .normalized_vectors
+            .into_mutation_budget(memory, memory.limit() / 32);
+        self.active = self
+            .active
+            .into_mutation_budget(memory, memory.limit() / 32);
+        self.dirty_nodes = self
+            .dirty_nodes
+            .into_mutation_budget(memory, memory.limit() / 32);
+        self.memory = memory.clone();
+        self
     }
 
     pub(super) fn max_connections(&self, layer: usize) -> usize {

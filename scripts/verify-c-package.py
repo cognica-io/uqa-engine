@@ -81,6 +81,12 @@ def verify_symbols(prefix: Path, manifest: dict) -> None:
             data = (prefix / "share/uqa/licenses" / item["path"]).read_bytes()
             if hashlib.sha256(data).hexdigest() != item["sha256"]:
                 raise ValueError(f"Changed dependency license: {item['path']}")
+    for item in manifest.get("native_bundled_libraries", []):
+        if not re.fullmatch(r"lib/[A-Za-z0-9_][A-Za-z0-9_.-]*\.lib", item["path"], re.I):
+            raise ValueError(f"Invalid native library inventory path: {item['path']}")
+        data = (prefix / item["path"]).read_bytes()
+        if hashlib.sha256(data).hexdigest() != item["sha256"]:
+            raise ValueError(f"Changed native library: {item['path']}")
     print(f"Verified {len(actual)} exact native exports and dependency license digests", flush=True)
 
 

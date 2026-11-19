@@ -213,7 +213,7 @@ pub(super) fn not(
     if matches!(*value, Value::Null) {
         plain(Value::Null, control)
     } else {
-        plain(Value::Bool(!truthy(&value)), control)
+        plain(Value::Bool(!truthy(&value)?), control)
     }
 }
 

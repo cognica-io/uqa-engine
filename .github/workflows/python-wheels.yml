@@ -41,6 +41,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
+  RUSTC_WRAPPER: ""
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: "0"
   RUSTFLAGS: "-D warnings"
@@ -52,7 +53,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: ./.github/actions/setup-python
         with:
           python-version: "3.12"
       - uses: dtolnay/rust-toolchain@stable
@@ -130,7 +131,7 @@ jobs:
   build-wheels:
     name: ${{ matrix.label }}
     if: ${{ inputs.full_matrix && inputs.repair_matrix != '[]' }}
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.os == 'macos-26-arm64' && fromJSON('["self-hosted","macOS","ARM64","macos-arm64","macos-26-arm64"]') || matrix.os }}
     strategy:
       fail-fast: false
       matrix:
@@ -138,21 +139,34 @@ jobs:
           ${{ fromJSON(inputs.repair_matrix || '[
             {"label":"linux x86_64","os":"ubuntu-24.04","target":"x86_64-unknown-linux-gnu","manylinux":"2_28"},
             {"label":"linux aarch64","os":"ubuntu-24.04-arm","target":"aarch64-unknown-linux-gnu","manylinux":"2_28"},
-            {"label":"macos x86_64","os":"macos-15-intel","target":"x86_64-apple-darwin","manylinux":"auto"},
-            {"label":"macos aarch64","os":"macos-15","target":"aarch64-apple-darwin","manylinux":"auto"},
+            {"label":"macos aarch64","os":"macos-26-arm64","target":"aarch64-apple-darwin","manylinux":"auto"},
             {"label":"windows x86_64","os":"windows-latest","target":"x86_64-pc-windows-msvc","manylinux":"auto"},
             {"label":"windows aarch64","os":"windows-11-arm","target":"aarch64-pc-windows-msvc","manylinux":"auto"}
           ]') }}
 
     steps:
+      - name: Limit shared macOS worker parallelism
+        if: runner.os == 'macOS' && runner.environment == 'self-hosted'
+        shell: bash
+        run: |
+          printf '%s\n' 'CARGO_BUILD_JOBS=4' 'RUST_TEST_THREADS=4' 'NEXTEST_TEST_THREADS=4' \
+            "RUSTUP_HOME=$RUNNER_TOOL_CACHE/rustup" "CARGO_HOME=$RUNNER_TOOL_CACHE/cargo" >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TOOL_CACHE/cargo/bin"
+          printf '%s\n' "$RUNNER_TOOL_CACHE/cargo/bin" >> "$GITHUB_PATH"
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.source_ref || github.sha }}
           persist-credentials: false
 
-      - uses: actions/setup-python@v5
+      - uses: ./.github/actions/setup-python
         with:
           python-version: "3.12"
+
+      - name: Select the original release source for wheel recovery
+        if: inputs.source_ref != ''
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_ref }}
+          persist-credentials: false
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -162,6 +176,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
+          save-if: ${{ runner.os != 'macOS' || runner.environment != 'self-hosted' }}
           cache-bin: false
           cache-targets: false
 
@@ -273,7 +288,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
+      - uses: ./.github/actions/setup-python
         with:
           python-version: "3.12"
 

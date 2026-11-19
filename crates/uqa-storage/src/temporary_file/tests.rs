@@ -9,6 +9,7 @@ use super::*;
 mod compatibility;
 mod failures;
 mod io_usage;
+mod quota;
 
 #[test]
 fn physical_length_accounts_for_both_slots_and_rejects_invalid_extents() {

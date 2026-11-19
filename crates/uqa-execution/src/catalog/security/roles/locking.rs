@@ -11,8 +11,9 @@ use crate::row_locks::{
     RelationLockMode,
 };
 use std::collections::{BTreeMap, BTreeSet};
+use uqa_sql::catalog::roles::RoleDefinitions;
+use uqa_sql::catalog::roles::RoleIdentity;
 use uqa_sql::catalog::roles::RoleReference;
-use uqa_sql::catalog::roles::{RoleDefinition, RoleIdentity};
 use uqa_sql::{catalog::roles::guards::RoleCatalogGuards, SQLError};
 
 pub const ROLE_CATALOG_CLASS_ID: u32 = 1260;
@@ -27,7 +28,7 @@ pub struct RoleDependencyLocks {
 impl RoleDependencyLocks {
     pub fn missing(
         &self,
-        roles: &BTreeMap<String, RoleDefinition>,
+        roles: &RoleDefinitions,
         dependencies: &BTreeSet<String>,
     ) -> Result<Vec<RoleBinding>, SQLError> {
         for original in self.bindings.values() {

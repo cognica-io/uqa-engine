@@ -27,11 +27,26 @@ impl RowLockManager {
     }
 
     fn with_cross_attachment(cross: Option<CrossAttachment>) -> Self {
+        Self::with_catalog_state(
+            cross,
+            crate::catalog::identity::CatalogOidCounter::default(),
+        )
+    }
+
+    /// Construct an independent memory database's concurrency state around its admitted catalog counter. Sessions, transaction history, locks and change tracking all start fresh.
+    pub fn with_catalog_oids(catalog_oids: crate::catalog::identity::CatalogOidCounter) -> Self {
+        Self::with_catalog_state(None, catalog_oids)
+    }
+
+    fn with_catalog_state(
+        cross: Option<CrossAttachment>,
+        catalog_oids: crate::catalog::identity::CatalogOidCounter,
+    ) -> Self {
         Self {
             baseline_owner: Weak::new(),
             next_session: AtomicU64::new(1),
             next_transaction_xid: AtomicU64::new(3),
-            catalog_oids: crate::catalog::identity::CatalogOidCounter::default(),
+            catalog_oids,
             identities: super::identity_registry::IdentityRegistry::default(),
             next_acquisition: AtomicU64::new(1),
             change_gate: RwLock::new(()),

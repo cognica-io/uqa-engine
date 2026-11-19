@@ -5,6 +5,7 @@
 //
 
 use super::{BoundSequenceSecurity, Catalog, RelationIdentity};
+use crate::catalog::roles::RoleDefinitions;
 use crate::{
     ast::RelationPersistence,
     catalog::{
@@ -15,32 +16,34 @@ use crate::{
     },
     plan::UnifiedPlan,
 };
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use uqa_core::catalog_acl::AclGrantee;
 use uqa_core::catalog_sequence::SequencePrivileges;
 
-fn roles() -> BTreeMap<String, RoleDefinition> {
-    [
-        "uqa",
-        "owner",
-        "reader",
-        "grantor",
-        "column_reader",
-        "sequence_reader",
-        "view_owner",
-    ]
-    .into_iter()
-    .enumerate()
-    .map(|(index, name)| {
-        let mut role = RoleDefinition::bootstrap();
-        role.name = name.into();
-        role.oid += index as i64;
-        if name != "uqa" {
-            role.object_id = [index as u8 + 1; 16];
-        }
-        (name.into(), role)
-    })
-    .collect()
+fn roles() -> RoleDefinitions {
+    RoleDefinitions::try_from_iter(
+        [
+            "uqa",
+            "owner",
+            "reader",
+            "grantor",
+            "column_reader",
+            "sequence_reader",
+            "view_owner",
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(index, name)| {
+            let mut role = RoleDefinition::bootstrap();
+            role.name = name.into();
+            role.oid += index as i64;
+            if name != "uqa" {
+                role.object_id = [index as u8 + 1; 16];
+            }
+            (name.into(), role)
+        }),
+    )
+    .unwrap()
 }
 
 fn entry(role: impl Into<AclGrantee>, grantor: Option<&str>) -> TableAclEntry {
@@ -66,7 +69,7 @@ fn temporary_view() -> StoredView {
             &crate::catalog::security::TableSecurity {
                 role_owner: "view_owner".into(),
                 acl: Some(vec![entry("reader", Some("uqa"))]),
-                column_acls: BTreeMap::new(),
+                column_acls: uqa_core::memory::OwnedMap::new(),
             },
             &roles(),
         )
@@ -115,36 +118,42 @@ fn temporary_dependencies_include_owners_grantees_and_grantors_only_once() {
     table.security = BoundTableSecurity::bind(&named, &roles()).unwrap();
     let sequence = RelationIdentity::new("pg_temp_1", "seq");
     catalog
-        .sequence_persistence
-        .insert(sequence.clone(), RelationPersistence::Temporary);
-    catalog.sequences.insert(
-        sequence,
-        BoundSequenceSecurity {
-            role_owner: uqa_core::catalog_role::RoleIdentity::BOOTSTRAP,
-            acl: Some(vec![uqa_core::catalog_role::BoundAclEntry {
-                role: Some(roles()["sequence_reader"].identity()),
-                grantor: roles()["grantor"].identity(),
-                privileges: SequencePrivileges {
-                    usage: true,
-                    ..Default::default()
-                },
-                grant_options: SequencePrivileges::default(),
-            }]),
-        },
-    );
-    catalog.sequences.insert(
-        RelationIdentity::new("public", "permanent"),
-        BoundSequenceSecurity {
-            role_owner: uqa_core::catalog_role::RoleIdentity {
-                oid: 999,
-                object_id: [99; 16],
+        .sequences
+        .insert(
+            sequence,
+            RelationPersistence::Temporary,
+            BoundSequenceSecurity {
+                role_owner: uqa_core::catalog_role::RoleIdentity::BOOTSTRAP,
+                acl: Some(vec![uqa_core::catalog_role::BoundAclEntry {
+                    role: Some(roles()["sequence_reader"].identity()),
+                    grantor: roles()["grantor"].identity(),
+                    privileges: SequencePrivileges {
+                        usage: true,
+                        ..Default::default()
+                    },
+                    grant_options: SequencePrivileges::default(),
+                }]),
             },
-            acl: None,
-        },
-    );
+        )
+        .unwrap();
+    catalog
+        .sequences
+        .insert(
+            RelationIdentity::new("public", "permanent"),
+            RelationPersistence::Permanent,
+            BoundSequenceSecurity {
+                role_owner: uqa_core::catalog_role::RoleIdentity {
+                    oid: 999,
+                    object_id: [99; 16],
+                },
+                acl: None,
+            },
+        )
+        .unwrap();
     catalog
         .views
-        .insert(RelationIdentity::new("pg_temp_1", "view"), temporary_view());
+        .insert(RelationIdentity::new("pg_temp_1", "view"), temporary_view())
+        .unwrap();
     assert_eq!(
         role_dependencies(&catalog, &roles(), 6).unwrap(),
         BTreeSet::from([11, 12, 13, 14, 15, 16])
@@ -157,13 +166,9 @@ fn temporary_dependencies_include_owners_grantees_and_grantors_only_once() {
             "release tables",
             "read views",
             "release views",
-            "read foreign persistence",
             "read foreign",
             "release foreign",
-            "release foreign persistence",
             "read sequences",
-            "read sequence persistence",
-            "release sequence persistence",
             "release sequences"
         ]
     );
@@ -205,7 +210,7 @@ fn named_public_temporary_owners_grantees_and_grantors_retain_dependencies() {
     named.name = "PUBLIC".into();
     named.oid = 17;
     named.object_id = [17; 16];
-    roles.insert(named.name.clone(), named);
+    roles.insert(named.name.clone(), named).unwrap();
     for (owner, acl, expected) in [
         ("PUBLIC", None, BTreeSet::from([17])),
         ("uqa", Some(entry("PUBLIC", None)), BTreeSet::from([17])),
@@ -236,20 +241,22 @@ fn temporary_foreign_dependencies_retain_owner_and_column_acl_roles() {
         vec![entry("column_reader", Some("grantor"))],
     );
     catalog
-        .foreign_persistence
-        .insert(temporary.clone(), RelationPersistence::Temporary);
-    catalog.foreign_tables.insert(
-        temporary.clone(),
-        BoundTableSecurity::bind(&security, &roles()).unwrap(),
-    );
+        .foreign_tables
+        .insert(
+            temporary.clone(),
+            RelationPersistence::Temporary,
+            BoundTableSecurity::bind(&security, &roles()).unwrap(),
+        )
+        .unwrap();
     let permanent = RelationIdentity::new("public", "durable");
     catalog
-        .foreign_persistence
-        .insert(permanent.clone(), RelationPersistence::Permanent);
-    catalog.foreign_tables.insert(
-        permanent,
-        BoundTableSecurity::owner(roles()["reader"].identity()),
-    );
+        .foreign_tables
+        .insert(
+            permanent,
+            RelationPersistence::Permanent,
+            BoundTableSecurity::owner(roles()["reader"].identity()),
+        )
+        .unwrap();
     assert_eq!(
         role_dependencies(&catalog, &roles(), 3).unwrap(),
         BTreeSet::from([11, 13, 14])
@@ -260,7 +267,17 @@ fn temporary_foreign_dependencies_retain_owner_and_column_acl_roles() {
             .sqlstate(),
         Some("53200")
     );
-    catalog.foreign_tables.remove(&temporary);
+    catalog
+        .foreign_tables
+        .insert(
+            temporary,
+            RelationPersistence::Temporary,
+            BoundTableSecurity::owner(crate::catalog::roles::RoleIdentity {
+                oid: 99_999,
+                object_id: [99; 16],
+            }),
+        )
+        .unwrap();
     assert_eq!(
         role_dependencies(&catalog, &roles(), 3)
             .unwrap_err()

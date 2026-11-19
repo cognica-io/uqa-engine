@@ -20,13 +20,13 @@ impl Engine {
         let Some(backend) = self.storage.backend.as_ref() else {
             return Ok(());
         };
-        let analyzer = table.analyzer.read().clone();
-        *table.document_store.write() = backend.document_store(table_name);
+        let analyzer = table.analyzer.read().configuration().clone();
+        *table.document_store.write() = backend.document_store(table_name).into();
         table
             .doc_count_dirty
             .store(true, std::sync::atomic::Ordering::Release);
-        Self::value_indexes_clear(table);
-        *table.inverted_index.write() = backend.inverted_index(table_name, analyzer);
+        Self::value_indexes_clear(table)?;
+        *table.inverted_index.write() = backend.inverted_index(table_name, analyzer).into();
 
         let vector_fields = table
             .vector_indexes
@@ -64,7 +64,7 @@ impl Engine {
             let idx = self.build_vector_index_for_restore(table_name, &field, dimensions, spec)?;
             rebound.insert(field, idx);
         }
-        *table.vector_indexes.write().live_mut()? = rebound;
+        table.vector_indexes.write().live_mut()?.replace(rebound)?;
         Ok(())
     }
 

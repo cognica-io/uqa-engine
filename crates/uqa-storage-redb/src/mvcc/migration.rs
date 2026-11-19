@@ -101,16 +101,25 @@ pub(super) fn migrate(database: &Database, identity: DatabaseId) -> VersionResul
                 .map_err(redb_error)?;
         }
         // The released initializer opens this exact name with byte types before it can write.
-        transaction
-            .open_table(GUARD)
-            .map_err(redb_error)?
-            .insert(0, 1)
-            .map_err(redb_error)?;
-        metadata
-            .insert("key_value_format", 1_u64.to_be_bytes().as_slice())
-            .map_err(redb_error)?;
+        drop(metadata);
+        initialize_guard(&transaction)?;
     }
     transaction.commit().map_err(redb_error)?;
+    Ok(())
+}
+
+/// Install the typed legacy-writer fence with the new mapping's publication transaction.
+pub(super) fn initialize_guard(transaction: &WriteTransaction) -> VersionResult<()> {
+    transaction
+        .open_table(GUARD)
+        .map_err(redb_error)?
+        .insert(0, 1)
+        .map_err(redb_error)?;
+    transaction
+        .open_table(METADATA)
+        .map_err(redb_error)?
+        .insert("key_value_format", 1_u64.to_be_bytes().as_slice())
+        .map_err(redb_error)?;
     Ok(())
 }
 

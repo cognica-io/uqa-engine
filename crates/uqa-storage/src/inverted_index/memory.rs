@@ -14,6 +14,44 @@ use super::{
 };
 
 impl InvertedIndex for MemoryInvertedIndex {
+    fn next_image_document_id(
+        &self,
+        after: Option<DocId>,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<Option<DocId>> {
+        self.check_retained_read()?;
+        control.check()?;
+        let next = self
+            .state
+            .documents
+            .first_from(
+                after
+                    .as_ref()
+                    .map_or(std::ops::Bound::Unbounded, std::ops::Bound::Excluded),
+            )
+            .map(|(&id, _)| id);
+        self.check_retained_read()?;
+        control.check()?;
+        Ok(next)
+    }
+
+    fn image_document_reader<'a>(
+        &'a self,
+        doc_id: DocId,
+        control: &'a crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<Option<crate::image_io::ImageReader<'a>>> {
+        super::image::reader(self, doc_id, control)
+    }
+
+    fn write_image_document(
+        &self,
+        doc_id: DocId,
+        output: &mut dyn std::io::Write,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<Option<u64>> {
+        super::image::write(self, doc_id, output, control)
+    }
+
     fn field_stats_scalar_budgeted(
         &self,
         field: &str,

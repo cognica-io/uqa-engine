@@ -72,12 +72,12 @@ fn collect_relation_claims(
             super::super::foreign_table_relation_oid(table),
         );
     }
-    for (relation, object_id) in definitions.sequence_object_ids.iter() {
+    for (relation, object_id) in definitions.sequences.object_ids() {
         append(
             relation,
             *object_id,
             crate::catalog::sequence::catalog_oids::sequence_catalog_oid(
-                &definitions.sequence_catalog_oids,
+                definitions.sequences.catalog_oids(),
                 object_id,
             ),
         );

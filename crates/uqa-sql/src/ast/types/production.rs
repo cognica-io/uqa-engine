@@ -7,6 +7,9 @@
 //! Type-value constructors admit recursive result payloads before copying them.
 
 use super::ColumnType;
+
+mod input;
+pub(crate) use input::Work as ColumnTypeInputWork;
 use uqa_core::{
     memory::{Produced, ProductionControl},
     ValueRetentionError,
@@ -35,9 +38,28 @@ impl ColumnType {
         base: &Self,
         control: &ProductionControl<'_>,
     ) -> Result<Produced<Self>, ValueRetentionError> {
+        Self::domain_from_base_with_control(
+            schema,
+            name,
+            oid,
+            array_oid,
+            collation_oid,
+            base.clone_with_control(control)?,
+            control,
+        )
+    }
+
+    fn domain_from_base_with_control(
+        schema: &str,
+        name: &str,
+        oid: u32,
+        array_oid: Option<u32>,
+        collation_oid: Option<u32>,
+        base: Produced<Self>,
+        control: &ProductionControl<'_>,
+    ) -> Result<Produced<Self>, ValueRetentionError> {
         let schema = control.copy_text(schema)?;
         let name = control.copy_text(name)?;
-        let base = base.clone_with_control(control)?;
         let box_memory = control.reserve(size_of::<Self>())?;
         let (schema, schema_memory) = schema.into_parts();
         let (name, name_memory) = name.into_parts();
@@ -59,144 +81,137 @@ impl ColumnType {
         )
     }
 
-    /// Copy only owned type payloads; inline scalar identities require no reservation.
-    #[expect(
-        clippy::too_many_lines,
-        reason = "exhaustive type retention keeps every payload-bearing variant charged to its owner"
-    )]
+    /// Copy unary ownership chains in source order without recursive stack frames or scratch allocation.
     pub fn clone_with_control(
         &self,
         control: &ProductionControl<'_>,
     ) -> Result<Produced<Self>, ValueRetentionError> {
-        control.check()?;
-        match self {
-            Self::Named(name) => {
-                let (name, memory) = control.copy_text(name)?.into_parts();
-                control.finish(Self::Named(name), memory)
-            }
-            Self::Array(element) => {
-                Self::array_with_control(element.clone_with_control(control)?, control)
-            }
-            Self::Enum(reference) => {
-                let (reference, memory) = reference.clone_with_control(control)?.into_parts();
-                control.finish(Self::Enum(reference), memory)
-            }
-            Self::Composite(reference) => {
-                let (reference, memory) = reference.clone_with_control(control)?.into_parts();
-                control.finish(Self::Composite(reference), memory)
-            }
-            Self::DeclaredRange(reference) | Self::DeclaredMultirange(reference) => {
-                let (reference, memory) = reference.clone_with_control(control)?.into_parts();
-                let ty = if matches!(self, Self::DeclaredRange(_)) {
-                    Self::DeclaredRange(reference)
-                } else {
-                    Self::DeclaredMultirange(reference)
-                };
-                control.finish(ty, memory)
-            }
-            Self::Domain {
-                schema,
-                name,
-                oid,
-                array_oid,
-                collation_oid,
-                base,
-            } => Self::domain_with_control(
-                schema,
-                name,
-                *oid,
-                *array_oid,
-                *collation_oid,
-                base,
-                control,
-            ),
-            Self::SmallInteger
-            | Self::Integer
-            | Self::BigInteger
-            | Self::Oid
-            | Self::Xid
-            | Self::Boolean
-            | Self::Void
-            | Self::Text
-            | Self::RefCursor
-            | Self::Name
-            | Self::Uuid
-            | Self::Varchar(_)
-            | Self::Bpchar
-            | Self::Character(_)
-            | Self::Real
-            | Self::DoublePrecision
-            | Self::Numeric {
-                precision: _,
-                scale: _,
-            }
-            | Self::Json
-            | Self::Xml
-            | Self::JsonB
-            | Self::Bytea
-            | Self::Bit(_)
-            | Self::VarBit(_)
-            | Self::InternalChar
-            | Self::Regproc
-            | Self::Regprocedure
-            | Self::Regclass
-            | Self::Regcollation
-            | Self::Regnamespace
-            | Self::Regrole
-            | Self::Regtype
-            | Self::PgNodeTree
-            | Self::AclItem
-            | Self::Int2Vector
-            | Self::OidVector
-            | Self::AnyArray
-            | Self::Record
-            | Self::Date
-            | Self::Time
-            | Self::TimePrecision(_)
-            | Self::TimeTz
-            | Self::TimeTzPrecision(_)
-            | Self::Timestamp
-            | Self::TimestampPrecision(_)
-            | Self::TimestampTz
-            | Self::TimestampTzPrecision(_)
-            | Self::Interval
-            | Self::IntervalWithFields {
-                fields: _,
-                precision: _,
-            }
-            | Self::Range(_)
-            | Self::Multirange(_)
-            | Self::Vector(_)
-            | Self::Tensor(_) => control.finish(self.clone(), control.empty_reservation()),
-        }
+        crate::catalog::work::inline(input::copy(self, control, &mut ()))
+    }
+
+    /// Retain the same type value through native work without recursive frames or copying an unbounded name in one poll. The selected source must outlive the continuation.
+    pub async fn clone_from_input(
+        &self,
+        control: &ProductionControl<'_>,
+        input: &mut uqa_core::image_io::AsyncImageInput<'_>,
+    ) -> Result<Produced<Self>, crate::SQLError> {
+        input::copy(self, control, input).await
+    }
+
+    pub(crate) async fn clone_with_input_work<W: ColumnTypeInputWork>(
+        &self,
+        control: &ProductionControl<'_>,
+        work: &mut W,
+    ) -> Result<Produced<Self>, W::Error> {
+        input::copy(self, control, work).await
+    }
+
+    fn clone_scalar_with_control(
+        &self,
+        control: &ProductionControl<'_>,
+    ) -> Result<Produced<Self>, ValueRetentionError> {
+        let scalar = match self {
+            Self::SmallInteger => Self::SmallInteger,
+            Self::Integer => Self::Integer,
+            Self::BigInteger => Self::BigInteger,
+            Self::Oid => Self::Oid,
+            Self::Xid => Self::Xid,
+            Self::Boolean => Self::Boolean,
+            Self::Void => Self::Void,
+            Self::Text => Self::Text,
+            Self::RefCursor => Self::RefCursor,
+            Self::Name => Self::Name,
+            Self::Uuid => Self::Uuid,
+            Self::Bpchar => Self::Bpchar,
+            Self::Real => Self::Real,
+            Self::DoublePrecision => Self::DoublePrecision,
+            Self::Json => Self::Json,
+            Self::Xml => Self::Xml,
+            Self::JsonB => Self::JsonB,
+            Self::Bytea => Self::Bytea,
+            Self::InternalChar => Self::InternalChar,
+            Self::Regproc => Self::Regproc,
+            Self::Regprocedure => Self::Regprocedure,
+            Self::Regclass => Self::Regclass,
+            Self::Regcollation => Self::Regcollation,
+            Self::Regnamespace => Self::Regnamespace,
+            Self::Regrole => Self::Regrole,
+            Self::Regtype => Self::Regtype,
+            Self::PgNodeTree => Self::PgNodeTree,
+            Self::AclItem => Self::AclItem,
+            Self::Int2Vector => Self::Int2Vector,
+            Self::OidVector => Self::OidVector,
+            Self::AnyArray => Self::AnyArray,
+            Self::Record => Self::Record,
+            Self::Date => Self::Date,
+            Self::Time => Self::Time,
+            Self::TimeTz => Self::TimeTz,
+            Self::Timestamp => Self::Timestamp,
+            Self::TimestampTz => Self::TimestampTz,
+            Self::Interval => Self::Interval,
+            Self::Varchar(value) => Self::Varchar(*value),
+            Self::Character(value) => Self::Character(*value),
+            Self::Bit(value) => Self::Bit(*value),
+            Self::VarBit(value) => Self::VarBit(*value),
+            Self::TimePrecision(value) => Self::TimePrecision(*value),
+            Self::TimeTzPrecision(value) => Self::TimeTzPrecision(*value),
+            Self::TimestampPrecision(value) => Self::TimestampPrecision(*value),
+            Self::TimestampTzPrecision(value) => Self::TimestampTzPrecision(*value),
+            Self::Range(value) => Self::Range(*value),
+            Self::Multirange(value) => Self::Multirange(*value),
+            Self::Vector(value) => Self::Vector(*value),
+            Self::Tensor(value) => Self::Tensor(*value),
+            Self::Numeric { precision, scale } => Self::Numeric {
+                precision: *precision,
+                scale: *scale,
+            },
+            Self::IntervalWithFields { fields, precision } => Self::IntervalWithFields {
+                fields: *fields,
+                precision: *precision,
+            },
+            Self::Named(_)
+            | Self::Array(_)
+            | Self::Domain { .. }
+            | Self::Enum(_)
+            | Self::Composite(_)
+            | Self::DeclaredRange(_)
+            | Self::DeclaredMultirange(_) => unreachable!("owned payload copied above"),
+        };
+        control.finish(scalar, control.empty_reservation())
     }
 
     pub fn without_type_modifiers_with_control(
         &self,
         control: &ProductionControl<'_>,
     ) -> Result<Produced<Self>, ValueRetentionError> {
-        let scalar = match self {
-            Self::Varchar(_) => Self::Varchar(None),
-            Self::Bit(_) => Self::Bit(None),
-            Self::VarBit(_) => Self::VarBit(None),
-            Self::Character(_) => Self::Bpchar,
-            Self::Numeric { .. } => Self::Numeric {
+        let mut dimensions = 0;
+        let mut element = self;
+        while let Self::Array(child) = element {
+            control.check()?;
+            dimensions += 1;
+            element = child;
+        }
+        let scalar = match element {
+            Self::Varchar(_) => Some(Self::Varchar(None)),
+            Self::Bit(_) => Some(Self::Bit(None)),
+            Self::VarBit(_) => Some(Self::VarBit(None)),
+            Self::Character(_) => Some(Self::Bpchar),
+            Self::Numeric { .. } => Some(Self::Numeric {
                 precision: None,
                 scale: None,
-            },
-            Self::Array(element) => {
-                return Self::array_with_control(
-                    element.without_type_modifiers_with_control(control)?,
-                    control,
-                )
-            }
-            other => {
-                return other
-                    .without_temporal_modifiers()
-                    .clone_with_control(control)
-            }
+            }),
+            _ => None,
         };
-        control.finish(scalar, control.empty_reservation())
+        let mut output = match scalar {
+            Some(scalar) => control.finish(scalar, control.empty_reservation())?,
+            None => element
+                .without_temporal_modifiers()
+                .clone_with_control(control)?,
+        };
+        for _ in 0..dimensions {
+            output = Self::array_with_control(output, control)?;
+        }
+        Ok(output)
     }
 }
 

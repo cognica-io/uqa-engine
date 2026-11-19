@@ -8,6 +8,8 @@
 
 #[derive(Debug, thiserror::Error)]
 pub enum DictionaryError {
+    #[error(transparent)]
+    Input(#[from] uqa_core::image_io::ImageIoError),
     #[error("Nori dictionary resource is unavailable: {0}")]
     ResourceMissing(String),
     #[error("Nori resource hash mismatch: expected {expected}, received {actual}")]
@@ -35,10 +37,19 @@ pub enum DictionaryError {
     Allocation(#[from] std::collections::TryReserveError),
     #[error("invalid UTF-8 in Nori dictionary: {0}")]
     Utf8(#[from] std::str::Utf8Error),
+    /// Retained input reports the validated byte prefix separately from the bounded fragment error.
+    #[error("invalid UTF-8 in Nori dictionary: {diagnostic}", diagnostic = crate::morphology::error::utf8_diagnostic(*offset, error))]
+    Utf8Offset {
+        offset: usize,
+        #[source]
+        error: std::str::Utf8Error,
+    },
     #[error("invalid UTF-16 in Nori dictionary: {0}")]
     Utf16(#[from] std::string::FromUtf16Error),
     #[error("invalid Nori provenance manifest: {0}")]
     Manifest(#[from] serde_json::Error),
+    #[error("invalid Nori provenance manifest: {0}")]
+    ManifestDiagnostic(#[from] uqa_core::json::JsonDiagnostic),
     #[cfg(feature = "nori-tools")]
     #[error("Nori dictionary tool I/O failed: {0}")]
     Io(#[from] std::io::Error),
@@ -51,7 +62,9 @@ impl From<crate::morphology::error::DictionaryError> for DictionaryError {
         use crate::morphology::error::DictionaryError as Shared;
 
         match error {
+            Shared::Input(error) => Self::Input(error),
             Shared::Manifest(error) => Self::Manifest(error),
+            Shared::ManifestDiagnostic(error) => Self::ManifestDiagnostic(error),
             Shared::Version(version) => Self::Version(version),
             Shared::Checksum(section) => Self::Checksum(section),
             Shared::Invalid {
@@ -74,6 +87,7 @@ impl From<crate::morphology::error::DictionaryError> for DictionaryError {
             },
             Shared::Allocation(error) => Self::Allocation(error),
             Shared::Utf8(error) => Self::Utf8(error),
+            Shared::Utf8Offset { offset, error } => Self::Utf8Offset { offset, error },
         }
     }
 }

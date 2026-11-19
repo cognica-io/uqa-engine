@@ -36,7 +36,19 @@ class Terminal:
             if no_color:
                 env["NO_COLOR"] = "1"
             os.execve(BINARY, [BINARY, *args], env)
-        self.started = self.read_until(b"usql> ")
+        try:
+            # Database open and the editor's first catalog read are distinct startup steps.
+            self.started = self.read_until(
+                b"usql> ", progress=(b"Use \\? for help, \\q to quit.",)
+            )
+        except BaseException:
+            try:
+                os.kill(self.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            os.waitpid(self.pid, 0)
+            os.close(self.fd)
+            raise
 
 
     def read(self, seconds):
@@ -64,12 +76,17 @@ class Terminal:
             chunks.append(part)
         return b"".join(chunks)
 
-    def read_until(self, witness, ready=None):
+    def read_until(self, witness, ready=None, progress=()):
         result = self.control_tail if ready else b""
+        pending = set(progress)
         deadline = time.monotonic() + 10
         while True:
             if witness in result and (ready is None or re.search(ready, result, re.S)):
                 return result
+            reached = {marker for marker in pending if marker in result}
+            if reached:
+                pending -= reached
+                deadline = time.monotonic() + 10
             if time.monotonic() >= deadline:
                 raise RuntimeError(f"terminal witness missing: {witness!r}, got {result!r}")
             result += self.read(0.1)
@@ -101,6 +118,51 @@ class Terminal:
         os.waitpid(self.pid, 0)
         os.close(self.fd)
         raise RuntimeError("terminal did not quit")
+
+
+def verify_wait_protocol():
+    from unittest.mock import patch
+
+    banner = b"Use \\? for help, \\q to quit."
+    prompt = b"usql> "
+
+    def observe(events, succeeds):
+        elapsed = 0.0
+        events = iter(events)
+        next_event = next(events, None)
+        terminal = Terminal.__new__(Terminal)
+        terminal.control_tail = b""
+
+        def read(seconds):
+            nonlocal elapsed, next_event
+            elapsed += seconds
+            output = b""
+            while next_event is not None and elapsed >= next_event[0]:
+                output += next_event[1]
+                next_event = next(events, None)
+            return output
+
+        terminal.read = read
+        with patch.object(time, "monotonic", lambda: elapsed):
+            try:
+                terminal.read_until(prompt, progress=(banner,))
+            except RuntimeError:
+                assert not succeeds, events
+            else:
+                assert succeeds, events
+        return elapsed
+
+    # Each real startup step has its own bound, including a banner split across reads.
+    assert observe([(8, banner[:12]), (9, banner[12:]), (18, prompt)], True) >= 18
+    assert observe([(11, prompt)], False) < 11
+    # Noise and repeated milestones cannot keep a stuck editor alive indefinitely.
+    assert observe([(5, b"noise"), (9, b"noise"), (13, prompt)], False) < 11
+    assert observe([(9, banner), (18, banner), (25, prompt)], False) < 20
+
+
+if BINARY == "--check-waits":
+    verify_wait_protocol()
+    sys.exit(0)
 
 
 terminal = Terminal("editing")

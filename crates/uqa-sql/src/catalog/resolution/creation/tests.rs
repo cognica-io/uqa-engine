@@ -5,6 +5,7 @@
 //
 
 use super::*;
+use crate::catalog::security::schema_registry::SchemaRegistry;
 use crate::catalog::{
     resolution::candidates::SearchPathRead,
     security::{
@@ -12,16 +13,13 @@ use crate::catalog::{
         BoundSchemaSecurity,
     },
 };
-use std::{
-    cell::{Cell, RefCell},
-    collections::BTreeMap,
-};
+use std::cell::{Cell, RefCell};
 
 mod type_names;
 
 struct Catalog {
     path: RefCell<Vec<String>>,
-    schemas: RefCell<BTreeMap<String, BoundSchemaSecurity>>,
+    schemas: RefCell<SchemaRegistry>,
     path_guard_expected: Cell<bool>,
     reads: RefCell<Vec<&'static str>>,
 }
@@ -35,10 +33,11 @@ impl Catalog {
                     .to_vec(),
             ),
             schemas: RefCell::new(
-                ["pg_catalog", "information_schema", "tenant"]
-                    .map(|name| (name.into(), BoundSchemaSecurity::bootstrap(name)))
-                    .into_iter()
-                    .collect(),
+                SchemaRegistry::try_from_iter(
+                    ["pg_catalog", "information_schema", "tenant"]
+                        .map(|name| (name.into(), BoundSchemaSecurity::bootstrap(name))),
+                )
+                .unwrap(),
             ),
             path_guard_expected: Cell::new(false),
             reads: RefCell::new(Vec::new()),

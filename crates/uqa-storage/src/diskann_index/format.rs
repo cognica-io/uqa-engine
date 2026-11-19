@@ -38,8 +38,10 @@ pub use origins::{
 pub use page::{decode_page, encode_page, DiskANNPage};
 pub(in crate::diskann_index) use provenance::adjacency_hash;
 pub use provenance::DiskANNBuildProvenance;
+pub(in crate::diskann_index) use quantization::decode_codebook_from;
 pub use quantization::{decode_codebook, encode_codebook, DiskANNQuantizationIdentity};
 pub use record::artifact_digest;
+pub(in crate::diskann_index) use record::artifact_digest_from;
 pub use side::{DiskANNSideBatch, DiskANNSideEntry, DiskANNSideLayout};
 
 pub const NODE_HEADER_BYTES: usize = 64;
@@ -61,7 +63,16 @@ fn field<const N: usize>(bytes: &[u8], offset: usize) -> StorageBackendResult<[u
 }
 
 fn zeros(bytes: &[u8], control: &StorageReadControl) -> StorageBackendResult<()> {
+    crate::image_io::work::inline(zeros_from(bytes, control, &mut ()))
+}
+
+async fn zeros_from(
+    bytes: &[u8],
+    control: &StorageReadControl,
+    work: &mut (impl crate::image_io::work::Work + Send),
+) -> StorageBackendResult<()> {
     for chunk in bytes.chunks(1024) {
+        work.checkpoint().await?;
         control.check()?;
         if chunk.iter().any(|&byte| byte != 0) {
             return Err(invalid("nonzero reserved bytes"));

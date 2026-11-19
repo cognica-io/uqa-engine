@@ -74,6 +74,8 @@
 //! `uqa-sql`. Errors flow through [`EngineError`], which wraps SQL and
 //! storage errors so callers only need to match one enum.
 
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+pub mod backup;
 pub mod functions;
 pub mod migration;
 pub mod operator_tree_bridge;
@@ -137,8 +139,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use uqa_core::memory::RetainedValue;
 
-use parking_lot::RwLock;
 use uqa_analysis::{analyzer::standard_analyzer, registry as analyzer_registry, Analyzer};
 use uqa_core::{DocId, FieldName, Value};
 use uqa_ml::{DeepLearnOutput, DeepModel, LearnOptions, TrainingSet};
@@ -150,11 +152,11 @@ use uqa_scoring::{
 use uqa_sql::SQLError;
 use uqa_storage::{
     document_store::Document, AnalyzerPhase, CatalogFacade, CatalogIndexRow, ColumnStatsInput,
-    ColumnStatsRow, DocumentStore, HNSWIndex, HNSWIndexParams, IVFIndex, IVFIndexParams,
-    InvertedIndex, MemoryDocumentStore, MemoryInvertedIndex, MemoryVectorIndex,
-    PersistentStorageBackend, PersistentStorageProvider, PersistentStorageSession,
-    RelationIdentity, SequenceRow, StorageBackendError, StorageBackendResult, StorageSavepointId,
-    TableSchema, VectorFieldSchema, VectorIndex, VectorIndexOpenMode, VectorIndexSpec,
+    DocumentStore, HNSWIndex, HNSWIndexParams, IVFIndex, IVFIndexParams, InvertedIndex,
+    MemoryDocumentStore, MemoryInvertedIndex, MemoryVectorIndex, PersistentStorageBackend,
+    PersistentStorageProvider, PersistentStorageSession, RelationIdentity, StorageBackendError,
+    StorageBackendResult, StorageSavepointId, TableSchema, VectorFieldSchema, VectorIndex,
+    VectorIndexOpenMode, VectorIndexSpec,
 };
 use uqa_storage_sqlite::{
     ManagedConnection, SQLiteCompressedContainerAnchor, SQLiteStorageProvider,
@@ -214,25 +216,23 @@ pub use uqa_storage::FtsIndexStat;
 
 pub use uqa_scoring::ScoringMode;
 
-type TableFieldAnalyzerRegistry = BTreeMap<(String, String), uqa_storage::FieldAnalyzerBinding>;
-type SessionPortalTableSnapshots = Arc<BTreeMap<RelationIdentity, Arc<TableState>>>;
-type SessionPortalViewSnapshots = Arc<BTreeMap<RelationIdentity, StoredView>>;
+type TableFieldAnalyzerRegistry = uqa_storage::analyzer_binding::registry::FieldAnalyzerCatalog;
+type SessionPortalTableSnapshots = Arc<crate::state::TableRegistryMap>;
+type SessionPortalViewSnapshots = RetainedValue<uqa_sql::catalog::stored_view::ViewDefinitions>;
 type SessionPortalSQLFunctionSnapshots =
-    Arc<BTreeMap<String, Vec<Arc<user_functions::SQLUserFunction>>>>;
+    RetainedValue<uqa_sql::routines::registry::RoutineRegistry>;
 type SessionPortalCatalogSnapshot = Arc<session::RetainedCatalogSnapshot>;
 type SessionPortalTransactionOverlay =
     Arc<BTreeMap<String, uqa_execution::query::document_changes::DocumentChanges>>;
 type ColumnStatsMap = BTreeMap<String, uqa_planner::ColumnStats>;
 type FixedTransactionCatalogBaseline = BTreeMap<[u8; 16], (RelationIdentity, Vec<u8>)>;
-type NontransactionalSequenceValues = BTreeMap<[u8; 16], NontransactionalSequenceHistory>;
-
-#[derive(Clone, Default)]
-struct NontransactionalSequenceHistory {
-    values_by_definition: BTreeMap<[u8; 16], NontransactionalSequenceValue>,
-    object_id: [u8; 16],
-    session_currval: Option<SessionSequenceValue>,
-    defines_lastval: bool,
-}
+type NontransactionalSequenceValues =
+    uqa_execution::catalog::sequence::session::NontransactionalSequenceValues;
+type NontransactionalSequenceSource = Arc<
+    uqa_storage::memory_capture::MemoryCaptureCell<
+        uqa_execution::catalog::sequence::capture::SequenceCaptureSource,
+    >,
+>;
 
 /// Unified query engine composed from explicit storage, durable-catalog,
 /// session, extension, epoch, and query-runtime ownership domains.
@@ -349,7 +349,7 @@ struct TransactionFrame {
     xid_levels: Vec<Option<u32>>,
     savepoints: Vec<TransactionSavepoint>,
     session_snapshot: SessionStateSnapshot,
-    data_snapshot: Option<EngineDataSnapshot>,
+    data_snapshot: Option<std::sync::Arc<EngineDataSnapshot>>,
     dirty_at_begin: TransactionDirtyState,
     prepared_changes: uqa_execution::statement::prepared::invalidation::PreparedInvalidationLog,
     /// Lock mark this frame started with. Rolling the whole frame back releases every acquisition at or above it, independent of the savepoint marks the frame allocated later.
@@ -372,7 +372,7 @@ struct TransactionFrame {
         parking_lot::Mutex<Option<Box<notifications::CrossNotificationCommit>>>,
     constraint_modes: ConstraintModeState,
     /// Values allocated by `nextval` or installed by `setval` are not rolled back in `PostgreSQL`, except that allocations made against a transactionally changed sequence definition roll back with that definition. Every active frame records values by definition generation so transaction, savepoint, and PL/pgSQL exception rollback can reapply exactly the generation owned by the rollback target while preserving the latest session `currval` and `lastval` effects.
-    nontransactional_sequence_values: NontransactionalSequenceValues,
+    nontransactional_sequence_values: NontransactionalSequenceSource,
 }
 
 enum FixedTransactionSnapshot {
@@ -422,7 +422,7 @@ struct TransactionSavepoint {
     storage_savepoint: StorageSavepointId,
     characteristics: TransactionCharacteristicsState,
     session_snapshot: SessionStateSnapshot,
-    data_snapshot: Option<EngineDataSnapshot>,
+    data_snapshot: Option<std::sync::Arc<EngineDataSnapshot>>,
     dirty: TransactionDirtyState,
     prepared_change_mark:
         uqa_execution::statement::prepared::invalidation::PreparedInvalidationMark,
@@ -444,7 +444,7 @@ struct SessionStateSnapshot {
     command_overlays: Vec<uqa_execution::mutation::overlay::CommandOverlayCheckpoint>,
     /// A pinned physical graph view plus this transaction's changed identities. Savepoints retain only handles and changed-id checkpoints, never graph payload replicas.
     graph_overlay: Option<GraphTransactionOverlay>,
-    search_path: Vec<String>,
+    search_path: Arc<Vec<String>>,
     /// The OIDs of the session's temporary namespace and its TOAST namespace once its first temporary object created them; a rollback past that creation forgets them.
     temporary_namespace: Option<uqa_sql::catalog::temporary_namespace::TemporaryNamespaceOids>,
     session_vars: BTreeMap<String, String>,
@@ -556,41 +556,80 @@ impl Default for SessionRandomState {
     }
 }
 
-#[derive(Clone)]
 struct EngineDataSnapshot {
-    tables: BTreeMap<RelationIdentity, TableDataSnapshot>,
-    durable: DurableCatalogSnapshot,
+    /// Undo alone retains mutable owners needed to restore dropped/replaced tables.
+    table_owners: BTreeMap<RelationIdentity, Arc<TableState>>,
+    data: Arc<EngineSnapshotData>,
     foreign_memory_tables: BTreeMap<RelationIdentity, Vec<uqa_sql::ResultRow>>,
 }
 
-#[derive(Clone)]
-#[expect(clippy::struct_excessive_bools, reason = "independent snapshot flags")]
+/// Immutable transaction values can outlive undo without pinning later mutable table contents. This is an internal source generation, not an admitted or temporary-filtered backup image.
+struct EngineSnapshotData {
+    tables: BTreeMap<RelationIdentity, TableDataSnapshot>,
+    memory_membership: Option<state::MembershipSnapshot>,
+    sources: Option<state::SnapshotSources>,
+    durable: DurableCatalogSnapshot,
+}
+
 struct TableDataSnapshot {
-    state: Arc<TableState>,
-    security: state::BoundTableSecurity,
-    storage_generation: [u8; 16],
-    document_store: Arc<dyn DocumentStore>,
-    inverted_index: Arc<dyn InvertedIndex>,
-    vector_indexes: BTreeMap<FieldName, Arc<dyn VectorIndex>>,
-    value_indexes: BTreeMap<uqa_storage::ValueIndexKey, value_index::ValueIndexCache>,
-    fts_fields: Vec<FieldName>,
-    columns: Vec<uqa_sql::ast::ColumnDef>,
-    columns_declared: bool,
+    object_id: [u8; 16],
+    catalog_oids: Option<uqa_sql::catalog::relation_oids::RelationCatalogOids>,
+    persistence: uqa_sql::ast::RelationPersistence,
+    on_commit: uqa_sql::ast::OnCommitAction,
+    security: state::CatalogSnapshot<
+        uqa_sql::catalog::table_metadata::TableMetadata<state::BoundTableSecurity>,
+        uqa_sql::catalog::security::table_binding::CapturedTableSecurity,
+    >,
+    storage_generation: state::CatalogSnapshot<[u8; 16]>,
+    document_store: uqa_storage::memory_capture::MemoryCaptureCell<
+        uqa_storage::StorageHandle<dyn DocumentStore>,
+    >,
+    inverted_index: uqa_storage::memory_capture::MemoryCaptureCell<
+        uqa_storage::StorageHandle<dyn InvertedIndex>,
+    >,
+    vector_indexes:
+        uqa_storage::memory_capture::MemoryCaptureCell<uqa_storage::vector_index::VectorIndexes>,
+    value_indexes: uqa_storage::memory_capture::MemoryCaptureCell<
+        uqa_execution::catalog::index::value::ValueIndexes,
+    >,
+    fts_fields:
+        state::CatalogSnapshot<uqa_sql::catalog::table_metadata::TableMetadata<Vec<FieldName>>>,
+    columns: state::CatalogSnapshot<
+        uqa_sql::catalog::table_definition::TableDefinition<Vec<uqa_sql::ast::ColumnDef>>,
+    >,
+    columns_declared: state::CatalogSnapshot<bool>,
     /// One-past-the-last allocated document id. `u128` is intentional: it
     /// represents `u64::MAX + 1`, so exhaustion is distinguishable from an
     /// available final id and can never wrap or issue a duplicate.
-    next_id: u128,
-    analyzer: Analyzer,
-    column_stats: uqa_planner::ColumnStatistics,
-    column_stats_loaded: bool,
-    column_stats_dirty: bool,
-    statistics_maintenance: statistics::MaintenanceState,
-    table_checks: Vec<uqa_sql::ast::TableCheck>,
-    foreign_keys: Vec<uqa_sql::ast::ForeignKey>,
-    key_constraints: Vec<uqa_sql::ast::TableKeyConstraint>,
-    hierarchy: uqa_sql::ast::TableHierarchy,
-    row_type_array_name: Option<String>,
-    dropped_attributes: Vec<uqa_sql::catalog::relation_attributes::DroppedAttribute>,
+    next_id: state::CatalogSnapshot<u128>,
+    maps_integer_keys: state::CatalogSnapshot<bool>,
+    analyzer: state::CatalogSnapshot<
+        uqa_analysis::AnalyzerDefinition,
+        uqa_analysis::AnalyzerConfigurationImage,
+    >,
+    column_stats: state::CatalogSnapshot<uqa_planner::ColumnStatistics>,
+    column_stats_loaded: state::CatalogSnapshot<bool>,
+    column_stats_dirty: state::CatalogSnapshot<bool>,
+    statistics_maintenance: state::CatalogSnapshot<statistics::MaintenanceState>,
+    table_checks: state::CatalogSnapshot<
+        uqa_sql::catalog::table_definition::TableDefinition<Vec<uqa_sql::ast::TableCheck>>,
+    >,
+    foreign_keys: state::CatalogSnapshot<
+        uqa_sql::catalog::table_metadata::TableMetadata<Vec<uqa_sql::ast::ForeignKey>>,
+    >,
+    key_constraints: state::CatalogSnapshot<
+        uqa_sql::catalog::table_metadata::TableMetadata<Vec<uqa_sql::ast::TableKeyConstraint>>,
+    >,
+    hierarchy: state::CatalogSnapshot<
+        uqa_sql::catalog::table_definition::TableDefinition<uqa_sql::ast::TableHierarchy>,
+    >,
+    row_type_array_name:
+        state::CatalogSnapshot<uqa_sql::catalog::table_metadata::TableMetadata<Option<String>>>,
+    dropped_attributes: state::CatalogSnapshot<
+        uqa_sql::catalog::table_metadata::TableMetadata<
+            Vec<uqa_sql::catalog::relation_attributes::DroppedAttribute>,
+        >,
+    >,
     doc_count_cache: u64,
     doc_count_dirty: bool,
 }
@@ -601,45 +640,58 @@ pub(crate) struct TableState {
     /// Durable logical relation identity used by `PostgreSQL` catalogs. Renames, schema changes, `TRUNCATE`, and reopen preserve it.
     object_id: [u8; 16],
     /// Durable SQL role ownership and ACL. Mutations publish this value atomically and preserve the relation's logical and physical identities.
-    security: state::CatalogCell<state::BoundTableSecurity>,
+    security: state::TableMetadataCell<
+        state::BoundTableSecurity,
+        uqa_sql::catalog::security::table_binding::CapturedTableSecurity,
+    >,
     /// Durable physical-storage generation shared by every session. Schema-only changes preserve it; CREATE and TRUNCATE replace it so a fixed transaction snapshot never aliases a different physical relation lifetime.
-    storage_generation: RwLock<[u8; 16]>,
-    pub(crate) document_store: RwLock<Box<dyn DocumentStore>>,
-    inverted_index: RwLock<Box<dyn InvertedIndex>>,
-    vector_indexes: RwLock<uqa_storage::vector_index::VectorIndexes>,
-    fts_fields: state::CatalogCell<Vec<FieldName>>,
+    storage_generation: state::CatalogCell<[u8; 16]>,
+    pub(crate) document_store: uqa_storage::memory_capture::MemoryCaptureCell<
+        uqa_storage::StorageHandle<dyn DocumentStore>,
+    >,
+    inverted_index: uqa_storage::memory_capture::MemoryCaptureCell<
+        uqa_storage::StorageHandle<dyn InvertedIndex>,
+    >,
+    vector_indexes:
+        uqa_storage::memory_capture::MemoryCaptureCell<uqa_storage::vector_index::VectorIndexes>,
+    fts_fields: state::TableMetadataCell<Vec<FieldName>>,
     /// Column schema captured at CREATE TABLE / ALTER TABLE time, driving auto-id allocation and ALTER COLUMN bookkeeping.
-    columns: state::CatalogCell<Vec<uqa_sql::ast::ColumnDef>>,
+    columns: state::TableDefinitionCell<Vec<uqa_sql::ast::ColumnDef>>,
     columns_declared: state::CatalogCell<bool>,
     /// Retained document-ID floor. Capable persistent backends reserve from the storage-owned durable namespace; temporary, memory and serialized backends use this local state. `u128` preserves the exhausted `u64::MAX + 1` value.
-    next_id: parking_lot::Mutex<u128>,
+    next_id: state::CatalogCell<u128>,
     /// Whether the table's single integer primary key, if it has one, names its rows' identities (see `MutationIdentifiers::maps_integer_keys`). A table an earlier version wrote with a row at an identity its key does not name resolves its keys through the key's index instead.
-    maps_integer_keys: AtomicBool,
-    analyzer: state::CatalogCell<Analyzer>,
+    maps_integer_keys: state::CatalogCell<bool>,
+    analyzer: state::CatalogCell<
+        uqa_analysis::AnalyzerDefinition,
+        uqa_analysis::AnalyzerConfigurationImage,
+    >,
     /// Per-column statistics refreshed by `ANALYZE table_name` or lazily
     /// by `column_stats` after writes mark the table dirty. Keyed by column
     /// name.
     column_stats: state::CatalogCell<uqa_planner::ColumnStatistics>,
-    column_stats_loaded: AtomicBool,
-    column_stats_dirty: AtomicBool,
+    column_stats_loaded: state::CatalogCell<bool>,
+    column_stats_dirty: state::CatalogCell<bool>,
     /// Changes since the last analysis of a table that no catalog tracks: tables of a memory-only engine and temporary tables. Their lazy analysis follows the maintenance policy of durable tables instead of re-analyzing after every write.
-    statistics_maintenance: parking_lot::Mutex<statistics::MaintenanceState>,
+    statistics_maintenance: state::CatalogCell<statistics::MaintenanceState>,
     /// Table-level `CHECK` constraints, evaluated against every row
     /// at INSERT / UPDATE time.
-    table_checks: state::CatalogCell<Vec<uqa_sql::ast::TableCheck>>,
+    table_checks: state::TableDefinitionCell<Vec<uqa_sql::ast::TableCheck>>,
     /// Table-level `FOREIGN KEY` constraints. Each entry binds local
     /// columns to a `(ref_table, ref_columns)` lookup target.
-    foreign_keys: state::CatalogCell<Vec<uqa_sql::ast::ForeignKey>>,
+    foreign_keys: state::TableMetadataCell<Vec<uqa_sql::ast::ForeignKey>>,
     /// Typed PRIMARY KEY / UNIQUE tuples, including composite keys and
     /// their SQL NULL-equality policy.
-    key_constraints: state::CatalogCell<Vec<uqa_sql::ast::TableKeyConstraint>>,
+    key_constraints: state::TableMetadataCell<Vec<uqa_sql::ast::TableKeyConstraint>>,
     /// Direct parents, an optional partition key, and an optional child bound.
     /// The complete object is persisted with the table's constraint envelope.
-    hierarchy: state::CatalogCell<uqa_sql::ast::TableHierarchy>,
+    hierarchy: state::TableDefinitionCell<uqa_sql::ast::TableHierarchy>,
     /// Lazily built per-column value indexes for PRIMARY KEY / UNIQUE
     /// / `CREATE INDEX` btree columns. Maintained incrementally by the
     /// document write paths; cleared on bulk reloads.
-    value_indexes: RwLock<BTreeMap<uqa_storage::ValueIndexKey, value_index::ValueIndexCache>>,
+    value_indexes: uqa_storage::memory_capture::MemoryCaptureCell<
+        uqa_execution::catalog::index::value::ValueIndexes,
+    >,
     /// Cached `document_store.len()`. Persistent stores answer `len`
     /// with a `COUNT(*)` query, which used to run once per SQL
     /// statement for planner row estimates; the cache is invalidated
@@ -651,9 +703,11 @@ pub(crate) struct TableState {
     on_commit: uqa_sql::ast::OnCommitAction,
     /// The public OIDs allocated when the table was created; `None` for a table created before OIDs were recorded, which derives them from its identity.
     catalog_oids: Option<uqa_sql::catalog::relation_oids::RelationCatalogOids>,
-    row_type_array_name: state::CatalogCell<Option<String>>,
+    row_type_array_name: state::TableMetadataCell<Option<String>>,
     dropped_attributes:
-        state::CatalogCell<Vec<uqa_sql::catalog::relation_attributes::DroppedAttribute>>,
+        state::TableMetadataCell<Vec<uqa_sql::catalog::relation_attributes::DroppedAttribute>>,
+    /// The state header retires after its fields; independently shared generations keep their own admission after this table is dropped.
+    _image_memory: Option<uqa_core::memory::MemoryReservation>,
 }
 
 impl TableState {
@@ -777,13 +831,7 @@ fn parse_analyzer_config(name: &str, config_json: &str) -> std::result::Result<A
 }
 
 fn normalize_analyzer_phase(phase: &str) -> std::result::Result<(String, AnalyzerPhase), String> {
-    let phase = AnalyzerPhase::parse(&phase.to_ascii_lowercase())?;
-    let normalized = match phase {
-        AnalyzerPhase::Index => "index",
-        AnalyzerPhase::Search => "search",
-        AnalyzerPhase::Both => "both",
-    };
-    Ok((normalized.to_string(), phase))
+    AnalyzerPhase::normalize(phase)
 }
 
 impl Drop for Engine {
@@ -874,6 +922,5 @@ mod tests;
 mod copy;
 
 use uqa_execution::catalog::sequence::session::{
-    NontransactionalSequenceValue, SessionLastSequenceReference, SessionSequenceCache,
-    SessionSequenceValue,
+    SessionLastSequenceReference, SessionSequenceCache, SessionSequenceValue,
 };

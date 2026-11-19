@@ -21,21 +21,38 @@ fn native_rule_target_columns_borrow_declarations_and_recover(#[case] provider: 
     let engine = provider.open(&directory.path().join("rule-target.db"));
     engine.sql("CREATE TABLE items (n text DEFAULT 'original'); CREATE VIEW selected AS SELECT 'original'::text AS n; CREATE MATERIALIZED VIEW materialized AS SELECT 'original'::text AS n", &[]).unwrap();
     let table = engine.try_table("items").unwrap().unwrap();
-    table.columns.write()[0].default = Some(Expr::Literal(Value::Str("x".repeat(4 * 1024 * 1024))));
+    table
+        .columns
+        .write()
+        .edit(|columns| {
+            columns[0].default = Some(Expr::Literal(Value::Str("x".repeat(4 * 1024 * 1024))));
+            Ok(())
+        })
+        .unwrap();
     {
         let mut views = engine.durable.views.write();
-        let view = views
-            .get_mut(&RelationIdentity::new("public", "selected"))
+        views
+            .edit(&RelationIdentity::new("public", "selected"), |view| {
+                let RelationalPlan::QueryBlock(block) = &mut view.query.root else {
+                    panic!("query")
+                };
+                block.projections[0].expr =
+                    ScalarExpr::Literal(Value::Str("x".repeat(4 * 1024 * 1024)));
+                Ok(())
+            })
+            .unwrap()
             .unwrap();
-        let RelationalPlan::QueryBlock(block) = &mut view.query.root else {
-            panic!("query")
-        };
-        block.projections[0].expr = ScalarExpr::Literal(Value::Str("x".repeat(4 * 1024 * 1024)));
-        let materialized = views
-            .get_mut(&RelationIdentity::new("public", "materialized"))
+        views
+            .edit(
+                &RelationIdentity::new("public", "materialized"),
+                |materialized| {
+                    materialized.materialized_rows[0]
+                        .insert("n".into(), Value::Str("x".repeat(4 * 1024 * 1024)));
+                    Ok(())
+                },
+            )
+            .unwrap()
             .unwrap();
-        materialized.materialized_rows[0]
-            .insert("n".into(), Value::Str("x".repeat(4 * 1024 * 1024)));
     }
     for target in ["items", "selected", "materialized"] {
         let copied = allocation_counter::measure(|| {
@@ -73,7 +90,14 @@ fn native_rule_target_columns_borrow_declarations_and_recover(#[case] provider: 
         drop(output);
         assert_eq!(memory.used(), before + occupied.bytes());
     }
-    table.columns.write()[0].name = "x".repeat(4 * 1024 * 1024);
+    table
+        .columns
+        .write()
+        .edit(|columns| {
+            columns[0].name = "x".repeat(4 * 1024 * 1024);
+            Ok(())
+        })
+        .unwrap();
     // The view still requires an admitted analysis tree to validate its row schema; table defaults and materialized rows are irrelevant to that descriptor.
     for target in ["items", "selected"] {
         let measured = allocation_counter::measure(|| {
@@ -90,7 +114,14 @@ fn native_rule_target_columns_borrow_declarations_and_recover(#[case] provider: 
         );
         assert_eq!(memory.used(), before + occupied.bytes());
     }
-    table.columns.write()[0].name = "n".into();
+    table
+        .columns
+        .write()
+        .edit(|columns| {
+            columns[0].name = "n".into();
+            Ok(())
+        })
+        .unwrap();
     drop(occupied);
     for token in [resources.cancellation(), &invoking] {
         token.cancel();
@@ -201,10 +232,16 @@ fn native_rule_target_columns_preserve_live_lookup_and_schema_diagnostics(
     }
     {
         let mut views = engine.durable.views.write();
-        let materialized = views
-            .get_mut(&RelationIdentity::new("public", "materialized"))
+        views
+            .edit(
+                &RelationIdentity::new("public", "materialized"),
+                |materialized| {
+                    materialized.materialized_column_types.clear();
+                    Ok(())
+                },
+            )
+            .unwrap()
             .unwrap();
-        materialized.materialized_column_types.clear();
     }
     let ordinary =
         RuleSourceCatalog::rule_relation_definitions(&engine, "public.materialized").unwrap_err();
@@ -250,7 +287,14 @@ fn native_rule_definitions_use_the_request_allowance_before_copying(#[case] prov
     let before_scope = memory.used();
     let scope = crate::capabilities::query_scope::new_for_current_routine(&engine).unwrap();
     let table = engine.try_table("items").unwrap().unwrap();
-    table.columns.write()[0].default = Some(Expr::Literal(Value::Str("x".repeat(4 * 1024 * 1024))));
+    table
+        .columns
+        .write()
+        .edit(|columns| {
+            columns[0].default = Some(Expr::Literal(Value::Str("x".repeat(4 * 1024 * 1024))));
+            Ok(())
+        })
+        .unwrap();
 
     let invoking = CancellationToken::new();
     let control = ProductionControl::new(memory, resources.cancellation(), &invoking);
@@ -287,7 +331,14 @@ fn native_rule_definitions_use_the_request_allowance_before_copying(#[case] prov
         "{provider:?}: {observed:?}"
     );
     assert_eq!(memory.used(), before + occupied.bytes());
-    table.columns.write()[0].default = Some(Expr::Literal(Value::Str("original".into())));
+    table
+        .columns
+        .write()
+        .edit(|columns| {
+            columns[0].default = Some(Expr::Literal(Value::Str("original".into())));
+            Ok(())
+        })
+        .unwrap();
     let definitions =
         rule_returning_columns_with_control(engine.rule_analysis_context(), "items", &control)
             .unwrap();

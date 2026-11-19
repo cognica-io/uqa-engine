@@ -9,6 +9,9 @@
 use super::super::scalar::ScalarMemory;
 use uqa_core::memory::{BudgetedVec, MemoryReservation};
 
+mod retirement;
+pub(super) use retirement::Folding;
+
 #[derive(Debug)]
 pub(crate) enum RewriteMemory {
     Fields {
@@ -54,34 +57,7 @@ impl RewriteMemory {
     }
 
     pub(crate) fn into_reservation(self) -> Option<MemoryReservation> {
-        match self {
-            Self::Scalar(memory) => memory.map(ScalarMemory::into_reservation),
-            Self::Scalars {
-                mut direct,
-                mut items,
-            } => {
-                while let Some(memory) = items.pop() {
-                    if let Some(memory) = memory {
-                        direct.absorb(memory.into_reservation());
-                    }
-                }
-                drop(items);
-                Some(direct)
-            }
-            Self::Fields {
-                mut direct,
-                mut fields,
-            } => {
-                while let Some(field) = fields.pop() {
-                    if let Some(memory) = field.memory.and_then(Self::into_reservation) {
-                        direct.absorb(memory);
-                    }
-                }
-                // Constructor records are temporary; their capacity is not executable storage.
-                drop(fields);
-                Some(direct)
-            }
-        }
+        retirement::fold(self)
     }
 
     pub(super) fn field_mut(&mut self, name: &str) -> &mut Option<Self> {
@@ -93,6 +69,24 @@ impl RewriteMemory {
             .find(|field| field.name == name)
             .expect("copied plan field")
             .memory
+    }
+
+    /// Lend disjoint constructor fields together while keeping their payloads and reservations in the original owner.
+    pub(super) fn fields_mut<const N: usize>(
+        &mut self,
+        names: [&str; N],
+    ) -> [&mut Option<Self>; N] {
+        let Self::Fields { fields, .. } = self else {
+            panic!("scalar ownership has no named plan fields");
+        };
+        let mut selected = std::array::from_fn::<_, N, _>(|_| None);
+        for field in fields.iter_mut() {
+            if let Some(index) = names.iter().position(|name| *name == field.name) {
+                assert!(selected[index].is_none(), "unique constructor field");
+                selected[index] = Some(&mut field.memory);
+            }
+        }
+        selected.map(|field| field.expect("copied plan field"))
     }
 
     pub(super) fn item_mut(&mut self, index: usize) -> &mut Option<Self> {

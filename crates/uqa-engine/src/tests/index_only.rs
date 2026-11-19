@@ -28,7 +28,7 @@ fn diverge_documents(engine: &Engine) {
         document.fields_mut().insert("c".into(), Value::Int(-1));
         diverged.put_stored(id, document).unwrap();
     }
-    *table.document_store.write() = Box::new(diverged);
+    *table.document_store.write() = uqa_storage::StorageHandle::new(Box::new(diverged));
 }
 
 #[test]
@@ -101,7 +101,10 @@ fn every_plain_key_column_of_an_index_is_held() {
     );
     let table = engine.table("covered").unwrap().expect("table");
     let indexes = table.value_indexes.read();
-    assert!(!indexes[&ValueIndexKey::Column("c".into())].is_carried());
+    assert!(!indexes
+        .get(&ValueIndexKey::Column("c".into()))
+        .unwrap()
+        .is_carried());
 }
 
 /// Run `sql` as an index-only read and as a read of the documents, and return the rows when both agree.

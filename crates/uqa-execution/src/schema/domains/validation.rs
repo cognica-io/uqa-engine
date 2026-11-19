@@ -126,7 +126,7 @@ fn validate_table<S: Clone + 'static>(
     let mut source = LocalTableRowSource::new(LocalTableScanConfig {
         cancellation: inputs.cancellation.clone(),
         serializable: inputs.tables.serializable_read(&name)?,
-        column_definitions: Arc::new(table.column_definitions()),
+        column_definitions: Arc::new(table.column_definitions()).into(),
         table,
         columns: columns.clone(),
         schema: columns,

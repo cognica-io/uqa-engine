@@ -20,7 +20,12 @@ pub trait TableRemovalCatalog {
     fn contains_relation(&self, relation: &RelationIdentity) -> bool;
 }
 pub trait TableRemovalPublication {
-    fn remove_state(&self, name: &str, relation: &RelationIdentity) -> StorageBackendResult<()>;
+    fn remove_state(
+        &self,
+        name: &str,
+        relation: &RelationIdentity,
+        indexes: crate::catalog::index::registry::CatalogIndexes,
+    ) -> StorageBackendResult<()>;
     fn prune_constraint_modes(&self) -> Result<(), SQLError>;
 }
 pub struct TableRemovalContext<'a> {

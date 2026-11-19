@@ -171,7 +171,8 @@ impl<'a, S: Clone + Send + Sync + 'static> QueryLateralSource<'a, S> {
                     binding: binding.as_ref(),
                     user_function: retained_function
                         .as_deref()
-                        .or_else(|| resolved.as_ref().map(|resolved| resolved.function.as_ref())),
+                        .or_else(|| resolved.as_ref().map(|resolved| resolved.function.as_ref()))
+                        .map(|function| &**function),
                     user_invocation: selected_binding
                         .and_then(|binding| binding.invocation.as_deref()),
                     args,
@@ -270,7 +271,7 @@ impl<'a, S: Clone + Send + Sync + 'static> crate::LateralSource<'a> for QueryLat
                 &right.row,
                 predicate.calls(),
             )?,
-        ))
+        )?)
     }
 
     fn rows_for(
@@ -373,7 +374,7 @@ impl<'a, S: Clone + Send + Sync + 'static> crate::LateralSource<'a> for QueryLat
                 &joined.row,
                 filter.calls(),
             )?,
-        ))
+        )?)
     }
 
     fn close(&mut self) -> crate::ExecResult<()> {

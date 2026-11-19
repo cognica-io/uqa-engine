@@ -11,14 +11,14 @@ pub use ownership::bind_analyzed_sql_body_types_owned;
 
 use super::{
     declaration::{
-        resolve_plpgsql_datum_types, routine_definition_error, routine_parameter_regrole_constants,
-        validate_routine_declaration, RoutineTypeCatalog,
+        resolve_plpgsql_datum_types, routine_parameter_regrole_constants,
+        validate_routine_declaration, validate_routine_language, RoutineTypeCatalog,
     },
     merge_columns::StoredMergeColumnCatalog,
     CompiledFunctionBody, RoutineResolution,
 };
 use crate::{
-    ast::{ColumnType, CreateFunction, FunctionBody, FunctionReturns, Statement},
+    ast::{ColumnType, CreateFunction, FunctionBody, Statement},
     binding::{
         snapshot::BindingSnapshot,
         stored_relations::{
@@ -32,7 +32,6 @@ use crate::{
     },
     plan::UnifiedPlan,
     plpgsql::PlpgsqlCatalog,
-    type_resolution::canonical_routine_type_name,
     SQLError, ScalarExpr,
 };
 
@@ -129,17 +128,7 @@ pub(super) fn validate_routine_signature(
     context: &RoutineCompilationContext<'_>,
     def: &CreateFunction,
 ) -> Result<StoredRegroleConstants, SQLError> {
-    if !matches!(def.language.as_str(), "plpgsql" | "sql") {
-        return Err(SQLError::Routine {
-            sqlstate: "42704".into(),
-            message: format!("language \"{}\" does not exist", def.language),
-        });
-    }
-    if def.language == "plpgsql" && matches!(def.body, FunctionBody::Statements(_)) {
-        return Err(routine_definition_error(
-            "inline SQL function body only valid for language SQL",
-        ));
-    }
+    validate_routine_language(def)?;
     let stored_regrole_constants = routine_parameter_regrole_constants(context.types, def);
     stored_regrole_constants.validate_inputs_with(context.regroles)?;
     validate_routine_declaration(def)?;
@@ -148,11 +137,7 @@ pub(super) fn validate_routine_signature(
 
 /// PL/pgSQL's compiler rejects declared arguments of a trigger function, which reads its arguments from `TG_ARGV`.
 fn reject_trigger_function_arguments(def: &CreateFunction) -> Result<(), SQLError> {
-    let returns_trigger = matches!(
-        &def.returns,
-        FunctionReturns::Scalar { type_name } if canonical_routine_type_name(type_name) == "trigger"
-    );
-    if returns_trigger && def.identity_arity() != 0 {
+    if super::declaration::routine_returns_trigger(def) && def.identity_arity() != 0 {
         return Err(SQLError::Diagnostic {
             sqlstate: "42P13".into(),
             message: "trigger functions cannot have declared arguments".into(),

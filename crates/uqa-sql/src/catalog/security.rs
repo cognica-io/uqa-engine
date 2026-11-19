@@ -4,14 +4,21 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use std::collections::BTreeMap;
+pub mod foreign_tables;
+
+use uqa_core::memory::OwnedMap;
 pub mod acl_command;
 pub mod acl_warning;
+pub mod authority;
+pub mod capture;
 pub mod columns;
 pub mod dependencies;
+mod grant_paths;
+pub mod projected_input;
 mod role_bindings;
 pub mod schema;
 pub mod schema_binding;
+pub mod schema_registry;
 pub use schema_binding::BoundSchemaSecurity;
 pub mod table;
 pub mod table_binding;
@@ -23,7 +30,7 @@ pub use uqa_core::catalog_acl::{AclGrantee, TableAclEntry, TablePrivileges};
 pub struct TableSecurity {
     pub role_owner: String,
     pub acl: Option<Vec<TableAclEntry>>,
-    pub column_acls: BTreeMap<String, Vec<TableAclEntry>>,
+    pub column_acls: OwnedMap<String, Vec<TableAclEntry>>,
 }
 
 impl TableSecurity {
@@ -39,7 +46,7 @@ impl TableSecurity {
         Self {
             role_owner: role_owner.into(),
             acl: None,
-            column_acls: BTreeMap::new(),
+            column_acls: OwnedMap::new(),
         }
     }
 }
@@ -85,6 +92,7 @@ pub mod sequence_binding;
 pub use sequence_binding::BoundSequenceSecurity;
 pub mod sequence_grants;
 pub mod sequence_inquiry;
+pub mod sequence_registry;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SequenceSecurity {
@@ -98,6 +106,8 @@ pub mod view_ownership;
 
 pub mod builtin_routines;
 pub mod grants;
+#[cfg(test)]
+mod native_authority_tests;
 pub mod object_acl;
 pub mod system_relations;
 pub mod table_grants;

@@ -130,7 +130,7 @@ pub(crate) fn field_selection_label<E: FieldNameLiteral>(
     field_selection_name(binding, field).map(str::to_owned)
 }
 
-fn field_selection_name<'a, E: FieldNameLiteral>(
+pub(crate) fn field_selection_name<'a, E: FieldNameLiteral>(
     binding: Option<&FunctionBinding>,
     field: Option<&'a E>,
 ) -> Option<&'a str> {

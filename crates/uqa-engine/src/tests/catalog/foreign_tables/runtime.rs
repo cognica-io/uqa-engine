@@ -79,7 +79,7 @@ fn memory_stream_reads_current_rows_and_reports_removed_loaded_data() {
 }
 
 #[test]
-fn missing_foreign_security_blocks_removal_before_memory_or_durable_publication() {
+fn failed_foreign_removal_admission_preserves_rows_and_persisted_definition() {
     let directory = tempfile::tempdir().unwrap();
     let engine = Engine::open(&directory.path().join("foreign_drop.db")).unwrap();
     engine.sql("CREATE SERVER source FOREIGN DATA WRAPPER memory_fdw; CREATE FOREIGN TABLE items(id integer) SERVER source",&[]).unwrap();
@@ -89,24 +89,19 @@ fn missing_foreign_security_blocks_removal_before_memory_or_durable_publication(
             vec![uqa_fdw::Row::from([("id".into(), Value::Int(1))])],
         )
         .unwrap();
+    engine.sql("CREATE FOREIGN TABLE aaa(id integer) SERVER source; CREATE FOREIGN TABLE zzz(id integer) SERVER source", &[]).unwrap();
+    let memory = super::bounded_catalog(&engine);
     let relation = RelationIdentity::new("public", "items");
-    let before = engine.durable.foreign_tables.snapshot();
-    let security = engine
-        .durable
-        .foreign_table_security
-        .write()
-        .remove(&relation)
-        .unwrap();
-    assert_eq!(
-        engine
-            .foreign_removal_context()
-            .drop_foreign_table_inner("items")
-            .unwrap_err(),
-        "Foreign table `public.items` has no loaded security metadata"
-    );
+    let before = engine.durable.foreign_catalog.snapshot().tables_snapshot();
+    let occupied = memory.reserve(memory.available()).unwrap();
+    assert!(engine
+        .foreign_removal_context()
+        .drop_foreign_table_inner("items")
+        .unwrap_err()
+        .contains("remove foreign definition"));
     assert!(Arc::ptr_eq(
         &before,
-        &engine.durable.foreign_tables.snapshot()
+        &engine.durable.foreign_catalog.snapshot().tables_snapshot()
     ));
     assert_eq!(
         engine.extensions.foreign_memory_tables.read()[&relation].len(),
@@ -121,13 +116,14 @@ fn missing_foreign_security_blocks_removal_before_memory_or_durable_publication(
             .load_foreign_tables()
             .unwrap()
             .len(),
-        1
+        3
     );
-    engine
+    drop(occupied);
+    assert!(engine
         .durable
-        .foreign_table_security
-        .write()
-        .insert(relation, security);
+        .foreign_catalog
+        .security()
+        .contains_key(&relation));
 }
 
 #[test]
@@ -182,7 +178,7 @@ fn foreign_drop_checks_owned_sequence_dependents_before_removing_persisted_state
         .foreign_memory_tables
         .read()
         .contains_key(&relation));
-    assert!(engine.durable.foreign_table_security.read().is_empty());
+    assert!(engine.durable.foreign_catalog.security().is_empty());
     assert!(engine.durable.sequences.read().is_empty());
     drop(engine);
     let reopened = Engine::open(&path).unwrap();

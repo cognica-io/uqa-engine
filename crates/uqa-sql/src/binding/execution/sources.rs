@@ -6,11 +6,12 @@
 
 //! Transfer freshly bound derived-source metadata along its borrowed execution tree.
 
+use crate::binding::preparation::AnalysisIdentity;
 use crate::{
     plan::{QueryBlockPlan, RelationalPlan, SourcePlan},
     RowSchema, SQLError,
 };
-use std::{ptr::NonNull, sync::Arc};
+use std::sync::Arc;
 use uqa_core::memory::{OwnedMap, Produced, ProductionControl};
 
 pub type SharedExecutionSourceBindings<'a> = Arc<Produced<ExecutionSourceBindings<'a>>>;
@@ -70,7 +71,7 @@ impl<'a> ExecutionSourceBindings<'a> {
 /// Addresses exist only while collecting metadata from the original borrowed tree. Temporary view, CTE and function-member syntax cannot replace an original node, and extraction returns borrowed structural owners rather than address keys.
 #[derive(Default)]
 pub(in crate::binding) struct CapturedSources {
-    blocks: OwnedMap<NonNull<QueryBlockPlan>, Option<(RowSchema, Option<RowSchema>)>>,
+    blocks: OwnedMap<AnalysisIdentity<QueryBlockPlan>, Option<(RowSchema, Option<RowSchema>)>>,
 }
 
 impl CapturedSources {
@@ -105,7 +106,7 @@ impl CapturedSources {
                         .as_ref()
                         .is_some_and(super::source_binds_routines)
                     {
-                        let key = NonNull::from(block.as_ref());
+                        let key = AnalysisIdentity::from(block.as_ref());
                         match control.budget() {
                             Some(budget) => {
                                 self.blocks.insert_budgeted(key, None, budget)?;
@@ -132,7 +133,7 @@ impl CapturedSources {
         outer: Option<&RowSchema>,
     ) {
         if !schema.columns_are_open(None) {
-            if let Some(slot) = self.blocks.get_mut(&NonNull::from(block)) {
+            if let Some(slot) = self.blocks.get_mut(&AnalysisIdentity::from(block)) {
                 *slot = Some((schema.clone(), outer.cloned()));
             }
         }
@@ -157,7 +158,7 @@ impl CapturedSources {
             SourcePlan::Subquery { body, .. } => match &body.root {
                 RelationalPlan::QueryBlock(block) => self
                     .blocks
-                    .remove(&NonNull::from(block.as_ref()))
+                    .remove(&AnalysisIdentity::from(block.as_ref()))
                     .flatten()
                     .map(|(schema, outer)| {
                         Ok::<_, SQLError>(QuerySourceBinding {

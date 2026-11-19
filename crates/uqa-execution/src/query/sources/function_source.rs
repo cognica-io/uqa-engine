@@ -256,7 +256,7 @@ fn initialize_function_source<'a, S: Clone + Send + Sync + 'static>(
         uqa_sql::semantics::ColumnDefinitionRequest {
             name: source.name,
             binding: source.binding,
-            user_function: resolved.as_ref().map(|resolved| resolved.function.as_ref()),
+            user_function: resolved.as_ref().map(|resolved| &**resolved.function),
             user_invocation: resolved
                 .as_ref()
                 .and_then(|resolved| resolved.binding.invocation.as_deref()),
@@ -306,7 +306,7 @@ fn initialize_function_source<'a, S: Clone + Send + Sync + 'static>(
             name: source.name,
             binding: source.binding,
             args: source.args,
-            user_function: resolved.as_ref().map(|resolved| resolved.function.as_ref()),
+            user_function: resolved.as_ref().map(|resolved| &**resolved.function),
             user_invocation: resolved
                 .as_ref()
                 .and_then(|resolved| resolved.binding.invocation.as_deref()),

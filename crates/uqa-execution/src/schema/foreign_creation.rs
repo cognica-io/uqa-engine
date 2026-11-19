@@ -13,7 +13,7 @@ use crate::schema::{
         ownership::ImplicitOwnershipContext,
     },
 };
-use std::{collections::BTreeMap, ops::DerefMut};
+use std::ops::DerefMut;
 use uqa_core::RelationIdentity;
 use uqa_sql::{
     ast::DeferredCreateForeignTable,
@@ -30,11 +30,8 @@ mod wrappers;
 pub use crate::catalog::foreign::reads::{
     ForeignRegistryReads, ForeignSecurityRead, ForeignServersRead, ForeignTablesRead,
 };
-pub type ForeignServersWrite<'a> = Box<
-    dyn DerefMut<
-            Target = BTreeMap<String, uqa_sql::catalog::foreign_server::ForeignServerDefinition>,
-        > + 'a,
->;
+pub type ForeignServersWrite<'a> =
+    Box<dyn DerefMut<Target = uqa_sql::catalog::foreign_server::ForeignServers> + 'a>;
 pub type ForeignWrappersWrite<'a> =
     Box<dyn DerefMut<Target = uqa_sql::catalog::foreign_wrapper::ForeignWrappers> + 'a>;
 pub trait ForeignCreationRegistry: ForeignRegistryReads {
@@ -112,24 +109,10 @@ impl ForeignCreationContext<'_> {
                 message: format!("relation \"{}\" already exists", relation.name),
             });
         }
-        {
-            let tables = self.registry.tables();
-            let table_security = self.registry.security();
-            if tables.contains_key(&relation) {
-                if !table_security.contains_key(&relation) {
-                    return Err(uqa_sql::SQLError::Internal(format!(
-                        "foreign table `{name}` has no loaded security metadata"
-                    )));
-                }
-                return Err(uqa_sql::SQLError::Internal(format!(
-                    "foreign table `{name}` appeared after relation collision preflight"
-                )));
-            }
-            if table_security.contains_key(&relation) {
-                return Err(uqa_sql::SQLError::Internal(format!(
-                    "foreign table security metadata exists without table `{name}`"
-                )));
-            }
+        if self.registry.relations().tables().contains_key(&relation) {
+            return Err(uqa_sql::SQLError::Internal(format!(
+                "foreign table `{name}` appeared after relation collision preflight"
+            )));
         }
         Ok(Some((name, relation)))
     }

@@ -62,10 +62,12 @@ impl ColumnBackfillState for Engine {
         Engine::column_type(self, table, column)
     }
     fn clear_missing_values(&self, table: &str) -> Result<(), SQLError> {
-        for definition in self.require_table(table)?.columns.write().iter_mut() {
-            definition.missing_value = None;
-        }
-        Ok(())
+        self.require_table(table)?.columns.write().edit(|columns| {
+            for definition in columns {
+                definition.missing_value = None;
+            }
+            Ok(())
+        })
     }
 }
 impl GeneratedRewriteState for Engine {
@@ -142,17 +144,19 @@ impl uqa_execution::schema::columns::addition::ColumnAdditionState for Engine {
         value: Option<uqa_core::Value>,
     ) -> Result<(), SQLError> {
         let state = self.require_table(table)?;
-        let mut columns = state.columns.write();
-        let definition = columns
-            .iter_mut()
-            .find(|definition| definition.name == column)
-            .ok_or_else(|| {
-                SQLError::Internal(format!(
-                    "new column `{column}` disappeared during ALTER TABLE"
-                ))
-            })?;
-        definition.missing_value = value;
-        Ok(())
+        let result = state.columns.write().edit(|columns| {
+            let definition = columns
+                .iter_mut()
+                .find(|definition| definition.name == column)
+                .ok_or_else(|| {
+                    SQLError::Internal(format!(
+                        "new column `{column}` disappeared during ALTER TABLE"
+                    ))
+                })?;
+            definition.missing_value = value;
+            Ok(())
+        });
+        result
     }
     fn persist_schema(&self, table: &str) -> StorageBackendResult<bool> {
         self.try_persist_table_schema(table)

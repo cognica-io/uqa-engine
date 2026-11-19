@@ -6,26 +6,24 @@
 
 //! Bind durable sequence loading and registry publication to Engine state.
 
-use super::{
-    CatalogFacade, Engine, RelationIdentity, SequenceRow, SequenceState, StorageBackendResult,
-};
-use crate::state::BoundSequenceSecurity;
+use super::{CatalogFacade, Engine, RelationIdentity, StorageBackendResult};
 use uqa_execution::catalog::sequence::snapshot::SequenceSnapshotSource;
 
 impl Engine {
-    pub(crate) fn sequence_row(
-        name: &str,
-        object_id: [u8; 16],
-        state: SequenceState,
-        persistence: uqa_sql::ast::RelationPersistence,
-        security: &BoundSequenceSecurity,
-    ) -> StorageBackendResult<SequenceRow> {
-        uqa_execution::catalog::sequence::sequence_row(
-            name,
-            object_id,
-            state,
-            persistence,
-            security,
+    #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+    pub(crate) fn sequence_input(
+        &self,
+        limits: uqa_storage::catalog::input::CatalogInputLimits,
+        control: &uqa_storage::read_control::StorageReadControl,
+    ) -> StorageBackendResult<
+        uqa_execution::catalog::sequence::registry::PersistentSequenceCatalogInput,
+    > {
+        uqa_execution::catalog::sequence::registry::PersistentSequenceCatalogInput::new(
+            std::sync::Arc::clone(self.storage.catalog.as_ref().expect("persistent catalog")),
+            self.durable.roles.read().clone(),
+            limits,
+            self.durable.sequences.read().budget(),
+            control,
         )
     }
 
@@ -55,46 +53,11 @@ impl Engine {
         source: &RelationIdentity,
         target: &RelationIdentity,
     ) -> Result<(), crate::SQLError> {
-        let mut sequences = self.durable.sequences.write();
-        let mut object_ids = self.durable.sequence_object_ids.write();
-        let mut persistence = self.durable.sequence_persistence.write();
-        let mut security = self.durable.sequence_security.write();
-        if !sequences.contains_key(source)
-            || !object_ids.contains_key(source)
-            || !persistence.contains_key(source)
-            || !security.contains_key(source)
-        {
-            return Err(crate::SQLError::Internal(format!(
-                "sequence registry entry `{}` disappeared during rename",
-                source.qualified_name()
-            )));
-        }
-        if sequences.contains_key(target)
-            || object_ids.contains_key(target)
-            || persistence.contains_key(target)
-            || security.contains_key(target)
-        {
-            return Err(crate::SQLError::Internal(format!(
-                "sequence registry target `{}` appeared during rename",
-                target.qualified_name()
-            )));
-        }
-        let state = sequences
-            .remove(source)
-            .expect("preflighted sequence state must exist");
-        let object_id = object_ids
-            .remove(source)
-            .expect("preflighted sequence object identity must exist");
-        let stored_persistence = persistence
-            .remove(source)
-            .expect("preflighted sequence persistence must exist");
-        let stored_security = security
-            .remove(source)
-            .expect("preflighted sequence security must exist");
-        sequences.insert(target.clone(), state);
-        object_ids.insert(target.clone(), object_id);
-        persistence.insert(target.clone(), stored_persistence);
-        security.insert(target.clone(), stored_security);
-        Ok(())
+        uqa_execution::catalog::sequence::registry::publication::rename(
+            &mut self.durable.sequences.write(),
+            self.storage.catalog.as_deref(),
+            source,
+            target,
+        )
     }
 }

@@ -16,7 +16,7 @@ fn deletion_checks_a_later_target_after_the_first_object_wait() {
         catalog.role("first", &[]);
         if removed {
             let mut refreshed = catalog.roles.borrow().clone();
-            refreshed.remove("first");
+            refreshed.remove("first").unwrap();
             catalog.refreshed_roles.borrow_mut().push_back(refreshed);
         }
         let statement = DropRoleStmt {
@@ -49,8 +49,22 @@ fn deletion_checks_later_administration_after_removing_prior_memberships() {
         catalog.role("second", &[]);
         catalog.membership("first", "actor", "uqa");
         catalog.membership("second", "first", "uqa");
-        for membership in catalog.memberships.borrow_mut().values_mut() {
-            membership.inherit_option = true;
+        let keys = catalog
+            .memberships
+            .borrow()
+            .keys()
+            .copied()
+            .collect::<Vec<_>>();
+        for key in keys {
+            catalog
+                .memberships
+                .borrow_mut()
+                .edit(&key, |membership| {
+                    membership.inherit_option = true;
+                    Ok(())
+                })
+                .unwrap()
+                .unwrap();
         }
         *catalog.current.borrow_mut() = "actor".into();
         let names = if reverse {

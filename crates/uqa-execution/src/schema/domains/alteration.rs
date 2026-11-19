@@ -20,8 +20,13 @@ use uqa_sql::{
 
 pub use super::validation::{DomainValidationInputs, DomainValidationTables};
 
-/// Bind only the new constraint against the domain's base type and current schema names.
-pub trait DomainConstraintBinding {
+/// Bind only the changed default or constraint against the domain's base type and current schema names.
+pub trait DomainAlterBinding {
+    fn bind_domain_default(
+        &self,
+        domain: &CreateDomain,
+        expression: &mut uqa_sql::ast::Expr,
+    ) -> Result<(), SQLError>;
     fn bind_added_check(
         &self,
         domain: &CreateDomain,
@@ -36,7 +41,7 @@ pub trait DomainConstraintBinding {
 
 pub struct DomainAlterContext<'a, S: Clone + 'static> {
     pub types: TypeLifecycleContext<'a>,
-    pub bindings: &'a dyn DomainConstraintBinding,
+    pub bindings: &'a dyn DomainAlterBinding,
     pub validation: DomainValidationInputs<'a, S>,
     pub deletion: &'a dyn deletion::CatalogRemovalInputs,
 }
@@ -59,6 +64,18 @@ pub fn alter_domain<S: Clone + 'static>(
         types: context.types.binding.catalog,
     };
     match statement.action {
+        AlterDomainAction::SetDefault { expression } => {
+            domain.definition.default = expression
+                .map(|expression| {
+                    let mut expression = *expression;
+                    context
+                        .bindings
+                        .bind_domain_default(&domain.definition, &mut expression)?;
+                    Ok::<_, SQLError>(expression)
+                })
+                .transpose()?;
+            publish(context, &mut domain)?;
+        }
         AlterDomainAction::AddCheck { constraint } => {
             let check = context
                 .bindings
@@ -197,7 +214,7 @@ fn publish<S: Clone + 'static>(
         .map_err(uqa_sql::schema::constraint_metadata::ConstraintMetadataError::into_sql_error)?;
     let before = context.types.registries.domains.domain_registry().clone();
     let mut registry = before.clone();
-    registry.insert(domain.identity.qualified_name(), domain.clone());
+    registry.insert(domain.identity.qualified_name(), domain.clone())?;
     domain::publish(context.types.registries.domains, &before, registry)?;
     context.types.changes.catalog_registry_changed();
     Ok(())

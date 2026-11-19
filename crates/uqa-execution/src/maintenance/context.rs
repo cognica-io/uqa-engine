@@ -21,7 +21,8 @@ pub trait VacuumStatistics {
     fn restore(&self);
     fn persist(&self, table: &str) -> StorageBackendResult<()>;
 }
-pub type VacuumDocuments<'a> = Box<dyn Deref<Target = Box<dyn DocumentStore>> + 'a>;
+pub type VacuumDocuments<'a> =
+    Box<dyn Deref<Target = uqa_storage::StorageHandle<dyn DocumentStore>> + 'a>;
 pub type VacuumVectorIndexes<'a> =
     Box<dyn DerefMut<Target = uqa_storage::vector_index::VectorIndexes> + 'a>;
 pub trait VacuumTable {
@@ -31,7 +32,7 @@ pub trait VacuumTable {
     fn clear_documents(&self) -> StorageBackendResult<()>;
     fn clear_text_index(&self) -> StorageBackendResult<()>;
     fn vector_indexes(&self) -> VacuumVectorIndexes<'_>;
-    fn clear_value_indexes(&self);
+    fn clear_value_indexes(&self) -> StorageBackendResult<()>;
     fn persistence(&self) -> RelationPersistence;
     fn mark_doc_count_dirty(&self);
 }

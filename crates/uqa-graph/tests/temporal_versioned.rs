@@ -31,7 +31,7 @@ fn delta_records_affected_ids_and_labels() {
 #[test]
 fn versioned_store_applies_and_rolls_back() {
     let mut store = MemoryGraphStore::new();
-    store.create_graph("g");
+    store.create_graph("g").unwrap();
     let mut versioned = VersionedGraphStore::new(&mut store, "g");
 
     let mut delta = GraphDelta::new();
@@ -63,7 +63,7 @@ fn versioned_store_applies_and_rolls_back() {
 #[test]
 fn versioned_store_rollback_rejects_future_version() {
     let mut store = MemoryGraphStore::new();
-    store.create_graph("g");
+    store.create_graph("g").unwrap();
     let mut versioned = VersionedGraphStore::new(&mut store, "g");
     let mut delta = GraphDelta::new();
     delta.add_vertex(Vertex::new(1, "Person"));
@@ -75,7 +75,7 @@ fn versioned_store_rollback_rejects_future_version() {
 #[test]
 fn versioned_store_invalidation_callback_fires_for_affected_labels() {
     let mut store = MemoryGraphStore::new();
-    store.create_graph("g");
+    store.create_graph("g").unwrap();
     let mut versioned = VersionedGraphStore::new(&mut store, "g");
 
     let captured: Arc<Mutex<Vec<BTreeSet<String>>>> = Arc::new(Mutex::new(Vec::new()));
@@ -140,7 +140,7 @@ fn temporal_filter_accepts_edge_without_temporal_props() {
 #[test]
 fn temporal_traverse_filters_by_validity() {
     let mut g = MemoryGraphStore::new();
-    g.create_graph("g");
+    g.create_graph("g").unwrap();
     for v in 1..=3 {
         g.add_vertex(Vertex::new(v, "n"), "g").unwrap();
     }
@@ -181,7 +181,7 @@ fn temporal_traverse_filters_by_validity() {
 #[test]
 fn zero_hop_temporal_traverse_rejects_a_missing_start_vertex() {
     let mut graph = MemoryGraphStore::new();
-    graph.create_graph("g");
+    graph.create_graph("g").unwrap();
     assert!(matches!(
         TemporalTraverse::new(999, "g")
             .max_hops(0)

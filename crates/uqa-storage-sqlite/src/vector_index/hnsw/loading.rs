@@ -96,7 +96,10 @@ pub(super) fn load_meta_from(
                     deleted_count, revision, format_version
                FROM _hnsw_indexes
               WHERE table_name = ?1 AND field = ?2",
-            params![index.persistent.table, index.persistent.field],
+            params![
+                index.persistent.table.as_str(),
+                index.persistent.field.as_str()
+            ],
             |row| -> rusqlite::Result<RawMeta> {
                 Ok((
                     row.get(0)?,
@@ -128,7 +131,10 @@ fn load_nodes_into(
         "SELECT node_id, doc_id, vector_ordinal, level, deleted, vector
          FROM _hnsw_nodes WHERE table_name = ?1 AND field = ?2 ORDER BY node_id",
     )?;
-    let mut rows = statement.query(params![index.persistent.table, index.persistent.field])?;
+    let mut rows = statement.query(params![
+        index.persistent.table.as_str(),
+        index.persistent.field.as_str()
+    ])?;
     while let Some(row) = rows.next()? {
         index.physical_control.check()?;
         let level = checked_hnsw_level("level", row.get(3)?)?;
@@ -176,7 +182,10 @@ fn load_edges_into(
         "SELECT source_node_id, layer, target_node_id FROM _hnsw_edges
          WHERE table_name = ?1 AND field = ?2 ORDER BY source_node_id, layer, target_node_id",
     )?;
-    let mut rows = statement.query(params![index.persistent.table, index.persistent.field])?;
+    let mut rows = statement.query(params![
+        index.persistent.table.as_str(),
+        index.persistent.field.as_str()
+    ])?;
     while let Some(row) = rows.next()? {
         index.physical_control.check()?;
         builder.edge(

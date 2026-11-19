@@ -9,6 +9,9 @@
 pub mod backend;
 pub mod deep_fusion;
 pub mod model;
+pub mod model_catalog;
+pub mod model_image;
+mod model_json;
 pub mod training;
 
 #[cfg(feature = "mlx")]

@@ -8,6 +8,8 @@ use super::*;
 use crate::catalog::range_type::support::{
     bound_equality_key, compare_bounds, RangeComparisonStates,
 };
+use std::collections::BTreeMap;
+use std::sync::Arc;
 use uqa_core::{
     memory::{MemoryBudget, Produced, ProductionControl},
     CancellationToken, DatumValue, Value,
@@ -471,12 +473,16 @@ fn enum_scenario(reference: &serde_json::Value, domain: bool) -> EnumScenario {
     second.multirange.array_oid += 100;
     second.identity.name.push_str("_other");
     let mut snapshot = catalog(first.clone()).snapshot().clone();
-    Arc::make_mut(&mut snapshot.definitions.ranges)
-        .insert(second.identity.qualified_name(), second.clone());
-    snapshot.definitions.enums = Arc::new(BTreeMap::from([
-        (first_enum.identity.qualified_name(), first_enum),
-        (second_enum.identity.qualified_name(), second_enum),
-    ]));
+    uqa_core::memory::RetainedValue::make_mut(&mut snapshot.definitions.ranges)
+        .insert(second.identity.qualified_name(), second.clone())
+        .unwrap();
+    snapshot.definitions.enums = uqa_core::memory::RetainedValue::new(
+        uqa_sql::catalog::type_definitions::TypeDefinitions::try_from_iter(BTreeMap::from([
+            (first_enum.identity.qualified_name(), first_enum),
+            (second_enum.identity.qualified_name(), second_enum),
+        ]))
+        .unwrap(),
+    );
     let values = Values(crate::catalog::CatalogReadView::new(snapshot));
     EnumScenario {
         values,

@@ -138,7 +138,7 @@ impl ManagedConnection {
         // Allocate the returned owner before any durable transition, and install it under exclusive admission.
         let owner = admission.retain(control)?;
         let spec = spec()?;
-        let initial = spec.open(false)?;
+        let initial = spec.open(super::ConnectionOpen::Restored)?;
         let connection = Self {
             pool: ConnectionPool::new(spec, initial, default_pool_connections(), Some(owner))?,
             session: Arc::new(SessionState::new()),

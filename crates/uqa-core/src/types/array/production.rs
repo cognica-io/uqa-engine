@@ -13,6 +13,7 @@ use crate::{
 };
 
 mod row_major;
+use crate::types::work::{checkpoint, inline, Work};
 
 impl ArrayValue {
     pub fn try_new_with_control(
@@ -92,11 +93,34 @@ pub(super) fn normalize(
     memory: &mut Option<MemoryReservation>,
     control: &ProductionControl<'_>,
 ) -> Result<(), ValueRetentionError> {
+    inline(normalize_with_work(
+        elements,
+        rank,
+        memory,
+        control,
+        &mut (),
+    ))
+}
+
+pub(super) async fn normalize_with_work<W: Work>(
+    elements: &mut [Value],
+    rank: usize,
+    memory: &mut Option<MemoryReservation>,
+    control: &ProductionControl<'_>,
+    work: &mut W,
+) -> Result<(), W::Error> {
+    checkpoint(work, &mut || control.check()).await?;
     if rank <= 1 {
-        return control.check();
+        return Ok(());
     }
-    for value in elements {
-        control.check()?;
+    let mut stack = shape::Buffer::new(control.budget());
+    stack.push((elements.iter_mut(), rank))?;
+    while let Some((values, rank)) = stack.last_mut() {
+        checkpoint(work, &mut || control.check()).await?;
+        let Some(value) = values.next() else {
+            stack.pop();
+            continue;
+        };
         if let Value::Array(array) = value {
             let released = array.retained_header_bytes()
                 + array.storage.dimensions.capacity() * size_of::<usize>()
@@ -109,8 +133,11 @@ pub(super) fn normalize(
                 drop(memory.split(released));
             }
         }
-        if let Value::List(values) = value {
-            normalize(values, rank - 1, memory, control)?;
+        let child_rank = *rank - 1;
+        if child_rank > 1 {
+            if let Value::List(values) = value {
+                stack.push((values.iter_mut(), child_rank))?;
+            }
         }
     }
     Ok(())

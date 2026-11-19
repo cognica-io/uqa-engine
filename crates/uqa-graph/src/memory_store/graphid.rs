@@ -10,6 +10,8 @@ use super::{BTreeMap, BTreeSet, Deserialize, GraphStoreError, GraphStoreResult, 
 
 use crate::age_names::{EDGE_DEFAULT_LABEL_NAME, VERTEX_DEFAULT_LABEL_NAME};
 
+pub(super) mod registry;
+
 /// Number of bits reserved for the per-label sequence inside an AGE
 /// `graphid`. The label id occupies the remaining high 16 bits.
 pub const GRAPHID_LABEL_SHIFT: u32 = 48;
@@ -174,91 +176,14 @@ impl GraphLabelRegistry {
     /// default label of the kind. Using a label registered for the
     /// other kind fails exactly like AGE's `CREATE` transform.
     pub(crate) fn label_id(&mut self, label: &str, kind: LabelKind) -> GraphStoreResult<u32> {
-        if label.is_empty() {
-            self.require_default_label(kind)?;
-            return Ok(kind.default_label_id());
-        }
-        // The reserved AGE names always denote the default labels, so they
-        // resolve to the reserved ids instead of allocating a user label.
-        for reserved in [LabelKind::Vertex, LabelKind::Edge] {
-            if label == reserved.default_label_name() {
-                Self::require_kind(label, reserved, kind)?;
-                self.require_default_label(reserved)?;
-                return Ok(reserved.default_label_id());
-            }
-        }
-        if let Some(existing) = self.kinds.get(label).copied() {
-            Self::require_kind(label, existing, kind)?;
-        }
-        if let Some(id) = self.labels.get(label) {
-            if *id > MAX_GRAPHID_LABEL_ID {
-                return Err(GraphStoreError::IdExhausted(format!(
-                    "persisted label id {id} exceeds {MAX_GRAPHID_LABEL_ID}"
-                )));
-            }
-            self.kinds.entry(label.to_string()).or_insert(kind);
-            return Ok(*id);
-        }
-        self.require_default_label(kind)?;
-        let id = self.allocate_label_id()?;
-        self.labels.insert(label.to_string(), id);
-        self.kinds.insert(label.to_string(), kind);
-        Ok(id)
-    }
-
-    fn require_default_label(&self, kind: LabelKind) -> GraphStoreResult<()> {
-        if self.dropped_label_ids.contains(&kind.default_label_id()) {
-            return Err(GraphStoreError::InvalidMutation(format!(
-                "default label {} does not exist",
-                kind.default_label_name()
-            )));
-        }
-        Ok(())
-    }
-
-    fn require_kind(
-        label: &str,
-        existing: LabelKind,
-        requested: LabelKind,
-    ) -> GraphStoreResult<()> {
-        if existing == requested {
-            return Ok(());
-        }
-        Err(GraphStoreError::InvalidMutation(format!(
-            "label {label} is for {}, not {}",
-            existing.entity_noun(),
-            requested.entity_noun()
-        )))
-    }
-
-    fn allocate_label_id(&mut self) -> GraphStoreResult<u32> {
-        let id = self.next_label_id;
-        if id > MAX_GRAPHID_LABEL_ID {
-            return Err(GraphStoreError::IdExhausted(format!(
-                "label id {id} exceeds {MAX_GRAPHID_LABEL_ID}"
-            )));
-        }
-        self.next_label_id = id
-            .checked_add(1)
-            .ok_or_else(|| GraphStoreError::IdExhausted("label id counter overflow".to_string()))?;
-        Ok(id)
+        registry::label_id(self, label, kind)
     }
 
     /// Whether `label` names a registered user label or a reserved
     /// default label.
     #[must_use]
     pub fn contains_label(&self, label: &str) -> bool {
-        if label == VERTEX_DEFAULT_LABEL_NAME {
-            return !self
-                .dropped_label_ids
-                .contains(&LabelKind::Vertex.default_label_id());
-        }
-        if label == EDGE_DEFAULT_LABEL_NAME {
-            return !self
-                .dropped_label_ids
-                .contains(&LabelKind::Edge.default_label_id());
-        }
-        self.labels.contains_key(label)
+        registry::contains_label(self, label)
     }
 
     /// The kind of a registered or default label. A user label persisted
@@ -266,16 +191,7 @@ impl GraphLabelRegistry {
     /// as a vertex label until its next use records the kind.
     #[must_use]
     pub fn label_kind(&self, label: &str) -> Option<LabelKind> {
-        if label == VERTEX_DEFAULT_LABEL_NAME {
-            return self.contains_label(label).then_some(LabelKind::Vertex);
-        }
-        if label == EDGE_DEFAULT_LABEL_NAME {
-            return self.contains_label(label).then_some(LabelKind::Edge);
-        }
-        if !self.labels.contains_key(label) {
-            return None;
-        }
-        Some(self.kinds.get(label).copied().unwrap_or(LabelKind::Vertex))
+        registry::label_kind(self, label)
     }
 
     /// Register an empty user label ahead of any entity, as
@@ -286,152 +202,44 @@ impl GraphLabelRegistry {
         label: &str,
         kind: LabelKind,
     ) -> GraphStoreResult<Option<u32>> {
-        if self.contains_label(label) {
-            return Ok(None);
-        }
-        self.require_default_label(kind)?;
-        if label == VERTEX_DEFAULT_LABEL_NAME || label == EDGE_DEFAULT_LABEL_NAME {
-            return Err(GraphStoreError::InvalidMutation(format!(
-                "default label {label} cannot be recreated without recreating the graph"
-            )));
-        }
-        let id = self.allocate_label_id()?;
-        self.labels.insert(label.to_string(), id);
-        self.kinds.insert(label.to_string(), kind);
-        Ok(Some(id))
+        registry::register_label(self, label, kind)
     }
 
     /// Forget a label. Default labels leave a durable tombstone so the graph
     /// can continue to exist without their AGE relations. Returns the
     /// released label id, or `None` when the label is not registered.
     pub fn remove_label(&mut self, label: &str) -> Option<u32> {
-        for kind in [LabelKind::Vertex, LabelKind::Edge] {
-            if label == kind.default_label_name() {
-                if !self.dropped_label_ids.insert(kind.default_label_id()) {
-                    return None;
-                }
-                self.sequences.remove(&kind.default_label_id());
-                return Some(kind.default_label_id());
-            }
+        match registry::remove_label(self, label) {
+            Ok(value) => value,
+            Err(error) => match error {},
         }
-        let id = self.labels.remove(label)?;
-        self.kinds.remove(label);
-        self.sequences.remove(&id);
-        self.dropped_label_ids.insert(id);
-        Some(id)
     }
 
     /// Every present label of the graph in `ag_label` order: surviving
     /// defaults first, then user labels by ascending label id.
     #[must_use]
     pub fn labels(&self) -> Vec<GraphLabelInfo> {
-        let mut out = Vec::new();
-        for kind in [LabelKind::Vertex, LabelKind::Edge] {
-            if !self.dropped_label_ids.contains(&kind.default_label_id()) {
-                out.push(GraphLabelInfo {
-                    name: kind.default_label_name().to_string(),
-                    id: kind.default_label_id(),
-                    kind,
-                    last_sequence: self
-                        .sequences
-                        .get(&kind.default_label_id())
-                        .copied()
-                        .unwrap_or(0),
-                });
-            }
-        }
-        let mut user: Vec<GraphLabelInfo> = self
-            .labels
-            .iter()
-            .map(|(name, id)| GraphLabelInfo {
-                name: name.clone(),
-                id: *id,
-                kind: self.label_kind(name).unwrap_or(LabelKind::Vertex),
-                last_sequence: self.sequences.get(id).copied().unwrap_or(0),
-            })
-            .collect();
-        user.sort_by_key(|label| label.id);
-        out.extend(user);
-        out
+        registry::labels(self)
     }
 
     pub(crate) fn next_sequence(&mut self, label_id: u32) -> GraphStoreResult<u64> {
-        let current = self.sequences.get(&label_id).copied().unwrap_or(0);
-        let next = current.checked_add(1).ok_or_else(|| {
-            GraphStoreError::IdExhausted(format!(
-                "sequence counter overflow for label id {label_id}"
-            ))
-        })?;
-        if next > MAX_GRAPHID_SEQUENCE {
-            return Err(GraphStoreError::IdExhausted(format!(
-                "sequence {next} exceeds {MAX_GRAPHID_SEQUENCE} for label id {label_id}"
-            )));
-        }
-        self.sequences.insert(label_id, next);
-        Ok(next)
+        registry::next_sequence(self, label_id)
     }
 
     /// Fold an existing entity id into the allocation watermarks and report whether the registry changed.
     pub(crate) fn observe(&mut self, label: &str, id: u64, kind: LabelKind) -> bool {
-        let label_id = graphid_label_id(id);
-        if label_id == 0 {
-            // Plain counter ids contain no AGE label allocation to retain.
-            return false;
+        match registry::observe(self, label, id, kind) {
+            Ok(value) => value,
+            Err(error) => match error {},
         }
-        let mut changed = false;
-        if !label.is_empty() && label_id >= FIRST_USER_LABEL_ID {
-            if let std::collections::btree_map::Entry::Vacant(entry) =
-                self.labels.entry(label.to_string())
-            {
-                entry.insert(label_id);
-                changed = true;
-            }
-            if let std::collections::btree_map::Entry::Vacant(entry) =
-                self.kinds.entry(label.to_string())
-            {
-                entry.insert(kind);
-                changed = true;
-            }
-        }
-        changed |= self.dropped_label_ids.remove(&label_id);
-        let seq = graphid_sequence(id);
-        match self.sequences.entry(label_id) {
-            std::collections::btree_map::Entry::Vacant(entry) => {
-                entry.insert(seq);
-                changed = true;
-            }
-            std::collections::btree_map::Entry::Occupied(mut entry) if seq > *entry.get() => {
-                entry.insert(seq);
-                changed = true;
-            }
-            std::collections::btree_map::Entry::Occupied(_) => {}
-        }
-        if label_id >= self.next_label_id {
-            self.next_label_id = label_id + 1;
-            changed = true;
-        }
-        changed
     }
 
     /// Merge another registry (e.g. persisted metadata) into this one,
     /// keeping the larger sequence values and label id watermark.
     pub fn merge(&mut self, other: &GraphLabelRegistry) {
-        for (label, id) in &other.labels {
-            self.labels.entry(label.clone()).or_insert(*id);
-        }
-        for (label, kind) in &other.kinds {
-            self.kinds.entry(label.clone()).or_insert(*kind);
-        }
-        for (label_id, seq) in &other.sequences {
-            let entry = self.sequences.entry(*label_id).or_insert(0);
-            if *seq > *entry {
-                *entry = *seq;
-            }
-        }
-        self.dropped_label_ids
-            .extend(other.dropped_label_ids.iter().copied());
-        if other.next_label_id > self.next_label_id {
-            self.next_label_id = other.next_label_id;
+        match registry::merge(self, other) {
+            Ok(()) => (),
+            Err(error) => match error {},
         }
     }
 }

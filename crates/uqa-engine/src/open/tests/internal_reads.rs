@@ -28,10 +28,10 @@ fn empty_graph_snapshots_share_the_absent_catalog_and_retain_its_visibility() {
         let directory = tempfile::tempdir().unwrap();
         let root = persistent_engine(provider, &directory.path().join("empty-graphs.db"));
         root.sql("BEGIN; CREATE TABLE t(v integer)", &[]).unwrap();
-        let original = root.visible_graph_handles();
+        let original = root.visible_graph_handles().unwrap();
         let retained = root.freeze_graph_read_handles(None, true).unwrap();
         assert!(
-            Arc::ptr_eq(&original, &retained),
+            uqa_core::memory::RetainedValue::ptr_eq(&original, &retained),
             "an empty graph view must not create another storage owner"
         );
         root.create_graph("later").unwrap();
@@ -41,7 +41,7 @@ fn empty_graph_snapshots_share_the_absent_catalog_and_retain_its_visibility() {
             .unwrap()
             .is_empty());
         root.rollback().unwrap();
-        assert!(root.visible_graph_handles().is_empty());
+        assert!(root.visible_graph_handles().unwrap().is_empty());
     }
 }
 
@@ -566,10 +566,7 @@ fn statistics_workers_keep_the_parent_statement_and_memory_lazy_collection() {
         root.sql("BEGIN ISOLATION LEVEL SERIALIZABLE; SELECT id FROM t", &[])
             .unwrap();
         if provider == 3 {
-            root.require_table("t")
-                .unwrap()
-                .column_stats_dirty
-                .store(true, Ordering::Release);
+            *root.require_table("t").unwrap().column_stats_dirty.write() = true;
         }
         std::thread::scope(|scope| {
             let statement = root.runtime.statement_gate.lock();

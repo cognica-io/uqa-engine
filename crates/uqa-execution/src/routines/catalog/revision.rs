@@ -6,7 +6,6 @@
 
 //! New routine catalog tuples keep object identity and receive a fresh replacement identity.
 
-use std::sync::Arc;
 use uqa_sql::{
     ast::{CreateFunction, FunctionBinding},
     routines::{lifecycle::RoutineRegistry, RoutineBody, SQLUserFunction},
@@ -16,12 +15,12 @@ use uqa_sql::{
 pub(in crate::routines) fn replacement(
     mut definition: CreateFunction,
     body: RoutineBody,
-) -> Result<Arc<SQLUserFunction>, SQLError> {
+) -> Result<uqa_sql::routines::SQLRoutine, SQLError> {
     definition.catalog_revision = Some(
         crate::catalog::identity::new_nonzero_catalog_identity("routine", "tuple revision")
             .map_err(|error| SQLError::Internal(error.to_string()))?,
     );
-    Ok(Arc::new(SQLUserFunction::new(definition, body)))
+    Ok(SQLUserFunction::new(definition, body).shared())
 }
 
 pub(in crate::routines) fn renamed(
@@ -29,15 +28,17 @@ pub(in crate::routines) fn renamed(
     name: &str,
     binding: &FunctionBinding,
 ) -> Result<(), SQLError> {
-    let routine = registry
-        .get_mut(name)
-        .and_then(|overloads| {
-            overloads.iter_mut().find(|routine| {
+    let replaced = registry.edit(name, |overloads| {
+        let routine = overloads
+            .iter_mut()
+            .find(|routine| {
                 binding.object_id.is_some() && routine.def.object_id == binding.object_id
             })
-        })
-        .ok_or_else(|| SQLError::Internal(format!("renamed routine `{name}` disappeared")))?;
-    *routine = replacement(routine.def.clone(), routine.body.clone())?;
+            .ok_or_else(|| SQLError::Internal(format!("renamed routine `{name}` disappeared")))?;
+        *routine = replacement(routine.def.clone(), routine.body.clone())?;
+        Ok(())
+    })?;
+    replaced.ok_or_else(|| SQLError::Internal(format!("renamed routine `{name}` disappeared")))?;
     Ok(())
 }
 

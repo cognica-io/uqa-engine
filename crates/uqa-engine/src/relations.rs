@@ -152,7 +152,9 @@ impl Engine {
                 .relation_kind_resolution(resolution, name);
         }
         let mut durable = self.durable.snapshot();
-        durable.graphs = self.visible_graph_handles();
+        durable.graphs = self.visible_graph_handles().map_err(|error| {
+            uqa_execution::storage_errors::storage_error("select graph catalog", &error)
+        })?;
         let definitions = Self::catalog_definition_snapshot(&durable);
         let tables = self.storage.tables.read();
         uqa_execution::catalog::relation_names::RelationNameCatalog::new(&*tables, &definitions)
@@ -178,7 +180,12 @@ impl Engine {
                 })
             } else if self.durable.sequences.read().contains_key(&relation) {
                 Some("sequence")
-            } else if self.durable.foreign_tables.read().contains_key(&relation) {
+            } else if self
+                .durable
+                .foreign_catalog
+                .tables()
+                .contains_key(&relation)
+            {
                 Some("foreign table")
             } else if self.durable.catalog_indexes.read().contains_key(&relation) {
                 Some("index")
@@ -258,11 +265,16 @@ impl Engine {
     ) -> StorageBackendResult<Option<String>> {
         self.refresh_sequences_from_catalog()?;
         let sequences = self.durable.sequences.read();
-        Ok(self
-            .relation_lookup_candidates(name)?
-            .into_iter()
-            .find(|candidate| sequences.contains_key(candidate))
-            .map(|relation| relation.qualified_name()))
+        let candidates = self.relation_lookup_candidates(name)?;
+        Ok(
+            uqa_sql::binding::stored_relations::select_query_sequence_with_control(
+                &candidates,
+                |candidate| sequences.contains_key(candidate),
+                &uqa_core::memory::ProductionControl::uncontrolled(),
+            )
+            .map_err(|error| StorageBackendError::Other(error.to_string()))?
+            .map(|name| name.into_uncontrolled().expect("ordinary sequence name")),
+        )
     }
 
     pub(crate) fn table(&self, name: &str) -> StorageBackendResult<Option<Arc<TableState>>> {
@@ -402,12 +414,7 @@ impl Engine {
             return Ok(None);
         };
         let relation = Self::resolved_relation_identity(&name)?;
-        Ok(self
-            .durable
-            .sequence_persistence
-            .read()
-            .get(&relation)
-            .copied())
+        Ok(self.durable.sequences.read().persistence(&relation))
     }
 }
 

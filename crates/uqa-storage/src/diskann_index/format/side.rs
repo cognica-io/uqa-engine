@@ -161,7 +161,17 @@ impl DiskANNSideLayout {
         bytes: &'a [u8],
         control: &StorageReadControl,
     ) -> StorageBackendResult<DiskANNSideBatch<'a>> {
-        let body = record::open(MAGIC, self.generation, bytes, control)?;
+        crate::image_io::work::inline(self.decode_from(start, bytes, control, &mut ()))
+    }
+
+    pub(in crate::diskann_index) async fn decode_from<'a>(
+        self,
+        start: u64,
+        bytes: &'a [u8],
+        control: &StorageReadControl,
+        work: &mut (impl crate::image_io::work::Work + Send),
+    ) -> StorageBackendResult<DiskANNSideBatch<'a>> {
+        let body = record::open_from(MAGIC, self.generation, bytes, control, work).await?;
         if body.len() < METADATA_BYTES || !(body.len() - METADATA_BYTES).is_multiple_of(ENTRY_BYTES)
         {
             return Err(invalid("side batch length differs"));
@@ -183,6 +193,7 @@ impl DiskANNSideLayout {
         }
         let mut previous = None;
         for bytes in entries.as_chunks::<ENTRY_BYTES>().0 {
+            work.checkpoint().await?;
             control.check()?;
             ordered(&mut previous, read_entry(self.dimensions, bytes)?)?;
         }

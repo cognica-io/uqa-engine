@@ -9,14 +9,13 @@ use super::context::RoutineInvocationContext;
 use crate::routines::arguments::{
     materialize_arguments, materialize_described_arguments, ArgumentDescriptions,
 };
-use std::{borrow::Cow, sync::Arc};
+use std::borrow::Cow;
 use uqa_core::Value;
 use uqa_sql::{
     ast::{ColumnType, FunctionBinding, RoutineInvocationBinding, RoutineVariadicMode},
     routines::{
         invocation::{routine_resolution_error, runtime_argument_types},
         resolution::RoutineCallKind,
-        SQLUserFunction,
     },
     SQLError,
 };
@@ -25,7 +24,7 @@ use uqa_sql::{
 mod tests;
 /// A resolved overload plus its bound argument values.
 pub(super) struct ResolvedRoutine<'a> {
-    pub(super) function: Arc<SQLUserFunction>,
+    pub(super) function: uqa_sql::routines::SQLRoutine,
     pub(super) bound: Vec<Value>,
     pub(super) invocation: Cow<'a, RoutineInvocationBinding>,
 }

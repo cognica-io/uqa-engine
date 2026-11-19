@@ -25,7 +25,7 @@ pub(super) struct Reads {
 }
 
 pub(super) struct Documents {
-    pub store: RwLock<Box<dyn DocumentStore>>,
+    pub store: RwLock<uqa_storage::StorageHandle<dyn DocumentStore>>,
     pub reads: Arc<Reads>,
     pub count: usize,
 }
@@ -50,12 +50,12 @@ impl Documents {
         }
         let reads = Arc::new(Reads::default());
         Self {
-            store: RwLock::new(Box::new(Store {
+            store: RwLock::new(uqa_storage::StorageHandle::new(Box::new(Store {
                 inner,
                 reads: reads.clone(),
                 fail,
                 malformed,
-            })),
+            }))),
             reads,
             count,
         }
@@ -63,7 +63,9 @@ impl Documents {
 }
 
 impl IndexDocuments for Documents {
-    fn read(&self) -> Box<dyn std::ops::Deref<Target = Box<dyn DocumentStore>> + '_> {
+    fn read(
+        &self,
+    ) -> Box<dyn std::ops::Deref<Target = uqa_storage::StorageHandle<dyn DocumentStore>> + '_> {
         Box::new(self.store.read())
     }
 }

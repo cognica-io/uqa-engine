@@ -14,7 +14,7 @@ use std::sync::Arc;
 
 pub(crate) fn table_definition(columns: Vec<crate::ast::ColumnDef>) -> TableDefinition {
     TableDefinition {
-        columns: Arc::new(columns),
+        columns: Arc::new(columns).into(),
         columns_declared: true,
     }
 }
@@ -94,7 +94,7 @@ impl AnalysisCatalog for FixtureCatalog {
         &self,
         _: &RelationNameResolution,
         _: &str,
-    ) -> Result<Option<Vec<Arc<crate::routines::SQLUserFunction>>>, SQLError> {
+    ) -> Result<Option<Vec<crate::routines::SQLRoutine>>, SQLError> {
         Ok(None)
     }
 }

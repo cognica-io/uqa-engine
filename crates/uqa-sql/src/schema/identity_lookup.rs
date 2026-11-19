@@ -42,6 +42,18 @@ impl PartialEq for dyn ColumnKey + '_ {
 
 impl Eq for dyn ColumnKey + '_ {}
 
+impl PartialOrd for dyn ColumnKey + '_ {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for dyn ColumnKey + '_ {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.parts().cmp(&other.parts())
+    }
+}
+
 impl Hash for dyn ColumnKey + '_ {
     fn hash<H: Hasher>(&self, state: &mut H) {
         let (qualifier, column) = self.parts();

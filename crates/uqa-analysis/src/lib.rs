@@ -12,10 +12,13 @@ pub mod analyzer;
 mod cache;
 pub mod char_filter;
 mod character_class;
+mod configuration;
+pub use configuration::AnalyzerDiagnostic;
 mod cooperative_regex;
 pub mod descriptor;
 pub mod error;
 pub mod highlight;
+mod json;
 #[cfg(feature = "kuromoji")]
 pub mod kuromoji;
 #[cfg(any(feature = "nori", feature = "kuromoji"))]
@@ -35,9 +38,12 @@ pub mod token;
 pub mod token_filter;
 pub mod tokenizer;
 mod unicode;
+mod work;
 
 pub use analyzer::{
     keyword_analyzer, standard_analyzer, standard_cjk_analyzer, whitespace_analyzer, Analyzer,
+    AnalyzerConfigurationError, AnalyzerConfigurationImage, AnalyzerDefinition,
+    AnalyzerImageSource, AnalyzerResource, AnalyzerResourceKind, CapturedAnalyzer,
     CompiledAnalyzer,
 };
 pub use char_filter::CharFilter;
@@ -51,7 +57,9 @@ pub use registry::{
     builtin_analyzer_names, drop_analyzer, get_analyzer, is_builtin_analyzer, list_analyzers,
     register_analyzer, DEFAULT_ANALYZER_NAME,
 };
-pub use resources::{AnalyzerCacheStats, AnalyzerResources, AnalyzerResourcesBuilder};
+pub use resources::{
+    AnalyzerCacheStats, AnalyzerResourceInput, AnalyzerResources, AnalyzerResourcesBuilder,
+};
 pub use source::{FilteredText, SourceOffsets, TextCoordinates};
 pub use term::TokenTerm;
 pub use token::{AnalysisToken, AnalyzedText};

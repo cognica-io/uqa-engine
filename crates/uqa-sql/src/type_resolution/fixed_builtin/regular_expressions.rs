@@ -12,88 +12,88 @@ use std::sync::LazyLock;
 
 declarations! { fn lookup_fixed(local);
         "regexp_count" => &[
-            Signature::named(&[T::Text, T::Text], &["string", "pattern"], T::Integer),
-            Signature::named(&[T::Text, T::Text, T::Integer], &["string", "pattern", "start"], T::Integer),
+            Signature::named(const { &[T::Text, T::Text] }, &["string", "pattern"], T::Integer),
+            Signature::named(const { &[T::Text, T::Text, T::Integer] }, &["string", "pattern", "start"], T::Integer),
             Signature::named(
-                &[T::Text, T::Text, T::Integer, T::Text],
+                const { &[T::Text, T::Text, T::Integer, T::Text] },
                 &["string", "pattern", "start", "flags"],
                 T::Integer,
             ),
         ],
         "regexp_instr" => &[
-            Signature::named(&[T::Text, T::Text], &["string", "pattern"], T::Integer),
-            Signature::named(&[T::Text, T::Text, T::Integer], &["string", "pattern", "start"], T::Integer),
+            Signature::named(const { &[T::Text, T::Text] }, &["string", "pattern"], T::Integer),
+            Signature::named(const { &[T::Text, T::Text, T::Integer] }, &["string", "pattern", "start"], T::Integer),
             Signature::named(
-                &[T::Text, T::Text, T::Integer, T::Integer],
+                const { &[T::Text, T::Text, T::Integer, T::Integer] },
                 &["string", "pattern", "start", "N"],
                 T::Integer,
             ),
             Signature::named(
-                &[T::Text, T::Text, T::Integer, T::Integer, T::Integer],
+                const { &[T::Text, T::Text, T::Integer, T::Integer, T::Integer] },
                 &["string", "pattern", "start", "N", "endoption"],
                 T::Integer,
             ),
             Signature::named(
-                &[T::Text, T::Text, T::Integer, T::Integer, T::Integer, T::Text],
+                const { &[T::Text, T::Text, T::Integer, T::Integer, T::Integer, T::Text] },
                 &["string", "pattern", "start", "N", "endoption", "flags"],
                 T::Integer,
             ),
             Signature::named(
-                &[T::Text, T::Text, T::Integer, T::Integer, T::Integer, T::Text, T::Integer],
+                const { &[T::Text, T::Text, T::Integer, T::Integer, T::Integer, T::Text, T::Integer] },
                 &["string", "pattern", "start", "N", "endoption", "flags", "subexpr"],
                 T::Integer,
             ),
         ],
         "regexp_like" => &[
-            Signature::named(&[T::Text, T::Text], &["string", "pattern"], T::Boolean),
-            Signature::named(&[T::Text, T::Text, T::Text], &["string", "pattern", "flags"], T::Boolean),
+            Signature::named(const { &[T::Text, T::Text] }, &["string", "pattern"], T::Boolean),
+            Signature::named(const { &[T::Text, T::Text, T::Text] }, &["string", "pattern", "flags"], T::Boolean),
         ],
         "regexp_replace" => &[
             Signature::named(
-                &[T::Text, T::Text, T::Text],
+                const { &[T::Text, T::Text, T::Text] },
                 &["string", "pattern", "replacement"],
                 T::Text,
             ),
             Signature::named(
-                &[T::Text, T::Text, T::Text, T::Text],
+                const { &[T::Text, T::Text, T::Text, T::Text] },
                 &["string", "pattern", "replacement", "flags"],
                 T::Text,
             ),
             Signature::named(
-                &[T::Text, T::Text, T::Text, T::Integer],
+                const { &[T::Text, T::Text, T::Text, T::Integer] },
                 &["string", "pattern", "replacement", "start"],
                 T::Text,
             ),
             Signature::named(
-                &[T::Text, T::Text, T::Text, T::Integer, T::Integer],
+                const { &[T::Text, T::Text, T::Text, T::Integer, T::Integer] },
                 &["string", "pattern", "replacement", "start", "N"],
                 T::Text,
             ),
             Signature::named(
-                &[T::Text, T::Text, T::Text, T::Integer, T::Integer, T::Text],
+                const { &[T::Text, T::Text, T::Text, T::Integer, T::Integer, T::Text] },
                 &["string", "pattern", "replacement", "start", "N", "flags"],
                 T::Text,
             ),
         ],
         "regexp_split_to_table" => &[
-            Signature::named(&[T::Text, T::Text], &["string", "pattern"], T::Text),
-            Signature::named(&[T::Text, T::Text, T::Text], &["string", "pattern", "flags"], T::Text),
+            Signature::named(const { &[T::Text, T::Text] }, &["string", "pattern"], T::Text),
+            Signature::named(const { &[T::Text, T::Text, T::Text] }, &["string", "pattern", "flags"], T::Text),
         ],
         "regexp_substr" => &[
-            Signature::named(&[T::Text, T::Text], &["string", "pattern"], T::Text),
-            Signature::named(&[T::Text, T::Text, T::Integer], &["string", "pattern", "start"], T::Text),
+            Signature::named(const { &[T::Text, T::Text] }, &["string", "pattern"], T::Text),
+            Signature::named(const { &[T::Text, T::Text, T::Integer] }, &["string", "pattern", "start"], T::Text),
             Signature::named(
-                &[T::Text, T::Text, T::Integer, T::Integer],
+                const { &[T::Text, T::Text, T::Integer, T::Integer] },
                 &["string", "pattern", "start", "N"],
                 T::Text,
             ),
             Signature::named(
-                &[T::Text, T::Text, T::Integer, T::Integer, T::Text],
+                const { &[T::Text, T::Text, T::Integer, T::Integer, T::Text] },
                 &["string", "pattern", "start", "N", "flags"],
                 T::Text,
             ),
             Signature::named(
-                &[T::Text, T::Text, T::Integer, T::Integer, T::Text, T::Integer],
+                const { &[T::Text, T::Text, T::Integer, T::Integer, T::Text, T::Integer] },
                 &["string", "pattern", "start", "N", "flags", "subexpr"],
                 T::Text,
             ),
@@ -106,9 +106,13 @@ const TEXT_ARRAY_FUNCTIONS: [&str; 3] = ["regexp_match", "regexp_matches", "rege
 static TEXT_ARRAY_SIGNATURES: LazyLock<[Signature; 2]> = LazyLock::new(|| {
     let text_array = || T::Array(Box::new(T::Text));
     [
-        Signature::named(&[T::Text, T::Text], &["string", "pattern"], text_array()),
         Signature::named(
-            &[T::Text, T::Text, T::Text],
+            const { &[T::Text, T::Text] },
+            &["string", "pattern"],
+            text_array(),
+        ),
+        Signature::named(
+            const { &[T::Text, T::Text, T::Text] },
             &["string", "pattern", "flags"],
             text_array(),
         ),

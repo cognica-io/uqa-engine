@@ -79,7 +79,7 @@ impl ViewRewriteCatalog for RetainedViewCatalog<'_> {
     ) -> Result<selection::CapturedRules, SQLError> {
         let relation = self.relation_with_control(name, control)?;
         selection::CapturedRules::from_catalog(
-            Arc::clone(&self.catalog.snapshot().definitions.rules),
+            uqa_core::memory::RetainedValue::clone(&self.catalog.snapshot().definitions.rules),
             relation,
             event,
             self.replica,

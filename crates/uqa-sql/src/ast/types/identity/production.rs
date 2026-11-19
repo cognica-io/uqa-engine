@@ -6,11 +6,9 @@
 
 //! Bound identity rendering borrows its leaf and admits one destination for every array dimension.
 
-use super::{
-    ColumnType, COMPOSITE_PREFIX, DOMAIN_PREFIX, ENUM_PREFIX, MULTIRANGE_PREFIX, RANGE_PREFIX,
-};
+use super::{ColumnType, UserTypeIdentity, UserTypeKind};
 use uqa_core::{
-    memory::{Produced, ProductionControl, ProductionString},
+    memory::{Produced, ProductionControl},
     ValueRetentionError,
 };
 
@@ -27,19 +25,20 @@ impl ColumnType {
             leaf = element;
             dimensions += 1;
         }
-        let (prefix, oid) = match leaf {
-            ColumnType::Enum(reference) => (ENUM_PREFIX, reference.oid),
-            ColumnType::Composite(reference) => (COMPOSITE_PREFIX, reference.oid),
-            ColumnType::Domain { oid, .. } => (DOMAIN_PREFIX, *oid),
-            ColumnType::DeclaredRange(reference) => (RANGE_PREFIX, reference.oid),
-            ColumnType::DeclaredMultirange(reference) => (MULTIRANGE_PREFIX, reference.oid),
+        let (kind, oid) = match leaf {
+            ColumnType::Enum(reference) => (UserTypeKind::Enum, reference.oid),
+            ColumnType::Composite(reference) => (UserTypeKind::Composite, reference.oid),
+            ColumnType::Domain { oid, .. } => (UserTypeKind::Domain, *oid),
+            ColumnType::DeclaredRange(reference) => (UserTypeKind::Range, reference.oid),
+            ColumnType::DeclaredMultirange(reference) => (UserTypeKind::Multirange, reference.oid),
             _ => return Ok(None),
         };
-        let leaf = control.format(format_args!("{prefix}{oid}"))?;
-        let mut output = ProductionString::from_produced(leaf, *control)?;
-        for _ in 0..dimensions {
-            output.push_str("[]")?;
+        UserTypeIdentity {
+            kind,
+            oid,
+            dimensions,
         }
-        Ok(Some(output.finish()?))
+        .render_with_control(control)
+        .map(Some)
     }
 }

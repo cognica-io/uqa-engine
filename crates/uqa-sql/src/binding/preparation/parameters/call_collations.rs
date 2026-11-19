@@ -6,7 +6,7 @@
 
 //! Retain input collations and type-observer selections on already bound calls without rereading constants or changing routine identities.
 
-use super::{AnalysisMap, NonNull, SQLError, ScalarExpr};
+use super::{AnalysisIdentity, AnalysisMap, SQLError, ScalarExpr};
 use crate::ast::FunctionBinding;
 use crate::catalog::collations::CollationSelection;
 use uqa_core::memory::{Produced, ProductionControl};
@@ -14,9 +14,9 @@ use uqa_core::memory::{Produced, ProductionControl};
 /// The selections are applied at the analyzed expression's original addresses; nothing else rewrites the expression between analysis and application.
 #[derive(Default)]
 pub(in crate::binding::preparation) struct CallCollations {
-    selections: AnalysisMap<NonNull<ScalarExpr>, Option<CollationSelection>>,
-    builtins: AnalysisMap<NonNull<ScalarExpr>, Produced<FunctionBinding>>,
-    observers: AnalysisMap<NonNull<ScalarExpr>, crate::ast::FunctionDispatch>,
+    selections: AnalysisMap<AnalysisIdentity<ScalarExpr>, Option<CollationSelection>>,
+    builtins: AnalysisMap<AnalysisIdentity<ScalarExpr>, Produced<FunctionBinding>>,
+    observers: AnalysisMap<AnalysisIdentity<ScalarExpr>, crate::ast::FunctionDispatch>,
 }
 
 impl CallCollations {
@@ -37,7 +37,8 @@ impl CallCollations {
             | crate::ast::FunctionDispatch::TypeOf { .. }),
         ) = selected.dispatch
         {
-            self.observers.insert(NonNull::from(expression), dispatch)?;
+            self.observers
+                .insert(AnalysisIdentity::from(expression), dispatch)?;
         }
         Ok(())
     }
@@ -48,7 +49,7 @@ impl CallCollations {
         selection: Option<CollationSelection>,
     ) -> Result<(), SQLError> {
         self.selections
-            .insert(NonNull::from(expression), selection)?;
+            .insert(AnalysisIdentity::from(expression), selection)?;
         Ok(())
     }
 
@@ -57,7 +58,8 @@ impl CallCollations {
         expression: &ScalarExpr,
         selected: Produced<FunctionBinding>,
     ) -> Result<(), SQLError> {
-        self.builtins.insert(NonNull::from(expression), selected)?;
+        self.builtins
+            .insert(AnalysisIdentity::from(expression), selected)?;
         Ok(())
     }
 
@@ -88,7 +90,7 @@ impl CallCollations {
     }
 
     fn apply_node(&mut self, node: &mut ScalarExpr) {
-        let identity = NonNull::from(&*node);
+        let identity = AnalysisIdentity::from(&*node);
         let ScalarExpr::Func { binding, .. } = node else {
             return;
         };

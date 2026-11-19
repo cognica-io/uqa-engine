@@ -258,7 +258,8 @@ fn default_value(
     arena: &mut ScalarQueryArena,
     control: &ProductionControl<'_>,
 ) -> Result<OwnedScalarExpr, SQLError> {
-    let expression = default.map_or(&Expr::Literal(Value::Null), |default| &**default);
+    let absent = Expr::Literal(Value::Null);
+    let expression = default.map_or(&absent, |default| &**default);
     arena.append_expression(
         ExpressionPlan::lower_borrowed_for_rewrite(expression, control)?,
         control,

@@ -124,7 +124,7 @@ impl AnalysisCatalog for Catalog {
         &self,
         _: &RelationNameResolution,
         _: &str,
-    ) -> Result<Option<Vec<Arc<crate::routines::SQLUserFunction>>>, SQLError> {
+    ) -> Result<Option<Vec<crate::routines::SQLRoutine>>, SQLError> {
         Ok(None)
     }
 }
@@ -195,7 +195,7 @@ impl RoutineResolution for Routines {
         names: &[Option<String>],
         types: &[Option<ColumnType>],
         variadic: bool,
-    ) -> Result<Option<Arc<crate::routines::SQLUserFunction>>, SQLError> {
+    ) -> Result<Option<crate::routines::SQLRoutine>, SQLError> {
         let Some(selected) =
             self.resolve_function_overload(name, binding, names, types, variadic)?
         else {
@@ -207,10 +207,13 @@ impl RoutineResolution for Routines {
             unreachable!()
         };
         definition.object_id = selected.binding.object_id;
-        Ok(Some(Arc::new(crate::routines::SQLUserFunction::new(
-            *definition,
-            crate::routines::RoutineBody::Source,
-        ))))
+        Ok(Some(
+            crate::routines::SQLUserFunction::new(
+                *definition,
+                crate::routines::RoutineBody::Source,
+            )
+            .shared(),
+        ))
     }
 }
 

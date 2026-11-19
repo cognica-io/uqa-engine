@@ -293,8 +293,10 @@ impl Engine {
             Ok((FixedTransactionSnapshot::Pinned(snapshot), graph_store))
         } else {
             let snapshot = self.capture_detached_fixed_transaction_snapshot()?;
-            let graph_snapshot =
-                self.detach_graph_storage_snapshot(&self.visible_graph_handles())?;
+            let graphs = self.visible_graph_handles().map_err(|error| {
+                uqa_execution::storage_errors::storage_error("select graph snapshot", &error)
+            })?;
+            let graph_snapshot = self.detach_graph_storage_snapshot(&graphs)?;
             self.restart_unwritten_backend_reader(stack)?;
             Ok((FixedTransactionSnapshot::Detached(snapshot), graph_snapshot))
         }
@@ -649,7 +651,7 @@ impl Engine {
             .tables
             .read()
             .values()
-            .map(|table| (table.storage_generation(), *table.next_id.lock()))
+            .map(|table| (table.storage_generation(), *table.next_id.read()))
             .collect::<BTreeMap<_, _>>();
         if let Err(error) = backend.rollback_transaction() {
             let failure = Self::storage_tx_error(action, &error);
@@ -709,7 +711,7 @@ impl Engine {
         }
         for table in self.storage.tables.read().values() {
             if let Some(reserved) = reservations.get(&table.storage_generation()) {
-                let mut next = table.next_id.lock();
+                let mut next = table.next_id.write();
                 *next = (*next).max(*reserved);
             }
         }

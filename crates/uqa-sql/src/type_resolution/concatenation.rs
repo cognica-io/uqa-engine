@@ -132,14 +132,14 @@ pub(crate) fn select<'a>(
         [Some(ColumnType::JsonB), Some(ColumnType::JsonB) | None]
         | [None, Some(ColumnType::JsonB)] => (
             3284,
-            [&ColumnType::JsonB, &ColumnType::JsonB],
-            &ColumnType::JsonB,
+            [const { &ColumnType::JsonB }, const { &ColumnType::JsonB }],
+            const { &ColumnType::JsonB },
         ),
         [Some(ColumnType::Bytea), Some(ColumnType::Bytea) | None]
         | [None, Some(ColumnType::Bytea)] => (
             2018,
-            [&ColumnType::Bytea, &ColumnType::Bytea],
-            &ColumnType::Bytea,
+            [const { &ColumnType::Bytea }, const { &ColumnType::Bytea }],
+            const { &ColumnType::Bytea },
         ),
         [left, right] => match (
             left.is_none_or(text_coercible),
@@ -147,24 +147,24 @@ pub(crate) fn select<'a>(
         ) {
             (true, true) => (
                 654,
-                [&ColumnType::Text, &ColumnType::Text],
-                &ColumnType::Text,
+                [const { &ColumnType::Text }, const { &ColumnType::Text }],
+                const { &ColumnType::Text },
             ),
             (true, false) => (
                 2779,
                 [
-                    &ColumnType::Text,
+                    const { &ColumnType::Text },
                     original[1].expect("known non-text operand"),
                 ],
-                &ColumnType::Text,
+                const { &ColumnType::Text },
             ),
             (false, true) => (
                 2780,
                 [
                     original[0].expect("known non-text operand"),
-                    &ColumnType::Text,
+                    const { &ColumnType::Text },
                 ],
-                &ColumnType::Text,
+                const { &ColumnType::Text },
             ),
             (false, false) => {
                 return Err(super::undefined_binary_operator(

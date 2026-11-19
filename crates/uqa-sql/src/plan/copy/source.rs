@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use super::{Copying, Result};
+use super::{CopyPurpose, Copying, Result};
 use crate::ast::{FunctionBinding, OperatorJoinRelations};
 use crate::plan::{SourcePlan, TableFunctionPlan};
 
@@ -39,7 +39,14 @@ impl Copying<'_> {
     pub(in crate::plan) fn source_fields(&mut self, source: &SourcePlan) -> Result<SourcePlan> {
         self.check()?;
         Ok(match source {
-            SourcePlan::RetainedRows(rows) => SourcePlan::RetainedRows(rows.clone()),
+            SourcePlan::RetainedRows(rows) => {
+                if self.purpose == CopyPurpose::Stored {
+                    return Err(crate::SQLError::Internal(
+                        "execution-scoped row source cannot enter stored syntax".into(),
+                    ));
+                }
+                SourcePlan::RetainedRows(rows.clone())
+            }
             SourcePlan::Table {
                 name,
                 executable_query,
@@ -51,6 +58,9 @@ impl Copying<'_> {
             } => SourcePlan::Table {
                 name: self.field("name", |copying| copying.text(name))?,
                 executable_query: self.field("executable_query", |copying| {
+                    if copying.purpose == CopyPurpose::Stored {
+                        return Ok(None);
+                    }
                     executable_query
                         .as_ref()
                         .map(|query| copying.boxed(|copying| copying.query(query)))
@@ -169,7 +179,11 @@ impl Copying<'_> {
                 alias,
                 column_aliases,
             } => SourcePlan::Subquery {
-                captured_output: *captured_output,
+                captured_output: if self.purpose == CopyPurpose::Stored {
+                    None
+                } else {
+                    *captured_output
+                },
                 lateral: *lateral,
                 body: self.field("body", |copying| {
                     copying.boxed(|copying| copying.query(body))

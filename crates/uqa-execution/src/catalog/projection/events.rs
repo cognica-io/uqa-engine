@@ -24,9 +24,8 @@ use crate::catalog::context::CatalogContext;
 use crate::catalog::tuples::constraint::ConstraintTuple;
 use crate::catalog::{CatalogReadView, RelationNameResolution};
 use uqa_core::RelationIdentity;
-use uqa_sql::canonical_routine_type_name;
 use uqa_sql::catalog::events::{StoredRule, StoredTrigger};
-use uqa_sql::routines::{routine_signature_types, SQLUserFunction};
+use uqa_sql::routines::routine_signature_types;
 
 use super::helpers::oids::{namespace_oid, split_schema_name, stable_oid};
 use super::helpers::rows::{bool_value, catalog_usize, int_value, row, str_value};
@@ -72,17 +71,27 @@ pub fn trigger_catalog_oid(
     resolution: &RelationNameResolution,
     trigger: &StoredTrigger,
 ) -> Result<i64, SQLError> {
-    if let Some(oid) = trigger.catalog_oid {
+    trigger_catalog_oid_for_relation(
+        trigger,
+        &trigger.definition.table,
+        trigger.catalog_oid,
+        || event_relation_oid_from(catalog, resolution, &trigger.definition.table),
+    )
+}
+
+pub(crate) fn trigger_catalog_oid_for_relation(
+    trigger: &StoredTrigger,
+    table: &str,
+    recorded: Option<i64>,
+    relation_oid: impl FnOnce() -> Result<i64, SQLError>,
+) -> Result<i64, SQLError> {
+    if let Some(oid) = recorded {
         return Ok(oid);
     }
     let identity = if let Some(object_id) = trigger.object_id {
-        format!(
-            "{}:{}",
-            hex_object_id(object_id),
-            event_relation_oid_from(catalog, resolution, &trigger.definition.table)?
-        )
+        format!("{}:{}", hex_object_id(object_id), relation_oid()?)
     } else {
-        format!("{}.{}", trigger.definition.table, trigger.definition.name)
+        format!("{table}.{}", trigger.definition.name)
     };
     Ok(stable_oid("trigger", &identity))
 }
@@ -92,10 +101,24 @@ pub fn trigger_constraint_catalog_oid(
     resolution: &RelationNameResolution,
     trigger: &StoredTrigger,
 ) -> Result<i64, SQLError> {
+    trigger_constraint_catalog_oid_for_relation(
+        trigger,
+        &trigger.definition.table,
+        trigger.constraint_catalog_oid,
+        || event_relation_oid_from(catalog, resolution, &trigger.definition.table),
+    )
+}
+
+pub(crate) fn trigger_constraint_catalog_oid_for_relation(
+    trigger: &StoredTrigger,
+    table: &str,
+    recorded: Option<i64>,
+    relation_oid: impl FnOnce() -> Result<i64, SQLError>,
+) -> Result<i64, SQLError> {
     if !trigger.definition.constraint {
         return Ok(0);
     }
-    if let Some(oid) = trigger.constraint_catalog_oid {
+    if let Some(oid) = recorded {
         return Ok(oid);
     }
     let constraint_name = trigger
@@ -103,13 +126,9 @@ pub fn trigger_constraint_catalog_oid(
         .as_deref()
         .unwrap_or(&trigger.definition.name);
     let identity = if let Some(object_id) = trigger.object_id {
-        format!(
-            "{}:{}",
-            hex_object_id(object_id),
-            event_relation_oid_from(catalog, resolution, &trigger.definition.table)?
-        )
+        format!("{}:{}", hex_object_id(object_id), relation_oid()?)
     } else {
-        format!("{}.{}", trigger.definition.table, constraint_name)
+        format!("{table}.{constraint_name}")
     };
     Ok(stable_oid("constraint", &identity))
 }
@@ -158,14 +177,15 @@ fn build_catalog_triggers(
     let mut resolution = resolution.clone();
     resolution.set_lookup_mode(crate::catalog::RelationLookupMode::Bound);
     let resolution = &resolution;
-    let originals = catalog_view
-        .snapshot()
-        .definitions
-        .triggers
-        .values()
-        .flat_map(|triggers| triggers.values());
-    let mut catalog = originals
-        .clone()
+    let originals = || {
+        catalog_view
+            .snapshot()
+            .definitions
+            .triggers
+            .values()
+            .flat_map(|triggers| triggers.values())
+    };
+    let mut catalog = originals()
         .map(|trigger| {
             #[cfg(test)]
             cache::record_trigger_copy();
@@ -185,7 +205,7 @@ fn build_catalog_triggers(
             continue;
         };
         for source in sources.iter().skip(1) {
-            for original in originals.clone().filter(|trigger| {
+            for original in originals().filter(|trigger| {
                 trigger.definition.row && trigger.definition.table == source.qualified_name()
             }) {
                 // A partition's clone of a row trigger has OIDs of its own, derived from the trigger's identity and the partition; the recorded OIDs are those of the trigger on its own table.
@@ -462,7 +482,7 @@ fn resolve_trigger_function(
     catalog: &CatalogReadView,
     resolution: &RelationNameResolution,
     name: &str,
-) -> Result<std::sync::Arc<SQLUserFunction>, SQLError> {
+) -> Result<uqa_sql::routines::SQLRoutine, SQLError> {
     let candidates = catalog
         .sql_functions(resolution, name)?
         .unwrap_or_default()
@@ -486,23 +506,7 @@ fn resolve_trigger_function(
             });
         }
     };
-    let returns_trigger = matches!(
-        &function.def.returns,
-        uqa_sql::ast::FunctionReturns::Scalar { type_name }
-            if canonical_routine_type_name(type_name) == "trigger"
-    );
-    if !returns_trigger {
-        return Err(SQLError::Routine {
-            sqlstate: "42P17".into(),
-            message: format!("function {} must return type trigger", function.def.name),
-        });
-    }
-    if function.def.language != "plpgsql" {
-        return Err(SQLError::Routine {
-            sqlstate: "0A000".into(),
-            message: "only LANGUAGE plpgsql trigger functions are executable".into(),
-        });
-    }
+    uqa_sql::catalog::events::validation::validate_trigger_function(&function.def)?;
     Ok(function)
 }
 

@@ -174,7 +174,7 @@ fn retain_argument_types(
             .attributes
             .iter()
             .find(|attribute| attribute.number == *number)
-            .map_or(&ColumnType::Integer, |attribute| &attribute.ty);
+            .map_or(const { &ColumnType::Integer }, |attribute| &attribute.ty);
         types.push_produced(selected.clone_with_control(control)?)?;
     }
     let binding = binding(
@@ -208,7 +208,7 @@ pub(crate) fn anonymous_depth(
             if resolver
                 .resolve_type_name_with_control(ty, control)?
                 .as_deref()
-                == Some(&ColumnType::Record) =>
+                == Some(const { &ColumnType::Record }) =>
         {
             Ok(anonymous_depth(expr, resolver, control)?.map(|depth| depth + 1))
         }

@@ -98,7 +98,9 @@ pub fn descriptor_with_control(
             schema.columns().iter().enumerate().map(|(index, name)| {
                 Ok((
                     name.as_str(),
-                    schema.column_type(index).unwrap_or(&ColumnType::Text),
+                    schema
+                        .column_type(index)
+                        .unwrap_or(const { &ColumnType::Text }),
                     number(None, index)?,
                     schema.column_collation(index),
                 ))

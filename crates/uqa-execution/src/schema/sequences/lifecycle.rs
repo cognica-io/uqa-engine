@@ -20,7 +20,6 @@ use uqa_sql::{
     schema::sequences::lifecycle as analysis,
     SQLError,
 };
-use uqa_storage::StorageBackendResult;
 
 pub trait SequenceStateRename {
     fn move_state(
@@ -29,17 +28,12 @@ pub trait SequenceStateRename {
         target: &RelationIdentity,
     ) -> Result<(), SQLError>;
 }
-pub trait SequenceRenameCatalog {
-    fn has_catalog(&self) -> bool;
-    fn rename_sequence_row(&self, source: &str, target: &str) -> StorageBackendResult<bool>;
-}
 pub struct SequenceLifecycleContext<'a> {
     pub analysis: &'a dyn analysis::SequenceLifecycleCatalog,
     pub creation: RelationCreationContext<'a>,
     pub schemas: SchemaDependencyPublicationContext<'a>,
     pub views: ViewSequenceRewriteContext<'a>,
     pub state: &'a dyn SequenceStateRename,
-    pub catalog: &'a dyn SequenceRenameCatalog,
     pub events: EventCatalogContext<'a>,
     pub changes: &'a dyn CatalogPublicationChanges,
 }
@@ -81,7 +75,7 @@ pub(crate) fn publish_relocation(
     context: &SequenceLifecycleContext<'_>,
     source: &RelationIdentity,
     target: &RelationIdentity,
-    persistence: RelationPersistence,
+    _persistence: RelationPersistence,
 ) -> Result<(), SQLError> {
     let source_name = source.qualified_name();
     let target_name = target.qualified_name();
@@ -99,21 +93,6 @@ pub(crate) fn publish_relocation(
             ))
         },
     )?;
-    if persistence != RelationPersistence::Temporary
-        && context.catalog.has_catalog()
-        && !context
-            .catalog
-            .rename_sequence_row(&source_name, &target_name)
-            .map_err(|error| {
-                SQLError::Internal(format!(
-                    "persist sequence rename `{source_name}` to `{target_name}`: {error}"
-                ))
-            })?
-    {
-        return Err(SQLError::Internal(format!(
-            "sequence `{source_name}` disappeared during rename"
-        )));
-    }
     context.state.move_state(source, target)?;
     crate::schema::events::rename_relation_events(&context.events, source, target).map_err(
         |error| {

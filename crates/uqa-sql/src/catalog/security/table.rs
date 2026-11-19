@@ -7,7 +7,8 @@
 //! Table-shaped relation ACL privilege sets, grant paths, and dependency-aware revocation.
 
 use crate::catalog::roles::identity::RoleSubject;
-use std::collections::{BTreeMap, BTreeSet};
+use crate::catalog::roles::{RoleDefinitions, RoleMemberships};
+use std::collections::BTreeSet;
 use uqa_core::catalog_acl::AclGrantee;
 
 use super::{TableAclEntry, TablePrivileges};
@@ -15,7 +16,7 @@ use crate::ast::{RoleAttribute, TablePrivilege, TablePrivilegeSpec};
 use crate::SQLError;
 
 use super::TableSecurity;
-use crate::catalog::roles::{role_inherits, RoleDefinition, RoleMembership, RoleMembershipKey};
+use crate::catalog::roles::role_inherits;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum TableAclPrivilege {
@@ -256,33 +257,23 @@ pub fn grant_option_roles(
     privilege: TableAclPrivilege,
 ) -> BTreeSet<String> {
     let mut reachable = BTreeSet::from([security.role_owner.clone()]);
-    let Some(acl) = security.acl.as_ref() else {
-        return reachable;
-    };
-    loop {
-        let mut changed = false;
-        for entry in acl {
-            let Some(role) = entry.role.role_name() else {
-                continue;
-            };
-            if entry.grant_options.intersects(privilege.mask())
-                && reachable.contains(acl_grantor(entry, &security.role_owner))
-            {
-                changed |= reachable.insert(role.to_owned());
-            }
-        }
-        if !changed {
-            return reachable;
-        }
-    }
+    grant_paths::extend(
+        &security.role_owner,
+        security.acl.as_deref(),
+        privilege,
+        &mut reachable,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
+    .expect("ordinary grant closure has no resource scope");
+    reachable
 }
 
 pub fn select_acl_grantor(
     security: &TableSecurity,
     privilege: TableAclPrivilege,
     current_user: &(impl RoleSubject + ?Sized),
-    roles: &BTreeMap<String, RoleDefinition>,
-    memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
+    roles: &RoleDefinitions,
+    memberships: &RoleMemberships,
 ) -> Option<String> {
     let current_user = current_user.role_name(roles)?;
     if role_inherits(roles, memberships, current_user, &security.role_owner) {
@@ -305,8 +296,8 @@ pub fn role_has_privilege(
     security: &TableSecurity,
     subject: &(impl RoleSubject + ?Sized),
     check: TablePrivilegeCheck,
-    roles: &BTreeMap<String, RoleDefinition>,
-    memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
+    roles: &RoleDefinitions,
+    memberships: &RoleMemberships,
 ) -> bool {
     if subject
         .role_definition(roles)
@@ -473,8 +464,8 @@ fn rewrite_acl_entries_owner(acl: &mut Vec<TableAclEntry>, old_owner: &str, new_
 pub fn role_can_view_table(
     security: &TableSecurity,
     subject: &(impl RoleSubject + ?Sized),
-    roles: &BTreeMap<String, RoleDefinition>,
-    memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
+    roles: &RoleDefinitions,
+    memberships: &RoleMemberships,
 ) -> bool {
     TableAclPrivilege::ALL.into_iter().any(|privilege| {
         role_has_privilege(
@@ -508,8 +499,8 @@ pub fn role_has_table_privilege(
     security: &TableSecurity,
     subject: &(impl RoleSubject + ?Sized),
     privilege: TableAclPrivilege,
-    roles: &BTreeMap<String, RoleDefinition>,
-    memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
+    roles: &RoleDefinitions,
+    memberships: &RoleMemberships,
 ) -> bool {
     role_has_privilege(
         security,
@@ -528,8 +519,8 @@ pub fn role_has_column_privilege(
     column: &str,
     subject: &(impl RoleSubject + ?Sized),
     privilege: TableAclPrivilege,
-    roles: &BTreeMap<String, RoleDefinition>,
-    memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
+    roles: &RoleDefinitions,
+    memberships: &RoleMemberships,
 ) -> bool {
     super::columns::role_has_column_privilege(
         security,
@@ -544,6 +535,7 @@ pub fn role_has_column_privilege(
     )
 }
 
-mod invariants;
+pub(super) mod grant_paths;
+pub(super) mod invariants;
 pub mod selection;
 pub use invariants::validate_table_security_invariants;

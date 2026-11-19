@@ -1,0 +1,6 @@
+list|nummultirange|inside,inside
+list|numrange|inside,inside
+range|int4multirange|inside,inside,outside
+range|int4range|inside,inside,outside
+range|nummultirange|inside,inside,outside
+range|numrange|inside,inside,outside

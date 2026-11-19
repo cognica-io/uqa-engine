@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import importlib.util
 import json
 from pathlib import Path
@@ -19,6 +20,7 @@ import platform
 import shutil
 
 from c_bindings_licenses import collect
+from c_bindings_native import bundled_msvc_libraries, cmake_path
 
 ROOT = Path(__file__).resolve().parents[1]
 HEADERS = ROOT / "crates/uqa-ffi/include/uqa"
@@ -91,7 +93,7 @@ def msvc_pkg_config_libraries(flags: str) -> str:
 
 
 def generate(output: Path, target: str, revision: str, features: set[str], flags: str,
-             cargo_metadata: Path, minimum_os: str = "") -> None:
+             cargo_metadata: Path, minimum_os: str = "", cargo_build_log: Path | None = None) -> None:
     if features - FEATURES:
         raise ValueError(f"unknown C binding features: {sorted(features - FEATURES)}")
     if not re.fullmatch(r"[a-zA-Z0-9_-]+", target):
@@ -104,6 +106,9 @@ def generate(output: Path, target: str, revision: str, features: set[str], flags
     version = versions[0]
     public, deferred = symbols()
     libraries, options = native_link_inputs(flags, target)
+    bundled = bundled_msvc_libraries(cargo_build_log.read_bytes(), json.loads(cargo_metadata.read_bytes()), features, flags) \
+        if "windows-msvc" in target and cargo_build_log else {}
+    build_libraries = [cmake_path(bundled[library]) if library in bundled else library for library in libraries]
     pkg_libraries = msvc_pkg_config_libraries(flags) if "windows-msvc" in target else ""
     dependency_licenses, inventory = collect(cargo_metadata, features)
     payloads = legal_payloads(features) | dependency_licenses
@@ -114,6 +119,9 @@ def generate(output: Path, target: str, revision: str, features: set[str], flags
     (output / "build.cmake").write_text(
         f'set(UQA_VERSION "{version}")\n'
         f'set(UQA_NATIVE_LIBRARIES "{";".join(libraries)}")\n'
+        f'set(UQA_BUILD_NATIVE_LIBRARIES "{";".join(build_libraries)}")\n'
+        f'set(UQA_BUNDLED_NATIVE_LIBRARIES "{";".join(cmake_path(path) for path in bundled.values())}")\n'
+        f'set(UQA_BUNDLED_NATIVE_NAMES "{";".join(bundled)}")\n'
         f'set(UQA_NATIVE_LINK_OPTIONS "{";".join(options)}")\n'
         f'set(UQA_PKG_CONFIG_NATIVE_LIBRARIES "{pkg_libraries}")\n')
     share = output / "share/uqa"
@@ -126,6 +134,8 @@ def generate(output: Path, target: str, revision: str, features: set[str], flags
         "source_revision": revision, "features": sorted(features),
         "exports": public, "declaration_only": {"uqa_log.h": deferred},
         "native_static_link_flags": shlex.split(flags),
+        "native_bundled_libraries": [{"path": "lib/" + name, "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+                                     for name, path in bundled.items()],
         "runtime": {"macos_deployment_target": minimum_os if "apple" in target else None,
                     "libc": list(platform.libc_ver()) if "linux" in target else None,
                     "msvc_crt": "dynamic (/MD)" if "windows" in target else None},
@@ -148,9 +158,11 @@ def main() -> None:
     parser.add_argument("--native-link-flags", required=True)
     parser.add_argument("--cargo-metadata", required=True, type=Path)
     parser.add_argument("--minimum-os", default="")
+    parser.add_argument("--cargo-build-log", default="")
     args = parser.parse_args()
     generate(args.output, args.target, args.revision,
-             set(filter(None, args.features.split(","))), args.native_link_flags, args.cargo_metadata, args.minimum_os)
+             set(filter(None, args.features.split(","))), args.native_link_flags, args.cargo_metadata, args.minimum_os,
+             Path(args.cargo_build_log) if args.cargo_build_log else None)
 
 
 if __name__ == "__main__":

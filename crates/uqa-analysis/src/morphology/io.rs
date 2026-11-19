@@ -114,9 +114,9 @@ impl<'a> Reader<'a> {
         Ok(count)
     }
 
-    pub fn text(&mut self) -> DictionaryResult<&'a str> {
+    pub fn text_bytes(&mut self) -> DictionaryResult<&'a [u8]> {
         let length = self.count(1)?;
-        Ok(std::str::from_utf8(self.take(length)?)?)
+        self.take(length)
     }
 
     pub fn finish(self) -> DictionaryResult<()> {

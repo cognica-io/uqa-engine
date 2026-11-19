@@ -15,12 +15,14 @@
 pub mod adapters;
 pub mod age_names;
 pub use uqa_core::agtype;
+mod catalog;
 mod centrality;
 mod cross_paradigm;
 pub mod cypher;
 mod delta;
 mod embedding;
 mod handle;
+mod image_work;
 mod incremental_match;
 mod index;
 mod memory_store;
@@ -38,6 +40,7 @@ mod types;
 mod versioned_store;
 
 pub use adapters::{GraphPostingCodec, PostingToGraphAdapter, TextTfScoreNormalizer};
+pub use catalog::{CapturedGraphCatalog, GraphCatalog, GraphCatalogInput};
 pub use centrality::{BetweennessCentrality, PageRank, HITS};
 pub use cross_paradigm::{
     CrossParadigmError, CrossParadigmResult, Document, SemanticGraphSearch, TextToGraph, ToGraph,
@@ -45,9 +48,12 @@ pub use cross_paradigm::{
 };
 pub use delta::{DeltaOp, GraphDelta};
 pub use embedding::{GraphEmbedding, MAX_GRAPH_EMBEDDING_DIMENSIONS, MAX_GRAPH_EMBEDDING_LAYERS};
-pub use handle::GraphStoreHandle;
+pub use handle::{GraphImageSnapshot, GraphStoreHandle};
 pub use incremental_match::{implicated_vertices, IncrementalPatternMatcher};
-pub use index::{LabelIndex, PathIndex, VertexPropertyIndex};
+pub use index::{
+    CapturedPath, CapturedPathIndex, CapturedPathIndexes, LabelIndex, PathIndex, PathIndexCatalog,
+    PathIndexImageSnapshot, VertexPropertyIndex,
+};
 pub use memory_store::{
     graphid_label_id, graphid_sequence, make_graphid, GraphLabelInfo, GraphLabelRegistry,
     LabelKind, MemoryGraphStore, EDGE_DEFAULT_LABEL_ID, FIRST_USER_LABEL_ID, GRAPHID_LABEL_SHIFT,

@@ -17,7 +17,7 @@ use uqa_graph::{
 
 fn corpus() -> MemoryGraphStore {
     let mut g = MemoryGraphStore::new();
-    g.create_graph("g");
+    g.create_graph("g").unwrap();
     let mk = |id: u64, label: &str, props: &[(&str, Value)]| {
         let mut v = Vertex::new(id, label);
         for (k, val) in props {

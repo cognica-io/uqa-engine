@@ -15,6 +15,40 @@ use crate::vector_index::VectorIndex;
 use crate::{read_control::StorageReadControl, StorageBackendResult};
 
 impl VectorIndex for HNSWIndex {
+    fn into_memory_capture(
+        self: Box<Self>,
+        registry: &crate::memory_capture::MemoryCaptureRegistry,
+    ) -> StorageBackendResult<Box<dyn VectorIndex>> {
+        crate::vector_index::capture::ExclusiveVectorCapture::register(self, registry, None)
+    }
+
+    fn into_memory_capture_with_control(
+        self: Box<Self>,
+        registry: &crate::memory_capture::MemoryCaptureRegistry,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<Box<dyn VectorIndex>> {
+        crate::vector_index::capture::ExclusiveVectorCapture::register(
+            self,
+            registry,
+            Some(control),
+        )
+    }
+
+    fn write_image(
+        &self,
+        output: &mut dyn std::io::Write,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<u64> {
+        super::image::write(self, output, control)
+    }
+
+    fn image_reader<'a>(
+        &'a self,
+        control: &'a StorageReadControl,
+    ) -> StorageBackendResult<crate::image_io::ImageReader<'a>> {
+        super::image::reader(self, control)
+    }
+
     fn contains_document(&self, doc_id: DocId) -> StorageBackendResult<bool> {
         Ok(self
             .active

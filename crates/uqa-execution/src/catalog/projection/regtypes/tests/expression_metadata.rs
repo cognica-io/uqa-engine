@@ -10,6 +10,7 @@ use crate::catalog::{
     test_support::{empty_catalog, table_snapshot, CatalogServices},
 };
 use uqa_core::{catalog_role::RoleIdentity, RelationIdentity};
+use uqa_sql::catalog::roles::RoleDefinitions;
 use uqa_sql::{
     ast::{ColumnDef, Expr, TableConstraintSet},
     catalog::{domain::StoredDomain, roles::RoleDefinition, security::BoundSchemaSecurity},
@@ -37,16 +38,21 @@ fn fixture(unrelated: usize) -> CatalogReadView {
     reader.oid = 20_000;
     reader.object_id = [9; 16];
     reader.attributes.clear();
-    snapshot.definitions.roles = Arc::new(BTreeMap::from([
-        ("uqa".into(), RoleDefinition::bootstrap()),
-        ("reader".into(), reader),
-    ]));
-    let mut schemas = BoundSchemaSecurity::initial_catalog();
-    schemas.insert(
-        "hidden".into(),
-        BoundSchemaSecurity::owner(RoleIdentity::BOOTSTRAP),
+    snapshot.definitions.roles = uqa_core::memory::RetainedValue::new(
+        RoleDefinitions::try_from_iter([
+            ("uqa".into(), RoleDefinition::bootstrap()),
+            ("reader".into(), reader),
+        ])
+        .unwrap(),
     );
-    snapshot.definitions.schemas = Arc::new(schemas);
+    let mut schemas = BoundSchemaSecurity::initial_catalog();
+    schemas
+        .insert(
+            "hidden".into(),
+            BoundSchemaSecurity::owner(RoleIdentity::BOOTSTRAP),
+        )
+        .unwrap();
+    snapshot.definitions.schemas = uqa_core::memory::RetainedValue::new(schemas);
     let Statement::CreateDomain(definition) =
         uqa_sql::compile("CREATE DOMAIN hidden.positive AS integer DEFAULT abs(-7)")
             .unwrap()
@@ -54,30 +60,33 @@ fn fixture(unrelated: usize) -> CatalogReadView {
     else {
         panic!("domain");
     };
-    snapshot.definitions.domains = Arc::new(BTreeMap::from([(
-        "hidden.positive".into(),
-        StoredDomain {
-            object_id: [2; 16],
-            oid: 60_000,
-            array_oid: Some(60_001),
-            identity: RelationIdentity::new("hidden", "positive"),
-            owner: RoleIdentity::BOOTSTRAP,
-            definition,
-            array_name: None,
-            usage_acl: None,
-        },
-    )]));
+    snapshot.definitions.domains = uqa_core::memory::RetainedValue::new(
+        uqa_sql::catalog::type_definitions::TypeDefinitions::try_from_iter(BTreeMap::from([(
+            "hidden.positive".into(),
+            StoredDomain {
+                object_id: [2; 16],
+                oid: 60_000,
+                array_oid: Some(60_001),
+                identity: RelationIdentity::new("hidden", "positive"),
+                owner: RoleIdentity::BOOTSTRAP,
+                definition,
+                array_name: None,
+                usage_acl: None,
+            },
+        )]))
+        .unwrap(),
+    );
     let Statement::CreateFunction(mut definition) = uqa_sql::compile("CREATE FUNCTION hidden.echo(n regtype DEFAULT 'hidden.positive'::regtype) RETURNS regtype LANGUAGE SQL AS 'SELECT n'").unwrap().remove(0) else { panic!("function"); };
     definition.params[0].default = Some(constant(60_000, "regtype"));
     definition.catalog_oid = Some(70_000);
     definition.owner = Some(RoleIdentity::BOOTSTRAP);
-    snapshot.definitions.sql_user_functions = Arc::new(BTreeMap::from([(
-        "hidden.echo".into(),
-        vec![Arc::new(SQLUserFunction::new(
-            *definition,
-            RoutineBody::Source,
-        ))],
-    )]));
+    snapshot.definitions.sql_user_functions = uqa_core::memory::RetainedValue::new(
+        uqa_sql::routines::registry::RoutineRegistry::try_from_iter([(
+            "hidden.echo".into(),
+            vec![SQLUserFunction::new(*definition, RoutineBody::Source).shared()],
+        )])
+        .unwrap(),
+    );
     for position in 0..=unrelated {
         let mut type_ref = ColumnDef::nullable("type_ref", ColumnType::Regtype);
         type_ref.default = Some(constant(60_000, "regtype"));

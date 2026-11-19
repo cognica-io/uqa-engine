@@ -8,9 +8,8 @@
 
 use crate::Engine;
 use parking_lot::MappedRwLockReadGuard;
-use std::{borrow::Cow, collections::BTreeMap, sync::Arc};
-use uqa_graph::GraphStoreHandle;
-use uqa_sql::catalog::graph_oids::GraphCatalogOids;
+use std::borrow::Cow;
+use uqa_sql::catalog::graph_oids::GraphOidRegistry;
 use uqa_sql::catalog::roles::identity::RoleSubject;
 use uqa_sql::{
     catalog::security::{
@@ -24,8 +23,8 @@ use uqa_sql::{
 };
 
 struct GraphNamesGuard<'a> {
-    graphs: MappedRwLockReadGuard<'a, BTreeMap<String, Arc<GraphStoreHandle>>>,
-    oids: MappedRwLockReadGuard<'a, BTreeMap<String, GraphCatalogOids>>,
+    graphs: MappedRwLockReadGuard<'a, uqa_graph::GraphCatalog>,
+    oids: MappedRwLockReadGuard<'a, GraphOidRegistry>,
 }
 impl GraphNamespaceRead for GraphNamesGuard<'_> {
     fn names(&self) -> Box<dyn Iterator<Item = &str> + '_> {
@@ -111,8 +110,40 @@ use uqa_sql::catalog::resolution::creation::{CreationRelationGuards, CreationRel
 use uqa_storage::StorageBackendResult;
 
 struct CreationNamesGuard<G>(G);
-impl<T, G: std::ops::Deref<Target = BTreeMap<RelationIdentity, T>>> CreationRelationNames
+impl<G: std::ops::Deref<Target = crate::state::TableRegistryMap>> CreationRelationNames
     for CreationNamesGuard<G>
+{
+    fn contains(&self, relation: &RelationIdentity) -> bool {
+        self.0.contains_key(relation)
+    }
+}
+struct SequenceCreationNamesGuard<G>(G);
+impl<G: std::ops::Deref<Target = uqa_execution::catalog::sequence::registry::SequenceCatalog>>
+    CreationRelationNames for SequenceCreationNamesGuard<G>
+{
+    fn contains(&self, relation: &RelationIdentity) -> bool {
+        self.0.contains_key(relation)
+    }
+}
+struct ViewCreationNamesGuard<G>(G);
+impl<G: std::ops::Deref<Target = uqa_sql::catalog::stored_view::ViewDefinitions>>
+    CreationRelationNames for ViewCreationNamesGuard<G>
+{
+    fn contains(&self, relation: &RelationIdentity) -> bool {
+        self.0.contains_key(relation)
+    }
+}
+struct ForeignCreationNamesGuard<G>(G);
+impl<G: std::ops::Deref<Target = uqa_execution::catalog::foreign::ForeignTables>>
+    CreationRelationNames for ForeignCreationNamesGuard<G>
+{
+    fn contains(&self, relation: &RelationIdentity) -> bool {
+        self.0.contains_key(relation)
+    }
+}
+struct IndexCreationNamesGuard<G>(G);
+impl<G: std::ops::Deref<Target = uqa_execution::catalog::index::registry::CatalogIndexes>>
+    CreationRelationNames for IndexCreationNamesGuard<G>
 {
     fn contains(&self, relation: &RelationIdentity) -> bool {
         self.0.contains_key(relation)
@@ -132,7 +163,7 @@ impl CreationRelationGuards for Engine {
             return true;
         }
         let views = self.durable.views.snapshot();
-        let foreign = self.durable.foreign_tables.snapshot();
+        let foreign = self.durable.foreign_catalog.snapshot().tables_snapshot();
         // Release the registry lock before reading individual table metadata.
         let tables = self.storage.tables.read().clone();
         let tables = tables
@@ -165,16 +196,18 @@ impl CreationRelationGuards for Engine {
         Box::new(CreationNamesGuard(self.storage.tables.read()))
     }
     fn views(&self) -> Box<dyn CreationRelationNames + '_> {
-        Box::new(CreationNamesGuard(self.durable.views.read()))
+        Box::new(ViewCreationNamesGuard(self.durable.views.read()))
     }
     fn sequences(&self) -> Box<dyn CreationRelationNames + '_> {
-        Box::new(CreationNamesGuard(self.durable.sequences.read()))
+        Box::new(SequenceCreationNamesGuard(self.durable.sequences.read()))
     }
     fn foreign_tables(&self) -> Box<dyn CreationRelationNames + '_> {
-        Box::new(CreationNamesGuard(self.durable.foreign_tables.read()))
+        Box::new(ForeignCreationNamesGuard(
+            self.durable.foreign_catalog.tables(),
+        ))
     }
     fn indexes(&self) -> Box<dyn CreationRelationNames + '_> {
-        Box::new(CreationNamesGuard(self.durable.catalog_indexes.read()))
+        Box::new(IndexCreationNamesGuard(self.durable.catalog_indexes.read()))
     }
     fn composite_types(&self) -> Box<dyn CreationRelationNames + '_> {
         Box::new(CompositeNamesGuard(self.durable.composites.read()))
@@ -193,7 +226,7 @@ impl<G: std::ops::Deref<Target = uqa_execution::catalog::composite_type::Composi
 impl RelationCreationRuntime for Engine {
     fn relation_array_name(&self, relation: &RelationIdentity, array_oid: u32) -> Option<String> {
         let views = self.durable.views.snapshot();
-        let foreign = self.durable.foreign_tables.snapshot();
+        let foreign = self.durable.foreign_catalog.snapshot().tables_snapshot();
         let table = self.storage.tables.read().get(relation).cloned();
         uqa_execution::schema::types::relation_arrays::current_array_name(
             [

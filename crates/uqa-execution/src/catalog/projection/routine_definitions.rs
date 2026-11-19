@@ -25,7 +25,7 @@ mod definition;
 pub use definition::pg_get_functiondef_value;
 
 enum Routine {
-    User(std::sync::Arc<SQLUserFunction>),
+    User(uqa_sql::routines::SQLRoutine),
     Builtin(BuiltinRoutineCatalogEntry),
 }
 

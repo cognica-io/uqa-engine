@@ -24,6 +24,7 @@ impl MemoryInvertedIndex {
                 state: Arc::clone(&self.state),
                 state_memory: None,
                 read_control: None,
+                image_memory: None,
             };
             snapshot.state_memory = Some(state_memory);
             snapshot.read_control = Some(control.clone());

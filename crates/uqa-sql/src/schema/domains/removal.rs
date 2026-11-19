@@ -44,6 +44,7 @@ pub struct RowTypeRelation {
     pub local_name: String,
     pub owner: uqa_core::catalog_role::RoleIdentity,
     pub schema: String,
+    pub persistence: crate::ast::RelationPersistence,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -250,13 +251,20 @@ fn drop_target(
         });
     }
     if let Some(element) = context.catalog.user_array_element(oid) {
-        let domain = context
+        let (schema, owner) = context
             .catalog
             .domain_by_oid(element)
+            .map(|domain| (domain.identity.schema, domain.owner))
+            .or_else(|| {
+                context
+                    .catalog
+                    .row_type_relation(element)
+                    .map(|relation| (relation.schema, relation.owner))
+            })
             .ok_or_else(|| SQLError::Internal(format!("array type {oid} has no element type")))?;
         return Ok(DropTarget {
-            schema: Some(domain.identity.schema),
-            owner: domain.owner,
+            schema: Some(schema),
+            owner,
             required_by: Some(Requirement::Object(format!(
                 "type {}",
                 format_type(context, i64::from(element))?

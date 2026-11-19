@@ -16,7 +16,7 @@ pub(super) fn validate(
     context: &IndexRegistryContext<'_>,
     before: &CatalogReadView,
     candidate: &CatalogReadView,
-    rows: &BTreeMap<RelationIdentity, CatalogIndexRow>,
+    rows: &crate::catalog::index::registry::CatalogIndexes,
     root: &RelationIdentity,
 ) -> StorageBackendResult<CatalogReadView> {
     let current = context.identities.catalog.current_catalog_snapshot();
@@ -27,7 +27,7 @@ pub(super) fn validate(
 fn validate_snapshots(
     before: &CatalogReadView,
     candidate: &CatalogReadView,
-    rows: &BTreeMap<RelationIdentity, CatalogIndexRow>,
+    rows: &crate::catalog::index::registry::CatalogIndexes,
     root: &RelationIdentity,
     current: &CatalogReadView,
 ) -> StorageBackendResult<()> {
@@ -112,10 +112,10 @@ fn validate_snapshots(
         .as_ref()
         .clone();
     for row in change.removals {
-        rebased.remove(&row.relation);
+        rebased.remove(&row.relation)?;
     }
     for row in change.upserts {
-        rebased.insert(row.relation.clone(), row);
+        rebased.insert_in(row, &snapshot)?;
     }
     validation::validate(&CatalogReadView::new(snapshot), &rebased)
 }
@@ -148,16 +148,16 @@ fn same_definition(before: &CatalogIndexRow, current: &CatalogIndexRow) -> bool 
 }
 
 fn rebind_names(candidate: &mut CatalogTableSnapshot, current: &CatalogTableSnapshot) {
+    let mut hierarchy = (*candidate.hierarchy).clone();
     crate::schema::indexes::constraint_names::rebind_current_key_names(
-        std::sync::Arc::make_mut(&mut candidate.keys)
+        candidate
+            .keys
+            .make_mut()
             .iter_mut()
-            .chain(
-                std::sync::Arc::make_mut(&mut candidate.hierarchy)
-                    .partition_inherited_key_constraints
-                    .iter_mut(),
-            ),
+            .chain(hierarchy.partition_inherited_key_constraints.iter_mut()),
         current,
     );
+    candidate.hierarchy = hierarchy.into();
 }
 
 fn declaration(table: &CatalogTableSnapshot) -> StorageBackendResult<Vec<u8>> {

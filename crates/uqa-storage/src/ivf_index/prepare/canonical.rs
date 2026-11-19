@@ -6,7 +6,8 @@
 
 //! Bounded canonical construction and detached training preserve immutable cached generations.
 
-use super::{workspace_bytes, Budgeted, DocId, IVFIndex, IVFMetadataSnapshot, IVFState};
+use super::{workspace_bytes, Budgeted, DocId, IVFMetadataSnapshot, IVFState};
+use crate::IVFIndex;
 use crate::{
     read_control::StorageReadControl, vector_index::IVFIndexParams, StorageBackendError,
     StorageBackendResult,
@@ -26,7 +27,7 @@ impl IVFIndex {
             vectors.len(),
             params.nlist.min(vectors.len()),
         )?)?;
-        let mut index = Self::with_params(
+        let index = Self::with_params(
             dimensions,
             params.nlist,
             params.nprobe,
@@ -48,7 +49,11 @@ impl IVFIndex {
                 crate::vector_index::validate_vector_values(dimensions, vector)?;
                 values.push(vector.clone());
             }
-            index.replace_controlled(document, values, Some(control))?;
+            index.data.write_with_control(control)?.replace_controlled(
+                document,
+                values,
+                Some(control),
+            )?;
             previous = Some(document);
         }
         Ok(Budgeted::new(index, memory))
@@ -61,8 +66,15 @@ impl IVFIndex {
         control: &StorageReadControl,
     ) -> StorageBackendResult<Budgeted<IVFMetadataSnapshot>> {
         let candidate = Self::from_canonical_controlled(dimensions, params, vectors, control)?;
-        candidate.train_controlled(Some(control))?;
-        candidate.metadata_controlled(control)
+        candidate
+            .data
+            .write_with_control(control)?
+            .train_controlled(Some(control))?;
+        let metadata = candidate
+            .data
+            .read_with_control(control)?
+            .metadata_controlled(control);
+        metadata
     }
 
     pub(crate) fn trained_snapshot_controlled(
@@ -71,7 +83,10 @@ impl IVFIndex {
     ) -> StorageBackendResult<Budgeted<Self>> {
         let candidate = self.snapshot_controlled(control)?;
         if candidate.state() == IVFState::Stale {
-            candidate.train_controlled(Some(control))?;
+            candidate
+                .data
+                .write_with_control(control)?
+                .train_controlled(Some(control))?;
         }
         Ok(candidate)
     }

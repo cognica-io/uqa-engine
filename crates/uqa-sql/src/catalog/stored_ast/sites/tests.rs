@@ -65,7 +65,7 @@ fn row_distinct_sites_drop_constructor_casts_and_preserve_subquery_order() {
         Ok(())
     })
     .unwrap();
-    let Expr::Or(expected_fields) = expected else {
+    let Expr::Or(expected_fields) = &expected else {
         panic!("field disjunction");
     };
     let Expr::Func {
@@ -80,7 +80,7 @@ fn row_distinct_sites_drop_constructor_casts_and_preserve_subquery_order() {
         binding.dispatch,
         Some(crate::ast::FunctionDispatch::RowDistinct)
     );
-    assert_eq!(args, &expected_fields);
+    assert_eq!(args, expected_fields);
     let restored = ExpressionPlan::lower(syntax.clone());
     let sites = expression_syntax_sites(&restored, &restored).unwrap();
     assert!(!bind_stored_expression_sites(&mut syntax, &sites).unwrap());

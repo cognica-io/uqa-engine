@@ -6,12 +6,9 @@
 
 //! Retain routine addresses, borrowing user definitions until the selected routine is needed.
 
-use super::{BuiltinRoutineCatalogEntry, CatalogReadView, SQLError, SQLUserFunction};
+use super::{BuiltinRoutineCatalogEntry, CatalogReadView, SQLError};
 use crate::catalog::cache::OrderedOidLookup;
-use std::{
-    collections::BTreeMap,
-    sync::{Arc, OnceLock},
-};
+use std::{collections::BTreeMap, sync::OnceLock};
 
 #[derive(Default)]
 pub(in crate::catalog) struct RoutineDefinitions {
@@ -20,7 +17,10 @@ pub(in crate::catalog) struct RoutineDefinitions {
 
 impl CatalogReadView {
     /// Borrow a retained user routine by its catalog identity, sharing the generation's existing OID lookup.
-    pub fn sql_function_by_oid(&self, oid: u32) -> Result<Option<&Arc<SQLUserFunction>>, SQLError> {
+    pub fn sql_function_by_oid(
+        &self,
+        oid: u32,
+    ) -> Result<Option<&uqa_sql::routines::SQLRoutine>, SQLError> {
         user_routine_by_oid(self, i64::from(oid))
     }
 }
@@ -28,7 +28,7 @@ impl CatalogReadView {
 pub(super) fn user_routine_by_oid(
     catalog: &CatalogReadView,
     oid: i64,
-) -> Result<Option<&Arc<SQLUserFunction>>, SQLError> {
+) -> Result<Option<&uqa_sql::routines::SQLRoutine>, SQLError> {
     let lookup = catalog.routine_definitions.by_oid.get_or_init(|| {
         OrderedOidLookup::build(
             catalog

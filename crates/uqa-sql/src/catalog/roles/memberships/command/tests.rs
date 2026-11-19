@@ -7,9 +7,11 @@
 use super::super::test_support::{insert_membership, Names};
 use super::*;
 use crate::ast::RoleSpecification;
+use crate::catalog::roles::{RoleDefinitions, RoleMemberships};
 
-fn roles() -> BTreeMap<String, RoleDefinition> {
-    let mut roles = BTreeMap::from([("uqa".into(), RoleDefinition::bootstrap())]);
+fn roles() -> RoleDefinitions {
+    let mut roles =
+        RoleDefinitions::try_from_iter([("uqa".into(), RoleDefinition::bootstrap())]).unwrap();
     for (index, name) in ["target", "member", "grantor", "actor", "CURRENT_USER"]
         .into_iter()
         .enumerate()
@@ -19,7 +21,7 @@ fn roles() -> BTreeMap<String, RoleDefinition> {
         role.oid = 20_001 + index as i64;
         role.object_id = [index as u8 + 1; 16];
         role.attributes = [RoleAttribute::Inherit].into_iter().collect();
-        roles.insert(name.into(), role);
+        roles.insert(name.into(), role).unwrap();
     }
     roles
 }
@@ -35,11 +37,11 @@ fn statement() -> GrantRoleStmt {
     }
 }
 
-fn bind(roles: &BTreeMap<String, RoleDefinition>, statement: &GrantRoleStmt) -> MembershipTarget {
+fn bind(roles: &RoleDefinitions, statement: &GrantRoleStmt) -> MembershipTarget {
     let recipients = MembershipRecipients::bind(&Names("uqa"), roles, statement).unwrap();
     MembershipTarget::authorize(
         roles,
-        &BTreeMap::new(),
+        &RoleMemberships::new(),
         "uqa",
         &"target".into(),
         &recipients,
@@ -51,7 +53,7 @@ fn bind(roles: &BTreeMap<String, RoleDefinition>, statement: &GrantRoleStmt) -> 
 #[test]
 fn captured_grant_authority_and_target_survive_an_admin_revoke_and_name_replacement() {
     let mut roles = roles();
-    let mut memberships = BTreeMap::new();
+    let mut memberships = RoleMemberships::new();
     insert_membership(
         &mut memberships,
         "target",
@@ -89,7 +91,13 @@ fn captured_grant_authority_and_target_survive_an_admin_revoke_and_name_replacem
     .unwrap();
     assert_eq!(bound.grantor.identity(), roles["grantor"].identity());
     memberships.clear();
-    roles.get_mut("target").unwrap().object_id = [99; 16];
+    roles
+        .edit("target", |value| {
+            value.object_id = [99; 16];
+            Ok(())
+        })
+        .unwrap()
+        .unwrap();
     bound.validate_graph(&memberships).unwrap();
     let MembershipChange::Insert(insert) = bound
         .change_for_member(&roles, &memberships, &bound.members[0])
@@ -110,7 +118,8 @@ fn member_default_uses_current_attributes_of_the_captured_identity() {
             let mut statement = statement();
             statement.options.inherit = explicit.then_some(true);
             let bound = bind(&roles, &statement);
-            let mut member = roles.remove("member").unwrap();
+            let mut member = roles.get("member").unwrap().clone();
+            roles.remove("member").unwrap();
             match change {
                 "attributes" => {
                     member.attributes.remove(&RoleAttribute::Inherit);
@@ -121,9 +130,10 @@ fn member_default_uses_current_attributes_of_the_captured_identity() {
                 _ => unreachable!(),
             }
             if change != "dropped" {
-                roles.insert(member.name.clone(), member);
+                roles.insert(member.name.clone(), member).unwrap();
             }
-            let result = bound.change_for_member(&roles, &BTreeMap::new(), &bound.members[0]);
+            let result =
+                bound.change_for_member(&roles, &RoleMemberships::new(), &bound.members[0]);
             if !explicit && matches!(change, "dropped" | "replaced") {
                 assert_eq!(result.err().unwrap().sqlstate(), Some("XX000"));
             } else {
@@ -174,13 +184,13 @@ fn unchanged_grants_and_absent_revokes_return_distinct_notices_without_an_oid_re
     let mut statement = statement();
     let bound = bind(&roles, &statement);
     let MembershipChange::Insert(insert) = bound
-        .change_for_member(&roles, &BTreeMap::new(), &bound.members[0])
+        .change_for_member(&roles, &RoleMemberships::new(), &bound.members[0])
         .unwrap()
     else {
         panic!("new membership")
     };
     let membership = insert.with_oid(42_000).unwrap();
-    let memberships = BTreeMap::from([(membership.key(), membership)]);
+    let memberships = RoleMemberships::try_from_iter([(membership.key(), membership)]).unwrap();
     let MembershipChange::Notice(notice) = bound
         .change_for_member(&roles, &memberships, &bound.members[0])
         .unwrap()
@@ -195,7 +205,7 @@ fn unchanged_grants_and_absent_revokes_return_distinct_notices_without_an_oid_re
     );
     statement.is_grant = false;
     let bound = bind(&roles, &statement);
-    let notice = MembershipRevocation::new(&bound, &BTreeMap::new())
+    let notice = MembershipRevocation::new(&bound, &RoleMemberships::new())
         .member(&roles, &bound.members[0])
         .unwrap()
         .unwrap();
@@ -210,7 +220,7 @@ fn unchanged_grants_and_absent_revokes_return_distinct_notices_without_an_oid_re
 #[test]
 fn group_checks_target_authority_before_recipients_and_accepts_inherited_admin() {
     let roles = roles();
-    let mut memberships = BTreeMap::new();
+    let mut memberships = RoleMemberships::new();
     let mut statement = AlterRoleStmt {
         name: "missing_target".into(),
         members: vec!["missing_member".into()],
@@ -218,7 +228,7 @@ fn group_checks_target_authority_before_recipients_and_accepts_inherited_admin()
         attributes: uqa_core::memory::OwnedMap::new(),
         connection_limit: None,
     };
-    let authorize = |memberships: &BTreeMap<_, _>, statement: &AlterRoleStmt| {
+    let authorize = |memberships: &RoleMemberships, statement: &AlterRoleStmt| {
         MembershipTarget::authorize_group(&Names("actor"), &roles, memberships, "actor", statement)
     };
     let error = authorize(&memberships, &statement).err().unwrap();
@@ -278,7 +288,7 @@ fn revocation_plans_duplicate_recipients_against_original_rows_and_preserves_row
             ..RoleMembershipOptions::default()
         },
     ] {
-        let mut memberships = BTreeMap::new();
+        let mut memberships = RoleMemberships::new();
         insert_membership(
             &mut memberships,
             "target",

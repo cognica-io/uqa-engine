@@ -7,6 +7,9 @@
 use super::*;
 use crate::ast::EnumTypeReference;
 use crate::catalog::roles::identity::RoleBinding;
+use crate::catalog::roles::RoleDefinition;
+use crate::catalog::roles::RoleMembership;
+use crate::catalog::roles::{RoleDefinitions, RoleMemberships};
 
 const FEELING: u32 = 20_000;
 
@@ -21,16 +24,18 @@ fn role(name: &str, oid: i64, attributes: &[RoleAttribute]) -> RoleDefinition {
     }
 }
 
-fn roles() -> BTreeMap<String, RoleDefinition> {
-    [
-        role("owner", 10_001, &[]),
-        role("user", 10_002, &[]),
-        role("group", 10_003, &[]),
-        role("admin", 10_004, &[RoleAttribute::Superuser]),
-    ]
-    .into_iter()
-    .map(|role| (role.name.clone(), role))
-    .collect()
+fn roles() -> RoleDefinitions {
+    RoleDefinitions::try_from_iter(
+        [
+            role("owner", 10_001, &[]),
+            role("user", 10_002, &[]),
+            role("group", 10_003, &[]),
+            role("admin", 10_004, &[RoleAttribute::Superuser]),
+        ]
+        .into_iter()
+        .map(|role| (role.name.clone(), role)),
+    )
+    .unwrap()
 }
 
 struct Types {
@@ -52,8 +57,8 @@ impl TypePrivilegeCatalog for Types {
 }
 
 fn usage(
-    roles: &BTreeMap<String, RoleDefinition>,
-    memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
+    roles: &RoleDefinitions,
+    memberships: &RoleMemberships,
     types: &Types,
     user: &str,
 ) -> Result<(), SQLError> {
@@ -111,7 +116,7 @@ fn usage_is_governed_by_the_array_element_or_the_domain_itself() {
 fn usage_follows_the_acl_ownership_membership_and_superuser() {
     let roles = roles();
     let owner = roles["owner"].identity();
-    let mut memberships = BTreeMap::new();
+    let mut memberships = RoleMemberships::new();
     let mut types = Types { owner, acl: None };
     // The default privileges grant USAGE to PUBLIC.
     usage(&roles, &memberships, &types, "user").unwrap();
@@ -142,12 +147,18 @@ fn usage_follows_the_acl_ownership_membership_and_superuser() {
         inherit_option: true,
         set_option: true,
     };
-    memberships.insert(membership.key(), membership);
+    memberships.insert(membership.key(), membership).unwrap();
     usage(&roles, &memberships, &types, "user").unwrap();
 
     // A membership without INHERIT does not.
-    for membership in memberships.values_mut() {
-        membership.inherit_option = false;
+    for key in memberships.keys().copied().collect::<Vec<_>>() {
+        memberships
+            .edit(&key, |membership| {
+                membership.inherit_option = false;
+                Ok(())
+            })
+            .unwrap()
+            .unwrap();
     }
     assert!(usage(&roles, &memberships, &types, "user").is_err());
 }
@@ -162,7 +173,7 @@ fn a_granted_usage_does_not_spell_the_type() {
     TypePrivilegeInquiry {
         current_user: &RoleReference::from("user"),
         roles: &roles,
-        memberships: &BTreeMap::new(),
+        memberships: &RoleMemberships::new(),
         catalog: &types,
     }
     .require_usage(FEELING, || unreachable!("only a denial names the type"))

@@ -8,12 +8,9 @@
 
 use super::object_acl;
 use crate::ast::{ColumnType, ObjectAclEntry, RoleAttribute};
-use crate::catalog::roles::{
-    identity::RoleSubject, role_inherits, RoleDefinition, RoleMembership, RoleMembershipKey,
-    RoleReference,
-};
+use crate::catalog::roles::{identity::RoleSubject, role_inherits, RoleReference};
+use crate::catalog::roles::{RoleDefinitions, RoleMemberships};
 use crate::SQLError;
-use std::collections::BTreeMap;
 use uqa_core::{catalog_role::RoleIdentity, Value};
 
 #[cfg(test)]
@@ -49,8 +46,8 @@ pub trait TypePrivilegeCatalog {
 
 pub struct TypePrivilegeInquiry<'a> {
     pub current_user: &'a RoleReference,
-    pub roles: &'a BTreeMap<String, RoleDefinition>,
-    pub memberships: &'a BTreeMap<RoleMembershipKey, RoleMembership>,
+    pub roles: &'a RoleDefinitions,
+    pub memberships: &'a RoleMemberships,
     pub catalog: &'a dyn TypePrivilegeCatalog,
 }
 

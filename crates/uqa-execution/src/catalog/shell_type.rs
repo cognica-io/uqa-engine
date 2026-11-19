@@ -6,26 +6,21 @@
 
 //! Undefined type authority uses the same independent records, OID claims and private-overlay rules as completed types.
 
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    ops::Deref,
-    sync::Arc,
-};
-use uqa_sql::catalog::{
-    roles::RoleDefinition,
-    shell_type::{validate_shell_registry, StoredShellType},
-};
+use std::{collections::BTreeSet, ops::Deref};
+use uqa_core::memory::RetainedValue;
+use uqa_sql::catalog::roles::RoleDefinitions;
+use uqa_sql::catalog::shell_type::{validate_shell_registry, StoredShellType};
 use uqa_storage::{CatalogFacade, StorageBackendError, StorageBackendResult};
 
 use super::type_records::{TypeRecord, TypeRecordFormat};
 
-pub type ShellRegistry = BTreeMap<String, StoredShellType>;
+pub type ShellRegistry = uqa_sql::catalog::type_definitions::TypeDefinitions<StoredShellType>;
 pub type ShellRegistryRead<'a> = Box<dyn Deref<Target = ShellRegistry> + 'a>;
 
 pub trait ShellRegistryPublication {
     fn shell_registry(&self) -> ShellRegistryRead<'_>;
     fn shell_catalog(&self) -> Option<&dyn CatalogFacade>;
-    fn shell_role_definitions(&self) -> BTreeMap<String, RoleDefinition>;
+    fn shell_role_definitions(&self) -> RoleDefinitions;
     fn publish_shell_definitions(&self, registry: ShellRegistry);
 }
 
@@ -48,7 +43,7 @@ impl TypeRecord for StoredShellType {
 
 pub fn restore(
     catalog: &dyn CatalogFacade,
-    roles: &BTreeMap<String, RoleDefinition>,
+    roles: &RoleDefinitions,
 ) -> StorageBackendResult<ShellRegistry> {
     let registry = FORMAT.read(catalog)?;
     validate_shell_registry(&registry, roles).map_err(StorageBackendError::Other)?;
@@ -57,10 +52,10 @@ pub fn restore(
 
 pub fn merge_private(
     catalog: Option<&dyn CatalogFacade>,
-    current: &Arc<ShellRegistry>,
-    committed: Arc<ShellRegistry>,
-    roles: &BTreeMap<String, RoleDefinition>,
-) -> StorageBackendResult<Arc<ShellRegistry>> {
+    current: &RetainedValue<ShellRegistry>,
+    committed: RetainedValue<ShellRegistry>,
+    roles: &RoleDefinitions,
+) -> StorageBackendResult<RetainedValue<ShellRegistry>> {
     let registry = FORMAT.merge_private(catalog, current, committed)?;
     validate_shell_registry(&registry, roles).map_err(StorageBackendError::Other)?;
     Ok(registry)
@@ -92,6 +87,19 @@ pub fn publish(
     };
     publication.publish_shell_definitions(registry);
     Ok(())
+}
+
+/// Resumable stored definitions, OID claims and complete native validation under one selected catalog read boundary.
+pub type ShellCatalogInput = super::type_records::input::TypeCatalogInput<StoredShellType>;
+
+pub fn begin_input(
+    catalog: std::sync::Arc<dyn CatalogFacade>,
+    roles: RoleDefinitions,
+    limits: uqa_storage::catalog::input::CatalogInputLimits,
+    mutations: &uqa_core::memory::MemoryBudget,
+    control: &uqa_storage::read_control::StorageReadControl,
+) -> StorageBackendResult<ShellCatalogInput> {
+    super::type_records::input::new(&FORMAT, catalog, roles, limits, mutations, control)
 }
 
 #[cfg(test)]

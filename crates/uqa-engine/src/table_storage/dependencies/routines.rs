@@ -125,9 +125,9 @@ impl Engine {
             updates.push((table, columns, checks, hierarchy));
         }
         for (table, columns, checks, hierarchy) in updates {
-            *table.columns.write() = columns;
-            *table.table_checks.write() = checks;
-            *table.hierarchy.write() = hierarchy;
+            table.columns.write().publish(columns)?;
+            table.table_checks.write().publish(checks)?;
+            table.hierarchy.write().publish(hierarchy)?;
         }
         Ok(())
     }
@@ -163,17 +163,24 @@ impl Engine {
         }
 
         let mut foreign_updates = Vec::new();
-        for (relation, mut table) in self.durable.foreign_tables.read().clone() {
+        let foreign = self.durable.foreign_catalog.read().clone();
+        for (relation, table) in foreign.tables() {
+            let mut table = table.clone();
             if rewrite_schema_routine_references(
                 &mut table.columns,
                 &mut table.checks,
                 target,
                 new_name,
             )? {
-                foreign_updates.push((relation, table));
+                foreign_updates.push((relation.clone(), table));
             }
         }
 
+        let next_foreign = foreign
+            .with_table_updates(&foreign_updates)
+            .map_err(|error| {
+                uqa_storage::StorageBackendError::backend("admit foreign dependency changes", error)
+            })?;
         if self.is_persistent() {
             for (table_name, table, columns, checks) in &table_updates {
                 self.persist_constraint_candidate(
@@ -193,15 +200,12 @@ impl Engine {
 
         let tables_changed = !table_updates.is_empty();
         for (_, table, columns, checks) in table_updates {
-            *table.columns.write() = columns;
-            *table.table_checks.write() = checks;
+            table.columns.write().publish(columns)?;
+            table.table_checks.write().publish(checks)?;
         }
         let foreign_tables_changed = !foreign_updates.is_empty();
         if foreign_tables_changed {
-            let mut tables = self.durable.foreign_tables.write();
-            for (relation, table) in foreign_updates {
-                tables.insert(relation, table);
-            }
+            *self.durable.foreign_catalog.write() = next_foreign;
         }
         if tables_changed {
             self.note_table_catalog_changed();

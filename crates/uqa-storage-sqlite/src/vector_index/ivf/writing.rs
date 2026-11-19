@@ -32,11 +32,11 @@ pub(super) fn write_metadata(
     )?;
     connection.execute(
         "DELETE FROM _ivf_centroids WHERE table_name = ?1 AND field = ?2",
-        params![persistent.table, persistent.field],
+        params![persistent.table.as_str(), persistent.field.as_str()],
     )?;
     connection.execute(
         "DELETE FROM _ivf_assignments WHERE table_name = ?1 AND field = ?2",
-        params![persistent.table, persistent.field],
+        params![persistent.table.as_str(), persistent.field.as_str()],
     )?;
     let mut centroid_insert = connection.prepare(
         "INSERT INTO _ivf_centroids (table_name, field, centroid_id, vector)
@@ -44,8 +44,8 @@ pub(super) fn write_metadata(
     )?;
     for (centroid_id, centroid) in &metadata.centroids {
         centroid_insert.execute(params![
-            persistent.table,
-            persistent.field,
+            persistent.table.as_str(),
+            persistent.field.as_str(),
             centroid_id,
             centroid
         ])?;
@@ -57,8 +57,8 @@ pub(super) fn write_metadata(
     )?;
     for (doc_id, ordinal, centroid) in &metadata.assignments {
         assignment_insert.execute(params![
-            persistent.table,
-            persistent.field,
+            persistent.table.as_str(),
+            persistent.field.as_str(),
             doc_id,
             ordinal,
             centroid
@@ -107,8 +107,8 @@ fn write_meta_values(
              state, trained_size, deletes_since_train, vector_count)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
         params![
-            persistent.table,
-            persistent.field,
+            persistent.table.as_str(),
+            persistent.field.as_str(),
             i64::from(persistent.dimensions),
             nlist,
             nprobe,

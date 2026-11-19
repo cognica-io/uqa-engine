@@ -10,14 +10,13 @@ use crate::catalog::view::{
 };
 use std::{
     cell::{Cell, RefCell, RefMut},
-    collections::BTreeMap,
     ops::{Deref, DerefMut},
 };
 use uqa_sql::plan::UnifiedPlan;
 use uqa_storage::{StorageBackendError, StorageBackendResult, ViewRow};
 
 struct Publication {
-    views: RefCell<BTreeMap<RelationIdentity, StoredView>>,
+    views: RefCell<uqa_sql::catalog::stored_view::ViewDefinitions>,
     held: Cell<bool>,
     events: RefCell<Vec<&'static str>>,
     durable: bool,
@@ -27,7 +26,7 @@ struct Publication {
 impl Publication {
     fn new(durable: bool, fail: bool) -> Self {
         Self {
-            views: RefCell::new(BTreeMap::new()),
+            views: RefCell::new(uqa_sql::catalog::stored_view::ViewDefinitions::new()),
             held: Cell::new(false),
             events: RefCell::new(Vec::new()),
             durable,
@@ -38,10 +37,10 @@ impl Publication {
 }
 struct Guard<'a> {
     publication: &'a Publication,
-    views: RefMut<'a, BTreeMap<RelationIdentity, StoredView>>,
+    views: RefMut<'a, uqa_sql::catalog::stored_view::ViewDefinitions>,
 }
 impl Deref for Guard<'_> {
-    type Target = BTreeMap<RelationIdentity, StoredView>;
+    type Target = uqa_sql::catalog::stored_view::ViewDefinitions;
     fn deref(&self) -> &Self::Target {
         &self.views
     }
@@ -118,6 +117,62 @@ fn definition(kind: StoredViewKind, persistence: RelationPersistence) -> StoredV
 }
 
 #[test]
+fn native_view_admission_failure_precedes_storage_and_preserves_the_previous_generation() {
+    for kind in [StoredViewKind::View, StoredViewKind::Materialized] {
+        let memory = uqa_core::memory::MemoryBudget::new(65536);
+        let publication = Publication::new(true, false);
+        *publication.views.borrow_mut() =
+            uqa_sql::catalog::stored_view::ViewDefinitions::with_budget(&memory);
+        let relation = RelationIdentity::new("public", "v");
+        publication
+            .views
+            .borrow_mut()
+            .insert(
+                relation.clone(),
+                definition(kind, RelationPersistence::Permanent),
+            )
+            .unwrap();
+        let original = publication.views.borrow().clone();
+        let bytes = memory.used();
+        let blocked = memory.reserve(memory.available()).unwrap();
+        let mut replacement = definition(kind, RelationPersistence::Permanent);
+        replacement.object_id = [8; 16];
+        let publish = if kind == StoredViewKind::View {
+            publish_regular_view
+        } else {
+            publish_materialized_view
+        };
+        let error = publish(
+            &publication,
+            &publication,
+            relation.clone(),
+            replacement,
+            "public.v",
+        )
+        .unwrap_err();
+        assert_eq!(error.sqlstate(), Some("53200"));
+        assert!(publication.saved.borrow().is_empty());
+        assert!(publication
+            .views
+            .borrow()
+            .shares_definition(&relation, &original));
+        assert!(!publication.held.get());
+        assert_eq!(
+            *publication.events.borrow(),
+            if kind == StoredViewKind::View {
+                vec!["lock", "unlock"]
+            } else {
+                vec![]
+            }
+        );
+        drop(blocked);
+        assert_eq!(memory.used(), bytes);
+        drop((publication, original));
+        assert_eq!(memory.used(), 0);
+    }
+}
+
+#[test]
 fn view_publication_preserves_distinct_regular_and_materialized_guard_boundaries() {
     let relation = RelationIdentity::new("public", "v");
     let regular = Publication::new(true, false);
@@ -167,7 +222,11 @@ fn persistence_failure_keeps_the_previous_view_and_suppresses_publication() {
         let relation = RelationIdentity::new("public", "v");
         let mut old = definition(kind, RelationPersistence::Permanent);
         old.object_id = [1; 16];
-        publication.views.borrow_mut().insert(relation.clone(), old);
+        publication
+            .views
+            .borrow_mut()
+            .insert(relation.clone(), old)
+            .unwrap();
         let operation = match kind {
             StoredViewKind::View => publish_regular_view,
             StoredViewKind::Materialized => publish_materialized_view,
@@ -226,7 +285,9 @@ fn temporary_materialized_rows_never_enter_durable_publication() {
     for populated in [true, false, true] {
         view.populated = populated;
         view.materialized_rows = if populated {
-            vec![[("value".into(), uqa_core::Value::Int(7))].into()]
+            vec![[("value".into(), uqa_core::Value::Int(7))]
+                .into_iter()
+                .collect()]
         } else {
             Vec::new()
         };

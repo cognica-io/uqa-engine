@@ -179,15 +179,19 @@ pub(super) fn expr_display(expr: &Expr) -> String {
     format!("{expr:?}")
 }
 
-pub(super) fn options_display(options: &BTreeMap<String, String>) -> String {
+pub(super) fn options_display<'a>(
+    options: impl IntoIterator<Item = (&'a String, &'a String)>,
+) -> String {
     options
-        .iter()
+        .into_iter()
         .map(|(key, value)| format!("{key}={value}"))
         .collect::<Vec<_>>()
         .join(" ")
 }
 
-pub(super) fn foreign_table_options_display(options: &BTreeMap<String, String>) -> String {
+pub(super) fn foreign_table_options_display(
+    options: &uqa_core::memory::OwnedMap<String, String>,
+) -> String {
     let mut out = Vec::new();
     if options
         .get("hive_partitioning")

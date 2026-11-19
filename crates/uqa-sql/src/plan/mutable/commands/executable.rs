@@ -6,8 +6,11 @@
 
 //! Utility statement bodies keep their existing wrapper and statement boxes while moving the executable owner.
 
-use super::super::MutableExecutablePlan;
-use super::{CommandPlan, MutableCommandPlan, MutableQueryPlan, RewriteMemory, SQLError};
+use super::super::{
+    edits::{BodySlot, Slot},
+    MutableExecutablePlan,
+};
+use super::{CommandPlan, MutableCommandPlan, RewriteMemory, SQLError};
 use crate::plan::UnifiedPlan;
 use uqa_core::memory::ProductionControl;
 
@@ -54,6 +57,13 @@ impl MutableCommandPlan {
     ) -> Result<Self, SQLError> {
         self.assert_owner(control);
         control.check()?;
+        let mut slot = self.executable_slot()?;
+        let output = map(slot.take())?;
+        slot.complete(output, control, "utility")?;
+        Ok(self)
+    }
+
+    pub(in crate::plan::mutable) fn executable_slot(&mut self) -> Result<BodySlot<'_>, SQLError> {
         let body = match &mut self.command {
             CommandPlan::Explain { body, .. } | CommandPlan::Prepare { body, .. } => body,
             _ => {
@@ -68,59 +78,15 @@ impl MutableCommandPlan {
                 .as_mut()
                 .expect("utility body owner")
         });
-        rewrite(body, memory, control, map)?;
-        Ok(self)
+        Ok(match body.as_mut() {
+            UnifiedPlan::Query(query) => BodySlot::Query(Slot::new(
+                query.as_mut(),
+                memory.map(|memory| memory.field_mut("query")),
+            )),
+            UnifiedPlan::Command(command) => BodySlot::Command(Slot::new(
+                command.as_mut(),
+                memory.map(|memory| memory.field_mut("command")),
+            )),
+        })
     }
-}
-
-fn rewrite(
-    body: &mut UnifiedPlan,
-    mut memory: Option<&mut RewriteMemory>,
-    control: &ProductionControl<'_>,
-    map: impl FnOnce(MutableExecutablePlan) -> Result<MutableExecutablePlan, SQLError>,
-) -> Result<(), SQLError> {
-    match body {
-        UnifiedPlan::Query(query) => {
-            let input = MutableQueryPlan {
-                query: std::mem::replace(query.as_mut(), super::super::queries::empty_query()),
-                memory: memory
-                    .as_mut()
-                    .and_then(|memory| memory.field_mut("query").take()),
-            };
-            let MutableExecutablePlan::Query(output) = map(MutableExecutablePlan::Query(input))?
-            else {
-                return Err(SQLError::Internal(
-                    "utility rewrite changed a query body into a command".into(),
-                ));
-            };
-            output.assert_owner(control);
-            control.check()?;
-            **query = output.query;
-            if let Some(memory) = memory {
-                *memory.field_mut("query") = output.memory;
-            }
-        }
-        UnifiedPlan::Command(command) => {
-            let input = MutableCommandPlan {
-                command: std::mem::replace(command.as_mut(), CommandPlan::Empty),
-                memory: memory
-                    .as_mut()
-                    .and_then(|memory| memory.field_mut("command").take()),
-            };
-            let MutableExecutablePlan::Command(output) =
-                map(MutableExecutablePlan::Command(input))?
-            else {
-                return Err(SQLError::Internal(
-                    "utility rewrite changed a command body into a query".into(),
-                ));
-            };
-            output.assert_owner(control);
-            control.check()?;
-            **command = output.command;
-            if let Some(memory) = memory {
-                *memory.field_mut("command") = output.memory;
-            }
-        }
-    }
-    Ok(())
 }

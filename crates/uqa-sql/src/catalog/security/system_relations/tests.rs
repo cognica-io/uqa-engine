@@ -5,6 +5,7 @@
 //
 
 use super::*;
+use crate::catalog::roles::{RoleDefinitions, RoleMemberships};
 use crate::catalog::{
     roles::RoleDefinition,
     security::{
@@ -22,12 +23,13 @@ fn system_acl_masks_relation_writes_but_preserves_attribute_grants_and_grant_opt
     reader.oid = 20_001;
     reader.object_id = [1; 16];
     reader.attributes.clear();
-    let roles = BTreeMap::from([
+    let roles = RoleDefinitions::try_from_iter([
         ("uqa".into(), RoleDefinition::bootstrap()),
         ("reader".into(), reader),
-    ]);
+    ])
+    .unwrap();
     let mut security = relation.bootstrap_security().resolve(&roles).unwrap();
-    let memberships = BTreeMap::new();
+    let memberships = RoleMemberships::new();
     for privilege in TableAclPrivilege::ALL {
         grant_acl(&mut security, privilege, &["reader".into()], "uqa", true);
         let check = TablePrivilegeCheck {
@@ -110,7 +112,8 @@ fn system_acl_masks_relation_writes_but_preserves_attribute_grants_and_grant_opt
 #[test]
 fn system_acl_validation_rejects_orphan_roles_wrong_owners_and_missing_columns() {
     let relation = SystemRelation::Projected(crate::catalog::VirtualRelation::PgAuthid);
-    let roles = BTreeMap::from([("uqa".into(), RoleDefinition::bootstrap())]);
+    let roles =
+        RoleDefinitions::try_from_iter([("uqa".into(), RoleDefinition::bootstrap())]).unwrap();
     let baseline = relation.bootstrap_security().resolve(&roles).unwrap();
     validate_security(relation, &baseline, &roles).unwrap();
     let mut invalid = baseline.clone();
@@ -145,10 +148,11 @@ fn system_defaults_follow_bootstrap_identity_after_rename_and_name_reuse() {
     replacement.oid = 20_001;
     replacement.object_id = [1; 16];
     replacement.attributes.clear();
-    let roles = BTreeMap::from([
+    let roles = RoleDefinitions::try_from_iter([
         (bootstrap.name.clone(), bootstrap),
         (replacement.name.clone(), replacement),
-    ]);
+    ])
+    .unwrap();
     let relation = SystemRelation::Projected(crate::catalog::VirtualRelation::PgAuthid);
     let bound = relation.bootstrap_security();
     let named = bound.resolve(&roles).unwrap();
@@ -164,7 +168,7 @@ fn system_defaults_follow_bootstrap_identity_after_rename_and_name_reuse() {
         "renamed_bootstrap",
         check,
         &roles,
-        &BTreeMap::new()
+        &RoleMemberships::new()
     ));
     assert!(!has_table_privilege(
         relation,
@@ -172,6 +176,6 @@ fn system_defaults_follow_bootstrap_identity_after_rename_and_name_reuse() {
         "uqa",
         check,
         &roles,
-        &BTreeMap::new()
+        &RoleMemberships::new()
     ));
 }

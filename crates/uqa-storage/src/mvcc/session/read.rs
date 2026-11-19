@@ -6,7 +6,7 @@
 
 use crate::key_value::{
     KeyPresenceVisitor, KeyValuePointVisitor, KeyValueRead, KeyValueReadKeyIterator,
-    KeyValueReadRevision,
+    KeyValueReadRevision, RecordKeyReadVisitor,
 };
 use crate::mvcc::{DatabaseId, VersionError};
 use crate::mvcc::{MergedRecordSnapshot, VersionResult};
@@ -35,6 +35,24 @@ impl<'a> RecordRead<'a> {
 }
 
 impl KeyValueRead for RecordRead<'_> {
+    fn visit_record_keys_after(
+        &self,
+        prefix: &[u8],
+        after: Option<&[u8]>,
+        limit: usize,
+        control: &StorageReadControl,
+        visit: &mut RecordKeyReadVisitor<'_>,
+    ) -> StorageBackendResult<()> {
+        self.control.check()?;
+        self.view
+            .visit_keys(prefix, after, limit, control, &mut |key, record| {
+                visit(key, record.live)?;
+                Ok(true)
+            })
+            .map_err(VersionError::into_storage_error)?;
+        self.control.check()
+    }
+
     fn control(&self) -> &StorageReadControl {
         self.control
     }
@@ -274,6 +292,18 @@ impl RetainedRecordRead {
     }
 }
 impl KeyValueRead for RetainedRecordRead {
+    fn visit_record_keys_after(
+        &self,
+        prefix: &[u8],
+        after: Option<&[u8]>,
+        limit: usize,
+        control: &StorageReadControl,
+        visit: &mut RecordKeyReadVisitor<'_>,
+    ) -> StorageBackendResult<()> {
+        self.read()
+            .visit_record_keys_after(prefix, after, limit, control, visit)
+    }
+
     fn control(&self) -> &StorageReadControl {
         &self.control
     }

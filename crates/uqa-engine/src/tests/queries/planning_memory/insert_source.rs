@@ -308,11 +308,25 @@ fn native_insert_source_names_precede_default_observation_and_release_on_failure
     else {
         panic!("table")
     };
-    table.columns.write()[0].default = missing.columns.remove(0).default;
+    table
+        .columns
+        .write()
+        .edit(|columns| {
+            columns[0].default = missing.columns.remove(0).default;
+            Ok(())
+        })
+        .unwrap();
     let mut visit = |name: &str| {
         assert!(!table.columns.is_locked());
         assert_eq!(name, "payload");
-        table.columns.write()[0].name = "changed".into();
+        table
+            .columns
+            .write()
+            .edit(|columns| {
+                columns[0].name = "changed".into();
+                Ok(())
+            })
+            .unwrap();
         assert_eq!(name, "payload");
         Ok(())
     };
@@ -323,7 +337,14 @@ fn native_insert_source_names_precede_default_observation_and_release_on_failure
         &mut visit,
     )
     .unwrap();
-    table.columns.write()[0].name = "payload".into();
+    table
+        .columns
+        .write()
+        .edit(|columns| {
+            columns[0].name = "payload".into();
+            Ok(())
+        })
+        .unwrap();
     uqa_sql::semantics::returning::ReturningCatalog::visit_column_names_with_control(
         &engine,
         "public.items",
@@ -331,7 +352,14 @@ fn native_insert_source_names_precede_default_observation_and_release_on_failure
         &mut visit,
     )
     .unwrap();
-    table.columns.write()[0].name = "x".repeat(4 << 20);
+    table
+        .columns
+        .write()
+        .edit(|columns| {
+            columns[0].name = "x".repeat(4 << 20);
+            Ok(())
+        })
+        .unwrap();
     let baseline = memory.used();
     let occupied = memory.reserve(memory.available() - (64 << 10)).unwrap();
     let schema =
@@ -354,7 +382,14 @@ fn native_insert_source_names_precede_default_observation_and_release_on_failure
     assert_eq!(consumer.state.borrow().result_width, None);
     assert!(consumer.state.borrow().statement_relation.is_empty());
     drop(occupied);
-    table.columns.write()[0].name = "payload".into();
+    table
+        .columns
+        .write()
+        .edit(|columns| {
+            columns[0].name = "payload".into();
+            Ok(())
+        })
+        .unwrap();
     let ordinary = engine
         .describe_table_in_execution("public.items")
         .unwrap_err();
@@ -370,12 +405,26 @@ fn native_insert_source_names_precede_default_observation_and_release_on_failure
     );
     assert_eq!(memory.used(), baseline);
     assert_eq!(consumer.state.borrow().result_width, None);
-    table.columns.write()[0].default = None;
+    table
+        .columns
+        .write()
+        .edit(|columns| {
+            columns[0].default = None;
+            Ok(())
+        })
+        .unwrap();
     consumer.begin(services, &source_columns, &schema).unwrap();
     assert_eq!(consumer.state.borrow().result_width, Some(1));
     assert_eq!(&**consumer.state.borrow().supplied_columns, &["payload"]);
     let bound = memory.used();
-    table.columns.write()[0].name = "changed".into();
+    table
+        .columns
+        .write()
+        .edit(|columns| {
+            columns[0].name = "changed".into();
+            Ok(())
+        })
+        .unwrap();
     let uqa_sql::SQLError::Internal(message) = consumer
         .begin(services, &source_columns, &schema)
         .unwrap_err()
@@ -389,7 +438,14 @@ fn native_insert_source_names_precede_default_observation_and_release_on_failure
     assert_eq!(consumer.state.borrow().result_width, Some(1));
     assert_eq!(&**consumer.state.borrow().supplied_columns, &["payload"]);
     assert_eq!(memory.used(), bound);
-    table.columns.write()[0].name = "payload".into();
+    table
+        .columns
+        .write()
+        .edit(|columns| {
+            columns[0].name = "payload".into();
+            Ok(())
+        })
+        .unwrap();
     consumer.begin(services, &source_columns, &schema).unwrap();
     assert_eq!(memory.used(), bound);
     drop(consumer);

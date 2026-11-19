@@ -10,6 +10,8 @@ mod node;
 mod vector;
 
 pub(super) use crate::spill_map::{invalid, Iter, Map, Read, Record};
+pub(super) use node::NodeRead;
+pub(super) use vector::VectorRead;
 
 #[cfg(test)]
 thread_local! {

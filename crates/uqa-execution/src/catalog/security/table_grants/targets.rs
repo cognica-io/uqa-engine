@@ -84,8 +84,9 @@ pub(super) fn validated_foreign_table_grant_targets<'a>(
     targets: &'a [ResolvedTableGrantTarget],
     requested: &RequestedTablePrivileges,
 ) -> Result<Vec<ForeignTableGrantTarget<'a>>, SQLError> {
-    let tables = context.registry.foreign_tables();
-    let securities = context.registry.foreign_security();
+    let catalog = context.registry.foreign_catalog();
+    let tables = catalog.tables();
+    let securities = catalog.security();
     targets
         .iter()
         .filter(|target| target.kind == "foreign table")

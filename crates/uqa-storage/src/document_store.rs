@@ -26,8 +26,12 @@ mod controlled_rows;
 pub use controlled_rows::{read_stored_documents, RetainedDocumentPage};
 mod controlled_presence;
 pub use controlled_presence::read_field_presence;
+mod shared_values;
+pub use shared_values::{SharedDocumentProjection, SharedDocumentValues};
 pub mod decoding;
 pub mod identifiers;
+pub mod image;
+pub mod maximum;
 mod retained;
 pub use retained::{RetainedDocumentFields, RetainedStoredDocument};
 mod retained_store;
@@ -114,12 +118,12 @@ static SHARED_NULL_VALUE: Value = Value::Null;
 /// cloning them.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SharedDocumentRow {
-    values: Arc<Vec<Value>>,
-    projection: Arc<[usize]>,
+    values: SharedDocumentValues,
+    projection: SharedDocumentProjection,
 }
 
 impl SharedDocumentRow {
-    pub(crate) fn new(values: Arc<Vec<Value>>, projection: Arc<[usize]>) -> Self {
+    pub(crate) fn new(values: SharedDocumentValues, projection: SharedDocumentProjection) -> Self {
         debug_assert!(projection
             .iter()
             .all(|slot| *slot == MISSING_SHARED_SLOT || *slot < values.len()));
@@ -172,15 +176,46 @@ impl SharedDocumentRow {
         (&self.values, &self.projection)
     }
 
-    /// Transfer the shared vector and its fragment-local projection into a
-    /// physical row without cloning either allocation.
+    /// Export an ordinary shared vector through the legacy unbudgeted result boundary. Ordinary rows preserve their original value allocation and every row preserves its original projection; retained image rows copy their values while the source lease is live. Internal physical scans use `into_shared_parts` to preserve the original owner without copying.
     pub fn into_parts(self) -> (Arc<Vec<Value>>, Arc<[usize]>) {
+        let values = match self.values {
+            SharedDocumentValues::Ordinary(values) => values,
+            SharedDocumentValues::Retained(values) => Arc::new((**values).clone()),
+        };
+        (values, self.projection.shared_slots())
+    }
+
+    /// Transfer the exact native value owner, including its original admission, and the fragment-local projection without copying either allocation.
+    pub fn into_shared_parts(self) -> (SharedDocumentValues, SharedDocumentProjection) {
         (self.values, self.projection)
     }
 }
 
 /// Mutating methods are fallible: persistent backends surface their write failures so callers (engine DML, upserts, referential rewrites) can abort the enclosing transaction instead of silently committing a partially-applied statement. A rewrite that deletes a row and then fails to re-insert it must never look like success.
 pub trait DocumentStore: Send + Sync {
+    /// Borrow a resumable evaluated document image from this exact read view. The cursor header is admitted before allocation, payloads remain owned by the source, and reads retain both source and invoking cancellation. Unsupported owners do not materialize a document or execute SQL as a fallback.
+    fn image_document_reader<'a>(
+        &'a self,
+        _doc_id: DocId,
+        _control: &'a StorageReadControl,
+    ) -> StorageBackendResult<Option<crate::image_io::ImageReader<'a>>> {
+        Err(StorageBackendError::Other(
+            "document image reader is unsupported by this owner".into(),
+        ))
+    }
+
+    /// Stream an evaluated document image from this exact read view, returning `None` for an absent document. Only owners with a lossless image codec implement this method; the default does not collect or re-evaluate fields. This primitive does not capture a committed Engine backup cut.
+    fn write_image_document(
+        &self,
+        _doc_id: DocId,
+        _output: &mut dyn std::io::Write,
+        _control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<u64>> {
+        Err(StorageBackendError::Other(
+            "document image export is unsupported by this owner".into(),
+        ))
+    }
+
     /// Persist one typed storage record. Every backend owns the physical representation of tuple metadata and must keep it outside the public field map.
     fn put_stored(&mut self, doc_id: DocId, document: StoredDocument) -> StorageBackendResult<()>;
 
@@ -614,6 +649,18 @@ pub trait DocumentStore: Send + Sync {
         Ok(self.doc_ids()?.into_iter().max().unwrap_or(0))
     }
 
+    /// Retain the current committed/private view for a key-only maximum lookup. Each advance consumes at most one physical record slot, including a tombstone. Unsupported stores reject without collecting document identities.
+    fn begin_max_doc_id_input(
+        &self,
+        maximum_key_bytes: usize,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<maximum::MaximumDocIdInput> {
+        maximum::validate_limit(maximum_key_bytes, control)?;
+        Err(StorageBackendError::Other(
+            "retained document maximum input is not supported".into(),
+        ))
+    }
+
     fn len(&self) -> StorageBackendResult<usize>;
 
     fn is_empty(&self) -> StorageBackendResult<bool> {
@@ -636,10 +683,18 @@ pub trait DocumentStore: Send + Sync {
         Ok(Box::new(rows.into_iter()))
     }
 
-    /// Read-only handle suitable for an `ExecutionContext`. Persistent
-    /// backends share their connection; memory backends deep-clone so the
-    /// snapshot is isolated from later mutations.
+    /// Read-only handle suitable for an `ExecutionContext`. Persistent backends may share a connection; memory stores share immutable generations isolated from later writes.
     fn snapshot(&self) -> StorageBackendResult<Arc<dyn DocumentStore>>;
+
+    /// Capture an immutable generation under the supplied retention allowance and cancellation. Unsupported owners return an error without collecting or reopening their data. Repeated captures of an already controlled owner keep its original retention and cancellation scope.
+    fn snapshot_with_control(
+        &self,
+        _control: &StorageReadControl,
+    ) -> StorageBackendResult<Arc<dyn DocumentStore>> {
+        Err(StorageBackendError::Other(
+            "controlled document snapshots are not supported by this backend".into(),
+        ))
+    }
 
     /// Share an already immutable retained view, preserving its selected rows, allocation owners and cancellation boundary. This capability must not capture a new live view or copy row payloads. The default reports that controlled copying is required without invoking the legacy `snapshot` method, whose persistent implementations may share a mutable connection.
     fn retained_snapshot(&self) -> StorageBackendResult<Option<Arc<dyn DocumentStore>>> {
@@ -686,4 +741,4 @@ pub fn eval_path_in_document(doc: &Document, path: &[PathSegment]) -> Option<Val
 
 mod memory;
 
-pub use memory::MemoryDocumentStore;
+pub use memory::{MemoryDocumentStore, MemoryDocumentStoreBuilder};

@@ -164,7 +164,7 @@ impl Lowering<'_> {
                 (false, Source::Borrowed(expression))
             }
         };
-        let expression = self.child(expression, aggregates, subqueries)?;
+        let expression = self.child(expression.unbox(), aggregates, subqueries)?;
         Ok(if preceding {
             ScalarFrameBound::Preceding(expression)
         } else {

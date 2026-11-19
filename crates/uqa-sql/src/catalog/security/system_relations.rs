@@ -7,22 +7,20 @@
 //! System relation ACL defaults, persistence validation and effective privilege rules.
 
 use super::{
-    table::{
-        role_has_privilege, validate_table_security_invariants, TableAclPrivilege,
-        TablePrivilegeCheck,
-    },
+    table::{role_has_privilege, TableAclPrivilege, TablePrivilegeCheck},
     BoundTableSecurity, TableSecurity,
 };
 use crate::catalog::roles::identity::RoleSubject;
-use crate::{
-    ast::RoleAttribute,
-    catalog::{
-        roles::{RoleDefinition, RoleMembership, RoleMembershipKey},
-        SystemRelation,
-    },
-};
-use std::{collections::BTreeMap, ops::Deref};
-use uqa_core::RelationIdentity;
+use crate::catalog::roles::{RoleDefinitions, RoleMemberships};
+use crate::{ast::RoleAttribute, catalog::SystemRelation};
+use std::ops::Deref;
+use uqa_core::{memory::OwnedMap, RelationIdentity};
+
+mod registry;
+pub mod stored;
+mod validation;
+pub use registry::{CapturedSystemRelationSecurities, SystemRelationSecurities};
+pub use validation::validate_security;
 
 /// One catalog tuple ACL and its replacement identity. Equal ACL values can still be different committed tuples.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -33,7 +31,7 @@ pub struct SystemAcl {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct SystemRelationSecurity {
     pub table: Option<SystemAcl>,
-    pub columns: BTreeMap<String, SystemAcl>,
+    pub columns: OwnedMap<String, SystemAcl>,
 }
 impl SystemRelationSecurity {
     pub fn security(&self, relation: SystemRelation) -> BoundTableSecurity {
@@ -53,7 +51,6 @@ impl SystemRelationSecurity {
         column.map_or_else(|| self.table.as_ref(), |column| self.columns.get(column))
     }
 }
-pub type SystemRelationSecurities = BTreeMap<RelationIdentity, SystemRelationSecurity>;
 pub type SystemRelationSecurityRead<'a> = Box<dyn Deref<Target = SystemRelationSecurities> + 'a>;
 
 pub trait SystemRelationSecurityCatalog {
@@ -87,27 +84,11 @@ pub fn metadata_key(relation: SystemRelation, column: Option<&str>) -> String {
     )
 }
 
-pub fn validate_security(
-    relation: SystemRelation,
-    security: &TableSecurity,
-    roles: &BTreeMap<String, RoleDefinition>,
-) -> Result<(), String> {
-    if super::role_bindings::bind_role(roles, &security.role_owner, "system relation")?
-        != crate::catalog::roles::RoleIdentity::BOOTSTRAP
-    {
-        return Err(format!(
-            "system relation `{}` has an invalid owner",
-            relation.qualified_name()
-        ));
-    }
-    validate_table_security_invariants(security, Some(&relation.column_names()), roles)
-}
-
 fn masks_table_write(
     relation: SystemRelation,
     subject: &(impl RoleSubject + ?Sized),
     check: TablePrivilegeCheck,
-    roles: &BTreeMap<String, RoleDefinition>,
+    roles: &RoleDefinitions,
 ) -> bool {
     relation.namespace() == "pg_catalog"
         && relation.kind() == "table"
@@ -129,8 +110,8 @@ pub fn has_table_privilege(
     security: &TableSecurity,
     subject: &(impl RoleSubject + ?Sized),
     check: TablePrivilegeCheck,
-    roles: &BTreeMap<String, RoleDefinition>,
-    memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
+    roles: &RoleDefinitions,
+    memberships: &RoleMemberships,
 ) -> bool {
     !masks_table_write(relation, subject, check, roles)
         && role_has_privilege(security, subject, check, roles, memberships)
@@ -142,8 +123,8 @@ pub fn has_column_privilege(
     column: &str,
     subject: &(impl RoleSubject + ?Sized),
     check: TablePrivilegeCheck,
-    roles: &BTreeMap<String, RoleDefinition>,
-    memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
+    roles: &RoleDefinitions,
+    memberships: &RoleMemberships,
 ) -> bool {
     if !masks_table_write(relation, subject, check, roles) {
         return super::columns::role_has_column_privilege(

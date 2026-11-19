@@ -6,11 +6,10 @@
 
 //! Versioned enum authority: per-type records, public OID claims, private overlays and durable publication.
 
-use std::{collections::BTreeMap, ops::Deref, sync::Arc};
-use uqa_sql::catalog::{
-    enum_type::{validate_enum_registry, StoredEnum},
-    roles::RoleDefinition,
-};
+use std::ops::Deref;
+use uqa_core::memory::RetainedValue;
+use uqa_sql::catalog::enum_type::{validate_enum_registry, StoredEnum};
+use uqa_sql::catalog::roles::RoleDefinitions;
 use uqa_storage::{CatalogFacade, StorageBackendError, StorageBackendResult};
 
 mod labels;
@@ -19,20 +18,20 @@ mod records;
 pub use labels::EnumLabelCache;
 
 /// Registered enum types keyed by qualified type name.
-pub type EnumRegistry = BTreeMap<String, StoredEnum>;
+pub type EnumRegistry = uqa_sql::catalog::type_definitions::TypeDefinitions<StoredEnum>;
 pub type EnumRegistryRead<'a> = Box<dyn Deref<Target = EnumRegistry> + 'a>;
 
 pub trait EnumRegistryPublication {
     fn enum_registry(&self) -> EnumRegistryRead<'_>;
     fn enum_catalog(&self) -> Option<&dyn CatalogFacade>;
-    fn enum_role_definitions(&self) -> BTreeMap<String, RoleDefinition>;
+    fn enum_role_definitions(&self) -> RoleDefinitions;
     fn publish_enum_definitions(&self, registry: EnumRegistry);
 }
 
 /// Read and validate every enum definition. Records and claims must agree before any definition is exposed.
 pub fn restore(
     catalog: &dyn CatalogFacade,
-    roles: &BTreeMap<String, RoleDefinition>,
+    roles: &RoleDefinitions,
 ) -> StorageBackendResult<EnumRegistry> {
     let registry = records::FORMAT.read(catalog)?;
     validate_enum_registry(&registry, roles).map_err(StorageBackendError::Other)?;
@@ -42,10 +41,10 @@ pub fn restore(
 /// Overlay private enum replacements and deletions without losing independently committed definitions.
 pub fn merge_private(
     catalog: Option<&dyn CatalogFacade>,
-    current: &Arc<EnumRegistry>,
-    committed: Arc<EnumRegistry>,
-    roles: &BTreeMap<String, RoleDefinition>,
-) -> StorageBackendResult<Arc<EnumRegistry>> {
+    current: &RetainedValue<EnumRegistry>,
+    committed: RetainedValue<EnumRegistry>,
+    roles: &RoleDefinitions,
+) -> StorageBackendResult<RetainedValue<EnumRegistry>> {
     let committed = records::FORMAT.merge_private(catalog, current, committed)?;
     validate_enum_registry(&committed, roles).map_err(StorageBackendError::Other)?;
     Ok(committed)
@@ -77,6 +76,19 @@ pub fn publish(
     };
     publication.publish_enum_definitions(registry);
     Ok(())
+}
+
+/// Resumable stored definitions, OID claims and complete native validation under one selected catalog read boundary.
+pub type EnumCatalogInput = super::type_records::input::TypeCatalogInput<StoredEnum>;
+
+pub fn begin_input(
+    catalog: std::sync::Arc<dyn CatalogFacade>,
+    roles: RoleDefinitions,
+    limits: uqa_storage::catalog::input::CatalogInputLimits,
+    mutations: &uqa_core::memory::MemoryBudget,
+    control: &uqa_storage::read_control::StorageReadControl,
+) -> StorageBackendResult<EnumCatalogInput> {
+    super::type_records::input::new(&records::FORMAT, catalog, roles, limits, mutations, control)
 }
 
 #[cfg(test)]

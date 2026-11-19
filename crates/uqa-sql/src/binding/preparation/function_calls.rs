@@ -6,6 +6,8 @@
 
 //! Keep call selection separate from input coercion so modifiers precede input effects.
 
+use crate::binding::preparation::{LiteralInput, SchemaContext};
+
 use super::ownership::{AnalysisType, AnalysisVec};
 use super::{ColumnType, ExpressionType, Preparation, QueryPlan, RowSchema, SQLError, ScalarExpr};
 use crate::ast::{BinaryOp, FunctionBinding};
@@ -212,7 +214,7 @@ pub(super) enum FunctionResult {
     Unselected,
 }
 
-impl Preparation<'_> {
+impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
     /// Borrow the original direct and ordered children: their input leaf identities
     /// must survive until the retained constants are applied to the original plan.
     pub(super) fn observe_function_arguments(
@@ -654,9 +656,13 @@ impl Preparation<'_> {
         if matches!(name, "cypher" | "ag_catalog.cypher") {
             let agtype = resolve_type_name(self.routines, "ag_catalog.agtype", &control)?;
             output.reserve(types.len().min(3))?;
-            for ty in [&ColumnType::Name, &ColumnType::Text, &*agtype]
-                .into_iter()
-                .take(types.len())
+            for ty in [
+                const { &ColumnType::Name },
+                const { &ColumnType::Text },
+                &*agtype,
+            ]
+            .into_iter()
+            .take(types.len())
             {
                 output.push_produced(optional_type(
                     Some(ty.clone_with_control(&control)?),
@@ -761,7 +767,7 @@ fn ordered_result_type(
 }
 
 /// Ordered and FILTER expressions are visited independently of a call's result collation.
-impl Preparation<'_> {
+impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
     pub(super) fn function_modifier_collations(
         &mut self,
         orders: &[crate::ScalarOrder],
@@ -834,7 +840,7 @@ impl Preparation<'_> {
                     .unwrap_or_else(|| modifiers.order_types[position].as_deref());
                 (&order.expr, ty)
             }))
-            .chain(filter.map(|filter| (filter, Some(&ColumnType::Boolean))));
+            .chain(filter.map(|filter| (filter, Some(const { &ColumnType::Boolean }))));
         let inputs = crate::type_resolution::CallInputTypes::new_with_control(
             input,
             observations,

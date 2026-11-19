@@ -131,3 +131,21 @@ fn polymorphic_result_errors_keep_postgresql_message_and_detail_separate() {
             if detail == format!("A result of type {result} requires at least one input of type {inputs}.")));
     }
 }
+
+#[test]
+fn trigger_declarations_preserve_setof_return_flags_and_argument_diagnostics() {
+    for returns in ["trigger", "SETOF trigger"] {
+        for parameters in ["", "integer"] {
+            let Statement::CreateFunction(definition) = crate::compile(&format!(
+                "CREATE FUNCTION public.fire({parameters}) RETURNS {returns} LANGUAGE plpgsql AS 'uncompiled source body'",
+            )).unwrap().remove(0) else { panic!("function"); };
+            validate_routine_declaration(&definition).unwrap();
+            let result = reject_trigger_function_arguments(&definition);
+            if parameters.is_empty() {
+                result.unwrap();
+            } else {
+                assert_eq!(result.unwrap_err().sqlstate(), Some("42P13"));
+            }
+        }
+    }
+}

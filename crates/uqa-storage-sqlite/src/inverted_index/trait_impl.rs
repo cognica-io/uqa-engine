@@ -450,7 +450,7 @@ impl InvertedIndex for SQLiteInvertedIndex {
             for chunk in doc_ids.chunks(900) {
                 let ids = (3..chunk.len()+3).map(|parameter| format!("?{parameter}")).collect::<Vec<_>>().join(", ");
                 let sql = format!("WITH lengths AS (SELECT doc_id, length FROM _occurrence_lengths WHERE table_name = ?1 AND field = ?2 AND doc_id IN ({ids})), documents AS (SELECT doc_id, metadata_blob FROM _occurrence_documents WHERE table_name = ?1 AND field = ?2 AND doc_id IN ({ids})) SELECT COALESCE(lengths.doc_id, documents.doc_id), length, metadata_blob FROM lengths FULL OUTER JOIN documents USING(doc_id)");
-                let mut values = vec![SqlValue::Text(self.table.clone()), SqlValue::Text(field.into())];
+                let mut values = vec![SqlValue::Text(self.table.as_str().to_owned()), SqlValue::Text(field.into())];
                 for doc_id in chunk {
                     values.push(SqlValue::Integer(encode_index_u64("document", *doc_id)?));
                 }
@@ -559,7 +559,7 @@ impl InvertedIndex for SQLiteInvertedIndex {
         let cluster = encode_index_u64("posting cluster", cluster_id(doc_id))?;
         Ok(self.conn.with(|conn| {
             self.require_graph_format_on(conn)?;
-            let row: Option<(i64, Vec<u8>)> = conn.query_row("SELECT posting_count, score_blob FROM _occurrence_clusters WHERE table_name = ?1 AND field = ?2 AND term = ?3 AND cluster_id = ?4", params![self.table, field, term.as_bytes(), cluster], |row| Ok((row.get(0)?, row.get(1)?))).optional()?;
+            let row: Option<(i64, Vec<u8>)> = conn.query_row("SELECT posting_count, score_blob FROM _occurrence_clusters WHERE table_name = ?1 AND field = ?2 AND term = ?3 AND cluster_id = ?4", params![self.table.as_str(), field, term.as_bytes(), cluster], |row| Ok((row.get(0)?, row.get(1)?))).optional()?;
             match row {
                 Some((count, bytes)) => {
                     // Validate the version and redundant row count before decoding only the requested cluster.
@@ -581,7 +581,7 @@ impl InvertedIndex for SQLiteInvertedIndex {
             let n: i64 = c.query_row(
                 "SELECT COUNT(DISTINCT doc_id) FROM _occurrence_lengths
                      WHERE table_name = ?1",
-                params![self.table],
+                params![self.table.as_str()],
                 |r| r.get(0),
             )?;
             decode_index_u64("document count", n)
@@ -614,7 +614,7 @@ impl InvertedIndex for SQLiteInvertedIndex {
         Ok(self.conn.with(|conn| {
             self.require_graph_format_on(conn)?;
             let mut statement = conn.prepare("SELECT DISTINCT term FROM _occurrence_clusters WHERE table_name = ?1 AND field = ?2 ORDER BY term")?;
-            let rows = statement.query_map(params![self.table, field], |row| row.get::<_, Vec<u8>>(0))?;
+            let rows = statement.query_map(params![self.table.as_str(), field], |row| row.get::<_, Vec<u8>>(0))?;
             rows.map(|row| clustered_result(TokenTermKey::from_bytes(row?))).collect()
         })?)
     }
@@ -644,7 +644,7 @@ impl InvertedIndex for SQLiteInvertedIndex {
                 let n: i64 = c.query_row(
                     "SELECT COALESCE(SUM(total_length), 0) FROM _occurrence_fields
                          WHERE table_name = ?1",
-                    params![self.table],
+                    params![self.table.as_str()],
                     |r| r.get(0),
                 )?;
                 decode_index_u64("total indexed length", n)
@@ -690,13 +690,13 @@ impl InvertedIndex for SQLiteInvertedIndex {
                 c.query_row(
                     "SELECT COUNT(*) FROM _occurrence_lengths
                          WHERE table_name = ?1 AND field = ?2",
-                    params![self.table, field],
+                    params![self.table.as_str(), field],
                     |r| r.get(0),
                 )?
             } else {
                 c.query_row(
                     "SELECT COUNT(*) FROM _occurrence_lengths WHERE table_name = ?1",
-                    params![self.table],
+                    params![self.table.as_str()],
                     |r| r.get(0),
                 )?
             };
@@ -745,7 +745,7 @@ impl InvertedIndex for SQLiteInvertedIndex {
             self.require_graph_format_on(c)?;
             let mut stmt =
                 c.prepare("SELECT DISTINCT field FROM _occurrence_lengths WHERE table_name = ?1")?;
-            let rows = stmt.query_map([&self.table], |row| row.get::<_, String>(0))?;
+            let rows = stmt.query_map([self.table.as_str()], |row| row.get::<_, String>(0))?;
             let mut fields = Vec::new();
             for row in rows {
                 fields.push(row?);

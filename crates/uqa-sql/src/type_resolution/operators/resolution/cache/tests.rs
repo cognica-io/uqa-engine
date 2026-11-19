@@ -23,8 +23,8 @@ fn builtin_selection_cache_owns_no_request_allocation_on_misses_hits_or_eviction
                 selected = Some(
                     super::super::select_with_cache(
                         name,
-                        Some(&ColumnType::Integer),
-                        Some(&ColumnType::Integer),
+                        Some(const { &ColumnType::Integer }),
+                        Some(const { &ColumnType::Integer }),
                         &control,
                         &cache,
                     )
@@ -46,10 +46,24 @@ fn builtin_selection_cache_owns_no_request_allocation_on_misses_hits_or_eviction
     let cache = cache.read().unwrap();
     assert_eq!(cache.len, 2);
     assert!(cache
-        .get(&selection_key("+", Some(&ColumnType::Integer), Some(&ColumnType::Integer)).unwrap())
+        .get(
+            &selection_key(
+                "+",
+                Some(const { &ColumnType::Integer }),
+                Some(const { &ColumnType::Integer })
+            )
+            .unwrap()
+        )
         .is_some());
     assert!(cache
-        .get(&selection_key("-", Some(&ColumnType::Integer), Some(&ColumnType::Integer)).unwrap())
+        .get(
+            &selection_key(
+                "-",
+                Some(const { &ColumnType::Integer }),
+                Some(const { &ColumnType::Integer })
+            )
+            .unwrap()
+        )
         .is_none());
 }
 
@@ -92,14 +106,17 @@ fn builtin_selection_cache_keys_keep_exact_catalog_identity_through_collisions()
     assert_eq!(cache.get(&missing), None);
     cache.insert(first.0, first.1);
     assert_eq!(cache.len, 2);
-    cache.insert(missing, [&ColumnType::Boolean; 3]);
-    assert_eq!(cache.get(&missing), Some([&ColumnType::Boolean; 3]));
-    let next = selection_key("?", Some(&ColumnType::Text), None).unwrap();
-    cache.insert(next, [&ColumnType::Text; 3]);
+    cache.insert(missing, [const { &ColumnType::Boolean }; 3]);
+    assert_eq!(
+        cache.get(&missing),
+        Some([const { &ColumnType::Boolean }; 3])
+    );
+    let next = selection_key("?", Some(const { &ColumnType::Text }), None).unwrap();
+    cache.insert(next, [const { &ColumnType::Text }; 3]);
     assert_eq!(cache.len, 1);
     assert_eq!(cache.get(&first.0), None);
     assert_eq!(cache.get(&collision.0), None);
-    assert_eq!(cache.get(&next), Some([&ColumnType::Text; 3]));
+    assert_eq!(cache.get(&next), Some([const { &ColumnType::Text }; 3]));
 
     let cache = BuiltinSelections::<32>::default();
     let control = ProductionControl::uncontrolled();

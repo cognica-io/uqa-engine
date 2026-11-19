@@ -7,11 +7,11 @@
 //! Read-only parent observations remain available while a child owns its moved payload.
 
 use super::{
-    sources::query_source_memory, MutableQueryPlan, MutableSourcePlan, OwnedScalarExpr,
-    QueryChildSlot, QueryPlan, QueryScalarSlot, RelationalPlan,
+    edits::Slot, sources::query_source_memory, MutableQueryPlan, MutableSourcePlan,
+    OwnedScalarExpr, QueryChildSlot, QueryPlan, QueryScalarSlot, RelationalPlan,
 };
-use crate::{SQLError, ScalarExpr};
-use uqa_core::{memory::ProductionControl, Value};
+use crate::SQLError;
+use uqa_core::memory::ProductionControl;
 
 impl MutableQueryPlan {
     /// Rewrite a scalar with a read-only view of the enclosing query. The selected parent slot temporarily contains an allocation-free NULL; the callback receives its actual previous scalar and owner separately.
@@ -23,25 +23,14 @@ impl MutableQueryPlan {
     ) -> Result<Self, SQLError> {
         self.assert_owner(control);
         control.check()?;
-        let Some(expression) = slot.expression_mut(&mut self.query) else {
+        let Some(mut position) = self.scalar_slot(slot) else {
             return Ok(self);
         };
-        let memory = self
-            .memory
-            .as_mut()
-            .and_then(|memory| slot.memory_mut(memory).take());
-        let input = OwnedScalarExpr::from_rewrite_parts(
-            std::mem::replace(expression, ScalarExpr::Literal(Value::Null)),
-            memory,
-        );
+        let input = position.take();
         let output = input.rewrite(control, |input| map(&self.query, input))?;
-        let (expression, memory) = output.into_rewrite_parts();
-        *slot
-            .expression_mut(&mut self.query)
-            .expect("original scalar slot") = expression;
-        if let Some(owner) = &mut self.memory {
-            *slot.memory_mut(owner) = memory;
-        }
+        self.scalar_slot(slot)
+            .expect("original scalar slot")
+            .restore(output);
         Ok(self)
     }
 
@@ -54,23 +43,11 @@ impl MutableQueryPlan {
     ) -> Result<Self, SQLError> {
         self.assert_owner(control);
         control.check()?;
-        let input = Self {
-            query: std::mem::replace(
-                slot.query_mut(&mut self.query),
-                super::queries::empty_query(),
-            ),
-            memory: self
-                .memory
-                .as_mut()
-                .and_then(|memory| slot.memory_mut(memory).take()),
-        };
+        let input = self.query_slot(slot).take();
         let output = map(&self.query, input)?;
         output.assert_owner(control);
         control.check()?;
-        *slot.query_mut(&mut self.query) = output.query;
-        if let Some(memory) = &mut self.memory {
-            *slot.memory_mut(memory) = output.memory;
-        }
+        self.query_slot(slot).restore(output);
         Ok(self)
     }
 
@@ -82,28 +59,21 @@ impl MutableQueryPlan {
     ) -> Result<Self, SQLError> {
         self.assert_owner(control);
         control.check()?;
-        let RelationalPlan::QueryBlock(block) = &mut self.query.root else {
-            return Err(SQLError::Internal(
-                "source rewrite requires a query block".into(),
-            ));
-        };
-        let Some(source) = block.from.take() else {
+        let Some(mut slot) = self.source_slot()? else {
             return Ok(self);
         };
-        let memory = self
-            .memory
-            .as_mut()
-            .and_then(|memory| query_source_memory(memory).take());
-        let output = map(&self.query, MutableSourcePlan { source, memory })?;
+        let input = slot.take();
+        let output = map(&self.query, input)?;
         output.assert_owner(control);
         control.check()?;
         let RelationalPlan::QueryBlock(block) = &mut self.query.root else {
             unreachable!("read-only parent cannot change topology");
         };
-        block.from = Some(output.source);
-        if let Some(memory) = &mut self.memory {
-            *query_source_memory(memory) = output.memory;
-        }
+        Slot::<MutableSourcePlan>::optional(
+            &mut block.from,
+            self.memory.as_mut().map(query_source_memory),
+        )
+        .restore(output);
         Ok(self)
     }
 }

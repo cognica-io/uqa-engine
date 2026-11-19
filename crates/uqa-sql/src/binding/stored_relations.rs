@@ -10,8 +10,9 @@ mod production;
 mod query;
 pub(crate) use production::canonical_catalog_relation_with_control;
 pub use query::{
-    bind_stored_query_relations, resolve_loaded_query_sequence, StoredQueryBindingContext,
-    StoredQueryNamespace, StoredQuerySequences,
+    bind_stored_query_relations, resolve_loaded_query_sequence,
+    resolve_query_sequence_with_control, select_query_sequence_with_control,
+    StoredQueryBindingContext, StoredQueryNamespace, StoredQuerySequences,
 };
 
 use crate::{
@@ -159,9 +160,8 @@ pub fn bind_rule_action_relation_dependencies(
     }
     .bind_statement(statement)?;
     Ok(RuleDependencies {
-        relations: dependencies,
-        columns: BTreeSet::new(),
-        routines: BTreeSet::new(),
+        relations: dependencies.into_iter().collect(),
+        ..RuleDependencies::default()
     })
 }
 
@@ -195,9 +195,8 @@ pub fn bind_rule_condition_relation_dependencies(
     }
     .bind_expr(expression, &BTreeSet::new())?;
     Ok(RuleDependencies {
-        relations: dependencies,
-        columns: BTreeSet::new(),
-        routines: BTreeSet::new(),
+        relations: dependencies.into_iter().collect(),
+        ..RuleDependencies::default()
     })
 }
 

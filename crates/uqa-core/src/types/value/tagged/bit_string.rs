@@ -9,27 +9,32 @@
 use super::{decode_hex_bytes, int_field, BTreeMap, Value, ValueRetentionError, Workspace};
 use crate::BitStringValue;
 
-pub(super) fn decode(
+pub(super) async fn decode<W: super::Work>(
     map: &BTreeMap<String, Value>,
     workspace: &mut Workspace<'_>,
-) -> Result<BitStringValue, ValueRetentionError> {
+    work: &mut W,
+) -> Result<BitStringValue, W::Error> {
     let malformed = || ValueRetentionError::Malformed {
         kind: "bit_string",
         reason: "invalid bit length, packed bytes or padding".into(),
     };
     if map.len() != 3 {
-        return Err(malformed());
+        return Err(malformed().into());
     }
     let length = int_field::<u32>(map, "bit_len").ok_or_else(malformed)?;
     let Some(Value::Str(hex)) = map.get("hex") else {
-        return Err(malformed());
+        return Err(malformed().into());
     };
     if hex.len() != length.div_ceil(8) as usize * 2 {
-        return Err(malformed());
+        return Err(malformed().into());
     }
-    let bytes = decode_hex_bytes(hex, workspace)?.ok_or_else(malformed)?;
+    let bytes = decode_hex_bytes(hex, workspace, work)
+        .await?
+        .ok_or_else(malformed)?;
     workspace.reserve(BitStringValue::retained_header_bytes())?;
-    BitStringValue::try_from_packed(bytes, length).ok_or_else(malformed)
+    BitStringValue::try_from_packed(bytes, length)
+        .ok_or_else(malformed)
+        .map_err(Into::into)
 }
 
 #[cfg(test)]

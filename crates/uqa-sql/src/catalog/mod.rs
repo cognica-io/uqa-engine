@@ -8,19 +8,30 @@
 
 use crate::ast::ColumnType;
 mod schema_production;
+pub(crate) mod work;
 use schema_production::CatalogColumnType::{self, Array, Domain, Inline};
 
 pub mod access_methods;
 pub mod collations;
+pub mod definition_capture;
 pub mod expression_text;
 pub mod foreign_relations;
+pub mod image;
 pub mod languages;
+pub mod named_definitions;
+pub mod namespace_names;
 pub mod node_tree;
 pub mod oids;
+pub mod regobject;
 pub mod resolution;
 pub mod result_type;
+pub mod table_definition;
+pub mod table_metadata;
+pub mod type_definitions;
 pub mod type_metadata;
 mod type_production;
+pub mod type_references;
+pub(crate) use type_production::is_system_catalog_type_oid;
 pub use type_production::system_catalog_domain_with_control;
 
 /// Namespace of the Apache AGE catalog relations, types, and functions.
@@ -639,7 +650,7 @@ impl VirtualRelation {
                 "rolconfig" => Array(ColumnType::Text),
                 "oid" => Inline(ColumnType::Oid),
             ],
-            Self::PgUser => columns![
+            Self::PgUser | Self::PgShadow => columns![
                 "usename" => Inline(ColumnType::Name),
                 "usesysid" => Inline(ColumnType::Oid),
                 "usecreatedb" => Inline(ColumnType::Boolean),
@@ -972,3 +983,5 @@ pub mod errors;
 pub mod sequence_functions;
 
 pub mod json_path;
+
+pub mod scalar_bindings;

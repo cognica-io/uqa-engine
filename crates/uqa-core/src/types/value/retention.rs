@@ -8,9 +8,12 @@
 
 use super::Value;
 use crate::{
-    memory::{BudgetedVec, MemoryBudget, MemoryError, MemoryReservation},
+    memory::{MemoryBudget, MemoryError, MemoryReservation, ProductionControl},
     CancellationToken, QueryCancelled,
 };
+
+mod stack;
+use stack::Stack;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ValueRetentionError {
@@ -90,77 +93,177 @@ impl Value {
         Ok(total)
     }
 
+    /// Count the same native payload during owner construction. Ordinary builders use ordinary traversal scratch; controlled producers admit that scratch and preserve both cancellation scopes. No payload is copied or reserved by this observation.
+    pub fn retained_payload_bytes_with_control(
+        &self,
+        control: &ProductionControl<'_>,
+    ) -> Result<usize, ValueRetentionError> {
+        let mut total = 0_usize;
+        self.visit_retained_payload(
+            control.budget(),
+            || control.check_cancellation(),
+            |bytes| {
+                total = total.checked_add(bytes).ok_or(MemoryError::SizeOverflow)?;
+                Ok(())
+            },
+        )?;
+        Ok(total)
+    }
+
+    /// Observe the same retained payload one native field or traversal transition at a time. Zero-byte transitions are retained so returning through a deep container chain cannot consume an unbounded iterator step. Original and invoking cancellation scopes and admitted scratch remain active; completion or failure retires the traversal, and later calls return `None`.
+    pub fn retained_payload_parts_with_control<'a>(
+        &'a self,
+        control: ProductionControl<'a>,
+    ) -> impl Iterator<Item = Result<usize, ValueRetentionError>> + Send + 'a {
+        self.payload_parts(control.budget(), move || control.check_cancellation())
+    }
+
+    /// Observe the same native payload transitions with admitted scratch and a caller-owned cancellation check. The iterator owns no payload and never combines a deep return chain into one step.
+    pub fn retained_payload_parts_with_check<'a>(
+        &'a self,
+        budget: &'a MemoryBudget,
+        check: impl FnMut() -> Result<(), QueryCancelled> + Send + 'a,
+    ) -> impl Iterator<Item = Result<usize, ValueRetentionError>> + Send + 'a {
+        self.payload_parts(Some(budget), check)
+    }
+
+    fn payload_parts<'a>(
+        &'a self,
+        budget: Option<&'a MemoryBudget>,
+        mut check: impl FnMut() -> Result<(), QueryCancelled> + Send + 'a,
+    ) -> impl Iterator<Item = Result<usize, ValueRetentionError>> + Send + 'a {
+        let mut state = Some(Traversal::new(self, budget));
+        std::iter::from_fn(move || {
+            let mut traversal = state.take()?;
+            let result = check()
+                .map_err(ValueRetentionError::from)
+                .and_then(|()| traversal.step().map_err(ValueRetentionError::from));
+            match result {
+                Ok(Some(bytes)) => {
+                    state = Some(traversal);
+                    Some(Ok(bytes))
+                }
+                Ok(None) => None,
+                Err(error) => Some(Err(error)),
+            }
+        })
+    }
+
     pub(crate) fn visit_retained_payload_with_check(
         &self,
         budget: &MemoryBudget,
+        check: impl FnMut() -> Result<(), QueryCancelled>,
+        visit: impl FnMut(usize) -> Result<(), MemoryError>,
+    ) -> Result<(), ValueRetentionError> {
+        self.visit_retained_payload(Some(budget), check, visit)
+    }
+
+    fn visit_retained_payload(
+        &self,
+        budget: Option<&MemoryBudget>,
         mut check: impl FnMut() -> Result<(), QueryCancelled>,
         mut visit: impl FnMut(usize) -> Result<(), MemoryError>,
     ) -> Result<(), ValueRetentionError> {
-        let mut stack = BudgetedVec::new(budget);
-        let mut current = Some((self, 0));
+        let mut traversal = Traversal::new(self, budget);
         loop {
             check()?;
-            if let Some((value, name_bytes)) = current.take() {
-                visit(name_bytes)?;
-                let (bytes, children) = match value {
-                    Self::Null
-                    | Self::Void
-                    | Self::Bool(_)
-                    | Self::Int(_)
-                    | Self::Float(_)
-                    | Self::Temporal(_) => (0, None),
-                    Self::Str(text)
-                    | Self::FixedChar(text)
-                    | Self::Json(text)
-                    | Self::JsonB(text) => (text.capacity(), None),
-                    Self::Bytes(bytes) => (bytes.capacity(), None),
-                    Self::BitString(value) => (value.retained_bytes(), None),
-                    Self::Datum(value) => (value.retained_bytes(), None),
-                    Self::Enum(value) => (value.retained_bytes(), None),
-                    Self::Decimal(decimal) => (decimal.retained_bytes(), None),
-                    Self::Array(array) => (
-                        array.retained_buffer_bytes()?,
-                        (!array.elements().is_empty())
-                            .then(|| Children::Values(array.elements().iter())),
-                    ),
-                    Self::LegacyVector(vector) => {
-                        (vector.as_array().retained_buffer_bytes()?, None)
-                    }
-                    Self::List(values) => (
-                        buffer_bytes::<Value>(values.capacity())?,
-                        (!values.is_empty()).then(|| Children::Values(values.iter())),
-                    ),
-                    Self::Row(row) => (
-                        row.retained_buffer_bytes()?,
-                        (!row.is_empty()).then(|| Children::Values(row.iter())),
-                    ),
-                    Self::Record(fields) => (
-                        fields.retained_buffer_bytes()?,
-                        (!fields.is_empty()).then(|| Children::Record(fields.iter())),
-                    ),
-                    Self::Map(fields) => (
-                        buffer_bytes::<(String, Value)>(fields.len())?,
-                        (!fields.is_empty()).then(|| Children::Map(fields.iter())),
-                    ),
-                };
-                visit(bytes)?;
-                if let Some(children) = children {
-                    stack.push(children)?;
-                }
-            }
-            while let Some(children) = stack.last_mut() {
-                check()?;
-                current = children.next();
-                if current.is_some() {
-                    break;
-                }
-                stack.pop();
-            }
-            if current.is_none() {
-                return Ok(());
+            match traversal.step()? {
+                Some(bytes) => visit(bytes)?,
+                None => return Ok(()),
             }
         }
     }
+}
+
+enum Phase<'a> {
+    Name(&'a Value, usize),
+    Payload(&'a Value),
+    Push(Option<Children<'a>>),
+    Next,
+}
+
+struct Traversal<'a> {
+    stack: Stack<'a>,
+    phase: Phase<'a>,
+}
+
+impl<'a> Traversal<'a> {
+    fn new(value: &'a Value, budget: Option<&MemoryBudget>) -> Self {
+        Self {
+            stack: Stack::new(budget),
+            phase: Phase::Name(value, 0),
+        }
+    }
+
+    fn step(&mut self) -> Result<Option<usize>, MemoryError> {
+        match std::mem::replace(&mut self.phase, Phase::Next) {
+            Phase::Name(value, bytes) => {
+                self.phase = Phase::Payload(value);
+                return Ok(Some(bytes));
+            }
+            Phase::Payload(value) => {
+                let (bytes, children) = payload(value)?;
+                self.phase = Phase::Push(children);
+                return Ok(Some(bytes));
+            }
+            Phase::Push(children) => {
+                if let Some(children) = children {
+                    self.stack.push(children)?;
+                }
+            }
+            Phase::Next => match self.stack.last_mut() {
+                Some(children) => {
+                    if let Some((value, bytes)) = children.next() {
+                        self.phase = Phase::Name(value, bytes);
+                    } else {
+                        self.stack.pop();
+                    }
+                }
+                None => return Ok(None),
+            },
+        }
+        Ok(Some(0))
+    }
+}
+
+fn payload(value: &Value) -> Result<(usize, Option<Children<'_>>), MemoryError> {
+    Ok(match value {
+        Value::Null
+        | Value::Void
+        | Value::Bool(_)
+        | Value::Int(_)
+        | Value::Float(_)
+        | Value::Temporal(_) => (0, None),
+        Value::Str(text) | Value::FixedChar(text) | Value::Json(text) | Value::JsonB(text) => {
+            (text.capacity(), None)
+        }
+        Value::Bytes(bytes) => (bytes.capacity(), None),
+        Value::BitString(value) => (value.retained_bytes(), None),
+        Value::Datum(value) => (value.retained_bytes(), None),
+        Value::Enum(value) => (value.retained_bytes(), None),
+        Value::Decimal(decimal) => (decimal.retained_bytes(), None),
+        Value::Array(array) => (
+            array.retained_buffer_bytes()?,
+            (!array.elements().is_empty()).then(|| Children::Values(array.elements().iter())),
+        ),
+        Value::LegacyVector(vector) => (vector.as_array().retained_buffer_bytes()?, None),
+        Value::List(values) => (
+            buffer_bytes::<Value>(values.capacity())?,
+            (!values.is_empty()).then(|| Children::Values(values.iter())),
+        ),
+        Value::Row(row) => (
+            row.retained_buffer_bytes()?,
+            (!row.is_empty()).then(|| Children::Values(row.iter())),
+        ),
+        Value::Record(fields) => (
+            fields.retained_buffer_bytes()?,
+            (!fields.is_empty()).then(|| Children::Record(fields.iter())),
+        ),
+        Value::Map(fields) => (
+            buffer_bytes::<(String, Value)>(fields.len())?,
+            (!fields.is_empty()).then(|| Children::Map(fields.iter())),
+        ),
+    })
 }
 
 #[cfg(test)]

@@ -9,7 +9,6 @@
 use super::resolution::RelationNameResolution;
 use crate::ast::ColumnDef;
 use crate::plan::QueryPlan;
-use crate::routines::SQLUserFunction;
 use crate::{ColumnType, SQLError};
 use std::sync::Arc;
 mod owned;
@@ -18,7 +17,7 @@ pub type VirtualRelationSchema = Vec<(String, ColumnType)>;
 
 #[derive(Clone)]
 pub struct TableDefinition {
-    pub columns: Arc<Vec<ColumnDef>>,
+    pub columns: crate::catalog::table_definition::SharedTableDefinition<Vec<ColumnDef>>,
     pub columns_declared: bool,
 }
 
@@ -303,7 +302,7 @@ pub trait AnalysisCatalog: Send + Sync {
         &self,
         resolution: &RelationNameResolution,
         name: &str,
-    ) -> Result<Option<Vec<Arc<SQLUserFunction>>>, SQLError>;
+    ) -> Result<Option<Vec<crate::routines::SQLRoutine>>, SQLError>;
 
     fn unopenable_relation_with_control(
         &self,

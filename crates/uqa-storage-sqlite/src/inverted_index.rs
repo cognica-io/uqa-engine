@@ -29,7 +29,7 @@ use uqa_storage::TokenTermKey;
 #[derive(Clone)]
 pub struct SQLiteInvertedIndex {
     conn: ManagedConnection,
-    table: String,
+    table: uqa_storage::StorageName,
     bindings: uqa_storage::inverted_index::AnalyzerBindings,
     retention_control: uqa_storage::read_control::StorageReadControl,
 }

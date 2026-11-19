@@ -6,12 +6,13 @@
 
 use super::*;
 use std::sync::Arc;
+use uqa_sql::catalog::table_definition::SharedTableDefinition;
 use uqa_sql::{
     ast::Statement,
     routines::{RoutineBody, SQLUserFunction},
 };
 
-fn function(identity: u8, revision: u8) -> Arc<SQLUserFunction> {
+fn function(identity: u8, revision: u8) -> uqa_sql::routines::SQLRoutine {
     let Statement::CreateFunction(mut definition) =
         uqa_sql::compile("CREATE FUNCTION public.f() RETURNS int LANGUAGE sql AS 'SELECT 1'")
             .unwrap()
@@ -21,7 +22,7 @@ fn function(identity: u8, revision: u8) -> Arc<SQLUserFunction> {
     };
     definition.object_id = Some([identity; 16]);
     definition.catalog_revision = Some([revision; 16]);
-    Arc::new(SQLUserFunction::new(*definition, RoutineBody::Source))
+    SQLUserFunction::new(*definition, RoutineBody::Source).shared()
 }
 
 #[test]
@@ -29,30 +30,37 @@ fn snapshots_follow_selected_routine_tuple_identity_and_global_namespaces() {
     let mut snapshot = super::super::test_support::empty_catalog()
         .snapshot()
         .clone();
-    Arc::make_mut(&mut snapshot.definitions.sql_user_functions)
-        .insert("public.f".into(), vec![function(1, 10)]);
+    uqa_core::memory::RetainedValue::make_mut(&mut snapshot.definitions.sql_user_functions)
+        .insert("public.f".into(), vec![function(1, 10)])
+        .unwrap();
     let dependencies = PreparedAnalysisDependencies {
         relations: uqa_core::memory::OwnedSet::new(),
         routines: uqa_core::memory::OwnedSet::from([[1; 16]]),
     };
     let original = capture(&CatalogReadView::new(snapshot.clone()), &dependencies).unwrap();
-    Arc::make_mut(&mut snapshot.definitions.sql_user_functions)
-        .insert("public.other".into(), vec![function(2, 20)]);
+    uqa_core::memory::RetainedValue::make_mut(&mut snapshot.definitions.sql_user_functions)
+        .insert("public.other".into(), vec![function(2, 20)])
+        .unwrap();
     assert_eq!(
         capture(&CatalogReadView::new(snapshot.clone()), &dependencies).unwrap(),
         original
     );
-    Arc::make_mut(&mut snapshot.definitions.sql_user_functions)
-        .insert("public.f".into(), vec![function(1, 11)]);
+    uqa_core::memory::RetainedValue::make_mut(&mut snapshot.definitions.sql_user_functions)
+        .insert("public.f".into(), vec![function(1, 11)])
+        .unwrap();
     let replaced = capture(&CatalogReadView::new(snapshot.clone()), &dependencies).unwrap();
     assert_ne!(replaced, original);
-    Arc::make_mut(&mut snapshot.definitions.sql_user_functions).remove("public.f");
+    uqa_core::memory::RetainedValue::make_mut(&mut snapshot.definitions.sql_user_functions)
+        .remove("public.f")
+        .unwrap();
     let missing = capture(&CatalogReadView::new(snapshot.clone()), &dependencies).unwrap();
     assert_eq!(missing.routines[&[1; 16]], None);
-    Arc::make_mut(&mut snapshot.definitions.schemas).insert(
-        "new_namespace".into(),
-        super::super::security::BoundSchemaSecurity::bootstrap("new_namespace"),
-    );
+    uqa_core::memory::RetainedValue::make_mut(&mut snapshot.definitions.schemas)
+        .insert(
+            "new_namespace".into(),
+            super::super::security::BoundSchemaSecurity::bootstrap("new_namespace"),
+        )
+        .unwrap();
     let namespace = capture(&CatalogReadView::new(snapshot), &dependencies).unwrap();
     assert_ne!(namespace.global_catalog, missing.global_catalog);
 }
@@ -72,19 +80,20 @@ fn relation_dependencies_resolve_the_bound_identity_and_report_missing_objects()
     snapshot.tables.insert(
         RelationIdentity::new("public", "docs"),
         CatalogTableSnapshot {
-            dropped_attributes: std::sync::Arc::new(Vec::new()),
-            row_type_array_name: None,
+            dropped_attributes: Vec::new().into(),
+            row_type_array_name: None.into(),
             object_id: object,
             catalog_oids: oids,
             security: Arc::new(super::super::security::BoundTableSecurity::owner(
                 uqa_sql::catalog::roles::RoleIdentity::BOOTSTRAP,
-            )),
-            columns: Arc::default(),
+            ))
+            .into(),
+            columns: SharedTableDefinition::default(),
             columns_declared: true,
-            checks: Arc::default(),
-            foreign_keys: Arc::default(),
-            keys: Arc::default(),
-            hierarchy: Arc::default(),
+            checks: SharedTableDefinition::default(),
+            foreign_keys: Vec::new().into(),
+            keys: Vec::new().into(),
+            hierarchy: SharedTableDefinition::default(),
             persistence: uqa_sql::ast::RelationPersistence::Permanent,
         },
     );

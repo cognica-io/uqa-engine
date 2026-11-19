@@ -39,14 +39,18 @@ fn private_foreign_definitions_survive_refresh_commit_and_undo(
         &format!("BEGIN ISOLATION LEVEL {isolation}; SELECT * FROM t; SAVEPOINT before_foreign"),
     );
     sql(&first, "ALTER FOREIGN TABLE replaced DROP COLUMN extra; GRANT SELECT(v) ON replaced TO PUBLIC; ALTER FOREIGN TABLE renamed_from RENAME TO renamed_to; DROP FOREIGN TABLE dropped; DROP FOREIGN TABLE recreated; CREATE FOREIGN TABLE recreated(v text) SERVER remote; CREATE FOREIGN TABLE created(v int) SERVER remote");
-    let private = first.durable.foreign_tables.snapshot();
-    let private_security = first.durable.foreign_table_security.snapshot();
+    let private = first.durable.foreign_catalog.snapshot().tables_snapshot();
+    let private_security = first.durable.foreign_catalog.snapshot().security_snapshot();
     sql(&second, "ALTER FOREIGN TABLE peer DROP COLUMN extra");
-    let committed = second.durable.foreign_tables.snapshot();
-    let committed_security = second.durable.foreign_table_security.snapshot();
+    let committed = second.durable.foreign_catalog.snapshot().tables_snapshot();
+    let committed_security = second
+        .durable
+        .foreign_catalog
+        .snapshot()
+        .security_snapshot();
     first.synchronize_catalog_registries().unwrap();
-    let current = first.durable.foreign_tables.snapshot();
-    let security = first.durable.foreign_table_security.snapshot();
+    let current = first.durable.foreign_catalog.snapshot().tables_snapshot();
+    let security = first.durable.foreign_catalog.snapshot().security_snapshot();
     let definition = |table: &uqa_execution::catalog::foreign::StoredForeignTable| {
         (
             table.name.clone(),

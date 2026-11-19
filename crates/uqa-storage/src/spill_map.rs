@@ -8,27 +8,47 @@
 
 mod builder;
 mod disk;
+mod scratch;
 #[cfg(test)]
 mod tests;
 mod workspace;
 
 pub(crate) use builder::Builder;
+pub(crate) use disk::RecordBytes;
+pub(crate) use scratch::Scratch;
 
 use std::{ops::Deref, sync::Arc};
 use uqa_core::memory::{Budgeted, BudgetedSharedMap, MemoryBudget, MemoryError, MemoryReservation};
 
 use crate::{read_control::StorageReadControl, StorageBackendError, StorageBackendResult};
 
-pub(crate) trait Record: Sized {
+pub(crate) trait Record: Sized + Send + Sync {
     fn memory_bytes(&self) -> StorageBackendResult<usize>;
     fn encoded_bytes(&self) -> StorageBackendResult<usize>;
     fn encode(&self, bytes: &mut Vec<u8>);
     fn decode(bytes: &[u8]) -> StorageBackendResult<Self>;
+    fn encode_from(
+        &self,
+        bytes: &mut Vec<u8>,
+        work: &mut (impl crate::image_io::work::Work + Send),
+    ) -> impl std::future::Future<Output = StorageBackendResult<()>> + Send {
+        async {
+            work.checkpoint().await?;
+            self.encode(bytes);
+            Ok(())
+        }
+    }
 }
 
 pub(crate) enum Read<'a, V> {
     Borrowed(&'a V),
     Owned(Budgeted<V>),
+}
+
+/// Immutable resident values and authenticated spilled extents share the same selected root.
+pub(crate) enum RecordRead<'a, V> {
+    Resident(&'a V),
+    Spilled(RecordBytes<'a>),
 }
 
 impl<V> Deref for Read<'_, V> {
@@ -42,7 +62,7 @@ impl<V> Deref for Read<'_, V> {
 }
 
 enum Root<V> {
-    Memory(BudgetedSharedMap<u128, Option<Arc<Budgeted<V>>>>),
+    Memory(BudgetedSharedMap<u128, Arc<Budgeted<V>>>),
     Disk(disk::Map),
 }
 
@@ -63,6 +83,7 @@ pub(crate) struct Map<V> {
     resident_bytes: usize,
     max_encoded_bytes: usize,
     workspace: Option<Arc<workspace::Workspace>>,
+    file_budget: Option<crate::temporary_file::FileBudget>,
 }
 
 impl<V> Clone for Map<V> {
@@ -74,6 +95,7 @@ impl<V> Clone for Map<V> {
             resident_bytes: self.resident_bytes,
             max_encoded_bytes: self.max_encoded_bytes,
             workspace: self.workspace.clone(),
+            file_budget: self.file_budget.clone(),
         }
     }
 }
@@ -88,6 +110,24 @@ impl<V> std::fmt::Debug for Map<V> {
 }
 
 impl<V: Record> Map<V> {
+    /// Keep immutable records and page leases while selecting future allocation ownership in constant work. Unused conversion workspace belongs to the previous writer and is not reused by the destination.
+    pub(crate) fn into_mutation_budget(
+        mut self,
+        memory: &MemoryBudget,
+        resident_bytes: usize,
+    ) -> Self {
+        self.root = match self.root {
+            Root::Memory(map) => {
+                Root::Memory(map.into_mutation_budget(&memory.child(resident_bytes)))
+            }
+            Root::Disk(map) => Root::Disk(map),
+        };
+        self.memory = memory.clone();
+        self.resident_bytes = resident_bytes;
+        self.workspace = None;
+        self
+    }
+
     pub(crate) fn new(memory: &MemoryBudget, resident_bytes: usize) -> Self {
         Self {
             root: Root::Memory(BudgetedSharedMap::new(&memory.child(resident_bytes))),
@@ -96,6 +136,19 @@ impl<V: Record> Map<V> {
             resident_bytes,
             max_encoded_bytes: 0,
             workspace: None,
+            file_budget: None,
+        }
+    }
+
+    #[cfg(any(test, windows, all(unix, not(target_os = "emscripten"))))]
+    pub(crate) fn with_file_budget(
+        memory: &MemoryBudget,
+        resident_bytes: usize,
+        budget: &crate::temporary_file::FileBudget,
+    ) -> Self {
+        Self {
+            file_budget: Some(budget.clone()),
+            ..Self::new(memory, resident_bytes)
         }
     }
 
@@ -108,12 +161,20 @@ impl<V: Record> Map<V> {
     }
 
     pub(crate) fn clear(&mut self) {
-        *self = Self::new(&self.memory, self.resident_bytes);
+        *self = Self {
+            file_budget: self.file_budget.clone(),
+            ..Self::new(&self.memory, self.resident_bytes)
+        };
     }
 
     pub(crate) fn iter(&self) -> Iter<'_, V> {
+        self.iter_with_memory(&self.memory)
+    }
+
+    pub(crate) fn iter_with_memory<'a>(&'a self, memory: &'a MemoryBudget) -> Iter<'a, V> {
         Iter {
             map: self,
+            memory,
             after: None,
             done: false,
         }
@@ -121,7 +182,7 @@ impl<V: Record> Map<V> {
 
     pub(crate) fn contains_key(&self, key: u128) -> StorageBackendResult<bool> {
         match &self.root {
-            Root::Memory(map) => Ok(map.get(&key).is_some_and(Option::is_some)),
+            Root::Memory(map) => Ok(map.get(&key).is_some()),
             Root::Disk(map) => map.contains_key(key),
         }
     }
@@ -136,12 +197,24 @@ impl<V: Record> Map<V> {
         memory: &MemoryBudget,
     ) -> StorageBackendResult<Option<Read<'_, V>>> {
         match &self.root {
-            Root::Memory(map) => Ok(map
-                .get(&key)
-                .and_then(Option::as_ref)
-                .map(|value| Read::Borrowed(&***value))),
+            Root::Memory(map) => Ok(map.get(&key).map(|value| Read::Borrowed(&***value))),
             Root::Disk(map) => map.get(key, memory).map(|value| value.map(Read::Owned)),
         }
+    }
+
+    /// Borrow a selected record without decoding or copying its complete spilled payload.
+    pub(crate) fn read_record(
+        &self,
+        key: u128,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<RecordRead<'_, V>>> {
+        control.check()?;
+        let record = match &self.root {
+            Root::Memory(map) => map.get(&key).map(|value| RecordRead::Resident(&***value)),
+            Root::Disk(map) => map.record(key)?.map(RecordRead::Spilled),
+        };
+        control.check()?;
+        Ok(record)
     }
 
     pub(crate) fn next(
@@ -163,11 +236,8 @@ impl<V: Record> Map<V> {
                         .as_ref()
                         .map_or(std::ops::Bound::Unbounded, std::ops::Bound::Excluded),
                 )
-                .find_map(|(key, value)| {
-                    value
-                        .as_ref()
-                        .map(|value| (*key, Read::Borrowed(&***value)))
-                })),
+                .next()
+                .map(|(key, value)| (*key, Read::Borrowed(&***value)))),
             Root::Disk(map) => map
                 .next(after, memory)
                 .map(|entry| entry.map(|(key, value)| (key, Read::Owned(value)))),
@@ -187,7 +257,8 @@ impl<V: Record> Map<V> {
                         .as_ref()
                         .map_or(std::ops::Bound::Unbounded, std::ops::Bound::Excluded),
                 )
-                .find_map(|(key, value)| value.as_ref().map(|_| *key))),
+                .next()
+                .map(|(key, _)| *key)),
             Root::Disk(map) => map.next_key(after, memory),
         }
     }
@@ -198,14 +269,26 @@ impl<V: Record> Map<V> {
         value: V,
         control: Option<&StorageReadControl>,
     ) -> StorageBackendResult<()> {
+        crate::image_io::work::inline(self.insert_from(key, value, control, &mut ()))
+    }
+
+    pub(crate) async fn insert_from(
+        &mut self,
+        key: u128,
+        value: V,
+        control: Option<&StorageReadControl>,
+        work: &mut (impl crate::image_io::work::Work + Send),
+    ) -> StorageBackendResult<()> {
+        work.checkpoint().await?;
         check(control)?;
         let present = self.contains_key(key)?;
         let Some(value) = self.insert_resident(key, value)? else {
             self.len += usize::from(!present);
             return Ok(());
         };
-        self.spill(control)?;
-        self.insert_disk(key, &value, present, control)
+        self.spill_from(control, work).await?;
+        self.insert_disk_from(key, &value, present, control, work)
+            .await
     }
 
     /// Return ownership when the resident tree cannot admit the value. Both a
@@ -231,7 +314,7 @@ impl<V: Record> Map<V> {
             match map.budget().reserve(bytes) {
                 Ok(memory) => {
                     let value = Arc::new(Budgeted::new(value, memory));
-                    match map.try_insert(key, Some(Arc::clone(&value))) {
+                    match map.try_insert(key, Arc::clone(&value)) {
                         Ok(()) => {
                             self.max_encoded_bytes = encoded_bytes;
                             self.retain_spill_workspace(workspace);
@@ -291,17 +374,22 @@ impl<V: Record> Map<V> {
         }
     }
 
-    fn insert_disk(
+    async fn insert_disk_from(
         &mut self,
         key: u128,
         value: &V,
         present: bool,
         control: Option<&StorageReadControl>,
+        work: &mut (impl crate::image_io::work::Work + Send),
     ) -> StorageBackendResult<()> {
         if let Root::Disk(map) = &mut self.root {
             let mut candidate = map.clone();
-            candidate.insert(key, value, &self.memory)?;
-            candidate.compact::<V>(&self.memory, control)?;
+            candidate
+                .insert_from(key, value, &self.memory, work)
+                .await?;
+            candidate
+                .compact_from::<V>(&self.memory, control, work)
+                .await?;
             check(control)?;
             *map = candidate;
             self.len += usize::from(!present);
@@ -333,8 +421,9 @@ impl<V: Record> Map<V> {
             None
         };
         if let Root::Memory(map) = &mut self.root {
-            match map.try_insert(key, None) {
-                Ok(()) => {
+            match map.with_remove(&key) {
+                Ok(candidate) => {
+                    *map = candidate;
                     self.len -= 1;
                     self.retain_spill_workspace(workspace);
                     return Ok(());
@@ -359,20 +448,9 @@ impl<V: Record> Map<V> {
 
     pub(crate) fn last(&self) -> StorageBackendResult<Option<(u128, Read<'_, V>)>> {
         match &self.root {
-            Root::Memory(map) => {
-                let mut before = None;
-                while let Some((key, value)) = map.last_before(
-                    before
-                        .as_ref()
-                        .map_or(std::ops::Bound::Unbounded, std::ops::Bound::Excluded),
-                ) {
-                    if let Some(value) = value {
-                        return Ok(Some((*key, Read::Borrowed(&***value))));
-                    }
-                    before = Some(*key);
-                }
-                Ok(None)
-            }
+            Root::Memory(map) => Ok(map
+                .last_before(std::ops::Bound::Unbounded)
+                .map(|(key, value)| (*key, Read::Borrowed(&***value)))),
             Root::Disk(map) => map
                 .last(&self.memory)
                 .map(|entry| entry.map(|(key, value)| (key, Read::Owned(value)))),
@@ -383,6 +461,14 @@ impl<V: Record> Map<V> {
         &mut self,
         control: Option<&StorageReadControl>,
     ) -> StorageBackendResult<()> {
+        crate::image_io::work::inline(self.spill_from(control, &mut ()))
+    }
+
+    async fn spill_from(
+        &mut self,
+        control: Option<&StorageReadControl>,
+        work: &mut (impl crate::image_io::work::Work + Send),
+    ) -> StorageBackendResult<()> {
         let Root::Memory(resident) = &self.root else {
             return Ok(());
         };
@@ -391,12 +477,11 @@ impl<V: Record> Map<V> {
             self.workspace
                 .as_ref()
                 .filter(|owner| Arc::strong_count(owner) == 1),
+            self.file_budget.as_ref(),
         )?;
         for (key, value) in resident {
             check(control)?;
-            if let Some(value) = value {
-                disk.push(*key, &***value, &self.memory)?;
-            }
+            disk.push_from(*key, &***value, &self.memory, work).await?;
         }
         let root = disk.finish()?;
         check(control)?;
@@ -421,6 +506,7 @@ impl<V: Record> Map<V> {
 
 pub(crate) struct Iter<'a, V> {
     map: &'a Map<V>,
+    memory: &'a MemoryBudget,
     after: Option<u128>,
     done: bool,
 }
@@ -431,7 +517,7 @@ impl<'a, V: Record> Iterator for Iter<'a, V> {
         if self.done {
             return None;
         }
-        match self.map.next(self.after) {
+        match self.map.next_with_memory(self.after, self.memory) {
             Ok(Some((key, value))) => {
                 self.after = Some(key);
                 Some(Ok((key, value)))

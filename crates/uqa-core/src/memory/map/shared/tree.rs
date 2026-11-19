@@ -11,70 +11,144 @@ use std::{cmp::Ordering, sync::Arc};
 use super::{Budgeted, Entry, Link, MemoryBudget, MemoryError, Node, SharedNode, MAX_HEIGHT};
 use crate::memory::MemoryReservation;
 
-pub(super) fn insert<K: Ord, V>(
-    root: &mut Link<K, V>,
+mod removal;
+pub(super) use removal::remove;
+
+pub(super) struct PreparedInsert<K, V> {
     key: K,
-    value: V,
+    path: [Ordering; MAX_HEIGHT],
+    depth: usize,
+    private_replacement: bool,
+    allowance: MemoryReservation,
+    value: std::marker::PhantomData<V>,
+}
+
+pub(super) fn prepare<K: Ord, V>(
+    root: &Link<K, V>,
+    key: K,
     memory: &MemoryBudget,
-) -> Result<bool, MemoryError> {
-    let mut path = [Ordering::Equal; MAX_HEIGHT];
-    let mut depth = 0;
-    let mut required = size_of::<Budgeted<(K, V)>>();
-    let mut shared = false;
-    let mut link = &*root;
+) -> Result<PreparedInsert<K, V>, MemoryError> {
+    let mut selected = InsertSelection::new::<K, V>();
+    let mut link = root;
     while let Some(node) = link {
-        // Copying a shared ancestor also shares each remaining node on this path.
-        shared |= Arc::strong_count(node) != 1 || Arc::weak_count(node) != 0;
-        if shared {
-            required = required
-                .checked_add(size_of::<Budgeted<Node<K, V>>>())
-                .ok_or(MemoryError::SizeOverflow)?;
-        }
         let direction = key.cmp(&node.entry.0);
-        path[depth] = direction;
-        depth += 1;
+        selected.observe(node, direction)?;
         link = match direction {
             Ordering::Less => &node.left,
             Ordering::Greater => &node.right,
             Ordering::Equal => break,
         };
     }
-    if link.is_none() {
-        required = required
-            .checked_add(size_of::<Budgeted<Node<K, V>>>())
-            .ok_or(MemoryError::SizeOverflow)?;
-    } else if !shared
-        && link.as_ref().is_some_and(|node| {
-            Arc::strong_count(&node.entry) == 1 && Arc::weak_count(&node.entry) == 0
+    selected.finish(link, key, memory)
+}
+
+/// Ordinary and suspended comparisons feed the same structural admission model. Selection owns no tree references or key copies.
+pub(super) struct InsertSelection {
+    path: [Ordering; MAX_HEIGHT],
+    depth: usize,
+    required: usize,
+    shared: bool,
+}
+
+impl InsertSelection {
+    pub(super) fn new<K, V>() -> Self {
+        Self {
+            path: [Ordering::Equal; MAX_HEIGHT],
+            depth: 0,
+            required: size_of::<Budgeted<(K, V)>>(),
+            shared: false,
+        }
+    }
+
+    pub(super) fn observe<K, V>(
+        &mut self,
+        node: &SharedNode<K, V>,
+        direction: Ordering,
+    ) -> Result<(), MemoryError> {
+        // Copying a shared ancestor also shares each remaining node on this path.
+        self.shared |= Arc::strong_count(node) != 1 || Arc::weak_count(node) != 0;
+        if self.shared {
+            self.required = self
+                .required
+                .checked_add(size_of::<Budgeted<Node<K, V>>>())
+                .ok_or(MemoryError::SizeOverflow)?;
+        }
+        self.path[self.depth] = direction;
+        self.depth += 1;
+        Ok(())
+    }
+
+    pub(super) fn finish<K, V>(
+        mut self,
+        link: &Link<K, V>,
+        key: K,
+        memory: &MemoryBudget,
+    ) -> Result<PreparedInsert<K, V>, MemoryError> {
+        let private_replacement = link.is_some()
+            && !self.shared
+            && link.as_ref().is_some_and(|node| {
+                Arc::strong_count(&node.entry) == 1 && Arc::weak_count(&node.entry) == 0
+            });
+        if link.is_none() {
+            self.required = self
+                .required
+                .checked_add(size_of::<Budgeted<Node<K, V>>>())
+                .ok_or(MemoryError::SizeOverflow)?;
+        } else if private_replacement {
+            self.required = 0;
+        }
+        Ok(PreparedInsert {
+            key,
+            path: self.path,
+            depth: self.depth,
+            private_replacement,
+            allowance: memory.reserve(self.required)?,
+            value: std::marker::PhantomData,
         })
-    {
-        let mut link = &mut *root;
-        for direction in &path[..depth] {
-            let node = private(link.as_mut().expect("admitted replacement path"));
-            match direction {
-                Ordering::Less => link = &mut node.left,
-                Ordering::Greater => link = &mut node.right,
-                Ordering::Equal => {
-                    let entry = Arc::get_mut(&mut node.entry).expect("private replacement entry");
-                    let previous = std::mem::replace(&mut entry.value, (key, value));
-                    drop(previous);
-                    return Ok(false);
+    }
+}
+
+impl<K, V> PreparedInsert<K, V> {
+    /// The enclosing map retains exclusive access between preparation and publication.
+    pub(super) fn publish(self, root: &mut Link<K, V>, value: V) -> bool {
+        let Self {
+            key,
+            path,
+            depth,
+            private_replacement,
+            mut allowance,
+            value: _,
+        } = self;
+        if private_replacement {
+            let mut link = &mut *root;
+            for direction in &path[..depth] {
+                let node = private(link.as_mut().expect("admitted replacement path"));
+                match direction {
+                    Ordering::Less => link = &mut node.left,
+                    Ordering::Greater => link = &mut node.right,
+                    Ordering::Equal => {
+                        let entry =
+                            Arc::get_mut(&mut node.entry).expect("private replacement entry");
+                        let previous = std::mem::replace(&mut entry.value, (key, value));
+                        drop(previous);
+                        return false;
+                    }
                 }
             }
+            unreachable!("replacement path ends at an equal key");
         }
-        unreachable!("replacement path ends at an equal key");
+        let entry = Arc::new(Budgeted::new(
+            (key, value),
+            allowance.split(size_of::<Budgeted<(K, V)>>()),
+        ));
+        // Comparisons and admission are complete; publication never calls Ord or reserves memory.
+        let (inserted, replaced) =
+            insert_prepared(root.take(), entry, &path[..depth], &mut allowance);
+        let added = replaced.is_none();
+        *root = Some(inserted);
+        drop(replaced);
+        added
     }
-    let mut allowance = memory.reserve(required)?;
-    let entry = Arc::new(Budgeted::new(
-        (key, value),
-        allowance.split(size_of::<Budgeted<(K, V)>>()),
-    ));
-    // Comparisons and admission are complete; publication cannot fail or call Ord again.
-    let (inserted, replaced) = insert_prepared(root.take(), entry, &path[..depth], &mut allowance);
-    let added = replaced.is_none();
-    *root = Some(inserted);
-    drop(replaced);
-    Ok(added)
 }
 
 fn insert_prepared<K, V>(

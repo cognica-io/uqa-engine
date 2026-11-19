@@ -9,7 +9,6 @@
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 
-use parking_lot::{Mutex, RwLock};
 use uqa_storage::{PersistentStorageProvider, PersistentStorageSession, StorageBackendResult};
 
 use crate::state::CatalogCell;
@@ -51,7 +50,7 @@ impl Engine {
         );
         session.durable.restore(&self.durable.snapshot());
         session.runtime.physical_index_cache = self.runtime.physical_index_cache.clone();
-        uqa_execution::catalog::foreign::restoration::retain_durable_registry(&session);
+        uqa_execution::catalog::foreign::restoration::retain_durable_registry(&session)?;
         session.rebind_graph_stores()?;
         for (relation, source) in self.storage.tables.read().iter() {
             if source.persistence == uqa_sql::ast::RelationPersistence::Temporary {
@@ -63,7 +62,7 @@ impl Engine {
                 .storage
                 .tables
                 .write()
-                .insert(relation.clone(), Arc::clone(&table));
+                .insert(relation.clone(), Arc::clone(&table))?;
             let vector_fields = source
                 .vector_indexes
                 .read()
@@ -100,40 +99,67 @@ impl Engine {
         name: &str,
         source: &TableState,
     ) -> Arc<TableState> {
-        let analyzer = source.analyzer.read().clone();
+        let analyzer = source.analyzer.read().configuration().clone();
         Arc::new(TableState {
+            _image_memory: None,
             lifecycle_id: AtomicU64::new(crate::next_table_lifecycle_id()),
             object_id: source.object_id(),
-            security: CatalogCell::from_snapshot(source.security.snapshot()),
-            storage_generation: RwLock::new(source.storage_generation()),
-            document_store: RwLock::new(storage.backend.document_store(name)),
-            inverted_index: RwLock::new(storage.backend.inverted_index(name, analyzer)),
+            security: crate::state::TableMetadataCell::from_generation(
+                source.security.generation(),
+            ),
+            storage_generation: crate::state::CatalogCell::new(source.storage_generation()),
+            document_store: uqa_storage::memory_capture::MemoryCaptureCell::new(
+                storage.backend.document_store(name).into(),
+            ),
+            inverted_index: uqa_storage::memory_capture::MemoryCaptureCell::new(
+                storage.backend.inverted_index(name, analyzer).into(),
+            ),
             // Bind catalog-selected vector stores after installing the table, which DiskANN restoration needs for its owner and resource handles.
-            vector_indexes: RwLock::new(std::collections::BTreeMap::new().into()),
-            fts_fields: CatalogCell::from_snapshot(source.fts_fields.snapshot()),
-            columns: CatalogCell::from_snapshot(source.columns.snapshot()),
+            vector_indexes: uqa_storage::memory_capture::MemoryCaptureCell::new(
+                std::collections::BTreeMap::new().into(),
+            ),
+            fts_fields: crate::state::TableMetadataCell::from_generation(
+                source.fts_fields.generation(),
+            ),
+            columns: crate::state::TableDefinitionCell::from_generation(
+                source.columns.generation(),
+            ),
             columns_declared: CatalogCell::from_snapshot(source.columns_declared.snapshot()),
-            next_id: Mutex::new(*source.next_id.lock()),
-            maps_integer_keys: AtomicBool::new(source.maps_integer_keys.load(Ordering::Acquire)),
+            next_id: crate::state::CatalogCell::new(*source.next_id.read()),
+            maps_integer_keys: crate::state::CatalogCell::new(*source.maps_integer_keys.read()),
             analyzer: CatalogCell::from_snapshot(source.analyzer.snapshot()),
             column_stats: CatalogCell::from_snapshot(source.column_stats.snapshot()),
-            column_stats_loaded: AtomicBool::new(
-                source.column_stats_loaded.load(Ordering::Acquire),
+            column_stats_loaded: crate::state::CatalogCell::new(*source.column_stats_loaded.read()),
+            column_stats_dirty: crate::state::CatalogCell::new(*source.column_stats_dirty.read()),
+            statistics_maintenance: crate::state::CatalogCell::new(
+                source.statistics_maintenance.read().clone(),
             ),
-            column_stats_dirty: AtomicBool::new(source.column_stats_dirty.load(Ordering::Acquire)),
-            statistics_maintenance: Mutex::new(source.statistics_maintenance.lock().clone()),
-            table_checks: CatalogCell::from_snapshot(source.table_checks.snapshot()),
-            foreign_keys: CatalogCell::from_snapshot(source.foreign_keys.snapshot()),
-            key_constraints: CatalogCell::from_snapshot(source.key_constraints.snapshot()),
-            hierarchy: CatalogCell::from_snapshot(source.hierarchy.snapshot()),
-            value_indexes: RwLock::new(std::collections::BTreeMap::new()),
+            table_checks: crate::state::TableDefinitionCell::from_generation(
+                source.table_checks.generation(),
+            ),
+            foreign_keys: crate::state::TableMetadataCell::from_generation(
+                source.foreign_keys.generation(),
+            ),
+            key_constraints: crate::state::TableMetadataCell::from_generation(
+                source.key_constraints.generation(),
+            ),
+            hierarchy: crate::state::TableDefinitionCell::from_generation(
+                source.hierarchy.generation(),
+            ),
+            value_indexes: uqa_storage::memory_capture::MemoryCaptureCell::new(
+                uqa_execution::catalog::index::value::ValueIndexes::default(),
+            ),
             doc_count_cache: AtomicU64::new(source.doc_count_cache.load(Ordering::Acquire)),
             doc_count_dirty: AtomicBool::new(source.doc_count_dirty.load(Ordering::Acquire)),
             persistence: source.persistence,
             on_commit: source.on_commit,
             catalog_oids: source.recorded_catalog_oids(),
-            row_type_array_name: CatalogCell::from_snapshot(source.row_type_array_name.snapshot()),
-            dropped_attributes: CatalogCell::from_snapshot(source.dropped_attributes.snapshot()),
+            row_type_array_name: crate::state::TableMetadataCell::from_generation(
+                source.row_type_array_name.generation(),
+            ),
+            dropped_attributes: crate::state::TableMetadataCell::from_generation(
+                source.dropped_attributes.generation(),
+            ),
         })
     }
 }

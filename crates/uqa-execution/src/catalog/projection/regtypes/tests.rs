@@ -5,6 +5,8 @@
 //
 
 use super::*;
+use uqa_sql::catalog::roles::RoleDefinitions;
+use uqa_sql::catalog::table_definition::SharedTableDefinition;
 
 mod expression_metadata;
 mod output_cache;
@@ -17,12 +19,16 @@ fn routine_pseudo_types_have_catalog_backed_names_and_reserved_identities() {
         test_support::{empty_catalog, CatalogServices},
     };
     let mut snapshot = empty_catalog().snapshot().clone();
-    snapshot.definitions.schemas =
-        Arc::new(crate::catalog::security::BoundSchemaSecurity::initial_catalog());
-    snapshot.definitions.roles = Arc::new(BTreeMap::from([(
-        "uqa".into(),
-        uqa_sql::catalog::roles::RoleDefinition::bootstrap(),
-    )]));
+    snapshot.definitions.schemas = uqa_core::memory::RetainedValue::new(
+        crate::catalog::security::BoundSchemaSecurity::initial_catalog(),
+    );
+    snapshot.definitions.roles = uqa_core::memory::RetainedValue::new(
+        RoleDefinitions::try_from_iter([(
+            "uqa".into(),
+            uqa_sql::catalog::roles::RoleDefinition::bootstrap(),
+        )])
+        .unwrap(),
+    );
     let catalog = CatalogReadView::new(snapshot);
     let services = CatalogServices::default();
     let cache = RegtypeOutputCache::default();
@@ -56,17 +62,17 @@ fn relation_name_projection_uses_immutable_metadata_without_row_readers() {
     snapshot.tables.insert(
         identity.clone(),
         CatalogTableSnapshot {
-            dropped_attributes: std::sync::Arc::new(Vec::new()),
+            dropped_attributes: Vec::new().into(),
             object_id: [7; 16],
             catalog_oids: oids,
-            row_type_array_name: None,
-            security: Arc::new(BoundTableSecurity::owner(RoleIdentity::BOOTSTRAP)),
-            columns: Arc::default(),
+            row_type_array_name: None.into(),
+            security: Arc::new(BoundTableSecurity::owner(RoleIdentity::BOOTSTRAP)).into(),
+            columns: SharedTableDefinition::default(),
             columns_declared: true,
-            checks: Arc::default(),
-            foreign_keys: Arc::default(),
-            keys: Arc::default(),
-            hierarchy: Arc::default(),
+            checks: SharedTableDefinition::default(),
+            foreign_keys: Vec::new().into(),
+            keys: Vec::new().into(),
+            hierarchy: SharedTableDefinition::default(),
             persistence: uqa_sql::ast::RelationPersistence::Permanent,
         },
     );
@@ -265,12 +271,16 @@ fn missing_retained_type_identity_uses_the_missing_type_diagnostic() {
         test_support::{empty_catalog, CatalogServices},
     };
     let mut snapshot = empty_catalog().snapshot().clone();
-    snapshot.definitions.schemas =
-        Arc::new(crate::catalog::security::BoundSchemaSecurity::initial_catalog());
-    snapshot.definitions.roles = Arc::new(BTreeMap::from([(
-        "uqa".into(),
-        uqa_sql::catalog::roles::RoleDefinition::bootstrap(),
-    )]));
+    snapshot.definitions.schemas = uqa_core::memory::RetainedValue::new(
+        crate::catalog::security::BoundSchemaSecurity::initial_catalog(),
+    );
+    snapshot.definitions.roles = uqa_core::memory::RetainedValue::new(
+        RoleDefinitions::try_from_iter([(
+            "uqa".into(),
+            uqa_sql::catalog::roles::RoleDefinition::bootstrap(),
+        )])
+        .unwrap(),
+    );
     let catalog = CatalogReadView::new(snapshot);
     let services = CatalogServices::default();
     let cache = RegtypeOutputCache::default();

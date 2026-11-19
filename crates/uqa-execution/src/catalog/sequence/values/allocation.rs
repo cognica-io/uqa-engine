@@ -5,21 +5,36 @@
 //
 
 //! Reserve sequence blocks, consume session caches and publish allocation observations.
+use super::persistence::SequenceValueStorage;
 use super::{
     positions::{Reserved, ReservedBlock},
     NextvalTarget, SequenceValueContext, SequenceValueError,
 };
 use crate::catalog::sequence::{
-    session::{
-        NontransactionalSequenceValue, SessionLastSequenceReference, SessionSequenceCache,
-        SessionSequenceValue,
-    },
+    session::{SessionLastSequenceReference, SessionSequenceCache, SessionSequenceValue},
     SequenceState,
 };
 use std::collections::BTreeMap;
 use uqa_core::RelationIdentity;
 use uqa_storage::SequenceReservationResult;
 impl SequenceValueContext<'_> {
+    pub(super) fn has_cached_nextval(
+        target: &NextvalTarget,
+        caches: &BTreeMap<RelationIdentity, SessionSequenceCache>,
+    ) -> bool {
+        caches
+            .get(&target.relation)
+            .or_else(|| {
+                caches
+                    .values()
+                    .find(|cache| cache.object_id == target.object_id)
+            })
+            .is_some_and(|cache| {
+                cache.object_id == target.object_id
+                    && cache.definition_generation == target.state.definition_generation
+            })
+    }
+
     pub(super) fn take_cached_nextval(
         target: &NextvalTarget,
         caches: &mut BTreeMap<RelationIdentity, SessionSequenceCache>,
@@ -65,18 +80,14 @@ impl SequenceValueContext<'_> {
     pub(super) fn reserve_nextval_block(
         &self,
         target: &NextvalTarget,
+        storage: &SequenceValueStorage<'_>,
+        state: SequenceState,
     ) -> Result<Reserved, SequenceValueError> {
-        let private = self.sequence_value_is_private(
-            target.temporary,
-            target.object_id,
-            target.state.definition_generation,
-        )?;
-        if let Some(positions) = self.shared_positions(target, private) {
-            return self.reserve_at_position(positions, target);
+        if let SequenceValueStorage::Positioned { positions, session } = storage {
+            return self.reserve_at_position(positions, session, target);
         }
-        if let Some((result, autonomous)) = self.mutate_persistent_value(
-            target.temporary,
-            private,
+        if let Some((result, autonomous)) = storage.mutate(
+            self.runtime.cancellation(),
             "reserve sequence values",
             |catalog| {
                 catalog.reserve_sequence_values(
@@ -101,13 +112,7 @@ impl SequenceValueContext<'_> {
                 }
             };
         }
-        let mut sequences = self.runtime.states_write();
-        let sequence = sequences
-            .get_mut(&target.relation)
-            .ok_or_else(|| SequenceValueError::Undefined(target.name.clone()))?;
-        if sequence.definition_generation != target.state.definition_generation {
-            return Ok(None);
-        }
+        let sequence = state;
         let reservation = uqa_storage::sequence_value_reservation(
             uqa_storage::SequenceValuePosition {
                 current: sequence.current,
@@ -120,10 +125,7 @@ impl SequenceValueContext<'_> {
             sequence.cycle,
             sequence.cache_size,
         )
-        .ok_or_else(|| exhausted(&target.relation.name, *sequence))?;
-        sequence.current = reservation.last_value;
-        sequence.called = true;
-        sequence.log_count = reservation.log_count;
+        .ok_or_else(|| exhausted(&target.relation.name, sequence))?;
         Ok(Some(ReservedBlock {
             reservation,
             autonomous: false,
@@ -131,7 +133,6 @@ impl SequenceValueContext<'_> {
         }))
     }
     pub(super) fn install_nextval_reservation(
-        &self,
         target: &NextvalTarget,
         block: ReservedBlock,
         caches: &mut BTreeMap<RelationIdentity, SessionSequenceCache>,
@@ -139,24 +140,12 @@ impl SequenceValueContext<'_> {
         let ReservedBlock {
             reservation,
             autonomous,
-            positioned,
+            positioned: _,
         } = block;
         let mut physical = target.state;
         physical.current = reservation.last_value;
         physical.called = true;
         physical.log_count = reservation.log_count;
-        if !positioned {
-            if let Some(state) = self
-                .runtime
-                .states_write()
-                .get_mut(&target.relation)
-                .filter(|state| state.definition_generation == target.state.definition_generation)
-            {
-                state.current = reservation.last_value;
-                state.called = true;
-                state.log_count = reservation.log_count;
-            }
-        }
         if reservation.count > 1 {
             let next_value = reservation
                 .first_value
@@ -185,8 +174,6 @@ impl SequenceValueContext<'_> {
         relation: &RelationIdentity,
         object_id: [u8; 16],
         current: i64,
-        physical: SequenceState,
-        autonomous: bool,
     ) {
         let mut session = self.runtime.session_write();
         session
@@ -204,17 +191,6 @@ impl SequenceValueContext<'_> {
             object_id,
         });
         drop(session);
-        self.runtime.record_nontransactional_sequence_value(
-            physical.definition_generation,
-            NontransactionalSequenceValue {
-                object_id,
-                current: physical.current,
-                called: physical.called,
-                log_count: physical.log_count,
-                autonomous,
-            },
-            true,
-        );
     }
 }
 pub(super) fn exhausted(name: &str, state: SequenceState) -> SequenceValueError {

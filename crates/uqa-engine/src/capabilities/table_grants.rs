@@ -6,8 +6,8 @@
 
 //! Retain table generations and lend live catalog guards to native GRANT execution.
 use crate::{Engine, TableState};
-use parking_lot::RwLockReadGuard;
-use std::{collections::BTreeMap, sync::Arc};
+use parking_lot::MappedRwLockReadGuard;
+use std::sync::Arc;
 use uqa_core::RelationIdentity;
 use uqa_execution::catalog::security::{
     table_grants::context::{
@@ -27,7 +27,7 @@ struct GrantTable {
     state: Arc<TableState>,
 }
 struct GrantTables<'a> {
-    guard: RwLockReadGuard<'a, BTreeMap<RelationIdentity, Arc<TableState>>>,
+    guard: MappedRwLockReadGuard<'a, crate::state::TableRegistryMap>,
 }
 impl TableGrantRegistry for Engine {
     fn tables(&self) -> Box<dyn TableGrantRead<'_> + '_> {

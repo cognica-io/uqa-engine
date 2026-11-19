@@ -46,8 +46,8 @@ pub fn rename_role(
     original.revalidate(&roles)?;
     analysis::require_available_name(&roles, &replacement.name, true)?;
     let mut next = roles.clone();
-    next.remove(&original.role.name);
-    next.insert(replacement.name.clone(), replacement);
+    next.remove(&original.role.name)?;
+    next.insert(replacement.name.clone(), replacement)?;
     context.publication.persist_roles(&roles, &next)?;
     **roles = next;
     drop(roles);

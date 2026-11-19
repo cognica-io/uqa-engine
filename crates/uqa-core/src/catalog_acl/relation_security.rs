@@ -8,15 +8,15 @@
 
 use super::{TableAclEntry, TablePrivileges};
 use crate::catalog_role::{BoundAclEntry, RoleIdentity};
+use crate::memory::OwnedMap;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
 
 /// Replacement identities of independently writable relation and attribute ACL tuples.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RelationAclRevisions {
     pub relation: Option<[u8; 16]>,
-    pub columns: BTreeMap<String, [u8; 16]>,
+    pub columns: OwnedMap<String, [u8; 16]>,
 }
 
 impl RelationAclRevisions {
@@ -36,7 +36,7 @@ pub struct BoundRelationSecurity {
     /// Explicit null preserves the owner-only default ACL; an absent current field is invalid.
     #[serde(deserialize_with = "Deserialize::deserialize")]
     pub acl: Option<Vec<BoundAclEntry<TablePrivileges>>>,
-    pub column_acls: BTreeMap<String, Vec<BoundAclEntry<TablePrivileges>>>,
+    pub column_acls: OwnedMap<String, Vec<BoundAclEntry<TablePrivileges>>>,
     /// Loaded from independent ACL records, never embedded in a relation definition.
     #[serde(skip)]
     pub acl_revisions: RelationAclRevisions,
@@ -47,7 +47,7 @@ impl BoundRelationSecurity {
         Self {
             role_owner,
             acl: None,
-            column_acls: BTreeMap::new(),
+            column_acls: OwnedMap::new(),
             acl_revisions: RelationAclRevisions::default(),
         }
     }
@@ -60,8 +60,8 @@ pub struct LegacyRelationSecurity {
     pub role_owner: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub acl: Option<Vec<TableAclEntry>>,
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub column_acls: BTreeMap<String, Vec<TableAclEntry>>,
+    #[serde(default, skip_serializing_if = "OwnedMap::is_empty")]
+    pub column_acls: OwnedMap<String, Vec<TableAclEntry>>,
 }
 
 impl LegacyRelationSecurity {
@@ -69,7 +69,7 @@ impl LegacyRelationSecurity {
         Self {
             role_owner: role_owner.into(),
             acl: None,
-            column_acls: BTreeMap::new(),
+            column_acls: OwnedMap::new(),
         }
     }
 }

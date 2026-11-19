@@ -11,6 +11,10 @@ use proptest::prelude::*;
 
 use super::*;
 
+mod bidirectional;
+mod prepared;
+mod removal;
+
 fn verify<K: Ord, V>(link: &Link<K, V>) -> (usize, u8) {
     let Some(node) = link else { return (0, 0) };
     let (left, left_height) = verify(&node.left);
@@ -184,6 +188,14 @@ fn borrowed_ranges_seek_inclusively_and_exclusively_without_allocating() {
         assert_eq!(map.get(key), expected.get(key));
         for bound in [Bound::Included(key), Bound::Excluded(key)] {
             assert_eq!(
+                map.first_from(bound)
+                    .map(|(key, value)| (key.as_str(), value)),
+                expected
+                    .range::<str, _>((bound, Bound::Unbounded))
+                    .next()
+                    .map(|(key, value)| (*key, value))
+            );
+            assert_eq!(
                 map.last_before(bound)
                     .map(|(key, value)| (key.as_str(), value)),
                 expected
@@ -207,6 +219,12 @@ fn borrowed_ranges_seek_inclusively_and_exclusively_without_allocating() {
     let empty = BudgetedSharedMap::<String, usize>::new(&budget);
     assert!(empty.range_from(Bound::Included("a")).next().is_none());
     assert!(empty.last_before(Bound::Included("a")).is_none());
+    assert!(empty.first_from(Bound::Excluded("a")).is_none());
+    assert_eq!(
+        map.first_from::<str>(Bound::Unbounded)
+            .map(|(key, value)| (key.as_str(), *value)),
+        Some(("a", 1))
+    );
     assert_eq!(
         map.last_before::<str>(Bound::Unbounded)
             .map(|(key, value)| (key.as_str(), *value)),
@@ -215,7 +233,7 @@ fn borrowed_ranges_seek_inclusively_and_exclusively_without_allocating() {
 }
 
 #[test]
-fn greatest_entry_seeks_without_linear_work_or_allocation() {
+fn bounded_entry_seeks_without_linear_work_or_allocation() {
     #[derive(Eq, PartialEq)]
     struct Key(usize);
     static COMPARISONS: AtomicUsize = AtomicUsize::new(0);
@@ -250,6 +268,25 @@ fn greatest_entry_seeks_without_linear_work_or_allocation() {
                 map.last_before(bound).map(|(_, value)| *value),
                 Some(expected)
             );
+        });
+        assert_eq!(allocated.count_total, 0);
+        assert!(COMPARISONS.load(AtomicOrdering::Relaxed) < 32);
+    }
+    for (bound, expected) in [
+        (Bound::Included(Key(2048)), Some(2048)),
+        (Bound::Excluded(Key(2048)), Some(2049)),
+        (Bound::Included(Key(0)), Some(0)),
+        (Bound::Excluded(Key(4095)), Some(4096)),
+        (Bound::Excluded(Key(8191)), None),
+    ] {
+        COMPARISONS.store(0, AtomicOrdering::Relaxed);
+        let allocated = allocation_counter::measure(|| {
+            let bound = match &bound {
+                Bound::Included(key) => Bound::Included(key),
+                Bound::Excluded(key) => Bound::Excluded(key),
+                Bound::Unbounded => unreachable!(),
+            };
+            assert_eq!(map.first_from(bound).map(|(_, value)| *value), expected);
         });
         assert_eq!(allocated.count_total, 0);
         assert!(COMPARISONS.load(AtomicOrdering::Relaxed) < 32);
@@ -384,4 +421,40 @@ fn failed_path_and_rotation_reservations_preserve_roots_and_release_candidates()
         }
     }
     assert!(failures > 1 && successes > 1);
+}
+
+#[test]
+fn immutable_successors_keep_original_entries_across_construction_allowances() {
+    let original = MemoryBudget::new(1 << 16);
+    let future = MemoryBudget::new(1 << 16);
+    let text = "original".repeat(32);
+    let owner = Budgeted::new(text.clone(), original.reserve(text.len()).unwrap());
+    let mut source = BudgetedSharedMap::new(&original);
+    source.try_insert(1, owner).unwrap();
+    let selected = source.snapshot();
+    let pointer = selected.get(&1).unwrap().as_ptr();
+    drop(source);
+    let occupied = original.reserve(original.available()).unwrap();
+    let empty = || Budgeted::new(String::new(), future.empty_reservation());
+    let added = selected.with_insert(2, empty(), &future).unwrap();
+    let removed = added.with_remove(&2, &future).unwrap();
+    let successor = removed.with_insert(3, empty(), &future).unwrap();
+    assert_eq!(successor.get(&1).unwrap().as_ptr(), pointer);
+    assert!(selected.get(&3).is_none());
+    assert!(successor.get(&2).is_none());
+    assert_eq!(verify(&successor.root).0, 2);
+    let limit = future.reserve(future.available()).unwrap();
+    assert!(successor.with_insert(4, empty(), &future).is_err());
+    assert!(successor.with_remove(&3, &future).is_err());
+    assert_eq!(successor.get(&1).unwrap().as_ptr(), pointer);
+    assert_eq!(successor.len(), 2);
+    drop((selected, added, removed));
+    assert_eq!(&**successor.get(&1).unwrap(), &text);
+    assert!(original.used() > occupied.bytes());
+    drop(successor);
+    assert_eq!(original.used(), occupied.bytes());
+    assert_eq!(future.used(), limit.bytes());
+    drop((occupied, limit));
+    assert_eq!(original.used(), 0);
+    assert_eq!(future.used(), 0);
 }

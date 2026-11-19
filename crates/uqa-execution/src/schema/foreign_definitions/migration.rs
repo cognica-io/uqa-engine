@@ -7,11 +7,12 @@
 //! Upgrade foreign identities inside the caller-owned initial catalog transaction.
 use crate::catalog::foreign::StoredForeignTable;
 use uqa_core::RelationIdentity;
+use uqa_sql::catalog::roles::RoleDefinitions;
 use uqa_storage::{CatalogFacade, StorageBackendError, StorageBackendResult};
 
 pub fn migrate_foreign_table_identities(
     catalog: &dyn CatalogFacade,
-    roles: &std::collections::BTreeMap<String, uqa_sql::catalog::roles::RoleDefinition>,
+    roles: &RoleDefinitions,
 ) -> StorageBackendResult<()> {
     let attribute_format =
         crate::schema::constraints::restoration::require_attribute_format(catalog, true)?;

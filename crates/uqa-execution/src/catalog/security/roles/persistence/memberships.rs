@@ -7,14 +7,15 @@
 //! Membership records retain role incarnations and publish independent OID claims.
 
 use super::{
-    restoration, BTreeMap, CatalogFacade, RoleDefinition, RoleMembership, RoleMembershipKey,
-    SQLError, StorageBackendError, StorageBackendResult, ROLE_MEMBERSHIPS_METADATA_KEY,
+    restoration, BTreeMap, CatalogFacade, RoleMembership, RoleMembershipKey, SQLError,
+    StorageBackendError, StorageBackendResult, ROLE_MEMBERSHIPS_METADATA_KEY,
 };
 use serde::Deserialize;
 use std::{collections::BTreeSet, fmt::Write};
+use uqa_sql::catalog::roles::{RoleDefinitions, RoleMemberships};
 
 pub(super) const PREFIX: &str = "uqa.sql.role_membership.v1:";
-const OID_PREFIX: &str = "uqa.sql.role_membership_oid.v1:";
+pub(super) const OID_PREFIX: &str = "uqa.sql.role_membership_oid.v1:";
 const FORMAT: &str = r#"{"role_membership_catalog_format":1}"#;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -29,6 +30,22 @@ struct RecordFormat {
     role_membership_catalog_format: u32,
 }
 
+pub(super) fn require_current_marker(json: Option<&str>) -> StorageBackendResult<()> {
+    let Some(json) = json else {
+        return Err(StorageBackendError::Other(
+            "role metadata requires initial-open record migration".into(),
+        ));
+    };
+    let format: RecordFormat = serde_json::from_str(json)?;
+    if format.role_membership_catalog_format != 1 {
+        return Err(StorageBackendError::Other(format!(
+            "unsupported role membership catalog format {}",
+            format.role_membership_catalog_format
+        )));
+    }
+    Ok(())
+}
+
 #[derive(Deserialize)]
 #[serde(untagged)]
 enum StoredMemberships {
@@ -37,15 +54,21 @@ enum StoredMemberships {
 }
 
 pub(super) fn key(membership: &RoleMembershipKey) -> String {
-    let mut key = String::from(PREFIX);
-    for identity in [membership.role, membership.member, membership.grantor] {
-        write!(&mut key, "{:08x}", identity.oid).expect("string write");
-        for byte in identity.object_id {
-            write!(&mut key, "{byte:02x}").expect("string write");
-        }
-        key.push(':');
-    }
+    let mut key = String::new();
+    write_key(&mut key, membership).expect("string write");
     key
+}
+
+pub(super) fn write_key(key: &mut impl Write, membership: &RoleMembershipKey) -> std::fmt::Result {
+    key.write_str(PREFIX)?;
+    for identity in [membership.role, membership.member, membership.grantor] {
+        write!(key, "{:08x}", identity.oid)?;
+        for byte in identity.object_id {
+            write!(key, "{byte:02x}")?;
+        }
+        key.write_char(':')?;
+    }
+    Ok(())
 }
 
 fn oid_key(oid: i64) -> String {
@@ -54,11 +77,8 @@ fn oid_key(oid: i64) -> String {
 
 pub(super) fn read(
     catalog: &dyn CatalogFacade,
-    roles: &BTreeMap<String, RoleDefinition>,
-) -> StorageBackendResult<(
-    BTreeMap<RoleMembershipKey, RoleMembership>,
-    MembershipFormat,
-)> {
+    roles: &RoleDefinitions,
+) -> StorageBackendResult<(RoleMemberships, MembershipFormat)> {
     let stored = catalog
         .get_metadata(ROLE_MEMBERSHIPS_METADATA_KEY)?
         .map(|json| serde_json::from_str::<StoredMemberships>(&json))
@@ -122,7 +142,7 @@ pub(super) fn read(
 /// Initial restoration owns the transaction and validates both catalogs before publishing either conversion.
 pub(super) fn migrate(
     catalog: &dyn CatalogFacade,
-    memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
+    memberships: &RoleMemberships,
 ) -> StorageBackendResult<()> {
     for (identity, membership) in memberships {
         let key = key(identity);
@@ -134,8 +154,8 @@ pub(super) fn migrate(
 
 pub(super) fn persist(
     catalog: &dyn CatalogFacade,
-    before: &BTreeMap<RoleMembershipKey, RoleMembership>,
-    after: &BTreeMap<RoleMembershipKey, RoleMembership>,
+    before: &RoleMemberships,
+    after: &RoleMemberships,
 ) -> Result<(), SQLError> {
     let mut oids = BTreeSet::new();
     for (identity, membership) in after {

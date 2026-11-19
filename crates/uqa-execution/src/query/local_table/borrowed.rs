@@ -41,11 +41,8 @@ impl LocalTableRowSource {
                             .map_or(Ok(true), |predicate| predicate.keep(values))
                     })?;
                     if keep {
-                        let (values, projection) = shared.into_parts();
-                        let row = self.with_lock_identity(
-                            PhysicalRow::from_shared_values(values, projection),
-                            id,
-                        )?;
+                        let row =
+                            self.with_lock_identity(PhysicalRow::from_document_row(shared), id)?;
                         let before = size.bytes();
                         size.append(&row)?;
                         self.shared_page_rows = self

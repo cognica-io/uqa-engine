@@ -11,8 +11,9 @@ use crate::SQLError;
 use uqa_core::memory::{Produced, ProductionControl};
 
 use super::{
-    canonical_column_type_name, common::base_type, common::common_type_with_control,
-    require_equality_operator, routine_type_accepts_implicit_cast,
+    common::base_type, common::common_type_with_control,
+    overload_resolution::canonical_column_type_name_with_control, require_equality_operator,
+    routine_type_accepts_implicit_cast,
 };
 
 pub fn equality_operand_type(
@@ -69,11 +70,29 @@ pub fn foreign_key_operand_type(
     referencing: &ColumnType,
     referenced: &ColumnType,
 ) -> Result<ColumnType, SQLError> {
+    foreign_key_operand_type_with_control(
+        referencing,
+        referenced,
+        &ProductionControl::uncontrolled(),
+    )
+    .map(|ty| {
+        ty.into_uncontrolled()
+            .expect("ordinary foreign key type has no reservation")
+    })
+}
+
+/// Retain comparison types and canonical type names under the caller's allowance while applying the ordinary foreign-key coercion rules.
+pub fn foreign_key_operand_type_with_control(
+    referencing: &ColumnType,
+    referenced: &ColumnType,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<ColumnType>, SQLError> {
+    control.check()?;
     let referencing = base_type(referencing);
     let referenced = base_type(referenced);
-    let comparison = equality_operand_type(referencing, referenced)?;
-    let referencing_name = canonical_column_type_name(referencing);
-    let referenced_name = canonical_column_type_name(referenced);
+    let comparison = equality_operand_type_with_control(referencing, referenced, control)?;
+    let referencing_name = canonical_column_type_name_with_control(referencing, control)?;
+    let referenced_name = canonical_column_type_name_with_control(referenced, control)?;
     let shared_operator_family = is_integral(referencing) && is_integral(referenced)
         || is_float(referencing) && is_float(referenced)
         || is_date_timestamp(referencing) && is_date_timestamp(referenced)

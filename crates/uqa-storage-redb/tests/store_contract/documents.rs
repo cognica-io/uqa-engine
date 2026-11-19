@@ -7,6 +7,16 @@
 //! Document ownership and durable reservation transfer use redb's real common consumers.
 
 use super::*;
+
+#[test]
+fn redb_document_maximum_preserves_private_visibility_and_bounded_progress() {
+    let directory = tempfile::tempdir().unwrap();
+    let provider = RedbStorage::open(directory.path().join("document-maximum.redb")).unwrap();
+    uqa_storage::key_value::conformance::verify_document_maximum_input(
+        provider.open_session().unwrap(),
+    )
+    .unwrap();
+}
 use uqa_storage::key_value::conformance::{verify_document_ownership, verify_document_reopen};
 use uqa_storage::{
     document_store::{read_document_ids, read_field_presence},

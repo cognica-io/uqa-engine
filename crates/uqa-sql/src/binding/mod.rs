@@ -27,6 +27,9 @@ pub mod legacy_patterns;
 mod merge_scopes;
 mod ordered_calls;
 mod preparation;
+pub(crate) use preparation::analyze_stored_routine_statement;
+pub(crate) use preparation::analyze_stored_scalar_with_control;
+pub(crate) use preparation::validate_stored_rule_condition_with_control;
 pub mod production;
 pub use production::{
     analyze_query_plan_schema_with_control, analyze_source_plan_schema_with_control,
@@ -132,6 +135,7 @@ thread_local! {
 #[derive(Clone, Copy)]
 enum ScalarBindingMode {
     References,
+    RoutineParameters,
     Stored,
     CompositeInputs,
 }

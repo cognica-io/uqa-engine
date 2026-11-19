@@ -31,6 +31,17 @@ pub enum AnalyzerPhase {
 }
 
 impl AnalyzerPhase {
+    /// Canonicalize the case-insensitive assignment vocabulary, including the query alias, without trimming stored input.
+    pub fn normalize(value: &str) -> Result<(String, Self), String> {
+        let phase = Self::parse(&value.to_ascii_lowercase())?;
+        let name = match phase {
+            Self::Index => "index",
+            Self::Search => "search",
+            Self::Both => "both",
+        };
+        Ok((name.to_owned(), phase))
+    }
+
     pub fn parse(s: &str) -> Result<Self, String> {
         match s {
             "index" => Ok(AnalyzerPhase::Index),
@@ -50,6 +61,43 @@ impl std::str::FromStr for AnalyzerPhase {
 }
 
 pub trait InvertedIndex: Send + Sync {
+    /// Select the next evaluated text document from this exact image owner without reading its payload. Identity zero and the maximum identity are valid; absent text fields do not create an image document. Unsupported owners reject the request instead of collecting or rebuilding the index.
+    fn next_image_document_id(
+        &self,
+        _after: Option<DocId>,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<DocId>> {
+        control.check()?;
+        Err(StorageBackendError::Other(
+            "evaluated text image identities are not supported by this backend".into(),
+        ))
+    }
+
+    /// Read one evaluated text image in bounded windows, retaining its exact term and occurrence positions. Unsupported providers reject construction before producing bytes.
+    fn image_document_reader<'a>(
+        &'a self,
+        _doc_id: DocId,
+        control: &'a StorageReadControl,
+    ) -> StorageBackendResult<Option<crate::image_io::ImageReader<'a>>> {
+        control.check()?;
+        Err(StorageBackendError::Other(
+            "evaluated text image readers are not supported by this backend".into(),
+        ))
+    }
+
+    /// Write one evaluated memory text document without analyzing source text or resolving analyzer resources. The enclosing image owns document identity and the referenced analyzer descriptors. Unsupported providers must reject this capability before writing bytes.
+    fn write_image_document(
+        &self,
+        _doc_id: DocId,
+        _output: &mut dyn std::io::Write,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<u64>> {
+        control.check()?;
+        Err(StorageBackendError::Other(
+            "evaluated text images are not supported by this backend".into(),
+        ))
+    }
+
     /// Whether persisted positional data must be rebuilt from original sources before this index can be read or mutated. The owning engine performs this after restoring exact analyzer revisions, in the same initial-open transaction.
     fn source_rebuild_required(&self) -> StorageBackendResult<bool> {
         Ok(false)
@@ -777,3 +825,6 @@ pub trait InvertedIndex: Send + Sync {
         ))
     }
 }
+
+#[cfg(test)]
+mod tests;

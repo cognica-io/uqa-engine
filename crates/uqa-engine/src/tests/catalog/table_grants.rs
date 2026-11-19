@@ -42,7 +42,7 @@ fn setup(engine: &Engine, foreign_column: &str) {
 fn security(engine: &Engine) -> (BoundTableSecurity, BoundTableSecurity, BoundTableSecurity) {
     let table = engine.storage.tables.read()[&RelationIdentity::new("public", "items")].security();
     let view = engine.durable.views.read()[&RelationIdentity::new("public", "visible")].security();
-    let foreign = engine.durable.foreign_table_security.read()
+    let foreign = engine.durable.foreign_catalog.security()
         [&RelationIdentity::new("public", "remote")]
         .clone();
     (table, view, foreign)
@@ -237,7 +237,7 @@ impl TableGrantNotices for Authorization<'_> {
                 .acl
                 .is_some()
         );
-        assert!(self.engine.durable.sequence_security.read()
+        assert!(self.engine.durable.sequences.read().security()
             [&RelationIdentity::new("public", "ids")]
             .acl
             .is_none());
@@ -286,7 +286,7 @@ fn mixed_table_sequence_grant_releases_authorization_guards_before_sequence_warn
         .with_sqlstate("0LP01")]
     );
     assert!(
-        engine.durable.sequence_security.read()[&RelationIdentity::new("public", "ids")]
+        engine.durable.sequences.read().security()[&RelationIdentity::new("public", "ids")]
             .acl
             .is_some()
     );

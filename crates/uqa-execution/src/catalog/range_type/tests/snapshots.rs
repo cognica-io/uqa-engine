@@ -5,6 +5,8 @@
 //
 
 use super::*;
+use std::collections::BTreeMap;
+use std::sync::Arc;
 
 #[test]
 fn range_descriptors_share_both_oids_and_retain_their_generation_without_repeat_allocations() {
@@ -85,8 +87,13 @@ fn restored_ranges_reject_cross_family_identity_and_namespace_collisions() {
                 .name
                 .clone_from(&range.multirange.identity.name),
         }
-        snapshot.definitions.shells =
-            Arc::new(BTreeMap::from([(shell.identity.qualified_name(), shell)]));
+        snapshot.definitions.shells = uqa_core::memory::RetainedValue::new(
+            uqa_sql::catalog::type_definitions::TypeDefinitions::try_from_iter(BTreeMap::from([(
+                shell.identity.qualified_name(),
+                shell,
+            )]))
+            .unwrap(),
+        );
         assert!(
             validate_catalog(&crate::catalog::CatalogReadView::new(snapshot)).is_err(),
             "collision {collision}"
@@ -117,7 +124,7 @@ fn range_claim_validation_borrows_unrelated_catalog_identities_without_projectin
             table.catalog_oids.relation = 200_000 + index;
             table.catalog_oids.row_type = Some(100_000 + index * 2);
             table.catalog_oids.array_type = Some(100_001 + index * 2);
-            table.row_type_array_name = Some(format!("_{name}"));
+            table.row_type_array_name = Some(format!("_{name}")).into();
             snapshot
                 .tables
                 .insert(RelationIdentity::new("public", name), table);

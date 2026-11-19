@@ -44,6 +44,7 @@ fn predecessor_format_upgrade_preserves_records_allocations_and_receipts() {
                 .unwrap()
                 .insert("format", predecessor.to_be_bytes().as_slice())
                 .unwrap();
+            remove_backup_metadata_for_predecessor(&transaction);
             transaction.commit().unwrap();
         }
         assert!(store.snapshot(&control).is_err());
@@ -287,6 +288,7 @@ fn record_format_upgrade_preserves_history_identity_allocations_and_receipts() {
                     )
                     .unwrap();
             }
+            remove_backup_metadata_for_predecessor(&transaction);
             transaction.commit().unwrap();
         }
         {

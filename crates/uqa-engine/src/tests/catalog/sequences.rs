@@ -5,8 +5,10 @@
 //
 
 mod alteration_authority;
+mod binding;
 mod dependencies;
 mod lifecycle;
+mod native;
 mod ownership;
 mod positions;
 mod privileges;
@@ -16,9 +18,9 @@ mod values;
 
 /// The `pg_class` OID a sequence recorded when it was created.
 fn sequence_oid(engine: &crate::Engine, relation: &uqa_core::RelationIdentity) -> i64 {
-    let object_id = engine.durable.sequence_object_ids.read()[relation];
+    let object_id = *engine.durable.sequences.read().object_id(relation).unwrap();
     uqa_execution::catalog::sequence::catalog_oids::sequence_catalog_oid(
-        &engine.durable.sequence_catalog_oids.read(),
+        engine.durable.sequences.read().catalog_oids(),
         &object_id,
     )
 }

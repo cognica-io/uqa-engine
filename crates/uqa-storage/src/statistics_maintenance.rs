@@ -9,6 +9,10 @@
 use crate::{CatalogFacade, StorageBackendResult};
 use serde::{Deserialize, Serialize};
 
+mod image;
+mod stored;
+pub use image::StatisticsMaintenanceImageReader;
+
 const MAX_DIRTY_AGE_MS: u64 = 60_000;
 /// What a session may keep to itself of a small table, whose analysis threshold is fifty changes.
 const MIN_KEPT_CHANGES: u64 = 16;
@@ -42,6 +46,26 @@ pub struct StatisticsMaintenance {
 }
 
 impl StatisticsMaintenance {
+    /// Capture the complete inline maintenance record without allocating or recomputing its eligibility or clock state.
+    pub fn clone_with_control(
+        &self,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_core::memory::Produced<Self>, uqa_core::ValueRetentionError> {
+        control.finish(
+            Self {
+                object_id: self.object_id,
+                generation: self.generation,
+                changes: self.changes,
+                dirty_since_ms: self.dirty_since_ms,
+                analyzed_rows: self.analyzed_rows,
+                statistics_format: self.statistics_format,
+                analyzed_at: self.analyzed_at,
+                analysis_generation: self.analysis_generation,
+            },
+            control.empty_reservation(),
+        )
+    }
+
     pub const KEY_PREFIX: &'static str = "uqa.statistics.maintenance.v1:";
 
     pub fn key(table: &str) -> String {
@@ -62,13 +86,15 @@ impl StatisticsMaintenance {
         object_id: [u8; 16],
     ) -> StorageBackendResult<Self> {
         let state = Self::load(catalog, table)?;
-        Ok(
-            if state.object_id.is_some_and(|stored| stored != object_id) {
-                Self::default()
-            } else {
-                state
-            },
-        )
+        Ok(state.for_object(object_id))
+    }
+
+    fn for_object(self, object_id: [u8; 16]) -> Self {
+        if self.object_id.is_some_and(|stored| stored != object_id) {
+            Self::default()
+        } else {
+            self
+        }
     }
 
     pub fn save(&self, catalog: &dyn CatalogFacade, table: &str) -> StorageBackendResult<()> {

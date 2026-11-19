@@ -261,7 +261,7 @@ fn evaluate_truth<F: FieldValues + ?Sized>(
         }
         _ => {
             let value = evaluate(expression, fields)?;
-            value_to_truth(value.as_value())
+            value_to_truth(value.as_value())?
         }
     };
     Ok(truth)
@@ -281,11 +281,11 @@ fn is_comparison(op: BinaryOp) -> bool {
 }
 
 #[inline]
-fn value_to_truth(value: &Value) -> Option<bool> {
+fn value_to_truth(value: &Value) -> Result<Option<bool>, SQLError> {
     if matches!(value, Value::Null) {
-        None
+        Ok(None)
     } else {
-        Some(truthy(value))
+        truthy(value).map(Some)
     }
 }
 
@@ -341,7 +341,7 @@ fn evaluate<'a, F: FieldValues + ?Sized>(
             let value = evaluate(expression, fields)?;
             ProjectedValue::Owned(match value.as_value() {
                 Value::Null => Value::Null,
-                value => Value::Bool(!truthy(value)),
+                value => Value::Bool(!truthy(value)?),
             })
         }
         ProjectedExpr::And(items) => ProjectedValue::Owned(evaluate_and(items, fields)?),
@@ -575,7 +575,7 @@ fn evaluate_and<F: FieldValues + ?Sized>(
         let value = evaluate(item, fields)?;
         match value.as_value() {
             Value::Null => saw_null = true,
-            value if !truthy(value) => return Ok(Value::Bool(false)),
+            value if !truthy(value)? => return Ok(Value::Bool(false)),
             _ => {}
         }
     }
@@ -595,7 +595,7 @@ fn evaluate_or<F: FieldValues + ?Sized>(
         let value = evaluate(item, fields)?;
         match value.as_value() {
             Value::Null => saw_null = true,
-            value if truthy(value) => return Ok(Value::Bool(true)),
+            value if truthy(value)? => return Ok(Value::Bool(true)),
             _ => {}
         }
     }

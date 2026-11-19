@@ -291,7 +291,12 @@ fn sql_analyzer_rebuild_cancellation_restores_bindings_postings_and_reopen() {
 #[test]
 fn prepared_search_uses_current_analyzer_revision_after_assignment_and_rollback() {
     use super::Backend;
-    for backend in [Backend::Memory, Backend::SQLite, Backend::Redb] {
+    for backend in [
+        Backend::Memory,
+        Backend::SQLite,
+        Backend::SQLiteKeyValue,
+        Backend::Redb,
+    ] {
         let directory = TempDir::new().unwrap();
         let database = directory.path().join("prepared-revisions.db");
         let engine = backend.open(&database);

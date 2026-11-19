@@ -21,7 +21,7 @@ pub(super) fn bind_removals(
         .map_err(|error| ddl_storage_error("DROP INDEX registry", error))?
         .into_iter()
         .map(|row| (row.relation.clone(), row))
-        .collect();
+        .collect::<BTreeMap<_, _>>();
     let mut tree = std::collections::BTreeMap::new();
     for root in indexes {
         for row in super::super::registry::lifecycle::descendants(&rows, &root.relation)

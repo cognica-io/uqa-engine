@@ -7,10 +7,10 @@
 //! Initial table catalog migration and persistent table hydration.
 
 use super::{
-    Analyzer, Arc, AtomicBool, BTreeMap, CatalogFacade, Engine, FieldName,
-    PersistentStorageBackend, RwLock, StorageBackendError, StorageBackendResult, TableSchema,
-    TableState, VectorIndex,
+    Analyzer, Arc, BTreeMap, CatalogFacade, Engine, FieldName, PersistentStorageBackend,
+    StorageBackendError, StorageBackendResult, TableSchema, TableState, VectorIndex,
 };
+use crate::statistics::MaintenanceState;
 use crate::{VectorIndexOpenMode, VectorIndexSpec};
 use uqa_execution::schema::indexes::constraint_names::KeyConstraintNames;
 
@@ -68,7 +68,7 @@ impl Engine {
         for (schema, security) in schemas {
             let relation = schema.relation.clone();
             let table = Self::load_session_table(catalog, backend, schema, security, &names)?;
-            self.storage.tables.write().insert(relation, table);
+            self.storage.tables.write().insert(relation, table)?;
         }
         self.synchronize_partition_identity_watermarks()?;
         if mode.allows_migration() {
@@ -79,7 +79,7 @@ impl Engine {
                     allocator.persist(
                         catalog,
                         &relation.qualified_name(),
-                        &mut table.next_id.lock(),
+                        &mut table.next_id.write(),
                     )?;
                 }
             }
@@ -204,12 +204,8 @@ impl Engine {
         .map_err(|error| StorageBackendError::Other(error.to_string()))?;
         let column_stats = Self::load_column_stats_from_catalog(catalog, &table_name)?;
         let column_stats_dirty = (column_stats.is_empty() && !columns.is_empty())
-            || crate::statistics::MaintenanceState::load_for(
-                catalog,
-                &table_name,
-                schema.object_id,
-            )?
-            .invalidates_existing_statistics();
+            || MaintenanceState::load_for(catalog, &table_name, schema.object_id)?
+                .invalidates_existing_statistics();
         let max_id = docs.max_doc_id()?;
         let persisted_next_id = if columns.iter().any(|column| {
             column
@@ -226,38 +222,33 @@ impl Engine {
             persisted_next_id,
         );
         let maps_integer_keys = Self::restored_key_mapping(catalog, &columns, schema.object_id)?;
-        Ok(Arc::new(TableState {
-            lifecycle_id: std::sync::atomic::AtomicU64::new(crate::next_table_lifecycle_id()),
+        let contents = crate::state::TableContents {
             object_id: schema.object_id,
-            security: crate::state::CatalogCell::new(security),
-            storage_generation: RwLock::new(schema.storage_generation),
-            document_store: RwLock::new(docs),
-            inverted_index: RwLock::new(inv),
-            vector_indexes: RwLock::new(vectors.into()),
-            fts_fields: crate::state::CatalogCell::new(schema.fts_fields),
-            columns_declared: crate::state::CatalogCell::new(
-                constraints.columns_declared.unwrap_or(!columns.is_empty()),
-            ),
-            columns: crate::state::CatalogCell::new(columns),
-            next_id: parking_lot::Mutex::new(next_id),
-            maps_integer_keys: AtomicBool::new(maps_integer_keys),
-            analyzer: crate::state::CatalogCell::new(analyzer),
-            column_stats: crate::state::CatalogCell::new(column_stats.into()),
-            column_stats_loaded: AtomicBool::new(true),
-            column_stats_dirty: AtomicBool::new(column_stats_dirty),
-            statistics_maintenance: parking_lot::Mutex::default(),
-            table_checks: crate::state::CatalogCell::new(constraints.checks),
-            foreign_keys: crate::state::CatalogCell::new(constraints.foreign_keys),
-            key_constraints: crate::state::CatalogCell::new(constraints.key_constraints),
-            hierarchy: crate::state::CatalogCell::new(constraints.hierarchy),
-            value_indexes: RwLock::new(BTreeMap::new()),
-            doc_count_cache: std::sync::atomic::AtomicU64::new(0),
-            doc_count_dirty: AtomicBool::new(true),
-            persistence: constraints.persistence,
-            on_commit: constraints.on_commit,
-            catalog_oids: constraints.catalog_oids,
-            row_type_array_name: crate::state::CatalogCell::new(constraints.row_type_array_name),
-            dropped_attributes: crate::state::CatalogCell::new(constraints.dropped_attributes),
-        }))
+            storage_generation: schema.storage_generation,
+            security: uqa_sql::catalog::table_metadata::TableMetadata::new(security),
+            documents: docs.into(),
+            text: inv.into(),
+            vectors: vectors.into(),
+            values: uqa_execution::catalog::index::value::ValueIndexes::default(),
+            fts_fields: uqa_sql::catalog::table_metadata::TableMetadata::new(schema.fts_fields),
+            columns: uqa_sql::catalog::table_definition::TableDefinition::new(&columns)
+                .map_err(table_publication_error)?,
+            constraints: uqa_sql::catalog::table_definition::NativeTableConstraints::new(
+                constraints,
+            )
+            .map_err(table_publication_error)?,
+            analyzer: uqa_analysis::AnalyzerDefinition::new(analyzer),
+            next_id,
+            maps_integer_keys,
+            statistics: column_stats.into(),
+            statistics_loaded: true,
+            statistics_dirty: column_stats_dirty,
+            maintenance: MaintenanceState::default(),
+        };
+        Ok(Arc::new(contents.into_state(None)?))
     }
+}
+
+fn table_publication_error(error: uqa_sql::SQLError) -> StorageBackendError {
+    StorageBackendError::backend("table definition publication", error)
 }

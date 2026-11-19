@@ -15,12 +15,13 @@ use uqa_sql::ast::{
     ConstraintCatalogIdentity, Expr, PartitionBound, PartitionSpec, PartitionStrategy,
     RelationPersistence, TableHierarchy,
 };
+use uqa_sql::catalog::table_definition::SharedTableDefinition;
 use uqa_storage::CatalogIndexRow;
 
 fn table(hierarchy: TableHierarchy) -> CatalogTableSnapshot {
     CatalogTableSnapshot {
-        dropped_attributes: std::sync::Arc::new(Vec::new()),
-        row_type_array_name: None,
+        dropped_attributes: Vec::new().into(),
+        row_type_array_name: None.into(),
         object_id: [1; 16],
         catalog_oids: uqa_sql::catalog::relation_oids::RelationCatalogOids::legacy(
             uqa_sql::catalog::relation_oids::RelationOidKind::Table,
@@ -28,13 +29,14 @@ fn table(hierarchy: TableHierarchy) -> CatalogTableSnapshot {
         ),
         security: Arc::new(BoundTableSecurity::owner(
             uqa_sql::catalog::roles::RoleIdentity::BOOTSTRAP,
-        )),
-        columns: Arc::default(),
+        ))
+        .into(),
+        columns: SharedTableDefinition::default(),
         columns_declared: true,
-        checks: Arc::default(),
-        foreign_keys: Arc::default(),
-        keys: Arc::default(),
-        hierarchy: Arc::new(hierarchy),
+        checks: SharedTableDefinition::default(),
+        foreign_keys: Vec::new().into(),
+        keys: Vec::new().into(),
+        hierarchy: Arc::new(hierarchy).into(),
         persistence: RelationPersistence::Permanent,
     }
 }
@@ -103,13 +105,10 @@ fn selection_preserves_declared_identity_and_standalone_expression_predicate_and
         .unwrap(),
     );
     let ordinary = index("ordinary", "target", false);
-    snapshot.definitions.catalog_indexes = Arc::new(
-        [
-            (unique.relation.clone(), unique),
-            (ordinary.relation.clone(), ordinary),
-        ]
-        .into(),
-    );
+    snapshot.definitions.catalog_indexes =
+        uqa_core::memory::RetainedValue::new(crate::catalog::test_support::index_rows([
+            unique, ordinary,
+        ]));
     let keys = enforced_keys(
         &CatalogReadView::new(snapshot),
         &resolution(),
@@ -174,17 +173,13 @@ fn persisted_partition_indexes_bind_local_incarnations_and_leave_ordinary_inheri
         row.definition_json = Some(serde_json::to_string(&definition).unwrap());
         row
     };
-    snapshot.definitions.catalog_indexes = Arc::new(
-        [
+    snapshot.definitions.catalog_indexes =
+        uqa_core::memory::RetainedValue::new(crate::catalog::test_support::index_rows([
             persisted("root_key", "root", 2, None),
             persisted("child_key", "child", 3, Some(2)),
             persisted("leaf_key", "leaf", 4, Some(3)),
             persisted("ordinary_key", "ordinary", 5, None),
-        ]
-        .into_iter()
-        .map(|index| (index.relation.clone(), index))
-        .collect(),
-    );
+        ]));
     let catalog = CatalogReadView::new(snapshot);
     for (target, name, id, ancestry) in [
         ("public.root", "root_key", 2, vec![]),

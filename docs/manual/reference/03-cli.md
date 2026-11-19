@@ -23,7 +23,7 @@ Current source builds include the memory foreign-data wrapper. Add `--features a
 
 ## Standalone release installation
 
-Starting with 0.6.0, GitHub releases attach `uqa-cli-<version>-<target>.tgz` for Linux and macOS, `.zip` archives for Windows, matching `.sha256` files, and `install-usql.sh` / `install-usql.ps1`. Each system has x86_64 and ARM64 builds on native runners. The standalone executable includes Nori, Kuromoji, Arrow and DuckDB; no Python or Rust installation is needed. Linux builds target GNU libc on Ubuntu 24.04, so use Ubuntu 24.04 or a compatible newer distribution; these are not musl/Alpine binaries.
+Starting with 0.6.0, GitHub releases attach `uqa-cli-<version>-<target>.tgz` for Linux and macOS, `.zip` archives for Windows, matching `.sha256` files, and `install-usql.sh` / `install-usql.ps1`. Current source builds support Linux and Windows on x86_64 and ARM64, and macOS on ARM64. Releases through 0.6.3 also provide macOS x86_64 archives. The standalone executable includes Nori, Kuromoji, Arrow and DuckDB; no Python or Rust installation is needed. Linux builds target GNU libc on Ubuntu 24.04, so use Ubuntu 24.04 or a compatible newer distribution; these are not musl/Alpine binaries.
 
 With [cargo-binstall](https://github.com/cargo-bins/cargo-binstall#installation) installed, Cargo users can download the same official binary without compiling UQA:
 

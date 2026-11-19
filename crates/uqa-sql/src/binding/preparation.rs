@@ -22,6 +22,7 @@ mod membership;
 mod ownership;
 mod parameters;
 mod production;
+pub(in crate::binding) use production::bind_routine_parameter_references;
 pub(crate) use production::bind_rule_inputs_owned;
 pub(in crate::binding) use production::retain_input_metadata_owned;
 pub use production::{
@@ -44,8 +45,8 @@ pub use query_layouts::{restore_query_layouts, restore_query_layouts_owned};
 mod routines;
 mod rows;
 pub(crate) use routines::{
-    analyze_routine_body_argument, analyze_routine_body_inputs, prepare_procedure_call,
-    prepare_routine_body_inputs, read_procedure_inputs,
+    analyze_routine_body_argument, analyze_routine_body_inputs, analyze_stored_routine_statement,
+    prepare_procedure_call, prepare_routine_body_inputs, read_procedure_inputs,
 };
 mod schema_expressions;
 mod set_contexts;
@@ -60,8 +61,9 @@ use crate::routines::RoutineResolution;
 use crate::schema::dependencies::oid_alias::OidAliasInput;
 use crate::ScalarExpr;
 use crate::{ColumnType, SQLError};
-use parameters::{error, ExpressionType, ParameterTypes};
-use schema_expressions::{SchemaExpressionContext, SchemaExpressionKind};
+pub(super) use ownership::AnalysisIdentity;
+use parameters::{error, ExpressionType, InputCatalogs, LiteralInput, ParameterTypes};
+use schema_expressions::{SchemaContext, SchemaExpressionContext, SchemaExpressionKind};
 
 #[derive(Debug)]
 pub(crate) struct PreparedInputAnalysis {
@@ -412,12 +414,74 @@ fn retain_compute_kinds(routines: &dyn RoutineResolution, plan: &mut UnifiedPlan
     });
 }
 
-struct Preparation<'a> {
+struct Preparation<'a, I = InputCatalogs<'a>, C = Option<SchemaExpressionContext<'a>>> {
     routines: &'a dyn RoutineResolution,
     scope: &'a mut SchemaScope,
-    parameters: ParameterTypes<'a>,
-    schema_expression: Option<SchemaExpressionContext<'a>>,
+    parameters: ParameterTypes<'a, I>,
+    schema_expression: C,
     bound_condition_queries: Option<&'a super::type_resolution::BoundConditionQueries<'a>>,
+}
+
+/// Inspect an existing scalar in its original row scope without rewriting it or executing catalog input functions. A condition retains unknown-literal metadata through ordinary Boolean input analysis.
+pub(crate) fn analyze_stored_scalar_with_control(
+    routines: &dyn RoutineResolution,
+    expression: &ScalarExpr,
+    input: &RowSchema,
+    binding: super::production::ControlledBindingContext<'_>,
+    boolean_context: Option<&str>,
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<Option<uqa_core::memory::Produced<ColumnType>>, SQLError> {
+    let mut scope = SchemaScope::for_analysis_with_control(binding, control)?;
+    let mut analysis = Preparation {
+        routines,
+        scope: &mut scope,
+        parameters: ParameterTypes::fixed_with_control(&[], control)?,
+        schema_expression: (),
+        bound_condition_queries: None,
+    };
+    let value = match boolean_context {
+        Some(context) => analysis.boolean_expression(expression, input, &[], context)?,
+        None => analysis.expression(expression, input, &[])?,
+    };
+    analysis
+        .parameters
+        .collations
+        .validate_expression(expression)?;
+    control.check()?;
+    value.ty.map(|ty| ty.into_produced(control)).transpose()
+}
+
+/// Borrow a captured condition and its nested queries; retain only analysis scratch and never apply recorded input rewrites.
+pub(crate) fn validate_stored_rule_condition_with_control(
+    routines: &dyn RoutineResolution,
+    expression: &crate::plan::ExpressionPlan,
+    input: &RowSchema,
+    binding: super::production::ControlledBindingContext<'_>,
+    whole_rows: [Option<crate::plan::OwnedScalarExpr>; 2],
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<(), SQLError> {
+    let mut scope = SchemaScope::for_analysis_with_control(binding, control)?;
+    scope.scalar_binding = super::ScalarBindingMode::References;
+    scope.preserve_syntax_shape = true;
+    scope.stored_expression_outer = Some(input.clone());
+    scope.stored_whole_rows = whole_rows;
+    let mut analysis = Preparation {
+        routines,
+        scope: &mut scope,
+        parameters: ParameterTypes::fixed_with_control(&[], control)?.with_reference_retention(),
+        schema_expression: (),
+        bound_condition_queries: None,
+    };
+    for query in &expression.subqueries {
+        analysis.query(query, Some(input))?;
+    }
+    analysis.boolean_expression(&expression.scalar, input, &expression.subqueries, "WHERE")?;
+    analysis
+        .parameters
+        .collations
+        .validate_expression(&expression.scalar)?;
+    control.check()?;
+    Ok(())
 }
 
 /// Share expression analysis with ordinary output binding while borrowing its lexical scope and fixed parameters.
@@ -434,7 +498,7 @@ pub(super) fn projection_metadata(
         routines,
         parameters: ParameterTypes::fixed_with_control(params, &scope.control())?,
         scope,
-        schema_expression: None,
+        schema_expression: (),
     };
     let mut value = analysis.expression(expression, input, subqueries)?;
     analysis
@@ -477,7 +541,7 @@ pub(crate) fn assign_stored_input_collations(
         routines,
         scope: &mut SchemaScope::for_analysis(binding)?,
         parameters: ParameterTypes::fixed(&[]).with_call_collations(),
-        schema_expression: None,
+        schema_expression: (),
     };
     analysis.expression(&expression.scalar, input, &expression.subqueries)?;
     analysis
@@ -497,7 +561,7 @@ pub fn assign_stored_query_input_collations(
         routines,
         scope: &mut SchemaScope::for_analysis(binding)?,
         parameters: ParameterTypes::fixed(&[]).with_call_collations(),
-        schema_expression: None,
+        schema_expression: (),
     };
     analysis.query(query, None)?;
     analysis
@@ -521,7 +585,7 @@ pub(super) fn call_input_collation(
         routines,
         parameters: ParameterTypes::fixed_with_control(params, &scope.control())?,
         scope,
-        schema_expression: None,
+        schema_expression: (),
     };
     let arguments = analysis.observe_function_arguments(name, args, &[], input, subqueries)?;
     arguments.input_collation(args.len(), None, false)
@@ -540,7 +604,7 @@ pub(super) fn condition_metadata(
         routines,
         parameters: ParameterTypes::fixed_with_control(params, &scope.control())?,
         scope,
-        schema_expression: None,
+        schema_expression: (),
     };
     let placement = match construct {
         "WHERE" => crate::semantics::sets::placement::SetPlacement::Where,
@@ -572,7 +636,7 @@ pub(super) fn values_metadata(
         routines,
         parameters: ParameterTypes::fixed_with_control(params, &scope.control())?,
         scope,
-        schema_expression: None,
+        schema_expression: (),
     };
     analysis
         .values(rows, subqueries, outer)
@@ -592,7 +656,7 @@ pub(super) fn set_metadata(
         routines,
         parameters: ParameterTypes::fixed_with_control(params, &scope.control())?,
         scope,
-        schema_expression: None,
+        schema_expression: (),
     };
     let output = analysis.root(root, outer, false)?;
     analysis
@@ -616,7 +680,7 @@ pub(super) fn block_metadata(
         routines,
         parameters: ParameterTypes::fixed_with_control(params, &scope.control())?,
         scope,
-        schema_expression: None,
+        schema_expression: (),
     };
     let output = analysis.block_with_source(block, source, outer, false)?;
     analysis
@@ -631,7 +695,7 @@ struct QueryOutput {
     types: ownership::AnalysisVec<ExpressionType>,
     open: bool,
     /// Sparse original targets for indeterminate output collations; addresses are never dereferenced.
-    key_origins: ownership::AnalysisVec<(usize, std::ptr::NonNull<ScalarExpr>)>,
+    key_origins: ownership::AnalysisVec<(usize, AnalysisIdentity<ScalarExpr>)>,
     /// Leaf output names of this set-operation query, retained only for inaccessible-column diagnostics.
     set_sources: ownership::AnalysisVec<ownership::AnalysisVec<uqa_core::memory::Produced<String>>>,
     control: uqa_core::memory::OwnedProductionControl,
@@ -649,7 +713,7 @@ impl QueryOutput {
         }
     }
 
-    fn key_origin(&self, position: usize) -> Option<std::ptr::NonNull<ScalarExpr>> {
+    fn key_origin(&self, position: usize) -> Option<AnalysisIdentity<ScalarExpr>> {
         self.key_origins
             .binary_search_by_key(&position, |(position, _)| *position)
             .ok()
@@ -678,7 +742,7 @@ impl QueryOutput {
     }
 }
 
-impl Preparation<'_> {
+impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
     fn plan(&mut self, plan: &UnifiedPlan) -> Result<(), SQLError> {
         match plan {
             UnifiedPlan::Query(query) => {
@@ -699,7 +763,7 @@ impl Preparation<'_> {
     ) -> Result<Option<ownership::AnalysisType>, SQLError> {
         let owner = self.scope.control().capture();
         let control = owner.control();
-        let defer_windows = self.schema_expression.is_none()
+        let defer_windows = self.schema_expression.schema_expression().is_none()
             && crate::semantics::windows::expr_has_window(expression);
         let canonical = if self.scope.routine_parameters.is_some() || defer_windows {
             Some(expression.copy_for_rewrite(&control)?.transform_nodes(

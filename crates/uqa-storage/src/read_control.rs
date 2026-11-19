@@ -18,18 +18,21 @@ pub type KeyReadVisitor<'a> = dyn FnMut(&[u8]) -> StorageBackendResult<()> + 'a;
 pub struct StorageReadControl {
     memory: MemoryBudget,
     cancellation: CancellationToken,
+    temporary_files: Option<crate::temporary_file::FileBudget>,
 }
 impl StorageReadControl {
     pub fn with_limit(limit: usize) -> Self {
         Self {
             memory: MemoryBudget::new(limit),
             cancellation: CancellationToken::new(),
+            temporary_files: None,
         }
     }
     pub fn new(memory: &MemoryBudget, cancellation: &CancellationToken) -> Self {
         Self {
             memory: memory.clone(),
             cancellation: cancellation.clone(),
+            temporary_files: None,
         }
     }
     pub fn memory(&self) -> &MemoryBudget {
@@ -38,9 +41,30 @@ impl StorageReadControl {
     pub fn cancellation(&self) -> &CancellationToken {
         &self.cancellation
     }
+
+    /// Attach a new physical ciphertext allowance to temporary files created by controlled image validation. Clones share this allowance, memory and cancellation; already retained source files keep their existing owner. Without this option, the existing standalone validation has no temporary-file quota.
+    pub fn with_temporary_limit(&self, maximum_bytes: u64) -> Self {
+        self.with_file_budget(&crate::temporary_file::FileBudget::new(maximum_bytes))
+    }
+
+    pub(crate) fn with_file_budget(&self, files: &crate::temporary_file::FileBudget) -> Self {
+        Self {
+            temporary_files: Some(files.clone()),
+            ..self.clone()
+        }
+    }
+
+    pub(crate) fn file_budget(&self) -> Option<&crate::temporary_file::FileBudget> {
+        self.temporary_files.as_ref()
+    }
     pub(crate) fn shares_context(&self, other: &Self) -> bool {
         self.memory.shares_allowance(&other.memory)
             && self.cancellation.shares_signal(&other.cancellation)
+            && match (&self.temporary_files, &other.temporary_files) {
+                (None, None) => true,
+                (Some(left), Some(right)) => left.shares_allowance(right),
+                _ => false,
+            }
     }
     pub fn check(&self) -> StorageBackendResult<()> {
         self.cancellation.check()?;

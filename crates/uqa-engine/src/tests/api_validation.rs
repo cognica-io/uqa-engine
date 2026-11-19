@@ -11,12 +11,12 @@ fn document_id_watermark_represents_and_reports_exhaustion_without_wrapping() {
     let engine = Engine::new();
     engine.create_default_table("docs", Vec::new()).unwrap();
     let table = engine.table("docs").unwrap().expect("table");
-    *table.next_id.lock() = u128::from(u64::MAX);
+    *table.next_id.write() = u128::from(u64::MAX);
 
     assert_eq!(engine.allocate_next_id("docs").unwrap(), u64::MAX);
     let error = engine.allocate_next_id("docs").unwrap_err();
     assert!(error.to_string().contains("document id space"), "{error}");
-    assert_eq!(*table.next_id.lock(), u128::from(u64::MAX) + 1);
+    assert_eq!(*table.next_id.read(), u128::from(u64::MAX) + 1);
 
     let second = Engine::new();
     second.create_default_table("docs", Vec::new()).unwrap();

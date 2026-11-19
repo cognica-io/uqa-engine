@@ -7,6 +7,7 @@
 //! Document operations over one committed/private native record boundary.
 
 mod decoded;
+pub(super) mod maximum;
 mod read;
 mod write;
 

@@ -180,8 +180,7 @@ impl ScoredDocumentSource {
         score: f64,
         shared: uqa_storage::document_store::SharedDocumentRow,
     ) -> ExecResult<crate::PhysicalRow> {
-        let (values, projection) = shared.into_parts();
-        let source = crate::PhysicalRow::from_shared_values(values, projection);
+        let source = crate::PhysicalRow::from_document_row(shared);
         if self.appended_doc_id_attribute.is_none()
             && self.appended_score_attribute.is_none()
             && self.projection_properties.identity

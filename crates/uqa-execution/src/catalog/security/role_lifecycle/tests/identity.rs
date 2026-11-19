@@ -20,7 +20,7 @@ fn oid_reservation_retries_a_collision_discovered_after_wait_without_retaining_i
     let old = catalog.roles.borrow().clone();
     let mut refreshed = old.clone();
     let collision = RoleDefinition::from_create(&create("peer"), 20_001, [1; 16]);
-    refreshed.insert(collision.name.clone(), collision);
+    refreshed.insert(collision.name.clone(), collision).unwrap();
     catalog.refreshed_roles.borrow_mut().push_back(refreshed);
     let mut candidates = [20_001, 20_002].into_iter();
     let definition = identity::reserve_oid(&catalog.context(), &create("created"), || {
@@ -60,7 +60,13 @@ fn role_binding_rejects_same_name_and_oid_with_a_different_incarnation() {
     };
     let bound = context.bind(&"original".into()).unwrap();
     let mut refreshed = catalog.roles.borrow().clone();
-    refreshed.get_mut("original").unwrap().object_id = [99; 16];
+    refreshed
+        .edit("original", |value| {
+            value.object_id = [99; 16];
+            Ok(())
+        })
+        .unwrap()
+        .unwrap();
     catalog.refreshed_roles.borrow_mut().push_back(refreshed);
     let error = context
         .lock(&bound, RelationLockMode::AccessShare)
@@ -88,7 +94,7 @@ fn competing_name_creation_is_a_unique_violation_after_wait_and_releases_the_nam
     let catalog = Catalog::new();
     catalog.role("competing", &[]);
     let refreshed = catalog.roles.borrow().clone();
-    catalog.roles.borrow_mut().remove("competing");
+    catalog.roles.borrow_mut().remove("competing").unwrap();
     catalog.refreshed_roles.borrow_mut().push_back(refreshed);
     let error = identity::reserve_definition(&catalog.context(), &create("competing")).unwrap_err();
     assert_eq!(error.sqlstate(), Some("23505"));

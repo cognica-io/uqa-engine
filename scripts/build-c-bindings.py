@@ -17,6 +17,8 @@ import re
 import subprocess
 import sys
 
+from c_bindings_native import native_static_flags
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -58,7 +60,7 @@ def main() -> None:
         feature_args += ["--features", ",".join(features)]
     # A staticlib-only compilation leaves the distribution's export decisions to
     # its linker; PE objects must not inherit a cdylib's implicit export directives.
-    command = ["cargo", "rustc", "--locked", "-p", "uqa-ffi", "--lib", "--crate-type", "staticlib",
+    command = ["cargo", "rustc", "--locked", "--message-format=json", "-p", "uqa-ffi", "--lib", "--crate-type", "staticlib",
                "--target", args.target, *feature_args]
     if args.profile == "release":
         command += ["--release"]
@@ -68,10 +70,7 @@ def main() -> None:
     sys.stdout.buffer.write(result.stdout)
     sys.stdout.buffer.flush()
     result.check_returncode()
-    matches = re.findall(rb"native-static-libs:\s*([^\r\n]+)", result.stdout)
-    if not matches:
-        raise ValueError("rustc did not report native static-library dependencies")
-    flags = matches[-1].strip().decode("utf-8")
+    flags = native_static_flags(result.stdout)
     metadata = subprocess.check_output(
         ["cargo", "metadata", "--locked", "--format-version", "1", "--filter-platform", args.target,
          "--manifest-path", str(ROOT / "crates/uqa-ffi/Cargo.toml"), *feature_args], cwd=ROOT, env=env)
@@ -84,6 +83,7 @@ def main() -> None:
                  f"-DUQA_RUST_STATIC_LIBRARY={archive}", f"-DUQA_NATIVE_LINK_FLAGS={flags}",
                  f"-DUQA_SOURCE_REVISION={revision}", f"-DUQA_FEATURES={','.join(features)}",
                  f"-DUQA_TARGET={args.target}", f"-DUQA_CARGO_METADATA={metadata_path}",
+                 f"-DUQA_CARGO_BUILD_LOG={build / 'native-build.log'}",
                  f"-DCMAKE_INSTALL_PREFIX={args.prefix.resolve()}", "-DCMAKE_INSTALL_LIBDIR=lib",
                  "-DCMAKE_BUILD_TYPE=Release"]
     if "apple" in args.target:

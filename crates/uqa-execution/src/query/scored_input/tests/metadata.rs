@@ -13,7 +13,7 @@ use uqa_sql::ast::ColumnDef;
 use uqa_storage::{DocumentStore, MemoryDocumentStore};
 
 struct Table {
-    documents: RwLock<Box<dyn DocumentStore>>,
+    documents: RwLock<uqa_storage::StorageHandle<dyn DocumentStore>>,
     columns: Vec<ColumnDef>,
 }
 
@@ -22,7 +22,7 @@ impl TableRead for Table {
         self.columns.clone()
     }
 
-    fn read_documents(&self) -> RwLockReadGuard<'_, Box<dyn DocumentStore>> {
+    fn read_documents(&self) -> RwLockReadGuard<'_, uqa_storage::StorageHandle<dyn DocumentStore>> {
         self.documents.read()
     }
 
@@ -90,7 +90,7 @@ fn projected_aggregation_prepares_metadata_per_batch_instead_of_per_row() {
             .unwrap();
     }
     let table: Arc<dyn TableRead> = Arc::new(Table {
-        documents: RwLock::new(Box::new(documents)),
+        documents: RwLock::new(uqa_storage::StorageHandle::new(Box::new(documents))),
         columns: Vec::new(),
     });
     for (scored, borrowed) in [(false, true), (true, true), (true, false)] {
@@ -196,7 +196,7 @@ fn projected_aggregation_keeps_declared_metadata_columns_and_repeated_slots() {
             .unwrap();
     }
     let table: Arc<dyn TableRead> = Arc::new(Table {
-        documents: RwLock::new(Box::new(documents)),
+        documents: RwLock::new(uqa_storage::StorageHandle::new(Box::new(documents))),
         columns: declaration.columns,
     });
     let mut source = ScoredDocumentSource::new(
@@ -232,7 +232,7 @@ fn projected_aggregation_reads_row_metadata_only_after_its_predicate() {
             .unwrap();
     }
     let table: Arc<dyn TableRead> = Arc::new(Table {
-        documents: RwLock::new(Box::new(documents)),
+        documents: RwLock::new(uqa_storage::StorageHandle::new(Box::new(documents))),
         columns: Vec::new(),
     });
     for filtered in [true, false] {

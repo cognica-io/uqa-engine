@@ -8,23 +8,36 @@
 
 use std::{borrow::Borrow, collections::BTreeMap, sync::Arc};
 use uqa_core::{
-    memory::{Budgeted, BudgetedMap, BudgetedMapIter, BudgetedString, MemoryReservation},
+    memory::{Budgeted, BudgetedMap, BudgetedMapIter, BudgetedString, MemoryReservation, OwnedMap},
     FieldName,
 };
 
 use super::VectorIndex;
 use crate::{
     read_control::StorageReadControl, ReadOnlySnapshot, StorageBackendError, StorageBackendResult,
+    StorageHandle,
 };
 
+mod capture;
+pub use capture::{CapturedVectorIndexes, LiveVectorIndexesMut, VectorSourcePublication};
+mod image;
+mod native;
+pub use image::MemoryVectorIndexesBuilder;
+mod persistent;
+pub use persistent::PersistentVectorIndexesBuilder;
+
 type LiveIndexes = BTreeMap<FieldName, Box<dyn VectorIndex>>;
-type RetainedIndexes = Arc<Budgeted<BudgetedMap<FieldName, Box<dyn VectorIndex>>>>;
+type NativeIndexes = OwnedMap<FieldName, StorageHandle<dyn VectorIndex>>;
+type RetainedIndexes = Arc<Budgeted<BudgetedMap<FieldName, StorageHandle<dyn VectorIndex>>>>;
 
 /// A table's vector registrations. Retained collections own controlled ordered-map nodes and share their names, index handles and original allowance with nested captures. Live mutation requires an explicit fallible borrow; a retained collection never converts itself to an uncharged writable map.
 pub struct VectorIndexes(Contents);
 
 enum Contents {
-    Live(LiveIndexes),
+    Live {
+        indexes: NativeIndexes,
+        capture: Option<native::NativeVectorSources>,
+    },
     Retained {
         indexes: Option<RetainedIndexes>,
         control: StorageReadControl,
@@ -33,20 +46,26 @@ enum Contents {
 
 impl Default for VectorIndexes {
     fn default() -> Self {
-        Self(Contents::Live(BTreeMap::new()))
+        Self::from(BTreeMap::new())
     }
 }
 
 impl From<LiveIndexes> for VectorIndexes {
     fn from(indexes: LiveIndexes) -> Self {
-        Self(Contents::Live(indexes))
+        Self(Contents::Live {
+            indexes: indexes
+                .into_iter()
+                .map(|(field, index)| (field, index.into()))
+                .collect(),
+            capture: None,
+        })
     }
 }
 
 impl VectorIndexes {
-    pub fn live_mut(&mut self) -> StorageBackendResult<&mut LiveIndexes> {
+    pub fn live_mut(&mut self) -> StorageBackendResult<LiveVectorIndexesMut<'_>> {
         match &mut self.0 {
-            Contents::Live(indexes) => Ok(indexes),
+            Contents::Live { indexes, capture } => Ok(LiveVectorIndexesMut { indexes, capture }),
             Contents::Retained { control, .. } => {
                 control.check()?;
                 Err(StorageBackendError::Other(
@@ -61,12 +80,12 @@ impl VectorIndexes {
         FieldName: Borrow<Q>,
     {
         let index = match &self.0 {
-            Contents::Live(indexes) => indexes.get(field),
+            Contents::Live { indexes, .. } => indexes.get(field),
             Contents::Retained { indexes, .. } => {
                 indexes.as_ref().and_then(|indexes| indexes.get(field))
             }
         };
-        index.map(Box::as_ref)
+        index.map(StorageHandle::as_ref)
     }
 
     pub fn contains_key<Q: Ord + ?Sized>(&self, field: &Q) -> bool
@@ -78,7 +97,7 @@ impl VectorIndexes {
 
     pub fn len(&self) -> usize {
         match &self.0 {
-            Contents::Live(indexes) => indexes.len(),
+            Contents::Live { indexes, .. } => indexes.len(),
             Contents::Retained { indexes, .. } => {
                 indexes.as_ref().map_or(0, |indexes| indexes.len())
             }
@@ -91,10 +110,8 @@ impl VectorIndexes {
 
     pub fn iter(&self) -> VectorIndexesIter<'_> {
         VectorIndexesIter(match &self.0 {
-            Contents::Live(indexes) => Entries::Live(indexes.iter()),
-            Contents::Retained { indexes, .. } => indexes
-                .as_ref()
-                .map_or(Entries::Empty, |indexes| Entries::Retained(indexes.iter())),
+            Contents::Live { indexes, .. } => Some(indexes.iter()),
+            Contents::Retained { indexes, .. } => indexes.as_ref().map(|indexes| indexes.iter()),
         })
     }
 
@@ -115,7 +132,7 @@ impl VectorIndexes {
         if let Some(retained) = source.retained_collection()? {
             match &retained.0 {
                 Contents::Retained { control, .. } => control.check()?,
-                Contents::Live(_) => {
+                Contents::Live { .. } => {
                     return Err(StorageBackendError::Other(
                         "vector provider returned live registrations as a retained collection"
                             .into(),
@@ -144,36 +161,22 @@ where
     }
 }
 
-pub struct VectorIndexesIter<'a>(Entries<'a>);
-
-#[expect(
-    clippy::large_enum_variant,
-    reason = "fixed iterator stack avoids unadmitted heap scratch"
-)]
-enum Entries<'a> {
-    Empty,
-    Live(std::collections::btree_map::Iter<'a, FieldName, Box<dyn VectorIndex>>),
-    Retained(BudgetedMapIter<'a, FieldName, Box<dyn VectorIndex>>),
-}
+pub struct VectorIndexesIter<'a>(
+    Option<BudgetedMapIter<'a, FieldName, StorageHandle<dyn VectorIndex>>>,
+);
 
 impl<'a> Iterator for VectorIndexesIter<'a> {
     type Item = (&'a FieldName, &'a (dyn VectorIndex + 'static));
 
     fn next(&mut self) -> Option<Self::Item> {
-        let next = match &mut self.0 {
-            Entries::Empty => None,
-            Entries::Live(iter) => iter.next(),
-            Entries::Retained(iter) => iter.next(),
-        };
-        next.map(|(field, index)| (field, index.as_ref()))
+        self.0
+            .as_mut()?
+            .next()
+            .map(|(field, index)| (field, index.as_ref()))
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        match &self.0 {
-            Entries::Empty => (0, Some(0)),
-            Entries::Live(iter) => iter.size_hint(),
-            Entries::Retained(iter) => iter.size_hint(),
-        }
+        self.0.as_ref().map_or((0, Some(0)), Iterator::size_hint)
     }
 }
 
@@ -226,7 +229,7 @@ impl VectorIndexSource for VectorIndexes {
 
     fn retained_collection(&self) -> StorageBackendResult<Option<VectorIndexes>> {
         match &self.0 {
-            Contents::Live(_) => Ok(None),
+            Contents::Live { .. } => Ok(None),
             Contents::Retained { indexes, control } => {
                 control.check()?;
                 Ok(Some(Self(Contents::Retained {
@@ -240,7 +243,7 @@ impl VectorIndexSource for VectorIndexes {
 
 /// Assemble reconstructed vector indexes without opaque standard-map nodes. Every node, copied name, boxed adapter and shared owner is reserved before allocation.
 pub struct RetainedVectorIndexesBuilder {
-    indexes: BudgetedMap<FieldName, Box<dyn VectorIndex>>,
+    indexes: BudgetedMap<FieldName, StorageHandle<dyn VectorIndex>>,
     control: StorageReadControl,
 }
 
@@ -284,7 +287,7 @@ impl RetainedVectorIndexesBuilder {
         let index = ReadOnlySnapshot::from_budgeted(Budgeted::new(index, memory))?;
         let index: Box<dyn VectorIndex> = Box::new(index);
         self.control.check()?;
-        self.indexes.insert(field, index)?;
+        self.indexes.insert(field, index.into())?;
         Ok(())
     }
 

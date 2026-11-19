@@ -11,8 +11,11 @@ use crate::{
     CancellationToken, Value, ValueRetentionError,
 };
 
+use crate::types::work::{checkpoint, inline, Work};
+
 type Shape = Option<(Vec<usize>, Option<MemoryReservation>)>;
 
+#[cfg(test)]
 pub(super) fn unbounded(elements: &[Value], rank: Option<usize>) -> Option<Vec<usize>> {
     validate(elements, rank, None, &mut || Ok(()))
         .ok()?
@@ -45,6 +48,24 @@ pub(super) fn produced(
         .transpose()
 }
 
+pub(super) async fn produced_with_work<W: Work>(
+    elements: &[Value],
+    rank: Option<usize>,
+    control: &crate::memory::ProductionControl<'_>,
+    work: &mut W,
+) -> Result<Option<crate::memory::Produced<Vec<usize>>>, W::Error> {
+    validate_with_work(
+        elements,
+        rank,
+        control.budget(),
+        &mut || control.check(),
+        work,
+    )
+    .await?
+    .map(|(dimensions, memory)| control.finish(dimensions, memory).map_err(Into::into))
+    .transpose()
+}
+
 fn nested(value: &Value, depth: usize, rank: Option<usize>) -> Option<&[Value]> {
     match value {
         Value::List(values) => Some(values),
@@ -55,11 +76,21 @@ fn nested(value: &Value, depth: usize, rank: Option<usize>) -> Option<&[Value]> 
 
 fn validate(
     elements: &[Value],
+    rank: Option<usize>,
+    memory: Option<&MemoryBudget>,
+    check: &mut (impl FnMut() -> Result<(), ValueRetentionError> + Send),
+) -> Result<Shape, ValueRetentionError> {
+    inline(validate_with_work(elements, rank, memory, check, &mut ()))
+}
+
+async fn validate_with_work<W: Work>(
+    elements: &[Value],
     mut rank: Option<usize>,
     memory: Option<&MemoryBudget>,
-    check: &mut impl FnMut() -> Result<(), ValueRetentionError>,
-) -> Result<Shape, ValueRetentionError> {
-    check()?;
+    check: &mut (impl FnMut() -> Result<(), ValueRetentionError> + Send),
+    work: &mut W,
+) -> Result<Shape, W::Error> {
+    checkpoint(work, check).await?;
     let mut dimensions = Buffer::new(memory);
     if elements.is_empty() {
         if rank == Some(1) {
@@ -69,7 +100,7 @@ fn validate(
     }
     let mut first = elements;
     loop {
-        check()?;
+        checkpoint(work, check).await?;
         dimensions.push(first.len())?;
         if rank.is_none() {
             if let Some(Value::Array(array)) = first.first().filter(
@@ -90,7 +121,7 @@ fn validate(
     let mut stack = Buffer::new(memory);
     stack.push((elements.iter(), 0))?;
     while let Some((values, depth)) = stack.last_mut() {
-        check()?;
+        checkpoint(work, check).await?;
         let Some(value) = values.next() else {
             stack.pop();
             continue;
@@ -109,24 +140,24 @@ fn validate(
             _ => return Ok(None),
         }
     }
-    check()?;
+    checkpoint(work, check).await?;
     Ok(Some(dimensions.into_parts()))
 }
 
-enum Buffer<T> {
+pub(super) enum Buffer<T> {
     Unbounded(Vec<T>),
     Bounded(BudgetedVec<T>),
 }
 
 impl<T> Buffer<T> {
-    fn new(memory: Option<&MemoryBudget>) -> Self {
+    pub(super) fn new(memory: Option<&MemoryBudget>) -> Self {
         memory.map_or_else(
             || Self::Unbounded(Vec::new()),
             |memory| Self::Bounded(BudgetedVec::new(memory)),
         )
     }
 
-    fn push(&mut self, value: T) -> Result<(), ValueRetentionError> {
+    pub(super) fn push(&mut self, value: T) -> Result<(), ValueRetentionError> {
         match self {
             Self::Unbounded(values) => values.push(value),
             Self::Bounded(values) => values.push(value)?,
@@ -141,14 +172,14 @@ impl<T> Buffer<T> {
         }
     }
 
-    fn last_mut(&mut self) -> Option<&mut T> {
+    pub(super) fn last_mut(&mut self) -> Option<&mut T> {
         match self {
             Self::Unbounded(values) => values.last_mut(),
             Self::Bounded(values) => values.last_mut(),
         }
     }
 
-    fn pop(&mut self) {
+    pub(super) fn pop(&mut self) {
         match self {
             Self::Unbounded(values) => {
                 values.pop();

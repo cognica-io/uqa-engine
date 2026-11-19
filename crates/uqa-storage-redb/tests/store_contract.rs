@@ -7,6 +7,9 @@
 use uqa_storage::{KeyValueStore, PersistentStorageProvider};
 use uqa_storage_redb::RedbStorage;
 
+#[path = "store_contract/catalog_text_input.rs"]
+mod catalog_text_input;
+
 #[path = "store_contract/documents.rs"]
 mod documents;
 #[path = "store_contract/foreign_servers.rs"]

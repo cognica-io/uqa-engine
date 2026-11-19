@@ -183,3 +183,5 @@ fn builtin_scalar_overload_names_retain_exact_reservations() {
 }
 
 mod production;
+
+mod input;

@@ -7,15 +7,17 @@
 use super::*;
 use std::{
     cell::{Cell, RefCell},
-    collections::{BTreeMap, VecDeque},
+    collections::VecDeque,
     sync::Arc,
 };
 use uqa_sql::catalog::roles::RoleReference;
+use uqa_sql::catalog::roles::{RoleDefinitions, RoleMemberships};
+use uqa_sql::catalog::security::schema_registry::SchemaRegistry;
 use uqa_sql::catalog::{
     resolution::{candidates::SearchPathRead, creation::CreationRelationNames},
     roles::{
         guards::{RoleDefinitionRead, RoleMembershipRead},
-        RoleDefinition, RoleMembership, RoleMembershipKey,
+        RoleDefinition,
     },
     security::{
         database::BoundDatabaseSecurity,
@@ -30,9 +32,9 @@ use uqa_storage::StorageBackendError;
 struct Fixture {
     user: String,
     path: Vec<String>,
-    schemas: RefCell<BTreeMap<String, BoundSchemaSecurity>>,
-    roles: BTreeMap<String, RoleDefinition>,
-    memberships: BTreeMap<RoleMembershipKey, RoleMembership>,
+    schemas: RefCell<SchemaRegistry>,
+    roles: RoleDefinitions,
+    memberships: RoleMemberships,
     database: BoundDatabaseSecurity,
     events: RefCell<Vec<&'static str>>,
     allocated: Cell<bool>,
@@ -41,16 +43,17 @@ struct Fixture {
     fail: Option<&'static str>,
     locks: Arc<crate::row_locks::RowLockManager>,
     cancellation: uqa_core::CancellationToken,
-    refreshes: RefCell<VecDeque<BTreeMap<String, BoundSchemaSecurity>>>,
+    refreshes: RefCell<VecDeque<SchemaRegistry>>,
 }
 impl Fixture {
     fn new() -> Self {
         Self {
             user: "uqa".into(),
             path: vec!["tenant".into()],
-            schemas: RefCell::new(BTreeMap::new()),
-            roles: BTreeMap::from([("uqa".into(), RoleDefinition::bootstrap())]),
-            memberships: BTreeMap::new(),
+            schemas: RefCell::new(SchemaRegistry::new()),
+            roles: RoleDefinitions::try_from_iter([("uqa".into(), RoleDefinition::bootstrap())])
+                .unwrap(),
+            memberships: RoleMemberships::new(),
             database: BoundDatabaseSecurity::bootstrap(),
             events: RefCell::new(Vec::new()),
             allocated: Cell::new(false),
@@ -248,7 +251,8 @@ impl RelationCreationRuntime for Fixture {
         if self.publish_on_fence {
             self.schemas
                 .borrow_mut()
-                .insert("tenant".into(), BoundSchemaSecurity::bootstrap("tenant"));
+                .insert("tenant".into(), BoundSchemaSecurity::bootstrap("tenant"))
+                .unwrap();
         }
         Ok(())
     }

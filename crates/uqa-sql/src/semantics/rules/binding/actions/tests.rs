@@ -229,11 +229,11 @@ fn native_rule_layout_keeps_declared_width_collation_and_whole_row_order() {
             .collect::<Vec<_>>(),
         ["z", "a"]
     );
-    let Expr::Cast { expr, ty, .. } = resolver.rewrite_name("NEW").unwrap().unwrap() else {
+    let Expr::Cast { expr, ty, .. } = &resolver.rewrite_name("NEW").unwrap().unwrap() else {
         panic!("row cast")
     };
     assert_eq!(ty, "items");
-    let Expr::Row(fields) = *expr else {
+    let Expr::Row(fields) = expr.as_ref() else {
         panic!("whole row")
     };
     for (field, (_, expected)) in fields.iter().zip(&resolver.columns) {

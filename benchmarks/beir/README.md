@@ -10,7 +10,7 @@ The benchmark is a module of the existing `uqa-engine` `retrieval_workloads` ben
 
 The preparation script rejects an archive whose SHA-256 differs from the manifest, rejects unsafe ZIP paths and symlinks, loads the model with `trust_remote_code=False` at the pinned revision, verifies finite unit-length embeddings of the declared dimension, and hashes both prepared JSONL artifacts. Prepared artifacts live below `target/benchmark-runs` and are not committed.
 
-Install the pinned embedding dependency into the Python environment used by the runner:
+Install the pinned embedding dependency into the Python 3.10 or newer environment used by the runner. Sentence Transformers 6.0 rejects custom module classes unless remote code is explicitly trusted, including classes referenced by local model directories; the benchmark keeps `trust_remote_code=False`:
 
 ```sh
 python3 -m pip install -r benchmarks/beir/requirements.txt

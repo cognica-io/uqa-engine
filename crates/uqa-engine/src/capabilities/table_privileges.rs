@@ -7,8 +7,8 @@
 //! Lend relation registries and retained table generations to privilege inquiry.
 
 use crate::{Engine, TableState};
-use parking_lot::RwLockReadGuard;
-use std::{collections::BTreeMap, sync::Arc};
+use parking_lot::MappedRwLockReadGuard;
+use std::sync::Arc;
 use uqa_core::RelationIdentity;
 use uqa_execution::catalog::security::table_inquiry::{
     PrivilegeForeignSecurityRead, PrivilegeForeignTablesRead, PrivilegeViewsRead,
@@ -17,7 +17,7 @@ use uqa_execution::catalog::security::table_inquiry::{
 use uqa_sql::catalog::security::BoundTableSecurity;
 use uqa_storage::StorageBackendResult;
 
-struct TablePrivilegeGuard<'a>(RwLockReadGuard<'a, BTreeMap<RelationIdentity, Arc<TableState>>>);
+struct TablePrivilegeGuard<'a>(MappedRwLockReadGuard<'a, crate::state::TableRegistryMap>);
 impl TablePrivilegeRead for TablePrivilegeGuard<'_> {
     fn security_entries(
         &self,
@@ -56,7 +56,12 @@ impl TablePrivilegeState for TableState {
     fn security_snapshot_with_control(
         &self,
         control: &uqa_core::memory::ProductionControl<'_>,
-    ) -> Result<uqa_core::memory::Produced<Arc<BoundTableSecurity>>, uqa_sql::SQLError> {
+    ) -> Result<
+        uqa_core::memory::Produced<
+            uqa_sql::catalog::table_metadata::SharedTableMetadata<BoundTableSecurity>,
+        >,
+        uqa_sql::SQLError,
+    > {
         Ok(control.finish(self.security.snapshot(), control.empty_reservation())?)
     }
     fn with_columns_with_control(
@@ -103,11 +108,14 @@ impl TablePrivilegeRegistry for Engine {
     fn views(&self) -> PrivilegeViewsRead<'_> {
         Box::new(self.durable.views.read())
     }
+    fn foreign_catalog(&self) -> uqa_execution::catalog::foreign::reads::ForeignCatalogRead<'_> {
+        Box::new(self.durable.foreign_catalog.read())
+    }
     fn foreign_tables(&self) -> PrivilegeForeignTablesRead<'_> {
-        Box::new(self.durable.foreign_tables.read())
+        Box::new(self.durable.foreign_catalog.tables())
     }
     fn foreign_security(&self) -> PrivilegeForeignSecurityRead<'_> {
-        Box::new(self.durable.foreign_table_security.read())
+        Box::new(self.durable.foreign_catalog.security())
     }
 }
 impl Engine {

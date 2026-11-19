@@ -8,10 +8,11 @@
 
 use super::{int_field, take_list, BTreeMap, Value, ValueRetentionError, Workspace};
 
-pub(super) fn decoded(
+pub(super) async fn decoded<W: super::Work>(
     map: &mut BTreeMap<String, Value>,
     workspace: &mut Workspace<'_>,
-) -> Result<Option<crate::RecordValue>, ValueRetentionError> {
+    work: &mut W,
+) -> Result<Option<crate::RecordValue>, W::Error> {
     let type_oid = if map.contains_key("type_oid") {
         let Some(oid) = int_field::<u32>(map, "type_oid") else {
             return Ok(None);
@@ -24,7 +25,7 @@ pub(super) fn decoded(
         return Ok(None);
     };
     for encoded in encoded_fields {
-        workspace.check()?;
+        workspace.checkpoint(work).await?;
         if !matches!(encoded, Value::List(pair) if matches!(pair.as_slice(), [Value::Str(_), _])) {
             return Ok(None);
         }
@@ -32,7 +33,7 @@ pub(super) fn decoded(
     let mut names = workspace.vector(encoded_fields.len())?;
     let mut values = workspace.vector(encoded_fields.len())?;
     for encoded in take_list(map, "fields") {
-        workspace.check()?;
+        workspace.checkpoint(work).await?;
         let Value::List(mut pair) = encoded else {
             unreachable!("record pair was validated");
         };
@@ -44,7 +45,9 @@ pub(super) fn decoded(
         values.push(value);
     }
     workspace.reserve(crate::RecordValue::retained_header_bytes())?;
-    workspace.reserve(crate::RecordDescriptor::buffer_bytes(names.len())?)?;
+    workspace.reserve(
+        crate::RecordDescriptor::buffer_bytes(names.len()).map_err(ValueRetentionError::from)?,
+    )?;
     let descriptor = crate::RecordDescriptor::new(names, type_oid);
     Ok(Some(crate::RecordValue::from_validated_parts(
         values, descriptor,

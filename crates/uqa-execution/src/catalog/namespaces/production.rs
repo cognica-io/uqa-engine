@@ -10,7 +10,7 @@ use super::{CatalogReadView, RelationNameResolution, RoleSubject, SchemaAclPrivi
 use uqa_core::{
     catalog_role::BoundAclEntry,
     catalog_schema::SchemaPrivileges,
-    memory::{Produced, ProductionControl, ProductionVec},
+    memory::{Produced, ProductionControl},
 };
 use uqa_sql::{
     catalog::{
@@ -42,7 +42,7 @@ fn temporary_toast_matches(temporary_schema: &str, schema: &str) -> bool {
             )
 }
 
-fn schema_privilege(
+pub(super) fn schema_privilege(
     catalog: &CatalogReadView,
     temporary_schema: &str,
     schema: &str,
@@ -53,46 +53,20 @@ fn schema_privilege(
 ) -> Result<bool, SQLError> {
     control.check()?;
     let definitions = &catalog.snapshot().definitions;
-    let owner = RoleIdentity::BOOTSTRAP;
-    let public = [
-        BoundAclEntry {
-            role: Some(owner),
-            grantor: owner,
-            privileges: SchemaPrivileges::ALL,
-            grant_options: SchemaPrivileges::default(),
-        },
-        BoundAclEntry {
-            role: None,
-            grantor: owner,
-            privileges: SchemaPrivileges {
-                usage: true,
-                create: schema == temporary_schema,
-            },
-            grant_options: SchemaPrivileges::default(),
-        },
-    ];
-    let security = if let Some(security) = catalog.schema_security(schema) {
-        SchemaPrivilegeView::from(security)
-    } else if (!temporary_schema.is_empty() && schema == temporary_schema)
-        || if catalog.contains_graph(schema) {
-            schema == "public"
-        } else {
-            matches!(schema, "pg_catalog" | "information_schema")
-        }
-    {
-        SchemaPrivilegeView {
-            role_owner: owner,
-            acl: Some(&public),
-        }
-    } else if schema == "ag_catalog"
-        || catalog.contains_graph(schema)
-        || (include_temporary_toast && temporary_toast_matches(temporary_schema, schema))
-    {
-        SchemaPrivilegeView {
-            role_owner: owner,
-            acl: None,
-        }
-    } else {
+    let public = public_acl(schema == temporary_schema);
+    let security = catalog
+        .schema_security(schema)
+        .map(SchemaPrivilegeView::from)
+        .or_else(|| {
+            fallback_security(
+                schema,
+                !temporary_schema.is_empty() && schema == temporary_schema,
+                catalog.contains_graph(schema),
+                include_temporary_toast && temporary_toast_matches(temporary_schema, schema),
+                &public,
+            )
+        });
+    let Some(security) = security else {
         return Ok(false);
     };
     role_has_schema_privilege_with_control(
@@ -153,35 +127,6 @@ pub fn require_schema_privilege_with_control(
     })
 }
 
-fn contains(
-    names: &[&str],
-    candidate: &str,
-    control: &ProductionControl<'_>,
-) -> Result<bool, SQLError> {
-    for name in names {
-        control.check()?;
-        if name.len() != candidate.len() {
-            continue;
-        }
-        let mut equal = true;
-        for (left, right) in name
-            .as_bytes()
-            .chunks(4096)
-            .zip(candidate.as_bytes().chunks(4096))
-        {
-            control.check()?;
-            if left != right {
-                equal = false;
-                break;
-            }
-        }
-        if equal {
-            return Ok(true);
-        }
-    }
-    Ok(false)
-}
-
 pub fn current_schema_names_with_control(
     catalog: &CatalogReadView,
     resolution: &RelationNameResolution,
@@ -189,52 +134,56 @@ pub fn current_schema_names_with_control(
     include_implicit: bool,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Vec<String>>, SQLError> {
-    control.check()?;
-    let mut explicit = ProductionVec::new(*control);
-    for name in resolution.search_path() {
-        control.check()?;
-        let name = if name == "pg_temp" {
-            &resolution.temporary_schema
+    super::input::ordinary(catalog, resolution, role, include_implicit, control)
+}
+
+pub(super) fn public_acl(temporary: bool) -> [BoundAclEntry<SchemaPrivileges>; 2] {
+    let owner = RoleIdentity::BOOTSTRAP;
+    [
+        BoundAclEntry {
+            role: Some(owner),
+            grantor: owner,
+            privileges: SchemaPrivileges::ALL,
+            grant_options: SchemaPrivileges::default(),
+        },
+        BoundAclEntry {
+            role: None,
+            grantor: owner,
+            privileges: SchemaPrivileges {
+                usage: true,
+                create: temporary,
+            },
+            grant_options: SchemaPrivileges::default(),
+        },
+    ]
+}
+
+pub(super) fn fallback_security<'a>(
+    schema: &str,
+    temporary: bool,
+    graph: bool,
+    toast: bool,
+    public: &'a [BoundAclEntry<SchemaPrivileges>],
+) -> Option<SchemaPrivilegeView<'a>> {
+    if temporary
+        || if graph {
+            schema == "public"
         } else {
-            name
-        };
-        if (name == &resolution.temporary_schema && !resolution.temporary_namespace_allocated)
-            || contains(&explicit, name, control)?
-        {
-            continue;
+            matches!(schema, "pg_catalog" | "information_schema")
         }
-        let usable = match schema_privilege(
-            catalog,
-            &resolution.temporary_schema,
-            name,
-            role,
-            SchemaAclPrivilege::Usage,
-            false,
-            control,
-        ) {
-            // Ordinary namespace selection ignores invalid persisted ACL references, while explicit privilege checks report their original diagnostic.
-            Err(SQLError::Internal(_)) => false,
-            result => result?,
-        };
-        if usable {
-            explicit.push_copy(name.as_str())?;
-        }
+    {
+        Some(SchemaPrivilegeView {
+            role_owner: RoleIdentity::BOOTSTRAP,
+            acl: Some(public),
+        })
+    } else if schema == "ag_catalog" || graph || toast {
+        Some(SchemaPrivilegeView {
+            role_owner: RoleIdentity::BOOTSTRAP,
+            acl: None,
+        })
+    } else {
+        None
     }
-    let mut names = ProductionVec::new(*control);
-    if include_implicit {
-        if resolution.temporary_namespace_allocated
-            && !contains(&explicit, &resolution.temporary_schema, control)?
-        {
-            names.push_produced(control.copy_text(&resolution.temporary_schema)?)?;
-        }
-        if !contains(&explicit, "pg_catalog", control)? {
-            names.push_produced(control.copy_text("pg_catalog")?)?;
-        }
-    }
-    for name in explicit.iter() {
-        names.push_produced(control.copy_text(name)?)?;
-    }
-    Ok(names.finish()?)
 }
 
 #[cfg(test)]

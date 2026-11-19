@@ -161,6 +161,54 @@ impl CompositeConstantChange<'_> {
             .map(|values| values || changed)
     }
 
+    /// Borrow unrelated stored syntax; copy a query only when a constructor, datum or scoped field rename can change it.
+    pub fn rewritten_query(&self, query: &QueryPlan) -> Result<Option<QueryPlan>, SQLError> {
+        let mut needed = self.rename.is_some();
+        let mut failure = None;
+        query.visit_scalar_expressions(&mut |root| {
+            root.visit(&mut |node| {
+                if needed || failure.is_some() {
+                    return;
+                }
+                let selected = (|| -> Result<bool, SQLError> {
+                    match node {
+                        ScalarExpr::CompositeRow { binding, .. } => {
+                            Ok(binding.argument_types.is_none())
+                        }
+                        ScalarExpr::TypedLiteral {
+                            value, ty: name, ..
+                        } => {
+                            let Some(ty) = self.types.resolve_type_name(name)? else {
+                                return if crate::ast::UserTypeIdentity::parse(name).is_some() {
+                                    Err(SQLError::Internal(format!(
+                                        "stored constant type {name} disappeared"
+                                    )))
+                                } else {
+                                    Ok(false)
+                                };
+                            };
+                            Ok(!matches!(value, Value::Null)
+                                && type_contains_composite(&ty, self.target, self.catalog)?)
+                        }
+                        _ => Ok(false),
+                    }
+                })();
+                match selected {
+                    Ok(value) => needed |= value,
+                    Err(error) => failure = Some(error),
+                }
+            });
+        });
+        if let Some(error) = failure {
+            return Err(error);
+        }
+        if !needed {
+            return Ok(None);
+        }
+        let mut next = query.clone();
+        Ok(self.query(&mut next)?.then_some(next))
+    }
+
     pub fn plan(&self, plan: &mut UnifiedPlan) -> Result<bool, SQLError> {
         let changed = self.rename.is_some_and(|rename| rename.bound_plan(plan));
         self.plan_nodes(|visit| plan.rewrite_scalar_expressions(visit))

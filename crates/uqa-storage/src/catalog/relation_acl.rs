@@ -7,6 +7,10 @@
 //! Independently versioned ACL replacements over a relation definition's security baseline.
 //! Definition writes compact these records into their supplied security, atomically removing the replacements.
 
+mod input;
+mod key_input;
+pub use key_input::decode_key_with_control;
+
 use super::{new_nonzero_catalog_identity, RelationIdentity, RelationSecurityRow};
 use crate::{StorageBackendError, StorageBackendResult};
 use serde::{Deserialize, Serialize};
@@ -206,3 +210,5 @@ pub(super) fn save_serialized<C: super::CatalogFacade + ?Sized>(
 
 #[cfg(test)]
 mod tests;
+
+pub(crate) mod replacements;

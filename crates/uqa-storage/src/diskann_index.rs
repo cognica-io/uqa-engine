@@ -12,7 +12,7 @@ pub mod catalog;
 pub mod changes;
 pub mod format;
 pub mod maintenance;
-mod memory;
+pub(crate) mod memory;
 mod metadata;
 mod metric;
 mod options;

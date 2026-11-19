@@ -6,14 +6,17 @@
 
 //! Command scalar transformation retains original analysis addresses and transfers each constructor's independent owner.
 
-use super::super::nodes::{scalar_memory, transform_ctes, transform_query, transform_source};
+use super::super::nodes::transformation::{
+    ctes_from,
+    input::{checkpoint, Immediate, Input},
+};
 use super::{CommandPlan, MutableCommandPlan, RewriteMemory, SQLError};
 use crate::plan::ScalarNodeTransform;
 use crate::{
     ast::{AssignmentStep, AssignmentTarget, AssignmentTargets},
     plan::{
         AssignmentPlan, ConflictActionPlan, ExpressionPlan, MergeWhenPlan, MutableExecutablePlan,
-        OwnedScalarExpr, ProjectionPlan, QueryPlan, UnifiedPlan, ViewCheckPlan,
+        ProjectionPlan, QueryPlan, UnifiedPlan, ViewCheckPlan,
     },
     ScalarExpr,
 };
@@ -74,6 +77,21 @@ impl MutableCommandPlan {
     }
 }
 
+pub(in crate::plan::mutable) fn transform_command(
+    command: &mut CommandPlan,
+    memory: Option<&mut RewriteMemory>,
+    control: &ProductionControl<'_>,
+    transform: &mut ScalarNodeTransform<'_>,
+) -> Result<(), SQLError> {
+    crate::catalog::work::inline(command_from(
+        command,
+        memory,
+        control,
+        &mut Immediate::new(transform),
+        true,
+    ))
+}
+
 fn field<'a>(memory: Option<&'a mut RewriteMemory>, name: &str) -> Option<&'a mut RewriteMemory> {
     memory.map(|memory| {
         memory
@@ -81,6 +99,13 @@ fn field<'a>(memory: Option<&'a mut RewriteMemory>, name: &str) -> Option<&'a mu
             .as_mut()
             .expect("command constructor field")
     })
+}
+
+fn field_slot<'a>(
+    memory: Option<&'a mut RewriteMemory>,
+    name: &str,
+) -> Option<&'a mut Option<RewriteMemory>> {
+    memory.map(|memory| memory.field_mut(name))
 }
 
 fn item(memory: Option<&mut RewriteMemory>, index: usize) -> Option<&mut RewriteMemory> {
@@ -92,253 +117,245 @@ fn item(memory: Option<&mut RewriteMemory>, index: usize) -> Option<&mut Rewrite
     })
 }
 
-fn scalar(
+async fn scalar<I: Input>(
     expression: &mut ScalarExpr,
     memory: Option<&mut RewriteMemory>,
     control: &ProductionControl<'_>,
-    transform: &mut ScalarNodeTransform<'_>,
+    input: &mut I,
 ) -> Result<(), SQLError> {
-    let memory = memory.map(|memory| scalar_memory(memory.scalar_mut()));
-    OwnedScalarExpr::transform_nodes_in_place(expression, memory, control, transform)
+    let memory = memory.map(RewriteMemory::scalar_mut);
+    input.scalar(expression, memory, control).await
 }
 
-fn optional(
+async fn optional<I: Input>(
     expression: Option<&mut ScalarExpr>,
     memory: Option<&mut RewriteMemory>,
     control: &ProductionControl<'_>,
-    transform: &mut ScalarNodeTransform<'_>,
+    input: &mut I,
 ) -> Result<(), SQLError> {
     if let Some(expression) = expression {
-        scalar(expression, memory, control, transform)?;
+        scalar(expression, memory, control, input).await?;
     }
     Ok(())
 }
 
-fn projections(
+async fn projections<I: Input>(
     values: &mut [ProjectionPlan],
     mut memory: Option<&mut RewriteMemory>,
     control: &ProductionControl<'_>,
-    transform: &mut ScalarNodeTransform<'_>,
+    input: &mut I,
 ) -> Result<(), SQLError> {
     for (index, value) in values.iter_mut().enumerate() {
+        checkpoint(control, input).await?;
         scalar(
             &mut value.expr,
             item(memory.as_deref_mut(), index),
             control,
-            transform,
-        )?;
+            input,
+        )
+        .await?;
     }
     Ok(())
 }
 
-fn queries(
+async fn queries<I: Input>(
     values: &mut [QueryPlan],
     mut memory: Option<&mut RewriteMemory>,
     control: &ProductionControl<'_>,
-    transform: &mut ScalarNodeTransform<'_>,
+    input: &mut I,
 ) -> Result<(), SQLError> {
     for (index, value) in values.iter_mut().enumerate() {
-        transform_query(
-            value,
-            field(item(memory.as_deref_mut(), index), "query"),
-            control,
-            transform,
-        )?;
+        checkpoint(control, input).await?;
+        input
+            .query(
+                value,
+                field_slot(item(memory.as_deref_mut(), index), "query"),
+                control,
+            )?
+            .await?;
     }
     Ok(())
 }
 
-fn checks(
+async fn checks<I: Input>(
     values: &mut [ViewCheckPlan],
     mut memory: Option<&mut RewriteMemory>,
     control: &ProductionControl<'_>,
-    transform: &mut ScalarNodeTransform<'_>,
+    input: &mut I,
 ) -> Result<(), SQLError> {
     for (index, value) in values.iter_mut().enumerate() {
+        checkpoint(control, input).await?;
         scalar(
             &mut value.predicate,
             field(item(memory.as_deref_mut(), index), "predicate"),
             control,
-            transform,
-        )?;
+            input,
+        )
+        .await?;
     }
     Ok(())
 }
 
-fn target(
+async fn target<I: Input>(
     value: &mut AssignmentTarget<ScalarExpr>,
     mut memory: Option<&mut RewriteMemory>,
     control: &ProductionControl<'_>,
-    transform: &mut ScalarNodeTransform<'_>,
+    input: &mut I,
 ) -> Result<(), SQLError> {
     for (index, step) in value.indirection.iter_mut().enumerate() {
+        checkpoint(control, input).await?;
         let mut memory = item(field(memory.as_deref_mut(), "indirection"), index);
         match step {
             AssignmentStep::Field(_) => {}
             AssignmentStep::Index(expression) => {
-                scalar(expression, field(memory, "index"), control, transform)?;
+                scalar(expression, field(memory, "index"), control, input).await?;
             }
             AssignmentStep::Slice { lower, upper } => {
                 optional(
                     lower.as_deref_mut(),
                     field(memory.as_deref_mut(), "lower"),
                     control,
-                    transform,
-                )?;
-                optional(
-                    upper.as_deref_mut(),
-                    field(memory, "upper"),
-                    control,
-                    transform,
-                )?;
+                    input,
+                )
+                .await?;
+                optional(upper.as_deref_mut(), field(memory, "upper"), control, input).await?;
             }
         }
     }
     Ok(())
 }
 
-fn targets(
+async fn targets<I: Input>(
     values: &mut [AssignmentTarget<ScalarExpr>],
     mut memory: Option<&mut RewriteMemory>,
     control: &ProductionControl<'_>,
-    transform: &mut ScalarNodeTransform<'_>,
+    input: &mut I,
 ) -> Result<(), SQLError> {
     for (index, value) in values.iter_mut().enumerate() {
-        target(
-            value,
-            item(memory.as_deref_mut(), index),
-            control,
-            transform,
-        )?;
+        checkpoint(control, input).await?;
+        target(value, item(memory.as_deref_mut(), index), control, input).await?;
     }
     Ok(())
 }
 
-fn assignments(
+async fn assignments<I: Input>(
     values: &mut [AssignmentPlan],
     mut memory: Option<&mut RewriteMemory>,
     control: &ProductionControl<'_>,
-    transform: &mut ScalarNodeTransform<'_>,
+    input: &mut I,
 ) -> Result<(), SQLError> {
     for (index, value) in values.iter_mut().enumerate() {
+        checkpoint(control, input).await?;
         let mut memory = item(memory.as_deref_mut(), index);
         let target_memory = field(memory.as_deref_mut(), "target");
         match &mut value.target {
-            AssignmentTargets::Single(value) => target(value, target_memory, control, transform)?,
-            AssignmentTargets::Multiple(group) => targets(
-                &mut group.targets,
-                field(target_memory, "targets"),
-                control,
-                transform,
-            )?,
+            AssignmentTargets::Single(value) => {
+                target(value, target_memory, control, input).await?;
+            }
+            AssignmentTargets::Multiple(group) => {
+                targets(
+                    &mut group.targets,
+                    field(target_memory, "targets"),
+                    control,
+                    input,
+                )
+                .await?;
+            }
         }
-        scalar(&mut value.value, field(memory, "value"), control, transform)?;
+        scalar(&mut value.value, field(memory, "value"), control, input).await?;
     }
     Ok(())
 }
 
-fn expressions(
+async fn expressions<I: Input>(
     values: &mut [ExpressionPlan],
     mut memory: Option<&mut RewriteMemory>,
     control: &ProductionControl<'_>,
-    transform: &mut ScalarNodeTransform<'_>,
+    input: &mut I,
 ) -> Result<(), SQLError> {
     for (index, value) in values.iter_mut().enumerate() {
+        checkpoint(control, input).await?;
         let mut memory = item(memory.as_deref_mut(), index);
-        scalar(&mut value.scalar, memory.as_deref_mut(), control, transform)?;
+        scalar(&mut value.scalar, memory.as_deref_mut(), control, input).await?;
         queries(
             &mut value.subqueries,
             field(memory, "subqueries"),
             control,
-            transform,
-        )?;
+            input,
+        )
+        .await?;
     }
     Ok(())
 }
 
-fn executable(
+async fn executable<I: Input>(
     value: &mut UnifiedPlan,
     memory: Option<&mut RewriteMemory>,
     control: &ProductionControl<'_>,
-    transform: &mut ScalarNodeTransform<'_>,
+    input: &mut I,
 ) -> Result<(), SQLError> {
     match value {
         UnifiedPlan::Query(query) => {
-            transform_query(query, field(memory, "query"), control, transform)
+            input
+                .query(query, field_slot(memory, "query"), control)?
+                .await
         }
         UnifiedPlan::Command(command) => {
-            transform_command(command, field(memory, "command"), control, transform)
+            input
+                .command(command, field_slot(memory, "command"), control)?
+                .await
         }
     }
 }
 
-pub(in crate::plan::mutable) fn transform_command(
-    command: &mut CommandPlan,
-    memory: Option<&mut RewriteMemory>,
-    control: &ProductionControl<'_>,
-    transform: &mut ScalarNodeTransform<'_>,
-) -> Result<(), SQLError> {
-    transform_command_scope(command, memory, control, transform, true)
-}
-
-/// The caller owns nested arenas and local source ordering; visit only this command's direct mutation roots.
-pub(in crate::plan::mutable) fn transform_local_command(
-    command: &mut CommandPlan,
-    memory: Option<&mut RewriteMemory>,
-    control: &ProductionControl<'_>,
-    transform: &mut ScalarNodeTransform<'_>,
-) -> Result<(), SQLError> {
-    transform_command_scope(command, memory, control, transform, false)
-}
-
-fn cte_children(
+async fn cte_children<I: Input>(
     values: &mut [crate::plan::CtePlan],
     memory: Option<&mut RewriteMemory>,
     control: &ProductionControl<'_>,
-    transform: &mut ScalarNodeTransform<'_>,
+    input: &mut I,
     recursive: bool,
 ) -> Result<(), SQLError> {
     if recursive {
-        transform_ctes(values, memory, control, transform)?;
+        ctes_from(values, memory, control, input).await?;
     }
     Ok(())
 }
 
-fn query_children(
+async fn query_children<I: Input>(
     values: &mut [QueryPlan],
     memory: Option<&mut RewriteMemory>,
     control: &ProductionControl<'_>,
-    transform: &mut ScalarNodeTransform<'_>,
+    input: &mut I,
     recursive: bool,
 ) -> Result<(), SQLError> {
     if recursive {
-        queries(values, field(memory, "subqueries"), control, transform)?;
+        queries(values, field(memory, "subqueries"), control, input).await?;
     }
     Ok(())
 }
 
-fn query_child(
+async fn query_child<I: Input>(
     value: &mut QueryPlan,
-    memory: Option<&mut RewriteMemory>,
+    memory: Option<&mut Option<RewriteMemory>>,
     control: &ProductionControl<'_>,
-    transform: &mut ScalarNodeTransform<'_>,
+    input: &mut I,
     recursive: bool,
 ) -> Result<(), SQLError> {
     if recursive {
-        transform_query(value, memory, control, transform)?;
+        input.query(value, memory, control)?.await?;
     }
     Ok(())
 }
 
-fn source_scope(
+async fn source_scope<I: Input>(
     value: &mut crate::plan::SourcePlan,
-    memory: Option<&mut RewriteMemory>,
+    memory: Option<&mut Option<RewriteMemory>>,
     control: &ProductionControl<'_>,
-    transform: &mut ScalarNodeTransform<'_>,
+    input: &mut I,
     recursive: bool,
 ) -> Result<(), SQLError> {
     if recursive {
-        transform_source(value, memory, control, transform)
+        input.source(value, memory, control)?.await
     } else {
         Ok(())
     }
@@ -348,14 +365,14 @@ fn source_scope(
     clippy::too_many_lines,
     reason = "one exhaustive command dispatch preserves analysis rewrite order and utility exclusions"
 )]
-fn transform_command_scope(
+pub(in crate::plan::mutable) async fn command_from<I: Input>(
     command: &mut CommandPlan,
     memory: Option<&mut RewriteMemory>,
     control: &ProductionControl<'_>,
-    transform: &mut ScalarNodeTransform<'_>,
+    input: &mut I,
     recursive: bool,
 ) -> Result<(), SQLError> {
-    control.check()?;
+    checkpoint(control, input).await?;
     if !recursive
         && !matches!(
             command,
@@ -374,47 +391,55 @@ fn transform_command_scope(
                 &mut plan.columns,
                 field(memory.as_deref_mut(), "columns"),
                 control,
-                transform,
-            )?;
+                input,
+            )
+            .await?;
             cte_children(
                 &mut plan.ctes,
                 field(memory.as_deref_mut(), "ctes"),
                 control,
-                transform,
+                input,
                 recursive,
-            )?;
+            )
+            .await?;
             for (row, values) in plan.rows.iter_mut().enumerate() {
+                checkpoint(control, input).await?;
                 for (column, value) in values.iter_mut().enumerate() {
+                    checkpoint(control, input).await?;
                     let memory = item(field(memory.as_deref_mut(), "rows"), row)
-                        .map(|memory| scalar_memory(memory.scalar_item_mut(column)));
-                    OwnedScalarExpr::transform_nodes_in_place(value, memory, control, transform)?;
+                        .map(|memory| memory.scalar_item_mut(column));
+                    input.scalar(value, memory, control).await?;
                 }
             }
             if let Some(source) = &mut plan.source {
                 query_child(
                     source,
-                    field(field(memory.as_deref_mut(), "source"), "query"),
+                    field_slot(field(memory.as_deref_mut(), "source"), "query"),
                     control,
-                    transform,
+                    input,
                     recursive,
-                )?;
+                )
+                .await?;
             }
             if let Some(conflict) = &mut plan.on_conflict {
                 let mut conflict_memory = field(memory.as_deref_mut(), "on_conflict");
                 for (index, expression) in conflict.expressions.iter_mut().enumerate() {
+                    checkpoint(control, input).await?;
                     scalar(
                         expression,
                         item(field(conflict_memory.as_deref_mut(), "expressions"), index),
                         control,
-                        transform,
-                    )?;
+                        input,
+                    )
+                    .await?;
                 }
                 optional(
                     conflict.predicate.as_deref_mut(),
                     field(conflict_memory.as_deref_mut(), "predicate"),
                     control,
-                    transform,
-                )?;
+                    input,
+                )
+                .await?;
                 if let ConflictActionPlan::Update {
                     assignments: values,
                     predicate,
@@ -425,29 +450,33 @@ fn transform_command_scope(
                         values,
                         field(action_memory.as_deref_mut(), "assignments"),
                         control,
-                        transform,
-                    )?;
+                        input,
+                    )
+                    .await?;
                     optional(
                         predicate.as_deref_mut(),
                         field(action_memory, "predicate"),
                         control,
-                        transform,
-                    )?;
+                        input,
+                    )
+                    .await?;
                 }
             }
             projections(
                 &mut plan.returning,
                 field(memory.as_deref_mut(), "returning"),
                 control,
-                transform,
-            )?;
+                input,
+            )
+            .await?;
             checks(
                 &mut plan.view_checks,
                 field(memory.as_deref_mut(), "view_checks"),
                 control,
-                transform,
-            )?;
-            query_children(&mut plan.subqueries, memory, control, transform, recursive)?;
+                input,
+            )
+            .await?;
+            query_children(&mut plan.subqueries, memory, control, input, recursive).await?;
         }
         CommandPlan::Update(plan) => {
             let mut memory = field(memory, "value0");
@@ -455,43 +484,49 @@ fn transform_command_scope(
                 &mut plan.ctes,
                 field(memory.as_deref_mut(), "ctes"),
                 control,
-                transform,
+                input,
                 recursive,
-            )?;
+            )
+            .await?;
             if let Some(source) = &mut plan.source {
                 source_scope(
                     source,
-                    field(field(memory.as_deref_mut(), "source"), "source"),
+                    field_slot(field(memory.as_deref_mut(), "source"), "source"),
                     control,
-                    transform,
+                    input,
                     recursive,
-                )?;
+                )
+                .await?;
             }
             assignments(
                 &mut plan.assignments,
                 field(memory.as_deref_mut(), "assignments"),
                 control,
-                transform,
-            )?;
+                input,
+            )
+            .await?;
             optional(
                 plan.predicate.as_mut(),
                 field(memory.as_deref_mut(), "predicate"),
                 control,
-                transform,
-            )?;
+                input,
+            )
+            .await?;
             projections(
                 &mut plan.returning,
                 field(memory.as_deref_mut(), "returning"),
                 control,
-                transform,
-            )?;
+                input,
+            )
+            .await?;
             checks(
                 &mut plan.view_checks,
                 field(memory.as_deref_mut(), "view_checks"),
                 control,
-                transform,
-            )?;
-            query_children(&mut plan.subqueries, memory, control, transform, recursive)?;
+                input,
+            )
+            .await?;
+            query_children(&mut plan.subqueries, memory, control, input, recursive).await?;
         }
         CommandPlan::Delete(plan) => {
             let mut memory = field(memory, "value0");
@@ -499,31 +534,35 @@ fn transform_command_scope(
                 &mut plan.ctes,
                 field(memory.as_deref_mut(), "ctes"),
                 control,
-                transform,
+                input,
                 recursive,
-            )?;
+            )
+            .await?;
             if let Some(source) = &mut plan.source {
                 source_scope(
                     source,
-                    field(field(memory.as_deref_mut(), "source"), "source"),
+                    field_slot(field(memory.as_deref_mut(), "source"), "source"),
                     control,
-                    transform,
+                    input,
                     recursive,
-                )?;
+                )
+                .await?;
             }
             optional(
                 plan.predicate.as_mut(),
                 field(memory.as_deref_mut(), "predicate"),
                 control,
-                transform,
-            )?;
+                input,
+            )
+            .await?;
             projections(
                 &mut plan.returning,
                 field(memory.as_deref_mut(), "returning"),
                 control,
-                transform,
-            )?;
-            query_children(&mut plan.subqueries, memory, control, transform, recursive)?;
+                input,
+            )
+            .await?;
+            query_children(&mut plan.subqueries, memory, control, input, recursive).await?;
         }
         CommandPlan::Merge(plan) => {
             let mut memory = field(memory, "value0");
@@ -531,29 +570,34 @@ fn transform_command_scope(
                 &mut plan.ctes,
                 field(memory.as_deref_mut(), "ctes"),
                 control,
-                transform,
+                input,
                 recursive,
-            )?;
+            )
+            .await?;
             source_scope(
                 &mut plan.source,
-                field(field(memory.as_deref_mut(), "source"), "source"),
+                field_slot(field(memory.as_deref_mut(), "source"), "source"),
                 control,
-                transform,
+                input,
                 recursive,
-            )?;
+            )
+            .await?;
             optional(
                 plan.target_predicate.as_mut(),
                 field(memory.as_deref_mut(), "target_predicate"),
                 control,
-                transform,
-            )?;
+                input,
+            )
+            .await?;
             scalar(
                 &mut plan.join_condition,
                 field(memory.as_deref_mut(), "join_condition"),
                 control,
-                transform,
-            )?;
+                input,
+            )
+            .await?;
             for (index, clause) in plan.when_clauses.iter_mut().enumerate() {
+                checkpoint(control, input).await?;
                 let mut memory = item(field(memory.as_deref_mut(), "when_clauses"), index);
                 match clause {
                     MergeWhenPlan::UpdateMatched {
@@ -568,9 +612,10 @@ fn transform_command_scope(
                             condition.as_mut(),
                             field(memory.as_deref_mut(), "condition"),
                             control,
-                            transform,
-                        )?;
-                        assignments(values, field(memory, "assignments"), control, transform)?;
+                            input,
+                        )
+                        .await?;
+                        assignments(values, field(memory, "assignments"), control, input).await?;
                     }
                     MergeWhenPlan::InsertNotMatched {
                         condition,
@@ -582,67 +627,79 @@ fn transform_command_scope(
                             condition.as_mut(),
                             field(memory.as_deref_mut(), "condition"),
                             control,
-                            transform,
-                        )?;
+                            input,
+                        )
+                        .await?;
                         targets(
                             columns,
                             field(memory.as_deref_mut(), "columns"),
                             control,
-                            transform,
-                        )?;
+                            input,
+                        )
+                        .await?;
                         for (index, value) in values.iter_mut().enumerate() {
+                            checkpoint(control, input).await?;
                             scalar(
                                 value,
                                 item(field(memory.as_deref_mut(), "values"), index),
                                 control,
-                                transform,
-                            )?;
+                                input,
+                            )
+                            .await?;
                         }
                     }
                     MergeWhenPlan::DeleteMatched { condition }
                     | MergeWhenPlan::DeleteNotMatchedBySource { condition }
                     | MergeWhenPlan::NothingMatched { condition }
                     | MergeWhenPlan::NothingNotMatched { condition }
-                    | MergeWhenPlan::NothingNotMatchedBySource { condition } => optional(
-                        condition.as_mut(),
-                        field(memory, "condition"),
-                        control,
-                        transform,
-                    )?,
+                    | MergeWhenPlan::NothingNotMatchedBySource { condition } => {
+                        optional(
+                            condition.as_mut(),
+                            field(memory, "condition"),
+                            control,
+                            input,
+                        )
+                        .await?;
+                    }
                 }
             }
             projections(
                 &mut plan.returning,
                 field(memory.as_deref_mut(), "returning"),
                 control,
-                transform,
-            )?;
+                input,
+            )
+            .await?;
             checks(
                 &mut plan.view_checks,
                 field(memory.as_deref_mut(), "view_checks"),
                 control,
-                transform,
-            )?;
-            query_children(&mut plan.subqueries, memory, control, transform, recursive)?;
+                input,
+            )
+            .await?;
+            query_children(&mut plan.subqueries, memory, control, input, recursive).await?;
         }
         CommandPlan::CreateView { query, .. }
         | CommandPlan::CreateMaterializedView { query, .. }
         | CommandPlan::CreateTableAs { query, .. }
-        | CommandPlan::DeclareCursor { query, .. } => query_child(
-            query,
-            field(field(memory, "query"), "query"),
-            control,
-            transform,
-            recursive,
-        )?,
+        | CommandPlan::DeclareCursor { query, .. } => {
+            query_child(
+                query,
+                field_slot(field(memory, "query"), "query"),
+                control,
+                input,
+                recursive,
+            )
+            .await?;
+        }
         CommandPlan::Explain { body, .. } | CommandPlan::Prepare { body, .. } => {
-            executable(body, field(memory, "body"), control, transform)?;
+            executable(body, field(memory, "body"), control, input).await?;
         }
         CommandPlan::Execute { params, .. } => {
-            expressions(params, field(memory, "params"), control, transform)?;
+            expressions(params, field(memory, "params"), control, input).await?;
         }
         CommandPlan::Call { args, .. } => {
-            expressions(args, field(memory, "args"), control, transform)?;
+            expressions(args, field(memory, "args"), control, input).await?;
         }
         CommandPlan::CreateTable(_)
         | CommandPlan::CreateTableIfNotExists(_)
@@ -711,6 +768,6 @@ fn transform_command_scope(
         | CommandPlan::DoBlock { .. }
         | CommandPlan::Empty => {}
     }
-    control.check()?;
+    checkpoint(control, input).await?;
     Ok(())
 }

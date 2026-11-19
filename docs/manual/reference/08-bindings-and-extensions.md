@@ -46,7 +46,7 @@ The binding transaction tests also exercise an independent session's commit whil
 
 ## C source API
 
-UQA Engine 0.6.3 provides an embedded C ABI and C11/C++17 shared/static library packages for Linux x86_64/aarch64, macOS x86_64/arm64 and Windows x86_64. Its [public headers](../../../crates/uqa-ffi/include/uqa/uqa.h) define the callable interface, and the [implementation ledger](../../plans/0028-c-bindings.md) records delivered scope and qualification evidence. Host logging remains declaration-only and is not exported.
+UQA Engine provides an embedded C ABI and C11/C++17 shared/static library packages for Linux x86_64/aarch64, macOS ARM64 and Windows x86_64. Releases through 0.6.3 also provide macOS x86_64 packages. Its [public headers](../../../crates/uqa-ffi/include/uqa/uqa.h) define the callable interface, and the [implementation ledger](../../plans/0028-c-bindings.md) records delivered scope and qualification evidence. Host logging remains declaration-only and is not exported.
 
 The [native build and installed-consumer guide](../../../crates/uqa-ffi/README.md#native-builds-and-installed-consumers) describes the CMake and pkg-config packages. `UQA::uqa` and `uqa.pc` select the shared library with `UQA_USE_SHARED`; `UQA::uqa_static` and `uqa-static.pc` select the static archive with its target-specific dependencies. Installed metadata records ABI major 1, source revision, features, native dependencies and license inventories. Linux/macOS/Windows package and full-library sanitizer workflows are configured; the ledger records their actual candidate qualification status.
 

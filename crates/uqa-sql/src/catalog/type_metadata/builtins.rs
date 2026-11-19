@@ -88,6 +88,50 @@ const TYPES: &[(ColumnType, &str)] = &[
     (ColumnType::Tensor(0), "tensor"),
 ];
 
+#[cfg(test)]
+#[test]
+fn builtin_name_occupancy_matches_original_qualified_type_projection() {
+    let names = TYPES.iter().map(|(_, name)| *name).chain([
+        "integer",
+        "boolean",
+        "double precision",
+        "timestamp with time zone",
+        "unknown",
+        "cstring",
+        "tid",
+        "pg_lsn",
+        "money",
+        "inet",
+        "fdw_handler",
+        "anyelement",
+        "",
+        "a\"b",
+        "a.b",
+        "가나다",
+        "not_a_type",
+    ]);
+    for name in names {
+        for candidate in [
+            name.to_owned(),
+            format!("_{name}"),
+            name.to_uppercase(),
+            format!("{name} "),
+        ] {
+            let expected = builtin_scalar_type_by_name(&candidate).is_some()
+                || ColumnType::from_sql_name(&format!(
+                    "pg_catalog.{}",
+                    crate::expr::quote_ident(&candidate)
+                ))
+                .is_ok();
+            assert_eq!(
+                super::builtin_catalog_type_name_exists(&candidate),
+                expected,
+                "{candidate:?}"
+            );
+        }
+    }
+}
+
 /// The builtin scalar type with this physical OID, without a declaration's typmod.
 pub fn builtin_scalar_type(oid: u32) -> Option<&'static ColumnType> {
     TYPES

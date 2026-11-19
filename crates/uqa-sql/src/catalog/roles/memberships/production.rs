@@ -6,14 +6,14 @@
 
 //! Role reachability keeps the queue and visited identities in the invoking allowance.
 
-use super::{RoleAttribute, RoleDefinition, RoleIdentity, RoleMembership, RoleMembershipKey};
+use super::{RoleAttribute, RoleIdentity};
+use crate::catalog::roles::{RoleDefinitions, RoleMemberships};
 use crate::{catalog::roles::identity::RoleSubject, SQLError};
-use std::collections::BTreeMap;
 use uqa_core::memory::{ProductionControl, ProductionMap, ProductionVec};
 
 pub fn role_inherits_with_control(
-    roles: &BTreeMap<String, RoleDefinition>,
-    memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
+    roles: &RoleDefinitions,
+    memberships: &RoleMemberships,
     member: &(impl RoleSubject + ?Sized),
     role: &(impl RoleSubject + ?Sized),
     control: &ProductionControl<'_>,
@@ -31,10 +31,26 @@ pub fn role_inherits_with_control(
 }
 
 fn role_reaches_with_control(
-    memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
+    memberships: &RoleMemberships,
     member: RoleIdentity,
     role: RoleIdentity,
     control: &ProductionControl<'_>,
+) -> Result<bool, SQLError> {
+    crate::catalog::work::inline(role_reaches_from(
+        memberships,
+        member,
+        role,
+        control,
+        &mut (),
+    ))
+}
+
+pub(crate) async fn role_reaches_from(
+    memberships: &RoleMemberships,
+    member: RoleIdentity,
+    role: RoleIdentity,
+    control: &ProductionControl<'_>,
+    work: &mut impl crate::catalog::work::Work,
 ) -> Result<bool, SQLError> {
     control.check()?;
     if member == role {
@@ -48,6 +64,8 @@ fn role_reaches_with_control(
     while let Some(&current) = queue.get(head) {
         head += 1;
         for membership in memberships.values() {
+            control.check()?;
+            work.checkpoint().await?;
             control.check()?;
             if membership.member.identity() != current || !membership.inherit_option {
                 continue;

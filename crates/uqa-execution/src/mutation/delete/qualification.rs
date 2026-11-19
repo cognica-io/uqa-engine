@@ -62,7 +62,7 @@ pub(super) fn recheck_delete_candidate<S: Clone + Send + Sync + 'static>(
             Some(&joined),
             params,
         )
-        .map(|value| uqa_sql::expr::truthy(&value))
+        .and_then(|value| uqa_sql::expr::truthy(&value))
     })?;
     Ok(qualifies.then(|| (doc, source_context.cloned())))
 }

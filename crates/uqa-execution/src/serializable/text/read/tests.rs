@@ -16,7 +16,7 @@ fn controlled_text_capture_keeps_the_owner_allowance_through_observer_snapshots(
         )
         .unwrap();
     let index: Arc<dyn InvertedIndex> = Arc::new(index);
-    let observed = ObservedTextIndex::new(index, None, Arc::new(Vec::new()));
+    let observed = ObservedTextIndex::new(index, None, Arc::new(Vec::new()).into());
     assert!(matches!(
         observed.snapshot_with_control(&StorageReadControl::with_limit(0)),
         Err(StorageBackendError::Memory(_))

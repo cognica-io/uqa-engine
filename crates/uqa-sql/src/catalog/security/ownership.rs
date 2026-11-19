@@ -7,14 +7,12 @@
 //! Read-only authority shared by object ownership checks.
 use super::BoundSchemaSecurity;
 use crate::catalog::roles::identity::RoleSubject;
+use crate::catalog::roles::{RoleDefinitions, RoleMemberships};
 use crate::{
     ast::RoleAttribute,
-    catalog::roles::{
-        require_set_role, role_inherits, RoleDefinition, RoleMembership, RoleMembershipKey,
-    },
+    catalog::roles::{require_set_role, role_inherits},
     SQLError,
 };
-use std::collections::BTreeMap;
 
 pub trait RelationOwnerSchemas {
     fn schema_security(&self, schema: &str) -> Option<BoundSchemaSecurity>;
@@ -61,8 +59,8 @@ pub fn reject_system_relation_alter(relation: &uqa_core::RelationIdentity) -> Re
 mod tests;
 
 pub struct OwnerChangeAuthority<'a> {
-    pub roles: &'a BTreeMap<String, RoleDefinition>,
-    pub memberships: &'a BTreeMap<RoleMembershipKey, RoleMembership>,
+    pub roles: &'a RoleDefinitions,
+    pub memberships: &'a RoleMemberships,
     pub current_user: &'a dyn RoleSubject,
     pub new_owner: &'a str,
 }

@@ -9,18 +9,14 @@ use crate::row_locks::{
     shared_objects::{SharedCatalogLock, SharedObjectLockSession},
     RelationLockMode, RowLockManager, ScopedRelationLock,
 };
-use std::{
-    cell::{Cell, RefCell, RefMut},
-    collections::BTreeMap,
-};
-use uqa_sql::catalog::roles::{
-    guards::RoleCatalogGuards, RoleDefinition, RoleMembership, RoleMembershipKey,
-};
+use std::cell::{Cell, RefCell, RefMut};
+use uqa_sql::catalog::roles::{guards::RoleCatalogGuards, RoleDefinition};
+use uqa_sql::catalog::roles::{RoleDefinitions, RoleMemberships};
 
 #[derive(Default)]
 struct Catalog {
-    roles: RefCell<BTreeMap<String, RoleDefinition>>,
-    memberships: RefCell<BTreeMap<RoleMembershipKey, RoleMembership>>,
+    roles: RefCell<RoleDefinitions>,
+    memberships: RefCell<RoleMemberships>,
     object: RefCell<()>,
     locks: RowLockManager,
     writer: Cell<usize>,
@@ -36,7 +32,11 @@ impl Catalog {
             role.name = name.into();
             role.oid = 20_000 + i64::try_from(index).unwrap();
             role.object_id = [u8::try_from(index + 1).unwrap(); 16];
-            catalog.roles.borrow_mut().insert(name.into(), role);
+            catalog
+                .roles
+                .borrow_mut()
+                .insert(name.into(), role)
+                .unwrap();
         }
         catalog
     }
@@ -94,7 +94,14 @@ impl SharedObjectLockSession for Catalog {
     fn refresh_shared_catalog(&self) -> Result<(), SQLError> {
         self.assert_released();
         if self.replace.get() {
-            self.roles.borrow_mut().get_mut("reader").unwrap().object_id = [9; 16];
+            self.roles
+                .borrow_mut()
+                .edit("reader", |value| {
+                    value.object_id = [9; 16];
+                    Ok(())
+                })
+                .unwrap()
+                .unwrap();
         }
         Ok(())
     }
@@ -171,9 +178,12 @@ fn owner_binding_survives_target_and_writer_waits_without_rebinding_the_name() {
             catalog
                 .roles
                 .borrow_mut()
-                .get_mut("reader")
+                .edit("reader", |value| {
+                    value.object_id = [8; 16];
+                    Ok(())
+                })
                 .unwrap()
-                .object_id = [8; 16];
+                .unwrap();
         }
         let result = prepare_role_owner(
             context,
@@ -183,9 +193,12 @@ fn owner_binding_survives_target_and_writer_waits_without_rebinding_the_name() {
                 catalog
                     .roles
                     .borrow_mut()
-                    .get_mut("reader")
+                    .edit("reader", |value| {
+                        value.object_id = [9; 16];
+                        Ok(())
+                    })
                     .unwrap()
-                    .object_id = [9; 16];
+                    .unwrap();
                 Ok(())
             },
             |_, _, _| {
@@ -241,14 +254,15 @@ fn owner_preparation_projects_the_original_identity_after_writer_refresh_renames
             catalog.assert_released();
             catalog.writer.set(catalog.writer.get() + 1);
             let mut roles = catalog.roles.borrow_mut();
-            let mut original = roles.remove("reader").unwrap();
+            let mut original = roles.get("reader").unwrap().clone();
+            roles.remove("reader").unwrap();
             let mut replacement = original.clone();
             replacement.oid += 10;
             replacement.object_id = [9; 16];
             original.name = "renamed".into();
             original.advance_revision().unwrap();
-            roles.insert("renamed".into(), original);
-            roles.insert("reader".into(), replacement);
+            roles.insert("renamed".into(), original).unwrap();
+            roles.insert("reader".into(), replacement).unwrap();
             Ok(())
         },
         |roles, _, name| {

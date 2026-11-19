@@ -6,6 +6,12 @@
 
 //! Immutable catalog inputs and runtime catalog projections.
 
+use uqa_core::memory::RetainedValue;
+use uqa_sql::catalog::roles::{RoleDefinitions, RoleMemberships};
+use uqa_sql::catalog::security::schema_registry::SchemaRegistry;
+use uqa_sql::catalog::table_definition::SharedTableDefinition;
+use uqa_sql::catalog::table_metadata::SharedTableMetadata;
+pub mod analyzers;
 pub mod comments;
 pub mod composite_type;
 pub mod domain;
@@ -13,26 +19,25 @@ pub mod enum_type;
 pub mod foreign;
 pub mod hierarchy;
 pub mod identity;
+#[cfg(test)]
+mod image_input_tests;
+pub mod image_validation;
 pub mod range_type;
 pub mod security;
 pub mod sequence;
 pub mod shell_type;
+pub mod table_capture;
+pub mod table_image;
+pub(crate) mod text_records;
 pub mod tuples;
 pub mod type_identity_restoration;
 pub(crate) mod type_records;
 pub mod value_restoration;
 pub mod view;
 
-use security::{
-    BoundDatabaseSecurity, BoundSchemaSecurity, BoundSequenceSecurity, BoundTableSecurity,
-};
-use sequence::SequenceState;
-use std::collections::BTreeMap;
 use std::sync::Arc;
 use uqa_core::memory::{Produced, ProductionControl};
-use uqa_core::RelationIdentity;
 pub use uqa_sql::catalog::resolution::{RelationLookupMode, RelationNameResolution};
-use view::StoredView;
 mod analysis;
 pub mod definition_revision;
 pub mod graph;
@@ -41,9 +46,11 @@ mod graph_reads;
 pub mod namespaces;
 mod prepared_dependencies;
 mod production;
+pub use production::CatalogReadCapture;
 mod read;
 pub mod relation_names;
 pub mod schema;
+pub(crate) mod selection_work;
 mod snapshot_read;
 
 /// Immutable catalog inputs with optional query read attribution. This view cannot change definitions, coordinate DDL, publish caches, or recover the enclosing engine.
@@ -90,18 +97,21 @@ pub struct GraphCatalogOverlay {
 /// Immutable table-definition fields used by binding and catalog projection.
 #[derive(Clone)]
 pub struct CatalogTableSnapshot {
-    pub dropped_attributes: Arc<Vec<uqa_sql::catalog::relation_attributes::DroppedAttribute>>,
+    pub dropped_attributes:
+        SharedTableMetadata<Vec<uqa_sql::catalog::relation_attributes::DroppedAttribute>>,
     pub object_id: [u8; 16],
     /// The table's public OIDs, recorded or derived from its identity.
     pub catalog_oids: uqa_sql::catalog::relation_oids::RelationCatalogOids,
-    pub row_type_array_name: Option<String>,
-    pub security: Arc<crate::catalog::security::BoundTableSecurity>,
-    pub columns: Arc<Vec<uqa_sql::ast::ColumnDef>>,
+    pub row_type_array_name: SharedTableMetadata<Option<String>>,
+    pub security: uqa_sql::catalog::table_metadata::SharedTableMetadata<
+        crate::catalog::security::BoundTableSecurity,
+    >,
+    pub columns: SharedTableDefinition<Vec<uqa_sql::ast::ColumnDef>>,
     pub columns_declared: bool,
-    pub checks: Arc<Vec<uqa_sql::ast::TableCheck>>,
-    pub foreign_keys: Arc<Vec<uqa_sql::ast::ForeignKey>>,
-    pub keys: Arc<Vec<uqa_sql::ast::TableKeyConstraint>>,
-    pub hierarchy: Arc<uqa_sql::ast::TableHierarchy>,
+    pub checks: SharedTableDefinition<Vec<uqa_sql::ast::TableCheck>>,
+    pub foreign_keys: SharedTableMetadata<Vec<uqa_sql::ast::ForeignKey>>,
+    pub keys: SharedTableMetadata<Vec<uqa_sql::ast::TableKeyConstraint>>,
+    pub hierarchy: SharedTableDefinition<uqa_sql::ast::TableHierarchy>,
     pub persistence: uqa_sql::ast::RelationPersistence,
 }
 
@@ -126,49 +136,36 @@ pub use uqa_sql::catalog::resolution::RelationResolution;
 #[derive(Clone)]
 pub struct CatalogDefinitionSnapshot {
     pub builtin_routine_security:
-        Arc<uqa_sql::catalog::security::builtin_routines::BuiltinRoutineSecurities>,
-    pub sequence_persistence: Arc<BTreeMap<RelationIdentity, uqa_sql::ast::RelationPersistence>>,
-    pub foreign_tables: Arc<BTreeMap<RelationIdentity, foreign::StoredForeignTable>>,
-    pub foreign_wrappers: Arc<uqa_sql::catalog::foreign_wrapper::ForeignWrappers>,
-    pub foreign_servers:
-        Arc<BTreeMap<String, uqa_sql::catalog::foreign_server::ForeignServerDefinition>>,
-    pub sql_user_functions: Arc<BTreeMap<String, Vec<Arc<uqa_sql::routines::SQLUserFunction>>>>,
-    pub role_memberships: Arc<
-        BTreeMap<
-            uqa_sql::catalog::roles::RoleMembershipKey,
-            uqa_sql::catalog::roles::RoleMembership,
-        >,
-    >,
+        RetainedValue<uqa_sql::catalog::security::builtin_routines::BuiltinRoutineSecurities>,
+    pub foreign_tables: Arc<foreign::ForeignTables>,
+    pub foreign_wrappers: RetainedValue<uqa_sql::catalog::foreign_wrapper::ForeignWrappers>,
+    pub foreign_servers: RetainedValue<uqa_sql::catalog::foreign_server::ForeignServers>,
+    pub sql_user_functions: RetainedValue<uqa_sql::routines::registry::RoutineRegistry>,
+    pub role_memberships: RetainedValue<RoleMemberships>,
 
-    pub domains: Arc<BTreeMap<String, uqa_sql::catalog::domain::StoredDomain>>,
-    pub enums: Arc<enum_type::EnumRegistry>,
-    pub ranges: Arc<range_type::RangeRegistry>,
-    pub shells: Arc<shell_type::ShellRegistry>,
-    pub comments: Arc<comments::CommentRegistry>,
-    pub composites: Arc<composite_type::CompositeRegistry>,
-    pub graphs: Arc<BTreeMap<String, Arc<uqa_graph::GraphStoreHandle>>>,
-    pub views: Arc<BTreeMap<RelationIdentity, StoredView>>,
-    pub catalog_indexes: Arc<BTreeMap<RelationIdentity, uqa_storage::CatalogIndexRow>>,
-    pub database_security: Arc<BoundDatabaseSecurity>,
-    pub schemas: Arc<BTreeMap<String, BoundSchemaSecurity>>,
-    pub sequences: Arc<BTreeMap<RelationIdentity, SequenceState>>,
-    pub sequence_object_ids: Arc<BTreeMap<RelationIdentity, [u8; 16]>>,
-    /// The `pg_class` OIDs sequences recorded when they were created, by object identity.
-    pub sequence_catalog_oids: Arc<BTreeMap<[u8; 16], u32>>,
-    /// The OIDs graphs and their labels recorded when they were created, by graph name.
-    pub graph_catalog_oids: Arc<BTreeMap<String, uqa_sql::catalog::graph_oids::GraphCatalogOids>>,
-    pub sequence_security: Arc<BTreeMap<RelationIdentity, BoundSequenceSecurity>>,
-    pub foreign_table_security: Arc<BTreeMap<RelationIdentity, BoundTableSecurity>>,
-    pub system_relation_security:
-        Arc<uqa_sql::catalog::security::system_relations::SystemRelationSecurities>,
-    pub roles: Arc<BTreeMap<String, uqa_sql::catalog::roles::RoleDefinition>>,
-    pub triggers: Arc<
-        BTreeMap<
-            uqa_storage::RelationIdentity,
-            BTreeMap<String, uqa_sql::catalog::events::StoredTrigger>,
-        >,
+    pub domains: RetainedValue<
+        uqa_sql::catalog::type_definitions::TypeDefinitions<uqa_sql::catalog::domain::StoredDomain>,
     >,
-    pub rules: Arc<uqa_sql::catalog::events::RuleCatalog>,
+    pub enums: RetainedValue<enum_type::EnumRegistry>,
+    pub ranges: RetainedValue<range_type::RangeRegistry>,
+    pub shells: RetainedValue<shell_type::ShellRegistry>,
+    pub comments: RetainedValue<comments::CommentRegistry>,
+    pub composites: RetainedValue<composite_type::CompositeRegistry>,
+    pub graphs: RetainedValue<uqa_graph::GraphCatalog>,
+    pub views: RetainedValue<uqa_sql::catalog::stored_view::ViewDefinitions>,
+    pub catalog_indexes: RetainedValue<crate::catalog::index::registry::CatalogIndexes>,
+    pub database_security: RetainedValue<uqa_sql::catalog::security::database::DatabaseAuthority>,
+    pub schemas: RetainedValue<SchemaRegistry>,
+    pub sequences: RetainedValue<sequence::registry::SequenceCatalog>,
+    /// The OIDs graphs and their labels recorded when they were created, by graph name.
+    pub graph_catalog_oids: RetainedValue<uqa_sql::catalog::graph_oids::GraphOidRegistry>,
+    pub foreign_table_security:
+        Arc<uqa_sql::catalog::security::foreign_tables::ForeignTableSecurities>,
+    pub system_relation_security:
+        RetainedValue<uqa_sql::catalog::security::system_relations::SystemRelationSecurities>,
+    pub roles: RetainedValue<RoleDefinitions>,
+    pub triggers: RetainedValue<uqa_sql::catalog::events::TriggerCatalog>,
+    pub rules: RetainedValue<uqa_sql::catalog::events::RuleCatalog>,
 }
 
 impl CatalogReadView {

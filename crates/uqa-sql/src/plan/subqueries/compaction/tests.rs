@@ -8,6 +8,8 @@ use super::*;
 use crate::plan::UnifiedPlan;
 use uqa_core::{memory::MemoryBudget, CancellationToken, Value};
 
+mod retirement;
+
 fn one(sql: &str) -> UnifiedPlan {
     UnifiedPlan::lower(crate::compile(sql).unwrap().remove(0))
 }

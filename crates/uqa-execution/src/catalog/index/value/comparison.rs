@@ -40,12 +40,44 @@ impl StoredComparison {
 /// Raw field probes are not SQL-bound: enum operands can have different types,
 /// and record/anonymous-row equality crosses distinct storage key variants.
 pub(super) fn field_needs_typed_comparison(value: &Value) -> bool {
+    let (typed, children) = typed_children(value);
+    typed || children.is_some_and(|mut children| children.any(field_needs_typed_comparison))
+}
+
+fn typed_children(value: &Value) -> (bool, Option<std::slice::Iter<'_, Value>>) {
     match value {
-        Value::Enum(_) | Value::Record(_) => true,
-        Value::Array(array) => array.elements().iter().any(field_needs_typed_comparison),
-        Value::Row(values) => values.iter().any(field_needs_typed_comparison),
-        Value::List(values) => values.iter().any(field_needs_typed_comparison),
-        _ => false,
+        Value::Enum(_) | Value::Record(_) => (true, None),
+        Value::Array(array) => (false, Some(array.elements().iter())),
+        Value::Row(values) => (false, Some(values.iter())),
+        Value::List(values) => (false, Some(values.iter())),
+        _ => (false, None),
+    }
+}
+
+pub(super) async fn field_needs_typed_comparison_from(
+    value: &Value,
+    input: &mut uqa_core::image_io::AsyncImageInput<'_>,
+) -> Result<bool, SQLError> {
+    let mut stack = uqa_core::memory::BudgetedVec::new(input.memory);
+    let mut next = Some(value);
+    loop {
+        input.checkpoint().await?;
+        if let Some(value) = next.take() {
+            let (typed, children) = typed_children(value);
+            if typed {
+                return Ok(true);
+            }
+            if let Some(children) = children {
+                stack.push(children)?;
+            }
+        } else if let Some(children) = stack.last_mut() {
+            next = children.next();
+            if next.is_none() {
+                stack.pop();
+            }
+        } else {
+            return Ok(false);
+        }
     }
 }
 

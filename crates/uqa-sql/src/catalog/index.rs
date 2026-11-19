@@ -37,6 +37,7 @@ pub struct IndexCatalogIdentity {
 }
 
 pub mod identity;
+pub mod native;
 
 mod relationships;
 pub use relationships::{

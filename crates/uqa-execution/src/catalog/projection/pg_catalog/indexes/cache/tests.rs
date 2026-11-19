@@ -9,8 +9,8 @@ use crate::catalog::{
     cache::RegtypeOutputCache,
     test_support::{empty_catalog, table_snapshot, CatalogServices},
 };
-use std::sync::Arc;
 use uqa_core::{catalog_identity::CatalogObjectIdentity, Value};
+use uqa_sql::catalog::roles::RoleDefinitions;
 use uqa_sql::{ast::ColumnDef, catalog::index::IndexCatalogIdentity, ColumnType};
 
 fn index_name(position: usize) -> RelationIdentity {
@@ -19,12 +19,16 @@ fn index_name(position: usize) -> RelationIdentity {
 
 fn fixture(unrelated: usize) -> CatalogReadView {
     let mut snapshot = empty_catalog().snapshot().clone();
-    snapshot.definitions.schemas =
-        Arc::new(crate::catalog::security::BoundSchemaSecurity::initial_catalog());
-    snapshot.definitions.roles = Arc::new(BTreeMap::from([(
-        "uqa".into(),
-        uqa_sql::catalog::roles::RoleDefinition::bootstrap(),
-    )]));
+    snapshot.definitions.schemas = uqa_core::memory::RetainedValue::new(
+        crate::catalog::security::BoundSchemaSecurity::initial_catalog(),
+    );
+    snapshot.definitions.roles = uqa_core::memory::RetainedValue::new(
+        RoleDefinitions::try_from_iter([(
+            "uqa".into(),
+            uqa_sql::catalog::roles::RoleDefinition::bootstrap(),
+        )])
+        .unwrap(),
+    );
     snapshot.tables.insert(
         RelationIdentity::new("public", "items"),
         table_snapshot(
@@ -45,17 +49,19 @@ fn fixture(unrelated: usize) -> CatalogReadView {
             }),
             ..super::super::IndexDefinition::default()
         };
-        Arc::make_mut(&mut snapshot.definitions.catalog_indexes).insert(
-            index_name(position),
-            uqa_storage::CatalogIndexRow {
-                relation: index_name(position),
-                table_name: "public.items".into(),
-                index_type: "btree".into(),
-                columns_json: r#"["id"]"#.into(),
-                parameters_json: "{}".into(),
-                definition_json: Some(serde_json::to_string(&definition).unwrap()),
-            },
-        );
+        uqa_core::memory::RetainedValue::make_mut(&mut snapshot.definitions.catalog_indexes)
+            .insert(
+                uqa_storage::CatalogIndexRow {
+                    relation: index_name(position),
+                    table_name: "public.items".into(),
+                    index_type: "btree".into(),
+                    columns_json: r#"["id"]"#.into(),
+                    parameters_json: "{}".into(),
+                    definition_json: Some(serde_json::to_string(&definition).unwrap()),
+                },
+                uqa_sql::ast::RelationPersistence::Permanent,
+            )
+            .unwrap();
     }
     CatalogReadView::new(snapshot)
 }
@@ -134,10 +140,10 @@ fn retained_index_collections_survive_rename_and_removal() {
     let original = catalog_index_by_oid(&catalog, 70_000).unwrap().unwrap();
     let renamed = RelationIdentity::new("public", "renamed");
     let mut snapshot = catalog.snapshot().clone();
-    let rows = Arc::make_mut(&mut snapshot.definitions.catalog_indexes);
-    let mut row = rows.remove(&index_name(0)).unwrap();
+    let rows = uqa_core::memory::RetainedValue::make_mut(&mut snapshot.definitions.catalog_indexes);
+    let mut row = rows.get(&index_name(0)).unwrap().clone();
     row.relation = renamed.clone();
-    rows.insert(renamed.clone(), row);
+    rows.rename(&index_name(0), row).unwrap();
     let current = CatalogReadView::new(snapshot.clone());
     let selected = catalog_index_by_oid(&current, 70_000).unwrap().unwrap();
     assert_eq!(selected.relation, renamed);
@@ -145,7 +151,9 @@ fn retained_index_collections_survive_rename_and_removal() {
     assert!(catalog_index_by_name(&current, &index_name(0))
         .unwrap()
         .is_none());
-    Arc::make_mut(&mut snapshot.definitions.catalog_indexes).remove(&renamed);
+    uqa_core::memory::RetainedValue::make_mut(&mut snapshot.definitions.catalog_indexes)
+        .remove(&renamed)
+        .unwrap();
     let removed = CatalogReadView::new(snapshot);
     assert!(catalog_index_by_oid(&removed, 70_000).unwrap().is_none());
     assert_eq!(original.relation, index_name(0));
@@ -160,12 +168,12 @@ fn change_definition(
     position: usize,
     change: impl FnOnce(&mut super::super::IndexDefinition),
 ) {
-    let row = Arc::make_mut(&mut snapshot.definitions.catalog_indexes)
-        .get_mut(&index_name(position))
-        .unwrap();
-    let mut definition = super::super::index_definition(row).unwrap();
+    let rows = uqa_core::memory::RetainedValue::make_mut(&mut snapshot.definitions.catalog_indexes);
+    let mut row = rows.get(&index_name(position)).unwrap().clone();
+    let mut definition = super::super::index_definition(&row).unwrap();
     change(&mut definition);
     row.definition_json = Some(serde_json::to_string(&definition).unwrap());
+    rows.replace(row).unwrap();
 }
 
 #[test]

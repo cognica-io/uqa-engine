@@ -13,13 +13,14 @@ permissions:
   contents: read
 
 env:
+  RUSTC_WRAPPER: ""
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: "0"
 
 jobs:
   node:
     name: node ${{ matrix.label }}
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.os == 'macos-26-arm64' && fromJSON('["self-hosted","macOS","ARM64","macos-arm64","macos-26-arm64"]') || matrix.os }}
     strategy:
       fail-fast: false
       matrix:
@@ -30,11 +31,8 @@ jobs:
           - label: linux aarch64
             os: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
-          - label: macos x86_64
-            os: macos-15-intel
-            target: x86_64-apple-darwin
           - label: macos aarch64
-            os: macos-15
+            os: macos-26-arm64
             target: aarch64-apple-darwin
           - label: windows x86_64
             os: windows-latest
@@ -43,6 +41,14 @@ jobs:
             os: windows-11-arm
             target: aarch64-pc-windows-msvc
     steps:
+      - name: Limit shared macOS worker parallelism
+        if: runner.os == 'macOS' && runner.environment == 'self-hosted'
+        shell: bash
+        run: |
+          printf '%s\n' 'CARGO_BUILD_JOBS=4' 'RUST_TEST_THREADS=4' 'NEXTEST_TEST_THREADS=4' \
+            "RUSTUP_HOME=$RUNNER_TOOL_CACHE/rustup" "CARGO_HOME=$RUNNER_TOOL_CACHE/cargo" >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TOOL_CACHE/cargo/bin"
+          printf '%s\n' "$RUNNER_TOOL_CACHE/cargo/bin" >> "$GITHUB_PATH"
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
@@ -59,6 +65,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
+          save-if: ${{ runner.os != 'macOS' || runner.environment != 'self-hosted' }}
           cache-bin: false
           cache-targets: false
 

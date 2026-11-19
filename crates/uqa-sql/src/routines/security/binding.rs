@@ -7,15 +7,22 @@
 //! Bind legacy routine names once and validate retained owner and ACL incarnations.
 
 use super::bound_routine_owner;
+use crate::catalog::roles::RoleDefinitions;
 use crate::catalog::security::object_acl;
 use crate::{
     ast::{CreateFunction, RoutineAclEntry},
-    catalog::roles::{identity::RoleSubject, RoleDefinition, RoleIdentity, RoleReference},
+    catalog::roles::{identity::RoleSubject, RoleIdentity},
     SQLError,
 };
 use serde::Deserialize;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use uqa_core::catalog_acl::AclGrantee;
+
+mod validation;
+pub use validation::{validate_routine_authority, validate_routine_authority_from_input};
+pub mod input;
+mod legacy;
+pub use legacy::bind_legacy_authority_from_input;
 
 /// Only the initial catalog converter may interpret named routine authority.
 #[derive(Deserialize)]
@@ -34,44 +41,23 @@ pub struct BoundRoutineAuthority {
 pub fn bind_legacy_authority(
     owner: &str,
     acl: Option<Vec<LegacyRoutineAclEntry>>,
-    roles: &BTreeMap<String, RoleDefinition>,
+    roles: &RoleDefinitions,
     implicit_owner_execute: bool,
 ) -> Result<BoundRoutineAuthority, SQLError> {
-    let bind = |name: &str| {
-        RoleReference::from(name)
-            .bind(roles)
-            .map(|role| role.identity())
-    };
-    let identity = bind(owner)?;
-    let mut execute_acl = acl
-        .map(|acl| {
-            acl.into_iter()
-                .map(|entry| {
-                    Ok(RoutineAclEntry {
-                        role: entry.role.role_name().map(bind).transpose()?,
-                        grantor: bind(entry.grantor.as_deref().unwrap_or(owner))?,
-                        grant_option: entry.grant_option,
-                    })
-                })
-                .collect::<Result<Vec<_>, SQLError>>()
-        })
-        .transpose()?;
-    if implicit_owner_execute {
-        if let Some(acl) = execute_acl.as_mut() {
-            if !acl.iter().any(|entry| entry.role == Some(identity)) {
-                acl.push(RoutineAclEntry {
-                    role: Some(identity),
-                    grantor: identity,
-                    grant_option: false,
-                });
-            }
-        }
-    }
-    validate_acl(identity, execute_acl.as_deref())?;
-    Ok(BoundRoutineAuthority {
-        owner: identity,
-        execute_acl,
-    })
+    let result = crate::catalog::work::inline(legacy::bind_from(
+        owner,
+        acl.as_deref(),
+        roles,
+        implicit_owner_execute,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+        &mut (),
+    ))?;
+    let (value, memory) = result.into_parts();
+    debug_assert!(
+        memory.is_none(),
+        "ordinary role binding has no admission owner"
+    );
+    Ok(value)
 }
 
 fn invalid(message: &str) -> SQLError {
@@ -98,7 +84,7 @@ fn authority_roles(definition: &CreateFunction) -> Result<BTreeSet<RoleIdentity>
 
 pub fn routine_role_dependencies(
     definition: &CreateFunction,
-    roles: &BTreeMap<String, RoleDefinition>,
+    roles: &RoleDefinitions,
 ) -> Result<BTreeSet<String>, SQLError> {
     validate_routine_authority_identities(definition)?;
     authority_roles(definition)?
@@ -112,16 +98,9 @@ pub fn routine_role_dependencies(
         .collect()
 }
 
-pub fn validate_routine_authority(
-    definition: &CreateFunction,
-    roles: &BTreeMap<String, RoleDefinition>,
-) -> Result<(), SQLError> {
-    routine_role_dependencies(definition, roles).map(|_| ())
-}
-
 pub fn bind_routine_grantees(
     grantees: &[AclGrantee],
-    roles: &BTreeMap<String, RoleDefinition>,
+    roles: &RoleDefinitions,
 ) -> Result<Vec<Option<RoleIdentity>>, SQLError> {
     object_acl::bind_grantees(grantees, roles)
 }
@@ -129,7 +108,7 @@ pub fn bind_routine_grantees(
 pub fn added_routine_acl_roles(
     before: &CreateFunction,
     after: &CreateFunction,
-    roles: &BTreeMap<String, RoleDefinition>,
+    roles: &RoleDefinitions,
     added: &mut BTreeSet<String>,
 ) -> Result<(), SQLError> {
     object_acl::added_acl_roles(

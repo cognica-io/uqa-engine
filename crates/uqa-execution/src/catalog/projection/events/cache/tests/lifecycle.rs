@@ -17,25 +17,31 @@ fn retained_event_addresses_survive_rename_and_removal() {
     let original_view = view_rule_by_oid(&catalog, 90_003).unwrap().1;
     let mut snapshot = catalog.snapshot().clone();
     let relation = RelationIdentity::new("public", "items");
-    let triggers = Arc::make_mut(&mut snapshot.definitions.triggers)
-        .get_mut(&relation)
+    uqa_core::memory::RetainedValue::make_mut(&mut snapshot.definitions.triggers)
+        .edit(&relation, |triggers| {
+            let mut trigger = triggers["watch_000"].clone();
+            triggers.remove("watch_000")?;
+            trigger.definition.name = "renamed_trigger".into();
+            triggers.insert(trigger.definition.name.clone(), trigger)
+        })
+        .unwrap()
         .unwrap();
-    let mut trigger = triggers.remove("watch_000").unwrap();
-    trigger.definition.name = "renamed_trigger".into();
-    triggers.insert(trigger.definition.name.clone(), trigger);
-    let rules = Arc::make_mut(
-        Arc::make_mut(&mut snapshot.definitions.rules)
-            .get_mut(&relation)
-            .unwrap(),
-    );
-    let mut rule = rules.remove("rule_000").unwrap();
-    rule.definition.name = "renamed_rule".into();
-    rules.insert(rule.definition.name.clone(), rule);
-    let views = Arc::make_mut(&mut snapshot.definitions.views);
-    let view = views
-        .remove(&RelationIdentity::new("public", "view_000"))
+    uqa_core::memory::RetainedValue::make_mut(&mut snapshot.definitions.rules)
+        .edit(&relation, |rules| {
+            let mut rule = rules["rule_000"].clone();
+            rules.remove("rule_000")?;
+            rule.definition.name = "renamed_rule".into();
+            rules.insert(rule.definition.name.clone(), rule)
+        })
+        .unwrap()
         .unwrap();
-    views.insert(RelationIdentity::new("public", "renamed_view"), view);
+    let views = uqa_core::memory::RetainedValue::make_mut(&mut snapshot.definitions.views);
+    let relation = RelationIdentity::new("public", "view_000");
+    let view = views[&relation].clone();
+    assert!(views.remove(&relation).unwrap());
+    views
+        .insert(RelationIdentity::new("public", "renamed_view"), view)
+        .unwrap();
     let current = CatalogReadView::new(snapshot.clone());
     assert_eq!(
         trigger_by_oid(&current, &resolution, 70_000)
@@ -53,9 +59,9 @@ fn retained_event_addresses_survive_rename_and_removal() {
         view_rule_by_oid(&current, 90_003).unwrap().0.name,
         "renamed_view"
     );
-    snapshot.definitions.triggers = Arc::default();
-    snapshot.definitions.rules = Arc::default();
-    snapshot.definitions.views = Arc::default();
+    snapshot.definitions.triggers = uqa_core::memory::RetainedValue::default();
+    snapshot.definitions.rules = uqa_core::memory::RetainedValue::default();
+    snapshot.definitions.views = uqa_core::memory::RetainedValue::default();
     let removed = CatalogReadView::new(snapshot);
     assert!(trigger_by_oid(&removed, &resolution, 70_000)
         .unwrap()
@@ -74,17 +80,23 @@ fn retained_event_addresses_survive_rename_and_removal() {
 fn rule_lookup_keeps_user_rules_before_views_and_ordinary_views_before_materialized() {
     let catalog = fixture(1);
     let mut snapshot = catalog.snapshot().clone();
-    let views = Arc::make_mut(&mut snapshot.definitions.views);
-    let first = views
-        .get_mut(&RelationIdentity::new("public", "view_000"))
-        .unwrap();
-    first.kind = uqa_sql::catalog::view::StoredViewKind::Materialized;
-    first.catalog_oids.as_mut().unwrap().rule = Some(80_000);
-    let second = views
-        .get_mut(&RelationIdentity::new("public", "view_001"))
-        .unwrap();
-    second.kind = uqa_sql::catalog::view::StoredViewKind::View;
-    second.catalog_oids.as_mut().unwrap().rule = Some(80_000);
+    let views = uqa_core::memory::RetainedValue::make_mut(&mut snapshot.definitions.views);
+    for (name, kind) in [
+        (
+            "view_000",
+            uqa_sql::catalog::view::StoredViewKind::Materialized,
+        ),
+        ("view_001", uqa_sql::catalog::view::StoredViewKind::View),
+    ] {
+        views
+            .edit(&RelationIdentity::new("public", name), |view| {
+                view.kind = kind;
+                view.catalog_oids.as_mut().unwrap().rule = Some(80_000);
+                Ok(())
+            })
+            .unwrap()
+            .unwrap();
+    }
     let catalog = CatalogReadView::new(snapshot);
     let services = CatalogServices::default();
     let output = crate::catalog::cache::RegtypeOutputCache::default();
@@ -110,13 +122,13 @@ fn rule_lookup_keeps_user_rules_before_views_and_ordinary_views_before_materiali
 fn a_later_missing_view_rule_identity_does_not_affect_an_earlier_match() {
     let catalog = fixture(2);
     let mut snapshot = catalog.snapshot().clone();
-    Arc::make_mut(&mut snapshot.definitions.views)
-        .get_mut(&RelationIdentity::new("public", "view_002"))
+    uqa_core::memory::RetainedValue::make_mut(&mut snapshot.definitions.views)
+        .edit(&RelationIdentity::new("public", "view_002"), |view| {
+            view.catalog_oids.as_mut().unwrap().rule = None;
+            Ok(())
+        })
         .unwrap()
-        .catalog_oids
-        .as_mut()
-        .unwrap()
-        .rule = None;
+        .unwrap();
     let catalog = CatalogReadView::new(snapshot);
     assert!(view_rule_by_oid(&catalog, 90_003).is_some());
     assert!(view_by_oid(&catalog, 90_020).is_some());

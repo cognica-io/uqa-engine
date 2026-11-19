@@ -11,7 +11,7 @@ use crate::{
     ast::{FunctionBinding, FunctionVolatility},
     SQLError,
 };
-use std::{cmp::Ordering, sync::Arc};
+use std::cmp::Ordering;
 use uqa_core::memory::{BudgetedMap, OwnedMap, Produced, ProductionControl, ProductionVec};
 
 struct Signature {
@@ -79,7 +79,7 @@ pub(super) fn visit_visible<'a, K: AsRef<str>>(
     registry: &'a RoutineRegistry,
     keys: impl IntoIterator<Item = K>,
     control: &ProductionControl<'_>,
-    mut visit: impl FnMut(&'a Arc<SQLUserFunction>) -> Result<(), SQLError>,
+    mut visit: impl FnMut(&'a crate::routines::SQLRoutine) -> Result<(), SQLError>,
 ) -> Result<(), SQLError> {
     control.check()?;
     let mut seen = Seen::new(control);

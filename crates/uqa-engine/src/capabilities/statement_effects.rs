@@ -16,8 +16,10 @@ impl uqa_sql::semantics::effects::QueryEffectCatalog for Engine {
     fn domain_by_oid(&self, oid: u32) -> Option<StoredDomain> {
         Engine::domain_by_oid(self, oid)
     }
-    fn sequence_persistence(&self, name: &str) -> Result<Option<RelationPersistence>, String> {
-        Engine::sequence_persistence(self, name).map_err(|error| error.to_string())
+    fn sequence_persistence(&self, name: &str) -> Result<Option<RelationPersistence>, SQLError> {
+        Engine::sequence_persistence(self, name).map_err(|error| {
+            uqa_execution::storage_errors::storage_error("resolve sequence persistence", &error)
+        })
     }
     fn table_persistence(&self, name: &str) -> Result<Option<RelationPersistence>, String> {
         Engine::table_persistence(self, name).map_err(|error| error.to_string())

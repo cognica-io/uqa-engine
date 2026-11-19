@@ -9,7 +9,7 @@ use crate::{
     catalog::view::{StoredView, ViewRegistryRead, ViewRegistryWrite},
     row_locks::{RowLockManager, ScopedRelationLock},
 };
-use std::{cell::RefCell, collections::BTreeMap};
+use std::cell::RefCell;
 use uqa_core::CancellationToken;
 use uqa_sql::{ast::RelationPersistence, catalog::view::StoredViewKind, plan::UnifiedPlan};
 
@@ -51,7 +51,7 @@ fn view(id: u8, source: &str) -> StoredView {
     }
 }
 
-type Registry = BTreeMap<RelationIdentity, StoredView>;
+type Registry = uqa_sql::catalog::stored_view::ViewDefinitions;
 type Change = Box<dyn FnOnce(&mut Registry)>;
 struct Session {
     views: RefCell<Registry>,
@@ -67,10 +67,13 @@ fn name(name: &str) -> RelationIdentity {
 impl Session {
     fn new(change: impl FnOnce(&mut Registry) + 'static) -> Self {
         Self {
-            views: RefCell::new(BTreeMap::from([
-                (name("dependent"), view(1, "root")),
-                (name("outer_view"), view(2, "dependent")),
-            ])),
+            views: RefCell::new(
+                uqa_sql::catalog::stored_view::ViewDefinitions::try_from_iter([
+                    (name("dependent"), view(1, "root")),
+                    (name("outer_view"), view(2, "dependent")),
+                ])
+                .unwrap(),
+            ),
             change: RefCell::new(Some(Box::new(change))),
             locks: RowLockManager::new(),
             cancellation: CancellationToken::new(),
@@ -119,7 +122,7 @@ impl RelationLockSession for Session {
 #[test]
 fn removed_dependency_releases_only_the_provisional_upgrade_and_keeps_its_descendants() {
     let session = Session::new(|views| {
-        views.insert(name("dependent"), view(1, "other"));
+        views.insert(name("dependent"), view(1, "other")).unwrap();
     });
     session
         .acquire("public.dependent", RelationLockMode::AccessShare, false)
@@ -140,10 +143,11 @@ fn removed_dependency_releases_only_the_provisional_upgrade_and_keeps_its_descen
 #[test]
 fn renamed_dependents_follow_identity_and_traverse_fresh_sources_without_adopting_the_old_name() {
     let session = Session::new(|views| {
-        let moved = views.remove(&name("dependent")).unwrap();
-        views.insert(name("moved"), moved);
-        views.insert(name("dependent"), view(3, "other"));
-        views.insert(name("outer_view"), view(2, "moved"));
+        let moved = views[&name("dependent")].clone();
+        assert!(views.remove(&name("dependent")).unwrap());
+        views.insert(name("moved"), moved).unwrap();
+        views.insert(name("dependent"), view(3, "other")).unwrap();
+        views.insert(name("outer_view"), view(2, "moved")).unwrap();
     });
     assert_eq!(
         lock_dependent_views(&session, &session, &["public.root".into()]).unwrap(),
@@ -157,7 +161,7 @@ fn renamed_dependents_follow_identity_and_traverse_fresh_sources_without_adoptin
 #[test]
 fn a_removed_edge_does_not_hide_another_root_that_still_requires_the_view() {
     let session = Session::new(|views| {
-        views.insert(name("dependent"), view(1, "other"));
+        views.insert(name("dependent"), view(1, "other")).unwrap();
     });
     assert_eq!(
         lock_dependent_views(

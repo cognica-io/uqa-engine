@@ -198,6 +198,32 @@ fn independent_cached_consumers_synchronize_another_sessions_publication() {
 }
 
 #[test]
+fn backup_capture_synchronizes_autonomous_values_without_publishing_a_record_revision() {
+    for mode in 0..4 {
+        let directory = tempfile::tempdir().unwrap();
+        let connection =
+            super::reclamation::open(&directory.path().join("backup-sequence.db"), mode);
+        let (backend, store) = initialize(&connection);
+        let control = control();
+        backend.begin_read_transaction().unwrap();
+        log(
+            &backend
+                .open_sequence_value_session(&uqa_core::CancellationToken::new())
+                .unwrap(),
+            1,
+        );
+        let before = boundary(&store);
+        let commits = commits(&store);
+        let snapshot = store.capture_backup_snapshot(&control).unwrap().unwrap();
+        assert_eq!(snapshot.records().sequence(), before.0);
+        assert_eq!(boundary(&store), (before.0, before.0));
+        assert_eq!(*commits.lock(), vec![false]);
+        backend.rollback_transaction().unwrap();
+        assert_eq!(boundary(&store), (before.0, before.0));
+    }
+}
+
+#[test]
 fn savepoint_undo_and_cancelled_completion_keep_the_sequence_durability_obligation() {
     let directory = tempfile::tempdir().unwrap();
     let connection = ManagedConnection::open(&directory.path().join("sequence.db")).unwrap();

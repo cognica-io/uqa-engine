@@ -24,7 +24,9 @@ fn fixture(failure: Failure) -> Fixture {
         stored.kind = StoredViewKind::Materialized;
         stored.materialized_column_types = vec![Some(ColumnType::Text)];
         stored.materialized_rows =
-            vec![[("value".into(), uqa_core::Value::Str("retained".into()))].into()];
+            vec![[("value".into(), uqa_core::Value::Str("retained".into()))]
+                .into_iter()
+                .collect()];
         catalog_view_row(&RelationIdentity::new("public", name), &stored).unwrap()
     })
     .collect();

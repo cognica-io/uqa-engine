@@ -19,7 +19,7 @@ impl SQLiteInvertedIndex {
                 .query_row(
                     "SELECT 1 FROM _occurrence_lengths
                      WHERE table_name = ?1 AND field = ?2 LIMIT 1",
-                    params![self.table, field],
+                    params![self.table.as_str(), field],
                     |row| row.get(0),
                 )
                 .optional()?;

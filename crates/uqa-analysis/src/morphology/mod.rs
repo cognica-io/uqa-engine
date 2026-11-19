@@ -18,6 +18,7 @@ pub(crate) mod matrix;
 pub(crate) mod strings;
 pub(crate) mod surfaces;
 pub(crate) mod unicode;
+pub(crate) mod work;
 
 use error::DictionaryError;
 type DictionaryResult<T> = Result<T, DictionaryError>;

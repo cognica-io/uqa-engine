@@ -75,7 +75,7 @@ impl ShellCompletionContext<'_> {
                 message: format!("shell type `{name}` changed during completion"),
             });
         }
-        registry.remove(&name);
+        registry.remove(&name)?;
         shell_type::publish(self.publication, &before, registry)
     }
 }
@@ -127,7 +127,7 @@ pub fn create_shell(context: &ShellTypeContext<'_>, name: &str) -> Result<(), SQ
             owner: owner.identity(),
             usage_acl: None,
         },
-    );
+    )?;
     shell_type::publish(context.publication, &before, registry)?;
     context.changes.catalog_registry_changed();
     Ok(())

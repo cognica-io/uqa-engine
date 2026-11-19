@@ -6,7 +6,7 @@
 
 use super::*;
 use crate::routines::descriptions::ProceduralDescriptions;
-use std::{cell::RefCell, sync::Arc};
+use std::cell::RefCell;
 use uqa_core::{
     memory::{MemoryBudget, ProductionControl},
     CancellationToken,
@@ -22,7 +22,11 @@ use uqa_sql::{
     },
 };
 
-fn fixture() -> (Arc<SQLUserFunction>, FunctionBinding, PLpgSQLFunction) {
+fn fixture() -> (
+    uqa_sql::routines::SQLRoutine,
+    FunctionBinding,
+    PLpgSQLFunction,
+) {
     let uqa_sql::Statement::CreateFunction(mut definition) = uqa_sql::compile(
         "CREATE FUNCTION public.procedural_read() RETURNS smallint LANGUAGE plpgsql AS $$ DECLARE v smallint; BEGIN RETURN v; END $$",
     ).unwrap().remove(0) else { panic!("routine") };
@@ -35,7 +39,7 @@ fn fixture() -> (Arc<SQLUserFunction>, FunctionBinding, PLpgSQLFunction) {
                 .catalog_name();
         }
     }
-    let function = Arc::new(SQLUserFunction::new(*definition, RoutineBody::Source));
+    let function = SQLUserFunction::new(*definition, RoutineBody::Source).shared();
     let binding = FunctionBinding {
         name: function.def.name.clone(),
         object_id: function.def.object_id,

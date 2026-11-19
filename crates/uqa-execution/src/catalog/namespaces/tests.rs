@@ -7,6 +7,7 @@
 use super::*;
 use std::sync::Arc;
 use uqa_sql::catalog::roles::RoleDefinition;
+use uqa_sql::catalog::roles::RoleDefinitions;
 
 pub(super) fn catalog() -> CatalogReadView {
     let mut snapshot = crate::catalog::test_support::empty_catalog()
@@ -17,25 +18,28 @@ pub(super) fn catalog() -> CatalogReadView {
     reader.oid = 42;
     reader.object_id = [42; 16];
     reader.attributes.clear();
-    snapshot.definitions.roles = Arc::new(
-        [
+    snapshot.definitions.roles = uqa_core::memory::RetainedValue::new(
+        RoleDefinitions::try_from_iter([
             ("uqa".into(), RoleDefinition::bootstrap()),
             ("reader".into(), reader),
-        ]
-        .into(),
+        ])
+        .unwrap(),
     );
-    snapshot.definitions.schemas = Arc::new(
-        [
+    snapshot.definitions.schemas = uqa_core::memory::RetainedValue::new(
+        uqa_sql::catalog::security::schema_registry::SchemaRegistry::try_from_iter([
             (
                 "public".into(),
                 BoundSchemaSecurity::with_public_privileges(true),
             ),
             ("private".into(), BoundSchemaSecurity::bootstrap("private")),
-        ]
-        .into(),
+        ])
+        .unwrap(),
     );
-    snapshot.definitions.graphs =
-        Arc::new([("g".into(), Arc::new(uqa_graph::GraphStoreHandle::default()))].into());
+    let mut graphs = uqa_graph::GraphCatalog::default();
+    graphs
+        .insert("g", Arc::new(uqa_graph::GraphStoreHandle::default()))
+        .unwrap();
+    snapshot.definitions.graphs = uqa_core::memory::RetainedValue::new(graphs);
     CatalogReadView::new(snapshot)
 }
 

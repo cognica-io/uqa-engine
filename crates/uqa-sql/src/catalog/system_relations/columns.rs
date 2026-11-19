@@ -24,17 +24,6 @@ impl SystemRelation {
         let names: &[&str] = match self {
             Self::Projected(relation) => return relation.column_names_with_control(control),
             Self::PgDbRoleSetting => &["setdatabase", "setrole", "setconfig"],
-            Self::PgShadow => &[
-                "usename",
-                "usesysid",
-                "usecreatedb",
-                "usesuper",
-                "userepl",
-                "usebypassrls",
-                "passwd",
-                "valuntil",
-                "useconfig",
-            ],
             Self::PgTablespace => &["oid", "spcname", "spcowner", "spcacl", "spcoptions"],
             Self::PgCollation => &[
                 "oid",

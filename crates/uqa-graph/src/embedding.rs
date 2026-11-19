@@ -288,7 +288,7 @@ mod tests {
     #[test]
     fn missing_edge_record_is_corruption_not_an_empty_label_bucket() {
         let mut store = MemoryGraphStore::new();
-        store.create_graph("g");
+        store.create_graph("g").unwrap();
         store.add_vertex(Vertex::new(1, "n"), "g").unwrap();
         store.add_vertex(Vertex::new(2, "n"), "g").unwrap();
         store.add_edge(Edge::new(10, 1, 2, "edge"), "g").unwrap();

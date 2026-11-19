@@ -43,25 +43,54 @@ struct StoredOptions {
 
 impl From<StoredOptions> for ExplainOptions {
     fn from(stored: StoredOptions) -> Self {
-        let options = stored.options.unwrap_or_else(|| {
-            let mut options = Vec::new();
-            for (name, value) in [("analyze", stored.analyze), ("verbose", stored.verbose)] {
-                if let Some(value) = value {
-                    options.push(ExplainOption {
-                        name: name.into(),
-                        value: Some(ExplainOptionValue::Boolean(value)),
-                    });
-                }
+        if let Some(options) = stored.options {
+            return Self { options };
+        }
+        let control = uqa_core::memory::ProductionControl::uncontrolled();
+        Self::from_legacy_with_control(
+            stored.analyze,
+            stored.verbose,
+            control
+                .finish(stored.format, None)
+                .expect("ordinary EXPLAIN input"),
+            control,
+        )
+        .expect("ordinary EXPLAIN construction")
+        .into_uncontrolled()
+        .expect("ordinary EXPLAIN owner")
+    }
+}
+
+impl ExplainOptions {
+    pub(crate) fn from_legacy_with_control(
+        analyze: Option<bool>,
+        verbose: Option<bool>,
+        format: uqa_core::memory::Produced<Option<String>>,
+        control: uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_core::memory::Produced<Self>, uqa_core::ValueRetentionError> {
+        use uqa_core::memory::{ProductionString, ProductionVec};
+        let mut options = ProductionVec::new(control);
+        let (format, memory) = format.into_parts();
+        for (name, value) in [
+            ("analyze", analyze.map(ExplainOptionValue::Boolean)),
+            ("verbose", verbose.map(ExplainOptionValue::Boolean)),
+            ("format", format.map(ExplainOptionValue::String)),
+        ] {
+            if let Some(value) = value {
+                let mut text = ProductionString::new(control);
+                text.push_str(name)?;
+                let (name, name_memory) = text.finish()?.into_parts();
+                options.push_produced(control.finish(
+                    ExplainOption {
+                        name,
+                        value: Some(value),
+                    },
+                    name_memory,
+                )?)?;
             }
-            if let Some(format) = stored.format {
-                options.push(ExplainOption {
-                    name: "format".into(),
-                    value: Some(ExplainOptionValue::String(format)),
-                });
-            }
-            options
-        });
-        Self { options }
+        }
+        let (options, options_memory) = options.finish()?.into_parts();
+        control.finish(Self { options }, control.combine(memory, options_memory))
     }
 }
 

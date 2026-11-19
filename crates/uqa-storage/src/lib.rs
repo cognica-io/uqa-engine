@@ -9,9 +9,12 @@
 //! provider-neutral catalog and transaction contracts.
 
 pub mod analyzer_binding;
+pub mod analyzer_catalog;
+pub mod analyzer_image;
 pub use analyzer_binding::{AnalyzerBindingOwner, BoundAnalyzerRevision, FieldAnalyzerBinding};
 
 pub mod backend;
+pub mod backup;
 pub mod block_max_index;
 pub mod btree_index;
 pub mod catalog_index_keys;
@@ -24,12 +27,14 @@ pub mod document_store;
 pub mod encryption_key;
 pub use encryption_key::StorageEncryptionKey;
 pub mod hnsw_index;
+pub mod image_io;
 pub mod index_abc;
 pub mod index_manager;
 pub mod index_types;
 pub mod inverted_index;
 pub mod ivf_index;
 pub mod key_value;
+pub mod memory_capture;
 pub mod mvcc;
 #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 #[allow(unsafe_code)]
@@ -38,6 +43,7 @@ pub mod native_file;
 pub mod notifications;
 pub mod read_control;
 mod read_only_snapshot;
+mod retained_memory;
 pub use read_only_snapshot::ReadOnlySnapshot;
 pub mod spatial_index;
 mod spill_map;
@@ -54,7 +60,8 @@ pub mod test_support;
 pub use backend::{
     CommittedDataRevision, PersistentStorageBackend, PersistentStorageIdentity,
     PersistentStorageProvider, PersistentStorageSession, StorageBackendError, StorageBackendResult,
-    StorageSavepointId, StorageSessionAffinity, StorageSessionMismatch, StorageTransactionModel,
+    StorageHandle, StorageName, StorageSavepointId, StorageSessionAffinity, StorageSessionMismatch,
+    StorageTransactionModel,
 };
 pub use block_max_index::{BlockMaxIndex, BlockMaxScorer, DEFAULT_BLOCK_SIZE};
 pub use btree_index::BTreeIndex;
@@ -73,9 +80,9 @@ pub use clustered_postings::{
     MaterializedPostingCursor, PostingCursor, PostingScore, POSTING_CLUSTER_DOCS,
 };
 pub use document_store::{
-    DocumentMetadata, DocumentStore, MemoryDocumentStore, RetainedDocumentFields,
-    RetainedDocumentPage, RetainedDocumentStore, RetainedDocumentStoreBuilder,
-    RetainedStoredDocument, SharedDocumentRow, StoredDocument,
+    DocumentMetadata, DocumentStore, MemoryDocumentStore, MemoryDocumentStoreBuilder,
+    RetainedDocumentFields, RetainedDocumentPage, RetainedDocumentStore,
+    RetainedDocumentStoreBuilder, RetainedStoredDocument, SharedDocumentRow, StoredDocument,
 };
 pub use hnsw_index::HNSWIndex;
 pub use index_abc::Index;

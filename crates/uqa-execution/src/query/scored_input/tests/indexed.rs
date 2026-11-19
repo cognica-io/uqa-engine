@@ -16,7 +16,7 @@ use uqa_sql::SQLError;
 use uqa_storage::{read_control::StorageReadControl, DocumentStore, MemoryDocumentStore};
 
 struct Table {
-    documents: RwLock<Box<dyn DocumentStore>>,
+    documents: RwLock<uqa_storage::StorageHandle<dyn DocumentStore>>,
     guard: RwLock<()>,
     value: Value,
     reads: AtomicUsize,
@@ -27,7 +27,7 @@ impl TableRead for Table {
     fn column_definitions(&self) -> Vec<uqa_sql::ast::ColumnDef> {
         Vec::new()
     }
-    fn read_documents(&self) -> RwLockReadGuard<'_, Box<dyn DocumentStore>> {
+    fn read_documents(&self) -> RwLockReadGuard<'_, uqa_storage::StorageHandle<dyn DocumentStore>> {
         self.documents.read()
     }
     fn maps_integer_keys(&self) -> bool {
@@ -65,7 +65,9 @@ impl TableRead for Table {
 
 fn fixture(fail_after: bool) -> (Arc<Table>, ScoredDocumentSource) {
     let table = Arc::new(Table {
-        documents: RwLock::new(Box::new(MemoryDocumentStore::new())),
+        documents: RwLock::new(uqa_storage::StorageHandle::new(Box::new(
+            MemoryDocumentStore::new(),
+        ))),
         guard: RwLock::new(()),
         value: Value::Str("x".repeat(8192)),
         reads: AtomicUsize::new(0),

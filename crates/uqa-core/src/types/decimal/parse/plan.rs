@@ -7,7 +7,10 @@
 //! Allocation-free syntax and precision validation derives the expanded coefficient shape.
 
 use super::super::{DecimalRepr, MAX_FRACTIONAL_DIGITS, MAX_INTEGER_DIGITS};
-use crate::ValueRetentionError;
+use crate::{
+    types::work::{checkpoint, Work},
+    ValueRetentionError,
+};
 
 pub(super) enum Plan<'a> {
     Special(DecimalRepr),
@@ -23,11 +26,12 @@ pub(super) struct FinitePlan<'a> {
 }
 
 impl<'a> Plan<'a> {
-    pub(super) fn parse(
+    pub(super) async fn parse<W: Work>(
         input: &'a str,
-        check: &mut impl FnMut() -> Result<(), ValueRetentionError>,
-    ) -> Result<Option<Self>, ValueRetentionError> {
-        let input = trim(input, check)?;
+        check: &mut (impl FnMut() -> Result<(), ValueRetentionError> + Send),
+        work: &mut W,
+    ) -> Result<Option<Self>, W::Error> {
+        let input = trim(input, check, work).await?;
         if let Some(special) = special(input) {
             return Ok(Some(Self::Special(special)));
         }
@@ -41,7 +45,7 @@ impl<'a> Plan<'a> {
         let mut exponent = 0;
         for (index, byte) in unsigned.bytes().enumerate() {
             if index.is_multiple_of(4096) {
-                check()?;
+                checkpoint(work, check).await?;
             }
             match byte {
                 b'0'..=b'9' => {
@@ -57,7 +61,8 @@ impl<'a> Plan<'a> {
                 b'.' if point.is_none() => point = Some(index),
                 b'e' | b'E' => {
                     end = index;
-                    let Some(value) = parse_exponent(&unsigned[index + 1..], check)? else {
+                    let Some(value) = parse_exponent(&unsigned[index + 1..], check, work).await?
+                    else {
                         return Ok(None);
                     };
                     exponent = value;
@@ -129,10 +134,11 @@ fn special(input: &str) -> Option<DecimalRepr> {
     }
 }
 
-fn parse_exponent(
+async fn parse_exponent<W: Work>(
     input: &str,
-    check: &mut impl FnMut() -> Result<(), ValueRetentionError>,
-) -> Result<Option<i32>, ValueRetentionError> {
+    check: &mut (impl FnMut() -> Result<(), ValueRetentionError> + Send),
+    work: &mut W,
+) -> Result<Option<i32>, W::Error> {
     let negative = input.starts_with('-');
     let unsigned = input.strip_prefix(['-', '+']).unwrap_or(input);
     if unsigned.is_empty() {
@@ -141,7 +147,7 @@ fn parse_exponent(
     let mut value = 0_i32;
     for (index, byte) in unsigned.bytes().enumerate() {
         if index.is_multiple_of(4096) {
-            check()?;
+            checkpoint(work, check).await?;
         }
         if !byte.is_ascii_digit() {
             return Ok(None);
@@ -160,14 +166,15 @@ fn parse_exponent(
     Ok(Some(value))
 }
 
-fn trim<'a>(
+async fn trim<'a, W: Work>(
     input: &'a str,
-    check: &mut impl FnMut() -> Result<(), ValueRetentionError>,
-) -> Result<&'a str, ValueRetentionError> {
+    check: &mut (impl FnMut() -> Result<(), ValueRetentionError> + Send),
+    work: &mut W,
+) -> Result<&'a str, W::Error> {
     let mut start = input.len();
     for (count, (index, character)) in input.char_indices().enumerate() {
         if count.is_multiple_of(4096) {
-            check()?;
+            checkpoint(work, check).await?;
         }
         if !character.is_whitespace() {
             start = index;
@@ -178,7 +185,7 @@ fn trim<'a>(
     let mut end = 0;
     for (count, (index, character)) in input.char_indices().rev().enumerate() {
         if count.is_multiple_of(4096) {
-            check()?;
+            checkpoint(work, check).await?;
         }
         if !character.is_whitespace() {
             end = index + character.len_utf8();

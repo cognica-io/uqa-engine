@@ -6,17 +6,11 @@
 
 //! Retained catalog inputs for ordered role dependency checks.
 
-use crate::{
-    catalog::{
-        security::{
-            database::BoundDatabaseSecurity, BoundSchemaSecurity, BoundSequenceSecurity,
-            BoundTableSecurity,
-        },
-        stored_view::StoredView,
-    },
-    routines::SQLUserFunction,
+use crate::catalog::security::schema_registry::SchemaRegistry;
+use crate::catalog::security::{
+    database::BoundDatabaseSecurity, sequence_registry::SequenceSecurities, BoundTableSecurity,
 };
-use std::{collections::BTreeMap, ops::Deref, sync::Arc};
+use std::ops::Deref;
 use uqa_core::RelationIdentity;
 
 pub type RoleDependencyRead<'a, T> = Box<dyn Deref<Target = T> + 'a>;
@@ -33,31 +27,22 @@ pub trait RoleDependencyCatalog:
     crate::catalog::security::system_relations::SystemRelationSecurityCatalog
 {
     fn database(&self) -> RoleDependencyRead<'_, BoundDatabaseSecurity>;
-    fn schemas(&self) -> RoleDependencyRead<'_, BTreeMap<String, BoundSchemaSecurity>>;
+    fn schemas(&self) -> RoleDependencyRead<'_, SchemaRegistry>;
     fn tables(&self) -> Box<dyn RoleTablesRead + '_>;
-    fn views(&self) -> RoleDependencyRead<'_, BTreeMap<RelationIdentity, StoredView>>;
+    fn views(&self) -> RoleDependencyRead<'_, crate::catalog::stored_view::ViewDefinitions>;
     fn foreign_tables(
         &self,
-    ) -> RoleDependencyRead<'_, BTreeMap<RelationIdentity, BoundTableSecurity>>;
-    fn sequences(
-        &self,
-    ) -> RoleDependencyRead<'_, BTreeMap<RelationIdentity, BoundSequenceSecurity>>;
-    fn routines(&self) -> RoleDependencyRead<'_, BTreeMap<String, Vec<Arc<SQLUserFunction>>>>;
+    ) -> RoleDependencyRead<'_, crate::catalog::security::foreign_tables::ForeignTableSecurities>;
+    fn sequences(&self) -> RoleDependencyRead<'_, SequenceSecurities>;
+    fn routines(&self) -> RoleDependencyRead<'_, crate::routines::registry::RoutineRegistry>;
     fn domains(
         &self,
-    ) -> RoleDependencyRead<'_, BTreeMap<String, crate::catalog::domain::StoredDomain>>;
-}
-
-pub trait RoleForeignPersistenceRead {
-    fn iter(
-        &self,
-    ) -> Box<dyn Iterator<Item = (&RelationIdentity, crate::ast::RelationPersistence)> + '_>;
+    ) -> RoleDependencyRead<
+        '_,
+        crate::catalog::type_definitions::TypeDefinitions<crate::catalog::domain::StoredDomain>,
+    >;
 }
 
 pub trait TemporaryRoleDependencyCatalog: RoleDependencyCatalog {
-    fn foreign_table_persistence(&self) -> Box<dyn RoleForeignPersistenceRead + '_>;
     fn temporary_namespace_allocated(&self) -> bool;
-    fn sequence_persistence(
-        &self,
-    ) -> RoleDependencyRead<'_, BTreeMap<RelationIdentity, crate::ast::RelationPersistence>>;
 }

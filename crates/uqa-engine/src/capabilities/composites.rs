@@ -7,15 +7,15 @@
 //! Bind composite type DDL to namespace, identity and publication state, and expose composite attributes to value conversion.
 
 use crate::Engine;
-use std::collections::BTreeMap;
 use std::sync::Arc;
+use uqa_core::memory::RetainedValue;
 use uqa_execution::catalog::composite_type::{
     CompositeRegistry, CompositeRegistryPublication, CompositeRegistryRead,
 };
 use uqa_execution::schema::composites::attributes::CompositeAttributeContext;
 use uqa_execution::schema::composites::values::{CompositeValueContext, CompositeValueTables};
 use uqa_execution::schema::composites::CompositeTypeContext;
-use uqa_sql::catalog::roles::RoleDefinition;
+use uqa_sql::catalog::roles::RoleDefinitions;
 use uqa_sql::expr::composites::{CompositeTypeCatalog, CompositeTypeDescriptor};
 use uqa_sql::SQLError;
 
@@ -85,10 +85,10 @@ impl Engine {
     }
 
     /// The composite registry generation of the running statement: the pinned query snapshot when one exists, otherwise the session's current definitions.
-    pub(crate) fn composite_registry_snapshot(&self) -> Arc<CompositeRegistry> {
+    pub(crate) fn composite_registry_snapshot(&self) -> RetainedValue<CompositeRegistry> {
         self.query_catalog_snapshot.as_ref().map_or_else(
             || self.durable.composites.snapshot(),
-            |snapshot| Arc::clone(&snapshot.composites),
+            |snapshot| snapshot.composites.clone(),
         )
     }
 }
@@ -152,7 +152,7 @@ impl CompositeRegistryPublication for Engine {
     fn composite_catalog(&self) -> Option<&dyn uqa_storage::CatalogFacade> {
         self.storage.catalog.as_deref()
     }
-    fn composite_role_definitions(&self) -> BTreeMap<String, RoleDefinition> {
+    fn composite_role_definitions(&self) -> RoleDefinitions {
         self.durable.roles.read().clone()
     }
     fn publish_composite_definitions(&self, registry: CompositeRegistry) {

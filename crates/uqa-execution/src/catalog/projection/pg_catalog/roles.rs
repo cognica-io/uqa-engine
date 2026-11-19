@@ -74,6 +74,14 @@ pub fn build_pg_auth_members(catalog: &CatalogReadView) -> Result<Vec<ResultRow>
 }
 
 pub fn build_pg_user(catalog: &CatalogReadView) -> Vec<ResultRow> {
+    build_login_roles(catalog, true)
+}
+
+pub fn build_pg_shadow(catalog: &CatalogReadView) -> Vec<ResultRow> {
+    build_login_roles(catalog, false)
+}
+
+fn build_login_roles(catalog: &CatalogReadView, mask_password: bool) -> Vec<ResultRow> {
     catalog
         .roles()
         .filter(|role| role.has(RoleAttribute::Login))
@@ -88,7 +96,14 @@ pub fn build_pg_user(catalog: &CatalogReadView) -> Vec<ResultRow> {
                     "usebypassrls",
                     bool_value(role.has(RoleAttribute::BypassRls)),
                 ),
-                ("passwd", str_value("********")),
+                (
+                    "passwd",
+                    if mask_password {
+                        str_value("********")
+                    } else {
+                        Value::Null
+                    },
+                ),
                 ("valuntil", Value::Null),
                 ("useconfig", Value::Null),
             ])

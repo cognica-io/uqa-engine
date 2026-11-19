@@ -9,8 +9,8 @@ use crate::catalog::{
     cache::RegtypeOutputCache,
     test_support::{empty_catalog, table_snapshot, CatalogServices},
 };
-use std::sync::Arc;
 use uqa_core::{catalog_identity::CatalogObjectIdentity, catalog_role::RoleIdentity};
+use uqa_sql::catalog::roles::RoleDefinitions;
 use uqa_sql::{
     ast::TableConstraintSet,
     catalog::{domain::StoredDomain, roles::RoleDefinition},
@@ -19,19 +19,20 @@ use uqa_sql::{
 
 fn fixture() -> CatalogReadView {
     let mut snapshot = empty_catalog().snapshot().clone();
-    snapshot.definitions.schemas =
-        Arc::new(crate::catalog::security::BoundSchemaSecurity::initial_catalog());
+    snapshot.definitions.schemas = uqa_core::memory::RetainedValue::new(
+        crate::catalog::security::BoundSchemaSecurity::initial_catalog(),
+    );
     let mut reader = RoleDefinition::bootstrap();
     reader.name = "reader".into();
     reader.oid = 20_000;
     reader.object_id = [1; 16];
     reader.attributes.clear();
-    snapshot.definitions.roles = Arc::new(
-        [
+    snapshot.definitions.roles = uqa_core::memory::RetainedValue::new(
+        RoleDefinitions::try_from_iter([
             ("uqa".into(), RoleDefinition::bootstrap()),
             (reader.name.clone(), reader),
-        ]
-        .into(),
+        ])
+        .unwrap(),
     );
     let Statement::CreateTable(mut table) = uqa_sql::compile("CREATE TABLE items(\"Has Space\" integer CONSTRAINT required NOT NULL, CONSTRAINT positive CHECK (\"Has Space\" > 0))").unwrap().remove(0) else { panic!("table"); };
     table.columns[0].not_null_identity = Some(CatalogObjectIdentity {
@@ -60,19 +61,21 @@ fn fixture() -> CatalogReadView {
         object_id: [6; 16],
         oid: 30_003,
     });
-    Arc::make_mut(&mut snapshot.definitions.domains).insert(
-        "public.positive".into(),
-        StoredDomain {
-            object_id: [7; 16],
-            oid: 30_004,
-            array_oid: Some(30_005),
-            identity: RelationIdentity::new("public", "positive"),
-            owner: RoleIdentity::BOOTSTRAP,
-            definition,
-            array_name: None,
-            usage_acl: None,
-        },
-    );
+    uqa_core::memory::RetainedValue::make_mut(&mut snapshot.definitions.domains)
+        .insert(
+            "public.positive".into(),
+            StoredDomain {
+                object_id: [7; 16],
+                oid: 30_004,
+                array_oid: Some(30_005),
+                identity: RelationIdentity::new("public", "positive"),
+                owner: RoleIdentity::BOOTSTRAP,
+                definition,
+                array_name: None,
+                usage_acl: None,
+            },
+        )
+        .unwrap();
     CatalogReadView::new(snapshot)
 }
 
@@ -114,10 +117,13 @@ fn constraint_views_preserve_owner_visibility_and_decoded_not_null_names() {
 fn domain_constraint_visibility_uses_the_retained_type_usage_acl() {
     let original = fixture();
     let mut snapshot = original.snapshot().clone();
-    Arc::make_mut(&mut snapshot.definitions.domains)
-        .get_mut("public.positive")
+    uqa_core::memory::RetainedValue::make_mut(&mut snapshot.definitions.domains)
+        .edit("public.positive", |domain| {
+            domain.usage_acl = Some(Vec::new());
+            Ok(())
+        })
         .unwrap()
-        .usage_acl = Some(Vec::new());
+        .unwrap();
     let restricted = CatalogReadView::new(snapshot);
     let mut resolution = CatalogServices::default().resolution;
     resolution.current_user = "reader".into();
@@ -146,9 +152,6 @@ fn domain_constraint_visibility_uses_the_retained_type_usage_acl() {
 fn requested_constraint_names_do_not_deparse_unselected_expressions() {
     let catalog = fixture();
     let mut snapshot = catalog.snapshot().clone();
-    let domain = Arc::make_mut(&mut snapshot.definitions.domains)
-        .get_mut("public.positive")
-        .unwrap();
     let Statement::CreateDomain(definition) =
         uqa_sql::compile("CREATE DOMAIN positive AS integer CHECK(missing_routine(VALUE))")
             .unwrap()
@@ -156,7 +159,13 @@ fn requested_constraint_names_do_not_deparse_unselected_expressions() {
     else {
         panic!("domain");
     };
-    domain.definition.checks[0].expression = definition.checks[0].expression.clone();
+    uqa_core::memory::RetainedValue::make_mut(&mut snapshot.definitions.domains)
+        .edit("public.positive", |domain| {
+            domain.definition.checks[0].expression = definition.checks[0].expression.clone();
+            Ok(())
+        })
+        .unwrap()
+        .unwrap();
     let catalog = CatalogReadView::new(snapshot);
     let mut request = CatalogRequest::columns(["constraint_name".into()]);
     request.require_name("constraint_name".into(), "domain_positive".into());
@@ -193,13 +202,12 @@ fn table_constraint_visibility_distinguishes_read_and_write_privileges() {
                 privileges: privilege.mask(),
                 grant_options: uqa_core::catalog_acl::TablePrivileges::default(),
             };
-            let security = Arc::make_mut(
-                &mut snapshot
-                    .tables
-                    .get_mut(&RelationIdentity::new("public", "items"))
-                    .unwrap()
-                    .security,
-            );
+            let security = snapshot
+                .tables
+                .get_mut(&RelationIdentity::new("public", "items"))
+                .unwrap()
+                .security
+                .make_mut();
             if let Some(column) = column {
                 security.column_acls.insert(column.into(), vec![entry]);
             } else {

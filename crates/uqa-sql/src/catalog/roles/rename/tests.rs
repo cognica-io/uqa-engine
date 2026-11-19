@@ -5,20 +5,20 @@
 //
 
 use super::*;
+use crate::catalog::roles::{RoleDefinitions, RoleMemberships};
 use crate::{
     ast::RoleAttribute,
     catalog::roles::{
         definition::RoleNotices,
         guards::{RoleCatalogGuards, RoleDefinitionRead, RoleMembershipRead},
         identity::RoleBinding,
-        RoleMembership, RoleMembershipKey, RoleReference, RoleReferenceNames,
+        RoleMembership, RoleReference, RoleReferenceNames,
     },
 };
-use std::collections::BTreeSet;
 
 struct Inputs {
-    roles: BTreeMap<String, RoleDefinition>,
-    memberships: BTreeMap<RoleMembershipKey, RoleMembership>,
+    roles: RoleDefinitions,
+    memberships: RoleMemberships,
     current: &'static str,
     session: &'static str,
     outer: &'static str,
@@ -26,7 +26,8 @@ struct Inputs {
 
 impl Inputs {
     fn new() -> Self {
-        let mut roles = BTreeMap::from([("uqa".into(), RoleDefinition::bootstrap())]);
+        let mut roles =
+            RoleDefinitions::try_from_iter([("uqa".into(), RoleDefinition::bootstrap())]).unwrap();
         for (index, name) in ["target", "actor", "plain", "existing", "pg_reserved"]
             .into_iter()
             .enumerate()
@@ -35,13 +36,14 @@ impl Inputs {
             role.name = name.into();
             role.oid = 20_000 + i64::try_from(index).unwrap();
             role.object_id = [u8::try_from(index + 1).unwrap(); 16];
-            role.attributes = BTreeSet::from([RoleAttribute::Inherit, RoleAttribute::Login]);
+            role.attributes =
+                uqa_core::memory::OwnedSet::from([RoleAttribute::Inherit, RoleAttribute::Login]);
             role.connection_limit = 7;
-            roles.insert(role.name.clone(), role);
+            roles.insert(role.name.clone(), role).unwrap();
         }
         Self {
             roles,
-            memberships: BTreeMap::new(),
+            memberships: RoleMemberships::new(),
             current: "plain",
             session: "uqa",
             outer: "plain",
@@ -129,18 +131,22 @@ fn rename_requires_createrole_and_admin_for_non_superuser_targets() {
                 if create {
                     inputs
                         .roles
-                        .get_mut("actor")
+                        .edit("actor", |value| {
+                            value.attributes.insert(RoleAttribute::CreateRole);
+                            Ok(())
+                        })
                         .unwrap()
-                        .attributes
-                        .insert(RoleAttribute::CreateRole);
+                        .unwrap();
                 }
                 if superuser_target {
                     inputs
                         .roles
-                        .get_mut("target")
+                        .edit("target", |value| {
+                            value.attributes.insert(RoleAttribute::Superuser);
+                            Ok(())
+                        })
                         .unwrap()
-                        .attributes
-                        .insert(RoleAttribute::Superuser);
+                        .unwrap();
                 }
                 let membership = RoleMembership {
                     oid: 30_000,
@@ -151,7 +157,10 @@ fn rename_requires_createrole_and_admin_for_non_superuser_targets() {
                     inherit_option: true,
                     set_option: true,
                 };
-                inputs.memberships.insert(membership.key(), membership);
+                inputs
+                    .memberships
+                    .insert(membership.key(), membership)
+                    .unwrap();
                 let result = inputs.candidate("target", "renamed");
                 if create && admin && !superuser_target {
                     result.unwrap();
@@ -184,10 +193,12 @@ fn definer_authority_does_not_replace_the_outer_user_rename_restriction() {
     inputs.outer = "actor";
     inputs
         .roles
-        .get_mut("target")
+        .edit("target", |value| {
+            value.attributes.insert(RoleAttribute::Superuser);
+            Ok(())
+        })
         .unwrap()
-        .attributes
-        .insert(RoleAttribute::Superuser);
+        .unwrap();
     inputs.candidate("target", "renamed").unwrap();
     assert_eq!(
         inputs.candidate("actor", "renamed").unwrap_err().sqlstate(),

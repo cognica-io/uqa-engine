@@ -9,12 +9,12 @@
 use std::collections::BTreeMap;
 
 use crate::{
-    json::{decode_json_string, JsonReadError, JsonReader, JsonToken},
-    memory::{Budgeted, BudgetedVec, MemoryBudget},
+    json::{decode_json_string_with_control, JsonReadError, JsonReader, JsonToken},
+    memory::{Budgeted, BudgetedVec, MemoryBudget, ProductionControl},
     CancellationToken, DecimalValue, ValueRetentionError,
 };
 
-use super::{tagged::value_from_tagged_map_budgeted, Value};
+use super::{tagged::value_from_tagged_map_scoped, Value};
 
 mod buffers;
 mod root;
@@ -27,6 +27,7 @@ type FieldVisitor<'a> = dyn FnMut(&str, Budgeted<Value>) -> Result<(), JsonReadE
 pub struct JsonValueDecoder<'a> {
     memory: &'a MemoryBudget,
     cancellation: &'a CancellationToken,
+    invoking: &'a CancellationToken,
     depth_limit: usize,
 }
 
@@ -37,6 +38,41 @@ enum Container {
 }
 
 impl Value {
+    pub(crate) async fn from_projected_json_fields<
+        W: crate::json::JsonReadWork<Error = JsonReadError>,
+    >(
+        fields: crate::memory::Produced<BTreeMap<String, Value>>,
+        control: ProductionControl<'_>,
+        work: &mut W,
+    ) -> Result<crate::memory::Produced<Self>, crate::types::work::JsonWorkError> {
+        super::tagged::value_from_tagged_fields(
+            fields,
+            control,
+            &mut crate::types::work::JsonWork(work),
+        )
+        .await
+    }
+
+    pub(crate) async fn from_projected_json_number<
+        W: crate::json::JsonReadWork<Error = JsonReadError>,
+    >(
+        text: &str,
+        control: ProductionControl<'_>,
+        work: &mut W,
+    ) -> Result<Option<crate::memory::Produced<Self>>, crate::types::work::JsonWorkError> {
+        if let Some(value) = primitive_number(text) {
+            return Ok(Some(control.finish(value, control.empty_reservation())?));
+        }
+        let Some(decimal) =
+            DecimalValue::parse_with_work(text, &control, &mut crate::types::work::JsonWork(work))
+                .await?
+        else {
+            return Ok(None);
+        };
+        let (decimal, memory) = decimal.into_parts();
+        Ok(Some(control.finish(Self::Decimal(decimal), memory)?))
+    }
+
     /// Apply the ordinary JSON visitor's private-number and tagged-object rules to decoded fields. The input reservation must cover its live entries, key capacities and nested payloads; conversion retains that allowance and moves recognized buffers.
     pub fn from_json_fields_budgeted(
         fields: Budgeted<BTreeMap<String, Value>>,
@@ -53,8 +89,26 @@ impl<'a> JsonValueDecoder<'a> {
         Self {
             memory,
             cancellation,
+            invoking: cancellation,
             depth_limit: 127,
         }
+    }
+
+    /// Keep the original input owner active while an independent caller consumes its values. Completed values retain their allocation owner independently of subsequent cancellation.
+    #[must_use]
+    pub fn with_invoking_cancellation(mut self, invoking: &'a CancellationToken) -> Self {
+        self.invoking = invoking;
+        self
+    }
+
+    fn control(&self) -> ProductionControl<'a> {
+        ProductionControl::new(self.memory, self.cancellation, self.invoking)
+    }
+
+    fn text(&self, encoded: &[u8]) -> Result<Budgeted<String>, JsonReadError> {
+        decode_json_string_with_control(encoded, &self.control())?
+            .into_budgeted()
+            .map_err(|_| unreachable!("controlled value string"))
     }
 
     /// Reduce the remaining container allowance when an owning format has already decoded outer containers. The ordinary serde value limit remains the maximum.
@@ -95,14 +149,17 @@ impl<'a> JsonValueDecoder<'a> {
     }
 
     fn number(&self, text: &str) -> Result<Budgeted<Value>, JsonReadError> {
-        self.cancellation.check()?;
+        self.control().check()?;
         if let Some(value) = primitive_number(text) {
             return Ok(self.scalar(value));
         }
-        let decimal = DecimalValue::parse_budgeted(text, self.memory, self.cancellation)?
+        let decimal = DecimalValue::parse_with_control(text, &self.control())?
             .ok_or(JsonReadError::InvalidJson)?;
         let (decimal, memory) = decimal.into_parts();
-        Ok(Budgeted::new(Value::Decimal(decimal), memory))
+        Ok(Budgeted::new(
+            Value::Decimal(decimal),
+            memory.expect("controlled decimal input"),
+        ))
     }
 
     fn object(
@@ -114,7 +171,7 @@ impl<'a> JsonValueDecoder<'a> {
                 return self.number(text);
             }
         }
-        value_from_tagged_map_budgeted(fields, self.cancellation).map_err(Into::into)
+        value_from_tagged_map_scoped(fields, self.cancellation, self.invoking).map_err(Into::into)
     }
 
     fn read(
@@ -123,9 +180,9 @@ impl<'a> JsonValueDecoder<'a> {
         field_root: bool,
         mut visitor: Option<&mut FieldVisitor<'_>>,
     ) -> Result<Budgeted<Value>, JsonReadError> {
-        self.cancellation.check()?;
-        let mut reader = JsonReader::new(text, self.memory, self.cancellation)
-            .with_depth_limit(self.depth_limit);
+        self.control().check()?;
+        let mut reader =
+            JsonReader::with_control(text, &self.control()).with_depth_limit(self.depth_limit);
         let mut stack = BudgetedVec::new(self.memory);
         let mut root = None;
         let mut root_key = None;
@@ -149,8 +206,7 @@ impl<'a> JsonValueDecoder<'a> {
                     }
                 }
                 JsonToken::String(text) => {
-                    let (text, memory) =
-                        decode_json_string(text, self.memory, self.cancellation)?.into_parts();
+                    let (text, memory) = self.text(text)?.into_parts();
                     Budgeted::new(Value::Str(text), memory)
                 }
                 JsonToken::Key(text) => {
@@ -159,7 +215,7 @@ impl<'a> JsonValueDecoder<'a> {
                             root_key = Some(FieldName::read(text, self)?);
                         }
                         Some(Container::Object(fields)) => {
-                            fields.key(decode_json_string(text, self.memory, self.cancellation)?);
+                            fields.key(self.text(text)?);
                         }
                         _ => unreachable!("object key event"),
                     }
@@ -186,7 +242,7 @@ impl<'a> JsonValueDecoder<'a> {
                 JsonToken::EndObject => match stack.pop() {
                     Some(Container::VisitedFields) => self.scalar(Value::Null),
                     Some(Container::Object(fields)) => {
-                        let fields = fields.finish(self.cancellation)?;
+                        let fields = fields.finish(&self.control())?;
                         if field_root && stack.is_empty() {
                             let (fields, memory) = fields.into_parts();
                             Budgeted::new(Value::Map(fields), memory)
@@ -207,7 +263,7 @@ impl<'a> JsonValueDecoder<'a> {
                 None => root = Some(value),
             }
         }
-        self.cancellation.check()?;
+        self.control().check()?;
         root.ok_or(JsonReadError::InvalidJson)
     }
 }

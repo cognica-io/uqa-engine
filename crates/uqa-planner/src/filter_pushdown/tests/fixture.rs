@@ -42,7 +42,7 @@ impl Fixture {
                 lookup_mode: RelationLookupMode::Dynamic,
             },
             table: TableDefinition {
-                columns: Arc::new(definition.columns),
+                columns: Arc::new(definition.columns).into(),
                 columns_declared: true,
             },
         }
@@ -112,7 +112,7 @@ impl AnalysisCatalog for Fixture {
         &self,
         _: &RelationNameResolution,
         _: &str,
-    ) -> Result<Option<Vec<Arc<SQLUserFunction>>>, SQLError> {
+    ) -> Result<Option<Vec<uqa_sql::routines::SQLRoutine>>, SQLError> {
         Ok(None)
     }
 }

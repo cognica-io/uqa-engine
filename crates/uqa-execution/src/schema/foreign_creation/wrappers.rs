@@ -116,13 +116,13 @@ impl ForeignCreationContext<'_> {
             }),
             options,
         };
+        let mut next = self.registry.wrappers().clone();
+        next.insert(statement.name.clone(), definition)?;
         if let Some(catalog) = self.catalog {
-            crate::catalog::foreign::wrappers::persist(catalog, &definition)
+            crate::catalog::foreign::wrappers::persist(catalog, &next[&statement.name])
                 .map_err(storage_error)?;
         }
-        self.registry
-            .wrappers_write()
-            .insert(statement.name.clone(), definition);
+        **self.registry.wrappers_write() = next;
         self.changes.catalog_registry_changed();
         Ok(())
     }

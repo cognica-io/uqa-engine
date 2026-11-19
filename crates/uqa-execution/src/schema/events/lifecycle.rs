@@ -6,7 +6,6 @@
 
 //! Native rule and trigger registration, removal, rename, and enable-mode publication.
 use super::context::EventLifecycleContext;
-use std::collections::BTreeMap;
 use uqa_sql::{
     ast::{CreateRule, CreateTrigger, DropRule, DropTrigger, EventEnableMode},
     catalog::{
@@ -100,18 +99,18 @@ impl EventLifecycleContext<'_> {
         let reserved = self.reserve_rule_oid(&relation, &definition.name)?;
         let mut rules = self.catalog.registry.rules();
         let mut next = rules.clone();
-        let relation_rules = std::sync::Arc::make_mut(next.entry(relation).or_default());
-        if relation_rules.contains_key(&definition.name) && !definition.or_replace {
+        let existing = next
+            .get(&relation)
+            .and_then(|entries| entries.get(&definition.name));
+        if existing.is_some() && !definition.or_replace {
             return Err(duplicate_object(
                 "rule",
                 &definition.name,
                 &definition.table,
             ));
         }
-        let enabled = relation_rules
-            .get(&definition.name)
-            .map_or(EventEnableMode::Origin, |rule| rule.enabled);
-        let catalog_oid = match relation_rules.get(&definition.name) {
+        let enabled = existing.map_or(EventEnableMode::Origin, |rule| rule.enabled);
+        let catalog_oid = match existing {
             Some(existing) => crate::catalog::projection::rule_catalog_oid(existing),
             None => reserved.ok_or_else(|| {
                 SQLError::Internal(format!(
@@ -120,7 +119,8 @@ impl EventLifecycleContext<'_> {
                 ))
             })?,
         };
-        relation_rules.insert(
+        next.insert_event(
+            relation,
             definition.name.clone(),
             StoredRule {
                 definition,
@@ -130,7 +130,7 @@ impl EventLifecycleContext<'_> {
                 dependencies: Some(dependencies),
                 catalog_oid: Some(catalog_oid),
             },
-        );
+        )?;
         self.catalog.publication.persist_rules(&next)?;
         **rules = next;
         drop(rules);
@@ -190,9 +190,9 @@ impl EventLifecycleContext<'_> {
         let mut rules = self.catalog.registry.rules();
         let mut next = rules.clone();
         let removed = next
-            .get_mut(&relation)
-            .and_then(|entries| std::sync::Arc::make_mut(entries).remove(&statement.name));
-        if removed.is_none() {
+            .edit(&relation, |entries| entries.remove(&statement.name))?
+            .unwrap_or(false);
+        if !removed {
             if statement.if_exists {
                 self.notice(uqa_sql::SQLNotice::notice(format!(
                     "rule \"{}\" for relation \"{}\" does not exist, skipping",
@@ -204,9 +204,9 @@ impl EventLifecycleContext<'_> {
         }
         if next
             .get(&relation)
-            .is_some_and(|entries| entries.is_empty())
+            .is_some_and(uqa_sql::catalog::events::EventDefinitions::is_empty)
         {
-            next.remove(&relation);
+            next.remove(&relation)?;
         }
         self.catalog.publication.persist_rules(&next)?;
         **rules = next;
@@ -239,15 +239,18 @@ impl EventLifecycleContext<'_> {
         self.writer.prepare_writer()?;
         let mut rules = self.catalog.registry.rules();
         let mut next = rules.clone();
-        let entries = std::sync::Arc::make_mut(next.entry(relation).or_default());
+        let mut entries = next.get(&relation).cloned().unwrap_or_default();
         if entries.contains_key(to) {
             return Err(duplicate_object("rule", to, table));
         }
         let mut rule = entries
-            .remove(from)
+            .get(from)
+            .cloned()
             .ok_or_else(|| undefined_rule(from, table))?;
+        entries.remove(from)?;
         rule.definition.name = to.to_string();
-        entries.insert(to.to_string(), rule);
+        entries.insert(to.to_string(), rule)?;
+        next.insert(relation, entries)?;
         self.catalog.publication.persist_rules(&next)?;
         **rules = next;
         self.catalog.changes.catalog_registry_changed();
@@ -268,10 +271,14 @@ impl EventLifecycleContext<'_> {
         self.writer.prepare_writer()?;
         let mut rules = self.catalog.registry.rules();
         let mut next = rules.clone();
-        std::sync::Arc::make_mut(next.entry(relation).or_default())
-            .get_mut(name)
-            .ok_or_else(|| undefined_rule(name, table))?
-            .enabled = mode;
+        next.edit(&relation, |entries| {
+            entries.edit(name, |rule| {
+                rule.enabled = mode;
+                Ok(())
+            })
+        })?
+        .flatten()
+        .ok_or_else(|| undefined_rule(name, table))?;
         self.catalog.publication.persist_rules(&next)?;
         **rules = next;
         self.catalog.changes.catalog_registry_changed();
@@ -312,30 +319,28 @@ impl EventLifecycleContext<'_> {
             self.reserve_trigger_oids(&relation, &definition.name, definition.constraint)?;
         let mut triggers = self.catalog.registry.triggers();
         let mut next = triggers.clone();
-        let table_triggers = next.entry(relation).or_default();
-        if definition.or_replace
-            && table_triggers
-                .get(&definition.name)
-                .is_some_and(|trigger| trigger.definition.constraint)
-        {
+        let existing = next
+            .get(&relation)
+            .and_then(|entries| entries.get(&definition.name));
+        if definition.or_replace && existing.is_some_and(|trigger| trigger.definition.constraint) {
             return Err(SQLError::Routine {
                 sqlstate: "0A000".into(),
                 message: "CREATE OR REPLACE CONSTRAINT TRIGGER is not supported".into(),
             });
         }
-        if table_triggers.contains_key(&definition.name) && !definition.or_replace {
+        if existing.is_some() && !definition.or_replace {
             return Err(duplicate_object(
                 "trigger",
                 &definition.name,
                 &definition.table,
             ));
         }
-        let object_id = match table_triggers.get(&definition.name) {
+        let object_id = match existing {
             Some(trigger) => trigger.object_id,
             None => Some(new_trigger_object_id()?),
         };
         let constraint_name = definition.constraint.then(|| definition.name.clone());
-        let (catalog_oid, constraint_catalog_oid) = match table_triggers.get(&definition.name) {
+        let (catalog_oid, constraint_catalog_oid) = match existing {
             Some(existing) => (existing.catalog_oid, existing.constraint_catalog_oid),
             None => reserved.ok_or_else(|| {
                 SQLError::Internal(format!(
@@ -344,7 +349,8 @@ impl EventLifecycleContext<'_> {
                 ))
             })?,
         };
-        table_triggers.insert(
+        next.insert_event(
+            relation,
             definition.name.clone(),
             StoredTrigger {
                 definition,
@@ -355,7 +361,7 @@ impl EventLifecycleContext<'_> {
                 catalog_oid,
                 constraint_catalog_oid,
             },
-        );
+        )?;
         self.catalog.publication.persist_triggers(&next)?;
         **triggers = next;
         drop(triggers);
@@ -397,8 +403,9 @@ impl EventLifecycleContext<'_> {
         let mut triggers = self.catalog.registry.triggers();
         let mut next = triggers.clone();
         let removed = next
-            .get_mut(&relation)
-            .and_then(|entries| entries.remove(&statement.name));
+            .get(&relation)
+            .and_then(|entries| entries.get(&statement.name))
+            .cloned();
         let Some(removed) = removed else {
             if statement.if_exists {
                 self.notice(uqa_sql::SQLNotice::notice(format!(
@@ -409,8 +416,12 @@ impl EventLifecycleContext<'_> {
             }
             return Err(undefined_object("trigger", &statement.name, &relation.name));
         };
-        if next.get(&relation).is_some_and(BTreeMap::is_empty) {
-            next.remove(&relation);
+        next.edit(&relation, |entries| entries.remove(&statement.name))?;
+        if next
+            .get(&relation)
+            .is_some_and(uqa_sql::catalog::events::EventDefinitions::is_empty)
+        {
+            next.remove(&relation)?;
         }
         self.catalog.publication.persist_triggers(&next)?;
         **triggers = next;
@@ -431,20 +442,23 @@ impl EventLifecycleContext<'_> {
         self.writer.prepare_writer()?;
         let mut triggers = self.catalog.registry.triggers();
         let mut next = triggers.clone();
-        let entries = next.entry(relation).or_default();
+        let mut entries = next.get(&relation).cloned().unwrap_or_default();
         if entries.contains_key(to) {
             return Err(duplicate_object("trigger", to, table));
         }
         let mut trigger = entries
-            .remove(from)
+            .get(from)
+            .cloned()
             .ok_or_else(|| undefined_object("trigger", from, table))?;
+        entries.remove(from)?;
         let constraint_identity = trigger
             .definition
             .constraint
             .then(|| trigger.constraint_identity())
             .transpose()?;
         trigger.definition.name = to.to_string();
-        entries.insert(to.to_string(), trigger);
+        entries.insert(to.to_string(), trigger)?;
+        next.insert(relation, entries)?;
         self.catalog.publication.persist_triggers(&next)?;
         **triggers = next;
         drop(triggers);
@@ -481,17 +495,21 @@ impl EventLifecycleContext<'_> {
         self.writer.prepare_writer()?;
         let mut triggers = self.catalog.registry.triggers();
         let mut next = triggers.clone();
-        let entries = next.entry(relation.clone()).or_default();
-        let trigger = entries
-            .values_mut()
-            .find(|trigger| {
-                trigger.definition.constraint
-                    && trigger.object_id == selected.object_id
-                    && trigger.definition.name == selected.definition.name
+        let trigger = next
+            .get(&relation)
+            .and_then(|entries| {
+                entries.values().find(|trigger| {
+                    trigger.definition.constraint
+                        && trigger.object_id == selected.object_id
+                        && trigger.definition.name == selected.definition.name
+                })
             })
+            .cloned()
             .ok_or_else(missing)?;
         let old_identity = trigger.constraint_identity()?;
+        let mut trigger = trigger;
         trigger.constraint_name = Some(to.to_string());
+        next.insert_event(relation, trigger.definition.name.clone(), trigger)?;
         self.catalog.publication.persist_triggers(&next)?;
         **triggers = next;
         drop(triggers);
@@ -511,16 +529,24 @@ impl EventLifecycleContext<'_> {
         self.writer.prepare_writer()?;
         let mut triggers = self.catalog.registry.triggers();
         let mut next = triggers.clone();
-        let entries = next.entry(relation).or_default();
         if let Some(name) = name {
-            entries
-                .get_mut(name)
-                .ok_or_else(|| undefined_object("trigger", name, table))?
-                .enabled = mode;
+            next.edit(&relation, |entries| {
+                entries.edit(name, |trigger| {
+                    trigger.enabled = mode;
+                    Ok(())
+                })
+            })?
+            .flatten()
+            .ok_or_else(|| undefined_object("trigger", name, table))?;
         } else {
-            for trigger in entries.values_mut() {
+            next.rewrite(|event_relation, _, trigger| {
+                if event_relation != &relation {
+                    return Ok(None);
+                }
+                let mut trigger = trigger.clone();
                 trigger.enabled = mode;
-            }
+                Ok(Some(trigger))
+            })?;
         }
         self.catalog.publication.persist_triggers(&next)?;
         **triggers = next;

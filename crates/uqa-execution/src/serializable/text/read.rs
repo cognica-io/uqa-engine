@@ -12,6 +12,7 @@ use uqa_core::{
     memory::Budgeted, DocId, FieldName, IndexStats, PostingEntry, PostingList, TokenOccurrence,
 };
 use uqa_sql::ast::ColumnDef;
+use uqa_sql::catalog::table_definition::SharedTableDefinition;
 use uqa_storage::{
     clustered_postings::{
         BudgetedPostingReadCursor, OccurrencePosting, PostingCursor, PostingReadCursor,
@@ -35,7 +36,7 @@ impl<I> ObservedTextIndex<I> {
     pub fn new(
         index: I,
         read: Option<SerializableRelationRead>,
-        columns: Arc<Vec<ColumnDef>>,
+        columns: SharedTableDefinition<Vec<ColumnDef>>,
     ) -> Self {
         Self {
             index,
@@ -68,7 +69,7 @@ impl<I: Deref<Target = dyn InvertedIndex>> ObservedTextIndex<I> {
 
 pub fn observe_snapshot(
     read: Option<&SerializableRelationRead>,
-    columns: Arc<Vec<ColumnDef>>,
+    columns: SharedTableDefinition<Vec<ColumnDef>>,
     index: Arc<dyn InvertedIndex>,
 ) -> Arc<dyn InvertedIndex> {
     match read {

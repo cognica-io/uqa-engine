@@ -1,0 +1,178 @@
+//
+// Unified Query Algebra
+//
+// Copyright (c) 2023-2026 Cognica, Inc.
+//
+
+//! Immutable table names and constraints retain publication-time payload capacities.
+
+use crate::SQLError;
+use std::{
+    ops::{Deref, DerefMut},
+    sync::Arc,
+};
+use uqa_core::{
+    image_io::ImageIoError,
+    memory::{Budgeted, MemoryError, Produced, ProductionControl},
+    CancellationToken,
+};
+
+mod footprint;
+mod image;
+mod names;
+mod shared;
+pub use shared::SharedTableMetadata;
+#[cfg(test)]
+mod tests;
+
+/// Metadata with exclusively owned, non-executable payloads. SQL seals this set so shared execution sources cannot enter an immutable generation without their own capture boundary.
+pub trait TableMetadataValue: footprint::Payload + Clone + Send + Sync + 'static {}
+impl TableMetadataValue for crate::catalog::security::BoundTableSecurity {}
+impl TableMetadataValue for String {}
+impl TableMetadataValue for Vec<String> {}
+impl TableMetadataValue for Option<String> {}
+impl TableMetadataValue for Vec<crate::ast::ForeignKey> {}
+impl TableMetadataValue for Vec<crate::ast::TableKeyConstraint> {}
+impl TableMetadataValue for Vec<crate::catalog::relation_attributes::DroppedAttribute> {}
+
+/// Stored metadata fields own every payload through one exact decoder reservation; they cannot contain independently admitted catalog nodes.
+pub(crate) trait DecodedTableMetadataValue: TableMetadataValue {}
+impl DecodedTableMetadataValue for Vec<String> {}
+impl DecodedTableMetadataValue for Option<String> {}
+impl DecodedTableMetadataValue for Vec<crate::ast::ForeignKey> {}
+impl DecodedTableMetadataValue for Vec<crate::ast::TableKeyConstraint> {}
+impl DecodedTableMetadataValue for Vec<crate::catalog::relation_attributes::DroppedAttribute> {}
+
+/// One immutable native metadata generation. Capture admits the original capacities without visiting or copying its population; mutation detaches before changing a shared generation.
+#[derive(Debug, Clone)]
+pub struct TableMetadata<T: TableMetadataValue> {
+    value: SharedTableMetadata<T>,
+    bytes: Option<usize>,
+}
+
+impl<T: TableMetadataValue> TableMetadata<T> {
+    pub fn new(value: T) -> Self {
+        Self::from_snapshot(Arc::new(value))
+    }
+
+    pub fn from_snapshot(value: Arc<T>) -> Self {
+        let bytes = footprint::retained(&*value);
+        Self {
+            value: value.into(),
+            bytes,
+        }
+    }
+
+    /// Adopt decoded native allocations and their original reservation. The input owner must account for every payload allocation; sharing admits only the fixed owner header and never copies the population.
+    pub fn from_admitted(
+        value: Budgeted<T>,
+        cancellation: &CancellationToken,
+    ) -> Result<Self, SQLError> {
+        cancellation.check()?;
+        let value = value.into_shared()?;
+        let bytes = footprint::admitted(&value);
+        cancellation.check()?;
+        Ok(Self {
+            value: SharedTableMetadata::admitted(value),
+            bytes,
+        })
+    }
+
+    pub fn snapshot(&self) -> SharedTableMetadata<T> {
+        self.value.clone()
+    }
+
+    pub fn capture_with_control(
+        &self,
+        control: &ProductionControl<'_>,
+    ) -> Result<Produced<Self>, SQLError> {
+        control.check()?;
+        let memory = control.reserve(self.bytes.ok_or(MemoryError::SizeOverflow)?)?;
+        Ok(control.finish(self.clone(), memory)?)
+    }
+
+    /// Keep the owning lock or borrow through footprint publication, including unwinding. Callers cannot expose a modified generation with its predecessor's capacities.
+    pub fn write<G: DerefMut<Target = Self>>(owner: G) -> TableMetadataWrite<T, G> {
+        TableMetadataWrite {
+            owner,
+            changed: false,
+        }
+    }
+}
+
+impl<T: TableMetadataValue> TableMetadata<T> {
+    /// Adopt an exclusively owned decoded field without revisiting its payload. Its exact reservation and newly admitted shared header are the complete native footprint.
+    pub(crate) fn from_decoded(
+        value: Budgeted<T>,
+        cancellation: &CancellationToken,
+    ) -> Result<Self, ImageIoError>
+    where
+        T: DecodedTableMetadataValue,
+    {
+        cancellation.check()?;
+        let value = value.into_shared()?;
+        let bytes = Some(value.reserved_bytes());
+        cancellation.check()?;
+        Ok(Self {
+            value: SharedTableMetadata::admitted(value),
+            bytes,
+        })
+    }
+}
+
+#[cfg(test)]
+thread_local! { static PAYLOAD_VISITS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) }; }
+
+#[cfg(test)]
+pub(crate) fn count_payload_visits<T>(call: impl FnOnce() -> T) -> (T, usize) {
+    let before = PAYLOAD_VISITS.get();
+    let value = call();
+    (value, PAYLOAD_VISITS.get() - before)
+}
+
+impl<T: TableMetadataValue> Deref for TableMetadata<T> {
+    type Target = T;
+    fn deref(&self) -> &T {
+        &self.value
+    }
+}
+
+impl<T: TableMetadataValue + serde::Serialize> serde::Serialize for TableMetadata<T> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        (**self).serialize(serializer)
+    }
+}
+
+pub struct TableMetadataWrite<T: TableMetadataValue, G: DerefMut<Target = TableMetadata<T>>> {
+    owner: G,
+    changed: bool,
+}
+
+impl<T: TableMetadataValue, G: DerefMut<Target = TableMetadata<T>>> Deref
+    for TableMetadataWrite<T, G>
+{
+    type Target = T;
+    fn deref(&self) -> &T {
+        &self.owner.value
+    }
+}
+
+impl<T: TableMetadataValue, G: DerefMut<Target = TableMetadata<T>>> DerefMut
+    for TableMetadataWrite<T, G>
+{
+    fn deref_mut(&mut self) -> &mut T {
+        self.changed = true;
+        self.owner.bytes = None;
+        self.owner.value.make_mut()
+    }
+}
+
+impl<T: TableMetadataValue, G: DerefMut<Target = TableMetadata<T>>> Drop
+    for TableMetadataWrite<T, G>
+{
+    fn drop(&mut self) {
+        if self.changed {
+            self.owner.bytes = self.owner.value.retained_bytes();
+        }
+    }
+}

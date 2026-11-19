@@ -5,12 +5,15 @@
 //
 
 use super::*;
+use crate::catalog::roles::RoleDefinition;
+use crate::catalog::roles::{RoleDefinitions, RoleMemberships};
 use uqa_core::{memory::MemoryBudget, CancellationToken};
 
 #[test]
 fn borrowed_schema_acl_matches_name_resolution_and_validates_all_grantors_first() {
-    let roles = BTreeMap::from([("uqa".into(), RoleDefinition::bootstrap())]);
-    let memberships = BTreeMap::new();
+    let roles =
+        RoleDefinitions::try_from_iter([("uqa".into(), RoleDefinition::bootstrap())]).unwrap();
+    let memberships = RoleMemberships::new();
     let budget = MemoryBudget::new(0);
     let token = CancellationToken::new();
     let control = ProductionControl::new(&budget, &token, &token);
@@ -74,8 +77,9 @@ fn borrowed_schema_acl_matches_name_resolution_and_validates_all_grantors_first(
 
 #[test]
 fn public_acl_scan_borrows_large_catalog_without_materializing_names() {
-    let roles = BTreeMap::from([("uqa".into(), RoleDefinition::bootstrap())]);
-    let memberships = BTreeMap::new();
+    let roles =
+        RoleDefinitions::try_from_iter([("uqa".into(), RoleDefinition::bootstrap())]).unwrap();
+    let memberships = RoleMemberships::new();
     let security = BoundSchemaSecurity {
         tuple: None,
         role_owner: RoleIdentity::BOOTSTRAP,

@@ -327,7 +327,7 @@ fn set_owner(
             object_acl::rewrite_owner(&mut definition.usage_acl, previous, new_owner);
             let before = context.shells.shell_registry().clone();
             let mut registry = before.clone();
-            registry.insert(definition.identity.qualified_name(), definition);
+            registry.insert(definition.identity.qualified_name(), definition)?;
             crate::catalog::shell_type::publish(context.shells, &before, registry)?;
         }
         TypeObject::Enum(mut definition) => {
@@ -335,7 +335,7 @@ fn set_owner(
             object_acl::rewrite_owner(&mut definition.usage_acl, previous, new_owner);
             let before = context.registries.enums.enum_registry().clone();
             let mut registry = before.clone();
-            registry.insert(definition.identity.qualified_name(), definition);
+            registry.insert(definition.identity.qualified_name(), definition)?;
             enum_type::publish(context.registries.enums, &before, registry)?;
         }
         TypeObject::Domain(mut definition) => {
@@ -343,7 +343,7 @@ fn set_owner(
             object_acl::rewrite_owner(&mut definition.usage_acl, previous, new_owner);
             let before = context.registries.domains.domain_registry().clone();
             let mut registry = before.clone();
-            registry.insert(definition.identity.qualified_name(), *definition);
+            registry.insert(definition.identity.qualified_name(), *definition)?;
             domain::publish(context.registries.domains, &before, registry)?;
         }
         // `ATExecChangeOwner` changes the composite relation's owner with the type's.
@@ -352,7 +352,7 @@ fn set_owner(
             object_acl::rewrite_owner(&mut definition.usage_acl, previous, new_owner);
             let before = context.registries.composites.composite_registry().clone();
             let mut registry = before.clone();
-            registry.insert(definition.identity.qualified_name(), *definition);
+            registry.insert(definition.identity.qualified_name(), *definition)?;
             crate::catalog::composite_type::publish(
                 context.registries.composites,
                 &before,
@@ -422,42 +422,42 @@ fn publish_identity(
         TypeObject::Shell(mut definition) => {
             let before = context.shells.shell_registry().clone();
             let mut registry = before.clone();
-            registry.remove(&definition.identity.qualified_name());
+            registry.remove(&definition.identity.qualified_name())?;
             definition.identity = identity.clone();
-            registry.insert(identity.qualified_name(), definition);
+            registry.insert(identity.qualified_name(), definition)?;
             crate::catalog::shell_type::publish(context.shells, &before, registry)?;
         }
         TypeObject::Enum(mut definition) => {
             let before = context.registries.enums.enum_registry().clone();
             let mut registry = before.clone();
-            registry.remove(&definition.identity.qualified_name());
+            registry.remove(&definition.identity.qualified_name())?;
             definition.identity = identity.clone();
             if let Some(array_name) = array_name {
                 definition.array_name = array_name;
             }
-            registry.insert(identity.qualified_name(), definition);
+            registry.insert(identity.qualified_name(), definition)?;
             enum_type::publish(context.registries.enums, &before, registry)?;
         }
         TypeObject::Domain(mut definition) => {
             let before = context.registries.domains.domain_registry().clone();
             let mut registry = before.clone();
-            registry.remove(&definition.identity.qualified_name());
+            registry.remove(&definition.identity.qualified_name())?;
             let array_name = array_name.unwrap_or_else(|| definition.array_type_name());
             definition.identity = identity.clone();
             definition.definition.name = identity.qualified_name();
             definition.array_name = Some(array_name);
-            registry.insert(identity.qualified_name(), *definition);
+            registry.insert(identity.qualified_name(), *definition)?;
             domain::publish(context.registries.domains, &before, registry)?;
         }
         TypeObject::Composite(mut definition) => {
             let before = context.registries.composites.composite_registry().clone();
             let mut registry = before.clone();
-            registry.remove(&definition.identity.qualified_name());
+            registry.remove(&definition.identity.qualified_name())?;
             definition.identity = identity.clone();
             if let Some(array_name) = array_name {
                 definition.array_name = array_name;
             }
-            registry.insert(identity.qualified_name(), *definition);
+            registry.insert(identity.qualified_name(), *definition)?;
             crate::catalog::composite_type::publish(
                 context.registries.composites,
                 &before,
@@ -481,8 +481,14 @@ fn rewrite_domain_bases(
     let before = context.registries.domains.domain_registry().clone();
     let mut registry = before.clone();
     let mut changed = false;
-    for domain in registry.values_mut() {
-        changed |= domain.definition.base.rename_user_type(oid, identity);
+    for (name, original) in before.iter() {
+        let mut base = original.definition.base.clone();
+        if base.rename_user_type(oid, identity) {
+            let mut domain = original.clone();
+            domain.definition.base = base;
+            registry.insert(name.clone(), domain)?;
+            changed = true;
+        }
     }
     if changed {
         domain::publish(context.registries.domains, &before, registry)?;
@@ -499,9 +505,15 @@ fn rewrite_composite_attributes(
     let before = context.registries.composites.composite_registry().clone();
     let mut registry = before.clone();
     let mut changed = false;
-    for definition in registry.values_mut() {
+    for (name, original) in before.iter() {
+        let mut definition = original.clone();
+        let mut rewritten = false;
         for attribute in &mut definition.attributes {
-            changed |= attribute.ty.rename_user_type(oid, identity);
+            rewritten |= attribute.ty.rename_user_type(oid, identity);
+        }
+        if rewritten {
+            registry.insert(name.clone(), definition)?;
+            changed = true;
         }
     }
     if changed {

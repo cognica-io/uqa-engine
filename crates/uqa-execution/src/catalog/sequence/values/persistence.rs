@@ -6,10 +6,41 @@
 
 //! Only rejected autonomous value mutations may be evaluated again; bound transactions and uncertain outcomes are never replayed.
 
-use super::{SequenceValueContext, SequenceValueError};
+use super::{NextvalTarget, SequenceValueContext, SequenceValueError};
 use uqa_storage::{
     CatalogFacade, PersistentStorageSession, StorageBackendError, StorageBackendResult,
 };
+
+pub(super) enum SequenceValueStorage<'a> {
+    Memory,
+    Bound(&'a dyn CatalogFacade),
+    Autonomous(PersistentStorageSession),
+    Positioned {
+        session: PersistentStorageSession,
+        positions: &'a crate::row_locks::RowLockManager,
+    },
+}
+
+impl SequenceValueStorage<'_> {
+    pub(super) fn persistent(&self) -> bool {
+        !matches!(self, Self::Memory)
+    }
+    pub(super) fn mutate<T>(
+        &self,
+        cancellation: &uqa_core::CancellationToken,
+        action: &str,
+        operation: impl Fn(&dyn CatalogFacade) -> StorageBackendResult<T>,
+    ) -> Result<Option<(T, bool)>, SequenceValueError> {
+        match self {
+            Self::Memory => Ok(None),
+            Self::Bound(catalog) => operation(*catalog).map(|value| Some((value, false))),
+            Self::Autonomous(session) | Self::Positioned { session, .. } => {
+                autonomous_value(session, cancellation, &operation).map(|value| Some((value, true)))
+            }
+        }
+        .map_err(|error| sequence_storage_error(action, error))
+    }
+}
 
 impl SequenceValueContext<'_> {
     /// Whether the caller's transaction created this definition generation, whose value record no other session can see, so that its values are allocated in the transaction. The values of a committed generation are allocated outside any transaction, even when the transaction changed the sequence's privileges, owner, name or ownership, as `PostgreSQL` moves a sequence's state outside the transaction that changes its catalog rows.
@@ -32,33 +63,44 @@ impl SequenceValueContext<'_> {
             .unwrap_or(false))
     }
 
-    pub(super) fn mutate_persistent_value<T>(
+    /// Choose the physical session and admit the explicit writer before acquiring native catalog or history publication guards.
+    pub(super) fn value_storage(
         &self,
-        temporary: bool,
-        private: bool,
-        action: &str,
-        operation: impl Fn(&dyn CatalogFacade) -> StorageBackendResult<T>,
-    ) -> Result<Option<(T, bool)>, SequenceValueError> {
-        if temporary {
-            return Ok(None);
+        target: &NextvalTarget,
+    ) -> Result<SequenceValueStorage<'_>, SequenceValueError> {
+        if target.temporary {
+            return Ok(SequenceValueStorage::Memory);
         }
-        let session = if private {
-            None
-        } else {
-            self.runtime
+        let private = self.sequence_value_is_private(
+            target.temporary,
+            target.object_id,
+            target.state.definition_generation,
+        )?;
+        if let Some(positions) = self.shared_positions(target, private) {
+            let session = self
+                .runtime
                 .open_nontransactional_sequence_session()
                 .map_err(|error| sequence_storage_error("open sequence session", error))?
-        };
-        if let Some(session) = session {
-            return autonomous_value(&session, self.runtime.cancellation(), &operation)
-                .map(|value| Some((value, true)))
-                .map_err(|error| sequence_storage_error(action, error));
+                .ok_or_else(|| {
+                    SequenceValueError::Internal(
+                        "sequence positions require an independent catalog session".into(),
+                    )
+                })?;
+            return Ok(SequenceValueStorage::Positioned { session, positions });
+        }
+        if !private {
+            if let Some(session) = self
+                .runtime
+                .open_nontransactional_sequence_session()
+                .map_err(|error| sequence_storage_error("open sequence session", error))?
+            {
+                return Ok(SequenceValueStorage::Autonomous(session));
+            }
         }
         self.prepare_transaction_writer()?;
-        self.storage
-            .map(|catalog| operation(catalog).map(|value| (value, false)))
-            .transpose()
-            .map_err(|error| sequence_storage_error(action, error))
+        Ok(self
+            .storage
+            .map_or(SequenceValueStorage::Memory, SequenceValueStorage::Bound))
     }
 
     /// Make the caller's transaction a writer before a sequence value is changed in it.
@@ -115,14 +157,11 @@ pub(super) fn sequence_storage_error(
     action: &str,
     error: StorageBackendError,
 ) -> SequenceValueError {
-    match error {
-        StorageBackendError::Cancelled(error) => SequenceValueError::Cancelled(error),
-        StorageBackendError::Memory(error) => uqa_sql::SQLError::Routine {
-            sqlstate: "53200".into(),
-            message: format!("{action}: {error}"),
+    match crate::storage_errors::storage_error(action, &error) {
+        uqa_sql::SQLError::Internal(_) => {
+            SequenceValueError::Internal(format!("{action}: {error}"))
         }
-        .into(),
-        error => SequenceValueError::Internal(format!("{action}: {error}")),
+        error => error.into(),
     }
 }
 

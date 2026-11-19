@@ -10,6 +10,7 @@ use super::super::Engine;
 use uqa_execution::catalog::shell_type::{
     ShellRegistry, ShellRegistryPublication, ShellRegistryRead,
 };
+use uqa_sql::catalog::roles::RoleDefinitions;
 
 impl Engine {
     pub(crate) fn shell_completion_context(
@@ -58,9 +59,7 @@ impl ShellRegistryPublication for Engine {
     fn shell_catalog(&self) -> Option<&dyn uqa_storage::CatalogFacade> {
         self.storage.catalog.as_deref()
     }
-    fn shell_role_definitions(
-        &self,
-    ) -> std::collections::BTreeMap<String, uqa_sql::catalog::roles::RoleDefinition> {
+    fn shell_role_definitions(&self) -> RoleDefinitions {
         self.durable.roles.read().clone()
     }
     fn publish_shell_definitions(&self, registry: ShellRegistry) {

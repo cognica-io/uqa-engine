@@ -12,7 +12,6 @@ mod memberships;
 mod rename;
 mod tuples;
 use fixtures::{create, Catalog};
-use std::collections::BTreeMap;
 use uqa_sql::ast::{DropRoleStmt, RoleAttribute, RoleMembershipOptions};
 
 #[test]

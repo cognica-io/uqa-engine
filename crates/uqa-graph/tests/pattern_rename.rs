@@ -26,7 +26,7 @@ const GRAPH: &str = "g";
 /// alice -> bob, bob -> carol, alice -> carol, alice -> dave.
 fn corpus() -> MemoryGraphStore {
     let mut g = MemoryGraphStore::new();
-    g.create_graph(GRAPH);
+    g.create_graph(GRAPH).unwrap();
     for id in 1..=4 {
         g.add_vertex(Vertex::new(id, "person"), GRAPH).unwrap();
     }

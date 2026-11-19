@@ -21,13 +21,11 @@ pub fn catalog_view_row(
 }
 
 /// Actual retained registry guard; publication ordering is controlled by the executor.
-pub type ViewRegistryWrite<'a> = Box<
-    dyn std::ops::DerefMut<Target = std::collections::BTreeMap<RelationIdentity, StoredView>> + 'a,
->;
+pub type ViewRegistryWrite<'a> =
+    Box<dyn std::ops::DerefMut<Target = uqa_sql::catalog::stored_view::ViewDefinitions> + 'a>;
 
-pub type ViewRegistryRead<'a> = Box<
-    dyn std::ops::Deref<Target = std::collections::BTreeMap<RelationIdentity, StoredView>> + 'a,
->;
+pub type ViewRegistryRead<'a> =
+    Box<dyn std::ops::Deref<Target = uqa_sql::catalog::stored_view::ViewDefinitions> + 'a>;
 
 pub trait ViewRegistryState {
     fn views_read(&self) -> ViewRegistryRead<'_>;

@@ -137,7 +137,7 @@ fn declared_range_references_require_a_current_definition_before_publication() {
     };
     **base = renamed;
     assert_eq!(resolved.catalog_name(), domain.catalog_name());
-    let ColumnType::Domain { base, .. } = resolved else {
+    let ColumnType::Domain { base, .. } = &resolved else {
         unreachable!()
     };
     assert_eq!(base.display_name(), "other.current_window[]");

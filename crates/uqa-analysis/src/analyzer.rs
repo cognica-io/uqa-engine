@@ -18,8 +18,14 @@ use crate::token_filter::TokenFilter;
 use crate::tokenizer::Tokenizer;
 
 mod compiled;
+mod definition;
 mod diagnostics;
+pub(crate) mod image_source;
+mod resources;
 pub use compiled::CompiledAnalyzer;
+pub use definition::{AnalyzerConfigurationError, AnalyzerConfigurationImage, AnalyzerDefinition};
+pub use image_source::AnalyzerImageSource;
+pub use resources::{AnalyzerResource, AnalyzerResourceKind, CapturedAnalyzer};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Analyzer {

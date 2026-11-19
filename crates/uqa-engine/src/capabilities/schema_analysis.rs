@@ -7,7 +7,8 @@
 //! Catalog metadata adapters for SQL declaration analysis and physical index validation.
 
 use crate::Engine;
-use std::{collections::BTreeMap, sync::Arc};
+use std::sync::Arc;
+use uqa_core::memory::RetainedValue;
 use uqa_core::RelationIdentity;
 use uqa_execution::schema::constraints::names::catalog::{
     ConstraintNameCatalog, ConstraintTableMetadata,
@@ -61,15 +62,13 @@ impl ConstraintNameCatalog for Engine {
             .map(|table| constraint_table_metadata(table))
             .collect()
     }
-    fn constraint_foreign_tables(
-        &self,
-    ) -> Arc<BTreeMap<RelationIdentity, uqa_execution::catalog::foreign::StoredForeignTable>> {
-        self.durable.foreign_tables.snapshot()
+    fn constraint_foreign_tables(&self) -> Arc<uqa_execution::catalog::foreign::ForeignTables> {
+        self.durable.foreign_catalog.snapshot().tables_snapshot()
     }
-    fn constraint_domains(&self) -> Arc<uqa_execution::catalog::domain::DomainRegistry> {
+    fn constraint_domains(&self) -> RetainedValue<uqa_execution::catalog::domain::DomainRegistry> {
         self.durable.domains.snapshot()
     }
-    fn constraint_triggers(&self) -> Arc<uqa_sql::catalog::events::TriggerCatalog> {
+    fn constraint_triggers(&self) -> RetainedValue<uqa_sql::catalog::events::TriggerCatalog> {
         self.durable.triggers.snapshot()
     }
 }
@@ -135,13 +134,13 @@ impl uqa_sql::schema::SchemaExpressionCatalog for Engine {
     fn plan_schema_expression(
         &self,
         expression: &Expr,
-        columns: &[ColumnDef],
+        schema: &uqa_sql::RowSchema,
     ) -> Result<uqa_sql::schema::expressions::PlannedSchemaExpression, SQLError> {
         uqa_planner::statement_planning::schema_expressions::plan_schema_expression(
             &self.statement_planning_context(),
             self,
             expression,
-            columns,
+            schema,
         )
     }
 

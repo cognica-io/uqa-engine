@@ -12,6 +12,7 @@ use crate::row_locks::{
     },
     RelationLockMode,
 };
+use uqa_sql::catalog::roles::RoleDefinitions;
 use uqa_sql::catalog::roles::RoleReference;
 use uqa_sql::{
     ast::{LockTableStmt, LockTableTarget, TableLockMode},
@@ -35,7 +36,7 @@ pub trait TableLockCatalog:
     fn table(
         &self,
         name: &str,
-        roles: &std::collections::BTreeMap<String, uqa_sql::catalog::roles::RoleDefinition>,
+        roles: &RoleDefinitions,
     ) -> Result<Option<TableLockMetadata>, SQLError>;
     fn view(&self, name: &str) -> Result<Option<StoredView>, SQLError>;
     fn descendants(&self, name: &str) -> Result<Vec<String>, SQLError>;

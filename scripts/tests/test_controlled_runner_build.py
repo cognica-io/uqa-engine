@@ -85,6 +85,10 @@ class ControlledBuildTest(unittest.TestCase):
         self.host.git = self.git
         self.host.progress = Mock()
         self.host.unit = Mock(side_effect=AssertionError("unexpected build"))
+        capacity = patch.object(runner.shutil, "disk_usage",
+                                return_value=SimpleNamespace(free=2 * runner.MIN_BUILD_FREE_BYTES))
+        capacity.start()
+        self.addCleanup(capacity.stop)
         for name, value in (("WORK", self.root), ("REPOSITORY", self.repository), ("BINARY_ROOT", self.binaries)):
             patched = patch.object(runner, name, value)
             patched.start()
@@ -221,13 +225,70 @@ class ControlledBuildTest(unittest.TestCase):
         self.host.unit = Mock(side_effect=build_unit)
         artifacts = []
         for role, revision, expected in [("reference", reference, "reference"), ("head", candidate, "candidate")]:
-            artifact = self.host.build(revision, role, False)["analytical_comparison"]
+            stale = self.repository / "target/reference/release/obsolete-output"
+            if role == "head":
+                stale.write_bytes(b"rebuildable output from another revision")
+            available = [runner.MIN_BUILD_FREE_BYTES - 1, runner.MIN_BUILD_FREE_BYTES] if role == "head" else [runner.MIN_BUILD_FREE_BYTES] * 2
+            with patch.object(runner.shutil, "disk_usage", side_effect=[SimpleNamespace(free=n) for n in available]):
+                artifact = self.host.build(revision, role, False)["analytical_comparison"]
             observed = subprocess.check_output([artifact["path"]], text=True).strip()
             self.assertEqual(observed, expected)
             self.assertEqual(artifact["source_path"], str(self.repository.resolve()))
+            self.assertFalse(stale.exists())
             artifacts.append(artifact)
         self.assertNotEqual(artifacts[0]["sha256"], artifacts[1]["sha256"])
         self.assertEqual(sum(call.args[0] == "clean-legacy-build-output" for call in self.host.unit.call_args_list), 1)
+        self.assertEqual(sum(call.args[0] == "clean-build-capacity-head" for call in self.host.unit.call_args_list), 1)
+        self.assertEqual(runner.file_hash(Path(artifacts[0]["path"])), artifacts[0]["sha256"])
+        with patch.object(runner.shutil, "disk_usage", side_effect=AssertionError("verified binary reuse needs no build space")):
+            self.assertEqual(self.host.build(reference, "reference", False)["analytical_comparison"], artifacts[0])
+
+    def admitted_cache(self):
+        target = self.repository / "target/reference"
+        target.mkdir(parents=True)
+        (target / "source-checkout.json").write_text(json.dumps(
+            {"schema": 1, "source_path": str(self.repository.resolve())}))
+        return target
+
+    def test_compilation_reclaims_only_its_derived_profile_at_the_capacity_boundary(self):
+        target = self.admitted_cache()
+        self.host.unit = Mock()
+        with patch.object(runner.shutil, "disk_usage", return_value=SimpleNamespace(free=runner.MIN_BUILD_FREE_BYTES)):
+            self.host.prepare_build_cache(self.repository, "head")
+        self.host.unit.assert_not_called()
+        with patch.object(runner.shutil, "disk_usage", side_effect=[
+                SimpleNamespace(free=runner.MIN_BUILD_FREE_BYTES - 1),
+                SimpleNamespace(free=runner.MIN_BUILD_FREE_BYTES)]):
+            self.host.prepare_build_cache(self.repository, "head")
+        self.host.unit.assert_called_once_with("clean-build-capacity-head",
+            [str(self.host.rust_bin / "cargo"), "clean", "--profile", "bench", "--target-dir", str(target)], self.repository)
+        storage = json.loads((self.host.output / "head-build-storage.json").read_text())
+        self.assertEqual(storage["cleanup_reason"], "capacity")
+        self.assertEqual(storage["free_before"], runner.MIN_BUILD_FREE_BYTES - 1)
+        self.assertEqual(storage["free_after"], runner.MIN_BUILD_FREE_BYTES)
+
+    def test_exhausted_storage_is_rejected_before_metadata_or_compilation(self):
+        self.admitted_cache()
+        self.host.unit = Mock()
+        with patch.object(runner.shutil, "disk_usage", return_value=SimpleNamespace(free=0)):
+            with self.assertRaisesRegex(runner.QualificationError, "insufficient build storage after cache reclamation"):
+                self.host.build(self.head, "head", False)
+        self.host.unit.assert_called_once()
+        self.assertEqual(self.host.unit.call_args.args[0], "clean-build-capacity-head")
+        self.assertFalse((self.binaries / "head/artifacts.json").exists())
+        storage = json.loads((self.host.output / "head-build-storage.json").read_text())
+        self.assertEqual((storage["free_before"], storage["free_after"]), (0, 0))
+
+    def test_failed_cache_reclamation_stops_without_retry_or_compilation(self):
+        self.admitted_cache()
+        self.host.unit = Mock(side_effect=runner.QualificationError("cleanup failed"))
+        with patch.object(runner.shutil, "disk_usage", return_value=SimpleNamespace(free=0)):
+            with self.assertRaisesRegex(runner.QualificationError, "cleanup failed"):
+                self.host.build(self.head, "head", False)
+        self.host.unit.assert_called_once()
+        self.assertEqual(self.host.unit.call_args.args[0], "clean-build-capacity-head")
+        self.assertEqual(self.git("rev-parse", "HEAD"), self.head)
+        self.assertEqual(self.git("status", "--porcelain"), "")
 
     def test_canonical_cache_transition_rejects_another_source_path(self):
         target = self.repository / "target/reference"

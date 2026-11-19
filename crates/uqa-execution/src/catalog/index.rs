@@ -30,5 +30,6 @@ pub use enforced_key_cache::EnforcedKeyCache;
 pub use enforcement::enforced_keys;
 pub mod diskann;
 pub mod physical;
+pub mod registry;
 pub mod value;
 pub mod vectors;

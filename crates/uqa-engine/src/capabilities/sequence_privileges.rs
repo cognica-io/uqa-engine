@@ -29,7 +29,7 @@ use uqa_storage::StorageBackendResult;
 
 impl SequenceSecurityCatalog for Engine {
     fn security_read(&self) -> SequenceSecurityRead<'_> {
-        Box::new(self.durable.sequence_security.read())
+        Box::new(self.durable.sequences.security())
     }
 }
 impl SequencePrivilegeResolution for Engine {
@@ -64,7 +64,7 @@ impl SequencePrivilegePublication for Engine {
         self.synchronize_catalog_registries()
     }
     fn security_write(&self) -> SequenceSecurityWrite<'_> {
-        Box::new(self.durable.sequence_security.write())
+        Box::new(self.durable.sequences.write())
     }
     fn catalog_changed(&self) {
         self.note_catalog_registry_changed();

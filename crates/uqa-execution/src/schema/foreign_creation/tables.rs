@@ -21,6 +21,7 @@ pub(super) struct ForeignDeclaration<'a> {
     relation: RelationIdentity,
     object_id: [u8; 16],
     finished: bool,
+    previous: Option<crate::catalog::foreign::ForeignCatalog>,
 }
 
 impl ForeignDeclaration<'_> {
@@ -34,19 +35,19 @@ impl Drop for ForeignDeclaration<'_> {
         if self.finished {
             return;
         }
-        let mut tables = self.context.publication.tables_write();
-        if tables
+        let current = self.context.publication.foreign_catalog();
+        if current
+            .tables()
             .get(&self.relation)
             .is_none_or(|table| table.object_id != self.object_id)
         {
             return;
         }
-        tables.remove(&self.relation);
-        self.context
-            .publication
-            .security_write()
-            .remove(&self.relation);
-        drop(tables);
+        self.context.publication.publish_foreign_catalog(
+            self.previous
+                .take()
+                .expect("unfinished declaration owns its rollback generation"),
+        );
         self.context.changes.catalog_registry_changed();
     }
 }
@@ -94,26 +95,26 @@ impl ForeignCreationContext<'_> {
             options: statement.options.iter().cloned().collect(),
             option_order: Vec::new(),
         };
-        let mut tables = self.publication.tables_write();
-        let mut security = self.publication.security_write();
-        if tables.contains_key(relation) || security.contains_key(relation) {
+        let previous = self.publication.foreign_catalog();
+        if previous.tables().contains_key(relation) {
             return Err(SQLError::Internal(format!(
                 "foreign table `{}` changed during creation",
                 table.name
             )));
         }
-        tables.insert(relation.clone(), table.clone());
-        security.insert(
+        let mut next = previous.clone();
+        next.insert(
             relation.clone(),
+            table.clone(),
             BoundTableSecurity::owner(owner.identity()),
-        );
-        drop(security);
-        drop(tables);
+        )?;
+        self.publication.publish_foreign_catalog(next);
         let declaration = ForeignDeclaration {
             context: self,
             relation: relation.clone(),
             object_id,
             finished: false,
+            previous: Some(previous),
         };
         self.changes.catalog_registry_changed();
         Ok((table, declaration))
@@ -129,8 +130,9 @@ impl ForeignCreationContext<'_> {
         let columns = table.columns.clone();
         let object_id = table.object_id;
         let catalog_oid = table.relation_oids().relation;
-        let mut tables = self.publication.tables_write();
-        if tables
+        let mut next = self.publication.foreign_catalog();
+        if next
+            .tables()
             .get(relation)
             .is_none_or(|current| current.object_id != object_id)
         {
@@ -139,13 +141,13 @@ impl ForeignCreationContext<'_> {
                 table.name
             )));
         }
+        next.insert(relation.clone(), table.clone(), security.clone())?;
         table
             .persist(self.catalog, relation, &security)
             .map_err(|error| {
                 SQLError::Internal(format!("persist foreign table `{}`: {error}", table.name))
             })?;
-        tables.insert(relation.clone(), table);
-        drop(tables);
+        self.publication.publish_foreign_catalog(next);
         ownership::attach_column_owners(
             &self.ownership,
             &relation.qualified_name(),

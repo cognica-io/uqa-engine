@@ -5,7 +5,7 @@
 //
 
 use super::{
-    AnalysisType, AnalysisVec, ColumnType, Derivation, ExpressionType, NonNull, Produced,
+    AnalysisIdentity, AnalysisType, AnalysisVec, ColumnType, Derivation, ExpressionType, Produced,
     ProductionControl, SQLError, ScalarExpr, UnknownOrigin,
 };
 
@@ -107,7 +107,7 @@ impl ExpressionType {
         text: Produced<String>,
     ) -> Self {
         Self {
-            literal: Some((NonNull::from(expression), text)),
+            literal: Some((AnalysisIdentity::from(expression), text)),
             ..Self::unknown()
         }
     }

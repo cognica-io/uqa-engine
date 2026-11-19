@@ -96,7 +96,12 @@ fn owner_attachment_reopens_with_the_same_sequence_identity_and_allocation_gener
     engine.sql("CREATE TABLE items(id integer); CREATE SEQUENCE ids START WITH 17 INCREMENT BY 3 CACHE 4",&[]).unwrap();
     let before = engine.sequence_state("ids").unwrap().unwrap().1;
     let relation = RelationIdentity::new("public", "ids");
-    let object_id = engine.durable.sequence_object_ids.read()[&relation];
+    let object_id = *engine
+        .durable
+        .sequences
+        .read()
+        .object_id(&relation)
+        .unwrap();
     let owner = owner(&engine);
     engine
         .with_implicit_transaction(|engine| {
@@ -114,7 +119,12 @@ fn owner_attachment_reopens_with_the_same_sequence_identity_and_allocation_gener
     };
     assert_eq!(after, expected);
     assert_eq!(
-        engine.durable.sequence_object_ids.read()[&relation],
+        (*engine
+            .durable
+            .sequences
+            .read()
+            .object_id(&relation)
+            .unwrap()),
         object_id
     );
     assert_eq!(
@@ -132,7 +142,12 @@ fn owner_attachment_reopens_with_the_same_sequence_identity_and_allocation_gener
     let reopened = Engine::open(&path).unwrap();
     assert_eq!(reopened.sequence_state("ids").unwrap().unwrap().1, after);
     assert_eq!(
-        reopened.durable.sequence_object_ids.read()[&relation],
+        (*reopened
+            .durable
+            .sequences
+            .read()
+            .object_id(&relation)
+            .unwrap()),
         object_id
     );
     assert_eq!(reopened.nextval("ids").unwrap(), 17);
@@ -145,14 +160,19 @@ fn loaded_owner_validation_rejects_stale_metadata_without_repairing_the_live_reg
     let table = engine.storage.tables.read()[&RelationIdentity::new("public", "items")].clone();
     let columns = table.columns.read().clone();
     let relation = RelationIdentity::new("public", "items_id_seq");
-    let before = engine.durable.sequences.read()[&relation];
+    let before = *engine.durable.sequences.read().state(&relation).unwrap();
     engine
         .durable
         .sequences
         .write()
-        .get_mut(&relation)
-        .unwrap()
-        .owner = None;
+        .replace_state(
+            &relation,
+            crate::SequenceState {
+                owner: None,
+                ..before
+            },
+        )
+        .unwrap();
     let error = engine
         .sequence_owner_publication_context()
         .validate_implicit_sequence_owners_for_columns("public.items", table.object_id(), &columns)
@@ -160,8 +180,20 @@ fn loaded_owner_validation_rejects_stale_metadata_without_repairing_the_live_reg
     assert!(error
         .to_string()
         .contains("has stale owner metadata that requires an initial-open migration"));
-    assert!(engine.durable.sequences.read()[&relation].owner.is_none());
-    engine.durable.sequences.write().insert(relation, before);
+    assert!(engine
+        .durable
+        .sequences
+        .read()
+        .state(&relation)
+        .unwrap()
+        .owner
+        .is_none());
+    engine
+        .durable
+        .sequences
+        .write()
+        .replace_state(&relation, before)
+        .unwrap();
     engine
         .sequence_owner_publication_context()
         .validate_implicit_sequence_owners_for_columns("public.items", table.object_id(), &columns)

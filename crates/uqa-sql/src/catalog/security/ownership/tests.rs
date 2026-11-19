@@ -5,7 +5,9 @@
 //
 
 use super::*;
-use std::collections::BTreeSet;
+use crate::catalog::roles::RoleDefinition;
+use crate::catalog::roles::RoleMembership;
+use crate::catalog::roles::{RoleDefinitions, RoleMemberships};
 
 #[test]
 fn relation_ownership_errors_name_the_actual_kind() {
@@ -54,19 +56,18 @@ impl RelationOwnerSchemas for Schemas {
     }
 }
 
-fn roles() -> BTreeMap<String, RoleDefinition> {
-    ["actor", "original", "target"]
-        .into_iter()
-        .enumerate()
-        .map(|(index, name)| {
+fn roles() -> RoleDefinitions {
+    RoleDefinitions::try_from_iter(["actor", "original", "target"].into_iter().enumerate().map(
+        |(index, name)| {
             let mut role = RoleDefinition::bootstrap();
             role.name = name.into();
             role.oid = 20_001 + index as i64;
             role.object_id = [index as u8 + 1; 16];
-            role.attributes = BTreeSet::from([RoleAttribute::Inherit]);
+            role.attributes = uqa_core::memory::OwnedSet::from([RoleAttribute::Inherit]);
             (name.into(), role)
-        })
-        .collect()
+        },
+    ))
+    .unwrap()
 }
 
 fn membership(role: &str, inherit: bool, set: bool) -> RoleMembership {
@@ -87,13 +88,15 @@ fn membership(role: &str, inherit: bool, set: bool) -> RoleMembership {
 fn transfer_requires_existing_owner_privileges_and_separate_target_set_permission() {
     let roles = roles();
     for (inherit, set) in [(false, true), (true, false), (true, true)] {
-        let memberships = [
-            membership("original", inherit, false),
-            membership("target", false, set),
-        ]
-        .into_iter()
-        .map(|membership| (membership.key(), membership))
-        .collect();
+        let memberships = RoleMemberships::try_from_iter(
+            [
+                membership("original", inherit, false),
+                membership("target", false, set),
+            ]
+            .into_iter()
+            .map(|membership| (membership.key(), membership)),
+        )
+        .unwrap();
         let authority = OwnerChangeAuthority {
             roles: &roles,
             memberships: &memberships,
@@ -116,7 +119,7 @@ fn transfer_requires_existing_owner_privileges_and_separate_target_set_permissio
 #[test]
 fn namespace_create_is_checked_for_the_new_owner_and_bypassed_for_superusers() {
     let mut roles = roles();
-    let memberships = BTreeMap::new();
+    let memberships = RoleMemberships::new();
     for schema_owner in ["actor", "target"] {
         let schemas = Schemas(BoundSchemaSecurity {
             tuple: None,
@@ -137,10 +140,12 @@ fn namespace_create_is_checked_for_the_new_owner_and_bypassed_for_superusers() {
         }
     }
     roles
-        .get_mut("actor")
+        .edit("actor", |value| {
+            value.attributes.insert(RoleAttribute::Superuser);
+            Ok(())
+        })
         .unwrap()
-        .attributes
-        .insert(RoleAttribute::Superuser);
+        .unwrap();
     OwnerChangeAuthority {
         roles: &roles,
         memberships: &memberships,
@@ -161,7 +166,7 @@ fn namespace_create_is_checked_for_the_new_owner_and_bypassed_for_superusers() {
 #[test]
 fn schema_owner_transfer_checks_database_create_for_the_invoker() {
     let roles = roles();
-    let memberships = BTreeMap::new();
+    let memberships = RoleMemberships::new();
     let authority = OwnerChangeAuthority {
         roles: &roles,
         memberships: &memberships,

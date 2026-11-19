@@ -8,24 +8,26 @@ use super::*;
 use crate::catalog::{test_support, CatalogTableSnapshot};
 use std::sync::Arc;
 use uqa_sql::catalog::relation_oids::RelationOidKind;
+use uqa_sql::catalog::table_definition::SharedTableDefinition;
 
 fn table(object_id: [u8; 16], name: Option<&str>, array_oid: Option<u32>) -> CatalogTableSnapshot {
     let mut oids = RelationCatalogOids::legacy(RelationOidKind::Table, &object_id);
     oids.array_type = array_oid;
     CatalogTableSnapshot {
-        dropped_attributes: std::sync::Arc::new(Vec::new()),
+        dropped_attributes: Vec::new().into(),
         object_id,
         catalog_oids: oids,
-        row_type_array_name: name.map(str::to_owned),
+        row_type_array_name: name.map(str::to_owned).into(),
         security: Arc::new(crate::catalog::security::BoundTableSecurity::owner(
             uqa_sql::catalog::roles::RoleIdentity::BOOTSTRAP,
-        )),
-        columns: Arc::default(),
+        ))
+        .into(),
+        columns: SharedTableDefinition::default(),
         columns_declared: true,
-        checks: Arc::default(),
-        foreign_keys: Arc::default(),
-        keys: Arc::default(),
-        hierarchy: Arc::default(),
+        checks: SharedTableDefinition::default(),
+        foreign_keys: Vec::new().into(),
+        keys: Vec::new().into(),
+        hierarchy: SharedTableDefinition::default(),
         persistence: uqa_sql::ast::RelationPersistence::Permanent,
     }
 }
@@ -68,7 +70,9 @@ fn missing_array_preserves_scalar_identity_and_skips_occupied_oids_and_names() {
         None
     );
     assert_eq!(
-        catalog.snapshot().tables[&relation].row_type_array_name,
+        catalog.snapshot().tables[&relation]
+            .row_type_array_name
+            .as_deref(),
         None
     );
 }
@@ -88,7 +92,7 @@ fn missing_array_name_keeps_its_recorded_identity_and_reopen_is_idempotent() {
     .unwrap();
     assert_eq!(changes[&relation], (original, "_item".into()));
     let state = snapshot.tables.get_mut(&relation).unwrap();
-    state.row_type_array_name = Some(changes[&relation].1.clone());
+    state.row_type_array_name = Some(changes[&relation].1.clone()).into();
     let reopened = CatalogReadView::new(snapshot);
     assert!(prepare(&reopened, &resolution(), &mut || panic!(
         "completed migration cannot allocate"
@@ -96,7 +100,9 @@ fn missing_array_name_keeps_its_recorded_identity_and_reopen_is_idempotent() {
     .unwrap()
     .is_empty());
     assert_eq!(
-        catalog.snapshot().tables[&relation].row_type_array_name,
+        catalog.snapshot().tables[&relation]
+            .row_type_array_name
+            .as_deref(),
         None
     );
 }
@@ -159,18 +165,20 @@ fn duplicate_arrays_and_explicit_type_collisions_are_rejected() {
     snapshot
         .tables
         .remove(&RelationIdentity::new("public", "second"));
-    Arc::make_mut(&mut snapshot.definitions.enums).insert(
-        "public._same".into(),
-        uqa_sql::catalog::enum_type::StoredEnum {
-            object_id: [10; 16],
-            oid: 47_002,
-            array_oid: 47_003,
-            array_name: "__same".into(),
-            identity: RelationIdentity::new("public", "_same"),
-            owner: uqa_core::catalog_role::RoleIdentity::BOOTSTRAP,
-            labels: Vec::new(),
-            usage_acl: None,
-        },
-    );
+    uqa_core::memory::RetainedValue::make_mut(&mut snapshot.definitions.enums)
+        .insert(
+            "public._same".into(),
+            uqa_sql::catalog::enum_type::StoredEnum {
+                object_id: [10; 16],
+                oid: 47_002,
+                array_oid: 47_003,
+                array_name: "__same".into(),
+                identity: RelationIdentity::new("public", "_same"),
+                owner: uqa_core::catalog_role::RoleIdentity::BOOTSTRAP,
+                labels: Vec::new(),
+                usage_acl: None,
+            },
+        )
+        .unwrap();
     assert!(validate(&CatalogReadView::new(snapshot)).is_err());
 }

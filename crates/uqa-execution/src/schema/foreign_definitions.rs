@@ -60,10 +60,11 @@ impl ForeignDefinitionContext<'_> {
         if !update(&mut table)? {
             return Ok(Some(false));
         }
+        let mut next = self.publication.foreign_catalog();
+        next.replace_table(relation.clone(), table.clone())
+            .map_err(|error| StorageBackendError::backend("foreign definition admission", error))?;
         self.persist_foreign_table_definition(&relation, &table)?;
-        self.publication
-            .tables_write()
-            .insert(relation.clone(), table);
+        self.publication.publish_foreign_catalog(next);
         self.changes.catalog_registry_changed();
         self.changes.prepared_relation_changed(&relation);
         Ok(Some(true))
@@ -147,13 +148,11 @@ impl ForeignDefinitionContext<'_> {
                 ))
             })?;
         security.remove_column_acl(column_name);
+        let mut next = self.publication.foreign_catalog();
+        next.insert(relation.clone(), table.clone(), security.clone())
+            .map_err(|error| StorageBackendError::backend("foreign column admission", error))?;
         table.persist(self.catalog, &relation, &security)?;
-        self.publication
-            .tables_write()
-            .insert(relation.clone(), table);
-        self.publication
-            .security_write()
-            .insert(relation.clone(), security);
+        self.publication.publish_foreign_catalog(next);
         self.changes.catalog_registry_changed();
         self.changes.prepared_relation_changed(&relation);
         Ok(Some(true))
@@ -164,12 +163,20 @@ impl ForeignDefinitionContext<'_> {
         sequence: &str,
     ) -> StorageBackendResult<bool> {
         let mut updates = Vec::new();
-        for (relation, mut table) in self.registry.tables().clone() {
+        for (relation, table) in self.registry.tables().iter() {
+            let mut table = table.clone();
             let changed =
                 declarations::detach_foreign_sequence_provenance(&mut table.columns, sequence);
             if changed {
-                updates.push((relation, table));
+                updates.push((relation.clone(), table));
             }
+        }
+        let mut next = self.publication.foreign_catalog();
+        for (relation, table) in &updates {
+            next.replace_table(relation.clone(), table.clone())
+                .map_err(|error| {
+                    StorageBackendError::backend("foreign dependency admission", error)
+                })?;
         }
         for (relation, table) in &updates {
             self.persist_foreign_table_definition(relation, table)?;
@@ -183,11 +190,7 @@ impl ForeignDefinitionContext<'_> {
         }
         let changed = !updates.is_empty();
         if changed {
-            let mut tables = self.publication.tables_write();
-            for (relation, table) in updates {
-                tables.insert(relation, table);
-            }
-            drop(tables);
+            self.publication.publish_foreign_catalog(next);
             self.changes.catalog_registry_changed();
         }
         Ok(changed)

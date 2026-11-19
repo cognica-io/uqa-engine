@@ -5,8 +5,7 @@
 //
 
 use crate::{Engine, TableState};
-use parking_lot::RwLockReadGuard;
-use std::collections::BTreeMap;
+use parking_lot::MappedRwLockReadGuard;
 use std::sync::{
     atomic::{AtomicUsize, Ordering},
     Arc,
@@ -39,7 +38,7 @@ impl TablePrivilegeState for ObservedTable {
     }
 }
 struct ObservedRead<'a> {
-    actual: RwLockReadGuard<'a, BTreeMap<RelationIdentity, Arc<TableState>>>,
+    actual: MappedRwLockReadGuard<'a, crate::state::TableRegistryMap>,
     columns_reads: Arc<AtomicUsize>,
 }
 impl TablePrivilegeRead for ObservedRead<'_> {
@@ -83,6 +82,9 @@ impl uqa_sql::catalog::security::system_relations::SystemRelationSecurityCatalog
     }
 }
 impl TablePrivilegeRegistry for ObservedRegistry<'_> {
+    fn foreign_catalog(&self) -> uqa_execution::catalog::foreign::reads::ForeignCatalogRead<'_> {
+        TablePrivilegeRegistry::foreign_catalog(self.engine)
+    }
     fn refresh_tables(&self) -> StorageBackendResult<()> {
         TablePrivilegeRegistry::refresh_tables(self.engine)
     }
@@ -115,19 +117,23 @@ fn bound_authorization_retains_the_selected_table_generation_after_registry_repl
             &[],
         )
         .unwrap();
-    let name = RelationIdentity::new("public", "original");
     let (_, selected) = engine
         .table_authorization_context()
         .bound_table_for_security("public.original")
         .unwrap();
-    let replacement =
-        engine.storage.tables.read()[&RelationIdentity::new("public", "replacement")].clone();
+    drop(
+        engine
+            .storage
+            .tables
+            .try_write()
+            .expect("binding must release the actual registry guard"),
+    );
     engine
-        .storage
-        .tables
-        .try_write()
-        .expect("binding must release the actual registry guard")
-        .insert(name, replacement);
+        .sql(
+            "DROP TABLE original; ALTER TABLE replacement RENAME TO original",
+            &[],
+        )
+        .unwrap();
     assert_eq!(selected.column_names(), ["id"]);
     assert_eq!(
         engine.bound_table_column_names("public.original").unwrap(),

@@ -6,6 +6,8 @@
 
 //! Cast, CASE, and window coercion rules for ordered parameter analysis.
 
+use crate::binding::preparation::{LiteralInput, SchemaContext};
+
 use super::{
     error, ColumnType, ExpressionType, Preparation, QueryPlan, RowSchema, SQLError, ScalarExpr,
 };
@@ -14,7 +16,7 @@ use crate::catalog::collations::derivation::Derivation;
 use crate::semantics::sets::placement::SetPlacement;
 use uqa_core::Value;
 
-impl Preparation<'_> {
+impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
     pub(super) fn cast_expression(
         &mut self,
         expr: &ScalarExpr,

@@ -112,7 +112,7 @@ impl Engine {
                     .map(uqa_storage::VectorIndex::dimensions);
                 if let Some(dimensions) = dimensions {
                     self.prepare_vector_column_rewrite(&table_name, column, dimensions)?;
-                    state.vector_indexes.write().live_mut()?.remove(column);
+                    state.vector_indexes.write().live_mut()?.remove(column)?;
                 }
                 self.try_save_table_schema(&table_name, &state)
             },
@@ -218,18 +218,20 @@ impl Engine {
         security.rename_column_acl(from, to);
     }
 
-    fn rename_column_analyzer_assignments(&self, table_name: &str, from: &str, to: &str) {
-        let mut analyzers = self.durable.table_field_analyzers.write();
-        let mut moved = Vec::new();
-        analyzers.retain(|(table, field), value| {
-            if table == table_name && field == from {
-                moved.push(((table_name.to_string(), to.to_string()), value.clone()));
-                false
-            } else {
-                true
-            }
-        });
-        analyzers.extend(moved);
+    fn rename_column_key_metadata(
+        t: &super::TableState,
+        from: &str,
+        to: &str,
+    ) -> StorageBackendResult<()> {
+        let mut hierarchy = t.hierarchy.read().clone();
+        uqa_sql::schema::columns::publication::rename_local_column(&mut hierarchy, from, to);
+        t.hierarchy.write().publish(hierarchy)?;
+        uqa_sql::schema::columns::publication::rename_key_columns(
+            &mut t.key_constraints.write(),
+            from,
+            to,
+        );
+        Ok(())
     }
 
     fn rename_document_fields(
@@ -303,26 +305,26 @@ impl Engine {
         } else {
             None
         };
-        self.rewrite_column_rename_dependencies(&table_name, from, to)?;
-        Self::value_indexes_clear(&t);
-        uqa_sql::schema::columns::publication::rename_column(&mut t.columns.write(), from, to);
-        Self::rename_column_acl(&t, from, to);
-        uqa_sql::schema::columns::publication::rename_local_column(
-            &mut t.hierarchy.write(),
+        let indexes = uqa_execution::schema::indexes::references::column_rename(
+            &self.durable.catalog_indexes.read(),
+            &table_name,
             from,
             to,
-        );
-        for constraint in t.key_constraints.write().iter_mut() {
-            for column in constraint
-                .columns
-                .iter_mut()
-                .chain(&mut constraint.included_columns)
-            {
-                if column == from {
-                    *column = to.to_string();
-                }
-            }
-        }
+        )?;
+        let analyzers = self
+            .durable
+            .table_field_analyzers
+            .read()
+            .with_renamed_field(&table_name, from, to)?;
+        self.rewrite_column_rename_dependencies(&table_name, from, to)?;
+        Self::value_indexes_clear(&t)?;
+        let mut columns = t.columns.write();
+        let mut next = columns.clone();
+        uqa_sql::schema::columns::publication::rename_column(&mut next, from, to);
+        columns.publish(next)?;
+        drop(columns);
+        Self::rename_column_acl(&t, from, to);
+        Self::rename_column_key_metadata(&t, from, to)?;
         {
             let mut fts = t.fts_fields.write();
             for f in fts.iter_mut() {
@@ -335,7 +337,7 @@ impl Engine {
         if let Some(binding) = &analyzer_binding {
             binding.install(to, t.inverted_index.write().as_mut())?;
         }
-        self.rename_column_analyzer_assignments(&table_name, from, to);
+        *self.durable.table_field_analyzers.write() = analyzers;
         let vector_rename = uqa_execution::catalog::index::vectors::detach_for_column_rename(
             &mut t.vector_indexes.write(),
             from,
@@ -354,11 +356,11 @@ impl Engine {
             t.vector_indexes
                 .write()
                 .live_mut()?
-                .insert(to.into(), index);
+                .insert_handle(to.into(), index)?;
         } else if let Some(dimensions) = vector_dimensions {
             self.create_vector_field(&table_name, to, dimensions)?;
         }
-        self.rename_catalog_index_column_refs(&table_name, from, to)?;
+        indexes.publish(self)?;
         if self.is_persistent() {
             if let Some(catalog) = self.storage.catalog.as_ref() {
                 catalog.rename_column_data(&table_name, from, to)?;
@@ -387,7 +389,23 @@ impl Engine {
 
     pub(crate) fn try_rename_table(&self, from: &str, to: &str) -> StorageBackendResult<bool> {
         self.with_implicit_storage_definition_transaction(|engine| {
-            engine.try_rename_table_inner(from, to)
+            let Some(from) = engine.resolve_table_ddl_target(from, "ALTER TABLE RENAME")? else {
+                return Ok(false);
+            };
+            let source = Self::resolved_relation_identity(&from)?;
+            let (schema, name) =
+                RelationIdentity::parse_reference(to).map_err(StorageBackendError::Other)?;
+            let target =
+                RelationIdentity::new(schema.unwrap_or_else(|| source.schema.clone()), name);
+            let indexes = uqa_execution::schema::indexes::relocation::prepare_table_indexes(
+                &engine.index_registry_context(),
+                &engine.relation_creation_context(),
+                engine,
+                &source,
+                &target,
+            )
+            .map_err(|error| StorageBackendError::backend("prepare table index rename", error))?;
+            engine.try_rename_table_inner(&source, &target, indexes)
         })
     }
 
@@ -413,19 +431,11 @@ impl Engine {
     /// Rename or move a table inside the caller's storage transaction: `ALTER SCHEMA RENAME` moves every table of a schema this way, so the catalog is refreshed once the whole schema is consistent rather than after each table.
     pub(crate) fn try_rename_table_inner(
         &self,
-        from: &str,
-        to: &str,
+        from_relation: &RelationIdentity,
+        to_relation: &RelationIdentity,
+        indexes: uqa_execution::schema::indexes::relocation::PreparedIndexRelocations,
     ) -> StorageBackendResult<bool> {
-        let Some(from) = self.resolve_table_ddl_target(from, "ALTER TABLE RENAME")? else {
-            return Ok(false);
-        };
-        let from_relation = Self::resolved_relation_identity(&from)?;
-        let (target_schema, target_name) =
-            RelationIdentity::parse_reference(to).map_err(StorageBackendError::Other)?;
-        let to_relation = RelationIdentity::new(
-            target_schema.unwrap_or_else(|| from_relation.schema.clone()),
-            target_name,
-        );
+        let from = from_relation.qualified_name();
         if to_relation.schema != self.temporary_schema_name()
             && !self
                 .durable
@@ -444,17 +454,25 @@ impl Engine {
                 "relation `{to}` already exists as {kind}"
             )));
         }
-        let array_name = self.reserve_table_array_rename(&from_relation, &to_relation)?;
+        let array_name = self.reserve_table_array_rename(from_relation, to_relation)?;
         let persist_catalog = {
             let tables = self.storage.tables.read();
-            if !tables.contains_key(&from_relation) || tables.contains_key(&to_relation) {
+            if !tables.contains_key(from_relation) || tables.contains_key(to_relation) {
                 return Ok(false);
             }
             self.is_persistent()
-                && tables.get(&from_relation).is_some_and(|table| {
+                && tables.get(from_relation).is_some_and(|table| {
                     table.persistence != uqa_sql::ast::RelationPersistence::Temporary
                 })
         };
+        let indexes = indexes.prepare_publication(self).map_err(|error| {
+            StorageBackendError::backend("prepare table index publication", error)
+        })?;
+        let analyzers = self
+            .durable
+            .table_field_analyzers
+            .read()
+            .with_renamed_table(&from, &to)?;
         self.rewrite_table_rename_dependencies(&from, &to)?;
         if persist_catalog {
             if let Some(catalog) = self.storage.catalog.as_ref() {
@@ -462,30 +480,14 @@ impl Engine {
             }
         }
         let mut tables = self.storage.tables.write();
-        if tables.contains_key(&to_relation) {
-            return Ok(false);
-        }
-        let Some(state) = tables.remove(&from_relation) else {
+        let Some(state) = tables.rename(from_relation, to_relation.clone())? else {
             return Ok(false);
         };
-        tables.insert(to_relation.clone(), state.clone());
         drop(tables);
         *state.row_type_array_name.write() = array_name;
-        self.rewrite_relation_rename_dependents(&from_relation, &to_relation)?;
-        self.rename_catalog_index_table_refs(&from, &to);
-        {
-            let mut analyzers = self.durable.table_field_analyzers.write();
-            let mut moved = Vec::new();
-            analyzers.retain(|(table, field), value| {
-                if table == &from {
-                    moved.push(((to.clone(), field.clone()), value.clone()));
-                    false
-                } else {
-                    true
-                }
-            });
-            analyzers.extend(moved);
-        }
+        self.rewrite_relation_rename_dependents(from_relation, to_relation)?;
+        indexes.publish(self)?;
+        *self.durable.table_field_analyzers.write() = analyzers;
         if persist_catalog {
             self.rebind_persistent_table_stores(&to, &state)?;
             self.try_save_table_schema(&to, &state)?;
@@ -503,7 +505,7 @@ impl Engine {
         }
         self.mark_column_stats_dirty(&to, &state)?;
         self.refresh_value_indexes_for_table(&to)?;
-        self.rename_constraint_transaction_relation(&from_relation, &to_relation);
+        self.rename_constraint_transaction_relation(from_relation, to_relation);
         self.note_prepared_table_change(&state);
         self.clear_regtype_output_cache();
         Ok(true)

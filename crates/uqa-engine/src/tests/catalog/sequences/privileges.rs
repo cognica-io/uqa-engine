@@ -41,7 +41,7 @@ fn sequence_privilege_inquiry_keeps_committed_roles_and_acl_together() {
                         "{provider}: {isolation}: {arguments:?}"
                     );
                     let roles = engine.durable.roles.read();
-                    for security in engine.durable.sequence_security.read().values() {
+                    for security in engine.durable.sequences.read().security().values() {
                         let security = security.resolve(&roles).unwrap();
                         assert!(
                             roles.contains_key(&security.role_owner),

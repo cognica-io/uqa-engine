@@ -8,13 +8,20 @@
 //!
 //! An accelerator holds the stored value of its field for every row. A search key also orders its non-null values in a B-tree for predicates. A column that an index only carries beside its key holds the values alone: it answers the projection of an index-only read and no predicate, and a write maintains no value bucket for it.
 
-use std::collections::BTreeMap;
 use uqa_core::{DocId, Payload, PostingEntry, PostingList, Predicate, Value};
 use uqa_storage::BTreeIndex;
 
 mod cache;
 mod comparison;
-pub use cache::{apply_cached_values, visit_stored_fields, ValueIndexBuilder, ValueIndexCache};
+mod identities;
+mod values;
+pub use cache::{
+    apply_cached_values, visit_stored_fields, CapturedValue, CapturedValueIndex,
+    CapturedValueIndexPolicy, CapturedValueIndexes, MemoryValueIndexesBuilder, ValueIndexBuilder,
+    ValueIndexCache, ValueIndexComparison, ValueIndexImageBuilder, ValueIndexImageMetadata,
+    ValueIndexes,
+};
+use values::StoredValues;
 
 /// Per-column index: the stored value of every row, and for a search key
 /// the non-null scalar keys in a B-tree plus the doc ids whose field is
@@ -23,9 +30,9 @@ pub use cache::{apply_cached_values, visit_stored_fields, ValueIndexBuilder, Val
 pub struct ColumnValueIndex {
     /// `None` for a column that an index only carries.
     index: Option<BTreeIndex>,
-    values: BTreeMap<DocId, Value>,
+    values: StoredValues,
     /// Sorted doc ids with a missing or `Value::Null` field, kept for a search key.
-    nulls: Vec<DocId>,
+    nulls: identities::NullIdentities,
     /// Set when any indexed key is temporal; disables acceleration
     /// because string-vs-temporal comparisons need parsing.
     has_temporal: bool,
@@ -172,12 +179,12 @@ impl ColumnValueIndex {
 
     /// Borrow the key evaluated for the stored row, without reevaluating an index expression against a newer routine definition.
     pub fn stored_value(&self, doc_id: DocId) -> Option<&Value> {
-        self.values.get(&doc_id)
+        self.values.get(doc_id)
     }
 
     /// Whether a row is indexed, which every row of the table is while the accelerator is current.
     pub fn contains(&self, doc_id: DocId) -> bool {
-        self.values.contains_key(&doc_id)
+        self.values.contains_key(doc_id)
     }
 
     /// Whether this accelerator only carries its column's values and answers no predicate.
@@ -189,8 +196,8 @@ impl ColumnValueIndex {
     pub fn build(field: &str, values: impl Iterator<Item = (DocId, Value)>) -> Self {
         let mut built = Self {
             index: Some(BTreeIndex::new(field)),
-            values: BTreeMap::new(),
-            nulls: Vec::new(),
+            values: StoredValues::new(),
+            nulls: identities::NullIdentities::default(),
             has_temporal: false,
             comparison: comparison::StoredComparison::default(),
             has_row_values: false,
@@ -209,7 +216,7 @@ impl ColumnValueIndex {
         Self {
             index: None,
             values: values.collect(),
-            nulls: Vec::new(),
+            nulls: identities::NullIdentities::default(),
             has_temporal: false,
             comparison: comparison::StoredComparison::default(),
             has_row_values: false,
@@ -218,12 +225,24 @@ impl ColumnValueIndex {
 
     /// The same stored values, carried or as a search key of `field`, when the indexes of the table give the column the other use.
     #[must_use]
-    pub fn with_use(self, field: &str, carried: bool) -> Self {
-        match (carried, self.is_carried()) {
-            (false, true) => Self::build(field, self.values.into_iter()),
-            (true, false) => Self::build_carried(self.values.into_iter()),
-            _ => self,
+    pub fn with_use(mut self, field: &str, carried: bool) -> Self {
+        if carried == self.is_carried() {
+            return self;
         }
+        self.index = (!carried).then(|| BTreeIndex::new(field));
+        self.nulls.clear();
+        self.has_temporal = false;
+        self.comparison = comparison::StoredComparison::default();
+        self.has_row_values = false;
+        if !carried {
+            let values = self.values.clone();
+            for (&id, value) in &values {
+                self.index_value(id, value);
+            }
+            self.nulls.sort_unstable();
+            self.nulls.dedup();
+        }
+        self
     }
 
     /// Order one stored value for predicates. `nulls` is appended to and sorted by the caller.
@@ -263,11 +282,12 @@ impl ColumnValueIndex {
     }
 
     pub fn remove(&mut self, doc_id: DocId, value: &Value) {
-        let stored = self.values.remove(&doc_id);
+        let stored = self.values.get(doc_id);
         let Some(index) = self.index.as_mut() else {
+            self.values.remove(doc_id);
             return;
         };
-        let value = stored.as_ref().unwrap_or(value);
+        let value = stored.unwrap_or(value);
         match value {
             Value::Null => {
                 if let Ok(pos) = self.nulls.binary_search(&doc_id) {
@@ -276,6 +296,7 @@ impl ColumnValueIndex {
             }
             value => index.remove(doc_id, value),
         }
+        self.values.remove(doc_id);
     }
 
     pub fn clear(&mut self) {
@@ -371,7 +392,7 @@ impl ColumnValueIndex {
         }
         observe()?;
         if matches!(predicate, Predicate::IsNull) {
-            for &id in &self.nulls {
+            for &id in self.nulls.iter() {
                 visit(id)?;
             }
         } else {

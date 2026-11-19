@@ -6,6 +6,8 @@
 
 //! Scoped and recursive WITH analysis without evaluating its statements.
 
+use crate::binding::preparation::{LiteralInput, SchemaContext};
+
 use super::super::{
     cte_controls::{
         extend_cte_generated_schema_with_control, extend_recursive_cte_binding_schema_with_control,
@@ -15,7 +17,7 @@ use super::super::{
 use super::{error, Preparation, RowSchema, SQLError};
 use crate::plan::{CtePlan, CtePlanBody, RelationalPlan};
 
-impl Preparation<'_> {
+impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
     pub(super) fn ctes(
         &mut self,
         ctes: &[CtePlan],

@@ -8,6 +8,8 @@
 
 use super::*;
 
+mod storage_handles;
+
 #[test]
 fn database_identity_preserves_siblings_and_independent_native_opens() {
     let memory = Engine::new();

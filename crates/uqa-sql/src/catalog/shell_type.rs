@@ -6,12 +6,9 @@
 
 //! An undefined type owns its name and OID before any value layout or array type exists. Completing it preserves that identity.
 
-use std::collections::{BTreeMap, BTreeSet};
-
 use serde::{Deserialize, Serialize};
 use uqa_core::{catalog_role::RoleIdentity, RelationIdentity};
 
-use super::roles::{identity::RoleSubject, RoleDefinition};
 use crate::ast::ObjectAclEntry;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -25,46 +22,23 @@ pub struct StoredShellType {
     pub usage_acl: Option<Vec<ObjectAclEntry>>,
 }
 
-/// Reject inconsistent names, duplicate identities and stale owner incarnations before publishing any restored shell.
-pub fn validate_shell_registry(
-    registry: &BTreeMap<String, StoredShellType>,
-    roles: &BTreeMap<String, RoleDefinition>,
-) -> Result<(), String> {
-    let mut identities = BTreeSet::new();
-    let mut oids = BTreeSet::new();
-    for (name, definition) in registry {
-        if definition.object_id == [0; 16] || !identities.insert(definition.object_id) {
-            return Err(format!("invalid or duplicate shell identity for `{name}`"));
-        }
-        if definition.oid < super::oids::FIRST_NORMAL_OBJECT_ID || !oids.insert(definition.oid) {
-            return Err(format!(
-                "invalid or duplicate shell OID {} for `{name}`",
-                definition.oid
-            ));
-        }
-        if definition.identity.schema.is_empty()
-            || !super::array_type_names::valid_type_name(&definition.identity.name)
-            || definition.identity.qualified_name() != *name
-        {
-            return Err(format!("inconsistent shell name for `{name}`"));
-        }
-        if !definition.owner.is_valid() || definition.owner.role_definition(roles).is_none() {
-            return Err(format!(
-                "shell `{name}` references missing role incarnation {}",
-                definition.owner.oid
-            ));
-        }
-    }
-    Ok(())
-}
+mod validation;
+pub use validation::{
+    validate_shell_registry, validate_shell_registry_from_input,
+    validate_shell_registry_with_control,
+};
 
 #[cfg(test)]
 mod tests {
+    use crate::catalog::roles::{RoleDefinition, RoleDefinitions};
+    use std::collections::BTreeMap;
+
     use super::*;
 
     #[test]
     fn retained_shells_reject_aliasing_corrupt_names_and_retired_owners() {
-        let roles = BTreeMap::from([("uqa".into(), RoleDefinition::bootstrap())]);
+        let roles =
+            RoleDefinitions::try_from_iter([("uqa".into(), RoleDefinition::bootstrap())]).unwrap();
         let shell = StoredShellType {
             object_id: [1; 16],
             oid: 20_000,
@@ -75,7 +49,7 @@ mod tests {
         let registry = BTreeMap::from([("public.pending".into(), shell.clone())]);
         validate_shell_registry(&registry, &roles).unwrap();
         let encoded = serde_json::to_string(&registry).unwrap();
-        let decoded = serde_json::from_str(&encoded).unwrap();
+        let decoded: BTreeMap<String, StoredShellType> = serde_json::from_str(&encoded).unwrap();
         validate_shell_registry(&decoded, &roles).unwrap();
         for corrupt in 0..5 {
             let mut changed = shell.clone();

@@ -6,40 +6,36 @@
 
 use super::*;
 use crate::catalog::roles::identity::RoleBinding;
+use crate::catalog::roles::RoleDefinition;
+use crate::catalog::roles::RoleMembership;
+use crate::catalog::roles::{RoleDefinitions, RoleMemberships};
 use uqa_core::{memory::MemoryBudget, CancellationToken};
 
-fn graph(
-    count: u8,
-) -> (
-    BTreeMap<String, RoleDefinition>,
-    BTreeMap<RoleMembershipKey, RoleMembership>,
-) {
-    let roles: BTreeMap<_, _> = (1..=count)
-        .map(|id| {
-            let mut role = RoleDefinition::bootstrap();
-            role.name = format!("r{id}");
-            role.oid = i64::from(id) + 100;
-            role.object_id = [id; 16];
-            role.attributes.clear();
-            (role.name.clone(), role)
-        })
-        .collect();
-    let memberships = (1..count)
-        .map(|id| {
-            let role = RoleBinding::from_definition(&roles[&format!("r{}", id + 1)]).unwrap();
-            let member = RoleBinding::from_definition(&roles[&format!("r{id}")]).unwrap();
-            let edge = RoleMembership {
-                oid: i64::from(id),
-                role,
-                member,
-                grantor: RoleBinding::from_definition(&RoleDefinition::bootstrap()).unwrap(),
-                admin_option: false,
-                inherit_option: true,
-                set_option: false,
-            };
-            (edge.key(), edge)
-        })
-        .collect();
+fn graph(count: u8) -> (RoleDefinitions, RoleMemberships) {
+    let roles = RoleDefinitions::try_from_iter((1..=count).map(|id| {
+        let mut role = RoleDefinition::bootstrap();
+        role.name = format!("r{id}");
+        role.oid = i64::from(id) + 100;
+        role.object_id = [id; 16];
+        role.attributes.clear();
+        (role.name.clone(), role)
+    }))
+    .unwrap();
+    let memberships = RoleMemberships::try_from_iter((1..count).map(|id| {
+        let role = RoleBinding::from_definition(&roles[&format!("r{}", id + 1)]).unwrap();
+        let member = RoleBinding::from_definition(&roles[&format!("r{id}")]).unwrap();
+        let edge = RoleMembership {
+            oid: i64::from(id),
+            role,
+            member,
+            grantor: RoleBinding::from_definition(&RoleDefinition::bootstrap()).unwrap(),
+            admin_option: false,
+            inherit_option: true,
+            set_option: false,
+        };
+        (edge.key(), edge)
+    }))
+    .unwrap();
     (roles, memberships)
 }
 
@@ -51,11 +47,18 @@ fn controlled_inheritance_preserves_edges_identity_and_releases_traversal() {
     let control = ProductionControl::new(&budget, &token, &token);
     for disabled in [None, Some(4)] {
         if let Some(oid) = disabled {
-            memberships
-                .values_mut()
-                .find(|edge| edge.oid == oid)
+            let key = *memberships
+                .iter()
+                .find(|(_, edge)| edge.oid == oid)
                 .unwrap()
-                .inherit_option = false;
+                .0;
+            memberships
+                .edit(&key, |edge| {
+                    edge.inherit_option = false;
+                    Ok(())
+                })
+                .unwrap()
+                .unwrap();
         }
         for member in roles.values() {
             for target in roles.values() {
@@ -81,11 +84,18 @@ fn controlled_inheritance_preserves_edges_identity_and_releases_traversal() {
         }
     }
     let bound = RoleBinding::from_definition(&roles["r1"]).unwrap();
-    let mut renamed = roles.remove("r1").unwrap();
+    let mut renamed = roles.get("r1").unwrap().clone();
+    roles.remove("r1").unwrap();
     renamed.name = "renamed".into();
-    roles.insert(renamed.name.clone(), renamed);
+    roles.insert(renamed.name.clone(), renamed).unwrap();
     assert!(role_inherits_with_control(&roles, &memberships, &bound, "r3", &control).unwrap());
-    roles.get_mut("renamed").unwrap().object_id = [99; 16];
+    roles
+        .edit("renamed", |value| {
+            value.object_id = [99; 16];
+            Ok(())
+        })
+        .unwrap()
+        .unwrap();
     assert!(!role_inherits_with_control(&roles, &memberships, &bound, "r3", &control).unwrap());
     assert_eq!(budget.used(), 0);
 }

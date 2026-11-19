@@ -1,0 +1,10 @@
+enum-bound|FOR VALUES FROM (MINVALUE) TO ('mild')
+enum-row|1|cold|enum_low
+enum-row|2|mild|enum_other
+enum-row|3|hot|enum_other
+domain-bound|FOR VALUES FROM ('1') TO ('5')
+domain-row|2|domain_low
+domain-row|20|domain_other
+function-volatility|v
+function-row|4|function_low
+function-row|12|function_other

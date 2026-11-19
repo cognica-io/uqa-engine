@@ -35,15 +35,24 @@ impl<'a> Replacement<'a> {
         }
     }
 
+    #[cfg(test)]
     pub fn prepare(text: &'a str, expression: &Regex) -> Self {
-        if !text.contains('$') {
-            return Self::literal(text);
-        }
+        crate::work::inline(Self::prepare_with(text, expression, &mut ()))
+            .unwrap_or_else(|never: std::convert::Infallible| match never {})
+    }
+
+    pub async fn prepare_with<E>(
+        text: &'a str,
+        expression: &Regex,
+        work: &mut impl crate::work::Work<E>,
+    ) -> Result<Self, E> {
+        let Some(mut dollar) = crate::work::find_byte(text, 0, b'$', work).await? else {
+            return Ok(Self::literal(text));
+        };
         let mut pieces = Vec::new();
         let mut cursor = 0;
         let mut uses_captures = false;
-        while let Some(relative) = text[cursor..].find('$') {
-            let dollar = cursor + relative;
+        loop {
             if cursor < dollar {
                 pieces.push(Piece::Literal(cursor..dollar));
             }
@@ -51,57 +60,63 @@ impl<'a> Replacement<'a> {
             if text.as_bytes().get(cursor) == Some(&b'$') {
                 pieces.push(Piece::Literal(dollar..cursor));
                 cursor += 1;
-                continue;
-            }
-            let reference = if text.as_bytes().get(cursor) == Some(&b'{') {
-                text[cursor + 1..].find('}').map(|length| {
-                    let end = cursor + 1 + length;
-                    (cursor + 1..end, end + 1)
-                })
             } else {
-                let start = cursor;
-                while text
-                    .as_bytes()
-                    .get(cursor)
-                    .is_some_and(|byte| byte.is_ascii_alphanumeric() || *byte == b'_')
-                {
-                    cursor += 1;
+                let reference = if text.as_bytes().get(cursor) == Some(&b'{') {
+                    crate::work::find_byte(text, cursor + 1, b'}', work)
+                        .await?
+                        .map(|end| (cursor + 1..end, end + 1))
+                } else {
+                    let start = cursor;
+                    while text
+                        .as_bytes()
+                        .get(cursor)
+                        .is_some_and(|byte| byte.is_ascii_alphanumeric() || *byte == b'_')
+                    {
+                        work.records(cursor - start).await?;
+                        cursor += 1;
+                    }
+                    (cursor != start).then_some((start..cursor, cursor))
+                };
+                if let Some((name, end)) = reference {
+                    cursor = end;
+                    let name = &text[name];
+                    let index = match name.parse::<usize>().ok() {
+                        Some(index) => Some(index),
+                        None => capture_index(expression, name, work).await?,
+                    };
+                    if let Some(index) = index.filter(|index| *index < expression.captures_len()) {
+                        uses_captures = true;
+                        pieces.push(Piece::Capture(index));
+                    }
+                } else {
+                    pieces.push(Piece::Literal(dollar..dollar + 1));
+                    cursor = dollar + 1;
                 }
-                (cursor != start).then_some((start..cursor, cursor))
-            };
-            let Some((name, end)) = reference else {
-                pieces.push(Piece::Literal(dollar..dollar + 1));
-                cursor = dollar + 1;
-                continue;
-            };
-            cursor = end;
-            let name = &text[name];
-            let index = name.parse::<usize>().ok().or_else(|| {
-                expression
-                    .capture_names()
-                    .position(|candidate| candidate == Some(name))
-            });
-            if let Some(index) = index.filter(|index| *index < expression.captures_len()) {
-                uses_captures = true;
-                pieces.push(Piece::Capture(index));
             }
+            let Some(next) = crate::work::find_byte(text, cursor, b'$', work).await? else {
+                break;
+            };
+            dollar = next;
         }
         if cursor < text.len() {
             pieces.push(Piece::Literal(cursor..text.len()));
         }
-        Self {
+        Ok(Self {
             text: Cow::Borrowed(text),
             pieces: Some(pieces),
             uses_captures,
-        }
+        })
     }
 
-    pub fn into_owned(self) -> Replacement<'static> {
-        Replacement {
-            text: Cow::Owned(self.text.into_owned()),
+    pub async fn into_owned_with<E>(
+        self,
+        work: &mut impl crate::work::Work<E>,
+    ) -> Result<Replacement<'static>, E> {
+        Ok(Replacement {
+            text: Cow::Owned(crate::work::own_text(self.text, work).await?),
             pieces: self.pieces,
             uses_captures: self.uses_captures,
-        }
+        })
     }
 
     pub fn uses_captures(&self) -> bool {
@@ -127,4 +142,20 @@ impl<'a> Replacement<'a> {
                     }),
             )
     }
+}
+
+async fn capture_index<E>(
+    expression: &Regex,
+    name: &str,
+    work: &mut impl crate::work::Work<E>,
+) -> Result<Option<usize>, E> {
+    for (index, candidate) in expression.capture_names().enumerate() {
+        work.records(index).await?;
+        if let Some(candidate) = candidate {
+            if crate::json::bytes_equal(candidate.as_bytes(), name.as_bytes(), work).await? {
+                return Ok(Some(index));
+            }
+        }
+    }
+    Ok(None)
 }

@@ -12,6 +12,8 @@ use std::{
     hash::Hasher,
 };
 
+mod slots;
+
 #[derive(Debug, Eq, PartialEq)]
 struct Collision(u64);
 impl Hash for Collision {

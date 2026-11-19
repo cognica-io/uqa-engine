@@ -5,6 +5,7 @@
 //
 
 //! Schema registration and owner publication through live catalog and authorization guards.
+use uqa_sql::catalog::security::schema_registry::SchemaRegistry;
 pub mod authority;
 pub mod identity;
 pub mod locking;
@@ -21,7 +22,7 @@ use crate::catalog::security::roles::{
     locking::RoleLockContext,
 };
 use crate::row_locks::shared_objects::SharedObjectLockSession;
-use std::{collections::BTreeMap, ops::DerefMut};
+use std::ops::DerefMut;
 use uqa_sql::{
     catalog::{
         roles::{self, RoleReferenceNames},
@@ -60,8 +61,7 @@ pub trait NamespaceCatalogChanges {
     }
 }
 
-pub type SchemaRegistryWrite<'a> =
-    Box<dyn DerefMut<Target = BTreeMap<String, BoundSchemaSecurity>> + 'a>;
+pub type SchemaRegistryWrite<'a> = Box<dyn DerefMut<Target = SchemaRegistry> + 'a>;
 pub trait SchemaRegistrationState {
     fn schemas_write(&self) -> SchemaRegistryWrite<'_>;
     fn contains_graph(&self, name: &str) -> bool;
@@ -107,7 +107,9 @@ pub fn register_schema(
         acl: None,
     };
     context.persistence.persist_schema(name, &security)?;
-    schemas.insert(name.to_string(), security);
+    schemas
+        .insert(name.to_string(), security)
+        .map_err(|error| StorageBackendError::backend("schema definition", error))?;
     drop(schemas);
     context.changes.namespace_catalog_changed();
     Ok(true)
@@ -266,7 +268,7 @@ pub trait SchemaSecurityPersistence {
     fn persist_security(&self, name: &str, security: &BoundSchemaSecurity) -> Result<(), SQLError>;
 }
 pub trait SchemaSecurityPublication {
-    fn publish_security(&self, name: &str, security: BoundSchemaSecurity);
+    fn publish_security(&self, name: &str, security: BoundSchemaSecurity) -> Result<(), SQLError>;
 }
 pub struct SchemaOwnerContext<'a> {
     pub writer: &'a dyn SchemaStatementWriter,
@@ -339,7 +341,7 @@ pub fn alter_schema_owner(
     drop(roles);
     context.tuples.replace(name, locking::tuple(&current)?)?;
     context.persistence.persist_security(name, &security)?;
-    context.publication.publish_security(name, security);
+    context.publication.publish_security(name, security)?;
     context.changes.namespace_catalog_changed();
     Ok(())
 }

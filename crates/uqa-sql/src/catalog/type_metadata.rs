@@ -20,6 +20,12 @@ pub use builtins::{
 };
 pub use production::routine_type_oid_with_control;
 
+/// Whether an exact identifier occupies the built-in `pg_catalog` type namespace, including generated array names. Modifier validation remains separate from name occupancy.
+pub fn builtin_catalog_type_name_exists(name: &str) -> bool {
+    builtin_scalar_type_by_name(name).is_some()
+        || crate::ast::builtin_array_element_name(name).is_some()
+}
+
 pub fn catalog_type_name(oid: i64) -> &'static str {
     match oid {
         16 => "boolean",
@@ -126,10 +132,13 @@ pub fn pg_type_oid(ty: &ColumnType) -> i64 {
             RangeSubtype::Date => 4535,
             RangeSubtype::BigInteger => 4536,
         },
-        ColumnType::Array(element) => match element.as_ref() {
-            ColumnType::Array(_) => pg_type_oid(element),
-            element => pg_type_array_oid(element),
-        },
+        ColumnType::Array(element) => {
+            let mut element = element.as_ref();
+            while let ColumnType::Array(inner) = element {
+                element = inner;
+            }
+            pg_type_array_oid(element)
+        }
         ColumnType::Date => 1082,
         ColumnType::Time | ColumnType::TimePrecision(_) => 1083,
         ColumnType::TimeTz | ColumnType::TimeTzPrecision(_) => 1266,

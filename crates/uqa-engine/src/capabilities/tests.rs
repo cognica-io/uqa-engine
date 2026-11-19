@@ -83,15 +83,14 @@ fn catalog_views_share_schema_and_graph_allocations_until_mutation() {
     let first = engine.catalog_read_view();
     let second = engine.catalog_read_view();
     let relation = crate::RelationIdentity::new("public", "items");
-    assert!(Arc::ptr_eq(
-        &first.snapshot().tables[&relation].columns,
-        &second.snapshot().tables[&relation].columns
-    ));
-    assert!(Arc::ptr_eq(
+    assert!(first.snapshot().tables[&relation]
+        .columns
+        .shares_definition(&second.snapshot().tables[&relation].columns));
+    assert!(uqa_core::memory::RetainedValue::ptr_eq(
         &first.snapshot().definitions.graphs,
         &second.snapshot().definitions.graphs
     ));
-    assert!(Arc::ptr_eq(
+    assert!(uqa_core::memory::RetainedValue::ptr_eq(
         &first.snapshot().definitions.schemas,
         &second.snapshot().definitions.schemas
     ));

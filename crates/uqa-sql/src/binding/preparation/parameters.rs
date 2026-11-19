@@ -6,17 +6,18 @@
 
 //! Ordered parameter occurrences and their independently resolved SQL types.
 
-use super::ownership::{AnalysisMap, AnalysisType, AnalysisVec};
+use super::ownership::{AnalysisIdentity, AnalysisMap, AnalysisType, AnalysisVec};
 use crate::catalog::collations::derivation::Derivation;
 use crate::{
     plan::{OwnedScalarExpr, UnifiedPlan},
     ColumnType, SQLError, SQLParam, ScalarExpr,
 };
-use std::ptr::NonNull;
 use uqa_core::memory::{OwnedProductionControl, Produced, ProductionControl, ProductionVec};
 use uqa_core::Value;
 
 mod application;
+mod callbacks;
+pub(super) use callbacks::{InputCatalogs, LiteralInput};
 mod call_collations;
 mod collations;
 mod completion;
@@ -25,6 +26,8 @@ mod expression_type;
 mod grouping;
 mod inputs;
 mod results;
+mod rows;
+mod selection;
 pub(super) use call_collations::CallCollations;
 
 pub(super) struct ExpressionType {
@@ -44,8 +47,8 @@ pub(super) struct ExpressionType {
     // callbacks with no declared result type stay unresolved until execution.
     unknown: UnknownOrigin,
     /// The text of an `unknown` string literal, which the selected type's input function reads when a context coerces it.
-    literal: Option<(NonNull<ScalarExpr>, Produced<String>)>,
-    collation: Option<NonNull<ScalarExpr>>,
+    literal: Option<(AnalysisIdentity<ScalarExpr>, Produced<String>)>,
+    collation: Option<AnalysisIdentity<ScalarExpr>>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -56,24 +59,22 @@ enum UnknownOrigin {
     Field,
 }
 
-pub(super) struct ParameterTypes<'a> {
+pub(super) struct ParameterTypes<'a, I = InputCatalogs<'a>> {
     pub(super) collations: super::collations::PendingCollations,
     types: AnalysisVec<Option<Produced<ColumnType>>>,
     fixed_values: Option<&'a [SQLParam]>,
     occurrences: AnalysisVec<(usize, Option<Produced<ColumnType>>)>,
     input_constants: Option<InputConstants>,
-    aliases: Option<&'a dyn crate::schema::dependencies::oid_alias::OidAliasInput>,
-    enum_labels: Option<&'a dyn crate::expr::enums::EnumLabelCatalog>,
-    catalog_inputs: Option<&'a dyn crate::expr::CatalogInputFunctions>,
+    inputs: I,
     call_collations: Option<CallCollations>,
     query_schemas: Option<QuerySchemas>,
     /// Generated field references remain at stable addresses throughout analysis, including inference that does not retain an executable plan.
     row_expansions: RowExpansions,
     rewritten_blocks: RewrittenBlocks,
     canonicalize_parameters: bool,
-    composite_inputs: Option<AnalysisMap<NonNull<ScalarExpr>, OwnedScalarExpr>>,
-    reference_sites: Option<AnalysisMap<NonNull<ScalarExpr>, usize>>,
-    reference_inputs: Option<AnalysisMap<NonNull<ScalarExpr>, ConvertedInput>>,
+    composite_inputs: Option<AnalysisMap<AnalysisIdentity<ScalarExpr>, OwnedScalarExpr>>,
+    reference_sites: Option<AnalysisMap<AnalysisIdentity<ScalarExpr>, usize>>,
+    reference_inputs: Option<AnalysisMap<AnalysisIdentity<ScalarExpr>, ConvertedInput>>,
     control: OwnedProductionControl,
 }
 
@@ -87,22 +88,25 @@ pub(super) struct ConvertedInput {
 }
 
 pub(super) struct InputConstants(
-    AnalysisMap<NonNull<ScalarExpr>, ConvertedInput>,
-    AnalysisMap<NonNull<ScalarExpr>, Produced<crate::ast::FunctionBinding>>,
-    AnalysisMap<NonNull<ScalarExpr>, super::membership::MembershipAnalysis>,
+    AnalysisMap<AnalysisIdentity<ScalarExpr>, ConvertedInput>,
+    AnalysisMap<AnalysisIdentity<ScalarExpr>, Produced<crate::ast::FunctionBinding>>,
+    AnalysisMap<AnalysisIdentity<ScalarExpr>, super::membership::MembershipAnalysis>,
     collations::CollationInputs,
     results::SelectedResults,
-    AnalysisMap<NonNull<ScalarExpr>, AnalysisType>,
+    AnalysisMap<AnalysisIdentity<ScalarExpr>, AnalysisType>,
     /// Each analyzed call's input collation, recorded on the binding the call keeps.
-    AnalysisMap<NonNull<ScalarExpr>, Option<crate::catalog::collations::CollationSelection>>,
     AnalysisMap<
-        NonNull<Option<crate::ast::FunctionBinding>>,
+        AnalysisIdentity<ScalarExpr>,
+        Option<crate::catalog::collations::CollationSelection>,
+    >,
+    AnalysisMap<
+        AnalysisIdentity<Option<crate::ast::FunctionBinding>>,
         Produced<crate::ast::FunctionBinding>,
     >,
     QuerySchemas,
     RowExpansions,
     RewrittenBlocks,
-    AnalysisMap<NonNull<ScalarExpr>, usize>,
+    AnalysisMap<AnalysisIdentity<ScalarExpr>, usize>,
 );
 
 impl Default for InputConstants {
@@ -131,15 +135,16 @@ impl InputConstants {
 }
 
 type RowExpansion = AnalysisVec<(usize, Produced<Vec<OwnedScalarExpr>>)>;
-type RowExpansions = AnalysisMap<NonNull<ScalarExpr>, RowExpansion>;
+type RowExpansions = AnalysisMap<AnalysisIdentity<ScalarExpr>, RowExpansion>;
 mod rewritten_blocks;
+mod sources;
 use rewritten_blocks::{install_rewritten_block, RewrittenBlocks};
 
 #[derive(Default)]
 struct QuerySchemas {
     groupings: grouping::GroupingInputs,
-    outputs: AnalysisMap<NonNull<crate::plan::QueryPlan>, crate::RowSchema>,
-    sources: AnalysisMap<NonNull<crate::plan::SourcePlan>, crate::RowSchema>,
+    outputs: AnalysisMap<AnalysisIdentity<crate::plan::QueryPlan>, crate::RowSchema>,
+    sources: AnalysisMap<AnalysisIdentity<crate::plan::SourcePlan>, crate::RowSchema>,
 }
 
 impl QuerySchemas {
@@ -150,38 +155,102 @@ impl QuerySchemas {
             sources: AnalysisMap::new(control),
         }
     }
-    fn apply_query(&mut self, query: &mut crate::plan::QueryPlan) {
-        query.analyzed_output = self.outputs.remove(&NonNull::from(&*query));
-        query.analyzed_source = match &query.root {
+    fn apply_query(&mut self, query: &mut crate::plan::QueryPlan) -> Result<(), SQLError> {
+        let output = self.outputs.remove(&AnalysisIdentity::from(&*query));
+        let source = match &query.root {
             crate::plan::RelationalPlan::QueryBlock(block) => block
                 .from
                 .as_ref()
-                .and_then(|source| self.take_source(source))
-                .map(|source| std::sync::Arc::new(source).into()),
+                .map(|source| {
+                    self.take_source_with_control(source, &ProductionControl::uncontrolled())
+                })
+                .transpose()?
+                .flatten()
+                .map(|source| {
+                    std::sync::Arc::new(
+                        source
+                            .into_uncontrolled()
+                            .expect("ordinary source metadata"),
+                    )
+                    .into()
+                }),
             _ => None,
         };
-    }
-
-    fn take_source(
-        &mut self,
-        source: &crate::plan::SourcePlan,
-    ) -> Option<crate::plan::AnalyzedSource> {
-        let schema = self.sources.remove(&NonNull::from(source))?;
-        let children = match source {
-            crate::plan::SourcePlan::Join { left, right, .. } => Some(Box::new((
-                self.take_source(left)?,
-                self.take_source(right)?,
-            ))),
-            _ => None,
-        };
-        Some(crate::plan::AnalyzedSource { schema, children })
+        crate::plan::QueryLayoutUpdate { output, source }.install(query);
+        Ok(())
     }
 }
 
 impl<'a> ParameterTypes<'a> {
+    pub(super) fn new(types: &[Option<ColumnType>]) -> Self {
+        Self::new_with_control(types, &ProductionControl::uncontrolled())
+            .expect("ordinary analysis parameter types")
+    }
+
+    pub(super) fn new_with_control(
+        types: &[Option<ColumnType>],
+        control: &ProductionControl<'_>,
+    ) -> Result<Self, SQLError> {
+        Self::new_with_inputs(types, InputCatalogs::default(), control)
+    }
+
+    pub(super) fn with_input_constants(
+        types: &[Option<ColumnType>],
+        aliases: Option<&'a dyn crate::schema::dependencies::oid_alias::OidAliasInput>,
+        enum_labels: Option<&'a dyn crate::expr::enums::EnumLabelCatalog>,
+        catalog_inputs: Option<&'a dyn crate::expr::CatalogInputFunctions>,
+    ) -> Self {
+        Self::with_input_constants_with_control(
+            types,
+            aliases,
+            enum_labels,
+            catalog_inputs,
+            &ProductionControl::uncontrolled(),
+        )
+        .expect("ordinary input analysis")
+    }
+
+    pub(super) fn with_input_constants_with_control(
+        types: &[Option<ColumnType>],
+        aliases: Option<&'a dyn crate::schema::dependencies::oid_alias::OidAliasInput>,
+        enum_labels: Option<&'a dyn crate::expr::enums::EnumLabelCatalog>,
+        catalog_inputs: Option<&'a dyn crate::expr::CatalogInputFunctions>,
+        control: &ProductionControl<'_>,
+    ) -> Result<Self, SQLError> {
+        Ok(Self {
+            input_constants: Some(InputConstants::new(control)),
+            inputs: InputCatalogs {
+                aliases,
+                enum_labels,
+                catalog_inputs,
+            },
+            ..Self::new_with_control(types, control)?
+        })
+    }
+}
+
+impl<'a> ParameterTypes<'a, ()> {
+    /// Output binding borrows caller parameters and preserves their explicit declarations.
+    pub(super) fn fixed(values: &'a [SQLParam]) -> Self {
+        Self::fixed_with_control(values, &ProductionControl::uncontrolled())
+            .expect("ordinary fixed parameter analysis")
+    }
+
+    pub(super) fn fixed_with_control(
+        values: &'a [SQLParam],
+        control: &ProductionControl<'_>,
+    ) -> Result<Self, SQLError> {
+        Ok(Self {
+            fixed_values: Some(values),
+            ..Self::new_with_inputs(&[], (), control)?
+        })
+    }
+}
+
+impl<I: LiteralInput> ParameterTypes<'_, I> {
     pub(super) fn take_row_expansion(&mut self, expression: &ScalarExpr) -> RowExpansion {
         self.row_expansions
-            .remove(&NonNull::from(expression))
+            .remove(&AnalysisIdentity::from(expression))
             .unwrap_or_else(|| AnalysisVec::new(&self.control()))
     }
 
@@ -192,7 +261,7 @@ impl<'a> ParameterTypes<'a> {
     ) -> Result<(), SQLError> {
         if !fields.is_empty() {
             self.row_expansions
-                .insert(NonNull::from(expression), fields)?;
+                .insert(AnalysisIdentity::from(expression), fields)?;
         }
         Ok(())
     }
@@ -208,10 +277,10 @@ impl<'a> ParameterTypes<'a> {
         params: &[SQLParam],
     ) -> Result<(), SQLError> {
         let mut schemas = self.query_schemas.unwrap_or_default();
-        query.visit_queries_mut(&mut |query| {
-            install_rewritten_block(&mut self.rewritten_blocks, query);
-            schemas.apply_query(query);
-        });
+        query.try_visit_queries_mut(&mut |query| {
+            install_rewritten_block(&mut self.rewritten_blocks, query)?;
+            schemas.apply_query(query)
+        })?;
         schemas.groupings.apply_query(query, routines, params)
     }
 
@@ -237,7 +306,7 @@ impl<'a> ParameterTypes<'a> {
         if let Some(schemas) = self.query_schemas_mut() {
             schemas
                 .sources
-                .insert(NonNull::from(source), schema.clone())?;
+                .insert(AnalysisIdentity::from(source), schema.clone())?;
         }
         Ok(())
     }
@@ -246,7 +315,9 @@ impl<'a> ParameterTypes<'a> {
         &self,
         query: &crate::plan::QueryPlan,
     ) -> Option<&crate::RowSchema> {
-        self.query_schemas()?.outputs.get(&NonNull::from(query))
+        self.query_schemas()?
+            .outputs
+            .get(&AnalysisIdentity::from(query))
     }
 
     pub(super) fn retain_set_operand_coercions(
@@ -262,7 +333,7 @@ impl<'a> ParameterTypes<'a> {
         let control = owner.control();
         let Some(schema) = self
             .query_schemas_mut()
-            .and_then(|schemas| schemas.outputs.get_mut(&NonNull::from(query)))
+            .and_then(|schemas| schemas.outputs.get_mut(&AnalysisIdentity::from(query)))
         else {
             return Ok(());
         };
@@ -327,9 +398,10 @@ impl<'a> ParameterTypes<'a> {
     ) -> Result<(), SQLError> {
         let owner = self.control.clone();
         if let Some(schemas) = self.query_schemas_mut() {
-            schemas
-                .outputs
-                .insert(NonNull::from(query), output.schema(&owner.control())?)?;
+            schemas.outputs.insert(
+                AnalysisIdentity::from(query),
+                output.schema(&owner.control())?,
+            )?;
         }
         Ok(())
     }
@@ -340,7 +412,9 @@ impl<'a> ParameterTypes<'a> {
         target: AnalysisType,
     ) -> Result<(), SQLError> {
         if let Some(constants) = &mut self.input_constants {
-            constants.5.insert(NonNull::from(expression), target)?;
+            constants
+                .5
+                .insert(AnalysisIdentity::from(expression), target)?;
         }
         Ok(())
     }
@@ -382,7 +456,7 @@ impl<'a> ParameterTypes<'a> {
         value: &mut ExpressionType,
         oid: u32,
     ) -> Result<(), SQLError> {
-        let origin = NonNull::from(expression);
+        let origin = AnalysisIdentity::from(expression);
         if let Some(constants) = &mut self.input_constants {
             constants.3.select(origin, value.collation, oid)?;
         }
@@ -398,18 +472,16 @@ impl<'a> ParameterTypes<'a> {
         analysis: super::membership::MembershipAnalysis,
     ) -> Result<(), SQLError> {
         if let Some(constants) = &mut self.input_constants {
-            constants.2.insert(NonNull::from(expression), analysis)?;
+            constants
+                .2
+                .insert(AnalysisIdentity::from(expression), analysis)?;
         }
         Ok(())
     }
 
-    pub(super) fn new(types: &[Option<ColumnType>]) -> Self {
-        Self::new_with_control(types, &ProductionControl::uncontrolled())
-            .expect("ordinary analysis parameter types")
-    }
-
-    pub(super) fn new_with_control(
+    fn new_with_inputs(
         types: &[Option<ColumnType>],
+        inputs: I,
         control: &ProductionControl<'_>,
     ) -> Result<Self, SQLError> {
         let mut admitted = AnalysisVec::new(control);
@@ -428,9 +500,7 @@ impl<'a> ParameterTypes<'a> {
             occurrences: AnalysisVec::new(control),
             input_constants: None,
             collations: super::collations::PendingCollations::new(control),
-            aliases: None,
-            enum_labels: None,
-            catalog_inputs: None,
+            inputs,
             call_collations: None,
             query_schemas: None,
             row_expansions: RowExpansions::new(control),
@@ -485,13 +555,13 @@ impl<'a> ParameterTypes<'a> {
         self.composite_inputs
             .as_mut()
             .expect("composite observation mode")
-            .insert(NonNull::from(expression), replacement)?;
+            .insert(AnalysisIdentity::from(expression), replacement)?;
         Ok(())
     }
 
     pub(super) fn take_composite_inputs(
         &mut self,
-    ) -> AnalysisMap<NonNull<ScalarExpr>, OwnedScalarExpr> {
+    ) -> AnalysisMap<AnalysisIdentity<ScalarExpr>, OwnedScalarExpr> {
         self.composite_inputs
             .take()
             .expect("composite observation mode")
@@ -508,30 +578,16 @@ impl<'a> ParameterTypes<'a> {
         number: usize,
     ) -> Result<ExpressionType, SQLError> {
         if let Some(sites) = &mut self.reference_sites {
-            sites.insert(NonNull::from(expression), number)?;
+            sites.insert(AnalysisIdentity::from(expression), number)?;
         }
         if self.canonicalize_parameters {
             if let Some(constants) = &mut self.input_constants {
-                constants.11.insert(NonNull::from(expression), number)?;
+                constants
+                    .11
+                    .insert(AnalysisIdentity::from(expression), number)?;
             }
         }
         self.reference(number)
-    }
-
-    /// Output binding borrows caller parameters and preserves their explicit declarations.
-    pub(super) fn fixed(values: &'a [SQLParam]) -> Self {
-        Self::fixed_with_control(values, &ProductionControl::uncontrolled())
-            .expect("ordinary fixed parameter analysis")
-    }
-
-    pub(super) fn fixed_with_control(
-        values: &'a [SQLParam],
-        control: &ProductionControl<'_>,
-    ) -> Result<Self, SQLError> {
-        Ok(Self {
-            fixed_values: Some(values),
-            ..Self::new_with_control(&[], control)?
-        })
     }
 
     pub(super) fn with_stored_inputs(mut self) -> Self {
@@ -548,7 +604,7 @@ impl<'a> ParameterTypes<'a> {
         let control = owner.control();
         if let Some(constants) = &mut self.input_constants {
             constants.0.insert(
-                NonNull::from(expression),
+                AnalysisIdentity::from(expression),
                 ConvertedInput {
                     expression: ScalarExpr::InternalColumn(column).copy_for_rewrite(&control)?,
                     session_dependent: false,
@@ -556,7 +612,7 @@ impl<'a> ParameterTypes<'a> {
             )?;
         } else if let Some(references) = &mut self.reference_inputs {
             references.insert(
-                NonNull::from(expression),
+                AnalysisIdentity::from(expression),
                 ConvertedInput {
                     expression: ScalarExpr::InternalColumn(column).copy_for_rewrite(&control)?,
                     session_dependent: false,
@@ -575,7 +631,7 @@ impl<'a> ParameterTypes<'a> {
             .as_mut()
             .expect("stored reference observation mode")
             .insert(
-                NonNull::from(expression),
+                AnalysisIdentity::from(expression),
                 ConvertedInput {
                     expression: replacement,
                     session_dependent: false,
@@ -587,38 +643,6 @@ impl<'a> ParameterTypes<'a> {
     /// Fixed output binding can describe a subtree after ordered statement analysis, without its enclosing SQL clause.
     pub(super) fn is_output_binding(&self) -> bool {
         self.fixed_values.is_some()
-    }
-
-    pub(super) fn with_input_constants(
-        types: &[Option<ColumnType>],
-        aliases: Option<&'a dyn crate::schema::dependencies::oid_alias::OidAliasInput>,
-        enum_labels: Option<&'a dyn crate::expr::enums::EnumLabelCatalog>,
-        catalog_inputs: Option<&'a dyn crate::expr::CatalogInputFunctions>,
-    ) -> Self {
-        Self::with_input_constants_with_control(
-            types,
-            aliases,
-            enum_labels,
-            catalog_inputs,
-            &ProductionControl::uncontrolled(),
-        )
-        .expect("ordinary input analysis")
-    }
-
-    pub(super) fn with_input_constants_with_control(
-        types: &[Option<ColumnType>],
-        aliases: Option<&'a dyn crate::schema::dependencies::oid_alias::OidAliasInput>,
-        enum_labels: Option<&'a dyn crate::expr::enums::EnumLabelCatalog>,
-        catalog_inputs: Option<&'a dyn crate::expr::CatalogInputFunctions>,
-        control: &ProductionControl<'_>,
-    ) -> Result<Self, SQLError> {
-        Ok(Self {
-            input_constants: Some(InputConstants::new(control)),
-            aliases,
-            enum_labels,
-            catalog_inputs,
-            ..Self::new_with_control(types, control)?
-        })
     }
 
     /// Keep the declaration selected by analysis on the original call, without
@@ -646,7 +670,7 @@ impl<'a> ParameterTypes<'a> {
         {
             if let Some(constants) = &mut self.input_constants {
                 constants.1.insert(
-                    NonNull::from(expression),
+                    AnalysisIdentity::from(expression),
                     selected.clone_with_control(&control)?,
                 )?;
             }
@@ -657,7 +681,7 @@ impl<'a> ParameterTypes<'a> {
     /// Keep the FROM call's selected identity and invocation for planning without resolving it again outside its row scope.
     pub(super) fn retain_source_binding(
         &mut self,
-        original: NonNull<Option<crate::ast::FunctionBinding>>,
+        original: AnalysisIdentity<Option<crate::ast::FunctionBinding>>,
         selected: Produced<crate::ast::FunctionBinding>,
     ) -> Result<(), SQLError> {
         if let Some(constants) = &mut self.input_constants {
@@ -673,7 +697,9 @@ impl<'a> ParameterTypes<'a> {
         collation: Option<crate::catalog::collations::CollationSelection>,
     ) -> Result<(), SQLError> {
         if let Some(constants) = &mut self.input_constants {
-            constants.6.insert(NonNull::from(expression), collation)?;
+            constants
+                .6
+                .insert(AnalysisIdentity::from(expression), collation)?;
         } else if let Some(calls) = &mut self.call_collations {
             calls.record(expression, collation)?;
         }
@@ -687,7 +713,9 @@ impl<'a> ParameterTypes<'a> {
         selected: Produced<crate::ast::FunctionBinding>,
     ) -> Result<(), SQLError> {
         if let Some(constants) = &mut self.input_constants {
-            constants.1.insert(NonNull::from(expression), selected)?;
+            constants
+                .1
+                .insert(AnalysisIdentity::from(expression), selected)?;
         } else if let Some(calls) = &mut self.call_collations {
             calls.record_builtin(expression, selected)?;
         }

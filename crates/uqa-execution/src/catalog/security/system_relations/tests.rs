@@ -6,6 +6,8 @@
 
 use super::*;
 use std::sync::Arc;
+use uqa_sql::catalog::roles::RoleDefinition;
+use uqa_sql::catalog::roles::RoleDefinitions;
 use uqa_sql::catalog::security::{
     columns::grant_column_acl,
     system_relations::security,
@@ -18,7 +20,8 @@ use uqa_storage::{KeyValueCatalog, MemoryKeyValueStore};
 fn system_acl_restoration_round_trips_independent_table_and_attribute_tuples() {
     let catalog = KeyValueCatalog::new(Arc::new(MemoryKeyValueStore::new()));
     let relation = SystemRelation::Projected(uqa_sql::catalog::VirtualRelation::PgAuthid);
-    let roles = BTreeMap::from([("uqa".into(), RoleDefinition::bootstrap())]);
+    let roles =
+        RoleDefinitions::try_from_iter([("uqa".into(), RoleDefinition::bootstrap())]).unwrap();
     let mut expected = relation.bootstrap_security().resolve(&roles).unwrap();
     grant_acl(
         &mut expected,
@@ -45,8 +48,10 @@ fn system_acl_restoration_round_trips_independent_table_and_attribute_tuples() {
     .unwrap();
     let mut live = SystemRelationSecurities::new();
     for update in [table, column] {
+        let mut next = live.clone();
+        update.publish(&mut next).unwrap();
         update.persist(Some(&catalog)).unwrap();
-        update.publish(&mut live);
+        live = next;
     }
     let restored = restore(&catalog, &roles, false).unwrap();
     assert_eq!(security(&restored, relation), expected);
@@ -63,9 +68,46 @@ fn system_acl_restoration_round_trips_independent_table_and_attribute_tuples() {
 }
 
 #[test]
+fn denied_system_acl_successor_preserves_independent_tuples_and_releases_reservations() {
+    let budget = uqa_core::memory::MemoryBudget::new(65536);
+    let relation = SystemRelation::Projected(uqa_sql::catalog::VirtualRelation::PgAuthid);
+    let identity = RelationIdentity::new(relation.namespace(), relation.name());
+    let mut live = SystemRelationSecurities::with_budget(&budget);
+    let acl = relation.bootstrap_security().acl.unwrap();
+    for column in [None, Some("rolname"), Some("rolsuper")] {
+        SystemPrivilegeUpdate::new(relation, column.map(str::to_string), acl.clone())
+            .unwrap()
+            .publish(&mut live)
+            .unwrap();
+    }
+    let before = live.clone();
+    let update = SystemPrivilegeUpdate::new(relation, Some("rolname".into()), Vec::new()).unwrap();
+    let used = budget.used();
+    let blocked = budget.reserve(budget.available()).unwrap();
+    assert_eq!(
+        update.publish(&mut live).unwrap_err().sqlstate(),
+        Some("53200")
+    );
+    assert_eq!(live, before);
+    drop(blocked);
+    assert_eq!(budget.used(), used);
+    update.publish(&mut live).unwrap();
+    assert_eq!(live[&identity].table, before[&identity].table);
+    assert_eq!(
+        live[&identity].columns["rolsuper"],
+        before[&identity].columns["rolsuper"]
+    );
+    assert_eq!(live[&identity].columns["rolname"], update.entry);
+    assert!(!before[&identity].columns["rolname"].acl.is_empty());
+    drop((live, before));
+    assert_eq!(budget.used(), 0);
+}
+
+#[test]
 fn system_acl_restoration_rejects_malformed_identity_role_and_attribute_records() {
     let relation = SystemRelation::Projected(uqa_sql::catalog::VirtualRelation::PgAuthid);
-    let roles = BTreeMap::from([("uqa".into(), RoleDefinition::bootstrap())]);
+    let roles =
+        RoleDefinitions::try_from_iter([("uqa".into(), RoleDefinition::bootstrap())]).unwrap();
     let valid =
         SystemPrivilegeUpdate::new(relation, None, relation.bootstrap_security().acl.unwrap())
             .unwrap();
@@ -112,7 +154,8 @@ fn system_acl_restoration_rejects_malformed_identity_role_and_attribute_records(
 fn legacy_system_acl_conversion_validates_every_tuple_before_writing_and_retains_revisions() {
     let catalog = KeyValueCatalog::new(Arc::new(MemoryKeyValueStore::new()));
     let relation = SystemRelation::Projected(uqa_sql::catalog::VirtualRelation::PgAuthid);
-    let roles = BTreeMap::from([("uqa".into(), RoleDefinition::bootstrap())]);
+    let roles =
+        RoleDefinitions::try_from_iter([("uqa".into(), RoleDefinition::bootstrap())]).unwrap();
     let baseline = relation.bootstrap_security().resolve(&roles).unwrap();
     let table_key = metadata_key(relation, None);
     let column_key = metadata_key(relation, Some("rolname"));
@@ -154,7 +197,8 @@ fn legacy_system_acl_conversion_validates_every_tuple_before_writing_and_retains
 #[test]
 fn current_system_acl_format_never_falls_back_to_legacy_or_implicit_public() {
     let relation = SystemRelation::Projected(uqa_sql::catalog::VirtualRelation::PgAuthid);
-    let roles = BTreeMap::from([("uqa".into(), RoleDefinition::bootstrap())]);
+    let roles =
+        RoleDefinitions::try_from_iter([("uqa".into(), RoleDefinition::bootstrap())]).unwrap();
     let entry =
         SystemPrivilegeUpdate::new(relation, None, relation.bootstrap_security().acl.unwrap())
             .unwrap()

@@ -7,12 +7,15 @@
 //! Routine registry snapshots, retained write guards, and durable publication.
 
 pub(crate) mod encoding;
+pub mod input;
 pub(super) mod publication;
 pub(super) mod revision;
 mod values;
+use uqa_sql::catalog::roles::RoleDefinitions;
 pub use values::rewrite_composite_constants;
 
 use std::ops::DerefMut;
+use uqa_core::memory::RetainedValue;
 use uqa_sql::{routines::lifecycle::RoutineRegistry, SQLError};
 
 pub type RoutineRegistryWrite<'a> = Box<dyn DerefMut<Target = RoutineRegistry> + 'a>;
@@ -34,30 +37,37 @@ pub struct RoutineMutationContext<'a> {
     pub changes: &'a dyn crate::schema::namespaces::NamespaceCatalogChanges,
 }
 
-use std::{collections::BTreeMap, sync::Arc};
-use uqa_sql::{ast::CreateFunction, routines::SQLUserFunction};
+use std::collections::BTreeMap;
+use uqa_sql::ast::CreateFunction;
 
 pub(crate) const FUNCTIONS_METADATA_KEY: &str = "sql_functions_json";
 
 /// Select one complete metadata record so committed refresh cannot discard private routine definitions or ACL changes.
 pub fn merge_private(
     catalog: Option<&dyn uqa_storage::CatalogFacade>,
-    current: &Arc<RoutineRegistry>,
-    committed: Arc<RoutineRegistry>,
-    roles: &BTreeMap<String, uqa_sql::catalog::roles::RoleDefinition>,
+    current: &RetainedValue<RoutineRegistry>,
+    committed: RetainedValue<RoutineRegistry>,
+    roles: &RoleDefinitions,
     temporary_schema: &str,
-) -> uqa_storage::StorageBackendResult<Arc<RoutineRegistry>> {
+) -> uqa_storage::StorageBackendResult<RetainedValue<RoutineRegistry>> {
     let mut registry = if catalog.map_or(Ok(false), |catalog| {
         catalog.metadata_has_private_changes(FUNCTIONS_METADATA_KEY)
     })? {
-        Arc::clone(current)
+        RetainedValue::clone(current)
     } else {
         committed
     };
     for (name, overloads) in current.iter().filter(|(name, _)| {
         uqa_sql::schema::namespaces::removal::routine_name_occupies_schema(name, temporary_schema)
     }) {
-        Arc::make_mut(&mut registry).insert(name.clone(), overloads.clone());
+        RetainedValue::make_mut(&mut registry)
+            .insert(name.clone(), overloads.clone())
+            .map_err(|error| {
+                uqa_storage::StorageBackendError::backend(
+                    "retain temporary routine definitions",
+                    error,
+                )
+            })?;
     }
     for function in registry.values().flatten() {
         uqa_sql::routines::security::binding::validate_routine_authority(&function.def, roles)
@@ -68,7 +78,7 @@ pub fn merge_private(
 
 pub fn persist_sql_functions_snapshot(
     catalog: Option<&dyn uqa_storage::CatalogFacade>,
-    registry: &BTreeMap<String, Vec<Arc<SQLUserFunction>>>,
+    registry: &uqa_sql::routines::registry::RoutineRegistry,
 ) -> Result<(), SQLError> {
     for function in registry.values().flatten() {
         uqa_sql::routines::security::binding::validate_routine_authority_identities(&function.def)?;
@@ -103,9 +113,5 @@ fn temporary_routine_name(name: &str) -> bool {
 }
 
 pub(super) fn temporary_snapshot(registry: &RoutineRegistry) -> RoutineRegistry {
-    registry
-        .iter()
-        .filter(|(name, _)| temporary_routine_name(name))
-        .map(|(name, overloads)| (name.clone(), overloads.clone()))
-        .collect()
+    registry.temporary_only()
 }

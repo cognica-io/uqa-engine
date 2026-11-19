@@ -100,6 +100,14 @@ INSERT INTO domain_orders VALUES (2, 5);
 SELECT id, amount FROM domain_orders ORDER BY id;
 ```
 
+`ALTER DOMAIN name SET DEFAULT expression` replaces the domain default; `ALTER DOMAIN name DROP DEFAULT` removes it. Both return `ALTER DOMAIN` with no result rows and require domain ownership. Existing columns without their own default use the current domain default; an explicit column default takes precedence. A derived domain keeps the default copied when it was created. Removing its default does not revive a later base-domain default, and `SET DEFAULT NULL` remains an explicit stored NULL default. These changes preserve domain and constraint identities, participate in transaction and savepoint rollback, and survive persistent reopen. Invalid expressions retain the ordinary default-expression diagnostics.
+
+```sql execute
+ALTER DOMAIN positive_amount SET DEFAULT 2;
+INSERT INTO domain_orders (id) VALUES (3);
+SELECT amount FROM domain_orders WHERE id = 3;
+```
+
 `ALTER DOMAIN name ADD [CONSTRAINT constraint_name] CHECK (expression) [NOT VALID]`, `ADD [CONSTRAINT constraint_name] NOT NULL`, `DROP CONSTRAINT [IF EXISTS] constraint_name [CASCADE | RESTRICT]`, and `VALIDATE CONSTRAINT constraint_name` change domain constraints and return `ALTER DOMAIN` with no result rows. The domain owner may change its constraints; its type and existing constraint identities remain stable. A duplicate constraint name reports `42710`; a missing constraint reports `42704`, or a notice with `DROP CONSTRAINT IF EXISTS`.
 
 Adding a CHECK or NOT NULL constraint validates existing columns of the domain and its derived domains, including materialized views. Validation retains relation locks and reads the latest committed rows plus the transaction's own changes, even under REPEATABLE READ or SERIALIZABLE; ordinary queries keep their isolation snapshot. Failed validation reports `23514` for CHECK or `23502` for NOT NULL and rolls back the catalog change. A stored array or composite containing the domain prevents validation with `0A000`, including an empty table with such a column, as PostgreSQL 18 does.
@@ -784,6 +792,8 @@ CREATE UNIQUE INDEX orders_account_state_uq ON orders (account_id, state);
 ALTER INDEX orders_state_idx RENAME TO orders_state_lookup;
 DROP INDEX orders_state_lookup;
 ```
+
+Expression keys and predicates see the indexed table's columns and named whole row. A table name used as an argument denotes its composite row unless a column has that same name. Partial-index predicates accept boolean values and domains over boolean, including values returned by declared routines. These row and type identities remain attached to the stored definition through type, routine and table renames, table schema moves and schema renames. Rolling back those changes restores the preceding index names and bound row references.
 
 Each B-tree key column or expression requires a default operator class for its resolved SQL type. Types such as `json`, `xid`, `refcursor` and `aclitem` report `42704`, including domains over such types; the diagnostic retains the declared domain's visible name. Arrays and composite records have generic operator classes, so their declaration does not require a scalar class for every element or field, although comparing actual values can still fail. `INCLUDE` values require no key operator class. The same rule applies to PRIMARY KEY and UNIQUE declarations and to affected indexes when `ALTER COLUMN TYPE` changes their input types; a rejected alteration preserves the original schema and data.
 

@@ -6,12 +6,8 @@
 
 //! Borrow pinned foreign definitions, live registry guards and session state for native catalog operations.
 use crate::{Engine, RelationIdentity};
-use std::collections::BTreeMap;
 use uqa_execution::{
-    catalog::foreign::{
-        lookup::{ForeignLookupContext, ForeignLookupState},
-        StoredForeignTable,
-    },
+    catalog::foreign::lookup::{ForeignLookupContext, ForeignLookupState},
     schema::foreign_removal::ForeignTableRemovalContext,
 };
 use uqa_storage::StorageBackendResult;
@@ -61,17 +57,15 @@ impl ForeignLookupState for Engine {
             .as_ref()
             .map(|snapshot| snapshot.foreign_wrappers.as_ref())
     }
-    fn query_servers(
-        &self,
-    ) -> Option<&BTreeMap<String, uqa_sql::catalog::foreign_server::ForeignServerDefinition>> {
+    fn query_servers(&self) -> Option<&uqa_sql::catalog::foreign_server::ForeignServers> {
         self.query_catalog_snapshot
             .as_ref()
             .map(|snapshot| snapshot.foreign_servers.as_ref())
     }
-    fn query_tables(&self) -> Option<&BTreeMap<RelationIdentity, StoredForeignTable>> {
+    fn query_tables(&self) -> Option<&uqa_execution::catalog::foreign::ForeignTables> {
         self.query_catalog_snapshot
             .as_ref()
-            .map(|snapshot| snapshot.foreign_tables.as_ref())
+            .map(|snapshot| snapshot.foreign_catalog.tables())
     }
     fn synchronize_catalog_registries(&self) -> StorageBackendResult<()> {
         Engine::synchronize_catalog_registries(self)

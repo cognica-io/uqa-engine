@@ -70,10 +70,37 @@ impl AnalysisType {
         self,
         control: &ProductionControl<'_>,
     ) -> Result<Produced<ColumnType>, SQLError> {
+        crate::catalog::work::inline(self.into_produced_from(control, &mut ())).map_err(Into::into)
+    }
+
+    pub(in crate::binding::preparation) async fn into_produced_from<
+        W: crate::plan::ScalarInputWork,
+    >(
+        self,
+        control: &ProductionControl<'_>,
+        work: &mut W,
+    ) -> Result<Produced<ColumnType>, W::Error> {
         match self {
             Self::Inline(ty) => Ok(control.finish(ty, control.empty_reservation())?),
-            Self::Shared(ty) => ty.clone_with_control(control).map_err(Into::into),
+            Self::Shared(ty) => {
+                let output = work.ty(&ty, control).await?;
+                Self::Shared(ty).retire_from(control, work).await?;
+                Ok(output)
+            }
         }
+    }
+
+    pub(in crate::binding::preparation) async fn retire_from<W: crate::plan::ScalarInputWork>(
+        self,
+        control: &ProductionControl<'_>,
+        work: &mut W,
+    ) -> Result<(), W::Error> {
+        if let Self::Shared(ty) = self {
+            if let Some(ty) = Arc::into_inner(ty) {
+                crate::plan::retirement::retire_produced_from(ty, control, work).await?;
+            }
+        }
+        Ok(())
     }
 
     pub(in crate::binding::preparation) fn into_ordinary(self) -> ColumnType {

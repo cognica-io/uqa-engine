@@ -9,17 +9,36 @@
 use redb::Database;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock, Weak};
-use uqa_storage::mvcc::{DatabaseId, SnapshotRegistry, VersionError, VersionResult};
+use uqa_storage::mvcc::{
+    DatabaseId, MetadataEpoch, SnapshotBoundary, SnapshotRegistry, VersionError, VersionResult,
+};
 
-type Registries = HashMap<usize, (DatabaseId, Weak<SnapshotRegistry>)>;
+type Registries<Boundary> = HashMap<usize, (DatabaseId, Weak<SnapshotRegistry<Boundary>>)>;
 
 pub(super) fn registry(
     database: &Arc<Database>,
     identity: DatabaseId,
 ) -> VersionResult<Arc<SnapshotRegistry>> {
-    static REGISTRIES: OnceLock<Mutex<Registries>> = OnceLock::new();
+    static REGISTRIES: OnceLock<Mutex<Registries<uqa_storage::mvcc::CommitSequence>>> =
+        OnceLock::new();
+    shared_registry(&REGISTRIES, database, identity)
+}
+
+pub(super) fn metadata_registry(
+    database: &Arc<Database>,
+    identity: DatabaseId,
+) -> VersionResult<Arc<SnapshotRegistry<MetadataEpoch>>> {
+    static REGISTRIES: OnceLock<Mutex<Registries<MetadataEpoch>>> = OnceLock::new();
+    shared_registry(&REGISTRIES, database, identity)
+}
+
+fn shared_registry<Boundary: SnapshotBoundary>(
+    cache: &OnceLock<Mutex<Registries<Boundary>>>,
+    database: &Arc<Database>,
+    identity: DatabaseId,
+) -> VersionResult<Arc<SnapshotRegistry<Boundary>>> {
     let key = Arc::as_ptr(database) as usize;
-    let mut registries = REGISTRIES
+    let mut registries = cache
         .get_or_init(Mutex::default)
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);

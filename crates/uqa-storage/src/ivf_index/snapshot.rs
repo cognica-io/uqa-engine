@@ -10,17 +10,17 @@ use std::convert::Infallible;
 
 use uqa_core::memory::Budgeted;
 
-use super::{prepare::workspace_bytes, IVFIndex};
+use super::{prepare::workspace_bytes, IVFData};
 use crate::{read_control::StorageReadControl, StorageBackendResult};
 
-impl IVFIndex {
+impl IVFData {
     pub(super) fn snapshot_controlled(
         &self,
         control: &StorageReadControl,
     ) -> StorageBackendResult<Budgeted<Self>> {
         control.check()?;
-        let count = self.vectors.lock().len();
-        let clusters = self.centroids.lock().len().max(self.nlist.min(count));
+        let count = self.vectors.len();
+        let clusters = self.centroids.len().max(self.nlist.min(count));
         let memory =
             control
                 .memory()
@@ -44,35 +44,35 @@ impl IVFIndex {
 
     fn clone_checked<E>(&self, mut check: impl FnMut() -> Result<(), E>) -> Result<Self, E> {
         check()?;
-        // Training publishes assignments, centroids, lists and counters while holding the vectors lock. Keep the same lock through capture so readers never combine different generations.
-        let vectors = self.vectors.lock();
+        // The immutable borrow comes from the index's single state boundary, so all dependent fields belong to one training generation.
+        let vectors = &self.vectors;
         let mut candidate = Self::with_params(
             self.dimensions,
             self.nlist,
             self.nprobe(),
             self.train_threshold,
         );
-        for (key, vector) in vectors.iter() {
+        for (key, vector) in vectors {
             check()?;
-            candidate.vectors.get_mut().insert(*key, vector.clone());
+            candidate.vectors.insert(*key, vector.clone());
         }
-        let centroids = self.centroids.lock();
-        *candidate.centroids.get_mut() = Vec::with_capacity(centroids.len());
-        for centroid in centroids.iter() {
+        let centroids = &self.centroids;
+        candidate.centroids = Vec::with_capacity(centroids.len());
+        for centroid in centroids {
             check()?;
-            candidate.centroids.get_mut().push(centroid.clone());
+            candidate.centroids.push(centroid.clone());
         }
-        drop(centroids);
-        let lists = self.inverted_lists.lock();
-        *candidate.inverted_lists.get_mut() = Vec::with_capacity(lists.len());
-        for list in lists.iter() {
+
+        let lists = &self.inverted_lists;
+        candidate.inverted_lists = Vec::with_capacity(lists.len());
+        for list in lists {
             check()?;
-            candidate.inverted_lists.get_mut().push(list.clone());
+            candidate.inverted_lists.push(list.clone());
         }
         check()?;
-        *candidate.state.get_mut() = self.state();
-        *candidate.trained_size.get_mut() = *self.trained_size.lock();
-        *candidate.deletes_since_train.get_mut() = *self.deletes_since_train.lock();
+        candidate.state = self.state();
+        candidate.trained_size = self.trained_size;
+        candidate.deletes_since_train = self.deletes_since_train;
         Ok(candidate)
     }
 }

@@ -7,14 +7,13 @@
 use super::*;
 use std::borrow::Cow;
 
-fn table_call() -> (
-    Arc<crate::routines::SQLUserFunction>,
-    crate::ast::FunctionBinding,
-) {
+fn table_call() -> (crate::routines::SQLRoutine, crate::ast::FunctionBinding) {
     let (mut function, mut binding) = bound_call();
-    Arc::get_mut(&mut function).unwrap().def.returns = FunctionReturns::SetOf {
-        type_name: "public.accepted_value".into(),
-    };
+    edit_definition(&mut function, |definition| {
+        definition.returns = FunctionReturns::SetOf {
+            type_name: "public.accepted_value".into(),
+        };
+    });
     binding.invocation.as_mut().unwrap().return_type = Some("public.accepted_value".into());
     (function, binding)
 }

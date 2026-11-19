@@ -14,6 +14,11 @@ use uqa_analysis::{AnalyzerResources, CompiledAnalyzer};
 
 use crate::{AnalyzerPhase, InvertedIndex, StorageBackendError, StorageBackendResult};
 
+pub mod capture;
+mod image;
+pub mod registry;
+mod stored;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AnalyzerBindingOwner {
@@ -24,15 +29,15 @@ pub enum AnalyzerBindingOwner {
 }
 
 #[derive(Debug, Clone)]
-pub struct BoundAnalyzerRevision {
+pub struct BoundAnalyzerRevision<T = Arc<CompiledAnalyzer>> {
     pub name: Option<String>,
-    pub compiled: Arc<CompiledAnalyzer>,
+    pub compiled: T,
 }
 
 #[derive(Debug, Clone)]
-pub struct FieldAnalyzerBinding {
-    pub index: BoundAnalyzerRevision,
-    pub search: BoundAnalyzerRevision,
+pub struct FieldAnalyzerBinding<T = Arc<CompiledAnalyzer>> {
+    pub index: BoundAnalyzerRevision<T>,
+    pub search: BoundAnalyzerRevision<T>,
     pub owner: AnalyzerBindingOwner,
     pub last_phase: AnalyzerPhase,
 }
@@ -96,19 +101,56 @@ impl FieldAnalyzerBinding {
         result
     }
 
+    /// GIN ownership can extend the same exact revision but cannot replace a field assignment or another installed GIN revision.
+    pub fn assigned_gin(
+        &self,
+        name: &str,
+        revision: Arc<CompiledAnalyzer>,
+    ) -> StorageBackendResult<Self> {
+        match self.owner {
+            AnalyzerBindingOwner::Field
+                if self.index.name.is_some() || self.search.name.is_some() =>
+            {
+                return Err(StorageBackendError::Other(
+                    "GIN analyzer option competes with an existing field assignment".into(),
+                ));
+            }
+            AnalyzerBindingOwner::Gin
+                if self.index.name.as_deref() != Some(name)
+                    || self.index.compiled.descriptor().fingerprint()
+                        != revision.descriptor().fingerprint() =>
+            {
+                return Err(StorageBackendError::Other(
+                    "GIN analyzer option competes with an existing GIN revision".into(),
+                ));
+            }
+            _ => {}
+        }
+        Ok(self.assigned(
+            name,
+            revision,
+            AnalyzerPhase::Both,
+            AnalyzerBindingOwner::Gin,
+        ))
+    }
+
     pub fn uses_name(&self, name: &str) -> bool {
         self.index.name.as_deref() == Some(name) || self.search.name.as_deref() == Some(name)
     }
 
     /// Compatibility label for the most recent explicit assignment. Exact execution always uses both retained revisions.
     pub fn last_assignment(&self) -> Option<(String, String)> {
+        self.last_assignment_ref()
+            .map(|(name, phase)| (name.to_owned(), phase.to_owned()))
+    }
+
+    /// Borrow the last assignment label without copying either native name.
+    pub fn last_assignment_ref(&self) -> Option<(&str, &'static str)> {
         let side = match self.last_phase {
             AnalyzerPhase::Index | AnalyzerPhase::Both => &self.index,
             AnalyzerPhase::Search => &self.search,
         };
-        side.name
-            .clone()
-            .map(|name| (name, self.phase_name().to_owned()))
+        side.name.as_deref().map(|name| (name, self.phase_name()))
     }
 
     pub fn phase_name(&self) -> &'static str {
@@ -180,7 +222,9 @@ impl FieldAnalyzerBinding {
         restored.validate()?;
         Ok(restored)
     }
+}
 
+impl<T: std::borrow::Borrow<CompiledAnalyzer>> FieldAnalyzerBinding<T> {
     fn validate(&self) -> StorageBackendResult<()> {
         for side in [&self.index, &self.search] {
             if side
@@ -199,8 +243,8 @@ impl FieldAnalyzerBinding {
             AnalyzerPhase::Both => {
                 self.index.name != self.search.name
                     || (self.index.name.is_some()
-                        && self.index.compiled.descriptor().fingerprint()
-                            != self.search.compiled.descriptor().fingerprint())
+                        && self.index.compiled.borrow().descriptor().fingerprint()
+                            != self.search.compiled.borrow().descriptor().fingerprint())
             }
         };
         if invalid_last_assignment {
@@ -211,8 +255,8 @@ impl FieldAnalyzerBinding {
         if self.owner == AnalyzerBindingOwner::Gin
             && (self.index.name.is_none()
                 || self.index.name != self.search.name
-                || self.index.compiled.descriptor().fingerprint()
-                    != self.search.compiled.descriptor().fingerprint()
+                || self.index.compiled.borrow().descriptor().fingerprint()
+                    != self.search.compiled.borrow().descriptor().fingerprint()
                 || self.last_phase != AnalyzerPhase::Both)
         {
             return Err(StorageBackendError::Other(

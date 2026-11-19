@@ -10,10 +10,10 @@ use super::RoutineRegistry;
 use crate::{
     ast::{CreateFunction, FunctionBinding, FunctionBody},
     catalog::events::RuleColumnDependency,
-    routines::{routine_signature_types, SQLUserFunction},
+    routines::routine_signature_types,
     SQLError,
 };
-use std::{collections::BTreeSet, sync::Arc};
+use std::collections::BTreeSet;
 use uqa_core::RelationIdentity;
 
 pub fn routine_column_drop_dependencies(
@@ -87,15 +87,15 @@ pub fn routine_column_alias_drop_candidates(
     Ok(definitions)
 }
 
-pub fn routine_body_rewrite_target<'a>(
-    rewritten: &'a mut RoutineRegistry,
+pub fn routine_body_rewrite_target(
+    rewritten: &RoutineRegistry,
     definition: &CreateFunction,
-) -> Result<&'a mut Arc<SQLUserFunction>, SQLError> {
+) -> Result<usize, SQLError> {
     let signature = routine_signature_types(definition);
     rewritten
-        .get_mut(&definition.name)
+        .get(&definition.name)
         .and_then(|overloads| {
-            overloads.iter_mut().find(|function| {
+            overloads.iter().position(|function| {
                 function.def.object_id == definition.object_id
                     && function.def.is_procedure == definition.is_procedure
                     && routine_signature_types(&function.def) == signature

@@ -9,7 +9,7 @@
 use super::{
     c_char, c_int, ffi, fill_random, fs, invalid_data, normalize_path, options_for_path, ptr,
     sync_parent_directory, AtomicOrdering, AtomicU64, CStr, CompressedSQLiteFile, Duration,
-    FileHandle, FileLocks, Path, PathBuf, SystemTime, VfsFile, IO_METHODS, UNIX_EPOCH,
+    FileHandle, FileLocks, OpenScope, Path, PathBuf, SystemTime, VfsFile, IO_METHODS, UNIX_EPOCH,
 };
 
 pub(super) unsafe extern "C" fn vfs_open(
@@ -18,6 +18,26 @@ pub(super) unsafe extern "C" fn vfs_open(
     file: *mut ffi::sqlite3_file,
     flags: c_int,
     out_flags: *mut c_int,
+) -> c_int {
+    unsafe { open_file(name, file, flags, out_flags, OpenScope::Registration) }
+}
+
+pub(super) unsafe extern "C" fn vfs_open_pool(
+    _vfs: *mut ffi::sqlite3_vfs,
+    name: ffi::sqlite3_filename,
+    file: *mut ffi::sqlite3_file,
+    flags: c_int,
+    out_flags: *mut c_int,
+) -> c_int {
+    unsafe { open_file(name, file, flags, out_flags, OpenScope::Pool) }
+}
+
+unsafe fn open_file(
+    name: ffi::sqlite3_filename,
+    file: *mut ffi::sqlite3_file,
+    flags: c_int,
+    out_flags: *mut c_int,
+    scope: OpenScope,
 ) -> c_int {
     let path = if name.is_null() {
         match temp_path() {
@@ -43,7 +63,8 @@ pub(super) unsafe extern "C" fn vfs_open(
         return ffi::SQLITE_CANTOPEN;
     }
     let open_result = FileLocks::open(&normalized, read_only).and_then(|locks| {
-        VfsFile::open(normalized, options, flags, read_only).map(|container| (container, locks))
+        VfsFile::open(normalized, options, flags, read_only, scope)
+            .map(|container| (container, locks))
     });
     let compressed = file.cast::<CompressedSQLiteFile>();
     unsafe {

@@ -8,7 +8,7 @@
 
 use super::{
     sequence::{self as acl, role_has_privilege, AclPrivilege, PrivilegeCheck},
-    BoundSequenceSecurity,
+    sequence_registry::SequenceSecurities,
 };
 use crate::catalog::roles::identity::RoleSubject;
 use crate::{
@@ -18,11 +18,10 @@ use crate::{
     },
     SQLError,
 };
-use std::{collections::BTreeMap, ops::Deref};
+use std::ops::Deref;
 use uqa_core::{RelationIdentity, Value};
 
-pub type SequenceSecurityRead<'a> =
-    Box<dyn Deref<Target = BTreeMap<RelationIdentity, BoundSequenceSecurity>> + 'a>;
+pub type SequenceSecurityRead<'a> = Box<dyn Deref<Target = SequenceSecurities> + 'a>;
 pub trait SequenceSecurityCatalog {
     fn security_read(&self) -> SequenceSecurityRead<'_>;
 }

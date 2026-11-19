@@ -6,7 +6,7 @@
 
 //! Root visitors borrow ordinary field names and retain only escape scratch.
 
-use super::{decode_json_string, Budgeted, JsonReadError, JsonValueDecoder};
+use super::{Budgeted, JsonReadError, JsonValueDecoder};
 
 pub(super) enum FieldName<'a> {
     Borrowed(&'a str),
@@ -22,11 +22,7 @@ impl<'a> FieldName<'a> {
         decoder: &JsonValueDecoder<'_>,
     ) -> Result<Self, JsonReadError> {
         if token.contains(&b'\\') {
-            Ok(Self::Decoded(decode_json_string(
-                token,
-                decoder.memory,
-                decoder.cancellation,
-            )?))
+            Ok(Self::Decoded(decoder.text(token)?))
         } else {
             // JsonReader has already validated quotes, Unicode and controls.
             Ok(Self::Borrowed(

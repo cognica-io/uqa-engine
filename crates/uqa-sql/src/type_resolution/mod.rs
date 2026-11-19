@@ -79,8 +79,11 @@ pub use operators::comparison::{
     type_supports_ordering, ComparisonKeySupport,
 };
 mod overload_resolution;
-pub use overload_resolution::canonical_routine_type_name_with_control;
 pub(crate) use overload_resolution::resolve_local_builtin_call_with_control;
+pub use overload_resolution::{
+    canonical_routine_type_name_from_input, canonical_routine_type_name_with_control,
+    RoutineSignatureInputError,
+};
 mod qualified_column;
 mod range;
 mod range_offsets;
@@ -122,6 +125,7 @@ pub use common::{
 };
 pub use equality::{
     equality_operand_type, equality_operand_type_with_control, foreign_key_operand_type,
+    foreign_key_operand_type_with_control,
 };
 pub(crate) use fixed_builtin::resolve_syntax_binding_with_control as resolve_fixed_syntax_binding_with_control;
 #[doc(hidden)]

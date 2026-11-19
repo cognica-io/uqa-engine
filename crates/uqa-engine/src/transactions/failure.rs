@@ -12,6 +12,9 @@ use super::{
     TransactionDirtyState, TransactionFrame, TransactionStatus,
 };
 
+#[cfg(test)]
+mod tests;
+
 pub(super) fn panic_description(payload: &(dyn std::any::Any + Send)) -> &str {
     payload
         .downcast_ref::<&str>()
@@ -23,7 +26,7 @@ pub(super) fn panic_description(payload: &(dyn std::any::Any + Send)) -> &str {
 struct StatementAbortSnapshot {
     storage_savepoint: Option<StorageSavepointId>,
     session: SessionStateSnapshot,
-    data: Option<EngineDataSnapshot>,
+    data: Option<std::sync::Arc<EngineDataSnapshot>>,
     dirty: TransactionDirtyState,
     keep_mark: Option<u32>,
     /// The length the frame's row changes return to.
@@ -193,7 +196,11 @@ impl Engine {
         let rollback_state = statement_abort_snapshot(frame);
         let storage_savepoint = rollback_state.storage_savepoint.or(frame.storage_savepoint);
         let outer_frame = &stack[0];
-        let nontransactional_sequence_values = outer_frame.nontransactional_sequence_values.clone();
+        let nontransactional_sequence_values = outer_frame
+            .nontransactional_sequence_values
+            .read()
+            .values()
+            .clone();
         let mut cleanup_errors = Vec::new();
         let backend_aborted = match self
             .rollback_failed_statement_backend(&stack, storage_savepoint)
@@ -228,7 +235,9 @@ impl Engine {
             }
         }
         self.restore_transaction_dirty_state(rollback_state.dirty);
-        self.drop_persistent_value_indexes();
+        if let Err(error) = self.drop_persistent_value_indexes() {
+            cleanup_errors.push(format!("value-index retirement: {error}"));
+        }
         if self.storage.backend.is_some() {
             self.reload_catalogs_after_rollback(&mut cleanup_errors);
         }

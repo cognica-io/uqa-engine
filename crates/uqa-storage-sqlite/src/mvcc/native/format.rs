@@ -19,6 +19,8 @@ use super::{
 use crate::mvcc::{codec, schema, write, PhysicalResult};
 
 mod graph_lookup_upgrade;
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+pub(super) mod image;
 mod occurrence_accelerators;
 
 const LEGACY_FORMAT: &str = "CREATE TABLE _uqa_mvcc_native_format (singleton INTEGER PRIMARY KEY CHECK(singleton = 1), format INTEGER NOT NULL CHECK(format = 1), catalog_version INTEGER NOT NULL CHECK(catalog_version = 49))";
@@ -222,15 +224,7 @@ pub(in crate::mvcc) fn initialize_in(
         );
     }
     // Older catalogs could install their generic cache triggers on raw record tables. Internal persistence bookkeeping must never change the logical cache generations.
-    for table in [
-        "_uqa_mvcc_metadata",
-        "_uqa_mvcc_heads",
-        "_uqa_mvcc_runs",
-        "_uqa_mvcc_versions",
-        "_uqa_mvcc_version_metadata",
-        "_uqa_mvcc_transactions",
-        "_uqa_mvcc_identifiers",
-    ] {
+    for (table, _) in schema::TABLES {
         for action in ["INSERT", "UPDATE", "DELETE"] {
             transaction.execute_batch(&format!(
                 "DROP TRIGGER IF EXISTS uqa_cache_{table}_{action}"
@@ -689,7 +683,22 @@ fn require_definition(connection: &Connection, name: &str, sql: &str) -> Physica
 }
 
 fn validate_cache_triggers(connection: &Connection, version: u32) -> PhysicalResult<()> {
-    for family in families(version).filter(|family| {
+    for family in cache_families(version) {
+        let layout = family.layout();
+        for event in ["INSERT", "DELETE", "UPDATE"] {
+            let (name, sql) = crate::Catalog::cache_revision_trigger(
+                layout.table,
+                layout.columns.contains(&"table_name"),
+                event,
+            );
+            require_definition(connection, &name, &sql)?;
+        }
+    }
+    Ok(())
+}
+
+fn cache_families(version: u32) -> impl Iterator<Item = Family> {
+    families(version).filter(|family| {
         !family.is_standalone_graph()
             && !matches!(
                 family,
@@ -707,18 +716,7 @@ fn validate_cache_triggers(connection: &Connection, version: u32) -> PhysicalRes
                     | Family::VectorPopulationWitnesses
                     | Family::SequenceValues
             )
-    }) {
-        let layout = family.layout();
-        for event in ["INSERT", "DELETE", "UPDATE"] {
-            let (name, sql) = crate::Catalog::cache_revision_trigger(
-                layout.table,
-                layout.columns.contains(&"table_name"),
-                event,
-            );
-            require_definition(connection, &name, &sql)?;
-        }
-    }
-    Ok(())
+    })
 }
 
 fn families(version: u32) -> impl Iterator<Item = Family> {
@@ -739,6 +737,7 @@ fn families(version: u32) -> impl Iterator<Item = Family> {
 }
 
 fn validate_layouts(connection: &Connection, version: u32) -> PhysicalResult<()> {
+    schema::image_binding::validate(connection)?;
     for family in families(version) {
         let layout = family.layout();
         let mut statement = connection.prepare(&format!("PRAGMA table_info({})", layout.table))?;
@@ -794,16 +793,8 @@ fn validate_layouts(connection: &Connection, version: u32) -> PhysicalResult<()>
             && !crate::btree_index::coverage::TABLES
                 .iter()
                 .any(|(table, _)| *table == name)
-            && !matches!(
-                name,
-                "_uqa_mvcc_metadata"
-                    | "_uqa_mvcc_heads"
-                    | "_uqa_mvcc_runs"
-                    | "_uqa_mvcc_versions"
-                    | "_uqa_mvcc_version_metadata"
-                    | "_uqa_mvcc_transactions"
-                    | "_uqa_mvcc_identifiers"
-            )
+            && !schema::TABLES.iter().any(|(table, _)| *table == name)
+            && name != schema::image_binding::IMAGE.0
         {
             return Err(invalid("unmapped native table requires an explicit record family").into());
         }

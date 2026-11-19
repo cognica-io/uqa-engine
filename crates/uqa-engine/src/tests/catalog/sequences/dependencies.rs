@@ -102,7 +102,7 @@ fn schemas(engine: &Engine) -> serde_json::Value {
     let table = engine.storage.tables.read()[&RelationIdentity::new("public", "items")].clone();
     let columns = table.columns.read().clone();
     let checks = table.table_checks.read().clone();
-    let foreign = engine.durable.foreign_tables.read()
+    let foreign = engine.durable.foreign_catalog.tables()
         [&RelationIdentity::new("public", "foreign_items")]
         .columns
         .clone();
@@ -122,7 +122,7 @@ fn assert_detached(engine: &Engine) {
     assert!(columns[0].auto_increment.is_none());
     assert!(columns[1].default.is_some());
     assert!(table.table_checks.read().is_empty());
-    assert!(engine.durable.foreign_tables.read()
+    assert!(engine.durable.foreign_catalog.tables()
         [&RelationIdentity::new("public", "foreign_items")]
         .columns[0]
         .default

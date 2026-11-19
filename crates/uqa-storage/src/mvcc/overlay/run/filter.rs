@@ -21,6 +21,10 @@ pub(super) struct KeyFilter {
 }
 
 impl KeyFilter {
+    pub(super) fn retained_bytes(&self) -> Option<usize> {
+        self.words.capacity().checked_mul(size_of::<u64>())
+    }
+
     /// A filter for `keys` keys, or `None` when it would occupy more than a quarter of the available workspace needed by the run index and readers. Omitting it makes lookups slower but exact.
     pub(super) fn with_capacity(keys: u64, memory: &MemoryBudget) -> Option<Self> {
         let bits = keys

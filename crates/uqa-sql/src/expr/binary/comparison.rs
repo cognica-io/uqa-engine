@@ -11,6 +11,8 @@ use super::{BinaryOp, Result, SQLError, Value};
 use std::cmp::Ordering;
 use uqa_core::memory::ProductionControl;
 
+mod eligibility;
+pub use eligibility::{value_comparison_can_fail, value_comparison_can_fail_from};
 mod collations;
 pub use collations::{
     compare_typed_values_with_catalog_and_collation, equal_typed_values_with_catalog_and_collation,
@@ -732,31 +734,6 @@ pub fn type_comparison_can_fail(ty: &crate::ast::ColumnType) -> bool {
         | ColumnType::Composite(_)
         | ColumnType::Array(_) => true,
         ColumnType::Domain { base: element, .. } => type_comparison_can_fail(element),
-        _ => false,
-    }
-}
-
-/// Whether an opaque value key can suppress a SQL operator failure. A single such input remains legal until an operator compares it.
-pub fn value_comparison_can_fail(value: &Value) -> bool {
-    match value {
-        Value::Datum(_) => true,
-        Value::LegacyVector(vector) => {
-            vector.kind() == uqa_core::LegacyVectorKind::Oid && !vector.has_vector_layout()
-        }
-        Value::Array(array) => {
-            array.element_type_oid().is_some()
-                || array.elements().iter().any(value_comparison_can_fail)
-        }
-        Value::Row(values) => {
-            values.field_types().is_some() || values.iter().any(value_comparison_can_fail)
-        }
-        Value::List(values) => values.iter().any(value_comparison_can_fail),
-        Value::Record(fields) => {
-            fields.type_oid().is_some()
-                || fields
-                    .iter()
-                    .any(|(_, value)| value_comparison_can_fail(value))
-        }
         _ => false,
     }
 }

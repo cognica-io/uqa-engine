@@ -5,9 +5,8 @@
 //
 
 //! Bind view restoration to live registry guards and the catalog-opening mode.
-use crate::{open::CatalogRestoreMode, CatalogFacade, Engine, StorageBackendResult, TableState};
-use parking_lot::RwLockReadGuard;
-use std::{collections::BTreeMap, sync::Arc};
+use crate::{open::CatalogRestoreMode, CatalogFacade, Engine, StorageBackendResult};
+use parking_lot::MappedRwLockReadGuard;
 use uqa_core::RelationIdentity;
 use uqa_execution::catalog::view::{
     restoration::{
@@ -21,7 +20,7 @@ use uqa_execution::catalog::view::{
 };
 use uqa_sql::{RowSchema, SQLError};
 
-struct TableNamesRead<'a>(RwLockReadGuard<'a, BTreeMap<RelationIdentity, Arc<TableState>>>);
+struct TableNamesRead<'a>(MappedRwLockReadGuard<'a, crate::state::TableRegistryMap>);
 impl ViewRestoreTableNames for TableNamesRead<'_> {
     fn names(&self) -> Box<dyn Iterator<Item = &RelationIdentity> + '_> {
         Box::new(self.0.keys())
@@ -40,7 +39,7 @@ impl ViewRestoreNamespace for Engine {
         Box::new(TableNamesRead(self.storage.tables.read()))
     }
     fn foreign_tables(&self) -> ViewRestoreForeignRead<'_> {
-        Box::new(self.durable.foreign_tables.read())
+        Box::new(self.durable.foreign_catalog.tables())
     }
     fn graphs(&self) -> ViewRestoreGraphsRead<'_> {
         Box::new(self.durable.graphs.read())

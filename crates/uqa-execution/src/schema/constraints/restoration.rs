@@ -19,7 +19,9 @@ pub const FOREIGN_KEY_IDENTITY_METADATA_KEY: &str = "sql_foreign_key_catalog_ide
 pub const CATALOG_ADDRESS_METADATA_KEY: &str = "sql_constraint_catalog_address_version";
 
 mod addresses;
+mod claims;
 mod hierarchy;
+pub mod input;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum AttributeFormat {
@@ -31,10 +33,19 @@ pub fn require_attribute_format(
     catalog: &dyn CatalogFacade,
     allow_migration: bool,
 ) -> StorageBackendResult<AttributeFormat> {
-    match catalog
-        .get_metadata(RELATION_ATTRIBUTE_METADATA_KEY)?
-        .as_deref()
-    {
+    attribute_format(
+        catalog
+            .get_metadata(RELATION_ATTRIBUTE_METADATA_KEY)?
+            .as_deref(),
+        allow_migration,
+    )
+}
+
+fn attribute_format(
+    value: Option<&str>,
+    allow_migration: bool,
+) -> StorageBackendResult<AttributeFormat> {
+    match value {
         Some("1") => Ok(AttributeFormat::Numbered),
         None if allow_migration => Ok(AttributeFormat::Legacy),
         None => Err(StorageBackendError::Other(
@@ -46,21 +57,35 @@ pub fn require_attribute_format(
     }
 }
 
+fn not_null_format(value: Option<&str>, allow_legacy: bool) -> StorageBackendResult<bool> {
+    identity_format(
+        value,
+        allow_legacy,
+        "NOT NULL constraints require an initial catalog identity migration",
+        "unknown NOT NULL constraint identity format",
+    )
+}
+
+fn identity_format(
+    value: Option<&str>,
+    allow_legacy: bool,
+    missing: &str,
+    unsupported: &str,
+) -> StorageBackendResult<bool> {
+    match value {
+        Some("1") => Ok(false),
+        None if allow_legacy => Ok(true),
+        None => Err(StorageBackendError::Other(missing.into())),
+        Some(_) => Err(StorageBackendError::Other(unsupported.into())),
+    }
+}
+
 /// Validate a load-only catalog without allocating identities or publishing repairs.
 pub fn validate_constraint_formats(catalog: &dyn CatalogFacade) -> StorageBackendResult<()> {
-    match catalog.get_metadata(IDENTITY_METADATA_KEY)?.as_deref() {
-        Some("1") => {}
-        None => {
-            return Err(StorageBackendError::Other(
-                "NOT NULL constraints require an initial catalog identity migration".into(),
-            ))
-        }
-        Some(_) => {
-            return Err(StorageBackendError::Other(
-                "unknown NOT NULL constraint identity format".into(),
-            ))
-        }
-    }
+    not_null_format(
+        catalog.get_metadata(IDENTITY_METADATA_KEY)?.as_deref(),
+        false,
+    )?;
     require_foreign_key_identity_format(catalog, false)?;
     addresses::require_format(catalog, false)?;
     require_attribute_format(catalog, false)?;
@@ -70,8 +95,7 @@ pub fn validate_constraint_formats(catalog: &dyn CatalogFacade) -> StorageBacken
 /// Validate a load-only catalog without allocating identities or publishing repairs.
 pub fn validate_constraint_catalog(catalog: &dyn CatalogFacade) -> StorageBackendResult<()> {
     validate_constraint_formats(catalog)?;
-    let mut identities = BTreeSet::new();
-    let mut oids = BTreeSet::new();
+    let mut identities = claims::GlobalClaims::default();
     let mut validate = |columns: &[uqa_sql::ast::ColumnDef],
                         constraints: &uqa_sql::ast::TableConstraintSet| {
         uqa_sql::catalog::relation_attributes::validate(columns, &constraints.dropped_attributes)
@@ -85,7 +109,7 @@ pub fn validate_constraint_catalog(catalog: &dyn CatalogFacade) -> StorageBacken
             constraints,
         )
         .map_err(|error| StorageBackendError::backend("constraint identity", error))?;
-        register_identities(columns, constraints, &mut identities, &mut oids)
+        register_identities(columns, constraints, &mut identities)
     };
     let names = crate::schema::indexes::constraint_names::KeyConstraintNames::load(catalog)?;
     for row in catalog.load_tables()? {
@@ -122,15 +146,10 @@ pub fn validate_constraint_catalog(catalog: &dyn CatalogFacade) -> StorageBacken
 }
 
 pub fn migrate_constraint_catalog(catalog: &dyn CatalogFacade) -> StorageBackendResult<()> {
-    let legacy = match catalog.get_metadata(IDENTITY_METADATA_KEY)?.as_deref() {
-        None => true,
-        Some("1") => false,
-        Some(_) => {
-            return Err(StorageBackendError::Other(
-                "unknown NOT NULL constraint identity format".into(),
-            ))
-        }
-    };
+    let legacy = not_null_format(
+        catalog.get_metadata(IDENTITY_METADATA_KEY)?.as_deref(),
+        true,
+    )?;
     let foreign_legacy = require_foreign_key_identity_format(catalog, true)?;
     let address_legacy = addresses::require_format(catalog, true)?;
     let attribute_format = require_attribute_format(catalog, true)?;
@@ -292,47 +311,34 @@ fn require_foreign_key_identity_format(
     catalog: &dyn CatalogFacade,
     allow_legacy: bool,
 ) -> StorageBackendResult<bool> {
-    match catalog
-        .get_metadata(FOREIGN_KEY_IDENTITY_METADATA_KEY)?
-        .as_deref()
-    {
-        Some("1") => Ok(false),
-        None if allow_legacy => Ok(true),
-        None => Err(StorageBackendError::Other(
-            "foreign keys require an initial catalog identity migration".into(),
-        )),
-        Some(_) => Err(StorageBackendError::Other(
-            "unknown foreign-key catalog identity format".into(),
-        )),
-    }
+    foreign_key_format(
+        catalog
+            .get_metadata(FOREIGN_KEY_IDENTITY_METADATA_KEY)?
+            .as_deref(),
+        allow_legacy,
+    )
+}
+
+fn foreign_key_format(value: Option<&str>, allow_legacy: bool) -> StorageBackendResult<bool> {
+    identity_format(
+        value,
+        allow_legacy,
+        "foreign keys require an initial catalog identity migration",
+        "unknown foreign-key catalog identity format",
+    )
 }
 
 fn register_identities(
     columns: &[uqa_sql::ast::ColumnDef],
     constraints: &uqa_sql::ast::TableConstraintSet,
-    identities: &mut BTreeSet<[u8; 16]>,
-    oids: &mut BTreeSet<i64>,
+    claims: &mut claims::GlobalClaims,
 ) -> StorageBackendResult<()> {
-    for identity in columns.iter().filter_map(|column| column.not_null_identity) {
-        if !identities.insert(identity.object_id) || !oids.insert(identity.oid) {
-            return Err(StorageBackendError::Other(
-                "duplicate NOT NULL constraint catalog identity".into(),
-            ));
-        }
-    }
-    for identity in foreign_keys::identities(columns, constraints).flatten() {
-        if !identities.insert(identity.object_id) || !oids.insert(identity.oid) {
-            return Err(StorageBackendError::Other(
-                "duplicate foreign-key catalog identity".into(),
-            ));
-        }
-    }
-    for identity in addresses::key_and_check_identities(columns, constraints) {
-        if !identities.insert(identity.object_id) || !oids.insert(identity.oid) {
-            return Err(StorageBackendError::Other(
-                "duplicate key or CHECK constraint catalog identity".into(),
-            ));
-        }
+    for (identity, kind) in claims::slots(columns, constraints) {
+        claims.register(
+            identity,
+            kind,
+            &uqa_core::memory::ProductionControl::uncontrolled(),
+        )?;
     }
     Ok(())
 }

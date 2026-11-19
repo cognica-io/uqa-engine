@@ -8,7 +8,7 @@
 
 use super::{
     AssignmentPlan, CommandPlan, ConflictActionPlan, MergeWhenPlan, OrderPlan, ProjectionPlan,
-    QueryPlan, RelationalPlan, ScalarExpr, ScalarFrameBound, SourcePlan,
+    QueryPlan, RelationalPlan, ScalarExpr, SourcePlan,
 };
 
 fn rewrite_ctes(ctes: &mut [super::CtePlan], rewrite: &mut dyn FnMut(&mut ScalarExpr)) {
@@ -437,102 +437,8 @@ pub(super) fn rewrite_scalar(
     expression: &mut ScalarExpr,
     rewrite: &mut dyn FnMut(&mut ScalarExpr),
 ) {
-    match expression {
-        ScalarExpr::Func {
-            args,
-            order_by,
-            filter,
-            ..
-        } => {
-            for argument in args {
-                rewrite_scalar(argument, rewrite);
-            }
-            for order in order_by {
-                rewrite_scalar(&mut order.expr, rewrite);
-            }
-            if let Some(filter) = filter {
-                rewrite_scalar(filter, rewrite);
-            }
-        }
-        ScalarExpr::Array(items)
-        | ScalarExpr::Row(items)
-        | ScalarExpr::CompositeRow { items, .. }
-        | ScalarExpr::And(items)
-        | ScalarExpr::Or(items) => {
-            for item in items {
-                rewrite_scalar(item, rewrite);
-            }
-        }
-        ScalarExpr::Binary { lhs, rhs, .. } => {
-            rewrite_scalar(lhs, rewrite);
-            rewrite_scalar(rhs, rewrite);
-        }
-        ScalarExpr::UnaryMinus(inner)
-        | ScalarExpr::Not(inner)
-        | ScalarExpr::IsNull { expr: inner, .. }
-        | ScalarExpr::Cast { expr: inner, .. }
-        | ScalarExpr::Collated { expr: inner, .. } => rewrite_scalar(inner, rewrite),
-        ScalarExpr::Between { expr, low, high } => {
-            rewrite_scalar(expr, rewrite);
-            rewrite_scalar(low, rewrite);
-            rewrite_scalar(high, rewrite);
-        }
-        ScalarExpr::InList { expr, list, .. } => {
-            rewrite_scalar(expr, rewrite);
-            for item in list {
-                rewrite_scalar(item, rewrite);
-            }
-        }
-        ScalarExpr::WindowCall {
-            args, spec, filter, ..
-        } => {
-            for argument in args {
-                rewrite_scalar(argument, rewrite);
-            }
-            if let Some(filter) = filter {
-                rewrite_scalar(filter, rewrite);
-            }
-            for expression in &mut spec.partition_by {
-                rewrite_scalar(expression, rewrite);
-            }
-            for order in &mut spec.order_by {
-                rewrite_scalar(&mut order.expr, rewrite);
-            }
-            if let Some(frame) = &mut spec.frame {
-                rewrite_frame_bound(&mut frame.start, rewrite);
-                rewrite_frame_bound(&mut frame.end, rewrite);
-            }
-        }
-        ScalarExpr::Case {
-            base,
-            when,
-            else_branch,
-        } => {
-            if let Some(base) = base {
-                rewrite_scalar(base, rewrite);
-            }
-            for (condition, result) in when {
-                rewrite_scalar(condition, rewrite);
-                rewrite_scalar(result, rewrite);
-            }
-            if let Some(branch) = else_branch {
-                rewrite_scalar(branch, rewrite);
-            }
-        }
-        ScalarExpr::InSubquery { expr, .. } => rewrite_scalar(expr, rewrite),
-        ScalarExpr::Default
-        | ScalarExpr::Star
-        | ScalarExpr::QualifiedStar(_)
-        | ScalarExpr::Column(_)
-        | ScalarExpr::Position(_)
-        | ScalarExpr::InternalColumn(_)
-        | ScalarExpr::QualifiedColumn { .. }
-        | ScalarExpr::Literal(_)
-        | ScalarExpr::TypedLiteral { .. }
-        | ScalarExpr::RetainedLiteral(_)
-        | ScalarExpr::Param(_)
-        | ScalarExpr::ScalarSubquery(_)
-        | ScalarExpr::Exists { .. } => {}
+    for child in expression.children_mut(crate::ir::children::Scope::Complete) {
+        rewrite_scalar(child, rewrite);
     }
     rewrite(expression);
 }
@@ -546,18 +452,4 @@ pub fn rewrite_scalar_expression(
     rewrite: &mut dyn FnMut(&mut ScalarExpr),
 ) {
     rewrite_scalar(expression, rewrite);
-}
-
-pub(super) fn rewrite_frame_bound(
-    bound: &mut ScalarFrameBound,
-    rewrite: &mut dyn FnMut(&mut ScalarExpr),
-) {
-    match bound {
-        ScalarFrameBound::Preceding(expression) | ScalarFrameBound::Following(expression) => {
-            rewrite_scalar(expression, rewrite);
-        }
-        ScalarFrameBound::UnboundedPreceding
-        | ScalarFrameBound::UnboundedFollowing
-        | ScalarFrameBound::CurrentRow => {}
-    }
 }

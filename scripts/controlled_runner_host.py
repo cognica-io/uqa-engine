@@ -31,6 +31,7 @@ WORK = Path("/var/lib/uqa-performance/work")
 REPOSITORY = WORK / "repository"
 CONTROL = Path("/var/lib/uqa-performance/controller")
 BINARY_ROOT = Path("/opt/uqa-performance/binaries")
+MIN_BUILD_FREE_BYTES = 32 * 1024 ** 3
 BENCH_CPUS = "8-15"
 MEASUREMENT_SLICE = "uqa_performance.slice"
 
@@ -146,7 +147,7 @@ class ControlledHost:
                 return cached
         # Cargo fingerprints are shared by workspace targets. A second checkout's old timestamps can make another revision's executable appear fresh.
         source = self.source(revision, "reference")
-        self.prepare_build_cache(source)
+        self.prepare_build_cache(source, role)
         metadata_output = self.unit("metadata-" + role,
             [str(self.rust_bin / "cargo"), "metadata", "--no-deps", "--format-version", "1", "--locked", "--offline"],
             source)
@@ -194,8 +195,8 @@ class ControlledHost:
         (self.output / (role + "-build.json")).write_text(json.dumps(artifacts, indent=2) + "\n")
         return artifacts
 
-    def prepare_build_cache(self, source: Path):
-        """Invalidate pre-existing multi-checkout output once, then reuse one canonical Cargo build tree."""
+    def prepare_build_cache(self, source: Path, role: str = "build"):
+        """Admit compilation against the canonical checkout and reclaim its derived cache when space is low."""
         if source.resolve() != REPOSITORY.resolve():
             raise QualificationError("build cache requires the canonical source checkout")
         target = REPOSITORY / "target" / "reference"
@@ -205,12 +206,24 @@ class ControlledHost:
             cached = json.loads(marker.read_text())
         except (OSError, ValueError):
             cached = None
-        if cached == identity:
-            return
-        self.unit("clean-legacy-build-output", [str(self.rust_bin / "cargo"), "clean", "--profile", "bench",
-                  "--target-dir", str(target)], source)
-        self.make_writable(target)
-        marker.write_text(json.dumps(identity) + "\n")
+        before = shutil.disk_usage(target if target.exists() else source).free
+        reason = ("source-checkout" if cached != identity else
+                  "capacity" if before < MIN_BUILD_FREE_BYTES else None)
+        if reason:
+            label = "clean-legacy-build-output" if reason == "source-checkout" else "clean-build-capacity-" + role
+            self.unit(label, [str(self.rust_bin / "cargo"), "clean", "--profile", "bench",
+                      "--target-dir", str(target)], source)
+            self.make_writable(target)
+            marker.write_text(json.dumps(identity) + "\n")
+        after = shutil.disk_usage(target).free
+        storage = {"source_path": str(source.resolve()), "target_path": str(target),
+                   "minimum_free_bytes": MIN_BUILD_FREE_BYTES, "free_before": before,
+                   "free_after": after, "cleanup_reason": reason}
+        (self.output / (role + "-build-storage.json")).write_text(json.dumps(storage, indent=2) + "\n")
+        if after < MIN_BUILD_FREE_BYTES:
+            raise QualificationError(
+                f"insufficient build storage after cache reclamation: {after} bytes free; "
+                f"{MIN_BUILD_FREE_BYTES} required")
 
     def isolate(self) -> dict:
         self.progress("establish-host-control")

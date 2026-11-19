@@ -5,6 +5,7 @@
 //
 
 use super::*;
+use crate::catalog::roles::RoleDefinitions;
 use crate::catalog::roles::{identity::RoleReference, RoleDefinition};
 
 fn binding(name: &str, oid: u32) -> Arc<RoleBinding> {
@@ -71,11 +72,11 @@ fn serialized_plan_authority_retains_the_original_incarnation() {
     assert_eq!(restored, reference);
     let mut replacement = original.clone();
     replacement.object_id = [42; 16];
-    let roles = std::collections::BTreeMap::from([(replacement.name.clone(), replacement)]);
+    let roles = RoleDefinitions::try_from_iter([(replacement.name.clone(), replacement)]).unwrap();
     assert_eq!(
         restored.require_name(&roles).unwrap_err().sqlstate(),
         Some("42704")
     );
-    let roles = std::collections::BTreeMap::from([(original.name.clone(), original)]);
+    let roles = RoleDefinitions::try_from_iter([(original.name.clone(), original)]).unwrap();
     assert_eq!(restored.require_name(&roles).unwrap(), "uqa");
 }

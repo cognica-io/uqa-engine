@@ -9,6 +9,56 @@ use crate::{eval_scalar, ProjectedPredicate, RowSchema, ScalarEvalContext, Scala
 use std::cell::Cell;
 use uqa_sql::{ColumnType, ResultRow};
 
+#[test]
+fn physical_boolean_conditions_match_scalar_and_projected_truth_and_errors() {
+    let schema = RowSchema::with_types(vec!["flag".into()], vec![Some(ColumnType::Boolean)]);
+    for flag in [false, true] {
+        let value = Value::Datum(uqa_core::DatumValue::new(16, 0, vec![u8::from(flag)]));
+        let row = ResultRow::from([("flag".into(), value.clone())]);
+        for (sql, expected) in [
+            ("flag", flag),
+            ("NOT flag", !flag),
+            ("flag AND true", flag),
+            ("flag OR false", flag),
+        ] {
+            let expression = expression(sql);
+            let projected = ProjectedPredicate::compile_with_schema(&expression, &schema, &[])
+                .unwrap()
+                .unwrap();
+            assert_eq!(projected.keep(&[&value]).unwrap(), expected, "{sql}");
+            let actual =
+                eval_scalar(&expression, &ScalarEvalContext::new(Some(&row), &[])).unwrap();
+            assert_eq!(truthy(&actual).unwrap(), expected, "{sql}");
+        }
+    }
+    let value = Value::Datum(uqa_core::DatumValue::new(16, 0, Vec::new()));
+    let row = ResultRow::from([("flag".into(), value.clone())]);
+    for sql in ["flag", "NOT flag", "flag AND true", "flag OR false"] {
+        let expression = expression(sql);
+        let projected = ProjectedPredicate::compile_with_schema(&expression, &schema, &[])
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            projected.keep(&[&value]).unwrap_err().sqlstate(),
+            Some("XX001"),
+            "{sql}"
+        );
+        let error = eval_scalar(&expression, &ScalarEvalContext::new(Some(&row), &[]))
+            .and_then(|value| truthy(&value))
+            .unwrap_err();
+        assert_eq!(error.sqlstate(), Some("XX001"), "{sql}");
+    }
+    for (sql, expected) in [("false AND flag", false), ("true OR flag", true)] {
+        let expression = expression(sql);
+        let projected = ProjectedPredicate::compile_with_schema(&expression, &schema, &[])
+            .unwrap()
+            .unwrap();
+        assert_eq!(projected.keep(&[&value]).unwrap(), expected);
+        let actual = eval_scalar(&expression, &ScalarEvalContext::new(Some(&row), &[])).unwrap();
+        assert_eq!(truthy(&actual).unwrap(), expected);
+    }
+}
+
 struct CountedFields<'a> {
     values: &'a [Value],
     reads: Cell<usize>,
@@ -213,7 +263,7 @@ fn projected_ranges_preserve_fallback_null_error_and_bound_order() {
             for y in [Value::Int(0), Value::Int(2), Value::Null] {
                 let row = ResultRow::from([("x".into(), x.clone()), ("y".into(), y.clone())]);
                 let expected = eval_scalar(&scalar, &ScalarEvalContext::new(Some(&row), &[]))
-                    .map(|value| truthy(&value));
+                    .and_then(|value| truthy(&value));
                 let actual = predicate.keep(&[&x, &y]);
                 match (expected, actual) {
                     (Ok(expected), Ok(actual)) => assert_eq!(actual, expected, "{source}: {row:?}"),

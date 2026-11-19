@@ -11,11 +11,11 @@ use crate::catalog::{
     projection::{builtin_routine_identities, BuiltinRoutineIdentity},
     CatalogReadView,
 };
-use std::collections::BTreeMap;
+use uqa_sql::catalog::roles::RoleDefinitions;
 use uqa_sql::{
     ast::FunctionBinding,
     catalog::{
-        roles::{identity::RoleSubject, RoleDefinition, RoleReference},
+        roles::{identity::RoleSubject, RoleReference},
         security::builtin_routines::{BuiltinRoutineExecution, BuiltinRoutineSecurities},
     },
     SQLError,
@@ -77,7 +77,7 @@ impl BuiltinRoutinePermissions {
     #[must_use]
     pub fn try_unrestricted(
         security: &BuiltinRoutineSecurities,
-        roles: &BTreeMap<String, RoleDefinition>,
+        roles: &RoleDefinitions,
         current_role: &RoleReference,
     ) -> Option<Self> {
         (security.is_empty()

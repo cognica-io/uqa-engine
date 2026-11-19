@@ -22,7 +22,7 @@ use uqa_storage::{read_control::StorageReadControl, InvertedIndex};
 
 struct TableStatistics(Arc<TableState>, StorageReadControl);
 struct TextRead<'a>(
-    RwLockReadGuard<'a, Box<dyn InvertedIndex>>,
+    RwLockReadGuard<'a, uqa_storage::StorageHandle<dyn InvertedIndex>>,
     &'a StorageReadControl,
 );
 struct VectorRead<'a>(

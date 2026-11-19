@@ -6,6 +6,571 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Changed
+
+- Retain exact scalar reservation totals as children are constructed, replaced or transferred. Deep scalar footprint observation uses no recursive traversal or scratch allocation, including when reached through an enclosing query. Sequence name binding shares the scalar editor and preserves the selected resolver order. Immediate scalar copies preserve their existing shallow allowance, while suspended sequence edits and window copies retain admitted workspace without expanding enclosing poll frames.
+- Share scalar-node input application and selected JSON path normalization between immediate and suspended routine input. Reuse the original parameter, nested ROW, function-binding, collation, constant and cast selection order through the existing scalar editor and constructors. Selected IN-list coercions, comparison construction and left-constant application also share their original sequence; parent slots and sibling ownership survive suspended child replacement, and discarded operands retire through the existing scalar state. Scalar-query reference remapping now uses the same bounded scalar editor, preserving the distinct pre-order index transfer and post-order occurrence-copy sequences without a separate recursive walk. Reuse existing type parsing, argument construction, call metadata publication and retirement; preserve named and variadic arguments, input collation, ordering and filter payloads through cancellation and memory admission failure. Complete routine restoration remains in progress.
+
+- Share ROW expansion, constant replacement, COLLATE selection, result metadata and implicit casts between ordinary and suspended input components. Apply selected ROW fields at their original analysis addresses through the existing scalar editor, preserve child order and keep the original field buffer reservation until its payloads retire. Reuse existing scalar/type constructors and retirement, preserve independent shared type readers, and bound catalog-name formatting and collation inspection for deeply nested array/domain types. Share iterative SQL type-name parsing with suspended input, reusing type-identity whitespace and decimal scanning and Core's admitted UTF-8 copying step. Preserve catalog aliases, modifiers and diagnostics without recursive array parsing. Complete routine restoration remains in progress.
+
+- Share generated scalar containers, call-binding replacement and selected IN-list construction between ordinary and suspended work. Move existing child payloads and reservations, retire replaced metadata through the existing owners, and preserve iterative cleanup after late CASE or binary-constructor admission failures.
+
+- Share CTE traversal, derived-source descent, local source scalars and mutation fields across arena-aware edits and ordinary scalar transforms. Preserve child-query completion before parent occurrence copies and isolate CYCLE marker expressions in their own scalar-query scope.
+
+- Preserve original query replacement owners in retained input-observation maps, and share layout, parameter-label and source-call installation across ordinary and native plans.
+
+- Transfer query and source replacements through their original constructor owners. Preserve stationary query headers and incoming buffers, admit combined structural depth before installation, and retire discarded plans, descriptors and field records through the existing work owners.
+
+- Retire row-schema fields and nested record, collation, relation and lateral metadata through the existing type, collection and tree owners. Transfer original buffers and reservations without copying lookup structures, and use the same cleanup for ordinary destruction, query-layout replacement and discarded source observations. Preserve shared readers and release admitted native metadata across work boundaries without allocating cleanup storage. Complete routine analysis, descriptor-input qualification and public backup restoration remain in progress.
+
+- Share routine parameter observation and projection-label preservation between ordinary and owned binding. Complete parameter replacement through the existing window normalizer so each window call retains its canonical definition's bound parameters. Captured input observations use opaque original-node identities, allowing their admitted values and metadata to transfer between tasks without moving the analyzed plan or exposing pointer access. Fixed analysis state also transfers without unused callback references, while ordinary input providers retain their existing threading contract. Scheduled SQL construction preserves each task's source/stored analysis mode across suspension and thread changes, restoring the invoking thread after every poll.
+
+- Share admitted scalar traversal across window normalization, pre-order replacement, post-order analysis edits and retained sequence-name binding. Query and source scalar fields share their existing traversal with window normalization, including work checkpoints for empty containers. Fresh retained statements also reuse the complete query, CTE, source and mutation traversal for sequence names. Preserve original analysis identities, field and lookup order, catalog name buffers and constructor ownership; deep edits and failures retire without recursive stack growth. Stored query binding completes its relation pass before sequence lookup, shares ordered namespace selection and transfers admitted canonical names through Engine catalog adapters. Routine binding/finalization and public backup restoration remain in progress.
+
+- Retire directly owned query, source, CTE and mutation metadata through the existing field, vector, type and function-binding cleanup states. Wide name/signature lists and deep column types release across work boundaries without cleanup allocations, preserving completed prefixes and independent reservations through cancellation and abandonment.
+
+- Retain shared native literals through their existing value owner, including deep reads, rejected shared-header admission and later capture metadata failures. Transfer final shared value/type ownership into the existing stepped retirement states without copying or invalidating other readers. Keep constant-storage inputs owned through cancellation and memory failure while preserving the published resident or spilled prefix.
+
+- Share the existing tree-retirement implementation across native values, SQL syntax and scalar ownership. Keep partial copies, decoded containers and completed private values with their original reservations through cancellation, denied admission and metadata errors, preventing recursive stack overflow when a deep copy fails. Ordinary and controlled value production use the existing iterative copier; native image encoding and nesting limits are unchanged.
+
+- Resolve canonical window inheritance through one shared ordinary and resumable implementation. Reuse ordered-map admission and bounded name comparison, and keep completed specifications under iterative retirement through later failures and cancellation. Scalar publication and retirement share allocation-free metadata folding. Window-call replacement and normalization share admitted traversal with ordinary execution, preserving argument/FILTER ownership and iterative cancellation cleanup. Superseded scalar retirement advances through work boundaries using the same allocation-free algorithm as ordinary destruction. Mutable query/source/command normalization shares ordered child traversal and paired child slots; retained child owners reuse the original plan retirement context, and specification copying admits its own workspace. Final shared canonical definitions retire through the same specification and scalar cleanup states, preserving their leases through bounded work, cancellation and abandonment. Constructor records and remapping scratch reuse metadata folding and ordered-map removal across work boundaries. Discarded constructor-owned query trees and scalar roots use the existing retirement algorithms across work boundaries while their original leases remain live. Private scalar types, function signatures and composite descriptors now retire one wrapper or element per work step through their owning interfaces. Source-specific resource cleanup, complete bounded arena compaction and public backup restoration remain in progress.
+
+- Share analyzed scalar and window-specification copying between ready and suspended work, retaining original bindings, query positions and child allocation owners. Reuse payload producers, container admission and final publication; retire completed deep children through later metadata failures and window replacement without recursive destruction. Complete mutable normalization and public backup restoration remain in progress.
+
+- Reuse owned scoped relation binding for stored queries and table-function inlining. Preserve CTE visibility, source and mutation-target order, temporary-relation flags and original catalog diagnostics while transferring admitted canonical names into their existing source owners. Index lexical names through the existing binding map and remove the separate inlining traversal. Native relation binding now schedules the same visitor and source-field edits, shares inherited scopes without copying their names, and retains detached children through cancellation and failure. Borrowed identifier parsing and decoding reuse Core's existing implementations. Sequence/routine binding and public backup restoration remain in progress.
+
+- Share enclosing query, VALUES, set-operation, query-block, JOIN/derived-source, CTE and complete INSERT/UPDATE/DELETE/MERGE assembly between ordinary controlled lowering and retained construction. The native statement input entry now uses these constructors and the existing scheduler directly, carries the supplied aggregate classifier through nested scopes and completes each query's canonical window normalization before observing later parent fields. Reuse existing field, query-arena, box and retirement owners; preserve field order, nested query slots, flags, RETURNING aliases, locking metadata, parameter pruning and first-error order. Completed native results retain their original field leases and admitted retirement workspace after source/input closure. Stored binding, routine finalization and public backup restoration remain in progress.
+
+- Keep completed query, CTE, FROM and mutation prefixes in the existing plan-tree retirement owner while later fields are constructed. Reuse the vector and box constructors, preserve field and scalar-query order, and release failed or cancelled prefixes without recursive scalar destruction or cleanup allocations.
+
+- Share retained FROM construction for tables, VALUES, table functions and function groups with ordinary controlled lowering. Reuse existing name, type and function-binding producers; preserve query order and retained row identity, and retire scalar prefixes through later metadata failures. Structural query construction and public backup restoration remain in progress.
+- Use the shared iterative scalar constructor for ordinary controlled SQL lowering, preventing stack overflow while constructing deeply nested expressions. Preserve original parameter pruning, query-arena order and typed cancellation, memory and subquery errors.
+- Retain CTE SEARCH and CYCLE metadata through suspended text/scalar construction and later body failures. Preserve independent mark/default query scopes, field order and original diagnostics while retiring completed deep marks iteratively.
+- Share retained construction for mutation targets, grouped assignment positions, ON CONFLICT actions and MERGE clauses. Preserve ordinary query-slot and target/value ordering while bounded name and scalar input can suspend; keep completed prefixes owned through later errors, cancellation and denied admission. Complete native statement construction and public backup restoration remain in progress.
+- Share retained construction for query grouping, ordering, DISTINCT ON, table-function arguments, optional scalar fields and complete projection/window-definition lists. Preserve query-slot order, owned names, inherited window slots and null-ordering flags, account for empty fields, and retire suspended or failed prefixes before returning their memory allowances. Complete query/body construction and public backup restoration remain in progress.
+- Retain scalar lowering, call metadata and native value production across bounded work windows with independent destination allowances. Preserve nested query slot order and suppress replaced parameter subtrees through the same private construction boundary. Retire deep mutable scalar trees and fold their ownership metadata without recursive stack growth or additional allocation. Share admitted SQL constructor scheduling between projected syntax and scalar input, applying the work limit to child submission and parent completion as well as payload steps. Retain aggregate and window discovery through the same work channel, including empty definitions and ordered catalog errors. Freeze and retire deep query constructor records without recursive calls or cleanup allocations. Retain iterative scalar ownership through the final cancellation check before immutable publication. Share retained plan-tree ownership and scalar retirement with native catalog input. Use one admitted row constructor for ordinary and suspended lowering, preserving movable cells and retiring partial or abandoned row buffers without recursive cleanup. Retain projection scalar owners through bounded alias construction and admit both field records before publication. Share window-definition construction across ordinary and retained input, preserving ordered query slots, frame options and partial-field ownership. Complete routine finalization and public backup restoration remain in progress.
+- Restore persistent model catalogs through retained ML-owned input. Preserve original JSON declarations, numeric conversions, selected snapshots and last-definition replacement while model construction, name comparison and publication resume under the restore allowance. Completed model handles keep their original weights after input retirement and later edits. Complete public backup restoration remains in progress.
+- Share intrinsic routine cost/row estimates, support identities, language, parameter-order, default and pseudo-type checks between ordinary declarations and private backup validation. Reject invalid captured source declarations before activation while preserving deferred bodies and input/output names. Reject domains over arrays as VARIADIC parameter types, while preserving arrays of domains, matching PostgreSQL 18. Complete public backup restoration remains in progress.
+- Restore persistent scoring parameters through bounded native catalog input. Preserve opaque names and values, selected snapshots and original allocation ownership; native image publication also resumes long-name comparisons. Failed or abandoned private input releases its read transaction without publishing a partial catalog. Complete public backup restoration remains in progress.
+
+- Validate captured routine defaults, original SQL-standard statements and independently retained plans against their selected row and parameter types before private backup activation. Reuse SQL expression and return-layout analysis without executing bodies, applying rewrites or advancing default sequences. Preserve deferred source compilation, renamed columns, typed mutation results and later rollback. Complete public backup restoration remains in progress.
+
+- Validate captured SQL-standard routine statement counts, statement kinds and parameter positions before private backup activation. Both stored syntax and independently retained plans must use the declared input slots; output-only procedure arguments do not add slots, and parameter defaults have no argument scope. Validate relation and selected type references in the original SQL-standard syntax independently of separately retained execution plans, including defaults and invocation metadata. Source SQL and PL/pgSQL bodies retain lazy compilation. Complete public backup restoration remains in progress.
+
+- Validate captured rewrite-rule OLD/NEW identities, referenced column positions and Boolean condition types before private backup activation. Reject incomplete bindings, invalid event sides, duplicate identities, external parameters and execution-only implicit row inputs. Analyze nested conditions and current table/view rows without executing expressions, and preserve unused historical column names, renamed Boolean domains and original routine identities. Require exact stored dependency summaries for rule syntax and captured conditions, preserving original relation, column and routine identities and rejecting missing or unrelated entries. Preserve DISTINCT ON output aliases and decoded quoted relation qualifiers through dependency capture, correlation and restoration. Complete public backup restoration remains in progress.
+
+- Keep encoded analyzer images prepared for persistent restoration privately owned. Ordinary readers of a shared compiled analyzer cannot acquire a restore candidate's allocations through the process cache; the candidate's allowance retires independently of those readers.
+
+- Validate restored partition keys, stored bound types and sibling membership before private activation. Preserve renamed enum labels, later domain constraints, selected routine identities and detached partition conditions without reevaluating bounds. Hash-bound admission now determines overlap without modulus-sized iteration or signed remainder overflow. Physical domain output uses the original base layout, including partition-bound catalog rendering. LIST/RANGE declarations and restoration share the default B-tree capability check. Bound admission, sibling ordering, row routing and restoration preserve the selected range/multirange key type, including numeric equality across different spellings. Complete public backup restoration remains in progress.
+
+- Validate restored column, table, foreign-table and domain CHECK bindings in their original typed scopes before private activation, including Boolean input beneath COLLATE. Preserve named rows, domain VALUE, selected routine/type identities and NOT VALID state without evaluating constraints or scanning existing rows. Complete public backup restoration remains in progress.
+
+- Validate restored index keys and predicates against their original row layouts, routine bindings and native type identities before private candidate activation. Preserve stored expressions, renamed objects, legacy absent type metadata and later index enforcement across memory, native SQLite, SQLite Key/Value and redb. Complete public backup restoration remains in progress.
+
+- Preserve the indexed relation's named row type through declaration, planning and index evaluation. Accept boolean domains in partial-index predicates, including routine results, and whole-row arguments in index keys and predicates. Preserve whole-row and qualified-column references through table rename and schema movement by admitting the complete index generation before table mutation and publishing the index and table namespace transition together. Resource denial preserves the original catalog owners and SQLSTATE. Observe retained Boolean fields through the shared SQL condition evaluator, so unique partial indexes enforce the same rows after rename, rollback, reopen and restoration.
+
+- Construct retained SQL routine parameter namespaces with bounded name comparison and type copying. Preserve visible and internal slots, duplicate-name ambiguity, empty relation namespaces and immutable ownership after cancellation or source retirement. Complete native routine body finalization remains in progress.
+
+- Share inline and retained type-copy construction for routine restoration, with bounded name copying, constant-stack array/domain traversal and complete partial-output retirement. Native routine body finalization remains in progress.
+
+- Share complete catalog read construction between ordinary Engine capture and retained input. Preserve immutable definition roots, prepared catalog handles, selected table metadata and temporary namespace identity through admitted membership/header construction. Native routine finalization and complete backup restoration remain in progress.
+- Share routine declaration validation between inline execution and retained input, admitting type names and yielding across every parameter visit without reading source bodies. Correct PostgreSQL diagnostic precedence for polymorphic and `internal` results, inferred output types and language-specific pseudo-types. Native body finalization and complete backup restoration remain in progress.
+- Retain original table array-name metadata owners in catalog snapshots and construct table membership through shared inline and retained input. Preserve decoded identity order, replacement semantics, native key/node admission and source-independent metadata lifetime. Complete routine restore integration remains in progress.
+- Retain one immutable session search-path and role generation before producing catalog namespace inputs. Preserve setting, rollback and routine-configuration behavior while copying retained namespace names through bounded work with native admission and cancellation. Complete routine restore integration remains in progress.
+
+- Prepare stored routine placeholders through retained input, moving original declaration and name allocations into a private namespace. Preserve signature-sorted lookup, original finalization order, existing temporary routines and failure retirement. Engine publication and body finalization remain in progress.
+
+- Canonicalize stored routine declarations through one retained physical-input, authority, syntax, schema-membership and signature-binding operation. Preserve original type-identity grammar, object/name/signature validation order, complete legacy-dispatch selection and native parameter/body allocations. Resolve native catalog type identities and usable namespaces with the original lookup and privilege order, without copying complete type descriptors. Failed candidates retire atomically; native routine body finalization and complete Engine restoration remain in progress.
+
+- Resume native relation-name parsing, decoded identity construction and routine-signature normalization through retained work. Preserve original quoting, schema defaults, aliases, modifiers, array identity and diagnostics while retaining typed memory/cancellation failures and exact native output ownership. Native routine finalization and complete Engine restoration remain in progress.
+
+- Complete typed routine catalog input through the original retained work channel. Move prepared legacy ACL buffers into outer declarations, preserve empty groups and migration flags, and validate all bodies before authority and object identities against the selected role generation. Native routine finalization and complete Engine restoration remain in progress.
+- Reconstruct projected statements, routine declarations and native values through retained work without serializing and reparsing their generic input. Preserve typed diagnostics, numeric visitors, flattened fields and cancellation ownership, including logical nesting beyond the physical JSON limit. Native routine finalization and complete Engine restoration remain in progress.
+- Resume physical, generic and raw-authority routine catalog input under its original work allowance, preserving repeated scalar projection, wrapper/version diagnostics, complete legacy ACL parsing and ordered role binding. Scalar input observes both cancellation owners after suspended work. Native routine finalization and Engine integration remain in progress.
+- Retain complete generic JSON documents through admitted input and output, preserving duplicate fields, numeric/raw scalar values and original diagnostics. Routine-catalog integration remains in progress.
+- Construct stored statements and routine declarations with admitted native ownership, preserving original defaults, legacy fields and nested statement depth. Complete routine-catalog loading and Engine restoration remain in progress.
+- Construct stored query expressions, windows and data-modifying CTEs as admitted native SQL syntax, preserving selected bindings, positional defaults and assignment alternatives. Native routine finalization and complete Engine restoration remain in progress.
+
+- Validate restored routine authority through shared grant-path and role-incarnation traversal. Retained validation admits scratch and resumes through work windows; ordinary validation no longer copies role names that it immediately discards. Native routine finalization and private Engine integration remain in progress.
+
+- Preserve original analyzer descriptor syntax, typed-field diagnostics and byte-based locations through ordinary and retained input. Keep duplicate-key validation first, retain public numeric/raw JSON values, and retire admitted diagnostic payloads at the backup boundary.
+
+- Preserve complete stored analyzer-binding envelope diagnostics through retained input, including missing/duplicate/unknown fields, positional forms, unit enums and numeric versions. Original error order, numeric spelling and source positions survive work suspension; error redaction releases admitted input names.
+
+- Preserve raw analyzer descriptor spans and their original syntax diagnostics through bounded input. Strict enclosing names and fields retain their own string validation, while raw descriptors keep their original escape and nesting rules until revision validation.
+
+- Preserve native GIN key and option diagnostics, including original type messages, byte-based positions and syntax/EOF classification. Retain memory and cancellation error types through field reconstruction; remove original scalar values at the backup error boundary. Other stored-owner diagnostic conversion remains in progress.
+
+- Restore persistent GIN analyzer ownership through bounded native input on native SQLite, SQLite Key/Value and redb. Share ordinary validation order, retain selected exact revisions, publish complete private field generations and transfer admitted ownership directly to field reconstruction. Interrupted reconstruction retires its private transaction; later writes use independent admission.
+
+- Validate complete stored index-key syntax, including query, window and command-CTE expressions, while retaining only ordinary column names. Preserve legacy struct sequences, generic numeric content, untagged alternatives, sorted analyzer options and Unicode trimming. GIN, named analyzer diagnostic JSON and type marker diagnostics retain their original parser observations; conversion of other stored owners remains in progress.
+
+- Share ordered field analyzer installation between ordinary reopening and retained backup reconstruction. Preserve historical index/search revisions, exact column and name checks, legacy migrations and first physical failures; publish complete private field catalogs with independent later mutation ownership.
+
+- Move persistent field binding and compatibility-label assembly into Execution. Preserve complete physical tuple order, canonical identity checks and interleaved label/GIN validation, while retained input transfers original admitted keys and exact revisions to the native field catalog.
+
+- Restore complete named analyzer catalogs through retained physical input, exact stored revisions and native diagnostic comparison. Preserve provider result order and original validation boundaries, then publish paired runtime/image roots at the existing Engine stage with independent later mutation ownership.
+
+- Share retained generic JSON validation between catalog markers and analyzer diagnostics. Compare saved analyzer configurations with the original native public fields, preserving omitted defaults, duplicate-key semantics, raw/numeric scalar representations and bounded work without another value tree.
+
+- Retain field analyzer bindings and compatibility labels from one selected native SQLite, SQLite KV or redb catalog view. Bound physical reads, preserve original field bytes and the binding-before-label validation boundary, and retire both streams together on failure or cancellation.
+
+- Resume stored analyzer and field revision preparation through the original work channel, preserving exact descriptor/resource validation, historical index/search sides, admitted names and complete paired catalog publication.
+
+- Persistent system-relation authority restoration now retains independent table and column ACL tuples through complete physical input and original role/grant validation, adopts native buffers and preserves private transaction cleanup.
+
+- Restore persistent database authority through admitted generic JSON field projection and the existing owner/ACL validation order. Preserve sorted last-value fields and installed numeric/raw scalar representations, and transfer native ACL buffers into the private Engine before routine restoration.
+
+- Restore current built-in routine ACL records through retained physical input and shared native field/authority validation, transferring decoded buffers into the private Engine generation at its original position after routine placeholders. Preserve the selected transaction and independent later mutation allowance.
+
+- Share ordinary and retained authority validation, preserving database endpoint order and built-in routine tuple, grant-path and role checks while allowing traversal to stop at work, memory and cancellation boundaries.
+
+- Support ALTER DOMAIN SET/DROP DEFAULT through the existing domain transaction owner. Preserve explicit NULL defaults, copied inherited defaults, column overrides and rollback; removed defaults no longer revive a base domain default.
+
+- Restore persistent domain definitions and exact OID claims through retained input, preserving marker precedence, native defaults and CHECK expressions, owner and constraint validation, private snapshots and later writable mutations. Keep the original delayed cross-catalog constraint validation before publication.
+- Restore persistent enum, shell, range and composite catalogs through retained physical input, exact format and OID-claim validation, native type publication and the original session snapshot. Restore object comments in their original position between range and composite definitions, retaining admitted text and independent future mutation ownership.
+
+- Resume borrowed JSON object projection through the existing input work channel, retaining duplicate-field order, original value ranges and admitted key ownership without copying values.
+- Decode stored enum and shell type declarations with admitted native buffers, preserving immutable enum keys, float4 sort positions, role identities and optional ACLs before registry validation. Share ordered identity, OID, label and owner validation between ordinary loading and retained input, with admitted scratch and terminal cleanup. Move decoded buffers into immutable type roots without copying, preserving captured predecessors and independent later mutation allowances.
+
+- Reconstruct stored graph catalog OIDs through retained native input, preserving label and relation identities, duplicate-map semantics and the selected persistent snapshot across bounded decoding.
+
+- Reconstruct persistent sequence definitions, generation values, bound authority and recorded catalog OIDs through retained input on native SQLite, SQLite KV and redb, preserving validation order, the selected snapshot and subsequent sequence mutations.
+
+- Reconstruct persistent graph catalogs through retained name, native label and identifier input, preserving selected membership, original allocation rules and terminal transaction cleanup without materializing ignored Key/Value payloads.
+
+- Reconstruct legacy partition counters through retained native hierarchy input, validating the complete hierarchy before private counter publication. Include migrated durable child reservations so reopening SQLite KV or redb cannot restart a shared parent below those reservations.
+
+- Validate complete persistent constraint catalogs through retained native input, preserving format and physical-row error order, cross-table identity uniqueness and terminal transaction cleanup.
+
+- Observe legacy stored function dispatches, array-slice omissions and range predicates without copying or rewriting declarations during load-only validation. Initial-open migration shares the same selection rules.
+
+- Decode stored foreign declarations under their original restore allowance, preserving current and legacy formats, SQL field semantics, option order and server-reference fences.
+
+- Retain complete foreign-table records and independent ACL replacements through the shared catalog input lifecycle on native SQLite, SQLite KV and redb. Preserve physical and stable relation ordering, private snapshots and original validation of overwritten authority fields without copying arbitrary-precision numbers that are discarded.
+
+- Resume native constraint identity and inherited-key validation between declaration slots and bounded name comparisons. Physical attribute validation uses the fixed PostgreSQL slot domain without allocating a temporary number vector or tree.
+
+- Restore persistent schema catalogs through bounded provider input and shared authority validation, preserving original ordering, snapshot identities and subsequent writable grants. Cancellation deferral checks use the existing inline lock instead of allocating a platform mutex on their first call.
+
+- Admit stored schema names, tuple identities and bound or named grants through the existing authority grammar, retaining original field/default rules and allocation ownership.
+
+- Restore persistent role catalogs through bounded metadata selection, ordered identity validation and native publication while preserving their original snapshot and later writable authority.
+- Retain stored role definitions and membership bindings under their original restore allowance, preserving incarnation identities, tuple revisions and existing declaration formats.
+
+- Expose Engine/uqa-api restore, recovery and cancellation entry points and connect native SQLite, SQLite KV and redb restore jobs to retained table input and private catalog validation, with exact-request recovery and shared runtime activation. The Engine import capability remains false until bounded catalog loading, logical closure and final restore qualification are complete.
+
+- Reconstruct memory backup catalogs, resources and evaluated table data into the ordinary Engine state, retaining original allocation ownership through validation, publication, later writes and repeated backup. Complete restore qualification remains in progress.
+
+- Preserve stored query, routine, rule, scalar and table definitions across native input windows, including paired foreign-table metadata and authority, without SQL replay or rebinding.
+
+- Resume native catalog metadata, authority, sequence, expression, trigger, index, comment and scoring input within retained byte/work windows, preserving existing encodings and terminal cleanup.
+
+- Retain private native SQLite, SQLite KV and redb restore destinations through logical validation, preserving original cancellation, exact-request recovery and later published writes.
+
+- Keep a verified archive component selected until native reconstruction explicitly completes, and decode table lifecycle metadata through the same bounded input grammar.
+
+- Resume complete table data reconstruction without changing selected component identities, replaying completed input or publishing incomplete native owners.
+
+- Preserve evaluated-index metadata, value ownership and comparison policy through cooperative reconstruction; enforce independent child cancellation before resumed input work.
+
+- Resume evaluated vector reconstruction through native input, validation, spill and DiskANN preparation, preserving existing images, search results and writable capture ownership.
+
+- Reconstruct evaluated text images and historical analyzer bindings through bounded native progress, preserving posting occurrences, counters, writable snapshots and terminal cleanup.
+
+- Reconstruct native document images through bounded input and conversion progress, preserving tuple boundaries, shared field layouts and both cancellation owners through post-input work.
+
+- Retain original table lookup names and map nodes through native registry publication, snapshots and runtime replacement; admit lookup/source nodes before binding capture updates and keep later mutation budgets independent of construction.
+
+- Assemble native table state without copying retained definitions or physical handles; keep state, catalog and capture-source headers under their own allocation lifetimes through snapshots and later writes.
+
+- Preserve integer-key mapping metadata through bounded reads, keeping original empty/present marker semantics, declared key types and transaction visibility.
+
+- Read stored statistics maintenance and legacy document reservations through bounded metadata input, preserving relation identities, full-width counters, defaults and original cancellation.
+
+- Reconstruct stored analyzer JSON through admitted native fields while preserving defaults, aliases, positional forms and duplicate handling; retire source text before canonical image publication.
+
+- Publish admitted native analyzer configurations with their original owners and a canonical image, using bounded field/text progress and no complete intermediate JSON tree.
+
+- Read persistent visible document maxima through retained key-only progress, including deleted slots, without collecting document identities or substituting autonomous allocator watermarks.
+
+- Read exact persistent metadata records under caller-selected encoded record and memory limits, retaining original text through private rollback and source retirement.
+
+- Restore persistent vector field catalogs through bounded input, retaining original keys and physical owners while preserving repeated-field selection.
+
+- Keep original admitted vector field, map-node and physical-handle owners through writable collection replacement, removal and reinsertion, preserving existing memory captures.
+
+- Retain canonical vector handle names, concrete allocations and shared SQLite cache state under their original reconstruction allowance while preserving subsequent writes and rollback.
+
+- Prepare every stored table column declaration and its bound authority before physical hydration. Decode columns once, retire their JSON immediately and retain original physical fields until native table assembly.
+
+- Keep admitted document and text-index handles in Engine table, snapshot and capture cells. Replacing a physical handle retires its own allocation allowance while retained tables keep their original handles alive.
+
+- Retain persistent document and text-index handles with their original admitted names, lazy analyzer definitions and native allocation owners. Handle retirement returns its own allowance, while completed handles remain usable after input cancellation and exhaustion; later SQLite snapshots retain their ordinary provider policy.
+
+- Resume stored table-authority validation across bounded work windows while preserving role incarnations, grant-path order and original allocation ownership.
+
+- Restore independently retained table authority without copying ACL payloads, and decode current key names from separate relation, identity and constraint fields. Preserve load-only migration rejection and original resource diagnostics.
+
+- Transfer retained persistent table definitions into independently owned fields without copying their buffers. Field visits use the original input work channel, and decoded JSON can retire separately from native table metadata.
+
+- Admit stored table-authority name projection and grant-path validation under the original memory and cancellation controls while preserving existing validation order and diagnostics.
+
+- Decode stored column statistics in Planner and retain their original payload allowance through immutable publication. Preserve legacy wide-value omission, paired frequencies, numeric representations and catalog diagnostic order.
+
+- Retain stored-statistics controls across input steps, discard the complete unpublished generation on failure, and publish its exact retained footprint without scanning prior rows.
+
+- Retain physical column-statistics rows in Storage and native SQLite under their original allowance and committed/private view, preserving encoded values while consuming one physical record per input step.
+
+- Native constraint identity validation retains temporary object/OID claims under the original allowance and cancellation owners while preserving ordinary validation order and borrowed table syntax.
+- Publish stored table constraints as independent native field owners, retaining their original payload allowances and exact capture footprints through current key-name restoration and publication without revisiting their entries. Failed construction retires every unpublished field.
+
+- Publish stored column declarations directly into native immutable definitions, retaining their original payload allowances through shared snapshots, backup capture and later schema changes.
+
+- Decode complete stored index definitions and restore index-owned constraint names under their original allowance and cancellation owners. Preserve legacy versions, current names, table incarnations and ordered local/inherited key structure; failed name input retires its entire prefix.
+
+- Decode stored table constraints and hierarchy under their original allowance and cancellation owners. Preserve CHECK and key definitions, foreign-key families, dropped attributes, partition bounds and identity overrides without evaluating expressions or rebuilding catalog identities.
+
+- Decode complete stored column declarations under their original allowance and cancellation owners. Retain defaults, generated expressions, checks, identity provenance, physical column identities and foreign-key metadata without evaluation or catalog rebinding.
+
+- Decode stored schema expressions under their original memory allowance and both cancellation owners. Preserve scalar syntax, selected call bindings and native constants without execution; explicit admitted parent frames support deep input and failure cleanup.
+
+- Decode stored SQL function bindings under their original allowance and both cancellation owners. Preserve selected routine identities, native dispatch, invocation types, composite/assignment metadata and deferred errors without rebinding names or executing routines.
+
+- Preserve independent original and invoking cancellation during retained JSON value input, including tagged conversions, decimal parsing, array shape checks and final payload accounting. Completed values keep their existing ownership after either caller cancels.
+
+- Decode stored SQL column types under the original memory allowance and cancellation owners, preserving complete type identities and existing JSON forms. Names and nested type nodes retain their admitted allocations through completion or failure.
+
+- Assemble admitted persistent table catalogs from original definitions, owner bindings and ordered ACL replacements. Native SQLite, SQLite Key/Value and redb preserve existing ordering and error precedence; cancellation or failure retires incomplete catalogs without publication. Assembly preserves the original control context, and failed authority construction frees native values before releasing their allowance.
+
+- Retain SQLite Key/Value and redb table definitions and independent ACL records from one catalog view. Known table fields preserve stream validation, flattened authority preserves ordered replacement, and unrelated metadata values are filtered before bounded reads.
+
+- Decode projected authority JSON with sorted last-value object fields and integer classification, retaining admitted recipient, grantor, column and path allocations without copying discarded values.
+
+- Project stored JSON object fields in sorted last-value order while retaining original value bytes, admitting decoded names and map nodes without building another value tree.
+
+- Read native SQLite table definitions and independent ACL replacements from one retained catalog view, admitting decoded buffers before allocation and retiring both inputs on failure or cancellation.
+
+- Decode stored named ACL paths with pre-admitted recipient, grantor and column buffers. SQL adopts the original named-authority map nodes without allocating replacement nodes; Rust `LegacyRelationSecurity` and `TableSecurity` column ACL constructors now use Core `OwnedMap`, with unchanged serialized data and migration rules.
+
+- Decode independent ACL metadata keys under their original catalog allowance, preserving canonical relation/column spelling and error order without allocating a second serialized key.
+
+- Decode independent relation ACL replacement tuples under the original record memory allowance, retaining their ordered path buffers and preserving stored field and revision validation order.
+
+- Decode stored full-text and vector field declarations under the original memory allowance, preserving ordered names, duplicate entries, vector dimensions and stored JSON forms. Input failure releases partial fields before returning their allowance.
+
+- Decode durable role identities and bound relation/column ACL JSON under the caller's memory allowance, preserving existing struct forms, numeric classifications, path order and duplicate-key behavior. Failed or cancelled input releases partial buffers.
+
+- Preserve stored relation ACL map nodes and their original memory reservations when adopting authority into SQL, without reallocating column entries or changing the persisted format. Rust `BoundRelationSecurity::column_acls` constructors now use Core's `OwnedMap`.
+
+- Retain persistent secondary-index definitions through the shared bounded catalog input owner. Original encoded fields, optional definitions, composite and legacy names, and private membership survive rollback and source retirement; returned fields retain their original allocation allowances. Complete typed catalog and Engine restore integration remain under implementation.
+
+- Retain persistent catalog text reads on one committed/private snapshot, including model, scoring, analyzer and path definitions. Each transition consumes one record slot, including deletions, and checks encoded key/value limits before owned payload admission. Typed catalog and Engine restore integration remain under implementation.
+
+- Resume native model input, validation and catalog adoption through the original byte/work windows, preserving exact weight bits, layer order, labels and original allocation ownership without retraining. Engine archive integration and public restore remain separate delivery work.
+
+- Resume native graph and materialized-path input, validation and catalog adoption through the original input byte/work windows. Original evaluated values, membership, label identities, materialized pairs and allocation ownership survive source retirement and later mutation. Pending registry labels keep their original allowance through ordering and tag reads, including cancellation and abandonment. Engine archive integration and public restore remain separate delivery work.
+
+- Restore resolved analyzer and field-binding images through the caller's byte and work windows, preserving original descriptors, dictionary bytes, user rules, index/search revisions and allocation ownership. Native named/field catalog publication retains both runtime and encoded roots, and capture images own copied descriptor/artifact bytes independently of imported executable revisions. Completed images use captured resources independently of live analyzer caches. Temporary dictionary-input storage retains its allowance until reconstruction retires the original vector. Public Engine restoration remains under implementation.
+
+- Compile native memory-backup capture adapters and their unit-test consumers under the same platform boundary as the local repository API, preserving strict browser WASM library/test builds and native transaction snapshots.
+
+- Reuse canonical JSON string workspace and borrow ordered object traversal during dictionary loading, preserving the existing allocation ceilings and insertion-order JSON compatibility.
+
+- Validate resolved analyzer configurations through retained borrowed fields, preserving exact canonical values and byte-limit diagnostics without complete pipeline copies.
+
+- Retain analyzer descriptor syntax, canonical output, fingerprints, runtime profiles and native configuration construction across input steps. Original configuration images and descriptor values share native field constructors while preserving exact values, schema diagnostics and allocation ownership. Executable preparation, Storage image input and native catalog publication share the retained reconstruction; public Engine restoration remains under implementation.
+
+- Retain Korean and Japanese dictionary frame decoding, native table/string construction, lexical completion and provenance validation through bounded work checkpoints. Ordinary loaders share the same constructors and preserve dictionary bytes, identities, validation order and token observations; Storage image input and native catalog publication use these constructors; public Engine restoration remains under implementation.
+
+- Retain native value decoding, copying, JSON scanning and relation-name rendering across bounded input steps. Shared Core continuations preserve original bytes and allocation ownership, retire interrupted candidates and keep synchronous scalar decoding allocation-free; complete Engine restore remains under implementation.
+- Validate legacy trigger targets through their exact stored schema/function name when an immutable function identity is absent. Original absent identity fields remain unchanged, and ambiguous or missing handlers reject before activation. Trigger activation consumes one event row even when the stored handler declaration includes `SETOF`.
+
+- Validate selected trigger function signatures, result types and languages during native restoration without compiling deferred bodies. Ordinary creation, catalog projection and restoration share the trigger contract, including PostgreSQL-compatible `RETURNS SETOF trigger` declarations.
+
+- Validate captured event registry ownership, trigger relation kinds and update columns, rule dependency relations/columns, and concrete action/condition references before private restoration. Native OLD/NEW scalar references, CTE visibility, quoted names and absent legacy dependency summaries retain their existing meaning; definitions are not rebound or executed.
+
+- Include each supplied constraint-trigger OID and incarnation in the same restore validation namespace as table and domain constraints, even when the companion legacy field is absent. Trigger-row OIDs retain their separate catalog namespace, and missing legacy identity fields remain unchanged.
+
+- Validate complete referencing-partition foreign-key families with the same borrowed definition comparison used for ordinary attachment. Missing members, conflicting targets/options and independent declaring owners reject before activation; attached names, catalog identities, eligible indexes and SET column subsets are preserved.
+
+- Reject restored foreign keys with omitted derived constraints for their captured referenced partitions, or with extra derived rows on an inherited foreign-key copy. Validation compares the complete original partition tree without executing declarations or creating replacement rows.
+
+- Reject duplicate supplied constraint catalog OIDs and incarnations across ordinary tables, foreign tables and domains before restore activation. Shared foreign-key enforcement families, distinct partition rows, separate catalog OID namespaces and original legacy metadata absence are preserved. Complete logical closure and public Engine restore remain under implementation.
+
+- Reject restored plain index keys and INCLUDE attributes that reference missing declared columns, including addressless legacy indexes. Undeclared document fields, exact quoted names and repeated included columns retain their existing behavior. Complete index-expression validation and public Engine restore remain under implementation.
+
+- Add SQL/Execution native predicates for captured named arguments of builtin sequence functions against the original relation namespace. Typed numeric OIDs, dash OID zero, native numeric spellings, explicit text casts, deferred routine bodies and same-named user functions retain their original behavior. Complete logical closure and public Engine restore remain under implementation.
+
+- Add SQL/Execution native predicates for live key/CHECK columns, original foreign-key indexes and captured referenced-partition edges before activation. Reordered target keys, repeated referencing/action columns, renamed indexes and NOT VALID declarations preserve their existing behavior without evaluating checks or callbacks. SQL owns the admitted dependency predicate; complete expression/resource closure and public Engine restore remain under implementation.
+
+- Add SQL/Execution native predicates for stored index table incarnations, constraint ownership and partition-parent identities. Missing or inconsistent references, duplicate addresses/physical keys and cyclic ancestry reject before private activation; original names, legacy addressless definitions and repeated included columns are preserved. Index metadata projection borrows expression payloads and admits copied physical keys under the restore allowance. Complete stored-expression validation and public Engine restore remain under implementation.
+
+- Add SQL/Execution native rejection of missing declaration schemas and duplicate relation/type names, while preserving virtual system schemas, native graph namespaces, quoted identifiers, independently relocated multiranges and displaced array names. Indexes and sequences retain their separate namespace from scalar types. Public Engine restore remains under implementation.
+
+- Add SQL/Execution native checks for concrete routine identities and original signatures in column/domain expressions, views, bound SQL bodies, trigger targets and rule actions without compiling deferred source bodies. Complete logical closure and public Engine restore remain under implementation.
+
+- Preserve imported graph handle reservations through transaction errors, panics, nesting and complete handle replacement. Native and mapped transaction boundaries retain the original allocation and restore the selected generation on failure.
+
+- Add SQL/Execution native predicates for inherited/partition parent references and stable sequence ownership. Missing parents, ancestry cycles, replaced owner columns and missing implicit sequences reject without repairing metadata or allocating sequence values; public Engine restore remains under implementation.
+
+- Add SQL/Execution validation of concrete stored-view and bound SQL routine relation references, preserving CTE visibility and deferred source bodies without rebinding or evaluation. Complete logical validation and public Engine restore remain under implementation.
+
+- Add SQL/Execution checks for declared user types and relation row types against the selected type address space, rejecting missing definitions, physical-identity conflicts and recursive concrete memberships.
+
+- Add SQL/Execution validation of role incarnations, owner-rooted ACL grant paths, column authority and retained memberships without changing native definitions.
+
+- Add ordered native sequence metadata/authority input, verified repository-unit decoding and graph/model/path/analyzer membership adoption. Complete Engine reconstruction and public restore activation remain under implementation.
+
+- Restored HNSW and DiskANN owners retain original decoded payload reservations while subsequent reads and writes use an independent destination allowance. Exhausting the completed input allowance no longer prevents ordinary vector mutations.
+
+- Native field-analyzer input retains decoded names and independent historical index/search revisions; restored lazy defaults share their admitted configurations without resolving resources during input. Memory source publication can transfer future mutations to a destination allowance while retaining original nodes and child update identities.
+
+- Native table data assembly joins writable document, evaluated text, vector and named value-index owners without reanalysis or rebuilding, retaining original decoded allocation ownership through later mutations. Complete Engine reconstruction and public restore remain under implementation.
+
+- Native catalog snapshots preserve original image allocation ownership through transaction undo, statement snapshots and definition caches; later writes retain their ordinary destination ownership.
+
+- Native memory source registration can admit its fixed allocation under the original input allowance. Failed registration preserves the unregistered source, and promoted readers retain its reservation through source retirement; vector and evaluated-index reconstruction use this ownership boundary, including exclusive vector adapters and IVF payload lifetime.
+
+- Native SQL and Execution catalog image readers can assign a separate destination mutation budget while preserving original input reservations through retained generations, including paired foreign definitions and authority, secondary-index metadata and comments.
+
+- Table authority images retain original ACL payloads and native map-node admission through shared catalog and privilege readers, rollback and Engine retirement.
+
+- Native vector registration imports retain decoded field buffers and admit ordered membership before publication; later writes and captured snapshots preserve those original owners.
+
+- Decoded memory documents can enter writable native storage while preserving tuple metadata and original payload admission through snapshots, physical query readers and source retirement. Complete Engine restore remains under implementation.
+
+- Evaluated memory text images can become writable native indexes without reanalysis. Original corpus and analyzer owners survive shared snapshots, subsequent mutations and source retirement.
+
+- Decoded memory vector indexes retain their original allocation leases through live registration, writes, snapshots and retirement without a separate caller-owned reservation. Completed DiskANN owners separate input cancellation from subsequent reads, mutations and rebuilding while preserving the original memory allowance.
+
+- Native table image import retains decoded field names, optional array names, constraints, definitions and unresolved analyzer settings with their original memory admission through shared catalog consumers. Complete Engine restore remains under implementation.
+
+- Table column, CHECK and partition definitions retain independent immutable generations and complete evaluated-literal ownership across committed memory capture, query readers and transaction rollback.
+
+- Committed memory captures share immutable table field names, foreign and key constraints, row-array names and dropped-attribute metadata under independent capacity admission; publication and rollback preserve original generations.
+
+- Committed memory captures share the original table analyzer configuration image while preserving deferred validation and resource loading.
+
+- Committed memory captures retain original Planner statistics under independent cached-footprint admission without copying their distribution population.
+
+- Stream original evaluated-index policies and value images from committed memory captures, including spilled keys, without reevaluation. Public Engine restore remains under implementation.
+
+- Retain immutable named-index membership separately from evaluated child values. Live publication and rollback preserve exact child identities through name reuse, deletion and source retirement without scanning values when capturing the name root. Public Engine restore remains under implementation.
+
+- Spilled evaluated-index captures retain native record roots and encrypted files without reading or copying the complete value population. Independent retention charges cached metadata footprints; bounded chunk preparation and output preserve exact evaluated bytes after source mutation or closure.
+
+- Add bounded native image composition with retained catalog/resource/table-metadata adapters, exact field analyzer revisions and document/text/vector readers. Immutable successor selection preserves empty-term text documents and original cancellation after source retirement. Public Engine restore remains under implementation.
+
+- Resident evaluated-index captures retain immutable native roots without visiting or copying their row population. Independent admission includes the complete cached payload footprint, and later updates preserve the selected values and existing predicate rules.
+
+- Foreign catalog capture includes separately retained literal payloads in its independent memory allowance, both for native definitions and reconstructed images.
+
+- Native rewrite-rule images preserve original SQL, bound conditions, OLD/NEW identities and dependency membership through independently retained event owners. Public Engine restore remains under implementation.
+
+- Nested scalar type binding no longer retains unrelated constructor and call-coercion workspace across recursive argument descent, preventing default-thread stack overflow in collation-aware expressions.
+
+- Reject saved query images whose DEFAULT positions exceed the original VALUES width, before rule rewriting can use those positions.
+
+- Added native query and expression-plan images with bounded output and admitted reconstruction, including data-modifying CTEs, original stored metadata and query/window arena validation. Immutable owners retire deep complete and partial plans without recursive stack growth or further allocation; complete stored catalog integration and Engine restore remain in progress.
+
+- Require Apple Silicon ARM64 for macOS support and native release packages. macOS CI uses the self-hosted macOS 26 ARM64 runner; releases through 0.6.3 retain their original macOS x86_64 artifacts.
+- Group C binding qualification into six Linux/macOS jobs instead of twenty-two, reusing Cargo dependencies while retaining all nine feature configurations per platform, both native sanitizer configurations and all four storage providers.
+- Keep self-hosted macOS Rust toolchains private to each worker and execute complete workspace and deterministic performance suites on their build workers, eliminating repeated test-archive downloads while retaining the full test selection and result artifacts.
+
+### Added
+
+- Reconstruct native evaluated value indexes with original admitted values, exact historical comparison policy and named capture membership. Normal writes and later spill preserve retained inputs; complete Engine restore activation remains under implementation.
+
+- Connect committed memory Engine catalogs, tables, evaluated data and resources to bounded full and incremental backup export; public restore activation remains under implementation.
+
+- Add native durable comment, secondary-index metadata and scoring-parameter images preserving original addresses, definitions and exact encoded values through source replacement and Engine retirement. Reconstructed entries retain their payload allowances through native catalog clones and captured generations. Public Engine restore remains under implementation.
+
+- Add bounded native foreign-table catalog images preserving original declarations, server references, option order and matching relation authority without contacting foreign data sources. Public Engine restore remains under implementation.
+
+- Add native routine catalog images preserving original declarations, unexamined source bodies, separately bound SQL plans and execution authority. Restored definitions and shared bodies retain independent memory and cleanup ownership; public Engine restore remains under implementation.
+
+- Add bounded images for original stored SQL query, mutation and NOTIFY bodies, with separate bound SQL plan images. Reconstruction preserves original syntax, bindings and local window addresses under admitted ownership; routine/rule catalog integration and complete Engine restore remain in progress.
+
+- Add bounded native stored-view images preserving original query bindings, authority revisions and evaluated materialized rows. Reconstructed immutable catalogs retain their query cleanup and memory ownership through capture and replacement; public Engine restore remains under implementation.
+
+- Add bounded native executable-scalar images preserving resolved types, selected calls, window clauses, collations and query-arena addresses. Admitted reconstruction owns deep-tree cleanup; public Engine restore remains under implementation.
+
+- Add bounded native column-statistics and statistics-maintenance images preserving complete distributions, floating-point frequency bits, original counters and sampled analysis identities without rerunning ANALYZE. Public Engine restore remains under implementation.
+
+- Add bounded native table and column authority images preserving role incarnations, grantor paths, optional ACLs and independent tuple revisions. Admitted input reconstructs private authority without resolving names; complete Engine restore remains under implementation.
+
+- Add bounded native images for table CHECKs, key and foreign-key constraints, inheritance and partition metadata, and dropped physical attributes. Admitted input preserves original identities, declaration order and bound expressions; public Engine restore remains under implementation.
+
+- Add bounded native column-definition images retaining physical attributes, missing values, bound defaults and generated expressions, foreign-reference identities and exact sequence provenance. Admitted input reconstructs private native columns without evaluation; public Engine restore remains under implementation.
+
+- Add native trigger catalog images preserving ordered relation membership, original function and constraint identities, enabled states, declaration metadata and bound WHEN expressions. Bounded output and admitted input retain source generations without firing triggers or resolving names; complete Engine restore remains under implementation.
+
+- Add bounded native domain and scalar-definition images with admitted native reconstruction, retaining original defaults, constraints, authority, function bindings and evaluated literal metadata. Input retires deep partial trees on malformed data, denied memory, cancellation or unwinding. Complete Engine restore remains under implementation.
+
+- Add native function-binding images that preserve selected operations, argument and type metadata, collations and deferred diagnostics with bounded output and admitted reconstruction. Existing foreign-callback image bytes remain unchanged; complete stored-expression backup and public Engine restore remain under implementation.
+
+- Add resumable native domain-catalog validation with admitted identity scratch, bounded role-index construction and terminal cancellation or failure handling. Existing domain restoration shares the same predicates and validation order; complete public Engine restore remains under implementation.
+
+- Add native sequence metadata and authority images for memory backup assembly. Bounded readers retain original allocation generations, reserved positions, owners, persistence and grants after source retirement. Import validates matching membership and preserves admitted native ownership; public Engine restore remains under implementation.
+
+- Add native foreign-wrapper images that preserve original handler and validator identities, complete invocation and value bindings, and option order without executing callbacks. Bounded streaming and admitted reconstruction survive callback removal, name reuse and source closure; complete memory Engine restore remains under implementation.
+
+- Add native composite and range catalog images that preserve dropped attributes, complete type modifiers and bindings, selected support OIDs and independently named multiranges. Bounded streaming and admitted private reconstruction retain original metadata after source closure without SQL replay; complete memory Engine restore remains under implementation.
+
+- Add native enum, shell-type, foreign-server and graph catalog OID image codecs. Bounded readers preserve original identities, enum order keys and sort bits, ordered options, ACL paths and optional metadata; private import validates local structure and retains decoded memory through native clones and captures. Public Engine restore remains under implementation.
+
+- Add repository-owned restore jobs that advance provider import and validation before publishing a new destination. Owned image readers retain archive leases across steps; failure, cancellation and unwinding close active work, and recovery uses the original durable request. Complete public Engine restore remains under implementation.
+
+- Add native role, membership, schema, database, built-in routine and system relation authority image codecs for memory backup assembly. Bounded readers retain exact identities, revisions, bindings and ordered ACLs; import validates framing and native keys and retains decoded memory admission through catalog clones and captures. Public Engine restore remains under implementation.
+
+- Add exact materialized path-index images for memory backups. Borrowed and owned readers stream original label sequences and evaluated vertex pairs with fixed state, preserving selected data after graph changes and source closure. Import validates complete framing and canonical order before publication and retains decoded memory admission through native clones and captures. Public Engine restore remains under implementation.
+
+- Add resumable stored-model and analyzer image readers. Models retain bounded shape and numeric validation before output; analyzers borrow exact resolved descriptors and dictionary artifacts. Borrowed and independently owned readers preserve source cancellation and bytes after source closure, and synchronous output shares the same encoders. Public Engine restore remains under implementation.
+
+- Read spilled HNSW image coordinates through fixed windows, allowing evaluated vectors larger than the invoking memory allowance without decoding complete records. Resident spill-map deletion now removes the selected tree key, preserving retained generations while eliminating scans across removed entries. Resumable HNSW preparation and output preserve node/layer order, structural diagnostics and tombstone reachability with bounded work and shared temporary-file admission. Borrowed, independently owned and synchronous readers use the same codec; public Engine restore remains under implementation.
+
+- Add resumable memory DiskANN image validation and output over retained sealed generations and canonical changes. Bounded preparation checks complete origin coverage before output; borrowed and owned readers preserve physical bytes, tensor bits and cancellation with fixed scratch, independently of live rebuilds and source retirement.
+
+- Add resumable IVF image validation and output over frozen training generations. Preparation counts coordinate windows and empty membership boundaries, preserves absolute coordinate diagnostics and rejects invalid state before output; captured readers survive live retraining and source retirement without copying complete encoded images.
+
+- Add resumable exact-vector image reads over retained tensor coordinates. Borrowed and independently owned readers preserve exact coordinate bits, tensor order and original cancellation with bounded output and admitted fixed scratch; synchronous output uses the same encoder. Public Engine restore remains under implementation.
+
+- Add resumable memory graph image reads with bounded pre-output validation and exact progress counts. Readers preserve evaluated properties, memberships, label registries and allocation state while retaining both source and invoking cancellation; synchronous graph output shares the same encoder. Captured graphs can transfer their source into an independent movable reader that survives Engine closure and releases retained memory on completion or failure. Public Engine restore remains under implementation.
+
+- Add public Rust persistent backup jobs through `Engine::begin_backup` and `uqa_api::backup`. Effective-role authorization and transaction admission precede capture; encrypted sources require repository protection or explicit plaintext export. Jobs retain independent provider cuts and expose bounded progress, cancellation, verification and publication. Native SQLite initialization now publishes its independent image source at the successful initialization transition. Memory Engine images and public restore activation remain under implementation.
+
+- Add resumable evaluated-value, memory-document and evaluated text-index image readers. Reads retain their exact position, emit at most 16 KiB, borrow source payloads and preserve private tuple metadata, raw token keys, occurrence graph edges and historical field metadata; admitted cursor and numerical scratch ownership ends on completion, cancellation, failure or drop. Existing image writers share the same encoder. Repository capture accepts streams whose length is established at EOF, records exact final lengths and preserves declared-length checks and incremental reuse without pre-encoding source values. Public Engine restore remains under implementation.
+
+- Add scheduled repository image capture with bounded source, payload, parent-inventory and verification steps. Jobs retain their original cancellation and memory controls, report actual work, release source/workspace ownership on failure and permit publication only after complete verification. Full and incremental preparation share this state machine; public Engine restore activation remains under implementation.
+
+- Expose the existing native SQLite, SQLite Key/Value and redb committed image streams through the common persistent-provider interface. The independently owned stream retains its original cut, cancellation and memory allowance after the provider or Engine closes; unsupported providers reject capture without opening a session. Complete memory-image restoration and public Engine restore activation remain under implementation.
+
+- Retain materialized memory path indexes and their registration catalogs as immutable native generations. Captures admit cached complete footprints without copying label sequences or evaluated pairs; selected children preserve their original memory and cancellation controls after source closure. Failed registration admission preserves prior path definitions and materializations across all storage providers. Public Engine restore remains under implementation.
+
+- Retain named and historical field analyzer catalogs as immutable native generations. Capture uses cached memory admission without copying complete registries, descriptors, dictionaries or table membership, and does not retain executable pipelines or decoded models. Temporary field bindings remain outside the durable encoded root; failed native publication preserves previous catalogs and stored definitions. Public Engine restore integration remains in progress.
+
+- Retain primary memory graph entities, membership and adjacency indexes, label definitions, allocation counters and tombstones in immutable native generations. Captures use cached footprints, selected changes share unrelated payloads, and failed admission preserves the complete graph and its identities. Imported graph generations retain their own allocation leases through cloning and source retirement. Native graph-resource membership retains cached image footprints and independently admitted child images through Engine publication, rollback and closure; public Engine restore remains under implementation.
+
+- Add bounded completed-backup listing, durable root retirement and repository garbage collection. Active readers, prepared images and incremental children retain their required objects after ancestor removal; collection authenticates complete inventories, revalidates concurrent publication and reclaims only inactive staging links and entirely unreferenced packs. Reports distinguish referenced ranges from retained whole-pack bytes.
+
+- Add standalone copies of completed backup roots into independently protected repositories. Copies preserve exact logical image digests, verify both repositories' content, share a bounded encrypted workspace and recover prepared publication without the original repository or key. Copying under a new key leaves existing roots and keys intact; public Engine restore remains in progress.
+
+- Avoid duplicate backup-source registration for memory savepoints and nested transaction frames. Their row, metadata and autonomous sequence undo remains intact; committed capture retains the outer original generation.
+
+- Retain native domain, enum, composite, range, shell, schema-authority, role, membership, graph identity, foreign-wrapper, foreign-server, paired foreign-table definition/authority, index metadata, view, user routine, trigger, rewrite-rule, database authority, built-in routine authority and system relation authority catalogs as immutable generations with separately owned temporary definitions. Captured durable roots use cached memory admission and preserve exact definitions, namespace and role identities, revisions and grants through native DDL, rollback and closure without copying complete catalogs. Public Engine restore remains under implementation.
+- Retain catalog comments in separate durable and temporary native generations. Changing one description shares unrelated text, source selection retains the durable root without scanning object catalogs, and capture admits its cached complete footprint. Failed native admission preserves original descriptions, eligibility and stored metadata. Physical refresh shares unchanged durable payloads and keeps session-owned temporary descriptions; fresh opens restore durable comments only. Object-address ordering and transactional rollback retain their existing behavior.
+
+- Add complete incremental repository inventories that reuse unchanged immutable unit ranges, preserve changed/new/tombstone units and omit deleted units. Bounded comparison reports actual source reads and hashes separately from reused and newly stored bytes; fingerprint acceleration and public Engine restore remain in progress.
+- Retain the absolute memory catalog OID counter position with the selected transaction data and sequence cut, including reservations consumed by rolled-back definitions. Fresh counter construction preserves uninitialized state, wrapping and exhaustion; memory document counters retain their original transactional semantics. Public Engine restore remains under implementation.
+- Retain complete sequence records and authority together with immutable native value history. Captures admit cached durable roots and match original object/definition generations without copying the catalog or rollback history. Sequence value operations admit native position and history successors before consuming cached values or changing persistent positions; failed admission preserves catalog, cache and session observations. Reserved cache endpoints, exact `setval` positions, private definition changes, rollback and closure retain their existing behavior; public Engine restore remains under implementation.
+- Register immutable transaction table, sequence, type, schema, view, routine, role, authority, foreign-table and event sources separately from private live state, together with their original graph/model/path/analyzer resources, scoring settings, index records, historical field-analyzer bindings and object-addressed comments. Selected captures exclude temporary data and definitions before output admission, retaining original identities, matching authority, syntax, table metadata and text/vector/value indexes through transaction completion and Engine closure under independent memory and cancellation controls. Public Engine restore remains under implementation.
+- Select immutable memory capture source sets under independent admission. Unselected source writes and retirement consume no capture payload allowance; replacement selections preserve earlier cuts. Public Engine restore remains under implementation.
+- Separate immutable memory transaction data from live table owners so retained generations survive rollback, replacement and closure without pinning later table contents. Complete admitted committed backup capture remains under implementation.
+- Exclude temporary views before allocating durable memory catalog images, preserving permanent and unlogged definitions under independent capture limits through rollback, replacement and Engine closure. Public Engine restore remains under implementation.
+- Preserve admitted non-temporary memory table membership through creation, deletion, rename, rollback and Engine closure without retaining mutable table owners or copying the relation corpus at capture. Immutable map deletion preserves earlier roots with logarithmic allocation. Public Engine restore remains under implementation.
+
+- Read captured memory sources through stable weak identities, including unchanged vector indexes, without borrowing current table/index membership. Retain selected images across source retirement and same-name replacement, admit weak source storage and release future mutable payloads on closure.
+
+- Preserve memory routine and rewrite-rule generations with exact source/bound bodies, attributes, identities, OLD/NEW conditions and dependencies. Captures retain independent constants without compiling deferred bodies or invoking routines; rollback, replacement and closure preserve selected definitions.
+- Preserve memory views and evaluated materialized-view rows through rollback, replacement and closure. Captures retain exact stored query bindings, authority and value representations without executing the query or retaining execution-only analysis owners.
+
+- Preserve memory trigger definitions, bound routine identities, enable modes and constraint metadata through rollback, replacement and closure, with independently admitted WHEN literals and argument payloads.
+
+- Retain resolved memory analyzer images and independent field bindings through replacement, rollback and closure. Captures preserve exact descriptor/dictionary bytes and historical index/search revisions without retaining compiled pipelines or source import allowances.
+
+- Preserve materialized memory path indexes through graph changes, rollback, replacement and closure, retaining exact label sequences and evaluated vertex pairs under independent capture allowances.
+
+- Retain memory foreign-wrapper, server and table definitions with exact handler and validator bindings, public identities, dropped attributes, constraints and option order. Captures own their default values independently and preserve selected definitions through rollback, replacement and closure without reading remote data.
+- Retain sequence positions and identities, graph catalog OIDs, comments, index definitions and stored scoring parameters in memory captures, preserving original names, allocation generations and encoded payloads through mutation, rollback and closure. Public Engine restore remains under implementation.
+- Preserve complete domain, enum, composite, range and shell type definitions in memory catalog captures, including exact OIDs, enum order keys, dropped attributes, support routine identities and independently owned default values. Public Engine restore remains under implementation.
+- Retain system-relation, built-in routine and foreign-table authority in memory catalog captures, including absent/empty ACLs, grant paths and relation/column tuple revisions. Permission changes, rollback and same-name foreign-table replacement preserve the selected values; public Engine restore remains under implementation.
+- Preserve role incarnations, tuple revisions, attributes and complete membership grant paths in retained memory catalog generations. Role rename, same-name replacement, rollback and Engine closure keep the selected authority under independent capture limits; public Engine restore remains under implementation.
+- Preserve memory database, schema and sequence authority in captured catalog generations, including bound role incarnations, ACL absence and grant paths, exact qualified names and namespace tuple identities. Public Engine restore remains under implementation.
+- Retain immutable memory graph and model images through catalog replacement, rollback and Engine closure, with explicit payload admission and original cancellation preserved by independently retained image handles. Public Engine restore remains under implementation.
+- Preserve non-temporary memory table definitions, complete ACL identities, statistics, analyzer configuration and allocation state through captured generations. Metadata mutation, rollback and source closure retain the original values under the backup's own limits; public Engine restore remains under implementation.
+- Retain evaluated named value-index keys and their original eligibility state through memory Engine mutation, rollback and closure, with explicit capture limits and cancellation. Expressions are not reevaluated; public Engine restore remains under implementation.
+- Register actual non-temporary memory Engine documents, text and vector indexes in their owning capture domain. Preserve unread sources on final closure and exact vector identities through replacement, removal and rollback, including IVF query retraining; share table membership roots without copying rows or names. Complete committed backup selection and public jobs remain in progress.
+
+- Preserve memory IVF state before every registered capture-domain mutation, including query-triggered retraining and probe changes. Export-only captures retain the original training state and controls after source closure; public Engine restore remains under implementation.
+- Add exact stored-model backup images preserving every supported layer, parameter bit, label and gating value. Controlled private reconstruction validates the complete model and retains decoded allocation ownership; public Engine restore remains under implementation.
+- Add exact analyzer-resource images that retain resolved descriptors and Korean/Japanese dictionary bytes without reopening files or consulting host caches during restore. Input validation, feature admission and retained encoded-resource memory remain explicit; public Engine restore remains under implementation.
+- Add fresh native SQLite image import with dependency-ordered physical rows, exact revision/namespace/watermark preservation, bounded row verification and recovery of uncertain history publication. Partial images remain unavailable; full logical catalog validation and public Engine restore remains in progress.
+- Add a bounded native SQLite image exporter preserving the stable data namespace, evaluated rows, committed revisions and autonomous watermarks in all four file modes. Capture reuses the initialized record owner without migrating the source or changing private transactions; notification delivery and unpublished/retired DiskANN payloads are excluded. Public Engine restore remains in progress.
+- Add fresh-file SQLite Key/Value image import for plain, encrypted, compressed and encrypted-compressed destinations. Bounded BLOB writes preserve captured records and allocator watermarks; incomplete images remain unavailable until full verification and the existing history-restoration transition complete. Repository restore adapters can open private provider paths through pinned directories, and SQLite recovery checks the exact image and target before resuming without replaying data. Logical catalog validation and public Engine restore integration remain in progress.
+- Add repository-owned restore intents, private target directories and atomic destination publication without replacement. Recovery retains the original history request, preserves later writes after a lost publication reply and can publish a prepared image after archive loss. Complete logical format validation and public Engine restore remains in progress.
+- Add bounded fresh-file redb image import with complete repository verification, preserved record revisions and identifier watermarks, incomplete-file admission rejection, and atomic replacement of transaction history. Complete logical format validation and public Engine restore integration remain in progress.
+- Connect complete provider image streams to protected shared packs and an encrypted, quota-bound inventory spool. redb and SQLite KV archives retain their captured bytes after source writes and source removal; publication uses the existing durable operation identity.
+- Add a bounded repository image reader that streams authenticated units, verifies every complete object and global frame range, and exposes completion only after all checks succeed. Corruption, cancellation and incomplete unit reads release files and verification workspace immediately.
+- Add online Key/Value image exporters for redb and SQLite KV. The versioned stream retains committed revisions, allocator watermarks and evaluated owner encodings, excludes notification delivery and unpublished/retired DiskANN payloads, and releases each physical read before returning. Complete native reconstruction and public Engine restore APIs remain in progress.
+
+- Add evaluated memory DiskANN images that retain sealed graphs, quantization, exact-side records and uncovered canonical changes without rebuilding. Export-only vector captures survive source mutation and closure; restored writers use independent future change identities. Public Engine restore remains under implementation.
+- Add controlled evaluated memory vector images for exact, IVF and HNSW indexes, preserving tensor bits, trained state, graph topology and pending persistence without rebuilding indexes. Public Engine restore remains under implementation.
+- Add evaluated memory graph images with controlled fresh reconstruction, preserving exact properties, named memberships, label allocation history and unused IDs. Derived graph indexes are validated and reconstructed by Graph; public Engine restore remains under implementation.
+
+- Add evaluated memory text-document image output and controlled reconstruction, preserving duplicate token graph edges, raw UTF-16 terms, original offsets, historical analyzer revisions and normalization lengths without reanalysis. Public Engine restore remains under implementation.
+
+- Add a Common Storage memory-capture owner that preserves an immutable source before its first subsequent write, without walking sources at capture registration. Each cut retains its own allowance and terminal failure; a failed backup does not consume an ordinary source write. Public Engine restore remains under implementation.
+
+- Add controlled memory-document snapshots that admit a retained generation without scanning or copying its rows. Snapshots preserve original cancellation and memory ownership through source replacement, clearing and closure; image output uses a separate bounded working allowance.
+
+- Add versioned evaluated-value and memory-document image codecs for backup construction, preserving exact floating-point bits, opaque SQL datums, collection types, descriptor identities and tuple metadata. Large borrowed strings and binary payloads stream without another payload-sized allocation; decoded state remains under an explicit memory allowance. Public Engine restore remains under implementation.
+- Add bounded committed-record reads and a streaming record/allocator cursor for backup image adapters. Physical scan windows include excluded keys in their limit, payload reads retain exact revisions across concurrent writes, and completion or failure immediately releases the captured cut.
+- Add joint SQLite record and autonomous identifier snapshots with short read windows, cross-process retention and durable capture in both mappings and all four file modes. Complete native reconstruction and public Engine restore APIs remain in progress.
+- Add native local backup repositories with authenticated immutable packs, bounded full verification, durable publication, cancellation and prepared-image recovery. Full restore qualification and public Engine restore APIs remain in progress.
+- Add Common Storage backup image codecs with ordered streaming inventories, immutable root descriptors, bounded parsing and authenticated frames. These format primitives support the ongoing online/incremental backup implementation; they do not expose Engine capture or restore yet.
+- Add joint redb record and autonomous identifier snapshots for backup image adapters. Retained metadata generations preserve allocation watermarks while later writes and bounded reads continue; redb record format 64 upgrades existing allocations atomically and requires updated database owners.
+
+### Fixed
+
+- Retire obsolete source layouts when reanalyzing an owned query, including queries without a FROM clause. Complete layout observations replace both optional descriptors through the same installer as ordinary analysis, releasing superseded descriptor handles before publication.
+- Make `pg_catalog.pg_shadow` queryable through the existing login-role projection, retaining its private table and column permissions, catalog identity and view locks.
+
+- Include retained routine defaults and bound scalar literals in independent catalog capture limits, including restored owners and reused SQL bodies.
+
+- Capture transaction rollback state after catalog admission, releasing obsolete cached analysis before replanning large statements and keeping rollback on the selected catalog view.
+
+- Keep SQL call-selection workspace out of recursive argument-observation frames, preventing stack exhaustion when a prepared nested collated expression is analyzed again on an ordinary thread stack.
+
+- Retire deeply nested native scalar expressions with constant stack and no traversal allocation, including cleanup after a retained resource unwinds. Native AST payloads move into execution plans without replacement boxes or declaration copies; Rust consumers borrow expression variants when inspecting their fields.
+
+- Reclaim derived benchmark build output before controlled performance compilation exhausts disk space, preserving retained reference executables and measurement records.
+
+- Retire, copy and validate deeply nested native SQL types with constant stack. Range-subtype validation and array-OID projection visit each nested node once; failed catalog-image input, exhausted memory admission and cancellation release partial type chains without recursive destruction; array modifier removal preserves domain boundaries. Rust matches that extract payload fields must now borrow `ColumnType` because it implements `Drop`.
+
+- Prevent backup temporary-file controls from increasing memory phrase-search cursor allocations, preserving the original cancellation and memory limits.
+
+- Retain memory vector field identities in immutable generations so capture does not copy the complete field catalog. Failed native or source-publication admission preserves the existing indexes and selected identities. Publish matching durable table and child source identities through mutation and rollback so internal idle capture can retain completed roots without walking the table/vector corpus.
+
+- Preserve encrypted compressed SQLite connection-pool growth after trusted-anchor admission and subsequent writes. Physical connections share authenticated publication state, including compaction and later synchronization failures, while explicit reopen retains exact external-anchor validation.
+
+- Preserve backup preparation across unrelated repository publications while still rejecting concurrent removal of verified references. Retried retirement now synchronizes its cancellation marker before acknowledging success, including operations that never published a root.
+
+- Group automatic regression selectors by package and test harness so discovery does not evaluate thousands of independent regular expressions for every listed test. Exact case identities, resource assertions and the discovery deadline remain enforced.
+
+- Preserve SQLSTATE `53200` for sequence catalog admission failures through statement-effect classification and failed transaction initialization, including cleanup diagnostics.
+
+- Resolve generated relation row-type arrays through their original element identity, preserving the owning relation's comment lifetime, role authority and type dependency diagnostics.
+
+- Preserve original catalog roots and table membership when persistent catalog reload runs out of memory, and retain SQLSTATE `53200` through index, table and routine publication errors.
+- Avoid premature stack-depth errors for valid recursive PL/pgSQL calls in unoptimized builds, including `fact(11)`. Interpreter activations retain their own heap storage while native stack and configured nesting limits remain enforced.
+- Stream temporary value-index payloads through the exact evaluated-value codec instead of JSON and a complete intermediate buffer. Tag-shaped maps keep their type, and owned reads retain decoded payload admission through their final consumer.
+- Retain immutable transaction and savepoint generations during error recovery instead of copying the complete table catalog. Table definitions share their existing immutable roots through capture and rollback; later DDL detaches only the changed definition.
+- Share immutable stored-model owners across Engine catalog generations so publishing another model does not copy previously retained weights. Owned model results and transaction rollback keep their existing behavior.
+- Validate stored deep models through borrowed layer views shared with runtime construction, avoiding complete weight copies while preserving shape checks and semantic diagnostics.
+- Release snapshot-retention memory when the last handle using its allowance is dropped, including during concurrent capture or reclamation. Independent sessions retain their own lease charges, so background maintenance cannot keep a completed query's allowance occupied.
+
+### Changed
+
+- Share immutable stored-model catalog roots across transaction snapshots and memory captures. Captures admit cached model footprints without visiting layers or copying weights; detached image handles retain only their selected model after catalog closure, under the original memory allowance and cancellation. Public Engine restore remains under implementation.
+- Share immutable scoring-parameter catalog roots across transaction snapshots and memory captures. Capture admits the complete retained footprint without copying the catalog; later updates preserve unrelated encoded payloads and exact rollback state. Public Engine restore remains under implementation.
+- Qualify dependent PR stacks once after integration into a candidate targeting main. Intermediate stacked PRs no longer start duplicate platform matrices; existing validation commands and acceptance bounds remain unchanged.
+
+### Security
+
+- Update Parquet and Arrow to 58.4.1 with Thrift 0.23.0, and DuckDB's build-time archive dependencies to tar 0.4.46 and zip 9.0.5, addressing excessive allocation and inconsistent archive-header parsing.
+- Update the BEIR embedding dependency to sentence-transformers 6.0.0 to enforce `trust_remote_code=False` when loading local model directories. Preserve the pinned model revision and invalidate prepared embeddings produced with the previous dependency version.
+
 ## [0.6.3] - 2026-11-01
 
 ### Changed

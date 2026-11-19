@@ -7,7 +7,7 @@
 //! Thread-scoped cancellation deferral for resource finalization, without consuming a signal.
 
 use super::CancellationToken;
-use std::sync::{Mutex, MutexGuard};
+use parking_lot::{Mutex, MutexGuard};
 use std::thread::ThreadId;
 
 #[derive(Debug, Default)]
@@ -15,11 +15,12 @@ pub(super) struct CancellationDeferrals {
     threads: Mutex<Vec<ThreadId>>,
 }
 
+// Only complete thread-ID insertions/removals mutate this private list. Caller code runs unlocked, and its deferral guard removes the entry during unwinding.
+impl std::panic::RefUnwindSafe for CancellationDeferrals {}
+
 impl CancellationDeferrals {
     fn threads(&self) -> MutexGuard<'_, Vec<ThreadId>> {
-        self.threads
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+        self.threads.lock()
     }
 
     pub(super) fn active(&self) -> bool {

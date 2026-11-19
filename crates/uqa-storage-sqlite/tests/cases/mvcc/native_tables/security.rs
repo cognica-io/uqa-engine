@@ -6,7 +6,7 @@
 
 //! Nullable migrated descriptors and table/column privileges retain their catalog snapshot boundary.
 
-use super::{bind, schema, BTreeMap, Catalog, ManagedConnection};
+use super::{bind, schema, Catalog, ManagedConnection};
 use uqa_storage::{RelationSecurityRow, TableAclEntry, TablePrivileges};
 
 #[test]
@@ -49,7 +49,7 @@ fn native_table_security_preserves_nullable_migrations_and_retained_privileges()
     row.security = RelationSecurityRow::Legacy(uqa_core::catalog_acl::LegacyRelationSecurity {
         role_owner: "new_owner".into(),
         acl: Some(acl.clone()),
-        column_acls: BTreeMap::from([("n".into(), acl)]),
+        column_acls: uqa_core::memory::OwnedMap::from_iter([("n".into(), acl)]),
     });
     catalog.save_table(&row).unwrap();
     let updated = catalog.load_tables().unwrap().remove(0);

@@ -391,3 +391,43 @@ fn sql_cleanup_keeps_the_callback_failure_across_entry_points(#[case] provider: 
     }
     engine.finalize_prepared_statement(&prepared);
 }
+
+#[rstest::rstest]
+#[case::sqlite_native(Provider::SQLiteNative)]
+#[case::sqlite_kv(Provider::SQLiteKeyValue)]
+#[case::redb(Provider::Redb)]
+fn admitted_begin_retires_analysis_from_the_previous_catalog_view(#[case] provider: Provider) {
+    let directory = tempfile::tempdir().unwrap();
+    let engine = provider.open(&directory.path().join("begin-catalog-cache.db"));
+    let sibling = engine.new_session().unwrap();
+    let control = engine.query_retention_control().unwrap();
+    let payload = "x".repeat(256 << 10);
+    let sql = format!("SELECT '{payload}'");
+    drop(engine.sql(&sql, &[]).unwrap());
+    assert!(control.memory().used() >= payload.len());
+
+    // Commit another catalog view after the old analysis is cached but before the transaction selects its provider snapshot.
+    sibling
+        .sql("CREATE TABLE published_before_begin (id integer)", &[])
+        .unwrap();
+    engine.begin().unwrap();
+    assert!(
+        control.memory().used() < payload.len(),
+        "{provider:?}: obsolete analysis retained {} bytes after BEGIN",
+        control.memory().used()
+    );
+    engine.rollback().unwrap();
+    assert!(
+        control.memory().used() < payload.len(),
+        "{provider:?}: rollback restored the preceding catalog cache"
+    );
+    assert!(engine.table("published_before_begin").unwrap().is_some());
+    {
+        let result = engine.sql(&sql, &[]).unwrap();
+        assert_eq!(result.value_at(0, 0), Some(&uqa_core::Value::Str(payload)));
+    }
+    sibling.close().unwrap();
+    engine.close().unwrap();
+    drop(engine);
+    assert_eq!(control.memory().used(), 0);
+}

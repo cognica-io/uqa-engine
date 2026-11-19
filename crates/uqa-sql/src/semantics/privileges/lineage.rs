@@ -74,11 +74,17 @@ pub(super) fn table_lineage(
     qualifier: &str,
     alias: Option<&str>,
     column_aliases: &[String],
+    bound_columns: Option<&[String]>,
     ctes: &PrivilegeScope<'_, impl AsRef<[QueryPlan]>>,
 ) -> Result<SourceLineage, SQLError> {
     let control = ctes.control();
     if ctes.is_visible_cte_with_control(name)? {
-        let mut output = if let Some(columns) = ctes.materialized_for_scan(name)? {
+        let mut output = if ctes.purpose == super::AnalysisPurpose::StoredDependencies {
+            match ctes.deferred_reference_with_control(name)? {
+                Some(cte) => super::columns::stored::cte_columns(cte, &control)?,
+                None => Columns::default(),
+            }
+        } else if let Some(columns) = ctes.materialized_for_scan(name)? {
             opaque_columns(columns.iter().map(String::as_str), &control)?
         } else if let Some(query) = ctes
             .deferred_reference_with_control(name)?
@@ -97,6 +103,40 @@ pub(super) fn table_lineage(
     else {
         return Ok(SourceLineage::default());
     };
+    if ctes.purpose == super::AnalysisPurpose::StoredDependencies {
+        let captured = bound_columns
+            .map(|columns| {
+                PrivilegeRelation::from_names(
+                    &relation.canonical,
+                    columns.iter().map(String::as_str),
+                    relation.kind,
+                    &control,
+                )
+            })
+            .transpose()?;
+        let relation = captured.as_deref().unwrap_or(&relation);
+        let mut lineage = relation_lineage(
+            relation,
+            [alias.unwrap_or(qualifier)],
+            column_aliases,
+            &control,
+        )?;
+        if alias.is_none() {
+            let identity = crate::catalog::resolution::bound_relation_identity_with_control(
+                &relation.canonical,
+                &control,
+            )?;
+            for extra in [name, identity.name.as_str()] {
+                insert(
+                    &mut lineage.qualifiers,
+                    extra,
+                    lineage.output.copy(&control)?,
+                    &control,
+                )?;
+            }
+        }
+        return Ok(lineage);
+    }
     relation_lineage(
         &relation,
         [alias.unwrap_or(qualifier)],

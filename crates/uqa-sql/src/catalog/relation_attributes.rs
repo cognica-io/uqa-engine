@@ -7,7 +7,6 @@
 //! Relation attribute numbers and the physical metadata retained by dropped slots.
 
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeSet;
 
 use super::type_metadata;
 use crate::ast::{AutoIncrementKind, ColumnDef, ColumnType};
@@ -167,39 +166,25 @@ pub fn materialize(
 
 /// Load-only restoration rejects missing or contradictory metadata instead of repairing a catalog snapshot.
 pub fn validate(columns: &[ColumnDef], dropped: &[DroppedAttribute]) -> Result<(), SQLError> {
-    let numbers = columns
-        .iter()
-        .map(|column| {
-            column.attribute_number.ok_or_else(|| {
-                SQLError::Internal("relation attributes require initial catalog migration".into())
-            })
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    validate_numbers(&numbers, dropped)
+    crate::catalog::work::inline(validation::validate_from(
+        columns,
+        dropped,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+        &mut (),
+    ))
 }
 
 fn validate_numbers(numbers: &[i16], dropped: &[DroppedAttribute]) -> Result<(), SQLError> {
-    let all: BTreeSet<_> = numbers
-        .iter()
-        .copied()
-        .chain(dropped.iter().map(|attribute| attribute.number))
-        .collect();
-    if all.last().is_some_and(|number| *number > MAX_ATTRIBUTES) {
-        return Err(too_many_columns());
-    }
-    if all.len() != numbers.len() + dropped.len()
-        || all
-            .iter()
-            .copied()
-            .ne(1..=i16::try_from(all.len()).unwrap_or(i16::MAX))
-        || numbers.windows(2).any(|pair| pair[0] >= pair[1])
-    {
-        return Err(SQLError::Internal(
-            "invalid relation attribute slot layout".into(),
-        ));
-    }
-    Ok(())
+    crate::catalog::work::inline(validation::numbers_from(
+        numbers.iter().copied(),
+        dropped,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+        &mut (),
+    ))
 }
+
+mod validation;
+pub use validation::{validate_from_input, validate_with_control};
 
 fn too_many_columns() -> SQLError {
     SQLError::Routine {

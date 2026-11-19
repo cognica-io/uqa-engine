@@ -8,7 +8,7 @@
 
 use crate::{
     assignment::AssignmentContext,
-    ast::{ColumnDef, Expr, TableHierarchy},
+    ast::{ColumnDef, ColumnType, Expr, TableHierarchy},
     schema::SchemaExpressionCatalog,
     type_resolution::FunctionTypeResolver,
     ResultRow, RowSchema, SQLError, SQLParam,
@@ -66,10 +66,12 @@ fn compare_values(
     context: &PartitionContext<'_>,
     left: &Value,
     right: &Value,
+    ty: &ColumnType,
 ) -> Result<Ordering, SQLError> {
-    crate::expr::compare_typed_values_with_enum_catalog(
+    crate::expr::compare_selected_values_with_catalog(
         left,
         right,
+        Some(ty),
         &uqa_core::memory::ProductionControl::uncontrolled(),
         Some(&crate::expr::EngineValueCatalog(context.assignment)),
         None,
@@ -78,14 +80,27 @@ fn compare_values(
 
 mod admission;
 mod bounds;
+mod comparison;
 mod datum_text;
 mod hash;
 mod key;
+pub mod native;
 pub use key::key_type as partition_key_type;
 
 pub use admission::validate_new_partition_bound;
 pub use bounds::transform_partition_bound;
 pub use datum_text::{partition_datum_text, range_bound_text, stored_datum};
+
+pub(crate) fn validate_partition_key_type(
+    strategy: crate::ast::PartitionStrategy,
+    ty: &ColumnType,
+) -> Result<(), SQLError> {
+    if strategy == crate::ast::PartitionStrategy::Hash {
+        hash::validate_partition_key_type(ty)
+    } else {
+        crate::catalog::index::operator_classes::require_default_btree_operator_class(ty)
+    }
+}
 
 pub fn validate_hash_partition_spec(
     context: &PartitionContext<'_>,
@@ -154,6 +169,7 @@ pub fn partition_constraint_accepts_document(
 /// A row's partition key under one partitioned table, with the row hash of a HASH partition key.
 struct RoutingKey {
     values: Vec<Value>,
+    types: Vec<ColumnType>,
     hash: Option<u64>,
 }
 
@@ -169,7 +185,16 @@ fn routing_key(
     let hash = (spec.strategy == crate::ast::PartitionStrategy::Hash)
         .then(|| hash::row_hash(context, spec, &definitions, &values))
         .transpose()?;
-    Ok(RoutingKey { values, hash })
+    let types = spec
+        .keys
+        .iter()
+        .map(|key| key::key_type(context.types, key, &definitions))
+        .collect::<Result<_, _>>()?;
+    Ok(RoutingKey {
+        values,
+        types,
+        hash,
+    })
 }
 
 /// Why partition routing rejects a row. The executor reports each with a description of the row, which depends on the statement and the role that writes it.
@@ -386,14 +411,14 @@ fn partition_bound_matches(
     match bound {
         PartitionBound::Default => Ok(true),
         PartitionBound::List(values) => {
-            let [key] = keys else {
+            let ([value], [ty]) = (keys, key.types.as_slice()) else {
                 return Err(SQLError::Internal(
                     "LIST partition has more than one partition key".into(),
                 ));
             };
             for expression in values {
                 let bound = context.expressions.evaluate_bound(expression, params)?;
-                if compare_values(context, &bound, key)?.is_eq() {
+                if compare_values(context, &bound, value, ty)?.is_eq() {
                     return Ok(true);
                 }
             }
@@ -404,8 +429,8 @@ fn partition_bound_matches(
                 return Ok(false);
             }
             Ok(
-                compare_key_to_bound(context, keys, lower, params)? != Ordering::Less
-                    && compare_key_to_bound(context, keys, upper, params)? == Ordering::Less,
+                compare_key_to_bound(context, key, lower, params)? != Ordering::Less
+                    && compare_key_to_bound(context, key, upper, params)? == Ordering::Less,
             )
         }
         PartitionBound::Hash { modulus, remainder } => hash::bound_matches(
@@ -420,10 +445,11 @@ fn partition_bound_matches(
 
 fn compare_key_to_bound(
     context: &PartitionContext<'_>,
-    keys: &[Value],
+    key: &RoutingKey,
     bound: &[crate::ast::PartitionRangeDatum],
     params: &[SQLParam],
 ) -> Result<Ordering, SQLError> {
+    let keys = &key.values;
     if keys.len() != bound.len() {
         return Err(SQLError::Internal(format!(
             "partition key width {} differs from bound width {}",
@@ -431,7 +457,7 @@ fn compare_key_to_bound(
             bound.len()
         )));
     }
-    for (key, datum) in keys.iter().zip(bound) {
+    for ((key, datum), ty) in keys.iter().zip(bound).zip(&key.types) {
         let ordering = match datum {
             crate::ast::PartitionRangeDatum::MinValue => Ordering::Greater,
             crate::ast::PartitionRangeDatum::MaxValue => Ordering::Less,
@@ -439,6 +465,7 @@ fn compare_key_to_bound(
                 context,
                 key,
                 &context.expressions.evaluate_bound(expression, params)?,
+                ty,
             )?,
         };
         if ordering != Ordering::Equal {

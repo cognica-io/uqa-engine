@@ -19,6 +19,117 @@ fn expression(sql: &str) -> Expr {
 }
 
 #[test]
+fn scalar_sequence_observation_preserves_selected_builtins_and_runtime_inputs() {
+    for (sql, expected) in [
+        ("nextval('public.original')", true),
+        ("currval('public.original'::regclass)", true),
+        ("setval('public.original'::text,1)", false),
+        ("nextval(2147483647::regclass)", false),
+    ] {
+        let memory = MemoryBudget::new(64 << 10);
+        let token = CancellationToken::new();
+        let control = ProductionControl::new(&memory, &token, &token);
+        let scalar =
+            crate::plan::ExpressionPlan::lower_scalar_with_control(&expression(sql), &control)
+                .unwrap();
+        let baseline = memory.used();
+        let mut count = 0;
+        visit_scalar_sequence_function_references_with_control(&scalar, &control, &mut |name| {
+            assert_eq!(name, "public.original");
+            count += 1;
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(count, usize::from(expected), "{sql}");
+        assert_eq!(memory.used(), baseline);
+    }
+    let mut call = expression("nextval('public.original')");
+    let Expr::Func { binding, name, .. } = &mut call else {
+        panic!("function")
+    };
+    *name = "historical_display_name".into();
+    *binding = Some(crate::ast::FunctionBinding {
+        name: "pg_catalog.nextval".into(),
+        argument_types: vec!["regclass".into()],
+        builtin: true,
+        object_id: None,
+        dispatch: None,
+        invocation: None,
+        value_binding: None,
+        resolution_error: None,
+        input_collation: None,
+    });
+    for user_function in [false, true] {
+        let Expr::Func {
+            binding: Some(binding),
+            ..
+        } = &mut call
+        else {
+            unreachable!()
+        };
+        binding.builtin = !user_function;
+        binding.object_id = user_function.then_some([1; 16]);
+        let control = ProductionControl::uncontrolled();
+        let scalar =
+            crate::plan::ExpressionPlan::lower_scalar_with_control(&call, &control).unwrap();
+        let mut count = 0;
+        visit_scalar_sequence_function_references_with_control(&scalar, &control, &mut |_| {
+            count += 1;
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(count, usize::from(!user_function));
+    }
+}
+
+#[test]
+fn scalar_sequence_observation_borrows_payloads_and_preserves_control_errors() {
+    let source = ScalarExpr::Array(vec![
+        ScalarExpr::Literal(Value::Str("x".repeat(4 << 20))),
+        crate::plan::ExpressionPlan::lower_scalar_with_control(
+            &expression("nextval('public.original')"),
+            &ProductionControl::uncontrolled(),
+        )
+        .unwrap()
+        .into_uncontrolled()
+        .unwrap(),
+    ]);
+    let memory = MemoryBudget::new(0);
+    let statement = CancellationToken::new();
+    let session = CancellationToken::new();
+    let control = ProductionControl::new(&memory, &statement, &session);
+    let measured = allocation_counter::measure(|| {
+        visit_scalar_sequence_function_references_with_control(&source, &control, &mut |name| {
+            assert_eq!(name, "public.original");
+            Ok(())
+        })
+        .unwrap();
+    });
+    assert_eq!(measured.count_total, 0, "{measured:?}");
+    let error =
+        visit_scalar_sequence_function_references_with_control(&source, &control, &mut |_| {
+            Err(SQLError::Internal("stopped".into()))
+        })
+        .unwrap_err();
+    assert!(error.to_string().contains("stopped"));
+    for token in [&statement, &session] {
+        token.cancel();
+        assert_eq!(
+            visit_scalar_sequence_function_references_with_control(
+                &source,
+                &control,
+                &mut |_| panic!("cancelled")
+            )
+            .unwrap_err()
+            .sqlstate(),
+            Some("57014")
+        );
+        token.reset();
+    }
+    assert_eq!(memory.used(), 0);
+}
+
+#[test]
 fn sequence_observation_borrows_large_unrelated_payloads_without_allocating() {
     let expression = Expr::Array(vec![
         Expr::Literal(Value::Str("x".repeat(4 << 20))),

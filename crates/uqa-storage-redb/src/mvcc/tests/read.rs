@@ -9,6 +9,8 @@
 use super::*;
 use uqa_storage::mvcc::RecordWrite;
 
+mod chunks;
+
 #[test]
 fn bounded_value_reads_use_the_shared_redb_owner_and_retained_versions() {
     let directory = tempfile::tempdir().unwrap();

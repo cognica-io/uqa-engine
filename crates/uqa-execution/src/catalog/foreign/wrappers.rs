@@ -7,14 +7,10 @@
 //! Durable wrapper records and initial-only conversion of legacy server references.
 
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
-use uqa_sql::catalog::{
-    foreign_server::ForeignServerDefinition,
-    foreign_wrapper::{
-        native_wrappers, validate_wrappers, ForeignWrapperDefinition, ForeignWrappers,
-    },
-    roles::RoleDefinition,
+use uqa_sql::catalog::foreign_wrapper::{
+    native_wrappers, validate_wrappers, ForeignWrapperDefinition, ForeignWrappers,
 };
+use uqa_sql::catalog::roles::RoleDefinitions;
 use uqa_storage::{CatalogFacade, ForeignServerRow, StorageBackendError, StorageBackendResult};
 
 const FORMAT_KEY: &str = "foreign-wrapper-catalog-format";
@@ -86,8 +82,8 @@ fn persist_record(
 
 pub(super) fn restore(
     catalog: &dyn CatalogFacade,
-    roles: &BTreeMap<String, RoleDefinition>,
-    servers: &mut BTreeMap<String, ForeignServerDefinition>,
+    roles: &RoleDefinitions,
+    servers: &mut uqa_sql::catalog::foreign_server::ForeignServers,
     allow_migration: bool,
 ) -> StorageBackendResult<RestoredWrappers> {
     let version = catalog_format(catalog)?;
@@ -110,7 +106,7 @@ pub(super) fn restore(
         ));
     }
     let mut definitions = if current {
-        BTreeMap::new()
+        ForeignWrappers::new()
     } else {
         native_wrappers()
     };
@@ -121,16 +117,17 @@ pub(super) fn restore(
         {
             return Err(invalid("invalid foreign-wrapper record version or key"));
         }
-        if definitions
-            .insert(record.definition.name.clone(), record.definition)
-            .is_some()
-        {
+        if definitions.contains_key(&record.definition.name) {
             return Err(invalid("duplicate foreign-wrapper catalog record"));
         }
+        definitions
+            .insert(record.definition.name.clone(), record.definition)
+            .map_err(|error| StorageBackendError::backend("foreign wrappers", error))?;
     }
     validate_wrappers(&definitions, roles).map_err(|error| invalid(error.to_string()))?;
     let mut server_migrations = Vec::new();
-    for server in servers.values_mut() {
+    let originals = servers.clone();
+    for server in originals.values() {
         match server.metadata.wrapper_reference {
             Some(_) if !current => {
                 return Err(invalid(
@@ -163,8 +160,12 @@ pub(super) fn restore(
                         server.name, server.fdw_type
                     ))
                 })?;
-                server.metadata.wrapper_reference = Some(wrapper.identity);
-                server_migrations.push(super::servers::catalog_row(server)?);
+                let mut next = server.clone();
+                next.metadata.wrapper_reference = Some(wrapper.identity);
+                server_migrations.push(super::servers::catalog_row(&next)?);
+                servers
+                    .insert(next.name.clone(), next)
+                    .map_err(|error| StorageBackendError::backend("foreign servers", error))?;
             }
         }
     }

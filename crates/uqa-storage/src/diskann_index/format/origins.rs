@@ -166,7 +166,17 @@ impl DiskANNOriginLayout {
         bytes: &'a [u8],
         control: &StorageReadControl,
     ) -> StorageBackendResult<DiskANNOriginBatch<'a>> {
-        let body = record::open(MAGIC, self.generation, bytes, control)?;
+        crate::image_io::work::inline(self.decode_from(first, bytes, control, &mut ()))
+    }
+
+    pub(in crate::diskann_index) async fn decode_from<'a>(
+        self,
+        first: u64,
+        bytes: &'a [u8],
+        control: &StorageReadControl,
+        work: &mut (impl crate::image_io::work::Work + Send),
+    ) -> StorageBackendResult<DiskANNOriginBatch<'a>> {
+        let body = record::open_from(MAGIC, self.generation, bytes, control, work).await?;
         if body.len() < METADATA_BYTES
             || !(body.len() - METADATA_BYTES).is_multiple_of(ORIGIN_ENTRY_BYTES)
         {
@@ -185,6 +195,7 @@ impl DiskANNOriginLayout {
         }
         let mut previous = None;
         for bytes in entries.as_chunks::<ORIGIN_ENTRY_BYTES>().0 {
+            work.checkpoint().await?;
             control.check()?;
             ordered(
                 &mut previous,

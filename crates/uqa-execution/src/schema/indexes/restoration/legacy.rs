@@ -9,7 +9,7 @@
 use super::{invalid, CatalogIndexRow, CatalogReadView, IndexCatalogIdentity, RelationIdentity};
 use crate::catalog::{index::index_definition, projection::CatalogIndexRelation};
 use crate::schema::indexes::registry::partitions::constraint_kind;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use uqa_sql::{
     ast::IndexKey,
     catalog::index::{can_attach_index, IndexAttachmentShape, IndexRelationships},
@@ -19,7 +19,7 @@ use uqa_storage::StorageBackendResult;
 
 pub(super) fn preserve_derived_names(
     catalog: &CatalogReadView,
-    rows: &mut BTreeMap<RelationIdentity, CatalogIndexRow>,
+    rows: &mut crate::catalog::index::registry::CatalogIndexes,
     stored: &[CatalogIndexRow],
     predecessor: &[CatalogIndexRelation],
     allocator: &mut dyn CatalogObjectAllocator,
@@ -91,7 +91,7 @@ pub(super) fn preserve_derived_names(
         ) {
             definition.relationships.parent_index = Some(parent_id);
             row.definition_json = Some(serde_json::to_string(&definition)?);
-            rows.insert(row.relation.clone(), row);
+            rows.insert_in(row, catalog.snapshot())?;
         }
     }
     Ok(())

@@ -15,6 +15,7 @@ use uqa_core::memory::OwnedMap as BTreeMap;
 
 pub(super) mod composition;
 mod production;
+mod retirement;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(super) struct Collations(Option<Box<Bindings>>);

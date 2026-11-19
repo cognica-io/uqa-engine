@@ -26,7 +26,10 @@ impl Copying<'_> {
             "assignment constructor allowance"
         );
         assert_eq!(
-            self.memory.bytes(),
+            self.memory
+                .as_ref()
+                .expect("controlled assignments")
+                .bytes(),
             0,
             "destination constructor has no prior allocations"
         );
@@ -34,7 +37,7 @@ impl Copying<'_> {
             self.fields.as_ref().is_some_and(|fields| fields.is_empty()),
             "destination constructor has no prior fields"
         );
-        self.memory = direct;
+        self.memory = Some(direct);
         self.fields = Some(fields);
     }
     fn take_assignment(&mut self, assignment: OwnedAssignment) -> Result<AssignmentPlan> {

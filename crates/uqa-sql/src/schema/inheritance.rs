@@ -6,6 +6,8 @@
 
 //! CREATE TABLE inheritance and partition row-type preparation.
 
+pub mod native;
+
 use crate::schema::table_creation::not_nulls::InheritedNotNull;
 use crate::semantics::partition::{
     transform_partition_bound, validate_new_partition_bound, PartitionContext,
@@ -410,6 +412,7 @@ pub fn merge_same_column(
 mod column_merge;
 mod partition_keys;
 use partition_keys::validate_partition_keys;
+pub(crate) use partition_keys::{validate_stored_key_references, PARTITION_MAX_KEYS};
 
 pub mod alter;
 

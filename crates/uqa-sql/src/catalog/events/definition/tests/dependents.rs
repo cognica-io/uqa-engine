@@ -17,7 +17,7 @@ use crate::{
         TriggerCatalog,
     },
 };
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use uqa_core::RelationIdentity;
 
 fn relation(name: &str) -> RelationIdentity {
@@ -74,14 +74,18 @@ fn column_dependencies_read_triggers_then_rules_and_include_when_references() {
     update.definition.update_columns = vec!["id".into()];
     let mut condition = trigger("public.child", "when_column");
     condition.definition.when = Some(Expr::qualified_column("NEW", "id"));
-    partitions.triggers.insert(
-        relation("child"),
-        BTreeMap::from([
-            ("update_columns".into(), update),
-            ("when_column".into(), condition),
-            ("independent".into(), trigger("public.child", "independent")),
-        ]),
-    );
+    partitions
+        .triggers
+        .insert(
+            relation("child"),
+            crate::catalog::events::EventDefinitions::try_from_iter([
+                ("update_columns".into(), update),
+                ("when_column".into(), condition),
+                ("independent".into(), trigger("public.child", "independent")),
+            ])
+            .unwrap(),
+        )
+        .unwrap();
     let mut dependent = stored_rule("uses_child");
     dependent
         .dependencies
@@ -89,10 +93,17 @@ fn column_dependencies_read_triggers_then_rules_and_include_when_references() {
         .unwrap()
         .columns
         .insert(column_dependency());
-    partitions.rules.insert(
-        relation("parent"),
-        BTreeMap::from([("uses_child".into(), dependent)]).into(),
-    );
+    partitions
+        .rules
+        .insert(
+            relation("parent"),
+            crate::catalog::events::EventDefinitions::try_from_iter([(
+                "uses_child".into(),
+                dependent,
+            )])
+            .unwrap(),
+        )
+        .unwrap();
     let selected = partitions
         .context(&catalog.context())
         .column_event_dependencies("public.child", "id")
@@ -113,15 +124,22 @@ fn column_drop_rejects_bound_dependencies_before_rewriting_sources() {
         .unwrap()
         .columns
         .insert(column_dependency());
-    partitions.rules.insert(
-        relation("parent"),
-        BTreeMap::from([("uses_child".into(), dependent)]).into(),
-    );
+    partitions
+        .rules
+        .insert(
+            relation("parent"),
+            crate::catalog::events::EventDefinitions::try_from_iter([(
+                "uses_child".into(),
+                dependent,
+            )])
+            .unwrap(),
+        )
+        .unwrap();
     let result = partitions
         .context(&catalog.context())
         .prepare_rule_column_drop("public.child", "id");
     assert!(
-        matches!(result,Err(message) if message=="cannot drop column id of table public.child because rule uses_child on public.parent depends on it")
+        matches!(result,Err(message) if message.to_string()=="cannot drop column id of table public.child because rule uses_child on public.parent depends on it")
     );
     assert!(catalog.events.lock().unwrap().is_empty());
     assert!(partitions.rules[&relation("parent")]["uses_child"]
@@ -139,20 +157,30 @@ fn removed_relation_candidates_include_referencing_constraints_and_preserve_orig
     let mut referencing = trigger("public.parent", "references_child");
     referencing.definition.constraint = true;
     referencing.definition.referenced_table = Some("public.child".into());
-    let triggers = TriggerCatalog::from([
-        (relation("child"), BTreeMap::from([("own".into(), own)])),
+    let triggers = TriggerCatalog::try_from_iter([
+        (
+            relation("child"),
+            crate::catalog::events::EventDefinitions::try_from_iter([("own".into(), own)]).unwrap(),
+        ),
         (
             relation("parent"),
-            BTreeMap::from([
+            crate::catalog::events::EventDefinitions::try_from_iter([
                 ("references_child".into(), referencing),
                 ("keep".into(), trigger("public.parent", "keep")),
-            ]),
+            ])
+            .unwrap(),
         ),
-    ]);
-    let rules = RuleCatalog::from([(
+    ])
+    .unwrap();
+    let rules = RuleCatalog::try_from_iter([(
         relation("child"),
-        BTreeMap::from([("own_rule".into(), stored_rule("own_rule"))]).into(),
-    )]);
+        crate::catalog::events::EventDefinitions::try_from_iter([(
+            "own_rule".into(),
+            stored_rule("own_rule"),
+        )])
+        .unwrap(),
+    )])
+    .unwrap();
     let removed = removed_relation_events(&triggers, &rules, &relation("child"))
         .unwrap()
         .unwrap();
@@ -191,14 +219,16 @@ fn trigger_routine_rewrites_preserve_object_ids_and_bound_when_identity() {
     let mut stale = trigger("public.child", "stale");
     stale.function_object_id = Some([2; 16]);
     stale.definition.function = "public.old".into();
-    let mut triggers = TriggerCatalog::from([(
+    let mut triggers = TriggerCatalog::try_from_iter([(
         relation("child"),
-        BTreeMap::from([
+        crate::catalog::events::EventDefinitions::try_from_iter([
             ("invokes".into(), invokes),
             ("condition".into(), condition),
             ("stale".into(), stale),
-        ]),
-    )]);
+        ])
+        .unwrap(),
+    )])
+    .unwrap();
     assert!(rewrite_trigger_routine_references(
         &mut triggers,
         &binding(Some([1; 16]), "public.old"),
@@ -229,10 +259,12 @@ fn event_column_candidates_rewrite_update_and_when_columns_without_changing_orig
     let mut stored = trigger("public.child", "affected");
     stored.definition.update_columns = vec!["id".into(), "other".into()];
     stored.definition.when = Some(Expr::qualified_column("NEW", "id"));
-    let triggers = TriggerCatalog::from([(
+    let triggers = TriggerCatalog::try_from_iter([(
         relation("child"),
-        BTreeMap::from([("affected".into(), stored)]),
-    )]);
+        crate::catalog::events::EventDefinitions::try_from_iter([("affected".into(), stored)])
+            .unwrap(),
+    )])
+    .unwrap();
     let (renamed, rules) = catalog
         .context()
         .renamed_event_column(
@@ -264,10 +296,12 @@ fn invalid_trigger_expression_aborts_column_candidate_before_rule_rebinding() {
     let catalog = Catalog::default();
     let mut stored = trigger("public.child", "corrupt");
     stored.definition.when = Some(Expr::Star);
-    let triggers = TriggerCatalog::from([(
+    let triggers = TriggerCatalog::try_from_iter([(
         relation("child"),
-        BTreeMap::from([("corrupt".into(), stored)]),
-    )]);
+        crate::catalog::events::EventDefinitions::try_from_iter([("corrupt".into(), stored)])
+            .unwrap(),
+    )])
+    .unwrap();
     let result = catalog.context().renamed_event_column(
         &triggers,
         &RuleCatalog::new(),
@@ -276,7 +310,7 @@ fn invalid_trigger_expression_aborts_column_candidate_before_rule_rebinding() {
         "next_id",
     );
     assert!(
-        matches!(result,Err(message) if message=="schema expression contains `*` and cannot be rewritten safely")
+        matches!(result,Err(message) if message.to_string()=="schema expression contains `*` and cannot be rewritten safely")
     );
     assert!(matches!(
         triggers[&relation("child")]["corrupt"].definition.when,
@@ -296,7 +330,8 @@ fn missing_rule_during_column_rebind_fails_before_catalog_reads() {
         catalog
             .context()
             .rebind_rule_column_drop(&mut prepared)
-            .unwrap_err(),
+            .unwrap_err()
+            .to_string(),
         "rule `missing` on `public.child` disappeared while dropping a column"
     );
     assert!(catalog.events.lock().unwrap().is_empty());

@@ -16,6 +16,10 @@ pub struct RelationName<'a> {
 }
 
 impl<'a> RelationName<'a> {
+    pub(super) fn encoded_len(self) -> usize {
+        self.text.len()
+    }
+
     /// Borrow an already decoded identifier; punctuation remains part of the name.
     pub fn decoded(text: &'a str) -> Self {
         Self {
@@ -93,6 +97,18 @@ pub struct RelationReferenceError<'a> {
     kind: InvalidReference,
     input: &'a str,
 }
+impl RelationReferenceError<'_> {
+    /// Borrow the original diagnostic fragments for admitted or resumable output without copying its complete source name.
+    pub fn message_parts(&self) -> [&str; 3] {
+        match self.kind {
+            InvalidReference::Empty => ["persisted relation name is empty", "", ""],
+            InvalidReference::Unterminated => {
+                ["unterminated quoted relation name `", self.input, "`"]
+            }
+            InvalidReference::Invalid => ["invalid persisted relation name `", self.input, "`"],
+        }
+    }
+}
 impl fmt::Debug for RelationReferenceError<'_> {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Display::fmt(self, formatter)
@@ -100,19 +116,10 @@ impl fmt::Debug for RelationReferenceError<'_> {
 }
 impl fmt::Display for RelationReferenceError<'_> {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self.kind {
-            InvalidReference::Empty => formatter.write_str("persisted relation name is empty"),
-            InvalidReference::Unterminated => write!(
-                formatter,
-                "unterminated quoted relation name `{}`",
-                self.input
-            ),
-            InvalidReference::Invalid => write!(
-                formatter,
-                "invalid persisted relation name `{}`",
-                self.input
-            ),
+        for part in self.message_parts() {
+            formatter.write_str(part)?;
         }
+        Ok(())
     }
 }
 
@@ -123,67 +130,8 @@ pub(super) fn parse_result(
 }
 
 pub(super) fn parse(value: &str) -> Result<RelationReference<'_>, InvalidReference> {
-    if value.is_empty() {
-        return Err(InvalidReference::Empty);
-    }
-    let mut remaining = value;
-    let first = component(&mut remaining)?;
-    if remaining.is_empty() {
-        return Ok(RelationReference {
-            schema: None,
-            name: first,
-        });
-    }
-    let name = component(&mut remaining)?;
-    if !remaining.is_empty() {
-        return Err(InvalidReference::Invalid);
-    }
-    Ok(RelationReference {
-        schema: Some(first),
-        name,
-    })
+    input::ordinary(value)
 }
 
-fn component<'a>(remaining: &mut &'a str) -> Result<RelationName<'a>, InvalidReference> {
-    let input = *remaining;
-    let quoted = input.starts_with('"');
-    let start = usize::from(quoted);
-    let bytes = input.as_bytes();
-    let mut index = start;
-    let end;
-    if quoted {
-        loop {
-            match bytes.get(index) {
-                None => return Err(InvalidReference::Unterminated),
-                Some(b'"') if bytes.get(index + 1) == Some(&b'"') => index += 2,
-                Some(b'"') => {
-                    end = index;
-                    index += 1;
-                    break;
-                }
-                Some(_) => index += 1,
-            }
-        }
-    } else {
-        while let Some(byte) = bytes.get(index) {
-            match byte {
-                b'.' => break,
-                b'"' => return Err(InvalidReference::Invalid),
-                _ => index += 1,
-            }
-        }
-        end = index;
-    }
-    if end == start {
-        return Err(InvalidReference::Invalid);
-    }
-    *remaining = match bytes.get(index) {
-        None => "",
-        Some(b'.') if index + 1 < bytes.len() => &input[index + 1..],
-        _ => return Err(InvalidReference::Invalid),
-    };
-    Ok(RelationName {
-        text: &input[start..end],
-        escaped: quoted,
-    })
-}
+mod input;
+pub use input::{RelationReferenceInputError, RelationReferenceWork};

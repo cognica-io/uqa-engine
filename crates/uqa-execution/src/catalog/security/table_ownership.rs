@@ -16,7 +16,7 @@ use crate::schema::{
     relation_alteration::RoleTransferContext,
     sequences::role_ownership::{
         table_owned_sequence_owner_updates, OwnedSequenceSecurityCatalog,
-        OwnedSequenceSecurityWrite, SequenceSecurityPublication,
+        SequenceSecurityPublication,
     },
 };
 use uqa_core::RelationIdentity;
@@ -48,16 +48,12 @@ pub trait TableOwnerRegistry {
     fn table(&self, relation: &RelationIdentity) -> Option<Box<dyn TableOwnerState + '_>>;
 }
 type BoundTableOwner<'a> = (RelationIdentity, Box<dyn TableOwnerState + 'a>);
-pub trait TableOwnerPublication {
-    fn sequence_security_write(&self) -> OwnedSequenceSecurityWrite<'_>;
-}
 pub struct TableOwnershipContext<'a> {
     pub writer: &'a dyn SchemaStatementWriter,
     pub tables: &'a dyn TableOwnerRegistry,
     pub roles: RoleTransferContext<'a>,
     pub owned_sequences: &'a dyn OwnedSequenceSecurityCatalog,
     pub sequences: &'a dyn SequenceSecurityPublication,
-    pub publication: &'a dyn TableOwnerPublication,
     pub changes: &'a dyn CatalogPublicationChanges,
 }
 impl TableOwnershipContext<'_> {
@@ -113,6 +109,10 @@ impl TableOwnershipContext<'_> {
             owner.require_name(&roles)?,
             &roles,
         )?;
+        let mut sequence_catalog = self.sequences.sequence_catalog();
+        for (sequence, security) in &sequence_updates {
+            sequence_catalog.replace_security(sequence, security.clone())?;
+        }
         for (sequence, security) in &sequence_updates {
             self.sequences
                 .persist_security(&sequence.qualified_name(), sequence, security)?;
@@ -125,11 +125,7 @@ impl TableOwnershipContext<'_> {
         table.security_write().clone_from(&table_security);
         let sequence_changed = !sequence_updates.is_empty();
         if sequence_changed {
-            let mut registry = self.publication.sequence_security_write();
-            for (sequence, security) in sequence_updates {
-                registry.insert(sequence, security);
-            }
-            drop(registry);
+            self.sequences.publish_sequences(sequence_catalog);
         }
         let temporary = table.persistence() == RelationPersistence::Temporary;
         drop(table);

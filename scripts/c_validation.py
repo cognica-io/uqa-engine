@@ -22,17 +22,19 @@ SHARED = (
     "Cargo.toml", "Cargo.lock", "build.rs", "crates/*/Cargo.toml", "crates/*/build.rs",
     "rust-toolchain", "rust-toolchain.toml",
     ".cargo/*", "crates/uqa-ffi/*", "examples/c/*",
-    ".github/scripts/free-linux-runner-disk.sh",
+    ".github/scripts/free-linux-runner-disk.sh", ".github/actions/setup-python/*",
 )
 BINDINGS = (
     "crates/uqa-core/src/*", "crates/uqa-api/src/*arrow*",
     "crates/*/src/test_support*",
     "scripts/verify-c-examples.py", "scripts/verify-c-clients.py",
     "scripts/verify-c-xml-isolation.py", "scripts/verify-c-sanitizer-link.py",
+    "scripts/verify-c-configurations.py", "scripts/tests/test_c_configurations.py",
+    "scripts/c_consumer_execution.py", "scripts/tests/test_c_consumer_execution.py",
     ".github/scripts/c-sanitizer-cc.sh",
 )
 PACKAGES = (
-    "scripts/*c-bindings*", "scripts/c_bindings_licenses.py",
+    "scripts/*c-bindings*", "scripts/c_bindings_licenses.py", "scripts/c_bindings_native.py",
     "scripts/verify-c-package.py", "scripts/tests/test_c_bindings_package.py",
     "scripts/check-release-licenses.py", "LICENSE*", "NOTICE*",
 )
@@ -51,7 +53,7 @@ def affected(kind: str, path: str) -> bool:
 
 
 def execution_definition(kind: str, contents: bytes) -> bytes:
-    """Ignore selection wiring only; commands, matrices, environments and tools remain inputs."""
+    """Ignore event, concurrency and selection wiring; commands, matrices, environments and tools remain inputs."""
     before, separator, remaining = contents.partition(b"\non:\n")
     if not separator:
         raise ValueError("workflow event declaration is unavailable")
@@ -59,6 +61,7 @@ def execution_definition(kind: str, contents: bytes) -> bytes:
     if following is None:
         raise ValueError("workflow execution definition is unavailable")
     execution = before + b"\n" + remaining[following.start():]
+    execution = re.sub(rb"(?m)^concurrency:\n(?:[ \t]+[^\n]*\n|\n)*", b"", execution)
     prefix, separator, jobs = execution.partition(b"\njobs:\n")
     if not separator:
         raise ValueError("workflow jobs are unavailable")

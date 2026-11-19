@@ -6,8 +6,8 @@
 
 use uqa_core::{memory::BudgetedVec, DocId};
 
-use super::{field, invalid, zeros, DiskANNNodeLayout, DiskANNVectorVersion, NODE_HEADER_BYTES};
-use crate::diskann_index::metric::{checkpoint, norms};
+use super::{field, invalid, DiskANNNodeLayout, DiskANNVectorVersion, NODE_HEADER_BYTES};
+use crate::diskann_index::metric::{checkpoint, checkpoint_from, norms_from};
 use crate::mvcc::{DatabaseId, StorageTransactionId};
 use crate::{read_control::StorageReadControl, StorageBackendResult};
 
@@ -96,6 +96,16 @@ impl DiskANNNodeLayout {
         bytes: &[u8],
         control: &StorageReadControl,
     ) -> StorageBackendResult<DiskANNNode> {
+        crate::image_io::work::inline(self.decode_node_from(expected_node, bytes, control, &mut ()))
+    }
+
+    pub(in crate::diskann_index) async fn decode_node_from(
+        self,
+        expected_node: u64,
+        bytes: &[u8],
+        control: &StorageReadControl,
+        work: &mut (impl crate::image_io::work::Work + Send),
+    ) -> StorageBackendResult<DiskANNNode> {
         control.check()?;
         self.node_address(expected_node)?;
         if bytes.len() != self.slot_bytes || u64::from_le_bytes(field(bytes, 0)?) != expected_node {
@@ -121,15 +131,15 @@ impl DiskANNNodeLayout {
             .iter()
             .enumerate()
         {
-            checkpoint(offset, control)?;
+            checkpoint_from(offset, control, work).await?;
             vector.push(f32::from_bits(u32::from_le_bytes(field(component, 0)?)))?;
         }
-        let raw_norm = graph_norm(self.dimensions, &vector, control)?;
+        let raw_norm = graph_norm_from(self.dimensions, &vector, control, work).await?;
         if raw_norm.to_bits() != u32::from_le_bytes(field(bytes, 20)?) {
             return Err(invalid("stored norm differs from canonical raw norm"));
         }
         let neighbor_end = vector_end + degree * 8;
-        zeros(&bytes[neighbor_end..], control)?;
+        super::zeros_from(&bytes[neighbor_end..], control, work).await?;
         let mut neighbors = BudgetedVec::new(control.memory());
         neighbors.reserve(degree)?;
         for (offset, neighbor) in bytes[vector_end..neighbor_end]
@@ -138,10 +148,11 @@ impl DiskANNNodeLayout {
             .iter()
             .enumerate()
         {
-            checkpoint(offset, control)?;
+            checkpoint_from(offset, control, work).await?;
             neighbors.push(u64::from_le_bytes(field(neighbor, 0)?))?;
         }
-        self.check_neighbors(expected_node, &neighbors, control)?;
+        self.check_neighbors_from(expected_node, &neighbors, control, work)
+            .await?;
         control.check()?;
         Ok(DiskANNNode {
             node_id: expected_node,
@@ -160,12 +171,22 @@ impl DiskANNNodeLayout {
         neighbors: &[u64],
         control: &StorageReadControl,
     ) -> StorageBackendResult<()> {
+        crate::image_io::work::inline(self.check_neighbors_from(node, neighbors, control, &mut ()))
+    }
+
+    async fn check_neighbors_from(
+        self,
+        node: u64,
+        neighbors: &[u64],
+        control: &StorageReadControl,
+        work: &mut (impl crate::image_io::work::Work + Send),
+    ) -> StorageBackendResult<()> {
         if neighbors.len() > self.max_degree || neighbors.len() as u64 >= self.node_count {
             return Err(invalid("degree exceeds generation bounds"));
         }
         let mut previous = None;
         for (offset, &neighbor) in neighbors.iter().enumerate() {
-            checkpoint(offset, control)?;
+            checkpoint_from(offset, control, work).await?;
             if neighbor >= self.node_count
                 || neighbor == node
                 || previous.is_some_and(|id| id >= neighbor)
@@ -185,7 +206,16 @@ fn graph_norm(
     raw: &[f32],
     control: &StorageReadControl,
 ) -> StorageBackendResult<f32> {
-    let (norm, _) = norms(dimensions, raw, control)?;
+    crate::image_io::work::inline(graph_norm_from(dimensions, raw, control, &mut ()))
+}
+
+async fn graph_norm_from(
+    dimensions: u32,
+    raw: &[f32],
+    control: &StorageReadControl,
+    work: &mut (impl crate::image_io::work::Work + Send),
+) -> StorageBackendResult<f32> {
+    let (norm, _) = norms_from(dimensions, raw, control, work).await?;
     if !norm.is_finite() || norm == 0.0 {
         return Err(invalid(
             "non-navigable vector belongs in the exact side stream",

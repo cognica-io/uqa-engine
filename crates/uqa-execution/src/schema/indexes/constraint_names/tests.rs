@@ -6,7 +6,9 @@
 
 use super::*;
 use std::sync::Arc;
+use uqa_sql::catalog::table_definition::SharedTableDefinition;
 
+mod input;
 mod projection;
 
 fn fixture() -> (TableSchema, TableConstraintSet, KeyConstraintNames) {
@@ -31,12 +33,13 @@ fn fixture() -> (TableSchema, TableConstraintSet, KeyConstraintNames) {
         constraints_json: encode(&constraints).unwrap(),
     };
     let names = KeyConstraintNames {
-        names: Some(BTreeMap::from([(
+        names: Some(OwnedMap::from_iter([(
             [3; 16],
             KeyName {
                 table: schema.relation.clone(),
                 table_object_id: schema.object_id,
                 name: "current".into(),
+                _memory: None,
             },
         )])),
     };
@@ -122,8 +125,8 @@ fn candidate_names_follow_catalog_identity_without_replacing_key_structure() {
     candidate.key_constraints.push(added.clone());
     candidate.key_constraints[0].columns = vec!["new_column".into()];
     let current = crate::catalog::CatalogTableSnapshot {
-        dropped_attributes: std::sync::Arc::new(Vec::new()),
-        row_type_array_name: None,
+        dropped_attributes: Vec::new().into(),
+        row_type_array_name: None.into(),
         object_id: [1; 16],
         catalog_oids: uqa_sql::catalog::relation_oids::RelationCatalogOids::legacy(
             uqa_sql::catalog::relation_oids::RelationOidKind::Table,
@@ -131,13 +134,14 @@ fn candidate_names_follow_catalog_identity_without_replacing_key_structure() {
         ),
         security: std::sync::Arc::new(crate::catalog::security::BoundTableSecurity::owner(
             uqa_sql::catalog::roles::RoleIdentity::BOOTSTRAP,
-        )),
-        columns: Arc::default(),
+        ))
+        .into(),
+        columns: SharedTableDefinition::default(),
         columns_declared: true,
-        checks: Arc::default(),
-        foreign_keys: Arc::default(),
+        checks: SharedTableDefinition::default(),
+        foreign_keys: Vec::new().into(),
         keys: vec![current_key].into(),
-        hierarchy: Arc::default(),
+        hierarchy: SharedTableDefinition::default(),
         persistence: uqa_sql::ast::RelationPersistence::Permanent,
     };
     rebind_current_key_names(

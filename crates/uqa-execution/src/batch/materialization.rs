@@ -7,6 +7,7 @@
 //! Final conversion from positional physical rows to named result rows.
 
 use std::collections::HashMap;
+use uqa_storage::document_store::SharedDocumentValues;
 
 mod selected;
 
@@ -16,6 +17,40 @@ use super::{
     Arc, PhysicalRow, ResultRow, RowFragment, RowSchema, SmallVec, Value, INLINE_ROW_FRAGMENTS,
     NULL_SLOT,
 };
+
+struct MaterializedValues {
+    values: Vec<Value>,
+    _memory: Option<uqa_core::memory::MemoryReservation>,
+}
+
+impl MaterializedValues {
+    /// Hand the completed values to an explicitly unbudgeted result consumer.
+    fn into_legacy(self) -> Vec<Value> {
+        self.values
+    }
+}
+
+fn unwrap_shared_values(
+    values: SharedDocumentValues,
+) -> Result<MaterializedValues, SharedDocumentValues> {
+    match values {
+        SharedDocumentValues::Ordinary(values) => Arc::try_unwrap(values)
+            .map(|values| MaterializedValues {
+                values,
+                _memory: None,
+            })
+            .map_err(SharedDocumentValues::Ordinary),
+        SharedDocumentValues::Retained(values) => Arc::try_unwrap(values)
+            .map(|values| {
+                let (values, memory) = values.into_parts();
+                MaterializedValues {
+                    values,
+                    _memory: Some(memory),
+                }
+            })
+            .map_err(SharedDocumentValues::Retained),
+    }
+}
 
 struct ResultMaterializationPlan {
     entries: Box<[ResultMaterializationEntry]>,
@@ -219,21 +254,22 @@ impl RowFragment {
             Self::Stored { values, projection } => (values, projection),
         };
         let Some(projection) = projection else {
-            match Arc::try_unwrap(values) {
-                Ok(values) => insert_values(columns, result, values),
+            match unwrap_shared_values(values) {
+                Ok(mut owned) => insert_values(columns, result, std::mem::take(&mut owned.values)),
                 Err(values) => insert_values(columns, result, values.iter().cloned()),
             }
             return;
         };
-        match Arc::try_unwrap(values) {
-            Ok(mut values) => {
+        match unwrap_shared_values(values) {
+            Ok(mut owned) => {
+                let values = &mut owned.values;
                 if projection
                     .iter()
                     .enumerate()
                     .all(|(position, slot)| position == *slot)
                 {
                     values.truncate(projection.len());
-                    insert_values(columns, result, values);
+                    insert_values(columns, result, std::mem::take(values));
                     return;
                 }
                 let mut remaining = vec![0usize; values.len()];
@@ -283,9 +319,10 @@ impl RowFragment {
             Self::Stored { values, projection } => (values, projection),
         };
         let Some(projection) = projection else {
-            return Arc::try_unwrap(values).unwrap_or_else(|values| values.as_ref().clone());
+            return unwrap_shared_values(values)
+                .map_or_else(|values| (*values).clone(), MaterializedValues::into_legacy);
         };
-        let mut values = match Arc::try_unwrap(values) {
+        let mut owned = match unwrap_shared_values(values) {
             Ok(values) => values,
             Err(values) => {
                 return projection
@@ -300,13 +337,14 @@ impl RowFragment {
                     .collect();
             }
         };
+        let values = &mut owned.values;
         if projection
             .iter()
             .enumerate()
             .all(|(position, slot)| position == *slot)
         {
             values.truncate(projection.len());
-            return values;
+            return owned.into_legacy();
         }
 
         let mut remaining = vec![0usize; values.len()];
@@ -315,7 +353,10 @@ impl RowFragment {
                 *count += 1;
             }
         }
-        let mut values = values.into_iter().map(Some).collect::<Vec<_>>();
+        let mut values = std::mem::take(values)
+            .into_iter()
+            .map(Some)
+            .collect::<Vec<_>>();
         projection
             .iter()
             .map(|slot| {

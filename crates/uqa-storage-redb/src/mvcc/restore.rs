@@ -53,17 +53,31 @@ pub(super) fn publish(
     serializable::validate_restore(store, control)?;
     let transaction = physical_writer(&store.database)?;
     {
-        let mut metadata = transaction.open_table(METADATA).map_err(redb_error)?;
+        let metadata = transaction.open_table(METADATA).map_err(redb_error)?;
         codec::validate_metadata(&metadata, request.source())?;
-        metadata
-            .insert("database", request.target().as_bytes().as_slice())
-            .map_err(redb_error)?;
     }
+    replace_history(&transaction, request)?;
+    control.cancellation().check()?;
+    transaction.commit().map_err(redb_error)?;
+    Ok(())
+}
+
+/// The exclusive restore boundary retires coordination authority in the same transaction as its new incarnation. Fresh image import invokes this only after all repository input is consumed and verified.
+pub(super) fn replace_history(
+    transaction: &redb::WriteTransaction,
+    request: DatabaseRestore,
+) -> VersionResult<()> {
+    let mut metadata = transaction.open_table(METADATA).map_err(redb_error)?;
+    if !request.needs_restore(codec::database_id(&metadata)?)? {
+        return Ok(());
+    }
+    metadata
+        .insert("database", request.target().as_bytes().as_slice())
+        .map_err(redb_error)?;
+    drop(metadata);
     // Data keys, committed revisions and identifier watermarks remain unchanged. No receipt from the backup is relabeled as a transaction in the new history.
     transaction.delete_table(TRANSACTIONS).map_err(redb_error)?;
     transaction.open_table(TRANSACTIONS).map_err(redb_error)?;
-    serializable::clear_restored_state(&transaction)?;
-    control.cancellation().check()?;
-    transaction.commit().map_err(redb_error)?;
+    serializable::clear_restored_state(transaction)?;
     Ok(())
 }

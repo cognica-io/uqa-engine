@@ -6,7 +6,6 @@
 
 //! Lend actual table generations and guard lifetimes to native DROP execution.
 use crate::{Engine, TableState};
-use std::{collections::BTreeMap, sync::Arc};
 use uqa_core::RelationIdentity;
 use uqa_execution::schema::table_removal::context::{
     TableRemovalCatalog, TableRemovalContext, TableRemovalPublication,
@@ -19,9 +18,7 @@ use uqa_sql::{
     SQLError,
 };
 use uqa_storage::StorageBackendResult;
-struct HierarchyTables<'a>(
-    parking_lot::RwLockReadGuard<'a, BTreeMap<RelationIdentity, Arc<TableState>>>,
-);
+struct HierarchyTables<'a>(parking_lot::MappedRwLockReadGuard<'a, crate::state::TableRegistryMap>);
 impl HierarchyDropCatalog for Engine {
     fn tables(&self) -> Box<dyn HierarchyDropTables + '_> {
         Box::new(HierarchyTables(self.storage.tables.read()))
@@ -50,11 +47,21 @@ impl TableRemovalPublication for Engine {
     fn prune_constraint_modes(&self) -> Result<(), SQLError> {
         Engine::prune_constraint_modes(self)
     }
-    fn remove_state(&self, name: &str, relation: &RelationIdentity) -> StorageBackendResult<()> {
+    fn remove_state(
+        &self,
+        name: &str,
+        relation: &RelationIdentity,
+        indexes: uqa_execution::catalog::index::registry::CatalogIndexes,
+    ) -> StorageBackendResult<()> {
         let table = self.storage.tables.read().get(relation).cloned();
         let temporary = table
             .as_ref()
             .is_some_and(|table| table.persistence == uqa_sql::ast::RelationPersistence::Temporary);
+        let analyzers = self
+            .durable
+            .table_field_analyzers
+            .read()
+            .without_table(name)?;
         if !temporary {
             if let Some(catalog) = self.storage.catalog.as_ref() {
                 catalog.drop_table_and_data(name)?;
@@ -73,7 +80,7 @@ impl TableRemovalPublication for Engine {
                 self.note_table_catalog_changed();
             }
         }
-        let removed = self.storage.tables.write().remove(relation);
+        let removed = self.storage.tables.write().remove(relation)?;
         if let Some(table) = removed {
             self.note_prepared_table_change(&table);
         }
@@ -84,14 +91,8 @@ impl TableRemovalPublication for Engine {
         }
         // Sweep every related per-table registry so catalog state
         // does not outlive the table.
-        self.durable
-            .table_field_analyzers
-            .write()
-            .retain(|(t, _), _| t != name);
-        self.durable
-            .catalog_indexes
-            .write()
-            .retain(|_, row| row.table_name != name);
+        *self.durable.table_field_analyzers.write() = analyzers;
+        *self.durable.catalog_indexes.write() = indexes;
         Ok(())
     }
 }

@@ -43,28 +43,8 @@ pub(crate) fn expand<T, E>(
 /// Normalize already visited syntax without resolving names or changing stored bindings. Lowering each copied subtree subsequently allocates independent subquery slots.
 pub(crate) fn restore_ast_node(node: &mut crate::ast::Expr) -> bool {
     use crate::ast::Expr;
-    let (value, low, high, symmetric) = match &*node {
-        Expr::Between { expr, low, high } => (expr.as_ref(), low.as_ref(), high.as_ref(), false),
-        Expr::Func {
-            binding: Some(binding),
-            args,
-            distinct,
-            order_by,
-            filter,
-            ..
-        } if binding.builtin
-            && binding.dispatch == Some(crate::ast::FunctionDispatch::BetweenSymmetric)
-            && binding.resolution_error.is_none()
-            && !distinct
-            && order_by.is_empty()
-            && filter.is_none() =>
-        {
-            let [value, low, high] = args.as_slice() else {
-                return false;
-            };
-            (value, low, high, true)
-        }
-        _ => return false,
+    let Some((value, low, high, symmetric)) = ast_operands(node) else {
+        return false;
     };
     *node = expand(
         symmetric,
@@ -86,6 +66,44 @@ pub(crate) fn restore_ast_node(node: &mut crate::ast::Expr) -> bool {
     )
     .unwrap_or_else(|never| match never {});
     true
+}
+
+pub(crate) fn needs_ast_restoration(node: &crate::ast::Expr) -> bool {
+    ast_operands(node).is_some()
+}
+
+fn ast_operands(
+    node: &crate::ast::Expr,
+) -> Option<(
+    &crate::ast::Expr,
+    &crate::ast::Expr,
+    &crate::ast::Expr,
+    bool,
+)> {
+    use crate::ast::Expr;
+    Some(match node {
+        Expr::Between { expr, low, high } => (expr.as_ref(), low.as_ref(), high.as_ref(), false),
+        Expr::Func {
+            binding: Some(binding),
+            args,
+            distinct,
+            order_by,
+            filter,
+            ..
+        } if binding.builtin
+            && binding.dispatch == Some(crate::ast::FunctionDispatch::BetweenSymmetric)
+            && binding.resolution_error.is_none()
+            && !distinct
+            && order_by.is_empty()
+            && filter.is_none() =>
+        {
+            let [value, low, high] = args.as_slice() else {
+                return None;
+            };
+            (value, low, high, true)
+        }
+        _ => return None,
+    })
 }
 
 /// Restore retained scalar plans and their independent nested query arenas without rebinding catalog identities.

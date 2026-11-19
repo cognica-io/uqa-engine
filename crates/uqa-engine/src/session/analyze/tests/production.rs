@@ -146,7 +146,7 @@ fn memory_lazy_statistics_failure_preserves_catalog_and_retries_on_the_same_owne
     )
     .unwrap_err();
     assert_eq!(error.sqlstate(), Some("53200"));
-    assert!(table.column_stats_dirty.load(Ordering::Acquire));
+    assert!(*table.column_stats_dirty.read());
     assert!(table.column_stats.read().is_empty());
     drop(full);
     assert_eq!(budget.used(), initial);
@@ -156,7 +156,7 @@ fn memory_lazy_statistics_failure_preserves_catalog_and_retries_on_the_same_owne
     )
     .unwrap();
     assert_eq!(statistics["payload"].row_count, 128);
-    assert!(!table.column_stats_dirty.load(Ordering::Acquire));
+    assert!(!*table.column_stats_dirty.read());
     drop((statistics, table));
     engine.close().unwrap();
     drop(engine);

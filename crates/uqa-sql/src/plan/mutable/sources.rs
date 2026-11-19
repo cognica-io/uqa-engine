@@ -11,7 +11,9 @@ use crate::{
     plan::{OwnedScalarExpr, SourcePlan},
     SQLError, ScalarExpr,
 };
-use uqa_core::{memory::ProductionControl, Value};
+use uqa_core::memory::ProductionControl;
+
+pub(super) use crate::plan::retirement::empty_source;
 
 mod bindings;
 mod functions;
@@ -52,26 +54,31 @@ impl MutableQueryPlan {
     ) -> Result<Self, SQLError> {
         self.assert_owner(control);
         control.check()?;
+        let Some(mut slot) = self.source_slot()? else {
+            return Ok(self);
+        };
+        let output = map(slot.take())?;
+        output.assert_owner(control);
+        control.check()?;
+        slot.restore(output);
+        Ok(self)
+    }
+
+    pub(super) fn source_slot(
+        &mut self,
+    ) -> Result<Option<super::edits::Slot<'_, MutableSourcePlan>>, SQLError> {
         let RelationalPlan::QueryBlock(block) = &mut self.query.root else {
             return Err(SQLError::Internal(
                 "source rewrite requires a query block".into(),
             ));
         };
-        let Some(source) = block.from.take() else {
-            return Ok(self);
-        };
-        let memory = self
-            .memory
-            .as_mut()
-            .and_then(|memory| query_source_memory(memory).take());
-        let output = map(MutableSourcePlan { source, memory })?;
-        output.assert_owner(control);
-        control.check()?;
-        block.from = Some(output.source);
-        if let Some(memory) = &mut self.memory {
-            *query_source_memory(memory) = output.memory;
+        if block.from.is_none() {
+            return Ok(None);
         }
-        Ok(self)
+        Ok(Some(super::edits::Slot::optional(
+            &mut block.from,
+            self.memory.as_mut().map(query_source_memory),
+        )))
     }
 }
 
@@ -90,6 +97,20 @@ impl MutableSourcePlan {
     ) -> Result<Self, SQLError> {
         self.assert_owner(control);
         control.check()?;
+        let Some(mut slot) = self.query_slot()? else {
+            return Ok(self);
+        };
+        let input = slot.take();
+        let output = map(input)?;
+        output.assert_owner(control);
+        control.check()?;
+        slot.restore(output);
+        Ok(self)
+    }
+
+    pub(super) fn query_slot(
+        &mut self,
+    ) -> Result<Option<super::edits::Slot<'_, MutableQueryPlan>>, SQLError> {
         let (query, field) = match &mut self.source {
             SourcePlan::Subquery { body, .. } => (body, "body"),
             SourcePlan::Table {
@@ -99,36 +120,23 @@ impl MutableSourcePlan {
             SourcePlan::Table {
                 executable_query: None,
                 ..
-            } => return Ok(self),
+            } => return Ok(None),
             _ => {
                 return Err(SQLError::Internal(
                     "source has no directly retained query".into(),
                 ));
             }
         };
-        let input = MutableQueryPlan {
-            query: std::mem::replace(query.as_mut(), super::queries::empty_query()),
-            memory: self.memory.as_mut().and_then(|memory| {
+        Ok(Some(super::edits::Slot::new(
+            query.as_mut(),
+            self.memory.as_mut().map(|memory| {
                 memory
                     .field_mut(field)
                     .as_mut()
                     .expect("source query box")
                     .field_mut("query")
-                    .take()
             }),
-        };
-        let output = map(input)?;
-        output.assert_owner(control);
-        control.check()?;
-        **query = output.query;
-        if let Some(memory) = &mut self.memory {
-            *memory
-                .field_mut(field)
-                .as_mut()
-                .expect("source query box")
-                .field_mut("query") = output.memory;
-        }
-        Ok(self)
+        )))
     }
 
     pub fn map_scalar(
@@ -139,26 +147,23 @@ impl MutableSourcePlan {
     ) -> Result<Self, SQLError> {
         self.assert_owner(control);
         control.check()?;
-        let Some(expression) = slot.expression_mut(&mut self.source) else {
+        let Some(mut slot) = self.scalar_slot(slot) else {
             return Ok(self);
         };
-        let memory = self
-            .memory
-            .as_mut()
-            .and_then(|memory| slot.memory_mut(memory).take());
-        let input = OwnedScalarExpr::from_rewrite_parts(
-            std::mem::replace(expression, ScalarExpr::Literal(Value::Null)),
-            memory,
-        );
+        let input = slot.take();
         let output = input.rewrite(control, map)?;
-        let (expression, memory) = output.into_rewrite_parts();
-        *slot
-            .expression_mut(&mut self.source)
-            .expect("original scalar slot") = expression;
-        if let Some(owner) = &mut self.memory {
-            *slot.memory_mut(owner) = memory;
-        }
+        slot.restore(output);
         Ok(self)
+    }
+
+    pub(super) fn scalar_slot(
+        &mut self,
+        slot: SourceScalarSlot,
+    ) -> Option<super::edits::Slot<'_, OwnedScalarExpr>> {
+        Some(super::edits::Slot::new(
+            slot.expression_mut(&mut self.source)?,
+            self.memory.as_mut().map(|memory| slot.memory_mut(memory)),
+        ))
     }
 
     pub fn map_child(
@@ -169,21 +174,20 @@ impl MutableSourcePlan {
     ) -> Result<Self, SQLError> {
         self.assert_owner(control);
         control.check()?;
-        let input = Self {
-            source: std::mem::replace(slot.source_mut(&mut self.source), empty_source()),
-            memory: self
-                .memory
-                .as_mut()
-                .and_then(|memory| slot.memory_mut(memory).take()),
-        };
+        let mut slot = self.child_slot(slot);
+        let input = slot.take();
         let output = map(input)?;
         output.assert_owner(control);
         control.check()?;
-        *slot.source_mut(&mut self.source) = output.source;
-        if let Some(memory) = &mut self.memory {
-            *slot.memory_mut(memory) = output.memory;
-        }
+        slot.restore(output);
         Ok(self)
+    }
+
+    pub(super) fn child_slot(&mut self, slot: SourceChildSlot) -> super::edits::Slot<'_, Self> {
+        super::edits::Slot::new(
+            slot.source_mut(&mut self.source),
+            self.memory.as_mut().map(|memory| slot.memory_mut(memory)),
+        )
     }
 
     /// Select one join child and destroy the former parent, including the child's old enclosing box. The selected child's own allocations retain their separate constructor records.
@@ -304,16 +308,4 @@ fn item<'a>(memory: &'a mut RewriteMemory, name: &str, index: usize) -> &'a mut 
         .item_mut(index)
         .as_mut()
         .expect("source vector item")
-}
-
-pub(super) fn empty_source() -> SourcePlan {
-    SourcePlan::Values {
-        lateral: false,
-        rows: Vec::new(),
-        alias: None,
-        column_aliases: Vec::new(),
-        internal_relation: None,
-        internal_column_types: Vec::new(),
-        internal_column_collations: Vec::new(),
-    }
 }

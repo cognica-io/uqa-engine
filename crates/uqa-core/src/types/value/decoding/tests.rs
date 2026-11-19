@@ -7,10 +7,15 @@
 use super::*;
 use crate::memory::MemoryError;
 
+mod owners;
+
 fn check_value(text: &str) {
     let memory = MemoryBudget::new(16 * 1024 * 1024);
     let cancellation = CancellationToken::new();
-    let actual = JsonValueDecoder::new(&memory, &cancellation).value(text);
+    let invoking = CancellationToken::new();
+    let actual = JsonValueDecoder::new(&memory, &cancellation)
+        .with_invoking_cancellation(&invoking)
+        .value(text);
     let expected = serde_json::from_str::<Value>(text);
     match (actual, expected) {
         (Ok(actual), Ok(expected)) => {

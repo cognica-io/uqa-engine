@@ -54,8 +54,8 @@ impl SQLiteDiskANNCanonical {
             return Err(invalid("journal discovery requires an inactive session"));
         }
         let bytes = size_of::<MaintenanceSource>()
-            .checked_add(self.index.table.capacity())
-            .and_then(|bytes| bytes.checked_add(self.index.field.capacity()))
+            .checked_add(self.index.table.unadmitted_payload_bytes())
+            .and_then(|bytes| bytes.checked_add(self.index.field.unadmitted_payload_bytes()))
             .ok_or(uqa_core::memory::MemoryError::SizeOverflow)?;
         let memory = control.memory().reserve(bytes)?;
         let source = self.retain_for_index(index, control)?;

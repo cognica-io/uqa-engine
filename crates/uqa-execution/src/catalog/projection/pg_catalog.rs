@@ -46,7 +46,9 @@ pub use relations::{
     pg_class_row, pg_class_row_with_lifecycle, relation_identity_for_oid, table_relation_oid_from,
     table_rowtype_oid_from,
 };
-pub use roles::{build_pg_auth_members, build_pg_authid, build_pg_roles, build_pg_user};
+pub use roles::{
+    build_pg_auth_members, build_pg_authid, build_pg_roles, build_pg_shadow, build_pg_user,
+};
 pub use sequences::build_pg_sequences;
 pub use types::build_pg_range_with_catalog;
 pub(crate) use types::build_requested_pg_type;

@@ -6,6 +6,10 @@
 
 //! Consolidated backend, persistence, session, and concurrency tests.
 
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+#[path = "storage/backup_provider.rs"]
+mod backup_provider;
+
 #[path = "catalog_atomicity.rs"]
 mod catalog_atomicity;
 #[path = "concurrency.rs"]

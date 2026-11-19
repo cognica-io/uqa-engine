@@ -4,8 +4,10 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
+mod anchors;
 #[cfg(unix)]
 mod commit_monitor;
+mod retained_diagnostic;
 mod source_identity;
 mod statements;
 
@@ -57,6 +59,33 @@ fn resource_failures_keep_their_types_across_provider_and_transaction_boundaries
             SQLiteError::Memory(_) | SQLiteError::Cancelled(_)
         ));
     }
+}
+
+#[test]
+fn native_json_diagnostics_survive_provider_transaction_and_backup_boundaries() {
+    use uqa_core::json::{JsonDiagnostic, JsonPosition, JsonSyntaxError, JsonSyntaxKind};
+    use uqa_storage::{backup::BackupError, StorageBackendError, TransactionError};
+    let original = JsonDiagnostic::from(JsonSyntaxError {
+        kind: JsonSyntaxKind::EndOfValue,
+        position: JsonPosition {
+            byte_offset: 9,
+            line: 2,
+            column: 3,
+        },
+    });
+    let position = original.position();
+    let expected = original.to_string();
+    let error = SQLiteError::from(StorageBackendError::from(original));
+    let TransactionError::Storage(error) = TransactionError::from(error) else {
+        panic!("native JSON storage diagnostic lost")
+    };
+    let BackupError::Storage(StorageBackendError::Json(error)) = BackupError::from(error) else {
+        panic!("native JSON backup diagnostic lost")
+    };
+    assert_eq!(error.position(), position);
+    assert_eq!(error.to_string(), expected);
+    assert!(error.is_eof());
+    assert!(!error.is_data());
 }
 
 #[test]
@@ -848,84 +877,6 @@ fn compressed_encrypted_file_requires_matching_key() {
         ManagedConnection::open_compressed_encrypted(&path, "", options),
         Err(SQLiteError::EmptyEncryptionKey)
     ));
-}
-
-#[test]
-fn compressed_encrypted_anchor_rejects_whole_file_rollback() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("anchored.uqac.sqlite3");
-    let old_snapshot = dir.path().join("anchored-old.uqac.sqlite3");
-    let options = SQLiteCompressionOptions::default();
-    let key = "trusted anchor key";
-
-    {
-        let connection = ManagedConnection::open_compressed_encrypted(&path, key, options).unwrap();
-        connection
-            .with(|sqlite| {
-                sqlite.execute_batch(
-                    "CREATE TABLE t (id INTEGER PRIMARY KEY); INSERT INTO t VALUES (1);",
-                )?;
-                Ok(())
-            })
-            .unwrap();
-    }
-    let old_anchor = compressed_vfs::read_authenticated_anchor(&path, key).unwrap();
-    std::fs::copy(&path, &old_snapshot).unwrap();
-
-    {
-        let connection = ManagedConnection::open_compressed_encrypted(&path, key, options).unwrap();
-        connection
-            .with(|sqlite| {
-                sqlite.execute("INSERT INTO t VALUES (2)", [])?;
-                Ok(())
-            })
-            .unwrap();
-    }
-    let current_anchor = compressed_vfs::read_authenticated_anchor(&path, key).unwrap();
-    assert_eq!(current_anchor.database_id, old_anchor.database_id);
-    assert!(current_anchor.generation > old_anchor.generation);
-    assert_ne!(current_anchor.state_tag, old_anchor.state_tag);
-    {
-        let anchored = ManagedConnection::open_compressed_encrypted_with_anchor(
-            &path,
-            key,
-            options,
-            current_anchor,
-        )
-        .unwrap();
-        anchored
-            .with(|sqlite| {
-                sqlite.execute("INSERT INTO t VALUES (3)", [])?;
-                Ok(())
-            })
-            .unwrap();
-    }
-    let Err(error) = ManagedConnection::open_compressed_encrypted(&path, key, options) else {
-        panic!("stale registered anchor unexpectedly accepted a newer state");
-    };
-    assert_ne!(error.to_string(), "");
-    let advanced_anchor = compressed_vfs::read_authenticated_anchor(&path, key).unwrap();
-    assert!(advanced_anchor.generation > current_anchor.generation);
-    ManagedConnection::open_compressed_encrypted_with_anchor(&path, key, options, advanced_anchor)
-        .unwrap();
-
-    std::fs::copy(&old_snapshot, &path).unwrap();
-    let Err(error) = ManagedConnection::open_compressed_encrypted_with_anchor(
-        &path,
-        key,
-        options,
-        advanced_anchor,
-    ) else {
-        panic!("rolled-back container unexpectedly satisfied its trusted anchor");
-    };
-    assert!(error
-        .to_string()
-        .contains("does not match trusted generation"));
-
-    let Err(error) = ManagedConnection::open_compressed_encrypted(&path, key, options) else {
-        panic!("unanchored re-registration weakened an existing trusted anchor");
-    };
-    assert_ne!(error.to_string(), "");
 }
 
 #[test]

@@ -153,7 +153,7 @@ impl DependencyBuilder<'_> {
     fn record_shared_objects(&mut self, database: u32) -> Result<(), SQLError> {
         let catalog = self.catalog;
         let snapshot = catalog.snapshot();
-        for (identity, security) in snapshot.definitions.sequence_security.iter() {
+        for (identity, security) in snapshot.definitions.sequences.security().iter() {
             let Some(oid) = self.objects.relation_oid(identity) else {
                 continue;
             };

@@ -14,6 +14,8 @@ use uqa_sql::{ast::FunctionBinding, ColumnType, SQLError};
 
 mod services;
 pub(crate) use services::CatalogServices;
+pub(crate) mod input;
+pub(crate) mod type_names;
 
 pub(crate) fn table_snapshot(
     object_id: [u8; 16],
@@ -29,10 +31,11 @@ pub(crate) fn table_snapshot(
                 &object_id,
             )
         }),
-        row_type_array_name: constraints.row_type_array_name,
+        row_type_array_name: constraints.row_type_array_name.into(),
         security: Arc::new(super::security::BoundTableSecurity::owner(
             uqa_sql::catalog::roles::RoleIdentity::BOOTSTRAP,
-        )),
+        ))
+        .into(),
         columns: columns.into(),
         columns_declared: true,
         checks: constraints.checks.into(),
@@ -48,34 +51,32 @@ pub(crate) fn empty_catalog() -> CatalogReadView {
         tables: uqa_core::memory::OwnedMap::default(),
         graph_overlay: None,
         definitions: CatalogDefinitionSnapshot {
-            builtin_routine_security: Arc::default(),
-            foreign_wrappers: Arc::default(),
-            foreign_servers: Arc::default(),
-            sequence_persistence: Arc::default(),
+            builtin_routine_security: uqa_core::memory::RetainedValue::default(),
+            foreign_wrappers: uqa_core::memory::RetainedValue::default(),
+            foreign_servers: uqa_core::memory::RetainedValue::default(),
             foreign_tables: Arc::default(),
-            sql_user_functions: Arc::default(),
-            role_memberships: Arc::default(),
-            domains: Arc::default(),
-            enums: Arc::default(),
-            ranges: Arc::default(),
-            shells: Arc::default(),
-            comments: Arc::default(),
-            composites: Arc::default(),
-            graphs: Arc::default(),
-            views: Arc::default(),
-            catalog_indexes: Arc::default(),
-            database_security: crate::catalog::security::BoundDatabaseSecurity::bootstrap().into(),
-            schemas: Arc::default(),
-            sequences: Arc::default(),
-            sequence_object_ids: Arc::default(),
-            sequence_catalog_oids: Arc::default(),
-            graph_catalog_oids: Arc::default(),
-            sequence_security: Arc::default(),
+            sql_user_functions: uqa_core::memory::RetainedValue::default(),
+            role_memberships: uqa_core::memory::RetainedValue::default(),
+            domains: uqa_core::memory::RetainedValue::default(),
+            enums: uqa_core::memory::RetainedValue::default(),
+            ranges: uqa_core::memory::RetainedValue::default(),
+            shells: uqa_core::memory::RetainedValue::default(),
+            comments: uqa_core::memory::RetainedValue::default(),
+            composites: uqa_core::memory::RetainedValue::default(),
+            graphs: uqa_core::memory::RetainedValue::default(),
+            views: uqa_core::memory::RetainedValue::default(),
+            catalog_indexes: uqa_core::memory::RetainedValue::default(),
+            database_security: uqa_core::memory::RetainedValue::new(
+                uqa_sql::catalog::security::database::DatabaseAuthority::bootstrap(),
+            ),
+            schemas: uqa_core::memory::RetainedValue::default(),
+            sequences: uqa_core::memory::RetainedValue::default(),
+            graph_catalog_oids: uqa_core::memory::RetainedValue::default(),
             foreign_table_security: Arc::default(),
-            system_relation_security: Arc::default(),
-            roles: Arc::default(),
-            triggers: Arc::default(),
-            rules: Arc::default(),
+            system_relation_security: uqa_core::memory::RetainedValue::default(),
+            roles: uqa_core::memory::RetainedValue::default(),
+            triggers: uqa_core::memory::RetainedValue::default(),
+            rules: uqa_core::memory::RetainedValue::default(),
         },
         temporary_namespace: None,
     })
@@ -127,4 +128,57 @@ pub(crate) fn empty_scope() -> crate::query::CteScope {
         },
         None,
     )
+}
+
+/// Projection fixtures use the complete native relation publisher.
+pub(crate) fn foreign_tables(
+    values: impl IntoIterator<
+        Item = (
+            uqa_core::RelationIdentity,
+            super::foreign::StoredForeignTable,
+        ),
+    >,
+) -> std::sync::Arc<super::foreign::ForeignTables> {
+    let mut catalog = super::foreign::ForeignCatalog::default();
+    for (relation, table) in values {
+        catalog
+            .insert(
+                relation,
+                table,
+                uqa_sql::catalog::security::BoundTableSecurity::owner(
+                    uqa_sql::catalog::roles::RoleIdentity::BOOTSTRAP,
+                ),
+            )
+            .unwrap();
+    }
+    catalog.tables_snapshot()
+}
+pub(crate) fn index_rows(
+    rows: impl IntoIterator<Item = uqa_storage::CatalogIndexRow>,
+) -> crate::catalog::index::registry::CatalogIndexes {
+    let mut indexes = crate::catalog::index::registry::CatalogIndexes::default();
+    for row in rows {
+        indexes
+            .insert(row, uqa_sql::ast::RelationPersistence::Permanent)
+            .unwrap();
+    }
+    indexes
+}
+
+/// Mutate a fixture through the same complete admitted authority owner as execution.
+pub(crate) fn edit_sequence_security(
+    snapshot: &mut super::sequence::snapshot::SequenceReadSnapshot,
+    edit: impl FnOnce(&mut uqa_sql::catalog::security::BoundSequenceSecurity),
+) {
+    let (relation, mut security) = snapshot
+        .catalog
+        .security()
+        .iter()
+        .next()
+        .map(|(relation, security)| (relation.clone(), security.clone()))
+        .unwrap();
+    edit(&mut security);
+    uqa_core::memory::RetainedValue::make_mut(&mut snapshot.catalog)
+        .replace_security(&relation, security)
+        .unwrap();
 }

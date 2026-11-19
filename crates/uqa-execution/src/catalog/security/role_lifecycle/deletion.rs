@@ -60,7 +60,7 @@ pub fn drop_roles(
         let mut roles = context.registry.write_roles();
         let name = tuple.revalidate(&roles)?.name.clone();
         let mut next = roles.clone();
-        next.remove(&name);
+        next.remove(&name)?;
         context.publication.persist_roles(&roles, &next)?;
         **roles = next;
         drop(roles);
@@ -76,7 +76,7 @@ fn remove_memberships(
     context.publication.prepare_writer()?;
     let roles = context.analysis.roles.role_definitions();
     let mut memberships = context.registry.write_memberships();
-    let next = role_drop_memberships_candidate(&memberships, target.identity());
+    let next = role_drop_memberships_candidate(&memberships, target.identity())?;
     context
         .publication
         .persist_memberships(&memberships, &next)?;

@@ -11,6 +11,8 @@ use serde_json::{json, Value};
 use super::{UserDictionary, UserDictionaryLimits, UserWord};
 use crate::kuromoji::{DictionaryError, DictionaryLimits, DictionaryResult, KuromojiDictionary};
 
+mod retained;
+
 fn model() -> &'static Arc<KuromojiDictionary> {
     static MODEL: OnceLock<Arc<KuromojiDictionary>> = OnceLock::new();
     MODEL.get_or_init(|| {

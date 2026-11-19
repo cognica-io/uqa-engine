@@ -110,26 +110,30 @@ jobs:
             python-sdist
             python-wheel-x86_64-unknown-linux-gnu
             python-wheel-aarch64-unknown-linux-gnu
-            python-wheel-x86_64-apple-darwin
             python-wheel-aarch64-apple-darwin
             python-wheel-x86_64-pc-windows-msvc
             python-wheel-aarch64-pc-windows-msvc
             node-packages
             node-addon-x86_64-unknown-linux-gnu
             node-addon-aarch64-unknown-linux-gnu
-            node-addon-x86_64-apple-darwin
             node-addon-aarch64-apple-darwin
             node-addon-x86_64-pc-windows-msvc
             node-addon-aarch64-pc-windows-msvc
             wasm-package
           )
+          macos_x86=$(python3 -c 'import json; print("true" if "x86_64-apple-darwin" in json.load(open("crates/uqa-node/package.json"))["napi"]["targets"] else "false")')
+          if [ "$macos_x86" = true ]; then
+            expected+=(python-wheel-x86_64-apple-darwin node-addon-x86_64-apple-darwin)
+            if [ -f scripts/usql-release.py ]; then expected+=(usql-x86_64-apple-darwin); fi
+            if [ -f scripts/c-bindings-release.py ]; then expected+=(c-bindings-x86_64-apple-darwin); fi
+          fi
           if [ -f scripts/usql-release.py ]; then
-            for target in x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu x86_64-apple-darwin aarch64-apple-darwin x86_64-pc-windows-msvc aarch64-pc-windows-msvc; do
+            for target in x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu aarch64-apple-darwin x86_64-pc-windows-msvc aarch64-pc-windows-msvc; do
               expected+=("usql-$target")
             done
           fi
           if [ -f scripts/c-bindings-release.py ]; then
-            for target in x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu x86_64-apple-darwin aarch64-apple-darwin x86_64-pc-windows-msvc; do
+            for target in x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu aarch64-apple-darwin x86_64-pc-windows-msvc; do
               expected+=("c-bindings-$target")
             done
           fi
@@ -230,11 +234,13 @@ jobs:
           print()
           print("Python wheels, a Python source distribution, the Node.js root npm package, `@cognica-io` native optional packages, standalone native addons, and the browser WASM package are attached to this release.")
           print()
+          targets = json.loads(pathlib.Path("crates/uqa-node/package.json").read_text())["napi"]["targets"]
+          macos_arches = "x86_64 and ARM64" if "x86_64-apple-darwin" in targets else "ARM64"
           if pathlib.Path("scripts/usql-release.py").is_file():
-              print("Standalone `usql` archives for Linux, macOS and Windows (x86_64 and ARM64), SHA-256 checksums, and `install-usql.sh` / `install-usql.ps1` are also attached. The CLI includes Nori, Kuromoji, Arrow and DuckDB. Cargo users can install the binary without compilation using `cargo binstall uqa-cli --strategies crate-meta-data`.")
+              print(f"Standalone `usql` archives for Linux and Windows (x86_64 and ARM64) and macOS ({macos_arches}), SHA-256 checksums, and `install-usql.sh` / `install-usql.ps1` are also attached. The CLI includes Nori, Kuromoji, Arrow and DuckDB. Cargo users can install the binary without compilation using `cargo binstall uqa-cli --strategies crate-meta-data`.")
               print()
           if pathlib.Path("scripts/c-bindings-release.py").is_file():
-              print("C shared/static library packages for Linux and macOS (x86_64 and ARM64) and Windows x86_64 are attached with SHA-256 checksums, installed headers, CMake/pkg-config targets and per-target build/license inventories. Their C11/C++17 consumers run against all four storage providers before packaging.")
+              print(f"C shared/static library packages for Linux (x86_64 and ARM64), macOS ({macos_arches}) and Windows x86_64 are attached with SHA-256 checksums, installed headers, CMake/pkg-config targets and per-target build/license inventories. Their C11/C++17 consumers run against all four storage providers before packaging.")
               print()
           crates_result = os.environ.get("CRATES_IO_RESULT", "unknown")
           if crates_result == "success":
@@ -307,13 +313,16 @@ jobs:
           version="${TAG#v}"
           expected=(
             "uqa-${version}.tar.gz"
-            "uqa-${version}-cp38-abi3-macosx_10_12_x86_64.whl"
             "uqa-${version}-cp38-abi3-macosx_11_0_arm64.whl"
             "uqa-${version}-cp38-abi3-manylinux_2_28_aarch64.whl"
             "uqa-${version}-cp38-abi3-manylinux_2_28_x86_64.whl"
             "uqa-${version}-cp38-abi3-win_amd64.whl"
             "uqa-${version}-cp38-abi3-win_arm64.whl"
           )
+          macos_x86=$(python3 -c 'import json; print("true" if "x86_64-apple-darwin" in json.load(open("crates/uqa-node/package.json"))["napi"]["targets"] else "false")')
+          if [ "$macos_x86" = true ]; then
+            expected+=("uqa-${version}-cp38-abi3-macosx_10_12_x86_64.whl")
+          fi
           release_assets="$RUNNER_TEMP/release-assets.txt"
           gh release view "$TAG" --json assets --jq '.assets[].name' > "$release_assets"
           missing=()
@@ -341,13 +350,16 @@ jobs:
           expected=(
             "cognica-io-uqa-linux-x64-gnu-${version}.tgz"
             "cognica-io-uqa-linux-arm64-gnu-${version}.tgz"
-            "cognica-io-uqa-darwin-x64-${version}.tgz"
             "cognica-io-uqa-darwin-arm64-${version}.tgz"
             "cognica-io-uqa-win32-x64-msvc-${version}.tgz"
             "cognica-io-uqa-win32-arm64-msvc-${version}.tgz"
             "cognica-io-uqa-${version}.tgz"
             "cognica-io-uqa-wasm-${version}.tgz"
           )
+          macos_x86=$(python3 -c 'import json; print("true" if "x86_64-apple-darwin" in json.load(open("crates/uqa-node/package.json"))["napi"]["targets"] else "false")')
+          if [ "$macos_x86" = true ]; then
+            expected+=("cognica-io-uqa-darwin-x64-${version}.tgz")
+          fi
           release_assets="$RUNNER_TEMP/release-assets.txt"
           gh release view "$TAG" --json assets --jq '.assets[].name' > "$release_assets"
           missing=()

@@ -6,12 +6,14 @@
 
 //! Foreign-wrapper catalog identity, separate from server names and source adapters.
 
-use super::roles::{identity::RoleSubject, RoleDefinition, RoleIdentity};
+use super::roles::{identity::RoleSubject, RoleIdentity};
+use crate::catalog::roles::RoleDefinitions;
 use crate::{ast::FunctionBinding, SQLError};
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
-pub type ForeignWrappers = BTreeMap<String, ForeignWrapperDefinition>;
+mod registry;
+pub use registry::{CapturedForeignWrappers, ForeignWrappers};
 
 /// Implementations already provided by the host. A SQL name alone never selects one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -110,27 +112,42 @@ impl ForeignWrapperDefinition {
 }
 
 pub fn native_wrappers() -> ForeignWrappers {
-    [
-        NativeForeignWrapper::Memory,
-        NativeForeignWrapper::DuckDB,
-        NativeForeignWrapper::Arrow,
-    ]
-    .into_iter()
-    .map(|native| {
-        let name = native.name().to_owned();
-        (
-            name.clone(),
-            ForeignWrapperDefinition {
-                name,
-                identity: native.reference(),
-                owner: RoleIdentity::BOOTSTRAP,
-                handler: ForeignWrapperHandler::Native(native),
-                validator: None,
-                options: Vec::new(),
-            },
-        )
-    })
-    .collect()
+    ForeignWrappers::try_from_iter(
+        [
+            NativeForeignWrapper::Memory,
+            NativeForeignWrapper::DuckDB,
+            NativeForeignWrapper::Arrow,
+        ]
+        .into_iter()
+        .map(|native| {
+            let name = native.name().to_owned();
+            (
+                name.clone(),
+                ForeignWrapperDefinition {
+                    name,
+                    identity: native.reference(),
+                    owner: RoleIdentity::BOOTSTRAP,
+                    handler: ForeignWrapperHandler::Native(native),
+                    validator: None,
+                    options: Vec::new(),
+                },
+            )
+        }),
+    )
+    .expect("fixed native foreign-wrapper catalog")
+}
+
+impl ForeignWrapperFunction {
+    /// Stored catalog callbacks carry a resolved routine identity, independently of whether it still exists.
+    pub(super) fn has_valid_identity(&self) -> bool {
+        let function = &self.binding;
+        self.oid != 0
+            && (function.builtin || self.oid >= super::oids::FIRST_NORMAL_OBJECT_ID)
+            && !function.name.is_empty()
+            && function.resolution_error.is_none()
+            && function.dispatch.is_none()
+            && (function.builtin || function.object_id.is_some_and(|id| id != [0; 16]))
+    }
 }
 
 /// A missing callback is a valid retained reference; a live callback must agree with its saved OID and incarnation.
@@ -190,7 +207,7 @@ pub fn bound_wrapper<'a>(
 /// Validate the complete candidate before publishing any restored wrapper.
 pub fn validate_wrappers(
     wrappers: &ForeignWrappers,
-    roles: &BTreeMap<String, RoleDefinition>,
+    roles: &RoleDefinitions,
 ) -> Result<(), SQLError> {
     let mut oids = BTreeSet::new();
     let mut identities = BTreeSet::new();
@@ -222,14 +239,7 @@ pub fn validate_wrappers(
             _ => None,
         };
         for reference in handler.into_iter().chain(wrapper.validator.as_ref()) {
-            let function = &reference.binding;
-            if reference.oid == 0
-                || (!function.builtin && reference.oid < super::oids::FIRST_NORMAL_OBJECT_ID)
-                || function.name.is_empty()
-                || function.resolution_error.is_some()
-                || function.dispatch.is_some()
-                || (!function.builtin && function.object_id.is_none_or(|id| id == [0; 16]))
-            {
+            if !reference.has_valid_identity() {
                 return Err(invalid(name, "invalid bound function identity"));
             }
         }

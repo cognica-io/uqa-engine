@@ -69,7 +69,7 @@ impl SequenceDependencyContext<'_> {
                 continue;
             }
             table.persist_columns(&columns)?;
-            table.write_columns().publish(columns);
+            table.write_columns().publish(columns)?;
             catalog_changed = true;
         }
         if catalog_changed {

@@ -55,8 +55,8 @@ pub fn run_drop_index(
         }))
 }
 
-fn ddl_storage_error(action: &str, err: impl std::error::Error + 'static) -> SQLError {
-    uqa_sql::catalog::errors::storage_error(action, &err)
+fn ddl_storage_error(action: &str, err: uqa_storage::StorageBackendError) -> SQLError {
+    crate::storage_errors::storage_error(action, &err)
 }
 
 fn lock_index_partitions(context: &IndexRemovalContext<'_>, table: &str) -> Result<(), SQLError> {

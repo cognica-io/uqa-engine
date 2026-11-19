@@ -1,0 +1,21 @@
+unvalidated|3
+rollback_names|t|t
+retained_identities|t|t
+old_rows|-1,1
+old_domain_rows|-1
+insert_check 23514
+update_check 23514
+domain_write 23514
+domain_cast 23514
+composite_domain_cast 23514
+delayed_evaluation 22012
+non_boolean_column 42804
+collated_unknown_true 00000
+collated_unknown_invalid 22P02
+non_boolean_operand 42804
+non_boolean_domain 42804
+non_boolean_foreign 42804
+aggregate 42803
+subquery 0A000
+later_rows|-1,1,2,3
+still_unvalidated|3

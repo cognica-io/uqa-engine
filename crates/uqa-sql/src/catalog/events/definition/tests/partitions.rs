@@ -137,10 +137,17 @@ fn invalid_partition_parent_fails_before_name_enumeration_or_trigger_reads() {
 fn ancestor_names_are_checked_even_when_replacing_a_local_trigger() {
     let catalog = Catalog::default();
     let mut partitions = fixture();
-    partitions.triggers.insert(
-        RelationIdentity::new("public", "parent"),
-        BTreeMap::from([("same".into(), trigger("public.parent", "same"))]),
-    );
+    partitions
+        .triggers
+        .insert(
+            RelationIdentity::new("public", "parent"),
+            crate::catalog::events::EventDefinitions::try_from_iter([(
+                "same".into(),
+                trigger("public.parent", "same"),
+            )])
+            .unwrap(),
+        )
+        .unwrap();
     let error = partitions
         .context(&catalog.context())
         .ensure_partition_trigger_name_available(
@@ -163,10 +170,17 @@ fn ancestor_names_are_checked_even_when_replacing_a_local_trigger() {
 fn descendant_conflicts_report_the_descendant_relation() {
     let catalog = Catalog::default();
     let mut partitions = fixture();
-    partitions.triggers.insert(
-        RelationIdentity::new("public", "child"),
-        BTreeMap::from([("same".into(), trigger("public.child", "same"))]),
-    );
+    partitions
+        .triggers
+        .insert(
+            RelationIdentity::new("public", "child"),
+            crate::catalog::events::EventDefinitions::try_from_iter([(
+                "same".into(),
+                trigger("public.child", "same"),
+            )])
+            .unwrap(),
+        )
+        .unwrap();
     let error = partitions
         .context(&catalog.context())
         .ensure_partition_trigger_name_available(

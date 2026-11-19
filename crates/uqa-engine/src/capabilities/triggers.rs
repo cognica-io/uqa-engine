@@ -6,7 +6,6 @@
 
 //! Connect trigger catalog reads, routine entry, and transaction deferral to engine state.
 use crate::Engine;
-use std::sync::Arc;
 use uqa_core::Value;
 use uqa_execution::{
     mutation::triggers::{
@@ -18,7 +17,6 @@ use uqa_execution::{
 use uqa_sql::{
     ast::{ColumnDef, ForeignKey, TriggerEvent, TriggerTiming},
     catalog::events::StoredTrigger,
-    routines::SQLUserFunction,
     semantics::referential::ReferentialCatalog,
     SQLError,
 };
@@ -112,13 +110,13 @@ impl TriggerRoutineInvoker for Engine {
         &self,
         name: &str,
         object_id: Option<[u8; 16]>,
-    ) -> Result<Arc<SQLUserFunction>, SQLError> {
+    ) -> Result<uqa_sql::routines::SQLRoutine, SQLError> {
         self.event_analysis_context()
             .resolve_bound_trigger_function(name, object_id)
     }
     fn execute_trigger_routine(
         &self,
-        function: &Arc<SQLUserFunction>,
+        function: &uqa_sql::routines::SQLRoutine,
         context: &TriggerRoutineContext,
     ) -> Result<Value, SQLError> {
         crate::capabilities::routine_invocation::execute_trigger_routine(self, function, context)

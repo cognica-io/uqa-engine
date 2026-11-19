@@ -249,6 +249,7 @@ impl SharedObjectLockSession for Session {
     }
 }
 
+mod graphs;
 mod snapshots;
 
 fn occupied(oid: i64) -> CatalogReadView {
@@ -267,7 +268,7 @@ fn occupied(oid: i64) -> CatalogReadView {
         object_id: [91; 16],
         oid,
     });
-    snapshot.definitions.foreign_tables = std::collections::BTreeMap::from([(
+    snapshot.definitions.foreign_tables = crate::catalog::test_support::foreign_tables([(
         uqa_core::RelationIdentity::new("hidden_schema", "peer"),
         crate::catalog::foreign::StoredForeignTable {
             dropped_attributes: Vec::new(),
@@ -280,11 +281,10 @@ fn occupied(oid: i64) -> CatalogReadView {
             server_reference: None,
             columns,
             checks: Vec::new(),
-            options: std::collections::BTreeMap::default(),
+            options: uqa_core::memory::OwnedMap::new(),
             option_order: Vec::new(),
         },
-    )])
-    .into();
+    )]);
     CatalogReadView::new(snapshot)
 }
 
@@ -303,20 +303,22 @@ fn domain_occupied(oid: i64) -> CatalogReadView {
         object_id: [91; 16],
         oid,
     });
-    snapshot.definitions.domains = std::collections::BTreeMap::from([(
-        "hidden_schema.peer".into(),
-        uqa_sql::catalog::domain::StoredDomain {
-            identity: uqa_core::RelationIdentity::new("hidden_schema", "peer"),
-            object_id: [90; 16],
-            oid: uqa_sql::catalog::domain::domain_object_oid(&[90; 16]),
-            array_oid: None,
-            owner: uqa_core::catalog_role::RoleIdentity::BOOTSTRAP,
-            definition,
-            array_name: None,
-            usage_acl: None,
-        },
-    )])
-    .into();
+    snapshot.definitions.domains = uqa_core::memory::RetainedValue::new(
+        uqa_sql::catalog::type_definitions::TypeDefinitions::try_from_iter([(
+            "hidden_schema.peer".into(),
+            uqa_sql::catalog::domain::StoredDomain {
+                identity: uqa_core::RelationIdentity::new("hidden_schema", "peer"),
+                object_id: [90; 16],
+                oid: uqa_sql::catalog::domain::domain_object_oid(&[90; 16]),
+                array_oid: None,
+                owner: uqa_core::catalog_role::RoleIdentity::BOOTSTRAP,
+                definition,
+                array_name: None,
+                usage_acl: None,
+            },
+        )])
+        .unwrap(),
+    );
     CatalogReadView::new(snapshot)
 }
 
@@ -647,11 +649,14 @@ fn type_reservations_check_both_catalog_generations_without_projecting_type_rows
         let session = Session::new();
         let candidate = 16_384;
         let mut snapshot = domain_occupied(50_001).snapshot().clone();
-        let domain = std::sync::Arc::make_mut(&mut snapshot.definitions.domains)
-            .get_mut("hidden_schema.peer")
+        uqa_core::memory::RetainedValue::make_mut(&mut snapshot.definitions.domains)
+            .edit("hidden_schema.peer", |domain| {
+                domain.oid = candidate;
+                domain.array_oid = Some(candidate + 1);
+                Ok(())
+            })
+            .unwrap()
             .unwrap();
-        domain.oid = candidate;
-        domain.array_oid = Some(candidate + 1);
         let occupied = CatalogReadView::new(snapshot);
         if after_refresh {
             *session.refresh.lock() = Some(occupied);

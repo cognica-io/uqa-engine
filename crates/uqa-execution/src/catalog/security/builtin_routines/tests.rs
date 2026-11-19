@@ -5,12 +5,15 @@
 //
 
 use super::*;
+use std::collections::BTreeMap;
 use std::sync::Arc;
+use uqa_sql::catalog::roles::RoleDefinition;
+use uqa_sql::catalog::roles::RoleDefinitions;
 use uqa_sql::catalog::roles::RoleIdentity;
 use uqa_storage::{KeyValueCatalog, MemoryKeyValueStore};
 
-fn roles() -> BTreeMap<String, RoleDefinition> {
-    BTreeMap::from([("uqa".into(), RoleDefinition::bootstrap())])
+fn roles() -> RoleDefinitions {
+    RoleDefinitions::try_from_iter([("uqa".into(), RoleDefinition::bootstrap())]).unwrap()
 }
 
 #[test]
@@ -23,7 +26,7 @@ fn builtin_acl_round_trip_preserves_revoke_and_independent_tuple_revisions() {
     }
     let expected = BTreeMap::from([(lower.oid, lower.entry), (aggregate.oid, aggregate.entry)]);
     let restored = restore(&catalog, &roles()).unwrap();
-    assert_eq!(restored, expected);
+    assert!(restored.iter().eq(expected.iter()));
     assert_eq!(restored[&870].execute_acl.len(), 0);
     let same = BuiltinRoutinePrivilegeUpdate::new(870, vec![]).unwrap();
     assert_ne!(same.entry.revision, restored[&870].revision);

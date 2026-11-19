@@ -208,6 +208,21 @@ pub fn read_with_value_catalog_and_control(
         && crate::catalog::type_metadata::builtin_array_element(datum.type_oid()).is_none()
     {
         if let Some(enums) = catalog {
+            if let Some(ty) = enums.value_type_by_oid_with_control(datum.type_oid(), control)? {
+                if let crate::ColumnType::Domain { .. } = &*ty {
+                    let mut base = &*ty;
+                    while let crate::ColumnType::Domain { base: inner, .. } = base {
+                        control.check()?;
+                        base = inner;
+                    }
+                    let oid = crate::catalog::type_metadata::pg_type_oid(base) as u32;
+                    return read_with_value_catalog_and_control(
+                        &datum.field(oid, datum.offset()),
+                        catalog,
+                        control,
+                    );
+                }
+            }
             if enums.enum_type_labels(datum.type_oid())?.is_some() {
                 let oid = enum_label_oid(datum)?;
                 return Ok(
@@ -317,7 +332,7 @@ fn read_payload(
             .transpose()?
             .flatten()
         {
-            match ty {
+            match &ty {
                 crate::ColumnType::DeclaredRange(_) | crate::ColumnType::DeclaredMultirange(_) => {
                     return super::range::datum::read(bytes, &ty, catalog, control);
                 }
@@ -325,7 +340,7 @@ fn read_payload(
                 crate::ColumnType::Composite(_) => return records::read(bytes, catalog, control),
                 crate::ColumnType::Domain { base, .. } => {
                     return read_payload(
-                        crate::catalog::type_metadata::pg_type_oid(&base) as u32,
+                        crate::catalog::type_metadata::pg_type_oid(base) as u32,
                         bytes,
                         catalog,
                         control,

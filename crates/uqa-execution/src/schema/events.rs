@@ -39,7 +39,7 @@ pub fn rename_relation_events(
     let mut rules = context.registry.rules();
     let Some((next_triggers, next_rules)) =
         uqa_sql::catalog::events::renames::renamed_relation_events(&triggers, &rules, from, to)
-            .map_err(StorageBackendError::Other)?
+            .map_err(|error| StorageBackendError::backend("rename event catalog", error))?
     else {
         return Ok(());
     };
@@ -68,3 +68,6 @@ mod lifecycle;
 mod dependents;
 
 pub mod persistence;
+
+#[cfg(test)]
+mod tests;

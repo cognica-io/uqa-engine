@@ -7,10 +7,11 @@
 //! Sequence owners, grantees and grantors retain their original role incarnations.
 
 use super::{role_bindings, SequenceSecurity};
-use crate::catalog::roles::{identity::RoleBinding, RoleDefinition, RoleIdentity, RoleReference};
-use std::collections::BTreeMap;
+use crate::catalog::roles::RoleDefinitions;
+use crate::catalog::roles::{identity::RoleBinding, RoleIdentity, RoleReference};
+mod resolution;
+
 use uqa_core::{
-    catalog_acl::AclGrantee,
     catalog_role::BoundAclEntry,
     catalog_sequence::{SequenceAclEntry, SequencePrivileges},
 };
@@ -50,7 +51,7 @@ impl BoundSequenceSecurity {
 
     pub fn owner_reference(
         &self,
-        roles: &BTreeMap<String, RoleDefinition>,
+        roles: &RoleDefinitions,
     ) -> Result<RoleReference, crate::SQLError> {
         let name = role_bindings::role_name(roles, self.role_owner, "sequence")
             .map_err(crate::SQLError::Internal)?;
@@ -59,10 +60,7 @@ impl BoundSequenceSecurity {
         )))
     }
 
-    pub fn bind(
-        security: &SequenceSecurity,
-        roles: &BTreeMap<String, RoleDefinition>,
-    ) -> Result<Self, String> {
+    pub fn bind(security: &SequenceSecurity, roles: &RoleDefinitions) -> Result<Self, String> {
         let bind = |name: &str| role_bindings::bind_role(roles, name, "sequence");
         let entries = |entries: &[SequenceAclEntry]| {
             entries
@@ -84,37 +82,15 @@ impl BoundSequenceSecurity {
     }
 
     /// Resolve display names only through the role view accompanying this authority snapshot.
-    pub fn resolve(
-        &self,
-        roles: &BTreeMap<String, RoleDefinition>,
-    ) -> Result<SequenceSecurity, String> {
-        let name =
-            |identity| role_bindings::role_name(roles, identity, "sequence").map(str::to_owned);
-        let entries = |entries: &[BoundSequenceAclEntry]| {
-            entries
-                .iter()
-                .map(|entry| {
-                    Ok(SequenceAclEntry {
-                        role: entry
-                            .role
-                            .map(name)
-                            .transpose()?
-                            .map_or(AclGrantee::Public, AclGrantee::Role),
-                        grantor: Some(name(entry.grantor)?),
-                        privileges: entry.privileges,
-                        grant_options: entry.grant_options,
-                    })
-                })
-                .collect::<Result<Vec<_>, String>>()
-        };
-        Ok(SequenceSecurity {
-            role_owner: name(self.role_owner)?,
-            acl: self.acl.as_deref().map(entries).transpose()?,
-        })
+    pub fn resolve(&self, roles: &RoleDefinitions) -> Result<SequenceSecurity, String> {
+        self.resolve_with_control(roles, &uqa_core::memory::ProductionControl::uncontrolled())
+            .map(|value| value.into_parts().0)
+            .map_err(resolution::diagnostic)
     }
 
-    pub fn validate(&self, roles: &BTreeMap<String, RoleDefinition>) -> Result<(), String> {
-        super::sequence::validate_sequence_security_invariants(&self.resolve(roles)?, roles)
+    pub fn validate(&self, roles: &RoleDefinitions) -> Result<(), String> {
+        self.validate_with_control(roles, &uqa_core::memory::ProductionControl::uncontrolled())
+            .map_err(resolution::diagnostic)
     }
 
     pub fn depends_on(&self, role: RoleIdentity) -> bool {

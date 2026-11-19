@@ -248,7 +248,7 @@ impl<'a, 'c> Selection<'a, 'c> {
             unavailable_ambiguous_columns,
             unavailable_qualifiers,
             unavailable_columns,
-            _memory: SchemaMemory::new(
+            memory: SchemaMemory::new(
                 control.combine(header, control.combine(names_memory, columns_memory)),
             ),
         })))

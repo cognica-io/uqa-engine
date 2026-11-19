@@ -185,7 +185,7 @@ impl TokenFilter {
     }
 }
 
-fn default_stop_language() -> String {
+pub(crate) fn default_stop_language() -> String {
     "english".to_string()
 }
 

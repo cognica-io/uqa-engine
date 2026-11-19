@@ -29,7 +29,7 @@ pub fn bind_expression_plan_routines_for_storage_owned(
         routines,
         scope: &mut scope,
         parameters: ParameterTypes::fixed_with_control(params, control)?.with_stored_inputs(),
-        schema_expression: None,
+        schema_expression: (),
     };
     let PlanRef::Query(query) = plan.as_plan_ref() else {
         unreachable!()
@@ -86,7 +86,7 @@ pub(crate) fn bind_rule_inputs_owned(
         routines,
         scope: &mut scope,
         parameters: ParameterTypes::fixed_with_control(&[], control)?.with_reference_retention(),
-        schema_expression: None,
+        schema_expression: (),
     };
     let PlanRef::Query(query) = plan.as_plan_ref() else {
         unreachable!()

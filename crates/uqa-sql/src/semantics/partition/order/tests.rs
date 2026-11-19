@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use super::partition_bound_order;
+use super::order_with_types;
 use crate::ast::{
     ColumnDef, ColumnType, Expr, FunctionBinding, PartitionBound, PartitionRangeDatum,
     PartitionSpec, PartitionStrategy, TableHierarchy,
@@ -81,7 +81,7 @@ impl PartitionCatalog for Catalog {
     }
 
     fn try_describe_table(&self, _table: &str) -> Result<Option<Vec<ColumnDef>>, String> {
-        Ok(None)
+        Ok(Some(vec![ColumnDef::nullable("a", ColumnType::Integer)]))
     }
 
     fn try_table_object_id(&self, table: &str) -> Result<Option<[u8; 16]>, String> {
@@ -165,7 +165,7 @@ impl crate::schema::SchemaExpressionCatalog for Unused {
     fn plan_schema_expression(
         &self,
         _: &crate::ast::Expr,
-        _: &[crate::ast::ColumnDef],
+        _: &crate::RowSchema,
     ) -> std::result::Result<crate::schema::expressions::PlannedSchemaExpression, crate::SQLError>
     {
         unreachable!("this fixture does not plan stored expressions")
@@ -195,7 +195,7 @@ fn context(catalog: &Catalog) -> PartitionContext<'_> {
 #[test]
 fn list_partitions_follow_their_smallest_value_then_null_then_default() {
     let catalog = Catalog(BTreeMap::new());
-    let order = partition_bound_order(
+    let order = order_with_types(
         &context(&catalog),
         vec![
             ("default".into(), PartitionBound::Default),
@@ -204,6 +204,7 @@ fn list_partitions_follow_their_smallest_value_then_null_then_default() {
             ("five".into(), list(vec![int(20), int(5)])),
             ("ten".into(), list(vec![int(10)])),
         ],
+        &[ColumnType::Integer],
     )
     .unwrap();
     assert_eq!(order, ["five", "ten", "fifty", "null", "default"]);
@@ -212,7 +213,7 @@ fn list_partitions_follow_their_smallest_value_then_null_then_default() {
 #[test]
 fn range_and_hash_partitions_follow_their_bounds() {
     let catalog = Catalog(BTreeMap::new());
-    let ranges = partition_bound_order(
+    let ranges = order_with_types(
         &context(&catalog),
         vec![
             (
@@ -237,10 +238,11 @@ fn range_and_hash_partitions_follow_their_bounds() {
                 ),
             ),
         ],
+        &[ColumnType::Integer],
     )
     .unwrap();
     assert_eq!(ranges, ["first", "second", "third"]);
-    let hashes = partition_bound_order(
+    let hashes = order_with_types(
         &context(&catalog),
         [(4, 1), (2, 1), (4, 3), (2, 0)]
             .into_iter()
@@ -251,9 +253,44 @@ fn range_and_hash_partitions_follow_their_bounds() {
                 )
             })
             .collect(),
+        &[ColumnType::Integer],
     )
     .unwrap();
     assert_eq!(hashes, ["2_0", "2_1", "4_1", "4_3"]);
+}
+
+#[test]
+fn range_key_partition_order_retains_selected_types() {
+    let catalog = Catalog(BTreeMap::new());
+    for (name, small, large) in [
+        ("int4range", "[2,3)", "[10,11)"),
+        ("int4multirange", "{[2,3)}", "{[10,11)}"),
+    ] {
+        let ty = ColumnType::from_sql_name(name).unwrap();
+        for strategy in [PartitionStrategy::List, PartitionStrategy::Range] {
+            let bound = |text: &str| {
+                let value = Expr::Literal(Value::Str(text.into()));
+                if strategy == PartitionStrategy::List {
+                    list(vec![value])
+                } else {
+                    range(
+                        PartitionRangeDatum::Value(value),
+                        PartitionRangeDatum::MaxValue,
+                    )
+                }
+            };
+            let ordered = order_with_types(
+                &context(&catalog),
+                vec![
+                    ("large".into(), bound(large)),
+                    ("small".into(), bound(small)),
+                ],
+                std::slice::from_ref(&ty),
+            )
+            .unwrap();
+            assert_eq!(ordered, ["small", "large"]);
+        }
+    }
 }
 
 #[test]

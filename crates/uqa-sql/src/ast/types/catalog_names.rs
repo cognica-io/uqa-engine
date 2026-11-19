@@ -6,10 +6,10 @@
 
 //! Bound type names preserve catalog identity and modifiers independently of `search_path`.
 
-use super::ColumnType;
+use super::{ColumnType, ColumnTypeInputWork};
 use std::fmt;
 use uqa_core::{
-    memory::{Produced, ProductionControl},
+    memory::{Produced, ProductionControl, ProductionString},
     ValueRetentionError,
 };
 
@@ -17,7 +17,10 @@ impl ColumnType {
     /// A search-path-independent name: user-defined OID identity or a qualified builtin catalog identifier.
     #[must_use]
     pub fn catalog_name(&self) -> String {
-        CatalogName(self).to_string()
+        self.catalog_name_with_control(&ProductionControl::uncontrolled())
+            .expect("ordinary catalog name cannot be cancelled or limited")
+            .into_uncontrolled()
+            .expect("ordinary catalog name")
     }
 
     /// Format a bound identity directly into the caller's admitted destination.
@@ -25,7 +28,43 @@ impl ColumnType {
         &self,
         control: &ProductionControl<'_>,
     ) -> Result<Produced<String>, ValueRetentionError> {
-        control.format(format_args!("{}", CatalogName(self)))
+        crate::catalog::work::inline(self.catalog_name_with_input_work(control, &mut ()))
+    }
+
+    pub(crate) async fn catalog_name_with_input_work<W: ColumnTypeInputWork>(
+        &self,
+        control: &ProductionControl<'_>,
+        work: &mut W,
+    ) -> Result<Produced<String>, W::Error> {
+        let mut leaf = self;
+        let mut dimensions = 0;
+        loop {
+            control.check()?;
+            work.checkpoint().await?;
+            control.check()?;
+            match leaf {
+                Self::Array(element) => {
+                    leaf = element;
+                    dimensions += 1;
+                }
+                _ => break,
+            }
+        }
+        let scalar = match leaf {
+            Self::Named(name) => work.text(name, control).await?,
+            scalar => control.format(format_args!("{}", CatalogName(scalar)))?,
+        };
+        if dimensions == 0 {
+            return Ok(scalar);
+        }
+        let mut output = ProductionString::from_produced(scalar, *control)?;
+        for _ in 0..dimensions {
+            control.check()?;
+            work.checkpoint().await?;
+            control.check()?;
+            output.push_str("[]")?;
+        }
+        Ok(output.finish()?)
     }
 }
 
@@ -34,8 +73,9 @@ struct CatalogName<'a>(&'a ColumnType);
 impl fmt::Display for CatalogName<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.0 {
-            ColumnType::Named(name) => return f.write_str(name),
-            ColumnType::Array(element) => return write!(f, "{}[]", Self(element)),
+            ColumnType::Named(_) | ColumnType::Array(_) => {
+                unreachable!("catalog name producer handles names and array dimensions")
+            }
             ty @ (ColumnType::Enum(_)
             | ColumnType::Composite(_)
             | ColumnType::Domain { .. }
@@ -77,3 +117,6 @@ impl fmt::Display for CatalogName<'_> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

@@ -9,6 +9,7 @@
 use uqa_analysis::TokenTerm;
 
 mod allocation;
+mod input;
 
 use crate::{StorageBackendError, StorageBackendResult};
 
@@ -77,24 +78,7 @@ impl TokenTermKey {
     }
 
     fn validate(bytes: &[u8]) -> StorageBackendResult<()> {
-        let invalid = || StorageBackendError::Other("invalid canonical token term key".into());
-        match bytes.split_first() {
-            Some((0, bytes)) => std::str::from_utf8(bytes)
-                .map(|_| ())
-                .map_err(|_| invalid()),
-            Some((1, bytes)) if bytes.len() % 2 == 0 => {
-                let units = bytes
-                    .as_chunks::<2>()
-                    .0
-                    .iter()
-                    .map(|pair| u16::from_be_bytes([pair[0], pair[1]]));
-                if !char::decode_utf16(units).any(|unit| unit.is_err()) {
-                    return Err(invalid());
-                }
-                Ok(())
-            }
-            _ => Err(invalid()),
-        }
+        crate::image_io::work::inline(Self::validate_with(bytes, &mut ()))
     }
 }
 

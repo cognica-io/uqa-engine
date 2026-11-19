@@ -59,6 +59,41 @@ impl<T: InvertedIndex + ?Sized> ReadOnlySnapshot<T> {
 }
 
 impl InvertedIndex for ReadOnlySnapshot<dyn InvertedIndex> {
+    fn next_image_document_id(
+        &self,
+        after: Option<DocId>,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<DocId>> {
+        self.check_inverted_read()?;
+        let next = self.0.next_image_document_id(after, control)?;
+        self.check_inverted_read()?;
+        control.check()?;
+        Ok(next)
+    }
+
+    fn image_document_reader<'a>(
+        &'a self,
+        doc_id: DocId,
+        control: &'a StorageReadControl,
+    ) -> StorageBackendResult<Option<crate::image_io::ImageReader<'a>>> {
+        self.check_inverted_read()?;
+        self.0
+            .image_document_reader(doc_id, control)?
+            .map(|reader| reader.with_source_control(self.2.as_ref(), control))
+            .transpose()
+    }
+
+    fn write_image_document(
+        &self,
+        doc_id: DocId,
+        output: &mut dyn std::io::Write,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<u64>> {
+        crate::image_io::with_retained_control(output, self.2.as_ref(), |output| {
+            self.0.write_image_document(doc_id, output, control)
+        })
+    }
+
     fn source_rebuild_required(&self) -> StorageBackendResult<bool> {
         self.check_inverted_read()?;
         self.0.source_rebuild_required()

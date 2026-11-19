@@ -16,9 +16,13 @@ use super::{
 
 impl SQLiteDocumentStore {
     pub fn new(conn: ManagedConnection, table: impl Into<String>) -> Self {
+        Self::from_name(conn, table.into().into())
+    }
+
+    pub(crate) fn from_name(conn: ManagedConnection, table: uqa_storage::StorageName) -> Self {
         Self {
             conn,
-            table: table.into(),
+            table,
             retained: None,
         }
     }
@@ -34,7 +38,7 @@ impl SQLiteDocumentStore {
         Ok(self.conn.with(|c| {
             let id: Option<i64> = c
                 .prepare_cached("SELECT MAX(doc_id) FROM _documents WHERE table_name = ?1")?
-                .query_row(params![self.table], |r| r.get(0))?;
+                .query_row(params![self.table.as_str()], |r| r.get(0))?;
             id.map_or(Ok(0), document_id_from_sqlite)
         })?)
     }
@@ -66,7 +70,7 @@ impl SQLiteDocumentStore {
                 "DELETE FROM {DOCUMENT_BLOBS_TABLE}
                  WHERE table_name = ?1 AND doc_id = ?2"
             ))?
-            .execute(params![self.table, sqlite_doc_id])?;
+            .execute(params![self.table.as_str(), sqlite_doc_id])?;
             c.prepare_cached(
                 "INSERT INTO _documents (table_name, doc_id, body, tuple_xmin)
                  VALUES (?1, ?2, ?3, ?4)
@@ -74,7 +78,7 @@ impl SQLiteDocumentStore {
                  DO UPDATE SET body = excluded.body, tuple_xmin = excluded.tuple_xmin",
             )?
             .execute(params![
-                self.table,
+                self.table.as_str(),
                 sqlite_doc_id,
                 body,
                 metadata.tuple_xmin().map(i64::from),
@@ -85,7 +89,12 @@ impl SQLiteDocumentStore {
                      (table_name, doc_id, field_name, bytes)
                      VALUES (?1, ?2, ?3, ?4)"
                 ))?
-                .execute(params![self.table, sqlite_doc_id, field, bytes])?;
+                .execute(params![
+                    self.table.as_str(),
+                    sqlite_doc_id,
+                    field,
+                    bytes
+                ])?;
             }
             Ok(())
         })
@@ -107,7 +116,7 @@ impl SQLiteDocumentStore {
                     "SELECT body, tuple_xmin FROM _documents
                      WHERE table_name = ?1 AND doc_id = ?2",
                 )?
-                .query_row(params![self.table, sqlite_doc_id], |row| {
+                .query_row(params![self.table.as_str(), sqlite_doc_id], |row| {
                     Ok((row.get(0)?, row.get(1)?))
                 })
                 .optional()?;
@@ -150,7 +159,7 @@ impl SQLiteDocumentStore {
                      FROM _documents
                      WHERE table_name = ?1 AND doc_id = ?2",
                 )?
-                .query_row(params![self.table, sqlite_doc_id, path], |r| {
+                .query_row(params![self.table.as_str(), sqlite_doc_id, path], |r| {
                     Ok((r.get(0)?, r.get(1)?))
                 })
                 .optional()?;
@@ -187,7 +196,7 @@ impl SQLiteDocumentStore {
                         "SELECT doc_id FROM _documents
                          WHERE table_name = ?1 AND json_type(body, ?2) = ?3
                          ORDER BY doc_id LIMIT 1",
-                        params![self.table, path, json_type],
+                        params![self.table.as_str(), path, json_type],
                         |r| r.get(0),
                     )
                     .optional()?;
@@ -199,7 +208,8 @@ impl SQLiteDocumentStore {
                         "SELECT doc_id FROM _documents
                          WHERE table_name = ?1 ORDER BY doc_id",
                     )?;
-                    let rows = stmt.query_map(params![self.table], |row| row.get::<_, i64>(0))?;
+                    let rows =
+                        stmt.query_map(params![self.table.as_str()], |row| row.get::<_, i64>(0))?;
                     let mut out = Vec::new();
                     for row in rows {
                         out.push(document_id_from_sqlite(row?)?);
@@ -235,7 +245,7 @@ impl SQLiteDocumentStore {
                      WHERE table_name = ?1 AND doc_id = ?2
                      LIMIT 1",
                 )?
-                .query_row(params![self.table, sqlite_doc_id], |r| r.get(0))
+                .query_row(params![self.table.as_str(), sqlite_doc_id], |r| r.get(0))
                 .optional()?;
             if exists.is_none() {
                 return Ok(false);
@@ -249,7 +259,7 @@ impl SQLiteDocumentStore {
                         c.execute(
                             "UPDATE _documents SET body = json_remove(body, ?3)
                              WHERE table_name = ?1 AND doc_id = ?2",
-                            params![self.table, sqlite_doc_id, path],
+                            params![self.table.as_str(), sqlite_doc_id, path],
                         )?;
                     }
                     Value::Bytes(bytes) => {
@@ -257,7 +267,7 @@ impl SQLiteDocumentStore {
                         c.execute(
                             "UPDATE _documents SET body = json_set(body, ?3, json(?4))
                              WHERE table_name = ?1 AND doc_id = ?2",
-                            params![self.table, sqlite_doc_id, path, marker],
+                            params![self.table.as_str(), sqlite_doc_id, path, marker],
                         )?;
                         upsert_document_blob(c, &self.table, doc_id, field, bytes)?;
                     }
@@ -267,7 +277,7 @@ impl SQLiteDocumentStore {
                         c.execute(
                             "UPDATE _documents SET body = json_set(body, ?3, json(?4))
                              WHERE table_name = ?1 AND doc_id = ?2",
-                            params![self.table, sqlite_doc_id, path, json],
+                            params![self.table.as_str(), sqlite_doc_id, path, json],
                         )?;
                         if let Some(bytes) = blob {
                             upsert_document_blob(c, &self.table, doc_id, field, &bytes)?;

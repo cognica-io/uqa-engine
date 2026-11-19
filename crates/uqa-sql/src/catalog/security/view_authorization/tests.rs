@@ -5,43 +5,41 @@
 //
 
 use super::*;
+use crate::catalog::roles::{RoleDefinitions, RoleMemberships};
 use crate::{
     ast::{RelationPersistence, Statement},
     catalog::{
         roles::{
             guards::{RoleDefinitionRead, RoleMembershipRead},
-            RoleDefinition, RoleMembership, RoleMembershipKey,
+            RoleDefinition,
         },
         security::columns::grant_column_acl,
     },
     plan::UnifiedPlan,
 };
-use std::{
-    cell::{Cell, RefCell},
-    collections::BTreeMap,
-};
+use std::cell::{Cell, RefCell};
 
 struct Catalog {
-    roles: RefCell<BTreeMap<String, RoleDefinition>>,
-    memberships: RefCell<BTreeMap<RoleMembershipKey, RoleMembership>>,
+    roles: RefCell<RoleDefinitions>,
+    memberships: RefCell<RoleMemberships>,
     calls: RefCell<Vec<&'static str>>,
     reads: Cell<usize>,
     promote_on_recheck: bool,
 }
 impl Default for Catalog {
     fn default() -> Self {
-        let roles = ["reader", "owner"]
-            .into_iter()
-            .enumerate()
-            .map(|(index, name)| {
-                let mut role = RoleDefinition::bootstrap();
-                role.name = name.into();
-                role.oid = 20_001 + index as i64;
-                role.object_id = [index as u8 + 1; 16];
-                role.attributes.clear();
-                (name.into(), role)
-            })
-            .collect();
+        let roles =
+            RoleDefinitions::try_from_iter(["reader", "owner"].into_iter().enumerate().map(
+                |(index, name)| {
+                    let mut role = RoleDefinition::bootstrap();
+                    role.name = name.into();
+                    role.oid = 20_001 + index as i64;
+                    role.object_id = [index as u8 + 1; 16];
+                    role.attributes.clear();
+                    (name.into(), role)
+                },
+            ))
+            .unwrap();
         Self {
             roles: RefCell::new(roles),
             memberships: RefCell::default(),
@@ -70,10 +68,13 @@ impl RoleCatalogGuards for Catalog {
             else {
                 panic!("expected role")
             };
-            self.roles.borrow_mut().insert(
-                "reader".into(),
-                RoleDefinition::from_create(&role, 20_001, [1; 16]),
-            );
+            self.roles
+                .borrow_mut()
+                .insert(
+                    "reader".into(),
+                    RoleDefinition::from_create(&role, 20_001, [1; 16]),
+                )
+                .unwrap();
         }
         self.reads.set(self.reads.get() + 1);
         self.calls.borrow_mut().push("roles");

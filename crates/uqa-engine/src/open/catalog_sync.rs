@@ -54,7 +54,7 @@ impl Engine {
     }
 
     fn fixed_transaction_catalog_baseline(
-        tables: &BTreeMap<uqa_storage::RelationIdentity, Arc<super::TableState>>,
+        tables: &crate::state::TableRegistryMap,
     ) -> StorageBackendResult<crate::FixedTransactionCatalogBaseline> {
         let mut baseline = BTreeMap::new();
         for (relation, table) in tables {
@@ -85,9 +85,9 @@ impl Engine {
     fn merged_latest_fixed_snapshot_table_catalog(
         &self,
         latest: &Engine,
-        current: &BTreeMap<uqa_storage::RelationIdentity, Arc<super::TableState>>,
+        current: &crate::state::TableRegistryMap,
     ) -> StorageBackendResult<(
-        BTreeMap<uqa_storage::RelationIdentity, Arc<super::TableState>>,
+        crate::state::TableRegistryMap,
         crate::FixedTransactionCatalogBaseline,
     )> {
         let baseline = self
@@ -127,7 +127,7 @@ impl Engine {
         let mut merged = latest_tables
             .into_iter()
             .filter(|(_, table)| !suppressed_generations.contains(&table.storage_generation()))
-            .collect::<BTreeMap<_, _>>();
+            .collect::<crate::state::TableRegistryMap>();
         for (relation, table) in local {
             let generation = table.storage_generation();
             merged.retain(|_, candidate| candidate.storage_generation() != generation);
@@ -221,11 +221,7 @@ impl Engine {
         )?;
         snapshot.roles = sequences.roles.roles;
         snapshot.role_memberships = sequences.roles.memberships;
-        snapshot.sequences = sequences.sequences;
-        snapshot.sequence_object_ids = sequences.object_ids;
-        snapshot.sequence_catalog_oids = sequences.catalog_oids;
-        snapshot.sequence_persistence = sequences.persistence;
-        snapshot.sequence_security = sequences.security;
+        snapshot.sequences = sequences.catalog;
         snapshot.schemas = uqa_execution::schema::namespaces::authority::merge_private(
             self.storage.catalog.as_deref(),
             &current.schemas,
@@ -274,7 +270,7 @@ impl Engine {
             &snapshot.roles,
             &self.temporary_schema_name(),
         )?;
-        snapshot.builtin_routine_security = Arc::new(
+        snapshot.builtin_routine_security = crate::state::CatalogGeneration::new(
             uqa_execution::catalog::security::builtin_routines::merge_private(
                 self.storage.catalog.as_deref(),
                 &current.builtin_routine_security,
@@ -282,25 +278,23 @@ impl Engine {
                 &snapshot.roles,
             )?,
         );
-        snapshot.system_relation_security = Arc::new(system_relations::merge_private(
-            self.storage.catalog.as_deref(),
-            &current.system_relation_security,
-            (*snapshot.system_relation_security).clone(),
-        )?);
+        snapshot.system_relation_security =
+            crate::state::CatalogGeneration::new(system_relations::merge_private(
+                self.storage.catalog.as_deref(),
+                &current.system_relation_security,
+                (*snapshot.system_relation_security).clone(),
+            )?);
         snapshot.views = uqa_execution::catalog::security::relation_authority::merge_private_views(
             self.storage.catalog.as_deref(),
             &current.views,
             snapshot.views,
         )?;
-        let foreign = uqa_execution::catalog::security::relation_authority::merge_private_foreign(
-            self.storage.catalog.as_deref(),
-            &current.foreign_tables,
-            &current.foreign_table_security,
-            snapshot.foreign_tables,
-            snapshot.foreign_table_security,
-        )?;
-        snapshot.foreign_tables = foreign.definitions;
-        snapshot.foreign_table_security = foreign.security;
+        snapshot.foreign_catalog =
+            uqa_execution::catalog::security::relation_authority::merge_private_foreign(
+                self.storage.catalog.as_deref(),
+                &current.foreign_catalog,
+                snapshot.foreign_catalog,
+            )?;
         Ok(snapshot)
     }
 
@@ -309,26 +303,17 @@ impl Engine {
         latest: &Engine,
         target_versions: CatalogVersions,
     ) -> StorageBackendResult<()> {
-        let previous_tables = self.storage.tables.read().clone();
+        let previous_tables = self.storage.tables.persistent_snapshot()?;
         let (merged_tables, latest_baseline) =
-            self.merged_latest_fixed_snapshot_table_catalog(latest, &previous_tables)?;
+            self.merged_latest_fixed_snapshot_table_catalog(latest, previous_tables.tables())?;
         let previous_durable = self.durable.snapshot();
-        let temporary_views = self
-            .durable
-            .views
-            .read()
-            .iter()
-            .filter(|(_, view)| view.persistence == uqa_sql::ast::RelationPersistence::Temporary)
-            .map(|(relation, view)| (relation.clone(), view.clone()))
-            .collect::<BTreeMap<_, _>>();
         let latest_durable =
             self.latest_catalog_snapshot_with_private_records(&previous_durable, latest)?;
         self.durable.restore(&latest_durable);
         self.rebind_graph_stores()?;
-        self.durable.views.write().extend(temporary_views);
         let previous_versions = self.swap_seen_catalog_versions(target_versions);
         let rollback = || {
-            *self.storage.tables.write() = previous_tables.clone();
+            previous_tables.restore();
             self.durable.restore(&previous_durable);
             self.store_seen_catalog_versions(previous_versions);
             self.clear_regtype_output_cache();
@@ -337,6 +322,7 @@ impl Engine {
         };
         for (relation, table) in &merged_tables {
             let already_bound = previous_tables
+                .tables()
                 .values()
                 .any(|previous| Arc::ptr_eq(previous, table));
             if table.persistence == uqa_sql::ast::RelationPersistence::Temporary || already_bound {
@@ -349,7 +335,7 @@ impl Engine {
                 return Err(error);
             }
         }
-        *self.storage.tables.write() = merged_tables;
+        self.storage.tables.write().replace(merged_tables)?;
         self.clear_regtype_output_cache();
         self.clear_bayesian_params_cache();
         self.clear_sql_statement_cache();
@@ -477,7 +463,7 @@ impl Engine {
         {
             return Ok(());
         }
-        self.reload_table_catalog(target_epoch)
+        self.reload_catalog_snapshot(Some(target_epoch), None)
     }
 
     /// Reload the table catalog and the registries after a rollback, pushing their failures to `cleanup_errors`. Both read one snapshot: the open transaction's, or else a read transaction pinned for them, since separate captures would leave the reloaded tables at different states when another session commits in between. When both succeed, the cache revisions and the read view they read are recorded, as a refresh records them, so the next statement refreshes only what other sessions committed since instead of reloading every table again.
@@ -502,15 +488,32 @@ impl Engine {
                 }
             }
         };
-        let tables = self.reload_table_catalog_after_rollback();
-        if let Err(error) = &tables {
-            cleanup_errors.push(format!("table catalog restore: {error}"));
+        self.discard_persistent_document_counts();
+        *self.epochs.storage_cache_revisions.lock() = None;
+        let tables = self
+            .epochs
+            .table_catalog
+            .published
+            .load(std::sync::atomic::Ordering::Acquire);
+        let registries = self
+            .epochs
+            .catalog_registry
+            .published
+            .load(std::sync::atomic::Ordering::Acquire);
+        let restored = self.reload_catalog_snapshot(Some(tables), Some(registries));
+        if let Err(error) = &restored {
+            cleanup_errors.push(format!("catalog restore: {error}"));
+        } else {
+            self.epochs
+                .table_catalog
+                .dirty
+                .store(false, std::sync::atomic::Ordering::Release);
+            self.epochs
+                .catalog_registry
+                .dirty
+                .store(false, std::sync::atomic::Ordering::Release);
         }
-        let registries = self.reload_catalog_registries_after_rollback();
-        if let Err(error) = &registries {
-            cleanup_errors.push(format!("registry restore: {error}"));
-        }
-        if tables.is_ok() && registries.is_ok() && (pinned || in_transaction) {
+        if restored.is_ok() && (pinned || in_transaction) {
             if let Err(error) = self.record_reloaded_snapshot(table_data_epoch, stable_version) {
                 cleanup_errors.push(format!("cache revision record: {error}"));
             }
@@ -574,17 +577,17 @@ impl Engine {
         Ok(())
     }
 
+    #[cfg(test)]
     pub(crate) fn reload_table_catalog_after_rollback(&self) -> StorageBackendResult<()> {
         // First, so that a failed reload cannot leave a count ahead of its store.
         self.discard_persistent_document_counts();
         *self.epochs.storage_cache_revisions.lock() = None;
-        self.clear_persistent_table_bindings_for_catalog_reload();
         let target_epoch = self
             .epochs
             .table_catalog
             .published
             .load(std::sync::atomic::Ordering::Acquire);
-        self.reload_table_catalog(target_epoch)?;
+        self.reload_catalog_snapshot(Some(target_epoch), None)?;
         self.epochs
             .table_catalog
             .dirty
@@ -597,18 +600,8 @@ impl Engine {
     /// back analyzer or vector-index binding cannot be applied to the fresh
     /// stores during the intermediate table reload.
     pub(super) fn clear_persistent_table_bindings_for_catalog_reload(&self) {
-        let temporary_schema = self.temporary_schema_name();
-        self.durable
-            .table_field_analyzers
-            .write()
-            .retain(|(table, _), _| {
-                crate::RelationIdentity::from_legacy_name(table)
-                    .is_ok_and(|relation| relation.schema == temporary_schema)
-            });
-        self.durable
-            .catalog_indexes
-            .write()
-            .retain(|relation, _| relation.schema == temporary_schema);
+        self.durable.table_field_analyzers.write().clear_durable();
+        self.durable.catalog_indexes.write().clear_durable();
     }
 
     pub(super) fn reload_table_catalog(&self, target_epoch: u64) -> StorageBackendResult<()> {
@@ -642,7 +635,7 @@ impl Engine {
                 )
             })
             .collect::<BTreeMap<_, _>>();
-        let mut rebound = BTreeMap::new();
+        let mut rebound = crate::state::TableRegistryMap::new();
         let names = uqa_execution::schema::indexes::constraint_names::KeyConstraintNames::load(
             catalog.as_ref(),
         )?;
@@ -680,7 +673,7 @@ impl Engine {
                 })
                 .map(|(relation, table)| (relation.clone(), table.clone())),
         );
-        *self.storage.tables.write() = rebound;
+        self.storage.tables.write().replace(rebound)?;
 
         // Restore per-field analyzers and IVF/HNSW bindings on the newly
         // created session-local stores. These registries are logical state
@@ -753,21 +746,7 @@ impl Engine {
         {
             return Ok(());
         }
-        self.reload_catalog_registries(target_epoch)
-    }
-
-    pub(crate) fn reload_catalog_registries_after_rollback(&self) -> StorageBackendResult<()> {
-        let target_epoch = self
-            .epochs
-            .catalog_registry
-            .published
-            .load(std::sync::atomic::Ordering::Acquire);
-        self.reload_catalog_registries(target_epoch)?;
-        self.epochs
-            .catalog_registry
-            .dirty
-            .store(false, std::sync::atomic::Ordering::Release);
-        Ok(())
+        self.reload_catalog_snapshot(None, Some(target_epoch))
     }
 
     pub(super) fn reload_catalog_registries(&self, target_epoch: u64) -> StorageBackendResult<()> {
@@ -781,22 +760,19 @@ impl Engine {
             return Ok(());
         };
 
-        let temporary_views = self
-            .durable
+        self.durable
             .views
-            .read()
-            .iter()
-            .filter(|(_, view)| view.persistence == uqa_sql::ast::RelationPersistence::Temporary)
-            .map(|(relation, view)| (relation.clone(), view.clone()))
-            .collect::<BTreeMap<_, _>>();
-        *self.durable.views.write() = temporary_views;
-        self.clear_persistent_table_bindings_for_catalog_reload();
+            .write()
+            .retain(|_, view| view.persistence == uqa_sql::ast::RelationPersistence::Temporary)
+            .map_err(|error| {
+                StorageBackendError::backend("retain temporary views for catalog reload", error)
+            })?;
         self.durable.schemas.write().clear();
         self.durable.path_indexes.write().clear();
         self.durable.named_analyzers.write().clear();
         self.durable.foreign_wrappers.write().clear();
         self.durable.foreign_servers.write().clear();
-        uqa_execution::catalog::foreign::restoration::retain_session_registry(self);
+        uqa_execution::catalog::foreign::restoration::retain_session_registry(self)?;
         self.durable.builtin_routine_security.write().clear();
         self.durable.system_relation_security.write().clear();
         self.durable.models.write().clear();
@@ -813,10 +789,10 @@ impl Engine {
             self.durable
                 .models
                 .write()
-                .insert(name, serde_json::from_str::<DeepModel>(&json)?);
+                .insert(name, Arc::new(serde_json::from_str::<DeepModel>(&json)?))?;
         }
         for (name, json) in catalog.load_all_scoring_params()? {
-            self.durable.scoring_params.write().insert(name, json);
+            self.durable.scoring_params.write().insert(name, json)?;
         }
         // Registry restoration can remove a table-field analyzer or replace a
         // vector/index binding. Recreate every persistent store after the

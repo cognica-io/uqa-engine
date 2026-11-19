@@ -27,6 +27,7 @@ mod command_children;
 pub use analyzed::SharedAnalyzedSource;
 mod command_expressions;
 pub(crate) mod copy;
+pub use copy::RetainedExecutablePlan;
 pub mod input_projection;
 mod memory;
 mod model;
@@ -39,7 +40,10 @@ pub use mutable::{
     OwnedProjectionIter, OwnedValueRow, QueryChildSlot, QueryScalarSlot, ScalarArenaTransform,
     ScalarQueryArena, SourceChildSlot, SourceScalarSlot,
 };
-pub(crate) use mutable::{QueryMetadataUpdate, SourceMetadataUpdate};
+pub(crate) use mutable::{
+    MetadataObserver, MetadataTarget, ProjectionAliasUpdates, QueryLayoutUpdate,
+    QueryMetadataUpdate, QueryReplacement, SourceMetadataUpdate, SourceReplacement,
+};
 mod optimization;
 pub use optimization::ExecutablePlanOptimizer;
 mod owned;
@@ -47,12 +51,14 @@ pub use owned::{ExecutableMemory, OwnedExecutablePlan, OwnedQueryPlan, SharedExe
 mod query;
 mod query_visit;
 mod retained;
+pub(crate) mod retirement;
 pub use retained::RetainedCtePlan;
 mod retained_arena;
 pub use retained_arena::RetainedQueryArena;
 mod rewrite;
 mod scalar;
 pub use scalar::{OwnedScalarChildren, OwnedScalarExpr, ScalarNodeTransform};
+pub(crate) use scalar::{ScalarEdit, ScalarEditIdentity, ScalarInputWork};
 mod scoped_visit;
 pub use scoped_visit::ScopedPlanVisitor;
 mod source_metadata;

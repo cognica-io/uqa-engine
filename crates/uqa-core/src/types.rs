@@ -50,6 +50,8 @@ mod record;
 mod row;
 mod temporal;
 mod value;
+pub(crate) mod work;
+pub use value::image as value_image;
 
 pub use array::{
     ArrayAssignmentError, ArrayTraversalError, ArrayValue, BudgetedArrayElements,
@@ -84,9 +86,10 @@ pub use temporal::{
     TemporalInputError, TemporalIntervalStyle, TemporalTimeZone, TemporalValue,
     POSTGRES_EPOCH_DAYS, POSTGRES_EPOCH_MICROS,
 };
+pub use value::OwnedValue;
 pub use value::{
     compare_bytes_with_control, fixed_char_comparison_text_with_control, JsonValueDecoder, Value,
-    ValueRetentionError, ValueSerialization,
+    ValueCopyWork, ValueRetentionError, ValueRetirement, ValueSerialization,
 };
 
 #[cfg(test)]

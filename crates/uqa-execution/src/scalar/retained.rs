@@ -68,6 +68,7 @@ impl ConstantValueStorage for RetainedConstants {
         value: Produced<Value>,
         control: &ProductionControl<'_>,
     ) -> Result<RetainedConstantValue, SQLError> {
+        let value = value.into_owned_value();
         control.check()?;
         let mut source = self.source.rows.lock();
         let index = source.len();

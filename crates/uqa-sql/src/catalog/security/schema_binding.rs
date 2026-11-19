@@ -10,8 +10,8 @@ use super::{
     role_bindings::{bind_role, role_name},
     SchemaSecurity,
 };
-use crate::catalog::roles::{RoleDefinition, RoleIdentity};
-use std::collections::BTreeMap;
+use crate::catalog::roles::RoleDefinitions;
+use crate::catalog::roles::RoleIdentity;
 use uqa_core::{
     catalog_acl::AclGrantee,
     catalog_role::BoundAclEntry,
@@ -29,13 +29,13 @@ impl BoundSchemaSecurity {
     pub const BUILTIN_NAMES: [&'static str; 3] = ["pg_catalog", "information_schema", "ag_catalog"];
 
     /// The initial namespace authority shared by memory and durable catalogs.
-    pub fn initial_catalog() -> BTreeMap<String, Self> {
-        std::iter::once(("public".into(), Self::bootstrap("public")))
-            .chain(
-                Self::BUILTIN_NAMES
-                    .map(|name| (name.into(), Self::builtin(name).expect("built-in schema"))),
-            )
-            .collect()
+    pub fn initial_catalog() -> super::schema_registry::SchemaRegistry {
+        let entries = std::iter::once(("public".into(), Self::bootstrap("public"))).chain(
+            Self::BUILTIN_NAMES
+                .map(|name| (name.into(), Self::builtin(name).expect("built-in schema"))),
+        );
+        super::schema_registry::SchemaRegistry::try_from_iter(entries)
+            .expect("fixed bootstrap schema definitions fit native admission")
     }
 
     pub fn builtin(name: &str) -> Option<Self> {
@@ -99,10 +99,7 @@ impl BoundSchemaSecurity {
         }
     }
 
-    pub fn bind(
-        security: &SchemaSecurity,
-        roles: &BTreeMap<String, RoleDefinition>,
-    ) -> Result<Self, String> {
+    pub fn bind(security: &SchemaSecurity, roles: &RoleDefinitions) -> Result<Self, String> {
         let bind = |name: &str| bind_role(roles, name, "schema");
         Ok(Self {
             tuple: None,
@@ -129,10 +126,7 @@ impl BoundSchemaSecurity {
         })
     }
 
-    pub fn resolve(
-        &self,
-        roles: &BTreeMap<String, RoleDefinition>,
-    ) -> Result<SchemaSecurity, String> {
+    pub fn resolve(&self, roles: &RoleDefinitions) -> Result<SchemaSecurity, String> {
         let name = |identity| role_name(roles, identity, "schema").map(str::to_owned);
         Ok(SchemaSecurity {
             role_owner: name(self.role_owner)?,
@@ -160,16 +154,52 @@ impl BoundSchemaSecurity {
         })
     }
 
-    pub fn validate(&self, roles: &BTreeMap<String, RoleDefinition>) -> Result<(), String> {
+    pub fn validate(&self, roles: &RoleDefinitions) -> Result<(), String> {
+        self.validate_with_control(roles, &uqa_core::memory::ProductionControl::uncontrolled())
+            .map_err(|error| match error {
+                crate::SQLError::Internal(message) => message,
+                error => error.to_string(),
+            })
+    }
+
+    pub fn validate_with_control(
+        &self,
+        roles: &RoleDefinitions,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<(), crate::SQLError> {
+        crate::catalog::work::inline(self.validate_from(roles, control, &mut ()))
+    }
+
+    pub async fn validate_from_input(
+        &self,
+        roles: &RoleDefinitions,
+        control: &uqa_core::memory::ProductionControl<'_>,
+        input: &mut uqa_core::image_io::AsyncImageInput<'_>,
+    ) -> Result<(), crate::SQLError> {
+        self.validate_from(roles, control, input).await
+    }
+
+    async fn validate_from(
+        &self,
+        roles: &RoleDefinitions,
+        control: &uqa_core::memory::ProductionControl<'_>,
+        work: &mut impl crate::catalog::work::Work,
+    ) -> Result<(), crate::SQLError> {
+        use super::role_bindings::role_definition_from;
+        control.check()?;
         if self.tuple.is_some_and(|tuple| !tuple.is_valid()) {
-            return Err("invalid schema catalog tuple identity".into());
+            return Err(crate::SQLError::Internal(
+                "invalid schema catalog tuple identity".into(),
+            ));
         }
-        role_name(roles, self.role_owner, "schema")?;
+        role_definition_from(roles, self.role_owner, "schema", control, work).await?;
         for entry in self.acl.iter().flatten() {
+            work.checkpoint().await?;
+            control.check()?;
             if let Some(grantee) = entry.role {
-                role_name(roles, grantee, "schema")?;
+                role_definition_from(roles, grantee, "schema", control, work).await?;
             }
-            role_name(roles, entry.grantor, "schema")?;
+            role_definition_from(roles, entry.grantor, "schema", control, work).await?;
         }
         Ok(())
     }

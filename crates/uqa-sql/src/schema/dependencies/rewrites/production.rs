@@ -8,7 +8,7 @@
 
 use crate::{
     ast::{ColumnType, Expr},
-    SQLError,
+    SQLError, ScalarExpr,
 };
 use uqa_core::{memory::ProductionControl, Value};
 
@@ -40,6 +40,52 @@ pub fn visit_sequence_function_references_with_control(
             }
         }
         Ok(())
+    })
+}
+
+/// Observe named arguments of the selected builtin, preserving explicit text casts, typed OIDs and user-defined functions as their original runtime inputs.
+pub fn visit_scalar_sequence_function_references_with_control(
+    expression: &ScalarExpr,
+    control: &ProductionControl<'_>,
+    visit: &mut impl FnMut(&str) -> Result<(), SQLError>,
+) -> Result<(), SQLError> {
+    expression.try_visit(&mut |node| {
+        control.check()?;
+        if let ScalarExpr::Func {
+            name,
+            binding,
+            args,
+            ..
+        } = node
+        {
+            if super::is_sequence_function(name, binding.as_ref()) {
+                let mut argument = args.first();
+                while let Some(value) = argument {
+                    control.check()?;
+                    match value {
+                        ScalarExpr::Literal(Value::Str(reference)) => {
+                            visit(reference)?;
+                            break;
+                        }
+                        ScalarExpr::Cast { expr, ty, .. } => {
+                            match ColumnType::from_sql_name_with_control(ty, control) {
+                                Ok(ty) if matches!(*ty, ColumnType::Regclass) => {
+                                    argument = Some(expr);
+                                }
+                                Err(error)
+                                    if matches!(error.sqlstate(), Some("53200" | "57014")) =>
+                                {
+                                    return Err(error)
+                                }
+                                _ => break,
+                            }
+                        }
+                        _ => break,
+                    }
+                }
+            }
+        }
+        Ok(true)
     })
 }
 

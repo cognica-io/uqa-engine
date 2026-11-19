@@ -119,7 +119,7 @@ pub fn create_composite_type(
             attributes,
             usage_acl: None,
         },
-    );
+    )?;
     composite_type::publish(context.publication, &before, registry)?;
     context.shells.complete(shell.as_ref())?;
     context.changes.catalog_registry_changed();

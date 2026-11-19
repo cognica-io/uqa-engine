@@ -10,17 +10,17 @@ use crate::catalog::{
     security::BoundSchemaSecurity,
     test_support::{empty_catalog, CatalogServices},
 };
-use std::{collections::BTreeMap, sync::Arc};
 use uqa_core::{memory::MemoryBudget, CancellationToken};
 use uqa_sql::catalog::roles::RoleDefinition;
+use uqa_sql::catalog::roles::RoleDefinitions;
 
 fn fixture() -> CatalogReadView {
     let mut snapshot = empty_catalog().snapshot().clone();
-    snapshot.definitions.schemas = Arc::new(BoundSchemaSecurity::initial_catalog());
-    snapshot.definitions.roles = Arc::new(BTreeMap::from([(
-        "uqa".into(),
-        RoleDefinition::bootstrap(),
-    )]));
+    snapshot.definitions.schemas =
+        uqa_core::memory::RetainedValue::new(BoundSchemaSecurity::initial_catalog());
+    snapshot.definitions.roles = uqa_core::memory::RetainedValue::new(
+        RoleDefinitions::try_from_iter([("uqa".into(), RoleDefinition::bootstrap())]).unwrap(),
+    );
     let uqa_sql::Statement::CreateFunction(mut definition) = uqa_sql::compile(
         "CREATE FUNCTION unrelated(text) RETURNS integer LANGUAGE SQL AS 'SELECT 1'",
     )
@@ -37,10 +37,13 @@ fn fixture() -> CatalogReadView {
         *definition,
         uqa_sql::routines::RoutineBody::Source,
     );
-    snapshot.definitions.sql_user_functions = Arc::new(BTreeMap::from([(
-        "public.unrelated".into(),
-        vec![Arc::new(function)],
-    )]));
+    snapshot.definitions.sql_user_functions = uqa_core::memory::RetainedValue::new(
+        uqa_sql::routines::registry::RoutineRegistry::try_from_iter([(
+            "public.unrelated".into(),
+            vec![function.shared()],
+        )])
+        .unwrap(),
+    );
     CatalogReadView::new(snapshot)
 }
 
@@ -49,7 +52,7 @@ fn ordinary(
     ty: &ColumnType,
     name: &str,
 ) -> Result<Option<i64>, SQLError> {
-    use super::super as regtypes;
+    use crate::catalog::projection::regtypes;
     match ty {
         ColumnType::Regclass => regtypes::resolve_regclass_oid(context, name),
         ColumnType::Regtype => regtypes::resolve_regtype_oid(context, name),

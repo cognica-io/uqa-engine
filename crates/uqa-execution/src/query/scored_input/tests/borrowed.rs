@@ -113,13 +113,13 @@ impl DocumentStore for CursorDocuments {
     }
 }
 
-struct Table(RwLock<Box<dyn DocumentStore>>);
+struct Table(RwLock<uqa_storage::StorageHandle<dyn DocumentStore>>);
 
 impl TableRead for Table {
     fn column_definitions(&self) -> Vec<ColumnDef> {
         Vec::new()
     }
-    fn read_documents(&self) -> RwLockReadGuard<'_, Box<dyn DocumentStore>> {
+    fn read_documents(&self) -> RwLockReadGuard<'_, uqa_storage::StorageHandle<dyn DocumentStore>> {
         self.0.read()
     }
 
@@ -139,9 +139,9 @@ fn table_with_shared(shared: bool) -> Arc<dyn TableRead> {
             .put(id, [("key".into(), Value::Int(id as i64))].into())
             .unwrap();
     }
-    Arc::new(Table(RwLock::new(Box::new(CursorDocuments(
-        documents, shared,
-    )))))
+    Arc::new(Table(RwLock::new(uqa_storage::StorageHandle::new(
+        Box::new(CursorDocuments(documents, shared)),
+    ))))
 }
 
 fn predicate() -> crate::ProjectedPredicate {
@@ -190,7 +190,7 @@ fn borrowed_local_scan_preserves_lock_identity_and_cancellation() {
             serializable: None,
             table_name: "t".into(),
             table: table_with_shared(shared),
-            column_definitions: Arc::new(Vec::new()),
+            column_definitions: Arc::new(Vec::new()).into(),
             columns: columns.clone(),
             schema: columns.clone(),
             physical_schema: crate::RowSchema::new(columns),

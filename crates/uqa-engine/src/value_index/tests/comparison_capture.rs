@@ -89,8 +89,8 @@ fn fixture(fail_page: bool) -> (crate::Engine, ComparisonRows) {
         fail_page,
     };
     let table = engine.require_table("comparison_capture").unwrap();
-    *table.document_store.write() = Box::new(rows.clone());
-    crate::Engine::value_indexes_clear(&table);
+    *table.document_store.write() = uqa_storage::StorageHandle::new(Box::new(rows.clone()));
+    crate::Engine::value_indexes_clear(&table).unwrap();
     (engine, rows)
 }
 

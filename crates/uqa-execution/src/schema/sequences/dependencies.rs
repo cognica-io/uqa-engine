@@ -8,9 +8,9 @@
 use crate::schema::publication::dependencies::{
     CatalogPublicationChanges, SchemaDependencyPublicationContext,
 };
-use std::{collections::BTreeMap, ops::Deref};
+use std::ops::Deref;
 use uqa_core::RelationIdentity;
-use uqa_sql::catalog::stored_view::StoredView;
+use uqa_sql::catalog::stored_view::ViewDefinitions;
 use uqa_sql::schema::sequences::dependencies::{
     rewrite_sequence_schema_references, rewritten_view_sequence_references,
 };
@@ -32,13 +32,20 @@ pub fn rewrite_sequence_schema_dependencies(
         }
     }
     let mut foreign_updates = Vec::new();
-    for (relation, mut table) in context.foreign.foreign_tables() {
+    let foreign = context.foreign.foreign_catalog();
+    for (relation, table) in foreign.tables() {
+        let mut table = table.clone();
         if rewrite_sequence_schema_references(&mut table.columns, &mut table.checks, from, to)
             .map_err(StorageBackendError::Other)?
         {
-            foreign_updates.push((relation, table));
+            foreign_updates.push((relation.clone(), table));
         }
     }
+    let foreign = foreign
+        .with_table_updates(&foreign_updates)
+        .map_err(|error| {
+            uqa_storage::StorageBackendError::backend("admit foreign sequence dependencies", error)
+        })?;
     for (state, columns, constraints) in &mut table_updates {
         constraints.columns_declared = Some(state.columns_declared());
         state.persist_candidate(columns, constraints)?;
@@ -47,11 +54,13 @@ pub fn rewrite_sequence_schema_dependencies(
         context.foreign.persist_foreign_table(relation, table)?;
     }
     for (state, columns, constraints) in &table_updates {
-        state.publish_expressions(columns, &constraints.checks);
+        state.publish_expressions(columns, &constraints.checks)?;
     }
     let foreign_tables_changed = !foreign_updates.is_empty();
     if foreign_tables_changed {
-        context.foreign.publish_foreign_tables(foreign_updates);
+        context
+            .foreign
+            .publish_foreign_tables(foreign, foreign_updates);
     }
     if !table_updates.is_empty() {
         context.changes.table_catalog_changed();
@@ -63,13 +72,13 @@ pub fn rewrite_sequence_schema_dependencies(
 }
 
 pub type ViewDefinitionsRead<'a> =
-    Box<dyn Deref<Target = BTreeMap<RelationIdentity, StoredView>> + 'a>;
+    Box<dyn Deref<Target = uqa_sql::catalog::stored_view::ViewDefinitions> + 'a>;
 pub trait ViewCatalogPublication {
     fn synchronize_catalog(&self) -> StorageBackendResult<()>;
     fn view_definitions(&self) -> ViewDefinitionsRead<'_>;
     fn has_catalog(&self) -> bool;
     fn save_view_row(&self, row: &uqa_storage::ViewRow) -> StorageBackendResult<()>;
-    fn publish_views(&self, updates: Vec<(RelationIdentity, StoredView)>);
+    fn publish_views(&self, next: ViewDefinitions);
 }
 pub struct ViewSequenceRewriteContext<'a> {
     pub views: &'a dyn ViewCatalogPublication,
@@ -90,18 +99,23 @@ pub(super) fn rewrite_loaded_view_sequence_references(
     from: &RelationIdentity,
     to: &str,
 ) -> StorageBackendResult<()> {
-    let mut rewritten_views = Vec::new();
+    let mut changed = Vec::new();
     let views = context.views.view_definitions();
+    let mut next = (**views).clone();
     for (relation, stored) in views.iter() {
         if let Some(rewritten) = rewritten_view_sequence_references(stored, from, to)
             .map_err(StorageBackendError::Other)?
         {
-            rewritten_views.push((relation.clone(), rewritten));
+            next.insert(relation.clone(), rewritten).map_err(|error| {
+                StorageBackendError::backend("rewrite view sequence references", error)
+            })?;
+            changed.push(relation.clone());
         }
     }
     drop(views);
     if context.views.has_catalog() {
-        for (relation, view) in &rewritten_views {
+        for relation in &changed {
+            let view = &next[relation];
             if view.persistence != uqa_sql::ast::RelationPersistence::Temporary {
                 context
                     .views
@@ -109,8 +123,8 @@ pub(super) fn rewrite_loaded_view_sequence_references(
             }
         }
     }
-    if !rewritten_views.is_empty() {
-        context.views.publish_views(rewritten_views);
+    if !changed.is_empty() {
+        context.views.publish_views(next);
         context.changes.catalog_registry_changed();
     }
     Ok(())

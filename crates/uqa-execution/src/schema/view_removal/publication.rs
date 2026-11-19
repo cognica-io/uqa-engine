@@ -21,6 +21,8 @@ pub(super) fn drop_view_state_inner(
 ) -> Result<(), SQLError> {
     let relation = RelationIdentity::from_legacy_name(name)
         .map_err(|err| SQLError::Internal(format!("invalid canonical view name: {err}")))?;
+    let mut next = (**registry.views_read()).clone();
+    next.remove(&relation)?;
     events
         .drop_relation_events_inner(&relation)
         .map_err(|error| SQLError::Internal(format!("drop view rules: {error}")))?;
@@ -40,7 +42,7 @@ pub(super) fn drop_view_state_inner(
             .unwrap_or_else(|| views.contains_key(&relation))
     };
     if removed {
-        views.remove(&relation);
+        **views = next;
     }
     drop(views);
     if removed {

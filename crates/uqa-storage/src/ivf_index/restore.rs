@@ -11,12 +11,12 @@ use std::collections::{BTreeMap, BTreeSet};
 use uqa_core::DocId;
 
 use super::math::l2_normalize;
-use super::state::{IVFIndex, IVFMetadataSnapshot, IVFState, StoredVector};
+use super::state::{IVFData, IVFMetadataSnapshot, IVFState, StoredVector};
 use crate::read_control::StorageReadControl;
 use crate::vector_index::validate_vector_values;
 use crate::{StorageBackendError, StorageBackendResult};
 
-impl IVFIndex {
+impl IVFData {
     pub fn from_persistence(
         dimensions: u32,
         nlist: usize,
@@ -115,18 +115,7 @@ impl IVFIndex {
         if assignments.keys().any(|key| !seen.contains(key)) {
             return Err(corrupt("assignment references a missing canonical vector"));
         }
-        let mut previous = None;
-        for &(document, ordinal) in &seen {
-            super::prepare::check(control)?;
-            let expected = match previous {
-                Some((prior, order)) if prior == document => u64::from(order) + 1,
-                _ => 0,
-            };
-            if u64::from(ordinal) != expected {
-                return Err(corrupt("canonical tensor has non-contiguous ordinals"));
-            }
-            previous = Some((document, ordinal));
-        }
+        validate_tensor_ordinals(&seen, control)?;
         let mut inverted_lists = vec![Vec::new(); snapshot.centroids.len()];
         for (key, vector) in &persisted {
             super::prepare::check(control)?;
@@ -137,16 +126,36 @@ impl IVFIndex {
         Ok(Self {
             dimensions,
             nlist,
-            nprobe: parking_lot::Mutex::new(nprobe),
+            nprobe,
             train_threshold,
-            state: parking_lot::Mutex::new(snapshot.state),
-            vectors: parking_lot::Mutex::new(persisted),
-            centroids: parking_lot::Mutex::new(snapshot.centroids),
-            inverted_lists: parking_lot::Mutex::new(inverted_lists),
-            trained_size: parking_lot::Mutex::new(snapshot.trained_size),
-            deletes_since_train: parking_lot::Mutex::new(snapshot.deletes_since_train),
+            state: snapshot.state,
+            vectors: persisted,
+            centroids: snapshot.centroids,
+            inverted_lists,
+            trained_size: snapshot.trained_size,
+            deletes_since_train: snapshot.deletes_since_train,
+            image_memory: None,
         })
     }
+}
+
+fn validate_tensor_ordinals(
+    vectors: &BTreeSet<(DocId, u32)>,
+    control: Option<&StorageReadControl>,
+) -> StorageBackendResult<()> {
+    let mut previous = None;
+    for &(document, ordinal) in vectors {
+        super::prepare::check(control)?;
+        let expected = match previous {
+            Some((prior, order)) if prior == document => u64::from(order) + 1,
+            _ => 0,
+        };
+        if u64::from(ordinal) != expected {
+            return Err(corrupt("canonical tensor has non-contiguous ordinals"));
+        }
+        previous = Some((document, ordinal));
+    }
+    Ok(())
 }
 
 fn validate_state_shape(snapshot: &IVFMetadataSnapshot) -> StorageBackendResult<()> {

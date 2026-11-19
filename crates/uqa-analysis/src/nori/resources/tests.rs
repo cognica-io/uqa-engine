@@ -12,6 +12,8 @@ use super::*;
 use crate::nori::{frame, tests::fixtures};
 use crate::nori::{DictionaryError, DictionaryLimits, UserDictionaryLimits};
 
+mod images;
+
 fn bytes(cost: i16) -> Arc<[u8]> {
     let mut sections = fixtures::sections();
     sections[3].bytes[8..10].copy_from_slice(&cost.to_le_bytes());

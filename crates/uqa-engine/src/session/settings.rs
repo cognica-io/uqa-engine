@@ -11,7 +11,7 @@ use super::{Engine, SQLError, StorageBackendResult};
 impl Engine {
     /// Return the current `search_path`.
     pub fn search_path(&self) -> Vec<String> {
-        self.session.state.read().search_path.clone()
+        self.session.state.read().search_path.to_vec()
     }
 
     /// `LOAD 'library'`. The engine embeds Apache AGE and PL/pgSQL, so loading either succeeds as a no-op through every spelling `PostgreSQL` resolves against `$libdir`; any other library fails exactly like a missing shared object.
@@ -133,7 +133,7 @@ impl Engine {
         let mut session = self.session.state.write();
         session.session_vars.clear();
         session.parameter_scopes.reset_all();
-        session.search_path = search_path;
+        session.search_path = search_path.into();
         session.sql_statement_cache.clear();
     }
 
@@ -318,7 +318,7 @@ impl Engine {
         match target {
             DiscardTarget::All => {
                 session.session_vars.clear();
-                session.search_path = search_path;
+                session.search_path = search_path.into();
                 self.session.prepared.write().clear();
                 self.invalidate_prepared_analysis();
                 session.sql_statement_cache.clear();

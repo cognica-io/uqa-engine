@@ -10,6 +10,8 @@ use crate::{
     CancellationToken,
 };
 
+mod input;
+
 #[test]
 fn ordered_production_scratch_tracks_exact_nodes_and_reuses_existing_keys() {
     let node_bytes = OwnedMap::<u32, u32>::entry_bytes();

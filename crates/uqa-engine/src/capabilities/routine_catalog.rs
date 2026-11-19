@@ -6,17 +6,14 @@
 
 //! Bind routine lookup and restoration to query snapshots, live registry guards, and catalog storage.
 
-use crate::{open::CatalogRestoreMode, Arc, CatalogFacade, Engine, StorageBackendResult};
+use crate::{open::CatalogRestoreMode, CatalogFacade, Engine, StorageBackendResult};
 use uqa_execution::routines::{
     catalog,
     restoration::{self, PendingSQLFunctionRestore, RoutineRestoreContext, RoutineRestoreSchemas},
 };
 use uqa_sql::{
     ast::FunctionBinding,
-    routines::{
-        lifecycle::{lookup, names, RoutineRegistry},
-        SQLUserFunction,
-    },
+    routines::lifecycle::{lookup, names, RoutineRegistry},
     SQLError,
 };
 
@@ -76,7 +73,7 @@ impl Engine {
     pub(crate) fn lookup_visible_sql_functions(
         &self,
         name: &str,
-    ) -> Result<Option<Vec<Arc<SQLUserFunction>>>, SQLError> {
+    ) -> Result<Option<Vec<uqa_sql::routines::SQLRoutine>>, SQLError> {
         let keys = names::routine_lookup_keys(self, name)?;
         Ok(self.with_routine_lookup_registry(|registry| {
             lookup::lookup_sql_functions_by_keys(registry, keys)
@@ -85,7 +82,7 @@ impl Engine {
     pub(crate) fn lookup_visible_sql_functions_for_analysis(
         &self,
         name: &str,
-    ) -> Result<Option<Vec<Arc<SQLUserFunction>>>, SQLError> {
+    ) -> Result<Option<Vec<uqa_sql::routines::SQLRoutine>>, SQLError> {
         let Some(keys) = names::routine_lookup_keys_for_analysis(self, name)? else {
             return Ok(None);
         };
@@ -133,7 +130,7 @@ impl Engine {
     pub(crate) fn lookup_bound_sql_functions(
         &self,
         name: &str,
-    ) -> Option<Vec<Arc<SQLUserFunction>>> {
+    ) -> Option<Vec<uqa_sql::routines::SQLRoutine>> {
         let keys = std::iter::once(name.to_string());
         self.with_routine_lookup_registry(|registry| {
             lookup::lookup_sql_functions_by_keys(registry, keys)
@@ -142,7 +139,7 @@ impl Engine {
     pub(crate) fn lookup_bound_sql_functions_by_binding(
         &self,
         binding: &FunctionBinding,
-    ) -> Option<Vec<Arc<SQLUserFunction>>> {
+    ) -> Option<Vec<uqa_sql::routines::SQLRoutine>> {
         self.with_routine_lookup_registry(|registry| {
             lookup::lookup_bound_sql_functions_by_binding(registry, binding)
         })
@@ -150,7 +147,7 @@ impl Engine {
     pub(crate) fn lookup_sql_routine_candidates(
         &self,
         name: &str,
-    ) -> Result<Option<Vec<Arc<SQLUserFunction>>>, SQLError> {
+    ) -> Result<Option<Vec<uqa_sql::routines::SQLRoutine>>, SQLError> {
         let keys = names::routine_lookup_keys(self, name)?;
         Ok(self.with_routine_lookup_registry(|registry| {
             lookup::lookup_sql_routine_candidates_by_keys(registry, keys)
@@ -160,7 +157,8 @@ impl Engine {
         &self,
         name: &str,
         control: &uqa_core::memory::ProductionControl<'_>,
-    ) -> Result<Option<uqa_core::memory::Produced<Vec<Arc<SQLUserFunction>>>>, SQLError> {
+    ) -> Result<Option<uqa_core::memory::Produced<Vec<uqa_sql::routines::SQLRoutine>>>, SQLError>
+    {
         let keys = names::routine_lookup_keys_with_control(self, name, control)?;
         self.with_routine_lookup_registry(|registry| {
             lookup::lookup_sql_routine_candidates_by_keys_with_control(
@@ -173,7 +171,7 @@ impl Engine {
     pub(crate) fn lookup_bound_sql_routine_candidates_by_binding(
         &self,
         binding: &FunctionBinding,
-    ) -> Option<Vec<Arc<SQLUserFunction>>> {
+    ) -> Option<Vec<uqa_sql::routines::SQLRoutine>> {
         self.with_routine_lookup_registry(|registry| {
             lookup::lookup_bound_sql_routine_candidates_by_binding(registry, binding)
         })
@@ -182,7 +180,7 @@ impl Engine {
         &self,
         binding: &FunctionBinding,
         control: &uqa_core::memory::ProductionControl<'_>,
-    ) -> Result<Option<Arc<SQLUserFunction>>, SQLError> {
+    ) -> Result<Option<uqa_sql::routines::SQLRoutine>, SQLError> {
         self.with_routine_lookup_registry(|registry| {
             lookup::select_bound_function_with_control(
                 registry.values().flat_map(|overloads| overloads.iter()),
@@ -196,7 +194,7 @@ impl Engine {
         binding: &FunctionBinding,
         kind: uqa_sql::routines::resolution::RoutineCallKind,
         control: &uqa_core::memory::ProductionControl<'_>,
-    ) -> Result<Option<Arc<SQLUserFunction>>, SQLError> {
+    ) -> Result<Option<uqa_sql::routines::SQLRoutine>, SQLError> {
         self.with_routine_lookup_registry(|registry| {
             lookup::select_bound_routine_with_control(
                 registry.values().flat_map(|overloads| overloads.iter()),

@@ -6,7 +6,7 @@
 
 //! Sequence cache entries and nontransactional session observations.
 use uqa_core::RelationIdentity;
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SessionSequenceValue {
     pub object_id: [u8; 16],
     pub value: i64,
@@ -27,7 +27,7 @@ pub struct SessionLastSequenceReference {
     pub object_id: [u8; 16],
 }
 
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct NontransactionalSequenceValue {
     pub object_id: [u8; 16],
     pub current: i64,
@@ -35,3 +35,7 @@ pub struct NontransactionalSequenceValue {
     pub log_count: i64,
     pub autonomous: bool,
 }
+
+mod history;
+pub mod recovery;
+pub use history::{NontransactionalSequenceValues, PreparedSequenceHistory, SequenceValueKey};

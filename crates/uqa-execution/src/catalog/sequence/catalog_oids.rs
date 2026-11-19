@@ -14,7 +14,10 @@ pub const SEQUENCE_CATALOG_OID_METADATA_PREFIX: &str = "sequence_catalog_oid:";
 
 /// The OID of the sequence with the object identity: the recorded one, or the one its identity derives.
 #[must_use]
-pub fn sequence_catalog_oid(oids: &BTreeMap<[u8; 16], u32>, object_id: &[u8; 16]) -> i64 {
+pub fn sequence_catalog_oid(
+    oids: &uqa_core::memory::RetainedMap<[u8; 16], u32>,
+    object_id: &[u8; 16],
+) -> i64 {
     oids.get(object_id).map_or_else(
         || crate::catalog::projection::legacy_sequence_relation_oid(*object_id),
         |oid| i64::from(*oid),
@@ -65,7 +68,7 @@ fn metadata_key(object_id: &[u8; 16]) -> String {
     key
 }
 
-fn decode_object_id(encoded: &str) -> StorageBackendResult<[u8; 16]> {
+pub(super) fn decode_object_id(encoded: &str) -> StorageBackendResult<[u8; 16]> {
     let invalid = || {
         StorageBackendError::Other(format!(
             "sequence catalog OID entry names invalid object identity `{encoded}`"

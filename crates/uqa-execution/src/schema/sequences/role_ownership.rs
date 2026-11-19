@@ -14,14 +14,12 @@ use crate::catalog::security::{
     },
     BoundSequenceSecurity,
 };
+use crate::catalog::sequence::registry::SequenceCatalog;
 use crate::row_locks::binding::RelationDefinitionSession;
 use crate::row_locks::shared_objects::SharedObjectLockSession;
 use crate::schema::publication::dependencies::CatalogPublicationChanges;
-use std::{
-    collections::BTreeMap,
-    ops::{Deref, DerefMut},
-};
 use uqa_core::RelationIdentity;
+use uqa_sql::catalog::roles::RoleDefinitions;
 use uqa_sql::{
     catalog::roles::{self, RoleReferenceNames},
     catalog::security::ownership::{OwnerChangeAuthority, RelationOwnerSchemas},
@@ -37,7 +35,8 @@ pub trait SequenceSecurityPublication {
         relation: &RelationIdentity,
         security: &BoundSequenceSecurity,
     ) -> Result<(), SQLError>;
-    fn publish_security(&self, relation: &RelationIdentity, security: BoundSequenceSecurity);
+    fn sequence_catalog(&self) -> SequenceCatalog;
+    fn publish_sequences(&self, catalog: SequenceCatalog);
 }
 pub struct SequenceRoleOwnershipContext<'a> {
     pub roles: &'a dyn RoleCatalogGuards,
@@ -101,10 +100,13 @@ pub fn alter_sequence_role_owner(
     let Some(security) = value else {
         return Ok(());
     };
+    let mut catalog = context.security.sequence_catalog();
+    catalog.replace_security(relation, security.clone())?;
     context
         .security
         .persist_security(name, relation, &security)?;
-    context.security.publish_security(relation, security);
+    context.security.publish_sequences(catalog);
+    context.changes.prepared_relation_changed(relation);
     drop(memberships);
     drop(roles);
     context.changes.catalog_registry_changed();
@@ -112,9 +114,7 @@ pub fn alter_sequence_role_owner(
 }
 
 pub type OwnedSequenceSecurityRead<'a> =
-    Box<dyn Deref<Target = BTreeMap<RelationIdentity, BoundSequenceSecurity>> + 'a>;
-pub type OwnedSequenceSecurityWrite<'a> =
-    Box<dyn DerefMut<Target = BTreeMap<RelationIdentity, BoundSequenceSecurity>> + 'a>;
+    uqa_sql::catalog::security::sequence_inquiry::SequenceSecurityRead<'a>;
 
 pub trait OwnedSequenceSecurityCatalog {
     fn owned_sequences(&self, table_object_id: [u8; 16]) -> Vec<RelationIdentity>;
@@ -125,7 +125,7 @@ pub fn table_owned_sequence_owner_updates(
     catalog: &dyn OwnedSequenceSecurityCatalog,
     table_object_id: [u8; 16],
     new_owner: &str,
-    roles: &BTreeMap<String, roles::RoleDefinition>,
+    roles: &RoleDefinitions,
 ) -> Result<Vec<(RelationIdentity, BoundSequenceSecurity)>, SQLError> {
     let owned = catalog.owned_sequences(table_object_id);
     let registry = catalog.security_registry();

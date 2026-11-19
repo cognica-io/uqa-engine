@@ -7,6 +7,14 @@
 use crate::tests::providers::Provider;
 use uqa_core::Value;
 
+fn pause_automatic_statistics(engine: &crate::Engine) {
+    engine.release_automatic_statistics_client();
+    engine
+        .session
+        .statistics_worker
+        .store(true, std::sync::atomic::Ordering::Release);
+}
+
 #[rstest::rstest]
 #[case::memory(Provider::Memory)]
 #[case::sqlite_native(Provider::SQLiteNative)]
@@ -120,6 +128,8 @@ fn named_explain_prepares_private_sources_and_preserves_cache_recovery(#[case] p
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("explain-private-sources.db");
     let engine = provider.open(&path);
+    // Keep the cache-identity fixture on one catalog generation; committed refresh is exercised separately below.
+    pause_automatic_statistics(&engine);
     engine.sql("CREATE SEQUENCE explanation_ticks; CREATE TABLE explanation_writes (n bigint); CREATE VIEW explanation_input AS SELECT nextval('explanation_ticks') AS n; PREPARE read_explanation AS WITH q AS MATERIALIZED (SELECT n FROM explanation_input) SELECT n FROM q; PREPARE write_explanation AS INSERT INTO explanation_writes SELECT n FROM explanation_input RETURNING n; SET plan_cache_mode = force_generic_plan", &[]).unwrap();
     let retained = engine.query_retention_control().unwrap();
     for (index, name) in ["read_explanation", "write_explanation"]
@@ -217,6 +227,76 @@ fn named_explain_prepares_private_sources_and_preserves_cache_recovery(#[case] p
         );
         engine.close().unwrap();
     }
+}
+
+#[rstest::rstest]
+#[case::sqlite_native(Provider::SQLiteNative)]
+#[case::sqlite_kv(Provider::SQLiteKeyValue)]
+#[case::redb(Provider::Redb)]
+fn named_explain_selected_owner_survives_committed_catalog_refresh(#[case] provider: Provider) {
+    use uqa_sql::prepared::planning::PreparedPlanProvider;
+    let directory = tempfile::tempdir().unwrap();
+    let engine = provider.open(&directory.path().join("explain-catalog-refresh.db"));
+    pause_automatic_statistics(&engine);
+    engine.sql("CREATE SEQUENCE explanation_ticks; CREATE TABLE explanation_writes (n bigint); INSERT INTO explanation_writes VALUES (0); CREATE VIEW explanation_input AS SELECT nextval('explanation_ticks') AS n; PREPARE write_explanation AS INSERT INTO explanation_writes SELECT n FROM explanation_input RETURNING n; SET plan_cache_mode = force_generic_plan", &[]).unwrap();
+    engine.sql("BEGIN", &[]).unwrap();
+    let selected = engine
+        .plan_for_execution("write_explanation", &[])
+        .unwrap()
+        .unwrap();
+    let original = serde_json::to_value(selected.as_ref()).unwrap();
+    assert!(engine.session.prepared.read()["write_explanation"]
+        .plan
+        .as_ref()
+        .unwrap()
+        .ptr_eq(&selected));
+    let backend = engine.storage.backend.as_ref().unwrap();
+    let previous = backend.read_view_revision().unwrap().unwrap();
+    let peer = engine.new_session().unwrap();
+    pause_automatic_statistics(&peer);
+    peer.sql("ANALYZE explanation_writes", &[]).unwrap();
+    peer.close().unwrap();
+    // Use the same boundary that EXPLAIN reaches after selecting its immutable executable.
+    uqa_execution::query::locking::lock_explained_relations(engine.row_lock_context(), &selected)
+        .unwrap();
+    let current = backend.read_view_revision().unwrap().unwrap();
+    assert!(!current.same_committed_state(&previous), "{provider:?}");
+    assert!(engine.session.prepared.read()["write_explanation"]
+        .plan
+        .is_none());
+    assert_eq!(serde_json::to_value(selected.as_ref()).unwrap(), original);
+    let result = engine
+        .sql(
+            "EXPLAIN (ANALYZE, MEMORY, FORMAT JSON) EXECUTE write_explanation",
+            &[],
+        )
+        .unwrap();
+    let Some(Value::Json(text)) = result.value_at(0, 0) else {
+        panic!("JSON explanation");
+    };
+    let document: serde_json::Value = serde_json::from_str(text).unwrap();
+    assert_eq!(document[0]["Plan"]["Actual Rows"], 1);
+    assert_eq!(
+        engine
+            .sql("SELECT currval('explanation_ticks')", &[])
+            .unwrap()
+            .value_at(0, 0),
+        Some(&Value::Int(1))
+    );
+    let rows = engine
+        .sql("SELECT count(*), max(n) FROM explanation_writes", &[])
+        .unwrap();
+    assert_eq!(rows.value_at(0, 0), Some(&Value::Int(2)));
+    assert_eq!(rows.value_at(0, 1), Some(&Value::Int(1)));
+    drop(rows);
+    drop(result);
+    engine.sql("COMMIT", &[]).unwrap();
+    assert_eq!(serde_json::to_value(selected.as_ref()).unwrap(), original);
+    let retained = engine.query_retention_control().unwrap();
+    engine.close().unwrap();
+    drop(engine);
+    drop(selected);
+    assert_eq!(retained.memory().used(), 0);
 }
 
 #[rstest::rstest]

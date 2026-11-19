@@ -8,35 +8,25 @@
 
 use uqa_core::{DocId, PostingList};
 
-use super::state::{IVFIndex, IVFState, StoredVector};
+use super::state::{IVFData, IVFState, StoredVector};
 use crate::read_control::StorageReadControl;
 use crate::vector_index::{
     cosine_similarity_with_norms,
-    query::{
-        check, nearest_normalized_centroids, normalized_query, postings_from_scores,
-        VectorQueryBuffer,
-    },
+    query::{check, nearest_normalized_centroids, postings_from_scores, VectorQueryBuffer},
     validate_vector_values, vector_norm,
 };
 use crate::{StorageBackendError, StorageBackendResult};
 
-impl IVFIndex {
+impl IVFData {
     pub(super) fn search_top_k(
         &self,
         query: &[f32],
+        normalized: &[f32],
+        norm: f32,
         k: usize,
         control: Option<&StorageReadControl>,
     ) -> StorageBackendResult<PostingList> {
-        check(control)?;
-        validate_vector_values(self.dimensions, query)?;
-        if k == 0 {
-            return Ok(PostingList::new());
-        }
-        let (normalized, norm) = normalized_query(query, control)?;
-        if self.state() == IVFState::Stale {
-            self.train_for_query(control)?;
-        }
-        let vectors = self.vectors.lock();
+        let vectors = &self.vectors;
         let state = self.state();
         let mut scored = VectorQueryBuffer::<(DocId, f32)>::new(control);
         let score = |vector: &StoredVector,
@@ -55,19 +45,19 @@ impl IVFIndex {
                 }
             }
             IVFState::Trained | IVFState::Stale => {
-                let centroids = self.centroids.lock();
+                let centroids = &self.centroids;
                 if centroids.is_empty() {
                     for vector in vectors.values() {
                         score(vector, &mut scored)?;
                     }
                 } else {
                     let probes = nearest_normalized_centroids(
-                        &normalized,
-                        &centroids,
+                        normalized,
+                        centroids,
                         self.nprobe(),
                         control,
                     )?;
-                    let lists = self.inverted_lists.lock();
+                    let lists = &self.inverted_lists;
                     for &centroid in probes.iter() {
                         for key in lists.get(centroid).into_iter().flatten() {
                             check(control)?;
@@ -96,7 +86,7 @@ impl IVFIndex {
             )));
         }
         let norm = vector_norm(query);
-        let vectors = self.vectors.lock();
+        let vectors = &self.vectors;
         let mut scored = VectorQueryBuffer::new(control);
         for vector in vectors.values() {
             check(control)?;

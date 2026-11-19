@@ -6,10 +6,12 @@
 
 //! Coerce already analyzed ROW inputs without observing their expressions a second time.
 
+use crate::binding::preparation::{LiteralInput, SchemaContext};
+
 use super::{ColumnType, ExpressionType, Preparation, SQLError};
 use crate::type_resolution::composite_rows::{row_cast_error, validate_width};
 
-impl Preparation<'_> {
+impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
     pub(super) fn coerce_row_comparison(
         &mut self,
         op: crate::ast::BinaryOp,

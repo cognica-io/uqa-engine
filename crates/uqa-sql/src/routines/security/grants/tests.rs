@@ -5,12 +5,14 @@
 //
 
 use super::*;
+use crate::catalog::roles::RoleDefinition;
+use crate::catalog::roles::{RoleDefinitions, RoleMemberships};
 use crate::{
     ast::{RoleAttribute, Statement},
     catalog::{roles::RoleReference, security::BoundSchemaSecurity},
     routines::{security::select_routine_acl_grantor, RoutineBody},
 };
-use std::{cell::RefCell, sync::Arc};
+use std::cell::RefCell;
 
 struct Names {
     denied: Vec<String>,
@@ -58,7 +60,7 @@ fn names() -> Names {
         visited: RefCell::new(Vec::new()),
     }
 }
-fn routine(name: &str, oid: u32, procedure: bool) -> Arc<SQLUserFunction> {
+fn routine(name: &str, oid: u32, procedure: bool) -> crate::routines::SQLRoutine {
     let sql = if procedure {
         format!("CREATE PROCEDURE {name}() LANGUAGE SQL AS 'SELECT 1'")
     } else {
@@ -70,18 +72,20 @@ fn routine(name: &str, oid: u32, procedure: bool) -> Arc<SQLUserFunction> {
     def.catalog_oid = Some(oid);
     def.object_id = Some([oid as u8; 16]);
     def.owner = Some(uqa_core::catalog_role::RoleIdentity::BOOTSTRAP);
-    Arc::new(SQLUserFunction::new(*def, RoutineBody::Source))
+    SQLUserFunction::new(*def, RoutineBody::Source).shared()
 }
 fn registry() -> RoutineRegistry {
-    [
-        ("app.z", 101, false),
-        ("app.a", 102, false),
-        ("app.p", 103, true),
-        ("other.f", 104, false),
-    ]
-    .into_iter()
-    .map(|(name, oid, procedure)| (name.into(), vec![routine(name, oid, procedure)]))
-    .collect()
+    RoutineRegistry::try_from_iter(
+        [
+            ("app.z", 101, false),
+            ("app.a", 102, false),
+            ("app.p", 103, true),
+            ("other.f", 104, false),
+        ]
+        .into_iter()
+        .map(|(name, oid, procedure)| (name.into(), vec![routine(name, oid, procedure)])),
+    )
+    .unwrap()
 }
 fn selected(
     names: &Names,
@@ -171,21 +175,23 @@ fn no_execute_is_an_error_while_execute_without_grant_option_only_warns() {
     reader.oid = 20_000;
     reader.object_id = [2; 16];
     reader.attributes.remove(&RoleAttribute::Superuser);
-    let roles = BTreeMap::from([
+    let roles = RoleDefinitions::try_from_iter([
         ("uqa".into(), RoleDefinition::bootstrap()),
         ("reader".into(), reader),
-    ]);
+    ])
+    .unwrap();
     let mut def = routine("app.f", 20_001, false).def.clone();
     assert_eq!(
-        select_routine_acl_grantor(&def, "reader", &roles, &BTreeMap::new()).unwrap(),
+        select_routine_acl_grantor(&def, "reader", &roles, &RoleMemberships::new()).unwrap(),
         None
     );
     def.execute_acl = Some(Vec::new());
-    let error = select_routine_acl_grantor(&def, "reader", &roles, &BTreeMap::new()).unwrap_err();
+    let error =
+        select_routine_acl_grantor(&def, "reader", &roles, &RoleMemberships::new()).unwrap_err();
     assert_eq!(error.sqlstate(), Some("42501"));
     assert_eq!(error.to_string(), "permission denied for function f");
     assert!(
-        select_routine_acl_grantor(&def, "uqa", &roles, &BTreeMap::new())
+        select_routine_acl_grantor(&def, "uqa", &roles, &RoleMemberships::new())
             .unwrap()
             .is_some()
     );

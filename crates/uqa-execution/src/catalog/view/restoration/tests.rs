@@ -6,18 +6,14 @@
 
 use super::*;
 use crate::{
-    catalog::{
-        foreign::StoredForeignTable,
-        view::{ViewIdentityAllocation, ViewRegistryRead, ViewRegistryState, ViewRegistryWrite},
+    catalog::view::{
+        ViewIdentityAllocation, ViewRegistryRead, ViewRegistryState, ViewRegistryWrite,
     },
     schema::view_creation::context::ViewPlanBinding,
 };
 use context::*;
-use std::{
-    cell::{Cell, RefCell},
-    sync::Arc,
-};
-use uqa_graph::GraphStoreHandle;
+use std::cell::{Cell, RefCell};
+use uqa_sql::catalog::roles::RoleDefinitions;
 use uqa_sql::{
     ast::{ColumnType, RelationPersistence},
     catalog::roles::{
@@ -30,6 +26,34 @@ use uqa_sql::{
 
 mod collations;
 
+#[test]
+fn denied_native_view_restore_precedes_provisional_publication_and_migration_writes() {
+    let fixture = Fixture::new(Failure::None);
+    let memory = uqa_core::memory::MemoryBudget::new(65536);
+    let mut admitted = uqa_sql::catalog::stored_view::ViewDefinitions::with_budget(&memory);
+    for (name, view) in fixture.registry.borrow().iter() {
+        admitted.insert(name.clone(), view.clone()).unwrap();
+    }
+    *fixture.registry.borrow_mut() = admitted;
+    let before = fixture.snapshot();
+    let bytes = memory.used();
+    let blocked = memory.reserve(memory.available()).unwrap();
+    let error = restore_views_from_catalog(&fixture.context(), &fixture, true).unwrap_err();
+    assert_eq!(
+        uqa_sql::catalog::errors::storage_error("view restore", &error).sqlstate(),
+        Some("53200")
+    );
+    assert_eq!(fixture.writes.get(), 0);
+    assert_eq!(fixture.bindings.get(), 0);
+    assert_eq!(fixture.schemas.get(), 0);
+    assert!(fixture.saved.borrow().is_empty());
+    assert_eq!(fixture.snapshot(), before);
+    drop(blocked);
+    assert_eq!(memory.used(), bytes);
+    drop(fixture);
+    assert_eq!(memory.used(), 0);
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Failure {
     None,
@@ -38,7 +62,7 @@ enum Failure {
     Persistence,
 }
 struct Fixture {
-    registry: RefCell<BTreeMap<RelationIdentity, StoredView>>,
+    registry: RefCell<uqa_sql::catalog::stored_view::ViewDefinitions>,
     rows: Vec<ViewRow>,
     saved: RefCell<Vec<ViewRow>>,
     failure: Failure,
@@ -46,9 +70,9 @@ struct Fixture {
     schemas: Cell<usize>,
     identities: Cell<u8>,
     writes: Cell<usize>,
-    roles: BTreeMap<String, RoleDefinition>,
-    foreign: BTreeMap<RelationIdentity, StoredForeignTable>,
-    graphs: BTreeMap<String, Arc<GraphStoreHandle>>,
+    roles: RoleDefinitions,
+    foreign: crate::catalog::foreign::ForeignTables,
+    graphs: uqa_graph::GraphCatalog,
 }
 fn view(object_id: u8, persistence: RelationPersistence) -> StoredView {
     let UnifiedPlan::Query(query) =
@@ -93,16 +117,19 @@ impl Fixture {
             })
             .collect();
         Self {
-            registry: RefCell::new(BTreeMap::from([
-                (
-                    RelationIdentity::new("public", "previous"),
-                    view(8, RelationPersistence::Permanent),
-                ),
-                (
-                    RelationIdentity::new("pg_temp_7", "session_view"),
-                    view(9, RelationPersistence::Temporary),
-                ),
-            ])),
+            registry: RefCell::new(
+                uqa_sql::catalog::stored_view::ViewDefinitions::try_from_iter([
+                    (
+                        RelationIdentity::new("public", "previous"),
+                        view(8, RelationPersistence::Permanent),
+                    ),
+                    (
+                        RelationIdentity::new("pg_temp_7", "session_view"),
+                        view(9, RelationPersistence::Temporary),
+                    ),
+                ])
+                .unwrap(),
+            ),
             rows,
             saved: RefCell::new(Vec::new()),
             failure,
@@ -110,19 +137,22 @@ impl Fixture {
             schemas: Cell::new(0),
             identities: Cell::new(0),
             writes: Cell::new(0),
-            roles: BTreeMap::from([(
+            roles: RoleDefinitions::try_from_iter([(
                 "owner".into(),
                 RoleDefinition {
                     oid: 42,
                     object_id: [42; 16],
                     revision: 1,
                     name: "owner".into(),
-                    attributes: BTreeSet::new(),
+                    attributes: uqa_core::memory::OwnedSet::new(),
                     connection_limit: -1,
                 },
-            )]),
-            foreign: BTreeMap::new(),
-            graphs: BTreeMap::new(),
+            )])
+            .unwrap(),
+            foreign: crate::catalog::foreign::ForeignCatalog::default()
+                .tables()
+                .clone(),
+            graphs: uqa_graph::GraphCatalog::default(),
         }
     }
     fn context(&self) -> ViewRestoreContext<'_> {

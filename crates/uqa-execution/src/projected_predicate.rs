@@ -607,7 +607,7 @@ mod tests {
             .zip(values.iter().cloned())
             .collect::<uqa_sql::ResultRow>();
         let expected = eval_scalar(expression, &ScalarEvalContext::new(Some(&row), params))
-            .map(|value| truthy(&value));
+            .and_then(|value| truthy(&value));
         let references = values.iter().collect::<Vec<_>>();
         let actual = predicate.keep(&references);
         match (expected, actual) {
@@ -711,7 +711,7 @@ mod tests {
                     eval_scalar(expression, &ScalarEvalContext::new(Some(&row), &[])).unwrap();
                 assert_eq!(
                     predicate.keep(&[value]).unwrap(),
-                    truthy(&canonical),
+                    truthy(&canonical).unwrap(),
                     "{expression:?} with {value:?}"
                 );
             }

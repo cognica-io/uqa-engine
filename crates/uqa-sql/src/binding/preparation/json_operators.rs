@@ -6,11 +6,13 @@
 
 //! JSON extraction resolves both operands before runtime strictness can skip them.
 
+use crate::binding::preparation::{LiteralInput, SchemaContext};
+
 use super::ownership::AnalysisType;
 use super::{ExpressionType, Preparation, QueryPlan, RowSchema, SQLError, ScalarExpr};
 use uqa_core::Value;
 
-impl Preparation<'_> {
+impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
     pub(super) fn json_extraction(
         &mut self,
         symbol: &str,

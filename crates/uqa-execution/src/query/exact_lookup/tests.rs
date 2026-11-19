@@ -14,7 +14,7 @@ use uqa_storage::StorageBackendResult;
 use uqa_storage::{DocumentStore, MemoryDocumentStore};
 
 struct Table {
-    documents: RwLock<Box<dyn DocumentStore>>,
+    documents: RwLock<uqa_storage::StorageHandle<dyn DocumentStore>>,
 }
 
 impl Table {
@@ -32,7 +32,7 @@ impl Table {
                 .unwrap();
         }
         Self {
-            documents: RwLock::new(Box::new(documents)),
+            documents: RwLock::new(uqa_storage::StorageHandle::new(Box::new(documents))),
         }
     }
 }
@@ -42,7 +42,7 @@ impl TableRead for Table {
         Vec::new()
     }
 
-    fn read_documents(&self) -> RwLockReadGuard<'_, Box<dyn DocumentStore>> {
+    fn read_documents(&self) -> RwLockReadGuard<'_, uqa_storage::StorageHandle<dyn DocumentStore>> {
         self.documents.read()
     }
 
@@ -353,10 +353,10 @@ impl DocumentStore for FieldOnlyStore {
 fn indexed_field_reads_mask_candidates_without_reading_stored_rows() {
     let reads = Arc::new(Mutex::new(Vec::new()));
     let table = Table {
-        documents: RwLock::new(Box::new(FieldOnlyStore {
+        documents: RwLock::new(uqa_storage::StorageHandle::new(Box::new(FieldOnlyStore {
             fields: BTreeMap::new(),
             reads: reads.clone(),
-        })),
+        }))),
     };
     let index = ColumnValueIndex::build("a", (1..=4096).map(|id| (id, Value::Int(7))));
     let mut overlay: BTreeMap<_, _> = (1..4096).map(|id| (id, None)).collect();
@@ -436,10 +436,10 @@ fn unchanged_field_views_keep_direct_first_match_without_index_hydration() {
 fn indexed_null_field_reads_recheck_presence_only_after_masking() {
     let reads = Arc::new(Mutex::new(Vec::new()));
     let table = Table {
-        documents: RwLock::new(Box::new(FieldOnlyStore {
+        documents: RwLock::new(uqa_storage::StorageHandle::new(Box::new(FieldOnlyStore {
             fields: BTreeMap::from([(1, Value::Null), (3, Value::Null)]),
             reads: reads.clone(),
-        })),
+        }))),
     };
     let index = ColumnValueIndex::build("a", (1..=3).map(|id| (id, Value::Null)));
     let overlay = BTreeMap::from([(1, None)]);

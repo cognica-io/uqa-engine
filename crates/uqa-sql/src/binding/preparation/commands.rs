@@ -6,6 +6,8 @@
 
 //! Command input analysis, mutation parameter coercion and RETURNING descriptions at preparation time.
 
+use crate::binding::preparation::{LiteralInput, SchemaContext};
+
 use super::{error, ExpressionType, Preparation, QueryPlan, RowSchema, SQLError, ScalarExpr};
 use crate::assignment::targets;
 use crate::ast::AssignmentTarget;
@@ -15,7 +17,9 @@ use crate::plan::{
 use crate::semantics::sets::placement::SetPlacement;
 use std::borrow::Cow;
 
-impl Preparation<'_> {
+mod references;
+
+impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
     pub(super) fn command(&mut self, command: &CommandPlan) -> Result<Option<RowSchema>, SQLError> {
         let lookup = self.scope.resolution.lookup_mode();
         self.scope.set_command_lookup_mode(command);
@@ -25,7 +29,7 @@ impl Preparation<'_> {
                 .as_ref()
                 .map(crate::binding::RoutineParameterScope::schema);
             let previous = self.ctes(command.ctes(), outer)?;
-            let result = self.in_query_level(|analysis| analysis.command_inner(command));
+            let result = self.in_query_level(|analysis| analysis.command_inner(command, outer));
             self.scope.restore_cte_schemas(previous);
             let result = result?;
             self.parameters.collations.validate_command(command)?;
@@ -35,31 +39,36 @@ impl Preparation<'_> {
         result
     }
 
-    fn command_inner(&mut self, command: &CommandPlan) -> Result<Option<RowSchema>, SQLError> {
+    fn command_inner(
+        &mut self,
+        command: &CommandPlan,
+        outer: Option<&RowSchema>,
+    ) -> Result<Option<RowSchema>, SQLError> {
         match command {
             CommandPlan::Explain { body, .. } => {
                 self.plan(body)?;
-                return Ok(None);
             }
             CommandPlan::CreateView { query, .. }
             | CommandPlan::CreateTableAs { query, .. }
             | CommandPlan::CreateMaterializedView { query, .. }
             | CommandPlan::DeclareCursor { query, .. } => {
                 self.query(query, None)?;
-                return Ok(None);
             }
-            _ => {}
-        }
-        let parameters = self.scope.routine_parameters.clone();
-        let outer = parameters
-            .as_ref()
-            .map(crate::binding::RoutineParameterScope::schema);
-        if command.mutation_target().is_none() {
-            for query in command.query_inputs() {
-                self.query(query, outer)?;
+            _ if command.mutation_target().is_some() => return self.mutation(command, outer),
+            _ => {
+                for query in command.query_inputs() {
+                    self.query(query, outer)?;
+                }
             }
-            return Ok(None);
         }
+        Ok(None)
+    }
+
+    fn mutation(
+        &mut self,
+        command: &CommandPlan,
+        outer: Option<&RowSchema>,
+    ) -> Result<Option<RowSchema>, SQLError> {
         let target =
             self.scope
                 .bind_command_target(self.routines, command, &self.parameters.values()?)?;
@@ -82,6 +91,19 @@ impl Preparation<'_> {
         let (returning, input) =
             self.command_clause_schemas(command, &target, source.as_ref(), outer)?;
         let subqueries = command.scalar_subqueries();
+        if matches!(
+            self.scope.scalar_binding,
+            crate::binding::ScalarBindingMode::RoutineParameters
+        ) {
+            self.observe_mutation_parameter_references(
+                command,
+                &target,
+                source.as_ref(),
+                &input,
+                outer,
+            )?;
+            return self.command_result(command, &target, &returning, source.as_ref());
+        }
         match command {
             CommandPlan::Insert(insert) => {
                 self.insert(insert, &target, &input, outer, subqueries)?;
@@ -259,8 +281,7 @@ impl Preparation<'_> {
             predicate,
         } = &conflict.action
         {
-            let excluded = RowSchema::with_relation_qualifier(target, "excluded");
-            let conflict_input = RowSchema::join(input, &excluded, std::iter::empty::<String>());
+            let conflict_input = self.conflict_update_scope(target, input)?;
             self.in_placement(SetPlacement::Update, |analysis| {
                 analysis.assignments(table, assignments, target, &conflict_input, subqueries)
             })?;
@@ -275,6 +296,17 @@ impl Preparation<'_> {
             }
         }
         Ok(())
+    }
+
+    fn conflict_update_scope(
+        &self,
+        target: &RowSchema,
+        input: &RowSchema,
+    ) -> Result<RowSchema, SQLError> {
+        let control = self.scope.control();
+        let excluded =
+            RowSchema::with_relation_qualifier_with_control(target, "excluded", &control)?;
+        RowSchema::join_with_control(input, &excluded, std::iter::empty::<String>(), &control)
     }
 
     /// Analyze a condition `construct` requires to be boolean as the expression kind `placement`.
@@ -361,14 +393,7 @@ impl Preparation<'_> {
             &self.scope.control(),
         )?;
         for clause in &merge.when_clauses {
-            let input = match clause {
-                MergeWhenPlan::UpdateNotMatchedBySource { .. }
-                | MergeWhenPlan::DeleteNotMatchedBySource { .. }
-                | MergeWhenPlan::NothingNotMatchedBySource { .. } => &target_input,
-                MergeWhenPlan::InsertNotMatched { .. }
-                | MergeWhenPlan::NothingNotMatched { .. } => &source_input,
-                _ => input,
-            };
+            let input = clause.input_scope(input, &target_input, &source_input);
             let condition = match clause {
                 MergeWhenPlan::UpdateMatched { condition, .. }
                 | MergeWhenPlan::UpdateNotMatchedBySource { condition, .. }

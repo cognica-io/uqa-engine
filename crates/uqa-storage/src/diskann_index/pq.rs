@@ -48,6 +48,7 @@ impl PQCodebook {
     pub const CODEC_REVISION: u32 = 1;
     pub const TRAINING_REVISION: u32 = 1;
 
+    #[cfg(test)]
     pub(in crate::diskann_index) fn restore(
         dimensions: u32,
         pq_bytes: usize,
@@ -56,12 +57,32 @@ impl PQCodebook {
         centroids: BudgetedVec<f64>,
         control: &StorageReadControl,
     ) -> StorageBackendResult<Self> {
+        crate::image_io::work::inline(Self::restore_from(
+            dimensions,
+            pq_bytes,
+            centroid_count,
+            training,
+            centroids,
+            control,
+            &mut (),
+        ))
+    }
+
+    pub(in crate::diskann_index) async fn restore_from(
+        dimensions: u32,
+        pq_bytes: usize,
+        centroid_count: u16,
+        training: PQTrainingSummary,
+        centroids: BudgetedVec<f64>,
+        control: &StorageReadControl,
+        work: &mut (impl crate::image_io::work::Work + Send),
+    ) -> StorageBackendResult<Self> {
         control.check()?;
         if centroids.len() != training.validate(dimensions, pq_bytes, centroid_count)? {
             return Err(invalid("centroid scalar count differs from dimensions"));
         }
         for (offset, &value) in centroids.iter().enumerate() {
-            checkpoint(offset, control)?;
+            super::metric::checkpoint_from(offset, control, work).await?;
             // Unit-coordinate means stay within this conservative rounding envelope for u32 dimensions and sample counts.
             if !value.is_finite() || value.abs() > 2.0 {
                 return Err(invalid(

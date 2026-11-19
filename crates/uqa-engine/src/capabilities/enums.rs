@@ -7,10 +7,10 @@
 //! Bind enum DDL to namespace, identity, publication and transaction visibility state.
 
 use crate::Engine;
-use std::collections::BTreeMap;
+use uqa_core::memory::RetainedValue;
 use uqa_execution::catalog::enum_type::{EnumRegistry, EnumRegistryPublication, EnumRegistryRead};
 use uqa_execution::schema::enums::{EnumLabelVisibility, EnumTypeContext};
-use uqa_sql::catalog::roles::RoleDefinition;
+use uqa_sql::catalog::roles::RoleDefinitions;
 use uqa_sql::expr::enums::{EnumLabelCatalog, EnumTypeLabels};
 use uqa_sql::schema::domains::removal::TypeObjectBinding;
 use uqa_sql::SQLError;
@@ -56,10 +56,10 @@ impl Engine {
 
 impl Engine {
     /// The enum registry generation of the running statement: the pinned query snapshot when one exists, otherwise the session's current definitions.
-    pub(crate) fn enum_registry_snapshot(&self) -> std::sync::Arc<EnumRegistry> {
+    pub(crate) fn enum_registry_snapshot(&self) -> RetainedValue<EnumRegistry> {
         self.query_catalog_snapshot.as_ref().map_or_else(
             || self.durable.enums.snapshot(),
-            |snapshot| std::sync::Arc::clone(&snapshot.enums),
+            |snapshot| snapshot.enums.clone(),
         )
     }
 }
@@ -225,7 +225,7 @@ impl EnumRegistryPublication for Engine {
     fn enum_catalog(&self) -> Option<&dyn uqa_storage::CatalogFacade> {
         self.storage.catalog.as_deref()
     }
-    fn enum_role_definitions(&self) -> BTreeMap<String, RoleDefinition> {
+    fn enum_role_definitions(&self) -> RoleDefinitions {
         self.durable.roles.read().clone()
     }
     fn publish_enum_definitions(&self, registry: EnumRegistry) {

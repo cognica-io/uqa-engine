@@ -16,6 +16,15 @@ use uqa_storage::{
 };
 
 mod builder;
+mod image;
+pub use image::ValueIndexImageBuilder;
+mod capture;
+pub use capture::{
+    CapturedValue, CapturedValueIndex, CapturedValueIndexPolicy, ValueIndexComparison,
+    ValueIndexImageMetadata,
+};
+mod collection;
+pub use collection::{CapturedValueIndexes, MemoryValueIndexesBuilder, ValueIndexes};
 mod probes;
 mod projection;
 mod publication;
@@ -28,7 +37,7 @@ pub struct ValueIndexCache {
     // With retained storage this holds eligibility flags and no row population.
     policy: ColumnValueIndex,
     retained: Option<RetainedValueIndex>,
-    field: String,
+    field: uqa_sql::catalog::table_metadata::SharedTableMetadata<String>,
     limit: usize,
     resident_bytes: usize,
 }
@@ -41,6 +50,10 @@ fn value_bytes(value: &Value, control: &StorageReadControl) -> Result<usize, SQL
     let payload = value
         .retained_payload_bytes(control.memory(), control.cancellation())
         .map_err(|error| storage(StorageBackendError::backend("retained key", error)))?;
+    value_bytes_for_payload(payload)
+}
+
+fn value_bytes_for_payload(payload: usize) -> Result<usize, SQLError> {
     // Both the identity map and the search tree may own the value. The allowance also covers their nodes, NULL identities and key headers.
     payload
         .checked_add(std::mem::size_of::<Value>())
@@ -170,7 +183,7 @@ impl ValueIndexCache {
             );
             self.policy = previous.with_use(field, carried);
         }
-        self.field = field.to_string();
+        self.field = field.to_string().into();
     }
 
     pub fn clear(&mut self) {

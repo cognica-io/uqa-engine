@@ -58,6 +58,31 @@ fn query_metadata_frame_slots_and_parent_observations_retain_exact_owners() {
 }
 
 #[test]
+fn query_source_parent_observation_preserves_absence_until_child_returns() {
+    for (sql, present) in [
+        ("SELECT a FROM (SELECT 1 a) s", true),
+        ("SELECT 1 a", false),
+    ] {
+        exercise(sql, |plan, control| {
+            let MutableExecutablePlan::Query(query) = plan else {
+                panic!("query");
+            };
+            let mut visited = false;
+            let query = query.map_source_with_parent(control, |parent, source| {
+                assert!(matches!(&parent.root, RelationalPlan::QueryBlock(block) if block.from.is_none()));
+                visited = true;
+                Ok(source)
+            })?;
+            assert_eq!(visited, present);
+            assert!(
+                matches!(&query.root, RelationalPlan::QueryBlock(block) if block.from.is_some() == present)
+            );
+            Ok(MutableExecutablePlan::Query(query))
+        });
+    }
+}
+
+#[test]
 fn query_and_command_ctes_transfer_their_exact_body_kind() {
     exercise(
         "WITH changed AS (UPDATE t SET a=1 RETURNING a) SELECT * FROM changed",

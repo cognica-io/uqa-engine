@@ -91,7 +91,7 @@ fn restoration_rejects_corruption_unknown_revisions_and_mutable_or_implicit_inpu
     wire["descriptor"]["unknown"] = json!(true);
     assert!(matches!(
         resources.restore_json(&rehash(&mut wire)),
-        Err(AnalysisError::Json(_))
+        Err(AnalysisError::JsonDiagnostic(error)) if error.is_data()
     ));
     wire = source;
     wire["descriptor"]["pipeline"]
@@ -153,7 +153,7 @@ fn restoration_rejects_duplicate_keys_and_omitted_runtime_profile_fields() {
     ] {
         assert!(matches!(
             resources.restore_json(&json.replace(needle, replacement)),
-            Err(AnalysisError::Json(_))
+            Err(AnalysisError::JsonDiagnostic(error)) if error.is_data()
         ));
     }
     for key in ["rust_unicode", "normalization_unicode"] {
@@ -164,7 +164,7 @@ fn restoration_rejects_duplicate_keys_and_omitted_runtime_profile_fields() {
             .remove(key);
         assert!(matches!(
             resources.restore_json(&rehash(&mut wire)),
-            Err(AnalysisError::Json(_))
+            Err(AnalysisError::JsonDiagnostic(error)) if error.is_data()
         ));
     }
     assert_eq!(resources.cache_stats().analyzers, 0);

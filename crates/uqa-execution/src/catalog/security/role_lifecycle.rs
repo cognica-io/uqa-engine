@@ -6,6 +6,7 @@
 
 //! Role lifecycle ordering over retained authorization and publication guards.
 
+use uqa_sql::catalog::roles::RoleDefinitions;
 use uqa_sql::catalog::roles::RoleReference;
 use uqa_sql::{
     ast::{AlterRoleStmt, CreateRoleStmt, GrantRoleStmt},
@@ -90,7 +91,7 @@ fn require_authorization_setting(parameter: &str) -> Result<(), SQLError> {
 }
 
 fn selected_role(
-    roles: &std::collections::BTreeMap<String, uqa_sql::catalog::roles::RoleDefinition>,
+    roles: &RoleDefinitions,
     name: &str,
 ) -> Result<uqa_sql::catalog::roles::identity::RoleBinding, SQLError> {
     let role = roles.get(name).ok_or_else(|| SQLError::Routine {
@@ -148,7 +149,7 @@ pub fn alter_role(
     let (original, replacement) = {
         let roles = context.analysis.roles.role_definitions();
         let name = name.catalog_name(&roles)?;
-        let mut next = definition::alter_role_candidate(
+        let next = definition::alter_role_candidate(
             &context.analysis,
             &roles,
             &current,
@@ -157,7 +158,7 @@ pub fn alter_role(
         )?;
         (
             uqa_sql::catalog::roles::tuple::RoleTuple::bind(&roles[&name])?,
-            next.remove(&name).expect("validated role alteration"),
+            next.get(&name).expect("validated role alteration").clone(),
         )
     };
     tuples::lock(context, &original)?;
@@ -165,7 +166,7 @@ pub fn alter_role(
     let mut roles = context.registry.write_roles();
     original.revalidate(&roles)?;
     let mut next = roles.clone();
-    next.insert(replacement.name.clone(), replacement);
+    next.insert(replacement.name.clone(), replacement)?;
     context.publication.persist_roles(&roles, &next)?;
     **roles = next;
     drop(roles);

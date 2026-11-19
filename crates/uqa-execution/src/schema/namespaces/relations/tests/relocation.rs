@@ -12,7 +12,8 @@ fn relocation_uses_an_explicit_namespace_despite_the_creation_search_path() {
     fixture
         .schemas
         .borrow_mut()
-        .insert("public".into(), BoundSchemaSecurity::bootstrap("public"));
+        .insert("public".into(), BoundSchemaSecurity::bootstrap("public"))
+        .unwrap();
     let target = RelationIdentity::new("public", "ids");
     assert_eq!(
         fixture.context().relocation_target(&target).unwrap(),

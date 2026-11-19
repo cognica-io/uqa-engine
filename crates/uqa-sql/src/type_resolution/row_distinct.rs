@@ -105,17 +105,26 @@ macro_rules! syntax {
         }
 
         pub(crate) fn $rewrite(expression: &mut $ty) -> Result<(), SQLError> {
-            fn fields(expression: $ty) -> Result<Vec<$ty>, SQLError> {
-                match expression {
-                    $ty::Row(items) | $ty::CompositeRow { items, .. } => Ok(items),
-                    $ty::Cast {
-                        expr,
-                        implicit: false,
-                        ..
-                    } => fields(*expr),
-                    _ => Err(SQLError::Internal(
-                        "selected ROW comparison has no constructor".into(),
-                    )),
+            fn fields(mut expression: $ty) -> Result<Vec<$ty>, SQLError> {
+                loop {
+                    match &mut expression {
+                        $ty::Row(items) | $ty::CompositeRow { items, .. } => {
+                            return Ok(std::mem::take(items))
+                        }
+                        $ty::Cast {
+                            expr,
+                            implicit: false,
+                            ..
+                        } => {
+                            expression =
+                                std::mem::replace(expr.as_mut(), $ty::Literal(Value::Null));
+                        }
+                        _ => {
+                            return Err(SQLError::Internal(
+                                "selected ROW comparison has no constructor".into(),
+                            ))
+                        }
+                    }
                 }
             }
             let $ty::Func {

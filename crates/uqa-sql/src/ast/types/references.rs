@@ -10,6 +10,24 @@ use super::ColumnType;
 use uqa_core::RelationIdentity;
 
 impl ColumnType {
+    /// Whether this type contains the selected identity, including array elements and domain bases.
+    pub fn references_user_type(&self, oid: u32) -> bool {
+        match self {
+            Self::DeclaredRange(reference) | Self::DeclaredMultirange(reference) => {
+                reference.oid == oid
+            }
+            Self::Enum(reference) => reference.oid == oid,
+            Self::Composite(reference) => reference.oid == oid,
+            Self::Domain {
+                oid: domain_oid,
+                base,
+                ..
+            } => *domain_oid == oid || base.references_user_type(oid),
+            Self::Array(element) => element.references_user_type(oid),
+            _ => false,
+        }
+    }
+
     /// Give every reference to the user-defined type `oid`, including array elements and domain bases, the type's current schema and name. Returns whether a reference changed.
     pub fn rename_user_type(&mut self, oid: u32, identity: &RelationIdentity) -> bool {
         match self {
@@ -79,6 +97,9 @@ mod tests {
             base: Box::new(mood),
         }));
         let feeling = RelationIdentity::new("other", "feeling");
+        assert!(column.references_user_type(20_000));
+        assert!(column.references_user_type(20_002));
+        assert!(!column.references_user_type(30_000));
         assert!(column.rename_user_type(20_000, &feeling));
         assert!(!column.rename_user_type(20_000, &feeling));
         let ColumnType::Array(element) = &column else {

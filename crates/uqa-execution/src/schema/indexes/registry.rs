@@ -6,8 +6,10 @@
 
 //! Prepare index registry changes before publishing their owning table definitions.
 
+use crate::catalog::index::registry::CatalogIndexes;
 use crate::catalog::{identity::CatalogIdentityReservationContext, index::index_definition};
 use std::collections::{BTreeMap, BTreeSet};
+use uqa_core::memory::RetainedValue;
 use uqa_core::RelationIdentity;
 use uqa_sql::{
     ast::{ColumnDef, IndexKey, TableConstraintSet},
@@ -36,6 +38,11 @@ pub enum IndexPublicationKind {
 }
 
 pub trait IndexRegistryPublication {
+    fn index_catalog(&self) -> RetainedValue<CatalogIndexes>;
+    fn index_table_persistence(
+        &self,
+        table: &str,
+    ) -> StorageBackendResult<uqa_sql::ast::RelationPersistence>;
     fn persist_index(
         &self,
         row: &CatalogIndexRow,
@@ -46,8 +53,7 @@ pub trait IndexRegistryPublication {
         row: &CatalogIndexRow,
         kind: IndexPublicationKind,
     ) -> StorageBackendResult<()>;
-    fn publish_index(&self, row: CatalogIndexRow);
-    fn forget_index(&self, relation: &RelationIdentity);
+    fn publish_indexes(&self, indexes: CatalogIndexes);
     fn refresh_index_table(&self, table: &str) -> StorageBackendResult<()>;
     /// Attach the completed persistent build after all catalog reservations and publications. Memory and temporary handles retain their original contents.
     fn rebind_persistent_vector_field(
@@ -110,27 +116,34 @@ impl IndexRegistryChange {
         previous: &CatalogIndexRow,
         renamed: CatalogIndexRow,
     ) -> StorageBackendResult<()> {
-        Self::rename_with_publication(context.publication, previous, renamed)
+        Self::prepare_name_changes(context.publication, vec![(previous.clone(), renamed)])?
+            .publish(context.publication)
     }
 
-    pub(super) fn rename_with_publication(
+    pub(super) fn prepare_name_changes(
         publication: &dyn IndexRegistryPublication,
-        previous: &CatalogIndexRow,
-        renamed: CatalogIndexRow,
-    ) -> StorageBackendResult<()> {
-        publication.erase_index(previous, IndexPublicationKind::Names)?;
-        publication.persist_index(&renamed, IndexPublicationKind::Names)?;
-        publication.forget_index(&previous.relation);
-        publication.publish_index(renamed.clone());
-        if renamed.index_type.eq_ignore_ascii_case("diskann") {
-            publication.rebind_diskann_index(&renamed)?;
+        changes: Vec<(CatalogIndexRow, CatalogIndexRow)>,
+    ) -> StorageBackendResult<PreparedIndexNameChange> {
+        let mut candidate = publication.index_catalog().as_ref().clone();
+        for (previous, renamed) in &changes {
+            candidate.rename(&previous.relation, renamed.clone())?;
         }
-        Ok(())
+        Ok(PreparedIndexNameChange { candidate, changes })
     }
 
     /// All identity reservations and schema candidate writes precede this non-refreshing publication path. The caller's schema transaction restores both registries if persistence or physical hydration fails.
     pub fn publish(self, context: &IndexRegistryContext<'_>) -> StorageBackendResult<()> {
         let publication = context.publication;
+        let mut candidate = publication.index_catalog().as_ref().clone();
+        for row in &self.removals {
+            candidate.remove(&row.relation)?;
+        }
+        for row in &self.upserts {
+            candidate.insert(
+                row.clone(),
+                publication.index_table_persistence(&row.table_name)?,
+            )?;
+        }
         let mut tables = BTreeSet::new();
         for row in self
             .physical_builds
@@ -161,19 +174,42 @@ impl IndexRegistryChange {
         }
         for change in self.schema {
             let state = change.current(context.tables)?;
-            state.publish_constraints(change.columns, change.constraints);
+            state.publish_constraints(change.columns, change.constraints)?;
         }
-        for row in self.removals {
-            publication.forget_index(&row.relation);
-        }
-        for row in &self.upserts {
-            publication.publish_index(row.clone());
-        }
+        publication.publish_indexes(candidate);
         for table in tables {
             publication.refresh_index_table(&table)?;
         }
         for row in &self.upserts {
             builds::rebind(context, row)?;
+        }
+        Ok(())
+    }
+}
+
+/// A fully admitted native index generation retained before its owning table changes.
+pub struct PreparedIndexNameChange {
+    candidate: CatalogIndexes,
+    changes: Vec<(CatalogIndexRow, CatalogIndexRow)>,
+}
+
+impl PreparedIndexNameChange {
+    /// Persist and install the retained generation without another native index allocation.
+    pub fn publish(self, publication: &dyn IndexRegistryPublication) -> StorageBackendResult<()> {
+        if self.changes.is_empty() {
+            return Ok(());
+        }
+        for (previous, renamed) in &self.changes {
+            if previous.relation != renamed.relation {
+                publication.erase_index(previous, IndexPublicationKind::Names)?;
+            }
+            publication.persist_index(renamed, IndexPublicationKind::Names)?;
+        }
+        publication.publish_indexes(self.candidate);
+        for (_, renamed) in &self.changes {
+            if renamed.index_type.eq_ignore_ascii_case("diskann") {
+                publication.rebind_diskann_index(renamed)?;
+            }
         }
         Ok(())
     }
@@ -231,10 +267,10 @@ pub fn prepare_constraint_indexes(
             &mut allocator,
         )?;
         for removed in change.removals {
-            rows.remove(&removed.relation);
+            rows.remove(&removed.relation)?;
         }
         for row in change.upserts {
-            rows.insert(row.relation.clone(), row);
+            rows.insert_in(row, candidate.snapshot())?;
         }
     }
     partitions::detach(&candidate, &mut rows)?;
@@ -268,8 +304,8 @@ struct IndexRegistryRows {
 }
 
 fn changed_rows(
-    previous: &BTreeMap<RelationIdentity, CatalogIndexRow>,
-    rows: &BTreeMap<RelationIdentity, CatalogIndexRow>,
+    previous: &crate::catalog::index::registry::CatalogIndexes,
+    rows: &crate::catalog::index::registry::CatalogIndexes,
 ) -> IndexRegistryRows {
     IndexRegistryRows {
         upserts: rows
@@ -289,8 +325,8 @@ fn changed_rows(
 }
 
 fn difference(
-    previous: &BTreeMap<RelationIdentity, CatalogIndexRow>,
-    rows: &BTreeMap<RelationIdentity, CatalogIndexRow>,
+    previous: &crate::catalog::index::registry::CatalogIndexes,
+    rows: &crate::catalog::index::registry::CatalogIndexes,
 ) -> StorageBackendResult<IndexRegistryChange> {
     let IndexRegistryRows { upserts, removals } = changed_rows(previous, rows);
     Ok(IndexRegistryChange {

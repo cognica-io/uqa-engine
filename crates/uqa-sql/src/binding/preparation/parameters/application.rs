@@ -6,18 +6,22 @@
 
 //! Private input destinations keep their original identities until all selected metadata and scalar replacements have transferred.
 
-use super::{InputConstants, NonNull, ParameterTypes, QuerySchemas};
+use super::{AnalysisIdentity, InputConstants, ParameterTypes};
 use crate::{
+    catalog::work::{inline, Work},
     plan::{
-        AnalyzedSource, MutableExecutablePlan, QueryMetadataUpdate, RelationalPlan,
-        SharedAnalyzedSource, SourceMetadataUpdate, SourcePlan,
+        MetadataObserver, MetadataTarget, MutableExecutablePlan, ProjectionAliasUpdates,
+        ProjectionPlan, SourceMetadataUpdate, SourcePlan,
     },
     routines::RoutineResolution,
     SQLError, SQLParam,
 };
 use uqa_core::memory::{Produced, ProductionControl, ProductionVec};
 
-impl ParameterTypes<'_> {
+mod layouts;
+use layouts::QueryLayouts;
+
+impl<I: super::LiteralInput> ParameterTypes<'_, I> {
     pub(in crate::binding::preparation) fn apply_owned_query_schemas(
         mut self,
         plan: &mut MutableExecutablePlan,
@@ -26,32 +30,11 @@ impl ParameterTypes<'_> {
         control: &ProductionControl<'_>,
     ) -> Result<(), SQLError> {
         let mut schemas = self.query_schemas.take().expect("query layout observation");
-        plan.apply_query_metadata(control, &mut |query| {
-            let root = match &query.root {
-                RelationalPlan::QueryBlock(block) => {
-                    self.rewritten_blocks.remove(&NonNull::from(block.as_ref()))
-                }
-                _ => None,
-            };
-            let selected = root.as_deref().unwrap_or(query);
-            let source = match &selected.root {
-                RelationalPlan::QueryBlock(block) => block
-                    .from
-                    .as_ref()
-                    .map(|source| schemas.take_source_with_control(source, control))
-                    .transpose()?
-                    .flatten(),
-                _ => None,
-            };
-            Ok(QueryMetadataUpdate {
-                root,
-                output: schemas.outputs.remove(&NonNull::from(query)),
-                source: source
-                    .map(|source| SharedAnalyzedSource::from_produced(source, control))
-                    .transpose()?,
-                ..Default::default()
-            })
-        })?;
+        inline(plan.apply_metadata_from(
+            &mut QueryLayouts(&mut schemas, &mut self.rewritten_blocks),
+            control,
+            &mut (),
+        ))?;
         plan.apply_query_metadata(control, &mut |query| {
             schemas.groupings.metadata(query, routines, params, control)
         })?;
@@ -67,53 +50,12 @@ impl InputConstants {
         params: &[SQLParam],
         control: &ProductionControl<'_>,
     ) -> Result<(), SQLError> {
-        plan.apply_query_metadata(control, &mut |query| {
-            let root = match &query.root {
-                RelationalPlan::QueryBlock(block) => self.10.remove(&NonNull::from(block.as_ref())),
-                _ => None,
-            };
-            let selected = root.as_deref().unwrap_or(query);
-            let source = match &selected.root {
-                RelationalPlan::QueryBlock(block) => block
-                    .from
-                    .as_ref()
-                    .map(|source| self.8.take_source_with_control(source, control))
-                    .transpose()?
-                    .flatten(),
-                _ => None,
-            };
-            Ok(QueryMetadataUpdate {
-                root,
-                output: self.8.outputs.remove(&NonNull::from(query)),
-                source: source
-                    .map(|source| SharedAnalyzedSource::from_produced(source, control))
-                    .transpose()?,
-                ..Default::default()
-            })
-        })?;
-        plan.apply_projection_aliases(control, &mut |projections| {
-            let mut aliases = ProductionVec::new(*control);
-            for (index, projection) in projections.iter().enumerate() {
-                if projection.alias.is_none()
-                    && self.11.contains_key(&NonNull::from(&projection.expr))
-                {
-                    if let crate::ScalarExpr::Column(name)
-                    | crate::ScalarExpr::QualifiedColumn { column: name, .. } = &projection.expr
-                    {
-                        let name = control.copy_text(name)?;
-                        aliases.push_produced(
-                            control.finish((index, name), control.empty_reservation())?,
-                        )?;
-                    }
-                }
-            }
-            Ok(aliases.finish()?)
-        })?;
-        plan.apply_source_metadata(control, &mut |source| self.source_metadata(source, control))?;
+        inline(self.apply_metadata_owned_from(plan, control, &mut ()))?;
         let mut groupings = std::mem::take(&mut self.8.groupings);
         plan.transform_scalar_arenas_with_metadata(
             control,
             &mut |identity, expression, arena| {
+                let identity = AnalysisIdentity::from(identity);
                 let expression = match self.2.remove(&identity) {
                     Some(membership) => membership.apply_owned(expression, arena, control)?,
                     None => expression,
@@ -131,64 +73,160 @@ impl InputConstants {
         Ok(())
     }
 
-    fn source_metadata(
+    async fn apply_metadata_owned_from<W: Work + Send, P: MetadataTarget>(
+        &mut self,
+        plan: &mut P,
+        control: &ProductionControl<'_>,
+        work: &mut W,
+    ) -> Result<(), SQLError> {
+        plan.apply_metadata_from(&mut QueryLayouts(&mut self.8, &mut self.10), control, work)
+            .await?;
+        if !self.11.is_empty() {
+            self.apply_projection_aliases_owned_from(plan, control, work)
+                .await?;
+        }
+        plan.apply_metadata_from(&mut SourceCalls(self), control, work)
+            .await
+    }
+
+    async fn apply_projection_aliases_owned_from<W: Work + Send, P: MetadataTarget>(
+        &self,
+        plan: &mut P,
+        control: &ProductionControl<'_>,
+        work: &mut W,
+    ) -> Result<(), SQLError> {
+        plan.apply_metadata_from(&mut ParameterNames(self), control, work)
+            .await
+    }
+
+    pub(super) fn projection_aliases(
+        &self,
+        projections: &[crate::plan::ProjectionPlan],
+        control: &ProductionControl<'_>,
+    ) -> Result<crate::plan::ProjectionAliasUpdates, SQLError> {
+        inline(self.projection_aliases_from(projections, control, &mut ()))
+    }
+
+    async fn projection_aliases_from<W: Work + Send>(
+        &self,
+        projections: &[crate::plan::ProjectionPlan],
+        control: &ProductionControl<'_>,
+        work: &mut W,
+    ) -> Result<crate::plan::ProjectionAliasUpdates, SQLError> {
+        let mut aliases = ProductionVec::new(*control);
+        for (index, projection) in projections.iter().enumerate() {
+            control.check()?;
+            work.checkpoint().await?;
+            control.check()?;
+            if projection.alias.is_none()
+                && self
+                    .11
+                    .contains_key(&AnalysisIdentity::from(&projection.expr))
+            {
+                if let crate::ScalarExpr::Column(name)
+                | crate::ScalarExpr::QualifiedColumn { column: name, .. } = &projection.expr
+                {
+                    let name = work.text(name, control).await?;
+                    aliases.push_produced(
+                        control.finish((index, name), control.empty_reservation())?,
+                    )?;
+                }
+            }
+        }
+        Ok(aliases.finish()?)
+    }
+
+    async fn source_metadata_from<W: Work + Send>(
         &mut self,
         source: &SourcePlan,
         control: &ProductionControl<'_>,
+        work: &mut W,
     ) -> Result<SourceMetadataUpdate, SQLError> {
+        control.check()?;
+        work.checkpoint().await?;
+        control.check()?;
         // Commands have no QueryPlan descriptor carrier; their source schema has already served ordered analysis.
-        self.8.sources.remove(&NonNull::from(source));
+        if let Some(schema) = self.8.sources.remove(&AnalysisIdentity::from(source)) {
+            schema.retire_from(control, work).await?;
+        }
         let mut selected = ProductionVec::new(*control);
-        let mut include = |index, binding: &Option<crate::ast::FunctionBinding>| {
-            if let Some(binding) = self.7.remove(&NonNull::from(binding)) {
-                selected.push_produced(
-                    control.finish((index, binding), control.empty_reservation())?,
+        match source {
+            SourcePlan::Function { binding, .. } => {
+                self.select_source_binding(
+                    0,
+                    AnalysisIdentity::from(binding),
+                    &mut selected,
+                    control,
                 )?;
             }
-            Ok::<_, SQLError>(())
-        };
-        match source {
-            SourcePlan::Function { binding, .. } => include(0, binding)?,
             SourcePlan::FunctionGroup { functions, .. } => {
                 for (index, function) in functions.iter().enumerate() {
-                    include(index, &function.binding)?;
+                    control.check()?;
+                    work.checkpoint().await?;
+                    control.check()?;
+                    self.select_source_binding(
+                        index,
+                        AnalysisIdentity::from(&function.binding),
+                        &mut selected,
+                        control,
+                    )?;
                 }
             }
             _ => {}
         }
         Ok(selected.finish()?)
     }
+
+    fn select_source_binding(
+        &mut self,
+        index: usize,
+        identity: AnalysisIdentity<Option<crate::ast::FunctionBinding>>,
+        selected: &mut ProductionVec<'_, (usize, Produced<crate::ast::FunctionBinding>)>,
+        control: &ProductionControl<'_>,
+    ) -> Result<(), SQLError> {
+        if let Some(binding) = self.7.remove(&identity) {
+            selected
+                .push_produced(control.finish((index, binding), control.empty_reservation())?)?;
+        }
+        Ok(())
+    }
 }
 
-impl QuerySchemas {
-    fn take_source_with_control(
+struct ParameterNames<'a>(&'a InputConstants);
+
+struct SourceCalls<'a>(&'a mut InputConstants);
+
+impl<W: Work + Send> MetadataObserver<W> for SourceCalls<'_> {
+    async fn source(
         &mut self,
         source: &SourcePlan,
         control: &ProductionControl<'_>,
-    ) -> Result<Option<Produced<AnalyzedSource>>, SQLError> {
-        control.check()?;
-        let Some(schema) = self.sources.remove(&NonNull::from(source)) else {
-            return Ok(None);
-        };
-        let (children, memory) = match source {
-            SourcePlan::Join { left, right, .. } => {
-                let Some(left) = self.take_source_with_control(left, control)? else {
-                    return Ok(None);
-                };
-                let Some(right) = self.take_source_with_control(right, control)? else {
-                    return Ok(None);
-                };
-                let header =
-                    control.reserve(std::mem::size_of::<(AnalyzedSource, AnalyzedSource)>())?;
-                let (left, left_memory) = left.into_parts();
-                let (right, right_memory) = right.into_parts();
-                let memory = control.combine(control.combine(left_memory, right_memory), header);
-                (Some(Box::new((left, right))), memory)
-            }
-            _ => (None, control.empty_reservation()),
-        };
-        Ok(Some(
-            control.finish(AnalyzedSource { schema, children }, memory)?,
-        ))
+        work: &mut W,
+    ) -> Result<Option<SourceMetadataUpdate>, SQLError> {
+        self.0
+            .source_metadata_from(source, control, work)
+            .await
+            .map(Some)
     }
 }
+
+impl<W: Work + Send> MetadataObserver<W> for ParameterNames<'_> {
+    fn visit_table_queries(&self) -> bool {
+        true
+    }
+
+    async fn projections(
+        &mut self,
+        projections: &[ProjectionPlan],
+        control: &ProductionControl<'_>,
+        work: &mut W,
+    ) -> Result<Option<ProjectionAliasUpdates>, SQLError> {
+        self.0
+            .projection_aliases_from(projections, control, work)
+            .await
+            .map(Some)
+    }
+}
+
+#[cfg(test)]
+mod tests;

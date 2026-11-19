@@ -115,18 +115,19 @@ fn apply_value_site<'a>(
             array_items: array_items.clone(),
         };
         sites.next();
+        let mut original = std::mem::replace(node, Expr::Literal(Value::Null));
         let Expr::InList {
             expr,
             list,
             negated,
-        } = std::mem::replace(node, Expr::Literal(Value::Null))
+        } = &mut original
         else {
             return Err(mismatch("membership comparison"));
         };
         *node = crate::type_resolution::membership::rewrite(
-            expr,
-            list,
-            negated,
+            Box::new(std::mem::replace(expr.as_mut(), Expr::Star)),
+            std::mem::take(list),
+            *negated,
             &shape,
             &uqa_core::memory::ProductionControl::uncontrolled(),
         )?
@@ -204,26 +205,26 @@ fn bind_composite_constructor(
         *current = binding;
         return Ok(changed);
     }
-    let original = std::mem::replace(node, Expr::Literal(Value::Null));
-    let mut row = match original {
-        Expr::Cast { expr, .. } => *expr,
-        row => row,
+    let mut original = std::mem::replace(node, Expr::Literal(Value::Null));
+    let mut row = match &mut original {
+        Expr::Cast { expr, .. } => std::mem::replace(expr.as_mut(), Expr::Star),
+        _ => original,
     };
-    while let Expr::Cast { ref ty, .. } = row {
+    while let Expr::Cast { expr, ty, .. } = &mut row {
         if crate::ColumnType::from_sql_name(ty).ok() != Some(crate::ColumnType::Record) {
             break;
         }
-        let Expr::Cast { expr, .. } = row else {
-            unreachable!()
-        };
-        row = *expr;
+        row = std::mem::replace(expr.as_mut(), Expr::Star);
     }
-    let Expr::Row(items) = row else {
+    let Expr::Row(items) = &mut row else {
         return Err(SQLError::Internal(
             "stored catalog binding does not match the composite constructor of its syntax".into(),
         ));
     };
-    *node = Expr::CompositeRow { items, binding };
+    *node = Expr::CompositeRow {
+        items: std::mem::take(items),
+        binding,
+    };
     Ok(true)
 }
 

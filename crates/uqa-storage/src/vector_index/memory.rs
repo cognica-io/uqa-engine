@@ -16,7 +16,7 @@ use std::{
     collections::BTreeMap,
     sync::{Arc, OnceLock},
 };
-use uqa_core::{DocId, PostingList};
+use uqa_core::{memory::MemoryReservation, DocId, PostingList};
 
 #[derive(Debug)]
 pub struct MemoryVectorIndex {
@@ -24,6 +24,7 @@ pub struct MemoryVectorIndex {
     pub(super) state: Arc<MemoryVectorState>,
     // The legacy full-map API keeps its concrete Rust type. Query and snapshot paths borrow the owned map directly and never construct this export.
     exported_vectors: OnceLock<BTreeMap<DocId, Vec<Vec<f32>>>>,
+    pub(super) image_memory: Option<MemoryReservation>,
 }
 
 impl Clone for MemoryVectorIndex {
@@ -32,6 +33,7 @@ impl Clone for MemoryVectorIndex {
             dimensions: self.dimensions,
             state: Arc::new((*self.state).clone()),
             exported_vectors: OnceLock::new(),
+            image_memory: None,
         }
     }
 }
@@ -42,6 +44,7 @@ impl MemoryVectorIndex {
             dimensions,
             state: Arc::new(MemoryVectorState::default()),
             exported_vectors: OnceLock::new(),
+            image_memory: None,
         }
     }
 
@@ -61,6 +64,7 @@ impl MemoryVectorIndex {
             dimensions: self.dimensions,
             state: Arc::clone(&self.state),
             exported_vectors: OnceLock::new(),
+            image_memory: None,
         }
     }
 
@@ -139,6 +143,40 @@ impl MemoryVectorIndex {
 }
 
 impl VectorIndex for MemoryVectorIndex {
+    fn into_memory_capture(
+        self: Box<Self>,
+        registry: &crate::memory_capture::MemoryCaptureRegistry,
+    ) -> StorageBackendResult<Box<dyn VectorIndex>> {
+        crate::vector_index::capture::ExclusiveVectorCapture::register(self, registry, None)
+    }
+
+    fn into_memory_capture_with_control(
+        self: Box<Self>,
+        registry: &crate::memory_capture::MemoryCaptureRegistry,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<Box<dyn VectorIndex>> {
+        crate::vector_index::capture::ExclusiveVectorCapture::register(
+            self,
+            registry,
+            Some(control),
+        )
+    }
+
+    fn image_reader<'a>(
+        &'a self,
+        control: &'a StorageReadControl,
+    ) -> StorageBackendResult<crate::image_io::ImageReader<'a>> {
+        super::image::read_exact(self, control)
+    }
+
+    fn write_image(
+        &self,
+        output: &mut dyn std::io::Write,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<u64> {
+        super::image::write_exact(self, output, control)
+    }
+
     fn contains_document(&self, doc_id: DocId) -> StorageBackendResult<bool> {
         Ok(self.state.vectors.contains_key(&doc_id))
     }

@@ -14,10 +14,6 @@ use crate::{
 use uqa_core::memory::ProductionControl;
 
 #[derive(Debug)]
-#[expect(
-    clippy::large_enum_variant,
-    reason = "statement owners remain inline so moving an admitted root requires no additional allocation"
-)]
 pub enum MutableExecutablePlan {
     Query(MutableQueryPlan),
     Command(MutableCommandPlan),

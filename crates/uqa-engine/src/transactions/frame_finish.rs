@@ -7,9 +7,9 @@
 //! COMMIT, ROLLBACK, and retained nontransactional sequence effects.
 
 use super::{
-    Engine, NontransactionalSequenceValues, SQLError, SessionLastSequenceReference,
-    SessionStateSnapshot, StorageBackendError, StorageBackendResult, StorageSavepointId,
-    TransactionDirtyState, TransactionFrame, TransactionIntent, TransactionStatus,
+    Engine, NontransactionalSequenceValues, SQLError, SessionStateSnapshot, StorageBackendError,
+    StorageBackendResult, StorageSavepointId, TransactionDirtyState, TransactionFrame,
+    TransactionIntent, TransactionStatus,
 };
 use crate::notifications::NotificationCommitGuard;
 use uqa_execution::row_locks::{
@@ -366,7 +366,13 @@ impl Engine {
     ) -> SQLError {
         let nontransactional_sequence_values = stack
             .first()
-            .map(|frame| frame.nontransactional_sequence_values.clone())
+            .map(|frame| {
+                frame
+                    .nontransactional_sequence_values
+                    .read()
+                    .values()
+                    .clone()
+            })
             .unwrap_or_default();
         let session_snapshot = stack.first().map(|frame| frame.session_snapshot.clone());
         let snapshot = stack.first().and_then(|frame| frame.data_snapshot.clone());
@@ -394,7 +400,9 @@ impl Engine {
             }
         }
         if self.storage.backend.is_some() {
-            self.drop_persistent_value_indexes();
+            if let Err(error) = self.drop_persistent_value_indexes() {
+                cleanup_errors.push(format!("value-index retirement: {error}"));
+            }
             self.reload_catalogs_after_rollback(&mut cleanup_errors);
         }
         if session_snapshot.is_some() {
@@ -413,7 +421,11 @@ impl Engine {
                 cleanup_errors.push(format!("notification state restore: {error}"));
             }
         }
-        self.apply_nontransactional_sequence_values(&nontransactional_sequence_values);
+        if let Err(error) =
+            self.apply_nontransactional_sequence_values(&nontransactional_sequence_values)
+        {
+            cleanup_errors.push(format!("sequence value restore: {error}"));
+        }
         if outer_notification_transaction {
             self.record_transaction_completion(if cleanup_errors.is_empty() {
                 super::ExecutionCompletion::RolledBack
@@ -569,7 +581,13 @@ impl Engine {
     ) -> Result<(), SQLError> {
         let nontransactional_sequence_values = stack
             .last()
-            .map(|frame| frame.nontransactional_sequence_values.clone())
+            .map(|frame| {
+                frame
+                    .nontransactional_sequence_values
+                    .read()
+                    .values()
+                    .clone()
+            })
             .unwrap_or_default();
         let storage_savepoint = stack
             .last()
@@ -595,7 +613,9 @@ impl Engine {
             .last()
             .map_or_else(TransactionDirtyState::default, |frame| frame.dirty_at_begin);
         self.restore_transaction_dirty_state(dirty_at_begin);
-        self.drop_persistent_value_indexes();
+        if let Err(error) = self.drop_persistent_value_indexes() {
+            cleanup_errors.push(format!("value-index retirement: {error}"));
+        }
         if self.storage.backend.is_some() {
             self.reload_catalogs_after_rollback(&mut cleanup_errors);
         }
@@ -610,7 +630,11 @@ impl Engine {
             self.session.prepared.write().values_mut(),
             &self.session.routine_bodies,
         );
-        self.apply_nontransactional_sequence_values(&nontransactional_sequence_values);
+        if let Err(error) =
+            self.apply_nontransactional_sequence_values(&nontransactional_sequence_values)
+        {
+            cleanup_errors.push(format!("sequence value restore: {error}"));
+        }
         let begin_lock_mark = frame.begin_lock_mark;
         let first_snapshot_set = frame.first_snapshot_set;
         stack.pop();
@@ -654,59 +678,15 @@ impl Engine {
         if self.storage.catalog.is_none() {
             return Ok(());
         }
-        let persistent = {
-            let sequences = self.durable.sequences.read();
-            let object_ids = self.durable.sequence_object_ids.read();
-            let persistence = self.durable.sequence_persistence.read();
-            values
-                .iter()
-                .filter_map(|(history_object_id, history)| {
-                    let (relation, object_id) = object_ids
-                        .iter()
-                        .find(|(_, object_id)| *object_id == history_object_id)?;
-                    if persistence.get(relation).copied().unwrap_or_default()
-                        == uqa_sql::ast::RelationPersistence::Temporary
-                    {
-                        return None;
-                    }
-                    let generation = sequences.get(relation)?.definition_generation;
-                    let value = history.values_by_definition.get(&generation).copied()?;
-                    (value.object_id == *object_id && !value.autonomous).then(|| {
-                        (
-                            relation.qualified_name(),
-                            value.object_id,
-                            generation,
-                            value,
-                        )
-                    })
-                })
-                .collect::<Vec<_>>()
-        };
+        let persistent =
+            uqa_execution::catalog::sequence::session::recovery::PersistentSequenceValues::select(
+                &self.durable.sequences.read(),
+                values,
+            );
         if persistent.is_empty() {
             return Ok(());
         }
-        let persist = |catalog: &dyn uqa_storage::CatalogFacade| -> StorageBackendResult<()> {
-            for (name, object_id, generation, value) in &persistent {
-                match catalog
-                    .set_sequence_value(
-                        name,
-                        *object_id,
-                        *generation,
-                        value.current,
-                        value.called,
-                        value.log_count,
-                    )? {
-                    uqa_storage::SequenceSetValueResult::Set(_) => {}
-                    uqa_storage::SequenceSetValueResult::Missing => return Err(StorageBackendError::Other(format!(
-                        "sequence `{name}` disappeared while restoring its nontransactional value"
-                    ))),
-                    uqa_storage::SequenceSetValueResult::DefinitionChanged => return Err(StorageBackendError::Other(format!(
-                        "sequence `{name}` definition changed while restoring its nontransactional value"
-                    ))),
-                }
-            }
-            Ok(())
-        };
+        let persist = |catalog: &dyn uqa_storage::CatalogFacade| persistent.persist(catalog);
         if !outer {
             return persist(self.storage.catalog.as_deref().ok_or_else(|| {
                 StorageBackendError::Other(
@@ -735,54 +715,17 @@ impl Engine {
     pub(super) fn apply_nontransactional_sequence_values(
         &self,
         values: &NontransactionalSequenceValues,
-    ) {
-        let mut sequences = self.durable.sequences.write();
-        let object_ids = self.durable.sequence_object_ids.read();
-        let mut session = self.session.state.write();
-        if let Some((history_object_id, history)) =
-            values.iter().find(|(_, history)| history.defines_lastval)
-        {
-            session.last_sequence = object_ids
-                .iter()
-                .find(|(_, object_id)| *object_id == history_object_id)
-                .map(|(relation, _)| SessionLastSequenceReference {
-                    relation: relation.clone(),
-                    object_id: history.object_id,
-                });
-        }
-        for (history_object_id, history) in values {
-            let Some((relation, object_id)) = object_ids
-                .iter()
-                .find(|(_, object_id)| *object_id == history_object_id)
-            else {
-                continue;
-            };
-            let Some(generation) = sequences
-                .get(relation)
-                .map(|sequence| sequence.definition_generation)
-            else {
-                continue;
-            };
-            if let Some(value) = history
-                .values_by_definition
-                .get(&generation)
-                .filter(|value| value.object_id == *object_id)
-            {
-                if let Some(sequence) = sequences.get_mut(relation) {
-                    sequence.current = value.current;
-                    sequence.called = value.called;
-                    sequence.log_count = value.log_count;
-                }
-            }
-            if history.object_id == *object_id {
-                session
-                    .sequence_currvals
-                    .retain(|_, current| current.object_id != *object_id);
-                if let Some(currval) = history.session_currval {
-                    session.sequence_currvals.insert(relation.clone(), currval);
-                }
-            }
-        }
+    ) -> Result<(), SQLError> {
+        let mut catalog = self.durable.sequences.write();
+        let mut session =
+            uqa_execution::catalog::sequence::values::context::SequenceValueRuntime::session_write(
+                self,
+            );
+        uqa_execution::catalog::sequence::session::recovery::restore_values(
+            &mut catalog,
+            values,
+            &mut *session,
+        )
     }
 
     pub(super) fn restore_session_state_preserving_sequences(
@@ -798,6 +741,8 @@ impl Engine {
             cleanup_errors.push(format!("sequence value restore: {error}"));
         }
         self.restore_session_state(snapshot);
-        self.apply_nontransactional_sequence_values(values);
+        if let Err(error) = self.apply_nontransactional_sequence_values(values) {
+            cleanup_errors.push(format!("sequence value restore: {error}"));
+        }
     }
 }

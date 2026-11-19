@@ -13,7 +13,7 @@ use super::{
     },
     sequences::role_ownership::{
         table_owned_sequence_owner_updates, OwnedSequenceSecurityCatalog,
-        OwnedSequenceSecurityWrite, SequenceSecurityPublication,
+        SequenceSecurityPublication,
     },
 };
 use crate::catalog::security::roles::dependencies::{prepare_role_owner, RoleDependencyCandidate};
@@ -33,10 +33,6 @@ use uqa_sql::{
 };
 use uqa_storage::StorageBackendResult;
 
-pub type ForeignTableRegistryWrite<'a> =
-    Box<dyn DerefMut<Target = BTreeMap<RelationIdentity, StoredForeignTable>> + 'a>;
-pub type ForeignSecurityRegistryWrite<'a> =
-    Box<dyn DerefMut<Target = BTreeMap<RelationIdentity, BoundTableSecurity>> + 'a>;
 pub type ForeignMemoryRegistryWrite<'a> =
     Box<dyn DerefMut<Target = BTreeMap<RelationIdentity, Vec<uqa_sql::ResultRow>>> + 'a>;
 
@@ -56,16 +52,16 @@ pub trait ForeignTableAlterPublication {
         &self,
         relation: &RelationIdentity,
         table: &StoredForeignTable,
+        security: &BoundTableSecurity,
     ) -> StorageBackendResult<()>;
     fn persist_rename(
         &self,
         from: &RelationIdentity,
         to: &RelationIdentity,
     ) -> StorageBackendResult<Option<bool>>;
-    fn tables_write(&self) -> ForeignTableRegistryWrite<'_>;
-    fn security_write(&self) -> ForeignSecurityRegistryWrite<'_>;
+    fn foreign_catalog(&self) -> crate::catalog::foreign::ForeignCatalog;
+    fn publish_foreign_catalog(&self, catalog: crate::catalog::foreign::ForeignCatalog);
     fn memory_tables_write(&self) -> ForeignMemoryRegistryWrite<'_>;
-    fn sequence_security_write(&self) -> OwnedSequenceSecurityWrite<'_>;
     fn persist_security(
         &self,
         relation: &RelationIdentity,
@@ -260,6 +256,12 @@ fn alter_foreign_table_role_owner(
         owner.require_name(&roles)?,
         &roles,
     )?;
+    let mut next = context.publication.foreign_catalog();
+    next.replace_security(&relation, security.clone())?;
+    let mut sequence_catalog = context.sequence_publication.sequence_catalog();
+    for (sequence, security) in &sequence_updates {
+        sequence_catalog.replace_security(sequence, security.clone())?;
+    }
     for (sequence, sequence_security) in &sequence_updates {
         context.sequence_publication.persist_security(
             &sequence.qualified_name(),
@@ -268,15 +270,11 @@ fn alter_foreign_table_role_owner(
         )?;
     }
     context.publication.persist_security(&relation, &security)?;
-    context
-        .publication
-        .security_write()
-        .insert(relation.clone(), security);
+    context.publication.publish_foreign_catalog(next);
     if !sequence_updates.is_empty() {
-        let mut registry = context.publication.sequence_security_write();
-        for (sequence, sequence_security) in sequence_updates {
-            registry.insert(sequence, sequence_security);
-        }
+        context
+            .sequence_publication
+            .publish_sequences(sequence_catalog);
     }
     drop(memberships);
     drop(roles);
@@ -349,6 +347,27 @@ fn rename_foreign_table_to(
             ))
         },
     )?;
+    let mut next = context.publication.foreign_catalog();
+    if next.tables().contains_key(&target) {
+        return Err(SQLError::Internal(format!(
+            "foreign table rename target `{}` appeared after preflight",
+            target.qualified_name()
+        )));
+    }
+    let security = next
+        .security()
+        .get(relation)
+        .cloned()
+        .ok_or_else(|| SQLError::Internal("renamed foreign authority disappeared".into()))?;
+    let mut table = next
+        .tables()
+        .get(relation)
+        .cloned()
+        .ok_or_else(|| SQLError::Internal("renamed foreign table disappeared".into()))?;
+    table.name = target.qualified_name();
+    table.row_type_array_name = array_name;
+    next.remove(relation)?;
+    next.insert(target.clone(), table.clone(), security.clone())?;
     if current.persistence != uqa_sql::ast::RelationPersistence::Temporary
         && context
             .publication
@@ -367,40 +386,11 @@ fn rename_foreign_table_to(
             relation.qualified_name()
         )));
     }
-    let mut tables = context.publication.tables_write();
-    let mut security = context.publication.security_write();
-    if tables.contains_key(&target) || security.contains_key(&target) {
-        return Err(SQLError::Internal(format!(
-            "foreign table rename target `{}` appeared after preflight",
-            target.qualified_name()
-        )));
-    }
-    let mut table = tables.remove(relation).ok_or_else(|| {
-        SQLError::Internal(format!(
-            "foreign table `{}` disappeared during rename",
-            relation.qualified_name()
-        ))
-    })?;
-    let table_security = security.remove(relation).ok_or_else(|| {
-        SQLError::Internal(format!(
-            "foreign table `{}` lost its security metadata during rename",
-            relation.qualified_name()
-        ))
-    })?;
-    table.name = target.qualified_name();
-    table.row_type_array_name = array_name;
-    tables.insert(target.clone(), table);
-    security.insert(target.clone(), table_security);
-    drop(security);
-    drop(tables);
-    let renamed = context
-        .catalog
-        .table(&target)
-        .ok_or_else(|| SQLError::Internal("renamed foreign table disappeared".into()))?;
     context
         .publication
-        .persist_definition(&target, &renamed)
+        .persist_definition(&target, &table, &security)
         .map_err(|error| uqa_sql::catalog::errors::storage_error("foreign array rename", &error))?;
+    context.publication.publish_foreign_catalog(next);
     let mut memory_tables = context.publication.memory_tables_write();
     if let Some(rows) = memory_tables.remove(relation) {
         memory_tables.insert(target.clone(), rows);

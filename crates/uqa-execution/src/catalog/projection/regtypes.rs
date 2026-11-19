@@ -22,13 +22,16 @@ mod row_types;
 pub use format_type::{format_type_name, format_type_name_with_control, format_type_value};
 use relation_oid::lookup_regclass_oid;
 pub use relation_oid::resolve_bound_regclass_oid;
-pub use row_types::{format_type_object, resolve_type_object_oid, row_type_relation};
+pub use row_types::{
+    format_type_object, resolve_type_object_oid, row_type_relation, type_object_array_element,
+};
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use uqa_core::Value;
 use uqa_sql::ast::ColumnType;
+use uqa_sql::catalog::regobject::{numeric_regobject_oid, NumericRegobjectOid};
 use uqa_sql::{ResultRow, SQLError};
 
 use crate::catalog::context::CatalogContext;
@@ -46,10 +49,11 @@ pub use procedures::{resolve_regprocedure_input_oid, routine_name_parts};
 
 pub use type_names::{
     catalog_routine_type_oid, catalog_routine_type_oid_with_control, catalog_user_type_identity,
-    catalog_user_type_identity_with_control, catalog_user_type_name_with_control,
-    named_type_exists, resolve_catalog_column_type, resolve_catalog_column_type_name_with_control,
-    resolve_catalog_column_type_with_control, resolve_catalog_user_type_by_oid,
-    resolve_catalog_user_type_by_oid_with_control, CatalogEnumLabels,
+    catalog_user_type_identity_with_control, catalog_user_type_name_identity_from_input,
+    catalog_user_type_name_with_control, named_type_exists, resolve_catalog_column_type,
+    resolve_catalog_column_type_name_with_control, resolve_catalog_column_type_with_control,
+    resolve_catalog_user_type_by_oid, resolve_catalog_user_type_by_oid_with_control,
+    routine_type_name_identity_from_input, CatalogEnumLabels,
 };
 
 fn cross_database_reference(name: &str) -> SQLError {
@@ -60,34 +64,6 @@ fn cross_database_reference(name: &str) -> SQLError {
 
 fn qualified_name_list(names: &[String]) -> String {
     names.join(".")
-}
-
-enum NumericRegobjectOid {
-    NotNumeric,
-    Valid(i64),
-    InvalidSyntax,
-    OutOfRange,
-}
-
-fn numeric_regobject_oid(input: &str) -> NumericRegobjectOid {
-    if input == "-" {
-        return NumericRegobjectOid::Valid(0);
-    }
-    if input.is_empty() || !input.bytes().all(|byte| byte.is_ascii_digit()) {
-        return NumericRegobjectOid::NotNumeric;
-    }
-    let radix = if input.len() > 1 && input.starts_with('0') {
-        8
-    } else {
-        10
-    };
-    match u32::from_str_radix(input, radix) {
-        Ok(oid) => NumericRegobjectOid::Valid(i64::from(oid)),
-        Err(error) if matches!(error.kind(), std::num::IntErrorKind::InvalidDigit) => {
-            NumericRegobjectOid::InvalidSyntax
-        }
-        Err(_) => NumericRegobjectOid::OutOfRange,
-    }
 }
 
 /// `parseDashOrOid`: `-` is the invalid OID and a string of digits is an OID `oidin` reads, which reports `22P02` for digits `strtoul` cannot read as one number and `22003` for a value past `uint32`; any other string is a name.

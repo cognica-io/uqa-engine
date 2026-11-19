@@ -20,6 +20,28 @@ pub fn validate_row_type(
     exact_columns: bool,
     reject_child_identity: bool,
 ) -> Result<(), SQLError> {
+    validate_row_type_with_control(
+        parent_columns,
+        child_columns,
+        parent,
+        child,
+        exact_columns,
+        reject_child_identity,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
+}
+
+/// Borrow original row declarations under the invoking allowance; no row or constraint is reconstructed.
+pub fn validate_row_type_with_control(
+    parent_columns: &[ColumnDef],
+    child_columns: &[ColumnDef],
+    parent: &str,
+    child: &str,
+    exact_columns: bool,
+    reject_child_identity: bool,
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<(), SQLError> {
+    control.check()?;
     validate_attached_columns(
         parent_columns,
         child_columns,
@@ -27,12 +49,19 @@ pub fn validate_row_type(
         child,
         exact_columns,
         reject_child_identity,
+        control,
     )?;
     for parent_column in parent_columns {
-        let Some(child_column) = child_columns
-            .iter()
-            .find(|column| column.name == parent_column.name)
-        else {
+        control.check()?;
+        let mut child_column = None;
+        for candidate in child_columns {
+            control.check()?;
+            if candidate.name == parent_column.name {
+                child_column = Some(candidate);
+                break;
+            }
+        }
+        let Some(child_column) = child_column else {
             return Err(routine(
                 "42804",
                 format!("child table is missing column \"{}\"", parent_column.name),
@@ -51,8 +80,10 @@ fn validate_attached_columns(
     child: &str,
     exact_columns: bool,
     reject_child_identity: bool,
+    control: &uqa_core::memory::ProductionControl<'_>,
 ) -> Result<(), SQLError> {
     for column in child_columns {
+        control.check()?;
         if reject_child_identity
             && column
                 .auto_increment
@@ -70,11 +101,17 @@ fn validate_attached_columns(
                 hint: None,
             });
         }
-        if exact_columns
-            && !parent_columns
-                .iter()
-                .any(|parent_column| parent_column.name == column.name)
-        {
+        let mut found = !exact_columns;
+        if exact_columns {
+            for parent_column in parent_columns {
+                control.check()?;
+                if parent_column.name == column.name {
+                    found = true;
+                    break;
+                }
+            }
+        }
+        if !found {
             return Err(SQLError::Diagnostic {
                 sqlstate: "42804".into(),
                 message: format!(
@@ -286,11 +323,53 @@ pub fn append_inherited_keys_matching(
 }
 
 pub fn key_equivalent(left: &TableKeyConstraint, right: &TableKeyConstraint) -> bool {
-    left.kind == right.kind
-        && left.columns == right.columns
-        && left.included_columns == right.included_columns
-        && left.nulls_not_distinct == right.nulls_not_distinct
-        && left.without_overlaps == right.without_overlaps
+    crate::catalog::work::inline(key_equivalent_from(
+        left,
+        right,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+        &mut (),
+    ))
+    .expect("uncontrolled key comparison")
+}
+
+pub(crate) async fn key_equivalent_from(
+    left: &TableKeyConstraint,
+    right: &TableKeyConstraint,
+    control: &uqa_core::memory::ProductionControl<'_>,
+    work: &mut impl crate::catalog::work::Work,
+) -> Result<bool, crate::SQLError> {
+    control.check()?;
+    if left.kind != right.kind {
+        return Ok(false);
+    }
+    for (left, right) in [
+        (&left.columns, &right.columns),
+        (&left.included_columns, &right.included_columns),
+    ] {
+        if left.len() != right.len() {
+            return Ok(false);
+        }
+        for (left, right) in left.iter().zip(right) {
+            work.checkpoint().await?;
+            control.check()?;
+            if left.len() != right.len() {
+                return Ok(false);
+            }
+            for (left, right) in left
+                .as_bytes()
+                .chunks(4096)
+                .zip(right.as_bytes().chunks(4096))
+            {
+                work.checkpoint().await?;
+                control.check()?;
+                if left != right {
+                    return Ok(false);
+                }
+            }
+        }
+    }
+    Ok(left.nulls_not_distinct == right.nulls_not_distinct
+        && left.without_overlaps == right.without_overlaps)
 }
 
 pub fn clear_partition_constraint_provenance(constraints: &mut crate::ast::TableConstraintSet) {

@@ -9,18 +9,14 @@
 use super::{diagnostics, matching, selection};
 use crate::{
     ast::{FunctionBinding, RoutineInvocationBinding, RoutineVariadicMode},
-    routines::{
-        resolution::{RoutineCallKind, RoutineOverloadContext},
-        SQLUserFunction,
-    },
+    routines::resolution::{RoutineCallKind, RoutineOverloadContext},
     type_resolution::RoutineCallDescriptor,
     ColumnType, SQLError,
 };
-use std::sync::Arc;
 use uqa_core::memory::{Produced, ProductionControl};
 
 pub struct OwnedStaticFunctionMatch {
-    pub function: Arc<SQLUserFunction>,
+    pub function: crate::routines::SQLRoutine,
     pub invocation: Produced<RoutineInvocationBinding>,
 }
 

@@ -7,7 +7,7 @@
 //! Native metadata generations supply identity; SQL and Execution own description reuse.
 
 use super::ScopedEngineHook;
-use std::sync::{Arc, Weak};
+use uqa_core::memory::RetainedValueIdentity;
 use uqa_core::{catalog_role::RoleIdentity, memory::ProductionControl, Value};
 use uqa_execution::routines::invocation::{self, context::RoutineCallRetention};
 use uqa_sql::{
@@ -21,7 +21,7 @@ use uqa_sql::{
 
 pub(super) struct NativeRoutineScope {
     revision: u64,
-    registry: Weak<RoutineRegistry>,
+    registry: RetainedValueIdentity<RoutineRegistry>,
     role: RoleIdentity,
     identity: RoutineDescriptionScope,
 }
@@ -44,14 +44,12 @@ impl ScopedEngineHook<'_> {
             .identity();
         let saved = self.routine_scope.get_or_init(|| NativeRoutineScope {
             revision,
-            registry: Arc::downgrade(&registry),
+            registry: registry.identity(),
             role,
             identity: RoutineDescriptionScope::default(),
         });
-        (saved.revision == revision
-            && saved.role == role
-            && Weak::ptr_eq(&saved.registry, &Arc::downgrade(&registry)))
-        .then(|| saved.identity.clone())
+        (saved.revision == revision && saved.role == role && saved.registry.matches(&registry))
+            .then(|| saved.identity.clone())
     }
 
     pub(super) fn call_described_routine(

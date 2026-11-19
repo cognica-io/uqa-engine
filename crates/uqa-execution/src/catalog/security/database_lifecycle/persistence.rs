@@ -6,26 +6,19 @@
 
 //! Versioned database security stores bound role references and converts legacy names once.
 
-use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
-use uqa_sql::catalog::{
-    roles::RoleDefinition,
-    security::database::{binding::BoundDatabaseSecurity, DatabaseSecurity},
+use uqa_sql::catalog::roles::RoleDefinitions;
+use uqa_sql::catalog::security::database::{
+    binding::BoundDatabaseSecurity, DatabaseAuthority, DatabaseSecurity,
 };
 use uqa_storage::{CatalogFacade, StorageBackendError, StorageBackendResult};
 
 use super::DATABASE_SECURITY_METADATA_KEY;
 
-#[derive(Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct StoredDatabaseSecurity<T> {
-    database_security_format: u32,
-    security: T,
-}
+use uqa_sql::catalog::security::database::stored::StoredSecurity as StoredDatabaseSecurity;
 
 pub(super) fn encode(
     security: &BoundDatabaseSecurity,
-    roles: &BTreeMap<String, RoleDefinition>,
+    roles: &RoleDefinitions,
 ) -> StorageBackendResult<String> {
     security
         .validate(roles)
@@ -38,9 +31,10 @@ pub(super) fn encode(
 
 pub(super) fn restore(
     catalog: &dyn CatalogFacade,
-    roles: &BTreeMap<String, RoleDefinition>,
+    roles: &RoleDefinitions,
     allow_migration: bool,
-) -> StorageBackendResult<BoundDatabaseSecurity> {
+    current: &DatabaseAuthority,
+) -> StorageBackendResult<DatabaseAuthority> {
     let json = catalog.get_metadata(DATABASE_SECURITY_METADATA_KEY)?;
     let value = json
         .as_deref()
@@ -62,7 +56,9 @@ pub(super) fn restore(
             .security
             .validate(roles)
             .map_err(StorageBackendError::Other)?;
-        return Ok(stored.security);
+        return current.successor(&stored.security).map_err(|error| {
+            StorageBackendError::backend("database authority restoration", error)
+        });
     }
     if !allow_migration {
         return Err(StorageBackendError::Other(
@@ -75,8 +71,11 @@ pub(super) fn restore(
     } else {
         BoundDatabaseSecurity::bootstrap()
     };
-    catalog.set_metadata(DATABASE_SECURITY_METADATA_KEY, &encode(&bound, roles)?)?;
-    Ok(bound)
+    let next = current
+        .successor(&bound)
+        .map_err(|error| StorageBackendError::backend("database authority restoration", error))?;
+    catalog.set_metadata(DATABASE_SECURITY_METADATA_KEY, &encode(&next, roles)?)?;
+    Ok(next)
 }
 
 #[cfg(test)]

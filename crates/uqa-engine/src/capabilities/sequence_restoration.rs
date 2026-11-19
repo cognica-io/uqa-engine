@@ -7,14 +7,11 @@
 //! Lend sequence registry guards and retain the original concrete publication order.
 use crate::Engine;
 use uqa_execution::catalog::sequence::restoration::{
-    RestoredSequenceRegistry, SequencePersistenceRead, SequenceRestoreContext,
-    SequenceRestoreRegistry,
+    RestoredSequenceRegistry, SequenceRestoreContext, SequenceRestoreRegistry,
 };
 impl Engine {
     pub(crate) fn sequence_restore_context(&self) -> SequenceRestoreContext<'_> {
         SequenceRestoreContext {
-            sequences: self,
-            security: self,
             registry: self,
             roles: self,
         }
@@ -28,28 +25,15 @@ impl Engine {
         self.durable
             .role_memberships
             .restore(&snapshot.roles.memberships);
-        self.durable.sequences.restore(&snapshot.sequences);
-        self.durable
-            .sequence_object_ids
-            .restore(&snapshot.object_ids);
-        self.durable
-            .sequence_catalog_oids
-            .restore(&snapshot.catalog_oids);
-        self.durable
-            .sequence_persistence
-            .restore(&snapshot.persistence);
-        self.durable.sequence_security.restore(&snapshot.security);
+        self.durable.sequences.restore(&snapshot.catalog);
     }
 }
 impl SequenceRestoreRegistry for Engine {
-    fn persistence(&self) -> SequencePersistenceRead<'_> {
-        Box::new(self.durable.sequence_persistence.read())
+    fn read(&self) -> uqa_execution::catalog::sequence::registry::SequenceCatalogRead<'_> {
+        Box::new(self.durable.sequences.read())
     }
     fn install(&self, registry: RestoredSequenceRegistry) {
-        *self.durable.sequences.write() = registry.sequences;
-        *self.durable.sequence_object_ids.write() = registry.object_ids;
-        *self.durable.sequence_persistence.write() = registry.persistence;
-        *self.durable.sequence_security.write() = registry.security;
+        *self.durable.sequences.write() = registry;
     }
 }
 
@@ -58,11 +42,7 @@ impl crate::DurableCatalogSnapshot {
         &self,
     ) -> uqa_execution::catalog::sequence::snapshot::SequenceReadSnapshot {
         uqa_execution::catalog::sequence::snapshot::SequenceReadSnapshot {
-            sequences: self.sequences.clone(),
-            object_ids: self.sequence_object_ids.clone(),
-            persistence: self.sequence_persistence.clone(),
-            security: self.sequence_security.clone(),
-            catalog_oids: self.sequence_catalog_oids.clone(),
+            catalog: self.sequences.clone(),
             roles: uqa_execution::catalog::security::roles::persistence::RoleCatalogSnapshot {
                 roles: self.roles.clone(),
                 memberships: self.role_memberships.clone(),
@@ -101,23 +81,14 @@ impl Engine {
     ) -> uqa_storage::StorageBackendResult<
         std::collections::BTreeMap<uqa_core::RelationIdentity, crate::SequenceState>,
     > {
-        let Some(positions) = self.shared_sequence_positions() else {
-            return Ok((*snapshot.sequences).clone());
-        };
-        let positions = positions
-            .sequence_positions()
-            .map_err(|error| uqa_storage::StorageBackendError::Other(error.to_string()))?;
-        Ok(snapshot
-            .sequences
-            .iter()
-            .map(|(relation, state)| {
-                let position = snapshot
-                    .object_ids
-                    .get(relation)
-                    .and_then(|object_id| positions.get(&state.position_key(*object_id)));
-                (relation.clone(), state.at_position(position.copied()))
-            })
-            .collect())
+        let positions = self
+            .shared_sequence_positions()
+            .map(|positions| positions.sequence_positions())
+            .transpose()
+            .map_err(|error| {
+                uqa_storage::StorageBackendError::backend("read sequence positions", error)
+            })?;
+        Ok(snapshot.states_at_positions(positions.as_ref()))
     }
 
     /// Public sequence metadata retains an attached or query-owned catalog; ordinary value operations use the independent sequence source.

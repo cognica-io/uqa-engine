@@ -30,10 +30,12 @@ pub(super) fn domain(name: &str, id: u8) -> StoredDomain {
 }
 
 fn registry(domains: Vec<StoredDomain>) -> DomainRegistry {
-    domains
-        .into_iter()
-        .map(|domain| (domain.identity.qualified_name(), domain))
-        .collect()
+    DomainRegistry::try_from_iter(
+        domains
+            .into_iter()
+            .map(|domain| (domain.identity.qualified_name(), domain)),
+    )
+    .unwrap()
 }
 
 #[test]
@@ -188,18 +190,22 @@ fn private_domain_merge_retains_only_its_own_replacements_and_deletions() {
         domain("private", 7),
         domain("untouched", 4),
     ]);
-    let committed = Arc::new(registry(vec![
+    let committed = uqa_core::memory::RetainedValue::new(registry(vec![
         domain("a", 1),
         domain("peer", 3),
         domain("removed", 2),
         domain("untouched", 5),
     ]));
-    let result = merge_private_records(&current, Arc::clone(&committed), |name| {
-        Ok(matches!(
-            name,
-            "public.a" | "public.private" | "public.removed"
-        ))
-    })
+    let result = merge_private_records(
+        &current,
+        uqa_core::memory::RetainedValue::clone(&committed),
+        |name| {
+            Ok(matches!(
+                name,
+                "public.a" | "public.private" | "public.removed"
+            ))
+        },
+    )
     .unwrap();
     assert_eq!(
         result.keys().cloned().collect::<Vec<_>>(),

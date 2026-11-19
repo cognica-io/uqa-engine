@@ -20,6 +20,8 @@ use crate::{
 
 use super::{PersistentGraphStore, ID_PAGE_SIZE};
 
+mod registry;
+
 /// A database-local physical graph namespace. Catalog graphs share one namespace; standalone families use their canonical provider scope. A transactional clear selects a new generation.
 pub struct GraphIdentifierScope<'a> {
     allocator: &'a dyn IdentifierAllocator,
@@ -116,29 +118,12 @@ impl<'a> GraphIdentifierScope<'a> {
         graph: &str,
         registry: &mut GraphLabelRegistry,
     ) -> GraphStoreResult<()> {
-        if registry.allocation_id == [0; 16] {
-            registry.allocation_id = self.legacy_graph_identity(graph);
-        }
-        if let Some(last) = self.watermark(&self.label_key(registry.allocation_id))? {
-            let next = last
-                .checked_add(1)
-                .and_then(|value| u32::try_from(value).ok())
-                .ok_or_else(|| {
-                    GraphStoreError::CorruptGraph("invalid label allocation watermark".into())
-                })?;
-            registry.next_label_id = registry.next_label_id.max(next);
-        }
-        for label in registry.labels() {
-            let key = self.sequence_key(registry.allocation_id, label.id);
-            if let Some(value) = self.watermark(&key)? {
-                registry
-                    .sequences
-                    .entry(label.id)
-                    .and_modify(|old| *old = (*old).max(value))
-                    .or_insert(value);
-            }
-        }
-        Ok(())
+        crate::image_work::inline(self.restore_registry_with(
+            graph,
+            registry,
+            &uqa_core::memory::ProductionControl::uncontrolled(),
+            &mut (),
+        ))
     }
 }
 

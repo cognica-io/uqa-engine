@@ -44,7 +44,7 @@ fn live_sequence_refresh_keeps_roles_and_private_dependencies_with_current_value
                 assert!(temporary_names.first().unwrap().ends_with(".temp_ids"));
                 let roles = engine.durable.roles.read();
                 assert!(roles.contains_key("private_reader"));
-                for security in engine.durable.sequence_security.read().values() {
+                for security in engine.durable.sequences.read().security().values() {
                     let security = security.resolve(&roles).unwrap();
                     assert!(
                         roles.contains_key(&security.role_owner),
@@ -62,7 +62,12 @@ fn live_sequence_refresh_keeps_roles_and_private_dependencies_with_current_value
                 }
                 drop(roles);
                 assert_eq!(
-                    engine.durable.sequences.read()[&RelationIdentity::new("public", "ids")]
+                    engine
+                        .durable
+                        .sequences
+                        .read()
+                        .state(&RelationIdentity::new("public", "ids"))
+                        .unwrap()
                         .current,
                     77
                 );

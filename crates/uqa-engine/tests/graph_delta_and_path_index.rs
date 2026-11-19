@@ -196,3 +196,100 @@ fn graph_delta_with_spilled_endpoints_preserves_atomicity_across_providers() {
             .unwrap());
     }
 }
+
+#[test]
+fn native_graph_admission_failure_preserves_engine_rollback_and_reuse() {
+    use std::sync::Arc;
+    use uqa_core::memory::MemoryBudget;
+    use uqa_graph::{GraphStoreHandle, MemoryGraphStore};
+    use uqa_storage::read_control::StorageReadControl;
+
+    let memory = MemoryBudget::new(1 << 20);
+    let mut native = MemoryGraphStore::with_memory(&memory);
+    native.create_graph("g").unwrap();
+    native.add_vertex(Vertex::new(1, "P"), "g").unwrap();
+    native.add_vertex(Vertex::new(2, "P"), "g").unwrap();
+    native.add_edge(Edge::new(10, 1, 2, "knows"), "g").unwrap();
+    let original = Arc::new(GraphStoreHandle::Memory(native.clone()));
+    let retained_control = StorageReadControl::with_limit(1 << 20);
+    let captured = original
+        .capture_image_with_control(&retained_control)
+        .unwrap();
+    let mut expected = Vec::new();
+    captured
+        .write_image(&mut expected, &StorageReadControl::with_limit(1))
+        .unwrap();
+    drop(original);
+
+    let engine = Engine::new();
+    engine.create_graph("g").unwrap();
+    engine
+        .graph_with_mut("g", |handle| {
+            *handle = GraphStoreHandle::Memory(native);
+            Ok(())
+        })
+        .unwrap()
+        .unwrap();
+    engine
+        .build_path_index("edge", "g", &[vec!["knows".into()]])
+        .unwrap();
+
+    for explicit in [false, true] {
+        if explicit {
+            engine.sql("BEGIN", &[]).unwrap();
+        }
+        let held = memory.reserve(memory.available()).unwrap();
+        let error = engine
+            .add_graph_vertex(Vertex::new(3, "denied"), "g")
+            .unwrap_err();
+        assert_eq!(
+            uqa_execution::storage_errors::storage_error("graph mutation", &error).sqlstate(),
+            Some("53200")
+        );
+        if explicit {
+            engine.sql("ROLLBACK", &[]).unwrap();
+        }
+        assert_eq!(
+            engine
+                .graph_with("g", |graph| graph.vertex_ids_in_graph("g").unwrap())
+                .unwrap()
+                .unwrap()
+                .into_iter()
+                .collect::<Vec<_>>(),
+            vec![1, 2]
+        );
+        assert_eq!(
+            engine
+                .get_path_index("edge", "g")
+                .unwrap()
+                .unwrap()
+                .lookup(&["knows".into()])
+                .unwrap()
+                .unwrap()
+                .into_iter()
+                .collect::<Vec<_>>(),
+            vec![(1, 2)]
+        );
+        drop(held);
+    }
+    engine
+        .add_graph_vertex(Vertex::new(3, "accepted"), "g")
+        .unwrap();
+    assert!(engine
+        .graph_with("g", |graph| graph
+            .vertex_ids_in_graph("g")
+            .unwrap()
+            .contains(&3))
+        .unwrap()
+        .unwrap());
+    drop(engine);
+    let mut actual = Vec::new();
+    captured
+        .write_image(&mut actual, &StorageReadControl::with_limit(1))
+        .unwrap();
+    assert_eq!(actual, expected);
+    assert!(memory.used() > 0);
+    drop(captured);
+    assert_eq!(memory.used(), 0);
+    assert_eq!(retained_control.memory().used(), 0);
+}

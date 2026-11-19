@@ -12,7 +12,6 @@ use super::{
     security::{roles::persistence::RoleCatalogSnapshot, SequenceSecurity},
     sequence::{snapshot::SequenceSnapshotSource, SequenceState},
 };
-use std::collections::BTreeMap;
 use uqa_core::{RelationIdentity, Value};
 use uqa_sql::{
     ast::{RelationPersistence, SequenceDataType},
@@ -24,18 +23,16 @@ use uqa_sql::{
 };
 use uqa_storage::StorageBackendResult;
 
-pub type SequenceObjectIdsRead<'a> =
-    Box<dyn std::ops::Deref<Target = BTreeMap<RelationIdentity, [u8; 16]>> + 'a>;
-pub type SequenceStatesRead<'a> =
-    Box<dyn std::ops::Deref<Target = BTreeMap<RelationIdentity, SequenceState>> + 'a>;
-
-/// Live sequence registry inputs for definition publication and ownership checks.
+/// Live complete sequence registry inputs for definition publication and ownership checks.
 pub trait SequenceIntrospectionCatalog {
     fn refresh_sequences(&self) -> StorageBackendResult<()>;
-    fn object_ids(&self) -> SequenceObjectIdsRead<'_>;
-    fn states(&self) -> SequenceStatesRead<'_>;
-    fn sequence_state(&self, relation: &RelationIdentity) -> Option<SequenceState>;
-    fn sequence_persistence(&self, relation: &RelationIdentity) -> Option<RelationPersistence>;
+    fn registry(&self) -> super::sequence::registry::SequenceCatalogRead<'_>;
+    fn sequence_state(&self, relation: &RelationIdentity) -> Option<SequenceState> {
+        self.registry().state(relation).copied()
+    }
+    fn sequence_persistence(&self, relation: &RelationIdentity) -> Option<RelationPersistence> {
+        self.registry().persistence(relation)
+    }
 }
 
 pub struct SequenceIntrospectionContext<'a> {
@@ -58,11 +55,11 @@ impl SequenceIntrospectionContext<'_> {
             return Ok(Value::Null);
         };
         let snapshot = self.snapshots.sequence_read_snapshot().map_err(|error| {
-            SQLError::Internal(format!("load sequence ownership catalog: {error}"))
+            crate::storage_errors::storage_error("load sequence ownership catalog", &error)
         })?;
         let sequence = snapshot
-            .sequences
-            .iter()
+            .catalog
+            .states()
             .find(|(_, state)| {
                 state.owner.is_some_and(|owner| {
                     owner.table_object_id == owner_column.table_object_id
@@ -246,38 +243,41 @@ fn read_sequence(
     oid: i64,
 ) -> Result<Option<IntrospectionSequence>, SQLError> {
     let snapshot = catalog.sequence_read_snapshot().map_err(|error| {
-        SQLError::Internal(format!("load sequences for introspection: {error}"))
+        crate::storage_errors::storage_error("load sequences for introspection", &error)
     })?;
     let Some(relation) = snapshot.relation_with_oid(oid) else {
         return Ok(None);
     };
-    let state = snapshot.sequences.get(&relation).copied().ok_or_else(|| {
+    let state = snapshot.catalog.state(&relation).copied().ok_or_else(|| {
         SQLError::Internal(format!(
             "sequence `{}` disappeared",
             relation.qualified_name()
         ))
     })?;
-    let position = match snapshot.object_ids.get(&relation) {
+    let position = match snapshot.catalog.object_id(&relation) {
         Some(object_id) => catalog
             .sequence_position(state.position_key(*object_id))
-            .map_err(|error| SQLError::Internal(format!("read sequence position: {error}")))?,
+            .map_err(|error| {
+                crate::storage_errors::storage_error("read sequence position", &error)
+            })?,
         None => None,
     };
     let state = state.at_position(position);
-    let security = snapshot.security.get(&relation).cloned().ok_or_else(|| {
-        SQLError::Internal(format!(
-            "sequence `{}` has no security metadata",
-            relation.qualified_name()
-        ))
-    })?;
+    let security = snapshot
+        .catalog
+        .security()
+        .get(&relation)
+        .cloned()
+        .ok_or_else(|| {
+            SQLError::Internal(format!(
+                "sequence `{}` has no security metadata",
+                relation.qualified_name()
+            ))
+        })?;
     let security = security
         .resolve(&snapshot.roles.roles)
         .map_err(SQLError::Internal)?;
-    let persistence = snapshot
-        .persistence
-        .get(&relation)
-        .copied()
-        .unwrap_or_default();
+    let persistence = snapshot.catalog.persistence(&relation).unwrap_or_default();
     Ok(Some(IntrospectionSequence {
         relation,
         state,

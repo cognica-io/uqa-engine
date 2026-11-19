@@ -21,7 +21,7 @@ pub use visibility::{
 pub fn lookup_sql_functions_by_keys(
     registry: &RoutineRegistry,
     keys: impl IntoIterator<Item = String>,
-) -> Option<Vec<Arc<SQLUserFunction>>> {
+) -> Option<Vec<crate::routines::SQLRoutine>> {
     let mut visible = Vec::new();
     visibility::visit_visible(
         registry,
@@ -39,7 +39,7 @@ pub fn lookup_sql_functions_by_keys(
 pub fn lookup_bound_sql_functions_by_binding(
     registry: &RoutineRegistry,
     binding: &FunctionBinding,
-) -> Option<Vec<Arc<SQLUserFunction>>> {
+) -> Option<Vec<crate::routines::SQLRoutine>> {
     let Some(object_id) = binding.object_id else {
         return lookup_sql_functions_by_keys(registry, std::iter::once(binding.name.clone()));
     };
@@ -56,7 +56,7 @@ pub fn lookup_bound_sql_functions_by_binding(
 pub fn lookup_sql_routine_candidates_by_keys(
     registry: &RoutineRegistry,
     keys: impl IntoIterator<Item = String>,
-) -> Option<Vec<Arc<SQLUserFunction>>> {
+) -> Option<Vec<crate::routines::SQLRoutine>> {
     let candidates = keys
         .into_iter()
         .filter_map(|key| registry.get(&key))
@@ -68,7 +68,7 @@ pub fn lookup_sql_routine_candidates_by_keys(
 pub fn lookup_bound_sql_routine_candidates_by_binding(
     registry: &RoutineRegistry,
     binding: &FunctionBinding,
-) -> Option<Vec<Arc<SQLUserFunction>>> {
+) -> Option<Vec<crate::routines::SQLRoutine>> {
     if binding.object_id.is_some() {
         lookup_bound_sql_functions_by_binding(registry, binding)
     } else {
@@ -78,10 +78,10 @@ pub fn lookup_bound_sql_routine_candidates_by_binding(
 
 /// Match the first retained scalar identity without copying the registry's candidate vector or declared signature.
 pub fn select_bound_function_with_control<'a>(
-    candidates: impl Iterator<Item = &'a Arc<SQLUserFunction>>,
+    candidates: impl Iterator<Item = &'a crate::routines::SQLRoutine>,
     binding: &FunctionBinding,
     control: &uqa_core::memory::ProductionControl<'_>,
-) -> Result<Option<Arc<SQLUserFunction>>, crate::SQLError> {
+) -> Result<Option<crate::routines::SQLRoutine>, crate::SQLError> {
     control.check()?;
     if binding.builtin || binding.resolution_error.is_some() {
         return Ok(None);
@@ -99,11 +99,11 @@ pub fn select_bound_function_with_control<'a>(
 
 /// Observe the selected function or procedure without allocating a candidate snapshot.
 pub fn select_bound_routine_with_control<'a>(
-    candidates: impl Iterator<Item = &'a Arc<SQLUserFunction>>,
+    candidates: impl Iterator<Item = &'a crate::routines::SQLRoutine>,
     binding: &FunctionBinding,
     kind: crate::routines::resolution::RoutineCallKind,
     control: &uqa_core::memory::ProductionControl<'_>,
-) -> Result<Option<Arc<SQLUserFunction>>, crate::SQLError> {
+) -> Result<Option<crate::routines::SQLRoutine>, crate::SQLError> {
     control.check()?;
     for function in candidates {
         control.check()?;

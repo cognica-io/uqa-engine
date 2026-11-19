@@ -7,6 +7,279 @@
 use super::*;
 use crate::vector_index::MemoryVectorIndex;
 
+mod handles;
+
+fn encoded(index: &dyn VectorIndex) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    index
+        .write_image(&mut bytes, &StorageReadControl::with_limit(1 << 20))
+        .unwrap();
+    bytes
+}
+
+fn encoded_capture(
+    index: &super::capture::CapturedVectorIndexes,
+    field: &str,
+    cut: &crate::memory_capture::MemoryCapture,
+) -> Vec<u8> {
+    let image = index.image(field, cut).unwrap();
+    let mut bytes = Vec::new();
+    image
+        .write_image(&mut bytes, &StorageReadControl::with_limit(1 << 20))
+        .unwrap();
+    bytes
+}
+
+fn capture_sources(
+    source_control: &StorageReadControl,
+) -> Vec<(&'static str, Box<dyn VectorIndex>)> {
+    use crate::vector_index::{DiskANNIndexParams, HNSWIndexParams};
+    use crate::{
+        diskann_index::{build::DiskANNTemporaryBudget, DiskANNIndexOptions, DiskANNMemoryIndex},
+        HNSWIndex, IVFIndex,
+    };
+    let temporary = DiskANNTemporaryBudget::new(16 << 20);
+    vec![
+        ("exact", Box::new(MemoryVectorIndex::new(2))),
+        ("ivf", Box::new(IVFIndex::with_params(2, 2, 1, 4))),
+        (
+            "hnsw",
+            Box::new(HNSWIndex::with_params(2, HNSWIndexParams::default()).unwrap()),
+        ),
+        (
+            "diskann",
+            Box::new(
+                DiskANNMemoryIndex::new(
+                    2,
+                    DiskANNIndexOptions::for_parameters(
+                        DiskANNIndexParams::for_dimensions(2).unwrap(),
+                    ),
+                    &temporary,
+                    source_control,
+                )
+                .unwrap(),
+            ),
+        ),
+    ]
+}
+
+#[test]
+fn memory_vector_membership_preserves_all_owners_across_replacement_and_source_retirement() {
+    use crate::memory_capture::MemoryCaptureRegistry;
+    let registry = MemoryCaptureRegistry::new();
+    let source_control = StorageReadControl::with_limit(16 << 20);
+    let mut indexes = capture_sources(&source_control);
+    let source = registry.cell(VectorIndexes::memory(&registry)).unwrap();
+    let mut expected = BTreeMap::new();
+    for (name, mut index) in indexes.drain(..) {
+        for id in 0..10 {
+            index.add(id, vec![id as f32, 10.0 - id as f32]).unwrap();
+        }
+        index.initialize().unwrap();
+        expected.insert(name, encoded(index.as_ref()));
+        source
+            .write()
+            .live_mut()
+            .unwrap()
+            .insert(name.into(), index)
+            .unwrap();
+    }
+    let control = StorageReadControl::with_limit(16 << 20);
+    let cut = registry.capture(&control).unwrap();
+    assert!(control.memory().used() < 4096);
+    let key = source.key().unwrap();
+    assert!(key.retained(&cut).unwrap().is_none());
+    let detached = source
+        .write()
+        .live_mut()
+        .unwrap()
+        .remove("ivf")
+        .unwrap()
+        .unwrap();
+    // A removed index still has a live owner; unpublication must already have preserved its image.
+    source
+        .write()
+        .live_mut()
+        .unwrap()
+        .insert("ivf".into(), Box::new(MemoryVectorIndex::new(3)))
+        .unwrap();
+    let captured = source.captured(&cut).unwrap();
+    assert_eq!(
+        captured.fields().unwrap().collect::<Vec<_>>(),
+        ["diskann", "exact", "hnsw", "ivf"]
+    );
+    for (name, bytes) in &expected {
+        assert_eq!(&encoded_capture(&captured, name, &cut), bytes, "{name}");
+    }
+    let next = registry.capture(&control).unwrap();
+    assert!(captured.image("exact", &next).is_err());
+    assert!(captured.image("ivf", &next).is_err());
+    let current = source
+        .read()
+        .iter()
+        .map(|(name, index)| (name.clone(), encoded(index)))
+        .collect::<BTreeMap<_, _>>();
+    source
+        .write()
+        .live_mut()
+        .unwrap()
+        .replace(BTreeMap::new())
+        .unwrap();
+    drop((detached, source, registry));
+    let next_captured = key.retained(&next).unwrap().unwrap();
+    for (name, bytes) in current {
+        assert_eq!(
+            encoded_capture(&next_captured, &name, &next),
+            bytes,
+            "{name}"
+        );
+    }
+    for (name, bytes) in expected {
+        assert_eq!(encoded_capture(&captured, name, &cut), bytes, "{name}");
+    }
+    drop((captured, next_captured, next, cut));
+    assert_eq!(control.memory().used(), 0);
+    assert_eq!(source_control.memory().used(), 0);
+}
+
+#[test]
+fn memory_vector_membership_reads_unchanged_sources_without_the_collection_guard() {
+    use crate::memory_capture::MemoryCaptureRegistry;
+    let registry = MemoryCaptureRegistry::new();
+    let source_control = StorageReadControl::with_limit(16 << 20);
+    let source = registry.cell(VectorIndexes::memory(&registry)).unwrap();
+    let mut expected = BTreeMap::new();
+    for (name, mut index) in capture_sources(&source_control) {
+        for id in 0..10 {
+            index.add(id, vec![id as f32, 10.0 - id as f32]).unwrap();
+        }
+        index.initialize().unwrap();
+        expected.insert(name, encoded(index.as_ref()));
+        source
+            .write()
+            .live_mut()
+            .unwrap()
+            .insert(name.into(), index)
+            .unwrap();
+    }
+    let control = StorageReadControl::with_limit(16 << 20);
+    let cut = registry.capture(&control).unwrap();
+    let captured = source.captured(&cut).unwrap();
+    // The collection remains exclusively borrowed while every unchanged child is first read through its captured identity.
+    let held = source.write();
+    for (name, bytes) in &expected {
+        assert_eq!(&encoded_capture(&captured, name, &cut), bytes, "{name}");
+    }
+    assert!(captured.image("absent", &cut).is_err());
+    drop(held);
+    drop((source, registry));
+    for (name, bytes) in expected {
+        assert_eq!(encoded_capture(&captured, name, &cut), bytes, "{name}");
+    }
+    control.cancellation().cancel();
+    assert!(captured.image("exact", &cut).is_err());
+    drop((captured, cut));
+    assert_eq!(control.memory().used(), 0);
+    assert_eq!(source_control.memory().used(), 0);
+}
+
+#[test]
+fn memory_vector_membership_retains_ivf_query_transitions_before_collection_preservation() {
+    use crate::{memory_capture::MemoryCaptureRegistry, IVFIndex};
+    let registry = MemoryCaptureRegistry::new();
+    let mut ivf = IVFIndex::with_params(2, 2, 1, 4);
+    for id in 0..10 {
+        ivf.add(id, vec![id as f32, 10.0 - id as f32]).unwrap();
+    }
+    ivf.train().unwrap();
+    for id in 0..3 {
+        ivf.delete(id).unwrap();
+    }
+    let original = encoded(&ivf);
+    let expected = ivf
+        .writable_snapshot()
+        .unwrap()
+        .search_knn(&[1.0, 0.0], 3)
+        .unwrap();
+    let source = registry.cell(VectorIndexes::memory(&registry)).unwrap();
+    source
+        .write()
+        .live_mut()
+        .unwrap()
+        .insert("v".into(), Box::new(ivf))
+        .unwrap();
+    let control = StorageReadControl::with_limit(1 << 20);
+    let cut = registry.capture(&control).unwrap();
+    assert_eq!(
+        source.read()["v"].search_knn(&[1.0, 0.0], 3).unwrap(),
+        expected
+    );
+    assert!(source.key().unwrap().retained(&cut).unwrap().is_none());
+    assert_ne!(encoded(&source.read()["v"]), original);
+    let captured = source.captured(&cut).unwrap();
+    assert_eq!(encoded_capture(&captured, "v", &cut), original);
+    source
+        .write()
+        .live_mut()
+        .unwrap()
+        .get_mut("v")
+        .unwrap()
+        .clear()
+        .unwrap();
+    assert_eq!(encoded_capture(&captured, "v", &cut), original);
+}
+
+#[test]
+fn memory_vector_membership_rejects_foreign_registration_without_changing_current_state() {
+    use crate::memory_capture::MemoryCaptureRegistry;
+    let registry = MemoryCaptureRegistry::new();
+    let other = MemoryCaptureRegistry::new();
+    let source = registry.cell(VectorIndexes::memory(&registry)).unwrap();
+    source
+        .write()
+        .live_mut()
+        .unwrap()
+        .insert("v".into(), Box::new(MemoryVectorIndex::new(2)))
+        .unwrap();
+    let foreign = Box::new(MemoryVectorIndex::new(3))
+        .into_memory_capture(&other)
+        .unwrap();
+    assert!(source
+        .write()
+        .live_mut()
+        .unwrap()
+        .insert("v".into(), foreign)
+        .is_err());
+    assert_eq!(source.read()["v"].dimensions(), 2);
+    for id in 0..100 {
+        source
+            .write()
+            .live_mut()
+            .unwrap()
+            .get_mut("v")
+            .unwrap()
+            .add(id, vec![1.0, 0.0])
+            .unwrap();
+    }
+    let control = StorageReadControl::with_limit(1024);
+    let cut = registry.capture(&control).unwrap();
+    source
+        .write()
+        .live_mut()
+        .unwrap()
+        .get_mut("v")
+        .unwrap()
+        .add(100, vec![1.0, 0.0])
+        .unwrap();
+    assert_eq!(source.read()["v"].count().unwrap(), 101);
+    // An underfunded archive must not prevent the mutation, retirement or replacement of the source.
+    assert!(cut.check().is_err());
+    source.write().live_mut().unwrap().remove("v").unwrap();
+    assert!(source.read().is_empty());
+    drop(cut);
+    assert_eq!(control.memory().used(), 0);
+}
+
 fn source() -> VectorIndexes {
     BTreeMap::from([
         (
@@ -122,7 +395,7 @@ fn partial_capture_unwinds_nodes_and_names_when_a_later_field_exceeds_quota() {
 #[test]
 fn retained_collections_reject_mutation_and_preserve_original_cancellation() {
     let mut live = source();
-    live.live_mut().unwrap().remove("z");
+    live.live_mut().unwrap().remove("z").unwrap();
     let control = StorageReadControl::with_limit(64 * 1024);
     let mut retained = VectorIndexes::capture(&live, &control).unwrap();
     assert!(retained.live_mut().is_err());

@@ -118,7 +118,7 @@ fn indexed_persistent_fixture(rows: usize) -> PersistentFixture {
 
 fn graph_fixture(vertices: u64) -> MemoryGraphStore {
     let mut graph = MemoryGraphStore::new();
-    graph.create_graph(GRAPH);
+    graph.create_graph(GRAPH).unwrap();
     for offset in 0..vertices {
         let mut vertex = Vertex::new(
             offset + 1,

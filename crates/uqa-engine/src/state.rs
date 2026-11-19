@@ -10,22 +10,56 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicI64, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
-use uqa_sql::catalog::events::{RuleCatalog, StoredTrigger};
+use uqa_sql::catalog::roles::{RoleDefinitions, RoleMemberships};
+use uqa_sql::catalog::security::database::{CapturedDatabaseAuthority, DatabaseAuthority};
+use uqa_sql::catalog::security::schema_registry::SchemaRegistry;
+use uqa_sql::catalog::{
+    events::{RuleCatalog, StoredTrigger, TriggerCatalog},
+    type_definitions::{CapturedTypeDefinitions, TypeDefinitions},
+};
 
 use parking_lot::{Mutex, ReentrantMutex, RwLock};
 
+mod catalog_capture;
 mod catalog_cell;
-pub(crate) use catalog_cell::CatalogCell;
+mod generation_sources;
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+pub(crate) use generation_sources::SnapshotCut;
+pub(crate) use generation_sources::SnapshotSources;
+mod resource_capture;
+mod session_namespace;
+mod table_assembly;
+mod table_capture;
+mod table_catalog;
+pub(crate) use table_assembly::TableContents;
+mod table_definition;
+pub(crate) use table_definition::{TableDefinitionCell, TableDefinitionWrite};
+mod table_metadata;
+pub(crate) use table_metadata::TableMetadataCell;
+mod table_membership;
+pub(crate) use catalog_cell::{CatalogCell, CatalogSnapshot};
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+pub(crate) use table_membership::CapturedTable;
+pub(crate) use table_membership::PersistentTableRegistrySnapshot;
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+pub(crate) use table_membership::SnapshotTableCut;
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+pub(crate) use table_membership::TableRegistryInput;
+pub(crate) use table_membership::TableRegistryMap;
+pub(crate) use table_membership::{MembershipSnapshot, SnapshotTableSources, TableRegistry};
+pub(crate) use uqa_core::memory::RetainedValue as CatalogGeneration;
 mod session_state_lock;
 pub(crate) use session_state_lock::{message_level, SessionStateLock, SessionStateWriteGuard};
 
 use super::{
-    BayesianBM25Params, CommandMutationOverlay, DeepModel, RelationIdentity, SQLStatementCache,
-    SequenceState, TableFieldAnalyzerRegistry, TableState, TransactionFrame,
+    BayesianBM25Params, CommandMutationOverlay, RelationIdentity, SQLStatementCache,
+    TableFieldAnalyzerRegistry, TransactionFrame,
 };
 
 pub(super) struct StorageContext {
-    pub(super) tables: Arc<RwLock<BTreeMap<RelationIdentity, Arc<TableState>>>>,
+    pub(super) tables: Arc<TableRegistry>,
+    pub(super) memory_capture: Option<uqa_storage::memory_capture::MemoryCaptureRegistry>,
+    pub(super) memory_identity: Option<Arc<Mutex<Option<uqa_storage::mvcc::DatabaseId>>>>,
     pub(super) catalog: Option<Arc<dyn uqa_storage::CatalogFacade>>,
     pub(super) backend: Option<Arc<dyn uqa_storage::PersistentStorageBackend>>,
     pub(super) provider: Option<Arc<dyn uqa_storage::PersistentStorageProvider>>,
@@ -35,13 +69,19 @@ pub(super) struct StorageContext {
 }
 
 pub(crate) use uqa_execution::catalog::security::{
-    BoundDatabaseSecurity, BoundSchemaSecurity, BoundSequenceSecurity, BoundTableSecurity,
+    BoundSchemaSecurity, BoundSequenceSecurity, BoundTableSecurity,
 };
 
 impl StorageContext {
     pub(super) fn memory() -> Self {
+        let registry = uqa_storage::memory_capture::MemoryCaptureRegistry::new();
         Self {
-            tables: Arc::new(RwLock::new(BTreeMap::new())),
+            tables: Arc::new(
+                table_membership::TableRegistry::memory(&registry)
+                    .expect("fresh memory capture domain"),
+            ),
+            memory_capture: Some(registry),
+            memory_identity: Some(Arc::new(Mutex::new(None))),
             catalog: None,
             backend: None,
             provider: None,
@@ -55,7 +95,9 @@ impl StorageContext {
         provider: Option<Arc<dyn uqa_storage::PersistentStorageProvider>>,
     ) -> Self {
         Self {
-            tables: Arc::new(RwLock::new(BTreeMap::new())),
+            tables: Arc::new(table_membership::TableRegistry::persistent()),
+            memory_capture: None,
+            memory_identity: None,
             catalog: Some(catalog),
             backend: Some(backend),
             provider,
@@ -66,148 +108,245 @@ impl StorageContext {
     pub(super) fn shared_from(source: &Self) -> Self {
         Self {
             tables: Arc::clone(&source.tables),
+            memory_capture: source.memory_capture.clone(),
+            memory_identity: source.memory_identity.clone(),
             catalog: source.catalog.clone(),
             backend: source.backend.clone(),
             provider: source.provider.clone(),
             document_identity_reader: Mutex::new(None),
         }
     }
+
+    pub(super) fn table_capture_registry(
+        &self,
+        persistence: uqa_sql::ast::RelationPersistence,
+    ) -> Option<&uqa_storage::memory_capture::MemoryCaptureRegistry> {
+        self.memory_capture
+            .as_ref()
+            .filter(|_| persistence != uqa_sql::ast::RelationPersistence::Temporary)
+    }
+
+    pub(super) fn memory_vector_indexes(
+        &self,
+        persistence: uqa_sql::ast::RelationPersistence,
+    ) -> uqa_storage::memory_capture::MemoryCaptureCell<uqa_storage::vector_index::VectorIndexes>
+    {
+        let indexes = self.table_capture_registry(persistence).map_or_else(
+            uqa_storage::vector_index::VectorIndexes::default,
+            uqa_storage::vector_index::VectorIndexes::memory,
+        );
+        uqa_storage::memory_capture::MemoryCaptureCell::new(indexes)
+    }
+
+    pub(super) fn memory_value_indexes(
+        &self,
+        persistence: uqa_sql::ast::RelationPersistence,
+    ) -> uqa_storage::memory_capture::MemoryCaptureCell<
+        uqa_execution::catalog::index::value::ValueIndexes,
+    > {
+        use uqa_execution::catalog::index::value::ValueIndexes;
+        let indexes = self
+            .table_capture_registry(persistence)
+            .map_or_else(ValueIndexes::default, ValueIndexes::memory);
+        uqa_storage::memory_capture::MemoryCaptureCell::new(indexes)
+    }
 }
 
 pub(crate) use uqa_execution::catalog::view::{StoredView, StoredViewKind};
 
 pub(super) struct DurableCatalogState {
-    pub(super) domains: CatalogCell<BTreeMap<String, super::domains::StoredDomain>>,
-    pub(super) enums: CatalogCell<uqa_execution::catalog::enum_type::EnumRegistry>,
-    pub(super) ranges: CatalogCell<uqa_execution::catalog::range_type::RangeRegistry>,
-    pub(super) shells: CatalogCell<uqa_execution::catalog::shell_type::ShellRegistry>,
-    pub(super) comments: CatalogCell<uqa_execution::catalog::comments::CommentRegistry>,
-    pub(super) composites: CatalogCell<uqa_execution::catalog::composite_type::CompositeRegistry>,
-    pub(super) graphs: CatalogCell<BTreeMap<String, Arc<uqa_graph::GraphStoreHandle>>>,
-    pub(super) models: CatalogCell<BTreeMap<String, DeepModel>>,
-    pub(super) scoring_params: CatalogCell<BTreeMap<String, String>>,
-    pub(super) views: CatalogCell<BTreeMap<RelationIdentity, StoredView>>,
-    pub(super) catalog_indexes:
-        CatalogCell<BTreeMap<RelationIdentity, uqa_storage::CatalogIndexRow>>,
-    pub(super) database_security: CatalogCell<BoundDatabaseSecurity>,
-    pub(super) schemas: CatalogCell<BTreeMap<String, BoundSchemaSecurity>>,
-    pub(super) path_indexes: CatalogCell<BTreeMap<String, uqa_graph::PathIndex>>,
-    pub(super) sequences: CatalogCell<BTreeMap<RelationIdentity, SequenceState>>,
-    pub(super) sequence_object_ids: CatalogCell<BTreeMap<RelationIdentity, [u8; 16]>>,
-    /// The `pg_class` OIDs sequences recorded when they were created, by object identity.
-    pub(super) sequence_catalog_oids: CatalogCell<BTreeMap<[u8; 16], u32>>,
+    pub(super) domains: CatalogCell<
+        TypeDefinitions<super::domains::StoredDomain>,
+        CapturedTypeDefinitions<super::domains::StoredDomain>,
+    >,
+    pub(super) enums: CatalogCell<
+        uqa_execution::catalog::enum_type::EnumRegistry,
+        CapturedTypeDefinitions<uqa_sql::catalog::enum_type::StoredEnum>,
+    >,
+    pub(super) ranges: CatalogCell<
+        uqa_execution::catalog::range_type::RangeRegistry,
+        CapturedTypeDefinitions<uqa_sql::catalog::range_type::StoredRange>,
+    >,
+    pub(super) shells: CatalogCell<
+        uqa_execution::catalog::shell_type::ShellRegistry,
+        CapturedTypeDefinitions<uqa_sql::catalog::shell_type::StoredShellType>,
+    >,
+    pub(super) comments: CatalogCell<
+        uqa_execution::catalog::comments::CommentRegistry,
+        uqa_execution::catalog::comments::CapturedComments,
+    >,
+    pub(super) composites: CatalogCell<
+        uqa_execution::catalog::composite_type::CompositeRegistry,
+        CapturedTypeDefinitions<uqa_sql::catalog::composite_type::StoredComposite>,
+    >,
+    pub(super) graphs: CatalogCell<uqa_graph::GraphCatalog, uqa_graph::CapturedGraphCatalog>,
+    pub(super) models: CatalogCell<
+        uqa_ml::model_catalog::ModelCatalog,
+        uqa_ml::model_catalog::CapturedModelCatalog,
+    >,
+    pub(super) scoring_params: CatalogCell<
+        uqa_storage::catalog::scoring_params::ScoringParameters,
+        uqa_storage::catalog::scoring_params::CapturedScoringParameters,
+    >,
+    pub(super) views: CatalogCell<
+        uqa_sql::catalog::stored_view::ViewDefinitions,
+        uqa_sql::catalog::stored_view::CapturedViewDefinitions,
+    >,
+    pub(super) catalog_indexes: CatalogCell<
+        uqa_execution::catalog::index::registry::CatalogIndexes,
+        uqa_execution::catalog::index::registry::CapturedCatalogIndexes,
+    >,
+    pub(super) database_security: CatalogCell<DatabaseAuthority, CapturedDatabaseAuthority>,
+    pub(super) schemas: CatalogCell<
+        SchemaRegistry,
+        uqa_sql::catalog::security::schema_registry::CapturedSchemaRegistry,
+    >,
+    pub(super) path_indexes:
+        CatalogCell<uqa_graph::PathIndexCatalog, uqa_graph::CapturedPathIndexes>,
+    pub(super) sequences: CatalogCell<
+        uqa_execution::catalog::sequence::registry::SequenceCatalog,
+        uqa_execution::catalog::sequence::registry::CapturedSequenceCatalog,
+    >,
     /// The OIDs graphs and their labels recorded when they were created, by graph name.
-    pub(super) graph_catalog_oids:
-        CatalogCell<BTreeMap<String, uqa_sql::catalog::graph_oids::GraphCatalogOids>>,
-    pub(super) sequence_persistence:
-        CatalogCell<BTreeMap<RelationIdentity, uqa_sql::ast::RelationPersistence>>,
-    pub(super) sequence_security: CatalogCell<BTreeMap<RelationIdentity, BoundSequenceSecurity>>,
-    pub(super) named_analyzers: CatalogCell<BTreeMap<String, Arc<uqa_analysis::CompiledAnalyzer>>>,
-    pub(super) table_field_analyzers: CatalogCell<TableFieldAnalyzerRegistry>,
-    pub(super) foreign_wrappers: CatalogCell<uqa_sql::catalog::foreign_wrapper::ForeignWrappers>,
-    pub(super) foreign_servers:
-        CatalogCell<BTreeMap<String, uqa_sql::catalog::foreign_server::ForeignServerDefinition>>,
-    pub(super) foreign_tables:
-        CatalogCell<BTreeMap<RelationIdentity, super::fdw::StoredForeignTable>>,
-    pub(super) foreign_table_security: CatalogCell<BTreeMap<RelationIdentity, BoundTableSecurity>>,
-    pub(super) builtin_routine_security:
-        CatalogCell<uqa_sql::catalog::security::builtin_routines::BuiltinRoutineSecurities>,
-    pub(super) system_relation_security:
-        CatalogCell<uqa_sql::catalog::security::system_relations::SystemRelationSecurities>,
-    pub(super) sql_user_functions:
-        CatalogCell<BTreeMap<String, Vec<Arc<super::user_functions::SQLUserFunction>>>>,
-    pub(super) roles: CatalogCell<BTreeMap<String, super::roles::RoleDefinition>>,
+    pub(super) graph_catalog_oids: CatalogCell<
+        uqa_sql::catalog::graph_oids::GraphOidRegistry,
+        uqa_sql::catalog::graph_oids::CapturedGraphOidRegistry,
+    >,
+    pub(super) named_analyzers: CatalogCell<
+        uqa_storage::analyzer_catalog::AnalyzerCatalog,
+        uqa_storage::analyzer_catalog::CapturedAnalyzers,
+    >,
+    pub(super) table_field_analyzers: CatalogCell<
+        TableFieldAnalyzerRegistry,
+        uqa_storage::analyzer_binding::registry::CapturedFieldAnalyzers,
+    >,
+    pub(super) foreign_wrappers: CatalogCell<
+        uqa_sql::catalog::foreign_wrapper::ForeignWrappers,
+        uqa_sql::catalog::foreign_wrapper::CapturedForeignWrappers,
+    >,
+    pub(super) foreign_servers: CatalogCell<
+        uqa_sql::catalog::foreign_server::ForeignServers,
+        uqa_sql::catalog::foreign_server::CapturedForeignServers,
+    >,
+    pub(super) foreign_catalog: CatalogCell<
+        uqa_execution::catalog::foreign::ForeignCatalog,
+        uqa_execution::catalog::foreign::registry::CapturedForeignCatalog,
+    >,
+    pub(super) builtin_routine_security: CatalogCell<
+        uqa_sql::catalog::security::builtin_routines::BuiltinRoutineSecurities,
+        uqa_sql::catalog::security::builtin_routines::CapturedBuiltinRoutineSecurities,
+    >,
+    pub(super) system_relation_security: CatalogCell<
+        uqa_sql::catalog::security::system_relations::SystemRelationSecurities,
+        uqa_sql::catalog::security::system_relations::CapturedSystemRelationSecurities,
+    >,
+    pub(super) sql_user_functions: CatalogCell<
+        uqa_sql::routines::registry::RoutineRegistry,
+        uqa_sql::routines::registry::CapturedRoutines,
+    >,
+    pub(super) roles:
+        CatalogCell<RoleDefinitions, uqa_sql::catalog::roles::CapturedRoleDefinitions>,
     pub(super) role_memberships:
-        CatalogCell<BTreeMap<super::roles::RoleMembershipKey, super::roles::RoleMembership>>,
+        CatalogCell<RoleMemberships, uqa_sql::catalog::roles::CapturedRoleMemberships>,
     pub(super) triggers:
-        CatalogCell<BTreeMap<uqa_storage::RelationIdentity, BTreeMap<String, StoredTrigger>>>,
-    pub(super) rules: CatalogCell<RuleCatalog>,
+        CatalogCell<TriggerCatalog, uqa_sql::catalog::events::CapturedEventCatalog<StoredTrigger>>,
+    pub(super) rules: CatalogCell<
+        RuleCatalog,
+        uqa_sql::catalog::events::CapturedEventCatalog<uqa_sql::catalog::events::StoredRule>,
+    >,
 }
 
 #[derive(Clone)]
 pub(super) struct DurableCatalogSnapshot {
-    pub(super) domains: Arc<BTreeMap<String, super::domains::StoredDomain>>,
-    pub(super) enums: Arc<uqa_execution::catalog::enum_type::EnumRegistry>,
-    pub(super) ranges: Arc<uqa_execution::catalog::range_type::RangeRegistry>,
-    pub(super) shells: Arc<uqa_execution::catalog::shell_type::ShellRegistry>,
-    pub(super) comments: Arc<uqa_execution::catalog::comments::CommentRegistry>,
-    pub(super) composites: Arc<uqa_execution::catalog::composite_type::CompositeRegistry>,
-    pub(super) graphs: Arc<BTreeMap<String, Arc<uqa_graph::GraphStoreHandle>>>,
-    pub(super) models: Arc<BTreeMap<String, DeepModel>>,
-    pub(super) scoring_params: Arc<BTreeMap<String, String>>,
-    pub(super) views: Arc<BTreeMap<RelationIdentity, StoredView>>,
-    pub(super) catalog_indexes: Arc<BTreeMap<RelationIdentity, uqa_storage::CatalogIndexRow>>,
-    pub(super) database_security: Arc<BoundDatabaseSecurity>,
-    pub(super) schemas: Arc<BTreeMap<String, BoundSchemaSecurity>>,
-    pub(super) path_indexes: Arc<BTreeMap<String, uqa_graph::PathIndex>>,
-    pub(super) sequences: Arc<BTreeMap<RelationIdentity, SequenceState>>,
-    pub(super) sequence_object_ids: Arc<BTreeMap<RelationIdentity, [u8; 16]>>,
-    pub(super) sequence_catalog_oids: Arc<BTreeMap<[u8; 16], u32>>,
+    pub(super) domains: CatalogGeneration<TypeDefinitions<super::domains::StoredDomain>>,
+    pub(super) enums: CatalogGeneration<uqa_execution::catalog::enum_type::EnumRegistry>,
+    pub(super) ranges: CatalogGeneration<uqa_execution::catalog::range_type::RangeRegistry>,
+    pub(super) shells: CatalogGeneration<uqa_execution::catalog::shell_type::ShellRegistry>,
+    pub(super) comments: CatalogGeneration<uqa_execution::catalog::comments::CommentRegistry>,
+    pub(super) composites:
+        CatalogGeneration<uqa_execution::catalog::composite_type::CompositeRegistry>,
+    pub(super) graphs: CatalogGeneration<uqa_graph::GraphCatalog>,
+    pub(super) models: CatalogGeneration<uqa_ml::model_catalog::ModelCatalog>,
+    pub(super) scoring_params:
+        CatalogGeneration<uqa_storage::catalog::scoring_params::ScoringParameters>,
+    pub(super) views: CatalogGeneration<uqa_sql::catalog::stored_view::ViewDefinitions>,
+    pub(super) catalog_indexes:
+        CatalogGeneration<uqa_execution::catalog::index::registry::CatalogIndexes>,
+    pub(super) database_security: CatalogGeneration<DatabaseAuthority>,
+    pub(super) schemas: CatalogGeneration<SchemaRegistry>,
+    pub(super) path_indexes: CatalogGeneration<uqa_graph::PathIndexCatalog>,
+    pub(super) sequences:
+        CatalogGeneration<uqa_execution::catalog::sequence::registry::SequenceCatalog>,
     pub(super) graph_catalog_oids:
-        Arc<BTreeMap<String, uqa_sql::catalog::graph_oids::GraphCatalogOids>>,
-    pub(super) sequence_persistence:
-        Arc<BTreeMap<RelationIdentity, uqa_sql::ast::RelationPersistence>>,
-    pub(super) sequence_security: Arc<BTreeMap<RelationIdentity, BoundSequenceSecurity>>,
-    pub(super) named_analyzers: Arc<BTreeMap<String, Arc<uqa_analysis::CompiledAnalyzer>>>,
-    pub(super) table_field_analyzers: Arc<TableFieldAnalyzerRegistry>,
-    pub(super) foreign_wrappers: Arc<uqa_sql::catalog::foreign_wrapper::ForeignWrappers>,
-    pub(super) foreign_servers:
-        Arc<BTreeMap<String, uqa_sql::catalog::foreign_server::ForeignServerDefinition>>,
-    pub(super) foreign_tables: Arc<BTreeMap<RelationIdentity, super::fdw::StoredForeignTable>>,
-    pub(super) foreign_table_security: Arc<BTreeMap<RelationIdentity, BoundTableSecurity>>,
+        CatalogGeneration<uqa_sql::catalog::graph_oids::GraphOidRegistry>,
+    pub(super) named_analyzers: CatalogGeneration<uqa_storage::analyzer_catalog::AnalyzerCatalog>,
+    pub(super) table_field_analyzers: CatalogGeneration<TableFieldAnalyzerRegistry>,
+    pub(super) foreign_wrappers:
+        CatalogGeneration<uqa_sql::catalog::foreign_wrapper::ForeignWrappers>,
+    pub(super) foreign_servers: CatalogGeneration<uqa_sql::catalog::foreign_server::ForeignServers>,
+    pub(super) foreign_catalog: CatalogGeneration<uqa_execution::catalog::foreign::ForeignCatalog>,
     pub(super) builtin_routine_security:
-        Arc<uqa_sql::catalog::security::builtin_routines::BuiltinRoutineSecurities>,
+        CatalogGeneration<uqa_sql::catalog::security::builtin_routines::BuiltinRoutineSecurities>,
     pub(super) system_relation_security:
-        Arc<uqa_sql::catalog::security::system_relations::SystemRelationSecurities>,
-    pub(super) sql_user_functions:
-        Arc<BTreeMap<String, Vec<Arc<super::user_functions::SQLUserFunction>>>>,
-    pub(super) roles: Arc<BTreeMap<String, super::roles::RoleDefinition>>,
-    pub(super) role_memberships:
-        Arc<BTreeMap<super::roles::RoleMembershipKey, super::roles::RoleMembership>>,
-    pub(super) triggers:
-        Arc<BTreeMap<uqa_storage::RelationIdentity, BTreeMap<String, StoredTrigger>>>,
-    pub(super) rules: Arc<RuleCatalog>,
+        CatalogGeneration<uqa_sql::catalog::security::system_relations::SystemRelationSecurities>,
+    pub(super) sql_user_functions: CatalogGeneration<uqa_sql::routines::registry::RoutineRegistry>,
+    pub(super) roles: CatalogGeneration<RoleDefinitions>,
+    pub(super) role_memberships: CatalogGeneration<RoleMemberships>,
+    pub(super) triggers: CatalogGeneration<TriggerCatalog>,
+    pub(super) rules: CatalogGeneration<RuleCatalog>,
 }
 
 impl DurableCatalogState {
     pub(super) fn new() -> Self {
         Self {
-            domains: CatalogCell::new(BTreeMap::new()),
-            enums: CatalogCell::new(BTreeMap::new()),
-            ranges: CatalogCell::new(BTreeMap::new()),
-            shells: CatalogCell::new(BTreeMap::new()),
-            comments: CatalogCell::new(BTreeMap::new()),
-            composites: CatalogCell::new(BTreeMap::new()),
-            graphs: CatalogCell::new(BTreeMap::new()),
-            models: CatalogCell::new(BTreeMap::new()),
-            scoring_params: CatalogCell::new(BTreeMap::new()),
-            views: CatalogCell::new(BTreeMap::new()),
-            catalog_indexes: CatalogCell::new(BTreeMap::new()),
-            database_security: CatalogCell::new(BoundDatabaseSecurity::bootstrap()),
+            domains: CatalogCell::new(TypeDefinitions::new()),
+            enums: CatalogCell::new(TypeDefinitions::new()),
+            ranges: CatalogCell::new(TypeDefinitions::new()),
+            shells: CatalogCell::new(TypeDefinitions::new()),
+            comments: CatalogCell::new(uqa_execution::catalog::comments::CommentRegistry::new()),
+            composites: CatalogCell::new(TypeDefinitions::new()),
+            graphs: CatalogCell::new(uqa_graph::GraphCatalog::default()),
+            models: CatalogCell::new(uqa_ml::model_catalog::ModelCatalog::default()),
+            scoring_params: CatalogCell::new(
+                uqa_storage::catalog::scoring_params::ScoringParameters::default(),
+            ),
+            views: CatalogCell::new(uqa_sql::catalog::stored_view::ViewDefinitions::new()),
+            catalog_indexes: CatalogCell::new(
+                uqa_execution::catalog::index::registry::CatalogIndexes::default(),
+            ),
+            database_security: CatalogCell::new(DatabaseAuthority::bootstrap()),
             schemas: CatalogCell::new(BoundSchemaSecurity::initial_catalog()),
-            path_indexes: CatalogCell::new(BTreeMap::new()),
-            sequences: CatalogCell::new(BTreeMap::new()),
-            sequence_object_ids: CatalogCell::new(BTreeMap::new()),
-            sequence_catalog_oids: CatalogCell::new(BTreeMap::new()),
-            graph_catalog_oids: CatalogCell::new(BTreeMap::new()),
-            sequence_persistence: CatalogCell::new(BTreeMap::new()),
-            sequence_security: CatalogCell::new(BTreeMap::new()),
-            named_analyzers: CatalogCell::new(BTreeMap::new()),
-            table_field_analyzers: CatalogCell::new(BTreeMap::new()),
+            path_indexes: CatalogCell::new(uqa_graph::PathIndexCatalog::default()),
+            sequences: CatalogCell::new(
+                uqa_execution::catalog::sequence::registry::SequenceCatalog::default(),
+            ),
+            graph_catalog_oids: CatalogCell::new(
+                uqa_sql::catalog::graph_oids::GraphOidRegistry::new(),
+            ),
+            named_analyzers: CatalogCell::new(
+                uqa_storage::analyzer_catalog::AnalyzerCatalog::default(),
+            ),
+            table_field_analyzers: CatalogCell::new(TableFieldAnalyzerRegistry::default()),
             foreign_wrappers: CatalogCell::new(uqa_sql::catalog::foreign_wrapper::native_wrappers()),
-            foreign_servers: CatalogCell::new(BTreeMap::new()),
-            foreign_tables: CatalogCell::new(BTreeMap::new()),
-            foreign_table_security: CatalogCell::new(BTreeMap::new()),
-            builtin_routine_security: CatalogCell::new(BTreeMap::new()),
-            system_relation_security: CatalogCell::new(BTreeMap::new()),
-            sql_user_functions: CatalogCell::new(BTreeMap::new()),
-            roles: CatalogCell::new(BTreeMap::from([(
-                "uqa".to_string(),
-                super::roles::RoleDefinition::bootstrap(),
-            )])),
-            role_memberships: CatalogCell::new(BTreeMap::new()),
-            triggers: CatalogCell::new(BTreeMap::new()),
-            rules: CatalogCell::new(BTreeMap::new()),
+            foreign_servers: CatalogCell::new(
+                uqa_sql::catalog::foreign_server::ForeignServers::new(),
+            ),
+            foreign_catalog: CatalogCell::new(
+                uqa_execution::catalog::foreign::ForeignCatalog::default(),
+            ),
+            builtin_routine_security: CatalogCell::new(
+                uqa_sql::catalog::security::builtin_routines::BuiltinRoutineSecurities::new(),
+            ),
+            system_relation_security: CatalogCell::new(
+                uqa_sql::catalog::security::system_relations::SystemRelationSecurities::new(),
+            ),
+            sql_user_functions: CatalogCell::new(
+                uqa_sql::routines::registry::RoutineRegistry::new(),
+            ),
+            roles: CatalogCell::new(RoleDefinitions::initial_catalog()),
+            role_memberships: CatalogCell::new(RoleMemberships::new()),
+            triggers: CatalogCell::new(TriggerCatalog::new()),
+            rules: CatalogCell::new(RuleCatalog::new()),
         }
     }
 
@@ -229,17 +368,12 @@ impl DurableCatalogState {
             schemas: self.schemas.snapshot(),
             path_indexes: self.path_indexes.snapshot(),
             sequences: self.sequences.snapshot(),
-            sequence_object_ids: self.sequence_object_ids.snapshot(),
-            sequence_catalog_oids: self.sequence_catalog_oids.snapshot(),
             graph_catalog_oids: self.graph_catalog_oids.snapshot(),
-            sequence_persistence: self.sequence_persistence.snapshot(),
-            sequence_security: self.sequence_security.snapshot(),
             named_analyzers: self.named_analyzers.snapshot(),
             table_field_analyzers: self.table_field_analyzers.snapshot(),
             foreign_wrappers: self.foreign_wrappers.snapshot(),
             foreign_servers: self.foreign_servers.snapshot(),
-            foreign_tables: self.foreign_tables.snapshot(),
-            foreign_table_security: self.foreign_table_security.snapshot(),
+            foreign_catalog: self.foreign_catalog.snapshot(),
             builtin_routine_security: self.builtin_routine_security.snapshot(),
             system_relation_security: self.system_relation_security.snapshot(),
             sql_user_functions: self.sql_user_functions.snapshot(),
@@ -261,23 +395,14 @@ impl DurableCatalogState {
         self.schemas.restore(&snapshot.schemas);
         self.path_indexes.restore(&snapshot.path_indexes);
         self.sequences.restore(&snapshot.sequences);
-        self.sequence_object_ids
-            .restore(&snapshot.sequence_object_ids);
-        self.sequence_catalog_oids
-            .restore(&snapshot.sequence_catalog_oids);
         self.graph_catalog_oids
             .restore(&snapshot.graph_catalog_oids);
-        self.sequence_persistence
-            .restore(&snapshot.sequence_persistence);
-        self.sequence_security.restore(&snapshot.sequence_security);
         self.named_analyzers.restore(&snapshot.named_analyzers);
         self.table_field_analyzers
             .restore(&snapshot.table_field_analyzers);
         self.foreign_wrappers.restore(&snapshot.foreign_wrappers);
         self.foreign_servers.restore(&snapshot.foreign_servers);
-        self.foreign_tables.restore(&snapshot.foreign_tables);
-        self.foreign_table_security
-            .restore(&snapshot.foreign_table_security);
+        self.foreign_catalog.restore(&snapshot.foreign_catalog);
         self.builtin_routine_security
             .restore(&snapshot.builtin_routine_security);
         self.system_relation_security
@@ -367,22 +492,13 @@ pub(super) enum RuntimeParameterValue {
     Setting(Option<String>),
     SearchPath {
         setting: Option<String>,
-        path: Vec<String>,
+        path: Arc<Vec<String>>,
     },
     Role(Option<Arc<uqa_sql::catalog::roles::identity::RoleBinding>>),
     SessionAuthorization(Arc<uqa_sql::catalog::roles::identity::RoleBinding>),
 }
 
 impl SessionContext {
-    pub(super) fn new(random_state: super::SessionRandomState) -> Self {
-        Self::with_retention(
-            random_state,
-            uqa_core::memory::MemoryBudget::new(
-                uqa_storage::mvcc::VersionedSessionOptions::default().retained_bytes,
-            ),
-        )
-    }
-
     pub(super) fn with_retention(
         random_state: super::SessionRandomState,
         query_retention: uqa_core::memory::MemoryBudget,
@@ -390,7 +506,7 @@ impl SessionContext {
         let state = super::SessionStateSnapshot {
             command_overlays: Vec::new(),
             graph_overlay: None,
-            search_path: crate::session::default_search_path(),
+            search_path: crate::session::default_search_path().into(),
             temporary_namespace: None,
             session_vars: BTreeMap::new(),
             parameter_scopes: uqa_sql::semantics::parameters::ParameterScopes::default(),
@@ -524,6 +640,13 @@ impl StatementGate {
         } else {
             self.mutex.try_lock()
         }
+    }
+
+    #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+    pub(super) fn owns_current_operation(&self) -> bool {
+        let identity = std::ptr::from_ref(self) as usize;
+        self.mutex.is_owned_by_current_thread()
+            || DELEGATED_STATEMENT_GATES.with(|gates| gates.borrow().contains(&identity))
     }
 
     pub(super) fn lock_with_cancellation(
@@ -726,5 +849,7 @@ impl EpochCoordinator {
     }
 }
 
+#[cfg(test)]
+mod memory_capture_tests;
 #[cfg(test)]
 mod tests;

@@ -7,6 +7,7 @@
 //! Retain the physical relation and its actual metadata/index guards during column deletion.
 use crate::{Engine, TableState};
 use std::{collections::BTreeSet, sync::Arc};
+use uqa_core::memory::RetainedValue;
 use uqa_core::{DocId, RelationIdentity};
 use uqa_execution::schema::publication::removal::{
     ColumnDropCatalog, ColumnDropIndexes, ColumnDropPublicationContext, ColumnDropRows,
@@ -94,8 +95,8 @@ impl ColumnDropTable for ColumnDropBinding<'_> {
     fn object_id(&self) -> [u8; 16] {
         self.state.object_id()
     }
-    fn clear_value_indexes(&self) {
-        self.state.value_indexes.write().clear();
+    fn clear_value_indexes(&self) -> StorageBackendResult<()> {
+        self.state.value_indexes.write().clear()
     }
     fn write_dropped_attributes(
         &self,
@@ -105,13 +106,22 @@ impl ColumnDropTable for ColumnDropBinding<'_> {
     fn hierarchy(&self) -> uqa_sql::ast::TableHierarchy {
         self.state.hierarchy.read().clone()
     }
-    fn publish_hierarchy(&self, hierarchy: uqa_sql::ast::TableHierarchy) {
-        *self.state.hierarchy.write() = hierarchy;
+    fn publish_hierarchy(
+        &self,
+        hierarchy: uqa_sql::ast::TableHierarchy,
+    ) -> StorageBackendResult<()> {
+        self.state.hierarchy.write().publish(hierarchy)
     }
-    fn write_columns(&self) -> SchemaWrite<'_, ColumnDef> {
+    fn write_columns(
+        &self,
+    ) -> Box<dyn uqa_execution::schema::publication::removal::DefinitionWrite<Vec<ColumnDef>> + '_>
+    {
         Box::new(self.state.columns.write())
     }
-    fn write_checks(&self) -> SchemaWrite<'_, TableCheck> {
+    fn write_checks(
+        &self,
+    ) -> Box<dyn uqa_execution::schema::publication::removal::DefinitionWrite<Vec<TableCheck>> + '_>
+    {
         Box::new(self.state.table_checks.write())
     }
     fn write_keys(&self) -> SchemaWrite<'_, TableKeyConstraint> {
@@ -163,15 +173,15 @@ impl ColumnDropIndexes for Engine {
     }
     fn remove_value_index(&self, table: &str, key: &ValueIndexKey) -> StorageBackendResult<()> {
         if let Some(state) = self.try_table(table)? {
-            state.value_indexes.write().remove(key);
+            state.value_indexes.write().remove(key)?;
         }
         Ok(())
     }
-    fn remove_field_analyzer(&self, table: &str, column: &str) {
-        self.durable
-            .table_field_analyzers
-            .write()
-            .retain(|(name, field), _| !(name == table && field == column));
+    fn field_analyzers(&self) -> RetainedValue<crate::TableFieldAnalyzerRegistry> {
+        self.durable.table_field_analyzers.snapshot()
+    }
+    fn publish_field_analyzers(&self, catalog: crate::TableFieldAnalyzerRegistry) {
+        *self.durable.table_field_analyzers.write() = catalog;
     }
     fn refresh_value_indexes(&self, table: &str) -> StorageBackendResult<()> {
         self.refresh_value_indexes_for_table(table)
@@ -186,7 +196,9 @@ impl ColumnDropRules for Engine {
     fn prepare(&self, table: &str, column: &str) -> StorageBackendResult<PreparedRuleColumnDrop> {
         self.event_lookup_context()
             .prepare_rule_column_drop(table, column)
-            .map_err(uqa_storage::StorageBackendError::Other)
+            .map_err(|error| {
+                uqa_storage::StorageBackendError::backend("prepare rule column removal", error)
+            })
     }
     fn finish(&self, prepared: PreparedRuleColumnDrop) -> StorageBackendResult<()> {
         self.event_lifecycle_context()

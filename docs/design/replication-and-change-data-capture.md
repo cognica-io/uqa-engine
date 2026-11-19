@@ -165,7 +165,7 @@ The source export handle owns its snapshot pins; the durable subscription owns l
 
 An interrupted target import remains explicitly `Initializing` after reopen and cannot become readable merely because some data files exist. A complete import can resume from its persisted checkpoint. Reseeding an existing replica uses a new empty target; the application replaces its database handle only after that target is complete. In-place replacement of a serving database and transparent migration of its active readers are outside the core scope.
 
-Long exports consume both snapshot retention and journal retention. Their byte/time budgets are admitted before progress continues, and cancellation releases the resources owned by that export. An expired export or journal gap returns a typed reseed-required result with the available range. No API silently jumps to the current head. The snapshot-plus-stream model has an analogous consistency boundary in [PostgreSQL 18 exported logical-decoding snapshots](https://www.postgresql.org/docs/18/logicaldecoding-explanation.html#LOGICALDECODING-EXPORTED-SNAPSHOTS).
+Long exports consume both snapshot retention and journal retention. Their byte/time budgets are admitted before progress continues, and cancellation releases the resources owned by that export. An expired export or journal gap returns a typed reseed-required result with the available range. No API silently jumps to the current head. The snapshot-plus-stream model has an analogous consistency boundary in [PostgreSQL 18 exported logical-decoding snapshots](https://www.postgresql.org/docs/18/logicaldecoding-explanation.html#LOGICALDECODING-EXPLANATION-EXPORTED-SNAPSHOTS).
 
 ## Replica lifecycle and apply
 

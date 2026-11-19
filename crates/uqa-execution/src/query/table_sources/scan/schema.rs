@@ -32,11 +32,12 @@ pub(super) fn projected_scan_schema_with_control(
             visible.as_str(),
             definition
                 .map(|definition| &definition.ty)
-                .or_else(|| (column == XMIN_COLUMN).then_some(&ColumnType::Xid)),
+                .or_else(|| (column == XMIN_COLUMN).then_some(const { &ColumnType::Xid })),
             definition.and_then(|definition| definition.collation_oid),
         )
     });
-    let oid = include_table_oid.then_some((TABLE_OID_COLUMN, Some(&ColumnType::Oid), None));
+    let oid =
+        include_table_oid.then_some((TABLE_OID_COLUMN, Some(const { &ColumnType::Oid }), None));
     let mut schema = RowSchema::with_column_metadata_with_control(
         Some(qualifier),
         metadata.chain(oid),
@@ -80,10 +81,11 @@ pub(super) fn append_scan_metadata(
     let attributes = [
         metadata
             .includes_doc_id()
-            .then_some((relation.column(0), Some(&ColumnType::BigInteger))),
-        metadata
-            .includes_score()
-            .then_some((relation.column(1), Some(&ColumnType::DoublePrecision))),
+            .then_some((relation.column(0), Some(const { &ColumnType::BigInteger }))),
+        metadata.includes_score().then_some((
+            relation.column(1),
+            Some(const { &ColumnType::DoublePrecision }),
+        )),
     ];
     if attributes.iter().all(Option::is_none) {
         control.check()?;
@@ -101,14 +103,14 @@ pub(super) fn append_scan_metadata(
             relation.column(0),
             META_DOC_ID_COLUMN,
             DOC_ID_COLUMN,
-            &ColumnType::BigInteger,
+            const { &ColumnType::BigInteger },
         ),
         (
             metadata.includes_score(),
             relation.column(1),
             META_SCORE_COLUMN,
             SCORE_COLUMN,
-            &ColumnType::DoublePrecision,
+            const { &ColumnType::DoublePrecision },
         ),
     ] {
         if !included {

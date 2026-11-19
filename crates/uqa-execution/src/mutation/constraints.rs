@@ -230,7 +230,7 @@ fn validate_row_checks(
                     document,
                     params,
                 )?;
-            matches!(result, Value::Null) || uqa_sql::expr::truthy(&result)
+            matches!(result, Value::Null) || uqa_sql::expr::truthy(&result)?
         };
         if !accepted {
             let label = constraint.name.unwrap_or_else(|| "<unnamed>".into());

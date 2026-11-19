@@ -10,6 +10,36 @@ use super::{BTreeMap, CatalogFacade, Engine, StorageBackendError, StorageBackend
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+impl Engine {
+    pub(super) fn graph_oid_input(
+        &self,
+        limits: uqa_storage::catalog::input::CatalogInputLimits,
+        control: &uqa_storage::read_control::StorageReadControl,
+    ) -> StorageBackendResult<uqa_execution::catalog::graph_oids::input::GraphOidCatalogInput> {
+        uqa_execution::catalog::graph_oids::input::GraphOidCatalogInput::new(
+            Arc::clone(self.storage.catalog.as_ref().expect("persistent catalog")),
+            limits,
+            self.durable.graph_catalog_oids.read().budget(),
+            control,
+        )
+    }
+
+    pub(super) fn graph_input(
+        &self,
+        limits: uqa_storage::catalog::input::CatalogInputLimits,
+        control: &uqa_storage::read_control::StorageReadControl,
+    ) -> StorageBackendResult<uqa_graph::GraphCatalogInput> {
+        uqa_graph::GraphCatalogInput::new(
+            Arc::clone(self.storage.catalog.as_ref().expect("persistent catalog")),
+            Arc::clone(self.storage.backend.as_ref().expect("persistent backend")),
+            self.durable.graphs.read().budget().clone(),
+            limits,
+            control,
+        )
+    }
+}
+
 impl Engine {
     pub(crate) fn new_graph_store(&self) -> StorageBackendResult<uqa_graph::GraphStoreHandle> {
         match (&self.storage.catalog, &self.storage.backend) {
@@ -30,34 +60,25 @@ impl Engine {
         if self.storage.backend.is_none() {
             return Ok(());
         }
-        let names = self
-            .durable
+        let stores = self.durable.graphs.read().rebind_persistent(
+            Arc::clone(self.storage.catalog.as_ref().expect("persistent catalog")),
+            Arc::clone(self.storage.backend.as_ref().expect("persistent backend")),
+        )?;
+        self.durable
             .graphs
-            .read()
-            .keys()
-            .cloned()
-            .collect::<Vec<_>>();
-        let stores = names
-            .into_iter()
-            .map(|name| Ok((name, Arc::new(self.new_graph_store()?))))
-            .collect::<StorageBackendResult<BTreeMap<_, _>>>()?;
-        self.durable.graphs.restore(&Arc::new(stores));
+            .restore(&crate::state::CatalogGeneration::new(stores));
         let indexes = self
             .durable
             .path_indexes
             .read()
-            .iter()
-            .map(|(key, index)| {
-                let rebound = index
-                    .rebind_persistent(
-                        Arc::clone(self.storage.catalog.as_ref().expect("persistent catalog")),
-                        Arc::clone(self.storage.backend.as_ref().expect("persistent backend")),
-                    )
-                    .map_err(|error| StorageBackendError::backend("graph catalog", error))?;
-                Ok((key.clone(), rebound))
-            })
-            .collect::<StorageBackendResult<BTreeMap<_, _>>>()?;
-        self.durable.path_indexes.restore(&Arc::new(indexes));
+            .rebind_persistent(
+                self.storage.catalog.as_ref().expect("persistent catalog"),
+                self.storage.backend.as_ref().expect("persistent backend"),
+            )
+            .map_err(|error| StorageBackendError::backend("graph catalog", error))?;
+        self.durable
+            .path_indexes
+            .restore(&crate::state::CatalogGeneration::new(indexes));
         Ok(())
     }
 
@@ -87,28 +108,15 @@ impl Engine {
         &self,
         catalog: &dyn CatalogFacade,
     ) -> StorageBackendResult<()> {
-        let names = catalog
-            .load_named_graphs()?
-            .into_iter()
-            .collect::<BTreeSet<_>>();
-        let existing = self.durable.graphs.read();
-        let mut stores = BTreeMap::new();
-        for name in names {
-            let store = match existing.get(&name) {
-                Some(store) => Arc::clone(store),
-                None => Arc::new(self.new_graph_store()?),
-            };
-            // Labels are small catalog metadata. Entity payloads are validated
-            // when a query reads the corresponding durable records.
-            store
-                .label_registry(&name)
-                .map_err(|error| StorageBackendError::backend("graph catalog", error))?;
-            stores.insert(name, store);
-        }
-        let changed = existing.len() != stores.len() || existing.keys().ne(stores.keys());
-        drop(existing);
-        if changed {
-            self.durable.graphs.restore(&Arc::new(stores));
+        let successor = self
+            .durable
+            .graphs
+            .read()
+            .restored(catalog, || self.new_graph_store())?;
+        if let Some(stores) = successor {
+            self.durable
+                .graphs
+                .restore(&crate::state::CatalogGeneration::new(stores));
         }
         Ok(())
     }

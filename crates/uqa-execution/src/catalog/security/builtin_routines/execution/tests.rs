@@ -5,7 +5,7 @@
 //
 
 use super::*;
-use std::{collections::BTreeMap, sync::Arc};
+use uqa_sql::catalog::roles::RoleDefinitions;
 use uqa_sql::{ast::RoleAttribute, catalog::roles::RoleDefinition};
 
 pub(super) fn binding(name: &str, types: &[&str]) -> FunctionBinding {
@@ -31,27 +31,33 @@ pub(super) fn permissions() -> BuiltinRoutinePermissions {
         object_id: [7; 16],
         revision: 1,
         name: "reader".into(),
-        attributes: std::collections::BTreeSet::from([RoleAttribute::Inherit]),
+        attributes: uqa_core::memory::OwnedSet::from([RoleAttribute::Inherit]),
         connection_limit: -1,
     };
-    snapshot.definitions.roles = Arc::new(BTreeMap::from([
-        ("uqa".into(), RoleDefinition::bootstrap()),
-        ("reader".into(), reader),
-    ]));
-    snapshot.definitions.builtin_routine_security = Arc::new(BTreeMap::from([
-        (
-            870,
-            super::super::BuiltinRoutinePrivilegeUpdate::new(870, Vec::new())
-                .unwrap()
-                .entry,
-        ),
-        (
-            2108,
-            super::super::BuiltinRoutinePrivilegeUpdate::new(2108, Vec::new())
-                .unwrap()
-                .entry,
-        ),
-    ]));
+    snapshot.definitions.roles = uqa_core::memory::RetainedValue::new(
+        RoleDefinitions::try_from_iter([
+            ("uqa".into(), RoleDefinition::bootstrap()),
+            ("reader".into(), reader),
+        ])
+        .unwrap(),
+    );
+    snapshot.definitions.builtin_routine_security = uqa_core::memory::RetainedValue::new(
+        BuiltinRoutineSecurities::try_from_iter([
+            (
+                870,
+                super::super::BuiltinRoutinePrivilegeUpdate::new(870, Vec::new())
+                    .unwrap()
+                    .entry,
+            ),
+            (
+                2108,
+                super::super::BuiltinRoutinePrivilegeUpdate::new(2108, Vec::new())
+                    .unwrap()
+                    .entry,
+            ),
+        ])
+        .unwrap(),
+    );
     BuiltinRoutinePermissions::new(CatalogReadView::new(snapshot), "reader".into())
 }
 
@@ -90,7 +96,8 @@ fn builtin_permission_snapshots_and_bootstrap_authority_are_retained() {
     let revoked = permissions();
     let catalog = &revoked.restricted.as_ref().unwrap().catalog;
     let mut next = catalog.snapshot().clone();
-    Arc::make_mut(&mut next.definitions.builtin_routine_security).clear();
+    uqa_core::memory::RetainedValue::make_mut(&mut next.definitions.builtin_routine_security)
+        .clear();
     let allowed = BuiltinRoutinePermissions::new(CatalogReadView::new(next), "reader".into());
     let lower = binding("lower", &["text"]);
     allowed.require_execute(&lower).unwrap();
@@ -126,10 +133,12 @@ fn unrestricted_builtin_authority_retains_its_acl_and_role_decision() {
     .unwrap();
     let mut changed_roles = (*definitions.roles).clone();
     changed_roles
-        .get_mut("uqa")
+        .edit("uqa", |role| {
+            role.attributes.remove(&RoleAttribute::Superuser);
+            Ok(())
+        })
         .unwrap()
-        .attributes
-        .remove(&RoleAttribute::Superuser);
+        .unwrap();
     assert!(BuiltinRoutinePermissions::try_unrestricted(
         &definitions.builtin_routine_security,
         &changed_roles,
@@ -139,9 +148,12 @@ fn unrestricted_builtin_authority_retains_its_acl_and_role_decision() {
     superuser
         .require_execute(&binding("lower", &["text"]))
         .unwrap();
-    let public =
-        BuiltinRoutinePermissions::try_unrestricted(&BTreeMap::new(), &changed_roles, &reader)
-            .unwrap();
+    let public = BuiltinRoutinePermissions::try_unrestricted(
+        &BuiltinRoutineSecurities::new(),
+        &changed_roles,
+        &reader,
+    )
+    .unwrap();
     public
         .require_execute(&binding("lower", &["text"]))
         .unwrap();

@@ -233,3 +233,21 @@ fn committed_live(
             .is_some_and(|info| info.length.is_some()),
     )
 }
+
+/// Validate a restored sequence row against the same definition/value pairing required of ordinary commits.
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+pub(super) fn validate_image_pair(
+    connection: &Connection,
+    identity: NativeRecordIdentity,
+    control: &StorageReadControl,
+) -> PhysicalResult<()> {
+    let other = match identity.family() {
+        Family::Sequences => Family::SequenceValues,
+        Family::SequenceValues => Family::Sequences,
+        _ => return Ok(()),
+    };
+    if !committed_live(connection, other, identity.owner(), control)? {
+        return Err(invalid("native image sequence definition and value are not paired").into());
+    }
+    Ok(())
+}

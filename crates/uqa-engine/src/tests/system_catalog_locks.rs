@@ -14,54 +14,70 @@ use uqa_execution::row_locks::RelationLockMode;
 use uqa_sql::catalog::VirtualRelation;
 
 // Independent PostgreSQL 18.4 LOCK reference sets, excluding catalog index scan locks.
-const CATALOGS: &[(&str, &str)] = &[
-    ("pg_catalog.pg_tablespace", "pg_catalog.pg_tablespace"),
-    ("pg_catalog.pg_type", "pg_catalog.pg_type"),
-    ("pg_catalog.pg_attribute", "pg_catalog.pg_attribute"),
-    ("pg_catalog.pg_proc", "pg_catalog.pg_proc"),
-    ("pg_catalog.pg_class", "pg_catalog.pg_class"),
-    ("pg_catalog.pg_authid", "pg_catalog.pg_authid"),
-    ("pg_catalog.pg_auth_members", "pg_catalog.pg_auth_members"),
-    ("pg_catalog.pg_database", "pg_catalog.pg_database"),
-    ("pg_catalog.pg_sequence", "pg_catalog.pg_sequence"),
-    ("pg_catalog.pg_attrdef", "pg_catalog.pg_attrdef"),
-    ("pg_catalog.pg_constraint", "pg_catalog.pg_constraint"),
-    ("pg_catalog.pg_depend", "pg_catalog.pg_depend"),
-    ("pg_catalog.pg_description", "pg_catalog.pg_description"),
-    ("pg_catalog.pg_index", "pg_catalog.pg_index"),
-    ("pg_catalog.pg_inherits", "pg_catalog.pg_inherits"),
-    ("pg_catalog.pg_language", "pg_catalog.pg_language"),
-    ("pg_catalog.pg_namespace", "pg_catalog.pg_namespace"),
-    ("pg_catalog.pg_rewrite", "pg_catalog.pg_rewrite"),
-    ("pg_catalog.pg_trigger", "pg_catalog.pg_trigger"),
-    ("pg_catalog.pg_db_role_setting", "pg_catalog.pg_db_role_setting"),
-    ("pg_catalog.pg_partitioned_table", "pg_catalog.pg_partitioned_table"),
-    ("pg_catalog.pg_collation", "pg_catalog.pg_collation"),
-    ("pg_catalog.pg_range", "pg_catalog.pg_range"),
-    ("pg_catalog.pg_roles", "pg_catalog.pg_authid,pg_catalog.pg_db_role_setting,pg_catalog.pg_roles"),
-    ("pg_catalog.pg_shadow", "pg_catalog.pg_authid,pg_catalog.pg_db_role_setting,pg_catalog.pg_shadow"),
-    ("pg_catalog.pg_user", "pg_catalog.pg_authid,pg_catalog.pg_db_role_setting,pg_catalog.pg_shadow,pg_catalog.pg_user"),
-    ("pg_catalog.pg_rules", "pg_catalog.pg_class,pg_catalog.pg_namespace,pg_catalog.pg_rewrite,pg_catalog.pg_rules"),
-    ("pg_catalog.pg_views", "pg_catalog.pg_class,pg_catalog.pg_namespace,pg_catalog.pg_views"),
-    ("pg_catalog.pg_tables", "pg_catalog.pg_class,pg_catalog.pg_namespace,pg_catalog.pg_tables,pg_catalog.pg_tablespace"),
-    ("pg_catalog.pg_matviews", "pg_catalog.pg_class,pg_catalog.pg_matviews,pg_catalog.pg_namespace,pg_catalog.pg_tablespace"),
-    ("pg_catalog.pg_indexes", "pg_catalog.pg_class,pg_catalog.pg_index,pg_catalog.pg_indexes,pg_catalog.pg_namespace,pg_catalog.pg_tablespace"),
-    ("pg_catalog.pg_sequences", "pg_catalog.pg_class,pg_catalog.pg_namespace,pg_catalog.pg_sequence,pg_catalog.pg_sequences"),
-    ("pg_catalog.pg_prepared_statements", "pg_catalog.pg_prepared_statements"),
-    ("pg_catalog.pg_settings", "pg_catalog.pg_settings"),
-    ("information_schema.information_schema_catalog_name", "information_schema.information_schema_catalog_name"),
-    ("information_schema.column_privileges", "information_schema.column_privileges,pg_catalog.pg_attribute,pg_catalog.pg_authid,pg_catalog.pg_class,pg_catalog.pg_namespace"),
-    ("information_schema.columns", "information_schema.columns,pg_catalog.pg_attrdef,pg_catalog.pg_attribute,pg_catalog.pg_class,pg_catalog.pg_collation,pg_catalog.pg_depend,pg_catalog.pg_namespace,pg_catalog.pg_sequence,pg_catalog.pg_type"),
-    ("information_schema.enabled_roles", "information_schema.enabled_roles,pg_catalog.pg_authid"),
-    ("information_schema.key_column_usage", "information_schema.key_column_usage,pg_catalog.pg_attribute,pg_catalog.pg_class,pg_catalog.pg_constraint,pg_catalog.pg_namespace"),
-    ("information_schema.role_column_grants", "information_schema.column_privileges,information_schema.enabled_roles,information_schema.role_column_grants,pg_catalog.pg_attribute,pg_catalog.pg_authid,pg_catalog.pg_class,pg_catalog.pg_namespace"),
-    ("information_schema.routines", "information_schema.routines,pg_catalog.pg_language,pg_catalog.pg_namespace,pg_catalog.pg_proc,pg_catalog.pg_type"),
-    ("information_schema.schemata", "information_schema.schemata,pg_catalog.pg_authid,pg_catalog.pg_namespace"),
-    ("information_schema.sequences", "information_schema.sequences,pg_catalog.pg_class,pg_catalog.pg_depend,pg_catalog.pg_namespace,pg_catalog.pg_sequence"),
-    ("information_schema.table_constraints", "information_schema.table_constraints,pg_catalog.pg_class,pg_catalog.pg_constraint,pg_catalog.pg_index,pg_catalog.pg_namespace"),
-    ("information_schema.tables", "information_schema.tables,pg_catalog.pg_class,pg_catalog.pg_namespace,pg_catalog.pg_type"),
-    ("information_schema.views", "information_schema.views,pg_catalog.pg_class,pg_catalog.pg_namespace,pg_catalog.pg_trigger"),
- ];
+macro_rules! catalog_cases {
+    ($($identifier:ident: ($name:literal, $expected:literal)),+ $(,)?) => {
+        const CATALOGS: &[(&str, &str)] = &[$(($name, $expected)),+];
+
+        #[rstest::rstest]
+        $(#[case::$identifier($name, $expected)])+
+        fn system_query_and_explicit_locks_cover_the_postgresql_view_source_closure(
+            #[case] name: &str,
+            #[case] expected: &str,
+            #[values(0, 1, 2)] provider: usize,
+        ) {
+            verify_catalog_source_closure(provider, name, expected);
+        }
+    };
+}
+
+catalog_cases! {
+    pg_catalog_pg_tablespace: ("pg_catalog.pg_tablespace", "pg_catalog.pg_tablespace"),
+    pg_catalog_pg_type: ("pg_catalog.pg_type", "pg_catalog.pg_type"),
+    pg_catalog_pg_attribute: ("pg_catalog.pg_attribute", "pg_catalog.pg_attribute"),
+    pg_catalog_pg_proc: ("pg_catalog.pg_proc", "pg_catalog.pg_proc"),
+    pg_catalog_pg_class: ("pg_catalog.pg_class", "pg_catalog.pg_class"),
+    pg_catalog_pg_authid: ("pg_catalog.pg_authid", "pg_catalog.pg_authid"),
+    pg_catalog_pg_auth_members: ("pg_catalog.pg_auth_members", "pg_catalog.pg_auth_members"),
+    pg_catalog_pg_database: ("pg_catalog.pg_database", "pg_catalog.pg_database"),
+    pg_catalog_pg_sequence: ("pg_catalog.pg_sequence", "pg_catalog.pg_sequence"),
+    pg_catalog_pg_attrdef: ("pg_catalog.pg_attrdef", "pg_catalog.pg_attrdef"),
+    pg_catalog_pg_constraint: ("pg_catalog.pg_constraint", "pg_catalog.pg_constraint"),
+    pg_catalog_pg_depend: ("pg_catalog.pg_depend", "pg_catalog.pg_depend"),
+    pg_catalog_pg_description: ("pg_catalog.pg_description", "pg_catalog.pg_description"),
+    pg_catalog_pg_index: ("pg_catalog.pg_index", "pg_catalog.pg_index"),
+    pg_catalog_pg_inherits: ("pg_catalog.pg_inherits", "pg_catalog.pg_inherits"),
+    pg_catalog_pg_language: ("pg_catalog.pg_language", "pg_catalog.pg_language"),
+    pg_catalog_pg_namespace: ("pg_catalog.pg_namespace", "pg_catalog.pg_namespace"),
+    pg_catalog_pg_rewrite: ("pg_catalog.pg_rewrite", "pg_catalog.pg_rewrite"),
+    pg_catalog_pg_trigger: ("pg_catalog.pg_trigger", "pg_catalog.pg_trigger"),
+    pg_catalog_pg_db_role_setting: ("pg_catalog.pg_db_role_setting", "pg_catalog.pg_db_role_setting"),
+    pg_catalog_pg_partitioned_table: ("pg_catalog.pg_partitioned_table", "pg_catalog.pg_partitioned_table"),
+    pg_catalog_pg_collation: ("pg_catalog.pg_collation", "pg_catalog.pg_collation"),
+    pg_catalog_pg_range: ("pg_catalog.pg_range", "pg_catalog.pg_range"),
+    pg_catalog_pg_roles: ("pg_catalog.pg_roles", "pg_catalog.pg_authid,pg_catalog.pg_db_role_setting,pg_catalog.pg_roles"),
+    pg_catalog_pg_shadow: ("pg_catalog.pg_shadow", "pg_catalog.pg_authid,pg_catalog.pg_db_role_setting,pg_catalog.pg_shadow"),
+    pg_catalog_pg_user: ("pg_catalog.pg_user", "pg_catalog.pg_authid,pg_catalog.pg_db_role_setting,pg_catalog.pg_shadow,pg_catalog.pg_user"),
+    pg_catalog_pg_rules: ("pg_catalog.pg_rules", "pg_catalog.pg_class,pg_catalog.pg_namespace,pg_catalog.pg_rewrite,pg_catalog.pg_rules"),
+    pg_catalog_pg_views: ("pg_catalog.pg_views", "pg_catalog.pg_class,pg_catalog.pg_namespace,pg_catalog.pg_views"),
+    pg_catalog_pg_tables: ("pg_catalog.pg_tables", "pg_catalog.pg_class,pg_catalog.pg_namespace,pg_catalog.pg_tables,pg_catalog.pg_tablespace"),
+    pg_catalog_pg_matviews: ("pg_catalog.pg_matviews", "pg_catalog.pg_class,pg_catalog.pg_matviews,pg_catalog.pg_namespace,pg_catalog.pg_tablespace"),
+    pg_catalog_pg_indexes: ("pg_catalog.pg_indexes", "pg_catalog.pg_class,pg_catalog.pg_index,pg_catalog.pg_indexes,pg_catalog.pg_namespace,pg_catalog.pg_tablespace"),
+    pg_catalog_pg_sequences: ("pg_catalog.pg_sequences", "pg_catalog.pg_class,pg_catalog.pg_namespace,pg_catalog.pg_sequence,pg_catalog.pg_sequences"),
+    pg_catalog_pg_prepared_statements: ("pg_catalog.pg_prepared_statements", "pg_catalog.pg_prepared_statements"),
+    pg_catalog_pg_settings: ("pg_catalog.pg_settings", "pg_catalog.pg_settings"),
+    information_schema_information_schema_catalog_name: ("information_schema.information_schema_catalog_name", "information_schema.information_schema_catalog_name"),
+    information_schema_column_privileges: ("information_schema.column_privileges", "information_schema.column_privileges,pg_catalog.pg_attribute,pg_catalog.pg_authid,pg_catalog.pg_class,pg_catalog.pg_namespace"),
+    information_schema_columns: ("information_schema.columns", "information_schema.columns,pg_catalog.pg_attrdef,pg_catalog.pg_attribute,pg_catalog.pg_class,pg_catalog.pg_collation,pg_catalog.pg_depend,pg_catalog.pg_namespace,pg_catalog.pg_sequence,pg_catalog.pg_type"),
+    information_schema_enabled_roles: ("information_schema.enabled_roles", "information_schema.enabled_roles,pg_catalog.pg_authid"),
+    information_schema_key_column_usage: ("information_schema.key_column_usage", "information_schema.key_column_usage,pg_catalog.pg_attribute,pg_catalog.pg_class,pg_catalog.pg_constraint,pg_catalog.pg_namespace"),
+    information_schema_role_column_grants: ("information_schema.role_column_grants", "information_schema.column_privileges,information_schema.enabled_roles,information_schema.role_column_grants,pg_catalog.pg_attribute,pg_catalog.pg_authid,pg_catalog.pg_class,pg_catalog.pg_namespace"),
+    information_schema_routines: ("information_schema.routines", "information_schema.routines,pg_catalog.pg_language,pg_catalog.pg_namespace,pg_catalog.pg_proc,pg_catalog.pg_type"),
+    information_schema_schemata: ("information_schema.schemata", "information_schema.schemata,pg_catalog.pg_authid,pg_catalog.pg_namespace"),
+    information_schema_sequences: ("information_schema.sequences", "information_schema.sequences,pg_catalog.pg_class,pg_catalog.pg_depend,pg_catalog.pg_namespace,pg_catalog.pg_sequence"),
+    information_schema_table_constraints: ("information_schema.table_constraints", "information_schema.table_constraints,pg_catalog.pg_class,pg_catalog.pg_constraint,pg_catalog.pg_index,pg_catalog.pg_namespace"),
+    information_schema_tables: ("information_schema.tables", "information_schema.tables,pg_catalog.pg_class,pg_catalog.pg_namespace,pg_catalog.pg_type"),
+    information_schema_views: ("information_schema.views", "information_schema.views,pg_catalog.pg_class,pg_catalog.pg_namespace,pg_catalog.pg_trigger"),
+}
 
 fn assert_locks(first: &Engine, second: &Engine, expected: &str, mode: RelationLockMode) {
     for (name, _) in CATALOGS {
@@ -84,29 +100,24 @@ fn assert_locks(first: &Engine, second: &Engine, expected: &str, mode: RelationL
     }
 }
 
-#[test]
-fn system_query_and_explicit_locks_cover_the_postgresql_view_source_closure() {
-    for provider in 0..3 {
-        let (_directory, first, second) = sessions(provider);
-        for (name, expected) in CATALOGS {
-            let mut statements = vec![(
-                format!("LOCK {name} IN SHARE MODE"),
-                RelationLockMode::RowExclusive,
-            )];
-            if VirtualRelation::from_qualified_name(name).is_some() {
-                statements.push((
-                    format!("SELECT * FROM {name} LIMIT 0"),
-                    RelationLockMode::AccessExclusive,
-                ));
-            }
-            for (statement, probe) in statements {
-                sql(&first, "BEGIN");
-                sql(&first, &statement);
-                assert_locks(&first, &second, expected, probe);
-                sql(&first, "ROLLBACK");
-                assert_locks(&first, &second, "", RelationLockMode::AccessExclusive);
-            }
-        }
+fn verify_catalog_source_closure(provider: usize, name: &str, expected: &str) {
+    let (_directory, first, second) = sessions(provider);
+    let mut statements = vec![(
+        format!("LOCK {name} IN SHARE MODE"),
+        RelationLockMode::RowExclusive,
+    )];
+    if VirtualRelation::from_qualified_name(name).is_some() {
+        statements.push((
+            format!("SELECT * FROM {name} LIMIT 0"),
+            RelationLockMode::AccessExclusive,
+        ));
+    }
+    for (statement, probe) in statements {
+        sql(&first, "BEGIN");
+        sql(&first, &statement);
+        assert_locks(&first, &second, expected, probe);
+        sql(&first, "ROLLBACK");
+        assert_locks(&first, &second, "", RelationLockMode::AccessExclusive);
     }
 }
 

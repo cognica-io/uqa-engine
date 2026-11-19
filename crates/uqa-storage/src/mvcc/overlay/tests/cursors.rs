@@ -9,6 +9,68 @@ use crate::mvcc::commit::RecordWriteKind;
 use crate::mvcc::{MemoryVersionStore, MergedRecordSnapshot, RecordMetadata};
 
 #[test]
+fn catalog_text_record_slots_count_tombstones_without_payload_reads() {
+    use crate::key_value::KeyValueRead;
+    use crate::mvcc::{DatabaseId, RecordRead};
+
+    let source = StorageReadControl::with_limit(128 << 10);
+    let changes = PrivateRecordChanges::new(source.memory());
+    let mut model = Model::new();
+    for id in 0..512 {
+        stage(&changes, &mut model, id, Some("x".repeat(1024)), &source);
+    }
+    for id in (0..512).step_by(2) {
+        stage(&changes, &mut model, id, None, &source);
+    }
+    assert!(spilled_runs(&changes) > 0);
+    let view = merged(&changes);
+    let read = RecordRead::new(&view, DatabaseId::from_bytes([7; 16]), &source);
+    let retained = read.retain(&[b"k"]).unwrap();
+    drop((view, changes));
+
+    let control = StorageReadControl::with_limit(128 << 10);
+    let mut after = None;
+    for (key, (_, value)) in model {
+        let mut found = None;
+        super::super::run::read_counts::take();
+        retained
+            .visit_record_keys_after(b"k", after.as_deref(), 1, &control, &mut |key, live| {
+                assert!(found.is_none(), "every tombstone consumes the only slot");
+                found = Some((key.to_vec(), live));
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(super::super::run::read_counts::take().values, 0);
+        assert_eq!(found, Some((key.clone(), value.is_some())));
+        after = Some(key);
+    }
+    for (after, limit) in [(None, 0), (after.as_deref(), 1)] {
+        retained
+            .visit_record_keys_after(b"k", after, limit, &control, &mut |_, _| {
+                panic!("an empty window cannot emit a slot")
+            })
+            .unwrap();
+    }
+    control.cancellation().cancel();
+    assert!(retained
+        .visit_record_keys_after(b"k", None, 1, &control, &mut |_, _| unreachable!())
+        .is_err());
+    source.cancellation().cancel();
+    assert!(retained
+        .visit_record_keys_after(
+            b"k",
+            None,
+            1,
+            &StorageReadControl::with_limit(128 << 10),
+            &mut |_, _| unreachable!(),
+        )
+        .is_err());
+    drop(retained);
+    assert_eq!(source.memory().used(), 0);
+    assert_eq!(control.memory().used(), 0);
+}
+
+#[test]
 fn revision_reads_stream_each_spilled_entry_once_without_payloads() {
     use crate::key_value::{KeyValueRead, KeyValueReadRevision};
     use crate::mvcc::{DatabaseId, RecordRead};

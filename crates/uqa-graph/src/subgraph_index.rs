@@ -92,7 +92,7 @@ mod tests {
     fn build_and_lookup_cached_pattern() {
         let graph = "g";
         let mut store = MemoryGraphStore::new();
-        store.create_graph(graph);
+        store.create_graph(graph).unwrap();
         store.add_vertex(Vertex::new(1, "Person"), graph).unwrap();
         store.add_vertex(Vertex::new(2, "Person"), graph).unwrap();
         store.add_edge(Edge::new(10, 1, 2, "knows"), graph).unwrap();

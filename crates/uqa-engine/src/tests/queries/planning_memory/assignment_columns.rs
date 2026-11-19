@@ -36,8 +36,14 @@ fn native_assignment_metadata_borrows_unused_defaults_and_owns_selected_names(
     let control = ProductionControl::new(memory, resources.cancellation(), runtime.cancellation);
     drop(GeneratedValueColumns::of_with_control(&engine, "public.items", &control).unwrap());
     let table = engine.storage.tables.read()[&RelationIdentity::new("public", "items")].clone();
-    table.columns.write()[1].default =
-        Some(uqa_sql::ast::Expr::Literal(Value::Str("x".repeat(4 << 20))));
+    table
+        .columns
+        .write()
+        .edit(|columns| {
+            columns[1].default = Some(uqa_sql::ast::Expr::Literal(Value::Str("x".repeat(4 << 20))));
+            Ok(())
+        })
+        .unwrap();
     let targets: [uqa_sql::ast::AssignmentTarget<uqa_sql::ScalarExpr>; 2] =
         ["id".into(), "payload".into()];
     let baseline = memory.used();
@@ -104,20 +110,41 @@ fn native_assignment_metadata_borrows_unused_defaults_and_owns_selected_names(
     assert_eq!(error.sqlstate(), Some("53200"));
     drop(occupied);
     assert_eq!(memory.used(), baseline);
-    table.columns.write()[1].default = None;
+    table
+        .columns
+        .write()
+        .edit(|columns| {
+            columns[1].default = None;
+            Ok(())
+        })
+        .unwrap();
     assert!(AssignmentColumnCatalog::with_column_metadata_with_control(
         &engine,
         "public.items",
         &control,
         &mut |columns| {
             assert!(!table.columns.is_locked());
-            table.columns.write()[1].name = "changed".into();
+            table
+                .columns
+                .write()
+                .edit(|columns| {
+                    columns[1].name = "changed".into();
+                    Ok(())
+                })
+                .unwrap();
             assert_eq!(columns[1].name, "payload");
             Ok(())
         }
     )
     .unwrap());
-    table.columns.write()[1].name = "payload".into();
+    table
+        .columns
+        .write()
+        .edit(|columns| {
+            columns[1].name = "payload".into();
+            Ok(())
+        })
+        .unwrap();
     drop(table);
     assert_eq!(
         engine
@@ -166,7 +193,14 @@ fn native_assignment_metadata_preserves_sequence_observation_before_validation(
     else {
         panic!("table")
     };
-    table.columns.write()[1].default = missing.columns.remove(0).default;
+    table
+        .columns
+        .write()
+        .edit(|columns| {
+            columns[1].default = missing.columns.remove(0).default;
+            Ok(())
+        })
+        .unwrap();
     let ordinary = engine
         .describe_table_in_execution("public.items")
         .unwrap_err();
@@ -187,7 +221,14 @@ fn native_assignment_metadata_preserves_sequence_observation_before_validation(
         format!("UPDATE failed in storage backend: {ordinary}")
     );
     assert_eq!(memory.used(), baseline);
-    table.columns.write()[1].default = original;
+    table
+        .columns
+        .write()
+        .edit(|columns| {
+            columns[1].default = original;
+            Ok(())
+        })
+        .unwrap();
     drop(table);
     assert_eq!(
         engine

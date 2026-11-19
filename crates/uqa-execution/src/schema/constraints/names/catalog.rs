@@ -6,11 +6,12 @@
 
 //! Current constraint declarations selected independently of a retained query catalog.
 
-use crate::catalog::{
-    domain::DomainRegistry, foreign::StoredForeignTable, CatalogReadSnapshot, CatalogTableSnapshot,
-};
-use std::{collections::BTreeMap, sync::Arc};
+use crate::catalog::{domain::DomainRegistry, CatalogReadSnapshot, CatalogTableSnapshot};
+use std::sync::Arc;
+use uqa_core::memory::RetainedValue;
 use uqa_core::RelationIdentity;
+use uqa_sql::catalog::table_definition::SharedTableDefinition;
+use uqa_sql::catalog::table_metadata::SharedTableMetadata;
 use uqa_sql::{
     ast::{ColumnDef, ForeignKey, TableCheck, TableHierarchy, TableKeyConstraint},
     catalog::events::TriggerCatalog,
@@ -19,11 +20,11 @@ use uqa_sql::{
 
 pub struct ConstraintTableMetadata {
     pub object_id: [u8; 16],
-    pub columns: Arc<Vec<ColumnDef>>,
-    pub checks: Arc<Vec<TableCheck>>,
-    pub foreign_keys: Arc<Vec<ForeignKey>>,
-    pub keys: Arc<Vec<TableKeyConstraint>>,
-    pub hierarchy: Arc<TableHierarchy>,
+    pub columns: SharedTableDefinition<Vec<ColumnDef>>,
+    pub checks: SharedTableDefinition<Vec<TableCheck>>,
+    pub foreign_keys: SharedTableMetadata<Vec<ForeignKey>>,
+    pub keys: SharedTableMetadata<Vec<TableKeyConstraint>>,
+    pub hierarchy: SharedTableDefinition<TableHierarchy>,
 }
 
 impl ConstraintTableMetadata {
@@ -47,11 +48,11 @@ impl From<&CatalogTableSnapshot> for ConstraintTableMetadata {
     fn from(table: &CatalogTableSnapshot) -> Self {
         Self {
             object_id: table.object_id,
-            columns: Arc::clone(&table.columns),
-            checks: Arc::clone(&table.checks),
-            foreign_keys: Arc::clone(&table.foreign_keys),
-            keys: Arc::clone(&table.keys),
-            hierarchy: Arc::clone(&table.hierarchy),
+            columns: table.columns.clone(),
+            checks: table.checks.clone(),
+            foreign_keys: table.foreign_keys.clone(),
+            keys: table.keys.clone(),
+            hierarchy: table.hierarchy.clone(),
         }
     }
 }
@@ -63,9 +64,9 @@ pub trait ConstraintNameCatalog {
         object_id: [u8; 16],
     ) -> Option<(RelationIdentity, ConstraintTableMetadata)>;
     fn constraint_schema_tables(&self, schema: &str) -> Vec<ConstraintTableMetadata>;
-    fn constraint_foreign_tables(&self) -> Arc<BTreeMap<RelationIdentity, StoredForeignTable>>;
-    fn constraint_domains(&self) -> Arc<DomainRegistry>;
-    fn constraint_triggers(&self) -> Arc<TriggerCatalog>;
+    fn constraint_foreign_tables(&self) -> Arc<crate::catalog::foreign::ForeignTables>;
+    fn constraint_domains(&self) -> RetainedValue<DomainRegistry>;
+    fn constraint_triggers(&self) -> RetainedValue<TriggerCatalog>;
 }
 
 impl ConstraintNameCatalog for CatalogReadSnapshot {
@@ -88,13 +89,13 @@ impl ConstraintNameCatalog for CatalogReadSnapshot {
             .map(|(_, table)| table.into())
             .collect()
     }
-    fn constraint_foreign_tables(&self) -> Arc<BTreeMap<RelationIdentity, StoredForeignTable>> {
+    fn constraint_foreign_tables(&self) -> Arc<crate::catalog::foreign::ForeignTables> {
         Arc::clone(&self.definitions.foreign_tables)
     }
-    fn constraint_domains(&self) -> Arc<DomainRegistry> {
-        Arc::clone(&self.definitions.domains)
+    fn constraint_domains(&self) -> RetainedValue<DomainRegistry> {
+        RetainedValue::clone(&self.definitions.domains)
     }
-    fn constraint_triggers(&self) -> Arc<TriggerCatalog> {
-        Arc::clone(&self.definitions.triggers)
+    fn constraint_triggers(&self) -> RetainedValue<TriggerCatalog> {
+        RetainedValue::clone(&self.definitions.triggers)
     }
 }

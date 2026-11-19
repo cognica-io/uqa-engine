@@ -32,13 +32,23 @@ pub fn rewrite_view_relation_references(
     if replacements.is_empty() {
         return Ok(());
     }
+    let original = (**context.registry.views_read()).clone();
     let updates = uqa_sql::catalog::stored_view::references::rewritten_relation_references(
-        &context.registry.views_read(),
+        &original,
         replacements,
     )
     .map_err(StorageBackendError::Other)?;
+    let mut next = original;
+    let mut changed = Vec::with_capacity(updates.len());
+    for (relation, view) in updates {
+        next.insert(relation.clone(), view).map_err(|error| {
+            StorageBackendError::backend("rewrite view relation references", error)
+        })?;
+        changed.push(relation);
+    }
     if context.publication.has_catalog() {
-        for (relation, view) in &updates {
+        for relation in &changed {
+            let view = &next[relation];
             if view.persistence != uqa_sql::ast::RelationPersistence::Temporary {
                 context
                     .publication
@@ -46,15 +56,15 @@ pub fn rewrite_view_relation_references(
             }
         }
     }
-    let mut views = context.registry.views_write();
-    for (relation, view) in updates {
+    for relation in changed {
+        let view = &next[&relation];
         context.changes.prepared_catalog_changed(
             crate::statement::prepared::invalidation::PreparedCatalogChange::Relation(
                 view.relation_oids().relation,
             ),
         );
-        views.insert(relation, view);
     }
+    **context.registry.views_write() = next;
     Ok(())
 }
 pub fn views_depending_on_column(
@@ -91,11 +101,13 @@ pub fn rewrite_view_column_references(
     to: &str,
 ) -> StorageBackendResult<()> {
     let target = RelationIdentity::from_legacy_name(table).map_err(StorageBackendError::Other)?;
-    let mut next = (**context.registry.views_read()).clone();
+    let original = (**context.registry.views_read()).clone();
+    let mut next = original.clone();
     let mut changed = Vec::new();
-    for (relation, view) in &mut next {
+    for (relation, view) in &original {
         if query_plan_references_relation(&view.query, &target, &std::collections::BTreeSet::new())
         {
+            let mut view = view.clone();
             projection::rename_view_column_query(
                 &context.catalog,
                 &mut view.query,
@@ -104,6 +116,9 @@ pub fn rewrite_view_column_references(
                 to,
             )
             .map_err(|error| StorageBackendError::Other(error.to_string()))?;
+            next.insert(relation.clone(), view).map_err(|error| {
+                StorageBackendError::backend("rewrite view column references", error)
+            })?;
             changed.push(relation.clone());
         }
     }

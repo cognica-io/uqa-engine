@@ -46,6 +46,7 @@ cc = "1.2.61"
 cmake = "0.1.58"
 
 [dev-dependencies]
+serde_json = { workspace = true, features = ["raw_value"] }
 allocation-counter = "=0.8.1"
 proptest = { workspace = true }
 

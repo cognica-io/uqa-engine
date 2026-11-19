@@ -122,11 +122,12 @@ fn routine_execute_denial_precedes_trigger_return_type_validation() {
         allow_owner: true,
         ..Catalog::default()
     };
-    let function = std::sync::Arc::make_mut(&mut catalog.routines[0]);
+    let mut function = (**catalog.routines[0]).clone();
     function.def.returns = crate::ast::FunctionReturns::Scalar {
         type_name: "integer".into(),
     };
     function.def.execute_acl = Some(Vec::new());
+    catalog.routines[0] = function.shared();
     let mut definition = trigger();
     error_state(
         catalog
@@ -238,9 +239,9 @@ fn restoration_requires_the_current_bound_function_object_identity() {
         error,
         "restore trigger catalog: function `handler` has no object identity"
     );
-    std::sync::Arc::make_mut(&mut catalog.routines[0])
-        .def
-        .object_id = Some([33; 16]);
+    let mut function = (**catalog.routines[0]).clone();
+    function.def.object_id = Some([33; 16]);
+    catalog.routines[0] = function.shared();
     assert_eq!(
         crate::catalog::events::restoration::trigger_function_object_id(
             &catalog.context(),

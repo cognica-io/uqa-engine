@@ -10,21 +10,19 @@ use super::super::{RoutineCallKind, RoutineTypeSnapshot};
 use super::{invocation, parameters};
 use crate::{
     ast::RoutineInvocationBinding,
-    routines::SQLUserFunction,
     type_resolution::{
         match_routine_candidate_with_control, MatchedRoutineSignature, RankedFunctionMatch,
         RoutineCallDescriptor, RoutineSignatureProductionError, RoutineVariadicMode,
     },
     SQLError,
 };
-use std::sync::Arc;
 use uqa_core::{
     memory::{Produced, ProductionControl},
     RelationIdentity,
 };
 
 pub(super) struct RoutineMatch {
-    pub function: Arc<SQLUserFunction>,
+    pub function: crate::routines::SQLRoutine,
     pub signature: Produced<MatchedRoutineSignature>,
     pub invocation: Produced<RoutineInvocationBinding>,
 }
@@ -53,7 +51,7 @@ impl RankedFunctionMatch for RoutineMatch {
 )]
 pub(super) fn match_candidate(
     catalog: &RoutineTypeSnapshot,
-    function: Arc<SQLUserFunction>,
+    function: crate::routines::SQLRoutine,
     call: RoutineCallDescriptor<'_>,
     kind: RoutineCallKind,
     control: &ProductionControl<'_>,

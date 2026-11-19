@@ -25,7 +25,10 @@ impl DatabasePrivilegeCatalog for Engine {
         })
     }
     fn security(&self) -> DatabaseSecurityRead<'_> {
-        Box::new(self.durable.database_security.read())
+        Box::new(parking_lot::MappedRwLockReadGuard::map(
+            self.durable.database_security.read(),
+            AsRef::as_ref,
+        ))
     }
 }
 impl Engine {
@@ -47,13 +50,13 @@ impl Engine {
 }
 
 use uqa_execution::catalog::security::database_lifecycle::{
-    self, DatabasePrivilegeContext, DatabasePrivilegePublication, DatabaseSecurityRegistry,
-    DatabaseSecurityWrite, DATABASE_SECURITY_METADATA_KEY,
+    self, DatabaseAuthorityRead, DatabasePrivilegeContext, DatabasePrivilegePublication,
+    DatabaseSecurityRegistry, DatabaseSecurityWrite, DATABASE_SECURITY_METADATA_KEY,
 };
 use uqa_storage::{CatalogFacade, StorageBackendResult};
 
 impl DatabaseSecurityRegistry for Engine {
-    fn security_read(&self) -> DatabaseSecurityRead<'_> {
+    fn security_read(&self) -> DatabaseAuthorityRead<'_> {
         Box::new(self.durable.database_security.read())
     }
     fn security_write(&self) -> DatabaseSecurityWrite<'_> {

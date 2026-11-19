@@ -15,7 +15,7 @@ fn save_view(catalog: &Catalog, name: &str, owner: &str) {
                 uqa_core::catalog_acl::LegacyRelationSecurity {
                     role_owner: owner.into(),
                     acl: None,
-                    column_acls: std::collections::BTreeMap::new(),
+                    column_acls: uqa_core::memory::OwnedMap::new(),
                 },
             ),
             definition_json: "{}".into(),
@@ -114,7 +114,7 @@ fn migration_39_preserves_view_acls_when_columns_precede_their_marker() {
     let connection = ManagedConnection::open_in_memory().unwrap();
     let current = Catalog::open(connection.clone()).unwrap();
     let acl = view_acl();
-    let column_acls = std::collections::BTreeMap::from([("id".into(), view_acl())]);
+    let column_acls = uqa_core::memory::OwnedMap::from_iter([("id".into(), view_acl())]);
     current
         .save_view(&ViewRow {
             relation: RelationIdentity::new("public", "early_view_acl"),

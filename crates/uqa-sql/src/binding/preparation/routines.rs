@@ -11,6 +11,40 @@ use super::{
     RowSchema, SQLError, SchemaScope, UnifiedPlan,
 };
 
+/// Inspect a captured statement with its original parameter namespace. Analysis may retain scratch metadata but never applies input conversions or rewrites to the stored plan.
+pub(crate) fn analyze_stored_routine_statement(
+    routines: &dyn RoutineResolution,
+    plan: crate::plan::PlanRef<'_>,
+    params: &[crate::SQLParam],
+    parameters: Option<&crate::binding::RoutineParameterScope>,
+    binding: crate::binding::production::ControlledBindingContext<'_>,
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<crate::binding::statements::AnalyzedResult, SQLError> {
+    let mut scope = SchemaScope::for_analysis_with_control(binding, control)?;
+    scope.scalar_binding = crate::binding::ScalarBindingMode::References;
+    scope.preserve_syntax_shape = true;
+    scope.routine_parameters = parameters.cloned();
+    let mut analysis = Preparation {
+        bound_condition_queries: None,
+        routines,
+        scope: &mut scope,
+        parameters: ParameterTypes::fixed_with_control(params, control)?.with_reference_retention(),
+        schema_expression: (),
+    };
+    let result = match plan {
+        crate::plan::PlanRef::Query(query) => Some(analysis.query(
+            query,
+            parameters.map(crate::binding::RoutineParameterScope::schema),
+        )?),
+        crate::plan::PlanRef::Command(command) => analysis.command(command)?,
+    };
+    control.check()?;
+    Ok(result.map_or(
+        crate::binding::statements::AnalyzedResult::Command,
+        crate::binding::statements::AnalyzedResult::Schema,
+    ))
+}
+
 /// Analyze a routine statement's inputs without executing it or retaining the
 /// constants in its source. Its target list resolves unknown literals to text,
 /// just as an ordinary analyzed statement does before SQL return validation.

@@ -12,6 +12,60 @@ use crate::ast::Expr;
 mod collations;
 mod type_observation;
 
+#[test]
+fn boolean_conditions_observe_retained_fields_and_preserve_short_circuit_errors() {
+    let expression = |source: &str| {
+        let crate::Statement::Select(mut query) = crate::compile(&format!("SELECT {source}"))
+            .unwrap()
+            .remove(0)
+        else {
+            panic!("SELECT expression");
+        };
+        query.projections.remove(0).expr
+    };
+    for flag in [false, true] {
+        let row = crate::ResultRow::from([(
+            "flag".into(),
+            Value::Datum(uqa_core::DatumValue::new(16, 0, vec![u8::from(flag)])),
+        )]);
+        for (sql, expected) in [
+            ("flag", flag),
+            ("NOT flag", !flag),
+            ("flag AND true", flag),
+            ("flag OR false", flag),
+            ("CASE WHEN flag THEN true ELSE false END", flag),
+        ] {
+            let value = eval(&expression(sql), &EvalContext::new(Some(&row), &[])).unwrap();
+            assert_eq!(truthy(&value).unwrap(), expected, "{sql}");
+        }
+    }
+    let row = crate::ResultRow::from([(
+        "flag".into(),
+        Value::Datum(uqa_core::DatumValue::new(16, 0, Vec::new())),
+    )]);
+    for sql in [
+        "flag",
+        "NOT flag",
+        "flag AND true",
+        "flag OR false",
+        "CASE WHEN flag THEN true ELSE false END",
+    ] {
+        let error = eval(&expression(sql), &EvalContext::new(Some(&row), &[]))
+            .and_then(|value| truthy(&value))
+            .unwrap_err();
+        assert_eq!(error.sqlstate(), Some("XX001"), "{sql}");
+    }
+    for (sql, expected) in [
+        ("false AND flag", false),
+        ("true OR flag", true),
+        ("CASE WHEN true THEN true ELSE flag END", true),
+    ] {
+        let value = eval(&expression(sql), &EvalContext::new(Some(&row), &[])).unwrap();
+        assert_eq!(truthy(&value).unwrap(), expected, "{sql}");
+    }
+    assert!(!truthy(&Value::Null).unwrap());
+}
+
 /// The ordinary scalar kernels, with collation-dependent functions under the database default collation.
 fn eval_scalar_function(name: &str, args: &[Value]) -> crate::error::Result<Value> {
     super::eval_scalar_function(

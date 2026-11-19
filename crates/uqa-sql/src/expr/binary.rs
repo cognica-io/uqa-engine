@@ -36,7 +36,7 @@ pub use comparison::{
     eval_comparison_truth_with_engine, eval_comparison_truth_with_enum_catalog,
     eval_record_comparison_truth_with_engine, eval_value_comparison_truth_with_engine,
     type_comparison_can_fail, validate_legacy_vector_comparison, value_comparison_can_fail,
-    values_equal_nullable_with_control, values_equal_with_control,
+    value_comparison_can_fail_from, values_equal_nullable_with_control, values_equal_with_control,
     visit_record_image_fields_with_catalog,
 };
 pub(in crate::expr) use comparison::{require_array_element_support, ComparisonSupport};
@@ -442,9 +442,12 @@ pub(super) fn eval_operand_borrowed<'a>(
     }
 }
 
-/// Whether a condition holds. `NULL` does not; text, which reaches a condition only as an `unknown` literal or parameter, holds when `boolin` reads it as true (parse analysis rejects any other text); the engine's numeric retrieval predicates hold when non-zero.
-pub fn truthy(v: &Value) -> bool {
-    match v {
+/// Whether a condition holds. Reached physical fields are decoded here, so corrupt input reports its original error instead of becoming true. `NULL` does not hold; text, which reaches a condition only as an `unknown` literal or parameter, holds when `boolin` reads it as true (parse analysis rejects any other text); the engine's numeric retrieval predicates hold when non-zero.
+pub fn truthy(v: &Value) -> Result<bool> {
+    if let Value::Datum(datum) = v {
+        return truthy(&super::datums::read(datum)?);
+    }
+    Ok(match v {
         Value::Null => false,
         Value::Bool(b) => *b,
         Value::Int(n) => *n != 0,
@@ -452,7 +455,7 @@ pub fn truthy(v: &Value) -> bool {
         Value::Decimal(d) => !d.is_zero(),
         Value::Str(s) | Value::FixedChar(s) => super::parse_boolean_input(s) == Some(true),
         _ => true,
-    }
+    })
 }
 
 /// `PostgreSQL` `division by zero` error (SQLSTATE 22012).

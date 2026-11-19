@@ -8,6 +8,7 @@
 
 use parking_lot::Mutex;
 use std::{collections::BTreeMap, sync::Arc};
+use uqa_core::memory::RetainedValue;
 use uqa_sql::expr::composites::CompositeTypeDescriptor;
 
 use super::CompositeRegistry;
@@ -20,7 +21,7 @@ pub struct CompositeDescriptorCache {
 }
 
 struct IndexedDescriptors {
-    registry: Arc<CompositeRegistry>,
+    registry: RetainedValue<CompositeRegistry>,
     types: BTreeMap<u32, Arc<CompositeTypeDescriptor>>,
 }
 
@@ -28,16 +29,16 @@ impl CompositeDescriptorCache {
     /// The live attributes of one composite type in the given registry generation.
     pub fn descriptor(
         &self,
-        registry: &Arc<CompositeRegistry>,
+        registry: &RetainedValue<CompositeRegistry>,
         type_oid: u32,
     ) -> Option<Arc<CompositeTypeDescriptor>> {
         let mut entry = self.entry.lock();
         if !entry
             .as_ref()
-            .is_some_and(|indexed| Arc::ptr_eq(&indexed.registry, registry))
+            .is_some_and(|indexed| RetainedValue::ptr_eq(&indexed.registry, registry))
         {
             *entry = Some(IndexedDescriptors {
-                registry: Arc::clone(registry),
+                registry: RetainedValue::clone(registry),
                 types: registry
                     .values()
                     .map(|definition| (definition.oid, Arc::new(definition.descriptor())))

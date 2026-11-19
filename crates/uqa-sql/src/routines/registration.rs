@@ -11,27 +11,32 @@ use super::{
     routine_local_name,
 };
 use crate::catalog::roles::identity::RoleSubject;
+use crate::catalog::roles::{RoleDefinitions, RoleMemberships};
 use crate::{
     ast::{AlterRoutineStmt, CreateFunction},
-    catalog::roles::{role_inherits, RoleDefinition, RoleMembership, RoleMembershipKey},
+    catalog::roles::role_inherits,
     type_resolution::canonical_routine_type_name,
     SQLError,
 };
-use std::collections::BTreeMap;
 
 pub trait RoutineSupportAuthority {
     fn current_user_is_superuser(&self) -> bool;
 }
-pub fn validate_routine_support(
-    authority: &dyn RoutineSupportAuthority,
-    support: &str,
-) -> Result<(), SQLError> {
+pub(super) fn validate_routine_support_identity(support: &str) -> Result<(), SQLError> {
     if builtin_routine_support_oid(support).is_none() {
         return Err(SQLError::Routine {
             sqlstate: "42883".into(),
             message: format!("function {support}(internal) does not exist"),
         });
     }
+    Ok(())
+}
+
+pub fn validate_routine_support(
+    authority: &dyn RoutineSupportAuthority,
+    support: &str,
+) -> Result<(), SQLError> {
+    validate_routine_support_identity(support)?;
     if !authority.current_user_is_superuser() {
         return Err(SQLError::Routine {
             sqlstate: "42501".into(),
@@ -68,8 +73,8 @@ pub fn prepare_routine_replacement(
     existing: &CreateFunction,
     def: &mut CreateFunction,
     current_user: &(impl RoleSubject + ?Sized),
-    roles: &BTreeMap<String, RoleDefinition>,
-    memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
+    roles: &RoleDefinitions,
+    memberships: &RoleMemberships,
     signature: &str,
 ) -> Result<(), SQLError> {
     if !def.or_replace {

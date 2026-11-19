@@ -6,11 +6,13 @@
 
 //! Fresh authority retains private relation definitions and ACL tuples from the active transaction.
 
-use crate::catalog::foreign::StoredForeignTable;
-use std::{collections::BTreeMap, sync::Arc};
+use crate::catalog::foreign::ForeignCatalog;
+use uqa_core::memory::RetainedValue;
 use uqa_core::RelationIdentity;
-use uqa_sql::catalog::{security::BoundTableSecurity, stored_view::StoredView};
-use uqa_storage::{catalog::relation_acl, CatalogFacade, StorageBackendResult};
+use uqa_sql::catalog::security::BoundTableSecurity;
+use uqa_storage::{
+    catalog::relation_acl, CatalogFacade, StorageBackendError, StorageBackendResult,
+};
 
 pub fn merge_private(
     catalog: Option<&dyn CatalogFacade>,
@@ -43,31 +45,50 @@ pub fn merge_private(
 
 pub fn merge_private_views(
     catalog: Option<&dyn CatalogFacade>,
-    current: &BTreeMap<RelationIdentity, StoredView>,
-    mut latest: Arc<BTreeMap<RelationIdentity, StoredView>>,
-) -> StorageBackendResult<Arc<BTreeMap<RelationIdentity, StoredView>>> {
+    current: &uqa_sql::catalog::stored_view::ViewDefinitions,
+    mut latest: RetainedValue<uqa_sql::catalog::stored_view::ViewDefinitions>,
+) -> StorageBackendResult<RetainedValue<uqa_sql::catalog::stored_view::ViewDefinitions>> {
     latest = merge_private_view_definitions(current, latest, |relation| {
         catalog.map_or(Ok(false), |catalog| {
             catalog.view_has_private_changes(relation)
         })
     })?;
-    for (relation, view) in Arc::make_mut(&mut latest) {
+    let mut next = (*latest).clone();
+    for (relation, view) in latest.iter() {
         if let Some(previous) = current
             .get(relation)
             .filter(|previous| previous.object_id == view.object_id)
         {
-            view.security =
+            let security =
                 merge_private(catalog, relation, &previous.security, view.security.clone())?;
+            if security != view.security {
+                let mut view = view.clone();
+                view.security = security;
+                next.insert(relation.clone(), view).map_err(|error| {
+                    StorageBackendError::backend("merge private view authority", error)
+                })?;
+            }
         }
     }
-    Ok(latest)
+    for (relation, view) in current
+        .iter()
+        .filter(|(_, view)| view.persistence == uqa_sql::ast::RelationPersistence::Temporary)
+    {
+        if !current.shares_definition(relation, &next) {
+            next.insert(relation.clone(), view.clone())
+                .map_err(|error| {
+                    StorageBackendError::backend("retain temporary view definition", error)
+                })?;
+        }
+    }
+    Ok(RetainedValue::new(next))
 }
 
 fn merge_private_view_definitions(
-    current: &BTreeMap<RelationIdentity, StoredView>,
-    mut latest: Arc<BTreeMap<RelationIdentity, StoredView>>,
+    current: &uqa_sql::catalog::stored_view::ViewDefinitions,
+    mut latest: RetainedValue<uqa_sql::catalog::stored_view::ViewDefinitions>,
     mut is_private: impl FnMut(&RelationIdentity) -> StorageBackendResult<bool>,
-) -> StorageBackendResult<Arc<BTreeMap<RelationIdentity, StoredView>>> {
+) -> StorageBackendResult<RetainedValue<uqa_sql::catalog::stored_view::ViewDefinitions>> {
     let relations = current
         .keys()
         .chain(latest.keys())
@@ -76,91 +97,92 @@ fn merge_private_view_definitions(
     for relation in relations {
         if is_private(&relation)? {
             if let Some(view) = current.get(&relation) {
-                Arc::make_mut(&mut latest).insert(relation, view.clone());
+                if !current.shares_definition(&relation, &latest) {
+                    RetainedValue::make_mut(&mut latest)
+                        .insert(relation, view.clone())
+                        .map_err(|error| {
+                            StorageBackendError::backend("merge private view definition", error)
+                        })?;
+                }
             } else {
-                Arc::make_mut(&mut latest).remove(&relation);
+                RetainedValue::make_mut(&mut latest)
+                    .remove(&relation)
+                    .map_err(|error| {
+                        StorageBackendError::backend("merge private view removal", error)
+                    })?;
             }
         }
     }
     Ok(latest)
 }
 
-pub struct ForeignAuthoritySnapshot {
-    pub definitions: Arc<BTreeMap<RelationIdentity, StoredForeignTable>>,
-    pub security: Arc<BTreeMap<RelationIdentity, BoundTableSecurity>>,
-}
-
 pub fn merge_private_foreign(
     catalog: Option<&dyn CatalogFacade>,
-    current_definitions: &BTreeMap<RelationIdentity, StoredForeignTable>,
-    current: &BTreeMap<RelationIdentity, BoundTableSecurity>,
-    mut latest_definitions: Arc<BTreeMap<RelationIdentity, StoredForeignTable>>,
-    mut latest: Arc<BTreeMap<RelationIdentity, BoundTableSecurity>>,
-) -> StorageBackendResult<ForeignAuthoritySnapshot> {
-    merge_private_foreign_definitions(
-        current_definitions,
-        current,
-        &mut latest_definitions,
-        &mut latest,
-        |relation| {
-            catalog.map_or(Ok(false), |catalog| {
-                catalog.foreign_table_has_private_changes(relation)
-            })
-        },
-    )?;
-    for (relation, security) in Arc::make_mut(&mut latest) {
-        if current_definitions
+    current: &ForeignCatalog,
+    latest: RetainedValue<ForeignCatalog>,
+) -> StorageBackendResult<RetainedValue<ForeignCatalog>> {
+    let mut next = (*latest).clone();
+    merge_private_foreign_definitions(current, &mut next, |relation| {
+        catalog.map_or(Ok(false), |catalog| {
+            catalog.foreign_table_has_private_changes(relation)
+        })
+    })?;
+    let authority = next.clone();
+    for (relation, security) in authority.security().iter() {
+        if current
+            .tables()
             .get(relation)
-            .zip(latest_definitions.get(relation))
-            .is_some_and(|(previous, next)| previous.object_id == next.object_id)
+            .zip(authority.tables().get(relation))
+            .is_some_and(|(previous, table)| previous.object_id == table.object_id)
         {
-            if let Some(previous) = current.get(relation) {
-                *security = merge_private(catalog, relation, previous, security.clone())?;
+            let merged = merge_private(
+                catalog,
+                relation,
+                &current.security()[relation],
+                security.clone(),
+            )?;
+            if &merged != security {
+                next.replace_security(relation, merged).map_err(|error| {
+                    StorageBackendError::backend("merge private foreign authority", error)
+                })?;
             }
         }
     }
-    crate::catalog::foreign::restoration::merge_session_relations(
-        current_definitions,
-        current,
-        Arc::make_mut(&mut latest_definitions),
-        Arc::make_mut(&mut latest),
-    )?;
-    Ok(ForeignAuthoritySnapshot {
-        definitions: latest_definitions,
-        security: latest,
-    })
+    crate::catalog::foreign::restoration::merge_session_relations(current, &mut next)?;
+    Ok(RetainedValue::new(next))
 }
 
 fn merge_private_foreign_definitions(
-    current_definitions: &BTreeMap<RelationIdentity, StoredForeignTable>,
-    current_security: &BTreeMap<RelationIdentity, BoundTableSecurity>,
-    latest_definitions: &mut Arc<BTreeMap<RelationIdentity, StoredForeignTable>>,
-    latest_security: &mut Arc<BTreeMap<RelationIdentity, BoundTableSecurity>>,
+    current: &ForeignCatalog,
+    latest: &mut ForeignCatalog,
     mut is_private: impl FnMut(&RelationIdentity) -> StorageBackendResult<bool>,
 ) -> StorageBackendResult<()> {
-    let relations = current_definitions
+    let relations = current
+        .tables()
         .keys()
-        .chain(latest_definitions.keys())
+        .chain(latest.tables().keys())
         .cloned()
         .collect::<std::collections::BTreeSet<_>>();
+    let mut next = latest.clone();
     for relation in relations {
-        if !is_private(&relation)? {
-            continue;
-        }
-        if let Some(table) = current_definitions.get(&relation) {
-            let security = current_security.get(&relation).ok_or_else(|| {
-                uqa_storage::StorageBackendError::Other(format!(
-                    "private foreign table `{}` has no security metadata",
-                    relation.qualified_name()
-                ))
-            })?;
-            Arc::make_mut(latest_definitions).insert(relation.clone(), table.clone());
-            Arc::make_mut(latest_security).insert(relation, security.clone());
-        } else {
-            Arc::make_mut(latest_definitions).remove(&relation);
-            Arc::make_mut(latest_security).remove(&relation);
+        if is_private(&relation)? {
+            if let Some(table) = current.tables().get(&relation) {
+                next.insert(
+                    relation.clone(),
+                    table.clone(),
+                    current.security()[&relation].clone(),
+                )
+                .map_err(|error| {
+                    StorageBackendError::backend("merge private foreign definition", error)
+                })?;
+            } else {
+                next.remove(&relation).map_err(|error| {
+                    StorageBackendError::backend("merge private foreign removal", error)
+                })?;
+            }
         }
     }
+    *latest = next;
     Ok(())
 }
 

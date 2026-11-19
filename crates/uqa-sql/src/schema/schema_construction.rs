@@ -7,8 +7,8 @@
 //! Construction and indexing of immutable row schemas.
 
 use super::{
-    Arc, ColumnIdentity, ColumnType, RowSchema, SchemaBuildMetadata, SchemaColdMetadata,
-    SchemaIndex, NULL_SLOT,
+    retirement::IndexOwner, Arc, ColumnIdentity, ColumnType, RowSchema, SchemaBuildMetadata,
+    SchemaColdMetadata, SchemaIndex, NULL_SLOT,
 };
 use crate::ast::InternalRelationId;
 use crate::schema::{SchemaMap, SchemaSet};
@@ -363,7 +363,7 @@ impl RowSchema {
         ambiguous_unqualified.extend(extra_ambiguous_unqualified);
         ambiguous_qualified.extend(extra_ambiguous_qualified);
         Self {
-            index: Arc::new(SchemaIndex {
+            index: IndexOwner::new(SchemaIndex {
                 columns: columns.into_boxed_slice(),
                 identities: identities.into_boxed_slice(),
                 slots: slots.into_boxed_slice(),

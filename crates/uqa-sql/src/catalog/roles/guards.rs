@@ -5,17 +5,13 @@
 //
 
 //! Retained read guards for role and membership catalogs during authorization and publication.
-use super::{RoleDefinition, RoleMembership, RoleMembershipKey};
-use std::{collections::BTreeMap, ops::Deref};
-pub type RoleDefinitionRead<'a> = Box<dyn Deref<Target = BTreeMap<String, RoleDefinition>> + 'a>;
-pub type RoleMembershipRead<'a> =
-    Box<dyn Deref<Target = BTreeMap<RoleMembershipKey, RoleMembership>> + 'a>;
+use crate::catalog::roles::{RoleDefinitions, RoleMemberships};
+use std::ops::Deref;
+pub type RoleDefinitionRead<'a> = Box<dyn Deref<Target = RoleDefinitions> + 'a>;
+pub type RoleMembershipRead<'a> = Box<dyn Deref<Target = RoleMemberships> + 'a>;
 /// Observe role definitions and memberships under the owning catalog's original lock order.
-pub type RoleCatalogVisitor<'a> = dyn FnMut(
-        &BTreeMap<String, RoleDefinition>,
-        &BTreeMap<RoleMembershipKey, RoleMembership>,
-    ) -> Result<(), crate::SQLError>
-    + 'a;
+pub type RoleCatalogVisitor<'a> =
+    dyn FnMut(&RoleDefinitions, &RoleMemberships) -> Result<(), crate::SQLError> + 'a;
 
 /// Roles and memberships are acquired separately so validation can retain its original error and lock order.
 pub trait RoleCatalogGuards {

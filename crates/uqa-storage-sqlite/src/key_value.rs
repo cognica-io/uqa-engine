@@ -607,9 +607,41 @@ impl SQLiteKeyValueStorage {
         let store: Arc<dyn KeyValueStore> = self.store.clone();
         KeyValueStorageBackend::new(store)
     }
+
+    /// Capture a committed Key/Value image in any supported file mode. Export uses logical retention and closes each physical read window before returning, including compressed rollback-journal connections. Private session writes are excluded.
+    pub fn capture_backup_image(
+        &self,
+        control: &StorageReadControl,
+    ) -> uqa_storage::backup::BackupResult<uqa_storage::key_value::KeyValueBackupImage> {
+        let snapshot = self.store.records.capture_backup_snapshot(control)?.ok_or(
+            uqa_storage::backup::BackupError::Unsupported("SQLite KV backup snapshot"),
+        )?;
+        uqa_storage::key_value::KeyValueBackupImage::new(
+            snapshot,
+            uqa_storage::backup::ImageProvider::SQLiteKV,
+            control,
+        )
+    }
 }
 
 impl PersistentStorageProvider for SQLiteKeyValueStorage {
+    fn backup_capabilities(&self) -> uqa_storage::backup::BackupCapabilities {
+        uqa_storage::backup::BackupCapabilities {
+            export: cfg!(any(windows, all(unix, not(target_os = "emscripten")))),
+            import: cfg!(any(windows, all(unix, not(target_os = "emscripten")))),
+            snapshot_fingerprints: false,
+        }
+    }
+
+    fn capture_backup_image(
+        &self,
+        control: &StorageReadControl,
+    ) -> uqa_storage::backup::BackupResult<uqa_storage::backup::OwnedBackupImage> {
+        uqa_storage::backup::OwnedBackupImage::capture(control, || {
+            SQLiteKeyValueStorage::capture_backup_image(self, control)
+        })
+    }
+
     fn auxiliary_encryption_key(&self) -> Option<uqa_storage::StorageEncryptionKey> {
         self.store.conn.auxiliary_encryption_key()
     }

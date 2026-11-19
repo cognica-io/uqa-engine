@@ -6,6 +6,8 @@
 
 use super::*;
 use crate::ast::{Statement, TablePrivilegeSpec};
+use crate::catalog::roles::RoleDefinition;
+use crate::catalog::roles::{RoleDefinitions, RoleMemberships};
 use crate::catalog::{
     resolution::RelationResolution,
     security::{
@@ -65,8 +67,9 @@ fn all_column_privileges_preserve_column_scope_and_grant_options() {
         TableAclPrivilege::ALL,
     );
 }
-fn roles() -> BTreeMap<String, RoleDefinition> {
-    let mut roles = BTreeMap::from([("uqa".into(), RoleDefinition::bootstrap())]);
+fn roles() -> RoleDefinitions {
+    let mut roles =
+        RoleDefinitions::try_from_iter([("uqa".into(), RoleDefinition::bootstrap())]).unwrap();
     for (index, name) in ["alice", "reader", "independent"].into_iter().enumerate() {
         let Statement::CreateRole(role) = crate::compile(&format!("CREATE ROLE {name}"))
             .unwrap()
@@ -74,10 +77,12 @@ fn roles() -> BTreeMap<String, RoleDefinition> {
         else {
             panic!("expected role")
         };
-        roles.insert(
-            name.into(),
-            RoleDefinition::from_create(&role, 20_001 + index as i64, [index as u8 + 1; 16]),
-        );
+        roles
+            .insert(
+                name.into(),
+                RoleDefinition::from_create(&role, 20_001 + index as i64, [index as u8 + 1; 16]),
+            )
+            .unwrap();
     }
     roles
 }
@@ -101,7 +106,7 @@ impl crate::catalog::roles::RoleReferenceNames for SessionRole<'_> {
 fn apply(
     sql: &str,
     user: &str,
-    roles: &BTreeMap<String, RoleDefinition>,
+    roles: &RoleDefinitions,
     current: &TableSecurity,
 ) -> Result<AppliedGrant, SQLError> {
     let statement = statement(sql);
@@ -113,7 +118,7 @@ fn apply(
         })
         .collect::<Result<Vec<_>, _>>()?;
     let requested = requested_acl_privileges(&statement.privileges)?;
-    let memberships = BTreeMap::new();
+    let memberships = RoleMemberships::new();
     let application = TableGrantApplication {
         statement: &statement,
         grantees: &grantees,
@@ -135,7 +140,7 @@ fn column_allowed(
     security: &TableSecurity,
     column: &str,
     role: &str,
-    roles: &BTreeMap<String, RoleDefinition>,
+    roles: &RoleDefinitions,
 ) -> bool {
     role_has_column_privilege(
         security,
@@ -146,7 +151,7 @@ fn column_allowed(
             grant_option: false,
         },
         roles,
-        &BTreeMap::new(),
+        &RoleMemberships::new(),
     )
 }
 fn target(kind: &'static str) -> ResolvedTableGrantTarget {
@@ -181,7 +186,7 @@ fn table_and_column_grants_preserve_input_security_and_grant_options() {
             grant_option: true
         },
         &roles,
-        &BTreeMap::new()
+        &RoleMemberships::new()
     ));
     assert!(role_has_column_privilege(
         &next,
@@ -192,7 +197,7 @@ fn table_and_column_grants_preserve_input_security_and_grant_options() {
             grant_option: true
         },
         &roles,
-        &BTreeMap::new()
+        &RoleMemberships::new()
     ));
     assert!(!column_allowed(&next, "other", "reader", &roles));
 }
@@ -280,7 +285,7 @@ fn partial_grant_publishes_only_authorized_privileges_and_reports_a_warning() {
             grant_option: false
         },
         &roles,
-        &BTreeMap::new()
+        &RoleMemberships::new()
     ));
     assert!(!column_allowed(&next, "id", "reader", &roles));
 }
@@ -497,7 +502,7 @@ fn foreign_acl_candidates_validate_columns_without_mutating_the_source_security(
     let roles = roles();
     let statement = statement("GRANT UPDATE(id) ON items TO reader");
     let requested = requested_acl_privileges(&statement.privileges).unwrap();
-    let memberships = BTreeMap::new();
+    let memberships = RoleMemberships::new();
     let application = TableGrantApplication {
         statement: &statement,
         grantees: &["reader".into()],
@@ -623,7 +628,7 @@ fn table_grant_option_revoke_tracks_column_grants_authorized_by_the_table_acl() 
             grant_option: false
         },
         &roles,
-        &BTreeMap::new()
+        &RoleMemberships::new()
     ));
 }
 
@@ -645,7 +650,7 @@ fn selected_attribute_candidates_preserve_new_grants_on_previously_skipped_colum
         requested: &requested,
         current_user: &"uqa",
         roles: &roles,
-        memberships: &BTreeMap::new(),
+        memberships: &RoleMemberships::new(),
     };
     let mut target = target("table");
     target.acl_columns = Some(BTreeSet::from(["b".into()]));

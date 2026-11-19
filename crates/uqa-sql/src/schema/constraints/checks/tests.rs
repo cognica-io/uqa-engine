@@ -58,7 +58,7 @@ impl SchemaExpressionCatalog for Catalog {
     fn plan_schema_expression(
         &self,
         _: &Expr,
-        _: &[ColumnDef],
+        _: &crate::RowSchema,
     ) -> Result<crate::schema::expressions::PlannedSchemaExpression, SQLError> {
         panic!("CHECK analysis must not optimize expressions");
     }

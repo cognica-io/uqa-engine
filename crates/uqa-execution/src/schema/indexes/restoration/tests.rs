@@ -10,6 +10,7 @@ use crate::catalog::{
     RelationLookupMode,
 };
 use std::sync::Arc;
+use uqa_sql::catalog::table_definition::SharedTableDefinition;
 use uqa_sql::{
     ast::{RelationPersistence, TableHierarchy},
     catalog::index::IndexDefinition,
@@ -39,8 +40,8 @@ fn fixture() -> (KeyValueCatalog, CatalogReadView, RelationNameResolution) {
     snapshot.tables.insert(
         relation,
         CatalogTableSnapshot {
-            dropped_attributes: std::sync::Arc::new(Vec::new()),
-            row_type_array_name: None,
+            dropped_attributes: Vec::new().into(),
+            row_type_array_name: None.into(),
             object_id: [1; 16],
             catalog_oids: uqa_sql::catalog::relation_oids::RelationCatalogOids::legacy(
                 uqa_sql::catalog::relation_oids::RelationOidKind::Table,
@@ -48,13 +49,14 @@ fn fixture() -> (KeyValueCatalog, CatalogReadView, RelationNameResolution) {
             ),
             security: Arc::new(BoundTableSecurity::owner(
                 uqa_sql::catalog::roles::RoleIdentity::BOOTSTRAP,
-            )),
-            columns: Arc::default(),
+            ))
+            .into(),
+            columns: SharedTableDefinition::default(),
             columns_declared: true,
-            checks: Arc::default(),
-            foreign_keys: Arc::default(),
-            keys: Arc::default(),
-            hierarchy: Arc::new(TableHierarchy::default()),
+            checks: SharedTableDefinition::default(),
+            foreign_keys: Vec::new().into(),
+            keys: Vec::new().into(),
+            hierarchy: Arc::new(TableHierarchy::default()).into(),
             persistence: RelationPersistence::Permanent,
         },
     );

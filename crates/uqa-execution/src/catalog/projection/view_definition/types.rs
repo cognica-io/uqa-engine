@@ -23,13 +23,13 @@ impl Deparser<'_> {
         subqueries: &[QueryPlan],
         show_type: bool,
     ) -> Result<String, SQLError> {
-        let Some(ColumnType::Composite(reference)) = self.resolved_type(&binding.ty) else {
+        let Some(ColumnType::Composite(ref reference)) = self.resolved_type(&binding.ty) else {
             return Err(SQLError::Internal(
                 "stored constructor has no composite type".into(),
             ));
         };
         let numbers =
-            crate::catalog::composite_type::relations::attribute_numbers(self.catalog, &reference)?;
+            crate::catalog::composite_type::relations::attribute_numbers(self.catalog, reference)?;
         let values = numbers
             .iter()
             .map(|number| match binding.attributes.binary_search(number) {

@@ -108,7 +108,7 @@ pub(super) fn publish(
         *current = change;
         let before = context.attributes.publication.composite_registry().clone();
         let mut after = before.clone();
-        after.insert(definition.identity.qualified_name(), definition.clone());
+        after.insert(definition.identity.qualified_name(), definition.clone())?;
         crate::catalog::composite_type::publish(context.attributes.publication, &before, after)?;
         context.attributes.changes.catalog_registry_changed();
     }

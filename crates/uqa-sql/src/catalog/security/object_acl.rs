@@ -7,13 +7,14 @@
 //! Check, grant and revoke the ACL of an object with one grantable privilege, as `PostgreSQL`'s `aclchk.c` does for routine `EXECUTE` and type `USAGE`. An absent ACL is the default ACL: the privilege for PUBLIC and for the owner. Owners always hold grant options.
 
 use crate::ast::ObjectAclEntry;
-use crate::catalog::roles::{
-    identity::RoleSubject, role_inherits, RoleDefinition, RoleMembership, RoleMembershipKey,
-    RoleReference,
-};
+use crate::catalog::roles::{identity::RoleSubject, role_inherits, RoleDefinition, RoleReference};
+use crate::catalog::roles::{RoleDefinitions, RoleMemberships};
 use crate::SQLError;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use uqa_core::{catalog_acl::AclGrantee, catalog_role::RoleIdentity};
+
+mod validation;
+pub(crate) use validation::{collect_roles_from, validate_acl_from};
 
 /// Whether a role holding `has_role` memberships may use the object, or grant it when `grant_option` is set.
 pub fn privilege_allowed(
@@ -62,22 +63,14 @@ pub fn grant_option_roles(
     acl: Option<&[ObjectAclEntry]>,
 ) -> BTreeSet<RoleIdentity> {
     let mut reachable = BTreeSet::from([owner]);
-    let Some(acl) = acl else {
-        return reachable;
-    };
-    loop {
-        let mut changed = false;
-        for entry in acl {
-            if let Some(role) = entry.role {
-                if entry.grant_option && reachable.contains(&entry.grantor) {
-                    changed |= reachable.insert(role);
-                }
-            }
-        }
-        if !changed {
-            return reachable;
-        }
-    }
+    crate::catalog::work::inline(validation::extend_from(
+        acl,
+        &mut reachable,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+        &mut (),
+    ))
+    .expect("ordinary grant closure has no fallible admission or work channel");
+    reachable
 }
 
 /// `select_best_grantor`: the owner when the current user inherits it, then the current user's own grant option, then an inherited role's grant option. `None` means the command grants or revokes nothing and warns.
@@ -85,8 +78,8 @@ pub fn select_grantor(
     owner: RoleIdentity,
     acl: Option<&[ObjectAclEntry]>,
     current_user: &(impl RoleSubject + ?Sized),
-    roles: &BTreeMap<String, RoleDefinition>,
-    memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
+    roles: &RoleDefinitions,
+    memberships: &RoleMemberships,
 ) -> Option<RoleIdentity> {
     if role_inherits(roles, memberships, current_user, &owner) {
         return Some(owner);
@@ -255,37 +248,27 @@ pub fn validate_acl(
     acl: Option<&[ObjectAclEntry]>,
     object_kind: &str,
 ) -> Result<(), SQLError> {
-    let invalid =
-        |message: &str| SQLError::Internal(format!("invalid {object_kind} authority: {message}"));
-    if !owner.is_valid() {
-        return Err(invalid("missing owner incarnation"));
-    }
-    let reachable = grant_option_roles(owner, acl);
-    let mut paths = BTreeSet::new();
-    for entry in acl.into_iter().flatten() {
-        if !entry.grantor.is_valid() || entry.role.is_some_and(|role| !role.is_valid()) {
-            return Err(invalid("missing ACL endpoint incarnation"));
-        }
-        if entry.role.is_none() && entry.grant_option {
-            return Err(invalid("PUBLIC cannot retain a grant option"));
-        }
-        if !paths.insert((entry.role, entry.grantor)) {
-            return Err(invalid("duplicate ACL grant path"));
-        }
-        if !reachable.contains(&entry.grantor) {
-            return Err(invalid("ACL grantor has no owner-rooted grant option"));
-        }
-    }
-    Ok(())
+    crate::catalog::work::inline(validation::validate_with(
+        owner,
+        acl,
+        object_kind,
+        (BTreeSet::new(), BTreeSet::new()),
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+        &mut (),
+    ))
 }
 
 /// The owner and every role named by the ACL.
 pub fn acl_roles(owner: RoleIdentity, acl: Option<&[ObjectAclEntry]>) -> BTreeSet<RoleIdentity> {
-    let mut identities = BTreeSet::from([owner]);
-    for entry in acl.into_iter().flatten() {
-        identities.extend(entry.role);
-        identities.insert(entry.grantor);
-    }
+    let mut identities = BTreeSet::new();
+    crate::catalog::work::inline(collect_roles_from(
+        owner,
+        acl,
+        &mut identities,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+        &mut (),
+    ))
+    .expect("ordinary role collection has no fallible admission or work channel");
     identities
 }
 
@@ -293,7 +276,7 @@ pub fn acl_roles(owner: RoleIdentity, acl: Option<&[ObjectAclEntry]>) -> BTreeSe
 pub fn added_acl_roles(
     before: (RoleIdentity, Option<&[ObjectAclEntry]>),
     after: (RoleIdentity, Option<&[ObjectAclEntry]>),
-    roles: &BTreeMap<String, RoleDefinition>,
+    roles: &RoleDefinitions,
     object_kind: &str,
     added: &mut BTreeSet<String>,
 ) -> Result<(), SQLError> {
@@ -320,7 +303,7 @@ pub fn added_acl_roles(
 /// Bind grantee names to role incarnations; PUBLIC stays unbound.
 pub fn bind_grantees(
     grantees: &[AclGrantee],
-    roles: &BTreeMap<String, RoleDefinition>,
+    roles: &RoleDefinitions,
 ) -> Result<Vec<Option<RoleIdentity>>, SQLError> {
     grantees
         .iter()

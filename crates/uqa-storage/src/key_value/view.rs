@@ -54,6 +54,8 @@ pub type KeyValueReadKeyIterator<'a> =
 pub type KeyValuePointVisitor<'a> =
     dyn FnMut(&[u8], Option<&[u8]>) -> StorageBackendResult<bool> + 'a;
 pub type KeyPresenceVisitor<'a> = dyn FnMut(&[u8], bool) -> StorageBackendResult<bool> + 'a;
+/// One visible record slot, including tombstones, on the retained read boundary.
+pub type RecordKeyReadVisitor<'a> = dyn FnMut(&[u8], bool) -> StorageBackendResult<()> + 'a;
 pub type KeyValueMutation<'a> =
     dyn FnMut(&dyn KeyValueRead, &mut dyn KeyValueBatch) -> StorageBackendResult<()> + 'a;
 pub type KeyValueVersionedMutation<'a> = dyn FnMut(
@@ -206,6 +208,21 @@ pub trait KeyValueRead {
         control.check()?;
         Err(super::codec::other_error(
             "compound key-only scans are not supported",
+        ))
+    }
+
+    /// Visit at most `limit` merged record slots in key order, including deleted slots. The Boolean reports liveness; no value is read. Unlike live-key scans, a tombstone consumes the caller's window and supplies a continuation key.
+    fn visit_record_keys_after(
+        &self,
+        _prefix: &[u8],
+        _after: Option<&[u8]>,
+        _limit: usize,
+        control: &StorageReadControl,
+        _visit: &mut RecordKeyReadVisitor<'_>,
+    ) -> StorageBackendResult<()> {
+        control.check()?;
+        Err(super::codec::other_error(
+            "bounded record-slot scans are not supported",
         ))
     }
 

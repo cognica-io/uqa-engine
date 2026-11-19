@@ -44,7 +44,7 @@ impl SequenceDependencyCatalog for Engine {
             .map(|state| state.map(|state| state as Arc<dyn SequenceTableMetadata>))
     }
     fn foreign_tables(&self) -> ForeignTablesRead<'_> {
-        Box::new(self.durable.foreign_tables.read())
+        Box::new(self.durable.foreign_catalog.tables())
     }
 }
 impl Engine {

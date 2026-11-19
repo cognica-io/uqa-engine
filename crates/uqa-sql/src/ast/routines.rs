@@ -265,7 +265,7 @@ impl CreateFunction {
             .count()
     }
 
-    fn is_identity_param(param: &FunctionParam) -> bool {
+    pub(crate) fn is_identity_param(param: &FunctionParam) -> bool {
         matches!(
             param.mode,
             FunctionParamMode::In | FunctionParamMode::InOut | FunctionParamMode::Variadic

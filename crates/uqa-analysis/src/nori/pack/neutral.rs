@@ -154,7 +154,7 @@ pub(super) fn read(directory: &Path, limits: DictionaryLimits) -> DictionaryResu
     for _ in 0..surface_count {
         let source_id = reader.u32()?;
         let surface = required_text(&mut reader, limits)?;
-        builder.insert(surface.encode_utf16().collect())?;
+        builder = builder.insert(surface.encode_utf16().collect())?;
         let count = reader.count(36)?;
         let start = count32(words.len())?;
         if count > known as usize - words.len() {

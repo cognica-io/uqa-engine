@@ -91,8 +91,8 @@ pub fn replace_hierarchy_components(
         constraints.columns_declared.unwrap_or(false) || !columns.is_empty(),
         columns,
         constraints,
-    );
-    state.publish_hierarchy(hierarchy);
+    )?;
+    state.publish_hierarchy(hierarchy)?;
     indexes.publish(&context.indexes)?;
     state.refresh_value_indexes()?;
     Ok(())

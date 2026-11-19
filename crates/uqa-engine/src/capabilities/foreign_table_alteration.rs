@@ -9,14 +9,10 @@ use crate::Engine;
 use uqa_core::RelationIdentity;
 use uqa_execution::{
     catalog::{foreign::StoredForeignTable, security::BoundTableSecurity},
-    schema::{
-        foreign_table_alteration::{
-            ForeignMemoryRegistryWrite, ForeignSecurityRegistryWrite, ForeignTableAlterAccess,
-            ForeignTableAlterCatalog, ForeignTableAlterContext, ForeignTableAlterPublication,
-            ForeignTableAlterTransactions, ForeignTableAlterWrite, ForeignTableOwnerWriter,
-            ForeignTableRegistryWrite,
-        },
-        sequences::role_ownership::OwnedSequenceSecurityWrite,
+    schema::foreign_table_alteration::{
+        ForeignMemoryRegistryWrite, ForeignTableAlterAccess, ForeignTableAlterCatalog,
+        ForeignTableAlterContext, ForeignTableAlterPublication, ForeignTableAlterTransactions,
+        ForeignTableAlterWrite, ForeignTableOwnerWriter,
     },
 };
 use uqa_sql::SQLError;
@@ -52,17 +48,17 @@ impl ForeignTableAlterTransactions for Engine {
 }
 impl ForeignTableAlterCatalog for Engine {
     fn contains_table(&self, relation: &RelationIdentity) -> bool {
-        self.durable.foreign_tables.read().contains_key(relation)
+        self.durable.foreign_catalog.tables().contains_key(relation)
     }
     fn security(&self, relation: &RelationIdentity) -> Option<BoundTableSecurity> {
         self.durable
-            .foreign_table_security
-            .read()
+            .foreign_catalog
+            .security()
             .get(relation)
             .cloned()
     }
     fn table(&self, relation: &RelationIdentity) -> Option<StoredForeignTable> {
-        self.durable.foreign_tables.read().get(relation).cloned()
+        self.durable.foreign_catalog.tables().get(relation).cloned()
     }
 }
 impl ForeignTableAlterAccess for Engine {
@@ -80,8 +76,9 @@ impl ForeignTableAlterPublication for Engine {
         &self,
         relation: &RelationIdentity,
         table: &StoredForeignTable,
+        security: &BoundTableSecurity,
     ) -> StorageBackendResult<()> {
-        uqa_execution::schema::publication::dependencies::ForeignSchemaPublication::persist_foreign_table(self, relation, table)
+        table.persist(self.storage.catalog.as_deref(), relation, security)
     }
     fn persist_rename(
         &self,
@@ -94,17 +91,14 @@ impl ForeignTableAlterPublication for Engine {
             .map(|catalog| catalog.rename_foreign_table(from, to))
             .transpose()
     }
-    fn tables_write(&self) -> ForeignTableRegistryWrite<'_> {
-        Box::new(self.durable.foreign_tables.write())
+    fn foreign_catalog(&self) -> uqa_execution::catalog::foreign::ForeignCatalog {
+        self.durable.foreign_catalog.read().clone()
     }
-    fn security_write(&self) -> ForeignSecurityRegistryWrite<'_> {
-        Box::new(self.durable.foreign_table_security.write())
+    fn publish_foreign_catalog(&self, catalog: uqa_execution::catalog::foreign::ForeignCatalog) {
+        *self.durable.foreign_catalog.write() = catalog;
     }
     fn memory_tables_write(&self) -> ForeignMemoryRegistryWrite<'_> {
         Box::new(self.extensions.foreign_memory_tables.write())
-    }
-    fn sequence_security_write(&self) -> OwnedSequenceSecurityWrite<'_> {
-        Box::new(self.durable.sequence_security.write())
     }
     fn persist_security(
         &self,

@@ -7,7 +7,8 @@
 //! Table-shaped relation column ACL grant paths and privilege checks.
 
 use crate::catalog::roles::identity::RoleSubject;
-use std::collections::{BTreeMap, BTreeSet};
+use crate::catalog::roles::{RoleDefinitions, RoleMemberships};
+use std::collections::BTreeSet;
 use uqa_core::catalog_acl::AclGrantee;
 
 use super::{TableAclEntry, TablePrivileges};
@@ -16,7 +17,7 @@ use crate::SQLError;
 
 use super::table::{acl_grantor, grant_option_roles, TableAclPrivilege, TablePrivilegeCheck};
 use super::TableSecurity;
-use crate::catalog::roles::{role_inherits, RoleDefinition, RoleMembership, RoleMembershipKey};
+use crate::catalog::roles::role_inherits;
 
 pub fn column_grant_option_roles(
     security: &TableSecurity,
@@ -24,25 +25,15 @@ pub fn column_grant_option_roles(
     privilege: TableAclPrivilege,
 ) -> BTreeSet<String> {
     let mut reachable = grant_option_roles(security, privilege);
-    let Some(acl) = security.column_acls.get(column) else {
-        return reachable;
-    };
-    loop {
-        let mut changed = false;
-        for entry in acl {
-            let Some(role) = entry.role.role_name() else {
-                continue;
-            };
-            if entry.grant_options.intersects(privilege.mask())
-                && reachable.contains(acl_grantor(entry, &security.role_owner))
-            {
-                changed |= reachable.insert(role.to_owned());
-            }
-        }
-        if !changed {
-            return reachable;
-        }
-    }
+    super::table::grant_paths::extend(
+        &security.role_owner,
+        security.column_acls.get(column).map(Vec::as_slice),
+        privilege,
+        &mut reachable,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
+    .expect("ordinary column grant closure has no resource scope");
+    reachable
 }
 
 pub fn select_column_acl_grantor(
@@ -50,8 +41,8 @@ pub fn select_column_acl_grantor(
     column: &str,
     privilege: TableAclPrivilege,
     current_user: &(impl RoleSubject + ?Sized),
-    roles: &BTreeMap<String, RoleDefinition>,
-    memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
+    roles: &RoleDefinitions,
+    memberships: &RoleMemberships,
 ) -> Option<String> {
     let current_user = current_user.role_name(roles)?;
     if role_inherits(roles, memberships, current_user, &security.role_owner) {
@@ -72,8 +63,8 @@ pub fn role_has_column_privilege(
     column: &str,
     subject: &(impl RoleSubject + ?Sized),
     check: TablePrivilegeCheck,
-    roles: &BTreeMap<String, RoleDefinition>,
-    memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
+    roles: &RoleDefinitions,
+    memberships: &RoleMemberships,
 ) -> bool {
     if subject
         .role_definition(roles)
@@ -107,7 +98,13 @@ pub fn grant_column_acl(
     grant_option: bool,
 ) {
     let owner = security.role_owner.clone();
-    let acl = security.column_acls.entry(column.to_string()).or_default();
+    if !security.column_acls.contains_key(column) {
+        security.column_acls.insert(column.to_owned(), Vec::new());
+    }
+    let acl = security
+        .column_acls
+        .get_mut(column)
+        .expect("column ACL was inserted");
     for grantee in grantees {
         let position = acl
             .iter()

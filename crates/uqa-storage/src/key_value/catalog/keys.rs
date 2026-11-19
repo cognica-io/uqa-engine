@@ -34,6 +34,35 @@ pub(super) fn decode_relation_key(key: &[u8]) -> StorageBackendResult<RelationId
     Ok(RelationIdentity::new(schema, name))
 }
 
+pub(super) fn decode_relation_key_with_control(
+    key: &[u8],
+    control: &crate::read_control::StorageReadControl,
+) -> StorageBackendResult<uqa_core::memory::Budgeted<RelationIdentity>> {
+    use uqa_core::{memory::ProductionControl, RelationName, RelationReference};
+    let mut offset = 1;
+    let schema = super::super::codec::read_str_ref(key, &mut offset)?;
+    let name = super::super::codec::read_str_ref(key, &mut offset)?;
+    if offset != key.len() {
+        return Err(StorageBackendError::Other(
+            "corrupt relation catalog key has trailing bytes".into(),
+        ));
+    }
+    Ok(RelationReference {
+        schema: Some(RelationName::decoded(schema)),
+        name: RelationName::decoded(name),
+    }
+    .identity_with_control(
+        RelationName::decoded("public"),
+        &ProductionControl::new(
+            control.memory(),
+            control.cancellation(),
+            control.cancellation(),
+        ),
+    )?
+    .into_budgeted()
+    .expect("catalog identity retains its allowance"))
+}
+
 pub(super) fn decode_catalog_relation_key(
     key: &[u8],
 ) -> StorageBackendResult<(RelationIdentity, bool, String)> {

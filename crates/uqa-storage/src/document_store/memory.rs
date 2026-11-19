@@ -7,6 +7,7 @@
 //! In-memory document storage and borrowed projection scans.
 
 use std::collections::BTreeMap;
+use std::ops::Bound::{Excluded, Unbounded};
 use std::sync::Arc;
 
 use uqa_core::{memory::BudgetedVec, DocId, Value};
@@ -14,13 +15,21 @@ use uqa_core::{memory::BudgetedVec, DocId, Value};
 use crate::backend::StorageBackendResult;
 use crate::read_control::StorageReadControl;
 
-use super::{Document, DocumentMetadata, DocumentStore, SharedDocumentRow, StoredDocument};
+use super::{
+    Document, DocumentMetadata, DocumentStore, SharedDocumentRow, SharedDocumentValues,
+    StoredDocument,
+};
 
+mod image;
 mod layouts;
 mod projection;
+mod rows;
+mod snapshot;
 
+pub use image::MemoryDocumentStoreBuilder;
 use layouts::DocumentLayouts;
 use projection::ProjectionCache;
+use rows::DocumentRows;
 
 #[derive(Debug, Default)]
 pub struct MemoryDocumentStore {
@@ -28,29 +37,38 @@ pub struct MemoryDocumentStore {
     state: Arc<MemoryDocumentState>,
     /// A read owner keeps one projection, with mappings only for layouts read.
     projections: ProjectionCache,
+    retention: Option<snapshot::Retention>,
 }
 
 /// Cloning retains independent row maps and layouts; snapshot APIs share them until a write.
 impl Clone for MemoryDocumentStore {
     fn clone(&self) -> Self {
+        if self.retention.is_some() {
+            return self.shared_snapshot();
+        }
         Self {
             state: Arc::new((*self.state).clone()),
             projections: ProjectionCache::default(),
+            retention: None,
         }
     }
 }
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default)]
 struct MemoryDocumentState {
-    documents: BTreeMap<DocId, MemoryDocumentRow>,
+    documents: DocumentRows,
     layouts: DocumentLayouts,
+    row_payload_bytes: u128,
+    retention: crate::retained_memory::RetainedMemory,
+    _image_memory: Option<uqa_core::memory::MemoryReservation>,
 }
 
 #[derive(Debug, Clone)]
 pub(super) struct MemoryDocumentRow {
     layout_id: usize,
-    values: Arc<Vec<Value>>,
+    values: SharedDocumentValues,
     metadata: DocumentMetadata,
+    payload_bytes: u128,
 }
 
 impl MemoryDocumentStore {
@@ -62,6 +80,7 @@ impl MemoryDocumentStore {
         Self {
             state: Arc::clone(&self.state),
             projections: ProjectionCache::default(),
+            retention: self.retention.clone(),
         }
     }
 
@@ -91,50 +110,122 @@ impl MemoryDocumentStore {
         stored.values.get(slot)
     }
 
-    fn put_stored_inner(&mut self, doc_id: DocId, document: StoredDocument) {
-        let state = Arc::make_mut(&mut self.state);
+    fn put_stored_inner(
+        &mut self,
+        doc_id: DocId,
+        document: StoredDocument,
+    ) -> StorageBackendResult<()> {
+        self.admit_write()?;
         let (document, metadata) = document.into_parts();
+        let payload = snapshot::document_payload(&document)?;
+        let state = Arc::make_mut(&mut self.state);
+        state.retention.invalidate();
         let (layout_id, values) = state.layouts.store(document);
-        state.documents.insert(
+        let payload_bytes = payload
+            + size_of::<Vec<Value>>() as u128
+            + values.capacity() as u128 * size_of::<Value>() as u128;
+        state.row_payload_bytes += payload_bytes;
+        if let Some(previous) = state.documents.insert(
             doc_id,
             MemoryDocumentRow {
                 layout_id,
-                values: Arc::new(values),
+                values: SharedDocumentValues::Ordinary(Arc::new(values)),
                 metadata,
+                payload_bytes,
             },
-        );
+        ) {
+            state.row_payload_bytes -= previous.payload_bytes;
+        }
+        Ok(())
     }
 }
 
 impl DocumentStore for MemoryDocumentStore {
+    fn image_document_reader<'a>(
+        &'a self,
+        doc_id: DocId,
+        control: &'a StorageReadControl,
+    ) -> StorageBackendResult<Option<crate::image_io::ImageReader<'a>>> {
+        control.check()?;
+        self.check_retained_read()?;
+        self.state
+            .documents
+            .get(doc_id)
+            .map(|row| {
+                let cursor = super::image::DocumentImageCursor::new(
+                    self.state.layouts[row.layout_id]
+                        .iter()
+                        .map(String::as_str)
+                        .zip(row.values.iter()),
+                    row.metadata,
+                    control,
+                );
+                crate::image_io::ImageReader::new(cursor, control)?.with_source_control(
+                    self.retention.as_ref().map(|retention| &retention.control),
+                    control,
+                )
+            })
+            .transpose()
+    }
+
+    fn write_image_document(
+        &self,
+        doc_id: DocId,
+        output: &mut dyn std::io::Write,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Option<u64>> {
+        control.check()?;
+        crate::image_io::with_retained_control(
+            output,
+            self.retention.as_ref().map(|retention| &retention.control),
+            |output| {
+                self.state
+                    .documents
+                    .get(doc_id)
+                    .map(|row| {
+                        super::image::write(
+                            self.state.layouts[row.layout_id]
+                                .iter()
+                                .map(String::as_str)
+                                .zip(row.values.iter()),
+                            row.metadata,
+                            output,
+                            control,
+                        )
+                    })
+                    .transpose()
+            },
+        )
+    }
+
     fn put(&mut self, doc_id: DocId, document: Document) -> StorageBackendResult<()> {
         let metadata = self
             .state
             .documents
-            .get(&doc_id)
+            .get(doc_id)
             .map_or_else(DocumentMetadata::default, |stored| stored.metadata);
-        self.put_stored_inner(doc_id, StoredDocument::with_metadata(document, metadata));
-        Ok(())
+        self.put_stored_inner(doc_id, StoredDocument::with_metadata(document, metadata))
     }
 
     fn get(&self, doc_id: DocId) -> StorageBackendResult<Option<Document>> {
+        self.check_retained_read()?;
         Ok(self
             .state
             .documents
-            .get(&doc_id)
+            .get(doc_id)
             .map(|stored| self.materialize_document(stored)))
     }
 
     fn put_stored(&mut self, doc_id: DocId, document: StoredDocument) -> StorageBackendResult<()> {
-        self.put_stored_inner(doc_id, document);
-        Ok(())
+        self.put_stored_inner(doc_id, document)
     }
 
     fn get_stored(&self, doc_id: DocId) -> StorageBackendResult<Option<StoredDocument>> {
+        self.check_retained_read()?;
         Ok(self
             .state
             .documents
-            .get(&doc_id)
+            .get(doc_id)
             .map(|stored| self.materialize_stored_document(stored)))
     }
 
@@ -143,15 +234,17 @@ impl DocumentStore for MemoryDocumentStore {
         ids: &[DocId],
         control: &StorageReadControl,
     ) -> StorageBackendResult<super::RetainedDocumentPage> {
+        self.check_retained_read()?;
         control.check()?;
         let mut page = BudgetedVec::new(control.memory());
         page.reserve(ids.len())?;
         for id in ids {
+            self.check_retained_read()?;
             control.check()?;
             let row = self
                 .state
                 .documents
-                .get(id)
+                .get(*id)
                 .map(|row| -> StorageBackendResult<_> {
                     let fields = super::controlled_rows::copy_fields(
                         self.state.layouts[row.layout_id]
@@ -169,6 +262,7 @@ impl DocumentStore for MemoryDocumentStore {
             page.push(row)?;
         }
         control.check()?;
+        self.check_retained_read()?;
         Ok(page)
     }
 
@@ -176,34 +270,38 @@ impl DocumentStore for MemoryDocumentStore {
         &self,
         doc_ids: &[DocId],
     ) -> StorageBackendResult<BTreeMap<DocId, StoredDocument>> {
+        self.check_retained_read()?;
         Ok(doc_ids
             .iter()
             .filter_map(|doc_id| {
                 self.state
                     .documents
-                    .get(doc_id)
+                    .get(*doc_id)
                     .map(|stored| (*doc_id, self.materialize_stored_document(stored)))
             })
             .collect())
     }
 
     fn get_metadata(&self, doc_id: DocId) -> StorageBackendResult<Option<DocumentMetadata>> {
+        self.check_retained_read()?;
         Ok(self
             .state
             .documents
-            .get(&doc_id)
+            .get(doc_id)
             .map(|stored| stored.metadata))
     }
 
     fn contains_doc_id(&self, doc_id: DocId) -> StorageBackendResult<bool> {
-        Ok(self.state.documents.contains_key(&doc_id))
+        self.check_retained_read()?;
+        Ok(self.state.documents.contains_key(doc_id))
     }
 
     fn get_field(&self, doc_id: DocId, field: &str) -> StorageBackendResult<Option<Value>> {
+        self.check_retained_read()?;
         Ok(self
             .state
             .documents
-            .get(&doc_id)
+            .get(doc_id)
             .and_then(|stored| self.field(stored, field).cloned()))
     }
 
@@ -212,10 +310,11 @@ impl DocumentStore for MemoryDocumentStore {
         doc_ids: &[DocId],
         fields: &[&str],
     ) -> StorageBackendResult<BTreeMap<DocId, Vec<Value>>> {
+        self.check_retained_read()?;
         Ok(doc_ids
             .iter()
             .filter_map(|doc_id| {
-                let stored = self.state.documents.get(doc_id)?;
+                let stored = self.state.documents.get(*doc_id)?;
                 let values = fields
                     .iter()
                     .map(|field| self.field(stored, field).cloned().unwrap_or(Value::Null))
@@ -231,8 +330,10 @@ impl DocumentStore for MemoryDocumentStore {
         fields: &[&str],
         visitor: &mut dyn FnMut(DocId, Vec<Value>) -> bool,
     ) -> StorageBackendResult<()> {
+        self.check_retained_read()?;
         for doc_id in doc_ids {
-            let values = self.state.documents.get(doc_id).map_or_else(
+            self.check_retained_read()?;
+            let values = self.state.documents.get(*doc_id).map_or_else(
                 || vec![Value::Null; fields.len()],
                 |stored| {
                     fields
@@ -245,7 +346,7 @@ impl DocumentStore for MemoryDocumentStore {
                 break;
             }
         }
-        Ok(())
+        self.check_retained_read()
     }
 
     fn for_each_fields_multi_ref(
@@ -254,10 +355,11 @@ impl DocumentStore for MemoryDocumentStore {
         fields: &[&str],
         visitor: &mut dyn FnMut(DocId, &[&Value]) -> bool,
     ) -> StorageBackendResult<()> {
+        self.check_retained_read()?;
         self.visit_fields_multi_ref_with_presence(doc_ids, fields, &mut |doc_id, _, values| {
-            visitor(doc_id, values)
+            self.check_retained_read().is_ok() && visitor(doc_id, values)
         });
-        Ok(())
+        self.check_retained_read()
     }
 
     fn for_each_fields_multi_ref_with_presence(
@@ -266,8 +368,11 @@ impl DocumentStore for MemoryDocumentStore {
         fields: &[&str],
         visitor: &mut dyn FnMut(DocId, bool, &[&Value]) -> bool,
     ) -> StorageBackendResult<()> {
-        self.visit_fields_multi_ref_with_presence(doc_ids, fields, visitor);
-        Ok(())
+        self.check_retained_read()?;
+        self.visit_fields_multi_ref_with_presence(doc_ids, fields, &mut |id, present, row| {
+            self.check_retained_read().is_ok() && visitor(id, present, row)
+        });
+        self.check_retained_read()
     }
 
     fn for_each_fields_multi_borrowed(
@@ -276,11 +381,16 @@ impl DocumentStore for MemoryDocumentStore {
         fields: &[&str],
         visitor: &mut dyn FnMut(DocId, bool, &[&Value]) -> bool,
     ) -> StorageBackendResult<Option<usize>> {
+        self.check_retained_read()?;
         let mut visited = 0;
         self.visit_fields_multi_ref_with_presence(ids, fields, &mut |id, present, values| {
+            if self.check_retained_read().is_err() {
+                return false;
+            }
             visited += 1;
             visitor(id, present, values)
         });
+        self.check_retained_read()?;
         Ok(Some(visited))
     }
 
@@ -291,13 +401,15 @@ impl DocumentStore for MemoryDocumentStore {
         control: &StorageReadControl,
         visitor: &mut dyn FnMut(Option<&Value>) -> StorageBackendResult<()>,
     ) -> StorageBackendResult<()> {
+        self.check_retained_read()?;
         control.check()?;
         let value = self
             .state
             .documents
-            .get(&id)
+            .get(id)
             .and_then(|row| self.field(row, field));
         visitor(value)?;
+        self.check_retained_read()?;
         control.check()
     }
 
@@ -307,16 +419,19 @@ impl DocumentStore for MemoryDocumentStore {
         fields: &[&str],
         control: &StorageReadControl,
     ) -> StorageBackendResult<BudgetedVec<bool>> {
+        self.check_retained_read()?;
         control.check()?;
         let mut present = BudgetedVec::new(control.memory());
         for id in ids {
-            let row = self.state.documents.get(id);
+            self.check_retained_read()?;
+            let row = self.state.documents.get(*id);
             for field in fields {
                 control.check()?;
                 present.push(row.is_some_and(|row| self.field(row, field).is_some()))?;
             }
         }
         control.check()?;
+        self.check_retained_read()?;
         Ok(present)
     }
 
@@ -325,6 +440,10 @@ impl DocumentStore for MemoryDocumentStore {
         doc_ids: &[DocId],
         fields: &[&str],
     ) -> StorageBackendResult<Option<Vec<Option<SharedDocumentRow>>>> {
+        self.check_retained_read()?;
+        if self.retention.is_some() {
+            return Ok(None);
+        }
         Ok(Some(self.shared_fields(doc_ids, fields)))
     }
 
@@ -333,6 +452,7 @@ impl DocumentStore for MemoryDocumentStore {
         field: &str,
         value: &Value,
     ) -> StorageBackendResult<Option<DocId>> {
+        self.check_retained_read()?;
         Ok(self.state.documents.iter().find_map(|(doc_id, stored)| {
             (self.field(stored, field) == Some(value)).then_some(*doc_id)
         }))
@@ -343,6 +463,7 @@ impl DocumentStore for MemoryDocumentStore {
         fields: &[String],
         values: &[Value],
     ) -> StorageBackendResult<Option<DocId>> {
+        self.check_retained_read()?;
         if fields.is_empty() || fields.len() != values.len() {
             return Ok(None);
         }
@@ -360,10 +481,11 @@ impl DocumentStore for MemoryDocumentStore {
         doc_id: DocId,
         updates: &BTreeMap<String, Value>,
     ) -> StorageBackendResult<bool> {
+        self.admit_write()?;
         let Some(mut document) = self
             .state
             .documents
-            .get(&doc_id)
+            .get(doc_id)
             .map(|stored| self.materialize_stored_document(stored))
         else {
             return Ok(false);
@@ -380,13 +502,18 @@ impl DocumentStore for MemoryDocumentStore {
     }
 
     fn delete(&mut self, doc_id: DocId) -> StorageBackendResult<()> {
-        if self.state.documents.contains_key(&doc_id) {
-            Arc::make_mut(&mut self.state).documents.remove(&doc_id);
+        self.admit_write()?;
+        if self.state.documents.contains_key(doc_id) {
+            let state = Arc::make_mut(&mut self.state);
+            state.retention.invalidate();
+            let previous = state.documents.remove(doc_id).expect("selected document");
+            state.row_payload_bytes -= previous.payload_bytes;
         }
         Ok(())
     }
 
     fn clear(&mut self) -> StorageBackendResult<()> {
+        self.admit_write()?;
         self.projections = ProjectionCache::default();
         if let Some(state) = Arc::get_mut(&mut self.state) {
             *state = MemoryDocumentState::default();
@@ -397,17 +524,17 @@ impl DocumentStore for MemoryDocumentStore {
     }
 
     fn doc_ids(&self) -> StorageBackendResult<Vec<DocId>> {
+        self.check_retained_read()?;
         Ok(self.state.documents.keys().copied().collect())
     }
 
     fn next_doc_id(&self, after: Option<DocId>) -> StorageBackendResult<Option<DocId>> {
-        use std::ops::Bound::{Excluded, Unbounded};
-
+        self.check_retained_read()?;
         Ok(match after {
             Some(after) => self
                 .state
                 .documents
-                .range((Excluded(after), Unbounded))
+                .range_from(Excluded(&after))
                 .next()
                 .map(|(doc_id, _)| *doc_id),
             None => self.state.documents.keys().next().copied(),
@@ -415,8 +542,7 @@ impl DocumentStore for MemoryDocumentStore {
     }
 
     fn next_doc_ids(&self, after: Option<DocId>, limit: usize) -> StorageBackendResult<Vec<DocId>> {
-        use std::ops::Bound::{Excluded, Unbounded};
-
+        self.check_retained_read()?;
         if limit == 0 {
             return Ok(Vec::new());
         }
@@ -424,7 +550,7 @@ impl DocumentStore for MemoryDocumentStore {
             Some(after) => self
                 .state
                 .documents
-                .range((Excluded(after), Unbounded))
+                .range_from(Excluded(&after))
                 .take(limit)
                 .map(|(doc_id, _)| *doc_id)
                 .collect(),
@@ -438,16 +564,17 @@ impl DocumentStore for MemoryDocumentStore {
         limit: usize,
         control: &StorageReadControl,
     ) -> StorageBackendResult<BudgetedVec<DocId>> {
-        use std::ops::Bound::{Excluded, Unbounded};
-
+        self.check_retained_read()?;
         control.check()?;
         let mut ids = BudgetedVec::new(control.memory());
-        let after = after.map_or(Unbounded, Excluded);
-        for (&id, _) in self.state.documents.range((after, Unbounded)).take(limit) {
+        let after = after.as_ref().map_or(Unbounded, Excluded);
+        for (&id, _) in self.state.documents.range_from(after).take(limit) {
+            self.check_retained_read()?;
             control.check()?;
             ids.push(id)?;
         }
         control.check()?;
+        self.check_retained_read()?;
         Ok(ids)
     }
 
@@ -457,6 +584,10 @@ impl DocumentStore for MemoryDocumentStore {
         limit: usize,
         fields: &[&str],
     ) -> StorageBackendResult<Option<Vec<(DocId, SharedDocumentRow)>>> {
+        self.check_retained_read()?;
+        if self.retention.is_some() {
+            return Ok(None);
+        }
         Ok(Some(self.next_shared_rows(after, limit, fields)))
     }
 
@@ -467,6 +598,9 @@ impl DocumentStore for MemoryDocumentStore {
         fields: &[&str],
         visitor: &mut dyn FnMut(DocId, &[&Value]) -> bool,
     ) -> Option<usize> {
+        if self.retention.is_some() {
+            return None;
+        }
         Some(self.visit_next_rows(after, limit, fields, visitor))
     }
 
@@ -477,18 +611,42 @@ impl DocumentStore for MemoryDocumentStore {
         fields: &[&str],
         visitor: &mut dyn FnMut(DocId, &[&Value]) -> bool,
     ) -> StorageBackendResult<Option<usize>> {
-        Ok(Some(self.visit_next_rows(after, limit, fields, visitor)))
+        self.check_retained_read()?;
+        let visited = self.visit_next_rows(after, limit, fields, &mut |id, row| {
+            self.check_retained_read().is_ok() && visitor(id, row)
+        });
+        self.check_retained_read()?;
+        Ok(Some(visited))
     }
 
     fn len(&self) -> StorageBackendResult<usize> {
+        self.check_retained_read()?;
         Ok(self.state.documents.len())
     }
 
     fn snapshot(&self) -> StorageBackendResult<Arc<dyn DocumentStore>> {
+        if let Some(retention) = &self.retention {
+            return self.controlled_snapshot(&retention.control);
+        }
         Ok(Arc::new(self.shared_snapshot()))
     }
 
+    fn snapshot_with_control(
+        &self,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Arc<dyn DocumentStore>> {
+        self.controlled_snapshot(control)
+    }
+
+    fn retained_snapshot(&self) -> StorageBackendResult<Option<Arc<dyn DocumentStore>>> {
+        if self.retention.is_some() {
+            return self.snapshot().map(Some);
+        }
+        Ok(None)
+    }
+
     fn writable_snapshot(&self) -> StorageBackendResult<Box<dyn DocumentStore>> {
+        self.admit_write()?;
         Ok(Box::new(self.shared_snapshot()))
     }
 }

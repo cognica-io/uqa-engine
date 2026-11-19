@@ -10,15 +10,20 @@ use crate::catalog::{
     test_support::{empty_catalog, table_snapshot, CatalogServices},
 };
 use uqa_core::RelationIdentity;
+use uqa_sql::catalog::roles::RoleDefinitions;
 
 fn fixture(unrelated: usize) -> CatalogReadView {
     let mut snapshot = empty_catalog().snapshot().clone();
-    snapshot.definitions.schemas =
-        Arc::new(crate::catalog::security::BoundSchemaSecurity::initial_catalog());
-    snapshot.definitions.roles = Arc::new(std::collections::BTreeMap::from([(
-        "uqa".into(),
-        uqa_sql::catalog::roles::RoleDefinition::bootstrap(),
-    )]));
+    snapshot.definitions.schemas = uqa_core::memory::RetainedValue::new(
+        crate::catalog::security::BoundSchemaSecurity::initial_catalog(),
+    );
+    snapshot.definitions.roles = uqa_core::memory::RetainedValue::new(
+        RoleDefinitions::try_from_iter([(
+            "uqa".into(),
+            uqa_sql::catalog::roles::RoleDefinition::bootstrap(),
+        )])
+        .unwrap(),
+    );
     for index in 0..=unrelated {
         snapshot.tables.insert(
             RelationIdentity::new("public", format!("item_{index}")),
@@ -187,17 +192,19 @@ fn failed_dependency_derivation_does_not_publish_partial_metadata() {
     let catalog = fixture(0);
     let mut snapshot = catalog.snapshot().clone();
     let relation = RelationIdentity::new("public", "malformed");
-    Arc::make_mut(&mut snapshot.definitions.catalog_indexes).insert(
-        relation.clone(),
-        uqa_storage::CatalogIndexRow {
-            relation,
-            table_name: "public.item_0".into(),
-            index_type: "btree".into(),
-            columns_json: "[]".into(),
-            parameters_json: "{}".into(),
-            definition_json: None,
-        },
-    );
+    uqa_core::memory::RetainedValue::make_mut(&mut snapshot.definitions.catalog_indexes)
+        .insert(
+            uqa_storage::CatalogIndexRow {
+                relation,
+                table_name: "public.item_0".into(),
+                index_type: "btree".into(),
+                columns_json: "[]".into(),
+                parameters_json: "{}".into(),
+                definition_json: None,
+            },
+            uqa_sql::ast::RelationPersistence::Permanent,
+        )
+        .unwrap();
     let invalid = CatalogReadView::new(snapshot);
     let services = CatalogServices::default();
     let output = RegtypeOutputCache::default();

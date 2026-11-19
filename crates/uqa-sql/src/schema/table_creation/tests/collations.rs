@@ -69,7 +69,7 @@ impl AnalysisCatalog for Catalog {
         &self,
         _: &RelationNameResolution,
         _: &str,
-    ) -> Result<Option<Vec<Arc<crate::routines::SQLUserFunction>>>, SQLError> {
+    ) -> Result<Option<Vec<crate::routines::SQLRoutine>>, SQLError> {
         Ok(None)
     }
     fn table_resolved(
@@ -85,7 +85,7 @@ impl AnalysisCatalog for Catalog {
         let mut p = ColumnDef::nullable("p", ColumnType::Text);
         p.collation_oid = Some(951);
         Ok(Some(TableDefinition {
-            columns: Arc::new(vec![c, p, ColumnDef::nullable("n", ColumnType::Integer)]),
+            columns: Arc::new(vec![c, p, ColumnDef::nullable("n", ColumnType::Integer)]).into(),
             columns_declared: true,
         }))
     }

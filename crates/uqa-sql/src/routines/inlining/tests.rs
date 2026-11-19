@@ -9,7 +9,7 @@
 
 use super::*;
 use crate::{ast::Statement, plan::RelationalPlan, ColumnType, FunctionTypeResolver};
-use std::sync::{atomic::Ordering, Arc};
+use std::sync::atomic::Ordering;
 use uqa_core::Value;
 mod concatenation;
 mod fixture;
@@ -142,7 +142,7 @@ fn authority_recursion_and_strict_null_do_not_parse_source() {
     let mut catalog = Catalog::new(
         r"CREATE FUNCTION denied(x integer) RETURNS text LANGUAGE sql STRICT AS $$SELECT 'a\nb'$$",
     );
-    Arc::make_mut(&mut catalog.functions[0]).def.execute_acl = Some(vec![]);
+    catalog.edit_definition(0, |definition| definition.execute_acl = Some(vec![]));
     catalog.allowed.store(false, Ordering::SeqCst);
     catalog.settings.lock().unwrap().standard_conforming_strings = false;
     let binding = catalog.binding("denied", &[Some(ColumnType::Integer)]);
@@ -455,8 +455,10 @@ fn assigned_default_type_does_not_replace_the_default_expression_type() {
         ),
     ] {
         let mut catalog = Catalog::new(declaration);
-        Arc::make_mut(&mut catalog.functions[0]).def.params[0].default_type =
-            Some(crate::ast::RoutineDefaultType::Concrete(target.clone()));
+        catalog.edit_definition(0, |definition| {
+            definition.params[0].default_type =
+                Some(crate::ast::RoutineDefaultType::Concrete(target.clone()));
+        });
         let expanded = catalog
             .context()
             .prepare(&catalog.binding("f", &[]), &[], &[])

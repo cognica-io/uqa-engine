@@ -20,12 +20,12 @@ use uqa_sql::{
 pub(super) struct PreparedBody {
     arguments: Produced<Vec<String>>,
     relation: Option<i64>,
-    body: Arc<CompiledFunctionBody>,
+    body: uqa_sql::routines::SharedRoutineBody,
     preparations: Arc<PLpgSQLPreparations>,
 }
 impl PreparedBody {
     fn new(
-        body: Arc<CompiledFunctionBody>,
+        body: uqa_sql::routines::SharedRoutineBody,
         arguments: Produced<Vec<String>>,
         relation: Option<i64>,
         preparations: Arc<PLpgSQLPreparations>,
@@ -39,7 +39,7 @@ impl PreparedBody {
     }
 }
 impl CompiledRoutine {
-    pub(super) fn new(version: u64, body: Arc<CompiledFunctionBody>) -> Self {
+    pub(super) fn new(version: u64, body: uqa_sql::routines::SharedRoutineBody) -> Self {
         Self {
             version,
             body,
@@ -57,7 +57,7 @@ impl SessionRoutineBodies {
         relation: Option<i64>,
         control: &ProductionControl<'_>,
         compile: impl FnOnce(&CreateFunction) -> Result<CompiledFunctionBody, SQLError>,
-    ) -> Result<Arc<CompiledFunctionBody>, SQLError> {
+    ) -> Result<uqa_sql::routines::SharedRoutineBody, SQLError> {
         let identity = routine_identity(function)?;
         let version = function.definition_version()?;
         let mut arguments = ProductionVec::new(*control);
@@ -100,7 +100,7 @@ impl SessionRoutineBodies {
                 }
             }
         }
-        let body = Arc::new(compile(definition)?);
+        let body = compile(definition)?.shared();
         let mut bodies = self.compiled.lock();
         let compiled = bodies
             .entry(identity)
@@ -138,7 +138,7 @@ impl SessionRoutineBodies {
             let bodies = self.compiled.lock();
             if let Some(compiled) = bodies.get(&identity) {
                 for entry in compiled.plpgsql.values() {
-                    if matches!(&*entry.body, CompiledFunctionBody::PLpgSQL(body) if body.compilation.same(&parsed.compilation))
+                    if matches!(&**entry.body, CompiledFunctionBody::PLpgSQL(body) if body.compilation.same(&parsed.compilation))
                     {
                         return Ok(Arc::clone(&entry.preparations));
                     }
@@ -180,7 +180,7 @@ fn compatible_validator(
 impl CompiledRoutine {
     fn retain_preparation(
         &mut self,
-        body: Arc<CompiledFunctionBody>,
+        body: uqa_sql::routines::SharedRoutineBody,
         arguments: Produced<Vec<String>>,
         relation: Option<i64>,
         registry: &crate::routines::preparation::PLpgSQLPreparationRegistry,

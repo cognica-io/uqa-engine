@@ -8,8 +8,6 @@
 //!
 //! Sequence values resolve names, definitions and authority against the latest commit and not against the caller's statement snapshot, and one inserted row asks for them several times. A read through an independent session costs more than everything else the row needs, so the session keeps the last read with what it depended on: the commits of the database, its own private records and its registries. While all three are unchanged, a new read returns the same catalog.
 
-use std::sync::Arc;
-
 use uqa_execution::catalog::security::roles::persistence::RoleCatalogSnapshot;
 use uqa_execution::catalog::sequence::snapshot::{read_sequence_snapshot, SequenceReadSnapshot};
 use uqa_storage::key_value::KeyValueReadRevision;
@@ -39,12 +37,12 @@ pub(crate) struct SequenceSnapshotMemo {
 }
 
 fn same_registries(left: &SequenceReadSnapshot, right: &SequenceReadSnapshot) -> bool {
-    Arc::ptr_eq(&left.sequences, &right.sequences)
-        && Arc::ptr_eq(&left.object_ids, &right.object_ids)
-        && Arc::ptr_eq(&left.persistence, &right.persistence)
-        && Arc::ptr_eq(&left.security, &right.security)
-        && Arc::ptr_eq(&left.roles.roles, &right.roles.roles)
-        && Arc::ptr_eq(&left.roles.memberships, &right.roles.memberships)
+    left.catalog.shares_generation(&right.catalog)
+        && uqa_core::memory::RetainedValue::ptr_eq(&left.roles.roles, &right.roles.roles)
+        && uqa_core::memory::RetainedValue::ptr_eq(
+            &left.roles.memberships,
+            &right.roles.memberships,
+        )
 }
 
 impl SequenceSnapshotMemo {
@@ -65,11 +63,7 @@ impl Engine {
     /// The sequence registries of this session, as a read of the catalog starts from them.
     pub(crate) fn sequence_registries(&self) -> SequenceReadSnapshot {
         SequenceReadSnapshot {
-            sequences: self.durable.sequences.snapshot(),
-            object_ids: self.durable.sequence_object_ids.snapshot(),
-            persistence: self.durable.sequence_persistence.snapshot(),
-            security: self.durable.sequence_security.snapshot(),
-            catalog_oids: self.durable.sequence_catalog_oids.snapshot(),
+            catalog: self.durable.sequences.snapshot(),
             roles: RoleCatalogSnapshot {
                 roles: self.durable.roles.snapshot(),
                 memberships: self.durable.role_memberships.snapshot(),

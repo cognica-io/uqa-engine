@@ -14,6 +14,20 @@ thread_local! {
     static PLACING_SET_CALLS: Cell<bool> = const { Cell::new(true) };
 }
 
+/// The analysis decision is movable; the guard that applies it belongs only to the current poll's thread.
+#[derive(Clone, Copy)]
+pub(crate) struct SetPlacementMode(bool);
+
+impl SetPlacementMode {
+    pub(crate) fn capture() -> Self {
+        Self(placing_set_calls())
+    }
+
+    pub(crate) fn enter(self) -> SetPlacementScope {
+        SetPlacementScope::enter(self.0)
+    }
+}
+
 /// Decides, until it drops, whether analysis on the current thread places set-returning calls, as parse analysis does for a statement or definition it analyzes for the first time, and restores the enclosing decision when it drops.
 pub struct SetPlacementScope {
     previous: bool,

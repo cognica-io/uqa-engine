@@ -6,16 +6,17 @@
 
 //! Physical graph snapshot ownership and transaction-local write identities.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::fmt::Write as _;
 use std::sync::Arc;
+use uqa_core::memory::RetainedValue;
 
 use uqa_graph::{GraphStore, GraphStoreHandle, PersistentGraphStore};
 use uqa_storage::{CatalogFacade, PersistentStorageBackend, StorageBackendResult};
 
 use crate::{Engine, GraphTransactionOverlay, SQLError};
 
-type GraphHandles = BTreeMap<String, Arc<GraphStoreHandle>>;
+type GraphHandles = uqa_graph::GraphCatalog;
 
 fn snapshot_error(error: impl std::error::Error + Send + Sync + 'static) -> SQLError {
     uqa_execution::storage_errors::storage_error(
@@ -76,21 +77,22 @@ impl Engine {
     }
 
     /// Only graph names and storage handles are collected here, not entities.
-    pub(crate) fn visible_graph_handles(&self) -> Arc<GraphHandles> {
+    pub(crate) fn visible_graph_handles(
+        &self,
+    ) -> StorageBackendResult<RetainedValue<GraphHandles>> {
         if let Some(snapshot) = &self.query_catalog_snapshot {
-            return Arc::clone(&snapshot.graphs);
+            return Ok(snapshot.graphs.clone());
         }
         if let Some(overlay) = &self.session.state.read().graph_overlay {
             let store = Arc::new(GraphStoreHandle::Persistent(overlay.store.as_ref().clone()));
-            return Arc::new(
-                overlay
-                    .names
-                    .iter()
-                    .map(|name| (name.clone(), Arc::clone(&store)))
-                    .collect(),
-            );
+            return self
+                .durable
+                .graphs
+                .read()
+                .bind_names(overlay.names.iter().map(String::as_str), &store)
+                .map(RetainedValue::new);
         }
-        self.durable.graphs.snapshot()
+        Ok(self.durable.graphs.snapshot())
     }
 
     pub(crate) fn install_fixed_graph_snapshot(
@@ -194,8 +196,8 @@ impl Engine {
         &self,
         required: Option<&BTreeSet<String>>,
         catalog_required: bool,
-    ) -> Result<Arc<GraphHandles>, SQLError> {
-        let graphs = self.visible_graph_handles();
+    ) -> Result<RetainedValue<GraphHandles>, SQLError> {
+        let graphs = self.visible_graph_handles().map_err(snapshot_error)?;
         let Some(backend) = &self.storage.backend else {
             return Ok(graphs);
         };
@@ -228,11 +230,10 @@ impl Engine {
             self.detach_selected_graph_storage_snapshot(&graphs, required)?
         };
         let handle = Arc::new(GraphStoreHandle::Persistent(store));
-        Ok(Arc::new(
+        Ok(RetainedValue::new(
             graphs
-                .keys()
-                .map(|name| (name.clone(), Arc::clone(&handle)))
-                .collect(),
+                .bind_names(graphs.keys().map(String::as_str), &handle)
+                .map_err(snapshot_error)?,
         ))
     }
 
@@ -244,7 +245,7 @@ impl Engine {
         let (catalog, mut snapshot) = new_detached_graph_storage()?;
         snapshot
             .transaction(|target| {
-                for (name, source) in graphs {
+                for (name, source) in graphs.iter() {
                     catalog.save_named_graph(name)?;
                     target.import_label_registry(name, &source.label_registry(name)?)?;
                     if required.is_some_and(|required| !required.contains(name)) {

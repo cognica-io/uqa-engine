@@ -59,6 +59,16 @@ impl MutableSourcePlan {
         qualifier: Option<Produced<String>>,
         control: &ProductionControl<'_>,
     ) -> Result<Self, SQLError> {
+        self.replace_table_reference_in_place(name, qualifier, control)?;
+        Ok(self)
+    }
+
+    pub(crate) fn replace_table_reference_in_place(
+        &mut self,
+        name: Option<Produced<String>>,
+        qualifier: Option<Produced<String>>,
+        control: &ProductionControl<'_>,
+    ) -> Result<(), SQLError> {
         self.assert_owner(control);
         control.check()?;
         let SourcePlan::Table {
@@ -83,7 +93,7 @@ impl MutableSourcePlan {
                 control,
             )?;
         }
-        Ok(self)
+        Ok(())
     }
 
     pub fn replace_function_references(
@@ -93,6 +103,17 @@ impl MutableSourcePlan {
         relations: Option<Produced<OperatorJoinRelations>>,
         control: &ProductionControl<'_>,
     ) -> Result<Self, SQLError> {
+        self.replace_function_references_in_place(index, output_name, relations, control)?;
+        Ok(self)
+    }
+
+    pub(crate) fn replace_function_references_in_place(
+        &mut self,
+        index: usize,
+        output_name: Option<Produced<String>>,
+        relations: Option<Produced<OperatorJoinRelations>>,
+        control: &ProductionControl<'_>,
+    ) -> Result<(), SQLError> {
         self.assert_owner(control);
         control.check()?;
         let (name, current_relations, mut memory) = match &mut self.source {
@@ -139,7 +160,7 @@ impl MutableSourcePlan {
                 control,
             )?;
         }
-        Ok(self)
+        Ok(())
     }
 }
 
@@ -169,9 +190,18 @@ impl MutableQueryPlan {
         bound: bool,
         control: &ProductionControl<'_>,
     ) -> Result<Self, SQLError> {
+        self.set_relations_bound_in_place(bound, control)?;
+        Ok(self)
+    }
+
+    pub(crate) fn set_relations_bound_in_place(
+        &mut self,
+        bound: bool,
+        control: &ProductionControl<'_>,
+    ) -> Result<(), SQLError> {
         self.assert_owner(control);
         control.check()?;
         self.query.relations_bound = bound;
-        Ok(self)
+        Ok(())
     }
 }

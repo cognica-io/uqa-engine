@@ -59,7 +59,7 @@ fn sequence_privilege_value(
                 .resolve(inquiry.resolution)?
                 .ok_or_else(|| missing_sequence(reference))?;
             let snapshot = read_snapshot(snapshots)?;
-            if !snapshot.object_ids.contains_key(&relation) {
+            if !snapshot.catalog.contains_key(&relation) {
                 return Err(missing_sequence(reference));
             }
             (relation, snapshot)

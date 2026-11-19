@@ -7,7 +7,9 @@
 //! OID identities of user-defined types. Stored syntax, routine signatures and bound casts name a user-defined type by identity, so a rename, a schema move or a different search path cannot change which type they mean; output spells the type's current name. `#` cannot occur in an unquoted type name, and quoted names keep their quotes, so an identity never collides with a name as written.
 
 use super::ColumnType;
+mod input;
 mod production;
+pub use input::TypeIdentityInputError;
 
 const ENUM_PREFIX: &str = "enum#";
 const DOMAIN_PREFIX: &str = "domain#";
@@ -37,6 +39,18 @@ pub enum UserTypeKind {
     Multirange,
 }
 
+impl UserTypeKind {
+    const fn prefix(self) -> &'static str {
+        match self {
+            Self::Enum => ENUM_PREFIX,
+            Self::Domain => DOMAIN_PREFIX,
+            Self::Composite => COMPOSITE_PREFIX,
+            Self::Range => RANGE_PREFIX,
+            Self::Multirange => MULTIRANGE_PREFIX,
+        }
+    }
+}
+
 /// A parsed identity: the type's kind and OID, and the number of array dimensions around it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct UserTypeIdentity {
@@ -49,31 +63,12 @@ impl UserTypeIdentity {
     /// Parse `enum#<oid>`, `domain#<oid>` or `composite#<oid>` with any number of `[]` suffixes.
     #[must_use]
     pub fn parse(name: &str) -> Option<Self> {
-        let mut element = name.trim();
-        let mut dimensions = 0usize;
-        while let Some(inner) = element.strip_suffix("[]") {
-            element = inner;
-            dimensions += 1;
-        }
-        let (kind, oid) = if let Some(oid) = element.strip_prefix(ENUM_PREFIX) {
-            (UserTypeKind::Enum, oid)
-        } else if let Some(oid) = element.strip_prefix(COMPOSITE_PREFIX) {
-            (UserTypeKind::Composite, oid)
-        } else if let Some(oid) = element.strip_prefix(RANGE_PREFIX) {
-            (UserTypeKind::Range, oid)
-        } else if let Some(oid) = element.strip_prefix(MULTIRANGE_PREFIX) {
-            (UserTypeKind::Multirange, oid)
-        } else {
-            (UserTypeKind::Domain, element.strip_prefix(DOMAIN_PREFIX)?)
-        };
-        if oid.is_empty() || !oid.bytes().all(|byte| byte.is_ascii_digit()) {
-            return None;
-        }
-        Some(Self {
-            kind,
-            oid: oid.parse().ok()?,
-            dimensions,
-        })
+        crate::catalog::work::inline(input::parse(
+            name,
+            &uqa_core::memory::ProductionControl::uncontrolled(),
+            &mut (),
+        ))
+        .expect("ordinary type identity parsing cannot be cancelled or limited")
     }
 }
 

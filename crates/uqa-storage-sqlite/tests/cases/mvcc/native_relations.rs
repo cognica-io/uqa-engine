@@ -7,7 +7,7 @@
 //! View/foreign definitions and relation claims remain atomic across logical sessions.
 
 use super::{open, MODES};
-use std::{collections::BTreeMap, sync::mpsc, time::Duration};
+use std::{sync::mpsc, time::Duration};
 use uqa_storage::{
     mvcc::VersionedSessionOptions, ForeignTableRow, RelationIdentity, TableAclEntry,
     TablePrivileges, ViewRow,
@@ -55,7 +55,7 @@ fn view(name: &str, value: &str) -> ViewRow {
             uqa_core::catalog_acl::LegacyRelationSecurity {
                 role_owner: "owner".into(),
                 acl: Some(acl()),
-                column_acls: BTreeMap::from([("field".into(), acl())]),
+                column_acls: uqa_core::memory::OwnedMap::from_iter([("field".into(), acl())]),
             },
         ),
         definition_json: value.into(),
@@ -69,7 +69,7 @@ fn foreign(name: &str, server: &str, value: &str) -> ForeignTableRow {
             uqa_core::catalog_acl::LegacyRelationSecurity {
                 role_owner: "owner".into(),
                 acl: Some(acl()),
-                column_acls: BTreeMap::from([("field".into(), acl())]),
+                column_acls: uqa_core::memory::OwnedMap::from_iter([("field".into(), acl())]),
             },
         ),
         server_name: server.into(),
@@ -112,7 +112,7 @@ fn assert_value(catalog: &Catalog, name: &str, value: Option<&str>) {
         assert_eq!(legacy_security(&v.security).acl, Some(acl()));
         assert_eq!(
             legacy_security(&v.security).column_acls,
-            BTreeMap::from([("field".into(), acl())])
+            uqa_core::memory::OwnedMap::from_iter([("field".into(), acl())])
         );
     }
     if let Some(f) = f {
@@ -120,7 +120,7 @@ fn assert_value(catalog: &Catalog, name: &str, value: Option<&str>) {
         assert_eq!(legacy_security(&f.security).acl, Some(acl()));
         assert_eq!(
             legacy_security(&f.security).column_acls,
-            BTreeMap::from([("field".into(), acl())])
+            uqa_core::memory::OwnedMap::from_iter([("field".into(), acl())])
         );
         assert_eq!(f.columns_json, "[{\"name\":\"field\"}]");
         assert_eq!(f.server_name, name);
@@ -317,7 +317,7 @@ fn native_and_legacy_relation_lifecycle_preserve_claims_security_and_sorted_read
         assert_eq!(legacy_security(&renamed.security).acl, Some(acl()));
         assert_eq!(
             legacy_security(&renamed.security).column_acls,
-            BTreeMap::from([("field".into(), acl())])
+            uqa_core::memory::OwnedMap::from_iter([("field".into(), acl())])
         );
         for row in catalog.load_views().unwrap() {
             assert!(catalog.drop_view(&row.relation).unwrap());

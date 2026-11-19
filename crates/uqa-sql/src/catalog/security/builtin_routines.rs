@@ -19,13 +19,15 @@ pub struct BuiltinRoutineIdentity {
 }
 
 use super::object_acl;
-use crate::catalog::roles::identity::RoleSubject;
-use crate::{
-    ast::RoutineAclEntry,
-    catalog::roles::{RoleDefinition, RoleIdentity},
-    SQLError,
-};
-use std::{collections::BTreeMap, ops::Deref};
+use crate::catalog::roles::RoleDefinitions;
+use crate::{ast::RoutineAclEntry, catalog::roles::RoleIdentity, SQLError};
+use std::ops::Deref;
+
+mod registry;
+pub mod stored;
+pub use registry::{BuiltinRoutineSecurities, CapturedBuiltinRoutineSecurities};
+mod validation;
+pub use validation::validate_from_input;
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -34,7 +36,6 @@ pub struct BuiltinRoutineSecurity {
     pub execute_acl: Vec<RoutineAclEntry>,
 }
 
-pub type BuiltinRoutineSecurities = BTreeMap<u32, BuiltinRoutineSecurity>;
 pub type BuiltinRoutineSecurityRead<'a> = Box<dyn Deref<Target = BuiltinRoutineSecurities> + 'a>;
 
 pub trait BuiltinRoutineSecurityCatalog {
@@ -65,28 +66,19 @@ pub fn metadata_key(oid: u32) -> String {
     format!("{METADATA_PREFIX}{oid}")
 }
 
-pub fn validate(
-    entry: &BuiltinRoutineSecurity,
-    roles: &BTreeMap<String, RoleDefinition>,
-) -> Result<(), SQLError> {
-    if entry.revision == [0; 16] {
-        return Err(SQLError::Internal(
-            "invalid builtin routine ACL tuple identity".into(),
-        ));
-    }
+pub fn validate(entry: &BuiltinRoutineSecurity, roles: &RoleDefinitions) -> Result<(), SQLError> {
+    validation::revision(entry)?;
     object_acl::validate_acl(
         RoleIdentity::BOOTSTRAP,
         Some(&entry.execute_acl),
         "builtin routine",
     )?;
-    for role in object_acl::acl_roles(RoleIdentity::BOOTSTRAP, Some(&entry.execute_acl)) {
-        if role.role_name(roles).is_none() {
-            return Err(SQLError::Internal(
-                "builtin routine ACL references missing role incarnation".into(),
-            ));
-        }
-    }
-    Ok(())
+    crate::catalog::work::inline(validation::validate_roles(
+        object_acl::acl_roles(RoleIdentity::BOOTSTRAP, Some(&entry.execute_acl)).into_iter(),
+        roles,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+        &mut (),
+    ))
 }
 
 #[cfg(test)]

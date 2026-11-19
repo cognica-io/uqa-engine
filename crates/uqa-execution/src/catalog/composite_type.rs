@@ -6,11 +6,10 @@
 
 //! Versioned composite type authority: per-type records, public OID claims, private overlays and durable publication.
 
-use std::{collections::BTreeMap, ops::Deref, sync::Arc};
-use uqa_sql::catalog::{
-    composite_type::{validate_composite_registry, StoredComposite},
-    roles::RoleDefinition,
-};
+use std::ops::Deref;
+use uqa_core::memory::RetainedValue;
+use uqa_sql::catalog::composite_type::{validate_composite_registry, StoredComposite};
+use uqa_sql::catalog::roles::RoleDefinitions;
 use uqa_storage::{CatalogFacade, StorageBackendError, StorageBackendResult};
 
 mod descriptors;
@@ -20,20 +19,20 @@ pub mod relations;
 pub use descriptors::CompositeDescriptorCache;
 
 /// Registered standalone composite types keyed by qualified type name.
-pub type CompositeRegistry = BTreeMap<String, StoredComposite>;
+pub type CompositeRegistry = uqa_sql::catalog::type_definitions::TypeDefinitions<StoredComposite>;
 pub type CompositeRegistryRead<'a> = Box<dyn Deref<Target = CompositeRegistry> + 'a>;
 
 pub trait CompositeRegistryPublication {
     fn composite_registry(&self) -> CompositeRegistryRead<'_>;
     fn composite_catalog(&self) -> Option<&dyn CatalogFacade>;
-    fn composite_role_definitions(&self) -> BTreeMap<String, RoleDefinition>;
+    fn composite_role_definitions(&self) -> RoleDefinitions;
     fn publish_composite_definitions(&self, registry: CompositeRegistry);
 }
 
 /// Read and validate every composite definition. Records and claims must agree before any definition is exposed.
 pub fn restore(
     catalog: &dyn CatalogFacade,
-    roles: &BTreeMap<String, RoleDefinition>,
+    roles: &RoleDefinitions,
 ) -> StorageBackendResult<CompositeRegistry> {
     let registry = records::FORMAT.read(catalog)?;
     validate_composite_registry(&registry, roles).map_err(StorageBackendError::Other)?;
@@ -43,10 +42,10 @@ pub fn restore(
 /// Overlay private composite replacements and deletions without losing independently committed definitions.
 pub fn merge_private(
     catalog: Option<&dyn CatalogFacade>,
-    current: &Arc<CompositeRegistry>,
-    committed: Arc<CompositeRegistry>,
-    roles: &BTreeMap<String, RoleDefinition>,
-) -> StorageBackendResult<Arc<CompositeRegistry>> {
+    current: &RetainedValue<CompositeRegistry>,
+    committed: RetainedValue<CompositeRegistry>,
+    roles: &RoleDefinitions,
+) -> StorageBackendResult<RetainedValue<CompositeRegistry>> {
     let committed = records::FORMAT.merge_private(catalog, current, committed)?;
     validate_composite_registry(&committed, roles).map_err(StorageBackendError::Other)?;
     Ok(committed)
@@ -78,4 +77,17 @@ pub fn publish(
     };
     publication.publish_composite_definitions(registry);
     Ok(())
+}
+
+/// Retain complete physical records and claims before publishing the validated native generation.
+pub type CompositeCatalogInput = super::type_records::input::TypeCatalogInput<StoredComposite>;
+
+pub fn begin_input(
+    catalog: std::sync::Arc<dyn CatalogFacade>,
+    roles: RoleDefinitions,
+    limits: uqa_storage::catalog::input::CatalogInputLimits,
+    mutations: &uqa_core::memory::MemoryBudget,
+    control: &uqa_storage::read_control::StorageReadControl,
+) -> StorageBackendResult<CompositeCatalogInput> {
+    super::type_records::input::new(&records::FORMAT, catalog, roles, limits, mutations, control)
 }

@@ -10,7 +10,9 @@ use std::sync::Arc;
 use uqa_core::PostingList;
 
 use super::{
-    pages::{DiskANNOriginReader, DiskANNPageSource, DiskANNReadLimits, DiskANNReader},
+    pages::{
+        DiskANNOriginReader, DiskANNPageSource, DiskANNReadLimits, DiskANNReader, RecordInput,
+    },
     search::{DiskANNTraversal, DiskANNTraversalStats},
     DiskANNCanonicalCounts, DiskANNCanonicalRead, DiskANNCanonicalScorer,
     DiskANNCanonicalVectorVisitor, DiskANNQueryRead, ExactVectorReason, NavigationInput,
@@ -58,27 +60,64 @@ impl<'a> DiskANNQuery<'a> {
         limits: DiskANNReadLimits,
         control: &StorageReadControl,
     ) -> StorageBackendResult<Self> {
+        Self::open_with_owner(canonical, source, parameters, limits, control, control)
+    }
+
+    /// Admission controls preparation; the completed owner supplies its runtime cancellation. Prepared allocations retain their original admission leases.
+    pub(in crate::diskann_index) fn open_with_owner(
+        canonical: &'a dyn DiskANNQueryRead,
+        source: Arc<dyn DiskANNPageSource>,
+        parameters: DiskANNIndexParams,
+        limits: DiskANNReadLimits,
+        control: &StorageReadControl,
+        owner: &StorageReadControl,
+    ) -> StorageBackendResult<Self> {
+        let (reader, origins) = crate::image_io::work::inline(Self::prepare(
+            canonical,
+            RecordInput::Provider(source),
+            parameters,
+            limits,
+            control,
+            owner,
+            &mut (),
+        ))?;
+        Ok(Self {
+            canonical,
+            reader,
+            origins,
+            control: owner.clone(),
+        })
+    }
+
+    pub(in crate::diskann_index) async fn prepare<S: DiskANNQueryRead + ?Sized>(
+        canonical: &S,
+        source: RecordInput,
+        parameters: DiskANNIndexParams,
+        limits: DiskANNReadLimits,
+        control: &StorageReadControl,
+        owner: &StorageReadControl,
+        work: &mut (impl crate::image_io::work::Work + Send),
+    ) -> StorageBackendResult<(DiskANNReader, DiskANNOriginReader)> {
         canonical.check_control(control)?;
-        let reader = DiskANNReader::open(
+        let reader = DiskANNReader::open_from(
             source.clone(),
             canonical.dimensions(),
             parameters,
             limits,
             control,
-        )?;
-        let origins = DiskANNOriginReader::open(source, limits.max_record_bytes, control)?;
+            work,
+        )
+        .await?;
+        let origins =
+            DiskANNOriginReader::open_from(source, limits.max_record_bytes, control, owner, work)
+                .await?;
         if reader.manifest() != origins.manifest() {
             return Err(invalid(
                 "physical manifest changed while preparing the query",
             ));
         }
         canonical.check_control(control)?;
-        Ok(Self {
-            canonical,
-            reader,
-            origins,
-            control: control.clone(),
-        })
+        Ok((reader, origins))
     }
 
     /// Approximate document top-k after complete tensor reranking, exact uncovered changes and numeric side entries. Exhausted ANN support continues through unexpanded nodes until the document quota is met or the entire base is exhausted.

@@ -55,7 +55,23 @@ impl Engine {
         }
     }
 }
-impl uqa_execution::schema::domains::alteration::DomainConstraintBinding for Engine {
+impl uqa_execution::schema::domains::alteration::DomainAlterBinding for Engine {
+    fn bind_domain_default(
+        &self,
+        definition: &CreateDomain,
+        expression: &mut uqa_sql::ast::Expr,
+    ) -> Result<(), SQLError> {
+        let scope = super::query_scope::new_for_catalog_binding(self)?;
+        let binding = uqa_execution::query::binding::binding_context(&scope)?;
+        uqa_sql::schema::domains::prepare_domain_default(
+            &uqa_sql::schema::SchemaBindingContext {
+                catalog: self,
+                binding: &binding,
+            },
+            definition,
+            expression,
+        )
+    }
     fn bind_added_check(
         &self,
         definition: &CreateDomain,
@@ -108,7 +124,6 @@ impl DomainDeclarationBinding for Engine {
         )
     }
 }
-use std::collections::BTreeMap;
 use uqa_execution::schema::domains::dependencies::{
     DomainDependencyCatalog, DomainDependencyContext, DomainRegistryPublication,
 };
@@ -126,7 +141,9 @@ impl Engine {
     }
 }
 impl DomainDependencyCatalog for Engine {
-    fn domain_definitions(&self) -> BTreeMap<String, StoredDomain> {
+    fn domain_definitions(
+        &self,
+    ) -> uqa_sql::catalog::type_definitions::TypeDefinitions<StoredDomain> {
         self.durable.domains.read().clone()
     }
 }
@@ -139,7 +156,7 @@ impl DomainRegistryPublication for Engine {
     }
     fn publish_domain_definitions(
         &self,
-        registry: BTreeMap<String, StoredDomain>,
+        registry: uqa_sql::catalog::type_definitions::TypeDefinitions<StoredDomain>,
     ) -> Result<(), SQLError> {
         *self.durable.domains.write() = registry;
         self.publish_catalog_constraint_tuples()
@@ -210,11 +227,10 @@ impl TypeObjectCatalog for Engine {
             .cloned()
     }
     fn user_array_element(&self, oid: u32) -> Option<u32> {
-        self.durable.domains.read().values().find_map(|domain| {
-            (uqa_sql::catalog::type_metadata::pg_type_array_oid(&domain.column_type())
-                == i64::from(oid))
-            .then_some(domain.oid)
-        })
+        uqa_execution::catalog::projection::type_object_array_element(
+            &self.catalog_execution(),
+            oid,
+        )
     }
     fn row_type_relation(
         &self,

@@ -173,3 +173,101 @@ fn legacy_routine_owner_acl_migration_is_initial_open_only_and_rolls_back_atomic
         access(&Engine::from_persistent_provider(factory).unwrap(), false);
     }
 }
+
+#[test]
+fn native_routine_restore_admission_keeps_original_definitions_and_metadata_on_failure() {
+    for provider in 0..3 {
+        let (_directory, first, second) = sessions(provider);
+        fixture(&first);
+        let factory = Arc::clone(first.storage.provider.as_ref().unwrap());
+        let raw = factory.open_session().unwrap();
+        let stored = raw.catalog.get_metadata("sql_functions_json").unwrap();
+        let memory = uqa_core::memory::MemoryBudget::new(1 << 20);
+        let mut admitted = uqa_sql::routines::registry::RoutineRegistry::with_budget(&memory);
+        for (name, overloads) in first.durable.sql_user_functions.read().iter() {
+            admitted.insert(name.clone(), overloads.clone()).unwrap();
+        }
+        *first.durable.sql_user_functions.write() = admitted;
+        let original = first.durable.sql_user_functions.snapshot();
+        let baseline = memory.used();
+        let exhausted = memory.reserve(memory.available()).unwrap();
+        let error = first
+            .install_sql_function_restore_placeholders(
+                raw.catalog.as_ref(),
+                crate::open::CatalogRestoreMode::InitialMigration,
+            )
+            .err()
+            .expect("native restore admission must fail");
+        assert_eq!(
+            uqa_sql::catalog::errors::storage_error("routine restore", &error).sqlstate(),
+            Some("53200")
+        );
+        assert_eq!(
+            raw.catalog.get_metadata("sql_functions_json").unwrap(),
+            stored
+        );
+        for (name, routines) in original.iter() {
+            for (routine, retained) in routines
+                .iter()
+                .zip(&first.durable.sql_user_functions.read()[name])
+            {
+                assert!(Arc::ptr_eq(routine, retained));
+            }
+        }
+        drop(exhausted);
+        assert_eq!(memory.used(), baseline);
+        let pending = first
+            .install_sql_function_restore_placeholders(
+                raw.catalog.as_ref(),
+                crate::open::CatalogRestoreMode::InitialMigration,
+            )
+            .unwrap()
+            .unwrap();
+        let exhausted = memory.reserve(memory.available()).unwrap();
+        let error = first
+            .finalize_sql_function_restore(
+                pending,
+                crate::open::CatalogRestoreMode::InitialMigration,
+            )
+            .unwrap_err();
+        assert_eq!(
+            uqa_sql::catalog::errors::storage_error("routine restore", &error).sqlstate(),
+            Some("53200")
+        );
+        assert_eq!(
+            raw.catalog.get_metadata("sql_functions_json").unwrap(),
+            stored
+        );
+        for (name, routines) in original.iter() {
+            for (routine, retained) in routines
+                .iter()
+                .zip(&first.durable.sql_user_functions.read()[name])
+            {
+                assert!(Arc::ptr_eq(routine, retained));
+            }
+        }
+        drop(exhausted);
+        assert_eq!(memory.used(), baseline);
+        access(&first, true);
+        let pending = first
+            .install_sql_function_restore_placeholders(
+                raw.catalog.as_ref(),
+                crate::open::CatalogRestoreMode::InitialMigration,
+            )
+            .unwrap()
+            .unwrap();
+        first
+            .finalize_sql_function_restore(
+                pending,
+                crate::open::CatalogRestoreMode::InitialMigration,
+            )
+            .unwrap();
+        assert_eq!(
+            raw.catalog.get_metadata("sql_functions_json").unwrap(),
+            stored
+        );
+        access(&first, true);
+        drop((first, second, original));
+        assert_eq!(memory.used(), 0);
+    }
+}

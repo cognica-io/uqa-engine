@@ -61,7 +61,9 @@ fn declared_range_generations_survive_provider_refresh_savepoints_and_reopen() {
         let definition = definition();
         sql(&first, "BEGIN; SAVEPOINT ranges");
         publish(&first, |registry| {
-            registry.insert("public.ranges".into(), definition.clone());
+            registry
+                .insert("public.ranges".into(), definition.clone())
+                .unwrap();
         });
         let pinned = first.catalog_read_view();
         assert_eq!(
@@ -82,7 +84,9 @@ fn declared_range_generations_survive_provider_refresh_savepoints_and_reopen() {
             .is_none());
         assert!(pinned.range_value_descriptor(51_000).unwrap().is_some());
         publish(&first, |registry| {
-            registry.insert("public.ranges".into(), definition.clone());
+            registry
+                .insert("public.ranges".into(), definition.clone())
+                .unwrap();
         });
         assert_eq!(
             sql(
@@ -95,11 +99,12 @@ fn declared_range_generations_survive_provider_refresh_savepoints_and_reopen() {
         sql(&first, "BEGIN");
         publish(&first, |registry| {
             registry
-                .get_mut("public.ranges")
+                .edit("public.ranges", |definition| {
+                    definition.multirange.identity.name = "changed".into();
+                    Ok(())
+                })
                 .unwrap()
-                .multirange
-                .identity
-                .name = "changed".into();
+                .unwrap();
         });
         sql(&first, "ROLLBACK");
         drop(pinned);

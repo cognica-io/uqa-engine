@@ -8,7 +8,6 @@
 
 use super::*;
 use std::collections::BTreeMap;
-use std::sync::atomic::Ordering;
 
 const VERIFIED: &str = "uqa.integer_key_identities.verified.v1";
 const LIMIT: i64 = 1 << 62;
@@ -41,11 +40,11 @@ fn legacy_database(path: &std::path::Path) {
 }
 
 fn maps_keys(engine: &Engine, table: &str) -> bool {
-    engine
+    *engine
         .require_table(table)
         .unwrap()
         .maps_integer_keys
-        .load(Ordering::Acquire)
+        .read()
 }
 
 fn values(engine: &Engine, sql: &str, column: &str) -> Vec<Value> {

@@ -66,6 +66,9 @@ pub fn rewritten_view_sequence_references(
     from: &RelationIdentity,
     to: &str,
 ) -> Result<Option<crate::catalog::stored_view::StoredView>, String> {
+    if !crate::binding::view_dependencies::query_plan_references_sequence(&stored.query, from) {
+        return Ok(None);
+    }
     let mut rewritten = stored.clone();
     let mut changed = false;
     crate::binding::view_dependencies::bind_query_plan_sequence_references(

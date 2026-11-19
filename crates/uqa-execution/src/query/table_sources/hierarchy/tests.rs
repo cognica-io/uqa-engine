@@ -12,13 +12,13 @@ use uqa_core::Value;
 use uqa_sql::ast::ColumnDef;
 use uqa_storage::{DocumentStore, MemoryDocumentStore, StoredDocument};
 
-struct Table(RwLock<Box<dyn DocumentStore>>);
+struct Table(RwLock<uqa_storage::StorageHandle<dyn DocumentStore>>);
 
 impl TableRead for Table {
     fn column_definitions(&self) -> Vec<ColumnDef> {
         Vec::new()
     }
-    fn read_documents(&self) -> RwLockReadGuard<'_, Box<dyn DocumentStore>> {
+    fn read_documents(&self) -> RwLockReadGuard<'_, uqa_storage::StorageHandle<dyn DocumentStore>> {
         self.0.read()
     }
 
@@ -103,7 +103,9 @@ fn source(retrieval: &Retrieval, recheck: bool, hierarchy: bool) -> Box<dyn Phys
         .unwrap();
     let source = ScoredDocumentSource::new(
         "docs",
-        Arc::new(Table(RwLock::new(Box::new(documents)))),
+        Arc::new(Table(RwLock::new(uqa_storage::StorageHandle::new(
+            Box::new(documents),
+        )))),
         ScoredInput::entries(Vec::new(), true),
         vec!["id".into()],
         None,

@@ -8,7 +8,7 @@
 
 use super::{RuleCatalog, RuleEvent, StoredRule};
 use crate::SQLError;
-use std::sync::Arc;
+use uqa_core::memory::RetainedValue;
 use uqa_core::{
     memory::{OwnedProductionControl, Produced, ProductionControl},
     RelationIdentity,
@@ -16,7 +16,7 @@ use uqa_core::{
 
 enum Definitions {
     Catalog {
-        rules: Arc<RuleCatalog>,
+        rules: RetainedValue<RuleCatalog>,
         relation: Produced<RelationIdentity>,
         event: RuleEvent,
         replica: bool,
@@ -32,7 +32,7 @@ pub struct CapturedRules {
 
 impl CapturedRules {
     pub fn from_catalog(
-        rules: Arc<RuleCatalog>,
+        rules: RetainedValue<RuleCatalog>,
         relation: Produced<RelationIdentity>,
         event: RuleEvent,
         replica: bool,
@@ -72,7 +72,7 @@ impl CapturedRules {
                 event,
                 replica,
             } => (
-                Candidates::Catalog(rules.get(&**relation).map(|rules| rules.values())),
+                Candidates::Catalog(rules.get(relation).map(|rules| rules.values())),
                 Some((*event, *replica)),
             ),
             Definitions::External(rules) => (Candidates::External(rules.iter()), None),
@@ -101,7 +101,7 @@ impl CapturedRules {
 }
 
 enum Candidates<'a> {
-    Catalog(Option<std::collections::btree_map::Values<'a, String, StoredRule>>),
+    Catalog(Option<crate::catalog::events::EventValues<'a, StoredRule>>),
     External(std::slice::Iter<'a, StoredRule>),
 }
 struct RuleIter<'a> {

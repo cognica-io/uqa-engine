@@ -31,6 +31,14 @@ impl RelationRowTypes {
             control,
         )?;
         let source = boxed_text(qualifier, control)?;
+        Self::from_admitted_anonymous(types, source, control)
+    }
+
+    pub(in crate::schema) fn from_admitted_anonymous(
+        types: SchemaMap<Box<str>, Option<crate::ast::ColumnType>>,
+        source: uqa_core::memory::Produced<Box<str>>,
+        control: &ProductionControl<'_>,
+    ) -> Result<Self, SQLError> {
         let header = control.reserve(size_of::<RelationRows>())?;
         let (source, memory) = source.into_parts();
         let rows = RelationRows {

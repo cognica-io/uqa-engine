@@ -8,7 +8,6 @@
 
 use super::persistence::{self, RoleCatalogSnapshot};
 use crate::catalog::snapshot_read::with_read_transaction;
-use std::sync::Arc;
 use uqa_storage::{CatalogFacade, PersistentStorageSession, StorageBackendResult};
 
 pub fn read_role_snapshot(
@@ -23,8 +22,8 @@ pub fn read_role_snapshot(
     with_read_transaction(independent, |catalog| {
         let restored = persistence::restore(catalog)?;
         let snapshot = RoleCatalogSnapshot {
-            roles: Arc::new(restored.roles),
-            memberships: Arc::new(restored.memberships),
+            roles: uqa_core::memory::RetainedValue::new(restored.roles),
+            memberships: uqa_core::memory::RetainedValue::new(restored.memberships),
         };
         if preserve_private {
             snapshot.merge_private(bound, &current)

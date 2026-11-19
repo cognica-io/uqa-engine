@@ -29,6 +29,80 @@ fn descriptors(query: &mut QueryPlan) -> Vec<RowSchema> {
 }
 
 #[test]
+fn layout_restoration_replaces_absent_source_metadata_and_retires_its_original_allowance() {
+    for sql in [
+        "SELECT 1",
+        "VALUES (1)",
+        "SELECT 1 UNION ALL SELECT 2",
+        "SELECT n FROM (VALUES (1)) v(n)",
+    ] {
+        let prior = MemoryBudget::new(1 << 20);
+        let current = MemoryBudget::new(4 << 20);
+        let token = CancellationToken::new();
+        let prior_control = ProductionControl::new(&prior, &token, &token);
+        let control = ProductionControl::new(&current, &token, &token);
+        let UnifiedPlan::Query(mut query) =
+            UnifiedPlan::lower(crate::compile(sql).unwrap().remove(0))
+        else {
+            unreachable!()
+        };
+        let stale = RowSchema::with_column_metadata_with_control(
+            None,
+            [("stale", Some(&ColumnType::Text), None)],
+            &prior_control,
+        )
+        .unwrap();
+        query.analyzed_output = Some(stale.clone());
+        query.analyzed_source = Some(
+            crate::plan::SharedAnalyzedSource::from_produced(
+                prior_control
+                    .finish(
+                        crate::plan::AnalyzedSource {
+                            schema: stale,
+                            children: None,
+                        },
+                        prior_control.empty_reservation(),
+                    )
+                    .unwrap(),
+                &prior_control,
+            )
+            .unwrap(),
+        );
+        let mut ordinary = query.clone();
+        let owned = query.copy_for_rewrite(&control).unwrap();
+        drop(query);
+        let binding = crate::binding::fixture::empty_binding_context();
+        restore_query_layouts(&NoRoutines, &mut ordinary, &[], &binding, None).unwrap();
+        assert!(
+            prior.used() > 0,
+            "the owned destination still retains the prior layout"
+        );
+        let actual = restore_query_layouts_owned(
+            &NoRoutines,
+            owned,
+            &[],
+            binding.copy_with_control(&control).unwrap(),
+            None,
+            &control,
+        )
+        .unwrap();
+        assert_eq!(actual.analyzed_output, ordinary.analyzed_output, "{sql}");
+        assert_eq!(
+            actual.analyzed_source.is_some(),
+            ordinary.analyzed_source.is_some(),
+            "{sql}"
+        );
+        assert_eq!(
+            prior.used(),
+            0,
+            "replaced layouts retire before publication: {sql}"
+        );
+        drop(actual);
+        assert_eq!(current.used(), 0);
+    }
+}
+
+#[test]
 fn owned_layouts_preserve_nested_namespace_and_lazy_expression_observations() {
     for sql in [
         "SELECT s.k,$1 AS p,outer_scope.x FROM (SELECT x AS k,10/x AS z FROM (VALUES(0),(2)) v(x)) s WHERE s.k=(SELECT 2)",

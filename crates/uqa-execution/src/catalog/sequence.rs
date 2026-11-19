@@ -7,8 +7,10 @@
 use uqa_sql::ast::SequenceDataType;
 use uqa_storage::SequenceOwner;
 
+pub mod capture;
 mod decode;
 mod definition;
+pub mod image;
 
 pub use definition::altered_sequence_state;
 
@@ -119,6 +121,7 @@ pub fn sequence_row(
 
 pub mod catalog_oids;
 pub mod latest_values;
+pub mod registry;
 pub mod restoration;
 
 pub mod session;

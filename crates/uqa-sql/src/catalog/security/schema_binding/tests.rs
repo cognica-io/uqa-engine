@@ -5,16 +5,19 @@
 //
 
 use super::*;
+use crate::catalog::roles::RoleDefinition;
+use crate::catalog::roles::{RoleDefinitions, RoleMemberships};
 use crate::catalog::security::schema::{role_has_schema_privilege, SchemaAclPrivilege};
 
-fn roles() -> BTreeMap<String, RoleDefinition> {
+fn roles() -> RoleDefinitions {
     let owner = RoleDefinition::bootstrap();
     let mut reader = owner.clone();
     reader.name = "reader".into();
     reader.oid = 20_000;
     reader.object_id = [1; 16];
     reader.attributes.clear();
-    BTreeMap::from([(owner.name.clone(), owner), (reader.name.clone(), reader)])
+    RoleDefinitions::try_from_iter([(owner.name.clone(), owner), (reader.name.clone(), reader)])
+        .unwrap()
 }
 
 #[test]
@@ -31,33 +34,40 @@ fn schema_identity_projection_preserves_original_authority_and_rejects_replaceme
     };
     let bound = BoundSchemaSecurity::bind(&security, &roles).unwrap();
     let reader = roles["reader"].identity();
-    let mut renamed = roles.remove("reader").unwrap();
+    let mut renamed = roles.get("reader").unwrap().clone();
+    roles.remove("reader").unwrap();
     renamed.name = "renamed".into();
     let mut replacement = renamed.clone();
     replacement.name = "reader".into();
     replacement.oid += 1;
     replacement.object_id = [2; 16];
-    roles.insert(renamed.name.clone(), renamed);
-    roles.insert(replacement.name.clone(), replacement);
+    roles.insert(renamed.name.clone(), renamed).unwrap();
+    roles.insert(replacement.name.clone(), replacement).unwrap();
     let names = bound.resolve(&roles).unwrap();
     assert!(role_has_schema_privilege(
         &names,
         "renamed",
         SchemaAclPrivilege::Create,
         &roles,
-        &BTreeMap::new()
+        &RoleMemberships::new()
     ));
     assert!(!role_has_schema_privilege(
         &names,
         "reader",
         SchemaAclPrivilege::Create,
         &roles,
-        &BTreeMap::new()
+        &RoleMemberships::new()
     ));
     assert!(bound.depends_on(reader));
     assert!(!bound.depends_on(roles["reader"].identity()));
     assert_eq!(BoundSchemaSecurity::bind(&names, &roles).unwrap(), bound);
-    roles.get_mut("renamed").unwrap().object_id = [3; 16];
+    roles
+        .edit("renamed", |value| {
+            value.object_id = [3; 16];
+            Ok(())
+        })
+        .unwrap()
+        .unwrap();
     assert!(bound.validate(&roles).is_err());
     assert!(bound.resolve(&roles).is_err());
 }
@@ -65,9 +75,10 @@ fn schema_identity_projection_preserves_original_authority_and_rejects_replaceme
 #[test]
 fn schema_defaults_and_public_access_retain_the_bootstrap_incarnation() {
     let mut roles = roles();
-    let mut owner = roles.remove("uqa").unwrap();
+    let mut owner = roles.get("uqa").unwrap().clone();
+    roles.remove("uqa").unwrap();
     owner.name = "renamed_owner".into();
-    roles.insert(owner.name.clone(), owner);
+    roles.insert(owner.name.clone(), owner).unwrap();
     let bound = BoundSchemaSecurity::bootstrap("public");
     let security = bound.resolve(&roles).unwrap();
     assert_eq!(security.role_owner, "renamed_owner");
@@ -76,14 +87,14 @@ fn schema_defaults_and_public_access_retain_the_bootstrap_incarnation() {
         "reader",
         SchemaAclPrivilege::Usage,
         &roles,
-        &BTreeMap::new()
+        &RoleMemberships::new()
     ));
     assert!(!role_has_schema_privilege(
         &security,
         "reader",
         SchemaAclPrivilege::Create,
         &roles,
-        &BTreeMap::new()
+        &RoleMemberships::new()
     ));
     let ordinary = BoundSchemaSecurity::bootstrap("ordinary");
     assert!(ordinary.acl.is_none());
@@ -91,7 +102,13 @@ fn schema_defaults_and_public_access_retain_the_bootstrap_incarnation() {
         BoundSchemaSecurity::from_row(ordinary.row("ordinary")),
         ("ordinary".into(), ordinary)
     );
-    roles.get_mut("renamed_owner").unwrap().object_id = [9; 16];
+    roles
+        .edit("renamed_owner", |value| {
+            value.object_id = [9; 16];
+            Ok(())
+        })
+        .unwrap()
+        .unwrap();
     assert!(bound.validate(&roles).is_err());
 }
 
@@ -115,7 +132,7 @@ fn initial_catalog_preserves_builtin_identities_and_public_privileges() {
                 "reader",
                 SchemaAclPrivilege::Usage,
                 &roles,
-                &BTreeMap::new()
+                &RoleMemberships::new()
             ),
             name != "ag_catalog"
         );
@@ -124,7 +141,7 @@ fn initial_catalog_preserves_builtin_identities_and_public_privileges() {
             "reader",
             SchemaAclPrivilege::Create,
             &roles,
-            &BTreeMap::new()
+            &RoleMemberships::new()
         ));
         if name != "public" {
             assert_eq!(BoundSchemaSecurity::builtin(name).as_ref(), Some(bound));

@@ -35,7 +35,12 @@ pub(super) struct Characters {
 }
 
 impl Characters {
-    pub fn decode(reader: &mut Reader<'_>, known: u32, total: usize) -> DictionaryResult<Self> {
+    pub async fn decode_with(
+        reader: &mut Reader<'_>,
+        known: u32,
+        total: usize,
+        work: &mut impl crate::morphology::work::Work,
+    ) -> DictionaryResult<Self> {
         if reader.u32()? as usize != CLASSES.len() {
             return Err(reader.invalid("unknown character class vocabulary").into());
         }
@@ -67,7 +72,8 @@ impl Characters {
             return Err(reader.invalid("truncated UTF-16 character table").into());
         }
         let mut values = vector(0x1_0000)?;
-        for _ in 0..0x1_0000_i32 {
+        for unit in 0..0x1_0000 {
+            work.records(unit).await?;
             let class = reader.u8()?;
             let attributes = reader.u8()?;
             let expected = u8::from(class == 10 || class == 11);

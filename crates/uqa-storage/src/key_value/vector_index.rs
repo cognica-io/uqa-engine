@@ -32,8 +32,8 @@ use super::{
 #[derive(Clone)]
 pub struct KeyValueVectorIndex {
     store: Arc<dyn KeyValueStore>,
-    table: String,
-    field: String,
+    table: crate::StorageName,
+    field: crate::StorageName,
     dimensions: u32,
 }
 
@@ -44,10 +44,24 @@ impl KeyValueVectorIndex {
         field: impl Into<String>,
         dimensions: u32,
     ) -> Self {
+        Self::from_names(
+            store,
+            Into::<String>::into(table).into(),
+            Into::<String>::into(field).into(),
+            dimensions,
+        )
+    }
+
+    pub(crate) fn from_names(
+        store: Arc<dyn KeyValueStore>,
+        table: crate::StorageName,
+        field: crate::StorageName,
+        dimensions: u32,
+    ) -> Self {
         Self {
             store,
-            table: table.into(),
-            field: field.into(),
+            table,
+            field,
             dimensions,
         }
     }

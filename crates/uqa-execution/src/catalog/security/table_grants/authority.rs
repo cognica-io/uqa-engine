@@ -65,11 +65,10 @@ pub(super) fn security(
             ))
         }
         "foreign table" => {
-            let tables = context.registry.foreign_tables();
-            let table = tables.get(&target.relation).ok_or_else(missing)?;
-            let security = context
-                .registry
-                .foreign_security()
+            let catalog = context.registry.foreign_catalog();
+            let table = catalog.tables().get(&target.relation).ok_or_else(missing)?;
+            let security = catalog
+                .security()
                 .get(&target.relation)
                 .cloned()
                 .ok_or_else(missing)?;

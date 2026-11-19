@@ -5,6 +5,8 @@
 //
 
 use super::*;
+use std::sync::Arc;
+use uqa_sql::catalog::roles::RoleDefinitions;
 use uqa_storage::{KeyValueCatalog, MemoryKeyValueStore};
 
 #[test]
@@ -16,14 +18,15 @@ fn role_name_moves_update_the_original_oid_claim_without_rewriting_other_roles()
     reader.name = "reader".into();
     reader.oid = 20_001;
     reader.object_id = [1; 16];
-    before.insert(reader.name.clone(), reader);
+    before.insert(reader.name.clone(), reader).unwrap();
     persist_roles(Some(&catalog), &initial, &before).unwrap();
     let reader_row = catalog.get_metadata(&records::role_key("reader")).unwrap();
     let mut after = before.clone();
-    let mut bootstrap = after.remove("uqa").unwrap();
+    let mut bootstrap = after.get("uqa").unwrap().clone();
+    after.remove("uqa").unwrap();
     bootstrap.name = "renamed".into();
     bootstrap.advance_revision().unwrap();
-    after.insert(bootstrap.name.clone(), bootstrap);
+    after.insert(bootstrap.name.clone(), bootstrap).unwrap();
     persist_roles(Some(&catalog), &before, &after).unwrap();
     assert_eq!(
         catalog
@@ -45,14 +48,15 @@ fn role_name_moves_update_the_original_oid_claim_without_rewriting_other_roles()
     let mut replacement = RoleDefinition::bootstrap();
     replacement.oid = 20_002;
     replacement.object_id = [2; 16];
-    after.insert("uqa".into(), replacement);
+    after.insert("uqa".into(), replacement).unwrap();
     persist_roles(Some(&catalog), &before, &after).unwrap();
     assert_eq!(restore_and_migrate(&catalog).unwrap().roles, after);
     let before = after.clone();
-    let mut impostor = after.remove("reader").unwrap();
+    let mut impostor = after.get("reader").unwrap().clone();
+    after.remove("reader").unwrap();
     impostor.name = "impostor".into();
     impostor.object_id = [3; 16];
-    after.insert(impostor.name.clone(), impostor);
+    after.insert(impostor.name.clone(), impostor).unwrap();
     assert_eq!(
         persist_roles(Some(&catalog), &before, &after)
             .unwrap_err()
@@ -84,7 +88,7 @@ fn role_metadata_restoration_preserves_legacy_values_and_round_trips_membership_
     assert_eq!(entry.oid, 2_500_000_001);
     assert!(entry.admin_option && entry.set_option && !entry.inherit_option);
     assert_eq!(restored.memberships.get(&entry.key()), Some(entry));
-    assert!(serde_json::from_str::<BTreeMap<String, RoleDefinition>>(
+    assert!(serde_json::from_str::<RoleDefinitions>(
         &catalog.get_metadata(ROLES_METADATA_KEY).unwrap().unwrap()
     )
     .is_err());
@@ -110,7 +114,7 @@ fn role_definition_records_gain_stable_incarnations_only_during_initial_open() {
     role.name = "legacy".into();
     role.oid = 20_001;
     role.object_id = [1; 16];
-    roles.insert(role.name.clone(), role);
+    roles.insert(role.name.clone(), role).unwrap();
     for (name, role) in &roles {
         let mut value = serde_json::to_value(role).unwrap();
         value.as_object_mut().unwrap().remove("object_id");
@@ -174,7 +178,13 @@ fn role_tuple_revisions_convert_only_legacy_records_and_preserve_current_version
         Some(r#"{"role_catalog_format":3}"#)
     );
     let mut changed = migrated.clone();
-    changed.get_mut("uqa").unwrap().advance_revision().unwrap();
+    changed
+        .edit("uqa", |value| {
+            value.advance_revision().unwrap();
+            Ok(())
+        })
+        .unwrap()
+        .unwrap();
     persist_roles(Some(&catalog), &migrated, &changed).unwrap();
     assert_eq!(restore(&catalog).unwrap().roles["uqa"].revision, 2);
     assert_eq!(
@@ -227,20 +237,20 @@ fn unchanged_role_metadata_uses_the_committed_catalog_instead_of_stale_session_v
     let catalog = KeyValueCatalog::new(Arc::new(MemoryKeyValueStore::new()));
     let values = restore_and_migrate(&catalog).unwrap();
     let current = RoleCatalogSnapshot {
-        roles: Arc::new(values.roles),
-        memberships: Arc::new(values.memberships),
+        roles: uqa_core::memory::RetainedValue::new(values.roles),
+        memberships: uqa_core::memory::RetainedValue::new(values.memberships),
     };
     let mut roles = (*current.roles).clone();
     let mut extra = RoleDefinition::bootstrap();
     extra.name = "committed".into();
     extra.oid = 20_001;
     extra.object_id = [1; 16];
-    roles.insert(extra.name.clone(), extra);
+    roles.insert(extra.name.clone(), extra).unwrap();
     persist_roles(Some(&catalog), &current.roles, &roles).unwrap();
     let values = restore(&catalog).unwrap();
     let latest = RoleCatalogSnapshot {
-        roles: Arc::new(values.roles),
-        memberships: Arc::new(values.memberships),
+        roles: uqa_core::memory::RetainedValue::new(values.roles),
+        memberships: uqa_core::memory::RetainedValue::new(values.memberships),
     }
     .merge_private(Some(&catalog), &current)
     .unwrap();
@@ -326,14 +336,14 @@ fn role_records_keep_literal_names_and_reject_reassigned_oids_before_writing() {
         role.name = name.into();
         role.oid = 20_001 + offset as i64;
         role.object_id = [offset as u8 + 1; 16];
-        after.insert(name.into(), role);
+        after.insert(name.into(), role).unwrap();
     }
     persist_roles(Some(&catalog), &before, &after).unwrap();
     assert_eq!(restore(&catalog).unwrap().roles, after);
     let mut collision = after.clone();
     let mut role = after["a:%_日本語"].clone();
     role.name = "collision".into();
-    collision.insert(role.name.clone(), role);
+    collision.insert(role.name.clone(), role).unwrap();
     assert_eq!(
         persist_roles(Some(&catalog), &after, &collision)
             .unwrap_err()
@@ -346,7 +356,7 @@ fn role_records_keep_literal_names_and_reject_reassigned_oids_before_writing() {
         let mut role = RoleDefinition::bootstrap();
         role.name = name.into();
         role.oid = 30_000;
-        same_candidate.insert(name.into(), role);
+        same_candidate.insert(name.into(), role).unwrap();
     }
     assert_eq!(
         persist_roles(Some(&catalog), &after, &same_candidate)
@@ -356,7 +366,7 @@ fn role_records_keep_literal_names_and_reject_reassigned_oids_before_writing() {
     );
     assert_eq!(restore(&catalog).unwrap().roles, after);
     let mut deleted = after.clone();
-    deleted.remove("a:%_日本語");
+    deleted.remove("a:%_日本語").unwrap();
     persist_roles(Some(&catalog), &after, &deleted).unwrap();
     assert_eq!(restore(&catalog).unwrap().roles, deleted);
     assert!(catalog

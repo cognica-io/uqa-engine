@@ -18,6 +18,7 @@ use crate::mvcc::{DatabaseId, StorageTransactionId};
 use crate::vector_index::DiskANNIndexParams;
 
 mod faults;
+mod input;
 mod nodes;
 mod resources;
 mod statistics;

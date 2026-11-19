@@ -7,30 +7,25 @@
 //! Bind role lifecycle consumers to live catalog guards, provider writes and session state.
 
 use crate::{Engine, TableState};
-use std::{collections::BTreeMap, sync::Arc};
+use std::sync::Arc;
 use uqa_core::RelationIdentity;
 use uqa_execution::catalog::security::role_lifecycle::context::{
     RoleDefinitionWrite, RoleExecutionContext, RoleMembershipWrite, RolePublication, RoleRegistry,
 };
 use uqa_sql::catalog::roles::identity::RoleBinding;
 use uqa_sql::catalog::roles::RoleReference;
+use uqa_sql::catalog::roles::{RoleDefinitions, RoleMemberships};
+use uqa_sql::catalog::security::schema_registry::SchemaRegistry;
 use uqa_sql::{
     catalog::{
         roles::{
             definition::{RoleNotices, RoleValidationContext},
             dependencies::context::{
-                RoleDependencyCatalog, RoleDependencyRead, RoleForeignPersistenceRead,
-                RoleTableSecurity, RoleTablesRead,
+                RoleDependencyCatalog, RoleDependencyRead, RoleTableSecurity, RoleTablesRead,
             },
-            RoleDefinition, RoleMembership, RoleMembershipKey,
         },
-        security::{
-            database::BoundDatabaseSecurity, BoundSchemaSecurity, BoundSequenceSecurity,
-            BoundTableSecurity,
-        },
-        stored_view::StoredView,
+        security::{database::BoundDatabaseSecurity, BoundTableSecurity},
     },
-    routines::SQLUserFunction,
     SQLError,
 };
 impl uqa_execution::catalog::security::roles::RoleCatalogGuards for Engine {
@@ -125,15 +120,15 @@ impl RolePublication for Engine {
     }
     fn persist_roles(
         &self,
-        before: &BTreeMap<String, RoleDefinition>,
-        roles: &BTreeMap<String, RoleDefinition>,
+        before: &RoleDefinitions,
+        roles: &RoleDefinitions,
     ) -> Result<(), SQLError> {
         self.persist_roles_snapshot(before, roles)
     }
     fn persist_memberships(
         &self,
-        before: &BTreeMap<RoleMembershipKey, RoleMembership>,
-        memberships: &BTreeMap<RoleMembershipKey, RoleMembership>,
+        before: &RoleMemberships,
+        memberships: &RoleMemberships,
     ) -> Result<(), SQLError> {
         self.persist_role_memberships_snapshot(before, memberships)
     }
@@ -157,7 +152,7 @@ impl RoleNotices for Engine {
     }
 }
 struct RoleTableRegistryRead<'a>(
-    parking_lot::RwLockReadGuard<'a, BTreeMap<RelationIdentity, Arc<TableState>>>,
+    parking_lot::MappedRwLockReadGuard<'a, crate::state::TableRegistryMap>,
 );
 impl RoleTableSecurity for TableState {
     fn persistence(&self) -> uqa_sql::ast::RelationPersistence {
@@ -186,67 +181,48 @@ impl uqa_execution::catalog::security::role_lifecycle::context::RoleSharedDepend
 }
 impl RoleDependencyCatalog for Engine {
     fn database(&self) -> RoleDependencyRead<'_, BoundDatabaseSecurity> {
-        Box::new(self.durable.database_security.read())
+        Box::new(parking_lot::MappedRwLockReadGuard::map(
+            self.durable.database_security.read(),
+            AsRef::as_ref,
+        ))
     }
-    fn schemas(&self) -> RoleDependencyRead<'_, BTreeMap<String, BoundSchemaSecurity>> {
+    fn schemas(&self) -> RoleDependencyRead<'_, SchemaRegistry> {
         Box::new(self.durable.schemas.read())
     }
     fn tables(&self) -> Box<dyn RoleTablesRead + '_> {
         Box::new(RoleTableRegistryRead(self.storage.tables.read()))
     }
-    fn views(&self) -> RoleDependencyRead<'_, BTreeMap<RelationIdentity, StoredView>> {
+    fn views(&self) -> RoleDependencyRead<'_, uqa_sql::catalog::stored_view::ViewDefinitions> {
         Box::new(self.durable.views.read())
     }
     fn foreign_tables(
         &self,
-    ) -> RoleDependencyRead<'_, BTreeMap<RelationIdentity, BoundTableSecurity>> {
-        Box::new(self.durable.foreign_table_security.read())
+    ) -> RoleDependencyRead<'_, uqa_sql::catalog::security::foreign_tables::ForeignTableSecurities>
+    {
+        Box::new(self.durable.foreign_catalog.security())
     }
     fn sequences(
         &self,
-    ) -> RoleDependencyRead<'_, BTreeMap<RelationIdentity, BoundSequenceSecurity>> {
-        Box::new(self.durable.sequence_security.read())
+    ) -> RoleDependencyRead<'_, uqa_sql::catalog::security::sequence_registry::SequenceSecurities>
+    {
+        Box::new(self.durable.sequences.security())
     }
-    fn routines(&self) -> RoleDependencyRead<'_, BTreeMap<String, Vec<Arc<SQLUserFunction>>>> {
+    fn routines(&self) -> RoleDependencyRead<'_, uqa_sql::routines::registry::RoutineRegistry> {
         Box::new(self.durable.sql_user_functions.read())
     }
     fn domains(
         &self,
-    ) -> RoleDependencyRead<'_, BTreeMap<String, uqa_sql::catalog::domain::StoredDomain>> {
+    ) -> RoleDependencyRead<
+        '_,
+        uqa_sql::catalog::type_definitions::TypeDefinitions<uqa_sql::catalog::domain::StoredDomain>,
+    > {
         Box::new(self.durable.domains.read())
     }
 }
 
-struct ForeignRolePersistenceRead<'a>(
-    parking_lot::MappedRwLockReadGuard<
-        'a,
-        BTreeMap<RelationIdentity, crate::fdw::StoredForeignTable>,
-    >,
-);
-impl RoleForeignPersistenceRead for ForeignRolePersistenceRead<'_> {
-    fn iter(
-        &self,
-    ) -> Box<dyn Iterator<Item = (&RelationIdentity, uqa_sql::ast::RelationPersistence)> + '_> {
-        Box::new(
-            self.0
-                .iter()
-                .map(|(relation, table)| (relation, table.persistence)),
-        )
-    }
-}
 impl uqa_sql::catalog::roles::dependencies::context::TemporaryRoleDependencyCatalog for Engine {
-    fn foreign_table_persistence(&self) -> Box<dyn RoleForeignPersistenceRead + '_> {
-        Box::new(ForeignRolePersistenceRead(
-            self.durable.foreign_tables.read(),
-        ))
-    }
     fn temporary_namespace_allocated(&self) -> bool {
         self.session.state.read().temporary_namespace.is_some()
-    }
-    fn sequence_persistence(
-        &self,
-    ) -> RoleDependencyRead<'_, BTreeMap<RelationIdentity, uqa_sql::ast::RelationPersistence>> {
-        Box::new(self.durable.sequence_persistence.read())
     }
 }
 

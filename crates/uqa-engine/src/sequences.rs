@@ -33,9 +33,9 @@ impl Engine {
         let relation = Self::resolved_relation_identity(&canonical)?;
         let object_id = self
             .durable
-            .sequence_object_ids
+            .sequences
             .read()
-            .get(&relation)
+            .object_id(&relation)
             .copied()
             .ok_or_else(|| {
                 StorageBackendError::Other(format!(
@@ -44,7 +44,7 @@ impl Engine {
             })?;
         Ok(Some(
             uqa_execution::catalog::sequence::catalog_oids::sequence_catalog_oid(
-                &self.durable.sequence_catalog_oids.read(),
+                self.durable.sequences.read().catalog_oids(),
                 &object_id,
             )
             .to_string(),
@@ -145,43 +145,18 @@ impl Engine {
         state: SequenceState,
         invalidate_current_cache: bool,
     ) -> Result<(), SQLError> {
-        let temporary = persistence == uqa_sql::ast::RelationPersistence::Temporary;
-        let security = self
-            .durable
-            .sequence_security
-            .read()
-            .get(relation)
-            .cloned()
-            .ok_or_else(|| {
-                SQLError::Internal(format!("sequence `{name}` has no security metadata"))
-            })?;
-        if !temporary {
-            if let Some(catalog) = self.storage.catalog.as_ref() {
-                if !catalog
-                    .replace_sequence_row(
-                        &Self::sequence_row(name, object_id, state, persistence, &security)
-                            .map_err(|error| {
-                                SQLError::Internal(format!("build sequence catalog row: {error}"))
-                            })?,
-                    )
-                    .map_err(|error| {
-                        SQLError::Internal(format!("persist sequence catalog: {error}"))
-                    })?
-                {
-                    return Err(SQLError::Internal(format!(
-                        "sequence `{name}` disappeared during ALTER"
-                    )));
-                }
-            }
-        }
-        self.durable
-            .sequences
-            .write()
-            .insert(relation.clone(), state);
-        self.durable
-            .sequence_persistence
-            .write()
-            .insert(relation.clone(), persistence);
+        uqa_execution::catalog::sequence::registry::publication::replace(
+            &mut self.durable.sequences.write(),
+            self.storage.catalog.as_deref(),
+            name,
+            relation,
+            uqa_execution::catalog::sequence::registry::SequenceRecord {
+                state,
+                object_id,
+                persistence,
+                catalog_oid: None,
+            },
+        )?;
         if invalidate_current_cache {
             self.session.sequence_caches.lock().remove(relation);
         }
@@ -232,7 +207,7 @@ impl Engine {
             };
             let relation =
                 RelationIdentity::from_legacy_name(&name).map_err(StorageBackendError::Other)?;
-            let position = match snapshot.object_ids.get(&relation) {
+            let position = match snapshot.catalog.object_id(&relation) {
                 Some(object_id) => engine.sequence_position(state.position_key(*object_id))?,
                 None => None,
             };

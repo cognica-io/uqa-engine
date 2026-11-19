@@ -5,15 +5,13 @@
 //
 
 use super::*;
-use crate::catalog::{
-    domain::DomainRegistry, foreign::StoredForeignTable, test_support, CatalogReadSnapshot,
-};
+use crate::catalog::{domain::DomainRegistry, test_support, CatalogReadSnapshot};
 use crate::row_locks::{RowLockManager, ScopedRelationLock};
 use std::{
     cell::{Cell, RefCell},
-    collections::BTreeMap,
     sync::Arc,
 };
+use uqa_core::memory::RetainedValue;
 use uqa_sql::catalog::events::TriggerCatalog;
 
 const OWNER: [u8; 16] = [1; 16];
@@ -100,13 +98,13 @@ impl ConstraintNameCatalog for Session {
     fn constraint_schema_tables(&self, schema: &str) -> Vec<ConstraintTableMetadata> {
         self.current.borrow().constraint_schema_tables(schema)
     }
-    fn constraint_foreign_tables(&self) -> Arc<BTreeMap<RelationIdentity, StoredForeignTable>> {
+    fn constraint_foreign_tables(&self) -> Arc<crate::catalog::foreign::ForeignTables> {
         self.current.borrow().constraint_foreign_tables()
     }
-    fn constraint_domains(&self) -> Arc<DomainRegistry> {
+    fn constraint_domains(&self) -> RetainedValue<DomainRegistry> {
         self.current.borrow().constraint_domains()
     }
-    fn constraint_triggers(&self) -> Arc<TriggerCatalog> {
+    fn constraint_triggers(&self) -> RetainedValue<TriggerCatalog> {
         self.current.borrow().constraint_triggers()
     }
 }
@@ -178,11 +176,11 @@ fn reservation_refresh_preserves_the_current_owned_index_name() {
     .unwrap();
     let relation = RelationIdentity::new("public", "t");
     let mut initial = snapshot(false, OWNER);
-    initial.tables.get_mut(&relation).unwrap().keys = Arc::new(vec![key.clone()]);
+    initial.tables.get_mut(&relation).unwrap().keys = vec![key.clone()].into();
     let mut refreshed = initial.clone();
     let mut renamed = key.clone();
     renamed.name = Some("renamed".into());
-    refreshed.tables.get_mut(&relation).unwrap().keys = Arc::new(vec![renamed.clone()]);
+    refreshed.tables.get_mut(&relation).unwrap().keys = vec![renamed.clone()].into();
     let session = Session::new(refreshed);
     *session.current.borrow_mut() = initial;
     let mut candidate = TableConstraintSet {

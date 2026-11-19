@@ -8,12 +8,12 @@
 
 use super::security::routine_privilege_allowed;
 use crate::catalog::roles::{identity::RoleSubject, RoleReference};
+use crate::catalog::roles::{RoleDefinitions, RoleMemberships};
 use crate::{
     ast::{RoleAttribute, RoutineAclEntry},
-    catalog::roles::{role_inherits, RoleDefinition, RoleMembership, RoleMembershipKey},
+    catalog::roles::role_inherits,
     SQLError,
 };
-use std::collections::BTreeMap;
 use uqa_core::Value;
 
 pub struct RoutinePrivileges<'a> {
@@ -28,8 +28,8 @@ pub trait RoutinePrivilegeCatalog {
 
 pub struct RoutinePrivilegeInquiry<'a> {
     pub current_user: &'a RoleReference,
-    pub roles: &'a BTreeMap<String, RoleDefinition>,
-    pub memberships: &'a BTreeMap<RoleMembershipKey, RoleMembership>,
+    pub roles: &'a RoleDefinitions,
+    pub memberships: &'a RoleMemberships,
     pub catalog: &'a dyn RoutinePrivilegeCatalog,
 }
 

@@ -18,7 +18,12 @@ struct RetainedIndexDocuments<'a>(&'a TableState);
 impl uqa_execution::catalog::index::physical::rebuild::IndexDocuments
     for RetainedIndexDocuments<'_>
 {
-    fn read(&self) -> Box<dyn std::ops::Deref<Target = Box<dyn uqa_storage::DocumentStore>> + '_> {
+    fn read(
+        &self,
+    ) -> Box<
+        dyn std::ops::Deref<Target = uqa_storage::StorageHandle<dyn uqa_storage::DocumentStore>>
+            + '_,
+    > {
         Box::new(self.0.document_store.read())
     }
 }
@@ -234,9 +239,11 @@ impl Engine {
         let carried = self.value_index_carried_fields(table_name, table)?;
         let mut indexes = table.value_indexes.write();
         for (field, values) in fields.iter().zip(values) {
-            if let std::collections::btree_map::Entry::Vacant(entry) = indexes.entry(field.clone())
-            {
-                entry.insert(self.build_value_index_as(field, carried.contains(field), values)?);
+            if !indexes.contains_key(field) {
+                indexes.insert(
+                    field.clone(),
+                    self.build_value_index_as(field, carried.contains(field), values)?,
+                )?;
             }
         }
         Ok(())

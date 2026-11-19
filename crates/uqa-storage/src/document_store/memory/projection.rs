@@ -6,7 +6,7 @@
 
 //! Layout-compiled borrowed and shared field projection.
 
-use std::sync::Arc;
+use crate::document_store::SharedDocumentProjection;
 
 use super::{DocId, MemoryDocumentRow, MemoryDocumentStore, SharedDocumentRow, Value};
 
@@ -29,10 +29,10 @@ impl MemoryDocumentStore {
         if limit == 0 {
             return 0;
         }
-        let lower = after.map_or(Unbounded, Excluded);
+        let lower = after.as_ref().map_or(Unbounded, Excluded);
         if fields.is_empty() {
             let mut visited = 0;
-            for (doc_id, _) in self.state.documents.range((lower, Unbounded)).take(limit) {
+            for (doc_id, _) in self.state.documents.range_from(lower).take(limit) {
                 visited += 1;
                 if !visitor(*doc_id, &[]) {
                     break;
@@ -44,7 +44,7 @@ impl MemoryDocumentStore {
         let null = Value::Null;
         let mut values = Vec::with_capacity(fields.len());
         let mut visited = 0usize;
-        for (doc_id, stored) in self.state.documents.range((lower, Unbounded)).take(limit) {
+        for (doc_id, stored) in self.state.documents.range_from(lower).take(limit) {
             visited += 1;
             projection
                 .layout(stored.layout_id)
@@ -68,17 +68,17 @@ impl MemoryDocumentStore {
             return Vec::new();
         }
         let mut projection = self.projections.page(&self.state, fields);
-        let lower = after.map_or(Unbounded, Excluded);
+        let lower = after.as_ref().map_or(Unbounded, Excluded);
         self.state
             .documents
-            .range((lower, Unbounded))
+            .range_from(lower)
             .take(limit)
             .map(|(doc_id, stored)| {
                 (
                     *doc_id,
                     SharedDocumentRow::new(
-                        Arc::clone(&stored.values),
-                        Arc::clone(&projection.layout(stored.layout_id).slots),
+                        stored.values.clone(),
+                        projection.layout(stored.layout_id).slots.clone(),
                     ),
                 )
             })
@@ -108,7 +108,7 @@ impl MemoryDocumentStore {
         }
 
         for doc_id in doc_ids {
-            let stored = self.state.documents.get(doc_id);
+            let stored = self.state.documents.get(*doc_id);
             project_stored(
                 stored,
                 stored.map(|stored| projection.layout(stored.layout_id)),
@@ -131,10 +131,10 @@ impl MemoryDocumentStore {
         doc_ids
             .iter()
             .map(|doc_id| {
-                let stored = self.state.documents.get(doc_id)?;
+                let stored = self.state.documents.get(*doc_id)?;
                 Some(SharedDocumentRow::new(
-                    Arc::clone(&stored.values),
-                    Arc::clone(&projection.layout(stored.layout_id).slots),
+                    stored.values.clone(),
+                    projection.layout(stored.layout_id).slots.clone(),
                 ))
             })
             .collect()
@@ -149,7 +149,10 @@ impl MemoryDocumentStore {
         values: &mut Vec<&'a Value>,
         visitor: &mut dyn FnMut(DocId, bool, &[&Value]) -> bool,
     ) {
-        let mut documents = self.state.documents.range(doc_ids[0]..);
+        let mut documents = self
+            .state
+            .documents
+            .range_from(std::ops::Bound::Included(&doc_ids[0]));
         let mut current = documents.next();
         for doc_id in doc_ids {
             while current.is_some_and(|(stored_id, _)| stored_id < doc_id) {
@@ -189,13 +192,13 @@ pub(super) fn should_merge_projected_scan(doc_ids: &[DocId], document_count: usi
 
 #[derive(Debug)]
 struct ProjectedLayout {
-    slots: Arc<[usize]>,
+    slots: SharedDocumentProjection,
     complete: bool,
 }
 
 impl ProjectedLayout {
     fn compile(layout: &[String], fields: &[String]) -> Self {
-        let slots: Arc<[usize]> = fields
+        let slots: Vec<usize> = fields
             .iter()
             .map(|field| {
                 layout
@@ -205,7 +208,7 @@ impl ProjectedLayout {
             .collect();
         Self {
             complete: slots.iter().all(|slot| *slot != MISSING_SLOT),
-            slots,
+            slots: SharedDocumentProjection::new(slots),
         }
     }
 

@@ -237,7 +237,7 @@ fn domain_array_input_is_read_once_and_retains_element_identity_and_bounds() {
 fn domain_array_metadata_inference_does_not_invoke_or_require_input_functions() {
     let inputs = Inputs::default();
     let mut parameters = ParameterTypes::new(&[]);
-    parameters.catalog_inputs = Some(&inputs);
+    parameters.inputs.catalog_inputs = Some(&inputs);
     let expression = ScalarExpr::Literal(Value::Str("{not read}".into()));
     let mut inferred = ExpressionType::unknown_literal(&expression, "{not read}".into());
     parameters
@@ -267,11 +267,11 @@ fn scalar_domain_base_input_and_explicit_text_do_not_invoke_array_input() {
     let inputs = Inputs::default();
     let mut parameters = ParameterTypes::with_input_constants(&[], None, None, Some(&inputs));
     let mut expression = ScalarExpr::Literal(Value::Str("0".into()));
-    let ColumnType::Array(domain) = domain_array() else {
+    let ColumnType::Array(ref domain) = domain_array() else {
         unreachable!()
     };
     let mut inferred = ExpressionType::unknown_literal(&expression, "0".into());
-    parameters.coerce_unknown(&mut inferred, &domain).unwrap();
+    parameters.coerce_unknown(&mut inferred, domain).unwrap();
     assert_eq!(inferred.ty.as_deref(), Some(domain.as_ref()));
     parameters
         .take_input_constants()

@@ -5,6 +5,8 @@
 //
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
+pub mod input;
+pub mod load;
 use uqa_core::catalog_schema::SchemaRow as LegacySchemaRow;
 pub use uqa_core::catalog_schema::{
     BoundSchemaRow, SchemaAclEntry, SchemaPrivileges, SchemaTupleIdentity,

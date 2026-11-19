@@ -72,6 +72,10 @@ class NPMReleaseArchiveTest(unittest.TestCase):
         self.source = self.directory / "legacy-source"
         self.manifest = json.loads(json.dumps(self.manifest))
         self.manifest["license"] = "AGPL-3.0-only"
+        self.manifest["napi"]["targets"] = [platform.triple for platform in NPM_RELEASE.LEGACY_PLATFORMS]
+        self.packed_manifest["optionalDependencies"] = {
+            platform.package_name: self.version for platform in NPM_RELEASE.LEGACY_PLATFORMS
+        }
         for relative in ("LICENSES/UQA-FOSS-EXCEPTION-1.0.txt",
                          "LICENSES/UQA-NONCOMMERCIAL-EXCEPTION-1.0.txt"):
             self.manifest["files"].append(relative)
@@ -85,6 +89,19 @@ class NPMReleaseArchiveTest(unittest.TestCase):
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(payload)
         NPM_RELEASE.write_json(self.source / "package.json", self.manifest)
+
+    def test_historical_root_keeps_intel_dependency_but_new_releases_reject_it(self) -> None:
+        self.use_legacy_source()
+        self.write_archive(self.archive, self.members)
+        NPM_RELEASE.validate_archives([self.archive], self.version, (NPM_RELEASE.ROOT_PACKAGE,), self.source)
+        del self.packed_manifest["optionalDependencies"]["@cognica-io/uqa-darwin-x64"]
+        self.members["package.json"] = json.dumps(self.packed_manifest).encode()
+        self.write_archive(self.archive, self.members)
+        with self.assertRaisesRegex(NPM_RELEASE.ReleaseError, "optionalDependencies"):
+            NPM_RELEASE.validate_archives([self.archive], self.version, (NPM_RELEASE.ROOT_PACKAGE,), self.source)
+        self.manifest["version"] = "0.6.4"
+        with self.assertRaisesRegex(NPM_RELEASE.ReleaseError, "napi targets"):
+            NPM_RELEASE.source_platforms(self.manifest)
 
     def test_archive_validation_uses_the_selected_release_license(self) -> None:
         self.write_archive(self.archive, self.members)
@@ -139,7 +156,7 @@ class NPMReleaseArchiveTest(unittest.TestCase):
         (source / "new-helper.js").write_text('module.exports = "complete";\n')
         stage = self.directory / "stage"
         stage.mkdir()
-        manifest = {"version": self.version, "files": ["new-helper.js"]}
+        manifest = {"version": self.version, "files": ["new-helper.js"], "napi": self.manifest["napi"]}
         NPM_RELEASE.stage_root_package(manifest, source, stage)
         self.assertEqual((stage / "new-helper.js").read_bytes(),
                          (source / "new-helper.js").read_bytes())

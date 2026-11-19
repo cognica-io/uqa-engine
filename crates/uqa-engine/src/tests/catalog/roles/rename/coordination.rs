@@ -11,143 +11,139 @@ use uqa_execution::{
     row_locks::shared_objects::SharedCatalogLock,
 };
 
-#[test]
-fn renames_wait_for_the_selected_definition_tuple_and_preserve_undo_outcomes() {
-    for provider in 0..3 {
-        for isolation in ["READ COMMITTED", "REPEATABLE READ", "SERIALIZABLE"] {
-            for finish in ["COMMIT", "ROLLBACK", "ROLLBACK TO undo; COMMIT"] {
-                for (holder, waiter, committed_name, undone_name) in [
-                    (
-                        "ALTER ROLE target LOGIN",
-                        "ALTER ROLE target RENAME TO renamed",
-                        Some("target"),
-                        Some("renamed"),
-                    ),
-                    (
-                        "ALTER ROLE target RENAME TO renamed",
-                        "ALTER ROLE target LOGIN",
-                        Some("renamed"),
-                        Some("target"),
-                    ),
-                    (
-                        "ALTER ROLE target RENAME TO renamed",
-                        "DROP ROLE target",
-                        Some("renamed"),
-                        None,
-                    ),
-                    (
-                        "DROP ROLE target",
-                        "ALTER ROLE target RENAME TO renamed",
-                        None,
-                        Some("renamed"),
-                    ),
-                ] {
-                    let (directory, first, second) = sessions(provider);
-                    sql(&first, "CREATE ROLE target");
-                    let original = first.durable.roles.read()["target"].identity();
-                    sql(&first, &format!("BEGIN; SAVEPOINT undo; {holder}"));
-                    sql(
-                        &second,
-                        &format!("BEGIN ISOLATION LEVEL {isolation}; SELECT 1"),
-                    );
-                    let (second, result) = after_wait(
-                        &first,
-                        second,
-                        waiter,
-                        SharedCatalogLock::Tuple {
-                            class_id: ROLE_CATALOG_CLASS_ID,
-                            oid: u32::try_from(original.oid).unwrap(),
-                        },
-                        finish,
-                    );
-                    if finish == "COMMIT" {
-                        assert_eq!(
-                            result.unwrap_err().sqlstate(),
-                            Some("XX000"),
-                            "{provider}/{isolation}/{holder}/{waiter}"
-                        );
-                        sql(&second, "ROLLBACK");
-                    } else {
-                        result.unwrap();
-                        sql(&second, "COMMIT");
-                    }
-                    sql(&first, "SELECT rolname FROM pg_roles");
-                    let roles = first.durable.roles.read().clone();
-                    let name = if finish == "COMMIT" {
-                        committed_name
-                    } else {
-                        undone_name
-                    };
-                    assert_eq!(
-                        roles
-                            .values()
-                            .find(|role| role.identity() == original)
-                            .map(|role| role.name.as_str()),
-                        name
-                    );
-                    drop(second);
-                    drop(first);
-                    let restored = reopen(provider, &directory.path().join("table-locks.db"));
-                    assert_eq!(*restored.durable.roles.read(), roles);
-                }
-            }
+#[rstest::rstest]
+fn renames_wait_for_the_selected_definition_tuple_and_preserve_undo_outcomes(
+    #[values(0, 1, 2)] provider: usize,
+    #[values("READ COMMITTED", "REPEATABLE READ", "SERIALIZABLE")] isolation: &str,
+    #[values("COMMIT", "ROLLBACK", "ROLLBACK TO undo; COMMIT")] finish: &str,
+) {
+    for (holder, waiter, committed_name, undone_name) in [
+        (
+            "ALTER ROLE target LOGIN",
+            "ALTER ROLE target RENAME TO renamed",
+            Some("target"),
+            Some("renamed"),
+        ),
+        (
+            "ALTER ROLE target RENAME TO renamed",
+            "ALTER ROLE target LOGIN",
+            Some("renamed"),
+            Some("target"),
+        ),
+        (
+            "ALTER ROLE target RENAME TO renamed",
+            "DROP ROLE target",
+            Some("renamed"),
+            None,
+        ),
+        (
+            "DROP ROLE target",
+            "ALTER ROLE target RENAME TO renamed",
+            None,
+            Some("renamed"),
+        ),
+    ] {
+        let (directory, first, second) = sessions(provider);
+        sql(&first, "CREATE ROLE target");
+        let original = first.durable.roles.read()["target"].identity();
+        sql(&first, &format!("BEGIN; SAVEPOINT undo; {holder}"));
+        sql(
+            &second,
+            &format!("BEGIN ISOLATION LEVEL {isolation}; SELECT 1"),
+        );
+        let (second, result) = after_wait(
+            &first,
+            second,
+            waiter,
+            SharedCatalogLock::Tuple {
+                class_id: ROLE_CATALOG_CLASS_ID,
+                oid: u32::try_from(original.oid).unwrap(),
+            },
+            finish,
+        );
+        if finish == "COMMIT" {
+            assert_eq!(
+                result.unwrap_err().sqlstate(),
+                Some("XX000"),
+                "{provider}/{isolation}/{holder}/{waiter}"
+            );
+            sql(&second, "ROLLBACK");
+        } else {
+            result.unwrap();
+            sql(&second, "COMMIT");
         }
+        sql(&first, "SELECT rolname FROM pg_roles");
+        let roles = first.durable.roles.read().clone();
+        let name = if finish == "COMMIT" {
+            committed_name
+        } else {
+            undone_name
+        };
+        assert_eq!(
+            roles
+                .values()
+                .find(|role| role.identity() == original)
+                .map(|role| role.name.as_str()),
+            name
+        );
+        drop(second);
+        drop(first);
+        let restored = reopen(provider, &directory.path().join("table-locks.db"));
+        assert_eq!(*restored.durable.roles.read(), roles);
     }
 }
 
-#[test]
-fn rename_destination_reservations_coordinate_creators_and_other_renamers() {
-    for provider in 0..3 {
-        for isolation in ["READ COMMITTED", "REPEATABLE READ", "SERIALIZABLE"] {
-            for finish in ["COMMIT", "ROLLBACK", "ROLLBACK TO undo; COMMIT"] {
-                for (holder, waiter) in [
-                    ("ALTER ROLE source RENAME TO taken", "CREATE ROLE taken"),
-                    (
-                        "ALTER ROLE source RENAME TO taken",
-                        "ALTER ROLE target RENAME TO taken",
-                    ),
-                    ("CREATE ROLE taken", "ALTER ROLE target RENAME TO taken"),
-                ] {
-                    let (directory, first, second) = sessions(provider);
-                    sql(&first, "CREATE ROLE source; CREATE ROLE target");
-                    sql(&first, &format!("BEGIN; SAVEPOINT undo; {holder}"));
-                    let reserved = first.durable.roles.read()["taken"].identity();
-                    sql(
-                        &second,
-                        &format!("BEGIN ISOLATION LEVEL {isolation}; SELECT 1"),
-                    );
-                    let (second, result) = after_wait(
-                        &first,
-                        second,
-                        waiter,
-                        SharedCatalogLock::Name {
-                            class_id: ROLE_CATALOG_CLASS_ID,
-                            name: "taken",
-                        },
-                        finish,
-                    );
-                    if finish == "COMMIT" {
-                        assert_eq!(result.unwrap_err().sqlstate(), Some("23505"));
-                        sql(&second, "ROLLBACK");
-                    } else {
-                        result.unwrap();
-                        sql(&second, "COMMIT");
-                    }
-                    sql(&first, "SELECT rolname FROM pg_roles");
-                    let roles = first.durable.roles.read().clone();
-                    assert_eq!(roles["taken"].identity() == reserved, finish == "COMMIT");
-                    drop(second);
-                    drop(first);
-                    assert_eq!(
-                        *reopen(provider, &directory.path().join("table-locks.db"))
-                            .durable
-                            .roles
-                            .read(),
-                        roles
-                    );
-                }
-            }
+#[rstest::rstest]
+fn rename_destination_reservations_coordinate_creators_and_other_renamers(
+    #[values(0, 1, 2)] provider: usize,
+    #[values("READ COMMITTED", "REPEATABLE READ", "SERIALIZABLE")] isolation: &str,
+    #[values("COMMIT", "ROLLBACK", "ROLLBACK TO undo; COMMIT")] finish: &str,
+) {
+    for (holder, waiter) in [
+        ("ALTER ROLE source RENAME TO taken", "CREATE ROLE taken"),
+        (
+            "ALTER ROLE source RENAME TO taken",
+            "ALTER ROLE target RENAME TO taken",
+        ),
+        ("CREATE ROLE taken", "ALTER ROLE target RENAME TO taken"),
+    ] {
+        let (directory, first, second) = sessions(provider);
+        sql(&first, "CREATE ROLE source; CREATE ROLE target");
+        sql(&first, &format!("BEGIN; SAVEPOINT undo; {holder}"));
+        let reserved = first.durable.roles.read()["taken"].identity();
+        sql(
+            &second,
+            &format!("BEGIN ISOLATION LEVEL {isolation}; SELECT 1"),
+        );
+        let (second, result) = after_wait(
+            &first,
+            second,
+            waiter,
+            SharedCatalogLock::Name {
+                class_id: ROLE_CATALOG_CLASS_ID,
+                name: "taken",
+            },
+            finish,
+        );
+        if finish == "COMMIT" {
+            assert_eq!(result.unwrap_err().sqlstate(), Some("23505"));
+            sql(&second, "ROLLBACK");
+        } else {
+            result.unwrap();
+            sql(&second, "COMMIT");
         }
+        sql(&first, "SELECT rolname FROM pg_roles");
+        let roles = first.durable.roles.read().clone();
+        assert_eq!(roles["taken"].identity() == reserved, finish == "COMMIT");
+        drop(second);
+        drop(first);
+        assert_eq!(
+            *reopen(provider, &directory.path().join("table-locks.db"))
+                .durable
+                .roles
+                .read(),
+            roles
+        );
     }
 }
 

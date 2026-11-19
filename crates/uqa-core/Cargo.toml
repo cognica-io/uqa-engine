@@ -28,6 +28,7 @@ triomphe = { workspace = true }
 parking_lot = { workspace = true }
 
 [dev-dependencies]
+serde_json = { workspace = true, features = ["raw_value"] }
 allocation-counter = "=0.8.1"
 proptest = { workspace = true }
 criterion = { workspace = true }

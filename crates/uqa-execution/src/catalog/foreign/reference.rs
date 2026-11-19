@@ -7,8 +7,9 @@
 //! Foreign tables retain the server they named at creation, including after concurrent deletion or name reuse.
 
 use super::StoredForeignTable;
+mod input;
+pub(crate) use input::check_format_with_control;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
 use uqa_sql::{catalog::foreign_server::ForeignServerDefinition, SQLError};
 use uqa_storage::{CatalogFacade, StorageBackendError, StorageBackendResult};
 
@@ -45,7 +46,9 @@ impl StoredForeignTable {
 
     pub fn bound_server<'a>(
         &self,
-        servers: &'a BTreeMap<String, ForeignServerDefinition>,
+        servers: &'a impl uqa_sql::catalog::named_definitions::NamedDefinitionView<
+            ForeignServerDefinition,
+        >,
     ) -> Result<&'a ForeignServerDefinition, SQLError> {
         let oid = self.server_oid()?;
         servers
@@ -140,7 +143,7 @@ pub(super) fn validate_schema_format(
 /// Legacy names bind once, within complete initial restoration. Current references may name a concurrently deleted server and must never bind a replacement.
 pub(super) fn restore(
     table: &mut StoredForeignTable,
-    servers: &BTreeMap<String, ForeignServerDefinition>,
+    servers: &impl uqa_sql::catalog::named_definitions::NamedDefinitionView<ForeignServerDefinition>,
     current: bool,
     allow_migration: bool,
 ) -> StorageBackendResult<bool> {

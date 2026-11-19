@@ -11,6 +11,16 @@ use crate::{catalog::roles::RoleReference, plan::copy::Copying};
 use uqa_core::memory::{BudgetedVec, Produced, ProductionControl};
 
 impl MutableCommandPlan {
+    pub(crate) fn mark_stored_cte_target_bound_in_place(
+        &mut self,
+        control: &ProductionControl<'_>,
+    ) -> Result<(), SQLError> {
+        self.assert_owner(control);
+        control.check()?;
+        self.command.mark_stored_cte_target_bound();
+        Ok(())
+    }
+
     pub fn set_target_privilege_subject(
         mut self,
         subject: Produced<RoleReference>,
@@ -43,6 +53,16 @@ impl MutableCommandPlan {
         include_descendants: bool,
         control: &ProductionControl<'_>,
     ) -> Result<Self, SQLError> {
+        self.retarget_mutation_in_place(target, include_descendants, control)?;
+        Ok(self)
+    }
+
+    pub(crate) fn retarget_mutation_in_place(
+        &mut self,
+        target: Produced<String>,
+        include_descendants: bool,
+        control: &ProductionControl<'_>,
+    ) -> Result<(), SQLError> {
         self.assert_owner(control);
         control.check()?;
         let (target, owner) = field_owner(target, control)?;
@@ -58,7 +78,7 @@ impl MutableCommandPlan {
         if let Some(memory) = &mut self.memory {
             *body(memory).field_mut(field) = owner;
         }
-        Ok(self)
+        Ok(())
     }
 
     pub fn clear_mutation_ctes(

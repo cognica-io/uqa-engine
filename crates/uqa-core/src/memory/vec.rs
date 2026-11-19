@@ -137,6 +137,17 @@ impl<T> std::ops::DerefMut for BudgetedVec<T> {
     }
 }
 
+impl BudgetedVec<crate::Value> {
+    pub(crate) fn push_owned_value(
+        &mut self,
+        value: crate::types::OwnedValue,
+    ) -> Result<(), MemoryError> {
+        self.reserve(1)?;
+        self.values.push(value.into_inner());
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

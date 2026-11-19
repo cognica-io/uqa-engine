@@ -5,9 +5,11 @@
 //
 
 use super::{
-    install_rewritten_block, AnalysisVec, InputConstants, NonNull, OwnedScalarExpr,
-    ProductionControl, SQLError, SQLParam, ScalarExpr, UnifiedPlan, Value,
+    install_rewritten_block, AnalysisIdentity, InputConstants, OwnedScalarExpr, ProductionControl,
+    SQLError, SQLParam, ScalarExpr, UnifiedPlan, Value,
 };
+
+pub(super) mod input;
 
 impl InputConstants {
     /// Ordinary messages must repeat session/catalog-dependent input functions.
@@ -24,7 +26,7 @@ impl InputConstants {
     }
 
     fn apply_node(&mut self, expression: &mut ScalarExpr) -> Result<(), SQLError> {
-        let identity = NonNull::from(&*expression);
+        let identity = AnalysisIdentity::from(&*expression);
         let input = std::mem::replace(expression, ScalarExpr::Literal(Value::Null));
         let control = ProductionControl::uncontrolled();
         *expression = self
@@ -37,83 +39,17 @@ impl InputConstants {
 
     pub(super) fn apply_node_owned(
         &mut self,
-        identity: NonNull<ScalarExpr>,
-        mut expression: OwnedScalarExpr,
+        identity: AnalysisIdentity<ScalarExpr>,
+        expression: OwnedScalarExpr,
         control: &ProductionControl<'_>,
     ) -> Result<OwnedScalarExpr, SQLError> {
-        control.check()?;
-        if let Some(index) = self.11.remove(&identity) {
-            expression = ScalarExpr::Param(index).copy_for_rewrite(control)?;
-        }
-        if let Some(expanded) = self.9.remove(&identity) {
-            if !matches!(&*expression, ScalarExpr::Row(_)) {
-                return Err(SQLError::Internal(
-                    "analyzed ROW expansion lost its constructor".into(),
-                ));
-            }
-            let mut selected = AnalysisVec::new(control);
-            let extra = expanded
-                .iter()
-                .map(|(_, fields)| fields.len())
-                .sum::<usize>();
-            selected.reserve(
-                expression.child_count().saturating_sub(expanded.len()) + extra,
-                control,
-            )?;
-            let mut expanded = expanded.into_iter().peekable();
-            for (position, item) in expression.into_children().enumerate() {
-                if expanded.peek().is_some_and(|(index, _)| *index == position) {
-                    let (_, fields) = expanded.next().expect("selected ROW expansion");
-                    let (mut fields, memory) = fields.into_parts();
-                    for field in &mut fields {
-                        field.transform_retained_nodes(control, &mut |identity, field| {
-                            self.apply_node_owned(identity, field, control)
-                        })?;
-                    }
-                    let fields = control.finish(fields, memory)?;
-                    for field in super::super::ownership::AnalysisItems::from_produced(fields) {
-                        selected.push(field, control)?;
-                    }
-                } else {
-                    selected.push(item, control)?;
-                }
-            }
-            expression = OwnedScalarExpr::row(selected.into_iter(), control)?;
-        }
-        if let Some(selected) = self.1.remove(&identity) {
-            if matches!(&*expression, ScalarExpr::Func { .. }) {
-                expression = expression.replace_call_binding(Some(selected), control)?;
-                expression = crate::type_resolution::json_path::normalize_retained_owned(
-                    expression, control,
-                )?;
-            }
-        }
-        if let Some(collation) = self.6.remove(&identity) {
-            if matches!(
-                &*expression,
-                ScalarExpr::Func {
-                    binding: Some(_),
-                    ..
-                }
-            ) {
-                expression = expression.set_call_input_collation(collation, control)?;
-            }
-        }
-        if let Some(constant) = self.0.remove(&identity) {
-            expression = constant.expression;
-        }
-        expression = self.3.apply_owned(identity, expression, control)?;
-        expression = self.4.apply_owned(identity, expression, control)?;
-        if let Some(target) = self.5.remove(&identity) {
-            expression = OwnedScalarExpr::cast(
-                expression,
-                target.catalog_name_with_control(control)?,
-                true,
-                control,
-            )?;
-        }
-        control.check()?;
-        Ok(expression)
+        crate::catalog::work::inline(input::apply_from(
+            &mut input::Inline(self),
+            identity,
+            expression,
+            control,
+            &mut (),
+        ))
     }
 
     #[cfg(test)]
@@ -137,7 +73,7 @@ impl InputConstants {
         params: &[SQLParam],
     ) -> Result<(), SQLError> {
         for query in subqueries.iter_mut() {
-            query.visit_queries_mut(&mut |query| self.apply_query(query));
+            query.try_visit_queries_mut(&mut |query| self.apply_query(query))?;
             query.visit_sources_mut(&mut |source| self.apply_source(source));
         }
         let mut groupings = std::mem::take(&mut self.8.groupings);
@@ -165,7 +101,12 @@ impl InputConstants {
         routines: &dyn crate::routines::RoutineResolution,
         params: &[SQLParam],
     ) -> Result<(), SQLError> {
-        plan.visit_queries_mut(&mut |query| self.apply_query(query));
+        plan.try_visit_queries_mut(&mut |query| self.apply_query(query))?;
+        if !self.11.is_empty() {
+            plan.apply_projection_aliases(&mut |projections| {
+                self.projection_aliases(projections, &ProductionControl::uncontrolled())
+            })?;
+        }
         // Source selections are consumed before expression rewrites can move their enclosing nodes.
         plan.visit_sources_mut(&mut |source| self.apply_source(source));
         // Consume all selected inputs at their original address before a parent transfers its children.
@@ -204,16 +145,16 @@ impl InputConstants {
             && self.11.is_empty()
     }
 
-    fn apply_query(&mut self, query: &mut crate::plan::QueryPlan) {
-        install_rewritten_block(&mut self.10, query);
-        self.8.apply_query(query);
+    fn apply_query(&mut self, query: &mut crate::plan::QueryPlan) -> Result<(), SQLError> {
+        install_rewritten_block(&mut self.10, query)?;
+        self.8.apply_query(query)
     }
 
     fn apply_source(&mut self, source: &mut crate::plan::SourcePlan) {
         // Command inputs have no enclosing QueryPlan; their validated descriptors are not needed by query-output pruning.
-        self.8.sources.remove(&NonNull::from(&*source));
+        self.8.sources.remove(&AnalysisIdentity::from(&*source));
         let mut apply = |binding: &mut Option<crate::ast::FunctionBinding>| {
-            if let Some(selected) = self.7.remove(&NonNull::from(&*binding)) {
+            if let Some(selected) = self.7.remove(&AnalysisIdentity::from(&*binding)) {
                 *binding = Some(
                     selected
                         .into_uncontrolled()
@@ -237,7 +178,7 @@ impl InputConstants {
         node: &mut ScalarExpr,
         arena: &mut Vec<crate::plan::QueryPlan>,
     ) -> Result<(), SQLError> {
-        if let Some(analysis) = self.2.remove(&NonNull::from(&*node)) {
+        if let Some(analysis) = self.2.remove(&AnalysisIdentity::from(&*node)) {
             analysis.apply(node, arena)?;
         }
         Ok(())

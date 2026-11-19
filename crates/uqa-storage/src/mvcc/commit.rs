@@ -99,6 +99,20 @@ impl RecordWriteKind {
 }
 
 impl PreparedRecordWrite {
+    /// The map key shares this exact key owner; count its buffer once alongside the optional value owner. Reference-count bookkeeping remains outside native payload accounting.
+    pub(super) fn retained_bytes(&self) -> Result<usize, MemoryError> {
+        let value = self.value.as_ref().map_or(Ok(0), |value| {
+            value
+                .capacity()
+                .checked_add(size_of::<BudgetedVec<u8>>())
+                .ok_or(MemoryError::SizeOverflow)
+        })?;
+        self.key
+            .retained_bytes()?
+            .checked_add(value)
+            .ok_or(MemoryError::SizeOverflow)
+    }
+
     pub(super) fn from_shared(
         key: RecordKey,
         expected: Option<CommitSequence>,

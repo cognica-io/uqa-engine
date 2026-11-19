@@ -6,6 +6,8 @@
 
 //! Ordered analysis owns its executable destination, parameter observations and published dependency nodes independently.
 
+use crate::binding::preparation::{LiteralInput, SchemaContext};
+
 use super::{ParameterTypes, Preparation, RoutineResolution, SQLError, SchemaScope};
 use crate::{
     binding::{
@@ -19,6 +21,7 @@ use crate::{
 use uqa_core::memory::{Produced, ProductionControl, ProductionVec};
 
 mod procedural;
+pub(in crate::binding) use procedural::bind_routine_parameter_references;
 pub use procedural::{
     bind_routine_parameter_references_owned, parameter_input_types_with_control,
     read_executable_inputs_owned, read_procedural_inputs_owned, ProceduralOwnedInputs,
@@ -201,7 +204,7 @@ fn include_plan_dependencies(
     status
 }
 
-impl Preparation<'_> {
+impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
     pub(super) fn observe_owned_plan(
         &mut self,
         plan: &MutableExecutablePlan,
@@ -344,12 +347,14 @@ pub(in crate::binding) fn retain_input_metadata_owned(
             scope: &mut scope,
             parameters: ParameterTypes::fixed_with_control(params, control)?
                 .with_composite_retention(),
-            schema_expression: None,
+            schema_expression: (),
         };
         analysis.observe_owned_plan(&plan, None)?;
         let mut replacements = analysis.parameters.take_composite_inputs();
         plan = plan.transform_scalar_nodes(control, &mut |identity, expression| {
-            Ok(replacements.remove(&identity).unwrap_or(expression))
+            Ok(replacements
+                .remove(&super::ownership::AnalysisIdentity::from(identity))
+                .unwrap_or(expression))
         })?;
         if !replacements.is_empty() {
             return Err(SQLError::Internal(
@@ -386,7 +391,7 @@ pub fn resolve_variable_sites_owned(
         routines,
         scope: &mut scope,
         parameters: ParameterTypes::fixed_with_control(params, control)?,
-        schema_expression: None,
+        schema_expression: (),
     };
     let walked = analysis.observe_owned_plan(plan, None);
     let resolutions = scope
