@@ -19,6 +19,16 @@ use uqa_core::Value;
 
 mod nodes;
 
+/// A selected scalar field whose owning analyzer can suspend between operands.
+enum CatalogOperands<'a> {
+    Cast(&'a ScalarExpr, &'a str),
+    Boolean(&'a [ScalarExpr], &'static str),
+    Null(&'a ScalarExpr),
+    Array(&'a [ScalarExpr]),
+    Row(&'a [ScalarExpr]),
+    Membership,
+}
+
 impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
     pub(super) fn retain_stored_reference(
         &mut self,
@@ -327,107 +337,51 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
             }
         }
         self.check_schema_column(expression)?;
-        match expression {
+        let operands = match expression {
             ScalarExpr::ScalarSubquery(index) => {
-                self.scalar_subquery_expression(*index, input, subqueries)
+                return self.scalar_subquery_expression(*index, input, subqueries);
             }
-            ScalarExpr::Param(index) => self.parameters.reference(*index),
-            ScalarExpr::Literal(Value::Null) => Ok(ExpressionType::unknown()),
-            ScalarExpr::Literal(Value::Str(text)) => Ok(ExpressionType::unknown_literal_produced(
-                expression,
-                self.scope.control().copy_text(text)?,
-            )),
+            ScalarExpr::Param(index) => return self.parameters.reference(*index),
+            ScalarExpr::Literal(Value::Null) => return Ok(ExpressionType::unknown()),
+            ScalarExpr::Literal(Value::Str(text)) => {
+                return Ok(ExpressionType::unknown_literal_produced(
+                    expression,
+                    self.scope.control().copy_text(text)?,
+                ));
+            }
             ScalarExpr::Collated {
                 expr,
                 ty,
                 collation,
-            } => self.collated_expression(expr, ty, *collation, input, subqueries),
-            ScalarExpr::Cast { expr, ty, .. } => {
-                if W::MAY_SUSPEND {
-                    let owner = self.scope.control().capture();
-                    crate::construction::retain_with(owner.control(), || {
-                        self.cast_expression(expr, ty, input, subqueries, work)
-                    })?
-                    .await
-                } else {
-                    self.cast_expression_inline(expr, ty, input, subqueries, work)
-                }
-            }
+            } => return self.collated_expression(expr, ty, *collation, input, subqueries),
+            ScalarExpr::Cast { expr, ty, .. } => CatalogOperands::Cast(expr, ty),
             ScalarExpr::Binary { op, lhs, rhs } => {
-                self.binary_expression(*op, lhs, rhs, input, subqueries)
+                return self.binary_expression(*op, lhs, rhs, input, subqueries);
             }
-            ScalarExpr::Not(inner) => self.not_expression(inner, input, subqueries),
+            ScalarExpr::Not(inner) => return self.not_expression(inner, input, subqueries),
             ScalarExpr::And(items) | ScalarExpr::Or(items) => {
                 let context = if matches!(expression, ScalarExpr::And(_)) {
                     "AND"
                 } else {
                     "OR"
                 };
-                if W::MAY_SUSPEND {
-                    let owner = self.scope.control().capture();
-                    crate::construction::retain_with(owner.control(), || {
-                        self.boolean_chain_expression(items, context, input, subqueries, work)
-                    })?
-                    .await
-                } else {
-                    self.boolean_chain_expression_inline(items, context, input, subqueries, work)
-                }
+                CatalogOperands::Boolean(items, context)
             }
-            ScalarExpr::IsNull { expr, .. } => {
-                if W::MAY_SUSPEND {
-                    let owner = self.scope.control().capture();
-                    crate::construction::retain_with(owner.control(), || {
-                        self.null_test_expression(expr, input, subqueries, work)
-                    })?
-                    .await
-                } else {
-                    self.null_test_expression_inline(expr, input, subqueries, work)
-                }
-            }
+            ScalarExpr::IsNull { expr, .. } => CatalogOperands::Null(expr),
             ScalarExpr::UnaryMinus(inner) => {
-                self.unary_minus_expression(expression, inner, input, subqueries)
+                return self.unary_minus_expression(expression, inner, input, subqueries);
             }
-            ScalarExpr::Array(items) => {
-                if W::MAY_SUSPEND {
-                    let owner = self.scope.control().capture();
-                    crate::construction::retain_with(owner.control(), || {
-                        self.array_expression(items, input, subqueries, work)
-                    })?
-                    .await
-                } else {
-                    self.array_expression_inline(items, input, subqueries, work)
-                }
-            }
+            ScalarExpr::Array(items) => CatalogOperands::Array(items),
             ScalarExpr::CompositeRow { items, binding, .. } => {
-                self.composite_row_expression(items, binding, input, subqueries)
+                return self.composite_row_expression(items, binding, input, subqueries);
             }
-            ScalarExpr::Row(items) => {
-                if W::MAY_SUSPEND {
-                    let owner = self.scope.control().capture();
-                    crate::construction::retain_with(owner.control(), || {
-                        self.row_expression(expression, items, input, subqueries, work)
-                    })?
-                    .await
-                } else {
-                    self.row_expression_inline(expression, items, input, subqueries, work)
-                }
-            }
+            ScalarExpr::Row(items) => CatalogOperands::Row(items),
             ScalarExpr::Func { .. } => {
                 let mut result = self.function_expression(expression, input, subqueries)?;
                 self.expression_record_fields(&mut result, expression, input, subqueries)?;
-                Ok(result)
+                return Ok(result);
             }
-            ScalarExpr::InList { .. } => {
-                if W::MAY_SUSPEND {
-                    let owner = self.scope.control().capture();
-                    crate::construction::retain_with(owner.control(), || {
-                        self.in_list(expression, input, subqueries, work)
-                    })?
-                    .await
-                } else {
-                    self.in_list_inline(expression, input, subqueries, work)
-                }
-            }
+            ScalarExpr::InList { .. } => CatalogOperands::Membership,
             ScalarExpr::Between { .. }
             | ScalarExpr::Case { .. }
             | ScalarExpr::Exists { .. }
@@ -435,7 +389,7 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
             | ScalarExpr::WindowCall { .. } => {
                 let mut result = self.compound_expression(expression, input, subqueries)?;
                 self.expression_record_fields(&mut result, expression, input, subqueries)?;
-                Ok(result)
+                return Ok(result);
             }
             ScalarExpr::Column(_)
             | ScalarExpr::QualifiedColumn { .. }
@@ -446,7 +400,87 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
             | ScalarExpr::RetainedLiteral(_)
             | ScalarExpr::Star
             | ScalarExpr::QualifiedStar(_)
-            | ScalarExpr::Default => self.leaf_expression(expression, input, subqueries),
+            | ScalarExpr::Default => return self.leaf_expression(expression, input, subqueries),
+        };
+        self.catalog_operands(operands, expression, input, subqueries, work)
+            .await
+    }
+
+    async fn catalog_operands<W: crate::catalog::work::Work + Send>(
+        &mut self,
+        operands: CatalogOperands<'_>,
+        expression: &ScalarExpr,
+        input: &RowSchema,
+        subqueries: &[QueryPlan],
+        work: &mut W,
+    ) -> Result<ExpressionType, SQLError> {
+        match operands {
+            CatalogOperands::Cast(expr, ty) => {
+                if W::MAY_SUSPEND {
+                    let owner = self.scope.control().capture();
+                    crate::construction::retain_with(owner.control(), || {
+                        self.cast_expression(expr, ty, input, subqueries, work)
+                    })?
+                    .await
+                } else {
+                    self.cast_expression_inline(expr, ty, input, subqueries, work)
+                }
+            }
+            CatalogOperands::Boolean(items, context) => {
+                if W::MAY_SUSPEND {
+                    let owner = self.scope.control().capture();
+                    crate::construction::retain_with(owner.control(), || {
+                        self.boolean_chain_expression(items, context, input, subqueries, work)
+                    })?
+                    .await
+                } else {
+                    self.boolean_chain_expression_inline(items, context, input, subqueries, work)
+                }
+            }
+            CatalogOperands::Null(expr) => {
+                if W::MAY_SUSPEND {
+                    let owner = self.scope.control().capture();
+                    crate::construction::retain_with(owner.control(), || {
+                        self.null_test_expression(expr, input, subqueries, work)
+                    })?
+                    .await
+                } else {
+                    self.null_test_expression_inline(expr, input, subqueries, work)
+                }
+            }
+            CatalogOperands::Array(items) => {
+                if W::MAY_SUSPEND {
+                    let owner = self.scope.control().capture();
+                    crate::construction::retain_with(owner.control(), || {
+                        self.array_expression(items, input, subqueries, work)
+                    })?
+                    .await
+                } else {
+                    self.array_expression_inline(items, input, subqueries, work)
+                }
+            }
+            CatalogOperands::Row(items) => {
+                if W::MAY_SUSPEND {
+                    let owner = self.scope.control().capture();
+                    crate::construction::retain_with(owner.control(), || {
+                        self.row_expression(expression, items, input, subqueries, work)
+                    })?
+                    .await
+                } else {
+                    self.row_expression_inline(expression, items, input, subqueries, work)
+                }
+            }
+            CatalogOperands::Membership => {
+                if W::MAY_SUSPEND {
+                    let owner = self.scope.control().capture();
+                    crate::construction::retain_with(owner.control(), || {
+                        self.in_list(expression, input, subqueries, work)
+                    })?
+                    .await
+                } else {
+                    self.in_list_inline(expression, input, subqueries, work)
+                }
+            }
         }
     }
 
