@@ -17,45 +17,39 @@ use crate::{
 use uqa_core::memory::{ProductionControl, ProductionMap};
 
 impl RuleConditionBinding {
-    pub(crate) fn captured_row_schema(
+    pub(crate) async fn captured_row_schema_with_work<W: Work + Send>(
         &self,
         row: &RowSchema,
         control: &ProductionControl<'_>,
+        work: &mut W,
     ) -> Result<RowSchema, SQLError> {
         let mut positions = ProductionMap::new(*control);
         for (position, name) in self.columns.iter().enumerate() {
-            positions.insert_copy(name.as_str(), position)?;
+            positions
+                .insert_copy_from(
+                    name.as_str(),
+                    position,
+                    &mut ReferenceWork { control, work },
+                )
+                .await?;
         }
-        let mut schema = RowSchema::empty_with_control(control)?;
-        for (side, relation) in [("old", self.old_relation), ("new", self.new_relation)] {
-            let Some(relation) = relation else { continue };
-            let current = RowSchema::with_column_metadata_with_control(
-                Some(side),
-                row.columns().iter().enumerate().map(|(index, name)| {
-                    (
-                        row.public_name(index).unwrap_or(name),
-                        row.column_type(index),
-                        row.column_collation(index),
-                    )
-                }),
-                control,
-            )?;
-            let current = RowSchema::with_physical_internal_aliases_with_control(
-                &current,
-                row.columns()
-                    .iter()
-                    .enumerate()
-                    .filter_map(|(index, name)| {
-                        let name = row.public_name(index).unwrap_or(name);
-                        positions.get(name).map(|position| {
-                            (relation.column(*position), index, row.column_type(index))
-                        })
-                    }),
-                control,
-            )?;
-            schema = RowSchema::join_with_control(&schema, &current, std::iter::empty(), control)?;
+        let mut surviving = uqa_core::memory::ProductionVec::new(*control);
+        surviving.reserve(row.len())?;
+        for (index, name) in row.columns().iter().enumerate() {
+            let name = row.public_name(index).unwrap_or(name);
+            let position = positions
+                .get_from(name, &mut ReferenceWork { control, work })
+                .await?;
+            surviving.push_copy(position.copied())?;
         }
-        Ok(schema)
+        retire_entries(positions.into_iter(), control, work).await?;
+        row.with_captured_row_images(
+            [("old", self.old_relation), ("new", self.new_relation)],
+            &surviving,
+            control,
+            work,
+        )
+        .await
     }
 
     pub(crate) fn current_whole_row(

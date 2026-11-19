@@ -194,3 +194,37 @@ fn clause_query_bindings_preserve_postgresql_descriptors_and_error_order() {
         }
     }
 }
+
+#[test]
+fn captured_rule_boolean_analysis_uses_each_selected_subquery_output_once() {
+    use crate::{ast::Statement, plan::ExpressionPlan};
+    use uqa_core::{
+        memory::{MemoryBudget, ProductionControl},
+        CancellationToken,
+    };
+
+    let Statement::CreateRule(rule) = crate::compile(
+        "CREATE RULE saved AS ON UPDATE TO items WHERE EXISTS(SELECT 1) AND (SELECT true) DO NOTHING",
+    ).unwrap().remove(0) else { panic!("rewrite rule") };
+    let plan = ExpressionPlan::lower(rule.condition.unwrap());
+    assert_eq!(plan.subqueries.len(), 2);
+    let memory = MemoryBudget::new(1 << 20);
+    let cancellation = CancellationToken::new();
+    let control = ProductionControl::new(&memory, &cancellation, &cancellation);
+    crate::binding::preparation::BLOCK_ANALYSES.with(|count| count.set(0));
+    crate::catalog::work::inline(crate::binding::validate_stored_rule_condition_with_work(
+        &EmptyRoutineResolution,
+        &plan,
+        &RowSchema::default(),
+        empty_binding_context().copy_with_control(&control).unwrap(),
+        [None, None],
+        &control,
+        &mut (),
+    ))
+    .unwrap();
+    assert_eq!(
+        crate::binding::preparation::BLOCK_ANALYSES.with(std::cell::Cell::get),
+        2
+    );
+    assert_eq!(memory.used(), 0);
+}

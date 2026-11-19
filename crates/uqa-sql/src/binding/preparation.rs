@@ -479,6 +479,8 @@ pub(crate) async fn validate_stored_rule_condition_with_work<
     scope.preserve_syntax_shape = true;
     scope.stored_expression_outer = Some(input.clone());
     scope.stored_whole_rows = whole_rows;
+    let mut outputs = crate::production::Buffer::new(control);
+    let queries;
     let mut analysis = Preparation {
         routines,
         scope: &mut scope,
@@ -487,8 +489,17 @@ pub(crate) async fn validate_stored_rule_condition_with_work<
         bound_condition_queries: None,
     };
     for query in &expression.subqueries {
-        analysis.query_with_work(query, Some(input), work).await?;
+        outputs.push(
+            Some(analysis.query_with_work(query, Some(input), work).await?),
+            control,
+        )?;
     }
+    queries = super::type_resolution::BoundConditionQueries {
+        plans: &expression.subqueries,
+        input,
+        schemas: Some(&outputs),
+    };
+    analysis.bound_condition_queries = Some(&queries);
     analysis
         .boolean_expression_with_work(
             &expression.scalar,

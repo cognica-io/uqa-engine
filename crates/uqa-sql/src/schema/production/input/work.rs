@@ -6,17 +6,14 @@
 
 use crate::{ast::InternalColumnRef, schema::ColumnIdentity, SQLError};
 use std::cmp::Ordering;
-use uqa_core::{
-    image_io::AsyncImageInput,
-    memory::{MapKeyInput, OwnedMap, Produced, ProductionControl},
-};
+use uqa_core::memory::{MapKeyInput, OwnedMap, Produced, ProductionControl};
 
-pub(super) struct Work<'a, 'b, 'c> {
+pub(super) struct Work<'a, 'b, W> {
     pub control: ProductionControl<'a>,
-    pub input: &'b mut AsyncImageInput<'c>,
+    pub input: &'b mut W,
 }
 
-impl Work<'_, '_, '_> {
+impl<W: crate::catalog::CatalogWork + Send> Work<'_, '_, W> {
     pub async fn checkpoint(&mut self) -> Result<(), SQLError> {
         self.control.check()?;
         self.input.checkpoint().await?;
@@ -44,18 +41,7 @@ impl Work<'_, '_, '_> {
 
     pub async fn compare_text(&mut self, left: &str, right: &str) -> Result<Ordering, SQLError> {
         self.checkpoint().await?;
-        for (left, right) in left
-            .as_bytes()
-            .chunks(4096)
-            .zip(right.as_bytes().chunks(4096))
-        {
-            self.checkpoint().await?;
-            let order = left.cmp(right);
-            if order.is_ne() {
-                return Ok(order);
-            }
-        }
-        Ok(left.len().cmp(&right.len()))
+        crate::catalog::work::compare_text(self.input, left, right, &self.control).await
     }
 
     pub async fn insert<K: Ord, V>(
@@ -68,18 +54,13 @@ impl Work<'_, '_, '_> {
         Self: MapKeyInput<K, Error = SQLError>,
     {
         Ok(map
-            .insert_admitted_key_from(
-                key.into_budgeted()
-                    .unwrap_or_else(|_| panic!("native schema key")),
-                value,
-                self,
-            )
+            .insert_produced_key_from(key, value, self)
             .await?
             .is_some())
     }
 }
 
-impl MapKeyInput<Box<str>> for Work<'_, '_, '_> {
+impl<W: crate::catalog::CatalogWork + Send> MapKeyInput<Box<str>> for Work<'_, '_, W> {
     type Error = SQLError;
 
     async fn checkpoint(&mut self) -> Result<(), SQLError> {
@@ -91,7 +72,7 @@ impl MapKeyInput<Box<str>> for Work<'_, '_, '_> {
     }
 }
 
-impl MapKeyInput<ColumnIdentity> for Work<'_, '_, '_> {
+impl<W: crate::catalog::CatalogWork + Send> MapKeyInput<ColumnIdentity> for Work<'_, '_, W> {
     type Error = SQLError;
 
     async fn checkpoint(&mut self) -> Result<(), SQLError> {
@@ -112,7 +93,7 @@ impl MapKeyInput<ColumnIdentity> for Work<'_, '_, '_> {
     }
 }
 
-impl MapKeyInput<InternalColumnRef> for Work<'_, '_, '_> {
+impl<W: crate::catalog::CatalogWork + Send> MapKeyInput<InternalColumnRef> for Work<'_, '_, W> {
     type Error = SQLError;
 
     async fn checkpoint(&mut self) -> Result<(), SQLError> {

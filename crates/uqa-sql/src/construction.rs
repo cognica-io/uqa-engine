@@ -74,7 +74,14 @@ impl<'a, T> Read<'a, T> {
         control: ProductionControl<'_>,
         future: F,
     ) -> Result<Self> {
-        let future = retain(control, future)?;
+        Self::with_constructor(control, || future)
+    }
+
+    pub(crate) fn with_constructor<F: Future<Output = T> + Send + 'a>(
+        control: ProductionControl<'_>,
+        construct: impl FnOnce() -> F,
+    ) -> Result<Self> {
+        let future = retain_with(control, construct)?;
         Ok(Self {
             future: future.future,
             memory: future.memory,

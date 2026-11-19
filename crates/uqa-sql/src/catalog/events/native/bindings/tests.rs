@@ -235,3 +235,125 @@ fn captured_rule_conditions_yield_inside_a_values_subquery_before_a_late_unknown
     run(Some(WIDTH - 1), Some(first + WIDTH / 2));
     run(None, None);
 }
+
+#[test]
+fn captured_rule_row_images_preserve_side_names_types_and_original_slots() {
+    let old = InternalRelationId::from_raw(101);
+    let new = InternalRelationId::from_raw(202);
+    let token = CancellationToken::new();
+    let memory = MemoryBudget::new(1 << 20);
+    let control = ProductionControl::new(&memory, &token, &token);
+    for (has_old, has_new) in [(true, false), (false, true), (true, true)] {
+        let binding = RuleConditionBinding::from_captured_parts(
+            has_old.then_some(old),
+            has_new.then_some(new),
+            vec!["early".into(), "removed".into(), "later".into()],
+        );
+        for empty in [false, true] {
+            let columns = [
+                ("later", Some(&ColumnType::Text), Some(950)),
+                ("added", Some(&ColumnType::Boolean), None),
+                ("early", Some(&ColumnType::Integer), None),
+            ];
+            let row = RowSchema::with_column_metadata_with_control(
+                None,
+                columns.into_iter().take(if empty { 0 } else { 3 }),
+                &control,
+            )
+            .unwrap();
+            let schema = crate::catalog::work::inline(binding.captured_row_schema_with_work(
+                &row,
+                &control,
+                &mut (),
+            ))
+            .unwrap();
+            let mut start = 0;
+            for (name, id, present) in [("old", old, has_old), ("new", new, has_new)] {
+                assert_eq!(schema.has_qualifier(name), present);
+                assert_eq!(schema.internal_slot(id.column(1)), None);
+                if !empty && present {
+                    assert_eq!(schema.internal_slot(id.column(0)), Some(start + 2));
+                    assert_eq!(schema.internal_slot(id.column(2)), Some(start));
+                    assert_eq!(
+                        schema.internal_type(id.column(0)),
+                        Some(&ColumnType::Integer)
+                    );
+                    assert_eq!(schema.internal_type(id.column(2)), Some(&ColumnType::Text));
+                    assert_eq!(schema.internal_collation(id.column(2)), Some(950));
+                    assert_eq!(schema.column_collation(start), Some(950));
+                    start += 3;
+                } else {
+                    assert_eq!(schema.internal_slot(id.column(0)), None);
+                    assert_eq!(schema.internal_slot(id.column(2)), None);
+                }
+            }
+            assert_eq!(schema.physical_width(), start);
+            drop((schema, row));
+            assert_eq!(memory.used(), 0);
+        }
+    }
+}
+
+#[test]
+fn captured_rule_row_construction_yields_while_building_qualified_attributes() {
+    use crate::{ast::RuleEvent, catalog::CatalogValidation};
+    let drive = |width: usize, stop: Option<usize>| {
+        let columns: Vec<_> = (0..width).map(|idx| format!("field_{idx}")).collect();
+        let ty = ColumnType::Integer;
+        let row = RowSchema::with_column_metadata_with_control(
+            None,
+            columns.iter().map(|name| (name.as_str(), Some(&ty), None)),
+            &ProductionControl::uncontrolled(),
+        )
+        .unwrap();
+        let binding = RuleConditionBinding::for_event(&columns, RuleEvent::Update);
+        let memory = MemoryBudget::new(1 << 20);
+        let token = CancellationToken::new();
+        let control = ProductionControl::new(&memory, &token, &token);
+        let owner = control.capture();
+        let mut reader = CatalogValidation::new(&control, |mut work| async move {
+            let image = binding
+                .captured_row_schema_with_work(&row, &owner.control(), &mut work)
+                .await?;
+            assert_eq!(image.physical_width(), 2 * width);
+            assert_eq!(
+                image.qualified_slot("old", columns.last().unwrap()),
+                Some(width - 1)
+            );
+            assert_eq!(
+                image.qualified_slot("new", columns.last().unwrap()),
+                Some(2 * width - 1)
+            );
+            Ok(())
+        })
+        .unwrap();
+        let mut calls = 0;
+        loop {
+            if stop == Some(calls) {
+                token.cancel();
+            }
+            calls += 1;
+            match reader.advance(&control, 1) {
+                Ok(Some(next)) => reader = next,
+                Ok(None) => {
+                    assert!(stop.is_none());
+                    break;
+                }
+                Err(error) => {
+                    assert!(stop.is_some(), "{error}");
+                    assert_eq!(error.sqlstate(), Some("57014"));
+                    break;
+                }
+            }
+        }
+        assert_eq!(memory.used(), 0);
+        calls
+    };
+    let short = drive(1, None);
+    let long = drive(64, None);
+    assert!(
+        long >= short + 2 * 63,
+        "one column {short}, 64 columns {long}"
+    );
+    drive(64, Some((short + long) / 2));
+}

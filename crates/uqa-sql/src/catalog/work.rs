@@ -46,6 +46,60 @@ pub trait Work {
     ) -> impl Future<Output = Result<Produced<String>, SQLError>> + Send;
 }
 
+/// Work checkpoints for a catalog operation that already owns its typed input.
+pub struct CatalogSteps(());
+
+impl Work for CatalogSteps {
+    async fn checkpoint(&mut self) -> Result<(), ImageIoError> {
+        crate::construction::suspend().await;
+        Ok(())
+    }
+
+    async fn text(
+        &mut self,
+        source: &str,
+        control: &ProductionControl<'_>,
+    ) -> Result<Produced<String>, SQLError> {
+        copy_text(self, source, control).await
+    }
+}
+
+/// An admitted catalog predicate on immutable native input. Each advance polls only its original validation and releases that input on completion or error.
+pub struct CatalogValidation(crate::construction::Read<'static, Result<(), SQLError>>);
+
+impl CatalogValidation {
+    pub fn new<F>(
+        control: &ProductionControl<'_>,
+        create: impl FnOnce(CatalogSteps) -> F,
+    ) -> Result<Self, SQLError>
+    where
+        F: Future<Output = Result<(), SQLError>> + Send + 'static,
+    {
+        control.check()?;
+        Ok(Self(crate::construction::Read::with_constructor(
+            *control,
+            || create(CatalogSteps(())),
+        )?))
+    }
+
+    pub fn advance(
+        mut self,
+        control: &ProductionControl<'_>,
+        steps: usize,
+    ) -> Result<Option<Self>, SQLError> {
+        if steps == 0 {
+            return Err(SQLError::Internal(
+                "catalog validation requires a nonzero work window".into(),
+            ));
+        }
+        Ok(self
+            .0
+            .advance_window(control, steps)?
+            .is_none()
+            .then_some(self))
+    }
+}
+
 impl Work for () {
     const MAY_SUSPEND: bool = false;
 

@@ -741,8 +741,14 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
             input_work.checkpoint().await?;
             columns.push(AnalysisVec::new(&control), &control)?;
         }
-        let empty = RowSchema::empty_with_control(&control)?;
-        let input = outer.unwrap_or(&empty);
+        let empty;
+        let input = match outer {
+            Some(row) => row,
+            None => {
+                empty = RowSchema::empty_with_control(&control)?;
+                &empty
+            }
+        };
         for row in rows {
             input_work.checkpoint().await?;
             for (position, expression) in row.iter().enumerate() {

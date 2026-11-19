@@ -31,22 +31,30 @@ impl RelationRowTypes {
             control,
         )?;
         let source = boxed_text(qualifier, control)?;
-        Self::from_admitted_anonymous(types, source, control)
+        Self::from_admitted_names(types, Some(source), control)
     }
 
-    pub(in crate::schema) fn from_admitted_anonymous(
+    pub(in crate::schema) fn from_admitted_names(
         types: SchemaMap<Box<str>, Option<crate::ast::ColumnType>>,
-        source: uqa_core::memory::Produced<Box<str>>,
+        source: Option<uqa_core::memory::Produced<Box<str>>>,
         control: &ProductionControl<'_>,
     ) -> Result<Self, SQLError> {
+        if types.is_empty() {
+            return Ok(Self::default());
+        }
         let header = control.reserve(size_of::<RelationRows>())?;
-        let (source, memory) = source.into_parts();
-        let rows = RelationRows {
-            types,
-            source: Some(source),
-            _memory: SchemaMemory::new(control.combine(header, memory)),
+        let (source, memory) = match source {
+            Some(source) => {
+                let (source, memory) = source.into_parts();
+                (Some(source), memory)
+            }
+            None => (None, control.empty_reservation()),
         };
-        Ok(Self(Some(Arc::new(rows))))
+        Ok(Self(Some(Arc::new(RelationRows {
+            types,
+            source,
+            _memory: SchemaMemory::new(control.combine(header, memory)),
+        }))))
     }
 }
 
@@ -137,19 +145,7 @@ impl RelationRowTypes {
         let source = source
             .map(|source| boxed_text(source, control))
             .transpose()?;
-        let header = control.reserve(size_of::<RelationRows>())?;
-        let (source, memory) = match source {
-            Some(source) => {
-                let (source, memory) = source.into_parts();
-                (Some(source), memory)
-            }
-            None => (None, control.empty_reservation()),
-        };
-        Ok(Self(Some(Arc::new(RelationRows {
-            types,
-            source,
-            _memory: SchemaMemory::new(control.combine(header, memory)),
-        }))))
+        Self::from_admitted_names(types, source, control)
     }
 }
 

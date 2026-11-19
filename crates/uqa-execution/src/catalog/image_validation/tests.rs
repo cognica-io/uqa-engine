@@ -375,3 +375,72 @@ fn native_catalog_types_retire_workspace_on_quota_denial_and_cancellation() {
     assert!(validate_types(&snapshot, &memory, &cancellation).is_err());
     assert_eq!(memory.used(), 0);
 }
+
+#[test]
+fn a_small_subquery_rule_fits_the_ordinary_catalog_validation_allowance() {
+    use crate::catalog::{test_support::NoRoutines, CatalogReadView};
+    use uqa_sql::{
+        ast::{EventEnableMode, Statement},
+        catalog::events::{RuleConditionBinding, RuleDependencies, StoredRule},
+        plan::ExpressionPlan,
+    };
+    let mut source = snapshot();
+    let owner = RelationIdentity::new("public", "saved");
+    source.tables.insert(
+        owner.clone(),
+        table_snapshot(
+            [1; 16],
+            vec![ColumnDef::nullable(
+                "value",
+                uqa_sql::ColumnType::BigInteger,
+            )],
+            TableConstraintSet::default(),
+        ),
+    );
+    let Statement::CreateRule(definition) = uqa_sql::compile(
+        "CREATE RULE saved_check AS ON UPDATE TO public.saved WHERE EXISTS (VALUES (1)) DO NOTHING",
+    )
+    .unwrap()
+    .remove(0) else {
+        panic!("rule")
+    };
+    let plan = ExpressionPlan::lower(definition.condition.clone().unwrap());
+    let binding = RuleConditionBinding::for_event(&["value".into()], definition.event);
+    RetainedValue::make_mut(&mut source.definitions.rules)
+        .insert_event(
+            owner,
+            "saved_check".into(),
+            StoredRule {
+                definition,
+                condition_plan: Some(plan),
+                condition_binding: Some(binding),
+                enabled: EventEnableMode::default(),
+                dependencies: Some(RuleDependencies::default()),
+                catalog_oid: Some(31_000),
+            },
+        )
+        .unwrap();
+    let catalog = CatalogReadView::new(source);
+    let token = CancellationToken::new();
+    for kib in [8, 12, 16, 20, 24, 32, 64] {
+        let ordinary = MemoryBudget::new(kib << 10);
+        let mut cursor = RelationshipValidation::new(catalog.clone(), &ordinary, &token);
+        let expected = loop {
+            match cursor.advance_with_steps(&NoRoutines, &NoRoutines, 1) {
+                Ok(Some(next)) => cursor = next,
+                finished => {
+                    break finished
+                        .map(|_| ())
+                        .map_err(|error| error.sqlstate().unwrap().to_owned())
+                }
+            }
+        };
+        assert_eq!(expected.is_ok(), kib >= 20, "{kib} KiB");
+        let retained = MemoryBudget::new(kib << 10);
+        let actual = retained_binding_windows(&catalog, &retained, &token, 1, None)
+            .1
+            .map_err(|error| error.sqlstate().unwrap().to_owned());
+        assert_eq!(expected, actual, "{kib} KiB");
+        assert_eq!((ordinary.used(), retained.used()), (0, 0));
+    }
+}

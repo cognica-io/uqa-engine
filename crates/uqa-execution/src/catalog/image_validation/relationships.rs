@@ -22,6 +22,7 @@ use uqa_core::{
     CancellationToken,
 };
 use uqa_sql::{
+    catalog::CatalogValidation,
     routines::{declaration::RoutineTypeCatalog, RoutineResolution},
     SQLError,
 };
@@ -31,7 +32,7 @@ use bindings::Binding;
 
 type CatalogReader = Budgeted<Box<ImageDecoder<(), SQLError>>>;
 type OpenBinding<'a> =
-    dyn Fn(Binding, &RelationshipValidation) -> Result<CatalogReader, SQLError> + 'a;
+    dyn Fn(Binding, &RelationshipValidation) -> Result<CatalogValidation, SQLError> + 'a;
 
 struct Inputs<'a> {
     view: &'a CatalogReadView,
@@ -97,6 +98,7 @@ pub struct RelationshipValidation {
 
 enum Reading {
     Catalog(CatalogReader),
+    Binding(CatalogValidation),
     Declarations(Budgeted<Box<DeclarationCursor>>),
 }
 
@@ -168,21 +170,27 @@ impl RelationshipValidation {
     fn advance_catalog(
         &mut self,
         steps: usize,
-        begin: impl FnOnce(&Self) -> Result<CatalogReader, SQLError>,
+        begin: impl FnOnce(&Self) -> Result<Reading, SQLError>,
     ) -> Result<bool, SQLError> {
-        let mut reading = match self.reading.take() {
-            Some(Reading::Catalog(reading)) => reading,
-            Some(Reading::Declarations(_)) => unreachable!("catalog predicate owns its reader"),
+        let reading = match self.reading.take() {
+            Some(reading) => reading,
             None => begin(self)?,
         };
-        let complete = reading
-            .as_mut()
-            .advance(&mut std::io::empty(), ImageDecodeWindow { bytes: 1, steps })?
-            .is_some();
-        if !complete {
-            self.reading = Some(Reading::Catalog(reading));
-        }
-        Ok(complete)
+        self.reading = match reading {
+            Reading::Catalog(mut input) => input
+                .as_mut()
+                .advance(&mut std::io::empty(), ImageDecodeWindow { bytes: 1, steps })?
+                .is_none()
+                .then_some(Reading::Catalog(input)),
+            Reading::Binding(input) => input
+                .advance(
+                    &ProductionControl::new(&self.memory, &self.cancellation, &self.cancellation),
+                    steps,
+                )?
+                .map(Reading::Binding),
+            Reading::Declarations(_) => unreachable!("catalog predicate owns its reader"),
+        };
+        Ok(self.reading.is_none())
     }
 
     fn next(
@@ -209,6 +217,7 @@ impl RelationshipValidation {
                 {
                     if !self.advance_catalog(steps, |state| {
                         bindings.expect("new binding owns its lookup services")(binding, state)
+                            .map(Reading::Binding)
                     })? {
                         return Ok(Some(self));
                     }
@@ -234,7 +243,7 @@ impl RelationshipValidation {
                     let mut cursor = match self.reading.take() {
                         Some(Reading::Declarations(cursor)) => cursor,
                         None => DeclarationCursor::new(&self.catalog, &self.memory)?,
-                        Some(Reading::Catalog(_)) => {
+                        Some(Reading::Binding(_) | Reading::Catalog(_)) => {
                             unreachable!("declaration validation owns its cursor")
                         }
                     };
@@ -263,7 +272,9 @@ impl RelationshipValidation {
             Predicate::Scheduled(check) if check.applies(self.catalog.snapshot()) => {
                 if let Some(steps) = steps {
                     if !self.advance_catalog(steps, |state| {
-                        check.begin(&state.catalog, &state.memory, &state.cancellation)
+                        check
+                            .begin(&state.catalog, &state.memory, &state.cancellation)
+                            .map(Reading::Catalog)
                     })? {
                         return Ok(Some(self));
                     }

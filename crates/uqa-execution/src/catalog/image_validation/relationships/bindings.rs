@@ -6,13 +6,14 @@
 
 //! Binding validation borrows the same private lookup session across every work window.
 
-use super::{CatalogReader, Inputs, RelationshipValidation};
+use super::{Inputs, RelationshipValidation};
 use crate::catalog::image_validation::{
     constraint_bindings, event_bindings, index_bindings, partition_bindings, routine_bindings,
     stored_expressions,
 };
-use uqa_core::{image_io::ImageDecoder, memory::Budgeted};
+use uqa_core::memory::ProductionControl;
 use uqa_sql::{
+    catalog::CatalogValidation,
     routines::{declaration::RoutineTypeCatalog, RoutineResolution},
     SQLError,
 };
@@ -33,24 +34,24 @@ impl Binding {
         state: &RelationshipValidation,
         owner: S,
         services: fn(&S) -> &R,
-    ) -> Result<CatalogReader, SQLError>
+    ) -> Result<CatalogValidation, SQLError>
     where
         S: Send + Sync + 'static,
         R: RoutineResolution + RoutineTypeCatalog + Send + Sync + 'static,
     {
-        let memory = &state.memory;
-        let header = memory.reserve(size_of::<ImageDecoder<(), SQLError>>())?;
+        let memory = state.memory.clone();
+        let control =
+            ProductionControl::new(&state.memory, &state.cancellation, &state.cancellation);
         let catalog = state.catalog.clone();
         let original = state.cancellation.clone();
         macro_rules! reader {
             ($module:ident $(, $types:expr)?) => {
-                ImageDecoder::new(memory, &state.cancellation, |mut reader| async move {
-                    let input = &mut reader.input();
-                    $module::validate_with_work(&catalog, services(&owner), $($types,)? input.memory, &original, input).await
+                CatalogValidation::new(&control, |mut work| async move {
+                    $module::validate_with_work(&catalog, services(&owner), $($types,)? &memory, &original, &mut work).await
                 })
             };
         }
-        let input = match self {
+        match self {
             Self::Expressions => reader!(stored_expressions),
             Self::Constraints => reader!(constraint_bindings),
             Self::Indexes => reader!(index_bindings),
@@ -58,8 +59,7 @@ impl Binding {
             Self::Routines => reader!(routine_bindings, || services(&owner)
                 as &dyn RoutineTypeCatalog),
             Self::Events => reader!(event_bindings),
-        }?;
-        Ok(Budgeted::new(Box::new(input), header))
+        }
     }
 
     pub(super) fn inline(self, input: &Inputs<'_>) -> Result<(), SQLError> {

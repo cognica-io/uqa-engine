@@ -47,7 +47,9 @@ pub async fn validate_condition_with_work(
             }
         })
         .await?;
-    let schema = binding.captured_row_schema(row, control)?;
+    let schema = binding
+        .captured_row_schema_with_work(row, control, work)
+        .await?;
     context
         .references
         .scalar_with_work(&plan.scalar, work)
