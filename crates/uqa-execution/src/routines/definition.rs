@@ -233,7 +233,7 @@ impl CatalogRoutineBinding {
         def: &CreateFunction,
         lowered: bool,
     ) -> Option<BindingScope> {
-        (matches!(self.stage, Stage::Dependencies(_))
+        (matches!(self.stage, Stage::Dependencies(_) | Stage::Regclasses(_))
             || matches!(self.stage, Stage::Compile)
                 && matches!(def.body, FunctionBody::Statements(_))
             || matches!(self.stage, Stage::Statements(_)) && lowered)
@@ -252,6 +252,7 @@ impl CatalogRoutineBinding {
         R: uqa_sql::routines::compilation::StoredRoutineCatalog
             + uqa_sql::binding::stored_columns::StoredSourceCatalog
             + uqa_sql::routines::resolution::RoutineOverloadCatalog
+            + RoutineRegclassCatalog
             + uqa_sql::plan::AggregateClassifier,
     {
         match &mut self.stage {
@@ -281,7 +282,11 @@ impl CatalogRoutineBinding {
                 )
                 .await?;
             }
-            _ => unreachable!("selected stored routine input"),
+            Stage::Regclasses(binding) => {
+                let changed = binding.advance_from(catalog, def, control, input).await?;
+                self.accept_regclasses(changed);
+            }
+            Stage::Finished => unreachable!("selected stored routine input"),
         }
         Ok(())
     }
@@ -290,6 +295,20 @@ impl CatalogRoutineBinding {
         if let Some(changed) = changed {
             self.changed |= changed;
             self.stage = Stage::Compile;
+        }
+    }
+
+    fn accept_regclasses(&mut self, changed: Option<bool>) {
+        if let Some(changed) = changed {
+            self.changed |= changed;
+            self.recompile = changed;
+            if changed {
+                self.compiled = None;
+                self.validated = None;
+                self.stage = Stage::Compile;
+            } else {
+                self.stage = Stage::Finished;
+            }
         }
     }
 
@@ -353,19 +372,8 @@ impl CatalogRoutineBinding {
                 }
             },
             Stage::Regclasses(input) => {
-                if let Some(changed) =
-                    input.advance(analysis.types, context.regclasses, def, control)?
-                {
-                    self.changed |= changed;
-                    self.recompile = changed;
-                    if changed {
-                        self.compiled = None;
-                        self.validated = None;
-                        self.stage = Stage::Compile;
-                    } else {
-                        self.stage = Stage::Finished;
-                    }
-                }
+                let changed = input.advance(analysis.types, context.regclasses, def, control)?;
+                self.accept_regclasses(changed);
             }
             Stage::Finished => {
                 return Ok(BindingStep::Complete(BoundRoutine {

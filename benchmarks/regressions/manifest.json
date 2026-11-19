@@ -75647,6 +75647,19 @@
     {
       "package": "uqa-sql",
       "kind": "lib",
+      "test": "stored_regclass_statement_edits_yield_before_late_lookup_and_release_failed_scratch",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/routines/regclass/tests.rs",
+      "capability": "Stored routine relation identities",
+      "workload": "Bind a 4,096-row routine statement with a missing sequence near the beginning or at the end, under single-step and batched input.",
+      "invariant": "Lookup reaches the missing name in its original order. Failed, denied and cancelled field edits release their reservations and preserve the source.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
       "test": "stored_statement_construction_and_retirement_share_the_original_work_and_allowance",
       "cases": 1,
       "source": "crates/uqa-sql/src/plan/copy/lowering/input/native/statement/tests/stored.rs",

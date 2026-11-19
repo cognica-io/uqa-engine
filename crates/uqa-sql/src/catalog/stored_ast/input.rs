@@ -11,7 +11,7 @@ use crate::ast::{FunctionBinding, MergeStmt, Projection};
 use std::future::{ready, Future};
 use uqa_core::memory::ProductionControl;
 
-pub(super) trait Actions<W> {
+pub(crate) trait Actions<W> {
     fn source(&mut self, _source: &mut FromClause) -> Result<(), SQLError> {
         Ok(())
     }

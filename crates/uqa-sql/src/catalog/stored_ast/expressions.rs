@@ -22,6 +22,34 @@ impl<W, F: FnMut(&mut Expr) -> Result<(), SQLError>> super::Actions<W> for Expre
     }
 }
 
+pub(crate) enum StoredExpressionRoot<'a> {
+    Expression(&'a mut Expr),
+    Statement(&'a mut Statement),
+}
+
+impl StoredExpressionRoot<'_> {
+    pub(crate) async fn visit_with<W: super::Work + Send>(
+        self,
+        actions: &mut impl super::Actions<W>,
+        control: &uqa_core::memory::ProductionControl<'_>,
+        work: &mut W,
+    ) -> Result<(), SQLError> {
+        let mut reader = super::Reader::new(actions, control, work);
+        match self {
+            Self::Expression(expression) => reader.bind_expr(expression, &BTreeSet::new()).await,
+            Self::Statement(statement) => reader.bind_statement(statement).await,
+        }
+    }
+
+    pub(crate) fn visit_inline(
+        self,
+        visit: impl FnMut(&mut Expr) -> Result<(), SQLError>,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<(), SQLError> {
+        crate::catalog::work::inline(self.visit_with(&mut Expressions(visit), control, &mut ()))
+    }
+}
+
 pub fn visit_stored_expression(
     expression: &mut Expr,
     visit: ExpressionCallback<'_>,

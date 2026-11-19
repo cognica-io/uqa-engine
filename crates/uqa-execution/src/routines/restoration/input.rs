@@ -131,6 +131,7 @@ impl RetainedRoutineFinalization {
         R: uqa_sql::routines::compilation::StoredRoutineCatalog
             + uqa_sql::binding::stored_columns::StoredSourceCatalog
             + uqa_sql::routines::resolution::RoutineOverloadCatalog
+            + uqa_sql::routines::regclass::RoutineRegclassCatalog
             + uqa_sql::plan::AggregateClassifier
             + 'static,
     {
