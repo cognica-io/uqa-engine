@@ -8,6 +8,8 @@ use super::*;
 use crate::ast::{FunctionReturns, RoutineAclEntry};
 use uqa_core::catalog_role::RoleIdentity;
 
+mod raw;
+
 fn declaration() -> CreateFunction {
     routine(1, true, "original default").def.clone()
 }

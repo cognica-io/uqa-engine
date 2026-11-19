@@ -51913,6 +51913,45 @@
     {
       "package": "uqa-sql",
       "kind": "lib",
+      "test": "stored_raw_routine_header_fields_yield_in_declaration_order_and_match_ordinary_capture",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/stored_routine/tests/header/raw.rs",
+      "capability": "Bounded stored routine catalog headers",
+      "workload": "Copy UTF-8 routine and type names, raw configuration actions, and 4,096 attribute clauses followed by a transform.",
+      "invariant": "Raw strings advance in UTF-8 chunks in declaration order. Each list window processes at most eight entries or text chunks, and the completed declaration matches ordinary syntax copying in value and footprint.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_raw_routine_header_actions_release_partial_and_denied_copies",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/stored_routine/tests/header/raw.rs",
+      "capability": "Bounded stored routine catalog headers",
+      "workload": "Read an explicit configuration action following 32 reset actions, then deny its text allocation or cancel either token before publication.",
+      "invariant": "The preceding actions and optional field shapes survive, the declaration stays private, and failure releases all charged memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "raw_routine_header_fits_the_ordinary_allowance_with_optional_names",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/stored_routine/tests/header/raw.rs",
+      "capability": "Bounded stored routine catalog headers",
+      "workload": "Retain optional raw schema names, an empty written type, a large reset name and a transform at the ordinary capture allowance.",
+      "invariant": "Absent and explicitly empty names retain their shapes, and both paths use the same peak and final allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
       "test": "stored_result_type_names_resume_at_utf8_boundaries_with_the_original_allowance",
       "cases": 1,
       "source": "crates/uqa-sql/src/plan/copy/stored_routine/tests/header.rs",

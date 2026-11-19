@@ -225,6 +225,14 @@ enum CopyPurpose {
     Executable,
     Definition,
     Stored,
+    /// Construct a raw routine header field from its existing syntax shape. Its text and list entries advance in the stored declaration cursor.
+    StoredHeader(HeaderText),
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum HeaderText {
+    BeforeBody,
+    WhenSelected,
 }
 
 pub(crate) fn capture_stored_with_control<T: syntax::SyntaxCopy>(

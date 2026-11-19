@@ -5,7 +5,7 @@
 //
 
 use super::{Copying, Result, SyntaxCopy};
-use crate::plan::copy::stored_routine::HeaderCopy;
+use crate::plan::copy::{stored_routine::HeaderCopy, HeaderText};
 
 impl crate::ast::CreateFunction {
     pub(in crate::plan::copy) fn copy_definition_with(
@@ -20,19 +20,26 @@ impl crate::ast::CreateFunction {
                 copying.field(stringify!($name), |child| self.$name.copy_syntax(child))?
             };
         }
+        macro_rules! header_field {
+            ($name:ident, $timing:ident) => {
+                copying.field(stringify!($name), |child| {
+                    header.project(&self.$name, child, HeaderText::$timing)
+                })?
+            };
+        }
         copying.check()?;
         Ok(Self {
             object_id: field!(object_id),
             catalog_revision: field!(catalog_revision),
             catalog_oid: field!(catalog_oid),
-            name: field!(name),
+            name: header_field!(name, BeforeBody),
             or_replace: field!(or_replace),
             is_procedure: field!(is_procedure),
             params: copying.field("params", params)?,
-            returns: copying.field("returns", |child| self.returns.copy_with(child, header))?,
-            return_type_reference: field!(return_type_reference),
-            return_written_type: field!(return_written_type),
-            language: field!(language),
+            returns: header_field!(returns, BeforeBody),
+            return_type_reference: header_field!(return_type_reference, BeforeBody),
+            return_written_type: header_field!(return_written_type, BeforeBody),
+            language: header_field!(language, BeforeBody),
             body: copying.field("body", body)?,
             body_origin: copying.field("body_origin", |child| {
                 syntax_field!(child, self.body_origin, None)
@@ -46,12 +53,12 @@ impl crate::ast::CreateFunction {
             owner: field!(owner),
             security: field!(security),
             parallel: field!(parallel),
-            support: field!(support),
+            support: header_field!(support, WhenSelected),
             cost: field!(cost),
             rows: field!(rows),
             config: copying.field("config", |child| header.copy(&self.config, child))?,
-            config_actions: field!(config_actions),
-            attribute_clauses: field!(attribute_clauses),
+            config_actions: header_field!(config_actions, WhenSelected),
+            attribute_clauses: header_field!(attribute_clauses, WhenSelected),
             execute_acl: copying.field("execute_acl", |child| {
                 self.execute_acl
                     .as_ref()
@@ -104,37 +111,12 @@ syntax_enum!(crate::ast::FunctionParamMode {
     Table
 });
 
-impl crate::ast::FunctionReturns {
-    fn copy_with(&self, copying: &mut Copying<'_>, mode: HeaderCopy) -> Result<Self> {
-        copying.check()?;
-        let mut name = |text: &str| {
-            copying.field("type_name", |child| match mode {
-                HeaderCopy::Inline => child.text(text),
-                HeaderCopy::Retained => {
-                    let mut output = uqa_core::memory::ProductionString::new(child.control);
-                    output.reserve(text.len())?;
-                    Ok(child.take(output.finish()?))
-                }
-            })
-        };
-        Ok(match self {
-            Self::None => Self::None,
-            Self::Table => Self::Table,
-            Self::Scalar { type_name } => Self::Scalar {
-                type_name: name(type_name)?,
-            },
-            Self::SetOf { type_name } => Self::SetOf {
-                type_name: name(type_name)?,
-            },
-        })
-    }
-}
-
-impl SyntaxCopy for crate::ast::FunctionReturns {
-    fn copy_syntax(&self, copying: &mut Copying<'_>) -> Result<Self> {
-        self.copy_with(copying, HeaderCopy::Inline)
-    }
-}
+syntax_enum!(crate::ast::FunctionReturns {
+    None,
+    Scalar { type_name },
+    SetOf { type_name },
+    Table
+});
 
 syntax_enum!(crate::ast::FunctionVolatility {
     Immutable,

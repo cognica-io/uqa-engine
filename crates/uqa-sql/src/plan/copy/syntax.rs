@@ -90,6 +90,14 @@ impl<T: Copy, const N: usize> SyntaxCopy for [T; N] {
 }
 impl SyntaxCopy for String {
     fn copy_syntax(&self, copying: &mut Copying<'_>) -> Result<Self> {
+        if let super::CopyPurpose::StoredHeader(timing) = copying.purpose {
+            if timing == super::HeaderText::WhenSelected {
+                return Ok(String::new());
+            }
+            let mut value = uqa_core::memory::ProductionString::new(copying.control);
+            value.reserve(self.len())?;
+            return Ok(copying.take(value.finish()?));
+        }
         copying.text(self)
     }
 }
@@ -102,6 +110,10 @@ impl<T: SyntaxCopy> SyntaxCopy for Option<T> {
 }
 impl<T: SyntaxCopy> SyntaxCopy for Vec<T> {
     fn copy_syntax(&self, copying: &mut Copying<'_>) -> Result<Self> {
+        if matches!(copying.purpose, super::CopyPurpose::StoredHeader(_)) {
+            copying.check()?;
+            return Ok(Vec::new());
+        }
         copying.map(self.iter(), |copying, value| value.copy_syntax(copying))
     }
 }
