@@ -52089,6 +52089,19 @@
     {
       "package": "uqa-sql",
       "kind": "lib",
+      "test": "inherited_column_type_and_collation_yield_within_one_array_pair",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/inheritance/alter/tests.rs",
+      "capability": "Private restore validation",
+      "workload": "Compare two inherited columns with nested array types, delayed type and collation mismatches and cancellation.",
+      "invariant": "Validation yields inside the selected column pair and releases its allowance after success, failure or cancellation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
       "test": "bound_routine_projection_copies_values_at_the_original_nested_source_and_mutation_slots",
       "cases": 1,
       "source": "crates/uqa-sql/src/plan/copy/stored_plan/tests.rs",
@@ -54311,6 +54324,32 @@
       "capability": "Stored routine identity and body references",
       "workload": "Validate a table default and then the same table with a stored zero-argument routine and a legacy trigger lookup. Give ordinary validation its registry allowance and the private reader 16 KiB.",
       "invariant": "Ordinary validation completes with the original registry allocation. Both retained registries stay within 16 KiB, the additional trigger takes more single-step calls, and retirement returns the complete allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "a_small_stored_default_fits_the_catalog_validation_allowance",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/tests.rs",
+      "capability": "Private restore validation",
+      "workload": "Validate one stored BIGINT column with a constant default using a 20 KiB working allowance.",
+      "invariant": "Both inline and retained catalog validation succeed and release the original allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "retained_partition_row_types_yield_between_parent_and_child_columns",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/tests/partitions.rs",
+      "capability": "Private restore validation",
+      "workload": "Validate partition row types with an incompatible first or last column in two 64-column declarations.",
+      "invariant": "A late mismatch requires additional work windows and returns the same PostgreSQL row-type diagnostic.",
       "case_names": [
         ""
       ]
