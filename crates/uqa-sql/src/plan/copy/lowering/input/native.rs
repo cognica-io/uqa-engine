@@ -27,7 +27,7 @@ mod ctes;
 mod mutations;
 mod statement;
 mod trees;
-pub use statement::RetainedExecutablePlan;
+pub use statement::{RetainedExecutablePlan, StoredStatementObserver};
 
 struct Native<'a, Q> {
     aggregates: &'a (dyn AggregateClassifier + Sync),

@@ -22,6 +22,15 @@ use crate::{
 };
 use uqa_core::image_io::AsyncImageInput;
 
+mod observation;
+pub use observation::StoredStatementObserver;
+
+#[derive(Clone, Copy)]
+enum Purpose {
+    Executable,
+    StoredReferences,
+}
+
 /// A completed private executable with its original mutable field leases and admitted retirement workspace. Observation borrows the native plan; dropping the owner retires its complete tree before returning those leases.
 #[derive(Debug)]
 pub struct RetainedExecutablePlan(Prefix<MutableExecutablePlan>);
@@ -134,6 +143,25 @@ impl UnifiedPlan {
         parameters: Option<&ParameterLookup<'_>>,
         input: &mut AsyncImageInput<'_>,
     ) -> Result<RetainedExecutablePlan> {
+        Self::lower_retained_statement(
+            statement,
+            aggregates,
+            control,
+            parameters,
+            Purpose::Executable,
+            input,
+        )
+        .await
+    }
+
+    async fn lower_retained_statement<W: crate::catalog::work::Work + Send>(
+        statement: &Statement,
+        aggregates: &(dyn AggregateClassifier + Sync),
+        control: &ProductionControl<'_>,
+        parameters: Option<&ParameterLookup<'_>>,
+        purpose: Purpose,
+        input: &mut W,
+    ) -> Result<RetainedExecutablePlan> {
         control.check()?;
         if control.budget().is_none() {
             return Err(SQLError::Internal(
@@ -169,16 +197,24 @@ impl UnifiedPlan {
                     query.map(MutableExecutablePlan::Query)
                 }
                 statement => {
-                    let source =
-                        crate::plan::copy::lowering::mutations::Source::statement(statement)
-                            .ok_or_else(|| {
-                                SQLError::Unsupported(
-                                    "native executable construction requires a query or mutation"
-                                        .into(),
-                                )
-                            })?;
-                    let command =
-                        mutations::child(source, &mut copying, &mut work, aggregates).await?;
+                    let command = match crate::plan::copy::lowering::mutations::Source::statement(
+                        statement,
+                    ) {
+                        Some(source) => {
+                            mutations::child(source, &mut copying, &mut work, aggregates).await?
+                        }
+                        None if matches!(purpose, Purpose::StoredReferences) => {
+                            copying
+                                .stored_utility(statement, aggregates, &mut work)
+                                .await?
+                        }
+                        None => {
+                            return Err(SQLError::Unsupported(
+                                "native executable construction requires a query or mutation"
+                                    .into(),
+                            ))
+                        }
+                    };
                     command.map(|command| {
                         MutableExecutablePlan::Command(MutableCommandPlan::from_rewrite_parts(
                             command,

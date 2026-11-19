@@ -11,7 +11,7 @@ use crate::catalog::{relation_names::RelationNameCatalog, CatalogReadView};
 use uqa_core::memory::ProductionControl;
 use uqa_sql::{
     catalog::CatalogWork,
-    plan::UnifiedPlan,
+    plan::{PlanRef, StoredStatementObserver, UnifiedPlan},
     schema::dependencies::rewrites::{
         visit_stored_sequence_references_with_work, SequenceFunctionRelations, StoredSequenceInput,
     },
@@ -78,24 +78,42 @@ impl SequenceFunctionRelations for SequenceReferences<'_, '_> {
     }
 }
 
+impl StoredStatementObserver for &SequenceReferences<'_, '_> {
+    async fn plan<W: CatalogWork + Send>(
+        &mut self,
+        plan: PlanRef<'_>,
+        control: &ProductionControl<'_>,
+        work: &mut W,
+    ) -> Result<(), SQLError> {
+        visit_stored_sequence_references_with_work(
+            StoredSequenceInput::Plan(plan),
+            control,
+            work,
+            *self,
+        )
+        .await
+    }
+}
+
 impl References for SequenceReferences<'_, '_> {
     async fn inspect<W: CatalogWork + Send>(
         &self,
         reference: Reference<'_>,
         work: &mut W,
     ) -> Result<(), SQLError> {
-        let plan;
         let input = match reference {
             Reference::Expression(expr) => StoredSequenceInput::Expression(expr),
             Reference::Scalar(expr) => StoredSequenceInput::Scalar(expr),
             Reference::Plan(plan) => StoredSequenceInput::Plan(plan),
             Reference::Statement(statement) => {
-                plan = UnifiedPlan::lower_borrowed_for_rewrite(
+                let mut observer = self;
+                return UnifiedPlan::visit_stored_statement_with_work(
                     statement,
-                    &|_: &str| false,
                     self.control,
-                )?;
-                StoredSequenceInput::Plan(plan.as_plan_ref())
+                    work,
+                    &mut observer,
+                )
+                .await;
             }
             // These carry no argument expression. The independent routine predicate checks their concrete identities.
             Reference::Binding(_) | Reference::Routine(..) | Reference::Trigger(..) => {

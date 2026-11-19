@@ -6,9 +6,18 @@
 
 //! Mutable statement roots publish only after their independent child edits finish.
 
-use super::{MutableCommandPlan, MutableQueryPlan};
+use super::{
+    edits::Editable, memory::Folding, MutableCommandPlan, MutableQueryPlan, RewriteMemory,
+};
 use crate::{
-    plan::{CommandPlan, OwnedExecutablePlan, OwnedQueryPlan, PlanRef, UnifiedPlan},
+    catalog::work::Work,
+    plan::{
+        retirement::{
+            construction::{CompletedTree, Context},
+            Node,
+        },
+        CommandPlan, OwnedExecutablePlan, OwnedQueryPlan, PlanRef, UnifiedPlan,
+    },
     SQLError,
 };
 use uqa_core::memory::ProductionControl;
@@ -17,6 +26,28 @@ use uqa_core::memory::ProductionControl;
 pub enum MutableExecutablePlan {
     Query(MutableQueryPlan),
     Command(MutableCommandPlan),
+}
+
+pub(in crate::plan) struct CompletedStatement {
+    // Cancellation and abandonment retire native fields before their allocation leases.
+    tree: CompletedTree,
+    memory: Option<RewriteMemory>,
+}
+
+impl CompletedStatement {
+    pub(in crate::plan) async fn retire_from<W: Work + Send>(
+        mut self,
+        control: &ProductionControl<'_>,
+        work: &mut W,
+    ) -> Result<(), SQLError> {
+        self.tree.retire_from(control, work).await?;
+        if let Some(memory) = self.memory.take() {
+            Folding::new(memory)
+                .retire_from(Some(control), work)
+                .await?;
+        }
+        Ok(())
+    }
 }
 
 impl UnifiedPlan {
@@ -43,6 +74,23 @@ impl PlanRef<'_> {
 }
 
 impl MutableExecutablePlan {
+    pub(in crate::plan) fn into_retirement(self, context: Context) -> CompletedStatement {
+        let (node, memory) = match self {
+            Self::Query(query) => {
+                let (query, memory) = query.into_parts();
+                (Node::Query(query), memory)
+            }
+            Self::Command(command) => {
+                let (command, memory) = command.into_parts();
+                (Node::Command(command), memory)
+            }
+        };
+        CompletedStatement {
+            tree: context.completed_tree(node),
+            memory,
+        }
+    }
+
     /// Transfer a retained native executable through another entry point using the same allowance and its current cancellation tokens.
     pub fn transfer(self, control: &ProductionControl<'_>) -> Result<Self, SQLError> {
         match &self {

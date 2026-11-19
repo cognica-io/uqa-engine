@@ -15,7 +15,7 @@ use std::future::{ready, Future};
 use uqa_core::memory::{Produced, ProductionControl};
 
 mod native;
-pub use native::RetainedExecutablePlan;
+pub use native::{RetainedExecutablePlan, StoredStatementObserver};
 
 pub(super) mod scalars;
 pub(in crate::plan::copy) mod text;

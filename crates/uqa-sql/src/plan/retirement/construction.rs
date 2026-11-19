@@ -18,7 +18,7 @@ use std::{
 use uqa_core::memory::{BudgetedVec, MemoryError, Produced, ProductionControl};
 
 mod retirement;
-pub(in crate::plan) use retirement::Retirement;
+pub(in crate::plan) use retirement::{CompletedTree, Retirement};
 mod local;
 use local::{Local, NodeRetirement};
 

@@ -18,6 +18,7 @@ use uqa_core::{
 };
 
 mod replacement;
+mod stored;
 
 struct Labels(usize);
 impl<W: Work + Send> MetadataObserver<W> for Labels {

@@ -75077,6 +75077,19 @@
     {
       "package": "uqa-sql",
       "kind": "lib",
+      "test": "stored_statement_construction_and_retirement_share_the_original_work_and_allowance",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/input/native/statement/tests/stored.rs",
+      "capability": "Stored statement reference validation",
+      "workload": "Observe a SQL-standard routine INSERT with 4,096 rows and a rewrite-rule NOTIFY with a 7,800-byte payload. Reserve the remaining allowance when the observer receives the plan.",
+      "invariant": "Construction and retirement yield across calls. Larger windows group the work. Cancellation in either phase returns SQLSTATE 57014 and releases all reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
       "test": "metadata_traversal_bounds_deep_and_wide_work_on_a_small_stack",
       "cases": 1,
       "source": "crates/uqa-sql/src/plan/copy/lowering/input/native/statement/tests.rs",

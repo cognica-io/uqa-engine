@@ -32,7 +32,7 @@ mod commands;
 mod ctes;
 mod expressions;
 pub(super) mod input;
-pub use input::RetainedExecutablePlan;
+pub use input::{RetainedExecutablePlan, StoredStatementObserver};
 mod mutations;
 mod ownership;
 mod projections;
