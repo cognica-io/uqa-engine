@@ -7,9 +7,9 @@
 //! Bound a child suite by completed fixtures, retaining its single-process history.
 
 use std::collections::BTreeSet;
-use std::io::BufRead;
+use std::fs::File;
+use std::io::{self, BufRead, BufReader, Read};
 use std::process::{Child, Command, ExitStatus, Stdio};
-use std::sync::mpsc::{self, Receiver, RecvTimeoutError, TryRecvError};
 use std::time::{Duration, Instant};
 
 struct Progress<'a> {
@@ -55,8 +55,6 @@ impl<'a> Progress<'a> {
                 return Err(format!("unexpected fixture summary: {line}"));
             }
             self.summary = true;
-        } else {
-            self.remaining(now)?;
         }
         Ok(())
     }
@@ -77,21 +75,14 @@ impl<'a> Progress<'a> {
         )
     }
 
-    fn receive(
-        &self,
-        receiver: &Receiver<std::io::Result<String>>,
-    ) -> Result<Option<String>, String> {
-        let result = match receiver.try_recv() {
-            Ok(line) => Ok(line),
-            Err(TryRecvError::Disconnected) => Err(RecvTimeoutError::Disconnected),
-            Err(TryRecvError::Empty) => receiver.recv_timeout(self.remaining(Instant::now())?),
-        };
-        match result {
-            Ok(Ok(line)) => Ok(Some(line)),
-            Ok(Err(error)) => Err(format!("cannot read child suite: {error}")),
-            Err(RecvTimeoutError::Timeout) => Err(self.stalled()),
-            Err(RecvTimeoutError::Disconnected) => Ok(None),
-        }
+    fn observe_line(&mut self, bytes: &[u8], label: &str) -> Result<(), String> {
+        let raw = std::str::from_utf8(bytes)
+            .map_err(|error| format!("cannot read child suite: {error}"))?;
+        let line = raw
+            .strip_suffix('\n')
+            .map_or(raw, |line| line.strip_suffix('\r').unwrap_or(line));
+        eprintln!("{label}: {line}");
+        self.observe(line, Instant::now())
     }
 
     fn finish(self) -> Result<(), String> {
@@ -108,22 +99,93 @@ impl<'a> Progress<'a> {
     }
 }
 
-struct OwnedChild(Option<Child>);
+struct OwnedChild {
+    process: Option<Child>,
+    output: BufReader<File>,
+}
 
 impl OwnedChild {
-    fn finish(&mut self, progress: &Progress<'_>) -> Result<ExitStatus, String> {
+    fn spawn(command: &mut Command, capture: tempfile::NamedTempFile) -> io::Result<Self> {
+        let output = BufReader::new(capture.reopen()?);
+        let process = command
+            .stdout(capture.into_file())
+            .stderr(Stdio::inherit())
+            .spawn();
+        command.stdout(Stdio::inherit());
+        Ok(Self {
+            process: Some(process?),
+            output,
+        })
+    }
+
+    fn status(&mut self) -> Result<Option<ExitStatus>, String> {
+        self.process
+            .as_mut()
+            .unwrap()
+            .try_wait()
+            .map_err(|error| format!("cannot reap child suite: {error}"))
+    }
+
+    fn watch(&mut self, mut progress: Progress<'_>, label: &str) -> Result<(), String> {
+        let mut offset = 0;
+        let mut line = Vec::new();
         loop {
-            match self.0.as_mut().unwrap().try_wait() {
-                Ok(Some(status)) => {
-                    self.0.take();
-                    return Ok(status);
+            let deadline = progress.deadline;
+            let due = Instant::now() >= deadline;
+            let status = self.status()?;
+            // At direct-child exit, every byte it wrote is visible. A descendant can still hold stdout.
+            let end = self
+                .output
+                .get_ref()
+                .metadata()
+                .map_err(|error| format!("cannot read child suite: {error}"))?
+                .len();
+            let available = end
+                .checked_sub(offset)
+                .ok_or("child suite output was truncated")?;
+            // Once due, inspect the entire finite backlog before declaring a live child stalled.
+            let limit = if due || status.is_some() {
+                available
+            } else {
+                available.min(64 * 1024)
+            };
+            let mut snapshot = self.output.by_ref().take(limit);
+            while snapshot.limit() != 0 {
+                let read = snapshot
+                    .read_until(b'\n', &mut line)
+                    .map_err(|error| format!("cannot read child suite: {error}"))?;
+                if read == 0 {
+                    return Err("child suite output was truncated".to_owned());
                 }
-                Ok(None) => std::thread::sleep(
-                    progress
-                        .remaining(Instant::now())?
-                        .min(Duration::from_millis(10)),
-                ),
-                Err(error) => return Err(format!("cannot reap child suite: {error}")),
+                if line.ends_with(b"\n") {
+                    progress.observe_line(&line, label)?;
+                    line.clear();
+                }
+            }
+            offset += limit;
+            if let Some(status) = status {
+                self.process.take();
+                if !line.is_empty() {
+                    progress.observe_line(&line, label)?;
+                }
+                eprintln!("{label}: child suite {status}");
+                if !status.success() {
+                    return Err(format!("child suite failed: {status}"));
+                }
+                return progress.finish();
+            }
+            match progress.remaining(Instant::now()) {
+                Ok(remaining) if offset == end => {
+                    std::thread::sleep(remaining.min(Duration::from_millis(10)));
+                }
+                Err(error) if due && deadline == progress.deadline && self.status()?.is_none() => {
+                    return Err(if progress.summary {
+                        format!("{error}; successful summary observed, child still running")
+                    } else {
+                        error
+                    });
+                }
+                _ => (),
             }
         }
     }
@@ -131,7 +193,7 @@ impl OwnedChild {
 
 impl Drop for OwnedChild {
     fn drop(&mut self) {
-        if let Some(mut child) = self.0.take() {
+        if let Some(mut child) = self.process.take() {
             let _ = child.kill();
             let _ = child.wait();
         }
@@ -145,35 +207,14 @@ pub(super) fn run(
     allowance: Duration,
     label: &str,
 ) -> Result<(), String> {
-    std::thread::scope(|scope| {
-        let mut child = OwnedChild(Some(
-            command
-                .stdout(Stdio::piped())
-                .stderr(Stdio::inherit())
-                .spawn()
-                .map_err(|error| format!("cannot start child suite: {error}"))?,
-        ));
-        let stdout = child.0.as_mut().unwrap().stdout.take().unwrap();
-        let (send, receive) = mpsc::sync_channel(64);
-        scope.spawn(move || {
-            for line in std::io::BufReader::new(stdout).lines() {
-                if send.send(line).is_err() {
-                    break;
-                }
-            }
-        });
-        let mut progress = Progress::new(prefix, expected, allowance, Instant::now());
-        while let Some(line) = progress.receive(&receive)? {
-            eprintln!("{label}: {line}");
-            progress.observe(&line, Instant::now())?;
-        }
-        drop(receive);
-        let status = child.finish(&progress)?;
-        if !status.success() {
-            return Err(format!("child suite failed: {status}"));
-        }
-        progress.finish()
-    })
+    tempfile::NamedTempFile::new()
+        .and_then(|capture| OwnedChild::spawn(command, capture))
+        .map_err(|error| format!("{label}: cannot start child suite: {error}"))?
+        .watch(
+            Progress::new(prefix, expected, allowance, Instant::now()),
+            label,
+        )
+        .map_err(|error| format!("{label}: {error}"))
 }
 
 #[cfg(test)]
