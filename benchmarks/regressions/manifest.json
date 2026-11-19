@@ -75972,6 +75972,19 @@
     {
       "package": "uqa-sql",
       "kind": "lib",
+      "test": "ordinary_row_schema_drop_releases_shared_and_final_owners_without_stepped_field_visits",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/retirement/tests.rs",
+      "capability": "Retained row schema retirement",
+      "workload": "Release a shared reader and the last owner of a 32-column schema with 16-level types under exhausted allowance, then retire an identical schema incrementally.",
+      "invariant": "Ordinary release allocates nothing, preserves the reader and visits zero scheduler fields. Explicit retirement visits fields and returns all reserved memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
       "test": "row_schema_retirement_preserves_readers_and_releases_native_fields_without_allocation",
       "cases": 1,
       "source": "crates/uqa-sql/src/schema/retirement/tests.rs",

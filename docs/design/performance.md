@@ -2,6 +2,17 @@
 
 This document records dated UQA Engine measurements, including controlled CI qualification and historical developer-machine comparisons. Each section identifies its source and measurement boundary; absolute times remain specific to the measured host. Controlled qualification uses independently authenticated host control and reference-only noise calibration. Unless a section explicitly compares another engine, its ratios compare UQA revisions. Measurements use the `bench` profile (release + debug symbols, thin LTO, `codegen-units = 1`) unless a section explicitly records a package-scoped `release` runner or a published package.
 
+## Controlled analytical results (2026-11-18 UTC)
+
+On main `4c98f23f2`, the Q1 grouped aggregate exceeded its 1.10 limit against reference `0e8be6892`. The cursor interval crossed its 1.15 limit. All sixteen claim comparisons passed. The m7g.4xlarge run used eight counterbalanced comparison pairs per workload and 32 independent calibration pairs. Absolute times below are median Criterion slopes. The paired ratio and its interval determine each decision. [Controlled run](https://github.com/cognica-io/uqa-engine/actions/runs/44390798718) · [Signed measurements](https://github.com/cognica-io/uqa-engine/actions/runs/44390798718/artifacts/14470663312)
+
+| Workload | Reference ms | Head ms | Paired ratio | Calibrated interval | Limit | Decision |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| Q1 grouped aggregate | 3.856040 | 4.312501 | 1.118499 | 1.107246–1.129867 | 1.10 | regression |
+| Q6 filtered aggregate | 3.554539 | 3.015383 | 0.849103 | 0.844656–0.853573 | 1.10 | accepted |
+| Materialized result scan | 9.927650 | 10.294692 | 1.033252 | 0.999838–1.067783 | 1.15 | accepted |
+| Cursor result scan | 4.875374 | 5.909816 | 1.212177 | 1.145052–1.283236 | 1.15 | inconclusive |
+
 ## Controlled cursor regression (2026-11-15 UTC)
 
 Automatic [run 43754562077](https://github.com/cognica-io/uqa-engine/actions/runs/43754562077), attempt 1, measures main `6d0a1ed49690e8c5c353fcc7916557470f221675` against analytical reference `0e8be6892340b2d1892e0abf68c2a9ad046f49d5`. Cursor result scan fails the existing 1.15 regression limit: its complete independently calibrated interval remains above that limit. Q1, Q6, materialized scan and all sixteen claim comparisons are accepted. This source does not have overall timing acceptance. [#653](https://github.com/cognica-io/uqa-engine/issues/653) retains the preceding cursor regressions and the unresolved cause, correction and corrected-source qualification.

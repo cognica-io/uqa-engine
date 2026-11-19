@@ -53,11 +53,6 @@ impl IndexOwner {
         }
     }
 }
-impl Drop for IndexOwner {
-    fn drop(&mut self) {
-        drop(self.take_retirement());
-    }
-}
 
 pub struct Retirement {
     fields: Option<index::Fields>,
