@@ -88,14 +88,15 @@ fn report(records: &dyn VersionedPersistence, committed: u64, pending: u64) -> s
     })
 }
 
-fn rejected<T, E: std::fmt::Display>(result: Result<T, E>, native_reopen: bool) {
+fn rejected<T, E: std::fmt::Display>(result: Result<T, E>, reopened_provider: Option<&str>) {
     let error = result.err().expect("previous writer accepted the new record format").to_string();
-    // Native reopen validates physical families and exact cache triggers before the common record version. Retained handles must still reject through their record-format guard.
-    let native_schema_fence = native_reopen && matches!(error.as_str(),
-        "invalid versioned record encoding: unmapped native table requires an explicit record family"
+    // Native SQLite checks materialization and redb checks its table set before either reader opens the record format.
+    let physical_format_error = matches!((reopened_provider, error.as_str()),
+        (Some("native"), "invalid versioned record encoding: unmapped native table requires an explicit record family"
         | "invalid versioned record encoding: missing or changed native materialization schema or guard"
-        | "SQLite storage failed: storage backend error: missing or changed metadata cache trigger");
-    assert!(error.contains("record format") || error.contains("record table definition") || native_schema_fence, "unrelated failure: {error}");
+        | "SQLite storage failed: storage backend error: missing or changed metadata cache trigger")
+        | (Some("redb"), "MVCC storage failed: invalid versioned record encoding: incomplete record table set"));
+    assert!(error.contains("record format") || error.contains("record table definition") || physical_format_error, "unrelated failure: {error}");
 }
 
 fn main() {
@@ -105,7 +106,7 @@ fn main() {
     let state = Path::new(&args[5]);
     let opened = open(kind, mode, path, action == "create");
     if action == "reject" {
-        rejected(opened, kind == "native");
+        rejected(opened, Some(kind.as_str()));
         return;
     }
     let records = opened.unwrap();
@@ -135,14 +136,14 @@ fn main() {
         let mut line = String::new();
         std::io::stdin().lock().read_line(&mut line).unwrap();
         assert_eq!(line.trim(), "upgraded");
-        rejected(records.snapshot(&control), false);
-        rejected(snapshot.get(b"fixture\0\xff", &control), false);
-        rejected(records.allocate_transaction(&control), false);
-        rejected(records.identifier_watermark(b"format-probe", &control), false);
-        rejected(records.allocate_identifiers(b"format-probe", IdentifierRequest::Observe(78), &control), false);
-        rejected(records.commit(pending_id, &empty, &control), false);
-        rejected(records.abort(pending_id, &control), false);
-        rejected(records.reclaim_versions(&control), false);
+        rejected(records.snapshot(&control), None);
+        rejected(snapshot.get(b"fixture\0\xff", &control), None);
+        rejected(records.allocate_transaction(&control), None);
+        rejected(records.identifier_watermark(b"format-probe", &control), None);
+        rejected(records.allocate_identifiers(b"format-probe", IdentifierRequest::Observe(78), &control), None);
+        rejected(records.commit(pending_id, &empty, &control), None);
+        rejected(records.abort(pending_id, &control), None);
+        rejected(records.reclaim_versions(&control), None);
         return;
     }
     assert_eq!(action, "verify");

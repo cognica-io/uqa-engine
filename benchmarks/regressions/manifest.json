@@ -475,6 +475,32 @@
       ]
     },
     {
+      "package": "uqa-storage-redb",
+      "kind": "lib",
+      "test": "equal_large_values_in_one_revision_share_bytes_until_the_last_retained_version_is_reclaimed",
+      "cases": 1,
+      "source": "crates/uqa-storage-redb/src/mvcc/tests/backup_metadata/fingerprints/bodies.rs",
+      "capability": "Physical reuse and reclamation of large redb values",
+      "workload": "Commit three 2 KiB values, two with identical bytes. Pin the revision, replace one of the matching values, then retire the snapshot and delete the remaining records.",
+      "invariant": "The three records occupy two stored bodies. The shared body keeps both owners while the old snapshot exists, retains one owner after reclamation and is released after its last owner is deleted. All visible values match their original bytes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-redb",
+      "kind": "lib",
+      "test": "point_and_batch_metadata_select_historical_and_current_revisions_without_reading_large_values",
+      "cases": 1,
+      "source": "crates/uqa-storage-redb/src/mvcc/tests/backup_metadata/fingerprints.rs",
+      "capability": "Cold redb point and batch metadata reads",
+      "workload": "Read a two-MiB record's metadata at its pinned and current revision with the page cache disabled. Repeat each lookup in a batch that requests a missing key and the same record twice.",
+      "invariant": "Each point lookup and each batch reads less than 256 KiB from storage with a 1 KiB invocation allowance. Each batch uses one physical read transaction and preserves request order, absence and revision.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
       "package": "uqa-engine",
       "kind": "lib",
       "test": "persistent_publication_opens_in_windows_and_resumes_after_runtime_abandonment",

@@ -224,12 +224,11 @@ impl<'a> RedbBackupImport<'a> {
                     });
                 }
                 let length = usize::try_from(value_bytes)
-                    .ok()
-                    .and_then(|n| n.checked_add(1))
-                    .ok_or(BackupError::Invalid("redb import value length overflow"))?;
+                    .map_err(|_| BackupError::Invalid("redb import value length overflow"))?;
+                let size = super::heads::stored_size(revision.as_u64(), length)?;
                 let mut owned_key = BackupCursorKey::new(self.control.memory());
                 owned_key.extend_from_slice(key)?;
-                let _value_reservation = self.control.memory().reserve(length)?;
+                let _value_reservation = self.control.memory().reserve(size)?;
                 let transaction = physical_writer(database)?;
                 {
                     let mut heads = transaction.open_table(HEADS).map_err(redb_error)?;
@@ -237,25 +236,15 @@ impl<'a> RedbBackupImport<'a> {
                         return Err(BackupError::Invalid("duplicate imported record"));
                     }
                     let mut versions = transaction.open_table(VERSIONS).map_err(redb_error)?;
-                    let mut value = versions
-                        .insert_reserve((&*owned_key, revision.as_u64()), length)
-                        .map_err(redb_error)?;
-                    let output = value.as_mut();
-                    output[0] = 1;
-                    let digest = read_record_image(input, revision, &mut output[1..])?;
-                    drop(value);
-                    let mut fingerprints = transaction
-                        .open_table(super::image_fingerprints::TABLE)
-                        .map_err(redb_error)?;
-                    super::image_fingerprints::insert(
-                        &mut fingerprints,
+                    super::heads::insert_from(
+                        &mut super::heads::VersionWriter::new(&transaction, Some(&self.control)),
+                        &mut heads,
+                        &mut versions,
                         &owned_key,
                         revision.as_u64(),
-                        Some((length - 1, digest)),
+                        length,
+                        |destination| read_record_image(input, revision, destination),
                     )?;
-                    heads
-                        .insert(&*owned_key, revision.as_u64())
-                        .map_err(redb_error)?;
                 }
                 self.control.cancellation().check()?;
                 transaction.commit().map_err(redb_error)?;
@@ -336,6 +325,7 @@ fn initialize(
     transaction
         .open_table(super::image_fingerprints::TABLE)
         .map_err(redb_error)?;
+    drop(super::large_values::Writer::open(&transaction)?);
     transaction.open_table(HEADS).map_err(redb_error)?;
     transaction.open_table(VERSIONS).map_err(redb_error)?;
     transaction.open_table(TRANSACTIONS).map_err(redb_error)?;

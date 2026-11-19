@@ -59,11 +59,9 @@ pub(super) fn migrate(database: &Database, identity: DatabaseId) -> VersionResul
             let table = transaction.open_table(LEGACY).map_err(redb_error)?;
             let mut heads = transaction.open_table(HEADS).map_err(redb_error)?;
             let mut versions = transaction.open_table(VERSIONS).map_err(redb_error)?;
-            let mut fingerprints = transaction
-                .open_table(super::image_fingerprints::TABLE)
-                .map_err(redb_error)?;
             let mut sequence = current.as_u64().max(old_sequence);
             let mut populated = false;
+            let mut images = super::heads::VersionWriter::new(&transaction, None);
             for entry in table.iter().map_err(redb_error)? {
                 let (key, value) = entry.map_err(redb_error)?;
                 let key = key.value();
@@ -77,25 +75,17 @@ pub(super) fn migrate(database: &Database, identity: DatabaseId) -> VersionResul
                     populated = true;
                 }
                 let value = value.value();
-                let size = value
-                    .len()
-                    .checked_add(1)
-                    .ok_or(VersionError::InvalidEncoding(
-                        "legacy value length overflow",
-                    ))?;
-                let mut destination = versions
-                    .insert_reserve((key, sequence), size)
-                    .map_err(redb_error)?;
-                destination.as_mut()[0] = 1;
-                let digest = copy_legacy_value(sequence, value, &mut destination.as_mut()[1..]);
-                drop(destination);
-                super::image_fingerprints::insert(
-                    &mut fingerprints,
+                super::heads::insert_from(
+                    &mut images,
+                    &mut heads,
+                    &mut versions,
                     key,
                     sequence,
-                    Some((value.len(), digest)),
+                    value.len(),
+                    |destination| {
+                        Ok::<_, VersionError>(copy_legacy_value(sequence, value, destination))
+                    },
                 )?;
-                heads.insert(key, sequence).map_err(redb_error)?;
             }
             metadata
                 .insert("sequence", sequence.to_be_bytes().as_slice())

@@ -33,17 +33,23 @@ pub(super) fn reclaim(
         let mut fingerprints = transaction
             .open_table(super::image_fingerprints::TABLE)
             .map_err(redb_error)?;
+        let mut bodies = None;
         for entry in heads.iter().map_err(redb_error)? {
             control.cancellation().check()?;
-            let (key, _) = entry.map_err(redb_error)?;
+            let (key, head) = entry.map_err(redb_error)?;
             let key = key.value();
-            let cutoff = versions
-                .range((key, 0)..=(key, horizon.sequence().as_u64()))
-                .map_err(redb_error)?
-                .next_back()
-                .transpose()
-                .map_err(redb_error)?
-                .map(|(key, _)| key.value().1);
+            let head = super::heads::RecordHead::decode(head.value())?;
+            let cutoff = if head.inline.is_some() && head.revision <= horizon.sequence().as_u64() {
+                Some(head.revision)
+            } else {
+                versions
+                    .range((key, 0)..=(key, horizon.sequence().as_u64()))
+                    .map_err(redb_error)?
+                    .next_back()
+                    .transpose()
+                    .map_err(redb_error)?
+                    .map(|(key, _)| key.value().1)
+            };
             let Some(cutoff) = cutoff else {
                 continue;
             };
@@ -60,7 +66,11 @@ pub(super) fn reclaim(
                 let Some(obsolete) = obsolete else {
                     break;
                 };
-                versions.remove((key, obsolete)).map_err(redb_error)?;
+                let previous = versions
+                    .remove((key, obsolete))
+                    .map_err(redb_error)?
+                    .expect("selected obsolete version");
+                super::large_values::Writer::release(&transaction, &mut bodies, previous.value())?;
                 fingerprints.remove((key, obsolete)).map_err(redb_error)?;
                 removed = removed.checked_add(1).ok_or(VersionError::InvalidEncoding(
                     "reclaimed version count overflow",

@@ -17,7 +17,7 @@ fn reclamation_preserves_live_views_tombstones_and_receipts_across_reopen() {
         let store = RedbRecordStore::new(Arc::new(Database::create(&path).unwrap())).unwrap();
         uqa_storage::mvcc::verify_version_reclamation(&store).unwrap();
         let read = store.database.begin_read().unwrap();
-        assert_eq!(read.open_table(VERSIONS).unwrap().len().unwrap(), 2);
+        assert_eq!(read.open_table(VERSIONS).unwrap().len().unwrap(), 0);
         assert_eq!(read.open_table(HEADS).unwrap().len().unwrap(), 2);
         assert_eq!(read.open_table(TRANSACTIONS).unwrap().len().unwrap(), 4);
     }

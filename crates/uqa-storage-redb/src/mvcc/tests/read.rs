@@ -161,11 +161,12 @@ fn a_visible_head_cannot_silently_point_to_a_missing_version() {
     );
     let store = RedbRecordStore::new(database.clone()).unwrap();
     let control = StorageReadControl::with_limit(1 << 20);
+    let payload = vec![1; super::super::heads::INLINE_LIMIT + 1];
     let write = PreparedRecordCommit::new(
         &[RecordWrite {
             key: b"a",
             expected: None,
-            value: Some(b"value"),
+            value: Some(&payload),
         }],
         &control,
     )
@@ -173,11 +174,12 @@ fn a_visible_head_cannot_silently_point_to_a_missing_version() {
     let id = store.allocate_transaction(&control).unwrap();
     let receipt = store.commit(id, &write, &control).unwrap();
     let transaction = physical_writer(&database).unwrap();
-    transaction
+    assert!(transaction
         .open_table(VERSIONS)
         .unwrap()
         .remove((b"a".as_slice(), receipt.sequence.as_u64()))
-        .unwrap();
+        .unwrap()
+        .is_some());
     transaction.commit().unwrap();
     let snapshot = store.snapshot(&control).unwrap();
     assert!(matches!(

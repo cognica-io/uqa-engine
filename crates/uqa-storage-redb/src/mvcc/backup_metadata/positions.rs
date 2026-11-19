@@ -74,7 +74,7 @@ impl Snapshot {
         control: &StorageReadControl,
         visit: &mut BackupRecordImageVisitor<'_>,
     ) -> VersionResult<()> {
-        image_fingerprints::visit_positions(
+        image_fingerprints::visit_positions::<true>(
             || self.read().map(|(transaction, _)| transaction),
             self.records.sequence(),
             b"",

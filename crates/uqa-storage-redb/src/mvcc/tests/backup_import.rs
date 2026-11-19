@@ -82,10 +82,7 @@ fn redb_backup_import_restores_artifacts_revisions_and_allocators_without_the_so
     let generation = verify_diskann_restore_source(&*session.backend).unwrap();
     drop(session);
     let store = source.store();
-    store.put(b"", b"").unwrap();
-    store.put(b"large", &vec![193; (128 << 10) + 17]).unwrap();
-    store.put(b"deleted", b"absent from the cut").unwrap();
-    store.delete(b"deleted").unwrap();
+    write_source_records(&store);
     let notification = KeyValueNotificationRecords.key(&setup).unwrap();
     store.put(&notification, b"excluded delivery").unwrap();
     let records = source.record_store().unwrap();
@@ -152,6 +149,7 @@ fn redb_backup_import_restores_artifacts_revisions_and_allocators_without_the_so
         super::backup_image::expected_records(&restored, b"\xffunused", &notification),
         expected
     );
+    verify_imported_images(&records, &expected, &setup);
     let session = restored.open_session().unwrap();
     verify_diskann_restored(&*session.backend, generation).unwrap();
     verify_diskann_restored_writes(&*session.backend, generation).unwrap();
@@ -176,6 +174,45 @@ fn redb_backup_import_restores_artifacts_revisions_and_allocators_without_the_so
         super::backup_image::expected_records(&retry, b"\xffunused", &notification),
         after
     );
+}
+
+fn write_source_records(store: &dyn KeyValueStore) {
+    store.put(b"", b"").unwrap();
+    let mut same_cut = store.batch();
+    same_cut.put(b"image-a", &[37; 513]).unwrap();
+    same_cut.put(b"image-b", &[83; 513]).unwrap();
+    same_cut.commit().unwrap();
+    store.put(b"large", &vec![193; (128 << 10) + 17]).unwrap();
+    store.put(b"deleted", b"absent from the cut").unwrap();
+    store.delete(b"deleted").unwrap();
+}
+
+fn verify_imported_images(
+    records: &crate::RedbRecordStore,
+    expected: &std::collections::BTreeMap<Vec<u8>, Vec<u8>>,
+    control: &StorageReadControl,
+) {
+    use uqa_storage::backup::{ImageDigest, UnitFingerprint};
+    assert_eq!(
+        expected[b"image-a".as_slice()][..8],
+        expected[b"image-b".as_slice()][..8]
+    );
+    let cut = records.capture_backup_snapshot(control).unwrap().unwrap();
+    let mut observed = 0;
+    cut.visit_record_image_positions(None, usize::MAX, control, &mut |key, selected| {
+        let bytes = &expected[key];
+        assert_eq!(
+            selected.fingerprint,
+            Some(UnitFingerprint {
+                decoded_bytes: bytes.len() as u64,
+                digest: ImageDigest::of_bytes(bytes),
+            })
+        );
+        observed += 1;
+        Ok(true)
+    })
+    .unwrap();
+    assert_eq!(observed, expected.len());
 }
 
 #[test]

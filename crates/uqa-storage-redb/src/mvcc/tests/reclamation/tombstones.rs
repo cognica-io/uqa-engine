@@ -31,7 +31,7 @@ fn tombstone_reclamation_preserves_absence_guards_receipts_and_epochs_across_reo
                 .range((b"pages/".as_slice(), 0)..(b"pages0".as_slice(), 0))
                 .unwrap()
                 .count(),
-            1
+            0
         );
     }
     let store = RedbRecordStore::new(Arc::new(Database::create(&path).unwrap())).unwrap();
