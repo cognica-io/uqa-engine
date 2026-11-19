@@ -4,14 +4,11 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use super::super::constants::input::{self as node_input, Application};
+use super::super::constants::input::apply_node;
 use super::super::{AnalysisIdentity, AnalysisType, ConvertedInput, InputConstants};
 use super::*;
 use crate::ast::BinaryOp;
-use crate::{
-    construction::{self, Read, Work},
-    plan::ScalarEditIdentity,
-};
+use crate::{construction, plan::ScalarEditIdentity};
 use uqa_core::{
     image_io::{ImageDecodeWindow, ImageDecoder},
     memory::{MemoryBudget, Produced, ProductionVec},
@@ -23,7 +20,6 @@ mod retirement;
 
 type Fixture = (OwnedScalarExpr, RowExpansion, InputConstants);
 type Input = ImageDecoder<OwnedScalarExpr, SQLError>;
-type AppliedInput = Result<(OwnedScalarExpr, InputConstants), SQLError>;
 
 fn scalar(text: &str, control: &ProductionControl<'_>) -> OwnedScalarExpr {
     OwnedScalarExpr::literal(
@@ -107,65 +103,6 @@ fn fixture(control: &ProductionControl<'_>) -> Fixture {
         .push((3, selected_fields([].into_iter(), control)), control)
         .unwrap();
     (row, expansion, constants)
-}
-
-struct Selected(Option<InputConstants>);
-impl ScalarEditIdentity for Selected {
-    type Identity = AnalysisIdentity<ScalarExpr>;
-    const BEFORE_CHILDREN: bool = false;
-    fn identity(expression: &ScalarExpr) -> Self::Identity {
-        expression.into()
-    }
-}
-impl Application<Work<'_>> for Selected {
-    fn constants(&mut self) -> &mut InputConstants {
-        self.0
-            .as_mut()
-            .expect("active node owns its input selections")
-    }
-}
-impl<'a> ScalarEdit<Work<'a>> for Selected {
-    async fn apply(
-        &mut self,
-        identity: Self::Identity,
-        expression: OwnedScalarExpr,
-        control: &ProductionControl<'_>,
-        work: &mut Work<'a>,
-    ) -> Result<OwnedScalarExpr, SQLError> {
-        let constants = self.0.take().expect("parent transfers input selections");
-        let owner = control.capture();
-        let output = work.submit(move |work| async move {
-            apply_node(constants, identity, expression, owner, work)?.await
-        })?;
-        let (expression, constants) = construction::receive(output).await?;
-        self.0 = Some(constants);
-        Ok(expression)
-    }
-}
-
-fn apply_node(
-    constants: InputConstants,
-    identity: AnalysisIdentity<ScalarExpr>,
-    expression: OwnedScalarExpr,
-    owner: uqa_core::memory::OwnedProductionControl,
-    mut work: Work<'_>,
-) -> Result<Read<'_, AppliedInput>, SQLError> {
-    let admission = owner.clone();
-    Ok(Read::new(admission.control(), async move {
-        let control = owner.control();
-        let mut edit = Selected(Some(constants));
-        let output = Read::new(
-            control,
-            node_input::apply_from(&mut edit, identity, expression, &control, &mut work),
-        )?
-        .await?;
-        Ok((
-            output,
-            edit.0
-                .take()
-                .expect("completed node owns its input selections"),
-        ))
-    })?)
 }
 
 fn input(
