@@ -261,3 +261,56 @@ fn stored_statement_edits_classify_the_current_text_on_every_copy() {
     drop(stored);
     assert_eq!(memory.used(), 0);
 }
+
+#[test]
+fn stored_statement_edits_retire_discarded_and_replaced_syntax_before_the_next_selection() {
+    use crate::ast::Expr;
+    let original = CancellationToken::new();
+    let memory = MemoryBudget::new(8 << 20);
+    let control = ProductionControl::new(&memory, &original, &original);
+    let rows = vec!["(7)"; 128].join(",");
+    let (mut stored, _) = capture_windows(body(&format!("VALUES {rows}")), &control);
+    let before = memory.used();
+    let mut work = Checkpoints::default();
+    let mut edit = inline(stored.statement_edit_from(0, &control, &mut work))
+        .unwrap()
+        .unwrap();
+    let deep = (0..128).fold(Expr::Literal(uqa_core::Value::Int(9)), |child, _| {
+        Expr::UnaryMinus(Box::new(child))
+    });
+    *edit.value_mut() = Statement::Values {
+        rows: vec![vec![deep]],
+    };
+    let pressure = memory.reserve(memory.available()).unwrap();
+    assert!(!inline(edit.finish_from(false, &control, &mut work)).unwrap());
+    drop(pressure);
+    assert_eq!(memory.used(), before);
+
+    let mut edit = inline(stored.statement_edit_from(0, &control, &mut work))
+        .unwrap()
+        .unwrap();
+    *edit.value_mut() = crate::compile("SELECT 19").unwrap().remove(0);
+    assert!(inline(edit.finish_from(true, &control, &mut work)).unwrap());
+    let published = serde_json::to_value(&statements(&stored)[0]).unwrap();
+    let held = memory.used();
+    let stop = CancellationToken::new();
+    let invoking = ProductionControl::new(&memory, &original, &stop);
+    let mut interrupted = Checkpoints(0, Some((4, stop.clone())));
+    assert_eq!(
+        inline(stored.statement_edit_from(1, &invoking, &mut interrupted))
+            .err()
+            .unwrap()
+            .sqlstate(),
+        Some("57014")
+    );
+    assert_eq!(
+        serde_json::to_value(&statements(&stored)[0]).unwrap(),
+        published
+    );
+    assert!(inline(stored.statement_edit_from(1, &control, &mut work))
+        .unwrap()
+        .is_none());
+    assert!(memory.used() < held);
+    drop(stored);
+    assert_eq!(memory.used(), 0);
+}

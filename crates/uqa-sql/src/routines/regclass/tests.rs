@@ -60,8 +60,14 @@ enum Stop {
 type ResultImage = Result<(bool, serde_json::Value), (String, String)>;
 
 fn run(definition: CreateFunction, steps: usize, stop: Stop) -> (ResultImage, usize) {
+    let (result, polls, _) = measure(definition, steps, stop);
+    (result, polls)
+}
+
+fn measure(definition: CreateFunction, steps: usize, stop: Stop) -> (ResultImage, usize, u64) {
     let source = SQLUserFunction::new(definition, RoutineBody::Source).shared();
-    let original_body = serde_json::to_value(&source.def.body).unwrap();
+    let retained_body = std::sync::Arc::new(serde_json::to_value(&source.def.body).unwrap());
+    let original_body = retained_body.clone();
     let memory = MemoryBudget::new(32 << 20);
     let native = memory.clone();
     let token = CancellationToken::new();
@@ -81,17 +87,12 @@ fn run(definition: CreateFunction, steps: usize, stop: Stop) -> (ResultImage, us
                 .advance_from(&Catalog, &mut definition, &control, &mut input)
                 .await
             {
-                Ok(Some(changed)) => {
-                    break Ok((
-                        changed,
-                        serde_json::to_value(definition.declaration()).unwrap(),
-                    ))
-                }
+                Ok(Some(changed)) => break Ok((changed, definition)),
                 Ok(None) => (),
                 Err(error) => {
                     assert_eq!(
                         serde_json::to_value(&definition.declaration().body).unwrap(),
-                        original_body
+                        *original_body
                     );
                     break Err(error);
                 }
@@ -100,21 +101,34 @@ fn run(definition: CreateFunction, steps: usize, stop: Stop) -> (ResultImage, us
     })
     .unwrap();
     let mut polls = 0;
+    let mut most_frees = 0;
     let result = loop {
         polls += 1;
         if matches!(stop,Stop::Cancel(at) if at==polls) {
             token.cancel();
         }
-        match reader.advance(&mut std::io::empty(), ImageDecodeWindow { bytes: 1, steps }) {
+        let mut next = None;
+        let allocations = allocation_counter::measure(|| {
+            next =
+                Some(reader.advance(&mut std::io::empty(), ImageDecodeWindow { bytes: 1, steps }));
+        });
+        let frees = u64::try_from(
+            i128::from(allocations.count_total) - i128::from(allocations.count_current),
+        )
+        .unwrap();
+        most_frees = most_frees.max(frees);
+        match next.unwrap() {
             Ok(None) => (),
-            Ok(Some(result)) => break Ok(result),
+            Ok(Some((changed, value))) => {
+                break Ok((changed, serde_json::to_value(value.declaration()).unwrap()))
+            }
             Err(error) => break Err((error.sqlstate().unwrap().to_owned(), error.to_string())),
         }
     };
     drop((reader, barrier));
     assert_eq!(workspace.used(), 0);
     assert_eq!(memory.used(), 0);
-    (result, polls)
+    (result, polls, most_frees)
 }
 
 #[test]
@@ -192,4 +206,33 @@ fn stored_regclass_statement_edits_yield_before_late_lookup_and_release_failed_s
         "53200"
     );
     assert!(run(values(4096, None), 32, Stop::Complete).0.unwrap().0);
+}
+
+#[test]
+fn stored_regclass_field_retirement_releases_independent_rows_in_work_windows() {
+    let rows = vec!["(1)"; 4096].join(",");
+    let mut unchanged = values(1, None);
+    unchanged.body = FunctionBody::Statements(
+        crate::compile(&format!("SELECT count(*) FROM (VALUES {rows}) AS t(v)")).unwrap(),
+    );
+    let result = measure(unchanged, 1, Stop::Complete);
+    assert!(!result.0.unwrap().0);
+    let changed = measure(values(4096, None), 1, Stop::Complete);
+    assert!(changed.0.unwrap().0);
+    let strings = vec!["'row'"; 4096].join(",");
+    let array = measure(
+        parse(&format!(
+            "CREATE FUNCTION saved() RETURNS text[] LANGUAGE SQL RETURN ARRAY[{strings}]"
+        )),
+        1,
+        Stop::Complete,
+    );
+    assert!(!array.0.unwrap().0);
+    assert!(
+        result.2 <= 64 && changed.2 <= 64 && array.2 <= 64,
+        "unchanged {}, changed {}, array {}",
+        result.2,
+        changed.2,
+        array.2
+    );
 }

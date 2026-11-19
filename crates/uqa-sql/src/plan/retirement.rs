@@ -18,7 +18,7 @@ mod tree;
 pub(in crate::plan) mod windows;
 pub(crate) use scalars::fields as scalar_fields;
 pub(crate) use scalars::{Pending, Retire, ScalarRetirement};
-pub(crate) use tree::{RetainedTree, RetirementFrame};
+pub(crate) use tree::{RetainedTree, RetiredChild, RetirementFrame};
 pub(crate) use windows::checkpoint;
 pub(in crate::plan) use windows::WindowRetirement;
 

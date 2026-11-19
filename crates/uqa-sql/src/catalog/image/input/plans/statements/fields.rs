@@ -5,6 +5,7 @@
 //
 
 use super::{Fields, Input, Kind, Node, PlanMemory, SQLError, Step};
+use crate::plan::retirement::RetiredChild;
 
 /// Empty field contents cannot contain another syntax node or allocate retirement storage.
 pub(super) trait Empty {
@@ -78,15 +79,18 @@ pub(super) trait Body {
             .attach(child);
         *position += 1;
     }
-    fn retire(&mut self, position: &mut usize) -> Option<Node> {
+    fn retire(&mut self, position: &mut usize) -> RetiredChild<Node> {
+        self.retire_fields(position)
+    }
+    fn retire_fields(&mut self, position: &mut usize) -> RetiredChild<Node> {
         *position = (*position).max(self.first_field());
-        while let Some(field) = self.field(*position) {
-            *position += 1;
-            if let Some(child) = field.retire() {
-                return Some(child);
-            }
-        }
-        None
+        let Some(field) = self.field(*position) else {
+            return RetiredChild::Done;
+        };
+        *position += 1;
+        field
+            .retire()
+            .map_or(RetiredChild::Continue, RetiredChild::Child)
     }
 }
 
@@ -201,7 +205,7 @@ impl<T: Tree> Body for Vec<T> {
         }
         await_field!(input.plan_children(memory, count, self, T::KIND))
     }
-    fn retire(&mut self, _: &mut usize) -> Option<Node> {
-        self.pop().map(T::into_node)
+    fn retire(&mut self, _: &mut usize) -> RetiredChild<Node> {
+        self.pop().map(T::into_node).into()
     }
 }

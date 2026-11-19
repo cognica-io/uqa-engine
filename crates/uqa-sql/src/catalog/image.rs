@@ -42,6 +42,7 @@ pub use expressions::{
     table_checks_image_reader, table_hierarchy_image_reader, table_keys_image_reader,
     DefinitionImageReader,
 };
+pub(crate) use input::StoredSyntaxRetirement;
 pub use input::{
     read_columns_image, read_columns_image_from, read_columns_image_with_footprint,
     read_dropped_attributes_image, read_dropped_attributes_image_from, read_foreign_keys_image,

@@ -51,6 +51,7 @@ mod windows;
 
 pub use api::{CapturedExpressionPlan, CapturedQuery};
 pub use statements::CapturedStatement;
+pub(crate) use statements::StoredSyntaxRetirement;
 pub(in crate::catalog::image) use statements::{read_routines, read_rules};
 pub use unified::CapturedPlan;
 

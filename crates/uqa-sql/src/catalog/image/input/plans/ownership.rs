@@ -30,7 +30,7 @@ impl<N: NativeNode> crate::plan::retirement::RetirementFrame for Frame<N> {
         }
         true
     }
-    fn retire_child(&mut self) -> Option<N> {
+    fn retire_child(&mut self) -> crate::plan::retirement::RetiredChild<N> {
         N::retire_child(self)
     }
 }

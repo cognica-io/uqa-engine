@@ -75660,6 +75660,32 @@
     {
       "package": "uqa-sql",
       "kind": "lib",
+      "test": "stored_regclass_field_retirement_releases_independent_rows_in_work_windows",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/routines/regclass/tests.rs",
+      "capability": "Stored routine relation identities",
+      "workload": "Advance native stored routine binding one step at a time for an unchanged nested VALUES and a 4,096-row field that rewrites a sequence literal.",
+      "invariant": "Each successful step releases a bounded number of independent row allocations, including the replaced original, while the completed declaration remains live.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_statement_edits_retire_discarded_and_replaced_syntax_before_the_next_selection",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/stored_routine/tests/statements.rs",
+      "capability": "Stored routine declaration ownership",
+      "workload": "Discard syntax deeper than the captured field with an exhausted allowance, then cancel retirement of a replaced 128-row declaration.",
+      "invariant": "A discarded edit preserves the original. Cancelling cleanup of an already published field preserves its accepted value and a resumed selection releases the original lease.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
       "test": "stored_statement_construction_and_retirement_share_the_original_work_and_allowance",
       "cases": 1,
       "source": "crates/uqa-sql/src/plan/copy/lowering/input/native/statement/tests/stored.rs",

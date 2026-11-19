@@ -17,6 +17,7 @@ type Step = super::driver::Step<Kind>;
 
 mod api;
 pub use api::CapturedStatement;
+pub(crate) use api::StoredSyntaxRetirement;
 mod fields;
 use fields::{Body, Empty, Field, Tree};
 #[macro_use]
@@ -116,7 +117,7 @@ impl super::NativeNode for Node {
         frame.node.body().attach(&mut frame.position, child.node);
     }
     fn retire_scalars(_: &mut super::Frame<Self>) {}
-    fn retire_child(frame: &mut super::Frame<Self>) -> Option<Self> {
+    fn retire_child(frame: &mut super::Frame<Self>) -> crate::plan::retirement::RetiredChild<Self> {
         frame.node.body().retire(&mut frame.position)
     }
 }

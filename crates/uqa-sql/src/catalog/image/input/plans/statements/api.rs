@@ -4,10 +4,21 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use super::{super::Owner, invalid, Fields, Input, Kind, Node, SQLError};
-use crate::ast::Statement;
+use super::{
+    super::{Frame, Owner},
+    invalid, Fields, Input, Kind, Node, SQLError,
+};
+use crate::{
+    ast::{FunctionParam, Statement},
+    catalog::work::{ReferenceWork, Work},
+    plan::retirement::RetainedTree,
+};
 use std::{io::Read, ops::Deref};
-use uqa_core::{image_io::ImageDecoder, memory::MemoryBudget, CancellationToken};
+use uqa_core::{
+    image_io::ImageDecoder,
+    memory::{Budgeted, MemoryBudget, MemoryError, ProductionControl},
+    CancellationToken,
+};
 
 /// Immutable original stored syntax with admitted construction and iterative retirement.
 #[derive(Debug)]
@@ -71,4 +82,73 @@ fn statement_input(
             Ok(CapturedStatement { owner })
         },
     )?)
+}
+
+/// A copied field admits its original syntax depth before the binding owner can edit or retire it.
+pub(crate) struct StoredSyntaxRetirement(Budgeted<Box<RetainedTree<Frame<Node>>>>);
+
+impl StoredSyntaxRetirement {
+    pub(crate) fn prepare(
+        slot: &mut Option<Self>,
+        depth: usize,
+        memory: &MemoryBudget,
+    ) -> Result<(), SQLError> {
+        if depth == 0 {
+            return Ok(());
+        }
+        if slot.is_none() {
+            let lease = memory.reserve(size_of::<RetainedTree<Frame<Node>>>())?;
+            *slot = Some(Self(Budgeted::new(
+                Box::new(RetainedTree::new(memory)),
+                lease,
+            )));
+        }
+        slot.as_mut()
+            .expect("selected syntax workspace")
+            .0
+            .as_mut()
+            .frames
+            .reserve(depth.checked_add(1).ok_or(MemoryError::SizeOverflow)?)?;
+        Ok(())
+    }
+
+    pub(crate) fn statement(&mut self, value: Statement) {
+        self.0.as_mut().root = Node::Statement(value);
+    }
+
+    pub(crate) fn parameter(&mut self, value: FunctionParam) {
+        self.0.as_mut().root = Node::RoutineParam(value);
+    }
+
+    pub(crate) async fn finish(
+        &mut self,
+        control: &ProductionControl<'_>,
+        work: &mut (impl Work + Send),
+        captured_depth: bool,
+    ) -> Result<(), SQLError> {
+        let mut input = ReferenceWork { control, work };
+        loop {
+            let tree = self.0.as_mut();
+            let done = if captured_depth {
+                tree.advance()
+            } else {
+                tree.advance_with_extra(|frames, child| {
+                    // A discarded edit can introduce syntax beyond the captured field's depth.
+                    // Its ordinary owning destructor remains available under an exhausted allowance.
+                    let _ = frames.try_push(Frame::new(child));
+                })
+            };
+            if done {
+                return Ok(());
+            }
+            input.checkpoint().await?;
+        }
+    }
+}
+
+impl Drop for StoredSyntaxRetirement {
+    fn drop(&mut self) {
+        // Unwind uses only existing capacity, including for an uncommitted externally replaced field.
+        while !self.0.as_mut().advance_with_extra(|_, _| ()) {}
+    }
 }

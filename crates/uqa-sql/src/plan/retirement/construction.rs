@@ -59,8 +59,8 @@ impl<L: NodeRetirement> RetirementFrame for Frame<L> {
         }
         self.retiring
     }
-    fn retire_child(&mut self) -> Option<Node> {
-        self.node.retire_child(&mut self.position)
+    fn retire_child(&mut self) -> super::RetiredChild<Node> {
+        self.node.retire_child(&mut self.position).into()
     }
 }
 

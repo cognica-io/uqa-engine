@@ -18,12 +18,27 @@ pub(crate) use compact::Window;
 pub(crate) struct Input<'s> {
     copying: Copying<'s>,
     pub(crate) work: construction::Work<'s>,
+    depth: usize,
+    maximum_depth: usize,
+    slots: usize,
 }
 
 pub(crate) struct Nested<T> {
     pub(crate) value: Produced<T>,
     pub(crate) children: usize,
     pub(crate) has_merge_targets: bool,
+    depth: usize,
+    slots: usize,
+}
+
+impl<T> Nested<T> {
+    pub(crate) fn retirement_depth(&self) -> usize {
+        if self.depth > Window::STEPS || self.slots > Window::STEPS {
+            self.depth
+        } else {
+            0
+        }
+    }
 }
 
 pub(crate) trait Field: Sized + Send + Sync {
@@ -44,6 +59,9 @@ impl<'s> Input<'s> {
         Self {
             copying: Copying::capture(control, CopyPurpose::Stored),
             work,
+            depth: 1,
+            maximum_depth: 1,
+            slots: 0,
         }
     }
     pub(super) fn inline<T: SyntaxCopy>(&mut self, value: &T) -> Result<T> {
@@ -55,10 +73,15 @@ impl<'s> Input<'s> {
     }
 
     pub(crate) async fn field<T: Field>(&mut self, value: &'s T) -> Result<T> {
-        value.copy_from(self).await
+        self.depth += 1;
+        self.maximum_depth = self.maximum_depth.max(self.depth);
+        let field = value.copy_from(self).await;
+        self.depth -= 1;
+        field
     }
 
     pub(crate) async fn list<T: Field>(&mut self, source: &'s [T]) -> Result<Vec<T>> {
+        self.slots = self.slots.saturating_add(source.len());
         let mut values = self.copying.reserve_slots(source.len())?;
         for value in source {
             self.work.checkpoint().await;
@@ -74,15 +97,21 @@ impl<'s> Input<'s> {
 
     pub(crate) fn finish_nested<T>(self, value: T) -> Result<Nested<T>> {
         let has_merge_targets = self.copying.has_merge_targets;
+        let depth = self.maximum_depth;
+        let slots = self.slots;
         let (value, children) = self.finish(value)?;
         Ok(Nested {
             value,
             children,
             has_merge_targets,
+            depth,
+            slots,
         })
     }
 
     pub(crate) fn take_nested<T>(&mut self, child: Nested<T>) -> Result<T> {
+        self.maximum_depth = self.maximum_depth.max(self.depth + child.depth - 1);
+        self.slots = self.slots.saturating_add(child.slots).saturating_add(1);
         self.copying.has_merge_targets |= child.has_merge_targets;
         self.take_child((child.value, child.children))
     }
@@ -237,7 +266,7 @@ macro_rules! body_statements {
                     crate::plan::copy::capture_stored(self, control, |copy| {
                         (copy.retained_children, copy.has_merge_targets)
                     })?;
-                Ok(Some(Nested { value, children, has_merge_targets }))
+                Ok(Some(Nested { value, children, has_merge_targets, depth: 0, slots: 0 }))
             }
 
             async fn copy_from<'s>(&'s self, input: &mut Input<'s>) -> Result<Self> {

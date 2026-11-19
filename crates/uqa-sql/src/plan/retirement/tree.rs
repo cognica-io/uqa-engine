@@ -9,6 +9,18 @@
 use crate::construction::Stack;
 use uqa_core::memory::MemoryBudget;
 
+pub(crate) enum RetiredChild<N> {
+    Continue,
+    Child(N),
+    Done,
+}
+
+impl<N> From<Option<N>> for RetiredChild<N> {
+    fn from(value: Option<N>) -> Self {
+        value.map_or(Self::Done, Self::Child)
+    }
+}
+
 pub(crate) trait RetirementFrame: Sized {
     type Node;
     type Local: Default;
@@ -16,7 +28,7 @@ pub(crate) trait RetirementFrame: Sized {
     fn is_empty(node: &Self::Node) -> bool;
     fn new(node: Self::Node) -> Self;
     fn advance_retirement(&mut self, local: &mut Self::Local) -> bool;
-    fn retire_child(&mut self) -> Option<Self::Node>;
+    fn retire_child(&mut self) -> RetiredChild<Self::Node>;
 }
 
 #[derive(Debug)]
@@ -53,6 +65,14 @@ impl<F: RetirementFrame> RetainedTree<F> {
 
     /// Retire one structural frame using the same admitted capacity as terminal cleanup.
     pub(crate) fn advance(&mut self) -> bool {
+        self.advance_with_extra(|_, _| unreachable!("constructor admitted every child depth"))
+    }
+
+    /// An independently edited field can contain replacement syntax deeper than its original copy.
+    pub(crate) fn advance_with_extra(
+        &mut self,
+        extra_child: impl FnOnce(&mut Stack<F>, F::Node),
+    ) -> bool {
         if !F::is_empty(&self.root) {
             debug_assert!(self.frames.is_empty());
             let root = std::mem::replace(&mut self.root, F::empty());
@@ -68,14 +88,21 @@ impl<F: RetirementFrame> RetainedTree<F> {
                     .expect("admitted local retirement slot");
                 return false;
             }
-            if let Some(child) = frame.retire_child() {
-                debug_assert!(self.frames.capacity() >= self.frames.len() + 2);
-                self.frames
-                    .push(frame)
-                    .expect("admitted parent retirement slot");
-                self.frames
-                    .push(F::new(child))
-                    .expect("admitted child retirement slot");
+            match frame.retire_child() {
+                RetiredChild::Continue => self.frames.push(frame).expect("admitted field slot"),
+                RetiredChild::Child(child) => {
+                    self.frames
+                        .push(frame)
+                        .expect("admitted parent retirement slot");
+                    if self.frames.len() < self.frames.capacity() {
+                        self.frames
+                            .push(F::new(child))
+                            .expect("admitted child retirement slot");
+                    } else {
+                        extra_child(&mut self.frames, child);
+                    }
+                }
+                RetiredChild::Done => (),
             }
         }
         self.frames.is_empty()
