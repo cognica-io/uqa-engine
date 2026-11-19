@@ -39,6 +39,7 @@ pub use production::{
 pub(in crate::binding) use production::{
     read_executable_inputs_owned, read_generic_explain_inputs_owned,
 };
+mod projections;
 mod queries;
 mod query_layouts;
 #[cfg(test)]

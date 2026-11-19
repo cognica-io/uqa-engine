@@ -9,13 +9,13 @@
 use crate::binding::preparation::{LiteralInput, SchemaContext};
 
 use super::super::{analysis, overlay_outer_schema_with_control};
-use super::ownership::{AnalysisIdentity, AnalysisVec};
+use super::ownership::AnalysisVec;
 use super::{
     error, ColumnType, ExpressionType, Preparation, QueryOutput, QueryPlan, RowSchema, SQLError,
     ScalarExpr,
 };
 use crate::catalog::work::{inline, ReferenceWork, Work};
-use crate::plan::{ProjectionPlan, QueryBlockPlan, RelationalPlan};
+use crate::plan::{QueryBlockPlan, RelationalPlan};
 use crate::semantics::sets::placement::SetPlacement;
 
 #[cfg(test)]
@@ -668,133 +668,6 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
             });
         }
         result
-    }
-
-    pub(super) fn projections<'a>(
-        &mut self,
-        projections: impl IntoIterator<Item = &'a ProjectionPlan>,
-        source: &RowSchema,
-        input: &RowSchema,
-        subqueries: &[QueryPlan],
-    ) -> Result<QueryOutput, SQLError> {
-        inline(self.projections_with_work(projections, source, input, subqueries, &mut ()))
-    }
-
-    pub(super) async fn projections_with_work<'a, W: Work + Send>(
-        &mut self,
-        projections: impl IntoIterator<Item = &'a ProjectionPlan>,
-        source: &RowSchema,
-        input: &RowSchema,
-        subqueries: &[QueryPlan],
-        work: &mut W,
-    ) -> Result<QueryOutput, SQLError> {
-        let owner = self.scope.control().capture();
-        let control = owner.control();
-        let mut input_work = ReferenceWork {
-            control: &control,
-            work,
-        };
-        let mut output = QueryOutput::new(&control);
-        for projection in projections {
-            input_work.checkpoint().await?;
-            let expansion = if matches!(projection.expr, ScalarExpr::QualifiedStar(_)) {
-                input
-            } else {
-                source
-            };
-            if super::super::projection::visit_projection_star_metadata_with_work(
-                &projection.expr,
-                expansion,
-                &control,
-                input_work.work,
-                &mut |field| {
-                    output
-                        .columns
-                        .push(control.copy_text(field.name)?, &control)?;
-                    let mut value = ExpressionType::resolved_produced(
-                        field
-                            .ty
-                            .map(|ty| ty.clone_with_control(&control))
-                            .transpose()?,
-                        &control,
-                    )?;
-                    if let Some(oid) = field.collation {
-                        value.derivation =
-                            crate::catalog::collations::derivation::Derivation::implicit(
-                                i64::from(oid),
-                            );
-                    }
-                    if let Some(record) = field.record {
-                        value.record_fields.clone_from(&record.types);
-                        value.record_descriptor.clone_from(&record.descriptor);
-                    }
-                    output.types.push(value, &control)?;
-                    Ok(())
-                },
-            )
-            .await?
-            {
-                output.open |= match &projection.expr {
-                    ScalarExpr::QualifiedStar(qualifier) => {
-                        expansion.columns_are_open(Some(qualifier))
-                    }
-                    _ => expansion.columns_are_open(None),
-                };
-            } else {
-                let mut value = self
-                    .expression_with_work(&projection.expr, input, subqueries, input_work.work)
-                    .await?;
-                if matches!(value.ty.as_deref(), Some(ColumnType::Composite(_))) {
-                    value.record_fields = self.scope.bind_record_fields(
-                        self.routines,
-                        &projection.expr,
-                        input,
-                        subqueries,
-                        &self.parameters.values()?,
-                    )?;
-                }
-                if matches!(
-                    value.derivation,
-                    crate::catalog::collations::derivation::Derivation::Conflict(..)
-                ) {
-                    output.key_origins.push(
-                        (output.types.len(), AnalysisIdentity::from(&projection.expr)),
-                        &control,
-                    )?;
-                    self.parameters
-                        .collations
-                        .record_target(&projection.expr, value.derivation)?;
-                }
-                let site_label = projection
-                    .alias
-                    .is_none()
-                    .then(|| {
-                        self.scope.variable_sites.as_ref().and_then(|sites| {
-                            sites
-                                .site(&projection.expr)
-                                .and_then(|site| sites.label(site))
-                        })
-                    })
-                    .flatten();
-                let name = if let Some(name) = site_label {
-                    control.copy_text(name)?
-                } else {
-                    crate::semantics::with_projection_label(projection, &control, |name| {
-                        Ok(control.copy_text(name)?)
-                    })?
-                };
-                output.columns.push(name, &control)?;
-                output.types.push(value, &control)?;
-            }
-        }
-        Ok(output)
-    }
-
-    pub(super) fn resolve_targets(&mut self, output: &mut QueryOutput) -> Result<(), SQLError> {
-        for ty in &mut output.types {
-            self.parameters.coerce_unknown(ty, &ColumnType::Text)?;
-        }
-        Ok(())
     }
 
     pub(super) async fn values_with_work(
