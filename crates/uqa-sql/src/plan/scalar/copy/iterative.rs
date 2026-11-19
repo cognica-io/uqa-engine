@@ -201,14 +201,17 @@ async fn copy_from<W: Work, const N: usize>(
 where
     W::Error: From<CatalogRetentionError>,
 {
-    let mut current = Frame::new_from(source, control, mode, work).await?;
     let mut stack = Stack::<_, N>::new(control);
+    let mut source = source;
     loop {
-        current.lowering.checkpoint(work).await?;
-        if let Some(child) = current.next_child()? {
-            stack.push(current)?;
-            current = Frame::new_from(child, control, mode, work).await?;
-        } else {
+        let mut current = Frame::new_from(source, control, mode, work).await?;
+        loop {
+            current.lowering.checkpoint(work).await?;
+            if let Some(child) = current.next_child()? {
+                stack.push(current)?;
+                source = child;
+                break;
+            }
             let child = current.finish_from(work).await?;
             let Some(mut parent) = stack.pop() else {
                 return Ok(child);

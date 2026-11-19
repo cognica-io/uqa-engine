@@ -91,7 +91,7 @@ impl OwnedWindowSpec {
         value.partition_by = lowering.vector(partition.len())?;
         for expression in partition {
             lowering.checkpoint(work).await?;
-            let child = expression.copy_for_rewrite_from(control, work).await?;
+            let child = std::pin::pin!(expression.copy_for_rewrite_from(control, work)).await?;
             value
                 .partition_by
                 .push(OwnedScalarExpr::attach_child(&mut lowering, child)?);
@@ -100,7 +100,7 @@ impl OwnedWindowSpec {
         value.order_by = lowering.vector(order.len())?;
         for order in order {
             lowering.checkpoint(work).await?;
-            let child = order.expr.copy_for_rewrite_from(control, work).await?;
+            let child = std::pin::pin!(order.expr.copy_for_rewrite_from(control, work)).await?;
             value.order_by.push(ScalarOrder {
                 expr: OwnedScalarExpr::attach_child(&mut lowering, child)?,
                 descending: order.descending,
@@ -166,7 +166,7 @@ where
         ScalarFrameBound::CurrentRow => ScalarFrameBound::CurrentRow,
         ScalarFrameBound::Preceding(expression) | ScalarFrameBound::Following(expression) => {
             lowering.admit_box::<ScalarExpr>()?;
-            let child = expression.copy_for_rewrite_from(control, work).await?;
+            let child = std::pin::pin!(expression.copy_for_rewrite_from(control, work)).await?;
             let child = Box::new(OwnedScalarExpr::attach_child(lowering, child)?);
             if matches!(value, ScalarFrameBound::Preceding(_)) {
                 ScalarFrameBound::Preceding(child)

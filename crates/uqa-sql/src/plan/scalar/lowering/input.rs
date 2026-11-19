@@ -224,13 +224,17 @@ where
     control.check()?;
     let memory = control.budget().expect("admitted scalar construction");
     let mut frames = BudgetedSmallVec::<[Frame<'_, '_>; 4]>::new(memory);
-    frames
-        .reserve(1)
-        .map_err(uqa_core::ValueRetentionError::from)?;
-    frames
-        .push(Frame::new(expression, *control, queries, input, retain_children).await?)
-        .map_err(uqa_core::ValueRetentionError::from)?;
+    let mut next = Some(expression);
     loop {
+        if let Some(source) = next.take() {
+            frames
+                .reserve(1)
+                .map_err(uqa_core::ValueRetentionError::from)?;
+            let frame = Frame::new(source, *control, queries, input, retain_children).await?;
+            frames
+                .push(frame)
+                .map_err(uqa_core::ValueRetentionError::from)?;
+        }
         control.check()?;
         input.checkpoint().await?;
         control.check()?;
@@ -245,12 +249,7 @@ where
                     .reserve_children(1)
                     .map_err(uqa_core::ValueRetentionError::from)?;
             }
-            frames
-                .reserve(1)
-                .map_err(uqa_core::ValueRetentionError::from)?;
-            frames
-                .push(Frame::new(child, *control, queries, input, retain_children).await?)
-                .map_err(uqa_core::ValueRetentionError::from)?;
+            next = Some(child);
         } else {
             let value = frames
                 .pop()

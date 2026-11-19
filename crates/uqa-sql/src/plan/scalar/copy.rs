@@ -46,15 +46,15 @@ impl ScalarExpr {
         iterative::mutable(self, *control)
     }
 
-    pub(crate) async fn copy_for_rewrite_from<W: Work>(
-        &self,
-        control: &ProductionControl<'_>,
-        work: &mut W,
-    ) -> std::result::Result<OwnedScalarExpr, W::Error>
+    pub(crate) fn copy_for_rewrite_from<'a, W: Work>(
+        &'a self,
+        control: &ProductionControl<'a>,
+        work: &'a mut W,
+    ) -> impl std::future::Future<Output = std::result::Result<OwnedScalarExpr, W::Error>> + 'a
     where
         W::Error: From<crate::schema::retention::CatalogRetentionError>,
     {
-        iterative::mutable_from(self, *control, work).await
+        iterative::mutable_from(self, *control, work)
     }
 }
 
