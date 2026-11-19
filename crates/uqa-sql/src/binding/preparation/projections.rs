@@ -11,8 +11,11 @@ use super::{
     ColumnType, ExpressionType, LiteralInput, Preparation, QueryOutput, QueryPlan, RowSchema,
     SQLError, ScalarExpr, SchemaContext,
 };
+use crate::catalog::collations::derivation::Derivation;
 use crate::catalog::work::{inline, ReferenceWork, Work};
 use crate::plan::ProjectionPlan;
+use crate::semantics::ProjectionStarMetadata;
+use uqa_core::memory::ProductionControl;
 
 impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
     pub(super) fn projections<'a>(
@@ -52,30 +55,7 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
                 expansion,
                 &control,
                 input_work.work,
-                &mut |field| {
-                    output
-                        .columns
-                        .push(control.copy_text(field.name)?, &control)?;
-                    let mut value = ExpressionType::resolved_produced(
-                        field
-                            .ty
-                            .map(|ty| ty.clone_with_control(&control))
-                            .transpose()?,
-                        &control,
-                    )?;
-                    if let Some(oid) = field.collation {
-                        value.derivation =
-                            crate::catalog::collations::derivation::Derivation::implicit(
-                                i64::from(oid),
-                            );
-                    }
-                    if let Some(record) = field.record {
-                        value.record_fields.clone_from(&record.types);
-                        value.record_descriptor.clone_from(&record.descriptor);
-                    }
-                    output.types.push(value, &control)?;
-                    Ok(())
-                },
+                &mut |field| output.push_star_field(field, &control),
             )
             .await?
             {
@@ -98,10 +78,7 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
                         &self.parameters.values()?,
                     )?;
                 }
-                if matches!(
-                    value.derivation,
-                    crate::catalog::collations::derivation::Derivation::Conflict(..)
-                ) {
+                if matches!(value.derivation, Derivation::Conflict(..)) {
                     output.key_origins.push(
                         (output.types.len(), AnalysisIdentity::from(&projection.expr)),
                         &control,
@@ -139,6 +116,30 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
         for ty in &mut output.types {
             self.parameters.coerce_unknown(ty, &ColumnType::Text)?;
         }
+        Ok(())
+    }
+}
+
+impl QueryOutput {
+    fn push_star_field(
+        &mut self,
+        field: ProjectionStarMetadata<'_>,
+        control: &ProductionControl<'_>,
+    ) -> Result<(), SQLError> {
+        self.columns.push(control.copy_text(field.name)?, control)?;
+        let field_type = field
+            .ty
+            .map(|ty| ty.clone_with_control(control))
+            .transpose()?;
+        let mut value = ExpressionType::resolved_produced(field_type, control)?;
+        if let Some(oid) = field.collation {
+            value.derivation = Derivation::implicit(i64::from(oid));
+        }
+        if let Some(record) = field.record {
+            value.record_fields.clone_from(&record.types);
+            value.record_descriptor.clone_from(&record.descriptor);
+        }
+        self.types.push(value, control)?;
         Ok(())
     }
 }

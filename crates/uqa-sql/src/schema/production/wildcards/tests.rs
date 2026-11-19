@@ -196,15 +196,15 @@ fn wildcard_metadata_schedules_each_visible_field_and_retires_qualified_sort_scr
         .unwrap();
         let bare = selected_star(row.clone(), ScalarExpr::Star, 1, None, 1 << 20);
         let allowance = if count == 2 { 16 << 10 } else { 1 << 20 };
-        let named = selected_star(row.clone(), qualified(), 1, None, allowance);
+        let qualified_step = selected_star(row.clone(), qualified(), 1, None, allowance);
         let batch = selected_star(row.clone(), qualified(), 32, None, 1 << 20);
         assert_eq!(bare.fields.unwrap(), names);
-        assert_eq!(named.fields.unwrap(), names);
+        assert_eq!(qualified_step.fields.unwrap(), names);
         assert_eq!(batch.fields.unwrap(), names);
         assert_eq!(bare.most_in_one_call, 1);
-        assert_eq!(named.most_in_one_call, 1);
-        assert!(batch.most_in_one_call <= 32 && batch.calls < named.calls);
-        assert!(named.first_field.unwrap() >= bare.first_field.unwrap() + count);
+        assert_eq!(qualified_step.most_in_one_call, 1);
+        assert!(batch.most_in_one_call <= 32 && batch.calls < qualified_step.calls);
+        assert!(qualified_step.first_field.unwrap() >= bare.first_field.unwrap() + count);
         for original in [true, false] {
             let result = selected_star(row.clone(), qualified(), 1, Some(original), 1 << 20);
             assert_eq!(result.fields.unwrap_err().sqlstate(), Some("57014"));
