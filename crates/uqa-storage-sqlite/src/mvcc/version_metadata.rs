@@ -35,8 +35,12 @@ const PREVIOUS_TRIGGERS: [(&str, &str); 3] = [
 ];
 
 pub(super) fn create_triggers(connection: &Connection) -> PhysicalResult<()> {
+    create_fingerprint_triggers(connection, true)
+}
+
+fn create_fingerprint_triggers(connection: &Connection, addressed: bool) -> PhysicalResult<()> {
     for (_, definition) in PREVIOUS_TRIGGERS {
-        connection.execute_batch(&fingerprint_trigger(definition))?;
+        connection.execute_batch(&fingerprint_trigger(definition, addressed))?;
     }
     Ok(())
 }
@@ -48,7 +52,7 @@ pub(super) fn validate_triggers(
 ) -> PhysicalResult<()> {
     for (name, definition) in PREVIOUS_TRIGGERS {
         let expected = if fingerprints {
-            fingerprint_trigger(definition)
+            fingerprint_trigger(definition, addressed)
         } else if addressed {
             addressed_trigger(definition)
         } else {
@@ -68,20 +72,35 @@ fn addressed_trigger(definition: &str) -> String {
     definition.replace("NEW.sequence, CASE", "NEW.sequence, NEW.version_id, CASE")
 }
 
-fn fingerprint_trigger(definition: &str) -> String {
-    addressed_trigger(definition).replace(
-        "INSERT INTO _uqa_mvcc_version_metadata VALUES",
-        "INSERT INTO _uqa_mvcc_version_metadata (key, sequence, version_id, payload_length) VALUES",
-    )
+fn fingerprint_trigger(definition: &str, addressed: bool) -> String {
+    let (definition, insert) = if addressed {
+        (
+            addressed_trigger(definition),
+            "INSERT INTO _uqa_mvcc_version_metadata (key, sequence, version_id, payload_length) VALUES",
+        )
+    } else {
+        (
+            definition.to_owned(),
+            "INSERT INTO _uqa_mvcc_version_metadata (key, sequence, payload_length) VALUES",
+        )
+    };
+    definition.replace("INSERT INTO _uqa_mvcc_version_metadata VALUES", insert)
 }
 
 pub(super) fn add_fingerprint_column(connection: &Connection) -> PhysicalResult<()> {
+    add_fingerprint_column_for_layout(connection, true)
+}
+
+fn add_fingerprint_column_for_layout(
+    connection: &Connection,
+    addressed: bool,
+) -> PhysicalResult<()> {
     for (name, _) in PREVIOUS_TRIGGERS {
         connection.execute_batch(&format!("DROP TRIGGER {name}"))?;
     }
     connection
         .execute_batch("ALTER TABLE _uqa_mvcc_version_metadata ADD COLUMN image_digest BLOB")?;
-    create_triggers(connection)
+    create_fingerprint_triggers(connection, addressed)
 }
 
 pub(super) fn set_image_digest(
