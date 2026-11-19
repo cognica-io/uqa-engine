@@ -13,7 +13,8 @@ use crate::semantics::partition::{
     transform_partition_bound, validate_new_partition_bound, PartitionContext,
 };
 use crate::{
-    ast::{CreateTable, TableCheck, TableConstraintSet},
+    ast::{ColumnDef, CreateTable, TableCheck, TableConstraintSet},
+    catalog::{work::ReferenceWork, CatalogWork},
     SQLError,
 };
 /// Parent lookup and constraint declarations used while assembling a new row type.
@@ -71,6 +72,21 @@ pub fn inheritance_parent_target(
 fn local_relation_name(canonical: &str) -> String {
     uqa_core::RelationIdentity::from_legacy_name(canonical)
         .map_or_else(|_| canonical.to_string(), |relation| relation.name)
+}
+
+async fn find_column<'a, W: CatalogWork + Send>(
+    columns: &'a [ColumnDef],
+    name: &str,
+    input: &mut ReferenceWork<'_, '_, W>,
+) -> Result<Option<&'a ColumnDef>, SQLError> {
+    use crate::ast::ColumnTypeInputWork;
+    for column in columns {
+        input.checkpoint().await?;
+        if input.same_text(name, &column.name, input.control).await? {
+            return Ok(Some(column));
+        }
+    }
+    Ok(None)
 }
 
 /// `MergeAttributes`: the columns, CHECK constraints and partition keys a new table inherits from its parents, ahead of its own, with the notices that report each merged column. `DefineRelation` first looks up every parent, rejecting one named twice; the table's own columns cannot repeat a name. The table's partition key and bound are bound by [`bind_create_table_partitioning`] once its row type is described, as `DefineRelation` computes them after creating the relation.

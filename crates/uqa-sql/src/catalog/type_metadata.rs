@@ -511,30 +511,43 @@ pub fn pg_type_element_oid(ty: &ColumnType) -> i64 {
 }
 
 pub fn pg_type_collation_oid(ty: &ColumnType) -> i64 {
-    let scalar = match ty {
-        ColumnType::Named(name) => {
-            unreachable!("unresolved declaration type {name} reached catalog projection")
-        }
-        ColumnType::Array(element) => return pg_type_collation_oid(element),
-        other => other,
-    };
-    match scalar {
-        ColumnType::Name => 950,
-        ColumnType::PgNodeTree => 100,
-        ColumnType::Text
-        | ColumnType::Varchar(_)
-        | ColumnType::Bpchar
-        | ColumnType::Character(_) => 100,
-        ColumnType::Domain {
-            collation_oid: Some(oid),
-            ..
-        } => i64::from(*oid),
-        ColumnType::Domain { oid, base, .. } => match oid {
-            13_310 | 13_312 | 13_320 => 950,
-            _ => pg_type_collation_oid(base),
-        },
-        _ => 0,
-    }
+    type_collation_steps(ty)
+        .flatten()
+        .next()
+        .expect("a type has a collation OID")
+}
+
+/// Each array element or legacy domain base is one inherited collation lookup.
+pub(super) fn type_collation_steps(ty: &ColumnType) -> impl Iterator<Item = Option<i64>> + '_ {
+    let mut next = Some(ty);
+    std::iter::from_fn(move || {
+        let oid = match next.take()? {
+            ColumnType::Named(name) => {
+                unreachable!("unresolved declaration type {name} reached catalog projection")
+            }
+            ColumnType::Name
+            | ColumnType::Domain {
+                oid: 13_310 | 13_312 | 13_320,
+                collation_oid: None,
+                ..
+            } => 950,
+            ColumnType::PgNodeTree
+            | ColumnType::Text
+            | ColumnType::Varchar(_)
+            | ColumnType::Bpchar
+            | ColumnType::Character(_) => 100,
+            ColumnType::Domain {
+                collation_oid: Some(oid),
+                ..
+            } => i64::from(*oid),
+            ColumnType::Array(base) | ColumnType::Domain { base, .. } => {
+                next = Some(base);
+                return Some(None);
+            }
+            _ => 0,
+        };
+        Some(Some(oid))
+    })
 }
 
 pub fn pg_type_subscript_handler(ty: &ColumnType) -> i64 {

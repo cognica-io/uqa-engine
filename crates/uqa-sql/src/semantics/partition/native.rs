@@ -89,15 +89,19 @@ pub async fn validate_with_work<'a, 'v>(
                 if **parent == *table.name {
                     let child = relations.get(child).expect("captured child");
                     let bound = child.hierarchy.partition_bound.as_ref().expect("partition");
-                    crate::schema::inheritance::alter::validate_row_type_with_control(
+                    crate::schema::inheritance::alter::validate_row_type_with_work(
                         table.columns,
                         child.columns,
                         &table.name.name,
                         &child.name.name,
                         true,
                         false,
-                        &control,
-                    )?;
+                        &mut crate::catalog::work::ReferenceWork {
+                            control: &control,
+                            work,
+                        },
+                    )
+                    .await?;
                     bounds::validate(spec, &types, bound, context, &values, &control, work).await?;
                     for previous in &*siblings {
                         work.checkpoint().await?;
@@ -167,7 +171,13 @@ async fn key_types(
     for key in &spec.keys {
         work.checkpoint().await?;
         control.check()?;
-        crate::schema::inheritance::validate_stored_key_references(key, table.columns, control)?;
+        crate::schema::inheritance::validate_stored_key_references(
+            key,
+            table.columns,
+            control,
+            work,
+        )
+        .await?;
         let ty = crate::catalog::scalar_bindings::expression_type_with_work(
             key, &schema, context, control, work,
         )
