@@ -392,7 +392,7 @@ fn check_row_windows(selected: CapturedRows) {
         long >= short + 2 * 63,
         "one column {short}, 64 columns {long}"
     );
-    drive(64, Some((short + long) / 2));
+    drive(64, Some(short.midpoint(long)));
     if whole_row {
         drive(64, Some(long - 2));
     }

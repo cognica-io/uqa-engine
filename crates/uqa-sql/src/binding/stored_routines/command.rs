@@ -27,6 +27,64 @@ enum Source {
     },
 }
 
+impl Source {
+    fn into_plan(
+        self,
+        control: &ProductionControl<'_>,
+        memory: &mut Option<uqa_core::memory::MemoryReservation>,
+    ) -> Result<Option<SourcePlan>, SQLError> {
+        Ok(match self {
+            Source::Relation(source) => source.map(|source| *source),
+            Source::Select(source) => match source {
+                None => None,
+                Some(body) => {
+                    let (alias, receipt) = control
+                        .copy_text("__uqa_catalog_statement_source")?
+                        .into_parts();
+                    *memory = control.combine(memory.take(), receipt);
+                    Some(SourcePlan::Subquery {
+                        captured_output: None,
+                        lateral: false,
+                        body,
+                        alias: Some(alias),
+                        column_aliases: Vec::new(),
+                    })
+                }
+            },
+            Source::Merge {
+                name,
+                qualifier,
+                alias,
+                descendants,
+                source,
+            } => {
+                let target = SourcePlan::Table {
+                    executable_query: None,
+                    bound_columns: None,
+                    name,
+                    qualifier,
+                    alias,
+                    column_aliases: Vec::new(),
+                    include_descendants: descendants,
+                };
+                Some(SourcePlan::Join {
+                    comma: false,
+                    left: Box::new(target),
+                    right: source,
+                    kind: crate::ast::JoinKind::Cross,
+                    on: None,
+                    using: None,
+                    natural: false,
+                    alias: None,
+                    column_aliases: Vec::new(),
+                    lateral: false,
+                    strategy: JoinExecutionStrategy::default(),
+                })
+            }
+        })
+    }
+}
+
 struct Parts {
     ctes: Vec<CtePlan>,
     source: Source,
@@ -213,55 +271,7 @@ async fn project<W: Work + Send>(
         source,
         subqueries,
     } = statement.parts();
-    let source = match source {
-        Source::Relation(source) => source.map(|source| *source),
-        Source::Select(source) => match source {
-            None => None,
-            Some(body) => {
-                let (alias, receipt) = control
-                    .copy_text("__uqa_catalog_statement_source")?
-                    .into_parts();
-                memory = control.combine(memory, receipt);
-                Some(SourcePlan::Subquery {
-                    captured_output: None,
-                    lateral: false,
-                    body,
-                    alias: Some(alias),
-                    column_aliases: Vec::new(),
-                })
-            }
-        },
-        Source::Merge {
-            name,
-            qualifier,
-            alias,
-            descendants,
-            source,
-        } => {
-            let target = SourcePlan::Table {
-                executable_query: None,
-                bound_columns: None,
-                name,
-                qualifier,
-                alias,
-                column_aliases: Vec::new(),
-                include_descendants: descendants,
-            };
-            Some(SourcePlan::Join {
-                comma: false,
-                left: Box::new(target),
-                right: source,
-                kind: crate::ast::JoinKind::Cross,
-                on: None,
-                using: None,
-                natural: false,
-                alias: None,
-                column_aliases: Vec::new(),
-                lateral: false,
-                strategy: JoinExecutionStrategy::default(),
-            })
-        }
-    };
+    let source = source.into_plan(control, &mut memory)?;
     let mut query = QueryPlan {
         analyzed_output: None,
         analyzed_source: None,

@@ -435,72 +435,10 @@ impl SchemaScope {
         let outer = input.as_ref();
         match source {
             crate::plan::SourcePlan::RetainedRows(_) => {}
-            SourcePlan::Join {
-                left,
-                right,
-                kind,
-                on,
-                using,
-                natural,
-                alias,
-                column_aliases,
-                lateral,
-                ..
-            } => {
-                let left_schema = crate::construction::retain_with(
-                    self.production.control().capture().control(),
-                    || {
-                        self.bind_source_for_execution_in_scope_with_work(
-                            routines,
-                            left,
-                            subqueries,
-                            params,
-                            scope.with_names(),
-                            work,
-                        )
-                    },
-                )?
-                .await?;
-                let preceding = scope.right_namespace_with_control(
-                    left,
-                    &left_schema,
-                    *kind,
-                    &self.control(),
-                )?;
-                let right_schema = crate::construction::retain_with(
-                    self.production.control().capture().control(),
-                    || {
-                        self.bind_source_for_execution_in_scope_with_work(
-                            routines,
-                            right,
-                            subqueries,
-                            params,
-                            SourceScope {
-                                outer: scope.outer,
-                                preceding: Some(&preceding),
-                                inherited_lateral: *lateral,
-                                retain_names: true,
-                            },
-                            work,
-                        )
-                    },
-                )?
-                .await?;
-                let condition = scope.condition_with_control(&self.control())?;
-                return self.bind_join_output_schema(JoinSchemaBinding {
-                    routines,
-                    kind: *kind,
-                    on: on.as_ref(),
-                    using: using.as_ref(),
-                    natural: *natural,
-                    alias: alias.as_deref(),
-                    column_aliases,
-                    left: &left_schema,
-                    right: &right_schema,
-                    subqueries,
-                    params,
-                    outer: condition.as_ref(),
-                });
+            SourcePlan::Join { .. } => {
+                return self
+                    .bind_execution_join(routines, source, subqueries, params, scope, work)
+                    .await;
             }
             SourcePlan::Function {
                 name, relations, ..
@@ -547,6 +485,82 @@ impl SchemaScope {
         }
         self.bind_source_with_work(routines, source, subqueries, params, outer, work)
             .await
+    }
+
+    async fn bind_execution_join<W: crate::catalog::work::Work + Send>(
+        &mut self,
+        routines: &dyn RoutineResolution,
+        source: &mut SourcePlan,
+        subqueries: &[QueryPlan],
+        params: &[SQLParam],
+        scope: SourceScope<'_>,
+        work: &mut W,
+    ) -> Result<RowSchema, SQLError> {
+        let SourcePlan::Join {
+            left,
+            right,
+            kind,
+            on,
+            using,
+            natural,
+            alias,
+            column_aliases,
+            lateral,
+            ..
+        } = source
+        else {
+            unreachable!("selected execution join")
+        };
+        let left_schema = crate::construction::retain_with(
+            self.production.control().capture().control(),
+            || {
+                self.bind_source_for_execution_in_scope_with_work(
+                    routines,
+                    left,
+                    subqueries,
+                    params,
+                    scope.with_names(),
+                    work,
+                )
+            },
+        )?
+        .await?;
+        let preceding =
+            scope.right_namespace_with_control(left, &left_schema, *kind, &self.control())?;
+        let right_schema = crate::construction::retain_with(
+            self.production.control().capture().control(),
+            || {
+                self.bind_source_for_execution_in_scope_with_work(
+                    routines,
+                    right,
+                    subqueries,
+                    params,
+                    SourceScope {
+                        outer: scope.outer,
+                        preceding: Some(&preceding),
+                        inherited_lateral: *lateral,
+                        retain_names: true,
+                    },
+                    work,
+                )
+            },
+        )?
+        .await?;
+        let condition = scope.condition_with_control(&self.control())?;
+        self.bind_join_output_schema(JoinSchemaBinding {
+            routines,
+            kind: *kind,
+            on: on.as_ref(),
+            using: using.as_ref(),
+            natural: *natural,
+            alias: alias.as_deref(),
+            column_aliases,
+            left: &left_schema,
+            right: &right_schema,
+            subqueries,
+            params,
+            outer: condition.as_ref(),
+        })
     }
 
     /// Select a table function's binding against the row it reads. A built-in that reads its input collation also records the collation of its arguments, as analysis records every other call's.

@@ -241,54 +241,36 @@ impl Dispatch<'_> {
                 .collect();
             return Ok(());
         }
-        let selected = if crate::is_fixed_builtin(name) {
-            crate::type_resolution::resolve_fixed_builtin_call_with_control(
-                name,
-                binding.as_ref(),
-                names,
-                types,
-                *variadic,
-                Some(&resolver),
-                control,
-            )?
-            .map(|resolved| resolved.selected)
-        } else if crate::catalog::json_path::JsonPathFunction::lookup(name).is_some() {
-            crate::type_resolution::json_path::resolve_call(
-                name,
-                binding.as_ref(),
-                crate::type_resolution::RoutineCallDescriptor {
-                    argument_names: names,
-                    argument_types: types,
-                    explicit_variadic: *variadic,
-                },
-                Some(&resolver),
-                control,
-            )?
-        } else if let Some(array) =
-            crate::type_resolution::resolve_array_transform_call_with_control(
-                name,
-                binding.as_ref(),
-                crate::type_resolution::ArrayTransformArguments {
-                    expressions: args,
-                    types,
-                    parameters: self.params,
-                    explicit_variadic: *variadic,
-                },
-                &resolver,
-                control,
-            )?
-        {
-            array.overload
-        } else {
-            resolver.resolve_function_overload_with_control(
-                name,
-                binding.as_ref(),
-                names,
-                types,
-                *variadic,
-                control,
-            )?
-        };
+        let selected = select_overload(
+            name,
+            binding.as_ref(),
+            args,
+            self.params,
+            crate::type_resolution::RoutineCallDescriptor {
+                argument_names: names,
+                argument_types: types,
+                explicit_variadic: *variadic,
+            },
+            &resolver,
+            control,
+        )?;
+        self.store_selected(name, binding, selected, control, work)
+            .await?;
+        if !self.scope.preserve_syntax_shape {
+            crate::type_resolution::json_path::normalize_retained(expression)?;
+        }
+        Ok(())
+    }
+    async fn store_selected<W: Work + Send>(
+        &mut self,
+        name: &str,
+        binding: &mut Option<FunctionBinding>,
+        selected: Option<
+            uqa_core::memory::Produced<crate::type_resolution::ResolvedFunctionOverload>,
+        >,
+        control: &ProductionControl<'_>,
+        work: &mut W,
+    ) -> Result<(), SQLError> {
         if let Some(selected) = selected {
             if !self.scope.stored_call_origin.keeps_runtime_lookup(
                 name,
@@ -315,9 +297,62 @@ impl Dispatch<'_> {
                     control.combine(self.scope.stored_binding_memory.take(), lease);
             }
         }
-        if !self.scope.preserve_syntax_shape {
-            crate::type_resolution::json_path::normalize_retained(expression)?;
-        }
         Ok(())
     }
+}
+
+fn select_overload(
+    name: &str,
+    binding: Option<&FunctionBinding>,
+    args: &[ScalarExpr],
+    params: &[SQLParam],
+    signature: crate::type_resolution::RoutineCallDescriptor<'_>,
+    resolver: &dyn FunctionTypeResolver,
+    control: &ProductionControl<'_>,
+) -> Result<
+    Option<uqa_core::memory::Produced<crate::type_resolution::ResolvedFunctionOverload>>,
+    SQLError,
+> {
+    let crate::type_resolution::RoutineCallDescriptor {
+        argument_names: names,
+        argument_types: types,
+        explicit_variadic: variadic,
+    } = signature;
+    Ok(if crate::is_fixed_builtin(name) {
+        crate::type_resolution::resolve_fixed_builtin_call_with_control(
+            name,
+            binding,
+            names,
+            types,
+            variadic,
+            Some(resolver),
+            control,
+        )?
+        .map(|resolved| resolved.selected)
+    } else if crate::catalog::json_path::JsonPathFunction::lookup(name).is_some() {
+        crate::type_resolution::json_path::resolve_call(
+            name,
+            binding,
+            signature,
+            Some(resolver),
+            control,
+        )?
+    } else if let Some(array) = crate::type_resolution::resolve_array_transform_call_with_control(
+        name,
+        binding,
+        crate::type_resolution::ArrayTransformArguments {
+            expressions: args,
+            types,
+            parameters: params,
+            explicit_variadic: variadic,
+        },
+        resolver,
+        control,
+    )? {
+        array.overload
+    } else {
+        resolver.resolve_function_overload_with_control(
+            name, binding, names, types, variadic, control,
+        )?
+    })
 }
