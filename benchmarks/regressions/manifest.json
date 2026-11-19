@@ -75618,6 +75618,19 @@
     {
       "package": "uqa-sql",
       "kind": "lib",
+      "test": "stored_call_selection_yields_within_variadic_arguments_and_data_modifying_ctes",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/tests/stored_dispatch.rs",
+      "capability": "Stored routine call selection",
+      "workload": "Bind COALESCE with 4,096 arguments and a data-modifying CTE with an invalid array_length overload in the first or last of 128 rows.",
+      "invariant": "Single-step and batched input retain the same routine selection and PostgreSQL diagnostics. Cancellation releases all SQL reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
       "test": "stored_statement_construction_and_retirement_share_the_original_work_and_allowance",
       "cases": 1,
       "source": "crates/uqa-sql/src/plan/copy/lowering/input/native/statement/tests/stored.rs",

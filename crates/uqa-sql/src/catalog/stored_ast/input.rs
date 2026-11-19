@@ -28,17 +28,21 @@ pub(super) trait Actions<W> {
 
     fn expression(
         &mut self,
-        value: &mut Expr,
-        control: &ProductionControl<'_>,
-        work: &mut W,
-    ) -> impl Future<Output = Result<(), SQLError>> + Send;
+        _value: &mut Expr,
+        _control: &ProductionControl<'_>,
+        _work: &mut W,
+    ) -> impl Future<Output = Result<(), SQLError>> + Send {
+        ready(Ok(()))
+    }
     fn routine(
         &mut self,
-        name: &mut String,
-        binding: Option<&mut Option<FunctionBinding>>,
-        control: &ProductionControl<'_>,
-        work: &mut W,
-    ) -> impl Future<Output = Result<(), SQLError>> + Send;
+        _name: &mut String,
+        _binding: Option<&mut Option<FunctionBinding>>,
+        _control: &ProductionControl<'_>,
+        _work: &mut W,
+    ) -> impl Future<Output = Result<(), SQLError>> + Send {
+        ready(Ok(()))
+    }
 }
 
 impl<W, R, F> Actions<W> for StoredAstVisitor<'_, R, F>

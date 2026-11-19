@@ -228,26 +228,69 @@ impl CatalogRoutineBinding {
     }
 
     /// The deferred operation enters its defining namespace anew for each poll.
-    pub(super) fn retained_scope(&self, def: &CreateFunction) -> Option<BindingScope> {
-        (matches!(self.stage, Stage::Compile) && matches!(def.body, FunctionBody::Statements(_)))
+    pub(super) fn retained_scope(
+        &self,
+        def: &CreateFunction,
+        lowered: bool,
+    ) -> Option<BindingScope> {
+        (matches!(self.stage, Stage::Dependencies(_))
+            || matches!(self.stage, Stage::Compile)
+                && matches!(def.body, FunctionBody::Statements(_))
+            || matches!(self.stage, Stage::Statements(_)) && lowered)
             .then(|| self.scope(def))
     }
 
-    pub(super) async fn advance_input<R: uqa_sql::routines::compilation::StoredRoutineCatalog>(
+    pub(super) async fn advance_input<R>(
         &mut self,
         catalog: &R,
         def: &mut StoredRoutineDefinition,
+        lowered: Option<uqa_sql::plan::RetainedExecutablePlan>,
         control: &ProductionControl<'_>,
         input: &mut uqa_core::image_io::AsyncImageInput<'_>,
-    ) -> Result<(), SQLError> {
-        let Stage::Compile = self.stage else {
-            unreachable!("selected stored compilation");
-        };
-        self.stage = Stage::Statements(
-            SQLStandardBodyCompilation::new_from_input(catalog, def.declaration(), control, input)
-                .await?,
-        );
+    ) -> Result<(), SQLError>
+    where
+        R: uqa_sql::routines::compilation::StoredRoutineCatalog
+            + uqa_sql::binding::stored_columns::StoredSourceCatalog
+            + uqa_sql::routines::resolution::RoutineOverloadCatalog
+            + uqa_sql::plan::AggregateClassifier,
+    {
+        match &mut self.stage {
+            Stage::Dependencies(dependencies) => {
+                let changed = dependencies
+                    .advance_from(catalog, def, control, input)
+                    .await?;
+                self.accept_dependencies(changed);
+            }
+            Stage::Compile => {
+                self.stage = Stage::Statements(
+                    SQLStandardBodyCompilation::new_from_input(
+                        catalog,
+                        def.declaration(),
+                        control,
+                        input,
+                    )
+                    .await?,
+                );
+            }
+            Stage::Statements(body) => {
+                body.accept_retained_from(
+                    catalog,
+                    lowered.expect("selected lowered statement"),
+                    control,
+                    input,
+                )
+                .await?;
+            }
+            _ => unreachable!("selected stored routine input"),
+        }
         Ok(())
+    }
+
+    fn accept_dependencies(&mut self, changed: Option<bool>) {
+        if let Some(changed) = changed {
+            self.changed |= changed;
+            self.stage = Stage::Compile;
+        }
     }
 
     fn advance_scoped<D: RoutineDeclaration>(
@@ -265,7 +308,7 @@ impl CatalogRoutineBinding {
         let stored = self.bodies == RoutineBodyCompilation::Stored;
         match &mut self.stage {
             Stage::Dependencies(input) => {
-                if let Some(changed) = input.advance(
+                let changed = input.advance(
                     analysis,
                     context.sources,
                     &uqa_sql::routines::resolution::RoutineOverloadContext {
@@ -273,10 +316,8 @@ impl CatalogRoutineBinding {
                     },
                     def,
                     control,
-                )? {
-                    self.changed |= changed;
-                    self.stage = Stage::Compile;
-                }
+                )?;
+                self.accept_dependencies(changed);
             }
             Stage::Compile => {
                 let def = def.declaration();

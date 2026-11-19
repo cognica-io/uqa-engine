@@ -265,6 +265,22 @@ pub(super) fn immutable(
         .0)
 }
 
+pub(super) async fn immutable_from<W: Work>(
+    source: &ScalarExpr,
+    control: ProductionControl<'_>,
+    work: &mut W,
+) -> std::result::Result<Produced<ScalarExpr>, W::Error>
+where
+    W::Error: From<CatalogRetentionError>,
+{
+    Ok(
+        copy_from::<_, 0>(source, control, CopyMode::Immutable, work)
+            .await?
+            .into_captured(&control)?
+            .0,
+    )
+}
+
 pub(super) fn capture(
     source: &ScalarExpr,
     control: ProductionControl<'_>,

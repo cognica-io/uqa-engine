@@ -90,10 +90,15 @@ impl CommandPlan {
     }
 
     pub fn source_input_mut(&mut self) -> Option<&mut SourcePlan> {
+        self.source_and_subqueries_mut().map(|(source, _)| source)
+    }
+
+    /// The source is edited while all scalar subqueries keep their original positions.
+    pub(crate) fn source_and_subqueries_mut(&mut self) -> Option<(&mut SourcePlan, &[QueryPlan])> {
         match self {
-            Self::Update(plan) => plan.source.as_deref_mut(),
-            Self::Delete(plan) => plan.source.as_deref_mut(),
-            Self::Merge(plan) => Some(&mut plan.source),
+            Self::Update(plan) => Some((plan.source.as_deref_mut()?, &plan.subqueries)),
+            Self::Delete(plan) => Some((plan.source.as_deref_mut()?, &plan.subqueries)),
+            Self::Merge(plan) => Some((&mut plan.source, &plan.subqueries)),
             _ => None,
         }
     }

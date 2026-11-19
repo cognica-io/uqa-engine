@@ -117,41 +117,70 @@ impl Inline for crate::plan::CommandPlan {
 /// Stored-name and parameter binding edit scalar/metadata fields of the original structural tree. Its original constructor already admitted the frames needed to retire it.
 pub(crate) struct OriginalWorkspace(pub(in crate::plan) Context);
 
-/// A stored default retains the constructor's tree frames and its payload allowance while the binder compares original and resolved syntax.
-pub(crate) struct DefaultExpression {
-    plan: Original<crate::plan::ExpressionPlan>,
-    memory: Option<uqa_core::memory::MemoryReservation>,
+/// The same constructor workspace keeps a before-binding shape and its independently owned field receipt until syntax position matching has completed.
+macro_rules! binding_syntax {
+    ($name:ident, $ty:ty, $kind:ident) => {
+        pub(crate) struct $name {
+            plan: Original<$ty>,
+            memory: Option<uqa_core::memory::MemoryReservation>,
+        }
+
+        impl $name {
+            fn from_context(value: Produced<$ty>, workspace: Option<&Context>) -> Self {
+                let (value, memory) = value.into_parts();
+                Self {
+                    plan: Original::new(value, workspace),
+                    memory,
+                }
+            }
+
+            pub(crate) async fn retire<W: crate::catalog::work::Work>(
+                self,
+                control: &ProductionControl<'_>,
+                work: &mut W,
+            ) -> CaptureResult<()> {
+                if let Original::Native(plan) = self.plan {
+                    let mut retirement = plan.context().prepare_retirement(control)?;
+                    retirement.$kind(plan.take());
+                    retirement.retire_from(control, work).await?;
+                }
+                drop(self.memory);
+                Ok(())
+            }
+        }
+
+        impl std::ops::Deref for $name {
+            type Target = $ty;
+            fn deref(&self) -> &Self::Target {
+                &self.plan
+            }
+        }
+    };
 }
+binding_syntax!(DefaultExpression, crate::plan::ExpressionPlan, expression);
+binding_syntax!(StatementQuery, crate::plan::QueryPlan, query);
 
 impl DefaultExpression {
     pub(crate) fn new(
         value: Produced<crate::plan::ExpressionPlan>,
         workspace: Option<&OriginalWorkspace>,
     ) -> Self {
-        let (value, memory) = value.into_parts();
-        let plan = Original::new(value, workspace);
-        Self { plan, memory }
-    }
-
-    pub(crate) async fn retire<W: crate::catalog::work::Work>(
-        self,
-        control: &ProductionControl<'_>,
-        work: &mut W,
-    ) -> CaptureResult<()> {
-        if let Original::Native(plan) = self.plan {
-            let mut retirement = plan.context().prepare_retirement(control)?;
-            retirement.expression(plan.take());
-            retirement.retire_from(control, work).await?;
-        }
-        drop(self.memory);
-        Ok(())
+        Self::from_context(value, workspace.map(|workspace| &workspace.0))
     }
 }
 
-impl std::ops::Deref for DefaultExpression {
-    type Target = crate::plan::ExpressionPlan;
-    fn deref(&self) -> &Self::Target {
-        &self.plan
+/// This borrow ends before the original statement can be retired. Only a live sibling plan owns a second reference to its workspace.
+pub(crate) struct StatementWorkspace<'a>(Option<&'a Context>);
+
+impl StatementWorkspace<'_> {
+    pub(crate) fn query(&self, value: Produced<crate::plan::QueryPlan>) -> StatementQuery {
+        StatementQuery::from_context(value, self.0)
+    }
+}
+
+impl AsMut<crate::plan::QueryPlan> for StatementQuery {
+    fn as_mut(&mut self) -> &mut crate::plan::QueryPlan {
+        &mut self.plan
     }
 }
 
@@ -167,9 +196,9 @@ enum Original<T: Root> {
 }
 
 impl<T: Root> Original<T> {
-    fn new(value: T, workspace: Option<&OriginalWorkspace>) -> Self {
+    fn new(value: T, workspace: Option<&Context>) -> Self {
         match workspace {
-            Some(workspace) => Self::Native(workspace.0.retain(value)),
+            Some(workspace) => Self::Native(workspace.retain(value)),
             None => Self::Ordinary(value),
         }
     }
@@ -196,8 +225,22 @@ impl<T: Root> std::ops::DerefMut for Original<T> {
 impl BoundPlan {
     pub(crate) fn new(plan: OwnedExecutablePlan, workspace: Option<OriginalWorkspace>) -> Self {
         let (plan, memory) = plan.into_parts();
-        let original = Original::new(plan, workspace.as_ref());
+        let original = Original::new(plan, workspace.as_ref().map(|workspace| &workspace.0));
         Self { original, memory }
+    }
+
+    pub(crate) fn retain_storage(&mut self, storage: ExecutableMemory) {
+        self.memory.absorb(storage);
+    }
+
+    pub(crate) fn binding_parts(&mut self) -> (&mut UnifiedPlan, StatementWorkspace<'_>) {
+        match &mut self.original {
+            Original::Native(plan) => {
+                let (plan, context) = plan.binding_parts();
+                (plan, StatementWorkspace(Some(context)))
+            }
+            Original::Ordinary(plan) => (plan, StatementWorkspace(None)),
+        }
     }
 
     pub(crate) fn into_ordinary(self) -> UnifiedPlan {
@@ -207,10 +250,10 @@ impl BoundPlan {
         }
     }
 
-    pub(crate) async fn retire(
+    pub(crate) async fn retire<W: crate::catalog::work::Work>(
         self,
         control: &ProductionControl<'_>,
-        work: &mut construction::Work<'_>,
+        work: &mut W,
     ) -> CaptureResult<()> {
         if let Original::Native(owned) = self.original {
             let context = owned.context().clone();
@@ -363,21 +406,23 @@ pub(crate) async fn capture<'s>(
     input.finish(plan)
 }
 
-impl crate::plan::MutableExpressionPlan {
-    /// Preserve the scalar syntax and its original query slots before routine binding edits the executable. Analyzed layouts and privilege metadata belong to the executable and never select a syntax site.
-    pub(crate) async fn capture_syntax_before_binding<W: crate::catalog::work::Work + Send>(
+/// Capture the original selected positions while retaining each written literal and nested query occurrence.
+pub(crate) trait BindingSyntax: Sync {
+    type Output: Send;
+    fn fields<'s>(
+        &'s self,
+        input: &mut Input<'s>,
+    ) -> impl std::future::Future<Output = CaptureResult<Self::Output>> + Send;
+    async fn capture_syntax_before_binding<W: crate::catalog::work::Work + Send>(
         &self,
         control: &ProductionControl<'_>,
         work: &mut W,
-    ) -> CaptureResult<Produced<crate::plan::ExpressionPlan>> {
+    ) -> CaptureResult<Produced<Self::Output>> {
         control.check()?;
         let mut driver = construction::Driver::new(*control)?;
         let output = driver.work().submit(move |work| async move {
             let mut input = Input::new(*control, work);
-            let syntax = crate::plan::ExpressionPlan {
-                scalar: input.field(self.scalar()).await?,
-                subqueries: input.list(self.queries()).await?,
-            };
+            let syntax = self.fields(&mut input).await?;
             input.finish(syntax).map(|(syntax, _)| syntax)
         })?;
         while driver.advance().await? {
@@ -385,6 +430,23 @@ impl crate::plan::MutableExpressionPlan {
         }
         control.check()?;
         construction::receive(output).await
+    }
+}
+
+impl BindingSyntax for crate::plan::MutableExpressionPlan {
+    type Output = crate::plan::ExpressionPlan;
+    async fn fields<'s>(&'s self, input: &mut Input<'s>) -> CaptureResult<Self::Output> {
+        Ok(crate::plan::ExpressionPlan {
+            scalar: input.field(self.scalar()).await?,
+            subqueries: input.list(self.queries()).await?,
+        })
+    }
+}
+
+impl BindingSyntax for crate::plan::QueryPlan {
+    type Output = Self;
+    async fn fields<'s>(&'s self, input: &mut Input<'s>) -> CaptureResult<Self> {
+        input.field(self).await
     }
 }
 

@@ -128,16 +128,19 @@ impl RetainedRoutineFinalization {
     ) -> StorageBackendResult<Option<Self>>
     where
         S: Clone + Send + Sync + 'static,
-        R: uqa_sql::routines::compilation::StoredRoutineCatalog + 'static,
+        R: uqa_sql::routines::compilation::StoredRoutineCatalog
+            + uqa_sql::binding::stored_columns::StoredSourceCatalog
+            + uqa_sql::routines::resolution::RoutineOverloadCatalog
+            + uqa_sql::plan::AggregateClassifier
+            + 'static,
     {
         self.advance_using(
             context,
             |bodies, mut declaration, lowered, context, read, aggregates| {
                 let scope = declaration.binding.as_ref().and_then(|binding| {
-                    binding.retained_scope(declaration.definition.declaration())
+                    binding.retained_scope(declaration.definition.declaration(), lowered.is_some())
                 });
                 if let Some(scope) = scope {
-                    debug_assert!(lowered.is_none());
                     let services = services.clone();
                     let original = read.cancellation().clone();
                     let analysis = ImageDecoder::new(
@@ -155,6 +158,7 @@ impl RetainedRoutineFinalization {
                                 .advance_input(
                                     catalog(&services),
                                     &mut record.definition,
+                                    lowered,
                                     &control,
                                     &mut input,
                                 )

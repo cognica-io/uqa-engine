@@ -17,7 +17,6 @@ use uqa_core::{
 };
 
 mod commands;
-use commands::syntax_expressions;
 mod input;
 pub(crate) use input::SiteInput;
 use input::Walk;
@@ -402,12 +401,7 @@ where
             }
             _ => return Err(shape_error("WITH command")),
         }
-        let lowered = syntax_expressions(lowered);
-        let bound = syntax_expressions(bound);
-        for (lowered, bound) in pairs(&lowered, &bound, "command expressions")? {
-            self.scalar(lowered, bound, subqueries).await?;
-        }
-        Ok(())
+        self.command_scalar_fields(lowered, bound, subqueries).await
     }
 
     async fn source(

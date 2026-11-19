@@ -7,7 +7,7 @@
 //! Persistent exact routine identity binding for catalog-owned query plans.
 
 use super::{
-    cte_references_own_name, extend_cte_generated_schema, extend_recursive_cte_binding_schema,
+    extend_cte_generated_schema, extend_recursive_cte_binding_schema,
     operator_join_relation_schemas, overlay_outer_schema, rename_schema,
     stored_routines::StoredCallOrigin, BindingContext, ColumnType, QueryPlan, RelationalPlan,
     RowSchema, SQLError, SQLParam, ScalarExpr, SchemaScope, SourcePlan, SourceScope,
@@ -16,6 +16,8 @@ use crate::ast::FunctionBinding;
 use crate::plan::ExpressionPlan;
 use crate::routines::RoutineResolution;
 use crate::{ColumnIdentity, FunctionTypeResolver};
+
+mod scalars;
 
 impl SchemaScope {
     pub(super) fn with_stored_outer_internal_aliases(
@@ -66,59 +68,75 @@ impl SchemaScope {
         });
     }
 
-    fn bind_cte_routines_for_storage(
+    async fn bind_cte_routines_for_storage<W: crate::catalog::work::Work + Send>(
         &mut self,
         routines: &dyn RoutineResolution,
         body: &mut crate::plan::CtePlanBody,
         params: &[SQLParam],
         outer: Option<&RowSchema>,
+        work: &mut W,
     ) -> Result<RowSchema, SQLError> {
         let crate::plan::CtePlanBody::Command(command) = body else {
-            return self.bind_query_routines_for_storage(
-                routines,
-                body.query_mut().expect("query CTE body"),
-                params,
-                outer,
+            let owner = self.production.clone();
+            return crate::catalog::work::nested!(
+                W::MAY_SUSPEND,
+                owner.control(),
+                self.bind_query_routines_for_storage_with_work(
+                    routines,
+                    body.query_mut().expect("query CTE body"),
+                    params,
+                    outer,
+                    work,
+                )
             );
         };
-        self.bind_command_routines_for_storage(routines, command, params, outer)?;
+        let owner = self.production.clone();
+        crate::catalog::work::nested!(
+            W::MAY_SUSPEND,
+            owner.control(),
+            self.bind_command_routines_for_storage_with_work(
+                routines, command, params, outer, work
+            )
+        )?;
         self.bind_command_returning(routines, command, params)
     }
 
-    pub(super) fn bind_cte_routine_schemas(
+    pub(super) async fn bind_cte_routine_schemas<W: crate::catalog::work::Work + Send>(
         &mut self,
         routines: &dyn RoutineResolution,
         ctes: &mut [crate::plan::CtePlan],
         params: &[SQLParam],
         outer: Option<&RowSchema>,
+        work: &mut W,
     ) -> Result<super::ctes::CteScopeStack, SQLError> {
-        let ordered_names = crate::semantics::ordered_cte_plans(ctes)?
-            .into_iter()
-            .map(|cte| cte.name.clone())
-            .collect::<Vec<_>>();
-        let mut previous = super::ctes::CteScopeStack::new(ordered_names.len(), &self.control())?;
-        for name in ordered_names {
-            let position = ctes
-                .iter()
-                .position(|cte| cte.name == name)
-                .ok_or_else(|| SQLError::Internal(format!("ordered CTE `{name}` disappeared")))?;
-            let self_recursive = cte_references_own_name(&ctes[position]);
+        let owner = self.production.clone();
+        let control = owner.control();
+        let positions = crate::semantics::cte_positions_with_work(ctes, control, work).await?;
+        let mut previous = super::ctes::CteScopeStack::new(positions.len(), &control)?;
+        for &position in positions.iter() {
+            work.checkpoint().await?;
+            let self_recursive =
+                crate::semantics::cte_references_own_name_with_control(&ctes[position], control)?;
             if let Some(cycle) = ctes[position].cycle.as_mut() {
                 let schema = RowSchema::default();
-                self.bind_scalar_routines_for_storage(
+                self.bind_scalar_routines_for_storage_with_work(
                     routines,
                     &mut cycle.mark_value,
                     &schema,
                     &[],
                     params,
-                )?;
-                self.bind_scalar_routines_for_storage(
+                    work,
+                )
+                .await?;
+                self.bind_scalar_routines_for_storage_with_work(
                     routines,
                     &mut cycle.mark_default,
                     &schema,
                     &[],
                     params,
-                )?;
+                    work,
+                )
+                .await?;
             }
             let provisional = if self_recursive {
                 self.bind_recursive_seed(
@@ -142,10 +160,11 @@ impl SchemaScope {
                     &mut ctes[position].body,
                     params,
                     outer,
-                )?
+                    work,
+                )
+                .await?
             };
-            let columns = ctes[position].columns.clone();
-            let provisional = rename_schema(&provisional, &columns, None);
+            let provisional = rename_schema(&provisional, &ctes[position].columns, None);
             let provisional = if self_recursive {
                 extend_recursive_cte_binding_schema(routines, &ctes[position], provisional, params)?
             } else {
@@ -153,16 +172,19 @@ impl SchemaScope {
             };
             previous.push(self.install_cte_schema(&ctes[position], Some(provisional))?);
             if self_recursive {
-                let complete = self.bind_cte_routines_for_storage(
-                    routines,
-                    &mut ctes[position].body,
-                    params,
-                    outer,
-                )?;
-                let complete = rename_schema(&complete, &columns, None);
+                let complete = self
+                    .bind_cte_routines_for_storage(
+                        routines,
+                        &mut ctes[position].body,
+                        params,
+                        outer,
+                        work,
+                    )
+                    .await?;
+                let complete = rename_schema(&complete, &ctes[position].columns, None);
                 let complete =
                     extend_cte_generated_schema(routines, &ctes[position], complete, params)?;
-                self.set_cte_schema(&name, complete)?;
+                self.set_cte_schema(&ctes[position].name, complete)?;
             }
         }
 
@@ -176,9 +198,32 @@ impl SchemaScope {
         params: &[SQLParam],
         outer: Option<&RowSchema>,
     ) -> Result<RowSchema, SQLError> {
-        let previous = self.bind_cte_routine_schemas(routines, &mut plan.ctes, params, outer)?;
+        crate::catalog::work::inline(self.bind_query_routines_for_storage_with_work(
+            routines,
+            plan,
+            params,
+            outer,
+            &mut (),
+        ))
+    }
 
-        let result = self.bind_root_routines_for_storage(routines, &mut plan.root, params, outer);
+    pub(super) async fn bind_query_routines_for_storage_with_work<
+        W: crate::catalog::work::Work + Send,
+    >(
+        &mut self,
+        routines: &dyn RoutineResolution,
+        plan: &mut QueryPlan,
+        params: &[SQLParam],
+        outer: Option<&RowSchema>,
+        work: &mut W,
+    ) -> Result<RowSchema, SQLError> {
+        let previous = self
+            .bind_cte_routine_schemas(routines, &mut plan.ctes, params, outer, work)
+            .await?;
+
+        let result = self
+            .bind_root_routines_for_storage_with_work(routines, &mut plan.root, params, outer, work)
+            .await;
         self.restore_cte_schemas(previous);
         result
     }
@@ -187,44 +232,56 @@ impl SchemaScope {
         clippy::too_many_lines,
         reason = "preserves SELECT schema and row identity"
     )]
-    fn bind_root_routines_for_storage(
+    async fn bind_root_routines_for_storage_with_work<W: crate::catalog::work::Work + Send>(
         &mut self,
         routines: &dyn RoutineResolution,
         root: &mut RelationalPlan,
         params: &[SQLParam],
         outer: Option<&RowSchema>,
+        work: &mut W,
     ) -> Result<RowSchema, SQLError> {
         match root {
             RelationalPlan::QueryBlock(block) => {
                 // The sources' own expressions resolve before the sources are analyzed, so that an analysis sees the names a nested query resolved, such as its output names in GROUP BY.
                 if let Some(source) = block.from.as_mut() {
-                    self.bind_source_routines_for_storage(
+                    self.bind_source_routines_for_storage_with_work(
                         routines,
                         source,
                         &block.subqueries,
                         params,
                         outer,
-                    )?;
+                        work,
+                    )
+                    .await?;
                 }
                 let source_schema = match block.from.as_mut() {
-                    Some(source) => self.bind_source_for_execution(
-                        routines,
-                        source,
-                        &block.subqueries,
-                        params,
-                        outer,
-                    )?,
+                    Some(source) => {
+                        self.bind_source_for_execution_with_work(
+                            routines,
+                            source,
+                            &block.subqueries,
+                            params,
+                            outer,
+                            work,
+                        )
+                        .await?
+                    }
                     None => RowSchema::default(),
                 };
                 let source_schema =
                     super::analysis::with_query_source_columns(&source_schema, block);
                 let expression_schema = overlay_outer_schema(&source_schema, outer);
                 for subquery in &mut block.subqueries {
-                    self.bind_query_routines_for_storage(
-                        routines,
-                        subquery,
-                        params,
-                        Some(&expression_schema),
+                    crate::catalog::work::nested!(
+                        W::MAY_SUSPEND,
+                        self.production.control(),
+                        self.bind_query_routines_for_storage_with_work(
+                            routines,
+                            subquery,
+                            params,
+                            Some(&expression_schema),
+                            work
+                        )
                     )?;
                 }
             }
@@ -234,21 +291,48 @@ impl SchemaScope {
                 subqueries,
                 ..
             } => {
-                self.bind_query_routines_for_storage(routines, left, params, outer)?;
-                self.bind_query_routines_for_storage(routines, right, params, outer)?;
+                crate::catalog::work::nested!(
+                    W::MAY_SUSPEND,
+                    self.production.control(),
+                    self.bind_query_routines_for_storage_with_work(
+                        routines, left, params, outer, work
+                    )
+                )?;
+                crate::catalog::work::nested!(
+                    W::MAY_SUSPEND,
+                    self.production.control(),
+                    self.bind_query_routines_for_storage_with_work(
+                        routines, right, params, outer, work
+                    )
+                )?;
                 for subquery in subqueries {
-                    self.bind_query_routines_for_storage(routines, subquery, params, outer)?;
+                    crate::catalog::work::nested!(
+                        W::MAY_SUSPEND,
+                        self.production.control(),
+                        self.bind_query_routines_for_storage_with_work(
+                            routines, subquery, params, outer, work
+                        )
+                    )?;
                 }
             }
             RelationalPlan::Values { subqueries, .. } => {
                 for subquery in subqueries {
-                    self.bind_query_routines_for_storage(routines, subquery, params, outer)?;
+                    crate::catalog::work::nested!(
+                        W::MAY_SUSPEND,
+                        self.production.control(),
+                        self.bind_query_routines_for_storage_with_work(
+                            routines, subquery, params, outer, work
+                        )
+                    )?;
                 }
             }
         }
 
         let set_output = match &*root {
-            RelationalPlan::SetOp { .. } => Some(self.bind_root(routines, root, params, outer)?),
+            RelationalPlan::SetOp { .. } => Some(
+                self.bind_root_with_work(routines, root, params, outer, work)
+                    .await?,
+            ),
             RelationalPlan::QueryBlock(_) | RelationalPlan::Values { .. } => None,
         };
         match root {
@@ -265,30 +349,44 @@ impl SchemaScope {
                         message: "SELECT * with no tables specified is not valid".into(),
                     });
                 }
-                let source = block.from.as_ref().map_or_else(
-                    || Ok(RowSchema::default()),
-                    |source| self.bind_source(routines, source, &block.subqueries, params, outer),
-                )?;
+                let source = match block.from.as_ref() {
+                    Some(source) => {
+                        self.bind_source_with_work(
+                            routines,
+                            source,
+                            &block.subqueries,
+                            params,
+                            outer,
+                            work,
+                        )
+                        .await?
+                    }
+                    None => RowSchema::default(),
+                };
                 let source_schema = super::analysis::with_query_source_columns(&source, block);
                 let expression_schema = overlay_outer_schema(&source_schema, outer);
                 if let Some(filter) = block.r#where.as_mut() {
-                    self.bind_scalar_routines_for_storage(
+                    self.bind_scalar_routines_for_storage_with_work(
                         routines,
                         filter,
                         &expression_schema,
                         &block.subqueries,
                         params,
-                    )?;
+                        work,
+                    )
+                    .await?;
                 }
                 let labels = super::routine_parameters::column_labels(&block.projections);
                 for projection in &mut block.projections {
-                    self.bind_scalar_routines_for_storage(
+                    self.bind_scalar_routines_for_storage_with_work(
                         routines,
                         &mut projection.expr,
                         &expression_schema,
                         &block.subqueries,
                         params,
-                    )?;
+                        work,
+                    )
+                    .await?;
                 }
                 super::routine_parameters::keep_column_labels(&mut block.projections, labels);
                 let expanded = crate::semantics::expand_bound_projection_stars_in_scope(
@@ -338,22 +436,26 @@ impl SchemaScope {
                     {
                         continue;
                     }
-                    self.bind_scalar_routines_for_storage(
+                    self.bind_scalar_routines_for_storage_with_work(
                         routines,
                         expression,
                         &expression_schema,
                         &block.subqueries,
                         params,
-                    )?;
+                        work,
+                    )
+                    .await?;
                 }
                 if let Some(having) = block.having.as_mut() {
-                    self.bind_scalar_routines_for_storage(
+                    self.bind_scalar_routines_for_storage_with_work(
                         routines,
                         having,
                         &expression_schema,
                         &block.subqueries,
                         params,
-                    )?;
+                        work,
+                    )
+                    .await?;
                 }
                 // A bare name in ORDER BY or DISTINCT ON names an output column before any input column or parameter, as `findTargetlistEntrySQL92` resolves it.
                 let names_output = |expression: &ScalarExpr| match expression {
@@ -366,31 +468,37 @@ impl SchemaScope {
                     {
                         continue;
                     }
-                    self.bind_scalar_routines_for_storage(
+                    self.bind_scalar_routines_for_storage_with_work(
                         routines,
                         &mut order.expr,
                         &expression_schema,
                         &block.subqueries,
                         params,
-                    )?;
+                        work,
+                    )
+                    .await?;
                 }
                 if let Some(limit) = block.limit.as_mut() {
-                    self.bind_scalar_routines_for_storage(
+                    self.bind_scalar_routines_for_storage_with_work(
                         routines,
                         limit,
                         &expression_schema,
                         &block.subqueries,
                         params,
-                    )?;
+                        work,
+                    )
+                    .await?;
                 }
                 if let Some(offset) = block.offset.as_mut() {
-                    self.bind_scalar_routines_for_storage(
+                    self.bind_scalar_routines_for_storage_with_work(
                         routines,
                         offset,
                         &expression_schema,
                         &block.subqueries,
                         params,
-                    )?;
+                        work,
+                    )
+                    .await?;
                 }
                 for expression in &mut block.distinct_on {
                     if names_output(expression)
@@ -398,26 +506,30 @@ impl SchemaScope {
                     {
                         continue;
                     }
-                    self.bind_scalar_routines_for_storage(
+                    self.bind_scalar_routines_for_storage_with_work(
                         routines,
                         expression,
                         &expression_schema,
                         &block.subqueries,
                         params,
-                    )?;
+                        work,
+                    )
+                    .await?;
                 }
                 for expression in block
                     .windows
                     .iter_mut()
                     .flat_map(|window| window.spec.expressions_mut())
                 {
-                    self.bind_scalar_routines_for_storage(
+                    self.bind_scalar_routines_for_storage_with_work(
                         routines,
                         expression,
                         &expression_schema,
                         &block.subqueries,
                         params,
-                    )?;
+                        work,
+                    )
+                    .await?;
                 }
                 // FROM and its scalar subqueries have their final bindings. A deferred view rewrite can change the source and its outer namespace before output analysis.
                 if block.from.is_some() && block.deferred_outer_rewrites.is_empty() {
@@ -439,65 +551,79 @@ impl SchemaScope {
                 );
                 let output = &output;
                 for order in order_by {
-                    self.bind_scalar_routines_for_storage(
+                    self.bind_scalar_routines_for_storage_with_work(
                         routines,
                         &mut order.expr,
                         output,
                         subqueries,
                         params,
-                    )?;
+                        work,
+                    )
+                    .await?;
                 }
                 if let Some(limit) = limit {
-                    self.bind_scalar_routines_for_storage(
-                        routines, limit, output, subqueries, params,
-                    )?;
+                    self.bind_scalar_routines_for_storage_with_work(
+                        routines, limit, output, subqueries, params, work,
+                    )
+                    .await?;
                 }
                 if let Some(offset) = offset {
-                    self.bind_scalar_routines_for_storage(
-                        routines, offset, output, subqueries, params,
-                    )?;
+                    self.bind_scalar_routines_for_storage_with_work(
+                        routines, offset, output, subqueries, params, work,
+                    )
+                    .await?;
                 }
             }
             RelationalPlan::Values { rows, subqueries } => {
                 let input = outer.cloned().unwrap_or_default();
                 for expression in rows.iter_mut().flatten() {
-                    self.bind_scalar_routines_for_storage(
-                        routines, expression, &input, subqueries, params,
-                    )?;
+                    self.bind_scalar_routines_for_storage_with_work(
+                        routines, expression, &input, subqueries, params, work,
+                    )
+                    .await?;
                 }
             }
         }
-        self.bind_root(routines, root, params, outer)
+        self.bind_root_with_work(routines, root, params, outer, work)
+            .await
     }
 
-    pub(super) fn bind_source_routines_for_storage(
+    pub(super) async fn bind_source_routines_for_storage_with_work<
+        W: crate::catalog::work::Work + Send,
+    >(
         &mut self,
         engine: &dyn RoutineResolution,
         source: &mut SourcePlan,
         subqueries: &[QueryPlan],
         params: &[SQLParam],
         outer: Option<&RowSchema>,
+        work: &mut W,
     ) -> Result<(), SQLError> {
-        self.bind_source_routines_in_scope(
+        self.bind_source_routines_in_scope_with_work(
             engine,
             source,
             subqueries,
             params,
             SourceScope::new(outer),
+            work,
         )
+        .await
     }
 
     #[expect(
         clippy::too_many_lines,
         reason = "preserves SELECT schema and row identity"
     )]
-    pub(super) fn bind_source_routines_in_scope(
+    pub(super) async fn bind_source_routines_in_scope_with_work<
+        W: crate::catalog::work::Work + Send,
+    >(
         &mut self,
         engine: &dyn RoutineResolution,
         source: &mut SourcePlan,
         subqueries: &[QueryPlan],
         params: &[SQLParam],
         scope: SourceScope<'_>,
+        work: &mut W,
     ) -> Result<(), SQLError> {
         let input = (!matches!(source, SourcePlan::Join { .. }))
             .then(|| scope.input(source))
@@ -513,20 +639,28 @@ impl SchemaScope {
                 kind,
                 ..
             } => {
-                self.bind_source_routines_in_scope(
-                    engine,
-                    left,
-                    subqueries,
-                    params,
-                    scope.with_names(),
+                crate::catalog::work::nested!(
+                    W::MAY_SUSPEND,
+                    self.production.control(),
+                    self.bind_source_routines_in_scope_with_work(
+                        engine,
+                        left,
+                        subqueries,
+                        params,
+                        scope.with_names(),
+                        work
+                    )
                 )?;
-                let left_schema = self.bind_source_in_scope(
-                    engine,
-                    left,
-                    subqueries,
-                    params,
-                    scope.with_names(),
-                )?;
+                let left_schema = self
+                    .bind_source_in_scope_with_work(
+                        engine,
+                        left,
+                        subqueries,
+                        params,
+                        scope.with_names(),
+                        work,
+                    )
+                    .await?;
                 let preceding = scope.right_namespace(left, &left_schema, *kind);
                 let right_scope = SourceScope {
                     outer: scope.outer,
@@ -534,27 +668,53 @@ impl SchemaScope {
                     inherited_lateral: *lateral,
                     retain_names: true,
                 };
-                self.bind_source_routines_in_scope(engine, right, subqueries, params, right_scope)?;
+                crate::catalog::work::nested!(
+                    W::MAY_SUSPEND,
+                    self.production.control(),
+                    self.bind_source_routines_in_scope_with_work(
+                        engine,
+                        right,
+                        subqueries,
+                        params,
+                        right_scope,
+                        work
+                    )
+                )?;
                 if let Some(on) = on {
-                    let right_schema =
-                        self.bind_source_in_scope(engine, right, subqueries, params, right_scope)?;
+                    let right_schema = self
+                        .bind_source_in_scope_with_work(
+                            engine,
+                            right,
+                            subqueries,
+                            params,
+                            right_scope,
+                            work,
+                        )
+                        .await?;
                     let input = RowSchema::join(&left_schema, &right_schema, std::iter::empty());
                     let input = super::with_query_table_pseudo_columns(&input);
                     let condition = scope.condition();
                     let input = overlay_outer_schema(&input, condition.as_ref());
-                    self.bind_scalar_routines_for_storage(engine, on, &input, subqueries, params)?;
+                    self.bind_scalar_routines_for_storage_with_work(
+                        engine, on, &input, subqueries, params, work,
+                    )
+                    .await?;
                 }
                 Ok(())
             }
-            SourcePlan::Subquery { body, .. } => self
-                .bind_query_routines_for_storage(engine, body, params, outer)
-                .map(|_| ()),
+            SourcePlan::Subquery { body, .. } => crate::catalog::work::nested!(
+                W::MAY_SUSPEND,
+                self.production.control(),
+                self.bind_query_routines_for_storage_with_work(engine, body, params, outer, work)
+            )
+            .map(|_| ()),
             SourcePlan::Values { rows, .. } => {
                 let input = outer.cloned().unwrap_or_default();
                 for expression in rows.iter_mut().flatten() {
-                    self.bind_scalar_routines_for_storage(
-                        engine, expression, &input, subqueries, params,
-                    )?;
+                    self.bind_scalar_routines_for_storage_with_work(
+                        engine, expression, &input, subqueries, params, work,
+                    )
+                    .await?;
                 }
                 Ok(())
             }
@@ -578,17 +738,19 @@ impl SchemaScope {
                             1 => &right,
                             _ => &constant,
                         };
-                        self.bind_scalar_routines_for_storage(
-                            engine, expression, input, subqueries, params,
-                        )?;
+                        self.bind_scalar_routines_for_storage_with_work(
+                            engine, expression, input, subqueries, params, work,
+                        )
+                        .await?;
                     }
                     return Ok(());
                 }
                 let input = outer.cloned().unwrap_or_default();
                 for expression in args {
-                    self.bind_scalar_routines_for_storage(
-                        engine, expression, &input, subqueries, params,
-                    )?;
+                    self.bind_scalar_routines_for_storage_with_work(
+                        engine, expression, &input, subqueries, params, work,
+                    )
+                    .await?;
                 }
                 Ok(())
             }
@@ -608,235 +770,25 @@ impl SchemaScope {
                                 1 => &right,
                                 _ => &constant,
                             };
-                            self.bind_scalar_routines_for_storage(
-                                engine, expression, input, subqueries, params,
-                            )?;
+                            self.bind_scalar_routines_for_storage_with_work(
+                                engine, expression, input, subqueries, params, work,
+                            )
+                            .await?;
                         }
                         continue;
                     }
                     let input = outer.cloned().unwrap_or_default();
                     for expression in &mut function.args {
-                        self.bind_scalar_routines_for_storage(
-                            engine, expression, &input, subqueries, params,
-                        )?;
+                        self.bind_scalar_routines_for_storage_with_work(
+                            engine, expression, &input, subqueries, params, work,
+                        )
+                        .await?;
                     }
                 }
                 Ok(())
             }
             SourcePlan::Table { .. } => Ok(()),
         }
-    }
-
-    pub(super) fn bind_scalar_routines_for_storage(
-        &mut self,
-        engine: &dyn RoutineResolution,
-        expression: &mut ScalarExpr,
-        schema: &RowSchema,
-        subqueries: &[QueryPlan],
-        params: &[SQLParam],
-    ) -> Result<(), SQLError> {
-        let schema = self.with_stored_outer_internal_aliases(schema)?;
-        let schema = &schema;
-        self.canonicalize_stored_outer_columns(expression, schema);
-        self.expand_stored_whole_rows(expression, schema);
-        self.canonicalize_routine_parameters(expression, schema);
-        self.resolve_variable_sites(expression, schema);
-        match self.scalar_binding {
-            super::ScalarBindingMode::References | super::ScalarBindingMode::RoutineParameters => {
-                return Ok(())
-            }
-            super::ScalarBindingMode::CompositeInputs => {
-                return self.retain_composite_inputs_in_scope(
-                    engine, expression, schema, subqueries, params,
-                )
-            }
-            super::ScalarBindingMode::Stored => {}
-        }
-        let mut failure = None;
-        crate::plan::rewrite_scalar_expression(expression, &mut |expression| {
-            if failure.is_some() {
-                return;
-            }
-            if matches!(expression, ScalarExpr::Func { order_syntax, name, binding, order_by, .. }
-                if super::ordered_calls::uses_ordered_arguments(*order_syntax, name, binding.as_ref(), order_by.len())
-                    || super::ordered_calls::is_ordered_set(name))
-            {
-                if let Err(error) = self.bind_ordered_function_for_storage(
-                    engine, expression, schema, subqueries, params,
-                ) {
-                    failure = Some(error);
-                }
-                return;
-            }
-            let ScalarExpr::Func {
-                name,
-                binding,
-                args,
-                ..
-            } = expression
-            else {
-                return;
-            };
-            if let Some(dispatch) = binding.as_ref().and_then(|binding| binding.dispatch) {
-                if let crate::ast::FunctionDispatch::NumericOperator(operator) = dispatch {
-                    let selected = (|| {
-                        let resolver = self.query_function_type_resolver_for_subqueries(
-                            engine, args, schema, subqueries, params,
-                        )?;
-                        let (_, types, _) = crate::function_call_argument_signature(
-                            args,
-                            schema,
-                            params,
-                            Some(&resolver),
-                        )?;
-                        crate::type_resolution::numeric_operator_types(operator, &types)
-                    })();
-                    match selected {
-                        Ok(selected) => {
-                            binding
-                                .as_mut()
-                                .expect("structural operator binding")
-                                .argument_types = selected
-                                .arguments
-                                .iter()
-                                .map(crate::ColumnType::sql_name)
-                                .collect();
-                        }
-                        Err(error) => failure = Some(error),
-                    }
-                }
-                return;
-            }
-            if let Err(error) = self.bind_scalar_function_for_storage(
-                engine, name, binding, args, schema, subqueries, params,
-            ) {
-                failure = Some(error);
-                return;
-            }
-            if !self.preserve_syntax_shape {
-                if let Err(error) =
-                    crate::type_resolution::json_path::normalize_retained(expression)
-                {
-                    failure = Some(error);
-                }
-            }
-        });
-        failure.map_or(Ok(()), Err)?;
-        let mut comparison_inputs = false;
-        expression.visit(&mut |node| {
-            comparison_inputs |= matches!(node, ScalarExpr::Func { binding: Some(binding), .. }
-                if matches!(binding.dispatch, Some(crate::ast::FunctionDispatch::IsDistinct | crate::ast::FunctionDispatch::ValueNullTest { .. })));
-        });
-        if comparison_inputs {
-            self.retain_composite_inputs_in_scope(engine, expression, schema, subqueries, params)?;
-        }
-        self.bind_stored_scalar_types(engine, expression, schema, subqueries, params)?;
-        self.record_composite_dependencies(engine, expression, schema, subqueries, params)
-    }
-
-    /// Name user-defined types by OID identity and keep the enum constants that binding coerces from `unknown` literals by label identity, as `PostgreSQL` stores type and label OIDs in analyzed expressions.
-    fn bind_stored_scalar_types(
-        &mut self,
-        engine: &dyn RoutineResolution,
-        expression: &mut ScalarExpr,
-        schema: &RowSchema,
-        subqueries: &[QueryPlan],
-        params: &[SQLParam],
-    ) -> Result<(), SQLError> {
-        super::stored_types::bind_scalar_type_identities(expression, &mut |name| {
-            engine.resolve_type_name(name)
-        })?;
-        let resolver = self.query_function_type_resolver_for_subqueries(
-            engine,
-            std::slice::from_ref(expression),
-            schema,
-            subqueries,
-            params,
-        )?;
-        // The coercions binding adds to an operator's operands, the constants it reads from `unknown` literals and the relabels of `oid` alias operands, are stored, as `PostgreSQL` stores them in an analyzed expression.
-        if self.preserve_syntax_shape {
-            crate::type_resolution::store_syntax_operand_coercions(
-                expression, schema, params, &resolver,
-            )?;
-        } else {
-            crate::type_resolution::store_operand_coercions(expression, schema, params, &resolver)?;
-        }
-        if !crate::type_resolution::contains_unknown_literal(expression) {
-            return Ok(());
-        }
-        crate::type_resolution::fold_stored_enum_constants(expression, schema, params, &resolver)
-            .map(drop)
-    }
-
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "keeps execution context inputs aligned"
-    )]
-    fn bind_scalar_function_for_storage(
-        &mut self,
-        engine: &dyn RoutineResolution,
-        name: &str,
-        binding: &mut Option<FunctionBinding>,
-        args: &[ScalarExpr],
-        schema: &RowSchema,
-        subqueries: &[QueryPlan],
-        params: &[SQLParam],
-    ) -> Result<(), SQLError> {
-        let resolver = self.query_function_type_resolver_for_subqueries(
-            engine, args, schema, subqueries, params,
-        )?;
-        let (argument_names, argument_types, explicit_variadic) =
-            crate::function_call_argument_signature(args, schema, params, Some(&resolver))?;
-        let selected = if crate::is_fixed_builtin(name) {
-            crate::resolve_fixed_builtin_call(
-                name,
-                binding.as_ref(),
-                &argument_names,
-                &argument_types,
-                explicit_variadic,
-                Some(&resolver),
-            )?
-            .map(|resolved| resolved.selected)
-        } else if crate::catalog::json_path::JsonPathFunction::lookup(name).is_some() {
-            crate::type_resolution::json_path::resolve_call(
-                name,
-                binding.as_ref(),
-                crate::type_resolution::RoutineCallDescriptor {
-                    argument_names: &argument_names,
-                    argument_types: &argument_types,
-                    explicit_variadic,
-                },
-                Some(&resolver),
-                &uqa_core::memory::ProductionControl::uncontrolled(),
-            )?
-            .map(|selected| {
-                selected
-                    .into_uncontrolled()
-                    .expect("ordinary stored binding")
-            })
-        } else if let Some(array) = crate::type_resolution::resolve_array_transform_call(
-            name,
-            binding.as_ref(),
-            args,
-            &argument_types,
-            params,
-            explicit_variadic,
-            &resolver,
-        )? {
-            array.overload
-        } else {
-            resolver.resolve_function_overload(
-                name,
-                binding.as_ref(),
-                &argument_names,
-                &argument_types,
-                explicit_variadic,
-            )?
-        };
-        if let Some(selected) = selected {
-            self.store_call_selection(name, binding, selected.binding);
-        }
-        Ok(())
     }
 }
 
@@ -859,9 +811,42 @@ impl StoredCallOrigin {
         ctes: &BindingContext,
         outer: Option<&RowSchema>,
     ) -> Result<RowSchema, SQLError> {
-        let mut scope = SchemaScope::for_analysis(ctes)?;
+        crate::catalog::work::inline(self.bind_query_in(
+            &mut SchemaScope::for_analysis(ctes)?,
+            engine,
+            plan,
+            params,
+            outer,
+            &mut (),
+        ))
+    }
+    pub(super) async fn bind_query_in<W: crate::catalog::work::Work + Send>(
+        self,
+        scope: &mut SchemaScope,
+        routines: &dyn RoutineResolution,
+        query: &mut QueryPlan,
+        params: &[SQLParam],
+        outer: Option<&RowSchema>,
+        work: &mut W,
+    ) -> Result<RowSchema, SQLError> {
         scope.stored_call_origin = self;
-        scope.bind_query_routines_for_storage(engine, plan, params, outer)
+        scope
+            .bind_query_routines_for_storage_with_work(routines, query, params, outer, work)
+            .await
+    }
+    pub(crate) async fn bind_query_from(
+        self,
+        routines: &dyn RoutineResolution,
+        query: &mut QueryPlan,
+        params: &[SQLParam],
+        binding: super::production::ControlledBindingContext<'_>,
+        control: &uqa_core::memory::ProductionControl<'_>,
+        input: &mut uqa_core::image_io::AsyncImageInput<'_>,
+    ) -> Result<crate::plan::ExecutableMemory, SQLError> {
+        let mut scope = SchemaScope::for_analysis_with_control(binding, control)?;
+        self.bind_query_in(&mut scope, routines, query, params, None, input)
+            .await?;
+        Ok(scope.stored_binding_memory.into())
     }
 }
 

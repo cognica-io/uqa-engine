@@ -6,22 +6,36 @@
 
 //! MERGE traversal within stored statements, including nested command CTEs.
 
-use super::{BTreeSet, MergeCallback, SQLError, Statement, StoredAstVisitor};
+use super::{BTreeSet, MergeCallback, SQLError, Statement};
 
+struct Selected<F>(F);
+impl<W, F: FnMut(&mut crate::ast::MergeStmt) -> Result<(), SQLError>> super::Actions<W>
+    for Selected<F>
+{
+    fn merge(&mut self, value: &mut crate::ast::MergeStmt) -> Result<(), SQLError> {
+        (self.0)(value)
+    }
+}
 pub fn visit_stored_statement_merges(
     statement: &mut Statement,
     visit: MergeCallback<'_>,
 ) -> Result<(), SQLError> {
-    StoredAstVisitor {
-        source: None,
-        merge: Some(visit),
-        expression: None,
-        projection: None,
-        ty: None,
-        relation: &mut |_: &mut String| Ok(()),
-        routine: &mut |_: &mut String, _: Option<&mut Option<crate::ast::FunctionBinding>>| Ok(()),
-    }
-    .bind_statement(statement)
+    crate::catalog::work::inline(visit_stored_statement_merges_from(
+        statement,
+        visit,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+        &mut (),
+    ))
+}
+pub(crate) async fn visit_stored_statement_merges_from<W: super::Work + Send>(
+    statement: &mut Statement,
+    visit: impl FnMut(&mut crate::ast::MergeStmt) -> Result<(), SQLError>,
+    control: &uqa_core::memory::ProductionControl<'_>,
+    work: &mut W,
+) -> Result<(), SQLError> {
+    super::Reader::new(&mut Selected(visit), control, work)
+        .bind_statement(statement)
+        .await
 }
 
 use super::{Actions, Reader, Work};

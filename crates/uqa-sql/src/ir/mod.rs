@@ -7,7 +7,9 @@
 //! Serializable scalar SQL IR shared by analysis, planning, and execution.
 
 mod call_arguments;
-pub(crate) use call_arguments::scalar_call_argument_value_owned;
+pub(crate) use call_arguments::{
+    scalar_call_argument_value_owned, scalar_call_arguments_with_work,
+};
 pub(crate) mod children;
 mod collation;
 mod equality;

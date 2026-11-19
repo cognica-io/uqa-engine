@@ -184,6 +184,14 @@ impl<T: Root> Prefix<T> {
         &self.context
     }
 
+    /// Borrow the root and its retirement context together while its binding inputs are selected.
+    pub(in crate::plan) fn binding_parts(&mut self) -> (&mut T, &Context) {
+        (
+            self.value.as_mut().expect("pending plan root"),
+            &self.context,
+        )
+    }
+
     /// Transfer a completed root into another native owner without an intervening fallible operation.
     pub(in crate::plan) fn map<U: Root>(mut self, map: impl FnOnce(T) -> U) -> Prefix<U> {
         let value = self.value.take().expect("pending plan root");

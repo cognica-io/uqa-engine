@@ -46,6 +46,27 @@ pub struct StoredQueryNamespace {
     pub temporary_schema: String,
     pub transition_relations: BTreeSet<String>,
 }
+/// Both namespace representations provide the same exact captured transition-name membership.
+pub trait TransitionRelationNames: Sync {
+    fn is_empty(&self) -> bool;
+    fn contains(&self, name: &str) -> bool;
+}
+impl TransitionRelationNames for BTreeSet<String> {
+    fn is_empty(&self) -> bool {
+        self.is_empty()
+    }
+    fn contains(&self, name: &str) -> bool {
+        self.contains(name)
+    }
+}
+impl TransitionRelationNames for crate::binding::production::BindingNameSet {
+    fn is_empty(&self) -> bool {
+        self.is_empty()
+    }
+    fn contains(&self, name: &str) -> bool {
+        self.contains(name)
+    }
+}
 pub struct StoredQueryBindingContext<
     'a,
     R: ?Sized = dyn StoredRelationCatalog + 'a,
@@ -55,7 +76,7 @@ pub struct StoredQueryBindingContext<
     pub lookup_mode: RelationLookupMode,
     pub sequences: &'a S,
     pub temporary_schema: &'a str,
-    pub transition_relations: &'a BTreeSet<String>,
+    pub transition_relations: &'a dyn TransitionRelationNames,
 }
 
 pub fn resolve_loaded_query_sequence(

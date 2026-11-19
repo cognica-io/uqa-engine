@@ -197,11 +197,31 @@ pub fn restore_statement(
     statement: &mut crate::ast::Statement,
     resolver: &dyn FunctionTypeResolver,
 ) -> Result<bool, crate::SQLError> {
+    crate::catalog::work::inline(restore_statement_from(
+        statement,
+        resolver,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+        &mut (),
+    ))
+}
+
+pub(crate) async fn restore_statement_from<W: crate::catalog::work::Work + Send>(
+    statement: &mut crate::ast::Statement,
+    resolver: &dyn FunctionTypeResolver,
+    control: &uqa_core::memory::ProductionControl<'_>,
+    work: &mut W,
+) -> Result<bool, crate::SQLError> {
     let mut changed = false;
-    crate::catalog::stored_ast::visit_stored_statement_expressions(statement, &mut |expression| {
-        changed |= restore_node(expression, false, resolver);
-        Ok(())
-    })?;
+    crate::catalog::stored_ast::visit_stored_statement_expressions_from(
+        statement,
+        |expression| {
+            changed |= restore_node(expression, false, resolver);
+            Ok(())
+        },
+        control,
+        work,
+    )
+    .await?;
     Ok(changed)
 }
 
@@ -210,12 +230,31 @@ pub fn restore_expression(
     expression: &mut Expr,
     resolver: &dyn FunctionTypeResolver,
 ) -> Result<bool, String> {
+    crate::catalog::work::inline(restore_expression_from(
+        expression,
+        resolver,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+        &mut (),
+    ))
+    .map_err(|error| error.to_string())
+}
+pub(crate) async fn restore_expression_from<W: crate::catalog::work::Work + Send>(
+    expression: &mut Expr,
+    resolver: &dyn FunctionTypeResolver,
+    control: &uqa_core::memory::ProductionControl<'_>,
+    work: &mut W,
+) -> Result<bool, crate::SQLError> {
     let mut changed = false;
-    crate::catalog::stored_ast::visit_stored_expression(expression, &mut |expression| {
-        changed |= restore_node(expression, false, resolver);
-        Ok(())
-    })
-    .map_err(|error| error.to_string())?;
+    crate::catalog::stored_ast::visit_stored_expression_from(
+        expression,
+        |node| {
+            changed |= restore_node(node, false, resolver);
+            Ok(())
+        },
+        control,
+        work,
+    )
+    .await?;
     Ok(changed)
 }
 

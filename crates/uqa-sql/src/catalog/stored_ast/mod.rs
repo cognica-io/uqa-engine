@@ -25,6 +25,7 @@ pub use expressions::*;
 use input::{Actions, Reader};
 pub use literals::read_unknown_stored_literal;
 pub use merge::visit_stored_statement_merges;
+pub(crate) use merge::visit_stored_statement_merges_from;
 pub use routines::*;
 pub use sites::*;
 pub use sources::*;
@@ -674,4 +675,21 @@ impl<W: Work + Send, A: Actions<W>> Reader<'_, '_, A, W> {
         }
         Ok(())
     }
+}
+
+pub(crate) async fn visit_stored_statement_relations_from<W: Work + Send>(
+    statement: &mut Statement,
+    visit: impl FnMut(&mut String) -> Result<(), SQLError>,
+    control: &uqa_core::memory::ProductionControl<'_>,
+    work: &mut W,
+) -> Result<(), SQLError> {
+    struct Relations<F>(F);
+    impl<W, F: FnMut(&mut String) -> Result<(), SQLError>> Actions<W> for Relations<F> {
+        fn relation(&mut self, name: &mut String) -> Result<(), SQLError> {
+            (self.0)(name)
+        }
+    }
+    Reader::new(&mut Relations(visit), control, work)
+        .bind_statement(statement)
+        .await
 }

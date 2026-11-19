@@ -62,6 +62,15 @@ impl SQLBodyInputs {
         control: &ProductionControl<'_>,
     ) -> Result<Self, SQLError> {
         super::compilation::validate_routine_signature(context, def)?;
+        Self::from_signature(context, def, mode, control)
+    }
+
+    fn from_signature(
+        context: &RoutineCompilationContext<'_>,
+        def: &CreateFunction,
+        mode: RoutineCompilationMode,
+        control: &ProductionControl<'_>,
+    ) -> Result<Self, SQLError> {
         let positional = super::body_validation::routine_parameter_values_with_control(
             context.types,
             def,
@@ -82,6 +91,72 @@ impl SQLBodyInputs {
             result_types,
             recording,
         })
+    }
+
+    async fn bind_from<R>(
+        &self,
+        catalog: &R,
+        statement: &mut crate::ast::Statement,
+        mode: RoutineCompilationMode,
+        control: &ProductionControl<'_>,
+        input: &mut uqa_core::image_io::AsyncImageInput<'_>,
+    ) -> Result<Produced<bool>, SQLError>
+    where
+        R: super::compilation::StoredRoutineCatalog
+            + StoredSourceCatalog
+            + super::resolution::RoutineOverloadCatalog
+            + crate::plan::AggregateClassifier,
+    {
+        let positional = self.positional.as_slice();
+        super::compilation::validate_sql_standard_statement_inputs(
+            &RoutineCompilationContext::from_catalog(catalog),
+            &super::resolution::RoutineOverloadContext { catalog },
+            statement,
+            positional,
+            &self.parameters,
+        )?;
+        let mut changed = crate::binding::stored_relations::bind_stored_statement_relations_from(
+            catalog,
+            statement,
+            RelationLookupMode::Bound,
+            true,
+            "SQL routine body",
+            control,
+            input,
+        )
+        .await?;
+        changed |= super::merge_columns::bind_stored_merge_target_columns_from(
+            catalog, statement, control, input,
+        )
+        .await?;
+        changed |= catalog
+            .stored_source_columns()
+            .bind_statement_from(statement, control, input)
+            .await?;
+        let plan = crate::plan::UnifiedPlan::lower_executable_from_input(
+            statement, catalog, control, input,
+        )
+        .await?
+        .upgrade_stored_dispatches(control, input)
+        .await?;
+        let (plan, snapshot) = super::compilation::bind_stored_statement_from(
+            catalog,
+            plan,
+            positional,
+            &self.parameters,
+            control,
+            input,
+        )
+        .await?;
+        let sites = crate::binding::stored_routines::statement_syntax_sites_from(
+            catalog, plan, positional, &snapshot, control, input,
+        )
+        .await?;
+        let (edited, memory) = mode
+            .bind_statement_sites_with_work(statement, &sites, control, input)
+            .await?
+            .into_parts();
+        Ok(control.finish(changed | edited, memory)?)
     }
 
     fn bind(

@@ -22,6 +22,17 @@ impl ScalarExpr {
         iterative::immutable(self, *control)
     }
 
+    pub(crate) async fn clone_with_work<W: Work>(
+        &self,
+        control: &ProductionControl<'_>,
+        work: &mut W,
+    ) -> std::result::Result<Produced<Self>, W::Error>
+    where
+        W::Error: From<crate::schema::retention::CatalogRetentionError>,
+    {
+        iterative::immutable_from(self, *control, work).await
+    }
+
     /// Capture scalar syntax and evaluated literals under independent ownership; query-arena references keep their original positions.
     pub(crate) fn capture_with_footprint(
         &self,

@@ -20,80 +20,104 @@ pub fn bind_stored_merge_target_columns(
     catalog: &dyn StoredMergeColumnCatalog,
     statement: &mut Statement,
 ) -> Result<bool, SQLError> {
+    crate::catalog::work::inline(bind_stored_merge_target_columns_from(
+        catalog,
+        statement,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+        &mut (),
+    ))
+}
+pub(crate) async fn bind_stored_merge_target_columns_from<
+    C: StoredMergeColumnCatalog + ?Sized,
+    W: crate::catalog::work::Work + Send,
+>(
+    catalog: &C,
+    statement: &mut Statement,
+    control: &uqa_core::memory::ProductionControl<'_>,
+    work: &mut W,
+) -> Result<bool, SQLError> {
     let mut changed = false;
-    crate::catalog::stored_ast::visit_stored_statement_merges(statement, &mut |merge| {
-        let Some(definitions) = catalog.stored_merge_target_definitions(&merge.target) else {
-            return Ok(());
-        };
-        let previous = merge.target_column_bindings.clone();
-        let mut targets = BTreeSet::new();
-        let mut coerced_targets = BTreeSet::new();
-        for action in &mut merge.when_clauses {
-            match action {
-                MergeWhen::UpdateMatched { assignments, .. }
-                | MergeWhen::UpdateNotMatchedBySource { assignments, .. } => {
-                    targets.extend(assignments.iter().flat_map(|(group, _)| {
-                        group.targets().iter().map(|target| target.column.clone())
-                    }));
-                    coerced_targets.extend(
-                        assignments
-                            .iter()
-                            .filter(|(_, expression)| !matches!(expression, Expr::Default))
-                            .flat_map(|(group, _)| {
-                                group.targets().iter().map(|target| target.column.clone())
-                            }),
-                    );
-                }
-                MergeWhen::InsertNotMatched {
-                    columns, values, ..
-                } => {
-                    if columns.is_empty() && !values.is_empty() {
-                        *columns = definitions
-                            .iter()
-                            .take(values.len())
-                            .map(|column| column.name.clone().into())
-                            .collect();
-                        changed = true;
+    crate::catalog::stored_ast::visit_stored_statement_merges_from(
+        statement,
+        |merge| {
+            let Some(definitions) = catalog.stored_merge_target_definitions(&merge.target) else {
+                return Ok(());
+            };
+            let previous = merge.target_column_bindings.clone();
+            let mut targets = BTreeSet::new();
+            let mut coerced_targets = BTreeSet::new();
+            for action in &mut merge.when_clauses {
+                match action {
+                    MergeWhen::UpdateMatched { assignments, .. }
+                    | MergeWhen::UpdateNotMatchedBySource { assignments, .. } => {
+                        targets.extend(assignments.iter().flat_map(|(group, _)| {
+                            group.targets().iter().map(|target| target.column.clone())
+                        }));
+                        coerced_targets.extend(
+                            assignments
+                                .iter()
+                                .filter(|(_, expression)| !matches!(expression, Expr::Default))
+                                .flat_map(|(group, _)| {
+                                    group.targets().iter().map(|target| target.column.clone())
+                                }),
+                        );
                     }
-                    targets.extend(columns.iter().map(|target| target.column.clone()));
-                    coerced_targets.extend(
-                        columns
-                            .iter()
-                            .zip(values.iter())
-                            .filter(|(_, expression)| !matches!(expression, Expr::Default))
-                            .map(|(target, _)| target.column.clone()),
-                    );
-                }
-                _ => {}
-            }
-        }
-        for name in targets {
-            if let Some((position, column)) = definitions
-                .iter()
-                .enumerate()
-                .find(|(_, column)| column.name == name)
-            {
-                if let Some(object_id) = column.object_id {
-                    let mut domain_dependencies = BTreeSet::new();
-                    if coerced_targets.contains(&name) {
-                        collect_target_domains(&column.ty, &mut domain_dependencies);
+                    MergeWhen::InsertNotMatched {
+                        columns, values, ..
+                    } => {
+                        if columns.is_empty() && !values.is_empty() {
+                            *columns = definitions
+                                .iter()
+                                .take(values.len())
+                                .map(|column| column.name.clone().into())
+                                .collect();
+                            changed = true;
+                        }
+                        targets.extend(columns.iter().map(|target| target.column.clone()));
+                        coerced_targets.extend(
+                            columns
+                                .iter()
+                                .zip(values.iter())
+                                .filter(|(_, expression)| !matches!(expression, Expr::Default))
+                                .map(|(target, _)| target.column.clone()),
+                        );
                     }
-                    let binding = MergeTargetColumnBinding {
-                        object_id,
-                        attribute_number: Some(crate::catalog::relation_attributes::column_number(
-                            column, position,
-                        )?),
-                        domain_dependencies: domain_dependencies.into_iter().collect(),
-                    };
-                    if !merge.target_column_bindings.contains_key(&name) {
-                        merge.target_column_bindings.insert(name, binding);
-                    }
+                    _ => {}
                 }
             }
-        }
-        changed |= merge.target_column_bindings != previous;
-        Ok(())
-    })?;
+            for name in targets {
+                if let Some((position, column)) = definitions
+                    .iter()
+                    .enumerate()
+                    .find(|(_, column)| column.name == name)
+                {
+                    if let Some(object_id) = column.object_id {
+                        let mut domain_dependencies = BTreeSet::new();
+                        if coerced_targets.contains(&name) {
+                            collect_target_domains(&column.ty, &mut domain_dependencies);
+                        }
+                        let binding = MergeTargetColumnBinding {
+                            object_id,
+                            attribute_number: Some(
+                                crate::catalog::relation_attributes::column_number(
+                                    column, position,
+                                )?,
+                            ),
+                            domain_dependencies: domain_dependencies.into_iter().collect(),
+                        };
+                        if !merge.target_column_bindings.contains_key(&name) {
+                            merge.target_column_bindings.insert(name, binding);
+                        }
+                    }
+                }
+            }
+            changed |= merge.target_column_bindings != previous;
+            Ok(())
+        },
+        control,
+        work,
+    )
+    .await?;
     Ok(changed)
 }
 

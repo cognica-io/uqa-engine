@@ -257,6 +257,38 @@ impl SQLStandardBodyCompilation {
         self.record_plan(plan, control)
     }
 
+    pub async fn accept_retained_from(
+        &mut self,
+        catalog: &impl super::StoredRoutineCatalog,
+        plan: crate::plan::RetainedExecutablePlan,
+        control: &ProductionControl<'_>,
+        input: &mut uqa_core::image_io::AsyncImageInput<'_>,
+    ) -> Result<(), SQLError> {
+        let (mut plan, snapshot) = super::bind_stored_statement_from(
+            catalog,
+            plan,
+            &self.compiler.positional,
+            &self.compiler.parameters,
+            control,
+            input,
+        )
+        .await?;
+        if let UnifiedPlan::Query(query) = &mut *plan {
+            let storage = crate::binding::stored_routines::StoredCallOrigin::Persisted
+                .bind_query_from(
+                    catalog,
+                    query,
+                    &self.compiler.positional,
+                    snapshot.context_with_control(control)?,
+                    control,
+                    input,
+                )
+                .await?;
+            plan.retain_storage(storage);
+        }
+        self.record_plan(plan, control)
+    }
+
     fn record_plan(
         &mut self,
         plan: BoundPlan,

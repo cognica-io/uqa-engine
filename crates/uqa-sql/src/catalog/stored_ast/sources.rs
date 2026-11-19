@@ -6,22 +6,34 @@
 
 //! Source metadata traversal without rewriting stored query expressions.
 
-use super::{FromClause, SQLError, SourceCallback, Statement, StoredAstVisitor};
+use super::{FromClause, SQLError, SourceCallback, Statement};
 
+struct Selected<F>(F);
+impl<W, F: FnMut(&mut FromClause) -> Result<(), SQLError>> super::Actions<W> for Selected<F> {
+    fn source(&mut self, value: &mut FromClause) -> Result<(), SQLError> {
+        (self.0)(value)
+    }
+}
 pub fn visit_stored_statement_sources(
     statement: &mut Statement,
     visit: SourceCallback<'_>,
 ) -> Result<(), SQLError> {
-    StoredAstVisitor {
-        source: Some(visit),
-        merge: None,
-        expression: None,
-        projection: None,
-        ty: None,
-        relation: &mut |_: &mut String| Ok(()),
-        routine: &mut |_: &mut String, _: Option<&mut Option<crate::ast::FunctionBinding>>| Ok(()),
-    }
-    .bind_statement(statement)
+    crate::catalog::work::inline(visit_stored_statement_sources_from(
+        statement,
+        visit,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+        &mut (),
+    ))
+}
+pub(crate) async fn visit_stored_statement_sources_from<W: super::Work + Send>(
+    statement: &mut Statement,
+    visit: impl FnMut(&mut FromClause) -> Result<(), SQLError>,
+    control: &uqa_core::memory::ProductionControl<'_>,
+    work: &mut W,
+) -> Result<(), SQLError> {
+    super::Reader::new(&mut Selected(visit), control, work)
+        .bind_statement(statement)
+        .await
 }
 
 enum SourceColumnShape {

@@ -283,6 +283,55 @@ pub struct SQLRoutineLowering {
     pub preserve_target_expressions: bool,
 }
 
+/// Retain the original private constructor through catalog identity selection and parameter substitution.
+pub(super) async fn bind_stored_statement_from(
+    catalog: &impl StoredRoutineCatalog,
+    plan: crate::plan::RetainedExecutablePlan,
+    positional: &[crate::SQLParam],
+    parameters: &crate::binding::RoutineParameterScope,
+    control: &uqa_core::memory::ProductionControl<'_>,
+    input: &mut uqa_core::image_io::AsyncImageInput<'_>,
+) -> Result<
+    (
+        crate::plan::copy::stored_plan::BoundPlan,
+        crate::binding::production::ControlledBindingSnapshot,
+    ),
+    SQLError,
+> {
+    let plan = if matches!(plan.as_plan_ref(), crate::plan::PlanRef::Query(_)) {
+        let namespace = catalog.stored_query_namespace_with_control(control)?;
+        let names = StoredQueryBindingContext {
+            relations: catalog,
+            lookup_mode: RelationLookupMode::Bound,
+            sequences: catalog,
+            temporary_schema: &namespace.temporary_schema,
+            transition_relations: &namespace.transition_relations,
+        };
+        names
+            .bind_query_names_from_input(plan, "SQL routine body", false, true, control, input)
+            .await?
+            .0
+    } else {
+        plan.mark_catalog_relations_bound(control)?
+    };
+    let snapshot = catalog.binding_snapshot_with_control(control)?;
+    let plan = crate::binding::bind_routine_parameter_references_from(
+        catalog,
+        plan,
+        positional,
+        snapshot.context_with_control(control)?,
+        parameters,
+        control,
+        input,
+    )
+    .await?;
+    let (plan, workspace) = plan.into_mutable();
+    Ok((
+        crate::plan::copy::stored_plan::BoundPlan::new(plan.finish(control)?, Some(workspace)),
+        snapshot,
+    ))
+}
+
 /// Lower one statement of a SQL routine body with its relations bound, before routine calls are bound.
 pub fn lower_sql_routine_statement(
     context: &RoutineCompilationContext<'_>,

@@ -135,7 +135,7 @@ impl RetainedExecutablePlan {
     }
 
     /// Share the native structural and scalar traversal while preserving each original scalar selection identity.
-    pub(in crate::plan) async fn edit_scalars_from_input<E, I>(
+    pub(crate) async fn edit_scalars_from_input<E, I>(
         self,
         edit: E,
         control: &ProductionControl<'_>,
@@ -147,6 +147,26 @@ impl RetainedExecutablePlan {
     {
         let (plan, edit) = self.0.edit_scalars_from_input(edit, control, input).await?;
         Ok((Self(plan), edit))
+    }
+
+    pub(crate) async fn normalize_windows_from(
+        self,
+        control: &ProductionControl<'_>,
+        input: &mut AsyncImageInput<'_>,
+    ) -> Result<Self> {
+        self.0
+            .normalize_windows_from(control, input)
+            .await
+            .map(Self)
+    }
+
+    pub(crate) fn mark_catalog_relations_bound(
+        self,
+        control: &ProductionControl<'_>,
+    ) -> Result<Self> {
+        let context = self.0.context().clone();
+        let plan = self.0.take().mark_catalog_relations_bound(control)?;
+        Ok(Self(context.retain(plan)))
     }
 
     pub fn as_plan_ref(&self) -> PlanRef<'_> {

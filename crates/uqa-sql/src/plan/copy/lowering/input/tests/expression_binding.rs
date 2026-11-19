@@ -5,6 +5,7 @@
 //
 
 use super::*;
+use crate::plan::copy::stored_plan::BindingSyntax;
 use crate::{binding::syntax_sites::expression_syntax_sites, plan::ExpressionPlan, RowSchema};
 use std::sync::atomic::{AtomicUsize, Ordering};
 

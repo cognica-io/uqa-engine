@@ -24,6 +24,7 @@ mod parameters;
 mod production;
 pub(crate) use production::bind_expression_plan_routines_for_storage_with_work;
 pub(in crate::binding) use production::bind_routine_parameter_references;
+pub(crate) use production::bind_routine_parameter_references_from;
 pub(crate) use production::bind_rule_inputs_owned;
 pub(in crate::binding) use production::retain_input_metadata_owned;
 pub use production::{
@@ -668,25 +669,6 @@ pub(super) fn condition_metadata(
 }
 
 /// VALUES relation typing and collation selection share preparation's row-then-column order.
-pub(super) fn values_metadata(
-    scope: &mut SchemaScope,
-    routines: &dyn RoutineResolution,
-    rows: &[Vec<ScalarExpr>],
-    subqueries: &[QueryPlan],
-    outer: Option<&RowSchema>,
-    params: &[crate::SQLParam],
-) -> Result<RowSchema, SQLError> {
-    crate::catalog::work::inline(values_metadata_with_work(
-        scope,
-        routines,
-        rows,
-        subqueries,
-        outer,
-        params,
-        &mut (),
-    ))
-}
-
 pub(super) async fn values_metadata_with_work<W: crate::catalog::work::Work + Send>(
     scope: &mut SchemaScope,
     routines: &dyn RoutineResolution,

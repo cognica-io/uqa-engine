@@ -87,14 +87,20 @@ pub fn collect_from_qualifiers(from: &SourcePlan, out: &mut Vec<String>) {
 }
 
 pub fn collect_subquery_ids(expression: &ScalarExpr, output: &mut BTreeSet<usize>) {
-    expression.visit(&mut |node| match node {
+    expression.visit(&mut |node| {
+        if let Some(id) = subquery_reference(node) {
+            output.insert(id);
+        }
+    });
+}
+
+pub(crate) fn subquery_reference(node: &ScalarExpr) -> Option<usize> {
+    match node {
         ScalarExpr::ScalarSubquery(id)
         | ScalarExpr::Exists { subquery: id, .. }
-        | ScalarExpr::InSubquery { subquery: id, .. } => {
-            output.insert(*id);
-        }
-        _ => {}
-    });
+        | ScalarExpr::InSubquery { subquery: id, .. } => Some(*id),
+        _ => None,
+    }
 }
 
 pub fn collect_frame_bound_subquery_ids(

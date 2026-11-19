@@ -12,7 +12,7 @@ pub(crate) use production::canonical_catalog_relation_with_control;
 pub use query::{
     bind_stored_query_relations, resolve_loaded_query_sequence,
     resolve_query_sequence_with_control, select_query_sequence_with_control,
-    StoredQueryBindingContext, StoredQueryNamespace, StoredQuerySequences,
+    StoredQueryBindingContext, StoredQueryNamespace, StoredQuerySequences, TransitionRelationNames,
 };
 
 use crate::{
@@ -101,7 +101,7 @@ fn copy_relation_resolution(
 }
 
 pub(crate) fn bind_catalog_relation_reference(
-    catalog: &dyn StoredRelationCatalog,
+    catalog: &(impl StoredRelationCatalog + ?Sized),
     reference: &mut String,
     lookup_mode: RelationLookupMode,
     loaded_catalog: bool,
@@ -207,6 +207,29 @@ pub fn bind_stored_statement_relations(
     loaded_catalog: bool,
     context: &str,
 ) -> Result<bool, SQLError> {
+    crate::catalog::work::inline(bind_stored_statement_relations_from(
+        catalog,
+        statement,
+        lookup_mode,
+        loaded_catalog,
+        context,
+        &ProductionControl::uncontrolled(),
+        &mut (),
+    ))
+}
+
+pub(crate) async fn bind_stored_statement_relations_from<
+    C: StoredRelationCatalog + ?Sized,
+    W: crate::catalog::work::Work + Send,
+>(
+    catalog: &C,
+    statement: &mut Statement,
+    lookup_mode: RelationLookupMode,
+    loaded_catalog: bool,
+    context: &str,
+    control: &ProductionControl<'_>,
+    work: &mut W,
+) -> Result<bool, SQLError> {
     let mut dependencies = BTreeSet::new();
     let mut changed = false;
     let mut bind = |reference: &mut String| {
@@ -222,19 +245,10 @@ pub fn bind_stored_statement_relations(
         changed |= reference != &previous;
         Ok(())
     };
-    let mut ignore_routine = |_: &mut String,
-                              _: Option<&mut Option<crate::ast::FunctionBinding>>|
-     -> Result<(), SQLError> { Ok(()) };
-    StoredAstVisitor {
-        source: None,
-        merge: None,
-        expression: None,
-        projection: None,
-        ty: None,
-        relation: &mut bind,
-        routine: &mut ignore_routine,
-    }
-    .bind_statement(statement)?;
+    crate::catalog::stored_ast::visit_stored_statement_relations_from(
+        statement, &mut bind, control, work,
+    )
+    .await?;
     match statement {
         Statement::Insert(insert) => {
             changed |= !insert.target_relation_bound;
@@ -252,3 +266,5 @@ pub fn bind_stored_statement_relations(
     }
     Ok(changed)
 }
+
+use uqa_core::memory::ProductionControl;

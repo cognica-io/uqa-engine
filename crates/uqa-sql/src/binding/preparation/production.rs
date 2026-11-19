@@ -22,6 +22,7 @@ use uqa_core::memory::{Produced, ProductionControl, ProductionVec};
 
 mod procedural;
 pub(in crate::binding) use procedural::bind_routine_parameter_references;
+pub(crate) use procedural::bind_routine_parameter_references_from;
 pub use procedural::{
     bind_routine_parameter_references_owned, parameter_input_types_with_control,
     read_executable_inputs_owned, read_procedural_inputs_owned, ProceduralOwnedInputs,

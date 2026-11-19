@@ -19,30 +19,46 @@ pub fn function_call_argument_signature_with_control(
     resolver: Option<&dyn FunctionTypeResolver>,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<FunctionCallArgumentSignature>, SQLError> {
-    let arguments = crate::ir::scalar_call_arguments_with_control(arguments, control)?;
+    crate::catalog::work::inline(signature_with_work(
+        arguments,
+        params,
+        control,
+        &mut (),
+        |value| {
+            super::common_context_expression_type_with_control(
+                value, schema, params, resolver, control,
+            )
+        },
+    ))
+}
+
+/// Complete marker validation before resolving the first supplied type, preserving the original call's error precedence.
+pub(crate) async fn signature_with_work<W: crate::catalog::work::Work + Send>(
+    arguments: &[ScalarExpr],
+    params: &[SQLParam],
+    control: &ProductionControl<'_>,
+    work: &mut W,
+    mut infer: impl FnMut(&ScalarExpr) -> Result<Option<Produced<crate::ColumnType>>, SQLError>,
+) -> Result<Produced<FunctionCallArgumentSignature>, SQLError> {
+    let arguments = crate::ir::scalar_call_arguments_with_work(arguments, control, work).await?;
     let mut names = ProductionVec::new(*control);
     let mut types = ProductionVec::new(*control);
     names.reserve(arguments.len())?;
     types.reserve(arguments.len())?;
     let mut variadic = false;
     for argument in arguments.iter() {
+        work.checkpoint().await?;
         control.check()?;
         variadic |= argument.explicit_variadic;
         let (name, memory) = match argument.name {
             Some(name) => {
-                let (name, memory) = control.copy_text(name)?.into_parts();
+                let (name, memory) = work.text(name, control).await?.into_parts();
                 (Some(name), memory)
             }
             None => (None, control.empty_reservation()),
         };
         names.push_produced(control.finish(name, memory)?)?;
-        let inferred = super::common_context_expression_type_with_control(
-            argument.value,
-            schema,
-            params,
-            resolver,
-            control,
-        )?;
+        let inferred = infer(argument.value)?;
         let effective = super::effective_overload_argument_type_ref_with_params(
             argument.value,
             inferred.as_deref(),
@@ -50,7 +66,13 @@ pub fn function_call_argument_signature_with_control(
         );
         let (ty, memory) = match effective {
             Some(ty) => {
-                let (ty, memory) = ty.clone_with_control(control)?.into_parts();
+                let (ty, memory) = ty
+                    .clone_with_input_work(
+                        control,
+                        &mut crate::catalog::work::ReferenceWork { control, work },
+                    )
+                    .await?
+                    .into_parts();
                 (Some(ty), memory)
             }
             None => (None, control.empty_reservation()),

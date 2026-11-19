@@ -27,6 +27,7 @@ pub(crate) use inputs::{
     select_common_input_type_with_control, select_common_input_type_with_work,
 };
 pub use signature::function_call_argument_signature_with_control;
+pub(crate) use signature::signature_with_work;
 
 /// Inputs whose absent type means `PostgreSQL` `unknown`, rather than an unresolved UQA runtime value.
 pub(super) fn unknown_input(mut expression: &ScalarExpr) -> bool {

@@ -7,6 +7,7 @@
 //! Rebind a stored parameter in its private field before publishing the edited declaration.
 
 use super::{RoutineCompilationMode, RoutineDeclaration};
+use crate::plan::copy::stored_plan::BindingSyntax;
 use crate::plan::copy::stored_plan::DefaultExpression;
 use crate::{
     ast::{Expr, FunctionParam, RoutineDefaultType, UserTypeIdentity},

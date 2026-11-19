@@ -44,6 +44,28 @@ impl<I: super::LiteralInput> ParameterTypes<'_, I> {
 }
 
 impl InputConstants {
+    pub(in crate::binding::preparation) async fn apply_references_from(
+        mut self,
+        mut plan: crate::plan::RetainedExecutablePlan,
+        control: &ProductionControl<'_>,
+        input: &mut uqa_core::image_io::AsyncImageInput<'_>,
+    ) -> Result<crate::plan::RetainedExecutablePlan, SQLError> {
+        self.apply_metadata_owned_from(&mut plan, control, input)
+            .await?;
+        if self.is_consumed() {
+            return Ok(plan);
+        }
+        let (plan, applied) = plan
+            .edit_scalars_from_input(super::constants::input::Selected::new(self), control, input)
+            .await?;
+        if !applied.into_constants().is_consumed() {
+            return Err(SQLError::Internal(
+                "prepared input constant did not belong to the analyzed plan".into(),
+            ));
+        }
+        Ok(plan)
+    }
+
     pub(in crate::binding::preparation) fn apply_owned(
         self,
         plan: &mut MutableExecutablePlan,
