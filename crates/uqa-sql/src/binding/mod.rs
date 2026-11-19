@@ -170,6 +170,7 @@ struct SchemaScope {
     routine_parameters: Option<RoutineParameterScope>,
     /// Select reference resolution, complete stored binding, or prepared composite identity retention.
     scalar_binding: ScalarBindingMode,
+    stored_call_origin: stored_routines::StoredCallOrigin,
     /// The names of a `PL/pgSQL` statement that the function's variables take, checked against what the statement can see.
     variable_sites: Option<variable_sites::VariableSites>,
     /// Keep `*` projections and `GROUP BY` output-name references as written, so a bound copy of stored syntax still corresponds to that syntax node for node.

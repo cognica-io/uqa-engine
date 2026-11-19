@@ -6,7 +6,9 @@
 
 //! Topological membership validation uses admitted adjacency and one queue entry per role.
 
-use super::{invalid, valid_identity, AuthorityCatalog, RoleIdentity, RoleMemberships, SQLError};
+use super::{
+    invalid, valid_identity, AuthorityCatalog, RoleIdentity, RoleMemberships, SQLError, Work,
+};
 use uqa_core::memory::{BudgetedMap, BudgetedVec};
 
 struct Edge {
@@ -14,9 +16,10 @@ struct Edge {
     next: Option<usize>,
 }
 
-pub(super) fn validate(
+pub(super) async fn validate(
     catalog: &AuthorityCatalog<'_>,
     memberships: &RoleMemberships,
+    work: &mut impl Work,
 ) -> Result<(), SQLError> {
     let mut degree = BudgetedMap::new(catalog.memory);
     let mut heads = BudgetedMap::new(catalog.memory);
@@ -24,11 +27,11 @@ pub(super) fn validate(
     let mut identities = BudgetedMap::new(catalog.memory);
     let mut membership_oids = BudgetedMap::new(catalog.memory);
     for (_, role) in &catalog.roles {
-        catalog.cancellation.check()?;
+        catalog.checkpoint(work).await?;
         identities.insert(role.object_id, role.oid)?;
     }
     for (key, membership) in memberships {
-        catalog.cancellation.check()?;
+        catalog.checkpoint(work).await?;
         let role = membership.role.identity();
         let member = membership.member.identity();
         for endpoint in [role, member, membership.grantor.identity()] {
@@ -68,18 +71,18 @@ pub(super) fn validate(
     }
     let mut pending = BudgetedVec::new(catalog.memory);
     for (identity, count) in &degree {
-        catalog.cancellation.check()?;
+        catalog.checkpoint(work).await?;
         if *count == 0 {
             pending.push(*identity)?;
         }
     }
     let mut remaining = degree.len();
     while let Some(identity) = pending.pop() {
-        catalog.cancellation.check()?;
+        catalog.checkpoint(work).await?;
         remaining -= 1;
         let mut next = heads.get(&identity).copied();
         while let Some(index) = next {
-            catalog.cancellation.check()?;
+            catalog.checkpoint(work).await?;
             let edge = &edges[index];
             let count = degree
                 .get_mut(&edge.role)
@@ -94,5 +97,10 @@ pub(super) fn validate(
     if remaining != 0 {
         return Err(invalid("cyclic role memberships"));
     }
+    let control = catalog.control();
+    crate::catalog::work::retire_entries(membership_oids.into_entries(), &control, work).await?;
+    crate::catalog::work::retire_entries(identities.into_entries(), &control, work).await?;
+    crate::catalog::work::retire_entries(heads.into_entries(), &control, work).await?;
+    crate::catalog::work::retire_entries(degree.into_entries(), &control, work).await?;
     Ok(())
 }

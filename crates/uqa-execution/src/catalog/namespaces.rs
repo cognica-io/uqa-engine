@@ -14,6 +14,7 @@ pub use production::{
     current_schema_names_with_control, namespace_schema_exists,
     require_schema_privilege_with_control, schema_has_privilege_with_control,
 };
+pub(super) use production::{namespace_schema_exists_with_work, NamespaceWork};
 use uqa_sql::catalog::{
     roles::identity::RoleSubject,
     security::{

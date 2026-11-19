@@ -296,24 +296,39 @@ fn check_parent_persistence(
     persistence: crate::ast::RelationPersistence,
     is_partition: bool,
 ) -> Result<(), SQLError> {
+    crate::catalog::work::inline(check_parent_persistence_with_work(
+        parent,
+        parent_persistence,
+        persistence,
+        is_partition,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+        &mut (),
+    ))
+}
+
+async fn check_parent_persistence_with_work(
+    parent: &str,
+    parent_persistence: crate::ast::RelationPersistence,
+    persistence: crate::ast::RelationPersistence,
+    is_partition: bool,
+    control: &uqa_core::memory::ProductionControl<'_>,
+    work: &mut (impl crate::catalog::CatalogWork + Send),
+) -> Result<(), SQLError> {
     use crate::ast::RelationPersistence::Temporary;
-    let message = if is_partition && parent_persistence != Temporary && persistence == Temporary {
-        format!(
-            "cannot create a temporary relation as partition of permanent relation \"{parent}\""
-        )
+    let prefix = if is_partition && parent_persistence != Temporary && persistence == Temporary {
+        "cannot create a temporary relation as partition of permanent relation "
     } else if persistence != Temporary && parent_persistence == Temporary {
         if is_partition {
-            format!("cannot create a permanent relation as partition of temporary relation \"{parent}\"")
+            "cannot create a permanent relation as partition of temporary relation "
         } else {
-            format!("cannot inherit from temporary relation \"{parent}\"")
+            "cannot inherit from temporary relation "
         }
     } else {
         return Ok(());
     };
-    Err(SQLError::Routine {
-        sqlstate: "42809".into(),
-        message,
-    })
+    let message =
+        crate::catalog::work::text_parts(work, &[prefix, "\"", parent, "\""], control).await?;
+    Err(SQLError::admit_routine_message("42809", message, control)?)
 }
 
 /// The bound of a new partition and the partition key of a new partitioned table, in `DefineRelation` order: `transformPartitionBound` and `check_new_partition_bound` before `ComputePartitionAttrs`.

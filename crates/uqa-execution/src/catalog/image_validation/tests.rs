@@ -20,7 +20,7 @@ use uqa_sql::{
     },
 };
 
-fn snapshot() -> CatalogReadSnapshot {
+pub(super) fn snapshot() -> CatalogReadSnapshot {
     let mut snapshot = empty_catalog().snapshot().clone();
     snapshot.definitions.roles = RetainedValue::new(RoleDefinitions::initial_catalog());
     snapshot.definitions.schemas = RetainedValue::new(BoundSchemaSecurity::initial_catalog());

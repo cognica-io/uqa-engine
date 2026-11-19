@@ -393,14 +393,22 @@ impl<'a, K, V> IntoIterator for &'a OwnedMap<K, V> {
     }
 }
 
-/// Consuming traversal keeps the pending AVL path on the stack and frees each visited node before yielding its entry.
+/// Consuming traversal keeps the pending AVL path in the nodes' vacated left links and frees each visited node before yielding its entry.
 pub struct OwnedMapIntoIter<K, V> {
-    stack: [Option<OwnedNode<K, V>>; MAX_HEIGHT],
-    depth: usize,
+    path: Link<K, V>,
     remaining: usize,
 }
 
 impl<K, V> OwnedMapIntoIter<K, V> {
+    pub(super) fn new(root: Link<K, V>, len: usize) -> Self {
+        let mut iter = Self {
+            path: None,
+            remaining: len,
+        };
+        iter.push_left(root);
+        iter
+    }
+
     /// Move the next entry while preserving any key-payload lease attached by admitted-key insertion. The freed tree node releases only its own layout; the original key keeps its remaining reservation. Values and separately funded payloads retain their existing owners. Ordinary entries remain explicitly uncontrolled. No key/value copy, comparison or allocation occurs.
     pub fn next_retained(&mut self) -> Option<(crate::memory::Produced<K>, V)> {
         self.next_node().map(tree::into_retained_entry)
@@ -409,18 +417,27 @@ impl<K, V> OwnedMapIntoIter<K, V> {
     fn push_left(&mut self, mut link: Link<K, V>) {
         while let Some(mut node) = link {
             link = node.value.left.take();
-            self.stack[self.depth] = Some(node);
-            self.depth += 1;
+            node.value.left = self.path.take();
+            self.path = Some(node);
         }
     }
 
     fn next_node(&mut self) -> Option<OwnedNode<K, V>> {
-        self.depth = self.depth.checked_sub(1)?;
-        let mut node = self.stack[self.depth].take().expect("owned traversal node");
+        let mut node = self.path.take()?;
+        self.path = node.value.left.take();
         self.push_left(node.value.right.take());
         node.value.height = 1;
         self.remaining -= 1;
         Some(node)
+    }
+}
+
+impl<K, V> Drop for OwnedMapIntoIter<K, V> {
+    fn drop(&mut self) {
+        // The right children remain unmodified AVL subtrees. Detach the pending path before dropping each subtree to keep its original stack bound.
+        while let Some(mut node) = self.path.take() {
+            self.path = node.value.left.take();
+        }
     }
 }
 
@@ -444,13 +461,7 @@ impl<K, V> IntoIterator for OwnedMap<K, V> {
     type IntoIter = OwnedMapIntoIter<K, V>;
 
     fn into_iter(self) -> Self::IntoIter {
-        let mut iter = OwnedMapIntoIter {
-            stack: std::array::from_fn(|_| None),
-            depth: 0,
-            remaining: self.len,
-        };
-        iter.push_left(self.root);
-        iter
+        OwnedMapIntoIter::new(self.root, self.len)
     }
 }
 

@@ -8,6 +8,7 @@
 
 use super::children::Scope;
 use crate::{catalog::work::Work, construction::Stack, SQLError, ScalarExpr};
+use std::future::Future;
 use uqa_core::memory::ProductionControl;
 
 enum Frame<N: Node> {
@@ -19,6 +20,29 @@ pub(crate) enum Decision {
     Descend,
     Prune,
     Stop,
+}
+
+/// Observe all metadata on the selected scalar before inspecting its first child.
+pub(crate) trait ScalarObserver {
+    fn scalar<W: Work + Send>(
+        &mut self,
+        value: &ScalarExpr,
+        work: &mut W,
+    ) -> impl Future<Output = Result<(), SQLError>> + Send;
+}
+
+pub(crate) async fn visit_all<W: Work + Send>(
+    expression: &ScalarExpr,
+    control: &ProductionControl<'_>,
+    work: &mut W,
+    observer: &mut impl ScalarObserver,
+) -> Result<(), SQLError> {
+    let mut nodes = Nodes::<_, 32>::new(expression, Scope::Complete, control)?;
+    while let Some(node) = nodes.next(control, work).await? {
+        observer.scalar(node, work).await?;
+        nodes.descend(node)?;
+    }
+    Ok(())
 }
 
 trait Node: Sized {
@@ -114,25 +138,54 @@ where
     W: Work,
     O: FnMut(&mut N) -> Result<Decision, SQLError> + ?Sized,
 {
-    let mut frames = Stack::<_, INLINE>::new(*control);
-    frames.push(Frame::Visit(expression))?;
-    while let Some(frame) = frames.pop() {
-        control.check()?;
-        work.checkpoint().await?;
-        control.check()?;
-        match frame {
-            Frame::Visit(mut expression) => match observe(&mut expression)? {
-                Decision::Descend => frames.push(Frame::Children(expression.children(scope)))?,
-                Decision::Prune => {}
-                Decision::Stop => return Ok(true),
-            },
-            Frame::Children(mut children) => {
-                if let Some(child) = N::next(&mut children, scope) {
-                    frames.push(Frame::Children(children))?;
-                    frames.push(Frame::Visit(child))?;
-                }
-            }
+    let mut nodes = Nodes::<_, INLINE>::new(expression, scope, control)?;
+    while let Some(mut node) = nodes.next(control, work).await? {
+        match observe(&mut node)? {
+            Decision::Descend => nodes.descend(node)?,
+            Decision::Prune => {}
+            Decision::Stop => return Ok(true),
         }
     }
     Ok(false)
+}
+
+struct Nodes<N: Node, const INLINE: usize> {
+    frames: Stack<Frame<N>, INLINE>,
+    scope: Scope,
+}
+
+impl<N: Node, const INLINE: usize> Nodes<N, INLINE> {
+    fn new(root: N, scope: Scope, control: &ProductionControl<'_>) -> Result<Self, SQLError> {
+        let mut frames = Stack::new(*control);
+        frames.push(Frame::Visit(root))?;
+        Ok(Self { frames, scope })
+    }
+
+    fn descend(&mut self, node: N) -> Result<(), SQLError> {
+        Ok(self
+            .frames
+            .push(Frame::Children(node.children(self.scope)))?)
+    }
+
+    async fn next(
+        &mut self,
+        control: &ProductionControl<'_>,
+        work: &mut impl Work,
+    ) -> Result<Option<N>, SQLError> {
+        while let Some(frame) = self.frames.pop() {
+            control.check()?;
+            work.checkpoint().await?;
+            control.check()?;
+            match frame {
+                Frame::Visit(expression) => return Ok(Some(expression)),
+                Frame::Children(mut children) => {
+                    if let Some(child) = N::next(&mut children, self.scope) {
+                        self.frames.push(Frame::Children(children))?;
+                        self.frames.push(Frame::Visit(child))?;
+                    }
+                }
+            }
+        }
+        Ok(None)
+    }
 }

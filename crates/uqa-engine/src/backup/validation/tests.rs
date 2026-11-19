@@ -31,8 +31,12 @@ fn catalog_validation_keeps_the_selected_missing_namespace_after_the_live_table_
         polls += 1;
     }
     assert!(polls > 2);
-    let Err(error) = checks.advance(&engine, &control, 1) else {
-        panic!("validation accepted the original table without its schema");
+    let error = loop {
+        match checks.advance(&engine, &control, 1) {
+            Ok(Some(next)) => checks = next,
+            Ok(None) => panic!("validation accepted the original table without its schema"),
+            Err(error) => break error,
+        }
     };
     assert!(
         error

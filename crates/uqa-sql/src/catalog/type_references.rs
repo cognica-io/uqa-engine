@@ -7,9 +7,15 @@
 //! Native type references resolve against admitted identities without rebinding names.
 
 use super::{
-    composite_type::StoredComposite, domain::StoredDomain, enum_type::StoredEnum,
-    range_type::StoredRange, relation_oids::RelationCatalogOids, shell_type::StoredShellType,
-    type_definitions::TypeDefinitions, type_metadata,
+    composite_type::StoredComposite,
+    domain::StoredDomain,
+    enum_type::StoredEnum,
+    range_type::StoredRange,
+    relation_oids::RelationCatalogOids,
+    shell_type::StoredShellType,
+    type_definitions::TypeDefinitions,
+    type_metadata,
+    work::{inline, retire_entries, Work},
 };
 use crate::{
     ast::{ColumnType, RangeAlignment, UserTypeIdentity, UserTypeKind},
@@ -65,6 +71,23 @@ impl<'a> TypeReferences<'a> {
         memory: &'a MemoryBudget,
         cancellation: &'a CancellationToken,
     ) -> Result<Self, SQLError> {
+        inline(Self::new_with_work(
+            input,
+            rows,
+            memory,
+            cancellation,
+            &mut (),
+        ))
+    }
+
+    /// Build the complete type identity index in declaration order on the invoking catalog work channel.
+    pub async fn new_with_work(
+        input: TypeReferenceInput<'a>,
+        rows: impl Iterator<Item = RelationCatalogOids>,
+        memory: &'a MemoryBudget,
+        cancellation: &'a CancellationToken,
+        work: &mut (impl Work + Send),
+    ) -> Result<Self, SQLError> {
         let mut result = Self {
             claims: BudgetedMap::new(memory),
             memory,
@@ -79,18 +102,21 @@ impl<'a> TypeReferences<'a> {
             .map_err(|_| invalid("domain array identity"))?;
             let mut claim = Claim::new(Some(UserTypeKind::Domain), array);
             claim.domain = Some(domain);
-            result.insert(domain.oid, claim)?;
+            result.insert(domain.oid, claim, work).await?;
         }
         for definition in input.enums.values() {
-            result.insert(
-                definition.oid,
-                Claim::new(Some(UserTypeKind::Enum), definition.array_oid),
-            )?;
+            result
+                .insert(
+                    definition.oid,
+                    Claim::new(Some(UserTypeKind::Enum), definition.array_oid),
+                    work,
+                )
+                .await?;
         }
         for definition in input.composites.values() {
             let mut claim = Claim::new(Some(UserTypeKind::Composite), definition.array_oid);
             claim.relation = definition.relation_oid;
-            result.insert(definition.oid, claim)?;
+            result.insert(definition.oid, claim, work).await?;
         }
         for definition in input.ranges.values() {
             for (oid, array, kind) in [
@@ -102,12 +128,14 @@ impl<'a> TypeReferences<'a> {
                 ),
             ] {
                 let mut claim = Claim::new(Some(kind), array);
-                claim.alignment = Some(result.endpoint_alignment(&definition.subtype)?);
-                result.insert(oid, claim)?;
+                claim.alignment = Some(result.endpoint_alignment(&definition.subtype, work).await?);
+                result.insert(oid, claim, work).await?;
             }
         }
         for definition in input.shells.values() {
-            result.insert(definition.oid, Claim::new(None, 0))?;
+            result
+                .insert(definition.oid, Claim::new(None, 0), work)
+                .await?;
         }
         for row in rows {
             cancellation.check()?;
@@ -116,12 +144,18 @@ impl<'a> TypeReferences<'a> {
             };
             let mut claim = Claim::new(Some(UserTypeKind::Composite), row.array_type.unwrap_or(0));
             claim.relation = row.relation;
-            result.insert(oid, claim)?;
+            result.insert(oid, claim, work).await?;
         }
         Ok(result)
     }
 
-    fn insert(&mut self, oid: u32, claim: Claim<'a>) -> Result<(), SQLError> {
+    async fn insert(
+        &mut self,
+        oid: u32,
+        claim: Claim<'a>,
+        work: &mut (impl Work + Send),
+    ) -> Result<(), SQLError> {
+        self.checkpoint(work).await?;
         let array = claim.array;
         self.insert_one(oid, claim)?;
         if array != 0 {
@@ -144,8 +178,21 @@ impl<'a> TypeReferences<'a> {
         Ok(())
     }
 
-    fn control(&self) -> ProductionControl<'_> {
+    fn control(&self) -> ProductionControl<'a> {
         ProductionControl::new(self.memory, self.cancellation, self.cancellation)
+    }
+
+    pub async fn checkpoint(&self, work: &mut (impl Work + Send)) -> Result<(), SQLError> {
+        self.cancellation.check()?;
+        work.checkpoint().await?;
+        self.cancellation.check()?;
+        Ok(())
+    }
+
+    /// Release the index one claim at a time when all selected declarations have been accepted.
+    pub async fn retire(self, work: &mut (impl Work + Send)) -> Result<(), SQLError> {
+        let control = self.control();
+        retire_entries(self.claims.into_entries(), &control, work).await
     }
 
     fn claim(&self, oid: u32, kind: UserTypeKind) -> Result<&Claim<'a>, SQLError> {
@@ -158,30 +205,43 @@ impl<'a> TypeReferences<'a> {
 
     /// Stored names representing a bound user type resolve by kind and OID, independently of display names or search paths. Ordinary builtin and pseudo-type spellings retain their existing declaration validation.
     pub fn stored_name(&self, name: &str) -> Result<(), SQLError> {
-        self.cancellation.check()?;
-        if let Some(identity) = UserTypeIdentity::parse(name) {
-            if identity.kind == UserTypeKind::Domain
-                && super::system_catalog_domain_with_control(identity.oid, &self.control())?
-                    .is_some()
-            {
-                return Ok(());
-            }
-            self.claim(identity.oid, identity.kind)?;
-        }
-        if ["enum#", "domain#", "composite#", "range#", "multirange#"]
-            .iter()
-            .any(|prefix| name.trim().starts_with(prefix))
-            && UserTypeIdentity::parse(name).is_none()
+        inline(self.stored_name_with_work(name, &mut ()))
+    }
+
+    pub async fn stored_name_with_work(
+        &self,
+        name: &str,
+        work: &mut (impl Work + Send),
+    ) -> Result<(), SQLError> {
+        let control = self.control();
+        let Some(identity) = UserTypeIdentity::parse_stored(name, &control, work, || {
+            invalid("malformed stored type identity")
+        })
+        .await?
+        else {
+            return Ok(());
+        };
+        if identity.kind == UserTypeKind::Domain
+            && super::system_catalog_domain_with_control(identity.oid, &control)?.is_some()
         {
-            return Err(invalid("malformed stored type identity"));
+            return Ok(());
         }
+        self.claim(identity.oid, identity.kind)?;
         Ok(())
     }
 
     /// Check the physical identity fields carried with a concrete type, including nested arrays and domain bases. Reference names are descriptive and never replace the selected OID.
-    pub fn column_type(&self, mut ty: &ColumnType) -> Result<(), SQLError> {
+    pub fn column_type(&self, ty: &ColumnType) -> Result<(), SQLError> {
+        inline(self.column_type_with_work(ty, &mut ()))
+    }
+
+    pub async fn column_type_with_work(
+        &self,
+        mut ty: &ColumnType,
+        work: &mut (impl Work + Send),
+    ) -> Result<(), SQLError> {
         loop {
-            self.cancellation.check()?;
+            self.checkpoint(work).await?;
             match ty {
                 ColumnType::Named(_) => return Err(invalid("unresolved column type")),
                 ColumnType::Array(element) => ty = element,
@@ -207,7 +267,9 @@ impl<'a> TypeReferences<'a> {
                         self.domain_base(
                             (*oid, *array_oid, *collation_oid, base),
                             (*expected_array, *expected_collation, expected_base),
-                        )?;
+                            work,
+                        )
+                        .await?;
                     } else {
                         let definition = self
                             .claim(*oid, UserTypeKind::Domain)?
@@ -220,7 +282,9 @@ impl<'a> TypeReferences<'a> {
                                 definition.definition.collation_oid,
                                 &definition.definition.base,
                             ),
-                        )?;
+                            work,
+                        )
+                        .await?;
                     }
                     ty = base;
                 }
@@ -259,7 +323,7 @@ impl<'a> TypeReferences<'a> {
         }
     }
 
-    fn domain_base(
+    async fn domain_base(
         &self,
         (oid, array, collation, base): (u32, Option<u32>, Option<u32>, &ColumnType),
         (expected_array, expected_collation, expected_base): (
@@ -267,22 +331,28 @@ impl<'a> TypeReferences<'a> {
             Option<u32>,
             &ColumnType,
         ),
+        work: &mut (impl Work + Send),
     ) -> Result<(), SQLError> {
         self.cancellation.check()?;
         if type_metadata::pg_domain_array_oid(oid, array)
             != type_metadata::pg_domain_array_oid(oid, expected_array)
             || collation != expected_collation
-            || self.physical_identity(base)? != self.physical_identity(expected_base)?
+            || self.physical_identity(base, work).await?
+                != self.physical_identity(expected_base, work).await?
         {
             return Err(invalid("domain base or physical identity"));
         }
         Ok(())
     }
 
-    fn physical_identity(&self, mut ty: &ColumnType) -> Result<(i64, i64), SQLError> {
+    async fn physical_identity(
+        &self,
+        mut ty: &ColumnType,
+        work: &mut (impl Work + Send),
+    ) -> Result<(i64, i64), SQLError> {
         let array = matches!(ty, ColumnType::Array(_));
         while let ColumnType::Array(element) = ty {
-            self.cancellation.check()?;
+            self.checkpoint(work).await?;
             ty = element;
         }
         if matches!(ty, ColumnType::Named(_)) {
@@ -296,9 +366,13 @@ impl<'a> TypeReferences<'a> {
         Ok((oid, type_metadata::pg_type_modifier(ty)))
     }
 
-    fn endpoint_alignment(&self, mut ty: &ColumnType) -> Result<RangeAlignment, SQLError> {
+    async fn endpoint_alignment(
+        &self,
+        mut ty: &ColumnType,
+        work: &mut (impl Work + Send),
+    ) -> Result<RangeAlignment, SQLError> {
         while let ColumnType::Domain { base, .. } = ty {
-            self.cancellation.check()?;
+            self.checkpoint(work).await?;
             ty = base;
         }
         if matches!(ty, ColumnType::Named(_)) {
@@ -313,6 +387,7 @@ fn invalid(reason: &'static str) -> SQLError {
 }
 
 mod membership;
+pub use membership::TypeMembership;
 
 #[cfg(test)]
 mod tests;

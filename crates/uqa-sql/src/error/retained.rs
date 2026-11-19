@@ -7,7 +7,7 @@
 use super::SQLError;
 use uqa_core::memory::{MemoryReservation, Produced, ProductionControl};
 
-/// One immutable routine diagnostic and its original payload/header allowance. The primary error is always an unpositioned Routine variant; outer context and positions keep their established ownership.
+/// One immutable SQL diagnostic and its original payload/header allowance. Outer context and positions retain the original primary error.
 #[derive(Debug)]
 pub struct RetainedRoutineDiagnostic {
     pub(super) error: SQLError,
@@ -34,6 +34,31 @@ impl SQLError {
         control: &ProductionControl<'_>,
     ) -> Result<Self, Self> {
         Ok(Self::produced_routine_message(sqlstate, message, control)?)
+    }
+
+    pub(crate) fn admit_internal_message(
+        message: Produced<String>,
+        control: &ProductionControl<'_>,
+    ) -> Result<Self, Self> {
+        let (message, memory) = message.into_parts();
+        let error = Self::Internal(message);
+        let Some(mut memory) = memory else {
+            return Ok(error);
+        };
+        memory.absorb(
+            memory
+                .budget()
+                .reserve(size_of::<RetainedRoutineDiagnostic>())?,
+        );
+        control.check()?;
+        Ok(error.with_diagnostic_memory(memory))
+    }
+
+    fn with_diagnostic_memory(self, memory: MemoryReservation) -> Self {
+        Self::RetainedRoutine(std::sync::Arc::new(RetainedRoutineDiagnostic {
+            error: self,
+            _memory: memory,
+        }))
     }
 
     /// Preserve the SQLSTATE and display text when a native catalog returns an analysis diagnostic across the storage boundary.
@@ -73,12 +98,7 @@ impl SQLError {
         let memory = control
             .combine(control.combine(header, state_memory), message_memory)
             .expect("admitted routine diagnostic");
-        Ok(Self::RetainedRoutine(std::sync::Arc::new(
-            RetainedRoutineDiagnostic {
-                error: Self::Routine { sqlstate, message },
-                _memory: memory,
-            },
-        )))
+        Ok(Self::Routine { sqlstate, message }.with_diagnostic_memory(memory))
     }
 }
 

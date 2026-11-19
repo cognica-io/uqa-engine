@@ -20,16 +20,100 @@ use uqa_sql::{
     SQLError,
 };
 
+pub(in crate::catalog) trait NamespaceWork:
+    crate::catalog::selection_work::Work
+{
+    fn overlay_contains(
+        &mut self,
+        names: &std::collections::BTreeSet<String>,
+        name: &str,
+        control: &ProductionControl<'_>,
+    ) -> impl std::future::Future<Output = Result<bool, SQLError>> + Send;
+}
+impl NamespaceWork for () {
+    async fn overlay_contains(
+        &mut self,
+        names: &std::collections::BTreeSet<String>,
+        name: &str,
+        _: &ProductionControl<'_>,
+    ) -> Result<bool, SQLError> {
+        Ok(names.contains(name))
+    }
+}
+impl NamespaceWork for uqa_core::image_io::AsyncImageInput<'_> {
+    async fn overlay_contains(
+        &mut self,
+        names: &std::collections::BTreeSet<String>,
+        name: &str,
+        control: &ProductionControl<'_>,
+    ) -> Result<bool, SQLError> {
+        for stored in names {
+            match crate::catalog::selection_work::compare(name, stored, control, self).await? {
+                std::cmp::Ordering::Less => break,
+                std::cmp::Ordering::Equal => return Ok(true),
+                std::cmp::Ordering::Greater => (),
+            }
+        }
+        Ok(false)
+    }
+}
+
 pub fn namespace_schema_exists(
     catalog: &CatalogReadView,
     temporary_schema: &str,
     schema: &str,
 ) -> bool {
-    catalog.schema_security(schema).is_some()
-        || (!temporary_schema.is_empty() && schema == temporary_schema)
+    crate::catalog::selection_work::inline(namespace_schema_exists_with_work(
+        catalog,
+        temporary_schema,
+        schema,
+        &ProductionControl::uncontrolled(),
+        &mut (),
+    ))
+    .expect("uncontrolled namespace membership")
+}
+
+pub(in crate::catalog) async fn namespace_schema_exists_with_work<W: NamespaceWork>(
+    catalog: &CatalogReadView,
+    temporary_schema: &str,
+    schema: &str,
+    control: &ProductionControl<'_>,
+    work: &mut W,
+) -> Result<bool, SQLError> {
+    use crate::catalog::selection_work::{checkpoint, equal, NameComparison};
+    checkpoint(control, work).await?;
+    let snapshot = catalog.snapshot();
+    if snapshot
+        .definitions
+        .schemas
+        .contains_key_from(
+            schema,
+            &mut NameComparison {
+                control: *control,
+                work,
+            },
+        )
+        .await?
+        || (!temporary_schema.is_empty() && equal(schema, temporary_schema, control, work).await?)
         || temporary_toast_matches(temporary_schema, schema)
-        || catalog.contains_graph(schema)
         || matches!(schema, "pg_catalog" | "information_schema" | "ag_catalog")
+    {
+        return Ok(true);
+    }
+    if let Some(overlay) = &snapshot.graph_overlay {
+        return work.overlay_contains(&overlay.names, schema, control).await;
+    }
+    snapshot
+        .definitions
+        .graphs
+        .contains_key_from(
+            schema,
+            &mut NameComparison {
+                control: *control,
+                work,
+            },
+        )
+        .await
 }
 
 fn temporary_toast_matches(temporary_schema: &str, schema: &str) -> bool {

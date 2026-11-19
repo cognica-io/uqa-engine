@@ -9,7 +9,10 @@
 use super::{
     routines::apply_routine_reference, BTreeSet, Expr, SQLError, Statement, StoredAstVisitor,
 };
-use crate::binding::syntax_sites::{SyntaxSites, ValueSite};
+use crate::binding::{
+    stored_routines::StoredCallOrigin,
+    syntax_sites::{SyntaxSites, ValueSite},
+};
 use uqa_core::Value;
 
 /// Apply the sites of a bound copy of `expression`. Returns whether the syntax changed.
@@ -17,7 +20,7 @@ pub fn bind_stored_expression_sites(
     expression: &mut Expr,
     sites: &SyntaxSites,
 ) -> Result<bool, SQLError> {
-    apply_sites(sites, Syntax::Expression(expression))
+    StoredCallOrigin::Definition.bind_expression_sites(expression, sites)
 }
 
 /// Apply the sites of a bound copy of `statement`. Returns whether the syntax changed.
@@ -25,7 +28,25 @@ pub fn bind_stored_statement_sites(
     statement: &mut Statement,
     sites: &SyntaxSites,
 ) -> Result<bool, SQLError> {
-    apply_sites(sites, Syntax::Statement(statement))
+    StoredCallOrigin::Definition.bind_statement_sites(statement, sites)
+}
+
+impl StoredCallOrigin {
+    pub(crate) fn bind_expression_sites(
+        self,
+        expression: &mut Expr,
+        sites: &SyntaxSites,
+    ) -> Result<bool, SQLError> {
+        apply_sites(sites, Syntax::Expression(expression), self)
+    }
+
+    pub(crate) fn bind_statement_sites(
+        self,
+        statement: &mut Statement,
+        sites: &SyntaxSites,
+    ) -> Result<bool, SQLError> {
+        apply_sites(sites, Syntax::Statement(statement), self)
+    }
 }
 
 enum Syntax<'a> {
@@ -33,7 +54,11 @@ enum Syntax<'a> {
     Statement(&'a mut Statement),
 }
 
-fn apply_sites(sites: &SyntaxSites, syntax: Syntax<'_>) -> Result<bool, SQLError> {
+fn apply_sites(
+    sites: &SyntaxSites,
+    syntax: Syntax<'_>,
+    origin: StoredCallOrigin,
+) -> Result<bool, SQLError> {
     let mut routines = sites.routines.iter();
     let mut values = sites.values.iter().peekable();
     let mut routines_changed = false;
@@ -47,7 +72,7 @@ fn apply_sites(sites: &SyntaxSites, syntax: Syntax<'_>) -> Result<bool, SQLError
                 "stored catalog routine binding has no entry for call `{name}`"
             ))
         })?;
-        routines_changed |= apply_routine_reference(name, binding, reference)?;
+        routines_changed |= apply_routine_reference(name, binding, reference, origin)?;
         Ok(())
     };
     let mut expression = |node: &mut Expr| -> Result<(), SQLError> {

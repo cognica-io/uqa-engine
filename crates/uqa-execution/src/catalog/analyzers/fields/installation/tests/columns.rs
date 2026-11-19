@@ -9,7 +9,9 @@ use uqa_storage::AnalyzerPhase;
 
 #[test]
 fn field_installation_checks_declared_types_before_names_and_preserves_unnamed_defaults() {
-    let resources = Arc::new(AnalyzerResources::default());
+    let resources = Arc::new(AnalyzerResources::new(
+        uqa_analysis::AnalyzerLimits::default(),
+    ));
     let plain = binding(&resources);
     for named in [false, true] {
         for ordinary in [false, true] {

@@ -424,8 +424,9 @@ pub use regtypes::{
     resolve_regcollation_oid, resolve_regnamespace_oid, resolve_regobject_oid,
     resolve_regproc_input_oid, resolve_regprocedure_oid, resolve_regrole_oid, resolve_regtype_oid,
     resolve_regtype_output, resolve_type_object_oid, resolved_relation_dependency_with_control,
-    routine_type_name_identity_from_input, row_type_relation, shell_type_oid,
-    type_object_array_element, type_privilege_oid, RegtypeOutputCatalog,
+    routine_type_name_identity_from_input, routine_variadic_array_from_input, row_type_relation,
+    shell_type_oid, type_object_array_element, type_privilege_oid, RegtypeOutputCatalog,
+    RoutineTypeNamespace,
 };
 
 pub fn resolve_catalog_column_type_name(

@@ -10,11 +10,19 @@ mod context;
 mod rules;
 mod triggers;
 use crate::{
+    binding::stored_routines::StoredCallOrigin,
     catalog::resolution::{RelationLookupMode, RelationResolution},
     SQLError,
 };
 pub use context::{EventAnalysisContext, EventForeignPrivileges, EventRelationCatalog};
 use uqa_core::RelationIdentity;
+
+fn call_origin(lookup_mode: RelationLookupMode) -> StoredCallOrigin {
+    match lookup_mode {
+        RelationLookupMode::Dynamic => StoredCallOrigin::Definition,
+        RelationLookupMode::Bound => StoredCallOrigin::Persisted,
+    }
+}
 
 impl EventAnalysisContext<'_> {
     pub fn event_relation_from_resolution(

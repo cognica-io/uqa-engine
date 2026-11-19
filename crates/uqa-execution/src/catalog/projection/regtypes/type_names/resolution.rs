@@ -17,7 +17,7 @@ use uqa_sql::{ast::UserTypeIdentity, ColumnType, ParsedRegtypeName, SQLError};
 mod diagnostics;
 use diagnostics::{routine, QualifiedNames};
 
-fn optional<T>(result: Result<T, SQLError>) -> Result<Option<T>, SQLError> {
+pub(super) fn optional<T>(result: Result<T, SQLError>) -> Result<Option<T>, SQLError> {
     match result {
         Ok(value) => Ok(Some(value)),
         Err(error)

@@ -84,22 +84,28 @@ impl<'a> ProductionString<'a> {
         self.control.check()
     }
 
-    /// Append at most 4096 bytes ending at a complete UTF-8 character and return the consumed byte count. Inline and scheduled producers share this admission and copying step.
-    pub fn push_str_chunk(&mut self, text: &str) -> Result<usize, ValueRetentionError> {
-        self.control.check()?;
+    /// Borrow one complete UTF-8 chunk for a producer that already admitted its destination buffer.
+    pub fn first_chunk(text: &str) -> &str {
         let mut end = text.len().min(4096);
         while !text.is_char_boundary(end) {
             end -= 1;
         }
+        &text[..end]
+    }
+
+    /// Append at most 4096 bytes ending at a complete UTF-8 character and return the consumed byte count. Inline and scheduled producers share this admission and copying step.
+    pub fn push_str_chunk(&mut self, text: &str) -> Result<usize, ValueRetentionError> {
+        self.control.check()?;
+        let chunk = Self::first_chunk(text);
         match &mut self.buffer {
             Buffer::Ordinary(value) => {
-                value.try_reserve(end).map_err(MemoryError::from)?;
-                value.push_str(&text[..end]);
+                value.try_reserve(chunk.len()).map_err(MemoryError::from)?;
+                value.push_str(chunk);
             }
-            Buffer::Controlled(value) => value.push_str(&text[..end])?,
+            Buffer::Controlled(value) => value.push_str(chunk)?,
         }
         self.control.check()?;
-        Ok(end)
+        Ok(chunk.len())
     }
 
     pub fn push(&mut self, character: char) -> Result<(), ValueRetentionError> {

@@ -50,16 +50,13 @@ impl BoundTableSecurity {
                 return Err(invalid_revision());
             }
             let exists = if let Some(columns) = &columns {
-                let mut exists = false;
-                for candidate in columns.clone() {
-                    work.checkpoint().await?;
-                    control.check()?;
-                    if candidate == column.as_str() {
-                        exists = true;
-                        break;
-                    }
-                }
-                exists
+                crate::catalog::security::table::invariants::contains_column(
+                    columns.clone(),
+                    column,
+                    control,
+                    work,
+                )
+                .await?
             } else {
                 true
             };

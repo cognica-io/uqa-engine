@@ -4,20 +4,8 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-pub(super) struct NoRoutines;
-impl uqa_sql::FunctionTypeResolver for NoRoutines {
-    fn resolve_function_type(
-        &self,
-        _: &str,
-        _: Option<&uqa_sql::ast::FunctionBinding>,
-        _: &[Option<String>],
-        _: &[Option<uqa_sql::ColumnType>],
-        _: bool,
-    ) -> Result<Option<uqa_sql::ColumnType>, uqa_sql::SQLError> {
-        Ok(None)
-    }
-}
-impl uqa_sql::routines::RoutineResolution for NoRoutines {}
+pub(super) use crate::catalog::test_support::NoRoutines;
+
 impl uqa_sql::prepared::utility::PreparedSessionMetadata for NoRoutines {
     fn show_result_schema(&self, _: &str) -> Result<uqa_sql::RowSchema, uqa_sql::SQLError> {
         panic!("query fixture does not read session utility descriptors");
@@ -107,29 +95,6 @@ impl uqa_sql::schema::dependencies::oid_alias::OidAliasInput for NoRoutines {
     }
 }
 
-impl uqa_sql::routines::declaration::RoutineTypeCatalog for NoRoutines {
-    fn try_describe_table(&self, _: &str) -> Result<Option<Vec<uqa_sql::ast::ColumnDef>>, String> {
-        panic!("query fixture does not read procedure types");
-    }
-    fn resolve_catalog_column_type(&self, _: &str) -> Option<uqa_sql::ColumnType> {
-        panic!("query fixture does not read procedure types");
-    }
-    fn resolve_catalog_column_type_name(
-        &self,
-        _: &str,
-    ) -> Result<uqa_sql::ColumnType, uqa_sql::SQLError> {
-        panic!("query fixture does not read procedure types");
-    }
-    fn resolve_catalog_user_type_by_oid(&self, _: u32) -> Option<uqa_sql::ColumnType> {
-        panic!("query fixture does not read procedure types");
-    }
-    fn require_type_usage(&self, _: &uqa_sql::ColumnType) -> Result<(), uqa_sql::SQLError> {
-        panic!("query fixture does not read procedure types");
-    }
-    fn format_type(&self, _: &uqa_sql::ColumnType) -> Result<String, uqa_sql::SQLError> {
-        panic!("query fixture does not read procedure types");
-    }
-}
 impl uqa_sql::routines::resolution::RoutineOverloadCatalog for NoRoutines {
     fn routine_type_snapshot(&self) -> uqa_sql::routines::resolution::RoutineTypeSnapshot {
         panic!("query fixture does not resolve procedures");

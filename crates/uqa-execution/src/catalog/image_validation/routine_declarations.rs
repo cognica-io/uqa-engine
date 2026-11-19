@@ -6,6 +6,10 @@
 
 //! Join each original routine declaration with the restored type owner before activation.
 
+mod input;
+pub(super) use input::{BorrowedTypes, Cursor};
+pub use input::{DeclarationTypeLookup, VariadicLookup};
+
 use crate::catalog::CatalogReadSnapshot;
 use uqa_core::memory::ProductionControl;
 use uqa_sql::{routines::declaration::RoutineTypeCatalog, SQLError};
@@ -24,3 +28,6 @@ pub fn validate(
     }
     Ok(control.check()?)
 }
+
+#[cfg(test)]
+mod tests;

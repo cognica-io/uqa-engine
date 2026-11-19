@@ -32,6 +32,35 @@ pub struct BoundStatementRoutines {
     pub query_output: Option<RowSchema>,
 }
 
+/// New syntax records its selected callable. Loading existing syntax preserves an unqualified call that still resolves through the runtime registry before its ordinary builtin fallback.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum StoredCallOrigin {
+    Definition,
+    Persisted,
+}
+
+impl StoredCallOrigin {
+    pub(crate) fn keeps_runtime_lookup(
+        self,
+        name: &str,
+        original: Option<&FunctionBinding>,
+        selected: &FunctionBinding,
+    ) -> bool {
+        self == Self::Persisted
+            && original.is_none()
+            && selected.builtin
+            && selected.object_id.is_none()
+            && selected.invocation.is_none()
+            && selected.value_binding.is_none()
+            && selected.resolution_error.is_none()
+            && selected.dispatch.is_none()
+            && selected.input_collation.is_none()
+            && !selected.is_polymorphic_builtin_syntax()
+            && uqa_core::RelationIdentity::try_borrowed_reference(name)
+                .is_ok_and(|identity| identity.schema.is_none())
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct BoundRoutineReference {
     pub name: String,

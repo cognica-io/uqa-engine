@@ -13,7 +13,7 @@ use crate::ast::{
 };
 use uqa_core::{
     image_io::{AsyncImageInput, ImageIoError},
-    memory::BudgetedVec,
+    memory::{BudgetedSmallVec, MemoryBudget, MemoryError, ProductionControl},
     CancellationToken,
 };
 
@@ -37,7 +37,35 @@ impl CreateFunction {
     }
 }
 
+/// The original children of a stored expression, including schema-specific boundaries that the consumer can reject before entering a nested query.
+pub(crate) struct StoredExpressionNodes<'a>(BorrowedNodes<'a>);
+
+impl<'a> StoredExpressionNodes<'a> {
+    pub(crate) async fn next(
+        &mut self,
+        control: &ProductionControl<'_>,
+        work: &mut impl crate::catalog::work::Work,
+    ) -> Result<Option<&'a Expr>, ImageIoError> {
+        while let Some(node) = self.0.next_with_work(control, work).await? {
+            if let Node::Expression(expression) = node {
+                return Ok(Some(expression));
+            }
+        }
+        Ok(None)
+    }
+}
+
 impl Expr {
+    pub(crate) fn stored_nodes(
+        &self,
+        memory: &MemoryBudget,
+    ) -> Result<StoredExpressionNodes<'_>, MemoryError> {
+        Ok(StoredExpressionNodes(BorrowedNodes::root(
+            Node::Expression(self),
+            memory,
+        )?))
+    }
+
     /// Observe the scalar registry lookups of a stored schema expression. An explicit stored binding keeps its selected implementation.
     pub async fn visit_runtime_scalar_calls<'a, 'input: 'a, F>(
         &'a self,
@@ -60,6 +88,38 @@ impl Expr {
             Ok(())
         })
         .await
+    }
+
+    /// Legacy rewrite predicates retain their SQL placements until ordinary binding installs a condition plan.
+    pub(crate) async fn visit_runtime_query_calls(
+        &self,
+        original: &CancellationToken,
+        input: &mut AsyncImageInput<'_>,
+        visit: &mut (impl FnMut(
+            &str,
+            crate::binding::view_dependencies::StoredFunctionSite,
+        ) -> Result<(), crate::SQLError>
+                  + Send),
+    ) -> Result<(), crate::SQLError> {
+        use crate::binding::view_dependencies::StoredFunctionSite as Site;
+        let mut nodes = BorrowedNodes::new(Node::Expression(self), input, original).await?;
+        while let Some(node) = nodes.next(original, input).await? {
+            let (name, site, binding) = match node {
+                Node::Expression(Self::Func { name, binding, .. }) => {
+                    (name, Site::Expression, binding.as_ref())
+                }
+                Node::Expression(Self::WindowCall { name, .. }) => (name, Site::Window, None),
+                Node::From(FromClause::Function { name, binding, .. })
+                | Node::TableFunction(TableFunction { name, binding, .. }) => {
+                    (name, Site::From, binding.as_ref())
+                }
+                _ => continue,
+            };
+            if let Some(site) = site.with_stored_binding(binding) {
+                visit(name, site)?;
+            }
+        }
+        Ok(())
     }
 
     /// Visit scalar function calls in stored syntax without evaluating them or copying their children. The original and invoking controls govern every traversal frame.
@@ -143,7 +203,7 @@ fn item<'a, T>(
 }
 
 struct BorrowedNodes<'a> {
-    frames: BudgetedVec<Frame<'a>>,
+    frames: BudgetedSmallVec<[Frame<'a>; 4]>,
     entering: bool,
 }
 
@@ -156,7 +216,11 @@ impl<'a> BorrowedNodes<'a> {
         original.check()?;
         input.checkpoint().await?;
         original.check()?;
-        let mut frames = BudgetedVec::new(input.memory);
+        Ok(Self::root(root, input.memory)?)
+    }
+
+    fn root(root: Node<'a>, memory: &MemoryBudget) -> Result<Self, MemoryError> {
+        let mut frames = BudgetedSmallVec::new(memory);
         frames.push(Frame {
             node: root,
             position: 0,
@@ -172,11 +236,20 @@ impl<'a> BorrowedNodes<'a> {
         original: &CancellationToken,
         input: &mut AsyncImageInput<'_>,
     ) -> Result<Option<Node<'a>>, ImageIoError> {
+        let control = ProductionControl::new(input.memory, original, input.cancellation);
+        self.next_with_work(&control, input).await
+    }
+
+    async fn next_with_work(
+        &mut self,
+        control: &ProductionControl<'_>,
+        work: &mut impl crate::catalog::work::Work,
+    ) -> Result<Option<Node<'a>>, ImageIoError> {
         while let Some(frame) = self.frames.last_mut() {
             if self.entering || frame.position != 0 {
-                original.check()?;
-                input.checkpoint().await?;
-                original.check()?;
+                control.check_cancellation()?;
+                work.checkpoint().await?;
+                control.check_cancellation()?;
             }
             if self.entering {
                 self.entering = false;
@@ -195,8 +268,7 @@ impl<'a> BorrowedNodes<'a> {
                 }
             }
         }
-        original.check()?;
-        input.cancellation.check()?;
+        control.check_cancellation()?;
         Ok(None)
     }
 }

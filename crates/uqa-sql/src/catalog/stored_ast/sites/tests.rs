@@ -341,3 +341,81 @@ fn stored_set_operations_bind_each_left_input_once() {
         serde_json::to_value(original).unwrap()
     );
 }
+
+#[test]
+fn persisted_call_sites_preserve_runtime_fallback_and_require_concrete_function_identities() {
+    use crate::{
+        ast::{FunctionBinding, FunctionDispatch},
+        binding::stored_routines::StoredCallOrigin,
+    };
+
+    let mut builtin = FunctionBinding::builtin_by_name("pg_catalog.abs", None);
+    builtin.argument_types.push("integer".into());
+    let mut user = builtin.clone();
+    user.builtin = false;
+    user.name = "public.abs".into();
+    user.object_id = Some([7; 16]);
+    let structural = FunctionBinding::dispatched(FunctionDispatch::FieldSelect);
+    for (origin, call, saved, selected, changed) in [
+        (
+            StoredCallOrigin::Definition,
+            "abs(-5)",
+            None,
+            &builtin,
+            true,
+        ),
+        (
+            StoredCallOrigin::Persisted,
+            "abs(-5)",
+            None,
+            &builtin,
+            false,
+        ),
+        (
+            StoredCallOrigin::Persisted,
+            "pg_catalog.abs(-5)",
+            None,
+            &builtin,
+            true,
+        ),
+        (
+            StoredCallOrigin::Persisted,
+            "abs(-5)",
+            Some(&builtin),
+            &builtin,
+            false,
+        ),
+        (StoredCallOrigin::Persisted, "abs(-5)", None, &user, true),
+        (
+            StoredCallOrigin::Persisted,
+            "abs(-5)",
+            None,
+            &structural,
+            true,
+        ),
+    ] {
+        let mut syntax = expression(call);
+        let Expr::Func { binding, .. } = &mut syntax else {
+            panic!("function syntax")
+        };
+        *binding = saved.cloned();
+        let original = ExpressionPlan::lower(syntax.clone());
+        let mut bound = original.clone();
+        let ScalarExpr::Func { binding, .. } = &mut bound.scalar else {
+            panic!("function plan")
+        };
+        *binding = Some(selected.clone());
+        let sites = expression_syntax_sites(&original, &bound).unwrap();
+        assert_eq!(
+            origin.bind_expression_sites(&mut syntax, &sites).unwrap(),
+            changed
+        );
+        let Expr::Func { binding, .. } = &syntax else {
+            unreachable!()
+        };
+        assert_eq!(
+            binding.as_ref(),
+            if changed { Some(selected) } else { saved }
+        );
+    }
+}

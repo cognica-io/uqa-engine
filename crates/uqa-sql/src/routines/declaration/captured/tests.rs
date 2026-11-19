@@ -132,3 +132,64 @@ fn captured_declarations_release_denied_and_cancelled_type_scratch() {
         assert_eq!(memory.used(), 0);
     }
 }
+
+#[test]
+fn captured_layout_bounds_wide_duplicate_comparisons_and_keeps_the_first_diagnostic() {
+    use std::sync::Arc;
+    use uqa_core::image_io::{ImageDecodeWindow, ImageDecoder};
+
+    let original = CancellationToken::new();
+    for width in [1, 32768] {
+        let mut source = declaration("CREATE FUNCTION f(a integer,b integer) RETURNS anyelement LANGUAGE sql AS 'uncalled($999)'");
+        let name = "資".repeat(width);
+        source.params[0].name.clone_from(&name);
+        source.params[1].name.clone_from(&name);
+        let source = Arc::new(source);
+        let ordinary = outcome(validate_captured_declaration(
+            &source,
+            &Types,
+            &ProductionControl::uncontrolled(),
+        ));
+        let expected = format!("parameter name \"{name}\" used more than once");
+        assert_eq!(ordinary["message"], expected);
+        for cancel in [false, true] {
+            let memory = MemoryBudget::new(1 << 20);
+            let caller = CancellationToken::new();
+            let token = original.clone();
+            let def = source.clone();
+            let mut input: ImageDecoder<_, SQLError> =
+                ImageDecoder::new(&memory, &caller, |mut reader| async move {
+                    let mut input = reader.input();
+                    let control = ProductionControl::new(input.memory, &token, input.cancellation);
+                    CapturedDeclarationCheck::default()
+                        .read_from_input(&def, &control, &mut input)
+                        .await
+                })
+                .unwrap();
+            let mut calls = 0;
+            let error = loop {
+                calls += 1;
+                if cancel && calls == 3 {
+                    caller.cancel();
+                }
+                match input.advance(
+                    &mut std::io::empty(),
+                    ImageDecodeWindow { bytes: 1, steps: 1 },
+                ) {
+                    Ok(None) => (),
+                    Ok(Some(_)) => panic!("invalid declaration passed its parameter layout"),
+                    Err(error) => break error,
+                }
+            };
+            if cancel {
+                assert_eq!(error.sqlstate(), Some("57014"));
+            } else {
+                assert_eq!(error.sqlstate(), Some("42P13"));
+                assert_eq!(error.to_string(), expected);
+                assert!(calls >= name.len().div_ceil(4096) * 2);
+            }
+            drop((error, input));
+            assert_eq!(memory.used(), 0);
+        }
+    }
+}

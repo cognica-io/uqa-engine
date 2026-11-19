@@ -6,9 +6,11 @@
 
 //! Immutable selected type references in stored syntax and executable metadata.
 
-use super::{invalid, type_metadata, TypeReferences};
+use super::{inline, invalid, type_metadata, TypeReferences, Work};
 use crate::{
     ast::{CompositeRowBinding, Expr, FunctionBinding, FunctionDispatch, UserTypeKind},
+    binding::view_dependencies::{visit_plan_type_metadata, StoredPlanOutput, TypeObserver},
+    ir::observation::{visit_all, ScalarObserver},
     plan::{PlanRef, UnifiedPlan},
     SQLError, ScalarExpr,
 };
@@ -16,85 +18,94 @@ use crate::{
 impl TypeReferences<'_> {
     /// Inspect selected identities without parsing source text, resolving replacement names or evaluating a value.
     pub fn expression(&self, expression: &Expr) -> Result<(), SQLError> {
-        crate::schema::dependencies::walk_schema_expr_with_control(
-            expression,
-            &self.control(),
-            &mut |node| match node {
+        inline(self.expression_with_work(expression, &mut ()))
+    }
+
+    pub async fn expression_with_work(
+        &self,
+        expression: &Expr,
+        work: &mut (impl Work + Send),
+    ) -> Result<(), SQLError> {
+        let control = self.control();
+        let mut nodes = expression.stored_nodes(self.memory)?;
+        while let Some(node) = nodes.next(&control, work).await? {
+            match node {
                 Expr::Cast { ty, .. }
                 | Expr::TypedLiteral { ty, .. }
                 | Expr::CompositeRow {
                     binding: CompositeRowBinding { ty, .. },
                     ..
-                } => self.stored_name(ty),
+                } => self.stored_name_with_work(ty, work).await?,
                 Expr::Func {
                     binding: Some(binding),
                     ..
-                } => self.function_types(binding),
-                Expr::RetainedLiteral(literal) => self.retained_literal(&literal.0),
-                _ => Ok(()),
-            },
-        )
+                } => self.function_types_with_work(binding, work).await?,
+                Expr::RetainedLiteral(literal) => {
+                    self.retained_literal_with_work(&literal.0, work).await?;
+                }
+                Expr::ScalarSubquery(_) | Expr::Exists { .. } | Expr::InSubquery { .. } => {
+                    return Err(crate::schema::dependencies::subquery_error(&control));
+                }
+                _ => {}
+            }
+        }
+        Ok(())
     }
 
     pub fn scalar(&self, expression: &ScalarExpr) -> Result<(), SQLError> {
-        expression.try_visit(&mut |node| {
-            self.cancellation.check()?;
-            match node {
-                ScalarExpr::Cast { ty, .. }
-                | ScalarExpr::TypedLiteral { ty, .. }
-                | ScalarExpr::CompositeRow {
-                    binding: CompositeRowBinding { ty, .. },
-                    ..
-                } => {
-                    self.stored_name(ty)?;
-                }
-                ScalarExpr::Func {
-                    binding: Some(binding),
-                    ..
-                } => self.function_types(binding)?,
-                ScalarExpr::RetainedLiteral(literal) => self.retained_literal(literal)?,
-                _ => {}
-            }
-            match node {
-                ScalarExpr::TypedLiteral {
-                    bound_type: Some(ty),
-                    ..
-                }
-                | ScalarExpr::CompositeRow {
-                    bound_type: Some(ty),
-                    ..
-                }
-                | ScalarExpr::Collated { ty, .. } => self.column_type(ty)?,
-                _ => {}
-            }
-            Ok(true)
-        })
+        let mut observer = self;
+        inline(visit_all(
+            expression,
+            &self.control(),
+            &mut (),
+            &mut observer,
+        ))
     }
 
-    fn retained_literal(&self, literal: &crate::ir::RetainedScalarLiteral) -> Result<(), SQLError> {
+    async fn retained_literal_with_work(
+        &self,
+        literal: &crate::ir::RetainedScalarLiteral,
+        work: &mut (impl Work + Send),
+    ) -> Result<(), SQLError> {
         if let Some(ty) = &literal.ty {
-            self.column_type(ty)?;
+            self.column_type_with_work(ty, work).await?;
         }
         if let Some(declaration) = &literal.declaration {
-            self.stored_name(declaration)?;
+            self.stored_name_with_work(declaration, work).await?;
         }
         Ok(())
     }
 
     pub fn function_types(&self, binding: &FunctionBinding) -> Result<(), SQLError> {
+        inline(self.function_types_with_work(binding, &mut ()))
+    }
+
+    async fn function_types_with_work(
+        &self,
+        binding: &FunctionBinding,
+        work: &mut (impl Work + Send),
+    ) -> Result<(), SQLError> {
         self.cancellation.check()?;
         for ty in &binding.argument_types {
-            self.stored_name(ty)?;
+            self.stored_name_with_work(ty, work).await?;
         }
         if let Some(invocation) = &binding.invocation {
+            for ty in &invocation.argument_targets {
+                self.stored_name_with_work(ty, work).await?;
+            }
+            for source in &invocation.argument_sources {
+                if let Some(ty) = source {
+                    self.stored_name_with_work(ty, work).await?;
+                } else {
+                    self.checkpoint(work).await?;
+                }
+            }
             for ty in invocation
-                .argument_targets
+                .parameter_types
                 .iter()
-                .chain(invocation.argument_sources.iter().flatten())
-                .chain(&invocation.parameter_types)
                 .chain(&invocation.return_type)
             {
-                self.stored_name(ty)?;
+                self.stored_name_with_work(ty, work).await?;
             }
         }
         match binding.dispatch {
@@ -126,24 +137,92 @@ impl TypeReferences<'_> {
     }
 
     pub fn plan(&self, plan: PlanRef<'_>) -> Result<(), SQLError> {
-        self.cancellation.check()?;
-        plan.try_visit_scalar_expressions(&mut |root| self.scalar(root))?;
-        crate::binding::view_dependencies::visit_stored_plan_function_bindings(
-            plan,
-            &self.control(),
-            &mut |binding| self.function_types(binding),
-        )?;
-        crate::binding::view_dependencies::visit_stored_plan_output_types(
-            plan,
-            &self.control(),
-            &mut |ty| self.stored_name(ty),
-            &mut |ty| self.column_type(ty),
-        )
+        inline(self.plan_with_work(plan, &mut ()))
+    }
+
+    pub async fn plan_with_work(
+        &self,
+        plan: PlanRef<'_>,
+        work: &mut (impl Work + Send),
+    ) -> Result<(), SQLError> {
+        let control = self.control();
+        let mut observer = self;
+        crate::plan::visit_scalar_nodes_with_work(plan, &control, work, &mut observer).await?;
+        visit_plan_type_metadata(plan, &control, work, &mut observer).await
     }
 
     pub fn statement(&self, statement: &crate::ast::Statement) -> Result<(), SQLError> {
+        inline(self.statement_with_work(statement, &mut ()))
+    }
+
+    pub async fn statement_with_work(
+        &self,
+        statement: &crate::ast::Statement,
+        work: &mut (impl Work + Send),
+    ) -> Result<(), SQLError> {
         let control = self.control();
         let plan = UnifiedPlan::lower_borrowed_for_rewrite(statement, &|_: &str| false, &control)?;
-        self.plan(plan.as_plan_ref())
+        self.plan_with_work(plan.as_plan_ref(), work).await
+    }
+}
+
+impl ScalarObserver for &TypeReferences<'_> {
+    async fn scalar<W: Work + Send>(
+        &mut self,
+        node: &ScalarExpr,
+        work: &mut W,
+    ) -> Result<(), SQLError> {
+        match node {
+            ScalarExpr::Cast { ty, .. }
+            | ScalarExpr::TypedLiteral { ty, .. }
+            | ScalarExpr::CompositeRow {
+                binding: CompositeRowBinding { ty, .. },
+                ..
+            } => {
+                self.stored_name_with_work(ty, work).await?;
+            }
+            ScalarExpr::Func {
+                binding: Some(binding),
+                ..
+            } => self.function_types_with_work(binding, work).await?,
+            ScalarExpr::RetainedLiteral(literal) => {
+                self.retained_literal_with_work(literal, work).await?;
+            }
+            _ => {}
+        }
+        match node {
+            ScalarExpr::TypedLiteral {
+                bound_type: Some(ty),
+                ..
+            }
+            | ScalarExpr::CompositeRow {
+                bound_type: Some(ty),
+                ..
+            }
+            | ScalarExpr::Collated { ty, .. } => self.column_type_with_work(ty, work).await?,
+            _ => {}
+        }
+        Ok(())
+    }
+}
+
+impl TypeObserver for &TypeReferences<'_> {
+    async fn binding<W: Work + Send>(
+        &mut self,
+        binding: &FunctionBinding,
+        work: &mut W,
+    ) -> Result<(), SQLError> {
+        self.function_types_with_work(binding, work).await
+    }
+
+    async fn output<W: Work + Send>(
+        &mut self,
+        value: StoredPlanOutput<'_>,
+        work: &mut W,
+    ) -> Result<(), SQLError> {
+        match value {
+            StoredPlanOutput::Name(name) => self.stored_name_with_work(name, work).await,
+            StoredPlanOutput::Concrete(ty) => self.column_type_with_work(ty, work).await,
+        }
     }
 }

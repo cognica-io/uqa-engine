@@ -15,11 +15,14 @@ use uqa_core::{
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Role {
+    ExpressionPlan,
     Query,
     Relational,
     Block,
     SetOperation,
     Values,
+    SourceValues,
+    Cast,
     Cte,
     Cycle,
     Source,
@@ -56,6 +59,8 @@ impl Role {
             Window, WindowDefinition,
         };
         match (self, key) {
+            (Self::ExpressionPlan, "scalar") => Scalar,
+            (Self::ExpressionPlan, "subqueries") => List(&Query),
             (Query, "root") => Relational,
             (Query, "ctes") => List(&Cte),
             (Cte, "query") => Query,
@@ -63,7 +68,8 @@ impl Role {
             (SetOperation, "left" | "right") | (Subquery, "body") => Query,
             (Relational, "QueryBlock") => Block,
             (Relational, "SetOp") => SetOperation,
-            (Relational | Source, "Values") => Values,
+            (Relational, "Values") => Values,
+            (Source, "Values") => Self::SourceValues,
             (Block, "from") | (Join, "left" | "right") => Source,
             (Block, "projections" | "order_by") | (SetOperation | Call(_) | Window, "order_by") => {
                 List(&ExpressionField)
@@ -73,12 +79,14 @@ impl Role {
             | (Call(_), "args")
             | (InList, "list")
             | (CompositeRow, "items") => List(&Scalar),
-            (Block, "grouping_sets") | (Values, "rows") | (Case, "when") => List(&List(&Scalar)),
+            (Block, "grouping_sets") | (Values | Self::SourceValues, "rows") | (Case, "when") => {
+                List(&List(&Scalar))
+            }
             (Block, "where" | "having" | "limit" | "offset")
             | (SetOperation, "limit" | "offset")
             | (Cycle, "mark_value" | "mark_default")
             | (Join, "on")
-            | (ExpressionField | Operand | InList, "expr")
+            | (ExpressionField | Operand | InList | Self::Cast, "expr")
             | (Between, "expr" | "low" | "high")
             | (Binary, "lhs" | "rhs")
             | (Case, "base" | "else_branch")
@@ -95,7 +103,8 @@ impl Role {
             (Scalar, "WindowCall") => Call(StoredFunctionSite::Window),
             (Scalar, "Array" | "Row" | "And" | "Or") => List(&Scalar),
             (Scalar, "UnaryMinus" | "Not") => Scalar,
-            (Scalar, "IsNull" | "Cast" | "Collated" | "InSubquery") => Operand,
+            (Scalar, "IsNull" | "Collated" | "InSubquery") => Operand,
+            (Scalar, "Cast") => Self::Cast,
             (Scalar, "Binary") => Binary,
             (Scalar, "Between") => Between,
             (Scalar, "InList") => InList,
@@ -116,21 +125,89 @@ impl Role {
     }
 }
 
+// Serde accepts positional and named fields for native structs. Both encodings use the same field roles, and lists retain their element role.
+impl Role {
+    fn element(self, index: usize) -> Self {
+        if let Self::List(element) = self {
+            return *element;
+        }
+        let fields: &[&str] = match self {
+            Self::ExpressionPlan => &["scalar", "subqueries"],
+            Self::Query => &["", "ctes", "root"],
+            Self::Cycle => &["", "", "mark_value", "mark_default"],
+            Self::Block => &[
+                "windows",
+                "projections",
+                "",
+                "from",
+                "where",
+                "",
+                "group_by",
+                "grouping_sets",
+                "",
+                "having",
+                "order_by",
+                "limit",
+                "",
+                "offset",
+                "",
+                "distinct_on",
+                "subqueries",
+            ],
+            Self::SetOperation => &[
+                "",
+                "",
+                "left",
+                "right",
+                "order_by",
+                "limit",
+                "",
+                "offset",
+                "subqueries",
+            ],
+            Self::Values => &["rows", "subqueries"],
+            Self::SourceValues => &["", "rows"],
+            Self::Join => &["", "left", "right", "", "on"],
+            Self::Subquery => &["", "body"],
+            Self::FunctionGroup => &["functions"],
+            Self::Binary => &["", "lhs", "rhs"],
+            Self::Operand | Self::ExpressionField => &["expr"],
+            Self::Cast => &["", "expr"],
+            Self::Between => &["expr", "low", "high"],
+            Self::InList => &["expr", "list"],
+            Self::Case => &["base", "when", "else_branch"],
+            Self::CompositeRow => &["items"],
+            Self::WindowDefinition => &["", "", "spec"],
+            Self::Window => &["", "partition_by", "order_by", "frame"],
+            Self::Frame => &["", "start", "end"],
+            Self::Call(StoredFunctionSite::Expression) => {
+                &["name", "binding", "args", "", "order_by", "", "filter"]
+            }
+            Self::Call(StoredFunctionSite::Window) => &["name", "args", "spec", "filter"],
+            Self::Call(StoredFunctionSite::From) => &["name", "binding", "", "", "args"],
+            // Binding and CTE both flatten a tagged object and require named fields.
+            _ => &[],
+        };
+        fields
+            .get(index)
+            .map_or(Self::Ignored, |name| self.field(name))
+    }
+}
+
 struct Frame {
     role: Role,
     field: Role,
+    index: Option<usize>,
     name: Option<Produced<String>>,
     selected: bool,
 }
 
 impl Frame {
-    fn new(role: Role) -> Self {
+    fn new(role: Role, array: bool) -> Self {
         Self {
             role,
-            field: match role {
-                Role::List(element) => *element,
-                _ => Role::Ignored,
-            },
+            field: Role::Ignored,
+            index: array.then_some(0),
             name: None,
             selected: false,
         }
@@ -152,6 +229,27 @@ pub async fn visit_stored_query_json_runtime_calls<W: JsonReadWork<Error = JsonR
     work: &mut W,
     visit: &mut (impl FnMut(&str, StoredFunctionSite) -> Result<(), SQLError> + Send),
 ) -> Result<(), SQLError> {
+    visit_json_runtime_calls(bytes, Role::Query, control, work, visit).await
+}
+
+pub(crate) async fn visit_expression_plan_json_runtime_calls<
+    W: JsonReadWork<Error = JsonReadError>,
+>(
+    bytes: &[u8],
+    control: &ProductionControl<'_>,
+    work: &mut W,
+    visit: &mut (impl FnMut(&str, StoredFunctionSite) -> Result<(), SQLError> + Send),
+) -> Result<(), SQLError> {
+    visit_json_runtime_calls(bytes, Role::ExpressionPlan, control, work, visit).await
+}
+
+async fn visit_json_runtime_calls<W: JsonReadWork<Error = JsonReadError>>(
+    bytes: &[u8],
+    root: Role,
+    control: &ProductionControl<'_>,
+    work: &mut W,
+    visit: &mut (impl FnMut(&str, StoredFunctionSite) -> Result<(), SQLError> + Send),
+) -> Result<(), SQLError> {
     let mut input = JsonReader::from_slice_with_control(bytes, control);
     let mut frames = BudgetedVec::<Frame>::new(control.budget().expect("admitted stored query"));
     let mut ignored = 0usize;
@@ -165,11 +263,9 @@ pub async fn visit_stored_query_json_runtime_calls<W: JsonReadWork<Error = JsonR
             }
             continue;
         }
-        let parent = frames.last_mut();
-        let field = parent.as_ref().map_or(Role::Query, |frame| frame.field);
         match event.token {
             JsonToken::Key(key) => {
-                let frame = parent.expect("JSON object");
+                let frame = frames.last_mut().expect("JSON object");
                 let key = decode_json_string_with_work(key, control, work)
                     .await
                     .map_err(json_error)?;
@@ -190,7 +286,16 @@ pub async fn visit_stored_query_json_runtime_calls<W: JsonReadWork<Error = JsonR
                 }
             }
             token => {
+                let parent = frames.last_mut();
+                let field = parent.as_deref().map_or(root, |frame| {
+                    frame
+                        .index
+                        .map_or(frame.field, |index| frame.role.element(index))
+                });
                 if let Some(frame) = parent {
+                    if let Some(index) = &mut frame.index {
+                        *index += 1;
+                    }
                     if field == Role::Selected && !matches!(token, JsonToken::Null)
                         || field == Role::Builtin && matches!(token, JsonToken::Bool(true))
                     {
@@ -209,7 +314,8 @@ pub async fn visit_stored_query_json_runtime_calls<W: JsonReadWork<Error = JsonR
                 if matches!(token, JsonToken::StartArray | JsonToken::StartObject) {
                     match field {
                         Role::Ignored | Role::Selected => ignored = 1,
-                        _ => frames.push(Frame::new(field))?,
+                        _ => frames
+                            .push(Frame::new(field, matches!(token, JsonToken::StartArray)))?,
                     }
                 }
             }

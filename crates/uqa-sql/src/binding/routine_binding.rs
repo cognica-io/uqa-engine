@@ -8,9 +8,9 @@
 
 use super::{
     cte_references_own_name, extend_cte_generated_schema, extend_recursive_cte_binding_schema,
-    operator_join_relation_schemas, overlay_outer_schema, rename_schema, BindingContext,
-    ColumnType, QueryPlan, RelationalPlan, RowSchema, SQLError, SQLParam, ScalarExpr, SchemaScope,
-    SourcePlan, SourceScope,
+    operator_join_relation_schemas, overlay_outer_schema, rename_schema,
+    stored_routines::StoredCallOrigin, BindingContext, ColumnType, QueryPlan, RelationalPlan,
+    RowSchema, SQLError, SQLParam, ScalarExpr, SchemaScope, SourcePlan, SourceScope,
 };
 use crate::ast::FunctionBinding;
 use crate::plan::ExpressionPlan;
@@ -831,7 +831,7 @@ impl SchemaScope {
             )?
         };
         if let Some(selected) = selected {
-            FunctionBinding::rebind(binding, selected.binding);
+            self.store_call_selection(name, binding, selected.binding);
         }
         Ok(())
     }
@@ -844,7 +844,38 @@ pub fn bind_query_plan_routines_for_storage(
     ctes: &BindingContext,
     outer: Option<&RowSchema>,
 ) -> Result<RowSchema, SQLError> {
-    SchemaScope::for_analysis(ctes)?.bind_query_routines_for_storage(engine, plan, params, outer)
+    StoredCallOrigin::Definition.bind_query(engine, plan, params, ctes, outer)
+}
+
+impl StoredCallOrigin {
+    pub(crate) fn bind_query(
+        self,
+        engine: &dyn RoutineResolution,
+        plan: &mut QueryPlan,
+        params: &[SQLParam],
+        ctes: &BindingContext,
+        outer: Option<&RowSchema>,
+    ) -> Result<RowSchema, SQLError> {
+        let mut scope = SchemaScope::for_analysis(ctes)?;
+        scope.stored_call_origin = self;
+        scope.bind_query_routines_for_storage(engine, plan, params, outer)
+    }
+}
+
+impl SchemaScope {
+    pub(super) fn store_call_selection(
+        &self,
+        name: &str,
+        binding: &mut Option<FunctionBinding>,
+        selected: FunctionBinding,
+    ) {
+        if !self
+            .stored_call_origin
+            .keeps_runtime_lookup(name, binding.as_ref(), &selected)
+        {
+            FunctionBinding::rebind(binding, selected);
+        }
+    }
 }
 
 /// Bind a copy of a query lowered from stored syntax, keeping its shape so every bound identity can be carried back to that syntax.
@@ -877,8 +908,9 @@ pub(super) fn bind_rule_condition_routines(
     ctes: &BindingContext,
     schema: &RowSchema,
     event: crate::ast::RuleEvent,
+    origin: StoredCallOrigin,
 ) -> Result<Option<ColumnType>, SQLError> {
-    bind_stored_expression(engine, plan, &[], ctes, schema, Some(event))
+    bind_stored_expression(engine, plan, &[], ctes, schema, Some((event, origin)))
 }
 
 fn bind_stored_expression(
@@ -887,10 +919,13 @@ fn bind_stored_expression(
     params: &[SQLParam],
     ctes: &BindingContext,
     schema: &RowSchema,
-    rule_event: Option<crate::ast::RuleEvent>,
+    rule: Option<(crate::ast::RuleEvent, StoredCallOrigin)>,
 ) -> Result<Option<ColumnType>, SQLError> {
     let mut scope = SchemaScope::for_analysis(ctes)?;
-    scope.rule_condition_event = rule_event;
+    if let Some((event, origin)) = rule {
+        scope.rule_condition_event = Some(event);
+        scope.stored_call_origin = origin;
+    }
     scope.preserve_syntax_shape = true;
     scope.stored_expression_outer = Some(schema.clone());
     for subquery in &mut plan.subqueries {

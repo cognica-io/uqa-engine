@@ -190,30 +190,50 @@ pub(super) fn bind_stored_schema_expression_with_schema(
     typed_expression: Expr,
     schema: &RowSchema,
 ) -> Result<bool, SQLError> {
-    let lowered = crate::plan::ExpressionPlan::lower_with(typed_expression, &|name: &str| {
-        context.catalog.has_registered_aggregate_function(name)
-    });
-    let mut plan = lowered.clone();
-    crate::binding::analyze_stored_expression_inputs(
-        context.catalog,
-        &mut plan,
-        context.binding,
+    crate::binding::stored_routines::StoredCallOrigin::Definition.bind_schema_expression(
+        context,
+        expression,
+        typed_expression,
         schema,
-    )?;
-    crate::binding::bind_expression_plan_routines_for_storage(
-        context.catalog,
-        &mut plan,
-        &[],
-        context.binding,
-        schema,
-    )?;
-    let sites = crate::binding::syntax_sites::expression_syntax_sites(&lowered, &plan)?;
-    let changed = crate::catalog::stored_ast::bind_stored_expression_sites(expression, &sites)?;
-    // Function binding can introduce regclass casts in CHECK expressions too.
-    // Read those inputs before publication so refresh never repairs a new schema.
-    let before_inputs = expression.clone();
-    crate::schema::dependencies::oid_alias::read_oid_alias_constants(context.catalog, expression)?;
-    Ok(changed || *expression != before_inputs)
+    )
+}
+
+impl crate::binding::stored_routines::StoredCallOrigin {
+    pub(super) fn bind_schema_expression(
+        self,
+        context: &SchemaBindingContext<'_, '_>,
+        expression: &mut Expr,
+        typed_expression: Expr,
+        schema: &RowSchema,
+    ) -> Result<bool, SQLError> {
+        let lowered = crate::plan::ExpressionPlan::lower_with(typed_expression, &|name: &str| {
+            context.catalog.has_registered_aggregate_function(name)
+        });
+        let mut plan = lowered.clone();
+        crate::binding::analyze_stored_expression_inputs(
+            context.catalog,
+            &mut plan,
+            context.binding,
+            schema,
+        )?;
+        crate::binding::bind_expression_plan_routines_for_storage(
+            context.catalog,
+            &mut plan,
+            &[],
+            context.binding,
+            schema,
+        )?;
+        let sites = crate::binding::syntax_sites::expression_syntax_sites(&lowered, &plan)?;
+        let changed = self.bind_expression_sites(expression, &sites)?;
+        // Function binding can introduce regclass casts in CHECK expressions too.
+        // Read those inputs before publication so refresh never repairs a new schema.
+        let before_inputs = expression.clone();
+        crate::schema::dependencies::oid_alias::read_oid_alias_constants(
+            context.catalog,
+            expression,
+        )?;
+        Ok(changed || *expression != before_inputs)
+    }
 }
 
 fn default_error(sqlstate: &str, message: &str) -> SQLError {
