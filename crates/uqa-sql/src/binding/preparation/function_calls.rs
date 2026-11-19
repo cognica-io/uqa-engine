@@ -550,6 +550,34 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
                 .as_ref()
                 .map_or(index, |positions| positions[index]);
             if let Some(target) = targets.get(position).and_then(Option::as_ref) {
+                if self.scope.preserve_syntax_shape
+                    && selection
+                        .overload
+                        .as_ref()
+                        .is_some_and(|call| call.binding.builtin)
+                    && crate::is_fixed_builtin(name)
+                {
+                    if let (Some(actual), Some(argument)) =
+                        (value.ty.as_deref(), original_args.get(index))
+                    {
+                        let argument = crate::scalar_call_argument(argument)?.value;
+                        let control = self.scope.control();
+                        if crate::type_resolution::fixed_argument_requires_cast_with_control(
+                            argument,
+                            Some(actual),
+                            target,
+                            &control,
+                        )? {
+                            self.parameters.retain_input_coercion(
+                                argument,
+                                AnalysisType::from_produced(
+                                    target.clone_with_control(&control)?,
+                                    &control,
+                                )?,
+                            )?;
+                        }
+                    }
+                }
                 self.parameters.coerce_unknown(value, target)?;
             }
         }

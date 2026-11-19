@@ -48,7 +48,8 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
         subqueries: &[QueryPlan],
     ) -> Result<ExpressionType, SQLError> {
         // The wrapped node has already been assigned. Analyze its inputs without scheduling another wrapper around that same node.
-        let mut value = self.expression_inner(expr, input, subqueries)?;
+        let mut value =
+            crate::catalog::work::inline(self.expression_inner(expr, input, subqueries, &mut ()))?;
         collation.validate(ty)?;
         // Collation assignment retains type identity, while a simplified arm keeps its own modifier.
         let control = self.scope.control();
@@ -156,27 +157,72 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
         Ok(ExpressionType::independent_owned(ty, &[inner]))
     }
 
-    pub(super) fn array_expression(
+    /// Keep the array's ordinary future on its selected call frame when another node recursively resolves a function.
+    pub(super) fn array_expression_inline<W: crate::catalog::work::Work + Send>(
         &mut self,
         items: &[ScalarExpr],
         input: &RowSchema,
         subqueries: &[QueryPlan],
+        work: &mut W,
+    ) -> Result<ExpressionType, SQLError> {
+        crate::catalog::work::inline_with(|| self.array_expression(items, input, subqueries, work))
+    }
+
+    pub(super) async fn array_expression<W: crate::catalog::work::Work + Send>(
+        &mut self,
+        items: &[ScalarExpr],
+        input: &RowSchema,
+        subqueries: &[QueryPlan],
+        work: &mut W,
     ) -> Result<ExpressionType, SQLError> {
         let owner = self.scope.control().capture();
         let control = owner.control();
         let mut observed = super::super::ownership::AnalysisVec::new(&control);
         observed.reserve(items.len(), &control)?;
         for item in items {
-            observed.push(self.expression(item, input, subqueries)?, &control)?;
+            let value = if matches!(item, ScalarExpr::Array(_)) && W::MAY_SUSPEND {
+                crate::construction::retain_with(control, || {
+                    self.expression_with_work(item, input, subqueries, work)
+                })?
+                .await?
+            } else {
+                crate::catalog::work::ReferenceWork {
+                    control: &control,
+                    work,
+                }
+                .checkpoint()
+                .await?;
+                self.expression(item, input, subqueries)?
+            };
+            observed.push(value, &control)?;
         }
-        let ty = self
-            .common(
+        let element = self
+            .common_with_work(
                 crate::type_resolution::CommonTypeContext::Array,
                 &mut observed,
-            )?
-            .map(|element| element.array(&control))
-            .transpose()?;
-        Ok(ExpressionType::combined_owned(ty, &observed))
+                work,
+            )
+            .await?;
+        let mut derivation = Derivation::None;
+        for (expression, value) in items.iter().zip(observed) {
+            crate::catalog::work::ReferenceWork {
+                control: &control,
+                work,
+            }
+            .checkpoint()
+            .await?;
+            if self.scope.preserve_syntax_shape {
+                if let (Some(source), Some(target)) = (value.ty.as_deref(), element.as_ref()) {
+                    if !crate::type_resolution::common_input_keeps_type(source, target, &control)? {
+                        self.parameters
+                            .retain_input_coercion(expression, target.clone())?;
+                    }
+                }
+            }
+            derivation = derivation.combine(value.derivation);
+        }
+        let ty = element.map(|element| element.array(&control)).transpose()?;
+        Ok(ExpressionType::with_derivation(ty, derivation))
     }
 
     pub(super) fn composite_row_expression(

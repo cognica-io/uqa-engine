@@ -26,7 +26,8 @@ pub(in crate::binding) use production::bind_routine_parameter_references;
 pub(crate) use production::bind_rule_inputs_owned;
 pub(in crate::binding) use production::retain_input_metadata_owned;
 pub use production::{
-    bind_expression_plan_routines_for_storage_owned, resolve_variable_sites_owned,
+    bind_expression_plan_routines_for_storage_owned,
+    bind_expression_plan_routines_for_storage_with_work, resolve_variable_sites_owned,
 };
 pub use production::{
     bind_routine_parameter_references_owned, parameter_input_types_with_control,
@@ -631,6 +632,26 @@ pub(super) fn values_metadata(
     outer: Option<&RowSchema>,
     params: &[crate::SQLParam],
 ) -> Result<RowSchema, SQLError> {
+    crate::catalog::work::inline(values_metadata_with_work(
+        scope,
+        routines,
+        rows,
+        subqueries,
+        outer,
+        params,
+        &mut (),
+    ))
+}
+
+pub(super) async fn values_metadata_with_work<W: crate::catalog::work::Work + Send>(
+    scope: &mut SchemaScope,
+    routines: &dyn RoutineResolution,
+    rows: &[Vec<ScalarExpr>],
+    subqueries: &[QueryPlan],
+    outer: Option<&RowSchema>,
+    params: &[crate::SQLParam],
+    work: &mut W,
+) -> Result<RowSchema, SQLError> {
     let mut analysis = Preparation {
         bound_condition_queries: None,
         routines,
@@ -639,7 +660,8 @@ pub(super) fn values_metadata(
         schema_expression: (),
     };
     analysis
-        .values(rows, subqueries, outer)
+        .values_with_work(rows, subqueries, outer, work)
+        .await
         .and_then(|output| output.schema(&analysis.scope.control()))
 }
 
@@ -833,8 +855,27 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
         subqueries: &[QueryPlan],
         context: &str,
     ) -> Result<ExpressionType, SQLError> {
+        crate::catalog::work::inline(self.boolean_expression_with_work(
+            expression,
+            input,
+            subqueries,
+            context,
+            &mut (),
+        ))
+    }
+
+    async fn boolean_expression_with_work<W: crate::catalog::work::Work + Send>(
+        &mut self,
+        expression: &ScalarExpr,
+        input: &RowSchema,
+        subqueries: &[QueryPlan],
+        context: &str,
+        work: &mut W,
+    ) -> Result<ExpressionType, SQLError> {
         let calls = self.set_calls();
-        let mut observed = self.expression(expression, input, subqueries)?;
+        let mut observed = self
+            .expression_with_work(expression, input, subqueries, work)
+            .await?;
         self.parameters
             .coerce_unknown(&mut observed, &ColumnType::Boolean)?;
         crate::type_resolution::boolean::require_argument_type(

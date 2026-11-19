@@ -24,23 +24,20 @@ pub fn visit_stored_statement_merges(
     .bind_statement(statement)
 }
 
-impl<R, F> StoredAstVisitor<'_, R, F>
-where
-    R: FnMut(&mut String) -> Result<(), SQLError>,
-    F: FnMut(&mut String, Option<&mut Option<crate::ast::FunctionBinding>>) -> Result<(), SQLError>,
-{
-    pub(super) fn bind_merge(
+use super::{Actions, Reader, Work};
+
+impl<W: Work + Send, A: Actions<W>> Reader<'_, '_, A, W> {
+    pub(super) async fn bind_merge(
         &mut self,
         merge: &mut crate::ast::MergeStmt,
         inherited: &BTreeSet<String>,
     ) -> Result<(), SQLError> {
-        if let Some(visit) = &mut self.merge {
-            visit(merge)?;
-        }
-        (self.relation)(&mut merge.target)?;
-        let ctes = self.bind_ctes(&mut merge.with, inherited)?;
-        self.bind_from(&mut merge.source, &ctes)?;
-        self.bind_expr(&mut merge.join_condition, &ctes)?;
+        self.checkpoint().await?;
+        self.actions.merge(merge)?;
+        self.actions.relation(&mut merge.target)?;
+        let ctes = self.bind_ctes(&mut merge.with, inherited).await?;
+        self.bind_from(&mut merge.source, &ctes).await?;
+        self.bind_expr(&mut merge.join_condition, &ctes).await?;
         for clause in &mut merge.when_clauses {
             match clause {
                 crate::ast::MergeWhen::UpdateMatched {
@@ -52,13 +49,9 @@ where
                     assignments,
                 } => {
                     if let Some(condition) = condition {
-                        self.bind_expr(condition, &ctes)?;
+                        self.bind_expr(condition, &ctes).await?;
                     }
-                    for expression in assignments.iter_mut().flat_map(|(target, value)| {
-                        target.expressions_mut().chain(std::iter::once(value))
-                    }) {
-                        self.bind_expr(expression, &ctes)?;
-                    }
+                    self.bind_assignments(assignments, &ctes).await?;
                 }
                 crate::ast::MergeWhen::InsertNotMatched {
                     condition,
@@ -67,14 +60,11 @@ where
                     ..
                 } => {
                     if let Some(condition) = condition {
-                        self.bind_expr(condition, &ctes)?;
+                        self.bind_expr(condition, &ctes).await?;
                     }
-                    for expression in columns
-                        .iter_mut()
-                        .flat_map(crate::ast::AssignmentTarget::expressions_mut)
-                        .chain(values)
-                    {
-                        self.bind_expr(expression, &ctes)?;
+                    self.bind_targets(columns, &ctes).await?;
+                    for expression in values {
+                        self.bind_expr(expression, &ctes).await?;
                     }
                 }
                 crate::ast::MergeWhen::DeleteMatched { condition }
@@ -83,13 +73,13 @@ where
                 | crate::ast::MergeWhen::NothingNotMatched { condition }
                 | crate::ast::MergeWhen::NothingNotMatchedBySource { condition } => {
                     if let Some(condition) = condition {
-                        self.bind_expr(condition, &ctes)?;
+                        self.bind_expr(condition, &ctes).await?;
                     }
                 }
             }
         }
         for projection in &mut merge.returning {
-            self.bind_projection(projection, &ctes)?;
+            self.bind_projection(projection, &ctes).await?;
         }
         Ok(())
     }

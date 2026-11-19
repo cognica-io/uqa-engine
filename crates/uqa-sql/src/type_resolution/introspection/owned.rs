@@ -15,6 +15,7 @@ use uqa_core::memory::ProductionControl;
 
 mod calls;
 mod coercion;
+pub(crate) use coercion::common_input_keeps_type;
 mod membership;
 
 #[cfg(test)]

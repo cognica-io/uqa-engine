@@ -12,6 +12,12 @@ use super::{
 };
 use crate::{plan::MutableExpressionPlan, RowSchema};
 
+#[derive(Clone, Copy)]
+enum ExpressionDestination {
+    Executable,
+    StoredSyntax,
+}
+
 pub fn bind_expression_plan_routines_for_storage_owned(
     routines: &dyn RoutineResolution,
     expression: MutableExpressionPlan,
@@ -20,6 +26,66 @@ pub fn bind_expression_plan_routines_for_storage_owned(
     input: &RowSchema,
     control: &ProductionControl<'_>,
 ) -> Result<MutableExpressionPlan, SQLError> {
+    crate::catalog::work::inline(bind_expression_owned(
+        routines,
+        expression,
+        params,
+        binding,
+        input,
+        ExpressionDestination::Executable,
+        control,
+        &mut (),
+    ))
+    .map(|(expression, _)| expression)
+}
+
+/// Analyze a private stored expression under the original catalog and return both its selected plan and its owned result type.
+pub async fn bind_expression_plan_routines_for_storage_with_work(
+    routines: &dyn RoutineResolution,
+    expression: MutableExpressionPlan,
+    params: &[SQLParam],
+    binding: ControlledBindingContext<'_>,
+    input: &RowSchema,
+    control: &ProductionControl<'_>,
+    work: &mut (impl crate::catalog::work::Work + Send),
+) -> Result<
+    (
+        uqa_core::memory::Produced<crate::plan::ExpressionPlan>,
+        Option<uqa_core::memory::Produced<crate::ColumnType>>,
+    ),
+    SQLError,
+> {
+    let (expression, ty) = bind_expression_owned(
+        routines,
+        expression,
+        params,
+        binding,
+        input,
+        ExpressionDestination::StoredSyntax,
+        control,
+        work,
+    )
+    .await?;
+    let ty = ty.map(|ty| ty.into_produced(control)).transpose()?;
+    Ok((expression.finish(control)?, ty))
+}
+
+async fn bind_expression_owned<W: crate::catalog::work::Work + Send>(
+    routines: &dyn RoutineResolution,
+    expression: MutableExpressionPlan,
+    params: &[SQLParam],
+    binding: ControlledBindingContext<'_>,
+    input: &RowSchema,
+    destination: ExpressionDestination,
+    control: &ProductionControl<'_>,
+    work: &mut W,
+) -> Result<
+    (
+        MutableExpressionPlan,
+        Option<super::super::ownership::AnalysisType>,
+    ),
+    SQLError,
+> {
     let mut plan = MutableExecutablePlan::Query(expression.into_projection_query(control)?);
     let mut scope = SchemaScope::for_analysis_with_control(binding, control)?;
     scope.preserve_syntax_shape = true;
@@ -38,16 +104,21 @@ pub fn bind_expression_plan_routines_for_storage_owned(
         unreachable!()
     };
     for query in &block.subqueries {
-        analysis.query(query, Some(input))?;
+        analysis.query_with_work(query, Some(input), work).await?;
     }
-    analysis.expression(&block.projections[0].expr, input, &block.subqueries)?;
+    let observed = analysis
+        .expression_with_work(&block.projections[0].expr, input, &block.subqueries, work)
+        .await?;
     let constants = analysis.parameters.take_input_constants();
     constants.apply_owned(&mut plan, routines, params, control)?;
     let MutableExecutablePlan::Query(query) = plan else {
         unreachable!()
     };
     let expression = MutableExpressionPlan::from_projection_query(query, control)?;
-    expression.map_scalar(control, |expression, arena| {
+    if matches!(destination, ExpressionDestination::StoredSyntax) {
+        return Ok((expression, observed.ty));
+    }
+    let expression = expression.map_scalar(control, |expression, arena| {
         let resolver = scope.query_function_type_resolver_for_subqueries(
             routines,
             std::slice::from_ref(&*expression),
@@ -58,7 +129,8 @@ pub fn bind_expression_plan_routines_for_storage_owned(
         crate::type_resolution::bind_stored_inputs_owned(
             expression, input, params, &resolver, control,
         )
-    })
+    })?;
+    Ok((expression, observed.ty))
 }
 
 /// Expand current event rows through the same scoped reference pass used by stored routine parameters.

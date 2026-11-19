@@ -19,6 +19,7 @@ pub(crate) use production::resolve_syntax_binding_with_control;
 mod registry;
 mod regular_expressions;
 mod selected;
+pub(crate) use selected::requires_cast as requires_argument_cast_with_control;
 mod selection;
 mod standard;
 

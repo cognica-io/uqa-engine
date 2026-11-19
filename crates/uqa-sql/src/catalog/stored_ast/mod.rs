@@ -13,13 +13,16 @@ use crate::{
 use std::collections::BTreeSet;
 use uqa_core::RelationIdentity;
 mod expressions;
+mod input;
 mod literals;
 mod merge;
 mod routines;
 mod sites;
 mod sources;
 mod types;
+use crate::catalog::work::Work;
 pub use expressions::*;
+use input::{Actions, Reader};
 pub use literals::read_unknown_stored_literal;
 pub use merge::visit_stored_statement_merges;
 pub use routines::*;
@@ -51,122 +54,165 @@ where
     F: FnMut(&mut String, Option<&mut Option<crate::ast::FunctionBinding>>) -> Result<(), SQLError>,
 {
     pub fn bind_statement(&mut self, statement: &mut Statement) -> Result<(), SQLError> {
+        let control = uqa_core::memory::ProductionControl::uncontrolled();
+        crate::catalog::work::inline(Reader::new(self, &control, &mut ()).bind_statement(statement))
+    }
+
+    pub fn bind_expr(
+        &mut self,
+        expression: &mut Expr,
+        visible_ctes: &BTreeSet<String>,
+    ) -> Result<(), SQLError> {
+        let control = uqa_core::memory::ProductionControl::uncontrolled();
+        crate::catalog::work::inline(
+            Reader::new(self, &control, &mut ()).bind_expr(expression, visible_ctes),
+        )
+    }
+}
+
+impl<W: Work + Send, A: Actions<W>> Reader<'_, '_, A, W> {
+    pub(super) async fn bind_statement(
+        &mut self,
+        statement: &mut Statement,
+    ) -> Result<(), SQLError> {
+        self.checkpoint().await?;
         let ctes = BTreeSet::new();
         match statement {
-            Statement::Select(query) => self.bind_select(query, &ctes),
-            Statement::Insert(insert) => self.bind_insert(insert, &ctes),
-            Statement::Update(update) => self.bind_update(update, &ctes),
-            Statement::Delete(delete) => self.bind_delete(delete, &ctes),
+            Statement::Select(query) => crate::catalog::work::nested!(
+                W::MAY_SUSPEND,
+                self.control,
+                self.bind_select(query, &ctes)
+            ),
+            Statement::Insert(insert) => self.bind_insert(insert, &ctes).await,
+            Statement::Update(update) => self.bind_update(update, &ctes).await,
+            Statement::Delete(delete) => self.bind_delete(delete, &ctes).await,
             Statement::Notify { .. } => Ok(()),
             Statement::Values { rows } => {
                 for expression in rows.iter_mut().flatten() {
-                    self.bind_expr(expression, &ctes)?;
+                    self.bind_expr(expression, &ctes).await?;
                 }
                 Ok(())
             }
-            Statement::Merge(merge) => self.bind_merge(merge, &ctes),
+            Statement::Merge(merge) => self.bind_merge(merge, &ctes).await,
             _ => Err(SQLError::Internal(
                 "catalog-owned statement has an unsupported dependency shape".into(),
             )),
         }
     }
 
-    fn bind_insert(
+    async fn bind_targets(
+        &mut self,
+        targets: &mut [crate::ast::AssignmentTarget],
+        visible: &BTreeSet<String>,
+    ) -> Result<(), SQLError> {
+        for target in targets {
+            for expression in target.expressions_mut() {
+                self.bind_expr(expression, visible).await?;
+            }
+        }
+        Ok(())
+    }
+
+    async fn bind_assignments(
+        &mut self,
+        assignments: &mut [(crate::ast::AssignmentTargets, Expr)],
+        visible: &BTreeSet<String>,
+    ) -> Result<(), SQLError> {
+        for (target, value) in assignments {
+            self.bind_targets(target.targets_mut(), visible).await?;
+            self.bind_expr(value, visible).await?;
+        }
+        Ok(())
+    }
+
+    async fn bind_insert(
         &mut self,
         insert: &mut crate::ast::InsertStmt,
         inherited: &BTreeSet<String>,
     ) -> Result<(), SQLError> {
-        (self.relation)(&mut insert.table)?;
-        let visible = self.bind_ctes(&mut insert.with, inherited)?;
+        self.actions.relation(&mut insert.table)?;
+        let visible = self.bind_ctes(&mut insert.with, inherited).await?;
         if let Some(source) = insert.select_source.as_deref_mut() {
-            self.bind_select(source, &visible)?;
+            crate::catalog::work::nested!(
+                W::MAY_SUSPEND,
+                self.control,
+                self.bind_select(source, &visible)
+            )?;
         }
-        for expression in insert
-            .columns
-            .iter_mut()
-            .flat_map(crate::ast::AssignmentTarget::expressions_mut)
-            .chain(insert.rows.iter_mut().flatten())
-        {
-            self.bind_expr(expression, &visible)?;
+        self.bind_targets(&mut insert.columns, &visible).await?;
+        for expression in insert.rows.iter_mut().flatten() {
+            self.bind_expr(expression, &visible).await?;
         }
         if let Some(conflict) = &mut insert.on_conflict {
             for expression in &mut conflict.expressions {
-                self.bind_expr(expression, &visible)?;
+                self.bind_expr(expression, &visible).await?;
             }
             if let Some(predicate) = conflict.predicate.as_deref_mut() {
-                self.bind_expr(predicate, &visible)?;
+                self.bind_expr(predicate, &visible).await?;
             }
             if let crate::ast::OnConflictAction::Update {
                 assignments,
                 r#where,
             } = &mut conflict.action
             {
-                for expression in assignments.iter_mut().flat_map(|(target, value)| {
-                    target.expressions_mut().chain(std::iter::once(value))
-                }) {
-                    self.bind_expr(expression, &visible)?;
-                }
+                self.bind_assignments(assignments, &visible).await?;
                 if let Some(expression) = r#where {
-                    self.bind_expr(expression, &visible)?;
+                    self.bind_expr(expression, &visible).await?;
                 }
             }
         }
         for projection in &mut insert.returning {
-            self.bind_projection(projection, &visible)?;
+            self.bind_projection(projection, &visible).await?;
         }
         Ok(())
     }
 
-    fn bind_update(
+    async fn bind_update(
         &mut self,
         update: &mut crate::ast::UpdateStmt,
         inherited: &BTreeSet<String>,
     ) -> Result<(), SQLError> {
-        (self.relation)(&mut update.table)?;
-        let visible = self.bind_ctes(&mut update.with, inherited)?;
+        self.actions.relation(&mut update.table)?;
+        let visible = self.bind_ctes(&mut update.with, inherited).await?;
         if let Some(source) = &mut update.from {
-            self.bind_from(source, &visible)?;
+            self.bind_from(source, &visible).await?;
         }
-        for expression in update
-            .assignments
-            .iter_mut()
-            .flat_map(|(target, value)| target.expressions_mut().chain(std::iter::once(value)))
-        {
-            self.bind_expr(expression, &visible)?;
-        }
+        self.bind_assignments(&mut update.assignments, &visible)
+            .await?;
         if let Some(expression) = &mut update.r#where {
-            self.bind_expr(expression, &visible)?;
+            self.bind_expr(expression, &visible).await?;
         }
         for projection in &mut update.returning {
-            self.bind_projection(projection, &visible)?;
+            self.bind_projection(projection, &visible).await?;
         }
         Ok(())
     }
 
-    fn bind_delete(
+    async fn bind_delete(
         &mut self,
         delete: &mut crate::ast::DeleteStmt,
         inherited: &BTreeSet<String>,
     ) -> Result<(), SQLError> {
-        (self.relation)(&mut delete.table)?;
-        let visible = self.bind_ctes(&mut delete.with, inherited)?;
+        self.actions.relation(&mut delete.table)?;
+        let visible = self.bind_ctes(&mut delete.with, inherited).await?;
         if let Some(source) = &mut delete.using {
-            self.bind_from(source, &visible)?;
+            self.bind_from(source, &visible).await?;
         }
         if let Some(expression) = &mut delete.r#where {
-            self.bind_expr(expression, &visible)?;
+            self.bind_expr(expression, &visible).await?;
         }
         for projection in &mut delete.returning {
-            self.bind_projection(projection, &visible)?;
+            self.bind_projection(projection, &visible).await?;
         }
         Ok(())
     }
 
-    fn bind_ctes(
+    async fn bind_ctes(
         &mut self,
         ctes: &mut [crate::ast::CTE],
         inherited: &BTreeSet<String>,
     ) -> Result<BTreeSet<String>, SQLError> {
+        self.checkpoint().await?;
         let mut visible = inherited.clone();
         let recursive = ctes.iter().any(|cte| cte.recursive).then(|| {
             ctes.iter()
@@ -179,29 +225,50 @@ where
                 |recursive| inherited.union(recursive).cloned().collect(),
             );
             match &mut cte.body {
-                crate::ast::CteBody::Query(query) => self.bind_select(query, &body_scope)?,
-                crate::ast::CteBody::Insert(plan) => self.bind_insert(plan, &body_scope)?,
-                crate::ast::CteBody::Update(plan) => self.bind_update(plan, &body_scope)?,
-                crate::ast::CteBody::Delete(plan) => self.bind_delete(plan, &body_scope)?,
-                crate::ast::CteBody::Merge(plan) => self.bind_merge(plan, &body_scope)?,
+                crate::ast::CteBody::Query(query) => crate::catalog::work::nested!(
+                    W::MAY_SUSPEND,
+                    self.control,
+                    self.bind_select(query, &body_scope)
+                )?,
+                crate::ast::CteBody::Insert(plan) => crate::catalog::work::nested!(
+                    W::MAY_SUSPEND,
+                    self.control,
+                    self.bind_insert(plan, &body_scope)
+                )?,
+                crate::ast::CteBody::Update(plan) => crate::catalog::work::nested!(
+                    W::MAY_SUSPEND,
+                    self.control,
+                    self.bind_update(plan, &body_scope)
+                )?,
+                crate::ast::CteBody::Delete(plan) => crate::catalog::work::nested!(
+                    W::MAY_SUSPEND,
+                    self.control,
+                    self.bind_delete(plan, &body_scope)
+                )?,
+                crate::ast::CteBody::Merge(plan) => crate::catalog::work::nested!(
+                    W::MAY_SUSPEND,
+                    self.control,
+                    self.bind_merge(plan, &body_scope)
+                )?,
             }
             if let Some(cycle) = &mut cte.cycle {
-                self.bind_expr(&mut cycle.mark_value, &body_scope)?;
-                self.bind_expr(&mut cycle.mark_default, &body_scope)?;
+                self.bind_expr(&mut cycle.mark_value, &body_scope).await?;
+                self.bind_expr(&mut cycle.mark_default, &body_scope).await?;
             }
             visible.insert(cte.name.clone());
         }
         Ok(visible)
     }
 
-    fn bind_select(
+    async fn bind_select(
         &mut self,
         select: &mut SelectStmt,
         inherited: &BTreeSet<String>,
     ) -> Result<(), SQLError> {
-        let visible = self.bind_ctes(&mut select.with, inherited)?;
+        self.checkpoint().await?;
+        let visible = self.bind_ctes(&mut select.with, inherited).await?;
         if let Some(set) = select.set_op.as_mut().filter(|set| set.left.is_some()) {
-            self.bind_set_operation(set, &visible)?;
+            self.bind_set_operation(set, &visible).await?;
             let left = set
                 .left
                 .as_deref()
@@ -219,75 +286,84 @@ where
             return Ok(());
         }
         if let Some(source) = &mut select.from {
-            self.bind_from(source, &visible)?;
+            self.bind_from(source, &visible).await?;
         }
         for projection in &mut select.projections {
-            self.bind_projection(projection, &visible)?;
+            self.bind_projection(projection, &visible).await?;
         }
         for expression in select.values.iter_mut().flatten() {
-            self.bind_expr(expression, &visible)?;
+            self.bind_expr(expression, &visible).await?;
         }
         if let Some(expression) = &mut select.r#where {
-            self.bind_expr(expression, &visible)?;
+            self.bind_expr(expression, &visible).await?;
         }
         for expression in &mut select.group_by {
-            self.bind_expr(expression, &visible)?;
+            self.bind_expr(expression, &visible).await?;
         }
         for expression in select.grouping_sets.iter_mut().flatten() {
-            self.bind_expr(expression, &visible)?;
+            self.bind_expr(expression, &visible).await?;
         }
         if let Some(expression) = &mut select.having {
-            self.bind_expr(expression, &visible)?;
+            self.bind_expr(expression, &visible).await?;
         }
         for order in &mut select.order_by {
-            self.bind_expr(&mut order.expr, &visible)?;
+            self.bind_expr(&mut order.expr, &visible).await?;
         }
         if let Some(expression) = &mut select.limit {
-            self.bind_expr(expression, &visible)?;
+            self.bind_expr(expression, &visible).await?;
         }
         if let Some(expression) = &mut select.offset {
-            self.bind_expr(expression, &visible)?;
+            self.bind_expr(expression, &visible).await?;
         }
         for expression in &mut select.distinct_on {
-            self.bind_expr(expression, &visible)?;
+            self.bind_expr(expression, &visible).await?;
         }
         for window in &mut select.windows {
             for expression in window.spec.expressions_mut() {
-                self.bind_expr(expression, &visible)?;
+                self.bind_expr(expression, &visible).await?;
             }
         }
         if let Some(set) = &mut select.set_op {
-            self.bind_set_operation(set, &visible)?;
+            self.bind_set_operation(set, &visible).await?;
         }
         Ok(())
     }
 
-    fn bind_set_operation(
+    async fn bind_set_operation(
         &mut self,
         set: &mut crate::ast::SetOp,
         visible: &BTreeSet<String>,
     ) -> Result<(), SQLError> {
         if let Some(left) = &mut set.left {
-            self.bind_select(left, visible)?;
+            crate::catalog::work::nested!(
+                W::MAY_SUSPEND,
+                self.control,
+                self.bind_select(left, visible)
+            )?;
         }
-        self.bind_select(&mut set.right, visible)?;
+        crate::catalog::work::nested!(
+            W::MAY_SUSPEND,
+            self.control,
+            self.bind_select(&mut set.right, visible)
+        )?;
         for order in &mut set.combined_order_by {
-            self.bind_expr(&mut order.expr, visible)?;
+            self.bind_expr(&mut order.expr, visible).await?;
         }
         if let Some(expression) = &mut set.combined_limit {
-            self.bind_expr(expression, visible)?;
+            self.bind_expr(expression, visible).await?;
         }
         if let Some(expression) = &mut set.combined_offset {
-            self.bind_expr(expression, visible)?;
+            self.bind_expr(expression, visible).await?;
         }
         Ok(())
     }
 
-    fn bind_from(
+    async fn bind_from(
         &mut self,
         source: &mut FromClause,
         visible_ctes: &BTreeSet<String>,
     ) -> Result<(), SQLError> {
+        self.checkpoint().await?;
         if let FromClause::Table { name, .. } = source {
             let is_cte = RelationIdentity::parse_reference(name).is_ok_and(|(schema, relation)| {
                 schema.is_none() && visible_ctes.contains(&relation)
@@ -296,9 +372,7 @@ where
                 return Ok(());
             }
         }
-        if let Some(visit) = self.source.as_mut() {
-            visit(source)?;
-        }
+        self.actions.source(source)?;
         match source {
             crate::ast::FromClause::RetainedRows(_) => {
                 return Err(SQLError::Internal(
@@ -306,20 +380,28 @@ where
                 ))
             }
             FromClause::Table { name, .. } => {
-                (self.relation)(name)?;
+                self.actions.relation(name)?;
             }
             FromClause::Join {
                 left, right, on, ..
             } => {
-                self.bind_from(left, visible_ctes)?;
-                self.bind_from(right, visible_ctes)?;
+                crate::catalog::work::nested!(
+                    W::MAY_SUSPEND,
+                    self.control,
+                    self.bind_from(left, visible_ctes)
+                )?;
+                crate::catalog::work::nested!(
+                    W::MAY_SUSPEND,
+                    self.control,
+                    self.bind_from(right, visible_ctes)
+                )?;
                 if let Some(expression) = on {
-                    self.bind_expr(expression, visible_ctes)?;
+                    self.bind_expr(expression, visible_ctes).await?;
                 }
             }
             FromClause::Values { rows, .. } => {
                 for expression in rows.iter_mut().flatten() {
-                    self.bind_expr(expression, visible_ctes)?;
+                    self.bind_expr(expression, visible_ctes).await?;
                 }
             }
             FromClause::Function {
@@ -329,56 +411,66 @@ where
                 args,
                 ..
             } => {
-                (self.routine)(name, Some(binding))?;
+                self.actions
+                    .routine(name, Some(binding), self.control, self.work)
+                    .await?;
                 if let Some(relations) = relations {
-                    (self.relation)(&mut relations.left)?;
-                    (self.relation)(&mut relations.right)?;
+                    self.actions.relation(&mut relations.left)?;
+                    self.actions.relation(&mut relations.right)?;
                 }
                 for expression in args {
-                    self.bind_expr(expression, visible_ctes)?;
+                    self.bind_expr(expression, visible_ctes).await?;
                 }
             }
             FromClause::FunctionGroup { functions, .. } => {
                 for function in functions {
-                    (self.routine)(&mut function.name, Some(&mut function.binding))?;
+                    self.actions
+                        .routine(
+                            &mut function.name,
+                            Some(&mut function.binding),
+                            self.control,
+                            self.work,
+                        )
+                        .await?;
                     if let Some(relations) = &mut function.relations {
-                        (self.relation)(&mut relations.left)?;
-                        (self.relation)(&mut relations.right)?;
+                        self.actions.relation(&mut relations.left)?;
+                        self.actions.relation(&mut relations.right)?;
                     }
                     for expression in &mut function.args {
-                        self.bind_expr(expression, visible_ctes)?;
+                        self.bind_expr(expression, visible_ctes).await?;
                     }
                 }
             }
-            FromClause::Subquery { body, .. } => self.bind_select(body, visible_ctes)?,
+            FromClause::Subquery { body, .. } => crate::catalog::work::nested!(
+                W::MAY_SUSPEND,
+                self.control,
+                self.bind_select(body, visible_ctes)
+            )?,
         }
         Ok(())
     }
 
-    fn bind_expression_type(&mut self, expression: &mut Expr) -> Result<(), SQLError> {
+    async fn bind_expression_type(&mut self, expression: &mut Expr) -> Result<(), SQLError> {
         if let Expr::RetainedLiteral(literal) = expression {
             *expression = literal.materialize()?;
         }
-        if let Some(visit) = self.expression.as_mut() {
-            visit(expression)?;
-        }
-        if let (
-            Some(visit),
-            Expr::Cast { ty, .. }
-            | Expr::TypedLiteral { ty, .. }
-            | Expr::CompositeRow {
-                binding: crate::ast::CompositeRowBinding { ty, .. },
-                ..
-            },
-        ) = (self.ty.as_mut(), expression)
+        self.actions
+            .expression(expression, self.control, self.work)
+            .await?;
+        if let Expr::Cast { ty, .. }
+        | Expr::TypedLiteral { ty, .. }
+        | Expr::CompositeRow {
+            binding: crate::ast::CompositeRowBinding { ty, .. },
+            ..
+        } = expression
         {
-            visit(ty);
+            self.actions.ty(ty);
         }
         Ok(())
     }
 
     /// Bind a window call's arguments, `FILTER`, keys and frame offsets.
-    fn bind_window_call(
+    async fn bind_window_call(
         &mut self,
         args: &mut [Expr],
         filter: Option<&mut Expr>,
@@ -386,44 +478,70 @@ where
         visible_ctes: &BTreeSet<String>,
     ) -> Result<(), SQLError> {
         for argument in args {
-            self.bind_expr(argument, visible_ctes)?;
+            self.bind_expr(argument, visible_ctes).await?;
         }
         if let Some(filter) = filter {
-            self.bind_expr(filter, visible_ctes)?;
+            self.bind_expr(filter, visible_ctes).await?;
         }
         for partition in &mut spec.partition_by {
-            self.bind_expr(partition, visible_ctes)?;
+            self.bind_expr(partition, visible_ctes).await?;
         }
         for order in &mut spec.order_by {
-            self.bind_expr(&mut order.expr, visible_ctes)?;
+            self.bind_expr(&mut order.expr, visible_ctes).await?;
         }
         if let Some(frame) = &mut spec.frame {
             for bound in [&mut frame.start, &mut frame.end] {
                 if let FrameBound::Preceding(inner) | FrameBound::Following(inner) = bound {
-                    self.bind_expr(inner, visible_ctes)?;
+                    self.bind_expr(inner, visible_ctes).await?;
                 }
             }
         }
         Ok(())
     }
 
-    fn bind_projection(
+    async fn bind_projection(
         &mut self,
         projection: &mut crate::ast::Projection,
         visible_ctes: &BTreeSet<String>,
     ) -> Result<(), SQLError> {
-        if let Some(visit) = self.projection.as_mut() {
-            visit(projection)?;
-        }
-        self.bind_expr(&mut projection.expr, visible_ctes)
+        self.actions.projection(projection)?;
+        self.bind_expr(&mut projection.expr, visible_ctes).await
     }
 
-    pub fn bind_expr(
+    pub(super) async fn bind_expr(
         &mut self,
         expression: &mut Expr,
         visible_ctes: &BTreeSet<String>,
     ) -> Result<(), SQLError> {
-        self.bind_expression_type(expression)?;
+        self.checkpoint().await?;
+        self.bind_expression_type(expression).await?;
+        if matches!(
+            expression,
+            Expr::Star
+                | Expr::QualifiedStar(_)
+                | Expr::Default
+                | Expr::Column(_)
+                | Expr::QualifiedColumn { .. }
+                | Expr::InternalColumn(_)
+                | Expr::Literal(_)
+                | Expr::TypedLiteral { .. }
+                | Expr::RetainedLiteral(_)
+                | Expr::Param(_)
+        ) {
+            return Ok(());
+        }
+        crate::catalog::work::nested!(
+            W::MAY_SUSPEND,
+            self.control,
+            self.bind_descendants(expression, visible_ctes)
+        )
+    }
+
+    async fn bind_descendants(
+        &mut self,
+        expression: &mut Expr,
+        visible_ctes: &BTreeSet<String>,
+    ) -> Result<(), SQLError> {
         match expression {
             Expr::Func {
                 name,
@@ -434,15 +552,17 @@ where
                 ..
             } => {
                 for argument in args {
-                    self.bind_expr(argument, visible_ctes)?;
+                    self.bind_expr(argument, visible_ctes).await?;
                 }
                 for order in order_by {
-                    self.bind_expr(&mut order.expr, visible_ctes)?;
+                    self.bind_expr(&mut order.expr, visible_ctes).await?;
                 }
                 if let Some(filter) = filter {
-                    self.bind_expr(filter, visible_ctes)?;
+                    self.bind_expr(filter, visible_ctes).await?;
                 }
-                (self.routine)(name, Some(binding))?;
+                self.actions
+                    .routine(name, Some(binding), self.control, self.work)
+                    .await?;
             }
             Expr::Array(items)
             | Expr::Row(items)
@@ -450,26 +570,26 @@ where
             | Expr::And(items)
             | Expr::Or(items) => {
                 for item in items {
-                    self.bind_expr(item, visible_ctes)?;
+                    self.bind_expr(item, visible_ctes).await?;
                 }
             }
             Expr::Binary { lhs, rhs, .. } => {
-                self.bind_expr(lhs, visible_ctes)?;
-                self.bind_expr(rhs, visible_ctes)?;
+                self.bind_expr(lhs, visible_ctes).await?;
+                self.bind_expr(rhs, visible_ctes).await?;
             }
             Expr::UnaryMinus(inner)
             | Expr::Not(inner)
             | Expr::IsNull { expr: inner, .. }
-            | Expr::Cast { expr: inner, .. } => self.bind_expr(inner, visible_ctes)?,
+            | Expr::Cast { expr: inner, .. } => self.bind_expr(inner, visible_ctes).await?,
             Expr::Between { expr, low, high } => {
-                self.bind_expr(expr, visible_ctes)?;
-                self.bind_expr(low, visible_ctes)?;
-                self.bind_expr(high, visible_ctes)?;
+                self.bind_expr(expr, visible_ctes).await?;
+                self.bind_expr(low, visible_ctes).await?;
+                self.bind_expr(high, visible_ctes).await?;
             }
             Expr::InList { expr, list, .. } => {
-                self.bind_expr(expr, visible_ctes)?;
+                self.bind_expr(expr, visible_ctes).await?;
                 for item in list {
-                    self.bind_expr(item, visible_ctes)?;
+                    self.bind_expr(item, visible_ctes).await?;
                 }
             }
             Expr::WindowCall {
@@ -479,8 +599,11 @@ where
                 filter,
                 ..
             } => {
-                self.bind_window_call(args, filter.as_deref_mut(), spec, visible_ctes)?;
-                (self.routine)(name, None)?;
+                self.bind_window_call(args, filter.as_deref_mut(), spec, visible_ctes)
+                    .await?;
+                self.actions
+                    .routine(name, None, self.control, self.work)
+                    .await?;
             }
             Expr::Case {
                 base,
@@ -488,22 +611,30 @@ where
                 else_branch,
             } => {
                 if let Some(base) = base {
-                    self.bind_expr(base, visible_ctes)?;
+                    self.bind_expr(base, visible_ctes).await?;
                 }
                 for (condition, result) in when {
-                    self.bind_expr(condition, visible_ctes)?;
-                    self.bind_expr(result, visible_ctes)?;
+                    self.bind_expr(condition, visible_ctes).await?;
+                    self.bind_expr(result, visible_ctes).await?;
                 }
                 if let Some(branch) = else_branch {
-                    self.bind_expr(branch, visible_ctes)?;
+                    self.bind_expr(branch, visible_ctes).await?;
                 }
             }
             Expr::ScalarSubquery(body) | Expr::Exists { body, .. } => {
-                self.bind_select(body, visible_ctes)?;
+                crate::catalog::work::nested!(
+                    W::MAY_SUSPEND,
+                    self.control,
+                    self.bind_select(body, visible_ctes)
+                )?;
             }
             Expr::InSubquery { expr, body, .. } => {
-                self.bind_expr(expr, visible_ctes)?;
-                self.bind_select(body, visible_ctes)?;
+                self.bind_expr(expr, visible_ctes).await?;
+                crate::catalog::work::nested!(
+                    W::MAY_SUSPEND,
+                    self.control,
+                    self.bind_select(body, visible_ctes)
+                )?;
             }
             Expr::Star
             | Expr::QualifiedStar(_)

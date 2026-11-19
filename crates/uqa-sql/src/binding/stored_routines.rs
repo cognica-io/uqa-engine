@@ -47,6 +47,16 @@ impl StoredCallOrigin {
         original: Option<&FunctionBinding>,
         selected: &FunctionBinding,
     ) -> bool {
+        self.keeps_unqualified_runtime_lookup(original, selected)
+            && uqa_core::RelationIdentity::try_borrowed_reference(name)
+                .is_ok_and(|identity| identity.schema.is_none())
+    }
+
+    pub(crate) fn keeps_unqualified_runtime_lookup(
+        self,
+        original: Option<&FunctionBinding>,
+        selected: &FunctionBinding,
+    ) -> bool {
         self == Self::Persisted
             && original.is_none()
             && selected.builtin
@@ -57,8 +67,6 @@ impl StoredCallOrigin {
             && selected.dispatch.is_none()
             && selected.input_collation.is_none()
             && !selected.is_polymorphic_builtin_syntax()
-            && uqa_core::RelationIdentity::try_borrowed_reference(name)
-                .is_ok_and(|identity| identity.schema.is_none())
     }
 }
 

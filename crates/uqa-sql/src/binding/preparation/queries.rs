@@ -14,6 +14,7 @@ use super::{
     error, ColumnType, ExpressionType, Preparation, QueryOutput, QueryPlan, RowSchema, SQLError,
     ScalarExpr,
 };
+use crate::catalog::work::{inline, Work};
 use crate::plan::{ProjectionPlan, QueryBlockPlan, RelationalPlan};
 use crate::semantics::sets::placement::SetPlacement;
 
@@ -46,7 +47,18 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
         plan: &QueryPlan,
         outer: Option<&RowSchema>,
     ) -> Result<RowSchema, SQLError> {
-        let output = self.query_output(plan, outer, false)?;
+        inline(self.query_with_work(plan, outer, &mut ()))
+    }
+
+    pub(super) async fn query_with_work<W: Work + Send>(
+        &mut self,
+        plan: &QueryPlan,
+        outer: Option<&RowSchema>,
+        work: &mut W,
+    ) -> Result<RowSchema, SQLError> {
+        let output = self
+            .query_output_with_work(plan, outer, false, work)
+            .await?;
         self.parameters
             .query_output_schema(plan)
             .cloned()
@@ -59,14 +71,30 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
         outer: Option<&RowSchema>,
         preserve_unknown: bool,
     ) -> Result<QueryOutput, SQLError> {
-        self.in_query_level(|analysis| analysis.query_level_output(plan, outer, preserve_unknown))
+        inline(self.query_output_with_work(plan, outer, preserve_unknown, &mut ()))
     }
 
-    fn query_level_output(
+    async fn query_output_with_work<W: Work + Send>(
         &mut self,
         plan: &QueryPlan,
         outer: Option<&RowSchema>,
         preserve_unknown: bool,
+        work: &mut W,
+    ) -> Result<QueryOutput, SQLError> {
+        let saved = self.enter_query_level();
+        let result = self
+            .query_level_output(plan, outer, preserve_unknown, work)
+            .await;
+        self.restore_query_level(saved);
+        result
+    }
+
+    async fn query_level_output<W: Work + Send>(
+        &mut self,
+        plan: &QueryPlan,
+        outer: Option<&RowSchema>,
+        preserve_unknown: bool,
+        work: &mut W,
     ) -> Result<QueryOutput, SQLError> {
         let mode = if plan.relations_bound {
             crate::catalog::resolution::RelationLookupMode::Bound
@@ -74,9 +102,11 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
             crate::catalog::resolution::RelationLookupMode::Dynamic
         };
         let lookup = self.scope.resolution.set_lookup_mode(mode);
-        let result = (|| {
+        let result = async {
             let previous = self.ctes(&plan.ctes, outer)?;
-            let result = self.root(&plan.root, outer, preserve_unknown);
+            let result = self
+                .root_with_work(&plan.root, outer, preserve_unknown, work)
+                .await;
             self.scope.restore_cte_schemas(previous);
             let output = result?;
             self.parameters.collations.validate_query(plan)?;
@@ -85,7 +115,8 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
             }
             self.parameters.retain_query_output(plan, &output)?;
             Ok(output)
-        })();
+        }
+        .await;
         self.scope.resolution.set_lookup_mode(lookup);
         result
     }
@@ -96,9 +127,23 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
         outer: Option<&RowSchema>,
         preserve_unknown: bool,
     ) -> Result<QueryOutput, SQLError> {
+        inline(self.root_with_work(root, outer, preserve_unknown, &mut ()))
+    }
+
+    async fn root_with_work<W: Work + Send>(
+        &mut self,
+        root: &RelationalPlan,
+        outer: Option<&RowSchema>,
+        preserve_unknown: bool,
+        work: &mut W,
+    ) -> Result<QueryOutput, SQLError> {
         match root {
-            RelationalPlan::QueryBlock(block) => self.block(block, outer, preserve_unknown),
-            RelationalPlan::Values { rows, subqueries } => self.values(rows, subqueries, outer),
+            RelationalPlan::QueryBlock(block) => {
+                self.block(block, outer, preserve_unknown, work).await
+            }
+            RelationalPlan::Values { rows, subqueries } => {
+                self.values_with_work(rows, subqueries, outer, work).await
+            }
             RelationalPlan::SetOp {
                 kind,
                 all,
@@ -110,8 +155,8 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
                 subqueries,
                 ..
             } => {
-                let mut left_output = self.query_output(left, outer, true)?;
-                let mut right_output = self.query_output(right, outer, true)?;
+                let mut left_output = self.set_operand_with_work(left, outer, work).await?;
+                let mut right_output = self.set_operand_with_work(right, outer, work).await?;
                 left_output.retain_set_operand_names(left)?;
                 right_output.retain_set_operand_names(right)?;
                 let owner = self.scope.control().capture();
@@ -141,6 +186,23 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
                 self.slice(limit.as_deref(), offset.as_deref(), &input, subqueries)?;
                 Ok(output)
             }
+        }
+    }
+
+    async fn set_operand_with_work<W: Work + Send>(
+        &mut self,
+        operand: &QueryPlan,
+        outer: Option<&RowSchema>,
+        work: &mut W,
+    ) -> Result<QueryOutput, SQLError> {
+        if W::MAY_SUSPEND {
+            let owner = self.scope.control().capture();
+            crate::construction::retain_with(owner.control(), || {
+                self.query_output_with_work(operand, outer, true, work)
+            })?
+            .await
+        } else {
+            self.query_output(operand, outer, true)
         }
     }
 
@@ -207,11 +269,12 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
         Ok(left)
     }
 
-    fn block(
+    async fn block<W: Work + Send>(
         &mut self,
         block: &QueryBlockPlan,
         outer: Option<&RowSchema>,
         preserve_unknown: bool,
+        work: &mut W,
     ) -> Result<QueryOutput, SQLError> {
         let captured_outer = outer
             .map(|schema| {
@@ -224,24 +287,31 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
             .transpose()?;
         let outer = captured_outer.as_deref();
         if !block.deferred_outer_rewrites.is_empty() {
-            return self.rewritten_block(block, outer, preserve_unknown);
+            return self
+                .rewritten_block(block, outer, preserve_unknown, work)
+                .await;
         }
-        self.analyzed_block(block, outer, preserve_unknown)
+        self.analyzed_block(block, outer, preserve_unknown, work)
+            .await
     }
 
-    fn analyzed_block(
+    async fn analyzed_block<W: Work + Send>(
         &mut self,
         block: &QueryBlockPlan,
         outer: Option<&RowSchema>,
         preserve_unknown: bool,
+        work: &mut W,
     ) -> Result<QueryOutput, SQLError> {
-        let source = block
-            .from
-            .as_ref()
-            .map(|source| self.source(source, &block.subqueries, outer))
-            .transpose()?;
-        let source = match source {
-            Some(source) => source,
+        let source = match &block.from {
+            Some(source) => {
+                self.source_in_scope_with_work(
+                    source,
+                    &block.subqueries,
+                    crate::binding::SourceScope::new(outer),
+                    work,
+                )
+                .await?
+            }
             None => RowSchema::empty_with_control(&self.scope.control())?,
         };
         let source = analysis::with_query_source_columns_with_control(
@@ -257,17 +327,20 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
         })
     }
 
-    fn rewritten_block(
+    async fn rewritten_block<W: Work + Send>(
         &mut self,
         original: &QueryBlockPlan,
         outer: Option<&RowSchema>,
         preserve_unknown: bool,
+        work: &mut W,
     ) -> Result<QueryOutput, SQLError> {
         if let Some(block) = self.parameters.take_rewritten_block(original) {
             let RelationalPlan::QueryBlock(rewritten) = &block.root else {
                 unreachable!("rewritten query block");
             };
-            let result = self.analyzed_block(rewritten, outer, preserve_unknown);
+            let result = self
+                .analyzed_block(rewritten, outer, preserve_unknown, work)
+                .await;
             self.parameters.retain_rewritten_block(original, block)?;
             return result;
         }
@@ -301,7 +374,9 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
         let RelationalPlan::QueryBlock(query) = &block.root else {
             unreachable!("rewritten query block");
         };
-        let result = self.analyzed_block(query, outer, preserve_unknown);
+        let result = self
+            .analyzed_block(query, outer, preserve_unknown, work)
+            .await;
         self.parameters.retain_rewritten_block(original, block)?;
         result
     }
@@ -646,24 +721,32 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
         Ok(())
     }
 
-    pub(super) fn values(
+    pub(super) async fn values_with_work(
         &mut self,
         rows: &[Vec<ScalarExpr>],
         subqueries: &[QueryPlan],
         outer: Option<&RowSchema>,
+        work: &mut (impl crate::catalog::work::Work + Send),
     ) -> Result<QueryOutput, SQLError> {
         let owner = self.scope.control().capture();
         let control = owner.control();
+        let mut input_work = crate::catalog::work::ReferenceWork {
+            control: &control,
+            work,
+        };
         let width = rows.first().map_or(0, Vec::len);
         let mut columns = AnalysisVec::new(&control);
         columns.reserve(width, &control)?;
         for _ in 0..width {
+            input_work.checkpoint().await?;
             columns.push(AnalysisVec::new(&control), &control)?;
         }
         let empty = RowSchema::empty_with_control(&control)?;
         let input = outer.unwrap_or(&empty);
         for row in rows {
+            input_work.checkpoint().await?;
             for (position, expression) in row.iter().enumerate() {
+                input_work.checkpoint().await?;
                 let value = self.in_placement(SetPlacement::Values, |analysis| {
                     analysis.expression(expression, input, subqueries)
                 })?;
@@ -686,7 +769,14 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
         output.types.reserve(width, &control)?;
         output.columns.reserve(width, &control)?;
         for (index, column) in columns.iter_mut().enumerate() {
-            let ty = self.common(crate::type_resolution::CommonTypeContext::Values, column)?;
+            input_work.checkpoint().await?;
+            let ty = self
+                .common_with_work(
+                    crate::type_resolution::CommonTypeContext::Values,
+                    column,
+                    input_work.work,
+                )
+                .await?;
             let mut value = ExpressionType::combined_owned(ty, column);
             // Resolve each column after all row expressions, retaining the relation's implicit output selection.
             let oid = value.derivation.common_oid(true)?;

@@ -41942,6 +41942,19 @@
     {
       "package": "uqa-sql",
       "kind": "lib",
+      "test": "stored_scalar_analysis_pairs_the_original_syntax_in_admitted_work_windows",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/preparation/tests/defaults.rs",
+      "capability": "Stored scalar binding",
+      "workload": "Bind named arguments and scalar arrays of 1 and 4,096 elements with one and 32 work steps.",
+      "invariant": "Retained binding preserves ordinary coercions, call identities, and the first undefined name. Cancellation stops the current window and releases all admitted memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
       "test": "both_cancellation_scopes_precede_schema_allocation_and_keep_retained_input",
       "cases": 1,
       "source": "crates/uqa-sql/src/schema/production/tests.rs",

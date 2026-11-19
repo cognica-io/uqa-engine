@@ -162,38 +162,104 @@ pub(super) fn apply_routine_reference(
     reference: &crate::binding::stored_routines::BoundRoutineReference,
     origin: crate::binding::stored_routines::StoredCallOrigin,
 ) -> Result<bool, SQLError> {
-    let (_, local_name) = RelationIdentity::parse_reference(name).map_err(|error| {
-        SQLError::Internal(format!("decode stored catalog routine `{name}`: {error}"))
-    })?;
-    let (_, reference_local_name) =
-        RelationIdentity::parse_reference(&reference.name).map_err(|error| {
-            SQLError::Internal(format!(
-                "decode bound catalog routine `{}`: {error}",
-                reference.name
-            ))
+    let control = uqa_core::memory::ProductionControl::uncontrolled();
+    let (changed, _) = crate::catalog::work::inline(apply_routine_reference_from(
+        name,
+        binding,
+        reference,
+        origin,
+        &control,
+        &mut (),
+    ))?
+    .into_parts();
+    Ok(changed)
+}
+
+pub(super) async fn apply_routine_reference_from<
+    W: crate::plan::ScalarInputWork + crate::catalog::work::Work,
+>(
+    name: &mut String,
+    mut binding: Option<&mut Option<crate::ast::FunctionBinding>>,
+    reference: &crate::binding::stored_routines::BoundRoutineReference,
+    origin: crate::binding::stored_routines::StoredCallOrigin,
+    control: &uqa_core::memory::ProductionControl<'_>,
+    work: &mut W,
+) -> Result<uqa_core::memory::Produced<bool>, SQLError>
+where
+    W::Error: Into<SQLError>,
+{
+    use crate::catalog::work::ReferenceWork;
+    use uqa_core::RelationReferenceInputError;
+    let mut input = ReferenceWork { control, work };
+    let source = RelationIdentity::try_borrowed_reference_from(name, &mut input)
+        .await
+        .map_err(|err| match err {
+            RelationReferenceInputError::Input(err) => err,
+            RelationReferenceInputError::Reference(err) => {
+                SQLError::Internal(format!("decode stored catalog routine `{name}`: {err}"))
+            }
         })?;
-    if local_name != reference_local_name {
-        return Err(SQLError::Internal(format!(
-            "stored catalog routine call `{name}` does not match bound call `{}`",
-            reference.name
-        )));
-    }
-    let Some(exact) = &reference.binding else {
-        return Ok(false);
-    };
-    if origin.keeps_runtime_lookup(name, binding.as_ref().and_then(|slot| slot.as_ref()), exact) {
-        return Ok(false);
-    }
-    let mut changed = false;
-    if !exact.builtin && name != &exact.name {
-        name.clone_from(&exact.name);
-        changed = true;
-    }
-    if let Some(binding) = binding {
-        if binding.as_ref() != Some(exact) {
-            *binding = Some(exact.clone());
-            changed = true;
+    let selected = RelationIdentity::try_borrowed_reference_from(&reference.name, &mut input)
+        .await
+        .map_err(|err| match err {
+            RelationReferenceInputError::Input(err) => err,
+            RelationReferenceInputError::Reference(err) => SQLError::Internal(format!(
+                "decode bound catalog routine `{}`: {err}",
+                reference.name
+            )),
+        })?;
+    {
+        let mut source_chars = source.name.chars();
+        let mut selected_chars = selected.name.chars();
+        let mut position = 0;
+        loop {
+            if position == 0 {
+                input.checkpoint().await?;
+            }
+            match (source_chars.next(), selected_chars.next()) {
+                (None, None) => break,
+                (Some(left), Some(right)) if left == right => {}
+                _ => {
+                    return Err(SQLError::Internal(format!(
+                        "stored catalog routine call `{name}` does not match bound call `{}`",
+                        reference.name
+                    )))
+                }
+            }
+            position = (position + 1) % 1024;
         }
     }
-    Ok(changed)
+    let mut memory = control.empty_reservation();
+    let Some(exact) = &reference.binding else {
+        return Ok(control.finish(false, memory)?);
+    };
+    if source.schema.is_none()
+        && origin.keeps_unqualified_runtime_lookup(
+            binding.as_ref().and_then(|slot| slot.as_ref()),
+            exact,
+        )
+    {
+        return Ok(control.finish(false, memory)?);
+    }
+    let rename = !exact.builtin && name != &exact.name;
+    if rename {
+        let (spelling, lease) = crate::catalog::work::Work::text(input.work, &exact.name, control)
+            .await?
+            .into_parts();
+        *name = spelling;
+        memory = control.combine(memory, lease);
+    }
+    let rebind = binding
+        .as_ref()
+        .is_some_and(|slot| slot.as_ref() != Some(exact));
+    if rebind {
+        let (selected, receipt) = exact
+            .clone_with_input_work(control, input.work)
+            .await
+            .map_err(Into::into)?
+            .into_parts();
+        *binding.take().expect("binding selected for replacement") = Some(selected);
+        memory = control.combine(memory, receipt);
+    }
+    Ok(control.finish(rename || rebind, memory)?)
 }

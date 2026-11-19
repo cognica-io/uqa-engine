@@ -23,7 +23,7 @@ mod enums;
 mod helpers;
 mod membership;
 mod owned;
-pub(crate) use owned::bind_stored_inputs_owned;
+pub(crate) use owned::{bind_stored_inputs_owned, common_input_keeps_type};
 pub use owned::{bind_type_introspection_owned, validate_catalog_literals_with_control};
 mod pattern;
 

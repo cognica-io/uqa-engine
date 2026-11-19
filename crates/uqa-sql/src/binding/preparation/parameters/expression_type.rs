@@ -30,6 +30,13 @@ impl ExpressionType {
         let selected = values.iter().fold(Derivation::None, |state, value| {
             state.combine(value.derivation)
         });
+        Self::with_derivation(ty, selected)
+    }
+
+    pub(in crate::binding::preparation) fn with_derivation(
+        ty: Option<AnalysisType>,
+        selected: Derivation,
+    ) -> Self {
         let mut result = Self::resolved_owned(ty);
         result.derivation = selected.result(result.derivation.oid());
         result

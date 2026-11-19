@@ -35,7 +35,7 @@ pub(crate) use common::value_type;
 pub(crate) use common::value_type_with_control;
 pub(crate) use common::{array_element_type, base_type, base_type_with_work};
 pub(crate) use common::{
-    select_common_input_type_in_with_control, select_common_input_type_with_control,
+    select_common_input_type_in_with_work, select_common_input_type_with_control,
 };
 mod containment;
 pub(crate) mod enums;
@@ -47,6 +47,7 @@ mod fixed_builtin;
 #[cfg(test)]
 pub(crate) use fixed_builtin::overloads as fixed_builtin_overloads;
 pub(crate) use fixed_builtin::overloads_with_control as fixed_builtin_overloads_with_control;
+pub(crate) use fixed_builtin::requires_argument_cast_with_control as fixed_argument_requires_cast_with_control;
 pub(crate) use fixed_builtin::resolve_fixed_builtin_call_with_control;
 pub(crate) use overload_resolution::builtin_binding_matches_with_control;
 mod function_inputs;
@@ -60,6 +61,7 @@ mod production;
 use inference::scalar_type_inner_with_control;
 mod introspection;
 pub(crate) use introspection::bind_stored_inputs_owned;
+pub(crate) use introspection::common_input_keeps_type;
 pub(crate) mod json_path;
 mod json_strip;
 mod length;

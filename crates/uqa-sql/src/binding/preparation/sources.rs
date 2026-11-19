@@ -11,6 +11,7 @@ use crate::binding::preparation::{LiteralInput, SchemaContext};
 use super::super::{overlay_outer_schema_with_control, JoinSchemaBinding, SourcePlan, SourceScope};
 use super::{Preparation, QueryPlan, RowSchema, SQLError, ScalarExpr};
 use crate::ast::{FunctionBinding, OperatorJoinRelations};
+use crate::catalog::work::{inline, Work};
 use crate::semantics::sets::placement::SetPlacement;
 
 impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
@@ -29,7 +30,19 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
         subqueries: &[QueryPlan],
         scope: SourceScope<'_>,
     ) -> Result<RowSchema, SQLError> {
-        let schema = self.source_in_scope_inner(source, subqueries, scope)?;
+        inline(self.source_in_scope_with_work(source, subqueries, scope, &mut ()))
+    }
+
+    pub(super) async fn source_in_scope_with_work<W: Work + Send>(
+        &mut self,
+        source: &SourcePlan,
+        subqueries: &[QueryPlan],
+        scope: SourceScope<'_>,
+        work: &mut W,
+    ) -> Result<RowSchema, SQLError> {
+        let schema = self
+            .source_in_scope_inner(source, subqueries, scope, work)
+            .await?;
         let schema = if scope.retain_names {
             SourceScope::describe_output_with_control(source, schema, &self.scope.control())?
         } else {
@@ -39,14 +52,15 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
         Ok(schema)
     }
 
-    fn source_in_scope_inner(
+    async fn source_in_scope_inner<W: Work + Send>(
         &mut self,
         source: &SourcePlan,
         subqueries: &[QueryPlan],
         scope: SourceScope<'_>,
+        work: &mut W,
     ) -> Result<RowSchema, SQLError> {
         if matches!(source, SourcePlan::Join { .. }) {
-            return self.join_source(source, subqueries, scope);
+            return self.join_source(source, subqueries, scope, work).await;
         }
         let input = scope.input_with_control(source, &self.scope.control())?;
         let outer = input.as_ref();
@@ -69,7 +83,7 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
                         outer,
                     );
                 }
-                let output = self.values(rows, subqueries, outer)?;
+                let output = self.values_with_work(rows, subqueries, outer, work).await?;
                 return crate::binding::projection::rename_schema_with_control(
                     &output.schema(&self.scope.control())?,
                     column_aliases,
@@ -83,7 +97,15 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
                 column_aliases,
                 ..
             } => {
-                let schema = self.query(body, outer)?;
+                let schema = if W::MAY_SUSPEND {
+                    let owner = self.scope.control().capture();
+                    crate::construction::retain_with(owner.control(), || {
+                        self.query_with_work(body, outer, work)
+                    })?
+                    .await?
+                } else {
+                    self.query(body, outer)?
+                };
                 return Ok(match source {
                     SourcePlan::Subquery {
                         captured_output: Some(relation),
@@ -137,11 +159,12 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
     }
 
     /// Analyze a join: its left input, its right input, which sees the left one when it is lateral or a function, and its ON condition, which admits no set-returning call.
-    fn join_source(
+    async fn join_source<W: Work + Send>(
         &mut self,
         source: &SourcePlan,
         subqueries: &[QueryPlan],
         scope: SourceScope<'_>,
+        work: &mut W,
     ) -> Result<RowSchema, SQLError> {
         let SourcePlan::Join {
             left,
@@ -154,20 +177,43 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
             unreachable!("join analysis called for a different source kind")
         };
         let left_source = left;
-        let left = self.source_in_scope(left_source, subqueries, scope.with_names())?;
+        let left = self
+            .join_member_with_work(left_source, subqueries, scope.with_names(), work)
+            .await?;
         let preceding =
             scope.right_namespace_with_control(left_source, &left, *kind, &self.scope.control())?;
-        let right = self.source_in_scope(
-            right,
-            subqueries,
-            SourceScope {
-                outer: scope.outer,
-                preceding: Some(&preceding),
-                inherited_lateral: *lateral,
-                retain_names: true,
-            },
-        )?;
+        let right = self
+            .join_member_with_work(
+                right,
+                subqueries,
+                SourceScope {
+                    outer: scope.outer,
+                    preceding: Some(&preceding),
+                    inherited_lateral: *lateral,
+                    retain_names: true,
+                },
+                work,
+            )
+            .await?;
         self.join_source_output(source, (&left, &right), subqueries, scope)
+    }
+
+    async fn join_member_with_work<W: Work + Send>(
+        &mut self,
+        source: &SourcePlan,
+        subqueries: &[QueryPlan],
+        scope: SourceScope<'_>,
+        work: &mut W,
+    ) -> Result<RowSchema, SQLError> {
+        if W::MAY_SUSPEND {
+            let owner = self.scope.control().capture();
+            crate::construction::retain_with(owner.control(), || {
+                self.source_in_scope_with_work(source, subqueries, scope, work)
+            })?
+            .await
+        } else {
+            self.source_in_scope(source, subqueries, scope)
+        }
     }
 
     fn join_source_output(

@@ -159,6 +159,11 @@ pub(crate) fn inline<F: Future>(future: F) -> F::Output {
     }
 }
 
+/// Construct only the selected inline future on this frame so unrelated fields do not grow the enclosing traversal's stack.
+pub(crate) fn inline_with<F: Future>(construct: impl FnOnce() -> F) -> F::Output {
+    inline(construct())
+}
+
 pub(crate) async fn reference<'a, W: Work + Send>(
     value: &'a str,
     control: &ProductionControl<'_>,

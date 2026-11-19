@@ -78,22 +78,52 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
         context: crate::type_resolution::CommonTypeContext,
         values: &mut [ExpressionType],
     ) -> Result<Option<AnalysisType>, SQLError> {
-        if values.iter().all(|value| value.ty.is_none())
-            && values.iter().any(ExpressionType::is_deferred)
-        {
-            return Ok(None);
-        }
+        crate::catalog::work::inline(self.common_with_work(context, values, &mut ()))
+    }
+
+    pub(super) async fn common_with_work<W: crate::catalog::work::Work + Send>(
+        &mut self,
+        context: crate::type_resolution::CommonTypeContext,
+        values: &mut [ExpressionType],
+        work: &mut W,
+    ) -> Result<Option<AnalysisType>, SQLError> {
         let control_owner = self.scope.control().capture();
         let control = control_owner.control();
-        let common = crate::type_resolution::select_common_input_type_in_with_control(
+        let mut deferred = false;
+        let mut known = false;
+        for value in values.iter() {
+            crate::catalog::work::ReferenceWork {
+                control: &control,
+                work,
+            }
+            .checkpoint()
+            .await?;
+            if value.ty.is_some() {
+                known = true;
+                break;
+            }
+            deferred |= value.is_deferred();
+        }
+        if !known && deferred {
+            return Ok(None);
+        }
+        let common = crate::type_resolution::select_common_input_type_in_with_work(
             context,
             values
                 .iter()
                 .filter(|value| !value.is_deferred())
                 .map(|value| value.ty.as_deref()),
             &control,
-        )?;
+            work,
+        )
+        .await?;
         for value in values {
+            crate::catalog::work::ReferenceWork {
+                control: &control,
+                work,
+            }
+            .checkpoint()
+            .await?;
             self.parameters.coerce_unknown(value, &common)?;
         }
         Ok(Some(AnalysisType::from_produced(common, &control)?))
@@ -138,17 +168,53 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
         input: &RowSchema,
         subqueries: &[QueryPlan],
     ) -> Result<ExpressionType, SQLError> {
+        crate::catalog::work::inline(self.expression_with_work(
+            expression,
+            input,
+            subqueries,
+            &mut (),
+        ))
+    }
+
+    pub(super) async fn expression_with_work<W: crate::catalog::work::Work + Send>(
+        &mut self,
+        expression: &ScalarExpr,
+        input: &RowSchema,
+        subqueries: &[QueryPlan],
+        work: &mut W,
+    ) -> Result<ExpressionType, SQLError> {
+        let owner = self.scope.control().capture();
+        let control = owner.control();
+        crate::catalog::work::ReferenceWork {
+            control: &control,
+            work,
+        }
+        .checkpoint()
+        .await?;
         self.retain_stored_reference(expression, input)?;
         let value = if let Some(row) = self.scope.stored_whole_row(expression, input) {
             let owner = self.scope.control().capture();
             let replacement = row.copy_for_rewrite(&owner.control())?;
-            let value = self.expression_inner(&replacement, input, subqueries)?;
+            let value = self
+                .expression_inner(&replacement, input, subqueries, work)
+                .await?;
             self.parameters
                 .retain_stored_expansion(expression, replacement)?;
             value
         } else {
-            self.expression_inner(expression, input, subqueries)?
+            self.expression_inner(expression, input, subqueries, work)
+                .await?
         };
+        self.record_expression_input(expression, value, input, subqueries)
+    }
+
+    fn record_expression_input(
+        &mut self,
+        expression: &ScalarExpr,
+        value: ExpressionType,
+        input: &RowSchema,
+        subqueries: &[QueryPlan],
+    ) -> Result<ExpressionType, SQLError> {
         self.parameters
             .collations
             .record(expression, value.derivation)?;
@@ -177,11 +243,12 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
         clippy::too_many_lines,
         reason = "one ordered dispatch covers every scalar expression"
     )]
-    fn expression_inner(
+    async fn expression_inner<W: crate::catalog::work::Work + Send>(
         &mut self,
         expression: &ScalarExpr,
         input: &RowSchema,
         subqueries: &[QueryPlan],
+        work: &mut W,
     ) -> Result<ExpressionType, SQLError> {
         if let Some(sites) = self.scope.variable_sites.as_mut() {
             if let Some(site) = sites.site(expression) {
@@ -197,7 +264,10 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
                         .expect("variable site scope")
                         .names[site]
                         .copy_for_rewrite(&control)?;
-                    return self.expression_inner(&name, input, subqueries);
+                    return crate::construction::retain_with(control, || {
+                        self.expression_inner(&name, input, subqueries, work)
+                    })?
+                    .await;
                 }
             }
         }
@@ -305,7 +375,17 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
             ScalarExpr::UnaryMinus(inner) => {
                 self.unary_minus_expression(expression, inner, input, subqueries)
             }
-            ScalarExpr::Array(items) => self.array_expression(items, input, subqueries),
+            ScalarExpr::Array(items) => {
+                if W::MAY_SUSPEND {
+                    let owner = self.scope.control().capture();
+                    crate::construction::retain_with(owner.control(), || {
+                        self.array_expression(items, input, subqueries, work)
+                    })?
+                    .await
+                } else {
+                    self.array_expression_inline(items, input, subqueries, work)
+                }
+            }
             ScalarExpr::CompositeRow { items, binding, .. } => {
                 self.composite_row_expression(items, binding, input, subqueries)
             }
