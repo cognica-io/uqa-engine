@@ -75,31 +75,27 @@ fn stored_query_and_window_defaults_preserve_public_restore_diagnostics(
     let window = format!("row_number() OVER (ORDER BY {order})");
     let early = format!("{query} + absent_early");
     let late = format!("{window} + absent_late");
-    for (case, first, last, expected) in [
+    let query_error =
+        "schema expression contains a subquery whose dependencies cannot be rewritten safely";
+    // A memory image validates the captured routine registry. Durable format-3 declarations first resolve their default names during private open.
+    let (early_error, late_error) = if matches!(provider, Provider::Memory) {
+        (query_error, query_error)
+    } else {
         (
-            "query",
-            query.as_str(),
-            "1",
-            "schema expression contains a subquery whose dependencies cannot be rewritten safely",
-        ),
+            "column \"absent_early\" does not exist",
+            "column \"absent_late\" does not exist",
+        )
+    };
+    for (case, first, last, expected) in [
+        ("query", query.as_str(), "1", query_error),
         (
             "window",
             "7",
             window.as_str(),
             "invalid native routine default binding: non-scalar expression",
         ),
-        (
-            "first",
-            early.as_str(),
-            late.as_str(),
-            "column \"absent_early\" does not exist",
-        ),
-        (
-            "last",
-            query.as_str(),
-            late.as_str(),
-            "column \"absent_late\" does not exist",
-        ),
+        ("first", early.as_str(), late.as_str(), early_error),
+        ("last", query.as_str(), late.as_str(), late_error),
     ] {
         let root = archive(case, first, last);
         let target = directory.path().join(format!("{case}-target"));
