@@ -160,12 +160,12 @@ impl SchemaScope {
             self.command_expression_schema(routines, command, params, outer)?;
         let source = match command.source_input() {
             Some(source) => Some(
-                self.bind_source_with_work(
+                self.bind_source_in_scope_with_work(
                     routines,
                     source,
                     command.scalar_subqueries(),
                     params,
-                    outer,
+                    SourceScope::new(outer),
                     work,
                 )
                 .await?,
@@ -393,12 +393,12 @@ impl SchemaScope {
         );
         let source = overlay_outer_schema(
             &self
-                .bind_source_with_work(
+                .bind_source_in_scope_with_work(
                     routines,
                     &merge.source,
                     &merge.subqueries,
                     params,
-                    None,
+                    SourceScope::new(None),
                     work,
                 )
                 .await?,

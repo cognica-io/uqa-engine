@@ -351,12 +351,12 @@ impl SchemaScope {
                 }
                 let source = match block.from.as_ref() {
                     Some(source) => {
-                        self.bind_source_with_work(
+                        self.bind_source_in_scope_with_work(
                             routines,
                             source,
                             &block.subqueries,
                             params,
-                            outer,
+                            SourceScope::new(outer),
                             work,
                         )
                         .await?

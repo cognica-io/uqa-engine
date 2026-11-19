@@ -364,8 +364,15 @@ impl SchemaScope {
         };
         let source = match block.from.as_ref() {
             Some(source) => {
-                self.bind_source_with_work(routines, source, &block.subqueries, params, outer, work)
-                    .await?
+                self.bind_source_in_scope_with_work(
+                    routines,
+                    source,
+                    &block.subqueries,
+                    params,
+                    SourceScope::new(outer),
+                    work,
+                )
+                .await?
             }
             None => RowSchema::new_with_control(
                 control.finish(Vec::new(), control.empty_reservation())?,

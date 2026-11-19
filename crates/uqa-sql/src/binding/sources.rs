@@ -272,32 +272,12 @@ impl SchemaScope {
         params: &[SQLParam],
         outer: Option<&RowSchema>,
     ) -> Result<RowSchema, SQLError> {
-        crate::catalog::work::inline(self.bind_source_with_work(
-            routines,
-            source,
-            subqueries,
-            params,
-            outer,
-            &mut (),
-        ))
-    }
-
-    pub(super) fn bind_source_with_work<'a, W: crate::catalog::work::Work + Send>(
-        &'a mut self,
-        routines: &'a dyn RoutineResolution,
-        source: &'a SourcePlan,
-        subqueries: &'a [QueryPlan],
-        params: &'a [SQLParam],
-        outer: Option<&'a RowSchema>,
-        work: &'a mut W,
-    ) -> impl std::future::Future<Output = Result<RowSchema, SQLError>> + Send + 'a {
-        self.bind_source_in_scope_with_work(
+        self.bind_source_in_scope(
             routines,
             source,
             subqueries,
             params,
             SourceScope::new(outer),
-            work,
         )
     }
 
@@ -451,7 +431,14 @@ impl SchemaScope {
                         relations.as_ref(),
                     )?;
                     return self
-                        .bind_source_with_work(routines, source, subqueries, params, outer, work)
+                        .bind_source_in_scope_with_work(
+                            routines,
+                            source,
+                            subqueries,
+                            params,
+                            SourceScope::new(outer),
+                            work,
+                        )
                         .await;
                 }
                 self.bind_table_function_for_execution(
@@ -483,8 +470,15 @@ impl SchemaScope {
             }
             SourcePlan::Table { .. } | SourcePlan::Values { .. } | SourcePlan::Subquery { .. } => {}
         }
-        self.bind_source_with_work(routines, source, subqueries, params, outer, work)
-            .await
+        self.bind_source_in_scope_with_work(
+            routines,
+            source,
+            subqueries,
+            params,
+            SourceScope::new(outer),
+            work,
+        )
+        .await
     }
 
     async fn bind_execution_join<W: crate::catalog::work::Work + Send>(
