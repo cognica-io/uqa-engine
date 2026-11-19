@@ -6,7 +6,7 @@
 
 //! Array input tokens and dimensions retain `PostgreSQL` diagnostic boundaries.
 
-use crate::{ast::MAX_ARRAY_SUBSCRIPT_DIMENSIONS, SQLError};
+use crate::{ast::MAX_ARRAY_SUBSCRIPT_DIMENSIONS, catalog::work::Work, SQLError};
 use uqa_core::{
     memory::{Produced, ProductionControl, ProductionString, ProductionVec},
     Value,
@@ -25,6 +25,7 @@ pub(super) struct ArrayLiteralParser<'a, 'control> {
     rank_frozen: bool,
     declared: bool,
     has_elements: bool,
+    characters: usize,
 }
 
 impl<'a, 'control> ArrayLiteralParser<'a, 'control> {
@@ -42,15 +43,17 @@ impl<'a, 'control> ArrayLiteralParser<'a, 'control> {
             rank_frozen: false,
             declared: false,
             has_elements: false,
+            characters: 0,
         }
     }
 
-    pub(super) fn parse(
+    pub(super) async fn parse<W: Work>(
         &mut self,
         input: &mut impl FnMut(Produced<Value>) -> Result<Produced<Value>>,
+        work: &mut W,
     ) -> Result<ParsedArray> {
-        self.skip_whitespace()?;
-        let dimensions = self.parse_dimensions()?;
+        self.skip_whitespace(work).await?;
+        let dimensions = self.parse_dimensions(work).await?;
         if self.chars.peek() != Some(&'{') {
             return Err(self.error(if self.declared {
                 "Array contents must start with \"{\"."
@@ -58,8 +61,8 @@ impl<'a, 'control> ArrayLiteralParser<'a, 'control> {
                 "Array value must start with \"{\" or dimension information."
             }));
         }
-        let items = self.parse_array(0, input)?;
-        self.skip_whitespace()?;
+        let items = self.parse_array(input, work).await?;
+        self.skip_whitespace(work).await?;
         if self.chars.peek().is_some() {
             return Err(self.error("Junk after closing right brace."));
         }
@@ -70,7 +73,7 @@ impl<'a, 'control> ArrayLiteralParser<'a, 'control> {
         Ok((dimensions, items))
     }
 
-    fn parse_dimensions(&mut self) -> Result<Option<Dimensions>> {
+    async fn parse_dimensions(&mut self, work: &mut impl Work) -> Result<Option<Dimensions>> {
         if self.chars.peek() != Some(&'[') {
             return Ok(None);
         }
@@ -80,12 +83,13 @@ impl<'a, 'control> ArrayLiteralParser<'a, 'control> {
             if dimensions.len() == MAX_ARRAY_SUBSCRIPT_DIMENSIONS {
                 return Err(Self::too_many_dimensions());
             }
-            let first = self.parse_bound()?.ok_or_else(|| {
+            let first = self.parse_bound(work).await?.ok_or_else(|| {
                 self.error("\"[\" must introduce explicitly-specified array dimensions.")
             })?;
             let (lower, upper) = if self.chars.next_if_eq(&':').is_some() {
                 let upper = self
-                    .parse_bound()?
+                    .parse_bound(work)
+                    .await?
                     .ok_or_else(|| self.error("Missing array dimension value."))?;
                 (first, upper)
             } else {
@@ -116,45 +120,48 @@ impl<'a, 'control> ArrayLiteralParser<'a, 'control> {
                 })?;
             self.dimensions[dimensions.len()] = Some(length);
             dimensions.push_copy((lower, length))?;
-            self.skip_whitespace()?;
+            self.skip_whitespace(work).await?;
         }
         self.rank = dimensions.len();
         self.rank_frozen = true;
         if self.chars.next() != Some('=') {
             return Err(self.error("Missing \"=\" after array dimensions."));
         }
-        self.skip_whitespace()?;
+        self.skip_whitespace(work).await?;
         Ok(Some(dimensions.finish()?))
     }
 
-    fn parse_bound(&mut self) -> Result<Option<i32>> {
-        let mut text = ProductionString::new(self.control);
-        if self
-            .chars
-            .peek()
-            .is_some_and(|character| matches!(character, '+' | '-'))
-        {
-            text.push(self.chars.next().expect("peeked array bound sign"))?;
+    async fn parse_bound(&mut self, work: &mut impl Work) -> Result<Option<i32>> {
+        let negative = self.chars.next_if_eq(&'-').is_some();
+        if !negative {
+            self.chars.next_if_eq(&'+');
         }
+        let mut value = Some(0i32);
         let mut has_digit = false;
-        while self.chars.peek().is_some_and(char::is_ascii_digit) {
+        while let Some(ch) = self.chars.next_if(char::is_ascii_digit) {
+            self.character(work).await?;
             has_digit = true;
-            text.push(self.chars.next().expect("peeked array bound digit"))?;
+            let digit = ch as i32 - '0' as i32;
+            value = value
+                .and_then(|value| value.checked_mul(10))
+                .and_then(|value| {
+                    if negative {
+                        value.checked_sub(digit)
+                    } else {
+                        value.checked_add(digit)
+                    }
+                });
         }
         if !has_digit {
             return Ok(None);
         }
-        text.parse().map(Some).map_err(|_| SQLError::Routine {
+        value.map(Some).ok_or_else(|| SQLError::Routine {
             sqlstate: "54000".into(),
             message: "array bound is out of integer range".into(),
         })
     }
 
-    fn parse_array(
-        &mut self,
-        level: usize,
-        input: &mut impl FnMut(Produced<Value>) -> Result<Produced<Value>>,
-    ) -> Result<Produced<Vec<Value>>> {
+    fn open_array(&mut self, level: usize) -> Result<ProductionVec<'control, Value>> {
         if level == MAX_ARRAY_SUBSCRIPT_DIMENSIONS {
             return Err(Self::too_many_dimensions());
         }
@@ -166,20 +173,33 @@ impl<'a, 'control> ArrayLiteralParser<'a, 'control> {
         }
         let opening = self.chars.next();
         debug_assert_eq!(opening, Some('{'));
-        let mut items = ProductionVec::new(self.control);
-        let mut expect_delimiter = false;
+        Ok(ProductionVec::new(self.control))
+    }
+
+    async fn parse_array<W: Work>(
+        &mut self,
+        input: &mut impl FnMut(Produced<Value>) -> Result<Produced<Value>>,
+        work: &mut W,
+    ) -> Result<Produced<Vec<Value>>> {
+        let mut levels = std::array::from_fn::<_, MAX_ARRAY_SUBSCRIPT_DIMENSIONS, _>(|_| None);
+        let mut level = 0;
+        levels[level] = Some((self.open_array(level)?, false));
         loop {
-            self.skip_whitespace()?;
+            work.checkpoint().await?;
+            let (items, expect_delimiter) = levels[level].as_mut().expect("open array");
+            self.skip_whitespace(work).await?;
             match self.chars.peek().copied() {
                 Some('{') => {
-                    if expect_delimiter {
+                    if *expect_delimiter {
                         return Err(self.error("Unexpected \"{\" character."));
                     }
-                    let (nested, memory) = self.parse_array(level + 1, input)?.into_parts();
-                    items.push_produced(self.control.finish(Value::List(nested), memory)?)?;
+                    let nested = self.open_array(level + 1)?;
+                    level += 1;
+                    levels[level] = Some((nested, false));
+                    continue;
                 }
                 Some('}') => {
-                    if !items.is_empty() && !expect_delimiter {
+                    if !items.is_empty() && !*expect_delimiter {
                         return Err(self.error("Unexpected \"}\" character."));
                     }
                     let _closing = self.chars.next();
@@ -187,20 +207,30 @@ impl<'a, 'control> ArrayLiteralParser<'a, 'control> {
                         return Err(self.dimension_error());
                     }
                     self.dimensions[level] = Some(items.len());
-                    return Ok(items.finish()?);
+                    let (items, _) = levels[level].take().expect("open array");
+                    let items = items.finish()?;
+                    if level == 0 {
+                        return Ok(items);
+                    }
+                    level -= 1;
+                    let (parent, delimiter) = levels[level].as_mut().expect("parent array");
+                    let (items, memory) = items.into_parts();
+                    parent.push_produced(self.control.finish(Value::List(items), memory)?)?;
+                    *delimiter = true;
+                    continue;
                 }
                 Some(',') => {
-                    if !expect_delimiter {
+                    if !*expect_delimiter {
                         return Err(self.error("Unexpected \",\" character."));
                     }
                     let _delimiter = self.chars.next();
-                    expect_delimiter = false;
+                    *expect_delimiter = false;
                     continue;
                 }
                 None => return Err(self.error("Unexpected end of input.")),
                 Some(_) => {
-                    let value = self.parse_element()?;
-                    if expect_delimiter {
+                    let value = self.parse_element(work).await?;
+                    if *expect_delimiter {
                         return Err(self.error("Unexpected array element."));
                     }
                     let value = input(value)?;
@@ -212,19 +242,20 @@ impl<'a, 'control> ArrayLiteralParser<'a, 'control> {
                     items.push_produced(value)?;
                 }
             }
-            expect_delimiter = true;
+            *expect_delimiter = true;
         }
     }
 
-    fn parse_element(&mut self) -> Result<Produced<Value>> {
+    async fn parse_element(&mut self, work: &mut impl Work) -> Result<Produced<Value>> {
         if self.chars.peek() == Some(&'"') {
-            let (value, memory) = self.parse_quoted()?.into_parts();
+            let (value, memory) = self.parse_quoted(work).await?.into_parts();
             return Ok(self.control.finish(Value::Str(value), memory)?);
         }
         let mut value = ProductionString::new(self.control);
         let mut significant_len = 0;
         let mut was_escaped = false;
         loop {
+            self.character(work).await?;
             match self.chars.peek().copied() {
                 Some(',' | '}') => break,
                 Some('{') => return Err(self.error("Unexpected \"{\" character.")),
@@ -262,13 +293,14 @@ impl<'a, 'control> ArrayLiteralParser<'a, 'control> {
         }
     }
 
-    fn parse_quoted(&mut self) -> Result<Produced<String>> {
+    async fn parse_quoted(&mut self, work: &mut impl Work) -> Result<Produced<String>> {
         let _opening_quote = self.chars.next();
         let mut value = ProductionString::new(self.control);
         loop {
+            self.character(work).await?;
             match self.chars.next() {
                 Some('"') => {
-                    self.skip_whitespace()?;
+                    self.skip_whitespace(work).await?;
                     return match self.chars.peek() {
                         Some(',' | '{' | '}') => Ok(value.finish()?),
                         None => Err(self.error("Unexpected end of input.")),
@@ -286,14 +318,24 @@ impl<'a, 'control> ArrayLiteralParser<'a, 'control> {
         }
     }
 
-    fn skip_whitespace(&mut self) -> Result<()> {
+    async fn character(&mut self, work: &mut impl Work) -> Result<()> {
+        self.characters += 1;
+        if self.characters == 1024 {
+            self.characters = 0;
+            self.control.check()?;
+            work.checkpoint().await?;
+        }
+        Ok(())
+    }
+
+    async fn skip_whitespace(&mut self, work: &mut impl Work) -> Result<()> {
         self.control.check()?;
         while self
             .chars
             .next_if(|character| scanner_whitespace(*character))
             .is_some()
         {
-            self.control.check()?;
+            self.character(work).await?;
         }
         Ok(())
     }

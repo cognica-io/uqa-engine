@@ -19,6 +19,19 @@ use uqa_core::{
     RelationIdentity,
 };
 
+/// Run nested input on the caller's stack for inline work and in an admitted frame when it can suspend.
+macro_rules! nested {
+    ($suspend:expr, $control:expr, $future:expr) => {{
+        if $suspend {
+            let control = $control.capture();
+            $crate::construction::retain_with(control.control(), || $future)?.await
+        } else {
+            $crate::catalog::work::inline($future)
+        }
+    }};
+}
+pub(crate) use nested;
+
 /// Schedule borrowed catalog validation and text construction through the invoking operation.
 pub trait Work {
     /// An inline caller can finish a selected field on its stack. Other callers retain that field across checkpoints.
@@ -183,6 +196,13 @@ impl<W: Work + Send> ReferenceWork<'_, '_, W> {
         self.work.checkpoint().await?;
         self.control.check()?;
         Ok(())
+    }
+}
+
+impl<W: Work + Send> uqa_core::ValueInputWork for ReferenceWork<'_, '_, W> {
+    type Error = SQLError;
+    async fn checkpoint(&mut self) -> Result<(), Self::Error> {
+        ReferenceWork::checkpoint(self).await
     }
 }
 

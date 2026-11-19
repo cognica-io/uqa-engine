@@ -262,27 +262,55 @@ pub fn fold_assigned_stored_literal(
     target: &crate::ast::ColumnType,
     catalog: Option<&dyn crate::expr::enums::EnumLabelCatalog>,
 ) -> Result<bool, SQLError> {
+    crate::catalog::work::inline(fold_assigned_stored_literal_from(
+        expression,
+        target,
+        &|| catalog,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+        &mut (),
+    ))
+    .map(|changed| *changed)
+}
+
+pub(crate) async fn fold_assigned_stored_literal_from<'a, W: crate::catalog::work::Work + Send>(
+    expression: &mut Expr,
+    target: &crate::ColumnType,
+    catalog: &impl Fn() -> Option<&'a dyn crate::expr::enums::EnumLabelCatalog>,
+    control: &uqa_core::memory::ProductionControl<'_>,
+    work: &mut W,
+) -> Result<uqa_core::memory::Produced<bool>, SQLError> {
+    let unchanged = || Ok(control.finish(false, control.empty_reservation())?);
     let Expr::Literal(value @ (Value::Str(_) | Value::Null)) = expression else {
-        return Ok(false);
+        return unchanged();
     };
     let mut base = target;
-    while let crate::ast::ColumnType::Domain { base: inner, .. } = base {
+    while let crate::ColumnType::Domain { base: inner, .. } = base {
+        control.check()?;
+        work.checkpoint().await?;
         base = inner;
     }
-    if !crate::expr::enums::is_enum_bearing(base) {
-        return Ok(false);
+    if catalog().is_none() {
+        return unchanged();
     }
-    let Some(catalog) = catalog else {
-        return Ok(false);
+    let Some(value) =
+        crate::expr::enums::fold_unknown_literal_with_work(catalog, value, base, control, work)
+            .await?
+    else {
+        return unchanged();
     };
-    let Some(value) = crate::expr::enums::fold_unknown_literal(Some(catalog), value, base)? else {
-        return Ok(false);
-    };
+    let (name, name_memory) = base
+        .catalog_name_with_input_work(
+            control,
+            &mut crate::catalog::work::ReferenceWork { control, work },
+        )
+        .await?
+        .into_parts();
+    let (value, value_memory) = value.into_parts();
     *expression = Expr::TypedLiteral {
         collation_oid: None,
         composite_source: None,
         value,
-        ty: base.catalog_name(),
+        ty: name,
     };
-    Ok(true)
+    Ok(control.finish(true, control.combine(name_memory, value_memory))?)
 }

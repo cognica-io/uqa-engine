@@ -11,7 +11,10 @@ use uqa_core::{
     ArrayValue, Value, ValueRetentionError,
 };
 
-use crate::error::{Result, SQLError};
+use crate::{
+    catalog::work::{inline, ReferenceWork, Work},
+    error::{Result, SQLError},
+};
 
 use super::cast_value_from_with_control;
 
@@ -53,34 +56,55 @@ pub fn parse_pg_array_literal_with_control(
 pub(in crate::expr) fn parse_pg_array_literal_with_input(
     text: &str,
     control: &ProductionControl<'_>,
+    input: impl FnMut(Produced<Value>) -> Result<Produced<Value>>,
+) -> Result<Produced<ArrayValue>> {
+    inline(parse_pg_array_literal_with_work(
+        text,
+        control,
+        input,
+        &mut (),
+    ))
+}
+
+pub(in crate::expr) async fn parse_pg_array_literal_with_work<W: Work + Send>(
+    text: &str,
+    control: &ProductionControl<'_>,
     mut input: impl FnMut(Produced<Value>) -> Result<Produced<Value>>,
+    work: &mut W,
 ) -> Result<Produced<ArrayValue>> {
     let mut parser = literal::ArrayLiteralParser::new(text, *control);
-    let (declared_dimensions, items) = parser.parse(&mut input)?;
-    match array_shape_with_control(&items, control) {
+    let (declared_dimensions, items) = parser.parse(&mut input, work).await?;
+    match array_shape_from(&items, control, work).await {
         Ok(shape) => drop(shape),
         Err(ShapeProductionError::Shape(_)) => return Err(parser.dimension_error()),
-        Err(ShapeProductionError::Control(error)) => return Err(error.into()),
+        Err(ShapeProductionError::Control(error)) => return Err(error),
     }
     // The parser owns syntactic dimensions. A converted scalar domain may itself contain an array; its carrier must not add another syntactic dimension.
-    let array = match &declared_dimensions {
+    let bounds = match &declared_dimensions {
         Some(declared) => {
             let mut bounds = ProductionVec::new(*control);
             bounds.reserve(declared.len())?;
             for (lower, _) in &**declared {
                 bounds.push_copy(*lower)?;
             }
-            ArrayValue::with_lower_bounds_with_control(items, bounds.finish()?, control)?
+            Some(bounds.finish()?)
         }
-        None if items.is_empty() => ArrayValue::try_new_with_control(items, control)?,
+        None if items.is_empty() => None,
         None => {
             let mut bounds = ProductionVec::new(*control);
             for _ in 0..parser.rank() {
                 bounds.push_copy(1)?;
             }
-            ArrayValue::with_lower_bounds_with_control(items, bounds.finish()?, control)?
+            Some(bounds.finish()?)
         }
-    }
+    };
+    let array = ArrayValue::from_elements_with_work(
+        items,
+        bounds,
+        control,
+        &mut ReferenceWork { control, work },
+    )
+    .await?
     .ok_or_else(|| parser.dimension_error())?;
     if let Some(declared) = declared_dimensions {
         if !declared
@@ -144,11 +168,11 @@ pub(super) fn array_shape(items: &[Value]) -> std::result::Result<Vec<usize>, Ar
 
 enum ShapeProductionError {
     Shape(ArrayShapeError),
-    Control(ValueRetentionError),
+    Control(SQLError),
 }
 impl From<ValueRetentionError> for ShapeProductionError {
     fn from(error: ValueRetentionError) -> Self {
-        Self::Control(error)
+        Self::Control(error.into())
     }
 }
 
@@ -156,14 +180,29 @@ fn array_shape_with_control(
     items: &[Value],
     control: &ProductionControl<'_>,
 ) -> std::result::Result<Produced<Vec<usize>>, ShapeProductionError> {
+    inline(array_shape_from(items, control, &mut ()))
+}
+
+async fn array_shape_from<W: Work + Send>(
+    items: &[Value],
+    control: &ProductionControl<'_>,
+    work: &mut W,
+) -> std::result::Result<Produced<Vec<usize>>, ShapeProductionError> {
     let mut dimensions = ProductionVec::new(*control);
     dimensions.push_copy(items.len())?;
     let mut nested_shape: Option<Produced<Vec<usize>>> = None;
     let mut has_scalar = false;
     for item in items {
         control.check()?;
+        work.checkpoint()
+            .await
+            .map_err(|error| ShapeProductionError::Control(error.into()))?;
         if let Value::List(nested) = item {
-            let shape = array_shape_with_control(nested, control)?;
+            let shape = crate::catalog::work::nested!(
+                W::MAY_SUSPEND,
+                control,
+                array_shape_from(nested, control, work)
+            )?;
             if has_scalar {
                 return Err(ShapeProductionError::Shape(ArrayShapeError::MixedNesting));
             }

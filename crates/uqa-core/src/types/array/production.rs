@@ -20,7 +20,12 @@ impl ArrayValue {
         elements: Produced<Vec<Value>>,
         control: &ProductionControl<'_>,
     ) -> Result<Option<Produced<Self>>, ValueRetentionError> {
-        Self::produce(elements, None, control)
+        inline(Self::from_elements_with_work(
+            elements,
+            None,
+            control,
+            &mut (),
+        ))
     }
 
     pub fn with_lower_bounds_with_control(
@@ -28,16 +33,24 @@ impl ArrayValue {
         lower_bounds: Produced<Vec<i32>>,
         control: &ProductionControl<'_>,
     ) -> Result<Option<Produced<Self>>, ValueRetentionError> {
-        Self::produce(elements, Some(lower_bounds), control)
+        inline(Self::from_elements_with_work(
+            elements,
+            Some(lower_bounds),
+            control,
+            &mut (),
+        ))
     }
 
-    fn produce(
+    /// Validate rectangular dimensions and transfer the original buffers within the caller's work window.
+    pub async fn from_elements_with_work<W: Work>(
         elements: Produced<Vec<Value>>,
         lower_bounds: Option<Produced<Vec<i32>>>,
         control: &ProductionControl<'_>,
-    ) -> Result<Option<Produced<Self>>, ValueRetentionError> {
+        work: &mut W,
+    ) -> Result<Option<Produced<Self>>, W::Error> {
         let rank = lower_bounds.as_ref().map(|bounds| bounds.len());
-        let Some(dimensions) = shape::produced(&elements, rank, control)? else {
+        let Some(dimensions) = shape::produced_with_work(&elements, rank, control, work).await?
+        else {
             return Ok(None);
         };
         let lower_bounds = match lower_bounds {
@@ -69,16 +82,18 @@ impl ArrayValue {
                 control.combine(bounds_memory, header),
             ),
         };
-        normalize(
+        normalize_with_work(
             &mut parts.value.elements,
             parts.value.dimensions.len(),
             &mut parts.memory,
             control,
-        )?;
+            work,
+        )
+        .await?;
         let value = Self {
             storage: Box::new(parts.value),
         };
-        control.finish(value, parts.memory).map(Some)
+        Ok(Some(control.finish(value, parts.memory)?))
     }
 }
 

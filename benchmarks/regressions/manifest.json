@@ -52076,6 +52076,19 @@
     {
       "package": "uqa-sql",
       "kind": "lib",
+      "test": "stored_enum_default_input_finishes_array_syntax_before_each_label_lookup",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/enums/tests.rs",
+      "capability": "Stored routine restoration",
+      "workload": "Read two-element and 4,096-element enum array defaults with an invalid final label or an incorrectly terminated array.",
+      "invariant": "The large input spans additional work windows, complete array syntax precedes enum input, and every outcome releases the original allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
       "test": "captured_signature_checks_large_defaults_before_the_declared_result_and_releases_input",
       "cases": 1,
       "source": "crates/uqa-sql/src/routines/declaration/captured/tests.rs",

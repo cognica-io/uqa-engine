@@ -16,7 +16,10 @@ use uqa_core::memory::{Produced, ProductionControl, ProductionVec};
 use uqa_core::{ArrayValue, EnumLabelKey, EnumValue, Value};
 
 use super::{Result, SQLError};
-use crate::ast::ColumnType;
+use crate::{
+    ast::ColumnType,
+    catalog::work::{compare_text, inline, ReferenceWork, Work},
+};
 
 mod functions;
 mod output;
@@ -57,7 +60,28 @@ impl EnumTypeLabels {
     }
 
     pub fn by_text(&self, text: &str) -> Option<&EnumTypeLabel> {
-        self.labels.iter().find(|label| label.label == text)
+        inline(self.by_text_with_work(text, &ProductionControl::uncontrolled(), &mut ()))
+            .expect("ordinary enum label comparison")
+    }
+
+    async fn by_text_with_work<W: Work>(
+        &self,
+        text: &str,
+        control: &ProductionControl<'_>,
+        work: &mut W,
+    ) -> Result<Option<&EnumTypeLabel>> {
+        for label in &self.labels {
+            control.check()?;
+            work.checkpoint().await?;
+            if label.label.len() == text.len()
+                && compare_text(work, &label.label, text, control)
+                    .await?
+                    .is_eq()
+            {
+                return Ok(Some(label));
+            }
+        }
+        Ok(None)
     }
 
     fn value(&self, label: &EnumTypeLabel) -> Value {
@@ -187,19 +211,35 @@ pub fn enum_value_from_text_with_control(
     text: &str,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Value>> {
+    inline(enum_value_from_text_with_work(
+        &|| catalog,
+        type_oid,
+        text,
+        control,
+        &mut (),
+    ))
+}
+
+async fn enum_value_from_text_with_work<'a, W: Work>(
+    catalog: &impl Fn() -> Option<&'a dyn EnumLabelCatalog>,
+    type_oid: u32,
+    text: &str,
+    control: &ProductionControl<'_>,
+    work: &mut W,
+) -> Result<Produced<Value>> {
     control.check()?;
-    let labels = labels(catalog, type_oid)?;
+    let labels = labels(catalog(), type_oid)?;
     control.check()?;
-    let Some(label) = labels.by_text(text) else {
+    let Some(label) = labels.by_text_with_work(text, control, work).await? else {
         return Err(SQLError::Routine {
             sqlstate: "22P02".into(),
             message: format!(
                 "invalid input value for enum {}: \"{text}\"",
-                type_name(catalog, type_oid)?
+                type_name(catalog(), type_oid)?
             ),
         });
     };
-    check_safe(catalog, &labels, label)?;
+    check_safe(catalog(), &labels, label)?;
     labels.value_with_control(label, control)
 }
 
@@ -500,63 +540,89 @@ pub fn fold_unknown_literal_with_control(
     target: &ColumnType,
     control: &ProductionControl<'_>,
 ) -> Result<Option<Produced<Value>>> {
-    control.check()?;
-    match (target, value) {
-        (ColumnType::Enum(_) | ColumnType::Array(_), Value::Null) if is_enum_bearing(target) => Ok(
-            Some(control.finish(Value::Null, control.empty_reservation())?),
-        ),
-        (ColumnType::Enum(reference), Value::Str(text)) => {
-            enum_value_from_text_with_control(catalog, reference.oid, text, control).map(Some)
-        }
-        (ColumnType::Array(element), Value::Str(text)) if is_enum_bearing(element) => {
-            let mut leaf = element.as_ref();
-            while let ColumnType::Array(inner) = leaf {
-                control.check()?;
-                leaf = inner;
-            }
-            let ColumnType::Enum(reference) = leaf else {
-                return Ok(None);
-            };
-            let parsed = super::casting::parse_pg_array_literal_with_control(text, control)?;
-            let elements =
-                enum_literal_elements(parsed.elements(), catalog, reference.oid, control)?;
-            let mut bounds = ProductionVec::new(*control);
-            bounds.extend_from_slice(parsed.lower_bounds())?;
-            let array =
-                ArrayValue::with_lower_bounds_with_control(elements, bounds.finish()?, control)?
-                    .filter(|array| array.dimensions() == parsed.dimensions())
-                    .ok_or_else(|| {
-                        SQLError::Internal("enum array conversion changed array dimensions".into())
-                    })?;
-            let (array, memory) = array.into_parts();
-            Ok(Some(control.finish(
-                Value::Array(array.with_element_type_oid(Some(reference.oid))),
-                memory,
-            )?))
-        }
-        _ => Ok(None),
-    }
+    inline(fold_unknown_literal_with_work(
+        &|| catalog,
+        value,
+        target,
+        control,
+        &mut (),
+    ))
 }
 
-fn enum_literal_elements(
+pub(crate) async fn fold_unknown_literal_with_work<'a, W: Work + Send>(
+    catalog: &impl Fn() -> Option<&'a dyn EnumLabelCatalog>,
+    value: &Value,
+    target: &ColumnType,
+    control: &ProductionControl<'_>,
+    work: &mut W,
+) -> Result<Option<Produced<Value>>> {
+    control.check()?;
+    let (leaf, dimensions) = target
+        .array_shape_with_work(control, &mut ReferenceWork { control, work })
+        .await?;
+    let ColumnType::Enum(reference) = leaf else {
+        return Ok(None);
+    };
+    let value = match value {
+        Value::Null => control.finish(Value::Null, control.empty_reservation())?,
+        Value::Str(text) if dimensions == 0 => {
+            enum_value_from_text_with_work(catalog, reference.oid, text, control, work).await?
+        }
+        Value::Str(text) => {
+            let parsed =
+                super::casting::parse_pg_array_literal_with_work(text, control, Ok, work).await?;
+            let elements =
+                enum_literal_elements(parsed.elements(), catalog, reference.oid, control, work)
+                    .await?;
+            let mut bounds = ProductionVec::new(*control);
+            bounds.extend_from_slice(parsed.lower_bounds())?;
+            let array = ArrayValue::from_elements_with_work(
+                elements,
+                Some(bounds.finish()?),
+                control,
+                &mut ReferenceWork { control, work },
+            )
+            .await?
+            .filter(|array| array.dimensions() == parsed.dimensions())
+            .ok_or_else(|| {
+                SQLError::Internal("enum array conversion changed array dimensions".into())
+            })?;
+            let (array, memory) = array.into_parts();
+            control.finish(
+                Value::Array(array.with_element_type_oid(Some(reference.oid))),
+                memory,
+            )?
+        }
+        _ => return Ok(None),
+    };
+    Ok(Some(value))
+}
+
+async fn enum_literal_elements<'a, W: Work + Send>(
     values: &[Value],
-    catalog: Option<&dyn EnumLabelCatalog>,
+    catalog: &impl Fn() -> Option<&'a dyn EnumLabelCatalog>,
     type_oid: u32,
     control: &ProductionControl<'_>,
+    work: &mut W,
 ) -> Result<Produced<Vec<Value>>> {
     let mut output = ProductionVec::new(*control);
     output.reserve(values.len())?;
     for value in values {
         control.check()?;
+        work.checkpoint().await?;
         let value = match value {
             Value::List(values) => {
-                let (values, memory) =
-                    enum_literal_elements(values, catalog, type_oid, control)?.into_parts();
+                let (values, memory) = crate::catalog::work::nested!(
+                    W::MAY_SUSPEND,
+                    control,
+                    enum_literal_elements(values, catalog, type_oid, control, work)
+                )?
+                .into_parts();
                 control.finish(Value::List(values), memory)?
             }
             Value::Null => control.finish(Value::Null, control.empty_reservation())?,
             Value::Str(text) => {
-                enum_value_from_text_with_control(catalog, type_oid, text, control)?
+                enum_value_from_text_with_work(catalog, type_oid, text, control, work).await?
             }
             other => {
                 return Err(SQLError::Internal(format!(

@@ -15,7 +15,8 @@ use std::{
     task::{Context, Poll, Waker},
 };
 
-pub(crate) trait Work: Send {
+/// Supply execution windows to native value construction and validation.
+pub trait Work: Send {
     type Error: From<ValueRetentionError>;
     fn checkpoint(&mut self) -> impl Future<Output = Result<(), Self::Error>> + Send;
 }
