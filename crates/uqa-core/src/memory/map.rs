@@ -16,6 +16,7 @@ pub use owned::{
     MapKeyInput, OwnedMap, OwnedMapIntoIter, OwnedMapRange, OwnedSet, OwnedSetIntoIter,
     OwnedSetIter,
 };
+pub(super) use shared::SharedMapRetirement;
 pub use shared::{
     BudgetedSharedMap, BudgetedSharedMapBidirectionalIter, BudgetedSharedMapIter,
     BudgetedSharedMapSnapshot, PreparedSharedMapInsert,

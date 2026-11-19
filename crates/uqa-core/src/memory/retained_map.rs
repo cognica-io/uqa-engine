@@ -6,6 +6,7 @@
 
 //! Immutable map generations with owner-supplied payload footprints and independent capture admission.
 
+use super::map::SharedMapRetirement;
 use super::{
     Budgeted, BudgetedSharedMap, BudgetedSharedMapBidirectionalIter, BudgetedSharedMapIter,
     BudgetedSharedMapSnapshot, MemoryBudget, MemoryError, PreparedSharedMapInsert,
@@ -21,6 +22,27 @@ struct Entry<V> {
 pub struct RetainedMap<K, V> {
     values: BudgetedSharedMap<K, Entry<V>>,
     payload_bytes: usize,
+}
+
+/// Release immutable map roots one node at a time. Entries shared with another generation remain with their readers.
+pub struct RetainedMapRetirement<K, V>(SharedMapRetirement<K, Entry<V>>);
+
+impl<K, V> RetainedMapRetirement<K, V> {
+    /// Retain the selected roots and admit the traversal before replacing their installed owners.
+    pub fn prepare<const N: usize>(
+        maps: [&RetainedMap<K, V>; N],
+        memory: &MemoryBudget,
+    ) -> Result<Self, MemoryError> {
+        SharedMapRetirement::prepare(maps.map(|map| &map.values), memory).map(Self)
+    }
+
+    /// Transfer at most one last-owned entry with its original lease. Return true after the last node.
+    pub fn advance(&mut self, release: impl FnOnce(Budgeted<(K, V)>)) -> bool {
+        self.0.advance(|entry| {
+            let ((key, entry), memory) = entry.into_parts();
+            release(Budgeted::new((key, entry.value), memory));
+        })
+    }
 }
 
 /// A native owner admits the final payload before preparation and supplies that value after its external operation succeeds. The selected path and complete retained footprint are fixed until publication; abandoning this token changes neither the root nor its footprint.

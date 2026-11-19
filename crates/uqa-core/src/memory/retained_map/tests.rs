@@ -7,6 +7,53 @@
 use super::*;
 
 #[test]
+fn retained_map_retirement_visits_one_last_owned_node_and_preserves_shared_roots() {
+    let native = MemoryBudget::new(4 << 20);
+    let work = MemoryBudget::new(2048);
+    for shared in [false, true] {
+        let mut durable = RetainedMap::new(&native);
+        let mut temporary = RetainedMap::new(&native);
+        for key in 0..4096 {
+            durable.insert(key, key, 0).unwrap();
+        }
+        temporary.insert(4096, 4096, 0).unwrap();
+        let reader = shared.then(|| durable.clone());
+        let denied = MemoryBudget::new(0);
+        assert!(RetainedMapRetirement::prepare([&durable, &temporary], &denied).is_err());
+        assert_eq!(durable.get(&4095), Some(&4095));
+        let mut retiring = RetainedMapRetirement::prepare([&durable, &temporary], &work).unwrap();
+        drop((durable, temporary));
+        let occupied = work.reserve(work.available()).unwrap();
+        let mut observed = vec![false; 4097];
+        let mut calls = 0;
+        loop {
+            let mut complete = false;
+            let allocations = allocation_counter::measure(|| {
+                complete = retiring.advance(|entry| {
+                    let (key, value) = *entry;
+                    assert_eq!(key, value);
+                    assert!(!std::mem::replace(&mut observed[key], true));
+                });
+            });
+            calls += 1;
+            assert_eq!(allocations.count_total, 0);
+            assert!(-allocations.count_current <= 2);
+            if complete {
+                break;
+            }
+        }
+        assert_eq!(calls, if shared { 2 } else { 4097 });
+        assert!(observed[4096]);
+        assert!(observed[..4096].iter().all(|visited| *visited != shared));
+        if let Some(reader) = reader {
+            assert_eq!(reader.get(&4095), Some(&4095));
+        }
+        drop((retiring, occupied));
+        assert_eq!((native.used(), work.used()), (0, 0));
+    }
+}
+
+#[test]
 fn retained_map_mutation_allowance_transfer_keeps_original_nodes_and_payload_owners() {
     let input = MemoryBudget::new(4096);
     let runtime = MemoryBudget::new(4096);

@@ -19,7 +19,9 @@ use uqa_core::{
     RelationIdentity,
 };
 
+mod retirement;
 mod serialization;
+pub use retirement::RoutineRegistryRetirement;
 #[cfg(test)]
 mod tests;
 

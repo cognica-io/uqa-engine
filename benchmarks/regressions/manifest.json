@@ -45910,6 +45910,19 @@
     {
       "package": "uqa-sql",
       "kind": "lib",
+      "test": "placeholder_registry_handoff_releases_one_group_node_or_overload_reference_per_step",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/routines/registry/tests.rs",
+      "capability": "Stored routine registry publication",
+      "workload": "Displace registries with 4,096 routine groups or 4,096 references in one overload group, and retain an independent generation.",
+      "invariant": "The atomic handoff preserves installed references. Each step releases at most one overload reference and allocates nothing.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
       "test": "native_routine_capture_has_constant_work_and_independent_exact_admission",
       "cases": 1,
       "source": "crates/uqa-sql/src/routines/registry/tests.rs",
@@ -53403,6 +53416,19 @@
         "case_2_sqlite_native",
         "case_3_sqlite_kv",
         "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "retained_map_retirement_visits_one_last_owned_node_and_preserves_shared_roots",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/retained_map/tests.rs",
+      "capability": "Ordered map retirement",
+      "workload": "Replace two native map roots containing 4,097 entries with and without a concurrent reader under an exhausted traversal allowance.",
+      "invariant": "Each step visits at most one node and allocates nothing. A shared subtree retains its keys, values and original reservations.",
+      "case_names": [
+        ""
       ]
     },
     {
