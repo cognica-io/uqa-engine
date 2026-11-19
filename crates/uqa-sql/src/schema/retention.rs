@@ -51,10 +51,7 @@ impl From<CatalogRetentionError> for crate::SQLError {
     fn from(error: CatalogRetentionError) -> Self {
         match error {
             CatalogRetentionError::SQL(error) => error,
-            CatalogRetentionError::Memory(error) => Self::Routine {
-                sqlstate: "53200".into(),
-                message: error.to_string(),
-            },
+            CatalogRetentionError::Memory(error) => error.into(),
             CatalogRetentionError::Cancelled(error) => Self::Cancelled(error),
             CatalogRetentionError::UnexpectedSubquery => Self::Internal(error.to_string()),
             CatalogRetentionError::Malformed { .. } => Self::Routine {
