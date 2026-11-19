@@ -13,7 +13,9 @@ use crate::ast::{CreateFunction, FunctionBody, FunctionParam, Statement};
 use crate::routines::{dependencies::RoutineDeclaration, SQLRoutine};
 use uqa_core::memory::{BudgetedVec, MemoryError, MemoryReservation, Produced, ProductionControl};
 
+mod edit;
 mod header;
+pub use edit::StoredRoutineParameterEdit;
 mod parameter;
 pub(super) use header::HeaderCopy;
 use header::{continue_text, start_text, Header};
@@ -75,13 +77,21 @@ impl<MergeTargets> Field<MergeTargets> {
         let (value, (children, has_merge_targets)) = capture_stored(value, control, |copying| {
             (copying.retained_children, merge_targets(copying))
         })?;
+        Ok(Self::from_produced(value, children, has_merge_targets))
+    }
+
+    fn from_produced<T>(
+        value: Produced<T>,
+        children: usize,
+        has_merge_targets: MergeTargets,
+    ) -> (T, MemoryReservation, Self) {
         let field = Self {
             direct: value.reserved_bytes(),
             children,
             has_merge_targets,
         };
         let (value, lease) = value.into_parts();
-        Ok((value, lease.expect("native routine declaration"), field))
+        (value, lease.expect("native routine declaration"), field)
     }
 }
 
@@ -252,13 +262,7 @@ impl StoredRoutineDefinition {
                     self.pending_parameter = Some(capture);
                     return Ok(false);
                 };
-                let field = Field {
-                    direct: produced.reserved_bytes(),
-                    children,
-                    has_merge_targets: (),
-                };
-                let (value, lease) = produced.into_parts();
-                (value, lease.expect("admitted parameter"), field)
+                Field::from_produced(produced, children, ())
             } else {
                 Field::capture(parameter, control, |_| ())?
             };
@@ -333,16 +337,13 @@ fn edit<T: SyntaxCopy, MergeTargets>(
     if !bind(&mut scratch)? {
         return Ok(false);
     }
-    let (replacement, lease, next) = Field::capture(&scratch, control, merge_targets)?;
-    let updated = (*children - field.children)
-        .checked_add(next.children)
-        .ok_or(MemoryError::SizeOverflow)?;
-    *value = replacement;
-    drop(direct.split(field.direct));
-    direct.absorb(lease);
-    *children = updated;
-    *field = next;
-    Ok(true)
+    edit::Target {
+        value,
+        field,
+        direct,
+        children,
+    }
+    .replace(Field::capture(&scratch, control, merge_targets)?)
 }
 
 impl RoutineDeclaration for StoredRoutineDefinition {

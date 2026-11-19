@@ -52063,6 +52063,19 @@
     {
       "package": "uqa-sql",
       "kind": "lib",
+      "test": "edited_parameter_publishes_its_current_value_and_receipt_only_after_reprojection",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/stored_routine/tests/defaults.rs",
+      "capability": "Stored routine restoration",
+      "workload": "Edit an already captured parameter with 4,096 array elements, then cancel, exhaust its allowance, abandon it or publish a changed or unchanged value.",
+      "invariant": "Copying and publishing both advance across the array. A failed edit preserves the original parameter and its exact reservation. Successful publication retains the selected field and releases the scratch allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
       "test": "captured_signature_checks_large_defaults_before_the_declared_result_and_releases_input",
       "cases": 1,
       "source": "crates/uqa-sql/src/routines/declaration/captured/tests.rs",

@@ -29,7 +29,9 @@ pub mod registry;
 pub mod resolution;
 pub mod result_check;
 pub mod security;
-pub use crate::plan::copy::{StoredRoutineDefinition, StoredStatementCompilation};
+pub use crate::plan::copy::{
+    StoredRoutineDefinition, StoredRoutineParameterEdit, StoredStatementCompilation,
+};
 pub use ownership::{RetainedRoutineValue, SQLRoutine, SharedRoutineBody};
 
 use crate::ast::{

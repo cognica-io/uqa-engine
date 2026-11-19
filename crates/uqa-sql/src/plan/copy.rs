@@ -294,7 +294,9 @@ mod owned_projection;
 mod owned_query;
 mod owned_scalar;
 mod stored_routine;
-pub use stored_routine::{StoredRoutineDefinition, StoredStatementCompilation};
+pub use stored_routine::{
+    StoredRoutineDefinition, StoredRoutineParameterEdit, StoredStatementCompilation,
+};
 
 impl<'a> Copying<'a> {
     fn new(control: ProductionControl<'a>) -> Option<Self> {
