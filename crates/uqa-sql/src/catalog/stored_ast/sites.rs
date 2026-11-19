@@ -286,55 +286,68 @@ impl Selected<'_> {
                 };
                 return Ok(true);
             }
-            return match node {
-                Expr::Cast { ty, .. } => {
-                    let Some(ValueSite::Cast(bound)) = self.values.next() else {
-                        return Err(mismatch("cast"));
-                    };
-                    // The bound name keeps the selected catalog identity independently of the caller's later search_path.
-                    if ty != bound {
-                        let spelling =
-                            crate::catalog::work::Work::text(work, bound, control).await?;
-                        *ty = self.take(spelling, control);
-                        return Ok(true);
-                    }
-                    Ok(changed)
+            return self.apply_terminal_site(node, changed, control, work).await;
+        }
+    }
+
+    // The structural changes above can expose another syntax node. Consume its final site once.
+    async fn apply_terminal_site<W: crate::catalog::work::Work + crate::plan::ScalarInputWork>(
+        &mut self,
+        node: &mut Expr,
+        changed: bool,
+        control: &ProductionControl<'_>,
+        work: &mut W,
+    ) -> Result<bool, SQLError>
+    where
+        W::Error: Into<SQLError> + Send,
+    {
+        match node {
+            Expr::Cast { ty, .. } => {
+                let Some(ValueSite::Cast(bound)) = self.values.next() else {
+                    return Err(mismatch("cast"));
+                };
+                // The bound name keeps the selected catalog identity independently of the caller's later search_path.
+                if ty != bound {
+                    let spelling = crate::catalog::work::Work::text(work, bound, control).await?;
+                    *ty = self.take(spelling, control);
+                    return Ok(true);
                 }
-                Expr::Literal(Value::Str(_) | Value::Null) => match self.values.next() {
-                    Some(ValueSite::Literal) => Ok(changed),
-                    Some(ValueSite::Constant { value, ty }) => {
-                        let value = crate::plan::ScalarInputWork::value(work, value, control)
-                            .await
-                            .map_err(Into::into)?;
-                        let ty = crate::catalog::work::Work::text(work, ty, control).await?;
-                        *node = Expr::TypedLiteral {
-                            collation_oid: None,
-                            composite_source: None,
-                            value: self.take(value, control),
-                            ty: self.take(ty, control),
-                        };
-                        Ok(true)
-                    }
-                    _ => Err(mismatch("literal")),
-                },
-                Expr::Func { order_syntax, .. } => {
-                    let Some(ValueSite::FunctionOrder(bound)) = self.values.next() else {
-                        return Err(mismatch("function ordering"));
+                Ok(changed)
+            }
+            Expr::Literal(Value::Str(_) | Value::Null) => match self.values.next() {
+                Some(ValueSite::Literal) => Ok(changed),
+                Some(ValueSite::Constant { value, ty }) => {
+                    let value = crate::plan::ScalarInputWork::value(work, value, control)
+                        .await
+                        .map_err(Into::into)?;
+                    let ty = crate::catalog::work::Work::text(work, ty, control).await?;
+                    *node = Expr::TypedLiteral {
+                        collation_oid: None,
+                        composite_source: None,
+                        value: self.take(value, control),
+                        ty: self.take(ty, control),
                     };
-                    if order_syntax == bound {
-                        return Ok(changed);
-                    }
-                    if !order_syntax.is_legacy() {
-                        return Err(mismatch("function ordering"));
-                    }
-                    *order_syntax = *bound;
                     Ok(true)
                 }
-                _ => match self.values.next() {
-                    Some(ValueSite::Node) => Ok(changed),
-                    _ => Err(mismatch("expression")),
-                },
-            };
+                _ => Err(mismatch("literal")),
+            },
+            Expr::Func { order_syntax, .. } => {
+                let Some(ValueSite::FunctionOrder(bound)) = self.values.next() else {
+                    return Err(mismatch("function ordering"));
+                };
+                if order_syntax == bound {
+                    return Ok(changed);
+                }
+                if !order_syntax.is_legacy() {
+                    return Err(mismatch("function ordering"));
+                }
+                *order_syntax = *bound;
+                Ok(true)
+            }
+            _ => match self.values.next() {
+                Some(ValueSite::Node) => Ok(changed),
+                _ => Err(mismatch("expression")),
+            },
         }
     }
 }

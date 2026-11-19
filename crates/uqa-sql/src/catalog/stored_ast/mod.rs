@@ -470,6 +470,25 @@ impl<W: Work + Send, A: Actions<W>> Reader<'_, '_, A, W> {
     }
 
     /// Bind a window call's arguments, `FILTER`, keys and frame offsets.
+    async fn bind_call_inputs(
+        &mut self,
+        args: &mut [Expr],
+        order_by: &mut [crate::ast::OrderBy],
+        filter: Option<&mut Expr>,
+        visible_ctes: &BTreeSet<String>,
+    ) -> Result<(), SQLError> {
+        for argument in args {
+            self.bind_expr(argument, visible_ctes).await?;
+        }
+        for order in order_by {
+            self.bind_expr(&mut order.expr, visible_ctes).await?;
+        }
+        if let Some(filter) = filter {
+            self.bind_expr(filter, visible_ctes).await?;
+        }
+        Ok(())
+    }
+
     async fn bind_window_call(
         &mut self,
         args: &mut [Expr],
@@ -477,12 +496,8 @@ impl<W: Work + Send, A: Actions<W>> Reader<'_, '_, A, W> {
         spec: &mut crate::ast::WindowSpec,
         visible_ctes: &BTreeSet<String>,
     ) -> Result<(), SQLError> {
-        for argument in args {
-            self.bind_expr(argument, visible_ctes).await?;
-        }
-        if let Some(filter) = filter {
-            self.bind_expr(filter, visible_ctes).await?;
-        }
+        self.bind_call_inputs(args, &mut [], filter, visible_ctes)
+            .await?;
         for partition in &mut spec.partition_by {
             self.bind_expr(partition, visible_ctes).await?;
         }
@@ -537,6 +552,26 @@ impl<W: Work + Send, A: Actions<W>> Reader<'_, '_, A, W> {
         )
     }
 
+    async fn bind_case(
+        &mut self,
+        base: Option<&mut Expr>,
+        arms: &mut [(Expr, Expr)],
+        otherwise: Option<&mut Expr>,
+        visible: &BTreeSet<String>,
+    ) -> Result<(), SQLError> {
+        if let Some(value) = base {
+            self.bind_expr(value, visible).await?;
+        }
+        for (condition, result) in arms {
+            self.bind_expr(condition, visible).await?;
+            self.bind_expr(result, visible).await?;
+        }
+        if let Some(value) = otherwise {
+            self.bind_expr(value, visible).await?;
+        }
+        Ok(())
+    }
+
     async fn bind_descendants(
         &mut self,
         expression: &mut Expr,
@@ -551,15 +586,8 @@ impl<W: Work + Send, A: Actions<W>> Reader<'_, '_, A, W> {
                 filter,
                 ..
             } => {
-                for argument in args {
-                    self.bind_expr(argument, visible_ctes).await?;
-                }
-                for order in order_by {
-                    self.bind_expr(&mut order.expr, visible_ctes).await?;
-                }
-                if let Some(filter) = filter {
-                    self.bind_expr(filter, visible_ctes).await?;
-                }
+                self.bind_call_inputs(args, order_by, filter.as_deref_mut(), visible_ctes)
+                    .await?;
                 self.actions
                     .routine(name, Some(binding), self.control, self.work)
                     .await?;
@@ -610,16 +638,13 @@ impl<W: Work + Send, A: Actions<W>> Reader<'_, '_, A, W> {
                 when,
                 else_branch,
             } => {
-                if let Some(base) = base {
-                    self.bind_expr(base, visible_ctes).await?;
-                }
-                for (condition, result) in when {
-                    self.bind_expr(condition, visible_ctes).await?;
-                    self.bind_expr(result, visible_ctes).await?;
-                }
-                if let Some(branch) = else_branch {
-                    self.bind_expr(branch, visible_ctes).await?;
-                }
+                self.bind_case(
+                    base.as_deref_mut(),
+                    when,
+                    else_branch.as_deref_mut(),
+                    visible_ctes,
+                )
+                .await?;
             }
             Expr::ScalarSubquery(body) | Expr::Exists { body, .. } => {
                 crate::catalog::work::nested!(

@@ -6,7 +6,7 @@
 
 //! Scalar positions in a stored mutation retain the original command clause order.
 
-use super::*;
+use super::{CommandPlan, ScalarExpr};
 
 /// The scalar expressions a data-modifying `WITH` query owns in syntax order; planner-added view checks and target predicates have no syntax.
 pub(super) fn syntax_expressions(command: &CommandPlan) -> Vec<&ScalarExpr> {

@@ -13,9 +13,9 @@ use super::{
 use crate::{plan::MutableExpressionPlan, RowSchema};
 
 #[derive(Clone, Copy)]
-enum ExpressionDestination {
-    Executable,
-    StoredSyntax,
+enum ExpressionDestination<'a> {
+    Executable(&'a RowSchema),
+    StoredSyntax(&'a RowSchema),
 }
 
 pub fn bind_expression_plan_routines_for_storage_owned(
@@ -31,8 +31,7 @@ pub fn bind_expression_plan_routines_for_storage_owned(
         expression,
         params,
         binding,
-        input,
-        ExpressionDestination::Executable,
+        ExpressionDestination::Executable(input),
         control,
         &mut (),
     ))
@@ -60,8 +59,7 @@ pub async fn bind_expression_plan_routines_for_storage_with_work(
         expression,
         params,
         binding,
-        input,
-        ExpressionDestination::StoredSyntax,
+        ExpressionDestination::StoredSyntax(input),
         control,
         work,
     )
@@ -75,8 +73,7 @@ async fn bind_expression_owned<W: crate::catalog::work::Work + Send>(
     expression: MutableExpressionPlan,
     params: &[SQLParam],
     binding: ControlledBindingContext<'_>,
-    input: &RowSchema,
-    destination: ExpressionDestination,
+    destination: ExpressionDestination<'_>,
     control: &ProductionControl<'_>,
     work: &mut W,
 ) -> Result<
@@ -86,6 +83,8 @@ async fn bind_expression_owned<W: crate::catalog::work::Work + Send>(
     ),
     SQLError,
 > {
+    let (ExpressionDestination::Executable(input) | ExpressionDestination::StoredSyntax(input)) =
+        destination;
     let mut plan = MutableExecutablePlan::Query(expression.into_projection_query(control)?);
     let mut scope = SchemaScope::for_analysis_with_control(binding, control)?;
     scope.preserve_syntax_shape = true;
@@ -115,7 +114,7 @@ async fn bind_expression_owned<W: crate::catalog::work::Work + Send>(
         unreachable!()
     };
     let expression = MutableExpressionPlan::from_projection_query(query, control)?;
-    if matches!(destination, ExpressionDestination::StoredSyntax) {
+    if matches!(destination, ExpressionDestination::StoredSyntax(_)) {
         return Ok((expression, observed.ty));
     }
     let expression = expression.map_scalar(control, |expression, arena| {

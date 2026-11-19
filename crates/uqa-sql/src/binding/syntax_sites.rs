@@ -196,8 +196,6 @@ fn optional_pair<'a, T>(
     }
 }
 
-/// Recursively selected fields use an admitted frame; unconstrained callers drain that same field inline.
-
 impl<W: SiteInput> Walk<'_, '_, W>
 where
     W::Error: Into<SQLError>,
@@ -222,53 +220,7 @@ where
         }
         match (&lowered.root, &bound.root) {
             (RelationalPlan::QueryBlock(lowered), RelationalPlan::QueryBlock(bound)) => {
-                let subqueries = (&lowered.subqueries[..], &bound.subqueries[..]);
-                if let Some((lowered, bound)) =
-                    optional_pair(lowered.from.as_ref(), bound.from.as_ref(), "FROM clause")?
-                {
-                    self.source(lowered, bound, subqueries).await?;
-                }
-                for (lowered, bound) in pairs(
-                    syntax_projections(&lowered.projections, command_root)?,
-                    syntax_projections(&bound.projections, command_root)?,
-                    "select list",
-                )? {
-                    self.scalar(&lowered.expr, &bound.expr, subqueries).await?;
-                }
-                self.optional(lowered.r#where.as_ref(), bound.r#where.as_ref(), subqueries)
-                    .await?;
-                self.scalars(&lowered.group_by, &bound.group_by, subqueries)
-                    .await?;
-                if lowered.grouping_sets.len() != bound.grouping_sets.len() {
-                    return Err(shape_error("grouping sets"));
-                }
-                for (lowered, bound) in lowered.grouping_sets.iter().zip(&bound.grouping_sets) {
-                    self.scalars(lowered, bound, subqueries).await?;
-                }
-                self.optional(lowered.having.as_ref(), bound.having.as_ref(), subqueries)
-                    .await?;
-                for (lowered, bound) in pairs(&lowered.order_by, &bound.order_by, "ORDER BY")? {
-                    self.scalar(&lowered.expr, &bound.expr, subqueries).await?;
-                }
-                self.optional(lowered.limit.as_ref(), bound.limit.as_ref(), subqueries)
-                    .await?;
-                self.optional(lowered.offset.as_ref(), bound.offset.as_ref(), subqueries)
-                    .await?;
-                self.scalars(&lowered.distinct_on, &bound.distinct_on, subqueries)
-                    .await?;
-                for (lowered, bound) in
-                    pairs(&lowered.windows, &bound.windows, "WINDOW definitions")?
-                {
-                    if lowered.name != bound.name || lowered.inherited != bound.inherited {
-                        return Err(shape_error("WINDOW identity"));
-                    }
-                    let lowered: Vec<_> = lowered.spec.expressions().collect();
-                    let bound: Vec<_> = bound.spec.expressions().collect();
-                    for (lowered, bound) in pairs(&lowered, &bound, "WINDOW expressions")? {
-                        self.scalar(lowered, bound, subqueries).await?;
-                    }
-                }
-                Ok(())
+                self.query_block(lowered, bound, command_root).await
             }
             (
                 RelationalPlan::SetOp {
@@ -324,6 +276,59 @@ where
             }
             _ => Err(shape_error("query")),
         }
+    }
+
+    async fn query_block(
+        &mut self,
+        lowered: &crate::plan::QueryBlockPlan,
+        bound: &crate::plan::QueryBlockPlan,
+        command_root: bool,
+    ) -> Result<(), SQLError> {
+        let subqueries = (&lowered.subqueries[..], &bound.subqueries[..]);
+        if let Some((lowered, bound)) =
+            optional_pair(lowered.from.as_ref(), bound.from.as_ref(), "FROM clause")?
+        {
+            self.source(lowered, bound, subqueries).await?;
+        }
+        for (lowered, bound) in pairs(
+            syntax_projections(&lowered.projections, command_root)?,
+            syntax_projections(&bound.projections, command_root)?,
+            "select list",
+        )? {
+            self.scalar(&lowered.expr, &bound.expr, subqueries).await?;
+        }
+        self.optional(lowered.r#where.as_ref(), bound.r#where.as_ref(), subqueries)
+            .await?;
+        self.scalars(&lowered.group_by, &bound.group_by, subqueries)
+            .await?;
+        if lowered.grouping_sets.len() != bound.grouping_sets.len() {
+            return Err(shape_error("grouping sets"));
+        }
+        for (lowered, bound) in lowered.grouping_sets.iter().zip(&bound.grouping_sets) {
+            self.scalars(lowered, bound, subqueries).await?;
+        }
+        self.optional(lowered.having.as_ref(), bound.having.as_ref(), subqueries)
+            .await?;
+        for (lowered, bound) in pairs(&lowered.order_by, &bound.order_by, "ORDER BY")? {
+            self.scalar(&lowered.expr, &bound.expr, subqueries).await?;
+        }
+        self.optional(lowered.limit.as_ref(), bound.limit.as_ref(), subqueries)
+            .await?;
+        self.optional(lowered.offset.as_ref(), bound.offset.as_ref(), subqueries)
+            .await?;
+        self.scalars(&lowered.distinct_on, &bound.distinct_on, subqueries)
+            .await?;
+        for (lowered, bound) in pairs(&lowered.windows, &bound.windows, "WINDOW definitions")? {
+            if lowered.name != bound.name || lowered.inherited != bound.inherited {
+                return Err(shape_error("WINDOW identity"));
+            }
+            let lowered: Vec<_> = lowered.spec.expressions().collect();
+            let bound: Vec<_> = bound.spec.expressions().collect();
+            for (lowered, bound) in pairs(&lowered, &bound, "WINDOW expressions")? {
+                self.scalar(lowered, bound, subqueries).await?;
+            }
+        }
+        Ok(())
     }
 
     /// A data-modifying `WITH` query, in the order the syntax visitor walks the statement.
@@ -629,7 +634,7 @@ where
                 match bound {
                     ScalarExpr::TypedLiteral { value, ty, .. } => self.constant(value, ty).await?,
                     ScalarExpr::Literal(Value::Str(_) | Value::Null) => {
-                        self.plain(ValueSite::Literal)?
+                        self.plain(ValueSite::Literal)?;
                     }
                     _ => return Err(shape_error("literal")),
                 }
