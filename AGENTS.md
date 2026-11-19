@@ -36,6 +36,8 @@ PR #1404 is the integration-only exception for the existing backup successor sta
 
 PR #1423 is the integration-only exception for the existing retained SQL construction and ownership stack #1415 and #1418–#1423 through product source `36669ef19e386cbf36ddf6548f6b4237c9dec49e`. Its 53,630 changed product/documentation lines across 436 files against main `3597b918350bb1820b1334e7fcd86fd5374566d4` are consolidated into one delivery candidate. Preserve all component commits and their source-specific evidence; do not expand the product scope. Only integration policy, delivery records and corrections required by qualification may be added. Remaining backup implementation stays in #1322 and #1417; arbitrary nested plan-field footprint observation remains in #1424.
 
+PR #1435 is the size exception for the two remaining backup deliverables in #1322 and #1417. It combines bounded catalog validation and stored SQL compilation with public full and standalone incremental restore qualification on memory, native SQLite, SQLite Key/Value and redb. Keep the ownership changes in logical commits and qualify the complete candidate once.
+
 Keep each prose paragraph on one physical line. Do not insert line breaks inside paragraphs.
 
 Describe decisions, scope, behavior and verification evidence directly in issues, PRs and documentation. Do not narrate instructions, approvals or conversation history, or attribute a decision or requirement to a person.
