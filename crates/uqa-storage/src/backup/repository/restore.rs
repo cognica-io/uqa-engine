@@ -482,16 +482,26 @@ impl BackupRestoreOperation<'_> {
         )
     }
 
-    fn stage(&self) -> BackupResult<(Dir, Dir)> {
+    fn stage_holder(&self) -> BackupResult<Dir> {
         let destination = self.destination.as_ref().ok_or(BackupError::Finished)?;
         let holder = target::holder(destination, self.id())?;
         if native::identity(&holder)? != self.target.holder {
             return Err(BackupError::Integrity);
         }
-        let image = directory::child(&holder, "image".as_ref())?;
+        Ok(holder)
+    }
+
+    fn stage_image(&self, holder: &Dir) -> BackupResult<Dir> {
+        let image = directory::child(holder, "image".as_ref())?;
         if native::identity(&image)? != self.target.image {
             return Err(BackupError::Integrity);
         }
+        Ok(image)
+    }
+
+    fn stage(&self) -> BackupResult<(Dir, Dir)> {
+        let holder = self.stage_holder()?;
+        let image = self.stage_image(&holder)?;
         Ok((holder, image))
     }
 
@@ -533,9 +543,7 @@ impl BackupRestoreOperation<'_> {
             if complete {
                 return Err(BackupError::Integrity);
             }
-            self.install_record("cancelled", FrameKind::RestoreCancelled, &self.completion)?;
-            self.retire(State::Cancelled);
-            return Ok(());
+            return self.finish_cancellation();
         }
         match self.published() {
             Ok(true) => return self.finish(),
@@ -669,13 +677,8 @@ impl BackupRestoreOperation<'_> {
 
     fn finish(&mut self) -> BackupResult<()> {
         let destination = self.destination.as_ref().ok_or(BackupError::Finished)?;
-        match target::holder(destination, self.id()) {
-            Ok(holder) => {
-                if native::identity(&holder)? != self.target.holder {
-                    return Err(BackupError::Integrity);
-                }
-                directory::synchronize(&holder)?;
-            }
+        match self.stage_holder() {
+            Ok(holder) => directory::synchronize(&holder)?,
             Err(BackupError::Io(error)) if error.kind() == io::ErrorKind::NotFound => {}
             Err(error) => return Err(error),
         }
@@ -708,12 +711,31 @@ impl BackupRestoreOperation<'_> {
         if self.has_record("complete", FrameKind::RestoreComplete)? {
             return Err(BackupError::Invalid("published restore target is missing"));
         }
+        self.finish_cancellation()?;
+        Ok(None)
+    }
+
+    fn finish_cancellation(&mut self) -> BackupResult<()> {
         self.state = State::Cancelling;
         #[cfg(test)]
         self.repository.before(super::Fault::RestoreCancel)?;
         self.install_record("cancelled", FrameKind::RestoreCancelled, &self.completion)?;
+        self.backup.take();
+        // The durable cancellation fences publication before any private data is unlinked. A retry can finish the same deletion without the source archive.
+        match self.stage_holder() {
+            Ok(holder) => {
+                match self.stage_image(&holder) {
+                    Ok(image) => image.remove_open_dir_all()?,
+                    Err(BackupError::Io(error)) if error.kind() == io::ErrorKind::NotFound => {}
+                    Err(error) => return Err(error),
+                }
+                directory::synchronize(&holder)?;
+            }
+            Err(BackupError::Io(error)) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
         self.retire(State::Cancelled);
-        Ok(None)
+        Ok(())
     }
 
     fn retire(&mut self, state: State) {
