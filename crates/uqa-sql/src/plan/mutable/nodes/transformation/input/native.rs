@@ -165,17 +165,17 @@ where
             .take()
             .unwrap_or_else(|| <E as ScalarEditIdentity>::identity(expression));
         let mut slot = Slot::<OwnedScalarExpr>::new(expression, memory);
-        let value = slot
-            .take()
-            .edit_from::<Work<'a>, E>(
-                identity,
-                control,
-                &mut self.work,
-                self.edit
-                    .as_mut()
-                    .expect("active traversal owns its editor"),
-            )
-            .await?;
+        let value = slot.take();
+        let mut edit = self.edit.take().expect("active traversal owns its editor");
+        let owner = control.capture();
+        let output = self.work.submit(move |mut work| async move {
+            let value = value
+                .edit_from(identity, &owner.control(), &mut work, &mut edit)
+                .await?;
+            Ok::<_, SQLError>((value, edit))
+        })?;
+        let (value, edit) = construction::receive(output).await?;
+        self.edit = Some(edit);
         slot.restore(value);
         Ok(())
     }
