@@ -68,12 +68,19 @@ fn public_backup_jobs_preserve_committed_images_after_engine_and_source_loss(
     let source = directory.path().join("source");
     std::fs::create_dir(&source).unwrap();
     let provider = kind.open(&source.join("database"), mode);
+    let session = provider.open_session().unwrap();
+    let backend_only = Engine::from_persistent_backends(session.catalog, session.backend).unwrap();
+    assert_eq!(
+        backend_only.backup_capabilities(),
+        BackupCapabilities::UNSUPPORTED
+    );
+    drop(backend_only);
     let engine = Engine::from_persistent_provider(provider.clone()).unwrap();
     assert_eq!(
         engine.backup_capabilities(),
         BackupCapabilities {
             export: true,
-            import: false,
+            import: true,
             snapshot_fingerprints: true,
         }
     );
@@ -411,7 +418,7 @@ fn public_backup_admission_preserves_authority_and_failed_transaction_boundaries
         memory.backup_capabilities(),
         BackupCapabilities {
             export: true,
-            import: false,
+            import: true,
             snapshot_fingerprints: true
         }
     );

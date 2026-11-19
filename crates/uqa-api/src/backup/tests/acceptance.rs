@@ -148,6 +148,7 @@ fn check_restored(
     while job.advance(16 << 10).unwrap() != RestorePhase::Prepared {}
     assert!(!directory.exists());
     let restored = job.publish().unwrap();
+    assert!(restored.backup_capabilities().import);
     drop((job, authority));
     let next = expected.next_ticket;
     let mut expected: Vec<_> = expected
@@ -170,6 +171,7 @@ fn check_restored(
     assert_eq!(rows(&restored), expected);
     drop(restored);
     if let Some(reopened) = provider.reopen(directory, mode) {
+        assert!(reopened.backup_capabilities().import);
         assert_eq!(rows(&reopened), expected);
         assert_eq!(next_ticket(&reopened), Value::Int(next + 1));
     }
@@ -222,6 +224,7 @@ fn public_restores_full_and_reprotected_incremental_images_after_source_and_ance
     let archive =
         LocalRepository::create(&archive_path, change.original(), limits, &control).unwrap();
     let source = provider.open(&source_dir.path().join("database"), source_mode);
+    assert!(source.backup_capabilities().import);
     source.sql("CREATE TABLE items(id integer PRIMARY KEY, body text NOT NULL); CREATE VIEW visible AS SELECT id, body FROM items; CREATE SEQUENCE ticket START 40 CACHE 1; INSERT INTO items VALUES(1,'first'),(2,'second')", &[]).unwrap();
     let full = capture(&source, &archive, None, &control);
     source

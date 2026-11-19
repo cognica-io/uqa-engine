@@ -52,7 +52,7 @@ impl BackupOptions {
 }
 
 impl Engine {
-    /// Report qualified Engine paths. Import remains disabled until complete bounded catalog loading, logical closure and final restore qualification are available.
+    /// Report the backup operations supported by this Engine’s storage provider.
     pub fn backup_capabilities(&self) -> BackupCapabilities {
         let memory = self.storage.memory_capture.is_some();
         let persistent = self
@@ -64,7 +64,7 @@ impl Engine {
             });
         BackupCapabilities {
             export: memory || persistent.export,
-            import: false,
+            import: memory || persistent.import,
             snapshot_fingerprints: memory || persistent.snapshot_fingerprints,
         }
     }
