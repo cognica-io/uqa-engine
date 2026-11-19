@@ -104,13 +104,16 @@ pub struct StoredStatementCompilation {
 }
 
 impl StoredStatementCompilation {
-    pub async fn lower(
-        &self,
-        definition: &StoredRoutineDefinition,
-        aggregates: &(dyn crate::plan::AggregateClassifier + Sync),
-        control: &ProductionControl<'_>,
-        input: &mut uqa_core::image_io::AsyncImageInput<'_>,
-    ) -> Result<crate::plan::RetainedExecutablePlan> {
+    pub fn lower<'a, 'control: 'a, 'input: 'a>(
+        &'a self,
+        definition: &'a StoredRoutineDefinition,
+        aggregates: &'a (dyn crate::plan::AggregateClassifier + Sync),
+        control: &'a ProductionControl<'control>,
+        input: &'a mut uqa_core::image_io::AsyncImageInput<'input>,
+    ) -> impl std::future::Future<Output = Result<crate::plan::RetainedExecutablePlan>>
+           + Send
+           + 'a
+           + use<'a, 'control, 'input> {
         let FunctionBody::Statements(values) = &definition.definition.body else {
             unreachable!("compilation holds its SQL-standard declaration")
         };
@@ -118,10 +121,14 @@ impl StoredStatementCompilation {
             .normalized
             .as_deref()
             .map_or(&values[self.position], Box::as_ref);
-        crate::plan::UnifiedPlan::lower_executable_from_input(statement, aggregates, control, input)
+        async move {
+            crate::plan::UnifiedPlan::lower_executable_from_input(
+                statement, aggregates, control, input,
+            )
             .await?
             .upgrade_stored_dispatches(control, input)
             .await
+        }
     }
 }
 
