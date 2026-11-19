@@ -69,24 +69,23 @@ fn alter(row: &mut CatalogIndexRow, change: impl FnOnce(&mut IndexDefinition)) {
     row.definition_json = Some(serde_json::to_string(&definition).unwrap());
 }
 
+fn projection(table: &Table) -> NativeIndexTable<'_> {
+    NativeIndexTable {
+        name: &table.name,
+        object_id: table.id,
+        columns: table.columns.as_deref(),
+        keys: &table.keys,
+        hierarchy: &table.hierarchy,
+    }
+}
+
 fn check(
     tables: &[Table],
     rows: &[CatalogIndexRow],
     memory: &MemoryBudget,
     token: &CancellationToken,
 ) -> Result<(), SQLError> {
-    validate(
-        tables.iter().map(|table| NativeIndexTable {
-            name: &table.name,
-            object_id: table.id,
-            columns: table.columns.as_deref(),
-            keys: &table.keys,
-            hierarchy: &table.hierarchy,
-        }),
-        rows.iter(),
-        memory,
-        token,
-    )
+    validate(tables.iter().map(projection), rows.iter(), memory, token)
 }
 
 fn accepts(tables: &[Table], rows: &[CatalogIndexRow], expected: bool) {
@@ -380,4 +379,93 @@ fn native_index_references_release_workspace_on_quota_failure_and_cancellation()
     token.cancel();
     assert!(check(&[table], &[row], &memory, &token).is_err());
     assert_eq!(memory.used(), 0);
+}
+
+#[test]
+fn native_index_relationships_yield_inside_one_definition_and_preserve_the_first_invalid_key() {
+    use uqa_core::image_io::{ImageDecodeWindow, ImageDecoder};
+
+    fn measure(
+        row: CatalogIndexRow,
+        window: usize,
+        cancel_after: Option<usize>,
+    ) -> (usize, Result<(), SQLError>) {
+        let memory = MemoryBudget::new(1 << 20);
+        let token = CancellationToken::new();
+        let original = token.clone();
+        let mut decoder = ImageDecoder::new(&memory, &token, move |mut reader| async move {
+            let table = table("items", 1);
+            let mut input = reader.input();
+            validate_with_work(
+                std::iter::once(projection(&table)),
+                std::iter::once(&row),
+                input.memory,
+                &original,
+                &mut input,
+            )
+            .await
+        })
+        .unwrap();
+        let mut windows = 0;
+        let outcome = loop {
+            if cancel_after == Some(windows) {
+                token.cancel();
+            }
+            windows += 1;
+            match decoder.advance(
+                &mut std::io::empty(),
+                ImageDecodeWindow {
+                    bytes: 1,
+                    steps: window,
+                },
+            ) {
+                Ok(Some(())) => break Ok(()),
+                Ok(None) => (),
+                Err(error) => break Err(error),
+            }
+        };
+        drop(decoder);
+        assert_eq!(memory.used(), 0);
+        (windows, outcome)
+    }
+
+    let table = table("items", 1);
+    let base = row(&table, 2);
+    let (small, result) = measure(base.clone(), 1, None);
+    result.unwrap();
+    for in_definition in [true, false] {
+        let mut large = base.clone();
+        let expression = serde_json::json!({"Literal": {"Str": "quoted\"값".repeat(32 << 10)}});
+        if in_definition {
+            let mut definition: serde_json::Value =
+                serde_json::from_str(large.definition_json.as_deref().unwrap()).unwrap();
+            definition["predicate"] = expression;
+            large.definition_json = Some(definition.to_string());
+        } else {
+            large.columns_json = serde_json::json!([expression, "value"]).to_string();
+        }
+        let (wide, result) = measure(large.clone(), 1, None);
+        result.unwrap();
+        assert!(wide > small + 64, "short {small}, wide {wide}");
+        let (batched, result) = measure(large.clone(), 97, None);
+        result.unwrap();
+        assert!(batched < wide);
+        let cancelled = measure(large.clone(), 1, Some(wide / 2)).1.unwrap_err();
+        assert_eq!(cancelled.sqlstate(), Some("57014"));
+        // The missing column is delivered before the malformed next key or a later relationship.
+        large.columns_json = r#"["missing", ]"#.into();
+        let ordinary = check(
+            std::slice::from_ref(&table),
+            std::slice::from_ref(&large),
+            &MemoryBudget::new(1 << 20),
+            &CancellationToken::new(),
+        )
+        .unwrap_err();
+        let scheduled = measure(large, 1, None).1.unwrap_err();
+        assert_eq!(scheduled.to_string(), ordinary.to_string());
+        assert!(
+            scheduled.to_string().contains("missing live column"),
+            "{scheduled}"
+        );
+    }
 }

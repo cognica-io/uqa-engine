@@ -53,6 +53,8 @@ enum Scheduled {
     Types,
     Hierarchies,
     Sequences,
+    Indexes,
+    Constraints,
 }
 
 const ORDERED: &[Predicate] = &[
@@ -73,10 +75,8 @@ const ORDERED: &[Predicate] = &[
     Predicate::Declarations,
     Predicate::Scheduled(Scheduled::Hierarchies),
     Predicate::Scheduled(Scheduled::Sequences),
-    Predicate::Direct(|input| validate_indexes(input.snapshot, input.memory, input.cancellation)),
-    Predicate::Direct(|input| {
-        validate_constraints(input.snapshot, input.memory, input.cancellation)
-    }),
+    Predicate::Scheduled(Scheduled::Indexes),
+    Predicate::Scheduled(Scheduled::Constraints),
     Predicate::Direct(|input| {
         validate_constraint_bindings(input.view, input.routines, input.memory, input.cancellation)
     }),
@@ -269,6 +269,16 @@ impl Scheduled {
                     || !snapshot.definitions.foreign_tables.is_empty()
                     || !snapshot.definitions.sequences.is_empty()
             }
+            Self::Indexes => {
+                !snapshot.tables.is_empty() || !snapshot.definitions.catalog_indexes.is_empty()
+            }
+            Self::Constraints => {
+                !snapshot.tables.is_empty()
+                    || !snapshot.definitions.foreign_tables.is_empty()
+                    || !snapshot.definitions.domains.is_empty()
+                    || !snapshot.definitions.triggers.is_empty()
+                    || !snapshot.definitions.catalog_indexes.is_empty()
+            }
         }
     }
 
@@ -303,6 +313,8 @@ impl Scheduled {
             Self::Types => validate_types(catalog.snapshot(), memory, cancellation),
             Self::Hierarchies => validate_hierarchies(catalog.snapshot(), memory, cancellation),
             Self::Sequences => validate_sequences(catalog.snapshot(), memory, cancellation),
+            Self::Indexes => validate_indexes(catalog.snapshot(), memory, cancellation),
+            Self::Constraints => validate_constraints(catalog.snapshot(), memory, cancellation),
             Self::Foreign => decode_image(
                 &mut std::io::empty(),
                 memory,
@@ -340,6 +352,24 @@ impl Scheduled {
             }
             Self::Sequences => {
                 super::validate_sequences_with_work(
+                    catalog.snapshot(),
+                    input.memory,
+                    cancellation,
+                    input,
+                )
+                .await
+            }
+            Self::Indexes => {
+                super::validate_indexes_with_work(
+                    catalog.snapshot(),
+                    input.memory,
+                    cancellation,
+                    input,
+                )
+                .await
+            }
+            Self::Constraints => {
+                super::validate_constraints_with_work(
                     catalog.snapshot(),
                     input.memory,
                     cancellation,

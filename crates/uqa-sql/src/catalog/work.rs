@@ -207,3 +207,40 @@ impl<Q: Borrow<RelationIdentity> + Sync, W: Work + Send> MapKeyInput<Q, &Relatio
         }
     }
 }
+
+impl<Q: Borrow<str> + Sync + ?Sized, W: Work + Send> MapKeyInput<Q, &str>
+    for ReferenceWork<'_, '_, W>
+{
+    type Error = SQLError;
+
+    async fn checkpoint(&mut self) -> Result<(), SQLError> {
+        Self::checkpoint(self).await
+    }
+
+    async fn compare(&mut self, query: &Q, stored: &&str) -> Result<Ordering, SQLError> {
+        compare_text(self.work, query.borrow(), stored, self.control).await
+    }
+}
+
+impl<'q, 's, W: Work + Send> MapKeyInput<([u8; 16], &'q str), ([u8; 16], &'s str)>
+    for ReferenceWork<'_, '_, W>
+{
+    type Error = SQLError;
+
+    async fn checkpoint(&mut self) -> Result<(), SQLError> {
+        Self::checkpoint(self).await
+    }
+
+    async fn compare(
+        &mut self,
+        query: &([u8; 16], &'q str),
+        stored: &([u8; 16], &'s str),
+    ) -> Result<Ordering, SQLError> {
+        let table = query.0.cmp(&stored.0);
+        if table.is_eq() {
+            compare_text(self.work, query.1, stored.1, self.control).await
+        } else {
+            Ok(table)
+        }
+    }
+}

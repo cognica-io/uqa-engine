@@ -10,9 +10,16 @@ use crate::catalog::{
     test_support::{table_snapshot, NoRoutines},
     CatalogReadView,
 };
-use uqa_core::{memory::MemoryBudget, CancellationToken, RelationIdentity};
+use uqa_core::{
+    catalog_index::CatalogIndexRow,
+    memory::{MemoryBudget, RetainedValue},
+    CancellationToken, RelationIdentity,
+};
 use uqa_sql::{
-    ast::{AutoIncrement, ColumnDef, TableConstraintSet, TableHierarchy},
+    ast::{
+        AutoIncrement, ColumnDef, RelationPersistence, TableConstraintSet, TableHierarchy,
+        TableKeyConstraint, TableKeyConstraintKind,
+    },
     ColumnType,
 };
 
@@ -76,6 +83,64 @@ fn sequences(missing: usize) -> CatalogReadView {
     CatalogReadView::new(catalog)
 }
 
+fn columns_with_missing_reference(missing: usize) -> (Vec<ColumnDef>, Vec<String>) {
+    let columns: Vec<_> = (0..WIDTH)
+        .map(|index| ColumnDef::nullable(format!("v{index:04}"), ColumnType::Integer))
+        .collect();
+    let mut references: Vec<_> = columns.iter().map(|column| column.name.clone()).collect();
+    references[missing] = "absent".into();
+    (columns, references)
+}
+
+fn index_columns(missing: usize) -> CatalogReadView {
+    let mut catalog = snapshot();
+    let table = RelationIdentity::new("public", "items");
+    let (columns, references) = columns_with_missing_reference(missing);
+    let row = CatalogIndexRow {
+        relation: RelationIdentity::new("public", "by_value"),
+        table_name: table.qualified_name(),
+        index_type: "btree".into(),
+        columns_json: serde_json::to_string(&references).unwrap(),
+        parameters_json: "{}".into(),
+        definition_json: None,
+    };
+    catalog.tables.insert(
+        table,
+        table_snapshot([1; 16], columns, TableConstraintSet::default()),
+    );
+    RetainedValue::make_mut(&mut catalog.definitions.catalog_indexes)
+        .insert(row, RelationPersistence::Permanent)
+        .unwrap();
+    CatalogReadView::new(catalog)
+}
+
+fn key_columns(missing: usize) -> CatalogReadView {
+    let mut catalog = snapshot();
+    let (columns, references) = columns_with_missing_reference(missing);
+    let key = TableKeyConstraint {
+        kind: TableKeyConstraintKind::Unique,
+        columns: references,
+        catalog_identity: None,
+        index_identity: None,
+        name: None,
+        included_columns: vec![],
+        nulls_not_distinct: false,
+        without_overlaps: false,
+    };
+    catalog.tables.insert(
+        RelationIdentity::new("public", "items"),
+        table_snapshot(
+            [1; 16],
+            columns,
+            TableConstraintSet {
+                key_constraints: vec![key],
+                ..TableConstraintSet::default()
+            },
+        ),
+    );
+    CatalogReadView::new(catalog)
+}
+
 fn windows_until_rejected(catalog: &CatalogReadView, steps: usize, diagnostic: &str) -> usize {
     let memory = MemoryBudget::new(16 << 20);
     let cancel = CancellationToken::new();
@@ -115,4 +180,20 @@ fn private_catalog_validation_yields_between_inheritance_parents() {
 #[test]
 fn private_catalog_validation_yields_between_implicit_sequence_columns() {
     check_windows(sequences, "missing implicit sequence");
+}
+
+#[test]
+fn private_catalog_validation_yields_between_index_columns() {
+    check_windows(
+        index_columns,
+        "invalid native index reference: missing live column",
+    );
+}
+
+#[test]
+fn private_catalog_validation_yields_between_key_constraint_columns() {
+    check_windows(
+        key_columns,
+        "invalid native constraint reference: missing live column",
+    );
 }

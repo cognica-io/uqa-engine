@@ -52,8 +52,22 @@ pub fn validate_constraints(
     memory: &MemoryBudget,
     cancellation: &CancellationToken,
 ) -> Result<(), SQLError> {
+    super::selection_work::inline(validate_constraints_with_work(
+        snapshot,
+        memory,
+        cancellation,
+        &mut (),
+    ))
+}
+
+async fn validate_constraints_with_work(
+    snapshot: &CatalogReadSnapshot,
+    memory: &MemoryBudget,
+    cancellation: &CancellationToken,
+    work: &mut (impl CatalogWork + Send),
+) -> Result<(), SQLError> {
     use uqa_sql::schema::constraints::native::NativeConstraintTable;
-    uqa_sql::schema::constraints::native::validate(
+    uqa_sql::schema::constraints::native::validate_with_work(
         snapshot
             .tables
             .iter()
@@ -94,7 +108,9 @@ pub fn validate_constraints(
             .flat_map(uqa_sql::catalog::events::EventDefinitions::values),
         memory,
         cancellation,
+        work,
     )
+    .await
 }
 
 /// Join original ordinary-table and index membership for SQL's native ownership predicate.
@@ -103,7 +119,21 @@ pub fn validate_indexes(
     memory: &MemoryBudget,
     cancellation: &CancellationToken,
 ) -> Result<(), SQLError> {
-    uqa_sql::catalog::index::native::validate(
+    super::selection_work::inline(validate_indexes_with_work(
+        snapshot,
+        memory,
+        cancellation,
+        &mut (),
+    ))
+}
+
+async fn validate_indexes_with_work(
+    snapshot: &CatalogReadSnapshot,
+    memory: &MemoryBudget,
+    cancellation: &CancellationToken,
+    work: &mut (impl CatalogWork + Send),
+) -> Result<(), SQLError> {
+    uqa_sql::catalog::index::native::validate_with_work(
         snapshot.tables.iter().map(|(name, table)| {
             uqa_sql::catalog::index::native::NativeIndexTable {
                 name,
@@ -116,7 +146,9 @@ pub fn validate_indexes(
         snapshot.definitions.catalog_indexes.values(),
         memory,
         cancellation,
+        work,
     )
+    .await
 }
 
 /// Join ordinary and foreign column identities with the selected native sequence registry; SQL checks the original dependency forms without migration or value allocation.

@@ -6,9 +6,11 @@
 
 //! Compare derived foreign-key rows with the complete captured partition membership.
 
-use super::{bound_relation_identity_with_control, invalid, Catalog, SQLError};
-use crate::schema::inheritance::foreign_keys::attachment::{declarations, Attachment};
-use uqa_core::memory::{BudgetedMap, ProductionControl, ProductionMap};
+use super::{
+    bound_relation_identity_with_work, invalid, retire_entries, BudgetedMap, Catalog, CatalogWork,
+    ReferenceWork, SQLError,
+};
+use crate::schema::inheritance::foreign_keys::attachment::{declaration_slots, Attachment};
 
 #[derive(Clone, Copy)]
 struct Link {
@@ -17,26 +19,31 @@ struct Link {
 }
 
 pub(super) struct Partitions<'a> {
-    links: ProductionMap<'a, [u8; 16], Link>,
-    first_child: ProductionMap<'a, [u8; 16], [u8; 16]>,
-    families: ProductionMap<'a, ([u8; 16], [u8; 16]), Attachment<'a>>,
-    control: ProductionControl<'a>,
+    links: BudgetedMap<[u8; 16], Link>,
+    first_child: BudgetedMap<[u8; 16], [u8; 16]>,
+    families: BudgetedMap<([u8; 16], [u8; 16]), Attachment<'a>>,
 }
 
 impl<'a> Partitions<'a> {
-    pub(super) fn new(catalog: &Catalog<'a>) -> Result<Self, SQLError> {
+    pub(super) async fn new(
+        catalog: &Catalog<'a>,
+        input: &mut ReferenceWork<'_, '_, impl CatalogWork + Send>,
+    ) -> Result<Self, SQLError> {
         let mut result = Self {
-            links: ProductionMap::new(catalog.control),
-            first_child: ProductionMap::new(catalog.control),
-            families: ProductionMap::new(catalog.control),
-            control: catalog.control,
+            links: BudgetedMap::new(catalog.memory),
+            first_child: BudgetedMap::new(catalog.memory),
+            families: BudgetedMap::new(catalog.memory),
         };
         for (_, table) in &catalog.tables {
-            result.control.check()?;
-            for (family, definition) in declarations(table.columns, table.foreign_keys) {
+            input.checkpoint().await?;
+            for slot in declaration_slots(table.columns, table.foreign_keys) {
+                input.checkpoint().await?;
+                let Some((family, definition)) = slot else {
+                    continue;
+                };
                 if result
                     .families
-                    .insert_copy((table.object_id, family), definition)?
+                    .insert((table.object_id, family), definition)?
                     .is_some()
                 {
                     return Err(invalid("duplicate foreign-key family on one relation"));
@@ -50,10 +57,12 @@ impl<'a> Partitions<'a> {
                 return Err(invalid("partition parent cardinality"));
             }
             let name =
-                bound_relation_identity_with_control(&hierarchy.parents[0], &result.control)?;
+                bound_relation_identity_with_work(&hierarchy.parents[0], input.control, input.work)
+                    .await?;
             let parent = catalog
                 .tables
-                .get(&*name)
+                .get_from(&*name, input)
+                .await?
                 .ok_or_else(|| invalid("missing partition parent"))?;
             if parent.object_id == table.object_id
                 || parent
@@ -64,8 +73,8 @@ impl<'a> Partitions<'a> {
             }
             let previous = result
                 .first_child
-                .insert_copy(parent.object_id, table.object_id)?;
-            result.links.insert_copy(
+                .insert(parent.object_id, table.object_id)?;
+            result.links.insert(
                 table.object_id,
                 Link {
                     parent: parent.object_id,
@@ -73,16 +82,20 @@ impl<'a> Partitions<'a> {
                 },
             )?;
         }
-        result.validate_families()?;
+        result.validate_families(catalog.memory, input).await?;
         Ok(result)
     }
 
-    fn validate_families(&self) -> Result<(), SQLError> {
-        let mut roots = ProductionMap::new(self.control);
+    async fn validate_families(
+        &self,
+        memory: &super::MemoryBudget,
+        input: &mut ReferenceWork<'_, '_, impl CatalogWork + Send>,
+    ) -> Result<(), SQLError> {
+        let mut roots = BudgetedMap::new(memory);
         for ((table, family), definition) in &self.families {
-            self.control.check()?;
+            input.checkpoint().await?;
             if !self.inherits_family(table, Some(*family))
-                && roots.insert_copy(*family, *table)?.is_some()
+                && roots.insert(*family, *table)?.is_some()
             {
                 return Err(invalid(
                     "foreign-key family has independent declaring owners",
@@ -90,12 +103,16 @@ impl<'a> Partitions<'a> {
             }
             let mut next = self.first_child.get(table).copied();
             while let Some(child) = next {
-                self.control.check()?;
+                input.checkpoint().await?;
                 let inherited = self
                     .families
                     .get(&(child, *family))
                     .ok_or_else(|| invalid("missing inherited foreign-key family"))?;
-                if inherited != definition {
+                if !inherited
+                    .same_reference_with_work(*definition, input)
+                    .await?
+                    || !inherited.same_options(*definition)
+                {
                     return Err(invalid("inherited foreign-key definition"));
                 }
                 next = self
@@ -105,7 +122,7 @@ impl<'a> Partitions<'a> {
                     .next_sibling;
             }
         }
-        Ok(())
+        retire_entries(roots.into_entries(), input.control, input.work).await
     }
 
     pub(super) fn parent(&self, table: &[u8; 16]) -> Option<[u8; 16]> {
@@ -118,16 +135,17 @@ impl<'a> Partitions<'a> {
             .is_some_and(|(parent, family)| self.families.get(&(parent, family)).is_some())
     }
 
-    pub(super) fn complete(
+    pub(super) async fn complete(
         &self,
         target: [u8; 16],
         seen: &BudgetedMap<[u8; 16], ()>,
+        input: &mut ReferenceWork<'_, '_, impl CatalogWork + Send>,
     ) -> Result<(), SQLError> {
         for parent in std::iter::once(target).chain(seen.iter().map(|(table, ())| *table)) {
-            self.control.check()?;
+            input.checkpoint().await?;
             let mut next = self.first_child.get(&parent).copied();
             while let Some(child) = next {
-                self.control.check()?;
+                input.checkpoint().await?;
                 if !seen.contains_key(&child) {
                     return Err(invalid("missing derived referenced-partition constraint"));
                 }
@@ -139,5 +157,13 @@ impl<'a> Partitions<'a> {
             }
         }
         Ok(())
+    }
+    pub(super) async fn retire(
+        self,
+        input: &mut ReferenceWork<'_, '_, impl CatalogWork + Send>,
+    ) -> Result<(), SQLError> {
+        retire_entries(self.families.into_entries(), input.control, input.work).await?;
+        retire_entries(self.first_child.into_entries(), input.control, input.work).await?;
+        retire_entries(self.links.into_entries(), input.control, input.work).await
     }
 }

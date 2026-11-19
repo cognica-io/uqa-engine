@@ -6,15 +6,22 @@
 
 //! Borrow the definition fields `PostgreSQL` compares when attaching a foreign key.
 
-use crate::ast::{ColumnDef, ForeignKey, ForeignKeyAction, ForeignKeyMatch, ForeignKeyRef};
+use crate::{
+    ast::{ColumnDef, ForeignKey, ForeignKeyAction, ForeignKeyMatch, ForeignKeyRef},
+    catalog::{
+        work::{compare_text, ReferenceWork},
+        CatalogWork,
+    },
+    SQLError,
+};
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy)]
 pub(crate) struct Attachment<'a> {
     reference: Reference<'a>,
     options: Options,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy)]
 struct Reference<'a> {
     local: &'a [String],
     target: &'a str,
@@ -71,9 +78,44 @@ impl<'a> Attachment<'a> {
         }
     }
 
-    pub(super) fn same_reference(self, other: Self) -> bool {
-        self.reference == other.reference
+    pub(crate) async fn same_reference_with_work(
+        self,
+        other: Self,
+        input: &mut ReferenceWork<'_, '_, impl CatalogWork + Send>,
+    ) -> Result<bool, SQLError> {
+        let left = self.reference;
+        let right = other.reference;
+        Ok(same_columns(left.local, right.local, input).await?
+            && compare_text(input.work, left.target, right.target, input.control)
+                .await?
+                .is_eq()
+            && same_columns(left.columns, right.columns, input).await?
+            && left.period == right.period)
     }
+
+    pub(crate) fn same_options(self, other: Self) -> bool {
+        self.options == other.options
+    }
+}
+
+pub(crate) async fn same_columns(
+    left: &[String],
+    right: &[String],
+    input: &mut ReferenceWork<'_, '_, impl CatalogWork + Send>,
+) -> Result<bool, SQLError> {
+    if left.len() != right.len() {
+        return Ok(false);
+    }
+    for (left, right) in left.iter().zip(right) {
+        input.checkpoint().await?;
+        if compare_text(input.work, left, right, input.control)
+            .await?
+            .is_ne()
+        {
+            return Ok(false);
+        }
+    }
+    Ok(true)
 }
 
 /// Catalog identities, names, validation flags, selected indexes and SET column subsets are not attachment-equivalence fields. Their independent validity remains with their native owners.
@@ -81,15 +123,22 @@ pub(crate) fn declarations<'a>(
     columns: &'a [ColumnDef],
     foreign_keys: &'a [ForeignKey],
 ) -> impl Iterator<Item = ([u8; 16], Attachment<'a>)> + 'a {
+    declaration_slots(columns, foreign_keys).flatten()
+}
+
+pub(crate) fn declaration_slots<'a>(
+    columns: &'a [ColumnDef],
+    foreign_keys: &'a [ForeignKey],
+) -> impl Iterator<Item = Option<([u8; 16], Attachment<'a>)>> + 'a {
     columns
         .iter()
-        .filter_map(|column| {
+        .map(|column| {
             let reference = column.references.as_ref()?;
             Some((reference.object_id?, Attachment::column(column, reference)))
         })
         .chain(
             foreign_keys
                 .iter()
-                .filter_map(|key| Some((key.object_id?, Attachment::table(key)))),
+                .map(|key| Some((key.object_id?, Attachment::table(key)))),
         )
 }

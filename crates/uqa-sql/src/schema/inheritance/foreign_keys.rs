@@ -28,12 +28,17 @@ pub fn attachable_foreign_key<'a>(
     parent_key: &ForeignKey,
     candidates: &'a [ForeignKey],
 ) -> Result<Option<&'a ForeignKey>, SQLError> {
+    let control = uqa_core::memory::ProductionControl::uncontrolled();
+    let mut input = crate::catalog::work::ReferenceWork {
+        control: &control,
+        work: &mut (),
+    };
     let parent = attachment::Attachment::table(parent_key);
     let mut ordered = candidates.iter().collect::<Vec<_>>();
     ordered.sort_by(|left, right| left.name.cmp(&right.name));
     for candidate in ordered {
         let definition = attachment::Attachment::table(candidate);
-        if !definition.same_reference(parent) {
+        if !crate::catalog::work::inline(definition.same_reference_with_work(parent, &mut input))? {
             continue;
         }
         if candidate.enforced != parent_key.enforced {
@@ -49,7 +54,7 @@ pub fn attachable_foreign_key<'a>(
                 hint: None,
             });
         }
-        if definition == parent {
+        if definition.same_options(parent) {
             return Ok(Some(candidate));
         }
     }

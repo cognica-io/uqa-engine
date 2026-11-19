@@ -54094,6 +54094,32 @@
     {
       "package": "uqa-execution",
       "kind": "lib",
+      "test": "private_catalog_validation_yields_between_index_columns",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/relationships/table_tests.rs",
+      "capability": "Restored index column references",
+      "workload": "Place an absent column first and last in a stored index with 256 column references and validate with one-step and 32-step windows.",
+      "invariant": "The late reference takes additional windows to reach. Both positions return the original missing-column diagnostic and release all private memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "private_catalog_validation_yields_between_key_constraint_columns",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/relationships/table_tests.rs",
+      "capability": "Restored unique key column references",
+      "workload": "Place an absent column first and last in a captured unique key with 256 column references and validate with one-step and 32-step windows.",
+      "invariant": "The late reference takes additional windows to reach. Both positions return the original missing-column diagnostic and release all private memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
       "test": "one_step_relationship_validation_reaches_last_missing_routine_owner_in_order",
       "cases": 1,
       "source": "crates/uqa-execution/src/catalog/image_validation/relationships/authority_tests.rs",
@@ -55164,7 +55190,7 @@
       "cases": 1,
       "source": "crates/uqa-sql/src/catalog/index/native/tests.rs",
       "capability": "Native index ownership validation",
-      "workload": "Validate a cyclic pair of table/index parent references using admitted node-local visitation.",
+      "workload": "Validate a cyclic pair of table/index parent references using the admitted index OIDs to record visits.",
       "invariant": "Cyclic index ancestry rejects without recursive traversal or catalog mutation.",
       "case_names": [
         ""
@@ -55184,6 +55210,19 @@
       ]
     },
     {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_index_relationships_yield_inside_one_definition_and_preserve_the_first_invalid_key",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/index/native/tests.rs",
+      "capability": "Native index ownership validation",
+      "workload": "Read a large escaped UTF-8 predicate or expression key with one-step and 97-step windows, then cancel during the read.",
+      "invariant": "Reading a larger record takes additional work windows, cancellation returns all memory, and an absent column is reported before a later malformed key.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
       "package": "uqa-execution",
       "kind": "lib",
       "test": "native_catalog_indexes_join_original_table_incarnations_and_release_rejected_workspace",
@@ -55192,6 +55231,32 @@
       "capability": "Native index ownership validation",
       "workload": "Join the same immutable native index with absent, original and replaced table incarnations.",
       "invariant": "Execution supplies original catalog owners to SQL and rejected validation leaves them unchanged.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_constraint_check_columns_yield_at_each_stored_node_before_the_first_error",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/constraints/native/tests/work.rs",
+      "capability": "Native constraint reference validation",
+      "workload": "Move a missing column across a stored CHECK expression with 4,096 nodes and validate with single-step and batched windows.",
+      "invariant": "The validation window advances through the original expression order and reports the same missing column as inline validation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_constraint_foreign_keys_yield_during_stored_index_matching_and_scratch_retirement",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/constraints/native/tests/work.rs",
+      "capability": "Native constraint reference validation",
+      "workload": "Match a 512-column foreign key to a stored unique index and release the catalog scratch state in work windows.",
+      "invariant": "Bounded and inline validation agree, and successful, cancelled and memory-denied operations release their reservations.",
       "case_names": [
         ""
       ]

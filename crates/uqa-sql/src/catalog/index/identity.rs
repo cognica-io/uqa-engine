@@ -7,24 +7,50 @@
 //! Validate stored index incarnations independently of their SQL names.
 
 use super::IndexCatalogIdentity;
+use crate::catalog::work::{inline, Work};
 use crate::schema::constraint_metadata::{
     CatalogObjectAllocator, CatalogOidClass, ConstraintMetadataError, ConstraintMetadataResult,
 };
-use uqa_core::catalog_identity::CatalogObjectIdentity;
+use uqa_core::{catalog_identity::CatalogObjectIdentity, memory::ProductionControl};
 
 impl IndexCatalogIdentity {
     pub fn validate(&self, table_object_id: [u8; 16]) -> ConstraintMetadataResult<()> {
+        let valid = inline(self.matches_table_with_work(
+            table_object_id,
+            &ProductionControl::uncontrolled(),
+            &mut (),
+        ))
+        .expect("inline identity checking has no cancellation or admission");
+        if valid {
+            Ok(())
+        } else {
+            Err(ConstraintMetadataError::Invalid(
+                "invalid index catalog identity or indexed table incarnation".into(),
+            ))
+        }
+    }
+
+    pub(super) async fn matches_table_with_work<W: Work + Send>(
+        &self,
+        table_object_id: [u8; 16],
+        control: &ProductionControl<'_>,
+        work: &mut W,
+    ) -> Result<bool, crate::SQLError> {
         if !self.identity.is_valid()
             || self.table_object_id == [0; 16]
             || self.table_object_id != table_object_id
             || self.physical_key.is_empty()
-            || self.physical_key.contains('\0')
         {
-            return Err(ConstraintMetadataError::Invalid(
-                "invalid index catalog identity or indexed table incarnation".into(),
-            ));
+            return Ok(false);
         }
-        Ok(())
+        for part in self.physical_key.as_bytes().chunks(4096) {
+            work.checkpoint().await?;
+            control.check()?;
+            if part.contains(&0) {
+                return Ok(false);
+            }
+        }
+        Ok(true)
     }
 
     pub fn allocate(
