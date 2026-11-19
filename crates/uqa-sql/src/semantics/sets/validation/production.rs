@@ -137,10 +137,6 @@ fn selected_setness(
     )
 }
 
-#[expect(
-    clippy::too_many_lines,
-    reason = "preserves SELECT schema and row identity"
-)]
 pub fn expression_may_return_set_with_control(
     engine: &dyn crate::routines::RoutineResolution,
     resolver: &dyn FunctionTypeResolver,
