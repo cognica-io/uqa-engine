@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use super::super::super::{Document, MemoryDocumentStore};
+use super::super::super::{snapshot::RETAINED_READ_CHECKS, Document, MemoryDocumentStore};
 use super::*;
 use crate::DocumentStore;
 use uqa_core::Value;
@@ -74,6 +74,7 @@ fn paged_memory_projection_compiles_only_encountered_layouts_once() {
         })
         .unwrap();
     assert_eq!(COMPILED.get(), 2);
+    RETAINED_READ_CHECKS.set(0);
     let warmed = allocation_counter::measure(|| {
         for after in (0..80).step_by(8) {
             store
@@ -84,6 +85,7 @@ fn paged_memory_projection_compiles_only_encountered_layouts_once() {
                 .unwrap();
         }
     });
+    assert_eq!(RETAINED_READ_CHECKS.get(), 0);
     assert!(warmed.bytes_total < 1024, "{warmed:?}");
     assert_eq!(COMPILED.get(), 2);
     assert_eq!(

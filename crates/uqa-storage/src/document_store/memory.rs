@@ -629,6 +629,9 @@ impl DocumentStore for MemoryDocumentStore {
         fields: &[&str],
         visitor: &mut dyn FnMut(DocId, &[&Value]) -> bool,
     ) -> StorageBackendResult<Option<usize>> {
+        if self.retention.is_none() {
+            return Ok(Some(self.visit_next_rows(after, limit, fields, visitor)));
+        }
         self.check_retained_read()?;
         let visited = self.visit_next_rows(after, limit, fields, &mut |id, row| {
             self.check_retained_read().is_ok() && visitor(id, row)
