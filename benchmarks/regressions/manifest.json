@@ -52063,6 +52063,19 @@
     {
       "package": "uqa-sql",
       "kind": "lib",
+      "test": "captured_signature_checks_large_defaults_before_the_declared_result_and_releases_input",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/routines/declaration/captured/tests.rs",
+      "capability": "Stored routine restoration",
+      "workload": "Validate routine defaults with a missing role at the end of two-element and 4,096-element arrays and an invalid polymorphic return.",
+      "invariant": "Late role lookup consumes additional work windows, precedes return-type rejection and releases both input allowances.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
       "test": "bound_routine_projection_copies_values_at_the_original_nested_source_and_mutation_slots",
       "cases": 1,
       "source": "crates/uqa-sql/src/plan/copy/stored_plan/tests.rs",

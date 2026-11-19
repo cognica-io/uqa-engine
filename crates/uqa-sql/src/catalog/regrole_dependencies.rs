@@ -152,6 +152,37 @@ impl<'a> Collector<'a> {
         }
         Ok(())
     }
+
+    async fn expression(
+        &mut self,
+        expression: &Expr,
+        assignment_target: Option<&ColumnType>,
+        work: &mut (impl Work + Send),
+    ) -> Result<(), SQLError> {
+        let control = self.control;
+        if let (Expr::Literal(Value::Str(input)), Some(ty)) = (expression, assignment_target) {
+            if matches!(
+                base_type_with_work(
+                    ty,
+                    &control,
+                    &mut ReferenceWork {
+                        control: &control,
+                        work
+                    }
+                )
+                .await?,
+                ColumnType::Regrole
+            ) {
+                self.inputs
+                    .push_produced(work.text(input, &control).await?)?;
+            }
+        }
+        let mut nodes = expression.stored_nodes_with_budget(control.budget())?;
+        while let Some(node) = nodes.next_scalar(&control, work).await? {
+            self.observe(Node::Syntax(node), work).await?;
+        }
+        Ok(())
+    }
 }
 
 impl ScalarObserver for Collector<'_> {
@@ -213,19 +244,46 @@ impl StoredRegroleConstants {
         work: &mut (impl Work + Send),
     ) -> Result<Produced<Self>, SQLError> {
         let mut collector = Collector::new(control);
-        if let (Expr::Literal(Value::Str(input)), Some(ty)) = (expression, assignment_target) {
-            if matches!(
-                base_type_with_work(ty, control, &mut ReferenceWork { control, work }).await?,
-                ColumnType::Regrole
-            ) {
-                collector
-                    .inputs
-                    .push_produced(work.text(input, control).await?)?;
-            }
-        }
-        let mut nodes = expression.stored_nodes_with_budget(control.budget())?;
-        while let Some(node) = nodes.next_scalar(control, work).await? {
-            collector.observe(Node::Syntax(node), work).await?;
+        collector
+            .expression(expression, assignment_target, work)
+            .await?;
+        collector.finish()
+    }
+
+    pub(crate) async fn from_routine_parameters<
+        T: crate::routines::declaration::RoutineTypeCatalog + ?Sized,
+    >(
+        catalog: &T,
+        parameters: &[crate::ast::FunctionParam],
+        control: &ProductionControl<'_>,
+        work: &mut (impl Work + Send),
+    ) -> Result<Produced<Self>, SQLError> {
+        let mut collector = Collector::new(control);
+        for parameter in parameters {
+            control.check()?;
+            work.checkpoint().await?;
+            let Some(default) = &parameter.default else {
+                continue;
+            };
+            let target = match catalog
+                .resolve_catalog_column_type_with_control(&parameter.type_name, control)?
+            {
+                Some(ty) => Some(ty),
+                None => match ColumnType::from_sql_name_with_input_work(
+                    &parameter.type_name,
+                    control,
+                    &mut ReferenceWork { control, work },
+                )
+                .await
+                {
+                    Ok(ty) => Some(ty),
+                    Err(error) if error.native_resource_error().is_some() => return Err(error),
+                    Err(_) => None,
+                },
+            };
+            collector
+                .expression(default, target.as_deref(), work)
+                .await?;
         }
         collector.finish()
     }

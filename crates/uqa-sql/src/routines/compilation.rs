@@ -12,10 +12,7 @@ pub use ownership::bind_analyzed_sql_body_types_owned;
 pub use standard::SQLStandardBodyCompilation;
 
 use super::{
-    declaration::{
-        resolve_plpgsql_datum_types, routine_parameter_regrole_constants,
-        validate_routine_declaration, validate_routine_language, RoutineTypeCatalog,
-    },
+    declaration::{resolve_plpgsql_datum_types, RoutineTypeCatalog},
     merge_columns::StoredMergeColumnCatalog,
     CompiledFunctionBody, RoutineResolution,
 };
@@ -76,6 +73,45 @@ pub struct RoutineCompilationContext<'a> {
     pub regroles: &'a dyn StoredRegroleResolver,
 }
 
+/// The catalog services a single native session supplies when it compiles a restored definition.
+pub trait StoredRoutineCatalog:
+    RoutineTypeCatalog
+    + RoutineParserCatalog
+    + RoutineCompilationCatalog
+    + RoutineResolution
+    + StoredRelationCatalog
+    + StoredQuerySequences
+    + StoredMergeColumnCatalog
+    + StoredRegroleResolver
+{
+}
+impl<C> StoredRoutineCatalog for C where
+    C: RoutineTypeCatalog
+        + RoutineParserCatalog
+        + RoutineCompilationCatalog
+        + RoutineResolution
+        + StoredRelationCatalog
+        + StoredQuerySequences
+        + StoredMergeColumnCatalog
+        + StoredRegroleResolver
+{
+}
+
+impl<'a> RoutineCompilationContext<'a> {
+    pub fn from_catalog(catalog: &'a impl StoredRoutineCatalog) -> Self {
+        Self {
+            types: catalog,
+            parsers: catalog,
+            catalog,
+            routines: catalog,
+            relations: catalog,
+            sequences: catalog,
+            merge: catalog,
+            regroles: catalog,
+        }
+    }
+}
+
 pub fn compile_function_body(
     context: &RoutineCompilationContext<'_>,
     def: &CreateFunction,
@@ -130,11 +166,7 @@ pub(super) fn validate_routine_signature(
     context: &RoutineCompilationContext<'_>,
     def: &CreateFunction,
 ) -> Result<StoredRegroleConstants, SQLError> {
-    validate_routine_language(def)?;
-    let stored_regrole_constants = routine_parameter_regrole_constants(context.types, def);
-    stored_regrole_constants.validate_inputs_with(context.regroles)?;
-    validate_routine_declaration(def)?;
-    Ok(stored_regrole_constants)
+    super::declaration::signature_dependencies(context, def)
 }
 
 /// PL/pgSQL's compiler rejects declared arguments of a trigger function, which reads its arguments from `TG_ARGV`.

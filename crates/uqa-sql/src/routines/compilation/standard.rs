@@ -125,6 +125,44 @@ impl SQLStandardBodyCompilation {
     ) -> Result<Self, SQLError> {
         control.check()?;
         let signature = validate_routine_signature(context, definition)?;
+        let mut state = Self::for_body(context, definition, persisted, control)?;
+        if signature.has_constants() {
+            state.reserve_roles(control)?;
+            state.roles.push(signature.retain(control)?);
+        }
+        Ok(state)
+    }
+
+    /// Prepare a stored SQL-standard body after consuming its signature through the same private catalog and work window as the body.
+    pub async fn new_from_input(
+        catalog: &impl super::StoredRoutineCatalog,
+        definition: &CreateFunction,
+        control: &ProductionControl<'_>,
+        input: &mut uqa_core::image_io::AsyncImageInput<'_>,
+    ) -> Result<Self, SQLError> {
+        let signature = crate::routines::declaration::validate_stored_routine_signature_from(
+            catalog, definition, control, input,
+        )
+        .await?;
+        let mut state = Self::for_body(
+            &RoutineCompilationContext::from_catalog(catalog),
+            definition,
+            true,
+            control,
+        )?;
+        if signature.has_constants() {
+            state.reserve_roles(control)?;
+            state.roles.push(signature);
+        }
+        Ok(state)
+    }
+
+    fn for_body(
+        context: &RoutineCompilationContext<'_>,
+        definition: &CreateFunction,
+        persisted: bool,
+        control: &ProductionControl<'_>,
+    ) -> Result<Self, SQLError> {
         let FunctionBody::Statements(statements) = &definition.body else {
             return Err(SQLError::Internal(
                 "expected a SQL-standard routine body".into(),
@@ -132,7 +170,7 @@ impl SQLStandardBodyCompilation {
         };
         let compiler = StatementCompiler::new(context, definition, control)?;
         let (plans, memory) = slots(statements.len(), control)?;
-        let mut state = Self {
+        Ok(Self {
             compiler,
             lowering: SQLRoutineLowering {
                 bind_catalog_dependencies: true,
@@ -148,21 +186,7 @@ impl SQLStandardBodyCompilation {
             role_memory: None,
             checked_roles: 0,
             next_role_input: 0,
-        };
-        state.collect_roles(signature, control)?;
-        Ok(state)
-    }
-
-    fn collect_roles(
-        &mut self,
-        roles: StoredRegroleConstants,
-        control: &ProductionControl<'_>,
-    ) -> Result<(), SQLError> {
-        if roles.has_constants() {
-            self.reserve_roles(control)?;
-            self.roles.push(roles.retain(control)?);
-        }
-        Ok(())
+        })
     }
 
     fn reserve_roles(&mut self, control: &ProductionControl<'_>) -> Result<(), SQLError> {
