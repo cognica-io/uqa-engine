@@ -52128,6 +52128,19 @@
     {
       "package": "uqa-sql",
       "kind": "lib",
+      "test": "stored_query_and_window_defaults_copy_native_fields_before_publication",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/image/input/plans/statements/routines/tests/footprints.rs",
+      "capability": "Stored routine restoration",
+      "workload": "Read native routine images containing two and 4,096 VALUES rows or window order keys in one parameter default.",
+      "invariant": "Each large input requires additional construction windows, interrupted fields release their allowances, and completed fields match the ordinary stored declaration and footprint.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
       "test": "restored_native_parameter_literals_keep_their_independent_payload_across_windows",
       "cases": 1,
       "source": "crates/uqa-sql/src/catalog/image/input/plans/statements/routines/tests/footprints.rs",
@@ -72744,6 +72757,22 @@
       "capability": "Stored routine declaration validation",
       "workload": "Restore backups with an early or late duplicate argument and an invalid polymorphic result on each provider.",
       "invariant": "The duplicate argument wins in both cases. Moving the duplicate later changes when the running job reports it.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "stored_query_and_window_defaults_preserve_public_restore_diagnostics",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/backup/restore/tests/routine_declarations/corruption/stored_defaults.rs",
+      "capability": "Stored routine declaration validation",
+      "workload": "Restore authenticated archives with scalar defaults, single 1,024-row query or 1,024-key window defaults, and missing names in the first or last parameter.",
+      "invariant": "Valid defaults keep their call results after publication and durable reopen. Each invalid archive reports its original dependency, scalar, or name diagnostic before publication and releases its budget.",
       "case_names": [
         "case_1_memory",
         "case_2_sqlite_native",

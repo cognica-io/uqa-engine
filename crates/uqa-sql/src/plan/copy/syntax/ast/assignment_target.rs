@@ -16,20 +16,20 @@ syntax_enum!(crate::ast::AssignmentPathStep {
     Subscripts { first_argument, dimensions, slice, bounds }
 });
 
-syntax_enum!(crate::ast::AssignmentStep<crate::ast::Expr> {
+native_enum!(crate::ast::AssignmentStep<crate::ast::Expr> {
     Field(value0),
     Index(value0),
     Slice { lower, upper }
 });
 
-syntax_struct!(crate::ast::AssignmentTarget {
+native_struct!(crate::ast::AssignmentTarget {
     column,
     indirection
 });
 
-syntax_enum!(crate::ast::AssignmentTargets {
+native_enum!(crate::ast::AssignmentTargets {
     Single(value0),
     Multiple(value0)
 });
 
-syntax_struct!(crate::ast::MultipleAssignmentTargets<crate::ast::Expr> { targets, source_positions, source_width });
+native_struct!(crate::ast::MultipleAssignmentTargets<crate::ast::Expr> { targets, source_positions, source_width });

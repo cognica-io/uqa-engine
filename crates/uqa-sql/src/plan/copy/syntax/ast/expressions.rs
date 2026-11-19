@@ -127,7 +127,7 @@ syntax_expression! {
     RetainedLiteral(value0)
 }
 
-syntax_enum!(crate::ast::FrameBound {
+native_enum!(crate::ast::FrameBound {
     UnboundedPreceding,
     UnboundedFollowing,
     CurrentRow,
@@ -156,7 +156,7 @@ native_struct!(crate::ast::OrderBy {
     nulls
 });
 
-syntax_struct!(crate::ast::Projection { expr, alias });
+native_struct!(crate::ast::Projection { expr, alias });
 
 syntax_struct!(crate::ast::WindowCallModifiers {
     distinct,
@@ -164,13 +164,13 @@ syntax_struct!(crate::ast::WindowCallModifiers {
     within_group
 });
 
-syntax_struct!(crate::ast::WindowDefinition {
+native_struct!(crate::ast::WindowDefinition {
     name,
     inherited,
     spec
 });
 
-syntax_struct!(crate::ast::WindowFrame {
+native_struct!(crate::ast::WindowFrame {
     mode,
     start,
     end,
@@ -178,17 +178,18 @@ syntax_struct!(crate::ast::WindowFrame {
     exclusion
 });
 
-syntax_struct!(crate::ast::WindowReference { name, kind });
+native_struct!(crate::ast::WindowReference { name, kind });
 
 syntax_enum!(crate::ast::WindowReferenceKind { Direct, Copy });
 
 impl SyntaxCopy for crate::ast::WindowSpec {
     fn copy_syntax(&self, copying: &mut Copying<'_>) -> Result<Self> {
+        if copying.purpose == crate::plan::copy::CopyPurpose::Stored {
+            return crate::plan::copy::stored_plan::Inline::project(self, copying);
+        }
         Ok(Self {
             raw_definition: copying.field("raw_definition", |copying| {
-                if copying.parameters.is_some()
-                    || copying.purpose == crate::plan::copy::CopyPurpose::Stored
-                {
+                if copying.parameters.is_some() {
                     Ok(None)
                 } else {
                     self.raw_definition.copy_syntax(copying)

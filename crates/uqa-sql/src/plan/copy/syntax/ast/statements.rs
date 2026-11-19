@@ -62,7 +62,7 @@ syntax_struct!(crate::ast::DeferredCreateForeignTable {
     if_not_exists
 });
 
-syntax_struct!(crate::ast::DeleteStmt {
+native_struct!(crate::ast::DeleteStmt {
     table,
     target_relation_bound,
     target_qualifier,
@@ -123,7 +123,7 @@ syntax_struct!(crate::ast::IndexColumnOrder {
     nulls_first
 });
 
-syntax_struct!(crate::ast::InsertStmt {
+native_struct!(crate::ast::InsertStmt {
     table,
     target_relation_bound,
     target_qualifier,
@@ -139,7 +139,7 @@ syntax_struct!(crate::ast::InsertStmt {
     returning_aliases
 });
 
-syntax_struct!(crate::ast::MergeStmt {
+native_struct!(crate::ast::MergeStmt {
     with,
     target,
     target_qualifier,
@@ -157,6 +157,9 @@ impl SyntaxCopy for crate::ast::MergeTargetColumnBinding {
     fn copy_syntax(&self, copying: &mut Copying<'_>) -> Result<Self> {
         copying.check()?;
         copying.has_merge_targets = true;
+        if copying.purpose == crate::plan::copy::CopyPurpose::Stored {
+            return crate::plan::copy::stored_plan::Inline::project(self, copying);
+        }
         Ok(Self {
             object_id: copying.field("object_id", |_| Ok(self.object_id))?,
             attribute_number: copying.field("attribute_number", |_| Ok(self.attribute_number))?,
@@ -167,7 +170,7 @@ impl SyntaxCopy for crate::ast::MergeTargetColumnBinding {
     }
 }
 
-syntax_enum!(crate::ast::MergeWhen {
+native_enum!(crate::ast::MergeWhen {
     UpdateMatched { condition, assignments },
     DeleteMatched { condition },
     UpdateNotMatchedBySource { condition, assignments },
@@ -178,7 +181,7 @@ syntax_enum!(crate::ast::MergeWhen {
     NothingNotMatchedBySource { condition }
 });
 
-syntax_struct!(crate::ast::OnConflict {
+native_struct!(crate::ast::OnConflict {
     predicate,
     constraint,
     conflict_columns,
@@ -186,7 +189,7 @@ syntax_struct!(crate::ast::OnConflict {
     action
 });
 
-syntax_enum!(crate::ast::OnConflictAction {
+native_enum!(crate::ast::OnConflictAction {
     Nothing,
     Update { assignments, r#where }
 });
@@ -198,26 +201,29 @@ syntax_struct!(crate::ast::ReturningAliases {
     new_explicit
 });
 
-syntax_struct!(crate::ast::SelectStmt {
-    windows,
-    projections,
-    values,
-    from,
-    r#where,
-    group_by,
-    grouping_sets,
-    group_distinct,
-    having,
-    order_by,
-    limit,
-    with_ties,
-    offset,
-    with,
-    set_op,
-    distinct,
-    distinct_on,
-    locking
-});
+native_struct!(
+    recursive,
+    crate::ast::SelectStmt {
+        windows,
+        projections,
+        values,
+        from,
+        r#where,
+        group_by,
+        grouping_sets,
+        group_distinct,
+        having,
+        order_by,
+        limit,
+        with_ties,
+        offset,
+        with,
+        set_op,
+        distinct,
+        distinct_on,
+        locking
+    }
+);
 
 syntax_struct!(crate::ast::SetConstraintName {
     catalog,
@@ -225,7 +231,7 @@ syntax_struct!(crate::ast::SetConstraintName {
     name
 });
 
-syntax_struct!(crate::ast::SetOp {
+native_struct!(crate::ast::SetOp {
     kind,
     all,
     left,
@@ -358,7 +364,7 @@ syntax_struct!(crate::ast::TruncateTarget {
     include_descendants
 });
 
-syntax_struct!(crate::ast::UpdateStmt {
+native_struct!(crate::ast::UpdateStmt {
     table,
     target_relation_bound,
     target_qualifier,

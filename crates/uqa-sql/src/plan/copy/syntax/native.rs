@@ -11,6 +11,8 @@ use crate::{ast, construction, plan::copy::CopyPurpose};
 use std::future::Future;
 use uqa_core::memory::{MemoryError, Produced, ProductionControl};
 
+mod collections;
+
 pub(crate) struct Input<'s> {
     copying: Copying<'s>,
     pub(crate) work: construction::Work<'s>,
@@ -64,7 +66,6 @@ macro_rules! inline_fields {
     )* };
 }
 
-// A query or window is rejected by routine parameter analysis. Preserve its existing stored projection and subsequent diagnostic when such syntax is supplied privately.
 inline_fields!(
     ast::BinaryOp,
     ast::FunctionOrderSyntax,
@@ -72,8 +73,8 @@ inline_fields!(
     ast::InternalColumnRef,
     ast::NullsOrder,
     ast::WindowCallModifiers,
-    ast::WindowSpec,
-    ast::SelectStmt,
+    ast::WindowReferenceKind,
+    ast::RetainedRowSource,
     ast::CompositeRowLayout,
     ast::InternalRelationId,
     ast::SetOpKind,
@@ -87,7 +88,8 @@ inline_fields!(
     bool,
     usize,
     u32,
-    i16
+    i16,
+    [u8; 16]
 );
 
 impl Field for ast::RetainedInputLiteral {
@@ -143,31 +145,6 @@ impl Field for crate::ColumnIdentity {
         )
         .await?;
         Ok(input.copying.take(value))
-    }
-}
-
-impl<T: Field + Ord> Field for uqa_core::memory::OwnedSet<T>
-where
-    for<'a, 'b, 'c> crate::catalog::work::ReferenceWork<'a, 'b, construction::Work<'c>>:
-        uqa_core::memory::MapKeyInput<T, Error = crate::SQLError>,
-{
-    async fn copy_from<'s>(&'s self, input: &mut Input<'s>) -> Result<Self> {
-        let mut output = Self::new();
-        for value in self {
-            input.work.checkpoint().await;
-            input.copying.reserve(Self::entry_bytes())?;
-            let key = input.field(value).await?;
-            let key = ProductionControl::uncontrolled().finish(key, None)?;
-            let control = input.control();
-            let mut comparison = crate::catalog::work::ReferenceWork {
-                control: &control,
-                work: &mut input.work,
-            };
-            output
-                .insert_produced_key_from(key, &mut comparison)
-                .await?;
-        }
-        Ok(output)
     }
 }
 

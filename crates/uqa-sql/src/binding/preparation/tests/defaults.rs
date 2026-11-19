@@ -256,3 +256,70 @@ fn default_membership_inputs_finish_before_enclosing_call_replacement() {
         }
     }
 }
+
+#[test]
+fn wide_routine_defaults_keep_the_first_query_window_or_name_error() {
+    let row = std::iter::repeat_n("(1)", 1024)
+        .collect::<Vec<_>>()
+        .join(",");
+    let order = std::iter::repeat_n("1", 1024).collect::<Vec<_>>().join(",");
+    let query = format!("(SELECT v FROM (VALUES {row}) AS s(v))");
+    let window = format!("row_number() OVER (ORDER BY {order})");
+    for (first, last, state, diagnostic) in [
+        (
+            query.as_str(),
+            "absent",
+            "0A000",
+            "cannot use subquery in DEFAULT expression",
+        ),
+        (
+            window.as_str(),
+            "absent",
+            "42P20",
+            "window functions are not allowed in DEFAULT expressions",
+        ),
+        (
+            "absent",
+            query.as_str(),
+            "42703",
+            "column \"absent\" does not exist",
+        ),
+        (
+            "absent",
+            window.as_str(),
+            "42703",
+            "column \"absent\" does not exist",
+        ),
+    ] {
+        let crate::Statement::CreateFunction(definition) = crate::compile(&format!(
+            "CREATE FUNCTION f(v bigint[] DEFAULT ARRAY[{first},{last}]) RETURNS bigint[] LANGUAGE sql AS 'SELECT v'"
+        )).unwrap().remove(0) else { unreachable!() };
+        let original = crate::routines::SQLUserFunction::new(
+            *definition,
+            crate::routines::RoutineBody::Source,
+        )
+        .shared();
+        let token = uqa_core::CancellationToken::new();
+        let memory = uqa_core::memory::MemoryBudget::new(16 << 20);
+        let control = uqa_core::memory::ProductionControl::new(&memory, &token, &token);
+        let mut capture =
+            crate::routines::StoredRoutineDefinition::new(original, &control).unwrap();
+        while !capture.copy_next_field(&control).unwrap() {}
+        let (definition, _) = capture.into_definition(&control).unwrap();
+        let mut plan = ExpressionPlan::lower(definition.params[0].default.clone().unwrap());
+        let error = analyze_default_inputs(
+            &NoRoutines,
+            &|_: &str| false,
+            &Aliases,
+            &mut plan,
+            &assignment_context(),
+        )
+        .unwrap_err();
+        assert_eq!(
+            (error.sqlstate(), error.to_string()),
+            (Some(state), diagnostic.to_owned())
+        );
+        drop(definition);
+        assert_eq!(memory.used(), 0);
+    }
+}

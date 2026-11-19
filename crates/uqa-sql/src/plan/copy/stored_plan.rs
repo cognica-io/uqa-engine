@@ -41,7 +41,13 @@ syntax_leaf!(
     bool,
     usize,
     u32,
+    i16,
+    [u8; 16],
     String,
+    crate::ast::Expr,
+    crate::ast::OrderBy,
+    crate::ast::WindowFrame,
+    crate::ast::WindowReference,
     crate::ast::InternalRelationId,
     crate::ast::SetOpKind,
     crate::ast::CteMaterialization,
@@ -274,21 +280,6 @@ macro_rules! project_enum {
     };
 }
 pub(crate) use project_enum;
-
-impl<W: crate::catalog::work::Work + Send> uqa_core::memory::MapKeyInput<usize>
-    for crate::catalog::work::ReferenceWork<'_, '_, W>
-{
-    type Error = crate::SQLError;
-
-    async fn checkpoint(&mut self) -> CaptureResult<()> {
-        Self::checkpoint(self).await
-    }
-
-    async fn compare(&mut self, left: &usize, right: &usize) -> CaptureResult<std::cmp::Ordering> {
-        self.checkpoint().await?;
-        Ok(left.cmp(right))
-    }
-}
 
 /// The caller owns the original plan and its receipt until all independently funded output fields are complete.
 pub(crate) async fn capture<'s>(

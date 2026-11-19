@@ -60,7 +60,7 @@ impl Provider {
     }
 }
 
-fn protected_repository(path: &Path) -> LocalRepository {
+pub(super) fn protected_repository(path: &Path) -> LocalRepository {
     LocalRepository::create(
         path,
         Protection::Encrypted {

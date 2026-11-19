@@ -56,23 +56,26 @@ macro_rules! syntax_enum {
 /// The native field list is shared with the synchronous syntax projection, including allocation and diagnostic order.
 macro_rules! native_struct {
     ($ty:ty { $($field:ident),* $(,)? }) => {
+        native_struct!(inline, $ty { $($field),* });
+    };
+    ($mode:ident, $ty:ty { $($field:ident),* $(,)? }) => {
         syntax_struct!($ty { $($field),* });
-        impl crate::plan::copy::syntax::native::Field for $ty {
-            async fn copy_from<'s>(&'s self, input: &mut crate::plan::copy::syntax::native::Input<'s>) -> Result<Self> {
-                Ok(Self { $($field: input.field(&self.$field).await?),* })
-            }
-        }
+        crate::plan::copy::stored_plan::projection!($mode, $ty, source, input, Self {
+            $($field: input.field(&source.$field).await?),*
+        });
     };
 }
 
 macro_rules! native_enum {
-    ($ty:ty { $($variant:ident($field:ident)),* $(,)? }) => {
-        syntax_enum!($ty { $($variant($field)),* });
-        impl crate::plan::copy::syntax::native::Field for $ty {
-            async fn copy_from<'s>(&'s self, input: &mut crate::plan::copy::syntax::native::Input<'s>) -> Result<Self> {
-                Ok(match self { $(Self::$variant($field) => Self::$variant(input.field($field).await?)),* })
-            }
-        }
+    ($ty:ty { $($variants:tt)* }) => {
+        native_enum!(inline, $ty { $($variants)* });
+    };
+    ($mode:ident, $ty:ty { $($variant:ident $(($item:ident))? $({$($field:ident),*})?),* $(,)? }) => {
+        syntax_enum!($ty { $($variant $(($item))? $({$($field),*})?),* });
+        crate::plan::copy::stored_plan::projection!($mode, $ty, source, input, match source {
+            $(Self::$variant $(($item))? $({$($field),*})? =>
+                Self::$variant $((input.field($item).await?))? $({$($field: input.field($field).await?),*})?),*
+        });
     };
 }
 

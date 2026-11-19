@@ -64,11 +64,14 @@ image_struct!(MergeStmt {
     returning,
     returning_aliases,
 });
-image_struct!(MergeTargetColumnBinding {
-    object_id,
-    attribute_number,
-    domain_dependencies
-});
+projected_struct!(
+    inline,
+    MergeTargetColumnBinding {
+        object_id,
+        attribute_number,
+        domain_dependencies
+    }
+);
 image_enum!(MergeWhen {
     0 => UpdateMatched { condition, assignments },
     1 => DeleteMatched { condition },
