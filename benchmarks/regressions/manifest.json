@@ -75764,6 +75764,32 @@
     {
       "package": "uqa-sql",
       "kind": "lib",
+      "test": "executable_publication_folds_row_constructors_in_ordered_windows",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/input/native/statement/tests/publication.rs",
+      "capability": "Stored SQL statement publication",
+      "workload": "Publish native query and INSERT executables with one and 4,096 VALUES rows using a single work step per call.",
+      "invariant": "Each call releases a bounded number of allocations. Both forms retain the ordinary plan and the exact constructor reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "executable_publication_keeps_root_admission_order_and_cancellation_ownership",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/input/native/statement/tests/publication.rs",
+      "capability": "Stored SQL statement publication",
+      "workload": "Freeze a native query and an INSERT under exhausted capacity and interrupt both active constructors with each cancellation token.",
+      "invariant": "The command reserves its box before releasing fields. The query can reserve its box after its constructor fields retire. Each cancellation releases the original allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
       "test": "stored_statement_construction_and_retirement_share_the_original_work_and_allowance",
       "cases": 1,
       "source": "crates/uqa-sql/src/plan/copy/lowering/input/native/statement/tests/stored.rs",

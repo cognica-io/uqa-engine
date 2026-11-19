@@ -17,6 +17,7 @@ use uqa_core::{
     CancellationToken,
 };
 
+mod publication;
 mod replacement;
 mod stored;
 

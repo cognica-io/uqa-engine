@@ -82,6 +82,20 @@ impl RetainedExecutablePlan {
         (self.0.take(), workspace)
     }
 
+    /// Publish the finished native fields and their original workspace for stored call binding.
+    pub(crate) async fn into_bound_from(
+        self,
+        control: &ProductionControl<'_>,
+        input: &mut AsyncImageInput<'_>,
+    ) -> Result<crate::plan::copy::stored_plan::BoundPlan> {
+        use crate::plan::copy::stored_plan::{BoundPlan, OriginalWorkspace};
+        let workspace = OriginalWorkspace(self.0.context().clone());
+        Ok(BoundPlan::new(
+            self.0.finish_from(control, input).await?,
+            Some(workspace),
+        ))
+    }
+
     pub(crate) async fn bind_relation_names_from_input(
         self,
         resolve: &crate::binding::view_dependencies::owned::fields::StoredRelationResolver<'_>,

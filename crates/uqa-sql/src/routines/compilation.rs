@@ -325,11 +325,7 @@ pub(super) async fn bind_stored_statement_from(
         input,
     )
     .await?;
-    let (plan, workspace) = plan.into_mutable();
-    Ok((
-        crate::plan::copy::stored_plan::BoundPlan::new(plan.finish(control)?, Some(workspace)),
-        snapshot,
-    ))
+    Ok((plan.into_bound_from(control, input).await?, snapshot))
 }
 
 /// Lower one statement of a SQL routine body with its relations bound, before routine calls are bound.

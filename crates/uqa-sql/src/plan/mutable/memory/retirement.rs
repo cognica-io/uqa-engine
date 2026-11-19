@@ -20,7 +20,7 @@ impl Drop for RewriteField {
 
 pub(super) fn fold(memory: RewriteMemory) -> Option<MemoryReservation> {
     let mut folding = Folding::new(memory);
-    while !folding.advance() {}
+    folding.drain();
     folding.finish()
 }
 
@@ -54,6 +54,14 @@ impl Folding {
         control: Option<&ProductionControl<'_>>,
         work: &mut W,
     ) -> Result<(), SQLError> {
+        self.advance_from(control, work).await
+    }
+
+    pub(in crate::plan::mutable) async fn advance_from<W: Work>(
+        &mut self,
+        control: Option<&ProductionControl<'_>>,
+        work: &mut W,
+    ) -> Result<(), SQLError> {
         while !self.is_complete() {
             if let Some(control) = control {
                 control.check()?;
@@ -64,8 +72,11 @@ impl Folding {
             }
             self.advance();
         }
-        drop(self.finish());
         Ok(())
+    }
+
+    pub(in crate::plan::mutable) fn drain(&mut self) {
+        while !self.advance() {}
     }
 
     /// Detach one constructor field or scalar owner, advance one scalar-fold edge, or release one completed record.
@@ -152,7 +163,7 @@ impl Folding {
         self.current.is_none() && self.path.parent.is_none() && self.scalar.is_none()
     }
 
-    fn finish(mut self) -> Option<MemoryReservation> {
+    pub(in crate::plan::mutable) fn finish(mut self) -> Option<MemoryReservation> {
         assert!(self.is_complete());
         self.retained.take()
     }
@@ -160,7 +171,7 @@ impl Folding {
 
 impl Drop for Folding {
     fn drop(&mut self) {
-        while !self.advance() {}
+        self.drain();
     }
 }
 
