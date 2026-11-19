@@ -49,7 +49,28 @@ fn admitted_routine_diagnostic_releases_payloads_when_header_admission_fails() {
     let control = ProductionControl::new(&memory, &token, &token);
     let message = control.copy_text("missing role").unwrap();
     let result = SQLError::admit_routine_message("42704", message, &control);
-    assert_eq!(result.unwrap_err().sqlstate(), Some("53200"));
+    let error = result
+        .unwrap_err()
+        .with_context("restore routine")
+        .at_position(Some(7));
+    let diagnostic = error.to_string();
+    assert_eq!(error.sqlstate(), Some("53200"));
+    assert_eq!(memory.used(), 0);
+    let held = memory.reserve(memory.available()).unwrap();
+    let error = error.into_retained_catalog_message(&control).unwrap();
+    let Some(uqa_core::ValueRetentionError::Memory(uqa_core::memory::MemoryError::Limit {
+        required,
+        limit,
+    })) = error.native_resource_error()
+    else {
+        panic!("catalog retention discarded the original memory error");
+    };
+    assert_eq!(limit, 64);
+    assert!(required > limit);
+    assert_eq!(error.to_string(), diagnostic);
+    assert_eq!(error.position(), Some(7));
+    assert_eq!(error.context(), Some("restore routine"));
+    drop(held);
     assert_eq!(memory.used(), 0);
     let ordinary = ProductionControl::uncontrolled();
     let error = SQLError::admit_routine_message(
@@ -59,4 +80,9 @@ fn admitted_routine_diagnostic_releases_payloads_when_header_admission_fails() {
     )
     .unwrap();
     assert!(matches!(error, SQLError::Routine { .. }));
+    let raised = SQLError::Routine {
+        sqlstate: "53200".into(),
+        message: diagnostic,
+    };
+    assert!(raised.native_resource_error().is_none());
 }

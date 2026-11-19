@@ -109,8 +109,10 @@ impl RoutineCatalogDocument {
 }
 
 pub(in crate::routines) fn binding_error(error: SQLError) -> StorageBackendError {
+    if let Some(cause) = error.native_resource_error() {
+        return cause.into();
+    }
     match error {
-        SQLError::Cancelled(error) => error.into(),
         SQLError::RetainedRoutine(source) => StorageBackendError::RetainedDiagnostic(source),
         error => StorageBackendError::Other(error.to_string()),
     }

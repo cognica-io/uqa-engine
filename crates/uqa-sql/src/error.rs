@@ -48,6 +48,8 @@ pub enum SQLError {
     },
     #[error("{0}")]
     Cancelled(#[from] uqa_core::QueryCancelled),
+    #[error("{0}")]
+    Memory(#[from] uqa_core::memory::MemoryError),
     /// An owned host callback diagnostic. Its typed cause survives workers,
     /// routine context, cleanup and cloning without a thread-local side channel.
     #[error("{0}")]
@@ -167,6 +169,15 @@ impl SQLError {
             | Self::Position { source, .. }
             | Self::InternalPosition { source, .. } => source.primary(),
             _ => self,
+        }
+    }
+
+    /// Recover a native cancellation or allocation failure across SQL diagnostic context.
+    pub fn native_resource_error(&self) -> Option<uqa_core::ValueRetentionError> {
+        match self.primary() {
+            Self::Cancelled(error) => Some((*error).into()),
+            Self::Memory(error) => Some(error.clone().into()),
+            _ => None,
         }
     }
 
@@ -304,8 +315,9 @@ impl SQLError {
             | SQLError::Position { source, .. }
             | SQLError::InternalPosition { source, .. } => source.sqlstate(),
             SQLError::Cancelled(cancelled) => Some(cancelled.sqlstate()),
-            SQLError::Host(_) => Some("38000"), // external_routine_exception
-            SQLError::Parse(_) => Some("42601"), // syntax_error
+            SQLError::Memory(_) => Some("53200"), // out_of_memory
+            SQLError::Host(_) => Some("38000"),   // external_routine_exception
+            SQLError::Parse(_) => Some("42601"),  // syntax_error
             SQLError::ParseDiagnostic(diagnostic) => Some(&diagnostic.sqlstate),
             SQLError::Unsupported(_) | SQLError::NotificationRequiresSubscription => Some("0A000"), // feature_not_supported
             SQLError::UnknownTable(_) => Some("42P01"), // undefined_table
@@ -373,15 +385,6 @@ impl From<pg_query::Error> for SQLError {
             pg_query::Error::ParseDiagnostic(diagnostic) => Self::ParseDiagnostic(diagnostic),
             pg_query::Error::Parse(message) => Self::Parse(message),
             other => Self::Parse(other.to_string()),
-        }
-    }
-}
-
-impl From<uqa_core::memory::MemoryError> for SQLError {
-    fn from(error: uqa_core::memory::MemoryError) -> Self {
-        Self::Routine {
-            sqlstate: "53200".into(),
-            message: error.to_string(),
         }
     }
 }

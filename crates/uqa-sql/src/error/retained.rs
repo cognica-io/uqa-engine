@@ -67,7 +67,8 @@ impl SQLError {
         control: &ProductionControl<'_>,
     ) -> Result<Self, uqa_core::ValueRetentionError> {
         if control.budget().is_none()
-            || matches!(self, Self::Cancelled(_) | Self::RetainedRoutine(_))
+            || matches!(self, Self::RetainedRoutine(_))
+            || self.native_resource_error().is_some()
         {
             return Ok(self);
         }
