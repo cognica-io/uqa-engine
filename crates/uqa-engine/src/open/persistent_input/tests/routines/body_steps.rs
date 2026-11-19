@@ -217,6 +217,28 @@ fn partial_sql_body_analysis_releases_its_registry_and_allowance(#[case] provide
             definitions
         );
     }
+    let control = StorageReadControl::with_limit(32 << 20);
+    let mut candidate = input(&source, &control);
+    while !retiring(&candidate) {
+        assert!(candidate.advance(1).unwrap().is_none());
+    }
+    assert!(candidate.advance(1).unwrap().is_none());
+    assert!(retiring(&candidate));
+    let private = candidate.candidate.as_ref().unwrap().session.engine_owner();
+    let lifetime = Arc::downgrade(private);
+    let backend = Arc::clone(private.storage.backend.as_ref().unwrap());
+    control.cancellation().cancel();
+    assert!(matches!(
+        candidate.advance(1),
+        Err(StorageBackendError::Cancelled(_))
+    ));
+    assert!(lifetime.upgrade().is_none());
+    assert!(!backend.in_transaction());
+    assert_eq!(control.memory().used(), 0);
+    assert_eq!(
+        catalog.get_metadata("sql_functions_json").unwrap(),
+        definitions
+    );
 }
 
 #[rstest::rstest]

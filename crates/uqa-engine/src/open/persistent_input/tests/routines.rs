@@ -6,7 +6,7 @@
 
 use super::super::super::authority_input::PersistentAuthorityInput;
 use super::*;
-use uqa_sql::routines::{CompiledFunctionBody, RoutineBody};
+use uqa_sql::routines::{registry::RoutineRegistry, CompiledFunctionBody, RoutineBody};
 
 mod body_steps;
 
@@ -32,6 +32,44 @@ fn compiling(input: &PersistentEngineInput) -> bool {
 
 fn reach_bodies(input: &mut PersistentEngineInput) {
     while !compiling(input) {
+        assert!(input.advance(1).unwrap().is_none());
+    }
+}
+
+fn retiring(input: &PersistentEngineInput) -> bool {
+    matches!(
+        input.candidate.as_ref().unwrap().stage,
+        Stage::Registries(RegistryInput::RetiringPlaceholders(_))
+    )
+}
+
+fn check_published_generation(input: &mut PersistentEngineInput, placeholders: &RoutineRegistry) {
+    let snapshot = |input: &PersistentEngineInput| {
+        input
+            .candidate
+            .as_ref()
+            .unwrap()
+            .session
+            .engine()
+            .durable
+            .sql_user_functions
+            .read()
+            .clone()
+    };
+    assert!(retiring(input));
+    let published = snapshot(input);
+    for (name, old) in placeholders {
+        let group = &published[name.as_str()];
+        assert_eq!(group.len(), old.len());
+        assert!(group.iter().zip(old).all(|(a, b)| !Arc::ptr_eq(a, b)));
+    }
+    while retiring(input) {
+        let functions = snapshot(input);
+        for (name, group) in &published {
+            let current = &functions[name.as_str()];
+            assert_eq!(current.len(), group.len());
+            assert!(current.iter().zip(group).all(|(a, b)| Arc::ptr_eq(a, b)));
+        }
         assert!(input.advance(1).unwrap().is_none());
     }
 }
@@ -133,6 +171,7 @@ fn persistent_routines_publish_complete_placeholders_and_finalize_after_views(
         polls += 1;
     }
     assert!(polls > original.values().map(Vec::len).sum::<usize>());
+    check_published_generation(&mut input, &placeholders);
     let session = finish(&mut input);
     {
         let functions = session.engine().durable.sql_user_functions.read();

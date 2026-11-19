@@ -118,6 +118,15 @@ impl super::NativeNode for Node {
     }
     fn retire_scalars(_: &mut super::Frame<Self>) {}
     fn retire_child(frame: &mut super::Frame<Self>) -> crate::plan::retirement::RetiredChild<Self> {
+        if let Node::RoutineParam(crate::ast::FunctionParam {
+            default_type: Some(crate::ast::RoutineDefaultType::Concrete(ty)),
+            ..
+        }) = &mut frame.node
+        {
+            if !ty.retire_step() {
+                return crate::plan::retirement::RetiredChild::Continue;
+            }
+        }
         frame.node.body().retire(&mut frame.position)
     }
 }

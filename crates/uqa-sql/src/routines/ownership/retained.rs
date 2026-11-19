@@ -89,3 +89,12 @@ impl<T> RetainedRoutineValue<T> {
         }))
     }
 }
+
+impl RetainedRoutineValue<super::SQLUserFunction> {
+    pub(in crate::routines) fn into_native_placeholder(self) -> Produced<super::SQLUserFunction> {
+        let Owner::Native(value) = self.owner else {
+            unreachable!("canonical placeholders contain their original native declaration")
+        };
+        value
+    }
+}

@@ -19,6 +19,36 @@ type FieldDriver<'a, T> = (
     construction::Output<Result<Nested<T>>>,
 );
 
+/// Both the compact eligibility check and the suspended constructor observe the original field.
+#[derive(Default)]
+pub(super) struct OriginalShape {
+    pub(super) depth: usize,
+    pub(super) wide: bool,
+}
+
+impl OriginalShape {
+    pub(super) fn parameter_type(&mut self, parameter: &FunctionParam) {
+        let Some(crate::ast::RoutineDefaultType::Concrete(ty)) = &parameter.default_type else {
+            return;
+        };
+        let mut ty = ty;
+        for _ in 0..Window::STEPS {
+            ty = match ty {
+                crate::ColumnType::Array(inner) | crate::ColumnType::Domain { base: inner, .. } => {
+                    inner
+                }
+                _ => return,
+            };
+        }
+        self.wide = true;
+    }
+
+    pub(super) fn record<T>(&mut self, field: &Nested<T>) {
+        self.depth = self.depth.max(field.depth());
+        self.wide |= field.retirement_depth() > 0;
+    }
+}
+
 pub(super) struct Capture<T>(construction::Read<'static, Result<Nested<T>>>);
 
 #[derive(Default)]

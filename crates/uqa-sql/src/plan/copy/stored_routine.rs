@@ -88,6 +88,7 @@ pub struct StoredRoutineDefinition {
     definition: CreateFunction,
     header: Header,
     pending: capture::Pending,
+    original: capture::OriginalShape,
     displaced: Option<edit::Displaced>,
     parameters: BudgetedVec<Field>,
     statements: BudgetedVec<Field<bool>>,
@@ -195,6 +196,7 @@ impl StoredRoutineDefinition {
             definition,
             header: Header::default(),
             pending: capture::Pending::default(),
+            original: capture::OriginalShape::default(),
             displaced: None,
             parameters,
             statements,
@@ -250,10 +252,12 @@ impl StoredRoutineDefinition {
                     self.pending = pending;
                     return Ok(false);
                 };
+                self.original.record(&field);
                 Field::from_produced(field.value, field.children, ())
             } else {
                 Field::capture(parameter, control, |_| ())?
             };
+            self.original.parameter_type(parameter);
             Field::install(
                 value,
                 lease,
@@ -284,6 +288,7 @@ impl StoredRoutineDefinition {
                     self.pending = pending;
                     return Ok(false);
                 };
+                self.original.record(&field);
                 let (value, lease, field) =
                     Field::from_produced(field.value, field.children, field.has_merge_targets);
                 Field::install(
@@ -298,6 +303,19 @@ impl StoredRoutineDefinition {
             }
         }
         Ok(self.complete())
+    }
+
+    /// Depth observed while copying the original placeholder, before stored binding edits its fields.
+    pub(crate) fn original_retirement_shape(&self) -> (usize, bool) {
+        use super::syntax::native::Window;
+        let original = &self.source.def;
+        let wide = original.params.len() > Window::STEPS
+            || original.creation_search_path.len() > Window::STEPS
+            || original.config.len() > Window::STEPS
+            || original.config_actions.len() > Window::STEPS
+            || original.attribute_clauses.transform_types.len() > Window::STEPS
+            || matches!(&original.body, FunctionBody::Statements(fields) if fields.len() > Window::STEPS);
+        (self.original.depth.max(1), self.original.wide || wide)
     }
 
     fn complete(&self) -> bool {

@@ -361,3 +361,162 @@ fn retained_routine_placeholders_preserve_temporary_replacement_and_empty_catalo
         assert_eq!((native.used(), work.used(), capture.used()), (0, 0, 0));
     }
 }
+
+fn original_retirement(
+    source: Produced<CreateFunction>,
+    native: &MemoryBudget,
+    work: &MemoryBudget,
+    token: &CancellationToken,
+    shared: bool,
+) -> (
+    RoutinePlaceholderRetirement,
+    Option<crate::routines::SQLRoutine>,
+) {
+    let mut canonical = native_decoder(
+        vec![("f".into(), true, vec![source])],
+        native,
+        work,
+        token,
+        token,
+    );
+    let (definitions, _) = complete(&mut canonical, 257).unwrap();
+    let mut input = placeholders(
+        definitions,
+        RoutineRegistry::new(),
+        native,
+        work,
+        token,
+        token,
+    );
+    let (placeholders, _) = finish(&mut input, 257).unwrap();
+    let (registry, mut pending) = placeholders.into_parts();
+    let original = &registry["public.f"][0];
+    let reader = shared.then(|| original.clone());
+    let control = ProductionControl::new(native, token, token);
+    let mut copy =
+        crate::routines::StoredRoutineDefinition::new(original.clone(), &control).unwrap();
+    while !copy.copy_next_field(&control).unwrap() {}
+    pending.prepare_retirement(&copy).unwrap();
+    drop((copy, registry));
+    (pending.into_retirement(), reader)
+}
+
+fn release_windows(mut retirement: RoutinePlaceholderRetirement, abandon: bool) -> usize {
+    let mut calls = 0;
+    loop {
+        let mut done = false;
+        let measured = allocation_counter::measure(|| done = retirement.advance());
+        assert_eq!(measured.count_total, 0);
+        let releases = -measured.count_current;
+        assert!(releases <= 32, "{releases} releases in one step");
+        calls += 1;
+        if done || (abandon && calls == 128) {
+            return calls;
+        }
+    }
+}
+
+#[test]
+fn final_placeholder_retirement_releases_wide_original_syntax_in_windows_and_preserves_readers() {
+    for (rows, shared, abandon) in [
+        (1, false, false),
+        (4096, false, false),
+        (4096, true, false),
+        (4096, false, true),
+    ] {
+        let native = MemoryBudget::new(16 << 20);
+        let work = MemoryBudget::new(16 << 20);
+        let token = CancellationToken::new();
+        let control = ProductionControl::new(&native, &token, &token);
+        let mut source = definition("f", 1, &[]);
+        let values = std::iter::repeat_n("(1)", rows)
+            .collect::<Vec<_>>()
+            .join(",");
+        source.body = FunctionBody::Statements(
+            crate::compile(&format!("SELECT count(*) FROM (VALUES {values}) AS t(v)")).unwrap(),
+        );
+        let source = crate::plan::copy::capture_stored_with_control(&source, &control).unwrap();
+        let (retirement, reader) = original_retirement(source, &native, &work, &token, shared);
+        let occupied = native.reserve(native.available()).unwrap();
+        let calls = release_windows(retirement, abandon);
+        if shared || rows == 1 {
+            assert!(calls < 8, "{calls}");
+        } else if abandon {
+            assert_eq!(calls, 128);
+        } else {
+            assert!(calls > rows, "{calls}");
+        }
+        drop(occupied);
+        if let Some(reader) = reader {
+            assert_eq!(reader.def.name, "public.f");
+            assert!(matches!(&reader.def.body, FunctionBody::Statements(body) if body.len() == 1));
+            assert!(native.used() > 0);
+        }
+        assert_eq!((native.used(), work.used()), (0, 0));
+    }
+}
+
+#[test]
+fn final_placeholder_retirement_drains_projected_transform_names_and_nested_parameter_types() {
+    use uqa_core::json::{JsonDocument, JsonScalarProtocol};
+    let native = MemoryBudget::new(64 << 20);
+    let work = MemoryBudget::new(64 << 20);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&native, &token, &token);
+    let protocol = JsonScalarProtocol::from_values(
+        &serde_json::Number::from(1u8),
+        serde_json::value::RawValue::NULL,
+    )
+    .unwrap();
+    for transforms in [true, false] {
+        let width = if transforms { 4096 } else { 512 };
+        let mut source = definition("f", 1, &["integer"]);
+        let encoded = if transforms {
+            source.attribute_clauses.transform_types = (0..width)
+                .map(|index| crate::ast::RoutineTransformType {
+                    type_name: format!("type_{index}"),
+                    written: format!("app.type_{index}"),
+                })
+                .collect();
+            serde_json::to_string(&source).unwrap()
+        } else {
+            source.params[0].default_type = Some(crate::ast::RoutineDefaultType::Concrete(
+                crate::ColumnType::Integer,
+            ));
+            let encoded = serde_json::to_string(&source).unwrap();
+            let anchor = r#""Concrete":"Integer""#;
+            assert!(encoded.contains(anchor));
+            let nested = format!(
+                r#""Concrete":{}"Integer"{}"#,
+                r#"{"Array":"#.repeat(width),
+                "}".repeat(width)
+            );
+            encoded.replace(anchor, &nested)
+        };
+        let document =
+            JsonDocument::read_with_control(encoded.as_bytes(), &control, protocol).unwrap();
+        let value = crate::catalog::work::inline(CreateFunction::from_projected_json_with_work(
+            document.root(),
+            &control,
+            &mut (),
+            protocol,
+        ))
+        .unwrap();
+        if transforms {
+            assert_eq!(value.attribute_clauses.transform_types.len(), width);
+        } else {
+            assert!(matches!(
+                &value.params[0].default_type,
+                Some(crate::ast::RoutineDefaultType::Concrete(
+                    crate::ColumnType::Array(_)
+                ))
+            ));
+        }
+        drop(document);
+        let (retirement, _) = original_retirement(value, &native, &work, &token, false);
+        let occupied = native.reserve(native.available()).unwrap();
+        assert!(release_windows(retirement, false) > width);
+        drop(occupied);
+        assert_eq!((native.used(), work.used()), (0, 0));
+    }
+}

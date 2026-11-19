@@ -29,11 +29,16 @@ pub(crate) struct Nested<T> {
     pub(crate) has_merge_targets: bool,
     depth: usize,
     slots: usize,
+    compact: bool,
 }
 
 impl<T> Nested<T> {
+    pub(crate) const fn depth(&self) -> usize {
+        self.depth
+    }
+
     pub(crate) fn retirement_depth(&self) -> usize {
-        if self.depth > Window::STEPS || self.slots > Window::STEPS {
+        if !self.compact && (self.depth > Window::STEPS || self.slots > Window::STEPS) {
             self.depth
         } else {
             0
@@ -104,6 +109,7 @@ impl<'s> Input<'s> {
             value,
             children,
             has_merge_targets,
+            compact: false,
             depth,
             slots,
         })
@@ -252,21 +258,22 @@ macro_rules! body_statements {
         impl Field for ast::Statement {
             fn fits(&self, window: &mut Window) -> bool {
                 match self {
-                    $(Self::$variant $(($item))? $({$field})? => $($item)? $($field)?.fits(window),)+
+                    $(Self::$variant $(($item))? $({$field})? => window.field($($item)? $($field)?),)+
                     _ => false,
                 }
             }
 
             fn capture_inline(&self, control: &ProductionControl<'_>) -> Result<Option<Nested<Self>>> {
                 control.check()?;
-                if !self.fits(&mut Window::new()) {
+                let mut window = Window::new();
+                if !window.field(self) {
                     return Ok(None);
                 }
                 let (value, (children, has_merge_targets)) =
                     crate::plan::copy::capture_stored(self, control, |copy| {
                         (copy.retained_children, copy.has_merge_targets)
                     })?;
-                Ok(Some(Nested { value, children, has_merge_targets, depth: 0, slots: 0 }))
+                Ok(Some(Nested { value, children, has_merge_targets, depth: window.maximum_depth(), slots: 0, compact: true }))
             }
 
             async fn copy_from<'s>(&'s self, input: &mut Input<'s>) -> Result<Self> {
@@ -354,7 +361,7 @@ impl Field for ast::ReferenceName {
 }
 impl<T: Field> Field for Option<T> {
     fn fits(&self, window: &mut Window) -> bool {
-        self.as_ref().is_none_or(|value| value.fits(window))
+        self.as_ref().is_none_or(|value| window.field(value))
     }
     async fn copy_from<'s>(&'s self, input: &mut Input<'s>) -> Result<Self> {
         match self {
@@ -365,7 +372,7 @@ impl<T: Field> Field for Option<T> {
 }
 impl<T: Field> Field for Box<T> {
     fn fits(&self, window: &mut Window) -> bool {
-        self.as_ref().fits(window)
+        window.field(self.as_ref())
     }
     async fn copy_from<'s>(&'s self, input: &mut Input<'s>) -> Result<Self> {
         input.copying.admit_box::<T>()?;
@@ -375,7 +382,7 @@ impl<T: Field> Field for Box<T> {
 }
 impl<T: Field> Field for Vec<T> {
     fn fits(&self, window: &mut Window) -> bool {
-        window.slots(self.len()) && self.iter().all(|value| value.fits(window))
+        window.slots(self.len()) && self.iter().all(|value| window.field(value))
     }
     async fn copy_from<'s>(&'s self, input: &mut Input<'s>) -> Result<Self> {
         input.list(self).await
@@ -383,7 +390,7 @@ impl<T: Field> Field for Vec<T> {
 }
 impl<A: Field, B: Field> Field for (A, B) {
     fn fits(&self, window: &mut Window) -> bool {
-        self.0.fits(window) && self.1.fits(window)
+        window.field(&self.0) && window.field(&self.1)
     }
     async fn copy_from<'s>(&'s self, input: &mut Input<'s>) -> Result<Self> {
         Ok((input.field(&self.0).await?, input.field(&self.1).await?))

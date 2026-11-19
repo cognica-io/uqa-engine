@@ -70995,6 +70995,32 @@
     {
       "package": "uqa-sql",
       "kind": "lib",
+      "test": "final_placeholder_retirement_releases_wide_original_syntax_in_windows_and_preserves_readers",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/routines/lifecycle/restoration/input/tests/placeholders.rs",
+      "capability": "Original routine placeholder retirement",
+      "workload": "Release one or 4096 VALUES rows after replacing the placeholder registry, with an outstanding reader or an interrupted finalization.",
+      "invariant": "Each work window releases a bounded number of original allocations with the admitted allowance exhausted. An existing reader retains its complete definition.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "final_placeholder_retirement_drains_projected_transform_names_and_nested_parameter_types",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/routines/lifecycle/restoration/input/tests/placeholders.rs",
+      "capability": "Original routine placeholder retirement",
+      "workload": "Decode typed stored routine JSON with 4,096 owned TRANSFORM name pairs and a 512-layer parameter default type, then retire the last original.",
+      "invariant": "The existing syntax and type owners retire one bounded field under an exhausted allowance and return all leases.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
       "test": "canonical_routine_group_transfer_preserves_native_names_overloads_and_declarations",
       "cases": 1,
       "source": "crates/uqa-sql/src/routines/lifecycle/restoration/input/tests/transfer.rs",

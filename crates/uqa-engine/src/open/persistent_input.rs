@@ -180,6 +180,7 @@ impl FieldAnalyzers {
 enum RegistryInput {
     Relations(RestoredAuthorities),
     Bodies(RestoredAuthorities),
+    RetiringPlaceholders(RestoredAuthorities),
     Dependents(uqa_execution::catalog::domain::DomainRestoreState),
     PathIndexes(uqa_graph::PathIndexCatalogInput),
 }
@@ -201,12 +202,16 @@ impl RegistryInput {
                 )?;
                 Self::Bodies(retained)
             }
-            Self::Bodies(RestoredAuthorities { domains, routines }) => {
+            Self::Bodies(RestoredAuthorities { domains, routines })
+            | Self::RetiringPlaceholders(RestoredAuthorities { domains, routines }) => {
                 match routines.advance_with_routines(
                     &engine.routine_restore_context(),
                     owner,
                     |private| -> &Engine { private },
                 )? {
+                    Some(routines) if routines.retiring_placeholders() => {
+                        Self::RetiringPlaceholders(RestoredAuthorities { domains, routines })
+                    }
                     Some(routines) => Self::Bodies(RestoredAuthorities { domains, routines }),
                     None => Self::Dependents(domains),
                 }

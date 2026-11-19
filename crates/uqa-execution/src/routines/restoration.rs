@@ -177,14 +177,13 @@ pub fn finalize_sql_function_restore(
         }
         Ok(restored)
     })();
-    let restored = match compiled {
-        Ok(restored) => restored,
-        Err(error) => {
-            **context.registry.routines_write() = previous;
-            return Err(error);
-        }
-    };
-    publish_restored(context, previous, restored, migrated, allows_migration)
+    let published = compiled.and_then(|restored| {
+        publish_restored(context, restored, migrated, allows_migration, |_| Ok(()))
+    });
+    if published.is_err() {
+        **context.registry.routines_write() = previous;
+    }
+    published
 }
 
 fn bind_stored(
@@ -199,26 +198,27 @@ fn bind_stored(
     Ok((bound.body, bound.changed))
 }
 
-fn publish_restored(
+fn publish_restored<T>(
     context: &RoutineRestoreContext<'_>,
-    previous: RoutineRegistry,
     restored: RoutineRegistry,
     migrated: bool,
     allows_migration: bool,
-) -> StorageBackendResult<()> {
+    before_replace: impl FnOnce(&RoutineRegistry) -> StorageBackendResult<T>,
+) -> StorageBackendResult<T> {
     if migrated && !allows_migration {
-        **context.registry.routines_write() = previous;
         return Err(StorageBackendError::Other(
             "routine-owned dependency bindings require an initial-open object-identity migration"
                 .into(),
         ));
     }
     if migrated {
-        if let Err(error) = context.publication.persist_routine_definitions(&restored) {
-            **context.registry.routines_write() = previous;
-            return Err(StorageBackendError::Other(error.to_string()));
-        }
+        context
+            .publication
+            .persist_routine_definitions(&restored)
+            .map_err(|error| StorageBackendError::Other(error.to_string()))?;
     }
-    **context.registry.routines_write() = restored;
-    Ok(())
+    let mut registry = context.registry.routines_write();
+    let prepared = before_replace(&registry)?;
+    **registry = restored;
+    Ok(prepared)
 }

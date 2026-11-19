@@ -9,7 +9,7 @@ use super::{
     invalid, Fields, Input, Kind, Node, SQLError,
 };
 use crate::{
-    ast::{FunctionParam, Statement},
+    ast::{CreateFunction, FunctionParam, Statement},
     catalog::work::{ReferenceWork, Work},
     plan::retirement::RetainedTree,
 };
@@ -118,6 +118,40 @@ impl StoredSyntaxRetirement {
 
     pub(crate) fn parameter(&mut self, value: FunctionParam) {
         self.0.as_mut().root = Node::RoutineParam(value);
+    }
+
+    /// The original routine holds three enclosing frames above an SQL body statement:
+    /// the declaration, the body variant and its statement list.
+    pub(crate) fn prepare_routine(
+        slot: &mut Option<Self>,
+        field_depth: usize,
+        memory: &MemoryBudget,
+    ) -> Result<(), SQLError> {
+        Self::prepare(
+            slot,
+            field_depth
+                .checked_add(3)
+                .ok_or(MemoryError::SizeOverflow)?,
+            memory,
+        )
+    }
+
+    pub(crate) fn routine(&mut self, definition: CreateFunction) {
+        self.0.as_mut().root = Node::Routine(definition);
+    }
+
+    pub(crate) fn advance_routine(&mut self) -> bool {
+        let tree = self.0.as_mut();
+        let released_header = match &mut tree.root {
+            Node::Routine(definition) => {
+                definition.creation_search_path.pop().is_some()
+                    || definition.config.pop().is_some()
+                    || definition.config_actions.pop().is_some()
+                    || definition.attribute_clauses.transform_types.pop().is_some()
+            }
+            _ => false,
+        };
+        !released_header && tree.advance()
     }
 
     pub(crate) async fn finish(

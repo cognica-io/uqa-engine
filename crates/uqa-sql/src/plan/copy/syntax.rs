@@ -57,8 +57,8 @@ macro_rules! syntax_enum {
 macro_rules! fields_fit {
     ($window:ident;) => { true };
     ($window:ident; $first:expr $(, $next:expr)* $(,)?) => {
-        crate::plan::copy::syntax::native::Field::fits($first, $window)
-        $(&& crate::plan::copy::syntax::native::Field::fits($next, $window))*
+        $window.field($first)
+        $(&& $window.field($next))*
     };
 }
 

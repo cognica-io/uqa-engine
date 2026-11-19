@@ -10,6 +10,8 @@ use uqa_core::memory::ProductionString;
 
 pub(crate) struct Window {
     slots: usize,
+    depth: usize,
+    maximum_depth: usize,
     bytes: usize,
 }
 
@@ -19,8 +21,22 @@ impl Window {
     pub(crate) const fn new() -> Self {
         Self {
             slots: Self::STEPS,
+            depth: 0,
+            maximum_depth: 0,
             bytes: ProductionString::CHUNK_BYTES,
         }
+    }
+
+    pub(crate) fn field<T: super::Field>(&mut self, value: &T) -> bool {
+        self.depth += 1;
+        self.maximum_depth = self.maximum_depth.max(self.depth);
+        let fits = value.fits(self);
+        self.depth -= 1;
+        fits
+    }
+
+    pub(super) const fn maximum_depth(&self) -> usize {
+        self.maximum_depth
     }
 
     pub(crate) fn slots(&mut self, count: usize) -> bool {

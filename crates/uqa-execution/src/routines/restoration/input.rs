@@ -20,7 +20,10 @@ use uqa_sql::{
     plan::{AggregateClassifier, RetainedExecutablePlan},
     routines::{
         dependencies::RoutineDeclaration,
-        lifecycle::restoration::{PendingRoutineDefinitions, RoutineRestorePlaceholders},
+        lifecycle::restoration::{
+            PendingRoutineDefinitions, RoutinePlaceholderRetirement, RoutineRestorePlaceholders,
+        },
+        registry::RoutineRegistryRetirement,
         SQLRoutine, StoredRoutineDefinition,
     },
     semantics::sets::placement_scope::SetPlacementScope,
@@ -59,6 +62,8 @@ enum Stage {
         ImageDecoder<Budgeted<Box<Declaration>>, StorageBackendError>,
     ),
     Group(ImageDecoder<Bodies, StorageBackendError>),
+    RetireRegistry(RoutineRegistryRetirement, RoutinePlaceholderRetirement),
+    RetireDeclarations(RoutinePlaceholderRetirement),
 }
 
 struct Declaration {
@@ -107,6 +112,14 @@ impl RetainedRoutineFinalization {
         Ok(Self {
             state: Budgeted::new(Box::new(state), lease),
         })
+    }
+
+    /// The compiled registry has replaced every placeholder. The private session now owns only their original release work.
+    pub fn retiring_placeholders(&self) -> bool {
+        matches!(
+            self.state.stage,
+            Some(Stage::RetireRegistry(..) | Stage::RetireDeclarations(_))
+        )
     }
 
     /// A call advances one declaration field, body statement, or private registry step.
@@ -197,14 +210,25 @@ impl RetainedRoutineFinalization {
             (Err(error), _) => Err(error),
             (Ok(()), Stage::Bind(bodies)) if bodies.definitions.group(bodies.group).is_none() => {
                 let restored = bodies.restored.into_mutation_budget(previous.budget());
-                return publish_restored(
-                    context,
-                    previous.clone(),
-                    restored,
-                    bodies.migrated,
-                    false,
-                )
-                .map(|()| None);
+                publish_restored(context, restored, bodies.migrated, false, |placeholders| {
+                    Ok(placeholders.prepare_placeholder_retirement(read.memory())?)
+                })
+                .map(|registry| {
+                    Stage::RetireRegistry(registry, bodies.definitions.into_retirement())
+                })
+            }
+            (Ok(()), Stage::RetireRegistry(mut registry, originals)) => {
+                if registry.advance() {
+                    Ok(Stage::RetireDeclarations(originals))
+                } else {
+                    Ok(Stage::RetireRegistry(registry, originals))
+                }
+            }
+            (Ok(()), Stage::RetireDeclarations(mut originals)) => {
+                if originals.advance() {
+                    return Ok(None);
+                }
+                Ok(Stage::RetireDeclarations(originals))
             }
             (Ok(()), Stage::Bind(bodies)) => bodies.advance(read),
             (Ok(()), Stage::Declaration(bodies, input)) => {
@@ -359,6 +383,9 @@ impl Bodies {
                 }
                 BindingStep::Complete(bound) => {
                     let (input, _state_lease) = input.into_parts();
+                    self.definitions
+                        .prepare_retirement(&input.definition)
+                        .map_err(|error| catalog_message(error, &control))?;
                     let routine = input
                         .definition
                         .publish(bound.body, &control)
