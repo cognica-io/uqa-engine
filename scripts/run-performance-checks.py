@@ -285,6 +285,7 @@ def main() -> int:
     mode.add_argument("--build-archive", type=pathlib.Path, help="compile the inventory's test targets without executing them")
     mode.add_argument("--build-claim-fixture", action="store_true", help="compile the claim example with the archive's package features and test profile")
     mode.add_argument("--archive-file", type=pathlib.Path, help="verify and run an already compiled nextest archive")
+    mode.add_argument("--built-in-place", action="store_true", help="verify tests already built in this checkout with a bounded discovery step")
     args = parser.parse_args()
     checks = inventory()
     if args.check:
@@ -333,7 +334,7 @@ def main() -> int:
         print("Discovering the exact regression inventory", file=sys.stderr, flush=True)
         listing_text = capture(
             "cargo", "nextest", "list", "--message-format", "json", *selection,
-            timeout=120 if args.archive_file is not None else None,
+            timeout=120 if args.built_in_place or args.archive_file is not None else None,
         )
         discovered.write_text(listing_text + "\n", encoding="utf-8")
         result["stage"] = "selection"
