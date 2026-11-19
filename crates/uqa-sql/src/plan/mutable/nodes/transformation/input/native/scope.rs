@@ -25,7 +25,8 @@ pub(crate) trait ArenaEdit {
         &mut self,
         query: &QueryPlan,
         control: &ProductionControl<'_>,
-    ) -> Result<QueryMetadataUpdate>;
+        work: &mut Work<'_>,
+    ) -> impl Future<Output = Result<QueryMetadataUpdate>> + Send;
 }
 
 pub(super) trait Mode<E>: Default + Send {
@@ -41,8 +42,9 @@ pub(super) trait Mode<E>: Default + Send {
         _: &mut E,
         _: &QueryPlan,
         _: &ProductionControl<'_>,
-    ) -> Result<QueryMetadataUpdate> {
-        unreachable!("scalar editor has no query arena")
+        _: &mut Work<'_>,
+    ) -> impl Future<Output = Result<QueryMetadataUpdate>> + Send {
+        async { unreachable!("scalar editor has no query arena") }
     }
 }
 
@@ -54,7 +56,7 @@ impl<E> Mode<E> for Flat {
 
 #[derive(Default)]
 pub(super) struct Scoped(Option<Prefix<ScalarQueryArena>>);
-impl<E: ArenaEdit> Mode<E> for Scoped {
+impl<E: ArenaEdit + Send> Mode<E> for Scoped {
     const SCOPED: bool = true;
     fn enter(&mut self, edit: &mut E, arena: ScalarQueryArena, context: &Context) {
         assert!(
@@ -68,13 +70,14 @@ impl<E: ArenaEdit> Mode<E> for Scoped {
         edit.set_arena(None);
         self.0.take().expect("active scalar-query namespace").take()
     }
-    fn completed_query(
+    async fn completed_query(
         &mut self,
         edit: &mut E,
         query: &QueryPlan,
         control: &ProductionControl<'_>,
+        work: &mut Work<'_>,
     ) -> Result<QueryMetadataUpdate> {
-        edit.completed_query(query, control)
+        edit.completed_query(query, control, work).await
     }
 }
 
@@ -106,7 +109,9 @@ where
                 self.edit.as_mut().expect("active scalar editor"),
                 query,
                 control,
-            )?
+                &mut self.work,
+            )
+            .await?
             .install(query, memory, control)
     }
 }

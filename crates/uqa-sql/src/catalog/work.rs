@@ -176,9 +176,14 @@ pub(crate) fn text_chunks<'a, 'b>(
     left: &'a str,
     right: &'b str,
 ) -> impl Iterator<Item = (&'a [u8], &'b [u8])> {
-    left.as_bytes()
-        .chunks(4096)
-        .zip(right.as_bytes().chunks(4096))
+    byte_chunks(left.as_bytes(), right.as_bytes())
+}
+
+fn byte_chunks<'a, 'b>(
+    left: &'a [u8],
+    right: &'b [u8],
+) -> impl Iterator<Item = (&'a [u8], &'b [u8])> {
+    left.chunks(4096).zip(right.chunks(4096))
 }
 
 pub(crate) async fn compare_text<W: Work>(
@@ -187,7 +192,16 @@ pub(crate) async fn compare_text<W: Work>(
     right: &str,
     control: &ProductionControl<'_>,
 ) -> Result<std::cmp::Ordering, SQLError> {
-    for (left, right) in text_chunks(left, right) {
+    compare_bytes(work, left.as_bytes(), right.as_bytes(), control).await
+}
+
+pub(crate) async fn compare_bytes<W: Work>(
+    work: &mut W,
+    left: &[u8],
+    right: &[u8],
+    control: &ProductionControl<'_>,
+) -> Result<std::cmp::Ordering, SQLError> {
+    for (left, right) in byte_chunks(left, right) {
         control.check()?;
         work.checkpoint().await?;
         control.check()?;

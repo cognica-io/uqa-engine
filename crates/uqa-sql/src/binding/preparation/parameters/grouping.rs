@@ -50,20 +50,32 @@ impl GroupingInputs {
         params: &[SQLParam],
         control: &ProductionControl<'_>,
     ) -> Result<crate::plan::QueryMetadataUpdate, SQLError> {
+        crate::catalog::work::inline(self.metadata_from(query, routines, params, control, &mut ()))
+    }
+
+    pub(super) async fn metadata_from<W: crate::catalog::work::Work + Send>(
+        &mut self,
+        query: &QueryPlan,
+        routines: &dyn RoutineResolution,
+        params: &[SQLParam],
+        control: &ProductionControl<'_>,
+        work: &mut W,
+    ) -> Result<crate::plan::QueryMetadataUpdate, SQLError> {
         let RelationalPlan::QueryBlock(block) = &query.root else {
             return Ok(crate::plan::QueryMetadataUpdate::default());
         };
         let Some((input, outer)) = self.0.remove(&AnalysisIdentity::from(block.as_ref())) else {
             return Ok(crate::plan::QueryMetadataUpdate::default());
         };
-        let grouping = crate::semantics::grouping_sets::analyze_distinct_grouping_with_control(
+        let grouping = crate::semantics::grouping_sets::analyze_distinct_grouping_from(
             routines,
             block,
             &input,
             outer.as_ref(),
             params,
-            control,
-        )?;
+            &mut crate::catalog::work::ReferenceWork { control, work },
+        )
+        .await?;
         Ok(crate::plan::QueryMetadataUpdate {
             grouping: Some(grouping),
             ..Default::default()

@@ -89,7 +89,33 @@ impl SchemaScope {
         params: &[SQLParam],
         outer: Option<&RowSchema>,
     ) -> Result<(), SQLError> {
-        let queries = ValidatedSubqueries::new(engine, &block.subqueries, params).retaining();
+        let owner = self.production.clone();
+        crate::catalog::work::inline(self.validate_query_block_clauses_with_work(
+            ValidatedSubqueries::new(engine, &block.subqueries, params).retaining(),
+            block,
+            source,
+            output,
+            outer,
+            &mut crate::catalog::work::ReferenceWork {
+                control: &owner.control(),
+                work: &mut (),
+            },
+        ))
+    }
+
+    pub(super) async fn validate_query_block_clauses_with_work<
+        W: crate::catalog::work::Work + Send,
+    >(
+        &mut self,
+        queries: ValidatedSubqueries<'_, '_>,
+        block: &QueryBlockPlan,
+        source: &RowSchema,
+        output: &RowSchema,
+        outer: Option<&RowSchema>,
+        input: &mut crate::catalog::work::ReferenceWork<'_, '_, W>,
+    ) -> Result<(), SQLError> {
+        let engine = queries.routines;
+        let params = queries.params;
         if let Some(predicate) = block.r#where.as_ref() {
             self.validate_condition_references(&queries, predicate, "WHERE", source)?;
         }
@@ -98,15 +124,11 @@ impl SchemaScope {
             .iter()
             .chain(block.grouping_sets.iter().flatten())
         {
-            let expression = crate::semantics::grouping_sets::resolve_grouping_expression(
-                engine,
-                expression,
-                &block.projections,
-                source,
-                outer,
-                params,
+            input.checkpoint().await?;
+            let expression = crate::semantics::grouping_sets::resolve_grouping_expression_reference_with_control(
+                engine, expression, &block.projections, source, outer, params, input.control,
             )?;
-            self.validate_expression_references_with_queries(&queries, &expression, source, None)?;
+            self.validate_expression_references_with_queries(&queries, expression, source, None)?;
         }
         if let Some(having) = block.having.as_ref() {
             self.validate_condition_references(&queries, having, "HAVING", source)?;
@@ -136,9 +158,10 @@ impl SchemaScope {
                 queries: &queries,
             },
         )?;
-        crate::semantics::grouping_sets::validate_grouped_expressions(
-            engine, block, source, outer, params,
+        crate::semantics::grouping_sets::validate_grouped_expressions_from(
+            engine, block, source, outer, params, input,
         )
+        .await
     }
 
     /// Validate a LIMIT or OFFSET argument, which can name the columns of the enclosing queries and the parameters but no column of its own query level, as `checkExprIsVarFree` requires.

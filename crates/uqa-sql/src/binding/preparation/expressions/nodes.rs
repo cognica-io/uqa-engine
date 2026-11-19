@@ -16,11 +16,8 @@ use super::{
 impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
     pub(super) fn scalar_subquery_expression(
         &mut self,
-        index: usize,
-        input: &RowSchema,
-        subqueries: &[QueryPlan],
+        schema: &RowSchema,
     ) -> Result<ExpressionType, SQLError> {
-        let schema = self.scalar_query_schema(index, input, subqueries)?;
         let control = self.scope.control();
         let mut result = ExpressionType::resolved_produced(
             schema

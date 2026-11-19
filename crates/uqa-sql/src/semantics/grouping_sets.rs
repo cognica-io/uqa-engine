@@ -18,7 +18,8 @@ mod normalization;
 mod production;
 mod serialization;
 pub(crate) use production::{
-    analyze_distinct_grouping_with_control, expression_identity_with_control,
+    analyze_distinct_grouping_from, analyze_distinct_grouping_with_control,
+    expression_identity_with_control,
 };
 mod names;
 pub(crate) use names::{bind_grouping_items, resolve_grouping_expression_reference_with_control};
@@ -28,7 +29,9 @@ pub use names::{
 };
 mod validation;
 pub use validation::validate_grouped_expressions;
-pub(crate) use validation::validate_grouped_expressions_with_inputs;
+pub(crate) use validation::{
+    validate_grouped_expressions_from, validate_grouped_expressions_with_inputs,
+};
 #[cfg(test)]
 mod tests;
 

@@ -715,13 +715,14 @@ pub(super) fn set_metadata(
 }
 
 /// Ordinary query blocks retain the same original output observations through clause and key selection.
-pub(super) fn block_metadata(
+pub(super) async fn block_metadata<W: crate::catalog::work::Work + Send>(
     scope: &mut SchemaScope,
     routines: &dyn RoutineResolution,
     block: &crate::plan::QueryBlockPlan,
     source: &RowSchema,
     outer: Option<&RowSchema>,
     params: &[crate::SQLParam],
+    work: &mut W,
 ) -> Result<RowSchema, SQLError> {
     let mut analysis = Preparation {
         bound_condition_queries: None,
@@ -730,7 +731,9 @@ pub(super) fn block_metadata(
         scope,
         schema_expression: (),
     };
-    let output = analysis.block_with_source(block, source, outer, false)?;
+    let output = analysis
+        .block_with_source(block, source, outer, false, work)
+        .await?;
     analysis
         .scope
         .collations

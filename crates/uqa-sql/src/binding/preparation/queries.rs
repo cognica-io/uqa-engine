@@ -14,7 +14,7 @@ use super::{
     error, ColumnType, ExpressionType, Preparation, QueryOutput, QueryPlan, RowSchema, SQLError,
     ScalarExpr,
 };
-use crate::catalog::work::{inline, Work};
+use crate::catalog::work::{inline, ReferenceWork, Work};
 use crate::plan::{ProjectionPlan, QueryBlockPlan, RelationalPlan};
 use crate::semantics::sets::placement::SetPlacement;
 
@@ -30,6 +30,16 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
         input: &RowSchema,
         subqueries: &[QueryPlan],
     ) -> Result<RowSchema, SQLError> {
+        inline(self.scalar_query_schema_with_work(index, input, subqueries, &mut ()))
+    }
+
+    pub(super) async fn scalar_query_schema_with_work<W: Work + Send>(
+        &mut self,
+        index: usize,
+        input: &RowSchema,
+        subqueries: &[QueryPlan],
+        work: &mut W,
+    ) -> Result<RowSchema, SQLError> {
         if let Some(schema) = self
             .bound_condition_queries
             .and_then(|queries| queries.get(index, input, subqueries))
@@ -39,7 +49,11 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
         let query = subqueries
             .get(index)
             .ok_or_else(|| error("XX000", "scalar subquery slot is outside its plan".into()))?;
-        self.query(query, Some(input))
+        crate::catalog::work::nested!(
+            W::MAY_SUSPEND,
+            self.scope.control(),
+            self.query_with_work(query, Some(input), work)
+        )
     }
 
     pub(super) fn query(
@@ -322,9 +336,8 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
         if let Some(from) = &block.from {
             self.parameters.retain_source_schema(from, &source)?;
         }
-        self.in_query_level(|analysis| {
-            analysis.block_level_output(block, &source, outer, preserve_unknown)
-        })
+        self.scoped_block_output(block, &source, outer, preserve_unknown, work)
+            .await
     }
 
     async fn rewritten_block<W: Work + Send>(
@@ -381,12 +394,13 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
         result
     }
 
-    pub(super) fn block_with_source(
+    pub(super) async fn block_with_source<W: Work + Send>(
         &mut self,
         block: &QueryBlockPlan,
         source: &RowSchema,
         outer: Option<&RowSchema>,
         preserve_unknown: bool,
+        work: &mut W,
     ) -> Result<QueryOutput, SQLError> {
         let captured_outer = outer
             .map(|schema| {
@@ -399,9 +413,9 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
             .transpose()?;
         let outer = captured_outer.as_deref();
         if block.deferred_outer_rewrites.is_empty() {
-            return self.in_query_level(|analysis| {
-                analysis.block_level_output(block, source, outer, preserve_unknown)
-            });
+            return self
+                .scoped_block_output(block, source, outer, preserve_unknown, work)
+                .await;
         }
         let owner = self.scope.control().capture();
         let control = owner.control();
@@ -413,19 +427,36 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
         let RelationalPlan::QueryBlock(query) = &rewritten.root else {
             unreachable!("rewritten query block");
         };
-        let result = self.in_query_level(|analysis| {
-            analysis.block_level_output(query, source, outer, preserve_unknown)
-        });
+        let result = self
+            .scoped_block_output(query, source, outer, preserve_unknown, work)
+            .await;
         self.parameters.retain_rewritten_block(block, rewritten)?;
         result
     }
 
-    fn block_level_output(
+    async fn scoped_block_output<W: Work + Send>(
         &mut self,
         block: &QueryBlockPlan,
         source: &RowSchema,
         outer: Option<&RowSchema>,
         preserve_unknown: bool,
+        work: &mut W,
+    ) -> Result<QueryOutput, SQLError> {
+        let enclosing = self.enter_query_level();
+        let result = self
+            .block_level_output(block, source, outer, preserve_unknown, work)
+            .await;
+        self.restore_query_level(enclosing);
+        result
+    }
+
+    async fn block_level_output<W: Work + Send>(
+        &mut self,
+        block: &QueryBlockPlan,
+        source: &RowSchema,
+        outer: Option<&RowSchema>,
+        preserve_unknown: bool,
+        work: &mut W,
     ) -> Result<QueryOutput, SQLError> {
         #[cfg(test)]
         BLOCK_ANALYSES.with(|count| count.set(count.get() + 1));
@@ -460,7 +491,9 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
         }
         let owner = self.scope.control().capture();
         let control = owner.control();
-        let grouping_inputs = self.grouping_inputs(block, source, &input, outer, &projected)?;
+        let grouping_inputs = self
+            .grouping_inputs(block, source, &input, outer, &projected, work)
+            .await?;
         for expression in &block.distinct_on {
             let value = self.alias_expression(
                 expression,
@@ -501,8 +534,12 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
             outer,
             &self.parameters.values()?,
             grouping_inputs.iter().copied(),
-            &control,
-        )?;
+            &mut ReferenceWork {
+                control: &control,
+                work,
+            },
+        )
+        .await?;
         self.parameters
             .retain_distinct_grouping(block, &input, outer)?;
         if !preserve_unknown {
@@ -511,38 +548,45 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
         Ok(output)
     }
 
-    fn grouping_inputs<'a>(
+    async fn grouping_inputs<'a, W: Work + Send>(
         &mut self,
         block: &'a QueryBlockPlan,
         source: &RowSchema,
         input: &RowSchema,
         outer: Option<&RowSchema>,
         projected: &RowSchema,
+        work: &mut W,
     ) -> Result<uqa_core::memory::Produced<Vec<&'a ScalarExpr>>, SQLError> {
         let owner = self.scope.control().capture();
         let control = owner.control();
         let mut grouping_inputs = uqa_core::memory::ProductionVec::new(control);
-        for expression in block
-            .group_by
-            .iter()
-            .chain(block.grouping_sets.iter().flatten())
+        let mut input_work = ReferenceWork {
+            control: &control,
+            work,
+        };
+        for set in std::iter::once(&block.group_by)
+            .filter(|group| !group.is_empty())
+            .chain(&block.grouping_sets)
         {
-            let site_output = self.scope.variable_sites.as_mut().and_then(|sites| {
-                let site = sites.site(expression)?;
-                let name = sites.bare_name(site)?;
-                if source.has_unqualified_column(name) || source.column_is_ambiguous(name) {
-                    return None;
-                }
-                let slot = projected.column_slot(name)?;
-                sites.resolutions.as_mut_slice()[site] =
-                    super::super::VariableSiteResolution::Output;
-                block
-                    .projections
-                    .get(slot)
-                    .map(|projection| &projection.expr)
-            });
-            let expression = site_output.unwrap_or(expression);
-            let expression =
+            input_work.checkpoint().await?;
+            for expression in set {
+                input_work.checkpoint().await?;
+                let site_output = self.scope.variable_sites.as_mut().and_then(|sites| {
+                    let site = sites.site(expression)?;
+                    let name = sites.bare_name(site)?;
+                    if source.has_unqualified_column(name) || source.column_is_ambiguous(name) {
+                        return None;
+                    }
+                    let slot = projected.column_slot(name)?;
+                    sites.resolutions.as_mut_slice()[site] =
+                        super::super::VariableSiteResolution::Output;
+                    block
+                        .projections
+                        .get(slot)
+                        .map(|projection| &projection.expr)
+                });
+                let expression = site_output.unwrap_or(expression);
+                let expression =
                 crate::semantics::grouping_sets::resolve_grouping_expression_reference_with_control(
                     self.routines,
                     expression,
@@ -552,15 +596,16 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
                     &self.parameters.values()?,
                     &control,
                 )?;
-            grouping_inputs.push_copy(expression)?;
-            let mut value = self.expression(expression, input, &block.subqueries)?;
-            self.parameters
-                .coerce_unknown(&mut value, &ColumnType::Text)?;
-            if let Some(ty) = &value.ty {
-                crate::type_resolution::ComparisonSupport::Equality
-                    .require_in_catalog(ty, self.routines)?;
+                grouping_inputs.push_copy(expression)?;
+                let mut value = self.expression(expression, input, &block.subqueries)?;
+                self.parameters
+                    .coerce_unknown(&mut value, &ColumnType::Text)?;
+                if let Some(ty) = &value.ty {
+                    crate::type_resolution::ComparisonSupport::Equality
+                        .require_in_catalog(ty, self.routines)?;
+                }
+                self.query_key(expression, value.derivation, block, input)?;
             }
-            self.query_key(expression, value.derivation, block, input)?;
         }
         Ok(grouping_inputs.finish()?)
     }
@@ -730,7 +775,7 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
     ) -> Result<QueryOutput, SQLError> {
         let owner = self.scope.control().capture();
         let control = owner.control();
-        let mut input_work = crate::catalog::work::ReferenceWork {
+        let mut input_work = ReferenceWork {
             control: &control,
             work,
         };

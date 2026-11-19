@@ -21,6 +21,7 @@ mod nodes;
 
 /// A selected scalar field whose owning analyzer can suspend between operands.
 enum CatalogOperands<'a> {
+    Subquery(usize),
     Cast(&'a ScalarExpr, &'a str),
     Boolean(&'a [ScalarExpr], &'static str),
     Null(&'a ScalarExpr),
@@ -338,9 +339,7 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
         }
         self.check_schema_column(expression)?;
         let operands = match expression {
-            ScalarExpr::ScalarSubquery(index) => {
-                return self.scalar_subquery_expression(*index, input, subqueries);
-            }
+            ScalarExpr::ScalarSubquery(index) => CatalogOperands::Subquery(*index),
             ScalarExpr::Param(index) => return self.parameters.reference(*index),
             ScalarExpr::Literal(Value::Null) => return Ok(ExpressionType::unknown()),
             ScalarExpr::Literal(Value::Str(text)) => {
@@ -415,6 +414,15 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
         work: &mut W,
     ) -> Result<ExpressionType, SQLError> {
         match operands {
+            CatalogOperands::Subquery(index) => {
+                let schema = if W::MAY_SUSPEND {
+                    self.scalar_query_schema_with_work(index, input, subqueries, work)
+                        .await?
+                } else {
+                    self.scalar_query_schema(index, input, subqueries)?
+                };
+                self.scalar_subquery_expression(&schema)
+            }
             CatalogOperands::Cast(expr, ty) => {
                 if W::MAY_SUSPEND {
                     let owner = self.scope.control().capture();

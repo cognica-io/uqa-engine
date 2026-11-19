@@ -72500,6 +72500,22 @@
     {
       "package": "uqa-engine",
       "kind": "lib",
+      "test": "restored_grouped_routine_reports_the_first_ungrouped_column_in_its_own_work_window",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/backup/restore/tests/routine_bodies.rs",
+      "capability": "Captured routine grouped projections",
+      "workload": "Restore two same-width stored SQL declarations with the ungrouped column first or last across memory, native SQLite, SQLite Key/Value and redb.",
+      "invariant": "The later grouping error consumes the intervening checked projections. Both inputs preserve the original grouping error, leave the destination unpublished and release all reserved bytes.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
       "test": "restored_routine_bodies_reject_parameters_outside_their_declared_scope",
       "cases": 4,
       "source": "crates/uqa-engine/src/backup/restore/tests/routine_bodies.rs",
@@ -76352,6 +76368,32 @@
       "capability": "Shared selected scalar input application",
       "workload": "Render an 8192-level array type through ordinary and one-step work on a 256 KiB stack.",
       "invariant": "The same formatter retains the exact scalar spelling and every suffix while traversal and output consume bounded work.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "grouped_validation_schedules_identities_and_projection_errors_in_original_order",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/semantics/grouping_sets/tests/ownership.rs",
+      "capability": "Stored SQL grouping analysis",
+      "workload": "Validate 2 and 32 grouping sets, move the first invalid projection, and interrupt the identity collection using the two cancellation owners or memory denial.",
+      "invariant": "Single-step progress follows each grouping identity and retirement. Batched work preserves the ordinary first error and all interrupted paths release retained state.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "distinct_grouping_selection_schedules_each_normalized_set_and_its_keys",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/semantics/grouping_sets/tests/ownership.rs",
+      "capability": "Stored SQL grouping analysis",
+      "workload": "Select distinct grouping sets with 2 and 64 repeated keys plus aliases and two empty sets under one-step or batched work.",
+      "invariant": "The original first equivalent set and empty set survive. Normalization, ordering, comparison and retirement consume work, and interrupted selection releases its original reservations.",
       "case_names": [
         ""
       ]

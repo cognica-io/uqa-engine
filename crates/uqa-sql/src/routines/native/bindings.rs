@@ -37,12 +37,12 @@ pub fn validate_captured_bindings(
     ))
 }
 
-pub async fn validate_captured_bindings_with_work<'a>(
+pub async fn validate_captured_bindings_with_work<'a, W: crate::catalog::CatalogWork + Send>(
     routine: &SQLUserFunction,
     types: impl Fn() -> &'a dyn RoutineTypeCatalog,
     context: &NativeScalarContext<'_, '_>,
     control: &ProductionControl<'_>,
-    work: &mut (impl crate::catalog::CatalogWork + Send),
+    work: &mut W,
 ) -> Result<(), SQLError> {
     control.check()?;
     let definition = &routine.def;
@@ -79,7 +79,7 @@ pub async fn validate_captured_bindings_with_work<'a>(
     };
     let params = routine_parameter_values_with_control(types(), definition, control)?;
     let parameters = sql_body_parameter_scope_with_control(definition, &params, control)?;
-    let inspect = |plan: PlanRef<'_>, original: bool| {
+    let inspect = async |plan: PlanRef<'_>, original: bool, work: &mut W| {
         crate::binding::analyze_stored_routine_statement(
             context.routines,
             plan,
@@ -87,13 +87,15 @@ pub async fn validate_captured_bindings_with_work<'a>(
             original.then_some(&parameters),
             context.binding.copy_with_control(control)?,
             control,
+            work,
         )
+        .await
     };
     let mut last = None;
     for statement in statements {
         control.check()?;
         let plan = UnifiedPlan::lower_stored_statement_with_work(statement, control, work).await?;
-        last = Some(inspect(plan.as_plan_ref(), true)?);
+        last = Some(inspect(plan.as_plan_ref(), true, work).await?);
         plan.retire(control, work).await?;
     }
     sql_function_result_layout_with_control(types(), definition, last.as_ref(), control)?;
@@ -101,7 +103,7 @@ pub async fn validate_captured_bindings_with_work<'a>(
     for plan in plans {
         work.checkpoint().await?;
         control.check()?;
-        last = Some(inspect(plan.into(), false)?);
+        last = Some(inspect(plan.into(), false, work).await?);
     }
     sql_function_result_layout_with_control(types(), definition, last.as_ref(), control)?;
     Ok(control.check()?)

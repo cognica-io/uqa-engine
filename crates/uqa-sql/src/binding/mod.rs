@@ -372,16 +372,18 @@ impl SchemaScope {
                 &control,
             )?,
         };
-        self.bind_query_block_output(routines, block, source, params, outer)
+        self.bind_query_block_output(routines, block, source, params, outer, work)
+            .await
     }
 
-    fn bind_query_block_output(
+    async fn bind_query_block_output<W: crate::catalog::work::Work + Send>(
         &mut self,
         routines: &dyn RoutineResolution,
         block: &QueryBlockPlan,
         source: RowSchema,
         params: &[SQLParam],
         outer: Option<&RowSchema>,
+        work: &mut W,
     ) -> Result<RowSchema, SQLError> {
         let production = self.production.clone();
         let control = production.control();
@@ -411,7 +413,9 @@ impl SchemaScope {
             None => block,
         };
         let expression_schema = overlay_outer_schema_with_control(&source, outer, &control)?;
-        let output = preparation::block_metadata(self, routines, block, &source, outer, params)?;
+        let output =
+            preparation::block_metadata(self, routines, block, &source, outer, params, work)
+                .await?;
         let output = analysis::with_projected_open_columns_with_control(
             &output,
             &block.projections,
@@ -419,14 +423,19 @@ impl SchemaScope {
             &control,
         )?;
         if self.validate_references {
-            self.validate_query_block_clauses(
-                routines,
+            self.validate_query_block_clauses_with_work(
+                type_resolution::ValidatedSubqueries::new(routines, &block.subqueries, params)
+                    .retaining(),
                 block,
                 &expression_schema,
                 &output,
-                params,
                 outer,
-            )?;
+                &mut crate::catalog::work::ReferenceWork {
+                    control: &control,
+                    work,
+                },
+            )
+            .await?;
         }
         Ok(output)
     }

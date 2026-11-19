@@ -29,16 +29,18 @@ impl ArenaEdit for Stored<'_> {
     fn set_arena(&mut self, width: Option<usize>) {
         self.edit.set_arena(width);
     }
-    fn completed_query(
+    async fn completed_query(
         &mut self,
         query: &QueryPlan,
         control: &ProductionControl<'_>,
+        work: &mut construction::Work<'_>,
     ) -> Result<QueryMetadataUpdate, SQLError> {
         self.edit
             .inputs()
             .8
             .groupings
-            .metadata(query, self.routines, self.params, control)
+            .metadata_from(query, self.routines, self.params, control, work)
+            .await
     }
 }
 

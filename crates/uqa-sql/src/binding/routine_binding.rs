@@ -533,7 +533,9 @@ impl SchemaScope {
                 }
                 // FROM and its scalar subqueries have their final bindings. A deferred view rewrite can change the source and its outer namespace before output analysis.
                 if block.from.is_some() && block.deferred_outer_rewrites.is_empty() {
-                    return self.bind_query_block_output(routines, block, source, params, outer);
+                    return self
+                        .bind_query_block_output(routines, block, source, params, outer, work)
+                        .await;
                 }
             }
             RelationalPlan::SetOp {

@@ -7,6 +7,7 @@
 //! Validate group inputs before constant folding or row production can erase their analyzed identity.
 
 use super::{expression_identity_with_control, resolve_grouping_expression_reference_with_control};
+use crate::catalog::work::{ReferenceWork, Work};
 use crate::plan::QueryBlockPlan;
 use crate::routines::RoutineResolution;
 use crate::semantics::aggregates::{contains_aggregate, has_aggregate, is_aggregate};
@@ -21,6 +22,27 @@ pub fn validate_grouped_expressions(
     outer: Option<&RowSchema>,
     params: &[SQLParam],
 ) -> Result<(), SQLError> {
+    crate::catalog::work::inline(validate_grouped_expressions_from(
+        routines,
+        statement,
+        schema,
+        outer,
+        params,
+        &mut ReferenceWork {
+            control: &ProductionControl::uncontrolled(),
+            work: &mut (),
+        },
+    ))
+}
+
+pub(crate) async fn validate_grouped_expressions_from<W: Work + Send>(
+    routines: &dyn RoutineResolution,
+    statement: &QueryBlockPlan,
+    schema: &RowSchema,
+    outer: Option<&RowSchema>,
+    params: &[SQLParam],
+    input: &mut ReferenceWork<'_, '_, W>,
+) -> Result<(), SQLError> {
     validate_grouped_expressions_with_inputs(
         routines,
         statement,
@@ -31,20 +53,22 @@ pub fn validate_grouped_expressions(
             .group_by
             .iter()
             .chain(statement.grouping_sets.iter().flatten()),
-        &ProductionControl::uncontrolled(),
+        input,
     )
+    .await
 }
 
 /// Validate already selected procedural grouping inputs without replacing or copying the query block.
-pub(crate) fn validate_grouped_expressions_with_inputs<'a>(
+pub(crate) async fn validate_grouped_expressions_with_inputs<'a, W: Work + Send>(
     routines: &dyn RoutineResolution,
     statement: &QueryBlockPlan,
     schema: &RowSchema,
     outer: Option<&RowSchema>,
     params: &[SQLParam],
     grouping: impl Iterator<Item = &'a ScalarExpr>,
-    control: &ProductionControl<'_>,
+    input: &mut ReferenceWork<'_, '_, W>,
 ) -> Result<(), SQLError> {
+    let control = input.control;
     control.check()?;
     let aggregates = |name: &str| routines.has_registered_aggregate_function(name);
     if statement.group_by.is_empty()
@@ -61,6 +85,7 @@ pub(crate) fn validate_grouped_expressions_with_inputs<'a>(
     }
     let mut groups = ProductionVec::new(*control);
     for expression in grouping {
+        input.checkpoint().await?;
         let expression = resolve_grouping_expression_reference_with_control(
             routines,
             expression,
@@ -74,6 +99,7 @@ pub(crate) fn validate_grouped_expressions_with_inputs<'a>(
             expression_identity_with_control(routines, expression, schema, params, control)?;
         groups.push_produced(control.finish(identity, control.empty_reservation())?)?;
     }
+    let (groups, _memory) = groups.finish()?.into_parts();
     let validate = |expression: &ScalarExpr| -> Result<(), SQLError> {
         expression.try_visit(&mut |part| {
             control.check()?;
@@ -105,6 +131,7 @@ pub(crate) fn validate_grouped_expressions_with_inputs<'a>(
         })
     };
     for projection in &statement.projections {
+        input.checkpoint().await?;
         validate_projection(projection, schema, control, &validate)?;
     }
     for expression in statement
@@ -126,6 +153,7 @@ pub(crate) fn validate_grouped_expressions_with_inputs<'a>(
                 .map(|expression| (expression, true)),
         )
     {
+        input.checkpoint().await?;
         let (expression, output_names) = expression;
         if output_names {
             if let ScalarExpr::Column(name) = expression {
@@ -136,7 +164,7 @@ pub(crate) fn validate_grouped_expressions_with_inputs<'a>(
         }
         validate(expression)?;
     }
-    Ok(())
+    crate::catalog::work::retire_entries(groups.into_iter(), control, input.work).await
 }
 
 fn validate_projection(
