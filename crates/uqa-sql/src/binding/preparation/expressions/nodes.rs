@@ -147,13 +147,28 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
         Ok(result)
     }
 
-    pub(super) fn null_test_expression(
+    pub(super) fn null_test_expression_inline<W: crate::catalog::work::Work + Send>(
         &mut self,
         expr: &ScalarExpr,
         input: &RowSchema,
         subqueries: &[QueryPlan],
+        work: &mut W,
     ) -> Result<ExpressionType, SQLError> {
-        let value = self.expression(expr, input, subqueries)?;
+        crate::catalog::work::inline_with(|| {
+            self.null_test_expression(expr, input, subqueries, work)
+        })
+    }
+
+    pub(super) async fn null_test_expression<W: crate::catalog::work::Work + Send>(
+        &mut self,
+        expr: &ScalarExpr,
+        input: &RowSchema,
+        subqueries: &[QueryPlan],
+        work: &mut W,
+    ) -> Result<ExpressionType, SQLError> {
+        let value = self
+            .expression_with_work(expr, input, subqueries, work)
+            .await?;
         Ok(ExpressionType::independent(
             Some(ColumnType::Boolean),
             &[value],

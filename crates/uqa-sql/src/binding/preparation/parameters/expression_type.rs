@@ -66,10 +66,18 @@ impl ExpressionType {
         values: &[Self],
     ) -> Self {
         let mut result = Self::resolved_owned(ty);
-        result.derivation = values.iter().fold(result.derivation, |state, value| {
-            state.combine(value.derivation.error_only())
-        });
+        for value in values {
+            result.include_independent(value);
+        }
         result
+    }
+
+    pub(in crate::binding::preparation) fn field_type(&self) -> Option<&ColumnType> {
+        self.ty.as_deref()
+    }
+
+    pub(in crate::binding::preparation) fn include_independent(&mut self, value: &Self) {
+        self.derivation = self.derivation.combine(value.derivation.error_only());
     }
 
     pub(in crate::binding::preparation) fn resolved(ty: Option<ColumnType>) -> Self {

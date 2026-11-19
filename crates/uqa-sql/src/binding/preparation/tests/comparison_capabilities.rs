@@ -7,11 +7,21 @@
 //! Independent `PostgreSQL` query contracts require declared operators before reading rows.
 
 use super::*;
+use crate::{
+    ast::{RuleEvent, Statement},
+    catalog::{events::RuleConditionBinding, work::inline, CatalogValidation},
+    plan::ExpressionPlan,
+};
+use uqa_core::{
+    memory::{MemoryBudget, ProductionControl},
+    CancellationToken,
+};
+
 use crate::ast::CompositeTypeReference;
 use crate::expr::composites::{CompositeAttribute, CompositeTypeCatalog, CompositeTypeDescriptor};
 use std::sync::Arc;
 
-struct Types(ColumnType);
+struct Types(Arc<CompositeTypeDescriptor>);
 
 fn pair() -> ColumnType {
     ColumnType::Composite(CompositeTypeReference {
@@ -34,7 +44,7 @@ impl FunctionTypeResolver for Types {
 
     fn resolve_type_name(&self, name: &str) -> Result<Option<ColumnType>, SQLError> {
         Ok(match name {
-            "pair" => Some(pair()),
+            "pair" | "hidden.pair" => Some(pair()),
             "pair[]" => Some(ColumnType::Array(Box::new(pair()))),
             _ if name == pair().catalog_name() => Some(pair()),
             _ => None,
@@ -59,28 +69,38 @@ impl FunctionTypeResolver for Types {
 
 impl RoutineResolution for Types {}
 
-impl CompositeTypeCatalog for Types {
-    fn composite_type(&self, oid: u32) -> Result<Option<Arc<CompositeTypeDescriptor>>, SQLError> {
-        assert_eq!(oid, 40_001);
-        Ok(Some(Arc::new(CompositeTypeDescriptor {
-            type_oid: oid,
+impl Types {
+    fn pair(second: ColumnType) -> Self {
+        Self::with_attributes(vec![
+            CompositeAttribute {
+                collation_oid: None,
+                name: "n".into(),
+                ty: ColumnType::Integer,
+                number: 1,
+            },
+            CompositeAttribute {
+                collation_oid: None,
+                name: "v".into(),
+                ty: second,
+                number: 2,
+            },
+        ])
+    }
+
+    fn with_attributes(attributes: Vec<CompositeAttribute>) -> Self {
+        Self(Arc::new(CompositeTypeDescriptor {
+            type_oid: 40_001,
             relation_oid: 40_002,
             dropped: Vec::new(),
-            attributes: vec![
-                CompositeAttribute {
-                    collation_oid: None,
-                    name: "n".into(),
-                    ty: ColumnType::Integer,
-                    number: 1,
-                },
-                CompositeAttribute {
-                    collation_oid: None,
-                    name: "v".into(),
-                    ty: self.0.clone(),
-                    number: 2,
-                },
-            ],
-        })))
+            attributes,
+        }))
+    }
+}
+
+impl CompositeTypeCatalog for Types {
+    fn composite_type(&self, oid: u32) -> Result<Option<Arc<CompositeTypeDescriptor>>, SQLError> {
+        assert_eq!(oid, self.0.type_oid);
+        Ok(Some(self.0.clone()))
     }
 }
 
@@ -96,7 +116,7 @@ fn analyze(sql: &str, catalog: &Types) -> Result<Vec<Option<ColumnType>>, SQLErr
 
 #[test]
 fn shared_query_outputs_preserve_named_composite_field_descriptors() {
-    let catalog = Types(ColumnType::Text);
+    let catalog = Types::pair(ColumnType::Text);
     let binding = crate::binding::fixture::empty_binding_context();
     for sql in [
         "SELECT NULL::pair",
@@ -144,25 +164,28 @@ fn empty_named_composite_queries_require_equality_from_every_live_field() {
         "SELECT NULL::pair WHERE false INTERSECT SELECT NULL::pair WHERE false",
         "SELECT NULL::pair WHERE false EXCEPT SELECT NULL::pair WHERE false",
     ] {
-        let error = analyze(sql, &Types(ColumnType::Json)).unwrap_err();
+        let error = analyze(sql, &Types::pair(ColumnType::Json)).unwrap_err();
         assert_eq!(error.sqlstate(), Some("42883"), "{sql}: {error}");
         assert_eq!(
             error.to_string(),
             "could not identify an equality operator for type hidden.pair",
             "{sql}"
         );
-        assert!(analyze(sql, &Types(ColumnType::Text)).is_ok(), "{sql}");
+        assert!(
+            analyze(sql, &Types::pair(ColumnType::Text)).is_ok(),
+            "{sql}"
+        );
     }
     analyze(
         "SELECT NULL::pair WHERE false UNION ALL SELECT NULL::pair WHERE false",
-        &Types(ColumnType::Json),
+        &Types::pair(ColumnType::Json),
     )
     .unwrap();
 }
 
 #[test]
 fn aggregate_distinct_requires_ordering_after_equality_with_its_own_detail() {
-    let catalog = Types(ColumnType::Xid);
+    let catalog = Types::pair(ColumnType::Xid);
     analyze("SELECT DISTINCT NULL::pair WHERE false", &catalog).unwrap();
     let error = analyze("SELECT count(DISTINCT NULL::pair) WHERE false", &catalog).unwrap_err();
     assert!(
@@ -189,7 +212,7 @@ fn ordering_preserves_catalog_name_and_hint_for_nested_declared_types() {
             "hidden.pair",
         ),
     ] {
-        let error = analyze(sql, &Types(ColumnType::Json)).unwrap_err();
+        let error = analyze(sql, &Types::pair(ColumnType::Json)).unwrap_err();
         assert!(
             matches!(error, SQLError::Diagnostic { ref sqlstate, ref message, detail: None, ref hint }
             if sqlstate == "42883" && message == &format!("could not identify an ordering operator for type {name}")
@@ -207,7 +230,8 @@ fn anonymous_record_capabilities_do_not_inspect_unreached_field_types() {
         "SELECT ROW(1, '{}'::json) AS v WHERE false ORDER BY v",
         "SELECT count(DISTINCT ROW(1, '{}'::json)) WHERE false",
     ] {
-        analyze(sql, &Types(ColumnType::Json)).unwrap_or_else(|error| panic!("{sql}: {error}"));
+        analyze(sql, &Types::pair(ColumnType::Json))
+            .unwrap_or_else(|error| panic!("{sql}: {error}"));
     }
 }
 
@@ -220,17 +244,19 @@ fn hashing_and_ordering_require_independent_declared_field_support() {
         ColumnType::Record,
         ColumnType::Array(Box::new(ColumnType::Record)),
     ] {
-        assert!(!type_supports_hashing(&ty, &Types(ColumnType::Text)).unwrap());
-        assert!(type_supports_ordering(&ty, &Types(ColumnType::Text)).unwrap());
+        assert!(!type_supports_hashing(&ty, &Types::pair(ColumnType::Text)).unwrap());
+        assert!(type_supports_ordering(&ty, &Types::pair(ColumnType::Text)).unwrap());
     }
-    assert!(type_supports_hashing(&pair(), &Types(ColumnType::Xid)).unwrap());
-    assert!(!type_supports_ordering(&pair(), &Types(ColumnType::Xid)).unwrap());
-    assert!(!type_supports_hashing(&pair(), &Types(ColumnType::Json)).unwrap());
+    assert!(type_supports_hashing(&pair(), &Types::pair(ColumnType::Xid)).unwrap());
+    assert!(!type_supports_ordering(&pair(), &Types::pair(ColumnType::Xid)).unwrap());
+    assert!(!type_supports_hashing(&pair(), &Types::pair(ColumnType::Json)).unwrap());
     let mut support = ComparisonKeySupport::default();
     support
-        .include(&ColumnType::Record, &Types(ColumnType::Xid))
+        .include(&ColumnType::Record, &Types::pair(ColumnType::Xid))
         .unwrap();
-    support.include(&pair(), &Types(ColumnType::Xid)).unwrap();
+    support
+        .include(&pair(), &Types::pair(ColumnType::Xid))
+        .unwrap();
     let error = support.require_implementation("GROUP BY").unwrap_err();
     assert_eq!(error.sqlstate(), Some("0A000"));
     assert_eq!(error.to_string(), "could not implement GROUP BY");
@@ -238,7 +264,7 @@ fn hashing_and_ordering_require_independent_declared_field_support() {
 
 #[test]
 fn row_distinct_binds_each_field_before_reading_rows() {
-    let catalog = Types(ColumnType::Json);
+    let catalog = Types::pair(ColumnType::Json);
     let analyze = |sql: &str| {
         let mut plan = UnifiedPlan::lower(crate::compile(sql).unwrap().remove(0));
         crate::binding::composite_inputs::retain_composite_inputs(
@@ -260,4 +286,102 @@ fn row_distinct_binds_each_field_before_reading_rows() {
     }
     analyze("SELECT ROW(1::smallint,NULL::integer) IS DISTINCT FROM ROW(1::bigint,NULL::integer)")
         .unwrap();
+}
+
+fn stored_rule_cast_windows(width: usize, bad: Option<usize>, stop: Option<usize>) -> usize {
+    let memory = MemoryBudget::new(2 << 20);
+    let cancel = CancellationToken::new();
+    let control = ProductionControl::new(&memory, &cancel, &cancel);
+    let names: Vec<_> = (0..width).map(|n| format!("field_{n}")).collect();
+    let integer = ColumnType::Integer;
+    let row = RowSchema::with_column_metadata_with_control(
+        None,
+        names
+            .iter()
+            .map(|name| (name.as_str(), Some(&integer), None)),
+        &control,
+    )
+    .unwrap();
+    let types = Types::with_attributes(
+        names
+            .iter()
+            .enumerate()
+            .map(|(index, name)| CompositeAttribute {
+                name: name.clone(),
+                number: i16::try_from(index + 1).unwrap(),
+                ty: if bad == Some(index) {
+                    ColumnType::Date
+                } else {
+                    ColumnType::Integer
+                },
+                collation_oid: None,
+            })
+            .collect(),
+    );
+    let binding = RuleConditionBinding::for_event(&names, RuleEvent::Update);
+    let schema = inline(binding.captured_row_schema_with_work(&row, &control, &mut ())).unwrap();
+    let rows = ["old", "new"].map(|side| {
+        inline(binding.current_whole_row_with_work(side, "hidden.pair", &row, &control, &mut ()))
+            .unwrap()
+    });
+    drop(row);
+    let Statement::CreateRule(rule) = crate::compile(
+        "CREATE RULE saved AS ON UPDATE TO hidden.pair WHERE OLD IS NOT NULL DO NOTHING",
+    )
+    .unwrap()
+    .remove(0) else {
+        panic!("rule")
+    };
+    let condition = ExpressionPlan::lower(rule.condition.unwrap());
+    let owner = control.capture();
+    let mut reader = CatalogValidation::new(&control, |mut work| async move {
+        let control = owner.control();
+        crate::binding::validate_stored_rule_condition_with_work(
+            &types,
+            &condition,
+            &schema,
+            crate::binding::fixture::empty_binding_context().copy_with_control(&control)?,
+            rows,
+            &control,
+            &mut work,
+        )
+        .await
+    })
+    .unwrap();
+    let mut calls = 0;
+    let error = loop {
+        if stop == Some(calls) {
+            cancel.cancel();
+        }
+        calls += 1;
+        match reader.advance(&control, 1) {
+            Ok(Some(next)) => reader = next,
+            Ok(None) => break None,
+            Err(error) => break Some(error),
+        }
+    };
+    if stop.is_some() {
+        assert_eq!(error.unwrap().sqlstate(), Some("57014"));
+    } else if let Some(index) = bad {
+        let error = error.expect("incompatible field");
+        assert_eq!(error.sqlstate(), Some("42846"), "{error:?}");
+        assert_eq!(
+            error.detail(),
+            Some(format!("Cannot cast type integer to date in column {}.", index + 1).as_str())
+        );
+    } else {
+        assert!(error.is_none(), "{error:?}");
+    }
+    assert_eq!(memory.used(), 0);
+    calls
+}
+
+#[test]
+fn stored_rule_whole_row_cast_visits_each_declared_field_before_reporting_its_error() {
+    const WIDTH: usize = 64;
+    let first = stored_rule_cast_windows(WIDTH, Some(0), None);
+    let last = stored_rule_cast_windows(WIDTH, Some(WIDTH - 1), None);
+    assert!(last >= first + WIDTH - 1, "first {first}, last {last}");
+    assert!(stored_rule_cast_windows(WIDTH, None, None) > last);
+    stored_rule_cast_windows(WIDTH, Some(WIDTH - 1), Some(first + (last - first) / 2));
 }

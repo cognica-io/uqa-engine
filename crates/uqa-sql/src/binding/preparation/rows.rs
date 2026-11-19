@@ -48,13 +48,21 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
         Ok(())
     }
 
-    pub(super) fn coerce_row_constructor(
+    pub(super) async fn coerce_row_constructor<W: crate::catalog::work::Work + Send>(
         &mut self,
         fields: &mut [ExpressionType],
         target: &ColumnType,
+        work: &mut W,
     ) -> Result<(), SQLError> {
+        let owner = self.scope.control().capture();
+        let control = owner.control();
+        let mut input = crate::catalog::work::ReferenceWork {
+            control: &control,
+            work,
+        };
         let mut base = target;
         while let ColumnType::Domain { base: nested, .. } = base {
+            input.checkpoint().await?;
             base = nested;
         }
         let ColumnType::Composite(reference) = base else {
@@ -66,6 +74,7 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
             &self.scope.control(),
         )?;
         for (index, attribute) in descriptor.attributes.iter().enumerate() {
+            input.checkpoint().await?;
             let Some(field) = fields.get_mut(index) else {
                 return Err(row_cast_error(
                     target,
@@ -82,7 +91,11 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
                 &self.scope.control(),
             )?;
             if let Some(nested) = &mut field.row_constructor {
-                self.coerce_row_constructor(nested, &attribute.ty)?;
+                crate::catalog::work::nested!(
+                    W::MAY_SUSPEND,
+                    control,
+                    self.coerce_row_constructor(nested, &attribute.ty, input.work)
+                )?;
             }
             self.parameters.coerce_unknown(field, &attribute.ty)?;
         }

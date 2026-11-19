@@ -193,19 +193,35 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
         .await?;
         self.parameters.observe_written_type(expression);
         self.retain_stored_reference(expression, input)?;
-        let value = if let Some(row) = self.scope.stored_whole_row(expression, input) {
-            let owner = self.scope.control().capture();
-            let replacement = row.copy_for_rewrite(&owner.control())?;
-            let value = self
-                .expression_inner(&replacement, input, subqueries, work)
-                .await?;
+        let replacement = if let Some(row) = self.scope.stored_whole_row(expression, input) {
+            let copied = if W::MAY_SUSPEND {
+                let mut input_work = crate::catalog::work::ReferenceWork {
+                    control: &control,
+                    work,
+                };
+                let copying = crate::construction::retain_with(control, || {
+                    row.copy_for_rewrite_from(&control, &mut input_work)
+                })?;
+                copying.await?
+            } else {
+                row.copy_for_rewrite(&control)?
+            };
+            Some(copied)
+        } else {
+            None
+        };
+        let value = self
+            .expression_inner(
+                replacement.as_deref().unwrap_or(expression),
+                input,
+                subqueries,
+                work,
+            )
+            .await?;
+        if let Some(replacement) = replacement {
             self.parameters
                 .retain_stored_expansion(expression, replacement)?;
-            value
-        } else {
-            self.expression_inner(expression, input, subqueries, work)
-                .await?
-        };
+        }
         self.record_expression_input(expression, value, input, subqueries)
     }
 
@@ -326,7 +342,17 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
                 ty,
                 collation,
             } => self.collated_expression(expr, ty, *collation, input, subqueries),
-            ScalarExpr::Cast { expr, ty, .. } => self.cast_expression(expr, ty, input, subqueries),
+            ScalarExpr::Cast { expr, ty, .. } => {
+                if W::MAY_SUSPEND {
+                    let owner = self.scope.control().capture();
+                    crate::construction::retain_with(owner.control(), || {
+                        self.cast_expression(expr, ty, input, subqueries, work)
+                    })?
+                    .await
+                } else {
+                    self.cast_expression_inline(expr, ty, input, subqueries, work)
+                }
+            }
             ScalarExpr::Binary { op, lhs, rhs } => {
                 self.binary_expression(*op, lhs, rhs, input, subqueries)
             }
@@ -347,7 +373,17 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
                     self.boolean_chain_expression_inline(items, context, input, subqueries, work)
                 }
             }
-            ScalarExpr::IsNull { expr, .. } => self.null_test_expression(expr, input, subqueries),
+            ScalarExpr::IsNull { expr, .. } => {
+                if W::MAY_SUSPEND {
+                    let owner = self.scope.control().capture();
+                    crate::construction::retain_with(owner.control(), || {
+                        self.null_test_expression(expr, input, subqueries, work)
+                    })?
+                    .await
+                } else {
+                    self.null_test_expression_inline(expr, input, subqueries, work)
+                }
+            }
             ScalarExpr::UnaryMinus(inner) => {
                 self.unary_minus_expression(expression, inner, input, subqueries)
             }
@@ -365,7 +401,17 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
             ScalarExpr::CompositeRow { items, binding, .. } => {
                 self.composite_row_expression(items, binding, input, subqueries)
             }
-            ScalarExpr::Row(items) => self.row_expression(expression, items, input, subqueries),
+            ScalarExpr::Row(items) => {
+                if W::MAY_SUSPEND {
+                    let owner = self.scope.control().capture();
+                    crate::construction::retain_with(owner.control(), || {
+                        self.row_expression(expression, items, input, subqueries, work)
+                    })?
+                    .await
+                } else {
+                    self.row_expression_inline(expression, items, input, subqueries, work)
+                }
+            }
             ScalarExpr::Func { .. } => {
                 let mut result = self.function_expression(expression, input, subqueries)?;
                 self.expression_record_fields(&mut result, expression, input, subqueries)?;
@@ -491,12 +537,26 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
         Ok(())
     }
 
-    fn row_expression(
+    fn row_expression_inline<W: crate::catalog::work::Work + Send>(
         &mut self,
         expression: &ScalarExpr,
         items: &[ScalarExpr],
         input: &RowSchema,
         subqueries: &[QueryPlan],
+        work: &mut W,
+    ) -> Result<ExpressionType, SQLError> {
+        crate::catalog::work::inline_with(|| {
+            self.row_expression(expression, items, input, subqueries, work)
+        })
+    }
+
+    async fn row_expression<W: crate::catalog::work::Work + Send>(
+        &mut self,
+        expression: &ScalarExpr,
+        items: &[ScalarExpr],
+        input: &RowSchema,
+        subqueries: &[QueryPlan],
+        work: &mut W,
     ) -> Result<ExpressionType, SQLError> {
         let control_owner = self.scope.control().capture();
         let control = control_owner.control();
@@ -512,22 +572,39 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
                     expanded.push((position, columns), &control)?;
                 }
                 for column in expanded[expansion].1.iter() {
-                    fields.push(self.expression(column, input, subqueries)?, &control)?;
+                    fields.push(
+                        self.expression_with_work(column, input, subqueries, work)
+                            .await?,
+                        &control,
+                    )?;
                 }
                 expansion += 1;
             } else {
-                fields.push(self.expression(item, input, subqueries)?, &control)?;
+                fields.push(
+                    self.expression_with_work(item, input, subqueries, work)
+                        .await?,
+                    &control,
+                )?;
             }
         }
         self.parameters.retain_row_expansion(expression, expanded)?;
-        let mut value = ExpressionType::independent(Some(ColumnType::Record), &fields);
-        let record_types = crate::schema::RecordFields::from_types_with_control(
-            fields.iter().map(|field| field.ty.as_deref()),
+        let mut value = ExpressionType::resolved(Some(ColumnType::Record));
+        let record_types = crate::schema::RecordFields::from_types_with_work(
+            fields.iter().map(ExpressionType::field_type),
             &control,
-        )?;
+            work,
+        )
+        .await?;
         let mut metadata = uqa_core::memory::ProductionVec::new(control);
         metadata.reserve(fields.len())?;
         for field in &fields {
+            crate::catalog::work::ReferenceWork {
+                control: &control,
+                work,
+            }
+            .checkpoint()
+            .await?;
+            value.include_independent(field);
             metadata.push_copy(crate::schema::RecordFieldMetadata {
                 collation_oid: u32::try_from(field.derivation.oid())
                     .expect("ROW field collation OID"),
