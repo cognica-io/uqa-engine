@@ -281,47 +281,10 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
             ..
         } = expression
         {
-            if binding.builtin
-                && binding.dispatch == Some(crate::ast::FunctionDispatch::MergeAction)
-                && !self.scope.merge_returning
-                && !self.parameters.is_output_binding()
+            if let Some(value) =
+                self.bound_call_input(expression, binding, args, input, subqueries)?
             {
-                return Err(error(
-                    "42601",
-                    "MERGE_ACTION() can only be used in the RETURNING list of a MERGE command"
-                        .into(),
-                ));
-            }
-            if let Some(symbol) = binding
-                .dispatch
-                .and_then(|dispatch| dispatch.json_extraction_symbol())
-            {
-                return self.json_extraction(symbol, args, input, subqueries);
-            }
-            if let Some(access) = binding.dispatch.and_then(|dispatch| {
-                crate::ast::ArrayAccess::from_dispatch(dispatch, args.len(), |index| {
-                    matches!(args[index], ScalarExpr::Literal(Value::Null))
-                })
-            }) {
-                let access = access?;
-                if binding.dispatch == Some(crate::ast::FunctionDispatch::ArraySlices) {
-                    let mut selected = binding.clone();
-                    selected.dispatch = Some(crate::ast::FunctionDispatch::ArraySlicesWithBounds(
-                        access.slice_bounds().expect("slice bounds"),
-                    ));
-                    self.parameters.retain_call(expression, &selected)?;
-                }
-                return self.array_access(access, args, input, subqueries);
-            }
-            if let Some(crate::ast::FunctionDispatch::BooleanTest(test)) = binding.dispatch {
-                let [argument] = args.as_slice() else {
-                    return Err(SQLError::Internal("Boolean test takes one input".into()));
-                };
-                let value = self.boolean_expression(argument, input, subqueries, test.label())?;
-                return Ok(ExpressionType::independent(
-                    Some(ColumnType::Boolean),
-                    &[value],
-                ));
+                return Ok(value);
             }
         }
         if let Some(clause) = crate::catalog::collations::expression::scalar_clause(expression)? {
@@ -367,13 +330,21 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
                 self.binary_expression(*op, lhs, rhs, input, subqueries)
             }
             ScalarExpr::Not(inner) => self.not_expression(inner, input, subqueries),
-            ScalarExpr::And(items) => {
-                self.boolean_chain_expression(items, "AND", input, subqueries, work)
+            ScalarExpr::And(items) | ScalarExpr::Or(items) => {
+                let context = if matches!(expression, ScalarExpr::And(_)) {
+                    "AND"
+                } else {
+                    "OR"
+                };
+                if W::MAY_SUSPEND {
+                    let owner = self.scope.control().capture();
+                    crate::construction::retain_with(owner.control(), || {
+                        self.boolean_chain_expression(items, context, input, subqueries, work)
+                    })?
                     .await
-            }
-            ScalarExpr::Or(items) => {
-                self.boolean_chain_expression(items, "OR", input, subqueries, work)
-                    .await
+                } else {
+                    self.boolean_chain_expression_inline(items, context, input, subqueries, work)
+                }
             }
             ScalarExpr::IsNull { expr, .. } => self.null_test_expression(expr, input, subqueries),
             ScalarExpr::UnaryMinus(inner) => {
@@ -399,8 +370,18 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
                 self.expression_record_fields(&mut result, expression, input, subqueries)?;
                 Ok(result)
             }
+            ScalarExpr::InList { .. } => {
+                if W::MAY_SUSPEND {
+                    let owner = self.scope.control().capture();
+                    crate::construction::retain_with(owner.control(), || {
+                        self.in_list(expression, input, subqueries, work)
+                    })?
+                    .await
+                } else {
+                    self.in_list_inline(expression, input, subqueries, work)
+                }
+            }
             ScalarExpr::Between { .. }
-            | ScalarExpr::InList { .. }
             | ScalarExpr::Case { .. }
             | ScalarExpr::Exists { .. }
             | ScalarExpr::InSubquery { .. }
@@ -420,6 +401,60 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
             | ScalarExpr::QualifiedStar(_)
             | ScalarExpr::Default => self.leaf_expression(expression, input, subqueries),
         }
+    }
+
+    fn bound_call_input(
+        &mut self,
+        expression: &ScalarExpr,
+        binding: &FunctionBinding,
+        args: &[ScalarExpr],
+        input: &RowSchema,
+        subqueries: &[QueryPlan],
+    ) -> Result<Option<ExpressionType>, SQLError> {
+        if binding.builtin
+            && binding.dispatch == Some(crate::ast::FunctionDispatch::MergeAction)
+            && !self.scope.merge_returning
+            && !self.parameters.is_output_binding()
+        {
+            return Err(error(
+                "42601",
+                "MERGE_ACTION() can only be used in the RETURNING list of a MERGE command".into(),
+            ));
+        }
+        if let Some(symbol) = binding
+            .dispatch
+            .and_then(|dispatch| dispatch.json_extraction_symbol())
+        {
+            return self
+                .json_extraction(symbol, args, input, subqueries)
+                .map(Some);
+        }
+        if let Some(access) = binding.dispatch.and_then(|dispatch| {
+            crate::ast::ArrayAccess::from_dispatch(dispatch, args.len(), |index| {
+                matches!(args[index], ScalarExpr::Literal(Value::Null))
+            })
+        }) {
+            let access = access?;
+            if binding.dispatch == Some(crate::ast::FunctionDispatch::ArraySlices) {
+                let mut selected = binding.clone();
+                selected.dispatch = Some(crate::ast::FunctionDispatch::ArraySlicesWithBounds(
+                    access.slice_bounds().expect("slice bounds"),
+                ));
+                self.parameters.retain_call(expression, &selected)?;
+            }
+            return self.array_access(access, args, input, subqueries).map(Some);
+        }
+        if let Some(crate::ast::FunctionDispatch::BooleanTest(test)) = binding.dispatch {
+            let [argument] = args else {
+                return Err(SQLError::Internal("Boolean test takes one input".into()));
+            };
+            let value = self.boolean_expression(argument, input, subqueries, test.label())?;
+            return Ok(Some(ExpressionType::independent(
+                Some(ColumnType::Boolean),
+                &[value],
+            )));
+        }
+        Ok(None)
     }
 
     fn expression_record_fields(
@@ -528,7 +563,6 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
                     first.combine(value.derivation.combine(high.derivation).error_only());
                 result
             }
-            ScalarExpr::InList { .. } => self.in_list(expression, input, subqueries)?,
             ScalarExpr::Case {
                 base,
                 when,

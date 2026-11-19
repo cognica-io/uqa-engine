@@ -118,31 +118,38 @@ pub(crate) fn references_current_row(
 ) -> bool {
     let mut found = false;
     expression.visit(&mut |node| {
-        found |= match node {
-            ScalarExpr::Column(column) => {
-                schema.is_none_or(|schema| schema.resolves_local_column(None, column))
-            }
-            ScalarExpr::QualifiedColumn { qualifier, column } => {
-                schema.is_none_or(|schema| schema.resolves_local_column(Some(qualifier), column))
-            }
-            ScalarExpr::Position(position) => schema.is_none_or(|schema| {
-                schema
-                    .slot(*position)
-                    .is_some_and(|slot| schema.slot_is_local(slot))
-            }),
-            ScalarExpr::InternalColumn(column) => schema.is_none_or(|schema| {
-                schema
-                    .internal_slot(*column)
-                    .is_some_and(|slot| schema.slot_is_local(slot))
-            }),
-            ScalarExpr::QualifiedStar(qualifier) => schema.is_none_or(|schema| {
-                schema
-                    .identities()
-                    .iter()
-                    .any(|identity| identity.qualifier() == Some(qualifier.as_str()))
-            }),
-            _ => false,
-        };
+        found |= node_references_current_row(node, schema);
     });
     found
+}
+
+pub(crate) fn node_references_current_row(
+    node: &ScalarExpr,
+    schema: Option<&crate::RowSchema>,
+) -> bool {
+    match node {
+        ScalarExpr::Column(column) => {
+            schema.is_none_or(|schema| schema.resolves_local_column(None, column))
+        }
+        ScalarExpr::QualifiedColumn { qualifier, column } => {
+            schema.is_none_or(|schema| schema.resolves_local_column(Some(qualifier), column))
+        }
+        ScalarExpr::Position(position) => schema.is_none_or(|schema| {
+            schema
+                .slot(*position)
+                .is_some_and(|slot| schema.slot_is_local(slot))
+        }),
+        ScalarExpr::InternalColumn(column) => schema.is_none_or(|schema| {
+            schema
+                .internal_slot(*column)
+                .is_some_and(|slot| schema.slot_is_local(slot))
+        }),
+        ScalarExpr::QualifiedStar(qualifier) => schema.is_none_or(|schema| {
+            schema
+                .identities()
+                .iter()
+                .any(|identity| identity.qualifier() == Some(qualifier.as_str()))
+        }),
+        _ => false,
+    }
 }

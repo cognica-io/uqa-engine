@@ -26,13 +26,6 @@ impl CommonInputType {
         }
     }
 
-    fn from_inputs<'a>(
-        types: impl Iterator<Item = Option<&'a ColumnType>>,
-        control: &ProductionControl<'_>,
-    ) -> Result<Self, SQLError> {
-        crate::catalog::work::inline(Self::from_inputs_with_work(types, control, &mut ()))
-    }
-
     async fn from_inputs_with_work<'a, W: crate::catalog::work::Work + Send>(
         mut types: impl Iterator<Item = Option<&'a ColumnType>>,
         control: &ProductionControl<'_>,
@@ -182,9 +175,25 @@ pub(crate) fn select_common_input_type_with_control(
     types: &[Option<&ColumnType>],
     control: &ProductionControl<'_>,
 ) -> Result<Option<Produced<ColumnType>>, SQLError> {
-    let mut selection = CommonInputType::from_inputs(types.iter().copied(), control)?;
+    crate::catalog::work::inline(select_common_input_type_with_work(
+        types.iter().copied(),
+        control,
+        &mut (),
+    ))
+}
+
+pub(crate) async fn select_common_input_type_with_work<'a, W: crate::catalog::work::Work + Send>(
+    types: impl Iterator<Item = Option<&'a ColumnType>> + Clone,
+    control: &ProductionControl<'_>,
+    work: &mut W,
+) -> Result<Option<Produced<ColumnType>>, SQLError> {
+    let mut selection =
+        CommonInputType::from_inputs_with_work(types.clone(), control, work).await?;
     for ty in types {
-        match selection.select(*ty, control) {
+        crate::catalog::work::ReferenceWork { control, work }
+            .checkpoint()
+            .await?;
+        match selection.select(ty, control) {
             Ok(()) => {}
             Err(CommonTypeFailure::Failed(error))
                 if matches!(error.sqlstate(), Some("53200" | "57014")) =>

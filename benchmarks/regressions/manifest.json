@@ -41942,6 +41942,19 @@
     {
       "package": "uqa-sql",
       "kind": "lib",
+      "test": "stored_membership_analysis_checks_each_operand_before_the_next_diagnostic",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/preparation/tests/rewritten_inputs.rs",
+      "capability": "Stored membership operand analysis",
+      "workload": "A stored IN predicate with 4,096 operands, a missing name in its first or last position, and a cancellation between those positions.",
+      "invariant": "Analysis advances through operands in order, gives the same undefined-column diagnostic, returns Boolean for valid input, and releases the full allowance on completion or interruption.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
       "test": "membership_inputs_finish_before_enclosing_call_metadata_moves_them",
       "cases": 1,
       "source": "crates/uqa-sql/src/binding/preparation/tests/rewritten_inputs.rs",

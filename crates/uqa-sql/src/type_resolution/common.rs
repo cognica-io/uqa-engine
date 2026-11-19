@@ -19,10 +19,12 @@ use super::FunctionTypeResolver;
 mod inputs;
 mod signature;
 pub use inputs::select_common_input_type;
-pub(crate) use inputs::select_common_input_type_with_control;
 pub(super) use inputs::CommonInputType;
 pub(crate) use inputs::{
     select_common_input_type_in_with_control, select_common_input_type_in_with_work,
+};
+pub(crate) use inputs::{
+    select_common_input_type_with_control, select_common_input_type_with_work,
 };
 pub use signature::function_call_argument_signature_with_control;
 

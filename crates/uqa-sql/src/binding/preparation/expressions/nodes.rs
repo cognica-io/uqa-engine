@@ -110,6 +110,19 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
         ))
     }
 
+    pub(super) fn boolean_chain_expression_inline<W: crate::catalog::work::Work + Send>(
+        &mut self,
+        items: &[ScalarExpr],
+        context: &str,
+        input: &RowSchema,
+        subqueries: &[QueryPlan],
+        work: &mut W,
+    ) -> Result<ExpressionType, SQLError> {
+        crate::catalog::work::inline_with(|| {
+            self.boolean_chain_expression(items, context, input, subqueries, work)
+        })
+    }
+
     pub(super) async fn boolean_chain_expression<W: crate::catalog::work::Work + Send>(
         &mut self,
         items: &[ScalarExpr],

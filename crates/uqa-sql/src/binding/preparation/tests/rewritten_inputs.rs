@@ -141,3 +141,98 @@ fn rewritten_subqueries_retain_input_constants_at_the_analyzed_addresses() {
         }
     }
 }
+
+#[test]
+fn stored_membership_analysis_checks_each_operand_before_the_next_diagnostic() {
+    use uqa_core::{
+        image_io::{ImageDecodeWindow, ImageDecoder},
+        memory::{MemoryBudget, ProductionControl},
+        CancellationToken, Value,
+    };
+
+    enum Interrupt {
+        Original(usize),
+        Invoking(usize),
+    }
+
+    fn run(
+        count: usize,
+        missing: Option<usize>,
+        steps: usize,
+        cancel: Option<Interrupt>,
+    ) -> (usize, Result<ColumnType, SQLError>) {
+        let integer = || ScalarExpr::Literal(Value::Int(1));
+        let membership = ScalarExpr::InList {
+            expr: Box::new(integer()),
+            list: (0..count)
+                .map(|index| {
+                    if Some(index) == missing {
+                        ScalarExpr::Column("missing_input".into())
+                    } else {
+                        integer()
+                    }
+                })
+                .collect(),
+            negated: false,
+        };
+        let memory = MemoryBudget::new(16 << 20);
+        let original = CancellationToken::new();
+        let retained = original.clone();
+        let token = CancellationToken::new();
+        let mut decoder = ImageDecoder::new(&memory, &token, |mut reader| async move {
+            let mut input = reader.input();
+            let control = ProductionControl::new(input.memory, &retained, input.cancellation);
+            let context = crate::binding::fixture::empty_binding_context();
+            let output = crate::binding::preparation::analyze_stored_scalar_with_work(
+                &NoRoutines,
+                &membership,
+                &RowSchema::default(),
+                context.copy_with_control(&control)?,
+                None,
+                &control,
+                &mut input,
+            )
+            .await?
+            .expect("membership has a Boolean result");
+            Ok::<_, SQLError>(output.into_parts().0)
+        })
+        .unwrap();
+        let mut calls = 0;
+        let result = loop {
+            calls += 1;
+            match cancel {
+                Some(Interrupt::Original(at)) if at == calls => original.cancel(),
+                Some(Interrupt::Invoking(at)) if at == calls => token.cancel(),
+                _ => (),
+            }
+            match decoder.advance(&mut std::io::empty(), ImageDecodeWindow { bytes: 1, steps }) {
+                Ok(Some(output)) => break Ok(output),
+                Ok(None) => (),
+                Err(error) => break Err(error),
+            }
+        };
+        drop(decoder);
+        assert_eq!(memory.used(), 0);
+        (calls, result)
+    }
+
+    let count = 4096;
+    let (first, early) = run(count, Some(0), 1, None);
+    let (last, late) = run(count, Some(count - 1), 1, None);
+    for error in [early.unwrap_err(), late.unwrap_err()] {
+        assert_eq!(error.sqlstate(), Some("42703"));
+        assert_eq!(error.to_string(), "column \"missing_input\" does not exist");
+    }
+    assert!(last >= first + count - 1, "first {first}, last {last}");
+    let (batched, output) = run(count, None, 32, None);
+    assert_eq!(output.unwrap(), ColumnType::Boolean);
+    let (single, output) = run(count, None, 1, None);
+    assert_eq!(output.unwrap(), ColumnType::Boolean);
+    assert!(single > batched * 8);
+    let cancel = first + count / 2;
+    for interrupt in [Interrupt::Original(cancel), Interrupt::Invoking(cancel)] {
+        let (stopped, result) = run(count, Some(count - 1), 1, Some(interrupt));
+        assert_eq!(stopped, cancel);
+        assert_eq!(result.unwrap_err().sqlstate(), Some("57014"));
+    }
+}
