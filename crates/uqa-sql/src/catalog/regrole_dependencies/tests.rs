@@ -112,3 +112,107 @@ fn query_dependency_collection_distinguishes_typed_null_and_role_constants() {
         assert_eq!(constants.reject_with(&Roles::default()).is_err(), rejected);
     }
 }
+
+#[test]
+fn stored_role_diagnostics_follow_mutation_and_query_input_order() {
+    for (sql, expected) in [
+        ("WITH c AS (SELECT 'cte'::regrole) SELECT 'projection'::regrole FROM (SELECT 'source'::regrole) s WHERE 'predicate'::regrole IS NOT NULL", &["cte", "source", "predicate", "projection"][..]),
+        ("WITH c AS (SELECT 'cte'::regrole) INSERT INTO t(x[('target'::regrole)::integer]) SELECT 'source'::regrole ON CONFLICT (x) DO UPDATE SET x = 'conflict'::regrole RETURNING 'returning'::regrole", &["target", "cte", "source", "conflict", "returning"][..]),
+        ("UPDATE t SET x = 'assignment'::regrole FROM (SELECT 'source'::regrole) s WHERE 'predicate'::regrole IS NOT NULL RETURNING 'returning'::regrole", &["source", "assignment", "predicate", "returning"][..]),
+        ("DELETE FROM t USING (SELECT 'source'::regrole) s WHERE 'predicate'::regrole IS NOT NULL RETURNING 'returning'::regrole", &["source", "predicate", "returning"][..]),
+        ("MERGE INTO t USING (SELECT 'source'::regrole AS x) s ON 'join'::regrole IS NOT NULL WHEN MATCHED THEN UPDATE SET x = 'assignment'::regrole", &["source", "join", "assignment"][..]),
+    ] {
+        let mut plan = UnifiedPlan::lower(crate::compile(sql).unwrap().remove(0));
+        let mut rewrite = StoredRegroleConstants::default();
+        plan.rewrite_scalar_expressions(&mut |node| rewrite.collect_scalar(node));
+        assert_eq!(rewrite.inputs, expected, "{sql}");
+        let mut collected = StoredRegroleConstants::default();
+        collected.collect_plan(&mut plan);
+        assert_eq!(collected.inputs, expected, "{sql}");
+        let roles = Roles::default();
+        assert_eq!(collected.reject_with(&roles).unwrap_err().to_string(), format!("role \"{}\" does not exist", expected[0]));
+        assert_eq!(roles.reads.get(), 1);
+    }
+}
+
+#[test]
+fn stored_role_collection_yields_inside_names_and_releases_original_allowance() {
+    use std::sync::Arc;
+    use uqa_core::{
+        image_io::{ImageDecodeWindow, ImageDecoder},
+        memory::MemoryBudget,
+        CancellationToken,
+    };
+
+    let name = "識".repeat(16_384);
+    let sql = format!("SELECT '23'::regrole, '{name}'::regrole");
+    let plan = Arc::new(UnifiedPlan::lower(crate::compile(&sql).unwrap().remove(0)));
+    let native = MemoryBudget::new(256 * 1024);
+    let work = MemoryBudget::new(256 * 1024);
+    let invoking = CancellationToken::new();
+    let decode = |original: CancellationToken| {
+        let plan = Arc::clone(&plan);
+        let native = native.clone();
+        ImageDecoder::new(&work, &invoking, |mut reader| async move {
+            let mut input = reader.input();
+            let control = ProductionControl::new(&native, &original, input.cancellation);
+            StoredRegroleConstants::from_plan(plan.as_ref().into(), &control, &mut input).await
+        })
+        .unwrap()
+    };
+    let window = ImageDecodeWindow { bytes: 1, steps: 1 };
+    let mut decoder = decode(CancellationToken::new());
+    let mut polls = 0;
+    let constants = loop {
+        polls += 1;
+        if let Some(value) = decoder.advance(&mut std::io::empty(), window).unwrap() {
+            break value;
+        }
+    };
+    assert!(polls > name.len() / 4096);
+    assert_eq!(constants.inputs, ["23", &name]);
+    assert_eq!(native.used(), constants.reserved_bytes());
+    let roles = Roles::default();
+    let mut next = 0;
+    assert!(constants.validate_next_input(&roles, &mut next).unwrap());
+    assert_eq!((next, roles.reads.get()), (1, 1));
+    assert_eq!(
+        constants
+            .validate_next_input(&roles, &mut next)
+            .unwrap_err()
+            .sqlstate(),
+        Some("42704")
+    );
+    assert_eq!((next, roles.reads.get()), (1, 2));
+    drop((constants, decoder));
+    assert_eq!((native.used(), work.used()), (0, 0));
+
+    let original = CancellationToken::new();
+    let mut decoder = decode(original.clone());
+    assert!(decoder
+        .advance(&mut std::io::empty(), window)
+        .unwrap()
+        .is_none());
+    original.cancel();
+    assert_eq!(
+        decoder
+            .advance(&mut std::io::empty(), window)
+            .unwrap_err()
+            .sqlstate(),
+        Some("57014")
+    );
+    drop(decoder);
+    let held = native.reserve(native.available()).unwrap();
+    let mut decoder = decode(CancellationToken::new());
+    let error = loop {
+        match decoder.advance(&mut std::io::empty(), window) {
+            Ok(None) => (),
+            Ok(Some(_)) => panic!("role text exceeded its allowance"),
+            Err(error) => break error,
+        }
+    };
+    assert!(error.native_resource_error().is_some());
+    assert_eq!(error.sqlstate(), Some("53200"));
+    drop((held, decoder));
+    assert_eq!((native.used(), work.used()), (0, 0));
+}

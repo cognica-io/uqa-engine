@@ -110,6 +110,7 @@ pub struct SQLStandardBodyCompilation {
     roles: Vec<Produced<StoredRegroleConstants>>,
     role_memory: Option<MemoryReservation>,
     checked_roles: usize,
+    next_role_input: usize,
 }
 
 impl SQLStandardBodyCompilation {
@@ -142,6 +143,7 @@ impl SQLStandardBodyCompilation {
             roles: Vec::new(),
             role_memory: None,
             checked_roles: 0,
+            next_role_input: 0,
         };
         state.collect_roles(signature, control)?;
         Ok(state)
@@ -246,7 +248,7 @@ impl SQLStandardBodyCompilation {
         Ok(())
     }
 
-    /// Compile one original statement or validate one previously collected group of role inputs. A later statement's analysis error precedes deferred role diagnostics.
+    /// Compile one original statement or resolve one deferred role input. A later statement's analysis error precedes deferred role diagnostics.
     pub fn advance(
         &mut self,
         context: &RoutineCompilationContext<'_>,
@@ -267,8 +269,10 @@ impl SQLStandardBodyCompilation {
             return Ok(false);
         }
         if let Some(roles) = self.roles.get(self.checked_roles) {
-            roles.validate_inputs_with(context.regroles)?;
-            self.checked_roles += 1;
+            if !roles.validate_next_input(context.regroles, &mut self.next_role_input)? {
+                self.checked_roles += 1;
+                self.next_role_input = 0;
+            }
             return Ok(false);
         }
         if self.roles.is_empty() {

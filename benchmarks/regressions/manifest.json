@@ -76122,6 +76122,19 @@
     {
       "package": "uqa-sql",
       "kind": "lib",
+      "test": "stored_role_collection_yields_inside_names_and_releases_original_allowance",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/regrole_dependencies/tests.rs",
+      "capability": "Stored SQL role dependencies",
+      "workload": "Collect a numeric role and a 48 KiB UTF-8 role name with single-step restore windows, then resolve the names in order.",
+      "invariant": "Collection retains its original allowance, yields inside the role name and releases every reservation on completion, cancellation and admission failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
       "test": "retained_sql_type_parsing_preserves_scalar_modifiers_aliases_and_diagnostics",
       "cases": 1,
       "source": "crates/uqa-sql/src/ast/types/parsing/tests.rs",

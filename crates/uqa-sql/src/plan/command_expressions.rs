@@ -74,19 +74,27 @@ impl InsertPlan {
     }
 
     fn expression_steps(&self) -> impl Iterator<Item = Option<&ScalarExpr>> {
+        self.target_steps()
+            .chain(self.row_steps())
+            .chain(self.result_steps())
+    }
+
+    pub(in crate::plan) fn target_steps(&self) -> impl Iterator<Item = Option<&ScalarExpr>> {
         self.columns
             .iter()
             .flat_map(|target| std::iter::once(None).chain(target.expression_steps()))
-            .chain(
-                self.rows
-                    .iter()
-                    .flat_map(|row| std::iter::once(None).chain(row.iter().map(Some))),
-            )
-            .chain(
-                self.on_conflict
-                    .iter()
-                    .flat_map(ConflictPlan::expression_steps),
-            )
+    }
+
+    pub(in crate::plan) fn row_steps(&self) -> impl Iterator<Item = Option<&ScalarExpr>> {
+        self.rows
+            .iter()
+            .flat_map(|row| std::iter::once(None).chain(row.iter().map(Some)))
+    }
+
+    pub(in crate::plan) fn result_steps(&self) -> impl Iterator<Item = Option<&ScalarExpr>> {
+        self.on_conflict
+            .iter()
+            .flat_map(ConflictPlan::expression_steps)
             .chain(
                 self.returning
                     .iter()

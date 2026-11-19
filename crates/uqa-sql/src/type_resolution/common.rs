@@ -100,7 +100,7 @@ pub(crate) fn base_type(ty: &ColumnType) -> &ColumnType {
     .expect("ordinary base type lookup has no resource limit or cancellation")
 }
 
-pub(super) async fn base_type_with_work<'a, W: crate::ast::ColumnTypeInputWork>(
+pub(crate) async fn base_type_with_work<'a, W: crate::ast::ColumnTypeInputWork>(
     mut ty: &'a ColumnType,
     control: &ProductionControl<'_>,
     work: &mut W,

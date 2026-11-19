@@ -170,4 +170,4 @@ impl SourcePlan {
 
 mod command;
 mod input;
-pub(crate) use input::visit_scalar_nodes_with_work;
+pub(crate) use input::{visit_scalar_nodes_with_work, visit_stored_definition_scalars};
