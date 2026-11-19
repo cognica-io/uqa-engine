@@ -148,7 +148,10 @@ class PremergeCIWorkflowContractTest(unittest.TestCase):
         self.assertIn("--archive-file", shard)
         self.assertNotIn("cargo test", shard)
         self.assertIn("--workspace --locked --doc --exclude uqa-node --exclude uqa-ffi", workspace)
-        archive = workspace.split("      - name: Build workspace tests once\n", 1)[1].split("      - uses:", 1)[0]
+        archive = workspace.split("      - name: Build workspace tests once\n", 1)[1].split("      - name:", 1)[0]
+        self.assertIn("args=(--workspace --locked)", archive)
+        self.assertIn('if [[ "$RUNNER_OS" == Linux ]]; then args+=(--exclude uqa-fdw); fi', archive)
+        self.assertIn('cargo nextest archive "${args[@]}"', archive)
         self.assertNotIn("--exclude uqa-node", archive)
         self.assertIn("Verify independent analyzer features", workspace)
         self.assertNotIn("--skip", workspace)
@@ -166,13 +169,15 @@ class PremergeCIWorkflowContractTest(unittest.TestCase):
         run = build.split("      - name: Run every macOS workspace test on its build worker\n", 1)[1].split("      - name:", 1)[0]
         self.assertIn("if: runner.os == 'macOS'", run)
         self.assertIn('NEXTEST_TEST_THREADS: "8"', run)
-        self.assertIn("cargo nextest run --profile ci", run)
-        self.assertIn('--archive-file "$RUNNER_TEMP/uqa-tests.tar.zst"', run)
-        self.assertIn("--extract-overwrite", run)
-        for option in ("--partition", "--filter", "--skip", "continue-on-error"):
-            self.assertNotIn(option, run)
+        self.assertEqual(run.split("        run: ", 1)[1].strip(), "cargo nextest run --profile ci --workspace --locked")
+        self.assertIn("timeout-minutes: 180", run)
+        self.assertNotIn("continue-on-error", run)
         self.assertIn("workspace-results-${{ inputs.os }}", build)
         self.assertIn("target/nextest/ci/junit.xml", build)
+        artifact = build.split("      - uses: actions/upload-artifact@v4\n", 1)[1].split("      - name:", 1)[0]
+        docs = build.split("      - name: Test documentation examples\n", 1)[1]
+        for step in (artifact, docs):
+            self.assertIn("if: ${{ !cancelled() && steps.archive.outcome == 'success' }}", step)
         self.assertNotIn("actions/download-artifact", build)
         performance = (ROOT / ".github/workflows/performance-platform.yml").read_text(encoding="utf-8")
         build, downstream = performance.split("  deterministic-work:\n", 1)

@@ -72,11 +72,7 @@ jobs:
         env:
           # Bound durable test concurrency independently of the other workers sharing this host.
           NEXTEST_TEST_THREADS: "8"
-        run: >-
-          cargo nextest run --profile ci
-          --archive-file "$RUNNER_TEMP/uqa-tests.tar.zst"
-          --extract-to "$GITHUB_WORKSPACE" --extract-overwrite
-          --workspace-remap "$GITHUB_WORKSPACE"
+        run: cargo nextest run --profile ci --workspace --locked
       - name: Retain macOS workspace test results
         if: always() && runner.os == 'macOS'
         uses: actions/upload-artifact@v4
@@ -86,6 +82,7 @@ jobs:
           retention-days: 7
           if-no-files-found: error
       - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && steps.archive.outcome == 'success' }}
         with:
           name: workspace-tests-${{ inputs.os }}
           path: ${{ runner.temp }}/uqa-tests.tar.zst
@@ -93,6 +90,7 @@ jobs:
           retention-days: 1
           if-no-files-found: error
       - name: Test documentation examples
+        if: ${{ !cancelled() && steps.archive.outcome == 'success' }}
         shell: bash
         run: |
           # Explicit --doc overrides doctest=false; native-only libraries have no Rust doctest target.
