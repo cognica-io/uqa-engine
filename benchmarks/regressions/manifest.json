@@ -54120,6 +54120,45 @@
     {
       "package": "uqa-execution",
       "kind": "lib",
+      "test": "small_routine_reference_registries_fit_the_private_catalog_allowance",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/relationships/table_tests.rs",
+      "capability": "Stored routine identity and body references",
+      "workload": "Validate a table default and then the same table with a stored zero-argument routine and a legacy trigger lookup. Give ordinary validation its registry allowance and the private reader 16 KiB.",
+      "invariant": "Ordinary validation completes with the original registry allocation. Both retained registries stay within 16 KiB, the additional trigger takes more single-step calls, and retirement returns the complete allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "original_routine_reference_validation_yields_inside_a_single_selected_signature",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/routine_dependencies/tests/windows.rs",
+      "capability": "Stored routine identity and body references",
+      "workload": "Validate a stored binding with 1,024 original argument types. Move a mismatch from the first to the last argument, finish an equal binding with one- and 97-step windows, then interrupt inside the same signature.",
+      "invariant": "The late mismatch requires at least 1,023 additional single-step advances, the ordinary signature error is preserved, and both cancellation and admission denial release all scratch.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "original_routine_body_validation_preserves_source_plan_and_registry_error_order",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/routine_dependencies/tests/windows.rs",
+      "capability": "Stored routine identity and body references",
+      "workload": "Place an invalid parameter at opposite ends of one 512-row VALUES statement and its separately retained plan ahead of a duplicate routine identity and a bad binding.",
+      "invariant": "The original statement and retained plan reject their own invalid parameter in order. The duplicate identity is reached only after both bodies validate, and every case releases its allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
       "test": "sequence_function_validation_suspends_in_a_single_reference_and_releases_interrupted_work",
       "cases": 1,
       "source": "crates/uqa-execution/src/catalog/image_validation/sequence_functions/tests.rs",

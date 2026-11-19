@@ -5,7 +5,11 @@
 //
 
 use super::*;
-use crate::ast::{FunctionDispatch, FunctionResolutionError, Statement};
+use crate::{
+    ast::{Expr, FunctionDispatch, FunctionResolutionError, Statement},
+    plan::PlanRef,
+    ScalarExpr,
+};
 
 fn definition() -> CreateFunction {
     let Statement::CreateFunction(mut definition) = crate::compile(
@@ -318,6 +322,22 @@ fn native_legacy_trigger_names_preserve_quoted_identity_without_rebinding() {
 
 #[test]
 fn native_legacy_trigger_names_reject_ambiguous_zero_argument_functions() {
+    let local = "名".repeat(1024);
+    let mut left = trigger_definition("public.fire", 1);
+    left.name = format!(r#"public."{local}""甲""#);
+    let mut right = trigger_definition("public.fire", 2);
+    right.name = format!(r#"public."{local}""乙""#);
+    let memory = MemoryBudget::new(64 << 10);
+    let token = CancellationToken::new();
+    let references =
+        NativeRoutineReferences::new([&left, &right].into_iter(), &memory, &token).unwrap();
+    references.trigger(&left.name, None).unwrap();
+    references.trigger(&right.name, None).unwrap();
+    assert!(references
+        .trigger(&format!(r#"public."{local}""丙""#), None)
+        .is_err());
+    drop(references);
+    assert_eq!(memory.used(), 0);
     let original = trigger_definition("public.fire", 1);
     let duplicate = trigger_definition(r#""public"."fire""#, 2);
     let memory = MemoryBudget::new(64 << 10);

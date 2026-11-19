@@ -7,26 +7,29 @@
 //! Concrete routine references retain their original identities without resolving new overloads.
 
 use crate::{
-    ast::{CreateFunction, Expr, FunctionBinding, Statement},
-    plan::PlanRef,
-    SQLError, ScalarExpr,
+    ast::{CreateFunction, FunctionBinding},
+    catalog::work::{inline, retire_entries, ReferenceWork, Work},
+    SQLError,
 };
 use uqa_core::{
-    memory::{BudgetedMap, MemoryBudget, ProductionControl},
-    CancellationToken, RelationIdentity, RelationName,
+    memory::{BudgetedMap, MemoryBudget, OwnedMap, ProductionControl},
+    CancellationToken,
 };
 
 mod bodies;
-pub use bodies::validate_captured_body;
+pub use bodies::{validate_captured_body, validate_captured_body_with_work};
 mod runtime_calls;
 pub use runtime_calls::visit_stored_routine_runtime_calls;
 mod bindings;
 pub use bindings::validate_captured_bindings;
+mod references;
+pub use references::StoredRoutineReference;
+mod trigger_names;
 
 /// An admitted borrowed identity index for one immutable routine registry. Late-bound calls and deferred source bodies retain their existing execution contract; runtime resource availability is checked separately.
 pub struct NativeRoutineReferences<'a> {
     definitions: BudgetedMap<[u8; 16], &'a CreateFunction>,
-    trigger_names: BudgetedMap<(RelationName<'a>, RelationName<'a>), &'a CreateFunction>,
+    trigger_names: OwnedMap<trigger_names::Name<'a>, &'a CreateFunction>,
     control: ProductionControl<'a>,
 }
 
@@ -36,25 +39,56 @@ impl<'a> NativeRoutineReferences<'a> {
         memory: &'a MemoryBudget,
         cancellation: &'a CancellationToken,
     ) -> Result<Self, SQLError> {
+        inline(Self::from_groups_with_work(
+            std::iter::once(definitions),
+            memory,
+            cancellation,
+            &mut (),
+        ))
+    }
+
+    pub async fn from_groups_with_work<W: Work + Send, I: Iterator<Item = &'a CreateFunction>>(
+        groups: impl Iterator<Item = I>,
+        memory: &'a MemoryBudget,
+        cancellation: &'a CancellationToken,
+        work: &mut W,
+    ) -> Result<Self, SQLError> {
         let control = ProductionControl::new(memory, cancellation, cancellation);
         control.check()?;
         let mut registry = BudgetedMap::new(memory);
-        let mut trigger_names = BudgetedMap::new(memory);
-        for definition in definitions {
-            control.check()?;
-            let identity = definition
-                .object_id
-                .ok_or_else(|| invalid("missing identity"))?;
-            if identity == [0; 16] || registry.insert(identity, definition)?.is_some() {
-                return Err(invalid("duplicate or zero identity"));
-            }
-            if !definition.is_procedure
-                && definition.identity_params().next().is_none()
-                && trigger_names
-                    .insert(trigger_name(&definition.name)?, definition)?
+        let mut trigger_names = OwnedMap::new();
+        let mut input = ReferenceWork {
+            control: &control,
+            work,
+        };
+        for definitions in groups {
+            input.checkpoint().await?;
+            'routine: for definition in definitions {
+                input.checkpoint().await?;
+                let identity = definition
+                    .object_id
+                    .ok_or_else(|| invalid("missing identity"))?;
+                if identity == [0; 16] || registry.insert(identity, definition)?.is_some() {
+                    return Err(invalid("duplicate or zero identity"));
+                }
+                if definition.is_procedure {
+                    continue;
+                }
+                for parameter in &definition.params {
+                    input.checkpoint().await?;
+                    if CreateFunction::is_identity_param(parameter) {
+                        continue 'routine;
+                    }
+                }
+                let name = trigger_names::name(&definition.name, &mut input).await?;
+                let key = uqa_core::memory::Budgeted::new(name, memory.reserve(0)?);
+                if trigger_names
+                    .insert_admitted_key_from(key, definition, &mut input)
+                    .await?
                     .is_some()
-            {
-                return Err(invalid("duplicate zero-argument function name"));
+                {
+                    return Err(invalid("duplicate zero-argument function name"));
+                }
             }
         }
         Ok(Self {
@@ -64,14 +98,29 @@ impl<'a> NativeRoutineReferences<'a> {
         })
     }
 
+    /// Retire the original borrowed registry entries in the same operation that validated them.
+    pub async fn retire_with_work(self, work: &mut impl Work) -> Result<(), SQLError> {
+        retire_entries(self.definitions.into_entries(), &self.control, work).await?;
+        retire_entries(self.trigger_names.into_iter(), &self.control, work).await
+    }
+
     /// Validate a selected function identity and its original declared signature. Display names can be historical after a rename; the ordinary lookup contract selects a concrete identity independently of that spelling.
     pub fn binding(&self, binding: &FunctionBinding) -> Result<(), SQLError> {
+        inline(self.binding_with_work(binding, &mut ()))
+    }
+
+    pub async fn binding_with_work(
+        &self,
+        binding: &FunctionBinding,
+        work: &mut (impl Work + Send),
+    ) -> Result<(), SQLError> {
         self.control.check()?;
         if binding.builtin || binding.dispatch.is_some() || binding.resolution_error.is_some() {
             return Ok(());
         }
         if let Some(identity) = binding.object_id {
-            self.identity(identity, &binding.argument_types, false)?;
+            self.identity_with_work(identity, &binding.argument_types, false, work)
+                .await?;
         }
         Ok(())
     }
@@ -82,28 +131,59 @@ impl<'a> NativeRoutineReferences<'a> {
         argument_types: &[String],
         procedure: bool,
     ) -> Result<(), SQLError> {
-        self.definition(identity, argument_types, procedure)
+        inline(self.identity_with_work(identity, argument_types, procedure, &mut ()))
+    }
+
+    pub async fn identity_with_work(
+        &self,
+        identity: [u8; 16],
+        argument_types: &[String],
+        procedure: bool,
+        work: &mut (impl Work + Send),
+    ) -> Result<(), SQLError> {
+        self.definition(identity, argument_types, procedure, work)
+            .await
             .map(|_| ())
     }
 
     /// A stored trigger selects its original identity or, for legacy entries, its exact qualified name. Both paths require the ordinary trigger contract without compiling the body or changing stored metadata.
     pub fn trigger(&self, name: &str, identity: Option<[u8; 16]>) -> Result<(), SQLError> {
-        let definition = if let Some(identity) = identity {
-            self.definition(identity, &[], false)?
-        } else {
-            self.control.check()?;
-            self.trigger_names
-                .get(&trigger_name(name)?)
-                .ok_or_else(|| invalid("missing legacy trigger function"))?
-        };
-        crate::catalog::events::validation::validate_trigger_function(definition)
+        inline(self.trigger_with_work(name, identity, &mut ()))
     }
 
-    fn definition(
+    pub async fn trigger_with_work(
+        &self,
+        name: &str,
+        identity: Option<[u8; 16]>,
+        work: &mut (impl Work + Send),
+    ) -> Result<(), SQLError> {
+        let definition = if let Some(id) = identity {
+            self.definition(id, &[], false, work).await?
+        } else {
+            let mut input = ReferenceWork {
+                control: &self.control,
+                work,
+            };
+            let key = trigger_names::name(name, &mut input).await?;
+            self.trigger_names
+                .get_from(&key, &mut input)
+                .await?
+                .ok_or_else(|| invalid("missing legacy trigger function"))?
+        };
+        crate::catalog::events::validation::validate_trigger_function_with_work(
+            definition,
+            &self.control,
+            work,
+        )
+        .await
+    }
+
+    async fn definition(
         &self,
         identity: [u8; 16],
         argument_types: &[String],
         procedure: bool,
+        work: &mut (impl Work + Send),
     ) -> Result<&CreateFunction, SQLError> {
         self.control.check()?;
         let definition = self
@@ -111,77 +191,12 @@ impl<'a> NativeRoutineReferences<'a> {
             .get(&identity)
             .ok_or_else(|| invalid("missing bound identity"))?;
         if definition.is_procedure != procedure
-            || !super::routine_signature_matches_with_control(
-                definition,
-                argument_types,
-                &self.control,
-            )?
+            || !super::signature_matches(definition, argument_types, &self.control, work).await?
         {
             return Err(invalid("bound signature or kind"));
         }
         Ok(definition)
     }
-
-    pub fn expression(&self, expression: &Expr) -> Result<(), SQLError> {
-        crate::schema::dependencies::walk_schema_expr_with_control(
-            expression,
-            &self.control,
-            &mut |node| {
-                if let Expr::Func {
-                    binding: Some(binding),
-                    ..
-                } = node
-                {
-                    self.binding(binding)?;
-                }
-                Ok(())
-            },
-        )
-    }
-
-    pub fn scalar(&self, expression: &ScalarExpr) -> Result<(), SQLError> {
-        expression.try_visit(&mut |node| {
-            self.control.check()?;
-            if let ScalarExpr::Func {
-                binding: Some(binding),
-                ..
-            } = node
-            {
-                self.binding(binding)?;
-            }
-            Ok(true)
-        })
-    }
-
-    pub fn plan(&self, plan: PlanRef<'_>) -> Result<(), SQLError> {
-        self.control.check()?;
-        plan.try_visit_scalar_expressions(&mut |expression| self.scalar(expression))?;
-        crate::binding::view_dependencies::visit_stored_plan_function_bindings(
-            plan,
-            &self.control,
-            &mut |binding| self.binding(binding),
-        )
-    }
-
-    /// Stored SQL actions use the existing admitted syntax lowering, preserving concrete bindings without resolving overloads or evaluating expressions. Deferred source text is never passed here.
-    pub fn statement(&self, statement: &Statement) -> Result<(), SQLError> {
-        self.control.check()?;
-        let plan = crate::plan::UnifiedPlan::lower_borrowed_for_rewrite(
-            statement,
-            &|_: &str| false,
-            &self.control,
-        )?;
-        self.plan(plan.as_plan_ref())
-    }
-}
-
-fn trigger_name(name: &str) -> Result<(RelationName<'_>, RelationName<'_>), SQLError> {
-    let reference = RelationIdentity::try_borrowed_reference(name)
-        .map_err(|_| invalid("invalid trigger function name"))?;
-    let schema = reference
-        .schema
-        .ok_or_else(|| invalid("unqualified trigger function name"))?;
-    Ok((schema, reference.name))
 }
 
 fn invalid(detail: &str) -> SQLError {

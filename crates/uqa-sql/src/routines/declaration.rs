@@ -30,10 +30,33 @@ pub use shells::RoutineShellTypes;
 
 /// `PostgreSQL` identifies a trigger handler by its result type, including a declaration that retains the `SETOF` flag.
 pub fn routine_returns_trigger(definition: &CreateFunction) -> bool {
-    matches!(
-        &definition.returns,
-        FunctionReturns::Scalar { type_name } | FunctionReturns::SetOf { type_name }
-            if canonical_routine_type_name(type_name) == "trigger"
+    crate::catalog::work::inline(routine_returns_trigger_with_work(
+        definition,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+        &mut (),
+    ))
+    .expect("ordinary trigger type normalization cannot be cancelled or limited")
+}
+
+pub(crate) async fn routine_returns_trigger_with_work(
+    definition: &CreateFunction,
+    control: &uqa_core::memory::ProductionControl<'_>,
+    work: &mut (impl crate::catalog::work::Work + Send),
+) -> Result<bool, SQLError> {
+    let (FunctionReturns::Scalar { type_name } | FunctionReturns::SetOf { type_name }) =
+        &definition.returns
+    else {
+        return Ok(false);
+    };
+    control.check()?;
+    if type_name.eq_ignore_ascii_case("trigger") {
+        return Ok(true);
+    }
+    Ok(
+        crate::type_resolution::canonical_routine_type_name_with_work(type_name, control, work)
+            .await?
+            .as_str()
+            == "trigger",
     )
 }
 

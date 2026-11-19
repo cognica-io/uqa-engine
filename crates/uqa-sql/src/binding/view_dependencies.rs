@@ -21,7 +21,8 @@ pub use application_calls::ApplicationFunctionKind;
 pub(crate) use owned::bind_query_relation_targets_owned;
 pub(crate) use references::{
     visit_expression_plan_runtime_calls, visit_plan_type_metadata, visit_statement_runtime_calls,
-    StoredPlanOutput, TypeObserver,
+    visit_table_function_calls_with_work, StoredPlanOutput, StoredTableFunctionObserver,
+    TypeObserver,
 };
 pub use references::{
     visit_stored_plan_function_bindings, visit_stored_plan_output_types,

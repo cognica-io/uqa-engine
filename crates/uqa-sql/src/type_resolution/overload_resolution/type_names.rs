@@ -40,6 +40,19 @@ pub async fn canonical_routine_type_name_from_input(
     input::normalize(type_name, control, input).await
 }
 
+pub(crate) async fn canonical_routine_type_name_with_work<W: crate::catalog::work::Work + Send>(
+    type_name: &str,
+    control: &ProductionControl<'_>,
+    work: &mut W,
+) -> Result<Produced<String>, crate::SQLError> {
+    input::normalize(
+        type_name,
+        control,
+        &mut input::TypeWork(&mut crate::catalog::work::ReferenceWork { control, work }),
+    )
+    .await
+}
+
 #[must_use]
 pub fn canonical_column_type_name(ty: &ColumnType) -> String {
     canonical_column_type_name_with_control(ty, &ProductionControl::uncontrolled())

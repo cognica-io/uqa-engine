@@ -174,7 +174,8 @@ pub use overload_resolution::{
     MatchedBuiltinFunction, MatchedFunctionSignature, RankedFunctionMatch,
 };
 pub(crate) use overload_resolution::{
-    match_builtin_with_control, rank_function_matches_with_control, Candidates, RankingCandidates,
+    canonical_routine_type_name_with_work, match_builtin_with_control,
+    rank_function_matches_with_control, Candidates, RankingCandidates,
 };
 #[doc(hidden)]
 pub use reverse::{resolve_reverse_overload, ResolvedReverseOverload};

@@ -15,6 +15,7 @@ use uqa_sql::{
 };
 
 mod bodies;
+mod windows;
 
 fn call(identity: u8) -> Expr {
     Expr::Func {
@@ -61,9 +62,10 @@ fn snapshot() -> CatalogReadSnapshot {
     snapshot
 }
 
-fn check(snapshot: &CatalogReadSnapshot) -> Result<(), SQLError> {
+fn check(snapshot: &CatalogReadSnapshot) -> Result<(), String> {
     let memory = MemoryBudget::new(1 << 20);
-    let result = validate(snapshot, &memory, &CancellationToken::new());
+    let result =
+        validate(snapshot, &memory, &CancellationToken::new()).map_err(|error| error.to_string());
     assert_eq!(memory.used(), 0);
     result
 }

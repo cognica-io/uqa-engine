@@ -631,11 +631,11 @@ pub fn routine_local_name(name: &str) -> Result<String, SQLError> {
 }
 
 mod names_production;
+pub(crate) use names_production::signature_matches;
 pub use names_production::{
     routine_local_name_with_control, routine_returns_anonymous_record_with_control,
     routine_signature_types_from_input,
 };
-pub(crate) use names_production::{signature_matches, SignatureWork};
 
 pub fn routine_kind(def: &CreateFunction) -> &'static str {
     if def.is_procedure {

@@ -29,7 +29,6 @@ use uqa_sql::{
 
 struct Inputs<'a> {
     view: &'a CatalogReadView,
-    snapshot: &'a CatalogReadSnapshot,
     routines: &'a dyn RoutineResolution,
     types: &'a dyn RoutineTypeCatalog,
     memory: &'a MemoryBudget,
@@ -55,6 +54,7 @@ enum Scheduled {
     Sequences,
     Indexes,
     Constraints,
+    Routines,
     SequenceFunctions,
 }
 
@@ -87,7 +87,7 @@ const ORDERED: &[Predicate] = &[
     Predicate::Direct(|input| {
         validate_partition_bindings(input.view, input.routines, input.memory, input.cancellation)
     }),
-    Predicate::Direct(|input| validate_routines(input.snapshot, input.memory, input.cancellation)),
+    Predicate::Scheduled(Scheduled::Routines),
     Predicate::Direct(|input| {
         validate_routine_bindings(
             input.view,
@@ -181,7 +181,6 @@ impl RelationshipValidation {
         match *predicate {
             Predicate::Direct(predicate) => predicate(&Inputs {
                 view: &self.catalog,
-                snapshot: self.catalog.snapshot(),
                 routines,
                 types,
                 memory: &self.memory,
@@ -280,7 +279,7 @@ impl Scheduled {
                     || !snapshot.definitions.triggers.is_empty()
                     || !snapshot.definitions.catalog_indexes.is_empty()
             }
-            Self::SequenceFunctions => {
+            Self::Routines | Self::SequenceFunctions => {
                 let d = &snapshot.definitions;
                 !snapshot.tables.is_empty()
                     || !d.foreign_tables.is_empty()
@@ -339,6 +338,11 @@ impl Scheduled {
             Self::Constraints => {
                 reader!(input => super::validate_constraints_with_work(catalog.snapshot(), input.memory, &original, input))
             }
+            Self::Routines => {
+                reader!(input => super::routine_dependencies::validate_with_work(
+                    catalog.snapshot(), input.memory, &original, input
+                ))
+            }
             Self::SequenceFunctions => {
                 reader!(input => super::sequence_functions::validate_with_work(
                     &catalog, &ProductionControl::new(input.memory, &original, input.cancellation), input
@@ -366,6 +370,7 @@ impl Scheduled {
             Self::Sequences => validate_sequences(catalog.snapshot(), memory, cancellation),
             Self::Indexes => validate_indexes(catalog.snapshot(), memory, cancellation),
             Self::Constraints => validate_constraints(catalog.snapshot(), memory, cancellation),
+            Self::Routines => validate_routines(catalog.snapshot(), memory, cancellation),
             Self::SequenceFunctions => validate_sequence_functions(
                 catalog,
                 &ProductionControl::new(memory, cancellation, cancellation),

@@ -21,6 +21,9 @@ use uqa_core::{
 
 /// Schedule borrowed catalog validation and text construction through the invoking operation.
 pub trait Work {
+    /// An inline caller can finish a selected field on its stack. Other callers retain that field across checkpoints.
+    const MAY_SUSPEND: bool = true;
+
     fn checkpoint(&mut self) -> impl Future<Output = Result<(), ImageIoError>> + Send;
 
     fn text(
@@ -31,6 +34,8 @@ pub trait Work {
 }
 
 impl Work for () {
+    const MAY_SUSPEND: bool = false;
+
     async fn checkpoint(&mut self) -> Result<(), ImageIoError> {
         Ok(())
     }

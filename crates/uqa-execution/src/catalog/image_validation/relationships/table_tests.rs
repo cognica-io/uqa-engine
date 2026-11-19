@@ -100,6 +100,95 @@ fn a_small_named_sequence_predicate_fits_a_16_kib_allowance() {
     assert_eq!(memory.used(), 0);
 }
 
+#[test]
+fn small_routine_reference_registries_fit_the_private_catalog_allowance() {
+    use uqa_sql::{
+        ast::{EventEnableMode, Statement},
+        catalog::events::StoredTrigger,
+        routines::{native::NativeRoutineReferences, RoutineBody, SQLUserFunction},
+    };
+
+    let predicate = super::ORDERED
+        .iter()
+        .find(|predicate| matches!(predicate, Predicate::Scheduled(Scheduled::Routines)))
+        .unwrap();
+    let mut previous_calls = 1;
+    for registered in [false, true] {
+        let mut snapshot = sequence_function_default("public.items", 1, 0)
+            .snapshot()
+            .clone();
+        if registered {
+            let sql = "CREATE FUNCTION public.fire() RETURNS trigger LANGUAGE plpgsql AS 'deferred source'";
+            let Statement::CreateFunction(mut handler) = uqa_sql::compile(sql).unwrap().remove(0)
+            else {
+                unreachable!("trigger function");
+            };
+            handler.object_id = Some([4; 16]);
+            RetainedValue::make_mut(&mut snapshot.definitions.sql_user_functions)
+                .insert(
+                    handler.name.clone(),
+                    vec![SQLUserFunction::new(*handler, RoutineBody::Source).shared()],
+                )
+                .unwrap();
+            let sql = "CREATE TRIGGER saved BEFORE INSERT ON public.items FOR EACH ROW EXECUTE FUNCTION public.fire()";
+            let Statement::CreateTrigger(definition) = uqa_sql::compile(sql).unwrap().remove(0)
+            else {
+                unreachable!("trigger");
+            };
+            RetainedValue::make_mut(&mut snapshot.definitions.triggers)
+                .insert_event(
+                    RelationIdentity::new("public", "items"),
+                    "saved".into(),
+                    StoredTrigger {
+                        definition,
+                        function_object_id: None,
+                        enabled: EventEnableMode::default(),
+                        object_id: None,
+                        constraint_name: None,
+                        catalog_oid: None,
+                        constraint_catalog_oid: None,
+                    },
+                )
+                .unwrap();
+        }
+        let memory = MemoryBudget::new(16 << 10);
+        let token = CancellationToken::new();
+        let registry = NativeRoutineReferences::new(
+            snapshot
+                .definitions
+                .sql_user_functions
+                .values()
+                .flatten()
+                .map(|f| &f.def),
+            &memory,
+            &token,
+        )
+        .unwrap();
+        let inline = MemoryBudget::new(memory.used());
+        drop(registry);
+        super::validate_routines(&snapshot, &inline, &token).unwrap();
+        assert_eq!(inline.used(), 0);
+        let view = CatalogReadView::new(snapshot);
+        let mut cursor = RelationshipValidation::new(view, &memory, &token);
+        cursor.remaining = std::slice::from_ref(predicate);
+        let mut calls = 1;
+        while let Some(next) = cursor
+            .advance_with_steps(&NoRoutines, &NoRoutines, 1)
+            .unwrap()
+        {
+            cursor = next;
+            calls += 1;
+        }
+        eprintln!(
+            "indexed trigger: {registered}, {calls} routine validation calls, peak {} bytes",
+            memory.peak()
+        );
+        assert!(calls > previous_calls);
+        previous_calls = calls;
+        assert_eq!(memory.used(), 0);
+    }
+}
+
 fn inheritance(missing: usize) -> CatalogReadView {
     let mut catalog = snapshot();
     let mut parents = Vec::new();

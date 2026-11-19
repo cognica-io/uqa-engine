@@ -266,7 +266,12 @@ impl<'a> BorrowedNodes<'a> {
             frame.position += 1;
             match child {
                 Child::Node(node) => {
-                    self.frames.try_push(Frame { node, position: 0 })?;
+                    let next = Frame { node, position: 0 };
+                    if matches!(frame.node.child(frame.position), Child::Done) {
+                        *frame = next;
+                    } else {
+                        self.frames.try_push(next)?;
+                    }
                     self.entering = true;
                 }
                 Child::Skip => {}

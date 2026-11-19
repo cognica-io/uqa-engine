@@ -34,6 +34,35 @@ pub fn walk_schema_expr_with_control(
     )
 }
 
+pub(crate) trait SchemaObserver {
+    fn expression<W: crate::catalog::work::Work + Send>(
+        &mut self,
+        node: &crate::ast::Expr,
+        work: &mut W,
+    ) -> impl std::future::Future<Output = Result<(), crate::SQLError>> + Send;
+}
+
+pub(crate) async fn observe_schema_expression<W: crate::catalog::work::Work + Send>(
+    expression: &crate::ast::Expr,
+    control: &uqa_core::memory::ProductionControl<'_>,
+    work: &mut W,
+    visit: &mut impl SchemaObserver,
+) -> Result<(), crate::SQLError> {
+    let mut nodes = expression.stored_nodes_with_budget(control.budget())?;
+    while let Some(node) = nodes.next(control, work).await? {
+        visit.expression(node, work).await?;
+        if matches!(
+            node,
+            crate::ast::Expr::ScalarSubquery(_)
+                | crate::ast::Expr::Exists { .. }
+                | crate::ast::Expr::InSubquery { .. }
+        ) {
+            return Err(subquery_error(control));
+        }
+    }
+    Ok(())
+}
+
 pub(crate) fn subquery_error(control: &uqa_core::memory::ProductionControl<'_>) -> crate::SQLError {
     match control.copy_text(SUBQUERY_DEPENDENCY_ERROR) {
         Ok(message) => crate::SQLError::Internal(message.into_parts().0),

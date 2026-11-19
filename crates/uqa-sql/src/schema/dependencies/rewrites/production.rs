@@ -129,19 +129,7 @@ pub async fn visit_stored_sequence_references_with_work<W: Work + Send>(
     let mut observer = Observer { control, relations };
     match source {
         StoredSequenceInput::Expression(expression) => {
-            let mut nodes = expression.stored_nodes_with_budget(control.budget())?;
-            while let Some(node) = nodes.next(control, work).await? {
-                if matches!(
-                    node,
-                    Expr::ScalarSubquery(_) | Expr::Exists { .. } | Expr::InSubquery { .. }
-                ) {
-                    return Err(super::super::subquery_error(control));
-                }
-                if let Some(reference) = Node::Syntax(node).reference(control, work).await? {
-                    relations.reference(reference, work).await?;
-                }
-            }
-            Ok(())
+            super::super::observe_schema_expression(expression, control, work, &mut observer).await
         }
         StoredSequenceInput::Scalar(expression) => {
             visit_all(expression, control, work, &mut observer).await
@@ -155,6 +143,19 @@ pub async fn visit_stored_sequence_references_with_work<W: Work + Send>(
 struct Observer<'a, 'b, R> {
     control: &'a ProductionControl<'b>,
     relations: &'a R,
+}
+
+impl<R: SequenceFunctionRelations> super::super::SchemaObserver for Observer<'_, '_, R> {
+    async fn expression<W: Work + Send>(
+        &mut self,
+        node: &Expr,
+        work: &mut W,
+    ) -> Result<(), SQLError> {
+        if let Some(reference) = Node::Syntax(node).reference(self.control, work).await? {
+            self.relations.reference(reference, work).await?;
+        }
+        Ok(())
+    }
 }
 
 impl<R: SequenceFunctionRelations> ScalarObserver for Observer<'_, '_, R> {

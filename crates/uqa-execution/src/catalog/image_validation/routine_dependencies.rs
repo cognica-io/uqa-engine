@@ -13,25 +13,16 @@ use uqa_core::{
     CancellationToken,
 };
 use uqa_sql::{
-    ast::{ColumnDef, Expr, FunctionBinding, FunctionBody, Statement},
+    ast::{ColumnDef, FunctionBody},
     catalog::CatalogWork,
     plan::PlanRef,
     routines::{
         native::NativeRoutineReferences, CompiledFunctionBody, RoutineBody, SQLUserFunction,
     },
-    SQLError, ScalarExpr,
+    SQLError,
 };
 
-/// A reference to the original catalog field. The inventory retains both the original statement and its compiled plan when both exist.
-pub(super) enum Reference<'a> {
-    Expression(&'a Expr),
-    Scalar(&'a ScalarExpr),
-    Plan(PlanRef<'a>),
-    Statement(&'a Statement),
-    Binding(&'a FunctionBinding),
-    Routine([u8; 16], &'a [String]),
-    Trigger(&'a str, Option<[u8; 16]>),
-}
+pub(super) use uqa_sql::routines::native::StoredRoutineReference as Reference;
 
 pub(super) trait References: Sync {
     fn inspect<W: CatalogWork + Send>(
@@ -45,17 +36,9 @@ impl References for NativeRoutineReferences<'_> {
     async fn inspect<W: CatalogWork + Send>(
         &self,
         reference: Reference<'_>,
-        _: &mut W,
+        work: &mut W,
     ) -> Result<(), SQLError> {
-        match reference {
-            Reference::Expression(expr) => self.expression(expr),
-            Reference::Scalar(expr) => self.scalar(expr),
-            Reference::Plan(plan) => self.plan(plan),
-            Reference::Statement(statement) => self.statement(statement),
-            Reference::Binding(binding) => self.binding(binding),
-            Reference::Routine(identity, arguments) => self.identity(identity, arguments, false),
-            Reference::Trigger(name, identity) => self.trigger(name, identity),
-        }
+        self.inspect_with_work(reference, work).await
     }
 }
 
@@ -64,20 +47,48 @@ pub fn validate(
     memory: &MemoryBudget,
     cancellation: &CancellationToken,
 ) -> Result<(), SQLError> {
-    let d = &snapshot.definitions;
-    let control = ProductionControl::new(memory, cancellation, cancellation);
-    for routine in d.sql_user_functions.values().flatten() {
-        uqa_sql::routines::native::validate_captured_body(routine, &control)?;
-    }
-    let references = NativeRoutineReferences::new(
-        d.sql_user_functions
-            .values()
-            .flatten()
-            .map(|function| &function.def),
+    crate::catalog::selection_work::inline(validate_with_work(
+        snapshot,
         memory,
         cancellation,
-    )?;
-    crate::catalog::selection_work::inline(visit(snapshot, &references, &control, &mut ()))
+        &mut (),
+    ))
+}
+
+fn declaration(function: &uqa_sql::routines::SQLRoutine) -> &uqa_sql::ast::CreateFunction {
+    &function.def
+}
+fn group(
+    routines: &[uqa_sql::routines::SQLRoutine],
+) -> impl Iterator<Item = &uqa_sql::ast::CreateFunction> {
+    routines.iter().map(declaration)
+}
+
+pub(super) async fn validate_with_work<W: CatalogWork + Send>(
+    snapshot: &CatalogReadSnapshot,
+    memory: &MemoryBudget,
+    cancellation: &CancellationToken,
+    work: &mut W,
+) -> Result<(), SQLError> {
+    let d = &snapshot.definitions;
+    let control = ProductionControl::new(memory, cancellation, cancellation);
+    for overloads in d.sql_user_functions.values() {
+        work.checkpoint().await?;
+        for routine in overloads {
+            work.checkpoint().await?;
+            uqa_sql::routines::native::validate_captured_body_with_work(routine, &control, work)
+                .await?;
+        }
+    }
+    let references = NativeRoutineReferences::from_groups_with_work(
+        d.sql_user_functions.values().map(Vec::as_slice).map(group),
+        memory,
+        cancellation,
+        work,
+    )
+    .await?;
+    visit(snapshot, &references, &control, work).await?;
+    references.retire_with_work(work).await
 }
 
 pub(super) async fn visit<W: CatalogWork + Send>(
