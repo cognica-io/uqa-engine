@@ -308,7 +308,7 @@ pub fn lower_sql_routine_statement(
 }
 
 /// SQL-standard bodies retain analyzed queries and DML, never utility commands. Use the same command name as ordinary SQL diagnostics.
-pub(super) fn validate_sql_standard_statement(statement: &Statement) -> Result<(), SQLError> {
+pub(crate) fn validate_sql_standard_statement(statement: &Statement) -> Result<(), SQLError> {
     match sql_standard_utility(statement) {
         Some(command) => Err(sql_standard_utility_error(&command)),
         None => Ok(()),

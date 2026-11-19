@@ -24,6 +24,7 @@ use uqa_core::image_io::AsyncImageInput;
 
 mod observation;
 pub use observation::StoredStatementObserver;
+mod legacy;
 
 #[derive(Clone, Copy)]
 enum Purpose {
@@ -70,6 +71,11 @@ impl TryFrom<RetainedExecutablePlan> for QueryReplacement {
 mod tests;
 
 impl RetainedExecutablePlan {
+    /// Transfer the complete constructor, including each field's allocation leases, to the next SQL analysis owner.
+    pub(crate) fn into_mutable(self) -> MutableExecutablePlan {
+        self.0.take()
+    }
+
     pub(crate) async fn bind_relation_names_from_input(
         self,
         resolve: &crate::binding::view_dependencies::owned::fields::StoredRelationResolver<'_>,

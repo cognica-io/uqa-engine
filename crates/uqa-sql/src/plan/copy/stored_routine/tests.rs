@@ -5,6 +5,7 @@
 //
 
 use super::*;
+use crate::plan::copy::capture_stored_with_footprint;
 use crate::routines::{RoutineBody, SQLUserFunction};
 use uqa_core::{
     memory::{MemoryBudget, ProductionString},
@@ -12,6 +13,71 @@ use uqa_core::{
 };
 
 mod header;
+
+#[test]
+fn compilation_projects_dropped_merge_targets_from_the_edited_declaration() {
+    use crate::routines::merge_columns::{
+        bind_stored_merge_target_columns, normalize_stored_merge_target_columns,
+        StoredMergeColumnCatalog,
+    };
+    struct Columns(Vec<crate::ast::ColumnDef>);
+    impl StoredMergeColumnCatalog for Columns {
+        fn stored_merge_target_definitions(&self, _: &str) -> Option<Vec<crate::ast::ColumnDef>> {
+            Some(self.0.clone())
+        }
+    }
+    let Statement::CreateTable(table) =
+        crate::compile("CREATE TABLE t(id integer, gone integer, keep integer)")
+            .unwrap()
+            .remove(0)
+    else {
+        panic!("table")
+    };
+    let mut columns = Columns(table.columns);
+    for (i, column) in columns.0.iter_mut().enumerate() {
+        column.object_id = Some([u8::try_from(i + 1).unwrap(); 16]);
+    }
+    let Statement::CreateFunction(definition) = crate::compile("CREATE FUNCTION compiled() RETURNS bigint LANGUAGE SQL BEGIN ATOMIC WITH updated AS (MERGE INTO t USING (SELECT 1 AS id) s ON t.id=s.id WHEN MATCHED THEN UPDATE SET (gone, keep)=(SELECT 11,22) RETURNING t.id) SELECT count(*) FROM updated; END").unwrap().remove(0) else {
+        panic!("routine")
+    };
+    let source = SQLUserFunction::new(*definition, RoutineBody::Source).shared();
+    let budget = MemoryBudget::new(4 << 20);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&budget, &token, &token);
+    let mut stored = StoredRoutineDefinition::new(source, &control).unwrap();
+    while !stored.copy_next_field(&control).unwrap() {}
+    assert_eq!(
+        stored
+            .edit_statement(0, &control, |statement| bind_stored_merge_target_columns(
+                &columns, statement
+            ))
+            .unwrap(),
+        Some(true)
+    );
+    assert!(stored
+        .compilation_statement(0, &columns, &control)
+        .unwrap()
+        .normalized
+        .is_none());
+    let FunctionBody::Statements(original) = &stored.declaration().body else {
+        unreachable!()
+    };
+    let saved = serde_json::to_value(original).unwrap();
+    let mut expected = original[0].clone();
+    columns.0.remove(1);
+    normalize_stored_merge_target_columns(&columns, &mut expected).unwrap();
+    let input = stored.compilation_statement(0, &columns, &control).unwrap();
+    assert_eq!(
+        serde_json::to_value(&*input.normalized.unwrap()).unwrap(),
+        serde_json::to_value(&expected).unwrap()
+    );
+    let FunctionBody::Statements(original) = &stored.declaration().body else {
+        unreachable!()
+    };
+    assert_eq!(serde_json::to_value(original).unwrap(), saved);
+    drop(stored);
+    assert_eq!(budget.used(), 0);
+}
 
 fn routine(count: usize, standard: bool, last_default: &str) -> SQLRoutine {
     let params: Vec<_> = (1..=count)

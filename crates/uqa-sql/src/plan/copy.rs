@@ -246,11 +246,19 @@ pub(crate) fn capture_stored_with_footprint<T: syntax::SyntaxCopy>(
     value: &T,
     control: &ProductionControl<'_>,
 ) -> Result<(Produced<T>, usize)> {
+    capture_stored(value, control, |copying| copying.retained_children)
+}
+
+fn capture_stored<T: syntax::SyntaxCopy, F>(
+    value: &T,
+    control: &ProductionControl<'_>,
+    fields: impl FnOnce(&Copying<'_>) -> F,
+) -> Result<(Produced<T>, F)> {
     control.check()?;
     let mut copying = Copying::capture(*control, CopyPurpose::Stored);
     let value = value.copy_syntax(&mut copying)?;
-    let children = copying.retained_children;
-    Ok((copying.finish(value)?, children))
+    let fields = fields(&copying);
+    Ok((copying.finish(value)?, fields))
 }
 
 pub(crate) struct Copying<'a> {
@@ -258,6 +266,7 @@ pub(crate) struct Copying<'a> {
     purpose: CopyPurpose,
     memory: Option<MemoryReservation>,
     retained_children: usize,
+    has_merge_targets: bool,
     fields: Option<BudgetedVec<RewriteField>>,
     scalar_items: Option<BudgetedVec<Option<super::scalar::ScalarMemory>>>,
     parameters: Option<&'a ParameterLookup<'a>>,
@@ -284,7 +293,7 @@ mod owned_projection;
 mod owned_query;
 mod owned_scalar;
 mod stored_routine;
-pub use stored_routine::StoredRoutineDefinition;
+pub use stored_routine::{StoredRoutineDefinition, StoredStatementCompilation};
 
 impl<'a> Copying<'a> {
     fn new(control: ProductionControl<'a>) -> Option<Self> {
@@ -299,6 +308,7 @@ impl<'a> Copying<'a> {
             purpose,
             memory: control.empty_reservation(),
             retained_children: 0,
+            has_merge_targets: false,
             fields: None,
             scalar_items: None,
             parameters: None,

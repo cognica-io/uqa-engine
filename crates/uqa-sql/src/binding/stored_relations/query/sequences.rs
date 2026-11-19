@@ -68,6 +68,26 @@ pub(super) fn external_name(
 }
 
 impl<R: ?Sized, S: super::StoredQuerySequences + ?Sized> StoredQueryBindingContext<'_, R, S> {
+    /// Bind selected sequence names after the independent relation pass. The same call and cast selection is used by ordinary stored plans.
+    pub(crate) fn bind_query_sequences_with_control(
+        &self,
+        query: crate::plan::MutableQueryPlan,
+        context: &str,
+        loaded_catalog: bool,
+        control: &ProductionControl<'_>,
+    ) -> Result<crate::plan::MutableQueryPlan, SQLError> {
+        query.transform_scalar_nodes(control, &mut |_, expression| {
+            let Some(reference) =
+                crate::binding::view_dependencies::sequence_function_reference(&expression)
+            else {
+                return Ok(expression);
+            };
+            let name =
+                self.canonical_sequence_with_control(reference, context, loaded_catalog, control)?;
+            expression.replace_sequence_reference(name, control)
+        })
+    }
+
     pub fn canonical_sequence_with_control(
         &self,
         reference: &str,

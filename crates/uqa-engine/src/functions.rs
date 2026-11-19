@@ -8,6 +8,22 @@
 
 pub use uqa_execution::functions::*;
 
+impl uqa_sql::plan::AggregateClassifier for crate::sql_registry::Registry {
+    fn is_registered_aggregate(&self, name: &str) -> bool {
+        uqa_execution::query::runtime::RegisteredAggregates(&self.aggregate)
+            .is_registered_aggregate(name)
+    }
+
+    fn is_registered_aggregate_with_control(
+        &self,
+        name: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<bool, uqa_sql::SQLError> {
+        uqa_execution::query::runtime::RegisteredAggregates(&self.aggregate)
+            .is_registered_aggregate_with_control(name, control)
+    }
+}
+
 impl uqa_sql::plan::AggregateClassifier for crate::Engine {
     fn is_registered_aggregate(&self, name: &str) -> bool {
         self.has_registered_aggregate_function(name)

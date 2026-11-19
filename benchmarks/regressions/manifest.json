@@ -64385,6 +64385,21 @@
     {
       "package": "uqa-engine",
       "kind": "lib",
+      "test": "restored_sql_compiler_advances_within_one_values_statement",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/open/persistent_input/tests/routines/body_steps.rs",
+      "capability": "Private backup routine binding",
+      "workload": "Compile one stored SQL-standard statement over one or 128 VALUES rows with a named routine parameter.",
+      "invariant": "One-step restore calls advance within the larger statement and the compiled routine returns its count plus the supplied parameter on each persistent provider.",
+      "case_names": [
+        "case_1_sqlite_native",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
       "test": "partial_sql_body_analysis_releases_its_registry_and_allowance",
       "cases": 3,
       "source": "crates/uqa-engine/src/open/persistent_input/tests/routines/body_steps.rs",

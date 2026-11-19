@@ -66,22 +66,27 @@ impl StatementCompiler {
                 &binding.context(),
                 &self.parameters,
             )?;
-            if let UnifiedPlan::Query(query) = &mut plan {
-                let origin = if lowering.persisted_definition {
-                    crate::binding::stored_routines::StoredCallOrigin::Persisted
-                } else {
-                    crate::binding::stored_routines::StoredCallOrigin::Definition
-                };
-                origin.bind_query(
-                    context.routines,
-                    query,
-                    &self.positional,
-                    &binding.context(),
-                    None,
-                )?;
-            }
+            self.bind_calls(context, &mut plan, &binding.context(), lowering)?;
         }
         Ok(plan)
+    }
+
+    fn bind_calls(
+        &self,
+        context: &RoutineCompilationContext<'_>,
+        plan: &mut UnifiedPlan,
+        binding: &crate::binding::BindingContext<'_>,
+        lowering: SQLRoutineLowering,
+    ) -> Result<(), SQLError> {
+        if let UnifiedPlan::Query(query) = plan {
+            let origin = if lowering.persisted_definition {
+                crate::binding::stored_routines::StoredCallOrigin::Persisted
+            } else {
+                crate::binding::stored_routines::StoredCallOrigin::Definition
+            };
+            origin.bind_query(context.routines, query, &self.positional, binding, None)?;
+        }
+        Ok(())
     }
 }
 
@@ -160,6 +165,87 @@ impl SQLStandardBodyCompilation {
         Ok(())
     }
 
+    pub fn next_statement(&self) -> Option<usize> {
+        (self.plans.len() < self.statement_count).then_some(self.plans.len())
+    }
+
+    /// Complete the ordinary binding and stored projection of the privately constructed statement. The original constructor allowance remains attached until that projection is installed.
+    pub fn accept_retained(
+        &mut self,
+        context: &RoutineCompilationContext<'_>,
+        plan: crate::plan::RetainedExecutablePlan,
+        control: &ProductionControl<'_>,
+    ) -> Result<(), SQLError> {
+        use crate::plan::MutableExecutablePlan;
+        control.check()?;
+        let plan = match plan.into_mutable() {
+            MutableExecutablePlan::Query(query) => {
+                let namespace = context.catalog.stored_query_namespace();
+                let names = super::StoredQueryBindingContext {
+                    relations: context.relations,
+                    lookup_mode: super::RelationLookupMode::Bound,
+                    sequences: context.sequences,
+                    temporary_schema: &namespace.temporary_schema,
+                    transition_relations: &namespace.transition_relations,
+                };
+                let (query, _) = names.bind_query_relation_names_with_control(
+                    query,
+                    "SQL routine body",
+                    false,
+                    true,
+                    control,
+                )?;
+                MutableExecutablePlan::Query(names.bind_query_sequences_with_control(
+                    query,
+                    "SQL routine body",
+                    true,
+                    control,
+                )?)
+            }
+            command => command.mark_catalog_relations_bound(control)?,
+        };
+        let snapshot = context.catalog.binding_snapshot()?;
+        let binding = snapshot.context();
+        let plan = crate::binding::bind_routine_parameter_references_owned(
+            context.routines,
+            plan,
+            &self.compiler.positional,
+            binding.copy_with_control(control)?,
+            &self.compiler.parameters,
+            control,
+        )?;
+        let (mut plan, lease) = plan.finish(control)?.into_parts();
+        let result = (|| {
+            self.compiler
+                .bind_calls(context, &mut plan, &binding, self.lowering)?;
+            self.record_plan(plan, control)
+        })();
+        drop(lease);
+        result
+    }
+
+    fn record_plan(
+        &mut self,
+        mut plan: UnifiedPlan,
+        control: &ProductionControl<'_>,
+    ) -> Result<(), SQLError> {
+        let mut roles = StoredRegroleConstants::default();
+        roles.collect_plan(&mut plan);
+        self.collect_roles(roles, control)?;
+        if control.budget().is_some() {
+            let (retained, children) = capture_stored_with_footprint(&plan, control)?;
+            self.children = self
+                .children
+                .checked_add(children)
+                .ok_or(MemoryError::SizeOverflow)?;
+            let (retained, memory) = retained.into_parts();
+            self.memory = control.combine(self.memory.take(), memory);
+            plan = retained;
+        }
+        self.plans.push(plan);
+        Ok(())
+    }
+
     /// Compile one original statement or validate one previously collected group of role inputs. A later statement's analysis error precedes deferred role diagnostics.
     pub fn advance(
         &mut self,
@@ -174,23 +260,10 @@ impl SQLStandardBodyCompilation {
             ));
         }
         if let Some(statement) = statements.get(self.plans.len()) {
-            let mut plan = self
+            let plan = self
                 .compiler
                 .compile(context, statement.clone(), self.lowering)?;
-            let mut roles = StoredRegroleConstants::default();
-            roles.collect_plan(&mut plan);
-            self.collect_roles(roles, control)?;
-            if control.budget().is_some() {
-                let (retained, children) = capture_stored_with_footprint(&plan, control)?;
-                self.children = self
-                    .children
-                    .checked_add(children)
-                    .ok_or(MemoryError::SizeOverflow)?;
-                let (retained, memory) = retained.into_parts();
-                self.memory = control.combine(self.memory.take(), memory);
-                plan = retained;
-            }
-            self.plans.push(plan);
+            self.record_plan(plan, control)?;
             return Ok(false);
         }
         if let Some(roles) = self.roles.get(self.checked_roles) {

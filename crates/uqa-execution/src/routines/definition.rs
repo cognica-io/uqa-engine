@@ -19,7 +19,7 @@ use uqa_sql::{
         },
         dependencies::{RoutineCompilationMode, RoutineDeclaration, RoutineDefinitionDependencies},
         regclass::{RoutineRegclassBinding, RoutineRegclassCatalog},
-        CompiledFunctionBody, RoutineBody,
+        CompiledFunctionBody, RoutineBody, StoredRoutineDefinition, StoredStatementCompilation,
     },
     semantics::sets::placement_scope::SetPlacementScope,
     SQLError,
@@ -96,6 +96,17 @@ enum Stage {
     Finished,
 }
 
+pub(super) enum BindingStep {
+    Pending,
+    Statement(StoredStatementCompilation),
+    Complete(BoundRoutine),
+}
+
+enum StatementStep {
+    Progress(bool),
+    Lower(StoredStatementCompilation),
+}
+
 /// Catalog compilation retains its declaration order across calls. Session, parser and set-placement scopes exist only within the selected step.
 pub struct CatalogRoutineBinding {
     bodies: RoutineBodyCompilation,
@@ -139,6 +150,57 @@ impl CatalogRoutineBinding {
         def: &mut impl RoutineDeclaration,
         control: &ProductionControl<'_>,
     ) -> Result<Option<BoundRoutine>, SQLError> {
+        match self.advance_with(context, def, control, |input, def, analysis| {
+            let FunctionBody::Statements(statements) = &def.declaration().body else {
+                unreachable!("SQL-standard compilation")
+            };
+            input
+                .advance(analysis, statements, control)
+                .map(StatementStep::Progress)
+        })? {
+            BindingStep::Pending => Ok(None),
+            BindingStep::Complete(bound) => Ok(Some(bound)),
+            BindingStep::Statement(_) => unreachable!("ordinary statements complete inline"),
+        }
+    }
+
+    pub(super) fn advance_restored(
+        &mut self,
+        context: &RoutineDefinitionContext<'_>,
+        def: &mut StoredRoutineDefinition,
+        lowered: Option<uqa_sql::plan::RetainedExecutablePlan>,
+        control: &ProductionControl<'_>,
+    ) -> Result<BindingStep, SQLError> {
+        self.advance_with(context, def, control, |input, def, analysis| {
+            if let Some(plan) = lowered {
+                input.accept_retained(analysis, plan, control)?;
+                return Ok(StatementStep::Progress(false));
+            }
+            if let Some(position) = input.next_statement() {
+                return def
+                    .compilation_statement(position, analysis.merge, control)
+                    .map(StatementStep::Lower);
+            }
+            let FunctionBody::Statements(statements) = &def.declaration().body else {
+                unreachable!("SQL-standard compilation")
+            };
+            input
+                .advance(analysis, statements, control)
+                .map(StatementStep::Progress)
+        })
+    }
+
+    fn advance_with<D: RoutineDeclaration>(
+        &mut self,
+        context: &RoutineDefinitionContext<'_>,
+        def: &mut D,
+        control: &ProductionControl<'_>,
+        statement: impl FnOnce(
+            &mut SQLStandardBodyCompilation,
+            &mut D,
+            &uqa_sql::routines::compilation::RoutineCompilationContext<'_>,
+        ) -> Result<StatementStep, SQLError>,
+    ) -> Result<BindingStep, SQLError> {
         control.check()?;
         let stored = self.bodies == RoutineBodyCompilation::Stored;
         let _placement = stored.then(SetPlacementScope::stored_definition);
@@ -194,19 +256,18 @@ impl CatalogRoutineBinding {
                 }
             }
             Stage::Statements(input) => {
-                let FunctionBody::Statements(statements) = &def.declaration().body else {
-                    unreachable!("SQL-standard compilation")
-                };
-                if with_parser_context(analysis.parsers, || {
-                    input.advance(analysis, statements, control)
-                })? {
-                    let Stage::Statements(input) =
-                        std::mem::replace(&mut self.stage, Stage::Finished)
-                    else {
-                        unreachable!()
-                    };
-                    self.compiled = Some(RoutineBody::Bound(input.into_shared(control)?));
-                    self.compiled_stage();
+                match with_parser_context(analysis.parsers, || statement(input, def, analysis))? {
+                    StatementStep::Lower(source) => return Ok(BindingStep::Statement(source)),
+                    StatementStep::Progress(false) => {}
+                    StatementStep::Progress(true) => {
+                        let Stage::Statements(input) =
+                            std::mem::replace(&mut self.stage, Stage::Finished)
+                        else {
+                            unreachable!()
+                        };
+                        self.compiled = Some(RoutineBody::Bound(input.into_shared(control)?));
+                        self.compiled_stage();
+                    }
                 }
             }
             Stage::Regclasses(input) => {
@@ -225,14 +286,14 @@ impl CatalogRoutineBinding {
                 }
             }
             Stage::Finished => {
-                return Ok(Some(BoundRoutine {
+                return Ok(BindingStep::Complete(BoundRoutine {
                     body: self.compiled.take().expect("compiled routine"),
                     validated: self.validated.take(),
                     changed: self.changed,
                 }))
             }
         }
-        Ok(None)
+        Ok(BindingStep::Pending)
     }
 
     fn compiled_stage(&mut self) {

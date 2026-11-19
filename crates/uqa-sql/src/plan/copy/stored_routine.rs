@@ -6,7 +6,9 @@
 
 //! Independently editable stored statements and parameters retain the exact allocations of the current declaration.
 
-use super::{capture_stored_with_footprint, syntax::SyntaxCopy, CopyPurpose, Copying, Result};
+use super::{
+    capture_stored, capture_stored_with_control, syntax::SyntaxCopy, CopyPurpose, Copying, Result,
+};
 use crate::ast::{CreateFunction, FunctionBody, FunctionParam, Statement};
 use crate::routines::{dependencies::RoutineDeclaration, SQLRoutine};
 use uqa_core::memory::{BudgetedVec, MemoryError, MemoryReservation, Produced, ProductionControl};
@@ -16,12 +18,13 @@ pub(super) use header::HeaderCopy;
 use header::{continue_text, start_text, Header};
 
 #[derive(Clone, Copy)]
-struct Field {
+struct Field<MergeTargets = ()> {
     direct: usize,
     children: usize,
+    has_merge_targets: MergeTargets,
 }
 
-impl Field {
+impl<MergeTargets> Field<MergeTargets> {
     fn slots<T>(
         count: usize,
         fields: &mut BudgetedVec<Self>,
@@ -38,8 +41,9 @@ impl Field {
         direct: &mut MemoryReservation,
         children: &mut usize,
         control: &ProductionControl<'_>,
+        merge_targets: impl FnOnce(&Copying<'_>) -> MergeTargets,
     ) -> Result<()> {
-        let (value, lease, field) = Self::capture(source, control)?;
+        let (value, lease, field) = Self::capture(source, control, merge_targets)?;
         let next = children
             .checked_add(field.children)
             .ok_or(MemoryError::SizeOverflow)?;
@@ -53,11 +57,15 @@ impl Field {
     fn capture<T: SyntaxCopy>(
         value: &T,
         control: &ProductionControl<'_>,
+        merge_targets: impl FnOnce(&Copying<'_>) -> MergeTargets,
     ) -> Result<(T, MemoryReservation, Self)> {
-        let (value, children) = capture_stored_with_footprint(value, control)?;
+        let (value, (children, has_merge_targets)) = capture_stored(value, control, |copying| {
+            (copying.retained_children, merge_targets(copying))
+        })?;
         let field = Self {
             direct: value.reserved_bytes(),
             children,
+            has_merge_targets,
         };
         let (value, lease) = value.into_parts();
         Ok((value, lease.expect("native routine declaration"), field))
@@ -70,12 +78,72 @@ pub struct StoredRoutineDefinition {
     definition: CreateFunction,
     header: Header,
     parameters: BudgetedVec<Field>,
-    statements: BudgetedVec<Field>,
+    statements: BudgetedVec<Field<bool>>,
     children: usize,
     direct: MemoryReservation,
 }
 
+/// The compiler borrows the current declaration unless a dropped MERGE target requires its own executable projection.
+pub struct StoredStatementCompilation {
+    position: usize,
+    normalized: Option<Produced<Box<Statement>>>,
+}
+
+impl StoredStatementCompilation {
+    pub async fn lower(
+        &self,
+        definition: &StoredRoutineDefinition,
+        aggregates: &(dyn crate::plan::AggregateClassifier + Sync),
+        control: &ProductionControl<'_>,
+        input: &mut uqa_core::image_io::AsyncImageInput<'_>,
+    ) -> Result<crate::plan::RetainedExecutablePlan> {
+        let FunctionBody::Statements(values) = &definition.definition.body else {
+            unreachable!("compilation holds its SQL-standard declaration")
+        };
+        let statement = self
+            .normalized
+            .as_deref()
+            .map_or(&values[self.position], Box::as_ref);
+        crate::plan::UnifiedPlan::lower_executable_from_input(statement, aggregates, control, input)
+            .await?
+            .upgrade_stored_dispatches(control, input)
+            .await
+    }
+}
+
 impl StoredRoutineDefinition {
+    pub fn compilation_statement(
+        &mut self,
+        position: usize,
+        catalog: &dyn crate::routines::merge_columns::StoredMergeColumnCatalog,
+        control: &ProductionControl<'_>,
+    ) -> Result<StoredStatementCompilation> {
+        let FunctionBody::Statements(statements) = &mut self.definition.body else {
+            unreachable!("SQL-standard compilation")
+        };
+        let statement = &mut statements[position];
+        crate::routines::compilation::validate_sql_standard_statement(statement)?;
+        let mut normalized = None;
+        if self.statements[position].has_merge_targets
+            && crate::routines::merge_columns::contains_removed_merge_target(catalog, statement)?
+        {
+            let (mut scratch, lease) =
+                capture_stored_with_control(statement, control)?.into_parts();
+            crate::routines::merge_columns::normalize_stored_merge_target_columns(
+                catalog,
+                &mut scratch,
+            )?;
+            let mut copying = Copying::capture(*control, CopyPurpose::Stored);
+            let selected = copying.boxed(|copying| scratch.copy_syntax(copying))?;
+            normalized = Some(copying.finish(selected)?);
+            drop(scratch);
+            drop(lease);
+        }
+        Ok(StoredStatementCompilation {
+            position,
+            normalized,
+        })
+    }
     pub fn new(routine: SQLRoutine, control: &ProductionControl<'_>) -> Result<Self> {
         let source = &routine.def;
         let budget = control.budget().ok_or_else(|| {
@@ -155,6 +223,7 @@ impl StoredRoutineDefinition {
                 &mut self.direct,
                 &mut self.children,
                 control,
+                |_| (),
             )?;
         } else if let (FunctionBody::Statements(source), FunctionBody::Statements(values)) =
             (&self.source.def.body, &mut self.definition.body)
@@ -167,6 +236,7 @@ impl StoredRoutineDefinition {
                     &mut self.direct,
                     &mut self.children,
                     control,
+                    |copying| copying.has_merge_targets,
                 )?;
             }
         }
@@ -204,19 +274,20 @@ impl StoredRoutineDefinition {
 }
 
 /// Analyze a private copy through the ordinary binder. Only a changed field replaces its original owner, so an error or an unchanged edit releases all scratch.
-fn edit<T: SyntaxCopy>(
+fn edit<T: SyntaxCopy, MergeTargets>(
     value: &mut T,
-    field: &mut Field,
+    field: &mut Field<MergeTargets>,
     direct: &mut MemoryReservation,
     children: &mut usize,
     control: &ProductionControl<'_>,
     bind: impl FnOnce(&mut T) -> Result<bool>,
+    merge_targets: impl FnOnce(&Copying<'_>) -> MergeTargets,
 ) -> Result<bool> {
-    let (mut scratch, _lease, _) = Field::capture(value, control)?;
+    let (mut scratch, _lease) = capture_stored_with_control(value, control)?.into_parts();
     if !bind(&mut scratch)? {
         return Ok(false);
     }
-    let (replacement, lease, next) = Field::capture(&scratch, control)?;
+    let (replacement, lease, next) = Field::capture(&scratch, control, merge_targets)?;
     let updated = (*children - field.children)
         .checked_add(next.children)
         .ok_or(MemoryError::SizeOverflow)?;
@@ -252,6 +323,7 @@ impl RoutineDeclaration for StoredRoutineDefinition {
             &mut self.children,
             control,
             bind,
+            |copying| copying.has_merge_targets,
         )
         .map(Some)
     }
@@ -272,6 +344,7 @@ impl RoutineDeclaration for StoredRoutineDefinition {
             &mut self.children,
             control,
             bind,
+            |_| (),
         )
         .map(Some)
     }

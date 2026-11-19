@@ -153,11 +153,19 @@ syntax_struct!(crate::ast::MergeStmt {
     returning_aliases
 });
 
-syntax_struct!(crate::ast::MergeTargetColumnBinding {
-    object_id,
-    attribute_number,
-    domain_dependencies
-});
+impl SyntaxCopy for crate::ast::MergeTargetColumnBinding {
+    fn copy_syntax(&self, copying: &mut Copying<'_>) -> Result<Self> {
+        copying.check()?;
+        copying.has_merge_targets = true;
+        Ok(Self {
+            object_id: copying.field("object_id", |_| Ok(self.object_id))?,
+            attribute_number: copying.field("attribute_number", |_| Ok(self.attribute_number))?,
+            domain_dependencies: copying.field("domain_dependencies", |copying| {
+                self.domain_dependencies.copy_syntax(copying)
+            })?,
+        })
+    }
+}
 
 syntax_enum!(crate::ast::MergeWhen {
     UpdateMatched { condition, assignments },

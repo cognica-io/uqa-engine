@@ -254,14 +254,18 @@ pub fn statement_has_removed_merge_target(
     catalog: &dyn StoredMergeColumnCatalog,
     statement: &Statement,
 ) -> Result<bool, SQLError> {
+    contains_removed_merge_target(catalog, &mut statement.clone())
+}
+
+pub(crate) fn contains_removed_merge_target(
+    catalog: &dyn StoredMergeColumnCatalog,
+    statement: &mut Statement,
+) -> Result<bool, SQLError> {
     let mut changed = false;
-    crate::catalog::stored_ast::visit_stored_statement_merges(
-        &mut statement.clone(),
-        &mut |merge| {
-            changed |= !dropped_stored_merge_targets(catalog, merge).is_empty();
-            Ok(())
-        },
-    )?;
+    crate::catalog::stored_ast::visit_stored_statement_merges(statement, &mut |merge| {
+        changed |= !dropped_stored_merge_targets(catalog, merge).is_empty();
+        Ok(())
+    })?;
     Ok(changed)
 }
 
