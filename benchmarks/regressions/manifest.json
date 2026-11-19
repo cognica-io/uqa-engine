@@ -753,7 +753,7 @@
       "source": "crates/uqa-api/src/backup/tests/acceptance.rs",
       "capability": "Public backup recovery",
       "workload": "Restore a full backup and a reprotected incremental grandchild after removing its source, ancestors and original repository on memory, redb and eight SQLite configurations.",
-      "invariant": "Public Rust jobs retain the captured table, view, routines and sequence behavior, survive cancellation, and publish writable destinations.",
+      "invariant": "Public Rust jobs retain the captured table, view, routines and sequence behavior, survive cancellation, and publish writable destinations. A stored SQL function returns the original results for default and explicit arguments after publication and cold reopen.",
       "case_names": [
         "case_01_memory",
         "case_02_redb",

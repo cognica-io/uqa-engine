@@ -87,6 +87,17 @@ fn rows(engine: &Engine) -> Vec<(Value, Value)> {
         .collect()
 }
 
+fn check_stored_routine(engine: &Engine) {
+    let result = engine
+        .sql(
+            "SELECT saved_count() AS implicit_arg, saved_count(11) AS explicit_arg",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(result.rows[0]["implicit_arg"], Value::Int(72));
+    assert_eq!(result.rows[0]["explicit_arg"], Value::Int(12));
+}
+
 fn next_ticket(engine: &Engine) -> Value {
     engine
         .sql("SELECT nextval('ticket') AS value", &[])
@@ -149,6 +160,7 @@ fn check_restored(
     assert!(!directory.exists());
     let restored = job.publish().unwrap();
     assert!(restored.backup_capabilities().import);
+    check_stored_routine(&restored);
     drop((job, authority));
     let next = expected.next_ticket;
     let mut expected: Vec<_> = expected
@@ -172,6 +184,7 @@ fn check_restored(
     drop(restored);
     if let Some(reopened) = provider.reopen(directory, mode) {
         assert!(reopened.backup_capabilities().import);
+        check_stored_routine(&reopened);
         assert_eq!(rows(&reopened), expected);
         assert_eq!(next_ticket(&reopened), Value::Int(next + 1));
     }
@@ -226,6 +239,14 @@ fn public_restores_full_and_reprotected_incremental_images_after_source_and_ance
     let source = provider.open(&source_dir.path().join("database"), source_mode);
     assert!(source.backup_capabilities().import);
     source.sql("CREATE TABLE items(id integer PRIMARY KEY, body text NOT NULL); CREATE VIEW visible AS SELECT id, body FROM items; CREATE SEQUENCE ticket START 40 CACHE 1; INSERT INTO items VALUES(1,'first'),(2,'second')", &[]).unwrap();
+    source
+        .sql(
+            "CREATE FUNCTION saved_count(n bigint DEFAULT 71) RETURNS bigint LANGUAGE SQL \
+             BEGIN ATOMIC SELECT n + (SELECT count(*) FROM (VALUES (1)) AS t(x)); END",
+            &[],
+        )
+        .unwrap();
+    check_stored_routine(&source);
     let full = capture(&source, &archive, None, &control);
     source
         .sql("INSERT INTO items VALUES(3,'third')", &[])
