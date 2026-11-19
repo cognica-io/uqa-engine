@@ -8,6 +8,7 @@
 
 use super::{footprint::FieldPath, MemoryReservation, RewriteField, RewriteMemory};
 use crate::{catalog::work::Work, plan::scalar::ScalarMemoryFolding, SQLError};
+use std::{borrow::BorrowMut, future::Future};
 use uqa_core::memory::ProductionControl;
 
 impl Drop for RewriteField {
@@ -49,20 +50,22 @@ impl Folding {
         }
     }
 
-    pub(in crate::plan::mutable) async fn retire_from<W: Work>(
-        mut self,
-        control: Option<&ProductionControl<'_>>,
-        work: &mut W,
-    ) -> Result<(), SQLError> {
-        self.advance_from(control, work).await
+    pub(in crate::plan::mutable) fn retire_from<'a, W: Work>(
+        self,
+        control: Option<&'a ProductionControl<'a>>,
+        work: &'a mut W,
+    ) -> impl Future<Output = Result<(), SQLError>> + 'a {
+        Self::advance_from(self, control, work)
     }
 
+    /// Detached records move into this frame. Publication borrows its records so the payload
+    /// still retires before its allocation reservations when an unfinished operation is dropped.
     pub(in crate::plan::mutable) async fn advance_from<W: Work>(
-        &mut self,
+        mut fields: impl BorrowMut<Self>,
         control: Option<&ProductionControl<'_>>,
         work: &mut W,
     ) -> Result<(), SQLError> {
-        while !self.is_complete() {
+        while !fields.borrow_mut().is_complete() {
             if let Some(control) = control {
                 control.check()?;
             }
@@ -70,7 +73,7 @@ impl Folding {
             if let Some(control) = control {
                 control.check()?;
             }
-            self.advance();
+            fields.borrow_mut().advance();
         }
         Ok(())
     }

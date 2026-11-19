@@ -376,9 +376,8 @@ fn native_catalog_types_retire_workspace_on_quota_denial_and_cancellation() {
     assert_eq!(memory.used(), 0);
 }
 
-#[test]
-fn a_small_subquery_rule_fits_the_ordinary_catalog_validation_allowance() {
-    use crate::catalog::{test_support::NoRoutines, CatalogReadView};
+fn subquery_rule(condition: &str, scalar_slot: Option<usize>) -> crate::catalog::CatalogReadView {
+    use crate::catalog::CatalogReadView;
     use uqa_sql::{
         ast::{EventEnableMode, Statement},
         catalog::events::{RuleConditionBinding, RuleDependencies, StoredRule},
@@ -397,14 +396,21 @@ fn a_small_subquery_rule_fits_the_ordinary_catalog_validation_allowance() {
             TableConstraintSet::default(),
         ),
     );
-    let Statement::CreateRule(definition) = uqa_sql::compile(
-        "CREATE RULE saved_check AS ON UPDATE TO public.saved WHERE EXISTS (VALUES (1)) DO NOTHING",
-    )
+    let Statement::CreateRule(definition) = uqa_sql::compile(&format!(
+        "CREATE RULE saved_check AS ON UPDATE TO public.saved WHERE {condition} DO NOTHING"
+    ))
     .unwrap()
     .remove(0) else {
         panic!("rule")
     };
-    let plan = ExpressionPlan::lower(definition.condition.clone().unwrap());
+    let mut plan = ExpressionPlan::lower(definition.condition.clone().unwrap());
+    if let Some(slot) = scalar_slot {
+        assert!(matches!(
+            plan.scalar,
+            uqa_sql::ScalarExpr::ScalarSubquery(0)
+        ));
+        plan.scalar = uqa_sql::ScalarExpr::ScalarSubquery(slot);
+    }
     let binding = RuleConditionBinding::for_event(&["value".into()], definition.event);
     RetainedValue::make_mut(&mut source.definitions.rules)
         .insert_event(
@@ -420,21 +426,27 @@ fn a_small_subquery_rule_fits_the_ordinary_catalog_validation_allowance() {
             },
         )
         .unwrap();
-    let catalog = CatalogReadView::new(source);
+    CatalogReadView::new(source)
+}
+
+#[test]
+fn a_small_subquery_rule_fits_the_ordinary_catalog_validation_allowance() {
+    use crate::catalog::{test_support::NoRoutines, CatalogReadView};
     let token = CancellationToken::new();
-    for kib in [8, 12, 16, 20, 24, 32, 64] {
-        let ordinary = MemoryBudget::new(kib << 10);
-        let mut cursor = RelationshipValidation::new(catalog.clone(), &ordinary, &token);
-        let expected = loop {
+    let validate = |catalog: &CatalogReadView, memory: &MemoryBudget| {
+        let mut cursor = RelationshipValidation::new(catalog.clone(), memory, &token);
+        loop {
             match cursor.advance_with_steps(&NoRoutines, &NoRoutines, 1) {
                 Ok(Some(next)) => cursor = next,
-                finished => {
-                    break finished
-                        .map(|_| ())
-                        .map_err(|error| error.sqlstate().unwrap().to_owned())
-                }
+                finished => break finished.map(|_| ()),
             }
-        };
+        }
+    };
+    let catalog = subquery_rule("EXISTS (VALUES (1))", None);
+    for kib in [8, 12, 16, 20, 24, 32, 64] {
+        let ordinary = MemoryBudget::new(kib << 10);
+        let expected =
+            validate(&catalog, &ordinary).map_err(|error| error.sqlstate().unwrap().to_owned());
         assert_eq!(expected.is_ok(), kib >= 20, "{kib} KiB");
         let retained = MemoryBudget::new(kib << 10);
         let actual = retained_binding_windows(&catalog, &retained, &token, 1, None)
@@ -442,5 +454,20 @@ fn a_small_subquery_rule_fits_the_ordinary_catalog_validation_allowance() {
             .map_err(|error| error.sqlstate().unwrap().to_owned());
         assert_eq!(expected, actual, "{kib} KiB");
         assert_eq!((ordinary.used(), retained.used()), (0, 0));
+    }
+    for slot in [0, 1] {
+        let memory = MemoryBudget::new((24 << 10) + 128);
+        let result = validate(&subquery_rule("(SELECT true)", Some(slot)), &memory);
+        if slot == 0 {
+            result.unwrap();
+        } else {
+            let error = result.unwrap_err();
+            assert_eq!(error.sqlstate(), Some("XX000"));
+            assert_eq!(
+                error.to_string(),
+                "scalar subquery slot is outside its plan"
+            );
+        }
+        assert_eq!(memory.used(), 0);
     }
 }

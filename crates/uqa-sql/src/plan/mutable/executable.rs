@@ -191,7 +191,7 @@ impl Prefix<MutableExecutablePlan> {
     ) -> Result<OwnedExecutablePlan, SQLError> {
         let mut publication = Publication::new(self, |plan| plan, control)?;
         if let Some(fields) = &mut publication.fields {
-            fields.advance_from(Some(control), work).await?;
+            Folding::advance_from(fields, Some(control), work).await?;
         }
         let (plan, memory) = publication.finish(control)?;
         Ok(plan.take().boxed(memory))
