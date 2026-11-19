@@ -53,16 +53,26 @@ macro_rules! syntax_enum {
     };
 }
 
+/// Check variable payloads in projection order and stop at the end of the work window.
+macro_rules! fields_fit {
+    ($window:ident;) => { true };
+    ($window:ident; $first:expr $(, $next:expr)* $(,)?) => {
+        crate::plan::copy::syntax::native::Field::fits($first, $window)
+        $(&& crate::plan::copy::syntax::native::Field::fits($next, $window))*
+    };
+}
+
 /// The native field list is shared with the synchronous syntax projection, including allocation and diagnostic order.
 macro_rules! native_struct {
     ($ty:ty { $($field:ident),* $(,)? }) => {
         native_struct!(inline, $ty { $($field),* });
     };
-    ($mode:ident, $ty:ty { $($field:ident),* $(,)? }) => {
+    ($mode:ident, $ty:ty { $($field:ident),* $(,)? } $(observe $observe:ident)?) => {
         syntax_struct!($ty { $($field),* });
-        crate::plan::copy::stored_plan::projection!($mode, $ty, source, input, Self {
-            $($field: input.field(&source.$field).await?),*
-        });
+        crate::plan::copy::stored_plan::projection!($mode, $ty, source, input, {
+            $(input.$observe(source);)?
+            Self { $($field: input.field(&source.$field).await?),* }
+        }; window => fields_fit!(window; $(&source.$field,)*));
     };
 }
 
@@ -75,6 +85,10 @@ macro_rules! native_enum {
         crate::plan::copy::stored_plan::projection!($mode, $ty, source, input, match source {
             $(Self::$variant $(($item))? $({$($field),*})? =>
                 Self::$variant $((input.field($item).await?))? $({$($field: input.field($field).await?),*})?),*
+        }; window => match source {
+            $(Self::$variant $(($item))? $({$($field),*})? =>
+                fields_fit!(window; $($item,)? $($($field,)*)?)
+            ),*
         });
     };
 }

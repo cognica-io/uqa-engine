@@ -13,10 +13,10 @@ use crate::ast::{CreateFunction, FunctionBody, FunctionParam, Statement};
 use crate::routines::{dependencies::RoutineDeclaration, SQLRoutine};
 use uqa_core::memory::{BudgetedVec, MemoryError, MemoryReservation, Produced, ProductionControl};
 
+mod capture;
 mod edit;
 mod header;
-pub use edit::StoredRoutineParameterEdit;
-mod parameter;
+pub use edit::{StoredRoutineParameterEdit, StoredRoutineStatementEdit};
 pub(super) use header::HeaderCopy;
 use header::{continue_text, start_text, Header};
 
@@ -35,19 +35,6 @@ impl<MergeTargets> Field<MergeTargets> {
     ) -> Result<Vec<T>> {
         fields.reserve(count)?;
         copying.reserve_slots(count)
-    }
-
-    fn append<T: SyntaxCopy>(
-        source: &T,
-        values: &mut Vec<T>,
-        fields: &mut BudgetedVec<Self>,
-        direct: &mut MemoryReservation,
-        children: &mut usize,
-        control: &ProductionControl<'_>,
-        merge_targets: impl FnOnce(&Copying<'_>) -> MergeTargets,
-    ) -> Result<()> {
-        let (value, lease, field) = Self::capture(source, control, merge_targets)?;
-        Self::install(value, lease, field, values, fields, direct, children)
     }
 
     fn install<T>(
@@ -100,7 +87,7 @@ pub struct StoredRoutineDefinition {
     source: SQLRoutine,
     definition: CreateFunction,
     header: Header,
-    pending_parameter: Option<parameter::Capture>,
+    pending: capture::Pending,
     parameters: BudgetedVec<Field>,
     statements: BudgetedVec<Field<bool>>,
     children: usize,
@@ -206,7 +193,7 @@ impl StoredRoutineDefinition {
             source: routine,
             definition,
             header: Header::default(),
-            pending_parameter: None,
+            pending: capture::Pending::default(),
             parameters,
             statements,
             children,
@@ -233,7 +220,7 @@ impl StoredRoutineDefinition {
 
     /// Advance the captured header, source text, parameters and body of the immutable placeholder before binding its private declaration.
     pub fn copy_next_field(&mut self, control: &ProductionControl<'_>) -> Result<bool> {
-        let pending = self.pending_parameter.take();
+        let mut pending = std::mem::take(&mut self.pending);
         control.check()?;
         if !self.header.complete() {
             self.copy_header(control)?;
@@ -250,19 +237,18 @@ impl StoredRoutineDefinition {
         }
         if let Some(parameter) = self.source.def.params.get(self.parameters.len()) {
             let (value, lease, field) = if parameter.default.is_some() {
-                let mut capture = match pending {
-                    Some(capture) => capture,
-                    None => parameter::Capture::new(
-                        self.source.clone(),
-                        self.parameters.len(),
-                        control,
-                    )?,
-                };
-                let Some((produced, children)) = capture.advance(control)? else {
-                    self.pending_parameter = Some(capture);
+                let Some(field) = capture::Capture::next(
+                    &mut pending.parameter,
+                    &self.source,
+                    self.parameters.len(),
+                    |source, position| &source.params[position],
+                    control,
+                )?
+                else {
+                    self.pending = pending;
                     return Ok(false);
                 };
-                Field::from_produced(produced, children, ())
+                Field::from_produced(field.value, field.children, ())
             } else {
                 Field::capture(parameter, control, |_| ())?
             };
@@ -278,15 +264,34 @@ impl StoredRoutineDefinition {
         } else if let (FunctionBody::Statements(source), FunctionBody::Statements(values)) =
             (&self.source.def.body, &mut self.definition.body)
         {
-            if let Some(statement) = source.get(self.statements.len()) {
-                Field::append(
-                    statement,
+            let position = self.statements.len();
+            if position < source.len() {
+                let Some(field) = capture::Capture::next(
+                    &mut pending.statement,
+                    &self.source,
+                    position,
+                    |source, position| {
+                        let FunctionBody::Statements(statements) = &source.body else {
+                            unreachable!("selected SQL-standard body")
+                        };
+                        &statements[position]
+                    },
+                    control,
+                )?
+                else {
+                    self.pending = pending;
+                    return Ok(false);
+                };
+                let (value, lease, field) =
+                    Field::from_produced(field.value, field.children, field.has_merge_targets);
+                Field::install(
+                    value,
+                    lease,
+                    field,
                     values,
                     &mut self.statements,
                     &mut self.direct,
                     &mut self.children,
-                    control,
-                    |copying| copying.has_merge_targets,
                 )?;
             }
         }

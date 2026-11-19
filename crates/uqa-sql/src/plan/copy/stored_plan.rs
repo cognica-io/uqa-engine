@@ -6,7 +6,7 @@
 
 //! Project bound query fields using the stored image's native field selections and the SQL constructor work owner.
 
-pub(crate) use super::syntax::native::{Field, Input};
+pub(crate) use super::syntax::native::{Field, Input, Nested, Window};
 use crate::construction;
 use crate::plan::{
     retirement::{
@@ -186,8 +186,12 @@ impl std::ops::DerefMut for BoundPlan {
 }
 
 macro_rules! projection {
-    (inline, $ty:ty, $source:ident, $input:ident, $value:expr) => {
+    (inline, $ty:ty, $source:ident, $input:ident, $value:expr $(; $window:ident => $fits:expr)?) => {
         impl $crate::plan::copy::stored_plan::Field for $ty {
+            $(fn fits(&self, $window: &mut $crate::plan::copy::stored_plan::Window) -> bool {
+                let $source=self;
+                $fits
+            })?
             async fn copy_from<'s>(
                 &'s self,
                 $input: &mut $crate::plan::copy::stored_plan::Input<'s>,
@@ -197,7 +201,7 @@ macro_rules! projection {
             }
         }
     };
-    (recursive, $ty:ty, $source:ident, $input:ident, $value:expr) => {
+    (recursive, $ty:ty, $source:ident, $input:ident, $value:expr $(; $window:ident => $fits:expr)?) => {
         impl $ty {
             fn submit_stored_projection<'s>(
                 &'s self,
@@ -206,7 +210,7 @@ macro_rules! projection {
             ) -> $crate::plan::copy::stored_plan::CaptureResult<
                 $crate::construction::Output<
                     $crate::plan::copy::stored_plan::CaptureResult<
-                        $crate::plan::copy::stored_plan::Captured<Self>,
+                        $crate::plan::copy::stored_plan::Nested<Self>,
                     >,
                 >,
             > {
@@ -214,17 +218,21 @@ macro_rules! projection {
                     let mut $input = $crate::plan::copy::stored_plan::Input::new(control, work);
                     let $source = self;
                     let value = $value;
-                    $input.finish(value)
+                    $input.finish_nested(value)
                 })?)
             }
         }
         impl $crate::plan::copy::stored_plan::Field for $ty {
+            $(fn fits(&self, $window: &mut $crate::plan::copy::stored_plan::Window) -> bool {
+                let $source=self;
+                $window.slots(1) && $fits
+            })?
             async fn copy_from<'s>(
                 &'s self,
                 input: &mut $crate::plan::copy::stored_plan::Input<'s>,
             ) -> $crate::plan::copy::stored_plan::CaptureResult<Self> {
                 let fields = self.submit_stored_projection(input.control(), &mut input.work)?;
-                input.take_child($crate::construction::receive(fields).await?)
+                input.take_nested($crate::construction::receive(fields).await?)
             }
         }
     };

@@ -14,6 +14,33 @@ use uqa_core::{
 
 mod defaults;
 mod header;
+mod statements;
+
+use crate::catalog::work::Work;
+use uqa_core::{image_io::ImageIoError, memory::Produced};
+
+#[derive(Default)]
+struct Checkpoints(usize, Option<(usize, CancellationToken)>);
+
+impl Work for Checkpoints {
+    async fn checkpoint(&mut self) -> std::result::Result<(), ImageIoError> {
+        self.0 += 1;
+        if let Some((at, token)) = &self.1 {
+            if *at == self.0 {
+                token.cancel();
+            }
+        }
+        Ok(())
+    }
+
+    async fn text(
+        &mut self,
+        value: &str,
+        control: &ProductionControl<'_>,
+    ) -> Result<Produced<String>> {
+        Ok(control.copy_text(value)?)
+    }
+}
 
 #[test]
 fn compilation_projects_dropped_merge_targets_from_the_edited_declaration() {
@@ -55,6 +82,21 @@ fn compilation_projects_dropped_merge_targets_from_the_edited_declaration() {
             .unwrap(),
         Some(true)
     );
+    assert!(stored.statements[0].has_merge_targets);
+    let mut restored = StoredRoutineDefinition::new(
+        SQLUserFunction::new(stored.declaration().clone(), RoutineBody::Source).shared(),
+        &control,
+    )
+    .unwrap();
+    while !restored.copy_next_field(&control).unwrap() {}
+    assert!(restored.statements[0].has_merge_targets);
+    let edit = crate::catalog::work::inline(restored.statement_edit_from(0, &control, &mut ()))
+        .unwrap()
+        .unwrap();
+    assert!(crate::catalog::work::inline(edit.finish_from(true, &control, &mut ())).unwrap());
+    assert!(restored.statements[0].has_merge_targets);
+    drop(stored);
+    let mut stored = restored;
     assert!(stored
         .compilation_statement(0, &columns, &control)
         .unwrap()

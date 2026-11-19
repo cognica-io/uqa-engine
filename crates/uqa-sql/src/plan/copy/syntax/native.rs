@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Retain native routine parameter fields with the existing SQL syntax projections and constructor driver.
+//! Retain native routine declaration fields with the existing SQL syntax projections and constructor driver.
 
 use super::{Copying, Result, SyntaxCopy};
 use crate::{ast, construction, plan::copy::CopyPurpose};
@@ -12,13 +12,30 @@ use std::future::Future;
 use uqa_core::memory::{MemoryError, Produced, ProductionControl};
 
 mod collections;
+mod compact;
+pub(crate) use compact::Window;
 
 pub(crate) struct Input<'s> {
     copying: Copying<'s>,
     pub(crate) work: construction::Work<'s>,
 }
 
+pub(crate) struct Nested<T> {
+    pub(crate) value: Produced<T>,
+    pub(crate) children: usize,
+    pub(crate) has_merge_targets: bool,
+}
+
 pub(crate) trait Field: Sized + Send + Sync {
+    /// An opaque payload goes through its native constructor until its complete copy cost is known.
+    fn fits(&self, _: &mut Window) -> bool {
+        false
+    }
+
+    fn capture_inline(&self, _: &ProductionControl<'_>) -> Result<Option<Nested<Self>>> {
+        Ok(None)
+    }
+
     fn copy_from<'s>(&'s self, input: &mut Input<'s>) -> impl Future<Output = Result<Self>> + Send;
 }
 
@@ -46,6 +63,25 @@ impl<'s> Input<'s> {
         Ok((self.copying.finish(value)?, children))
     }
 
+    pub(crate) fn finish_nested<T>(self, value: T) -> Result<Nested<T>> {
+        let has_merge_targets = self.copying.has_merge_targets;
+        let (value, children) = self.finish(value)?;
+        Ok(Nested {
+            value,
+            children,
+            has_merge_targets,
+        })
+    }
+
+    pub(crate) fn take_nested<T>(&mut self, child: Nested<T>) -> Result<T> {
+        self.copying.has_merge_targets |= child.has_merge_targets;
+        self.take_child((child.value, child.children))
+    }
+
+    pub(crate) fn observe_merge(&mut self, statement: &ast::MergeStmt) {
+        self.copying.has_merge_targets |= !statement.target_column_bindings.is_empty();
+    }
+
     pub(crate) fn take_child<T>(&mut self, (value, children): (Produced<T>, usize)) -> Result<T> {
         self.copying.retained_children = self
             .copying
@@ -59,6 +95,7 @@ impl<'s> Input<'s> {
 macro_rules! inline_fields {
     ($($ty:ty),* $(,)?) => { $(
         impl Field for $ty {
+            fn fits(&self, _: &mut Window) -> bool { true }
             fn copy_from<'s>(&'s self, input: &mut Input<'s>) -> impl Future<Output = Result<Self>> + Send {
                 std::future::ready(input.inline(self))
             }
@@ -158,6 +195,9 @@ impl Field for crate::catalog::roles::RoleReference {
 }
 
 impl Field for ast::ReturningAliases {
+    fn fits(&self, window: &mut Window) -> bool {
+        window.text(&self.old) && window.text(&self.new)
+    }
     async fn copy_from<'s>(&'s self, input: &mut Input<'s>) -> Result<Self> {
         crate::plan::copy::lowering::input::text::returning_aliases(
             self,
@@ -167,6 +207,48 @@ impl Field for ast::ReturningAliases {
         .await
     }
 }
+
+/// Select the same native fields to measure or construct a stored SQL body statement.
+macro_rules! body_statements {
+    ($($variant:ident $(($item:ident))? $({$field:ident})?),+ $(,)?) => {
+        impl Field for ast::Statement {
+            fn fits(&self, window: &mut Window) -> bool {
+                match self {
+                    $(Self::$variant $(($item))? $({$field})? => $($item)? $($field)?.fits(window),)+
+                    _ => false,
+                }
+            }
+
+            fn capture_inline(&self, control: &ProductionControl<'_>) -> Result<Option<Nested<Self>>> {
+                control.check()?;
+                if !self.fits(&mut Window::new()) {
+                    return Ok(None);
+                }
+                let (value, (children, has_merge_targets)) =
+                    crate::plan::copy::capture_stored(self, control, |copy| {
+                        (copy.retained_children, copy.has_merge_targets)
+                    })?;
+                Ok(Some(Nested { value, children, has_merge_targets }))
+            }
+
+            async fn copy_from<'s>(&'s self, input: &mut Input<'s>) -> Result<Self> {
+                Ok(match self {
+                    $(Self::$variant $(($item))? $({$field})? =>
+                        Self::$variant $((input.field($item).await?))? $({$field: input.field($field).await?})?,)+
+                    utility => input.inline(utility)?,
+                })
+            }
+        }
+    };
+}
+body_statements!(
+    Select(query),
+    Values { rows },
+    Insert(statement),
+    Update(statement),
+    Delete(statement),
+    Merge(statement),
+);
 
 impl Field for crate::plan::CommandPlan {
     async fn copy_from<'s>(&'s self, input: &mut Input<'s>) -> Result<Self> {
@@ -181,8 +263,9 @@ impl Field for crate::plan::CommandPlan {
 }
 
 macro_rules! payload {
-    ($ty:ty, $method:ident) => {
+    ($ty:ty, $method:ident $(, |$source:ident, $window:ident| $bounded:expr)?) => {
         impl Field for $ty {
+            $(fn fits(&self, $window: &mut Window) -> bool { let $source = self; $bounded })?
             async fn copy_from<'s>(&'s self, input: &mut Input<'s>) -> Result<Self> {
                 let value = self.$method(&input.control(), &mut input.work).await?;
                 Ok(input.copying.take(value))
@@ -190,7 +273,19 @@ macro_rules! payload {
         }
     };
 }
-payload!(uqa_core::Value, clone_from_input);
+payload!(
+    uqa_core::Value,
+    clone_from_input,
+    |value, window| match value {
+        uqa_core::Value::Void
+        | uqa_core::Value::Null
+        | uqa_core::Value::Int(_)
+        | uqa_core::Value::Bool(_)
+        | uqa_core::Value::Float(_) => true,
+        uqa_core::Value::Str(text) => window.text(text),
+        _ => false,
+    }
+);
 payload!(ast::FunctionBinding, clone_with_input_work);
 payload!(crate::ColumnType, clone_with_input_work);
 payload!(
@@ -199,6 +294,9 @@ payload!(
 );
 
 impl Field for String {
+    fn fits(&self, window: &mut Window) -> bool {
+        window.text(self)
+    }
     async fn copy_from<'s>(&'s self, input: &mut Input<'s>) -> Result<Self> {
         let value =
             crate::catalog::work::copy_text(&mut input.work, self, &input.copying.control).await?;
@@ -206,6 +304,9 @@ impl Field for String {
     }
 }
 impl Field for ast::ReferenceName {
+    fn fits(&self, window: &mut Window) -> bool {
+        window.text(self.as_str())
+    }
     async fn copy_from<'s>(&'s self, input: &mut Input<'s>) -> Result<Self> {
         let text =
             crate::catalog::work::copy_text(&mut input.work, self.as_str(), &input.copying.control)
@@ -214,6 +315,9 @@ impl Field for ast::ReferenceName {
     }
 }
 impl<T: Field> Field for Option<T> {
+    fn fits(&self, window: &mut Window) -> bool {
+        self.as_ref().is_none_or(|value| value.fits(window))
+    }
     async fn copy_from<'s>(&'s self, input: &mut Input<'s>) -> Result<Self> {
         match self {
             Some(value) => Ok(Some(input.field(value).await?)),
@@ -222,6 +326,9 @@ impl<T: Field> Field for Option<T> {
     }
 }
 impl<T: Field> Field for Box<T> {
+    fn fits(&self, window: &mut Window) -> bool {
+        self.as_ref().fits(window)
+    }
     async fn copy_from<'s>(&'s self, input: &mut Input<'s>) -> Result<Self> {
         input.copying.admit_box::<T>()?;
         let child = input.field(self.as_ref()).await?;
@@ -229,6 +336,9 @@ impl<T: Field> Field for Box<T> {
     }
 }
 impl<T: Field> Field for Vec<T> {
+    fn fits(&self, window: &mut Window) -> bool {
+        window.slots(self.len()) && self.iter().all(|value| value.fits(window))
+    }
     async fn copy_from<'s>(&'s self, input: &mut Input<'s>) -> Result<Self> {
         let mut values = input.copying.reserve_slots(self.len())?;
         for source in self {
@@ -239,6 +349,9 @@ impl<T: Field> Field for Vec<T> {
     }
 }
 impl<A: Field, B: Field> Field for (A, B) {
+    fn fits(&self, window: &mut Window) -> bool {
+        self.0.fits(window) && self.1.fits(window)
+    }
     async fn copy_from<'s>(&'s self, input: &mut Input<'s>) -> Result<Self> {
         Ok((input.field(&self.0).await?, input.field(&self.1).await?))
     }

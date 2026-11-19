@@ -119,26 +119,7 @@ fn stored_parameter_default_abandonment_denial_and_cancellation_release_private_
 
 #[test]
 fn edited_parameter_publishes_its_current_value_and_receipt_only_after_reprojection() {
-    use crate::catalog::work::{inline, Work};
-    use uqa_core::{image_io::ImageIoError, memory::Produced};
-
-    #[derive(Default)]
-    struct Checkpoints(usize);
-
-    impl Work for Checkpoints {
-        async fn checkpoint(&mut self) -> std::result::Result<(), ImageIoError> {
-            self.0 += 1;
-            Ok(())
-        }
-
-        async fn text(
-            &mut self,
-            value: &str,
-            control: &ProductionControl<'_>,
-        ) -> Result<Produced<String>> {
-            Ok(control.copy_text(value)?)
-        }
-    }
+    use crate::catalog::work::inline;
 
     let width = 4096;
     let values = std::iter::repeat_n("1", width)

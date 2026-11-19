@@ -295,7 +295,8 @@ mod owned_query;
 mod owned_scalar;
 mod stored_routine;
 pub use stored_routine::{
-    StoredRoutineDefinition, StoredRoutineParameterEdit, StoredStatementCompilation,
+    StoredRoutineDefinition, StoredRoutineParameterEdit, StoredRoutineStatementEdit,
+    StoredStatementCompilation,
 };
 
 impl<'a> Copying<'a> {

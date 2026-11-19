@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use super::{Field, Input, Result};
+use super::{Field, Input, Result, Window};
 use crate::catalog::work::{ReferenceWork, Work};
 use crate::construction;
 use std::cmp::Ordering;
@@ -15,6 +15,10 @@ where
     for<'a, 'b, 'c> ReferenceWork<'a, 'b, construction::Work<'c>>:
         MapKeyInput<T, Error = crate::SQLError>,
 {
+    fn fits(&self, _: &mut Window) -> bool {
+        self.is_empty()
+    }
+
     async fn copy_from<'s>(&'s self, input: &mut Input<'s>) -> Result<Self> {
         let mut output = Self::new();
         for value in self {
@@ -36,6 +40,10 @@ where
 }
 
 impl<V: Field> Field for OwnedMap<String, V> {
+    fn fits(&self, _: &mut Window) -> bool {
+        self.is_empty()
+    }
+
     async fn copy_from<'s>(&'s self, input: &mut Input<'s>) -> Result<Self> {
         let mut output = Self::new();
         for (key, value) in self {

@@ -8,34 +8,11 @@ use super::{Copying, Result, SyntaxCopy};
 use crate::{
     ast::Expr,
     construction,
-    plan::copy::syntax::native::{Field, Input},
+    plan::copy::syntax::native::{Field, Input, Nested},
 };
-use uqa_core::{
-    memory::{Produced, ProductionControl},
-    Value,
-};
+use uqa_core::{memory::ProductionControl, Value};
 
-type StoredExpression = construction::Output<Result<(Produced<Expr>, usize)>>;
-
-impl Field for Expr {
-    async fn copy_from<'s>(&'s self, parent: &mut Input<'s>) -> Result<Self> {
-        if matches!(
-            self,
-            Self::Star
-                | Self::Default
-                | Self::Param(_)
-                | Self::InternalColumn(_)
-                | Self::Literal(
-                    Value::Void | Value::Null | Value::Bool(_) | Value::Int(_) | Value::Float(_)
-                )
-        ) {
-            return parent.inline(self);
-        }
-        // The driver polls each recursive expression constructor independently of its parent.
-        let output = self.submit_stored_fields(parent.control(), &mut parent.work)?;
-        parent.take_child(construction::receive(output).await?)
-    }
-}
+type StoredExpression = construction::Output<Result<Nested<Expr>>>;
 
 syntax_enum!(crate::ast::BinaryOp {
     Equal,
@@ -69,8 +46,32 @@ macro_rules! native_field {
     };
 }
 
+impl Field for Expr {
+    fn fits(&self, window: &mut crate::plan::copy::syntax::native::Window) -> bool {
+        self.fits_stored_window(window)
+    }
+
+    async fn copy_from<'s>(&'s self, parent: &mut Input<'s>) -> Result<Self> {
+        if matches!(
+            self,
+            Self::Star
+                | Self::Default
+                | Self::Param(_)
+                | Self::InternalColumn(_)
+                | Self::Literal(
+                    Value::Void | Value::Null | Value::Bool(_) | Value::Int(_) | Value::Float(_)
+                )
+        ) {
+            return parent.inline(self);
+        }
+        // The driver polls each recursive expression constructor independently of its parent.
+        let output = self.submit_stored_fields(parent.control(), &mut parent.work)?;
+        parent.take_nested(construction::receive(output).await?)
+    }
+}
+
 macro_rules! syntax_expression {
-    ($($shape:tt)*) => {
+    ($($variant:ident $(($($item:ident),+))? $({$($member:ident),*})?),* $(,)?) => {
         impl SyntaxCopy for crate::ast::Expr {
             fn copy_syntax(&self, copying: &mut Copying<'_>) -> Result<Self> {
                 copying.check()?;
@@ -78,18 +79,29 @@ macro_rules! syntax_expression {
                     return Err(crate::SQLError::Internal("stored definition contains a query or window expression".into()));
                 }
                 if let Some(number) = copying.parameters.and_then(|parameters| parameters(self)) { return Ok(Self::Param(number)); }
-                Ok(expression_fields!(self, copying, inline_field; $($shape)*))
+                Ok(expression_fields!(self, copying, inline_field; $($variant $(($($item),+))? $({$($member),*})?),*))
             }
         }
 
         impl Expr {
+            fn fits_stored_window(&self, window: &mut crate::plan::copy::syntax::native::Window) -> bool {
+                if !window.slots(1) {
+                    return false;
+                }
+                match self {
+                    $(Self::$variant $(($($item),+))? $({$($member),*})? =>
+                        fields_fit!(window; $($($item,)+)? $($($member,)*)?)
+                    ),*
+                }
+            }
+
             fn submit_stored_fields<'s>(
                 &'s self, control: ProductionControl<'s>, work: &mut construction::Work<'s>,
             ) -> Result<StoredExpression> {
                 Ok(work.submit(move |work| async move {
                     let mut input = Input::new(control, work);
-                    let value = expression_fields!(self, input, native_field; $($shape)*);
-                    input.finish(value)
+                    let value = expression_fields!(self, input, native_field; $($variant $(($($item),+))? $({$($member),*})?),*);
+                    input.finish_nested(value)
                 })?)
             }
         }

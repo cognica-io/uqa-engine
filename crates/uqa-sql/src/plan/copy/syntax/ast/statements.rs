@@ -139,7 +139,7 @@ native_struct!(crate::ast::InsertStmt {
     returning_aliases
 });
 
-native_struct!(crate::ast::MergeStmt {
+native_struct!(inline, crate::ast::MergeStmt {
     with,
     target,
     target_qualifier,
@@ -151,7 +151,7 @@ native_struct!(crate::ast::MergeStmt {
     when_clauses,
     returning,
     returning_aliases
-});
+} observe observe_merge);
 
 impl SyntaxCopy for crate::ast::MergeTargetColumnBinding {
     fn copy_syntax(&self, copying: &mut Copying<'_>) -> Result<Self> {

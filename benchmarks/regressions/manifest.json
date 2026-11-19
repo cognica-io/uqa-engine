@@ -76576,6 +76576,45 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_routine_statements_copy_queries_and_dml_under_the_same_field_windows",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/stored_routine/tests/statements.rs",
+      "capability": "Stored routine restoration",
+      "workload": "Capture, edit and publish two and 1,024 rows or expressions in VALUES, SELECT with a CTE, INSERT, UPDATE, DELETE and MERGE.",
+      "invariant": "Initial capture and both edit copies respect the caller work window. The exact stored syntax, direct allocation and descendant ownership agree with the ordinary projection.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_statement_edits_preserve_prior_changes_and_release_unpublished_fields",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/stored_routine/tests/statements.rs",
+      "capability": "Stored routine restoration",
+      "workload": "Capture a 4,096-row SQL body, cancel an incomplete capture, and discard, deny, cancel and publish edits to the captured statement.",
+      "invariant": "No incomplete statement or failed replacement changes the declaration. A subsequent edit sees the previous published value and releases all scratch reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_statement_edits_classify_the_current_text_on_every_copy",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/stored_routine/tests/statements.rs",
+      "capability": "Stored routine restoration",
+      "workload": "Replace a small SELECT literal with over 128 KiB of UTF-8 text, cancel and retry the edit, then replace it with the original small literal.",
+      "invariant": "Each copy uses the current expression's total bytes. The long text yields across byte windows, cancellation preserves the declaration, and shrinking the value releases its reservation.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }
