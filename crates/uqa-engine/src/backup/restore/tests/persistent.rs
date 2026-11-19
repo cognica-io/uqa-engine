@@ -154,6 +154,109 @@ fn persistent_restore_honors_each_calls_object_verification_window(#[case] kind:
     }
 }
 
+#[rstest::rstest]
+#[case::sqlite_native(Provider::Native)]
+#[case::sqlite_kv(Provider::KV)]
+#[case::redb(Provider::Redb)]
+fn persistent_publication_opens_in_windows_and_resumes_after_runtime_abandonment(
+    #[case] kind: Provider,
+) {
+    let directory = tempfile::tempdir().unwrap();
+    let source_path = directory.path().join("source");
+    std::fs::create_dir(&source_path).unwrap();
+    let source =
+        Engine::from_persistent_provider(kind.open(&source_path.join("database"), 0)).unwrap();
+    source.sql("CREATE TABLE items (id integer); INSERT INTO items VALUES (1); CREATE VIEW visible AS SELECT id FROM items", &[]).unwrap();
+    let repository = protected_repository(&directory.path().join("repository"));
+    let root = capture(&source, &repository, None);
+    drop(source);
+    std::fs::remove_dir_all(&source_path).unwrap();
+
+    let authority = Engine::new();
+    let control = StorageReadControl::with_limit(32 << 20);
+    let path = directory.path().join("restored");
+    let target = kind.target(0);
+    let mut job = authority
+        .begin_restore(
+            &repository,
+            root.backup(),
+            destination(&path, &target),
+            options(),
+            &control,
+        )
+        .unwrap();
+    let id = job.id().unwrap();
+    assert!(matches!(
+        job.advance_publication(1),
+        Err(BackupError::Finished)
+    ));
+    prepare(&mut job);
+    assert!(matches!(
+        job.advance_publication(0),
+        Err(BackupError::Invalid(_))
+    ));
+    assert!(!path.exists());
+    assert!(job.advance_publication(1).unwrap().is_none());
+    assert_eq!(job.phase(), RestorePhase::Publishing);
+    assert!(path.join("database").is_file());
+    for _ in 0..3 {
+        assert_eq!(job.advance(1).unwrap(), RestorePhase::Publishing);
+    }
+    drop(job);
+    assert_eq!(control.memory().used(), 0);
+    repository.remove_backup(root.backup(), &control).unwrap();
+
+    let mut resumed = authority
+        .resume_restore(
+            &repository,
+            id,
+            destination(&path, &target),
+            options(),
+            &control,
+        )
+        .unwrap();
+    assert!(resumed.root().is_none());
+    assert!(resumed.advance_publication(1).unwrap().is_none());
+    control.cancellation().cancel();
+    let mut pending = 0;
+    let engine = loop {
+        if let Some(engine) = resumed.advance_publication(1).unwrap() {
+            break engine;
+        }
+        pending += 1;
+    };
+    assert!(pending > 3);
+    assert_eq!(
+        engine.sql("SELECT id FROM visible", &[]).unwrap().rows[0]["id"],
+        Value::Int(1)
+    );
+    engine.sql("INSERT INTO items VALUES (2)", &[]).unwrap();
+    let completed = resumed.cancel().unwrap().unwrap();
+    assert!(std::ptr::eq(&raw const *completed, &raw const *engine));
+    drop((completed, engine, resumed));
+
+    let mut late = authority
+        .resume_restore(
+            &repository,
+            id,
+            destination(&path, &target),
+            options(),
+            &control,
+        )
+        .unwrap();
+    assert!(late.advance_publication(1).unwrap().is_none());
+    let engine = late.cancel().unwrap().unwrap();
+    assert_eq!(
+        engine
+            .sql("SELECT id FROM visible ORDER BY id", &[])
+            .unwrap()
+            .rows[1]["id"],
+        Value::Int(2)
+    );
+    drop((engine, late));
+    assert_eq!(control.memory().used(), 0);
+}
+
 #[test]
 fn persistent_restore_admission_applies_authority_transaction_and_target_exclusivity() {
     let directory = tempfile::tempdir().unwrap();
@@ -229,11 +332,13 @@ fn persistent_restore_admission_applies_authority_transaction_and_target_exclusi
 #[case::redb(Provider::Redb)]
 fn persistent_restore_recovers_private_completion_and_retires_failed_or_cancelled_input(
     #[case] kind: Provider,
-    #[values("validating", "prepared", "cancel", "failure")] outcome: &str,
+    #[values("validating", "prepared", "cancel", "failure", "prepared_cancel")] outcome: &str,
 ) {
     let directory = tempfile::tempdir().unwrap();
+    let source_dir = directory.path().join("source");
+    std::fs::create_dir(&source_dir).unwrap();
     let source =
-        Engine::from_persistent_provider(kind.open(&directory.path().join("source"), 0)).unwrap();
+        Engine::from_persistent_provider(kind.open(&source_dir.join("database"), 0)).unwrap();
     source
         .sql(
             "CREATE TABLE items(id integer); INSERT INTO items VALUES(17)",
@@ -243,6 +348,7 @@ fn persistent_restore_recovers_private_completion_and_retires_failed_or_cancelle
     let repository = protected_repository(&directory.path().join("repository"));
     let root = capture(&source, &repository, None);
     drop(source);
+    std::fs::remove_dir_all(&source_dir).unwrap();
     let path = directory.path().join("restored");
     let target = kind.target(0);
     let authority = Engine::new();
@@ -257,14 +363,15 @@ fn persistent_restore_recovers_private_completion_and_retires_failed_or_cancelle
         )
         .unwrap();
     let id = job.id().unwrap();
-    if matches!(outcome, "validating" | "prepared") {
+    let prepared = matches!(outcome, "prepared" | "prepared_cancel");
+    if outcome == "validating" || prepared {
         while job.advance(1024).unwrap() != RestorePhase::Validating {}
-        if outcome == "prepared" {
+        if prepared {
             while job.advance(1024).unwrap() != RestorePhase::Prepared {}
         }
         drop(job);
         assert_eq!(control.memory().used(), 0);
-        if outcome == "prepared" {
+        if prepared {
             repository.remove_backup(root.backup(), &control).unwrap();
         }
         let mut job = authority
@@ -281,6 +388,22 @@ fn persistent_restore_recovers_private_completion_and_retires_failed_or_cancelle
         }
         assert_eq!(job.phase(), RestorePhase::Prepared);
         assert!(!path.exists());
+        if prepared {
+            for _ in 0..2 {
+                assert!(job.advance_publication(1).unwrap().is_none());
+                assert_eq!(job.phase(), RestorePhase::Publishing);
+                assert!(!path.exists());
+            }
+            if outcome == "prepared_cancel" {
+                control.cancellation().cancel();
+                assert!(job.cancel().unwrap().is_none());
+                assert_eq!(job.phase(), RestorePhase::Cancelled);
+                assert!(!path.exists());
+                drop(job);
+                assert_eq!(control.memory().used(), 0);
+                return;
+            }
+        }
         let restored = job.publish().unwrap();
         assert_eq!(
             restored.sql("SELECT id FROM items", &[]).unwrap().rows[0]["id"],
@@ -455,18 +578,7 @@ fn persistent_restore_publishes_full_and_standalone_incremental_images(
     std::fs::remove_dir_all(source_directory).unwrap();
     let control = StorageReadControl::with_limit(32 << 20);
     if incremental {
-        repository.remove_backup(parent.backup(), &control).unwrap();
-        for attempt in 0..100 {
-            if repository
-                .collect_garbage(16, 16 << 20, &control)
-                .unwrap()
-                .remaining_files
-                == 0
-            {
-                break;
-            }
-            assert!(attempt < 99, "ancestor collection did not finish");
-        }
+        retire_ancestor(&repository, parent, &control);
     }
     let path = directory.path().join("restored");
     let target = kind.target((mode + usize::from(incremental)) % 4);

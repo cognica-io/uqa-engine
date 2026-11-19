@@ -174,3 +174,101 @@ fn stored_relations_borrow_large_payloads_and_reject_unsupported_commands() {
             .is_err()
     );
 }
+
+#[test]
+fn runtime_calls_keep_placement_and_ignore_selected_builtins() {
+    use crate::ast::FunctionBinding;
+    use StoredFunctionSite::{Expression, From, Window};
+
+    let mut stored = plan("WITH q AS (SELECT source_scalar(1) AS n) SELECT fixed(n), window_total(n) OVER () FROM q CROSS JOIN ROWS FROM(rows_a(outer_scalar(1)), rows_b())");
+    stored.rewrite_scalar_expressions(&mut |expression| {
+        if let crate::ScalarExpr::Func { name, binding, .. } = expression {
+            if name == "fixed" {
+                *binding = Some(
+                    FunctionBinding::builtin_by_name_with_control(
+                        "fixed",
+                        None,
+                        &ProductionControl::uncontrolled(),
+                    )
+                    .unwrap()
+                    .into_uncontrolled()
+                    .unwrap(),
+                );
+            }
+        }
+    });
+    let crate::plan::UnifiedPlan::Query(query) = &stored else {
+        unreachable!()
+    };
+    let mut json = serde_json::to_value(query).unwrap();
+    let raw = &mut json["root"]["QueryBlock"]["projections"][0]["expr"]["Func"]["args"][0];
+    assert!(raw.is_object());
+    *raw = serde_json::json!({"Literal":{"Func":{"name":"not_a_function","args":[]}}});
+    let wire = serde_json::to_vec(&json).unwrap();
+    let memory = MemoryBudget::new(512 << 10);
+    let cancel = CancellationToken::new();
+    let owned = memory.clone();
+    let original = cancel.clone();
+    let mut decoder = uqa_core::image_io::ImageDecoder::<_, SQLError>::new(
+        &memory,
+        &cancel,
+        move |mut reader| async move {
+            let mut work = reader.input();
+            let control = ProductionControl::new(&owned, &original, work.cancellation);
+            let mut calls = Vec::new();
+            super::super::visit_stored_query_json_runtime_calls(
+                &wire,
+                &control,
+                &mut work,
+                &mut |name, site| {
+                    calls.push((name.to_owned(), site));
+                    Ok(())
+                },
+            )
+            .await?;
+            Ok(calls)
+        },
+    )
+    .unwrap();
+    let mut windows = 0;
+    let mut projected = loop {
+        windows += 1;
+        if let Some(calls) = decoder
+            .advance(
+                &mut std::io::empty(),
+                uqa_core::image_io::ImageDecodeWindow {
+                    bytes: 16,
+                    steps: 4,
+                },
+            )
+            .unwrap()
+        {
+            break calls;
+        }
+    };
+    assert!(windows > 20);
+    projected.sort_by(|left, right| left.0.cmp(&right.0));
+    assert_eq!(memory.used(), 0);
+    let mut found = Vec::new();
+    visit_stored_runtime_calls(
+        (&stored).into(),
+        &ProductionControl::uncontrolled(),
+        &mut |name, site| {
+            found.push((name.to_owned(), site));
+            Ok(())
+        },
+    )
+    .unwrap();
+    found.sort_by(|left, right| left.0.cmp(&right.0));
+    assert_eq!(found, projected);
+    assert_eq!(
+        found,
+        [
+            ("outer_scalar".into(), Expression),
+            ("rows_a".into(), From),
+            ("rows_b".into(), From),
+            ("source_scalar".into(), Expression),
+            ("window_total".into(), Window),
+        ]
+    );
+}

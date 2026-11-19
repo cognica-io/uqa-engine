@@ -101,9 +101,13 @@ impl<E> AssignmentTargets<E> {
     }
 
     pub fn expressions(&self) -> impl Iterator<Item = &E> {
+        self.expression_steps().flatten()
+    }
+
+    pub(crate) fn expression_steps(&self) -> impl Iterator<Item = Option<&E>> {
         self.targets()
             .iter()
-            .flat_map(AssignmentTarget::expressions)
+            .flat_map(|target| std::iter::once(None).chain(target.expression_steps()))
     }
 
     pub fn expressions_mut(&mut self) -> impl Iterator<Item = &mut E> {
@@ -166,6 +170,10 @@ impl<E> AssignmentTarget<E> {
     }
 
     pub fn expressions(&self) -> impl Iterator<Item = &E> {
+        self.expression_steps().flatten()
+    }
+
+    pub(crate) fn expression_steps(&self) -> impl Iterator<Item = Option<&E>> {
         self.indirection.iter().flat_map(|step| {
             match step {
                 AssignmentStep::Field(_) => [None, None],
@@ -173,7 +181,6 @@ impl<E> AssignmentTarget<E> {
                 AssignmentStep::Slice { lower, upper } => [lower.as_deref(), upper.as_deref()],
             }
             .into_iter()
-            .flatten()
         })
     }
 

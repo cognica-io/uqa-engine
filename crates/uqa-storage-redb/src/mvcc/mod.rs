@@ -10,7 +10,10 @@
 pub(crate) mod backup_import;
 mod backup_metadata;
 mod codec;
+mod heads;
 mod identifiers;
+mod image_fingerprints;
+mod large_values;
 mod migration;
 mod read;
 mod receipts;
@@ -40,11 +43,11 @@ use uqa_storage::read_control::StorageReadControl;
 use crate::error::redb_error;
 use codec::{read_u64, receipt_bytes, status};
 
-/// Every identifier writer preserves metadata boundaries retained by online backups.
-const RECORD_FORMAT: u64 = 64;
+/// New writers atomically publish record image digests alongside each immutable revision.
+const RECORD_FORMAT: u64 = 67;
 
 const METADATA: TableDefinition<&str, &[u8]> = TableDefinition::new("uqa_mvcc_metadata");
-const HEADS: TableDefinition<&[u8], u64> = TableDefinition::new("uqa_mvcc_heads");
+const HEADS: TableDefinition<&[u8], &[u8]> = TableDefinition::new("uqa_mvcc_image_heads");
 const VERSIONS: TableDefinition<(&[u8], u64), &[u8]> = TableDefinition::new("uqa_mvcc_versions");
 const TRANSACTIONS: TableDefinition<u64, &[u8]> = TableDefinition::new("uqa_mvcc_transactions");
 
@@ -72,7 +75,6 @@ impl RedbRecordStore {
         let initialize_backup_metadata;
         let identity = {
             let mut metadata = transaction.open_table(METADATA).map_err(redb_error)?;
-            let heads = transaction.open_table(HEADS).map_err(redb_error)?;
             let versions = transaction.open_table(VERSIONS).map_err(redb_error)?;
             let receipts = transaction.open_table(TRANSACTIONS).map_err(redb_error)?;
             let mut identifiers = transaction
@@ -84,23 +86,25 @@ impl RedbRecordStore {
                 .map(|value| codec::decode_u64(value.value()))
                 .transpose()?;
             if let Some(format) = initialized {
-                if !(1..=RECORD_FORMAT).contains(&format) {
-                    return Err(VersionError::InvalidEncoding("unknown record format"));
-                }
-                let expected = if format < 5 {
-                    15
-                } else if format < 64 {
-                    31
-                } else {
-                    127
+                let expected = match format {
+                    1..=4 => 15,
+                    5..=63 => 31,
+                    64 => 127,
+                    65 => 255,
+                    66 => 509,
+                    RECORD_FORMAT => 2045,
+                    _ => return Err(VersionError::InvalidEncoding("unknown record format")),
                 };
                 if present != expected {
                     return Err(VersionError::InvalidEncoding(
                         "record tables disagree with record format",
                     ));
                 }
+                if format < 66 {
+                    heads::migrate_heads(&transaction, format)?;
+                }
                 let allocated = read_u64(&metadata, "allocated")?;
-                read_u64(&metadata, "sequence")?;
+                image_fingerprints::initialize_boundary(&mut metadata, format)?;
                 let identity = codec::database_id(&metadata)?;
                 if format < 43 {
                     // Predecessor receipts retain manual resolution ownership. Validate their old encoding before exposing the new acknowledgement tags.
@@ -133,7 +137,6 @@ impl RedbRecordStore {
                 identity
             } else {
                 if !metadata.is_empty().map_err(redb_error)?
-                    || !heads.is_empty().map_err(redb_error)?
                     || !versions.is_empty().map_err(redb_error)?
                     || !receipts.is_empty().map_err(redb_error)?
                     || !identifiers.is_empty().map_err(redb_error)?
@@ -142,10 +145,16 @@ impl RedbRecordStore {
                         "uninitialized metadata has record data",
                     ));
                 }
+                heads::initialize_empty_heads(&transaction, present & 2 != 0)?;
+                large_values::Writer::open(&transaction)?.require_empty()?;
                 initialize_backup_metadata = true;
                 initialize_record_metadata(&mut metadata)?
             }
         };
+        transaction
+            .open_table(image_fingerprints::TABLE)
+            .map_err(redb_error)?;
+        drop(large_values::Writer::open(&transaction)?);
         backup_metadata::initialize(&transaction, initialize_backup_metadata)?;
         transaction.commit().map_err(redb_error)?;
         let snapshots = retention::registry(&database, identity)?;
@@ -194,52 +203,22 @@ impl RedbRecordStore {
             control,
         )?;
         prepared.validate(control, |key| {
-            Ok(heads
+            heads
                 .get(key)
                 .map_err(redb_error)?
-                .map(|version| CommitSequence::from_u64(version.value())))
+                .map(|version| {
+                    Ok(CommitSequence::from_u64(
+                        heads::RecordHead::decode(version.value())?.revision,
+                    ))
+                })
+                .transpose()
         })?;
         let sequence = if prepared.is_empty() {
             current
         } else {
             current.successor()?
         };
-        let mut maximum = 0;
-        let mut writes = prepared.writes();
-        while let Some(write) = writes.next_metadata(control)? {
-            let len = usize::try_from(write.value_len().unwrap_or(0))
-                .map_err(|_| VersionError::InvalidEncoding("record size overflow"))?;
-            maximum = maximum.max(
-                len.checked_add(1)
-                    .ok_or(VersionError::InvalidEncoding("record size overflow"))?,
-            );
-        }
-        let mut workspace = control.memory().reserve(maximum)?;
-        let mut encoded = Vec::new();
-        encoded
-            .try_reserve_exact(maximum)
-            .map_err(|error| uqa_storage::StorageBackendError::Memory(error.into()))?;
-        workspace.grow(encoded.capacity() - maximum)?;
-        let mut versions = transaction.open_table(VERSIONS).map_err(redb_error)?;
-        let mut writes = prepared.writes();
-        while let Some(write) = writes.next(control)? {
-            let value = write.value();
-            // redb's insert_reserve allocates a temporary value for every row. Reuse one charged encoding buffer for this bounded physical commit instead.
-            encoded.clear();
-            encoded.push(u8::from(value.is_some()));
-            if let Some(value) = value {
-                for source in value.chunks(65536) {
-                    control.cancellation().check()?;
-                    encoded.extend_from_slice(source);
-                }
-            }
-            versions
-                .insert((write.key(), sequence.as_u64()), encoded.as_slice())
-                .map_err(redb_error)?;
-            heads
-                .insert(write.key(), sequence.as_u64())
-                .map_err(redb_error)?;
-        }
+        heads::write_batch(transaction, &mut heads, sequence, prepared, control)?;
         let receipt = CommitReceipt {
             transaction: id,
             sequence,
@@ -473,6 +452,12 @@ fn initialize_record_metadata(
         .insert("format", RECORD_FORMAT.to_be_bytes().as_slice())
         .map_err(redb_error)?;
     metadata
+        .insert(
+            image_fingerprints::LEGACY_THROUGH,
+            0_u64.to_be_bytes().as_slice(),
+        )
+        .map_err(redb_error)?;
+    metadata
         .insert("allocated", 0_u64.to_be_bytes().as_slice())
         .map_err(redb_error)?;
     metadata
@@ -487,23 +472,27 @@ fn initialize_record_metadata(
     Ok(DatabaseId::from_bytes(bytes))
 }
 
-fn record_table_presence(transaction: &WriteTransaction) -> VersionResult<u8> {
+fn record_table_presence(transaction: &WriteTransaction) -> VersionResult<u16> {
     let names = [
         METADATA.name(),
-        HEADS.name(),
+        heads::LEGACY_HEADS.name(),
         VERSIONS.name(),
         TRANSACTIONS.name(),
         identifiers::TABLE.name(),
         backup_metadata::BIRTHS.name(),
         backup_metadata::HISTORY.name(),
+        image_fingerprints::TABLE.name(),
+        HEADS.name(),
+        large_values::BODIES.name(),
+        large_values::OWNERS.name(),
     ];
-    let mut present = 0_u8;
+    let mut present = 0_u16;
     for table in transaction.list_tables().map_err(redb_error)? {
         if let Some(position) = names.iter().position(|name| *name == table.name()) {
             present |= 1 << position;
         }
     }
-    if !matches!(present, 0 | 15 | 31 | 127) {
+    if !matches!(present, 0 | 15 | 31 | 127 | 255 | 509 | 2045) {
         return Err(VersionError::InvalidEncoding("incomplete record table set"));
     }
     Ok(present)

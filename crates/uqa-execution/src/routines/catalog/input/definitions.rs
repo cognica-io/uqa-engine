@@ -17,7 +17,7 @@ use uqa_sql::{
 };
 
 mod canonical;
-pub(super) use canonical::restore_error;
+pub(in crate::routines) use canonical::restore_error;
 
 struct DefinitionGroup {
     name: Budgeted<String>,
@@ -115,13 +115,13 @@ impl RoutineCatalogAuthority {
     }
 }
 
-struct Slots<T> {
+pub(super) struct Slots<T> {
     values: std::vec::IntoIter<T>,
     _memory: MemoryReservation,
 }
 
 impl<T> Slots<T> {
-    fn new(values: BudgetedVec<T>) -> Self {
+    pub(super) fn new(values: BudgetedVec<T>) -> Self {
         let (values, memory) = values.into_parts();
         Self {
             values: values.into_iter(),

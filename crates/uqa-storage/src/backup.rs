@@ -15,6 +15,7 @@
 mod destination;
 mod error;
 mod frame;
+mod functions;
 #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 mod import;
 mod inventory;
@@ -26,6 +27,8 @@ mod repository;
 mod root;
 mod source;
 mod types;
+mod view_queries;
+pub use view_queries::{BackupCatalogField, BackupCatalogTextInput, BackupTableField};
 
 #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 pub use memory::{MemoryImageImportReader, MemoryImageImportUnit};
@@ -33,11 +36,12 @@ pub use memory::{MemoryImageImportReader, MemoryImageImportUnit};
 #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 pub use repository::{
     BackupCapturePhase, BackupCaptureProgress, BackupCaptureReport, BackupCaptureStep,
-    BackupCollectionReport, BackupCopyReport, BackupImageCapture, BackupImageReader,
-    BackupImageStatistics, BackupLease, BackupLeaseInput, BackupListing, BackupOperation,
-    BackupPack, BackupReadStep, BackupRestoreFactory, BackupRestoreImporter, BackupRestoreJob,
-    BackupRestoreOperation, BackupRestoreStep, BackupRestoreWork, BackupRestoreWorkStep,
-    LocalRepository, PackObject, PackRange, RestoreDirectory, RestoreFileWork, RestoredDatabase,
+    BackupCollectionReport, BackupCopyReport, BackupFunctionReader, BackupImageCapture,
+    BackupImageReader, BackupImageStatistics, BackupLease, BackupLeaseInput, BackupListing,
+    BackupOperation, BackupPack, BackupReadStep, BackupRestoreFactory, BackupRestoreImporter,
+    BackupRestoreJob, BackupRestoreOperation, BackupRestoreStep, BackupRestoreWork,
+    BackupRestoreWorkStep, LocalRepository, PackObject, PackRange, PreparedRestoreStep,
+    PreparedRestoreValidation, RestoreDirectory, RestoreFileWork, RestoredDatabase,
     VerifiedBackupImage,
 };
 
@@ -49,6 +53,9 @@ pub use destination::{
 };
 pub use error::{BackupError, BackupResult};
 pub use frame::{read_frame, write_frame, BackupKey, FrameContext, FrameKind, Protection};
+pub use functions::{
+    BackupFunctionDigestJob, BackupFunctionKind, BackupFunctionReference, BackupFunctionSource,
+};
 #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 pub use import::{BackupRecordImportMapping, MappedRecordImageImportReader, RecordImageImportUnit};
 pub use inventory::{InventoryEntry, InventoryReader, InventorySummary, InventoryWriter};
@@ -62,11 +69,14 @@ pub use memory::{
     MemoryTableUnit, MEMORY_IMAGE_CATALOG_COUNT, MEMORY_IMAGE_RESOURCE_KINDS,
     MEMORY_IMAGE_TABLE_METADATA_COUNT,
 };
-pub use records::{RecordImageCursor, RecordImageFamily, RecordImageStep, RecordImageUnit};
+pub use records::{
+    RecordImageCursor, RecordImageFamily, RecordImageHasher, RecordImageStep, RecordImageUnit,
+};
 pub use root::BackupRoot;
 pub use source::{
     BackupImageSource, BackupSourceStatistics, BackupSourceStep, BackupSourceUnit,
     NativeBackupImage, NativeImageEntries, NativeImageStep, NativeImageUnit, OwnedBackupImage,
+    SourceUnitHash, UnitFingerprint,
 };
 pub use types::{
     BackupCapabilities, BackupCut, BackupId, BackupLimits, ImageDigest, ImageFormat, ImageProvider,

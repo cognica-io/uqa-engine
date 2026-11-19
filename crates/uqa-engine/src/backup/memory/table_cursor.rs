@@ -132,6 +132,15 @@ impl TableCursor {
             return Ok(NativeImageStep::Pending);
         };
         self.document = Some(id);
+        let owner = if text {
+            self.table
+                .inverted_index
+                .image_document_owner(id, control)?
+        } else {
+            self.table
+                .document_store
+                .image_document_owner(id, control)?
+        };
         self.emit(
             if text {
                 MemoryTableUnit::Text(id)
@@ -139,7 +148,7 @@ impl TableCursor {
                 MemoryTableUnit::Document(id)
             },
             UnitKind::Record,
-            reader,
+            reader.with_image_owner(owner),
             control,
         )
     }

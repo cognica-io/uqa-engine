@@ -16,6 +16,7 @@ mod admission;
 mod capture;
 mod copy;
 mod failures;
+mod functions;
 mod image_fixture;
 mod incremental;
 mod integrity;

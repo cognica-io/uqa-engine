@@ -6,7 +6,7 @@
 
 //! Concrete type membership is acyclic; historical dropped attributes are not live members.
 
-use super::{invalid, ColumnType, SQLError, TypeReferences};
+use super::{inline, invalid, retire_entries, ColumnType, SQLError, TypeReferences, Work};
 use uqa_core::memory::{BudgetedMap, BudgetedVec};
 
 struct Edge {
@@ -14,57 +14,98 @@ struct Edge {
     next: Option<usize>,
 }
 
-impl TypeReferences<'_> {
-    /// Check direct live members of domains, ranges, composites and relation row types. Array wrappers preserve the element dependency. Every endpoint is checked before the graph can admit it.
-    pub fn validate_membership<'a>(
-        &self,
-        members: impl Iterator<Item = (u32, &'a ColumnType)>,
-    ) -> Result<(), SQLError> {
-        let mut degree = BudgetedMap::new(self.memory);
-        let mut heads = BudgetedMap::new(self.memory);
-        let mut edges = BudgetedVec::new(self.memory);
-        for (owner, ty) in members {
-            self.cancellation.check()?;
-            if !self.claims.contains_key(&owner) {
-                return Err(invalid("missing type membership owner"));
-            }
-            self.column_type(ty)?;
-            let Some(child) = dependency(ty).filter(|oid| self.claims.contains_key(oid)) else {
-                continue;
-            };
-            let count = degree.get(&child).copied().unwrap_or(0usize);
-            degree.insert(
-                child,
-                count
-                    .checked_add(1)
-                    .ok_or_else(|| invalid("type membership count"))?,
-            )?;
-            if degree.get(&owner).is_none() {
-                degree.insert(owner, 0)?;
-            }
-            let index = edges.len();
-            edges.push(Edge {
-                child,
-                next: heads.get(&owner).copied(),
-            })?;
-            heads.insert(owner, index)?;
+/// Direct edges in the native catalog's concrete type dependency graph.
+pub struct TypeMembership<'r, 'a> {
+    types: &'r TypeReferences<'a>,
+    degree: BudgetedMap<u32, usize>,
+    heads: BudgetedMap<u32, usize>,
+    edges: BudgetedVec<Edge>,
+}
+
+impl<'a> TypeReferences<'a> {
+    pub fn membership(&self) -> TypeMembership<'_, 'a> {
+        TypeMembership {
+            types: self,
+            degree: BudgetedMap::new(self.memory),
+            heads: BudgetedMap::new(self.memory),
+            edges: BudgetedVec::new(self.memory),
         }
-        let mut pending = BudgetedVec::new(self.memory);
-        for (oid, count) in &degree {
-            self.cancellation.check()?;
+    }
+
+    /// Check direct live members of domains, ranges, composites and relation row types.
+    pub fn validate_membership<'t>(
+        &self,
+        members: impl Iterator<Item = (u32, &'t ColumnType)>,
+    ) -> Result<(), SQLError> {
+        let mut graph = self.membership();
+        for (owner, ty) in members {
+            inline(graph.member(owner, ty, &mut ()))?;
+        }
+        inline(graph.finish(&mut ()))
+    }
+}
+
+impl TypeMembership<'_, '_> {
+    /// Resolve the physical endpoint before admitting an edge. Array wrappers preserve the element dependency.
+    pub async fn member(
+        &mut self,
+        owner: u32,
+        ty: &ColumnType,
+        work: &mut (impl Work + Send),
+    ) -> Result<(), SQLError> {
+        self.types.checkpoint(work).await?;
+        if !self.types.claims.contains_key(&owner) {
+            return Err(invalid("missing type membership owner"));
+        }
+        self.types.column_type_with_work(ty, work).await?;
+        let Some(child) = self
+            .types
+            .dependency(ty, work)
+            .await?
+            .filter(|oid| self.types.claims.contains_key(oid))
+        else {
+            return Ok(());
+        };
+        let count = self.degree.get(&child).copied().unwrap_or(0);
+        self.degree.insert(
+            child,
+            count
+                .checked_add(1)
+                .ok_or_else(|| invalid("type membership count"))?,
+        )?;
+        if self.degree.get(&owner).is_none() {
+            self.degree.insert(owner, 0)?;
+        }
+        let index = self.edges.len();
+        self.edges.push(Edge {
+            child,
+            next: self.heads.get(&owner).copied(),
+        })?;
+        self.heads.insert(owner, index)?;
+        Ok(())
+    }
+
+    /// Check the graph for cycles and retire the admitted scratch.
+    pub async fn finish(mut self, work: &mut (impl Work + Send)) -> Result<(), SQLError> {
+        let mut pending = BudgetedVec::new(self.types.memory);
+        for (oid, count) in &self.degree {
+            self.types.checkpoint(work).await?;
             if *count == 0 {
                 pending.push(*oid)?;
             }
         }
-        let mut remaining = degree.len();
+        let mut remaining = self.degree.len();
         while let Some(owner) = pending.pop() {
-            self.cancellation.check()?;
+            self.types.checkpoint(work).await?;
             remaining -= 1;
-            let mut next = heads.get(&owner).copied();
+            let mut next = self.heads.get(&owner).copied();
             while let Some(index) = next {
-                self.cancellation.check()?;
-                let edge = &edges[index];
-                let count = degree.get_mut(&edge.child).expect("admitted type child");
+                self.types.checkpoint(work).await?;
+                let edge = &self.edges[index];
+                let count = self
+                    .degree
+                    .get_mut(&edge.child)
+                    .expect("admitted type child");
                 *count -= 1;
                 if *count == 0 {
                     pending.push(edge.child)?;
@@ -75,21 +116,30 @@ impl TypeReferences<'_> {
         if remaining != 0 {
             return Err(invalid("cyclic concrete type membership"));
         }
-        Ok(())
+        let control = self.types.control();
+        retire_entries(self.degree.into_entries(), &control, work).await?;
+        retire_entries(self.heads.into_entries(), &control, work).await
     }
 }
 
-fn dependency(mut ty: &ColumnType) -> Option<u32> {
-    while let ColumnType::Array(element) = ty {
-        ty = element;
-    }
-    match ty {
-        ColumnType::Domain { oid, .. } => Some(*oid),
-        ColumnType::Enum(reference) => Some(reference.oid),
-        ColumnType::Composite(reference) => Some(reference.oid),
-        ColumnType::DeclaredRange(reference) | ColumnType::DeclaredMultirange(reference) => {
-            Some(reference.oid)
+impl TypeReferences<'_> {
+    async fn dependency(
+        &self,
+        mut ty: &ColumnType,
+        work: &mut (impl Work + Send),
+    ) -> Result<Option<u32>, SQLError> {
+        while let ColumnType::Array(element) = ty {
+            self.checkpoint(work).await?;
+            ty = element;
         }
-        _ => None,
+        Ok(match ty {
+            ColumnType::Domain { oid, .. } => Some(*oid),
+            ColumnType::Enum(reference) => Some(reference.oid),
+            ColumnType::Composite(reference) => Some(reference.oid),
+            ColumnType::DeclaredRange(reference) | ColumnType::DeclaredMultirange(reference) => {
+                Some(reference.oid)
+            }
+            _ => None,
+        })
     }
 }

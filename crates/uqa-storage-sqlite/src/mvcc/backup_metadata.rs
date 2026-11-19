@@ -88,6 +88,16 @@ pub(super) fn capture(
 }
 
 impl CommittedBackupSnapshot for Snapshot {
+    fn visit_record_image_positions(
+        &self,
+        after: Option<&[u8]>,
+        limit: usize,
+        control: &StorageReadControl,
+        visit: &mut uqa_storage::mvcc::BackupRecordImageVisitor<'_>,
+    ) -> VersionResult<()> {
+        self.record_positions(after, limit, control, visit)
+    }
+
     fn record_key_ceiling(
         &self,
         control: &StorageReadControl,
@@ -110,7 +120,9 @@ impl CommittedBackupSnapshot for Snapshot {
         control: &StorageReadControl,
         visit: &mut uqa_storage::mvcc::BackupRecordPositionVisitor<'_>,
     ) -> VersionResult<()> {
-        self.record_positions(after, limit, control, visit)
+        self.record_positions(after, limit, control, &mut |key, image| {
+            visit(key, image.visible)
+        })
     }
     fn records(&self) -> &dyn CommittedRecordSnapshot {
         self.records.as_ref()

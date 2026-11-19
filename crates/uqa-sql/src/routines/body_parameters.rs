@@ -79,7 +79,7 @@ pub fn record_sql_standard_body_parameters(
     let mut recorded = statements.clone();
     let mut changed = false;
     for statement in &mut recorded {
-        changed |= recording.record(statement)?;
+        changed |= recording.record(context, statement)?;
     }
     if changed {
         def.body = FunctionBody::Statements(recorded);
@@ -149,21 +149,19 @@ impl ParameterSites {
 }
 
 /// What finding the parameter references of a SQL-standard body needs: the body's names are resolved by the same analysis that compiles the body.
-pub(super) struct ParameterRecording<'a> {
-    context: &'a RoutineCompilationContext<'a>,
+pub(super) struct ParameterRecording {
     scope: RoutineParameterScope,
     params: Vec<SQLParam>,
     sites: ParameterSites,
 }
 
-impl<'a> ParameterRecording<'a> {
+impl ParameterRecording {
     pub(super) fn new(
-        context: &'a RoutineCompilationContext<'a>,
+        context: &RoutineCompilationContext<'_>,
         def: &CreateFunction,
     ) -> Result<Self, SQLError> {
         let params = routine_parameter_values(context.types, def);
         Ok(Self {
-            context,
             scope: sql_body_parameter_scope(def, &params)?,
             params,
             sites: ParameterSites {
@@ -174,12 +172,16 @@ impl<'a> ParameterRecording<'a> {
     }
 
     /// Record the parameter references of one statement. A name is a parameter reference exactly when writing the parameter in its place removes one of the references analysis resolves to that parameter by name; a name that resolves to a column leaves them as they were, or makes the statement invalid when the parameter does not type as the column does.
-    pub(super) fn record(&self, statement: &mut Statement) -> Result<bool, SQLError> {
+    pub(super) fn record(
+        &self,
+        context: &RoutineCompilationContext<'_>,
+        statement: &mut Statement,
+    ) -> Result<bool, SQLError> {
         let candidates = self.sites.collect(statement)?;
         if candidates.is_empty() {
             return Ok(false);
         }
-        let original = self.resolved_counts(statement.clone())?;
+        let original = self.resolved_counts(context, statement.clone())?;
         let mut chosen = BTreeSet::new();
         for (ordinal, position) in candidates.iter().enumerate() {
             if original[*position] == 0 {
@@ -188,7 +190,7 @@ impl<'a> ParameterRecording<'a> {
             let mut probe = statement.clone();
             self.sites.replace(&mut probe, &BTreeSet::from([ordinal]))?;
             if self
-                .resolved_counts(probe)
+                .resolved_counts(context, probe)
                 .is_ok_and(|counts| counts[*position] < original[*position])
             {
                 chosen.insert(ordinal);
@@ -202,9 +204,13 @@ impl<'a> ParameterRecording<'a> {
     }
 
     /// The number of references to each parameter that analysis of `statement` resolves by name.
-    fn resolved_counts(&self, statement: Statement) -> Result<Vec<usize>, SQLError> {
+    fn resolved_counts(
+        &self,
+        context: &RoutineCompilationContext<'_>,
+        statement: Statement,
+    ) -> Result<Vec<usize>, SQLError> {
         let mut plan = lower_sql_routine_statement(
-            self.context,
+            context,
             statement,
             SQLRoutineLowering {
                 bind_catalog_dependencies: true,
@@ -213,9 +219,9 @@ impl<'a> ParameterRecording<'a> {
             },
         )?;
         let before = parameter_counts(&mut plan, self.params.len());
-        let snapshot = self.context.catalog.binding_snapshot()?;
+        let snapshot = context.catalog.binding_snapshot()?;
         bind_routine_parameter_references(
-            self.context.routines,
+            context.routines,
             &mut plan,
             &self.params,
             &snapshot.context(),

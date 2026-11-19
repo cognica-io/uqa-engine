@@ -229,6 +229,7 @@ fn initialized_session_restores_once_on_a_pinned_view_and_keeps_racing_commits_v
             backend: backend.clone(),
         },
         None,
+        None,
     )
     .unwrap();
     assert!(!backend.armed.load(Ordering::Acquire));

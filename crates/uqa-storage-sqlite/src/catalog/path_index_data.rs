@@ -8,10 +8,112 @@
 
 use super::native::graph::paths;
 use super::{decode_catalog_id, encode_catalog_id, Catalog, Result, SQLiteError};
-use rusqlite::{params, params_from_iter, types::Value as SQLValue};
+use rusqlite::{params, params_from_iter, types::Value as SQLValue, OptionalExtension};
 use uqa_storage::MAX_GRAPH_ID_PAGE;
 
 impl Catalog {
+    /// The physical graph identity remains usable when reachability data was invalidated.
+    pub fn path_index_graph(&self, index: &str) -> Result<Option<String>> {
+        if let Some(owner) = self.read_native(|snapshot| paths::recorded_graph(snapshot, index))? {
+            return Ok(owner);
+        }
+        self.conn.with(|c| Self::path_index_graph_on(c, index))
+    }
+
+    pub(super) fn path_index_graph_on(
+        c: &rusqlite::Connection,
+        index: &str,
+    ) -> Result<Option<String>> {
+        Ok(c.query_row(
+            "SELECT graph_name FROM _graph_path_index_state WHERE index_key = ?1",
+            [index],
+            |row| row.get(0),
+        )
+        .optional()?)
+    }
+
+    pub(super) fn register_named_graph_on(c: &rusqlite::Connection, graph: &str) -> Result<()> {
+        if Self::named_graph_exists_on(c, graph)? {
+            return Ok(());
+        }
+        // The open upper bound is the binary successor of the literal "::" suffix.
+        let mut definitions = c.prepare_cached(
+            "SELECT graph_name FROM _path_indexes
+             WHERE graph_name >= (?1 || '::') AND graph_name < (?1 || ':;')
+             ORDER BY graph_name",
+        )?;
+        let mut recorded = c.prepare_cached(
+            "SELECT EXISTS(SELECT 1 FROM _graph_path_index_state WHERE index_key = ?1)",
+        )?;
+        // Only a completed build owns a validity definition. This row records the graph alone.
+        let mut retain = c.prepare_cached(
+            "INSERT INTO _graph_path_index_state(index_key, graph_name, definition_json, valid)
+             VALUES (?1, ?2, '[]', 0)",
+        )?;
+        let mut rows = definitions.query([graph])?;
+        while let Some(row) = rows.next()? {
+            let key = super::native::string_ref(row.get_ref(0)?)?;
+            if let Some(owner) = uqa_storage::catalog::path_index::owner_before_graph_creation(
+                key,
+                graph,
+                || {
+                    recorded
+                        .query_row([key], |row| row.get(0))
+                        .map_err(|e| SQLiteError::from(e).into())
+                },
+                |candidate| Self::named_graph_exists_on(c, candidate).map_err(Into::into),
+            )? {
+                retain.execute(params![key, owner])?;
+            }
+        }
+        c.execute("INSERT INTO _named_graphs(name) VALUES (?1)", [graph])?;
+        Ok(())
+    }
+
+    pub fn drop_graph_path_indexes(&self, graph: &str) -> Result<()> {
+        if self
+            .conn
+            .with_native_write(|snapshot, batch| {
+                super::native::graph::lifecycle::remove_paths(snapshot, batch, graph)
+            })?
+            .is_some()
+        {
+            return Ok(());
+        }
+        self.conn.with_mut(|c| {
+            let tx = c.savepoint()?;
+            Self::drop_graph_path_indexes_on(&tx, graph)?;
+            tx.commit()?;
+            Ok(())
+        })
+    }
+
+    pub(super) fn drop_graph_path_indexes_on(c: &rusqlite::Connection, graph: &str) -> Result<()> {
+        let mut next = c.prepare_cached(
+            "SELECT graph_name FROM _path_indexes WHERE graph_name > ?1 ORDER BY graph_name LIMIT 1",
+        )?;
+        let mut delete = c.prepare_cached("DELETE FROM _path_indexes WHERE graph_name = ?1")?;
+        let mut key: Option<String> = c
+            .query_row(
+                "SELECT graph_name FROM _path_indexes ORDER BY graph_name LIMIT 1",
+                [],
+                |row| row.get(0),
+            )
+            .optional()?;
+        while let Some(current) = key {
+            key = next.query_row([&current], |row| row.get(0)).optional()?;
+            if uqa_storage::catalog::path_index::belongs_to(
+                &current,
+                graph,
+                || Self::path_index_graph_on(c, &current).map_err(Into::into),
+                |candidate| Self::named_graph_exists_on(c, candidate).map_err(Into::into),
+            )? {
+                delete.execute([&current])?;
+            }
+        }
+        Ok(())
+    }
+
     pub fn clear_path_index_data(&self, index: &str) -> Result<()> {
         if self
             .conn

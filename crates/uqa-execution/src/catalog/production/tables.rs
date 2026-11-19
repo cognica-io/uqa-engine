@@ -124,18 +124,7 @@ impl<W: Work> MapKeyInput<RelationIdentity> for Comparison<'_, '_, W> {
 
 impl<W: Work> Comparison<'_, '_, W> {
     async fn text(&mut self, left: &str, right: &str) -> Result<Ordering, SQLError> {
-        for (left, right) in left
-            .as_bytes()
-            .chunks(4096)
-            .zip(right.as_bytes().chunks(4096))
-        {
-            self.checkpoint().await?;
-            let order = left.cmp(right);
-            if order != Ordering::Equal {
-                return Ok(order);
-            }
-        }
-        Ok(left.len().cmp(&right.len()))
+        crate::catalog::selection_work::compare(left, right, self.control, self.work).await
     }
 }
 

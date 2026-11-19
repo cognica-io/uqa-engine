@@ -13,7 +13,7 @@ use crate::{
     plan::{ProjectionPlan, QueryPlan, SharedAnalyzedSource, SourcePlan},
     RowSchema, SQLError,
 };
-use uqa_core::memory::{BudgetedVec, MemoryReservation, Produced, ProductionControl};
+use uqa_core::memory::{MemoryReservation, Produced, ProductionControl};
 
 mod observation;
 pub(crate) use observation::MetadataObserver;
@@ -108,10 +108,7 @@ impl QueryMetadataUpdate {
             query.analyzed_grouping = Some(grouping);
             if let Some(memory) = memory {
                 let direct = lease.expect("admitted grouping metadata");
-                *memory.field_mut("analyzed_grouping") = Some(RewriteMemory::Fields {
-                    fields: BudgetedVec::new(direct.budget()),
-                    direct,
-                });
+                *memory.field_mut("analyzed_grouping") = Some(RewriteMemory::direct(direct));
             }
         }
         Ok(())
@@ -269,10 +266,7 @@ async fn install_source_updates<W: Work>(
         *binding = Some(selected);
         if let Some(owner) = owner {
             let direct = lease.expect("admitted selected function binding");
-            *owner = Some(RewriteMemory::Fields {
-                fields: BudgetedVec::new(direct.budget()),
-                direct,
-            });
+            *owner = Some(RewriteMemory::direct(direct));
         }
     }
     Ok(())
@@ -307,10 +301,7 @@ async fn install_aliases<W: Work>(
                 .item_mut(index)
                 .as_mut()
                 .expect("projection")
-                .field_mut("alias") = Some(RewriteMemory::Fields {
-                fields: BudgetedVec::new(direct.budget()),
-                direct,
-            });
+                .field_mut("alias") = Some(RewriteMemory::direct(direct));
         }
     }
     Ok(())

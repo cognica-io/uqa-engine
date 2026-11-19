@@ -23,6 +23,7 @@ const POLL: Duration = Duration::from_secs(1);
 
 pub(super) fn run(
     provider: &Weak<dyn PersistentStorageProvider>,
+    extensions: &crate::RuntimeExtensions,
     manager: &Weak<RowLockManager>,
     statistics: &Weak<super::StatisticsCoordinator>,
     receiver: &mpsc::Receiver<()>,
@@ -58,7 +59,7 @@ pub(super) fn run(
         };
         if session.is_none() {
             match provider.open_session().and_then(|storage| {
-                Engine::from_initialized_persistent_session(storage, Some(Arc::clone(&provider)))
+                Engine::from_maintenance_session(storage, Arc::clone(&provider), extensions)
             }) {
                 Ok(mut engine) => {
                     engine
@@ -192,7 +193,10 @@ fn refresh_due_tables_at(
         return Ok(());
     }
     maintenance.begin_pass();
-    engine.synchronize_table_catalog()?;
+    engine
+        .extensions
+        .functions
+        .with_catalog_declarations(|| engine.synchronize_table_catalog())?;
     engine.synchronize_table_data()?;
     let tables = engine
         .storage

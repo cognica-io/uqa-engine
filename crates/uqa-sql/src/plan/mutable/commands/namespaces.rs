@@ -71,7 +71,7 @@ impl MutableCommandPlan {
         arena: ScalarQueryArena,
     ) -> Result<(), SQLError> {
         *mutation_queries(&mut self.command)? = arena.queries;
-        if let Some(memory) = &mut self.memory {
+        if let Some(memory) = self.memory.as_mut() {
             *memory
                 .field_mut("value0")
                 .as_mut()

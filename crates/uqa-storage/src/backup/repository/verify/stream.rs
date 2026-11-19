@@ -14,6 +14,7 @@ use super::{
     },
     Ledger,
 };
+use crate::backup::functions::FunctionDecoder;
 use crate::{
     backup::{
         BackupError, BackupResult, BackupRoot, FrameKind, ImageDigest, InventoryEntry,
@@ -24,6 +25,7 @@ use crate::{
 };
 use sha2::{Digest, Sha256};
 use std::io::Read;
+use uqa_core::memory::Budgeted;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BackupReadStep {
@@ -50,6 +52,7 @@ struct Unit<'a> {
     hash: Sha256,
     bytes: u64,
     complete: bool,
+    functions: Option<Budgeted<Box<FunctionDecoder>>>,
 }
 
 enum Stage {
@@ -187,6 +190,34 @@ impl<'a> BackupImageReader<'a> {
         result
     }
 
+    /// Consume the optional repository-owned section through the ordinary verifier while exposing only provider units to installed physical importers.
+    pub(in crate::backup) fn advance_provider(
+        &mut self,
+        maximum_bytes: usize,
+    ) -> BackupResult<BackupReadStep> {
+        if self
+            .unit
+            .as_ref()
+            .is_some_and(|unit| unit.functions.is_some() && !unit.complete)
+        {
+            let mut buffer = [0; 4096];
+            let size = maximum_bytes.min(buffer.len());
+            self.read_current(&mut buffer[..size])?;
+            return Ok(BackupReadStep::Pending);
+        }
+        let step = self.advance(maximum_bytes)?;
+        if step == BackupReadStep::Unit
+            && self
+                .unit
+                .as_ref()
+                .is_some_and(|unit| unit.functions.is_some())
+        {
+            Ok(BackupReadStep::Pending)
+        } else {
+            Ok(step)
+        }
+    }
+
     fn advance_inner(&mut self, maximum_object_bytes: usize) -> BackupResult<BackupReadStep> {
         match self.stage {
             Stage::Complete => return Ok(BackupReadStep::Complete),
@@ -229,6 +260,21 @@ impl<'a> BackupImageReader<'a> {
     fn next_unit(&mut self) -> BackupResult<BackupReadStep> {
         let inventory = self.inventory.as_mut().expect("inventory stage owns input");
         if let Some(entry) = inventory.read_next()? {
+            let functions = if entry.kind() == crate::backup::UnitKind::FunctionReferences {
+                let memory = self
+                    .control
+                    .memory()
+                    .reserve(size_of::<FunctionDecoder>())?;
+                Some(Budgeted::new(
+                    Box::new(FunctionDecoder::new(
+                        Some(entry.decoded_bytes()),
+                        &self.control,
+                    )),
+                    memory,
+                ))
+            } else {
+                None
+            };
             let input = self
                 .ledger
                 .as_mut()
@@ -245,6 +291,7 @@ impl<'a> BackupImageReader<'a> {
                 hash: Sha256::new(),
                 bytes: 0,
                 complete: false,
+                functions,
             });
             return Ok(BackupReadStep::Unit);
         }
@@ -310,6 +357,12 @@ impl<'a> BackupImageReader<'a> {
             return Err(BackupError::Integrity);
         }
         unit.hash.update(&output[..read]);
+        if let Some(decoder) = &mut unit.functions {
+            if read == 0 {
+                decoder.finish()?;
+            }
+            decoder.as_mut().verify(&output[..read])?;
+        }
         if read == 0 {
             if unit.bytes != unit.entry.decoded_bytes()
                 || ImageDigest::from_bytes(unit.hash.clone().finalize().into())

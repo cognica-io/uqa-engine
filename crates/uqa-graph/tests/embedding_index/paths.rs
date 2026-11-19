@@ -328,3 +328,6 @@ fn retained_path_data_stays_fixed_without_serializable_admission() {
         BTreeSet::from([(1, 2)])
     );
 }
+
+#[path = "paths/registry.rs"]
+mod registry;

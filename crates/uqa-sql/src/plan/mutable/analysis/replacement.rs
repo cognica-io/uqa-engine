@@ -151,7 +151,7 @@ impl QueryReplacement {
             tree.query(replacement.query);
             Ok(Some(Discarded {
                 tree,
-                memory: replacement.memory,
+                memory: replacement.memory.into_parts(),
             }))
         } else {
             drop(replacement);
@@ -172,7 +172,7 @@ impl SourceReplacement {
         control.check()?;
         let retirement = scope.prepare(&self.0, control)?;
         let replacement = self.0.value_mut();
-        match (memory, &mut replacement.memory) {
+        match (memory, replacement.memory.as_mut()) {
             (Some(memory), Some(replacement)) => std::mem::swap(memory, replacement),
             (None, None) => (),
             _ => unreachable!("source replacement preserves constructor ownership"),
@@ -183,7 +183,7 @@ impl SourceReplacement {
             tree.source(replacement.source);
             Ok(Some(Discarded {
                 tree,
-                memory: replacement.memory,
+                memory: replacement.memory.into_parts(),
             }))
         } else {
             drop(replacement);

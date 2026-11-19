@@ -47,6 +47,15 @@ impl GraphCatalog {
     pub fn is_empty(&self) -> bool {
         self.graphs.is_empty()
     }
+    /// Test graph membership against original key bytes with a caller-controlled comparison window.
+    pub async fn contains_key_from<C: uqa_core::memory::MapKeyInput<str, Produced<String>>>(
+        &self,
+        name: &str,
+        input: &mut C,
+    ) -> Result<bool, C::Error> {
+        Ok(self.graphs.get_from(name, input).await?.is_some())
+    }
+
     pub fn get(&self, name: &str) -> Option<&Arc<GraphStoreHandle>> {
         self.graphs.get(name)
     }

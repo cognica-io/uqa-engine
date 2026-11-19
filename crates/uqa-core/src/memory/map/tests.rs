@@ -154,3 +154,27 @@ fn prepared_entries_cannot_move_reservations_between_allowances() {
     assert_eq!(foreign.used(), 0);
     assert_eq!(original.used(), size_of::<Node<u32, u32>>());
 }
+
+#[test]
+fn consuming_budgeted_map_releases_each_original_node_without_another_allowance() {
+    let count = 257_usize;
+    let node = size_of::<Node<usize, usize>>();
+    let memory = MemoryBudget::new(count * node);
+    let mut map = BudgetedMap::new(&memory);
+    for key in (0..count).rev() {
+        map.insert(key, key + 1).unwrap();
+    }
+    assert_eq!(memory.used(), memory.limit());
+    let mut entries = map.into_entries();
+    assert_eq!(
+        size_of_val(&entries),
+        size_of::<(Link<usize, usize>, usize)>()
+    );
+    for key in 0..count / 2 {
+        assert_eq!(entries.next(), Some((key, key + 1)));
+        assert_eq!(entries.len(), count - key - 1);
+        assert_eq!(memory.used(), node * entries.len());
+    }
+    drop(entries);
+    assert_eq!(memory.used(), 0);
+}

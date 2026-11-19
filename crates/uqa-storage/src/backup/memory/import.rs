@@ -118,7 +118,7 @@ impl<'a> MemoryImageImportReader<'a> {
         if let Some(current) = self.current.take() {
             self.previous = Some(current);
         }
-        match reader.advance(maximum)? {
+        match reader.advance_provider(maximum)? {
             BackupReadStep::Pending => return Ok(BackupSourceStep::Pending),
             BackupReadStep::Complete => {
                 if self.header.is_none() || reader.verified().is_none() {

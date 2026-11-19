@@ -7,7 +7,7 @@
 use super::SQLError;
 use uqa_core::memory::{MemoryReservation, Produced, ProductionControl};
 
-/// One immutable routine diagnostic and its original payload/header allowance. The primary error is always an unpositioned Routine variant; outer context and positions keep their established ownership.
+/// One immutable SQL diagnostic and its original payload/header allowance. Outer context and positions retain the original primary error.
 #[derive(Debug)]
 pub struct RetainedRoutineDiagnostic {
     pub(super) error: SQLError,
@@ -27,11 +27,61 @@ impl std::error::Error for RetainedRoutineDiagnostic {
 }
 
 impl SQLError {
-    pub(crate) fn admit_routine_message(
+    /// Preserve an already produced SQL diagnostic and its SQLSTATE without formatting or copying its message again.
+    pub fn admit_routine_message(
         sqlstate: &'static str,
         message: Produced<String>,
         control: &ProductionControl<'_>,
     ) -> Result<Self, Self> {
+        Ok(Self::produced_routine_message(sqlstate, message, control)?)
+    }
+
+    pub(crate) fn admit_internal_message(
+        message: Produced<String>,
+        control: &ProductionControl<'_>,
+    ) -> Result<Self, Self> {
+        let (message, memory) = message.into_parts();
+        let error = Self::Internal(message);
+        let Some(mut memory) = memory else {
+            return Ok(error);
+        };
+        memory.absorb(
+            memory
+                .budget()
+                .reserve(size_of::<RetainedRoutineDiagnostic>())?,
+        );
+        control.check()?;
+        Ok(error.with_diagnostic_memory(memory))
+    }
+
+    fn with_diagnostic_memory(self, memory: MemoryReservation) -> Self {
+        Self::RetainedRoutine(std::sync::Arc::new(RetainedRoutineDiagnostic {
+            error: self,
+            _memory: memory,
+        }))
+    }
+
+    /// Preserve the SQLSTATE and display text when a native catalog returns an analysis diagnostic across the storage boundary.
+    pub fn into_retained_catalog_message(
+        self,
+        control: &ProductionControl<'_>,
+    ) -> Result<Self, uqa_core::ValueRetentionError> {
+        if control.budget().is_none()
+            || matches!(self, Self::Cancelled(_) | Self::RetainedRoutine(_))
+        {
+            return Ok(self);
+        }
+        let Some(sqlstate) = self.sqlstate() else {
+            return Ok(self);
+        };
+        Self::produced_routine_message(sqlstate, control.format(format_args!("{self}"))?, control)
+    }
+
+    fn produced_routine_message(
+        sqlstate: &str,
+        message: Produced<String>,
+        control: &ProductionControl<'_>,
+    ) -> Result<Self, uqa_core::ValueRetentionError> {
         if control.budget().is_none() {
             let (message, memory) = message.into_parts();
             debug_assert!(memory.is_none());
@@ -48,12 +98,7 @@ impl SQLError {
         let memory = control
             .combine(control.combine(header, state_memory), message_memory)
             .expect("admitted routine diagnostic");
-        Ok(Self::RetainedRoutine(std::sync::Arc::new(
-            RetainedRoutineDiagnostic {
-                error: Self::Routine { sqlstate, message },
-                _memory: memory,
-            },
-        )))
+        Ok(Self::Routine { sqlstate, message }.with_diagnostic_memory(memory))
     }
 }
 

@@ -8,6 +8,7 @@
 
 use super::*;
 
+mod fingerprints;
 mod positions;
 use uqa_storage::mvcc::{CommittedBackupSnapshot, IdentifierRequest, MetadataEpoch};
 

@@ -8,6 +8,52 @@
 
 use crate::ScalarExpr;
 
+/// Dedicated window functions select their kernels directly, independently of the aggregate registry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BuiltinWindowFunction {
+    RowNumber,
+    Rank,
+    DenseRank,
+    PercentRank,
+    CumeDist,
+    Ntile,
+    Lag,
+    Lead,
+    FirstValue,
+    LastValue,
+    NthValue,
+}
+
+impl BuiltinWindowFunction {
+    pub fn from_dispatch_name(name: &str) -> Option<Self> {
+        Some(match name {
+            "row_number" => Self::RowNumber,
+            "rank" => Self::Rank,
+            "dense_rank" => Self::DenseRank,
+            "percent_rank" => Self::PercentRank,
+            "cume_dist" => Self::CumeDist,
+            "ntile" => Self::Ntile,
+            "lag" => Self::Lag,
+            "lead" => Self::Lead,
+            "first_value" => Self::FirstValue,
+            "last_value" => Self::LastValue,
+            "nth_value" => Self::NthValue,
+            _ => return None,
+        })
+    }
+
+    pub(crate) fn accepts(self, arity: usize) -> bool {
+        match self {
+            Self::RowNumber | Self::Rank | Self::DenseRank | Self::PercentRank | Self::CumeDist => {
+                arity == 0
+            }
+            Self::Ntile | Self::FirstValue | Self::LastValue => arity == 1,
+            Self::NthValue => arity == 2,
+            Self::Lag | Self::Lead => (1..=3).contains(&arity),
+        }
+    }
+}
+
 pub fn expr_has_window(expr: &ScalarExpr) -> bool {
     match expr {
         ScalarExpr::WindowCall { .. } => true,

@@ -22,7 +22,12 @@ pub fn bind_stored_statement_routines(
                 "stored catalog routine binding has no entry for call `{name}`"
             ))
         })?;
-        changed |= apply_routine_reference(name, binding, reference)?;
+        changed |= apply_routine_reference(
+            name,
+            binding,
+            reference,
+            crate::binding::stored_routines::StoredCallOrigin::Definition,
+        )?;
         Ok(())
     };
     StoredAstVisitor {
@@ -124,7 +129,12 @@ pub fn bind_stored_expression_routines(
                 "stored catalog routine binding has no entry for call `{name}`"
             ))
         })?;
-        changed |= apply_routine_reference(name, binding, reference)?;
+        changed |= apply_routine_reference(
+            name,
+            binding,
+            reference,
+            crate::binding::stored_routines::StoredCallOrigin::Definition,
+        )?;
         Ok(())
     };
     StoredAstVisitor {
@@ -150,6 +160,7 @@ pub(super) fn apply_routine_reference(
     name: &mut String,
     binding: Option<&mut Option<crate::ast::FunctionBinding>>,
     reference: &crate::binding::stored_routines::BoundRoutineReference,
+    origin: crate::binding::stored_routines::StoredCallOrigin,
 ) -> Result<bool, SQLError> {
     let (_, local_name) = RelationIdentity::parse_reference(name).map_err(|error| {
         SQLError::Internal(format!("decode stored catalog routine `{name}`: {error}"))
@@ -170,6 +181,9 @@ pub(super) fn apply_routine_reference(
     let Some(exact) = &reference.binding else {
         return Ok(false);
     };
+    if origin.keeps_runtime_lookup(name, binding.as_ref().and_then(|slot| slot.as_ref()), exact) {
+        return Ok(false);
+    }
     let mut changed = false;
     if !exact.builtin && name != &exact.name {
         name.clone_from(&exact.name);

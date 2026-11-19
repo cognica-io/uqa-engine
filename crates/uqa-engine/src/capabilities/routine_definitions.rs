@@ -262,6 +262,15 @@ impl RoutineCompilationSession for Engine {
     fn restore_routine_search_path(&self, path: Vec<String>) {
         self.session.state.write().search_path = path.into();
     }
+    fn replace_shared_routine_search_path(
+        &self,
+        path: std::sync::Arc<Vec<String>>,
+    ) -> std::sync::Arc<Vec<String>> {
+        std::mem::replace(&mut self.session.state.write().search_path, path)
+    }
+    fn restore_shared_routine_search_path(&self, path: std::sync::Arc<Vec<String>>) {
+        self.session.state.write().search_path = path;
+    }
     fn routine_settings_scope(
         &self,
         settings: &[(String, String)],

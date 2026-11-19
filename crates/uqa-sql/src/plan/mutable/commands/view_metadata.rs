@@ -14,7 +14,7 @@ use crate::{
         ViewRuleUpdatePlan,
     },
 };
-use uqa_core::memory::{BudgetedVec, Produced, ProductionControl, ProductionVec};
+use uqa_core::memory::{Produced, ProductionControl, ProductionVec};
 
 impl MutableCommandPlan {
     pub fn prepend_view_check(
@@ -53,7 +53,7 @@ impl MutableCommandPlan {
             .and_then(|memory| body(memory).field_mut("view_checks").take());
         let replacement = FieldVector { values, memory }.insert(0, incoming, control)?;
         *checks(&mut self.command)? = replacement.values;
-        if let Some(memory) = &mut self.memory {
+        if let Some(memory) = self.memory.as_mut() {
             *body(memory).field_mut("view_checks") = replacement.memory;
         }
         Ok(self)
@@ -107,7 +107,7 @@ impl MutableCommandPlan {
             .and_then(|memory| body(memory).field_mut("view_rule_update_plans").take());
         let replacement = FieldVector { values, memory }.insert(index, incoming, control)?;
         plan.view_rule_update_plans = replacement.values;
-        if let Some(memory) = &mut self.memory {
+        if let Some(memory) = self.memory.as_mut() {
             *body(memory).field_mut("view_rule_update_plans") = replacement.memory;
         }
         Ok(self)
@@ -135,7 +135,7 @@ impl MutableCommandPlan {
             }
             let (columns, memory) = columns.finish()?.into_parts();
             input.input_columns = columns;
-            if let Some(owner) = &mut self.memory {
+            if let Some(owner) = self.memory.as_mut() {
                 *body(owner)
                     .field_mut("view_rule_update_plans")
                     .as_mut()
@@ -143,10 +143,7 @@ impl MutableCommandPlan {
                     .item_mut(index)
                     .as_mut()
                     .expect("view rule update")
-                    .field_mut("input_columns") = memory.map(|direct| RewriteMemory::Fields {
-                    fields: BudgetedVec::new(direct.budget()),
-                    direct,
-                });
+                    .field_mut("input_columns") = memory.map(RewriteMemory::direct);
             }
         }
         Ok(self)
@@ -195,7 +192,7 @@ impl MutableCommandPlan {
             .and_then(|memory| body(memory).field_mut("view_rule_insert_plans").take());
         let replacement = FieldVector { values, memory }.insert(index, incoming, control)?;
         plan.view_rule_insert_plans = replacement.values;
-        if let Some(memory) = &mut self.memory {
+        if let Some(memory) = self.memory.as_mut() {
             *body(memory).field_mut("view_rule_insert_plans") = replacement.memory;
         }
         Ok(self)
@@ -219,7 +216,7 @@ impl MutableCommandPlan {
             }
             let (columns, memory) = columns.finish()?.into_parts();
             input.input_columns = columns;
-            if let Some(owner) = &mut self.memory {
+            if let Some(owner) = self.memory.as_mut() {
                 *body(owner)
                     .field_mut("view_rule_insert_plans")
                     .as_mut()
@@ -227,10 +224,7 @@ impl MutableCommandPlan {
                     .item_mut(index)
                     .as_mut()
                     .expect("view rule insert")
-                    .field_mut("input_columns") = memory.map(|direct| RewriteMemory::Fields {
-                    fields: BudgetedVec::new(direct.budget()),
-                    direct,
-                });
+                    .field_mut("input_columns") = memory.map(RewriteMemory::direct);
             }
         }
         Ok(self)

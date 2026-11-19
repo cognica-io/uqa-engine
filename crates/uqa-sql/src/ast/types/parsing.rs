@@ -55,6 +55,15 @@ impl ColumnType {
         crate::catalog::work::inline(Self::from_sql_name_with_input_work(name, control, &mut ()))
     }
 
+    /// Parse a native catalog type spelling with the invoking continuation.
+    pub async fn from_sql_name_from_input(
+        name: &str,
+        control: &ProductionControl<'_>,
+        input: &mut uqa_core::image_io::AsyncImageInput<'_>,
+    ) -> Result<Produced<Self>, SQLError> {
+        Self::from_sql_name_with_input_work(name, control, input).await
+    }
+
     pub(crate) async fn from_sql_name_with_input_work<W: ColumnTypeInputWork>(
         name: &str,
         control: &ProductionControl<'_>,

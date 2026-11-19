@@ -79,6 +79,37 @@ fn current_server_references_do_not_rebind_absent_or_recreated_servers() {
 }
 
 #[test]
+fn live_server_validation_preserves_historical_references_and_retires_private_storage() {
+    use uqa_core::{
+        memory::{MemoryBudget, ProductionControl},
+        CancellationToken,
+    };
+    use uqa_sql::catalog::foreign_server::ForeignServers;
+    let server = definition();
+    let mut table = table();
+    table.server_reference = Some(ForeignServerReference::from(&server));
+    let servers = ForeignServers::try_from_iter([(server.name.clone(), server)]).unwrap();
+    let memory = MemoryBudget::new(4096);
+    let original = CancellationToken::new();
+    let invoking = CancellationToken::new();
+    let control = ProductionControl::new(&memory, &original, &invoking);
+    validate_live_servers([&table].into_iter(), &servers, &control).unwrap();
+    validate_live_servers([&table].into_iter(), &ForeignServers::new(), &control).unwrap();
+    assert_eq!(memory.used(), 0);
+
+    let occupied = memory.reserve(memory.available()).unwrap();
+    validate_live_servers([&table].into_iter(), &servers, &control).unwrap();
+    table.server_name = "other".into();
+    let error = validate_live_servers([&table].into_iter(), &servers, &control).unwrap_err();
+    assert_eq!(error.sqlstate(), Some("53200"));
+    drop(occupied);
+    invoking.cancel();
+    let error = validate_live_servers([&table].into_iter(), &servers, &control).unwrap_err();
+    assert_eq!(error.sqlstate(), Some("57014"));
+    assert_eq!(memory.used(), 0);
+}
+
+#[test]
 fn current_foreign_schema_requires_a_valid_versioned_reference() {
     let mut table = table();
     table.server_reference = Some(ForeignServerReference::from(&definition()));
@@ -200,4 +231,68 @@ fn preceding_reference_marker_requires_initial_conversion_without_early_publicat
     assert_eq!(check_format(&catalog).unwrap(), Some(1));
     initialize_format(&catalog).unwrap();
     assert_eq!(restore_format(&catalog, false).unwrap(), Some(2));
+}
+
+#[test]
+fn foreign_server_and_table_bindings_yield_for_each_selected_definition() {
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+    use uqa_core::{
+        image_io::{ImageDecodeWindow, ImageDecoder},
+        memory::{MemoryBudget, ProductionControl},
+        CancellationToken,
+    };
+    use uqa_sql::catalog::{foreign_server::ForeignServers, foreign_wrapper::native_wrappers};
+    let wrappers = native_wrappers();
+    let mut servers = ForeignServers::new();
+    let mut first = table();
+    for index in 0..40u32 {
+        let mut server = definition();
+        server.name = format!("s{index:03}");
+        server.metadata.oid += index;
+        server.metadata.object_id = u128::from(100 + index).to_be_bytes();
+        server.metadata.wrapper_reference = Some(wrappers["memory_fdw"].identity);
+        if index == 0 {
+            first.server_name = server.name.clone();
+            first.server_reference = Some(ForeignServerReference::from(&server));
+        }
+        servers.insert(server.name.clone(), server).unwrap();
+    }
+    let memory = MemoryBudget::new(1 << 20);
+    let token = CancellationToken::new();
+    let visits = Arc::new(AtomicUsize::new(0));
+    let observed = visits.clone();
+    let mut input = ImageDecoder::<_, SQLError>::new(&memory, &token, |mut reader| async move {
+        let mut input = reader.input();
+        let control = ProductionControl::new(input.memory, input.cancellation, input.cancellation);
+        wrappers_with_work(&servers, &wrappers, &control, &mut input).await?;
+        let tables = std::iter::repeat_n(&first, 40).inspect(|_| {
+            observed.fetch_add(1, Ordering::Relaxed);
+        });
+        servers_with_work(tables, &servers, &control, &mut input).await
+    })
+    .unwrap();
+    let mut polls = 0;
+    loop {
+        let before = visits.load(Ordering::Relaxed);
+        let result = input
+            .advance(
+                &mut std::io::empty(),
+                ImageDecodeWindow { bytes: 1, steps: 1 },
+            )
+            .unwrap();
+        polls += 1;
+        let after = visits.load(Ordering::Relaxed);
+        assert!(after - before <= 1);
+        if before == 0 && after == 1 {
+            assert!(polls >= 40);
+        }
+        if result.is_some() {
+            break;
+        }
+    }
+    assert_eq!(visits.load(Ordering::Relaxed), 40);
+    assert_eq!(memory.used(), 0);
 }

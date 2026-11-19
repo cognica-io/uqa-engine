@@ -7,6 +7,7 @@
 use super::*;
 use uqa_core::memory::{BudgetedVec, MemoryBudget, MemoryError};
 
+mod footprint;
 mod resources;
 
 fn chain(depth: usize, memory: &MemoryBudget) -> Result<RewriteMemory, MemoryError> {
@@ -19,7 +20,7 @@ fn chain(depth: usize, memory: &MemoryBudget) -> Result<RewriteMemory, MemoryErr
                 name: "child",
                 memory: Some(owner),
             })?;
-            owner = RewriteMemory::Fields { direct, fields };
+            owner = RewriteMemory::fields(direct, fields);
             continue;
         }
         let direct = memory.reserve(3)?;
@@ -41,7 +42,7 @@ fn chain(depth: usize, memory: &MemoryBudget) -> Result<RewriteMemory, MemoryErr
                 items,
             }),
         })?;
-        owner = RewriteMemory::Fields { direct, fields };
+        owner = RewriteMemory::fields(direct, fields);
     }
     Ok(owner)
 }
@@ -100,7 +101,7 @@ fn moving_query_constructor_fields_preserves_exact_surviving_reservations() {
     let RewriteMemory::Fields { direct, mut fields } = owner else {
         unreachable!();
     };
-    let child = fields[1].memory.take().unwrap();
+    let mut child = fields.edit_item(1).memory.take().unwrap();
     let detached = child.reserved_bytes();
     drop((fields, direct));
     assert_eq!(memory.used(), detached);

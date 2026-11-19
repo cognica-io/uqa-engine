@@ -34,6 +34,76 @@ mod serializable;
 mod vector_spill;
 
 fn remove_backup_metadata_for_predecessor(transaction: &WriteTransaction) {
+    let format = read_u64(&transaction.open_table(METADATA).unwrap(), "format").unwrap();
+    if format < 67 {
+        let bodies = transaction.open_table(super::large_values::BODIES).unwrap();
+        let mut versions = transaction.open_table(VERSIONS).unwrap();
+        let references = versions
+            .iter()
+            .unwrap()
+            .filter_map(|entry| {
+                let (key, raw) = entry.unwrap();
+                if raw.value().first() != Some(&2) {
+                    return None;
+                }
+                let (name, revision) = key.value();
+                let digest: &[u8; 32] = raw.value()[9..].try_into().unwrap();
+                let payload = bodies.get(digest).unwrap().unwrap().value().to_vec();
+                Some((name.to_vec(), revision, payload))
+            })
+            .collect::<Vec<_>>();
+        for (name, revision, value) in references {
+            versions
+                .insert((name.as_slice(), revision), value.as_slice())
+                .unwrap();
+        }
+        drop(bodies);
+        transaction
+            .delete_table(super::large_values::BODIES)
+            .unwrap();
+        transaction
+            .delete_table(super::large_values::OWNERS)
+            .unwrap();
+    }
+    if format < 66 {
+        let current = transaction.open_table(HEADS).unwrap();
+        let mut old = transaction.open_table(super::heads::LEGACY_HEADS).unwrap();
+        let mut certificates = transaction
+            .open_table(super::image_fingerprints::TABLE)
+            .unwrap();
+        let mut versions = transaction.open_table(VERSIONS).unwrap();
+        for entry in current.iter().unwrap() {
+            let (key, head) = entry.unwrap();
+            let record = super::heads::RecordHead::decode(head.value()).unwrap();
+            let revision = record.revision;
+            if let Some(inline) = record.inline {
+                versions.insert((key.value(), revision), inline).unwrap();
+            }
+            old.insert(key.value(), revision).unwrap();
+            if format == 65 {
+                if let Some(image) = record.history_certificate().unwrap() {
+                    certificates
+                        .insert((key.value(), revision), &image)
+                        .unwrap();
+                }
+            }
+        }
+        drop(current);
+        transaction.delete_table(HEADS).unwrap();
+    }
+    if format < 65 {
+        transaction
+            .delete_table(super::image_fingerprints::TABLE)
+            .unwrap();
+        transaction
+            .open_table(METADATA)
+            .unwrap()
+            .remove(super::image_fingerprints::LEGACY_THROUGH)
+            .unwrap();
+    }
+    if format >= 64 {
+        return;
+    }
     transaction
         .delete_table(super::backup_metadata::BIRTHS)
         .unwrap();
@@ -51,6 +121,7 @@ fn remove_backup_metadata_for_predecessor(transaction: &WriteTransaction) {
 struct FaultBackend {
     storage: Arc<InMemoryBackend>,
     fail_sync: Arc<AtomicBool>,
+    read_bytes: Arc<AtomicUsize>,
     writes: Arc<AtomicUsize>,
     syncs: Arc<AtomicUsize>,
 }
@@ -60,6 +131,7 @@ impl StorageBackend for FaultBackend {
         self.storage.len()
     }
     fn read(&self, offset: u64, out: &mut [u8]) -> io::Result<()> {
+        self.read_bytes.fetch_add(out.len(), Ordering::Relaxed);
         self.storage.read(offset, out)
     }
     fn set_len(&self, len: u64) -> io::Result<()> {

@@ -136,6 +136,18 @@ pub(in crate::catalog) fn finish(
     Ok(())
 }
 
+pub(in crate::catalog) fn recorded_graph(
+    snapshot: &NativeSnapshot,
+    index: &str,
+) -> Result<Option<String>> {
+    snapshot.read_row(
+        Family::GraphPathIndexState,
+        owner(snapshot),
+        &[text(index)],
+        |row| super::string(row[1]),
+    )
+}
+
 pub(in crate::catalog) fn current(
     snapshot: &NativeSnapshot,
     index: &str,

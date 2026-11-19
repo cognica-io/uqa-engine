@@ -28,6 +28,8 @@ pub(crate) use generation_sources::SnapshotCut;
 pub(crate) use generation_sources::SnapshotSources;
 mod resource_capture;
 mod session_namespace;
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+pub(crate) use session_namespace::SessionNamespace;
 mod table_assembly;
 mod table_capture;
 mod table_catalog;
@@ -586,6 +588,7 @@ pub(super) struct RuntimeExtensions {
     pub(super) foreign_memory_tables:
         Arc<RwLock<BTreeMap<RelationIdentity, Vec<uqa_sql::ResultRow>>>>,
     pub(super) functions: Arc<crate::sql_registry::Registry>,
+    pub(super) analyzer_resources: Option<uqa_analysis::AnalyzerResources>,
 }
 
 impl RuntimeExtensions {
@@ -594,6 +597,7 @@ impl RuntimeExtensions {
             parallel: uqa_execution::parallel::ParallelExecutor::default(),
             foreign_memory_tables: Arc::new(RwLock::new(BTreeMap::new())),
             functions: Arc::new(crate::sql_registry::Registry::new(session, gate)),
+            analyzer_resources: None,
         }
     }
 
@@ -602,6 +606,7 @@ impl RuntimeExtensions {
             parallel: source.parallel.clone(),
             foreign_memory_tables: source.foreign_memory_tables.clone(),
             functions: Arc::clone(&source.functions),
+            analyzer_resources: source.analyzer_resources.clone(),
         }
     }
 }

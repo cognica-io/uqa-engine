@@ -6,32 +6,38 @@
 
 //! Storage owns durable admission and publication; Engine supplies immutable catalog validation and fresh runtime activation.
 
-use super::{RestoreOptions, RestorePhase, RestoredEngine};
-use crate::Engine;
+use super::{
+    configuration::AdmittedRestore, Admission, RestoreBindings, RestoreOptions, RestorePhase,
+    RestoredEngine,
+};
 use std::{
     path::{Path, PathBuf},
     sync::Arc,
 };
-use uqa_core::memory::{Budgeted, MemoryBudget, RetainedValue};
+use uqa_core::memory::{Budgeted, MemoryBudget};
 use uqa_storage::{
     backup::{
-        BackupId, BackupImageImportStep, BackupImageValidationStep, BackupImageValidationWork,
-        BackupImageValidator, BackupImportLimits, BackupLease, BackupRestoreFactory,
-        BackupRestoreJob, BackupRestoreOperation, BackupRestoreStep, BackupRestoreWork,
-        BackupRestoreWorkStep, BackupResult, LocalRepository, OwnedBackupImageValidation,
-        OwnedPersistentBackupImport, PersistentBackupTarget, RestoreDirectory, RestoreId,
+        BackupFunctionDigestJob, BackupId, BackupImageImportStep, BackupImageValidationStep,
+        BackupImageValidationWork, BackupImageValidator, BackupImportLimits, BackupLease,
+        BackupRestoreFactory, BackupRestoreJob, BackupRestoreOperation, BackupRestoreStep,
+        BackupRestoreWork, BackupRestoreWorkStep, BackupResult, ImageDigest, LocalRepository,
+        OwnedBackupImageValidation, OwnedPersistentBackupImport, PersistentBackupTarget,
+        PreparedRestoreStep, PreparedRestoreValidation, RestoreDirectory, RestoreId,
     },
     catalog::input::CatalogInputLimits,
     mvcc::DatabaseRestore,
-    read_control::{CancellationToken, StorageReadControl},
+    read_control::StorageReadControl,
     PersistentStorageProvider,
 };
+
+mod activation;
+pub(super) use activation::PublishedInput;
 
 pub(super) struct Persistent<'a> {
     execution: Execution<'a>,
     target: Arc<dyn PersistentBackupTarget>,
     directory: Budgeted<PathBuf>,
-    options: RestoreOptions,
+    options: AdmittedRestore,
     request: DatabaseRestore,
     id: RestoreId,
 }
@@ -39,6 +45,7 @@ pub(super) struct Persistent<'a> {
 enum Execution<'a> {
     Admitted(BackupRestoreOperation<'a>),
     Active(BackupRestoreJob<'a, Work<'a>>),
+    CheckingPrepared(PreparedRestoreValidation<'a, OwnedBackupImageValidation>),
     Failed,
 }
 
@@ -48,7 +55,7 @@ impl<'a> Persistent<'a> {
         backup: BackupId,
         directory: PathBuf,
         target: Arc<dyn PersistentBackupTarget>,
-        options: RestoreOptions,
+        options: AdmittedRestore,
         control: &StorageReadControl,
     ) -> BackupResult<Self> {
         let memory = control.memory().reserve(directory.capacity())?;
@@ -62,7 +69,7 @@ impl<'a> Persistent<'a> {
         id: RestoreId,
         directory: PathBuf,
         target: Arc<dyn PersistentBackupTarget>,
-        options: RestoreOptions,
+        options: AdmittedRestore,
         control: &StorageReadControl,
     ) -> BackupResult<(Self, BackupId)> {
         let memory = control.memory().reserve(directory.capacity())?;
@@ -79,7 +86,7 @@ impl<'a> Persistent<'a> {
         operation: BackupRestoreOperation<'a>,
         directory: Budgeted<PathBuf>,
         target: Arc<dyn PersistentBackupTarget>,
-        options: RestoreOptions,
+        options: AdmittedRestore,
     ) -> Self {
         Self {
             request: operation.request(),
@@ -107,6 +114,7 @@ impl<'a> Persistent<'a> {
                 }
             }
             Execution::Active(job) => job,
+            Execution::CheckingPrepared(_) => return RestorePhase::Publishing,
             Execution::Failed => return RestorePhase::Failed,
         };
         match job.work() {
@@ -124,38 +132,57 @@ impl<'a> Persistent<'a> {
         let job = match execution {
             Execution::Admitted(operation) => operation.into_job(Factory {
                 target: Arc::clone(&self.target),
-                options: self.options,
+                options: self.options.clone(),
             })?,
             Execution::Active(mut job) => {
                 job.advance_with(|work| work.advance(maximum_object_bytes))?;
                 job
             }
-            Execution::Failed => return Err(uqa_storage::backup::BackupError::Finished),
+            Execution::CheckingPrepared(_) | Execution::Failed => {
+                return Err(uqa_storage::backup::BackupError::Finished)
+            }
         };
         self.execution = Execution::Active(job);
         Ok(self.phase())
     }
 
-    fn durable_publish(&mut self) -> BackupResult<()> {
-        match &mut self.execution {
-            Execution::Admitted(operation) => {
-                operation.publish()?;
-            }
-            Execution::Active(job) => {
-                job.publish()?;
-            }
-            Execution::Failed => return Err(uqa_storage::backup::BackupError::Finished),
-        }
-        Ok(())
-    }
-
-    pub(super) fn publish(
+    pub(super) fn advance_publication(
         &mut self,
+        maximum_steps: usize,
         retained: MemoryBudget,
         control: &StorageReadControl,
-    ) -> BackupResult<RestoredEngine> {
-        self.durable_publish()?;
-        self.open_published(retained, control)
+    ) -> BackupResult<Option<PublishedInput>> {
+        let execution = std::mem::replace(&mut self.execution, Execution::Failed);
+        let step = match execution {
+            Execution::Admitted(operation) => {
+                let expected = operation.function_reference_digest();
+                operation.begin_prepared_validation(|directory, request, original| {
+                    let provider = self.target.open(directory, request, original)?;
+                    Validator::new(&self.options, expected).begin(provider, original)
+                })?
+            }
+            Execution::CheckingPrepared(work) => work.advance(|validation| {
+                Ok(match validation.advance(maximum_steps)? {
+                    BackupImageValidationStep::Pending => BackupRestoreWorkStep::Pending,
+                    BackupImageValidationStep::Complete => BackupRestoreWorkStep::Complete,
+                })
+            })?,
+            Execution::Active(mut job) => {
+                job.publish()?;
+                return self.open_published(retained, control).map(Some);
+            }
+            Execution::Failed => return Err(uqa_storage::backup::BackupError::Finished),
+        };
+        match step {
+            PreparedRestoreStep::Pending(work) => {
+                self.execution = Execution::CheckingPrepared(work);
+                Ok(None)
+            }
+            PreparedRestoreStep::Complete(mut operation) => {
+                operation.publish()?;
+                self.open_published(retained, control).map(Some)
+            }
+        }
     }
 
     pub(super) fn cancel(
@@ -163,13 +190,14 @@ impl<'a> Persistent<'a> {
         retained: MemoryBudget,
         control: &StorageReadControl,
     ) -> BackupResult<Option<RestoredEngine>> {
-        let completed = match &mut self.execution {
-            Execution::Admitted(operation) => operation.cancel()?,
-            Execution::Active(job) => job.cancel()?,
+        let completed = match std::mem::replace(&mut self.execution, Execution::Failed) {
+            Execution::Admitted(mut operation) => operation.cancel()?,
+            Execution::CheckingPrepared(work) => work.cancel()?,
+            Execution::Active(mut job) => job.cancel()?,
             Execution::Failed => return Err(uqa_storage::backup::BackupError::Finished),
         };
         if completed.is_some() {
-            self.open_published(retained, control).map(Some)
+            self.open_published(retained, control)?.finish().map(Some)
         } else {
             Ok(None)
         }
@@ -179,12 +207,12 @@ impl<'a> Persistent<'a> {
         &self,
         retained: MemoryBudget,
         control: &StorageReadControl,
-    ) -> BackupResult<RestoredEngine> {
-        open_published(
+    ) -> BackupResult<PublishedInput> {
+        PublishedInput::open(
             self.target.as_ref(),
             self.directory.as_path(),
             self.request,
-            self.options,
+            &self.options,
             retained,
             control,
         )
@@ -196,7 +224,7 @@ pub(super) fn cancel(
     id: RestoreId,
     directory: &Path,
     target: &dyn PersistentBackupTarget,
-    options: RestoreOptions,
+    options: &AdmittedRestore,
     control: &StorageReadControl,
 ) -> BackupResult<Option<RestoredEngine>> {
     let operation = repository.cancel_restore(id, directory, control)?;
@@ -204,43 +232,21 @@ pub(super) fn cancel(
     if operation.completed().is_none() {
         return Ok(None);
     }
-    open_published(
+    PublishedInput::open(
         target,
         directory,
         request,
         options,
-        MemoryBudget::new(options.retained_bytes),
+        MemoryBudget::new(options.limits.retained_bytes),
         control,
-    )
+    )?
+    .finish()
     .map(Some)
-}
-
-fn open_published(
-    target: &dyn PersistentBackupTarget,
-    directory: &std::path::Path,
-    request: DatabaseRestore,
-    options: RestoreOptions,
-    retained: MemoryBudget,
-    control: &StorageReadControl,
-) -> BackupResult<RestoredEngine> {
-    // A durable completion remains authoritative after cancellation or a lost reply. Opening resolves that exact request and never recreates a missing destination or replays history.
-    let completion = StorageReadControl::new(control.memory(), &CancellationToken::new());
-    let provider = target.open(directory, request, &completion)?;
-    let engine = Engine::from_restored_persistent_provider(
-        &provider,
-        retained,
-        catalog_limits(options),
-        &completion,
-    )?;
-    Ok(RestoredEngine(RetainedValue::with_budget(
-        engine,
-        control.memory(),
-    )?))
 }
 
 struct Factory {
     target: Arc<dyn PersistentBackupTarget>,
-    options: RestoreOptions,
+    options: AdmittedRestore,
 }
 
 impl<'a> BackupRestoreFactory<'a> for Factory {
@@ -253,10 +259,11 @@ impl<'a> BackupRestoreFactory<'a> for Factory {
         request: DatabaseRestore,
         control: &StorageReadControl,
     ) -> BackupResult<Self::Work> {
+        let functions = Admission::open(&backup, control)?;
         let input = self
             .target
             .import(directory, backup, request, self.limits(), control)?;
-        Ok(self.work(input, control))
+        Ok(self.work(input, functions, control))
     }
 
     fn recover(
@@ -266,30 +273,32 @@ impl<'a> BackupRestoreFactory<'a> for Factory {
         request: DatabaseRestore,
         control: &StorageReadControl,
     ) -> BackupResult<Self::Work> {
+        let functions = Admission::open(&backup, control)?;
         let input = self
             .target
             .recover(directory, backup, request, self.limits(), control)?;
-        Ok(self.work(input, control))
+        Ok(self.work(input, functions, control))
     }
 }
 
 impl Factory {
     fn limits(&self) -> BackupImportLimits {
         BackupImportLimits {
-            maximum_workspace_bytes: self.options.maximum_workspace_bytes,
-            maximum_value_bytes: self.options.maximum_value_bytes,
+            maximum_workspace_bytes: self.options.limits.maximum_workspace_bytes,
+            maximum_value_bytes: self.options.limits.maximum_value_bytes,
         }
     }
 
     fn work<'a>(
         &self,
         input: OwnedPersistentBackupImport<'a>,
+        functions: Option<Admission<'a>>,
         control: &StorageReadControl,
     ) -> Work<'a> {
         Work {
             stage: Stage::Reading(input),
-            retention: MemoryBudget::new(self.options.retained_bytes),
-            limits: catalog_limits(self.options),
+            validator: Validator::new(&self.options, None),
+            functions,
             control: control.clone(),
         }
     }
@@ -304,8 +313,8 @@ enum Stage<'a> {
 
 pub(super) struct Work<'a> {
     stage: Stage<'a>,
-    retention: MemoryBudget,
-    limits: CatalogInputLimits,
+    validator: Validator,
+    functions: Option<Admission<'a>>,
     control: StorageReadControl,
 }
 
@@ -322,19 +331,22 @@ impl Work<'_> {
         }
         let stage = std::mem::replace(&mut self.stage, Stage::Failed);
         self.control.check()?;
+        if !Admission::advance(
+            &mut self.functions,
+            maximum_object_bytes,
+            &self.validator.bindings,
+            &self.control,
+        )? {
+            self.stage = stage;
+            return Ok(BackupRestoreWorkStep::Pending);
+        }
         self.stage = match stage {
             Stage::Reading(mut input) => match input.advance(maximum_object_bytes)? {
                 BackupImageImportStep::Pending => Stage::Reading(input),
                 BackupImageImportStep::Imported => Stage::Validating(input),
             },
             Stage::Validating(mut input) => {
-                match input.advance_validation(
-                    &mut Validator {
-                        retention: self.retention.clone(),
-                        limits: self.limits,
-                    },
-                    1,
-                )? {
+                match input.advance_validation(&mut self.validator, 1)? {
                     BackupImageValidationStep::Pending => Stage::Validating(input),
                     BackupImageValidationStep::Complete => Stage::Complete,
                 }
@@ -360,6 +372,19 @@ fn catalog_limits(options: RestoreOptions) -> CatalogInputLimits {
 struct Validator {
     retention: MemoryBudget,
     limits: CatalogInputLimits,
+    bindings: RestoreBindings,
+    expected: Option<ImageDigest>,
+}
+
+impl Validator {
+    fn new(settings: &AdmittedRestore, expected: Option<ImageDigest>) -> Self {
+        Self {
+            retention: MemoryBudget::new(settings.limits.retained_bytes),
+            limits: catalog_limits(settings.limits),
+            bindings: settings.bindings.clone(),
+            expected,
+        }
+    }
 }
 
 impl BackupImageValidator for Validator {
@@ -379,31 +404,110 @@ impl BackupImageValidator for Validator {
         control: &StorageReadControl,
     ) -> BackupResult<OwnedBackupImageValidation> {
         OwnedBackupImageValidation::create(control, || {
-            Ok(Validation {
-                input: crate::open::PersistentEngineInput::new(
-                    provider,
-                    self.retention.clone(),
-                    self.limits,
-                    control,
-                )?,
-                control: control.clone(),
-            })
+            Validation::new(
+                provider,
+                self.retention.clone(),
+                self.limits,
+                &self.bindings,
+                self.expected,
+                control,
+            )
         })
     }
 }
 
 struct Validation {
-    input: crate::open::PersistentEngineInput,
+    stage: Option<ValidationStage>,
+    expected: Option<ImageDigest>,
     control: StorageReadControl,
+}
+
+enum ValidationStage {
+    Catalog(crate::open::PersistentEngineInput),
+    Functions(
+        crate::open::PersistentEngineState,
+        Budgeted<Box<BackupFunctionDigestJob<crate::backup::functions::References>>>,
+    ),
+    Relationships(
+        crate::open::PersistentEngineState,
+        crate::backup::validation::CatalogValidation,
+    ),
+}
+
+impl Validation {
+    fn new(
+        provider: Arc<dyn PersistentStorageProvider>,
+        retention: MemoryBudget,
+        limits: CatalogInputLimits,
+        bindings: &RestoreBindings,
+        expected: Option<ImageDigest>,
+        control: &StorageReadControl,
+    ) -> BackupResult<Self> {
+        let input = crate::open::PersistentEngineInput::new(
+            provider, retention, limits, bindings, control,
+        )?;
+        Ok(Self {
+            stage: Some(ValidationStage::Catalog(input)),
+            expected,
+            control: control.clone(),
+        })
+    }
 }
 
 impl BackupImageValidationWork for Validation {
     fn advance(&mut self, maximum_steps: usize) -> BackupResult<BackupImageValidationStep> {
-        let Some(session) = self.input.advance(maximum_steps)? else {
-            return Ok(BackupImageValidationStep::Pending);
+        let next = match self.stage.take().expect("active private validation") {
+            ValidationStage::Catalog(mut input) => match input.advance(maximum_steps)? {
+                Some(session) => {
+                    let checks = crate::backup::validation::CatalogValidation::begin(
+                        session.engine(),
+                        &self.control,
+                    )?;
+                    ValidationStage::Relationships(session, checks)
+                }
+                None => ValidationStage::Catalog(input),
+            },
+            ValidationStage::Relationships(session, checks) => {
+                let Some(checks) =
+                    checks.advance(session.engine(), &self.control, maximum_steps)?
+                else {
+                    if self.expected.is_some() {
+                        let source = crate::backup::functions::References::staged(
+                            session.engine(),
+                            &self.control,
+                        )?;
+                        let memory = self.control.memory().reserve(size_of::<
+                            BackupFunctionDigestJob<crate::backup::functions::References>,
+                        >())?;
+                        let digest = BackupFunctionDigestJob::new(source, &self.control);
+                        self.stage = Some(ValidationStage::Functions(
+                            session,
+                            Budgeted::new(Box::new(digest), memory),
+                        ));
+                        return Ok(BackupImageValidationStep::Pending);
+                    }
+                    drop(session.finish()?);
+                    return Ok(BackupImageValidationStep::Complete);
+                };
+                ValidationStage::Relationships(session, checks)
+            }
+            ValidationStage::Functions(session, mut input) => {
+                if let Some(digest) = input.as_mut().advance(maximum_steps, 4096)? {
+                    if Some(digest) != self.expected {
+                        return Err(uqa_storage::backup::BackupError::Invalid(
+                            "application function declarations differ from the captured database",
+                        ));
+                    }
+                    drop(session.finish()?);
+                    return Ok(BackupImageValidationStep::Complete);
+                }
+                ValidationStage::Functions(session, input)
+            }
         };
-        crate::backup::validation::validate(session.engine(), &self.control)?;
-        drop(session.finish()?);
-        Ok(BackupImageValidationStep::Complete)
+        self.stage = Some(next);
+        Ok(BackupImageValidationStep::Pending)
     }
 }
+
+#[cfg(test)]
+mod tests;

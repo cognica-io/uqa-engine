@@ -94,7 +94,12 @@ impl RoutineRegistry {
         }
     }
 
-    pub(crate) fn into_mutation_budget(self, memory: &MemoryBudget) -> Self {
+    pub fn budget(&self) -> &MemoryBudget {
+        self.definitions.budget()
+    }
+
+    /// Select the allowance for later edits while existing entries retain their own memory.
+    pub fn into_mutation_budget(self, memory: &MemoryBudget) -> Self {
         Self {
             definitions: self.definitions.into_mutation_budget(memory),
         }

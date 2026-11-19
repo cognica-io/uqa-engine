@@ -8,6 +8,7 @@
 
 use super::*;
 
+mod fingerprints;
 mod images;
 mod positions;
 use crate::mvcc::backup_metadata::{BIRTHS, EPOCH, HISTORY};

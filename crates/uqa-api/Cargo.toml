@@ -28,6 +28,8 @@ arrow-schema = { workspace = true }
 parquet = { workspace = true }
 
 [dev-dependencies]
+rstest = { workspace = true }
+uqa-storage = { workspace = true }
 uqa-storage-sqlite = { workspace = true }
 uqa-storage-redb = { workspace = true }
 tempfile = "3.13"

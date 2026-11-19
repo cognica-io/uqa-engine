@@ -8,7 +8,7 @@
 
 use super::{CommandPlan, MutableCommandPlan, RewriteMemory, SQLError};
 use crate::{catalog::roles::RoleReference, plan::copy::Copying};
-use uqa_core::memory::{BudgetedVec, Produced, ProductionControl};
+use uqa_core::memory::{Produced, ProductionControl};
 
 impl MutableCommandPlan {
     pub(crate) fn mark_stored_cte_target_bound_in_place(
@@ -41,7 +41,7 @@ impl MutableCommandPlan {
             }
         };
         *target = Some(subject);
-        if let Some(memory) = &mut self.memory {
+        if let Some(memory) = self.memory.as_mut() {
             *body(memory).field_mut("target_privilege_subject") = owner;
         }
         Ok(self)
@@ -75,7 +75,7 @@ impl MutableCommandPlan {
         };
         *name = target;
         *descendants = include_descendants;
-        if let Some(memory) = &mut self.memory {
+        if let Some(memory) = self.memory.as_mut() {
             *body(memory).field_mut(field) = owner;
         }
         Ok(())
@@ -99,13 +99,13 @@ impl MutableCommandPlan {
             }
         };
         ctes.clear();
-        if let Some(memory) = &mut self.memory {
+        if let Some(memory) = self.memory.as_mut() {
             let RewriteMemory::Fields { fields, .. } =
                 body(memory).field_mut("ctes").as_mut().expect("CTE vector")
             else {
                 unreachable!("CTE vector constructor")
             };
-            fields.clear();
+            fields.truncate(0);
         }
         Ok(self)
     }
@@ -143,7 +143,7 @@ impl MutableCommandPlan {
             _ => unreachable!(),
         };
         *relations = names;
-        if let Some(memory) = &mut self.memory {
+        if let Some(memory) = self.memory.as_mut() {
             *body(memory).field_mut("view_rule_relations") = owner;
         }
         Ok(self)
@@ -209,7 +209,7 @@ impl MutableCommandPlan {
             )
         };
         *retained = Some(returning);
-        if let Some(memory) = &mut self.memory {
+        if let Some(memory) = self.memory.as_mut() {
             *body(memory).field_mut("view_rule_returning") = owner;
         }
         control.check()?;
@@ -227,13 +227,7 @@ fn field_owner<T>(
 ) -> Result<(T, Option<RewriteMemory>), SQLError> {
     let (value, owner) = value.into_parts();
     let (value, owner) = control.finish(value, owner)?.into_parts();
-    Ok((
-        value,
-        owner.map(|direct| RewriteMemory::Fields {
-            fields: BudgetedVec::new(direct.budget()),
-            direct,
-        }),
-    ))
+    Ok((value, owner.map(RewriteMemory::direct)))
 }
 
 fn append_rule_relation(

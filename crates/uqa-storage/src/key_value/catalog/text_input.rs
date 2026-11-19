@@ -44,8 +44,9 @@ impl KeyValueCatalog {
         )
     }
 
-    pub(super) fn metadata_with_control(
+    pub(super) fn text_point_with_control(
         &self,
+        tags: &[u8],
         name: &str,
         limits: CatalogTextLimits,
         control: &StorageReadControl,
@@ -53,11 +54,13 @@ impl KeyValueCatalog {
         control.check()?;
         limits.validate()?;
         control.check_value_size(
-            name.len().checked_add(5).ok_or(MemoryError::SizeOverflow)?,
+            name.len()
+                .checked_add(size_of::<u32>() + tags.len())
+                .ok_or(MemoryError::SizeOverflow)?,
             limits.maximum_key_bytes,
         )?;
-        let key = crate::key_value::codec::single_str_key_prefix(
-            TAG_METADATA,
+        let key = crate::key_value::codec::tagged_str_key_prefix(
+            tags,
             name,
             name.len(),
             control.memory(),
@@ -111,7 +114,7 @@ impl KeyValueCatalog {
     }
 }
 
-fn select_metadata(
+pub(in crate::key_value) fn select_metadata(
     key: &[u8],
     prefix: &str,
     control: &StorageReadControl,

@@ -35,6 +35,22 @@ pub(crate) struct PersistentTableInput {
     input: ImageDecoder<TableRegistry, StorageBackendError>,
 }
 
+struct TableSources {
+    catalog: Arc<dyn CatalogFacade>,
+    backend: Arc<dyn PersistentStorageBackend>,
+    analyzers: AnalyzerResources,
+}
+
+impl TableSources {
+    fn select(engine: &super::Engine) -> Self {
+        Self {
+            catalog: Arc::clone(engine.storage.catalog.as_ref().expect("persistent catalog")),
+            backend: Arc::clone(engine.storage.backend.as_ref().expect("persistent backend")),
+            analyzers: engine.analyzer_resources(),
+        }
+    }
+}
+
 struct Declarations {
     tables: std::vec::IntoIter<PreparedTableDeclaration>,
     _memory: MemoryReservation,
@@ -47,8 +63,7 @@ impl super::Engine {
         control: &StorageReadControl,
     ) -> StorageBackendResult<PersistentTableInput> {
         PersistentTableInput::from_catalog(
-            Arc::clone(self.storage.catalog.as_ref().expect("persistent catalog")),
-            Arc::clone(self.storage.backend.as_ref().expect("persistent backend")),
+            TableSources::select(self),
             self.durable.roles.read().clone(),
             limits,
             control,
@@ -58,9 +73,8 @@ impl super::Engine {
 
 impl PersistentTableInput {
     /// Restore complete table membership from one caller-retained catalog transaction. Physical table/ACL validation and all columns/authority precede index-name input, which precedes table hydration. Failure never publishes an earlier table prefix.
-    pub(crate) fn from_catalog(
-        catalog: Arc<dyn CatalogFacade>,
-        backend: Arc<dyn PersistentStorageBackend>,
+    fn from_catalog(
+        sources: TableSources,
         roles: uqa_sql::catalog::roles::RoleDefinitions,
         limits: CatalogInputLimits,
         control: &StorageReadControl,
@@ -72,7 +86,7 @@ impl PersistentTableInput {
             control.memory(),
             control.cancellation(),
             |mut reader| async move {
-                let mut tables = catalog.begin_table_load(limits, &retained)?;
+                let mut tables = sources.catalog.begin_table_load(limits, &retained)?;
                 let tables = loop {
                     reader.input().checkpoint().await?;
                     if let Some(tables) = tables.advance(1)? {
@@ -87,14 +101,13 @@ impl PersistentTableInput {
                     }
                 };
                 let names = KeyConstraintNames::load_from(
-                    &*catalog,
+                    &*sources.catalog,
                     limits,
                     &retained,
                     &mut reader.input(),
                 )
                 .await?;
-                let mut hydration =
-                    Self::new(catalog, backend, declarations, names, limits, &retained)?;
+                let mut hydration = Self::new(sources, declarations, names, limits, &retained)?;
                 loop {
                     reader.input().checkpoint().await?;
                     if let Some(tables) = hydration.advance(1)? {
@@ -107,9 +120,8 @@ impl PersistentTableInput {
     }
 
     /// The caller retains one transaction view for the paired catalog and backend. Complete column/authority preparation and index-owned key names precede this stage. Only a complete registry is published; no physical writes or resource resolution occur.
-    pub(crate) fn new(
-        catalog: Arc<dyn CatalogFacade>,
-        backend: Arc<dyn PersistentStorageBackend>,
+    fn new(
+        sources: TableSources,
         declarations: PreparedTableDeclarations,
         names: KeyConstraintNames,
         limits: CatalogInputLimits,
@@ -136,8 +148,7 @@ impl PersistentTableInput {
                 for declaration in source.tables.by_ref() {
                     reader.input().checkpoint().await?;
                     let (name, table) = hydrate(
-                        &*catalog,
-                        &backend,
+                        &sources,
                         declaration,
                         &names,
                         limits,
@@ -162,8 +173,7 @@ impl PersistentTableInput {
 }
 
 async fn hydrate(
-    catalog: &dyn CatalogFacade,
-    backend: &Arc<dyn PersistentStorageBackend>,
+    sources: &TableSources,
     declaration: PreparedTableDeclaration,
     names: &KeyConstraintNames,
     limits: CatalogInputLimits,
@@ -173,6 +183,7 @@ async fn hydrate(
     uqa_core::memory::Budgeted<uqa_core::RelationIdentity>,
     Arc<crate::TableState>,
 )> {
+    let backend = &sources.backend;
     let PreparedTableDeclaration {
         relation,
         security,
@@ -190,7 +201,7 @@ async fn hydrate(
         .await
         .map_err(|error| StorageBackendError::backend("stored table analyzer", error))?;
     let default =
-        AnalyzerDefault::from_definition(analyzer.clone(), AnalyzerResources::default(), control)?;
+        AnalyzerDefault::from_definition(analyzer.clone(), sources.analyzers.clone(), control)?;
     let documents = backend.document_store_with_control(name.clone(), control)?;
     let text = backend.inverted_index_with_control(name.clone(), default, control)?;
     let mut vector_input = PersistentVectorIndexesBuilder::catalog_input(
@@ -238,7 +249,7 @@ async fn hydrate(
     )
     .map_err(|error| StorageBackendError::backend("stored foreign-key identities", error))?;
     let scalars = PersistentTableScalars {
-        catalog,
+        catalog: sources.catalog.as_ref(),
         name: &name,
         object_id,
         columns: &columns,

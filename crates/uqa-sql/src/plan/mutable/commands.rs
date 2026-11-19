@@ -36,7 +36,7 @@ pub use children::CommandQuerySlot;
 #[derive(Debug)]
 pub struct MutableCommandPlan {
     pub(super) command: CommandPlan,
-    pub(super) memory: Option<RewriteMemory>,
+    pub(super) memory: super::RootMemory,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -66,13 +66,13 @@ impl CommandPlan {
         let Some(mut copying) = Copying::for_rewrite(*control) else {
             return Ok(MutableCommandPlan {
                 command: self.clone(),
-                memory: None,
+                memory: None.into(),
             });
         };
         let command = copying.command_syntax(self)?;
         let output = MutableCommandPlan {
             command,
-            memory: Some(copying.into_rewrite_memory()),
+            memory: Some(copying.into_rewrite_memory()).into(),
         };
         control.check()?;
         Ok(output)
@@ -83,7 +83,7 @@ impl MutableCommandPlan {
     pub(crate) fn from_ordinary(command: CommandPlan) -> Self {
         Self {
             command,
-            memory: None,
+            memory: None.into(),
         }
     }
 
@@ -91,13 +91,14 @@ impl MutableCommandPlan {
         command: CommandPlan,
         memory: Option<RewriteMemory>,
     ) -> Self {
-        Self { command, memory }
+        Self {
+            command,
+            memory: memory.into(),
+        }
     }
 
     pub fn reserved_bytes(&self) -> usize {
-        self.memory
-            .as_ref()
-            .map_or(0, RewriteMemory::reserved_bytes)
+        self.memory.reserved_bytes()
     }
 
     /// Rewrite one scalar root without changing the statement's other inputs or its diagnostic order.
@@ -125,7 +126,7 @@ impl MutableCommandPlan {
         *slot
             .expression_mut(&mut self.command)
             .expect("original command scalar") = expression;
-        if let Some(owner) = &mut self.memory {
+        if let Some(owner) = self.memory.as_mut() {
             *slot.memory_mut(owner) = memory;
         }
         Ok(self)
@@ -152,25 +153,29 @@ impl MutableCommandPlan {
         };
         let input = MutableQueryPlan {
             query: std::mem::replace(query.as_mut(), super::queries::empty_query()),
-            memory: self.memory.as_mut().and_then(|memory| {
-                memory
-                    .field_mut("query")
-                    .as_mut()
-                    .expect("command query field")
-                    .field_mut("query")
-                    .take()
-            }),
+            memory: self
+                .memory
+                .as_mut()
+                .and_then(|memory| {
+                    memory
+                        .field_mut("query")
+                        .as_mut()
+                        .expect("command query field")
+                        .field_mut("query")
+                        .take()
+                })
+                .into(),
         };
         let output = map(input)?;
         output.assert_owner(control);
         control.check()?;
         **query = output.query;
-        if let Some(memory) = &mut self.memory {
+        if let Some(memory) = self.memory.as_mut() {
             *memory
                 .field_mut("query")
                 .as_mut()
                 .expect("command query field")
-                .field_mut("query") = output.memory;
+                .field_mut("query") = output.memory.into_parts();
         }
         Ok(self)
     }
@@ -182,11 +187,16 @@ impl MutableCommandPlan {
         self.assert_owner(control);
         control.check()?;
         let Self { command, memory } = self;
-        Ok(control.finish(command, memory.and_then(RewriteMemory::into_reservation))?)
+        Ok(control.finish(
+            command,
+            memory
+                .into_parts()
+                .and_then(RewriteMemory::into_reservation),
+        )?)
     }
 
     pub(super) fn assert_owner(&self, control: &ProductionControl<'_>) {
-        match (&self.memory, control.budget()) {
+        match (self.memory.read().as_ref(), control.budget()) {
             (Some(RewriteMemory::Fields { direct, .. }), Some(budget)) => assert!(
                 direct.budget().shares_allowance(budget),
                 "command rewrite preserves its constructor allowance"

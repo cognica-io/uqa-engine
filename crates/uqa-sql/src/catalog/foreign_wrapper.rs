@@ -155,36 +155,15 @@ pub fn validate_functions(
     wrappers: &ForeignWrappers,
     routines: &crate::routines::lifecycle::RoutineRegistry,
 ) -> Result<(), SQLError> {
-    for wrapper in wrappers.values() {
-        let handler = match &wrapper.handler {
-            ForeignWrapperHandler::Function(function) => Some(function),
-            _ => None,
-        };
-        for reference in handler.into_iter().chain(wrapper.validator.as_ref()) {
-            if reference.binding.builtin {
-                continue;
-            }
-            let Some(function) = routines
-                .values()
-                .flatten()
-                .find(|function| function.def.object_id == reference.binding.object_id)
-            else {
-                continue;
-            };
-            if function.def.catalog_oid != Some(reference.oid)
-                || function.def.is_procedure
-                || crate::routines::routine_signature_types(&function.def)
-                    != reference.binding.argument_types
-            {
-                return Err(invalid(
-                    &wrapper.name,
-                    "live function disagrees with its retained identity",
-                ));
-            }
-        }
-    }
-    Ok(())
+    validate_functions_with_control(
+        wrappers,
+        routines,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
 }
+
+mod callbacks;
+pub use callbacks::{validate_functions_from_input, validate_functions_with_control};
 
 /// A stored reference must keep its selected incarnation when a wrapper name is reused.
 pub fn bound_wrapper<'a>(
@@ -192,16 +171,22 @@ pub fn bound_wrapper<'a>(
     name: &str,
     reference: ForeignWrapperReference,
 ) -> Result<&'a ForeignWrapperDefinition, SQLError> {
-    wrappers
-        .get(name)
-        .filter(|wrapper| wrapper.identity == reference)
-        .ok_or_else(|| SQLError::Routine {
-            sqlstate: "XX000".into(),
-            message: format!(
-                "cache lookup failed for foreign-data wrapper {}",
-                reference.oid
-            ),
-        })
+    reference.resolve(wrappers.get(name))
+}
+
+impl ForeignWrapperReference {
+    /// Resolve an already selected catalog row without rebinding a replaced name.
+    pub fn resolve(
+        self,
+        current: Option<&ForeignWrapperDefinition>,
+    ) -> Result<&ForeignWrapperDefinition, SQLError> {
+        current
+            .filter(|wrapper| wrapper.identity == self)
+            .ok_or_else(|| SQLError::Routine {
+                sqlstate: "XX000".into(),
+                message: format!("cache lookup failed for foreign-data wrapper {}", self.oid),
+            })
+    }
 }
 
 /// Validate the complete candidate before publishing any restored wrapper.

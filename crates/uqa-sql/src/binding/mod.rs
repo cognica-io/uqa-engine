@@ -140,6 +140,11 @@ enum ScalarBindingMode {
     CompositeInputs,
 }
 
+enum RecursiveViewBinding {
+    Reject,
+    DeclaredColumns,
+}
+
 struct SchemaScope {
     execution_sources: Option<execution::CapturedSources>,
     collations: preparation::PendingCollations,
@@ -150,6 +155,7 @@ struct SchemaScope {
     non_returning_ctes: production::BindingNameSet,
     production: uqa_core::memory::OwnedProductionControl,
     visiting_views: production::BindingNameSet,
+    recursive_view: RecursiveViewBinding,
     validate_references: bool,
     stored_expression_outer: Option<RowSchema>,
     rule_condition_event: Option<crate::ast::RuleEvent>,
@@ -164,6 +170,7 @@ struct SchemaScope {
     routine_parameters: Option<RoutineParameterScope>,
     /// Select reference resolution, complete stored binding, or prepared composite identity retention.
     scalar_binding: ScalarBindingMode,
+    stored_call_origin: stored_routines::StoredCallOrigin,
     /// The names of a `PL/pgSQL` statement that the function's variables take, checked against what the statement can see.
     variable_sites: Option<variable_sites::VariableSites>,
     /// Keep `*` projections and `GROUP BY` output-name references as written, so a bound copy of stored syntax still corresponds to that syntax node for node.

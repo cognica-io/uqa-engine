@@ -10,6 +10,139 @@ use super::*;
 use uqa_storage::mvcc::{IdentifierRequest, RecordWrite};
 
 #[test]
+fn formatless_predecessor_cannot_discard_heads_or_leave_two_directories() {
+    let database = Arc::new(
+        Database::builder()
+            .create_with_backend(InMemoryBackend::new())
+            .unwrap(),
+    );
+    let transaction = physical_writer(&database).unwrap();
+    transaction.open_table(METADATA).unwrap();
+    transaction.open_table(VERSIONS).unwrap();
+    transaction.open_table(TRANSACTIONS).unwrap();
+    transaction
+        .open_table(heads::LEGACY_HEADS)
+        .unwrap()
+        .insert(b"only".as_slice(), 17)
+        .unwrap();
+    transaction.commit().unwrap();
+    assert!(matches!(
+        RedbRecordStore::new(Arc::clone(&database)),
+        Err(VersionError::InvalidEncoding(
+            "uninitialized metadata has record data"
+        ))
+    ));
+    {
+        let unchanged = database.begin_read().unwrap();
+        assert!(unchanged.open_table(HEADS).is_err());
+        assert!(unchanged.open_table(METADATA).unwrap().is_empty().unwrap());
+        assert_eq!(
+            unchanged
+                .open_table(heads::LEGACY_HEADS)
+                .unwrap()
+                .get(b"only".as_slice())
+                .unwrap()
+                .unwrap()
+                .value(),
+            17
+        );
+    }
+    let transaction = physical_writer(&database).unwrap();
+    transaction
+        .open_table(heads::LEGACY_HEADS)
+        .unwrap()
+        .remove(b"only".as_slice())
+        .unwrap();
+    transaction.commit().unwrap();
+    let identity = RedbRecordStore::new(Arc::clone(&database))
+        .unwrap()
+        .database_id();
+    assert!(database
+        .begin_read()
+        .unwrap()
+        .open_table(heads::LEGACY_HEADS)
+        .is_err());
+    assert_eq!(
+        RedbRecordStore::new(database).unwrap().database_id(),
+        identity
+    );
+}
+
+#[test]
+fn formatless_storage_rejects_orphaned_image_and_body_records_without_claiming_an_identity() {
+    use crate::mvcc::{
+        image_fingerprints::TABLE,
+        large_values::{BODIES, OWNERS},
+    };
+    for (image, body, count) in [
+        (true, false, false),
+        (false, true, false),
+        (false, false, true),
+    ] {
+        let database = Arc::new(
+            Database::builder()
+                .create_with_backend(InMemoryBackend::new())
+                .unwrap(),
+        );
+        drop(RedbRecordStore::new(Arc::clone(&database)).unwrap());
+        let hash = [91; 32];
+        let change = physical_writer(&database).unwrap();
+        change.delete_table(METADATA).unwrap();
+        change.open_table(METADATA).unwrap();
+        if image {
+            change
+                .open_table(TABLE)
+                .unwrap()
+                .insert((b"old".as_slice(), 7), &[23; 40])
+                .unwrap();
+        }
+        if body {
+            change
+                .open_table(BODIES)
+                .unwrap()
+                .insert(&hash, b"owned bytes".as_slice())
+                .unwrap();
+        }
+        if count {
+            change.open_table(OWNERS).unwrap().insert(&hash, 3).unwrap();
+        }
+        change.commit().unwrap();
+        assert!(matches!(
+            RedbRecordStore::new(Arc::clone(&database)),
+            Err(VersionError::InvalidEncoding(
+                "uninitialized metadata has record data"
+            ))
+        ));
+        let read = database.begin_read().unwrap();
+        assert!(read.open_table(METADATA).unwrap().is_empty().unwrap());
+        assert_eq!(
+            read.open_table(TABLE)
+                .unwrap()
+                .get((b"old".as_slice(), 7))
+                .unwrap()
+                .map(|v| *v.value()),
+            image.then_some([23; 40])
+        );
+        assert_eq!(
+            read.open_table(BODIES)
+                .unwrap()
+                .get(&hash)
+                .unwrap()
+                .map(|v| v.value().to_vec()),
+            body.then(|| b"owned bytes".to_vec())
+        );
+        assert_eq!(
+            read.open_table(OWNERS)
+                .unwrap()
+                .get(&hash)
+                .unwrap()
+                .map(|v| v.value()),
+            count.then_some(3)
+        );
+    }
+}
+
+#[test]
 fn predecessor_format_upgrade_preserves_records_allocations_and_receipts() {
     for predecessor in 29_u64..RECORD_FORMAT {
         let database = Arc::new(

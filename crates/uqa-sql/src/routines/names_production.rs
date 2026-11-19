@@ -74,5 +74,67 @@ pub async fn routine_signature_types_from_input(
     Ok(signature.finish()?)
 }
 
+pub(crate) trait SignatureWork: crate::catalog::work::Work + Send {
+    fn normalize(
+        &mut self,
+        name: &str,
+        control: &ProductionControl<'_>,
+    ) -> impl std::future::Future<Output = Result<Produced<String>, SQLError>> + Send;
+}
+
+impl SignatureWork for () {
+    async fn normalize(
+        &mut self,
+        name: &str,
+        control: &ProductionControl<'_>,
+    ) -> Result<Produced<String>, SQLError> {
+        Ok(canonical_routine_type_name_with_control(name, control)?)
+    }
+}
+
+impl SignatureWork for uqa_core::image_io::AsyncImageInput<'_> {
+    async fn normalize(
+        &mut self,
+        name: &str,
+        control: &ProductionControl<'_>,
+    ) -> Result<Produced<String>, SQLError> {
+        crate::type_resolution::canonical_routine_type_name_from_input(name, control, self)
+            .await
+            .map_err(|error| match error {
+                crate::type_resolution::RoutineSignatureInputError::Native(error) => error.into(),
+                crate::type_resolution::RoutineSignatureInputError::Work(error) => error.into(),
+            })
+    }
+}
+
+/// Compare the declared identity without materializing the signature or skipping work for OUT parameters.
+pub(crate) async fn signature_matches(
+    definition: &CreateFunction,
+    types: &[String],
+    control: &ProductionControl<'_>,
+    work: &mut impl SignatureWork,
+) -> Result<bool, SQLError> {
+    let mut expected = types.iter();
+    for parameter in &definition.params {
+        control.check()?;
+        work.checkpoint().await?;
+        if !CreateFunction::is_identity_param(parameter) {
+            continue;
+        }
+        let Some(source) = expected.next() else {
+            return Ok(false);
+        };
+        let canonical = work.normalize(&parameter.type_name, control).await?;
+        if crate::catalog::work::compare_text(work, &canonical, source, control)
+            .await?
+            .is_ne()
+        {
+            return Ok(false);
+        }
+    }
+    control.check()?;
+    Ok(expected.next().is_none())
+}
+
 #[cfg(test)]
 mod tests;

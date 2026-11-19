@@ -7,13 +7,18 @@
 //! Capture routine namespaces, bind catalog dependencies, and recompile changed definitions.
 
 use super::compilation::{self, StoredRoutineCompilationContext};
+use std::sync::Arc;
+use uqa_core::memory::{MemoryReservation, ProductionControl, ProductionVec};
 use uqa_sql::{
     ast::{CreateFunction, FunctionBody},
     binding::stored_columns::StoredSourceCatalog,
     routines::{
-        compilation::{compile_function_body, defer_function_body},
-        dependencies::{self, RoutineCompilationMode},
-        regclass::{self, RoutineRegclassCatalog},
+        compilation::{
+            compile_function_body, defer_function_body, with_parser_context,
+            SQLStandardBodyCompilation,
+        },
+        dependencies::{RoutineCompilationMode, RoutineDeclaration, RoutineDefinitionDependencies},
+        regclass::{RoutineRegclassBinding, RoutineRegclassCatalog},
         CompiledFunctionBody, RoutineBody,
     },
     semantics::sets::placement_scope::SetPlacementScope,
@@ -62,11 +67,7 @@ pub fn compile_catalog_bound_routine(
     def: &mut CreateFunction,
     bodies: RoutineBodyCompilation,
 ) -> Result<BoundRoutine, SQLError> {
-    // A stored body is bound again as it was created; its set-returning calls are not placed again.
-    let _stored =
-        matches!(bodies, RoutineBodyCompilation::Stored).then(SetPlacementScope::stored_definition);
-    let mode = bodies.mode();
-    if matches!(mode, RoutineCompilationMode::Definition) {
+    if matches!(bodies.mode(), RoutineCompilationMode::Definition) {
         if matches!(def.body, FunctionBody::Statements(_))
             || def
                 .params
@@ -78,115 +79,180 @@ pub fn compile_catalog_bound_routine(
             def.creation_search_path.clear();
         }
     }
-    let mut changed = bind_routine_definition_dependencies(context, def, mode)?;
-    let mut compiled = compile_routine_body(&context.compilation, def, bodies)?;
-    let regclass_changed = bind_routine_regclass_constants(context, def)?;
-    changed |= regclass_changed;
-    if regclass_changed {
-        compiled = compile_routine_body(&context.compilation, def, bodies)?;
+    let control = ProductionControl::uncontrolled();
+    let mut binding = CatalogRoutineBinding::new(def, bodies, &control)?;
+    loop {
+        if let Some(bound) = binding.advance(context, def, &control)? {
+            return Ok(bound);
+        }
     }
-    if !matches!(def.body, FunctionBody::Statements(_)) {
-        return Ok(BoundRoutine {
-            body: RoutineBody::Source,
-            validated: compiled,
-            changed,
-        });
-    }
-    let compiled = compiled.ok_or_else(|| {
-        SQLError::Internal(format!(
-            "SQL-standard body of routine `{}` was not compiled",
-            def.name
-        ))
-    })?;
-    Ok(BoundRoutine {
-        body: RoutineBody::Bound(compiled.shared()),
-        validated: None,
-        changed,
-    })
 }
 
-/// Compile the body as `bodies` asks: a SQL-standard body always, and a source body only to validate a new definition under `check_function_bodies`. The sessions that run a source body compile it.
-fn compile_routine_body(
-    context: &StoredRoutineCompilationContext<'_>,
-    def: &CreateFunction,
+enum Stage {
+    Dependencies(RoutineDefinitionDependencies),
+    Compile,
+    Statements(SQLStandardBodyCompilation),
+    Regclasses(RoutineRegclassBinding),
+    Finished,
+}
+
+/// Catalog compilation retains its declaration order across calls. Session, parser and set-placement scopes exist only within the selected step.
+pub struct CatalogRoutineBinding {
     bodies: RoutineBodyCompilation,
-) -> Result<Option<CompiledFunctionBody>, SQLError> {
-    match (bodies, &def.body) {
-        (
-            RoutineBodyCompilation::Checked | RoutineBodyCompilation::Unchecked,
-            FunctionBody::Statements(_),
-        ) => compile_function_body(&context.analysis, def).map(Some),
-        (RoutineBodyCompilation::Stored, FunctionBody::Statements(_)) => {
-            compilation::compile_persisted_sql_function(context, def).map(Some)
+    stage: Stage,
+    search_path: Arc<Vec<String>>,
+    _path_memory: Option<MemoryReservation>,
+    changed: bool,
+    recompile: bool,
+    compiled: Option<RoutineBody>,
+    validated: Option<CompiledFunctionBody>,
+}
+
+impl CatalogRoutineBinding {
+    pub fn new(
+        def: &CreateFunction,
+        bodies: RoutineBodyCompilation,
+        control: &ProductionControl<'_>,
+    ) -> Result<Self, SQLError> {
+        let mut path = ProductionVec::new(*control);
+        path.reserve(def.creation_search_path.len())?;
+        for name in &def.creation_search_path {
+            path.push_produced(control.copy_text(name)?)?;
         }
-        (RoutineBodyCompilation::Checked, FunctionBody::Source(_)) => {
-            compilation::with_routine_settings(context, def, || {
-                compile_function_body(&context.analysis, def)
-            })
-            .map(Some)
+        let (path, memory) = path.finish()?.into_parts();
+        let memory = control.combine(memory, control.reserve(size_of::<Vec<String>>())?);
+        Ok(Self {
+            bodies,
+            stage: Stage::Dependencies(RoutineDefinitionDependencies::new(bodies.mode())),
+            search_path: Arc::new(path),
+            _path_memory: memory,
+            changed: false,
+            recompile: false,
+            compiled: None,
+            validated: None,
+        })
+    }
+
+    pub fn advance(
+        &mut self,
+        context: &RoutineDefinitionContext<'_>,
+        def: &mut impl RoutineDeclaration,
+        control: &ProductionControl<'_>,
+    ) -> Result<Option<BoundRoutine>, SQLError> {
+        control.check()?;
+        let stored = self.bodies == RoutineBodyCompilation::Stored;
+        let _placement = stored.then(SetPlacementScope::stored_definition);
+        let needs_path = match self.stage {
+            Stage::Regclasses(_) => true,
+            Stage::Dependencies(_) => !self.search_path.is_empty(),
+            Stage::Compile | Stage::Statements(_) => {
+                stored
+                    && !self.search_path.is_empty()
+                    && matches!(def.declaration().body, FunctionBody::Statements(_))
+            }
+            Stage::Finished => false,
+        };
+        let session = context.compilation.session;
+        let _path = needs_path.then(|| SearchPath {
+            session,
+            previous: Some(session.replace_shared_routine_search_path(self.search_path.clone())),
+        });
+        let analysis = &context.compilation.analysis;
+        match &mut self.stage {
+            Stage::Dependencies(input) => {
+                if let Some(changed) = input.advance(
+                    analysis,
+                    context.sources,
+                    &uqa_sql::routines::resolution::RoutineOverloadContext {
+                        catalog: context.overloads,
+                    },
+                    def,
+                    control,
+                )? {
+                    self.changed |= changed;
+                    self.stage = Stage::Compile;
+                }
+            }
+            Stage::Compile => {
+                let def = def.declaration();
+                if matches!(def.body, FunctionBody::Statements(_)) {
+                    self.stage = Stage::Statements(with_parser_context(analysis.parsers, || {
+                        SQLStandardBodyCompilation::new(analysis, def, stored, control)
+                    })?);
+                } else {
+                    self.validated = match self.bodies {
+                        RoutineBodyCompilation::Checked => Some(
+                            compilation::with_routine_settings(&context.compilation, def, || {
+                                compile_function_body(analysis, def)
+                            })?,
+                        ),
+                        RoutineBodyCompilation::Unchecked => defer_function_body(analysis, def)?,
+                        RoutineBodyCompilation::Stored => None,
+                    };
+                    self.compiled = Some(RoutineBody::Source);
+                    self.compiled_stage();
+                }
+            }
+            Stage::Statements(input) => {
+                let FunctionBody::Statements(statements) = &def.declaration().body else {
+                    unreachable!("SQL-standard compilation")
+                };
+                if with_parser_context(analysis.parsers, || {
+                    input.advance(analysis, statements, control)
+                })? {
+                    let Stage::Statements(input) =
+                        std::mem::replace(&mut self.stage, Stage::Finished)
+                    else {
+                        unreachable!()
+                    };
+                    self.compiled = Some(RoutineBody::Bound(input.into_shared(control)?));
+                    self.compiled_stage();
+                }
+            }
+            Stage::Regclasses(input) => {
+                if let Some(changed) =
+                    input.advance(analysis.types, context.regclasses, def, control)?
+                {
+                    self.changed |= changed;
+                    self.recompile = changed;
+                    if changed {
+                        self.compiled = None;
+                        self.validated = None;
+                        self.stage = Stage::Compile;
+                    } else {
+                        self.stage = Stage::Finished;
+                    }
+                }
+            }
+            Stage::Finished => {
+                return Ok(Some(BoundRoutine {
+                    body: self.compiled.take().expect("compiled routine"),
+                    validated: self.validated.take(),
+                    changed: self.changed,
+                }))
+            }
         }
-        (RoutineBodyCompilation::Unchecked, FunctionBody::Source(_)) => {
-            defer_function_body(&context.analysis, def)
-        }
-        (RoutineBodyCompilation::Stored, FunctionBody::Source(_)) => Ok(None),
+        Ok(None)
+    }
+
+    fn compiled_stage(&mut self) {
+        self.stage = if self.recompile {
+            Stage::Finished
+        } else {
+            Stage::Regclasses(RoutineRegclassBinding::default())
+        };
     }
 }
 
-fn bind_routine_definition_dependencies(
-    context: &RoutineDefinitionContext<'_>,
-    def: &mut CreateFunction,
-    mode: RoutineCompilationMode,
-) -> Result<bool, SQLError> {
-    with_creation_search_path(context, def, |def| {
-        dependencies::bind_routine_definition_dependencies(
-            &context.compilation.analysis,
-            context.sources,
-            &uqa_sql::routines::resolution::RoutineOverloadContext {
-                catalog: context.overloads,
-            },
-            def,
-            mode,
-        )
-    })
+struct SearchPath<'a> {
+    session: &'a dyn compilation::RoutineCompilationSession,
+    previous: Option<Arc<Vec<String>>>,
 }
 
-/// Resolve names in stored routine syntax with the search path captured when the routine was created.
-fn with_creation_search_path<T>(
-    context: &RoutineDefinitionContext<'_>,
-    def: &mut CreateFunction,
-    bind: impl FnOnce(&mut CreateFunction) -> Result<T, SQLError>,
-) -> Result<T, SQLError> {
-    if def.creation_search_path.is_empty() {
-        return bind(def);
+impl Drop for SearchPath<'_> {
+    fn drop(&mut self) {
+        self.session.restore_shared_routine_search_path(
+            self.previous.take().expect("active routine search path"),
+        );
     }
-    let previous = context
-        .compilation
-        .session
-        .replace_routine_search_path(def.creation_search_path.clone());
-    let result = bind(def);
-    context
-        .compilation
-        .session
-        .restore_routine_search_path(previous);
-    result
-}
-
-fn bind_routine_regclass_constants(
-    context: &RoutineDefinitionContext<'_>,
-    definition: &mut CreateFunction,
-) -> Result<bool, SQLError> {
-    let previous = context
-        .compilation
-        .session
-        .replace_routine_search_path(definition.creation_search_path.clone());
-    let result = regclass::bind_routine_regclass_constants(
-        context.compilation.analysis.types,
-        context.regclasses,
-        definition,
-    );
-    context
-        .compilation
-        .session
-        .restore_routine_search_path(previous);
-    result
 }

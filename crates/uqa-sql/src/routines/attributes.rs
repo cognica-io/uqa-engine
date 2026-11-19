@@ -91,14 +91,29 @@ pub fn validate_parallel(clauses: &RoutineAttributeClauses) -> Result<(), SQLErr
 
 /// The language `CreateFunction` looks up: a routine without one reports `no language specified`, and only SQL and PL/pgSQL exist.
 pub fn validate_routine_language(def: &CreateFunction) -> Result<(), SQLError> {
+    crate::catalog::work::inline(validate_routine_language_with_work(
+        def,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+        &mut (),
+    ))
+}
+
+pub(super) async fn validate_routine_language_with_work(
+    def: &CreateFunction,
+    control: &uqa_core::memory::ProductionControl<'_>,
+    work: &mut (impl crate::catalog::work::Work + Send),
+) -> Result<(), SQLError> {
     if def.language.is_empty() {
         return Err(definition_error("no language specified"));
     }
     if !matches!(def.language.as_str(), "plpgsql" | "sql") {
-        return Err(routine_error(
-            "42704",
-            format!("language \"{}\" does not exist", def.language),
-        ));
+        let message = crate::catalog::work::text_parts(
+            work,
+            &["language \"", &def.language, "\" does not exist"],
+            control,
+        )
+        .await?;
+        return Err(SQLError::admit_routine_message("42704", message, control)?);
     }
     Ok(())
 }

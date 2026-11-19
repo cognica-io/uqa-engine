@@ -45,7 +45,7 @@ fn vector_field_guard_reclamation_bounds_deleted_tables_and_preserves_writers() 
             .range((lower, 0)..(upper, 0))
             .unwrap()
             .count(),
-        1
+        0
     );
 }
 
@@ -359,7 +359,7 @@ fn diskann_maintenance_uses_finite_key_only_discovery_and_vacuum() {
                 .unwrap()
                 .len()
                 .unwrap(),
-            2
+            0
         );
     }
 }

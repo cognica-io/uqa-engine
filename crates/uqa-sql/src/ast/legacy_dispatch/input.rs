@@ -13,7 +13,7 @@ use crate::ast::{
 };
 use uqa_core::{
     image_io::{AsyncImageInput, ImageIoError},
-    memory::BudgetedVec,
+    memory::{BudgetedSmallVec, MemoryBudget, MemoryError, ProductionControl},
     CancellationToken,
 };
 
@@ -27,7 +27,116 @@ impl CreateFunction {
         original: &CancellationToken,
         input: &mut AsyncImageInput<'_>,
     ) -> Result<bool, ImageIoError> {
-        observe(Node::Function(self), original, input).await
+        let mut nodes = BorrowedNodes::new(Node::Function(self), input, original).await?;
+        while let Some(node) = nodes.next(original, input).await? {
+            if node.needs_migration(original, input).await? {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+}
+
+/// The original children of a stored expression, including schema-specific boundaries that the consumer can reject before entering a nested query.
+pub(crate) struct StoredExpressionNodes<'a>(BorrowedNodes<'a>);
+
+impl<'a> StoredExpressionNodes<'a> {
+    pub(crate) async fn next(
+        &mut self,
+        control: &ProductionControl<'_>,
+        work: &mut impl crate::catalog::work::Work,
+    ) -> Result<Option<&'a Expr>, ImageIoError> {
+        while let Some(node) = self.0.next_with_work(control, work).await? {
+            if let Node::Expression(expression) = node {
+                return Ok(Some(expression));
+            }
+        }
+        Ok(None)
+    }
+}
+
+impl Expr {
+    pub(crate) fn stored_nodes(
+        &self,
+        memory: &MemoryBudget,
+    ) -> Result<StoredExpressionNodes<'_>, MemoryError> {
+        Ok(StoredExpressionNodes(BorrowedNodes::root(
+            Node::Expression(self),
+            memory,
+        )?))
+    }
+
+    /// Observe the scalar registry lookups of a stored schema expression. An explicit stored binding keeps its selected implementation.
+    pub async fn visit_runtime_scalar_calls<'a, 'input: 'a, F>(
+        &'a self,
+        original: &'a CancellationToken,
+        input: &'a mut AsyncImageInput<'input>,
+        visit: &'a mut F,
+    ) -> Result<(), crate::SQLError>
+    where
+        F: FnMut(
+                &str,
+                crate::binding::view_dependencies::StoredFunctionSite,
+            ) -> Result<(), crate::SQLError>
+            + Send,
+    {
+        use crate::binding::view_dependencies::StoredFunctionSite;
+        self.visit_stored_scalar_calls_from_input(original, input, &mut |name, binding| {
+            if let Some(site) = StoredFunctionSite::ScalarOnly.with_stored_binding(binding) {
+                visit(name, site)?;
+            }
+            Ok(())
+        })
+        .await
+    }
+
+    /// Legacy rewrite predicates retain their SQL placements until ordinary binding installs a condition plan.
+    pub(crate) async fn visit_runtime_query_calls(
+        &self,
+        original: &CancellationToken,
+        input: &mut AsyncImageInput<'_>,
+        visit: &mut (impl FnMut(
+            &str,
+            crate::binding::view_dependencies::StoredFunctionSite,
+        ) -> Result<(), crate::SQLError>
+                  + Send),
+    ) -> Result<(), crate::SQLError> {
+        use crate::binding::view_dependencies::StoredFunctionSite as Site;
+        let mut nodes = BorrowedNodes::new(Node::Expression(self), input, original).await?;
+        while let Some(node) = nodes.next(original, input).await? {
+            let (name, site, binding) = match node {
+                Node::Expression(Self::Func { name, binding, .. }) => {
+                    (name, Site::Expression, binding.as_ref())
+                }
+                Node::Expression(Self::WindowCall { name, .. }) => (name, Site::Window, None),
+                Node::From(FromClause::Function { name, binding, .. })
+                | Node::TableFunction(TableFunction { name, binding, .. }) => {
+                    (name, Site::From, binding.as_ref())
+                }
+                _ => continue,
+            };
+            if let Some(site) = site.with_stored_binding(binding) {
+                visit(name, site)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Visit scalar function calls in stored syntax without evaluating them or copying their children. The original and invoking controls govern every traversal frame.
+    pub(crate) async fn visit_stored_scalar_calls_from_input(
+        &self,
+        original: &CancellationToken,
+        input: &mut AsyncImageInput<'_>,
+        visit: &mut (impl FnMut(&str, Option<&crate::ast::FunctionBinding>) -> Result<(), crate::SQLError>
+                  + Send),
+    ) -> Result<(), crate::SQLError> {
+        let mut nodes = BorrowedNodes::new(Node::Expression(self), input, original).await?;
+        while let Some(node) = nodes.next(original, input).await? {
+            if let Node::Expression(Self::Func { name, binding, .. }) = node {
+                visit(name, binding.as_ref())?;
+            }
+        }
+        Ok(())
     }
 }
 
@@ -93,39 +202,75 @@ fn item<'a, T>(
         .map_or(Child::Done, |value| Child::Node(node(value)))
 }
 
-async fn observe(
-    root: Node<'_>,
-    original: &CancellationToken,
-    input: &mut AsyncImageInput<'_>,
-) -> Result<bool, ImageIoError> {
-    original.check()?;
-    input.checkpoint().await?;
-    original.check()?;
-    let mut frames = BudgetedVec::new(input.memory);
-    frames.push(Frame {
-        node: root,
-        position: 0,
-    })?;
-    while let Some(frame) = frames.last_mut() {
+struct BorrowedNodes<'a> {
+    frames: BudgetedSmallVec<[Frame<'a>; 4]>,
+    entering: bool,
+}
+
+impl<'a> BorrowedNodes<'a> {
+    async fn new(
+        root: Node<'a>,
+        input: &mut AsyncImageInput<'_>,
+        original: &CancellationToken,
+    ) -> Result<Self, ImageIoError> {
         original.check()?;
         input.checkpoint().await?;
         original.check()?;
-        if frame.position == 0 && frame.node.needs_migration(original, input).await? {
-            return Ok(true);
-        }
-        let child = frame.node.child(frame.position);
-        frame.position += 1;
-        match child {
-            Child::Node(node) => frames.push(Frame { node, position: 0 })?,
-            Child::Skip => {}
-            Child::Done => {
-                frames.pop();
+        Ok(Self::root(root, input.memory)?)
+    }
+
+    fn root(root: Node<'a>, memory: &MemoryBudget) -> Result<Self, MemoryError> {
+        let mut frames = BudgetedSmallVec::new(memory);
+        frames.push(Frame {
+            node: root,
+            position: 0,
+        })?;
+        Ok(Self {
+            frames,
+            entering: true,
+        })
+    }
+
+    async fn next(
+        &mut self,
+        original: &CancellationToken,
+        input: &mut AsyncImageInput<'_>,
+    ) -> Result<Option<Node<'a>>, ImageIoError> {
+        let control = ProductionControl::new(input.memory, original, input.cancellation);
+        self.next_with_work(&control, input).await
+    }
+
+    async fn next_with_work(
+        &mut self,
+        control: &ProductionControl<'_>,
+        work: &mut impl crate::catalog::work::Work,
+    ) -> Result<Option<Node<'a>>, ImageIoError> {
+        while let Some(frame) = self.frames.last_mut() {
+            if self.entering || frame.position != 0 {
+                control.check_cancellation()?;
+                work.checkpoint().await?;
+                control.check_cancellation()?;
+            }
+            if self.entering {
+                self.entering = false;
+                return Ok(Some(frame.node));
+            }
+            let child = frame.node.child(frame.position);
+            frame.position += 1;
+            match child {
+                Child::Node(node) => {
+                    self.frames.push(Frame { node, position: 0 })?;
+                    self.entering = true;
+                }
+                Child::Skip => {}
+                Child::Done => {
+                    self.frames.pop();
+                }
             }
         }
+        control.check_cancellation()?;
+        Ok(None)
     }
-    original.check()?;
-    input.cancellation.check()?;
-    Ok(false)
 }
 
 impl<'a> Node<'a> {

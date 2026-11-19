@@ -113,7 +113,7 @@ fn predecessor_conversion_rolls_back_schema_and_copied_payloads_together() {
                 schema::definition_matches(sqlite, TABLE.0, PREVIOUS_TABLE)?,
                 Some(true)
             );
-            validate_triggers(sqlite, false)?;
+            validate_triggers(sqlite, false, false)?;
             assert_eq!(
                 sqlite.query_row(
                     "SELECT count(*) FROM sqlite_schema WHERE name = '_uqa_mvcc_previous_versions'",

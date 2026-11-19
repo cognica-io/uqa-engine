@@ -6,6 +6,7 @@
 
 //! Bind and rewrite durable routine identities in stored SQL schema expressions.
 use super::{regclass::SchemaReferenceCatalog, walk_schema_expr_mut};
+use crate::binding::stored_routines::StoredCallOrigin;
 use crate::schema::{SchemaBindingContext, SchemaExpressionCatalog};
 use crate::semantics::conflict::InferenceBindingScope;
 use crate::{
@@ -121,22 +122,47 @@ pub fn bind_table_schema_routine_identities(
     columns: &mut [crate::ast::ColumnDef],
     checks: &mut [crate::ast::TableCheck],
 ) -> Result<bool, String> {
-    let check_columns = columns.to_vec();
-    bind_table_schema_routine_identities_with_check_columns(
-        context,
-        table_name,
-        columns,
-        checks,
-        &check_columns,
-    )
+    StoredCallOrigin::Definition.bind_table_identities(context, table_name, columns, checks)
+}
+
+impl StoredCallOrigin {
+    /// Bind a new table's declarations or validate its already stored expressions using their current call placement.
+    pub fn bind_table_identities(
+        self,
+        context: &SchemaDependencyBindingContext<'_>,
+        table_name: &str,
+        columns: &mut [ColumnDef],
+        checks: &mut [crate::ast::TableCheck],
+    ) -> Result<bool, String> {
+        let check_columns = columns.to_vec();
+        bind_table_columns(self, context, table_name, columns, checks, &check_columns)
+    }
 }
 
 pub fn bind_table_schema_routine_identities_with_check_columns(
     context: &SchemaDependencyBindingContext<'_>,
     table_name: &str,
-    columns: &mut [crate::ast::ColumnDef],
+    columns: &mut [ColumnDef],
     checks: &mut [crate::ast::TableCheck],
-    check_columns: &[crate::ast::ColumnDef],
+    check_columns: &[ColumnDef],
+) -> Result<bool, String> {
+    bind_table_columns(
+        StoredCallOrigin::Definition,
+        context,
+        table_name,
+        columns,
+        checks,
+        check_columns,
+    )
+}
+
+fn bind_table_columns(
+    origin: StoredCallOrigin,
+    context: &SchemaDependencyBindingContext<'_>,
+    table_name: &str,
+    columns: &mut [ColumnDef],
+    checks: &mut [crate::ast::TableCheck],
+    check_columns: &[ColumnDef],
 ) -> Result<bool, String> {
     let mut changed = super::regclass::bind_table_schema_regclass_constants(
         context.references,
@@ -146,24 +172,31 @@ pub fn bind_table_schema_routine_identities_with_check_columns(
     )?;
     for column in columns {
         if let Some(default) = &mut column.default {
-            changed |= bind_default_routine_identities(context, table_name, &column.name, default)?;
+            changed |= bind_column_default(origin, context, table_name, &column.name, default)?;
         }
         if let Some(check) = &mut column.check {
             if schema_expr_may_require_routine_identity_binding(context, check)? {
-                changed |=
-                    bind_check_routines(context, table_name, table_name, check_columns, check)
-                        .map_err(|error| {
-                            format!(
-                                "bind CHECK routine identities for `{table_name}`.`{}`: {error}",
-                                column.name
-                            )
-                        })?;
+                changed |= bind_check_routines(
+                    origin,
+                    context,
+                    table_name,
+                    table_name,
+                    check_columns,
+                    check,
+                )
+                .map_err(|error| {
+                    format!(
+                        "bind CHECK routine identities for `{table_name}`.`{}`: {error}",
+                        column.name
+                    )
+                })?;
             }
         }
     }
     for check in checks {
         if schema_expr_may_require_routine_identity_binding(context, &check.expr)? {
             changed |= bind_check_routines(
+                origin,
                 context,
                 table_name,
                 table_name,
@@ -184,18 +217,36 @@ pub fn bind_default_routine_identities(
     column_name: &str,
     default: &mut crate::ast::Expr,
 ) -> Result<bool, String> {
+    bind_column_default(
+        StoredCallOrigin::Definition,
+        context,
+        table_name,
+        column_name,
+        default,
+    )
+}
+
+fn bind_column_default(
+    origin: StoredCallOrigin,
+    context: &SchemaDependencyBindingContext<'_>,
+    table_name: &str,
+    column_name: &str,
+    default: &mut Expr,
+) -> Result<bool, String> {
     let changed =
         super::regclass::bind_schema_regclass_constants(context.references, default, false)?;
     if !schema_expr_may_require_routine_identity_binding(context, default)? {
         return Ok(changed);
     }
-    let bound = bind_default_routines(context, default, default.clone()).map_err(|error| {
-        format!("bind default routine identities for `{table_name}`.`{column_name}`: {error}")
-    })?;
+    let bound =
+        bind_default_routines(origin, context, default, default.clone()).map_err(|error| {
+            format!("bind default routine identities for `{table_name}`.`{column_name}`: {error}")
+        })?;
     Ok(changed || bound)
 }
 
 fn bind_check_routines(
+    origin: StoredCallOrigin,
     context: &SchemaDependencyBindingContext<'_>,
     table: &str,
     qualifier: &str,
@@ -203,7 +254,7 @@ fn bind_check_routines(
     expression: &mut Expr,
 ) -> Result<bool, SQLError> {
     let binding = context.bindings.binding_scope()?;
-    crate::schema::constraints::bind_stored_check_expression(
+    origin.bind_check_expression(
         &SchemaBindingContext {
             catalog: context.schema,
             binding: &binding.context(),
@@ -215,18 +266,20 @@ fn bind_check_routines(
     )
 }
 fn bind_default_routines(
+    origin: StoredCallOrigin,
     context: &SchemaDependencyBindingContext<'_>,
     expression: &mut Expr,
     typed: Expr,
 ) -> Result<bool, SQLError> {
     let binding = context.bindings.binding_scope()?;
-    crate::schema::defaults::bind_stored_schema_expression(
+    origin.bind_schema_expression(
         &SchemaBindingContext {
             catalog: context.schema,
             binding: &binding.context(),
         },
         expression,
         typed,
+        &crate::RowSchema::default(),
     )
 }
 
@@ -247,8 +300,13 @@ pub fn restore_legacy_default_sequence_inputs(
             sequences,
             default,
         )? {
-            bind_default_routines(context, default, default.clone())
-                .map_err(|error| error.to_string())?;
+            bind_default_routines(
+                StoredCallOrigin::Persisted,
+                context,
+                default,
+                default.clone(),
+            )
+            .map_err(|error| error.to_string())?;
             changed = true;
         }
     }

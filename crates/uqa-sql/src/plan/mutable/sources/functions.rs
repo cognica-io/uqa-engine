@@ -37,7 +37,7 @@ impl SourcePlan {
             let source = copying.function_group_member(function, alias.as_deref())?;
             MutableSourcePlan {
                 source,
-                memory: Some(copying.into_rewrite_memory()),
+                memory: Some(copying.into_rewrite_memory()).into(),
             }
         } else {
             let function = function.clone();
@@ -53,7 +53,7 @@ impl SourcePlan {
                     column_types: function.column_types,
                     ordinality: false,
                 },
-                memory: None,
+                memory: None.into(),
             }
         };
         control.check()?;
@@ -98,7 +98,7 @@ impl MutableSourcePlan {
             } => *body,
             _ => unreachable!("selected query source"),
         };
-        let output = MutableQueryPlan { query, memory };
+        let output = MutableQueryPlan::from_rewrite_parts(query, memory);
         drop(self);
         control.check()?;
         Ok(output)

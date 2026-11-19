@@ -91,13 +91,14 @@ impl Catalog {
         {
             return Ok(found);
         }
-        self.conn.with(|conn| {
-            Ok(conn.query_row(
-                "SELECT EXISTS(SELECT 1 FROM _named_graphs WHERE name = ?1)",
-                [name],
-                |row| row.get(0),
-            )?)
-        })
+        self.conn
+            .with(|conn| Self::named_graph_exists_on(conn, name))
+    }
+
+    pub(super) fn named_graph_exists_on(conn: &rusqlite::Connection, name: &str) -> Result<bool> {
+        Ok(conn
+            .prepare_cached("SELECT EXISTS(SELECT 1 FROM _named_graphs WHERE name = ?1)")?
+            .query_row([name], |row| row.get(0))?)
     }
 
     pub fn graph_vertex(&self, id: u64) -> Result<Option<GraphVertexRow>> {

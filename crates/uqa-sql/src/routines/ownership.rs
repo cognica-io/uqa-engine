@@ -80,15 +80,32 @@ impl SQLUserFunction {
     }
 }
 
-pub(super) fn retained_bytes(function: &SQLRoutine) -> Result<usize, SQLError> {
+impl super::StoredRoutineDefinition {
+    pub fn publish(
+        self,
+        body: RoutineBody,
+        control: &ProductionControl<'_>,
+    ) -> Result<SQLRoutine, SQLError> {
+        let (definition, children) = self.into_definition(control)?;
+        let (definition, lease) = definition.into_parts();
+        RetainedRoutineValue::native_with_children(
+            control.finish(SQLUserFunction::new(definition, body), lease)?,
+            children,
+            control,
+        )
+        .map_err(Into::into)
+    }
+}
+
+pub(super) fn retained_bytes(function: &SQLRoutine) -> Result<usize, MemoryError> {
     let body = match &function.body {
         RoutineBody::Source => 0,
         RoutineBody::Bound(body) => body.reserved_bytes(),
     };
-    Ok(function
+    function
         .reserved_bytes()
         .checked_add(body)
-        .ok_or(MemoryError::SizeOverflow)?)
+        .ok_or(MemoryError::SizeOverflow)
 }
 
 pub(super) fn retained_by(function: &SQLRoutine, control: &ProductionControl<'_>) -> bool {

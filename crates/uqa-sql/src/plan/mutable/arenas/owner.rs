@@ -63,7 +63,7 @@ impl ScalarQueryArena {
         let query = self.take(index);
         let (query, owner) = map(query)?.into_rewrite_parts(control)?;
         self.queries[index] = query;
-        if let Some(memory) = &mut self.memory {
+        if let Some(memory) = self.memory.as_mut() {
             *memory
                 .item_mut(index)
                 .as_mut()

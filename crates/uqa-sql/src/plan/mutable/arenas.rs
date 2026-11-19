@@ -7,7 +7,7 @@
 //! Scalar-query compaction keeps the existing remapping algorithm and retires child owners with their inputs.
 
 use super::{
-    memory::{Folding, RewriteField, RewriteMemory},
+    memory::{Folding, RewriteFields, RewriteMemory},
     MutableCommandPlan, MutableQueryPlan,
 };
 use crate::{
@@ -18,7 +18,7 @@ use crate::{
     },
     SQLError,
 };
-use uqa_core::memory::{BudgetedVec, ProductionControl};
+use uqa_core::memory::ProductionControl;
 
 mod nodes;
 mod owner;
@@ -89,7 +89,7 @@ impl MutableQueryPlan {
 
 async fn compact<W: Work, K: Fn(usize) -> bool + ?Sized>(
     arena: &mut Vec<QueryPlan>,
-    mut fields: Option<&mut BudgetedVec<RewriteField>>,
+    mut fields: Option<&mut RewriteFields>,
     keep: &K,
     retirement: Option<&mut Retirement>,
     control: Option<&ProductionControl<'_>>,
@@ -173,7 +173,7 @@ impl MutableCommandPlan {
     }
 }
 
-fn query_fields(memory: &mut RewriteMemory) -> &mut BudgetedVec<RewriteField> {
+fn query_fields(memory: &mut RewriteMemory) -> &mut RewriteFields {
     let root = memory.field_mut("root").as_mut().expect("query root");
     let block = match root {
         RewriteMemory::Fields { fields, .. } => fields.iter().any(|field| field.name == "block"),

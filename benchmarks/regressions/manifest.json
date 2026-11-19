@@ -2,6 +2,898 @@
   "schema_version": 1,
   "checks": [
     {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "a_single_wide_path_definition_yields_for_sequences_labels_and_utf8_fragments",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/index/path_index/catalog/persistent/definition/tests.rs",
+      "capability": "Persistent graph path-index restoration",
+      "workload": "Read large nested sequence lists, wide lists of labels and long escaped UTF-8 strings with single-step windows.",
+      "invariant": "Definition input yields within each shape, keeps the compact physical spelling and releases partial allocations after interruption.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "stored_path_sequences_preserve_compact_serde_spelling_and_diagnostics",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/index/path_index/catalog/persistent/definition/tests.rs",
+      "capability": "Persistent graph path-index restoration",
+      "workload": "Read valid and malformed stored declarations and compare results to the original typed JSON decoder.",
+      "invariant": "Valid sequences retain their compact JSON and malformed input reports the original error and position.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "test",
+      "test": "private_durable_path_catalog_binds_complete_generations_in_bounded_windows",
+      "cases": 1,
+      "source": "crates/uqa-graph/tests/embedding_index/paths/registry.rs",
+      "capability": "Persistent graph path-index restoration",
+      "workload": "Reconstruct a 4,096-definition registry in small windows across an independent committed edit and interrupt partial inputs.",
+      "invariant": "The complete selected generation retains its original physical handles. Cancellation and admission denial release partial bindings and preserve the caller-owned transaction.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "retained_registration_resolves_the_recorded_graph_in_windows_and_transfers_both_outputs",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/path_index/tests.rs",
+      "capability": "Persistent graph path-index restoration",
+      "workload": "Resolve the recorded owner of a wide legacy key using a single-step window and exhaust the input allowance.",
+      "invariant": "Both the canonical key and the graph identity preserve their complete text and storage reservations and retire on failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "sqlite_native_path_index_owner_reads_bound_physical_rows_and_preserve_private_state",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/catalog/tests/text_input.rs",
+      "capability": "Persistent graph path-index restoration",
+      "workload": "Point-read the recorded path owner and test key and value size limits, memory denial and cancellation in the native SQLite session.",
+      "invariant": "The provider charges the encoded state row and exact key before returning an owner and retains the selected transaction.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "sqlite_key_value_path_index_owner_reads_bound_physical_rows_and_preserve_private_state",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/catalog/tests/text_input.rs",
+      "capability": "Persistent graph path-index restoration",
+      "workload": "Point-read the recorded path owner at the encoded key and exercise exact bounds in a SQLite KV session.",
+      "invariant": "The six-byte key prefix and owner value are charged at the physical boundary. Failure leaves the selected state intact.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-redb",
+      "kind": "test",
+      "test": "redb_path_index_owner_reads_bound_physical_rows_and_preserve_private_state",
+      "cases": 1,
+      "source": "crates/uqa-storage-redb/tests/store_contract/catalog_text_input.rs",
+      "capability": "Persistent graph path-index restoration",
+      "workload": "Point-read the recorded path owner at the encoded key and exercise exact bounds in a redb session.",
+      "invariant": "The six-byte key prefix and owner value are charged at the physical boundary. Failure leaves the selected state intact.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "persistent_path_registries_yield_between_definitions_before_publication",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/open/persistent_input/tests/graph_paths.rs",
+      "capability": "Persistent graph path-index restoration",
+      "workload": "Build one and 33 path indexes on a graph with a real edge. Reconstruct each registry one step at a time and query the published index.",
+      "invariant": "Each additional registration requires a later step. The private Engine installs the complete registry together and the resulting index returns the original vertex pair.",
+      "case_names": [
+        "case_1_sqlite_native",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "persistent_path_registries_keep_selected_pairs_and_then_accept_later_writes",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/open/persistent_input/tests/graph_paths.rs",
+      "capability": "Persistent graph path-index restoration",
+      "workload": "Change the source after a private registry has started. Read the selected definition and reachability pair, finish the session and then register another index.",
+      "invariant": "The private transaction keeps the old materialization. The activated engine sees later commits and admits a new index after the restore allowance is occupied and its token cancelled.",
+      "case_names": [
+        "case_1_sqlite_native",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "persistent_path_registries_release_partial_bindings_and_the_read_transaction",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/open/persistent_input/tests/graph_paths.rs",
+      "capability": "Persistent graph path-index restoration",
+      "workload": "Interrupt a private path catalog after input has started using cancellation or allocation denial. Resume ordinary writes against the same provider.",
+      "invariant": "Both failures preserve the published catalog, retire the read transaction and release the restore allowance.",
+      "case_names": [
+        "case_1_sqlite_native",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "empty_path_index_names_and_adjacent_colons_round_trip",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/backup/restore/tests/graph_path_indexes.rs",
+      "capability": "Graph path-index ownership across restore",
+      "workload": "Build an empty index name, an ordinary index, and two registrations with a triple colon at their historical boundary. Reopen the source and restore a full backup.",
+      "invariant": "All four registrations keep their original graph's vertex pairs and the empty and ordinary keys keep their historical spelling.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "graph_path_removal_preserves_literal_encoded_prefixes_and_distinct_owners",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/index/path_index/catalog/tests/ownership.rs",
+      "capability": "Graph path-index ownership",
+      "workload": "Register overlapping ordinary and encoded prefixes in a retained catalog, then remove each graph and read the earlier snapshot.",
+      "invariant": "Removal affects exactly the selected graph and leaves every neighboring key and the original catalog readable.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "restored_path_images_resolve_legacy_names_against_the_original_graphs",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/index/path_index/catalog/tests/ownership.rs",
+      "capability": "Graph path-index ownership",
+      "workload": "Restore an evaluated memory path sequence to catalogs with one, two or no plausible graph owners.",
+      "invariant": "Unique ownership preserves the materialization. Ambiguity, missing graphs and invalid keys are rejected with all memory released.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "path_owner_resolution_yields_and_retires_after_cancellation_or_denial",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/index/path_index/catalog/tests/ownership.rs",
+      "capability": "Graph path-index ownership",
+      "workload": "Restore a wide path name with a single-step work window, then cancel or deny memory while validating its owner.",
+      "invariant": "Ownership resolution yields before completion, and a discarded or rejected continuation releases its allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "canonical_pairs_preserve_simple_keys_and_distinguish_overlapping_delimiters",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/path_index/tests.rs",
+      "capability": "Graph path-index ownership",
+      "workload": "Encode and decode ordinary, empty, Unicode and overlapping-delimiter graph and index names.",
+      "invariant": "Each decoded key gives its original name pair and ordinary keys keep their spelling.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "graph_creation_preserves_only_preexisting_unrecorded_path_owners",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/path_index/tests.rs",
+      "capability": "Graph path-index ownership",
+      "workload": "Add a competing graph name to historical keys with overlapping separators, known owners and unrelated prefixes.",
+      "invariant": "Only a previously unique graph can acquire an owner record. Opaque and unrelated keys require no catalog reads.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "new_graph_preserves_historical_owners_and_raw_cache_state_in_the_same_batch",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/key_value/catalog/path_index_data.rs",
+      "capability": "Graph path-index ownership",
+      "workload": "Add and replace a graph whose stored prefix matches historical path keys of several byte lengths, including an empty index name.",
+      "invariant": "The forward and reverse owner records commit with the graph. Rollback preserves the earlier membership, stored pairs and materialization state.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "historical_owners_require_unique_catalog_evidence_and_scope_destructive_selection",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/path_index/tests.rs",
+      "capability": "Graph path-index ownership",
+      "workload": "Resolve historical and opaque path keys against a recorded owner and the available graph names.",
+      "invariant": "A mutation selects only its owning graph, and an ambiguous historical address fails before deletion.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "retained_legacy_conversion_limits_work_and_preserves_admission_and_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/path_index/tests.rs",
+      "capability": "Graph path-index ownership",
+      "workload": "Canonicalize an admitted historical name across small work windows and exercise insufficient memory and cancellation.",
+      "invariant": "Each output retains its own allocation and earlier private buffers retire on interruption.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "graph_registration_retains_only_unrecorded_legacy_owners_across_rollback_and_reopen",
+      "cases": 2,
+      "source": "crates/uqa-storage-sqlite/src/catalog/tests/graph_path_owners.rs",
+      "capability": "Graph path-index ownership",
+      "workload": "Register, roll back and replace a graph in standalone and native SQLite beside invalid and materialized historical path indexes.",
+      "invariant": "Cold reopening preserves the original owner, definition, validity and stored pairs. Rolling back leaves the original catalog intact.",
+      "case_names": [
+        "case_1_sqlite",
+        "case_2_native"
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "ambiguous_legacy_owner_aborts_graph_creation_and_earlier_owner_changes",
+      "cases": 2,
+      "source": "crates/uqa-storage-sqlite/src/catalog/tests/graph_path_owners.rs",
+      "capability": "Graph path-index ownership",
+      "workload": "Create a graph alongside two historical path indexes, including one that already matches multiple graph names.",
+      "invariant": "A failed creation rolls back the graph and any owner records staged for earlier keys.",
+      "case_names": [
+        "case_1_sqlite",
+        "case_2_native"
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "concurrent_native_removal_cannot_publish_a_stale_legacy_owner",
+      "cases": 2,
+      "source": "crates/uqa-storage-sqlite/src/catalog/tests/graph_path_owners.rs",
+      "capability": "Graph path-index ownership",
+      "workload": "Register a graph while a second native SQLite session removes its matching path definition or the definition's original owner.",
+      "invariant": "Committing the stale registration fails. The competing deletion remains visible and no stale owner record survives rollback.",
+      "case_names": [
+        "case_1_index",
+        "case_2_owner"
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "test",
+      "test": "graph_scoped_removal_uses_recorded_owners_and_rolls_back_ambiguous_legacy_changes",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/tests/cases/persistent_graph/path_ownership.rs",
+      "capability": "Graph path-index ownership",
+      "workload": "Exercise deletion and rollback on physical definitions in standalone SQLite, native SQLite, SQLite KV and in-memory KV.",
+      "invariant": "A recorded owner survives invalidation, unowned physical keys are preserved, and an ambiguous deletion rolls back the whole mutation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "graph_path_indexes_preserve_their_owners_after_source_retirement",
+      "cases": 8,
+      "source": "crates/uqa-engine/src/backup/restore/tests/graph_path_indexes.rs",
+      "capability": "Graph path-index ownership across restore",
+      "workload": "Restore two graph and index pairs with the same historical spelling from full and standalone incremental backups after deleting the source and collecting the ancestor.",
+      "invariant": "Each index returns its original vertex pairs in ordinary and repeatable reads. A write or deletion in one graph preserves the other registration, including after cold reopen.",
+      "case_names": [
+        "case_1_memory::incremental_1_false",
+        "case_1_memory::incremental_2_true",
+        "case_2_sqlite_native::incremental_1_false",
+        "case_2_sqlite_native::incremental_2_true",
+        "case_3_sqlite_kv::incremental_1_false",
+        "case_3_sqlite_kv::incremental_2_true",
+        "case_4_redb::incremental_1_false",
+        "case_4_redb::incremental_2_true"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "legacy_path_indexes_reopen_restore_and_write_to_the_original_owner",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/backup/restore/tests/legacy_graph_path_indexes.rs",
+      "capability": "Graph path-index ownership across restore",
+      "workload": "Open and restore legacy definitions with either recorded materialization owner or one possible catalog graph. Replace the sequence and reopen before dropping the index.",
+      "invariant": "The original graph supplies the exact reachability pairs in a selected snapshot. Replacement and deletion affect the same physical registration.",
+      "case_names": [
+        "case_1_sqlite_native",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "restored_legacy_path_index_keeps_its_owner_when_a_second_graph_is_created",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/backup/restore/tests/legacy_graph_path_indexes.rs",
+      "capability": "Graph path-index ownership across restore",
+      "workload": "Restore a database with a legacy path definition, roll back and then commit creation of a graph whose name also matches. Back up and restore the two independent indexes.",
+      "invariant": "Both graphs preserve their own vertex pairs across cold opens after the source and each selected archive have been removed.",
+      "case_names": [
+        "case_1_sqlite_native",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "legacy_path_indexes_reject_unresolvable_owners_before_publication",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/backup/restore/tests/legacy_graph_path_indexes.rs",
+      "capability": "Graph path-index ownership across restore",
+      "workload": "Open and restore historical definitions with competing, missing and contradictory graph owners.",
+      "invariant": "Cold open and restore diagnose the invalid ownership. A failed restore releases its memory and keeps the destination private.",
+      "case_names": [
+        "case_1_sqlite_native",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "persisted_call_sites_preserve_runtime_fallback_and_require_concrete_function_identities",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/stored_ast/sites/tests.rs",
+      "capability": "Persistent stored function lookup",
+      "workload": "Bind scalar call sites from new and existing declarations against the same selected builtins, qualified names, structural operations and SQL routine identities.",
+      "invariant": "An existing bare call retains its runtime lookup. A positive or qualified builtin keeps its selection, and a resolved SQL object or structural operation still requires its identity.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_routine_defaults_and_bound_bodies_keep_their_call_placements_while_source_remains_deferred",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/routines/native/runtime_calls/tests.rs",
+      "capability": "Application function references in backups",
+      "workload": "Visit SQL-standard and quoted routines with parameter defaults, FROM calls, window calls and scalar expressions under two work windows.",
+      "invariant": "Stored and retained executable statements select the same call placements. Quoted source remains deferred, utility statements retain their SQL diagnostic and traversal releases its memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "physical_routine_records_resume_overloads_and_release_their_private_inputs",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/routines/catalog/input/runtime_calls/tests.rs",
+      "capability": "Application function references in backups",
+      "workload": "Read multiple versions of a routine signature from one encoded catalog with short work windows. Cancel one input during decoding.",
+      "invariant": "The physical catalog yields the bound call and the deferred routine’s parameter default, preserves overload order, and retires all private allocations after completion or cancellation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "bounded_fingerprint_cache_rejects_evicted_and_replaced_owners",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/memory_capture/image_fingerprints.rs",
+      "capability": "Bounded native image fingerprint retention",
+      "workload": "Replace the registry generation and an immutable owner, then scan more distinct image addresses than the fingerprint cache can retain.",
+      "invariant": "Weak certificates do not retain payloads, old generations and replaced or evicted owners compare through the reader, and repeated ordered scans reuse the complete bounded address sample.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "incremental_fingerprints_preserve_a_pinned_sparse_image_and_measure_actual_reads",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/storage/backup_provider/public.rs",
+      "capability": "Snapshot-qualified incremental image reuse",
+      "workload": "Capture two large rows, repeat the same cut, replace one row and compare an incremental image and an independent full image pinned before a later write.",
+      "invariant": "Each provider reads the changed row and reuses at least one complete unchanged row from bounded metadata. The unchanged small memory image hashes its 33-byte OID header and its nine-byte empty function declaration section. Reported hashed, reused and stored byte counts agree with the inventory.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "incremental_capture_reuses_provider_units_and_recomputes_the_registered_function_section",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/storage/backup_provider/public.rs",
+      "capability": "Incremental backup of registered SQL functions",
+      "workload": "Back up a stored view and a 64 KiB row, retire its registered scalar after pinning the next incremental cut, then capture the new registration state against the original parent.",
+      "invariant": "The pinned root retains its scalar declaration. The later cut writes exactly the changed function section and certifies the unchanged row. Source positions count catalog projection, and hashed and certified bytes sum to the verified image length.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-storage-redb",
+      "kind": "lib",
+      "test": "cold_fingerprint_reads_stay_bounded_and_select_the_pinned_revision",
+      "cases": 1,
+      "source": "crates/uqa-storage-redb/src/mvcc/tests/backup_metadata/fingerprints.rs",
+      "capability": "Cold redb retained revision fingerprints",
+      "workload": "Reopen without the redb page cache, replace a two-MiB row, then read the original revision through both backup certificates and ordinary key-only access on the counted file backend.",
+      "invariant": "The original encoded length and independently computed SHA-256 match while the physical backend reads less than 256 KiB with an 8 KiB invocation allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-redb",
+      "kind": "lib",
+      "test": "equal_large_values_in_one_revision_share_bytes_until_the_last_retained_version_is_reclaimed",
+      "cases": 1,
+      "source": "crates/uqa-storage-redb/src/mvcc/tests/backup_metadata/fingerprints/bodies.rs",
+      "capability": "Physical reuse and reclamation of large redb values",
+      "workload": "Commit three 2 KiB values, two with identical bytes. Pin the revision, replace one of the matching values, then retire the snapshot and delete the remaining records.",
+      "invariant": "The three records occupy two stored bodies. The shared body keeps both owners while the old snapshot exists, retains one owner after reclamation and is released after its last owner is deleted. All visible values match their original bytes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-redb",
+      "kind": "lib",
+      "test": "point_and_batch_metadata_select_historical_and_current_revisions_without_reading_large_values",
+      "cases": 1,
+      "source": "crates/uqa-storage-redb/src/mvcc/tests/backup_metadata/fingerprints.rs",
+      "capability": "Cold redb point and batch metadata reads",
+      "workload": "Read a two-MiB record's metadata at its pinned and current revision with the page cache disabled. Repeat each lookup in a batch that requests a missing key and the same record twice.",
+      "invariant": "Each point lookup and each batch reads less than 256 KiB from storage with a 1 KiB invocation allowance. Each batch uses one physical read transaction and preserves request order, absence and revision.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "persistent_publication_opens_in_windows_and_resumes_after_runtime_abandonment",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/backup/restore/tests/persistent.rs",
+      "capability": "Persistent restore activation",
+      "workload": "Publish in one-step windows, abandon an installed database before its runtime opens, remove its archive and resume the same request on each persistent provider.",
+      "invariant": "The target stays absent until explicit publication. Subsequent steps yield while opening the catalog. Recovery, cancellation after installation and repeated publication preserve later writes and release every private handle.",
+      "case_names": [
+        "case_1_sqlite_native",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "private_maintenance_keeps_registered_declarations_without_holding_application_gates",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/statistics/worker/tests.rs",
+      "capability": "Registered SQL functions during automatic maintenance",
+      "workload": "Hold a maintenance session's statement gate while replacing and retiring an application function.",
+      "invariant": "The private session binds against stable registered declarations. Automatic sampling permits ordinary application registration changes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "archive_analysis_uses_the_supplied_owner_before_and_after_publication",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/backup/restore/tests/analyzer_resources.rs",
+      "capability": "Restored analyzer resource ownership",
+      "workload": "Restore an analyzer under a denied descriptor allowance and then with an available resource owner. Use the published Engine and a cold persistent session.",
+      "invariant": "Unavailable resources leave the destination private. Successful restoration and later analyzer registrations retain the selected owner.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "persistent_dictionary_restore_requires_the_archived_digest",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/backup/restore/tests/analyzer_resources.rs",
+      "capability": "Restored analyzer resource ownership",
+      "workload": "Restore a saved Korean analyzer against missing, mismatched and matching dictionary bytes. Reopen the destination with the installed resources.",
+      "invariant": "The resolver receives the archived digest. Only its validated contents publish and produce the original text analysis after reopen.",
+      "case_names": [
+        "case_1_sqlite_native",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "durable_completion_keeps_both_allowances_after_the_request_is_cancelled",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/read_control.rs",
+      "capability": "Durable restore resources",
+      "workload": "Reserve memory under a restore request, then cancel it while its durable completion retains the original file and memory budgets.",
+      "invariant": "The completion remains active and accounts against both original allowances.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "catalog_validation_returns_the_original_cancellation_reason_from_sql",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/backup/validation/tests.rs",
+      "capability": "Private restore validation",
+      "workload": "Forward cancellation raised inside SQL relationship validation through a stored routine context.",
+      "invariant": "The public restore error preserves the original cancellation reason.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "restore_rejects_a_live_foreign_server_bound_to_a_different_oid_or_name",
+      "cases": 8,
+      "source": "crates/uqa-engine/src/backup/restore/tests/foreign_bindings.rs",
+      "capability": "Foreign catalog restoration",
+      "workload": "Restore archives containing a valid live server and a table with a conflicting server name or OID.",
+      "invariant": "Every provider rejects the contradicting reference before publishing the destination.",
+      "case_names": [
+        "case_1_memory::binding_1_Binding__WrongOid",
+        "case_1_memory::binding_2_Binding__WrongName",
+        "case_2_sqlite_native::binding_1_Binding__WrongOid",
+        "case_2_sqlite_native::binding_2_Binding__WrongName",
+        "case_3_sqlite_kv::binding_1_Binding__WrongOid",
+        "case_3_sqlite_kv::binding_2_Binding__WrongName",
+        "case_4_redb::binding_1_Binding__WrongOid",
+        "case_4_redb::binding_2_Binding__WrongName"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "restore_preserves_live_and_historical_foreign_server_bindings",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/backup/restore/tests/foreign_bindings.rs",
+      "capability": "Foreign catalog restoration",
+      "workload": "Restore a table bound to a retired server incarnation alongside live and same-name server definitions.",
+      "invariant": "The surviving table binding keeps its original identity across all four providers.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "restore_rejects_a_live_foreign_wrapper_bound_to_a_different_oid_or_name",
+      "cases": 8,
+      "source": "crates/uqa-engine/src/backup/restore/tests/foreign_bindings.rs",
+      "capability": "Foreign catalog restoration",
+      "workload": "Import a server that contradicts its live wrapper's catalog name or OID.",
+      "invariant": "Logical verification rejects the archive before the restored runtime is published.",
+      "case_names": [
+        "case_1_memory::binding_1_Binding__WrongOid",
+        "case_1_memory::binding_2_Binding__WrongName",
+        "case_2_sqlite_native::binding_1_Binding__WrongOid",
+        "case_2_sqlite_native::binding_2_Binding__WrongName",
+        "case_3_sqlite_kv::binding_1_Binding__WrongOid",
+        "case_3_sqlite_kv::binding_2_Binding__WrongName",
+        "case_4_redb::binding_1_Binding__WrongOid",
+        "case_4_redb::binding_2_Binding__WrongName"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "restore_preserves_a_server_whose_validator_deleted_its_foreign_wrapper",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/backup/restore/tests/foreign_bindings.rs",
+      "capability": "Foreign catalog restoration",
+      "workload": "Create a server through a SQL validator that deletes its own foreign wrapper, then back up and restore the result.",
+      "invariant": "All four providers preserve this reachable server history and its original wrapper reference.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "restore_rejects_foreign_callbacks_that_disagree_with_the_live_sql_routine",
+      "cases": 8,
+      "source": "crates/uqa-engine/src/backup/restore/tests/foreign_callbacks.rs",
+      "capability": "Stored foreign callbacks",
+      "workload": "Restore a wrapper callback with an OID or argument type that disagrees with its live SQL routine.",
+      "invariant": "Every provider rejects the image before publication and persistent open reports the same inconsistency.",
+      "case_names": [
+        "case_1_memory::change_1_Contradiction__Oid",
+        "case_1_memory::change_2_Contradiction__ArgumentType",
+        "case_2_sqlite_native::change_1_Contradiction__Oid",
+        "case_2_sqlite_native::change_2_Contradiction__ArgumentType",
+        "case_3_sqlite_kv::change_1_Contradiction__Oid",
+        "case_3_sqlite_kv::change_2_Contradiction__ArgumentType",
+        "case_4_redb::change_1_Contradiction__Oid",
+        "case_4_redb::change_2_Contradiction__ArgumentType"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "restore_preserves_retired_sql_validators_and_invokes_live_callbacks_only_on_use",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/backup/restore/tests/foreign_callbacks.rs",
+      "capability": "Stored foreign callbacks",
+      "workload": "Capture and restore live and retired validators and perform a later operation that invokes a live callback.",
+      "invariant": "Historical routine identities remain restorable and validation runs no callbacks.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "live_server_validation_preserves_historical_references_and_retires_private_storage",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/foreign/reference/tests.rs",
+      "capability": "Foreign definition validation",
+      "workload": "Check matching, contradictory and retired server references with controlled private memory.",
+      "invariant": "Live identities must match, historical identities survive and private work retires.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "live_wrapper_validation_distinguishes_invalid_and_reserved_references_from_retired_users",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/foreign/wrappers/tests.rs",
+      "capability": "Foreign definition validation",
+      "workload": "Check invalid, reserved and retired user OIDs against live wrapper definitions.",
+      "invariant": "Validation preserves retired user identities and rejects malformed and conflicting live references.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "failed_wrapper_migration_preserves_prior_servers_and_catalog_records",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/foreign/wrappers/tests.rs",
+      "capability": "Foreign definition validation",
+      "workload": "Fail a foreign wrapper migration while reading existing server definitions and metadata.",
+      "invariant": "The original server identities and catalog records survive the failed migration.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "missing_functions_are_retained_but_live_oid_conflicts_are_corruption",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/foreign_wrapper/tests.rs",
+      "capability": "Foreign callback references",
+      "workload": "Check a missing callback and live routine declarations with disagreeing identities and argument types.",
+      "invariant": "The SQL owner retains historical references, rejects live conflicts and preserves cancellation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-api",
+      "kind": "lib",
+      "test": "public_restores_full_and_reprotected_incremental_images_after_source_and_ancestor_loss",
+      "cases": 10,
+      "source": "crates/uqa-api/src/backup/tests/acceptance.rs",
+      "capability": "Public backup recovery",
+      "workload": "Restore a full backup and a reprotected incremental grandchild after removing its source, ancestors and original repository on memory, redb and eight SQLite configurations.",
+      "invariant": "Public Rust jobs retain the captured table, view, routines and sequence behavior, survive cancellation, and publish writable destinations.",
+      "case_names": [
+        "case_01_memory",
+        "case_02_redb",
+        "case_03_native_plain",
+        "case_04_native_encrypted",
+        "case_05_native_compressed",
+        "case_06_native_compressed_encrypted",
+        "case_07_kv_plain",
+        "case_08_kv_encrypted",
+        "case_09_kv_compressed",
+        "case_10_kv_compressed_encrypted"
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "indexed_field_lending_keeps_wide_sibling_measurements",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/mutable/memory/footprint/tests.rs",
+      "capability": "Plan reservation ownership",
+      "workload": "Transfer 4,096 indexed fields in pairs while measuring their owner with exhausted allowance.",
+      "invariant": "Each measurement accounts for every remaining sibling and allocates no scratch.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "interrupted_footprint_observation_restores_return_slots_before_reuse",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/mutable/memory/footprint/tests.rs",
+      "capability": "Plan reservation ownership",
+      "workload": "Interrupt observation after descending thirty-two nested fields and then reuse the same root.",
+      "invariant": "Unwinding restores field ownership and subsequent exact observation allocates no scratch.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "deep_plan_field_footprints_preserve_subtree_ownership_with_exhausted_allowance",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/mutable/memory/retirement/tests/footprint.rs",
+      "capability": "Plan reservation ownership",
+      "workload": "Measure and transfer independently admitted nested field chains on a 256 KiB thread stack after exhausting native memory.",
+      "invariant": "Each subtree retains its exact reservations and its sibling remains independently observable without allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "concurrent_plan_footprint_readers_share_the_original_field_records",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/mutable/memory/retirement/tests/footprint.rs",
+      "capability": "Plan reservation ownership",
+      "workload": "Read nested footprint totals from concurrent observers of the same plan root.",
+      "invariant": "Readers agree on the original reservation total without taking ownership from the published plan.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "nested_query_construction_and_extraction_keep_exact_public_footprints",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/mutable/memory/retirement/tests/footprint.rs",
+      "capability": "Plan reservation ownership",
+      "workload": "Build and extract 1,024 nested query plans through the public mutable plan constructors.",
+      "invariant": "The original shallow SQL plan survives and every intermediate source and query reports its exact remaining reservations on a small stack.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "catalog_validation_keeps_the_selected_missing_namespace_after_the_live_table_is_removed",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/backup/validation/tests.rs",
+      "capability": "Private restore validation",
+      "workload": "Start a catalog validation, repair the live schema and remove its table before the first work window.",
+      "invariant": "All providers reject the originally selected inconsistent catalog and a fresh validation accepts the later valid generation.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "persistent_validation_holds_the_private_read_transaction_until_completion_or_cancellation",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/backup/restore/persistent/tests.rs",
+      "capability": "Private restore validation",
+      "workload": "Drive a private restored catalog through separate predicate steps, then complete, cancel or abandon its transaction on each persistent provider.",
+      "invariant": "The read transaction is pinned across every intermediate step, retires before publication or return, and later writes succeed.",
+      "case_names": [
+        "case_1_sqlite_native",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "persistent_routines_publish_complete_placeholders_and_finalize_after_views",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/open/persistent_input/tests/routines.rs",
+      "capability": "Persistent routine catalog restoration",
+      "workload": "Restore overloaded source and SQL-standard routines that reference a domain, a view and a later routine while another session publishes a function.",
+      "invariant": "Each compilation and group assembly step preserves every installed placeholder. Final publication preserves revision, signature order and later reads and writes after the read allowance is exhausted.",
+      "case_names": [
+        "case_1_sqlite_native",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "persistent_routine_input_retires_partial_declarations_and_the_private_transaction",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/open/persistent_input/tests/routines.rs",
+      "capability": "Persistent routine catalog restoration",
+      "workload": "Cancel, deny read memory, submit zero work and abandon a private Engine during declaration input and after compiling its first body.",
+      "invariant": "The published source metadata survives every terminal path and all private memory and read transactions retire.",
+      "case_names": [
+        "case_1_sqlite_native",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
+    },
+    {
       "package": "uqa-sql",
       "kind": "lib",
       "test": "scalar_free_query_and_source_containers_consume_bounded_work",
@@ -2533,7 +3425,7 @@
       "source": "crates/uqa-engine/tests/storage/backup_provider/public.rs",
       "capability": "Public persistent backup lifecycle",
       "workload": "Start full and incremental jobs through actual Engine admission for native SQLite and KV in all four file modes and redb; interleave an independent writer and restore after Engine, source and parent loss.",
-      "invariant": "Public jobs preserve committed SQL/catalog/security/sequence/text/vector/graph observations, exclude private state and retain independent source ownership and completed publication. Follow-up restores preserve later writes.",
+      "invariant": "The public Engine restore job and storage import preserve the committed source catalog, rows, retrieval results and writable runtime after source and parent removal.",
       "case_names": [
         "case_1_native_plain",
         "case_2_native_encrypted",
@@ -26256,7 +27148,7 @@
       "cases": 4,
       "source": "crates/uqa-engine/src/value_index/tests/retained_cache.rs",
       "capability": "Bounded cold value-index consumers",
-      "workload": "256 indexed 8KiB values, persistent reopen, cold hydration under 64KiB query work memory, mutation, savepoint and rollback.",
+      "workload": "256 indexed 8KiB values, persistent reopen and cold hydration under 64KiB query work memory. The redb allocation measurement uses a 64KiB physical page cache. The ordinary provider configuration exercises hydration, mutation, savepoint and rollback.",
       "invariant": "Cold retained-key construction stays below a fixed 1536KiB peak ceiling; previous snapshots and transaction-visible results remain exact.",
       "case_names": [
         "case_1_memory",
@@ -51019,6 +51911,140 @@
       ]
     },
     {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_result_type_names_resume_at_utf8_boundaries_with_the_original_allowance",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/stored_routine/tests/header.rs",
+      "capability": "Bounded stored routine catalog headers",
+      "workload": "Copy long UTF-8 scalar and set-returning type names, preserve table and absent results, and stop a partial copy.",
+      "invariant": "Each call copies at most 4,096 result-type bytes. The original allowance covers the final representation and is released after cancellation or denial.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "persistent_routine_result_type_names_yield_before_binding",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/open/persistent_input/tests/routines/body_steps.rs",
+      "capability": "Bounded stored routine catalog headers",
+      "workload": "Create, reload and invoke scalar and set-returning functions with one or 4,096 declared array dimensions on all three persistent providers.",
+      "invariant": "The longer stored result type takes additional work windows and preserves the callable result after loading.",
+      "case_names": [
+        "case_1_sqlite_native",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_routine_catalog_lists_bound_each_entry_and_text_chunk_before_binding",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/stored_routine/tests/header.rs",
+      "capability": "Bounded stored routine catalog headers",
+      "workload": "Copy wide search paths, UTF-8 configuration settings and explicit grants while observing the published prefix after each step.",
+      "invariant": "A window advances at most eight entries or text chunks. The completed declaration and its footprint match ordinary copying.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_routine_catalog_lists_release_denied_cancelled_and_abandoned_headers",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/stored_routine/tests/header.rs",
+      "capability": "Bounded stored routine catalog headers",
+      "workload": "Stop private header construction by denying its next allocation, cancelling either caller or dropping the continuation.",
+      "invariant": "Incomplete definitions stay private and every retained allocation returns to the original allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_routine_catalog_lists_preserve_the_ordinary_peak_and_optional_acl",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/stored_routine/tests/header.rs",
+      "capability": "Bounded stored routine catalog headers",
+      "workload": "Compare ordinary and resumed header copies with absent, empty and populated execution privileges.",
+      "invariant": "Copying preserves ACL presence, entry order and the routine's allocation peak.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "restored_routine_configuration_advances_through_large_effective_values",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/open/persistent_input/tests/routines/body_steps.rs",
+      "capability": "Bounded stored routine catalog headers",
+      "workload": "Load a stored SQL function with a short or wide UTF-8 setting on native SQLite, SQLite KV and redb, then invoke the restored function.",
+      "invariant": "The wide effective setting requires additional work windows and its value is visible to the function after publication.",
+      "case_names": [
+        "case_1_sqlite_native",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_routine_parameters_and_statements_are_copied_in_separate_windows",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/stored_routine/tests.rs",
+      "capability": "Stored routine restoration",
+      "workload": "Copy declarations with zero, one and 64 parameters and with SQL text or a two-statement body.",
+      "invariant": "Each step transfers one parameter or statement in source order. The completed declaration and its reservation match ordinary stored-syntax capture.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_routine_parameters_release_partial_copies_after_denial_or_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/stored_routine/tests.rs",
+      "capability": "Stored routine restoration",
+      "workload": "Copy 63 parameters before cancelling or denying the last 128 KiB default.",
+      "invariant": "An interrupted declaration keeps its last completed field and releases the private reservation when discarded.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "deferred_source_copies_exact_utf8_windows_and_preserves_later_parameter_edits",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/stored_routine/tests.rs",
+      "capability": "Stored routine restoration",
+      "workload": "Restore a deferred routine body with multibyte text at work-window boundaries and edit a subsequently restored parameter.",
+      "invariant": "Each copy advances by at most 4096 complete UTF-8 bytes in the original allocation. Source text and parameter changes survive publication.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "deferred_source_keeps_the_ordinary_peak_and_releases_every_unpublished_prefix",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/stored_routine/tests.rs",
+      "capability": "Stored routine restoration",
+      "workload": "Copy a deferred body at the ordinary memory limit, one byte below it and with cancellation during construction.",
+      "invariant": "The exact allowance suffices, denial or cancellation releases the private declaration, and a partial body cannot be published.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
       "package": "uqa-storage",
       "kind": "lib",
       "test": "native_image_preparation_and_output_are_bounded_and_preserve_exact_units",
@@ -52962,6 +53988,175 @@
       ]
     },
     {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "stored_default_types_yield_for_native_syntax_and_selected_invocation_fields",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/type_dependencies/tests/defaults.rs",
+      "capability": "Stored routine default type references",
+      "workload": "Read a stored routine default with 4,096 syntax children, routine argument types or empty source positions, then cancel a suspended read.",
+      "invariant": "One-step and 32-step windows produce the same type diagnostic and release the selected syntax and invocation work on cancellation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "stored_default_type_spelling_yields_for_whitespace_digits_and_array_suffixes",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/type_dependencies/tests/defaults.rs",
+      "capability": "Stored routine default type names",
+      "workload": "Read stored default type names with 131,072 Unicode spaces, zero digits or array suffixes in one-step and 32-step windows.",
+      "invariant": "Long type names yield while scanning, preserve the first invalid type diagnostic and release the operation allowance on cancellation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "type_claims_yield_before_checking_the_last_column_and_retire_on_every_exit",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/type_dependencies/tests.rs",
+      "capability": "Bounded native type identity validation",
+      "workload": "Read 4,096 native type declarations and a final invalid column in one-step and 32-step windows. Cancel, abandon and exhaust the working allowance on separate reads.",
+      "invariant": "Both window sizes return the original enum array error. Terminal paths retire privately owned type claims and denied admission returns SQLSTATE 53200.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "stored_routine_plan_type_checks_yield_for_original_and_bound_scalar_positions",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/type_dependencies/tests/plans.rs",
+      "capability": "Restored routine plan scalar types",
+      "workload": "Validate 4,096 VALUES expressions in both the stored routine syntax and its lowered plan, including a missing late type.",
+      "invariant": "One-step and 32-step windows preserve the same first syntax or bound-plan error. Cancellation retires the private cursor.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "stored_routine_plan_type_checks_yield_for_bindings_and_optional_output_slots",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/type_dependencies/tests/plans.rs",
+      "capability": "Restored routine plan output types",
+      "workload": "Visit 4,096 function argument types, declared output types or optional query output slots before the last invalid type.",
+      "invariant": "Each selected binding or output advances the type check. Batching preserves the first type diagnostic and cancellation releases private state.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "type_membership_yields_for_each_edge_and_during_successful_claim_retirement",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/type_dependencies/tests.rs",
+      "capability": "Bounded native type reference validation",
+      "workload": "Resolve 4,096 type references and retire the valid declaration index using one-step and 31-step windows.",
+      "invariant": "Each reference contributes bounded work. Batching preserves the result, and successful validation releases individual claim nodes through the original allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "private_catalog_validation_yields_between_inheritance_parents",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/relationships/table_tests.rs",
+      "capability": "Restored table inheritance",
+      "workload": "Move a missing parent from the first to the last entry of a 256-parent catalog and read it in one- and 32-step windows.",
+      "invariant": "Later parents take additional calls to reach. Both positions return the missing-parent diagnostic and release the original allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "private_catalog_validation_yields_between_implicit_sequence_columns",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/relationships/table_tests.rs",
+      "capability": "Restored implicit sequence names",
+      "workload": "Move an absent implicit sequence from the first to the last of 256 columns in the same table.",
+      "invariant": "Both window sizes reach the late column after the early column and release all scratch memory with the same error.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "one_step_relationship_validation_reaches_last_missing_routine_owner_in_order",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/relationships/authority_tests.rs",
+      "capability": "Stored routine owner validation",
+      "workload": "Read 4,096 sorted routine declarations with the final owner missing through one-step catalog validation.",
+      "invariant": "The authority check advances across routine owners and returns the same first error as inline validation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "one_step_relationship_validation_suspends_within_one_routine_grant_graph",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/relationships/authority_tests.rs",
+      "capability": "Routine grant graph validation",
+      "workload": "Restore one routine with 4,096 role grants and a final grant detached from the owner-rooted chain.",
+      "invariant": "Single-step work windows reach the invalid grant after checking endpoints and propagating grant options.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "suspended_relationship_authority_retires_on_pressure_cancellation_and_drop",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/relationships/authority_tests.rs",
+      "capability": "Retained authority validation",
+      "workload": "Suspend a 4,096-grant catalog check, abandon it, exhaust its remaining allowance, and cancel during grant analysis.",
+      "invariant": "Each terminal path releases the cursor and graph scratch, with the original memory or cancellation SQLSTATE.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "valid_large_routine_grants_retire_the_final_role_index_across_work_windows",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/relationships/authority_tests.rs",
+      "capability": "Bounded privilege scratch retirement",
+      "workload": "Advance a valid 4,096-edge routine grant graph one step at a time and sample its original memory allowance.",
+      "invariant": "The final role index releases nodes across at least 4,096 consecutive shrinking windows before the next relationship predicate.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "consuming_budgeted_map_releases_each_original_node_without_another_allowance",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/map/tests.rs",
+      "capability": "Incremental map retirement",
+      "workload": "Fill an allowance with 257 AVL nodes, consume a sorted prefix, and drop the remaining cursor.",
+      "invariant": "Each returned entry releases exactly one node and dropping the cursor releases all remaining reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
       "package": "uqa-sql",
       "kind": "lib",
       "test": "native_type_references_follow_identity_and_reject_wrong_kind_or_array_metadata",
@@ -53354,6 +54549,32 @@
     {
       "package": "uqa-sql",
       "kind": "lib",
+      "test": "native_hierarchy_yields_for_parent_sequences_edges_cycles_and_retirement",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/inheritance/native/tests.rs",
+      "capability": "Native table inheritance validation",
+      "workload": "Visit 4,096 parent edges and sequence numbers, including a late missing parent and a cycle.",
+      "invariant": "Single-step and batched validation agree on membership and the first error. Active graph traversal can be cancelled and successful cleanup releases nodes across calls.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_hierarchy_yields_while_comparing_quoted_parent_names_and_reporting_persistence",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/inheritance/native/tests.rs",
+      "capability": "Native parent-name validation",
+      "workload": "Resolve long quoted parent names and build the temporary-parent persistence diagnostic within the supplied allowance.",
+      "invariant": "Name comparison and error construction yield across work windows and retain the original names, SQLSTATE and message.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
       "test": "native_hierarchy_preserves_diamond_and_quoted_parent_identity",
       "cases": 1,
       "source": "crates/uqa-sql/src/schema/inheritance/native/tests.rs",
@@ -53425,6 +54646,45 @@
       "capability": "Native inheritance dependency closure",
       "workload": "Validate inherited and partition parent identity, edge kind, sparse sequence numbers and iterative deep ancestry under original admission.",
       "invariant": "Missing, repeated and cyclic parents reject; valid diamond ancestry retains borrowed definitions and scratch retires on failure.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_sequence_validation_yields_for_original_tables_columns_owners_and_scratch_retirement",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/sequences/native/tests.rs",
+      "capability": "Native sequence ownership validation",
+      "workload": "Read 4,096 original tables, columns and sequence owners, then retire the lookup indexes.",
+      "invariant": "Window size preserves the result and first bad owner. Cancellation, abandoned input and denied allocation release the original allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_sequence_name_comparisons_yield_within_shared_utf8_prefixes_and_reject_the_first_conflict",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/sequences/native/tests.rs",
+      "capability": "Native sequence identity comparison",
+      "workload": "Compare two duplicate native sequence names with shared 192 KiB UTF-8 schema and relation prefixes.",
+      "invariant": "Both window sizes yield within the long names and report the duplicate before the invalid internal owner.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "implicit_sequence_checks_yield_across_empty_tables_and_columns_without_object_ids",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/sequences/native/tests.rs",
+      "capability": "Native implicit sequence validation",
+      "workload": "Place an invalid SERIAL declaration after 4,096 empty tables or 4,096 columns without object IDs.",
+      "invariant": "Each visited table and column contributes work before the original missing-sequence error, including entries with no owner key.",
       "case_names": [
         ""
       ]
@@ -53672,6 +54932,45 @@
       "capability": "Admitted native routine namespace decoding",
       "workload": "Validate a stored routine with a deferred unresolved body under ordinary, zero and cancelled allowances.",
       "invariant": "Bound names retain their declared schema without compiling bodies; allocation denial and cancellation release all scratch.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "late_namespaces_and_array_collisions_yield_in_order_and_retire_their_private_claims",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/name_claims/tests.rs",
+      "capability": "Bounded namespace and name validation",
+      "workload": "Drive 12 and 72 native enum declarations to the last missing namespace or duplicate generated array. Suspend, cancel and abandon an immutable catalog separately.",
+      "invariant": "One-step and larger windows preserve the first diagnostic. More declarations require more steps. Each terminal path releases private validation memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "long_namespace_claims_yield_during_comparison_and_successful_retirement",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/namespace_names/tests.rs",
+      "capability": "SQL namespace claim work",
+      "workload": "Compare eight row declarations under 15-byte and 20,480-byte common schema names. Advance one step until all private claims retire.",
+      "invariant": "Long shared key bytes require additional steps and completed claim entries release their admitted memory across separate steps.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "malformed_bound_names_yield_while_decoding_and_keep_the_admitted_original_diagnostic",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/resolution.rs",
+      "capability": "Canonical stored relation diagnostics",
+      "workload": "Decode an unterminated 49,153-byte quoted reference one step at a time and retain the resulting SQL error after dropping its decoder.",
+      "invariant": "The original XX000 text and typed primary error remain available until the last diagnostic owner releases its allowance.",
       "case_names": [
         ""
       ]
@@ -61715,7 +63014,7 @@
       "source": "crates/uqa-engine/src/backup/restore/tests.rs",
       "capability": "Owned memory restore job lifecycle",
       "workload": "Drop or cancel reading/prepared candidates and reject cancelled or invalid verification steps.",
-      "invariant": "The owning job terminates failed work, releases original admission and prevents reuse without caller repair.",
+      "invariant": "Cancellation, abandonment and a zero work window retire pending data and the private candidate, including between logical relationship checks.",
       "case_names": [
         ""
       ]
@@ -61741,7 +63040,7 @@
       "source": "crates/uqa-engine/src/backup/restore/tests.rs",
       "capability": "Owned memory restore job lifecycle",
       "workload": "Restore a completed archive whose stored view refers to an omitted relation through the actual Engine job.",
-      "invariant": "Logical validation fails before publication, immediately releases the candidate and archive lease, and keeps all later work terminal.",
+      "invariant": "Publication stays unavailable in every validation window. A missing plan relation reports the original error and retires the private candidate and archive lease.",
       "case_names": [
         ""
       ]
@@ -62186,10 +63485,665 @@
       ]
     },
     {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "foreign_server_and_table_bindings_yield_for_each_selected_definition",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/foreign/reference/tests.rs",
+      "capability": "Stored foreign catalog relationships",
+      "workload": "Traverse 40 foreign servers followed by 40 foreign tables in one-step windows.",
+      "invariant": "Server definitions precede table definitions and each work window examines at most one selected table.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "each_window_visits_at_most_one_routine_and_multiple_callbacks_scan_the_registry_once",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/foreign_wrapper/callbacks/tests.rs",
+      "capability": "Stored foreign wrapper callback validation",
+      "workload": "Bind 48 wrapper callbacks against 64 stored routines one step at a time.",
+      "invariant": "All callbacks share one registry scan and each step examines at most one stored routine.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "a_later_bad_target_cannot_displace_the_first_callback_and_cancellation_releases_its_index",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/foreign_wrapper/callbacks/tests.rs",
+      "capability": "Stored foreign wrapper callback validation",
+      "workload": "Select a malformed callback and interrupt the scan after seven routine entries.",
+      "invariant": "Handler and validator order determine the first error. Cancellation reports its original SQLSTATE and releases the index.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "wrappers_without_stored_callbacks_need_no_index_and_visit_no_routines",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/foreign_wrapper/callbacks/tests.rs",
+      "capability": "Stored foreign wrapper callback validation",
+      "workload": "Validate native wrappers with no memory for a stored callback index.",
+      "invariant": "No index is allocated and the stored routine registry is never visited.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "large_callback_archive_yields_before_a_late_binding_failure_and_cancels_before_publication",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/backup/restore/tests/foreign_callbacks.rs",
+      "capability": "Stored foreign wrapper callback validation",
+      "workload": "Restore an archive with a late invalid wrapper callback and cancel a second restore while it validates.",
+      "invariant": "The restore remains private between work windows and retires its budget on error or cancellation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "restore_binds_application_functions_without_executing_callbacks",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/backup/restore/tests/external_functions.rs",
+      "capability": "Private backup routine binding",
+      "workload": "Supply missing, mismatched and matching table functions to real restore jobs.",
+      "invariant": "Binding reads stable result columns and executes no application code until SQL is invoked on the published Engine.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "restore_preserves_recursive_views_and_deferred_function_resolution",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/backup/restore/tests/external_functions.rs",
+      "capability": "Private backup routine binding",
+      "workload": "Restore a recursive view and a source routine with a deferred application dependency.",
+      "invariant": "Restoration preserves the original query-time errors and deferred lookup.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "restore_resolves_function_calls_in_stored_views_and_defaults",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/backup/restore/tests/external_functions.rs",
+      "capability": "Private backup routine binding",
+      "workload": "Bind application scalar calls from views, materialized views, table defaults and domain defaults.",
+      "invariant": "A missing mandatory name fails before publication and a supplied registration is used for later SQL.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "resumed_prepared_restore_checks_new_process_functions_before_publication",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/backup/restore/tests/external_functions.rs",
+      "capability": "Private backup routine binding",
+      "workload": "Prepare a persistent image, remove the archive and resume with a different process-local registry.",
+      "invariant": "An incompatible or absent binding leaves the database private. Compatible registrations open the requested database and subsequent recovery keeps later writes.",
+      "case_names": [
+        "case_1_sqlite_native",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "standalone_restore_preserves_the_function_selected_at_the_source_cut",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/backup/restore/tests/function_origins.rs",
+      "capability": "Application function references in backups",
+      "workload": "Retire a scalar function named abs after starting an incremental backup, capture a second child and remove each parent before restoring its child.",
+      "invariant": "Both children retain their source selections. Unused registrations are optional, capture and restore never invoke callbacks, and failed restore releases its allowance.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "prepared_restore_keeps_the_function_requirement_after_archive_removal",
+      "cases": 6,
+      "source": "crates/uqa-engine/src/backup/restore/tests/function_origins.rs",
+      "capability": "Application function references in backups",
+      "workload": "Prepare a persistent target, remove the archive and reopen the restore request in a process with different function registrations.",
+      "invariant": "Both an absent required registration and a registration conflicting with the captured builtin fallback keep the target private. Matching registrations open the restored views without calling application functions until query execution.",
+      "case_names": [
+        "case_1_sqlite_native",
+        "case_2_sqlite_kv",
+        "case_3_redb",
+        "case_4_sqlite_native_builtin",
+        "case_5_sqlite_kv_builtin",
+        "case_6_redb_builtin"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "archives_without_function_requirements_keep_known_builtin_bindings",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/backup/restore/tests/function_origins.rs",
+      "capability": "Application function references in backups",
+      "workload": "Restore an image without application binding metadata into an Engine that has an application function named abs.",
+      "invariant": "A view explicitly bound to the builtin returns 5 without invoking the application function and restore memory is released.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "query_projection_preserves_original_bytes_across_escapes_and_previous_nested_fields",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/view_queries/tests.rs",
+      "capability": "Application function references in backups",
+      "workload": "Read escaped query text from a physical view definition one byte at a time.",
+      "invariant": "The extracted query retains its original bytes across escape sequences, nested fields and split Unicode.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "legacy_queries_keep_their_representation_and_missing_fields_retire_the_input",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/view_queries/tests.rs",
+      "capability": "Application function references in backups",
+      "workload": "Read a standalone stored query and a view definition missing its query.",
+      "invariant": "The original query representation is retained and a failed input releases its memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "stored_view_queries_read_the_original_physical_cut",
+      "cases": 2,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/backup_target.rs",
+      "capability": "Application function references in backups",
+      "workload": "Replace a view after capture and read its definition from a database with a large materialized row.",
+      "invariant": "The cursor yields the original query within its read allowance, counts physical bytes and checks cancellation.",
+      "case_names": [
+        "mapping_1_SQLiteBackupMapping__Native",
+        "mapping_2_SQLiteBackupMapping__KeyValue"
+      ]
+    },
+    {
+      "package": "uqa-storage-redb",
+      "kind": "lib",
+      "test": "stored_view_queries_read_the_original_physical_cut",
+      "cases": 1,
+      "source": "crates/uqa-storage-redb/src/backup_target.rs",
+      "capability": "Application function references in backups",
+      "workload": "Replace a view after capture and read a stored query alongside a 256 KiB materialized value.",
+      "invariant": "The reader exposes the captured query and keeps input for the evaluated row outside its working set.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "full_incremental_and_reprotected_copies_preserve_only_the_selected_root_declarations",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/tests/functions.rs",
+      "capability": "Application function references in backups",
+      "workload": "Read application bindings from a full root, a standalone child and a copy in another protection domain.",
+      "invariant": "Each root exposes its own ordered declarations, including after removal of its parent.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "long_shared_prefixes_and_split_utf8_resume_under_single_byte_windows",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/tests/functions.rs",
+      "capability": "Application function references in backups",
+      "workload": "Read declarations with a long shared prefix and split Unicode using one-byte windows.",
+      "invariant": "Reading advances within the window and preserves declaration order, digest and memory ownership.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "malformed_or_contradictory_declarations_fail_before_publication",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/tests/functions.rs",
+      "capability": "Application function references in backups",
+      "workload": "Capture invalid, repeated and contradictory function requirements.",
+      "invariant": "Malformed requirements prevent publication and the operation releases its private state.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "independently_encoded_function_sections_reject_invalid_versions_utf8_lengths_and_trailing_bytes",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/tests/functions.rs",
+      "capability": "Application function references in backups",
+      "workload": "Decode independently assembled sections with invalid headers, truncated records, split UTF-8 and extra bytes.",
+      "invariant": "Malformed sections fail before their bindings can be installed. A valid independently encoded section yields its canonical references.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "durable_prepared_receipts_keep_legacy_empty_and_populated_requirements_after_collection",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/repository/tests/functions.rs",
+      "capability": "Application function references in backups",
+      "workload": "Prepare private restore requests from legacy, empty and populated roots and remove those roots.",
+      "invariant": "Prepared requests retain exactly their original binding digest independently of the collected archive.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "restored_aggregates_follow_runtime_dispatch_and_ranking_uses_its_kernel",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/backup/restore/tests/application_priority.rs",
+      "capability": "Application function references in backups",
+      "workload": "Capture ordinary and windowed sum with an active and retired aggregate and a ranking kernel with a same-name registration.",
+      "invariant": "Restore preserves the lookup used by each call and first executes application aggregates when a client reads the view.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "restored_domain_preserves_functions_in_defaults_and_checks",
+      "cases": 8,
+      "source": "crates/uqa-engine/src/backup/restore/tests/function_origins.rs",
+      "capability": "Application function references in backups",
+      "workload": "Capture a domain CHECK or DEFAULT with scalar, aggregate and table registrations under the same name. Retire the scalar and remove the archive before resuming persistent restore requests.",
+      "invariant": "Domain expressions use the scalar registration. The other registrations cannot satisfy a missing scalar or prevent restoration with the correct one.",
+      "case_names": [
+        "case_1_memory::domain_default_1_false",
+        "case_1_memory::domain_default_2_true",
+        "case_2_sqlite_native::domain_default_1_false",
+        "case_2_sqlite_native::domain_default_2_true",
+        "case_3_sqlite_kv::domain_default_1_false",
+        "case_3_sqlite_kv::domain_default_2_true",
+        "case_4_redb::domain_default_1_false",
+        "case_4_redb::domain_default_2_true"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "restored_table_preserves_functions_in_defaults_and_checks",
+      "cases": 8,
+      "source": "crates/uqa-engine/src/backup/restore/tests/function_origins.rs",
+      "capability": "Application function references in backups",
+      "workload": "Capture a stored table CHECK or column default with scalar, table and aggregate registrations named abs. Retire the source registration and remove the archive before recovering persistent targets.",
+      "invariant": "A missing scalar rejects publication. The original scalar preserves values and constraints independently of same-name table or aggregate registrations.",
+      "case_names": [
+        "case_1_memory::column_default_1_false",
+        "case_1_memory::column_default_2_true",
+        "case_2_sqlite_native::column_default_1_false",
+        "case_2_sqlite_native::column_default_2_true",
+        "case_3_sqlite_kv::column_default_1_false",
+        "case_3_sqlite_kv::column_default_2_true",
+        "case_4_redb::column_default_1_false",
+        "case_4_redb::column_default_2_true"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "restored_routines_preserve_functions_in_defaults_and_eager_bodies",
+      "cases": 8,
+      "source": "crates/uqa-engine/src/backup/restore/tests/function_origins.rs",
+      "capability": "Application function references in backups",
+      "workload": "Capture a stored SQL routine with an application scalar in its argument default or eager statement body. Check fresh and archive-free prepared targets before invoking the routine.",
+      "invariant": "A missing registration rejects publication and the supplied scalar preserves the original routine result without executing callbacks while restoring.",
+      "case_names": [
+        "case_1_memory::argument_default_1_false",
+        "case_1_memory::argument_default_2_true",
+        "case_2_sqlite_native::argument_default_1_false",
+        "case_2_sqlite_native::argument_default_2_true",
+        "case_3_sqlite_kv::argument_default_1_false",
+        "case_3_sqlite_kv::argument_default_2_true",
+        "case_4_redb::argument_default_1_false",
+        "case_4_redb::argument_default_2_true"
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "event_calls_preserve_the_selected_predicate_and_action_placements",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/events/runtime_calls/tests.rs",
+      "capability": "Application function references in backups",
+      "workload": "Observe trigger predicates and rewrite-rule conditions, subqueries and actions using the original stored call sites.",
+      "invariant": "Explicit builtin calls retain their selection. Window, table and scalar calls keep their placement, including in stored rule condition plans.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "late_trigger_predicate_calls_yield_and_release_original_input_on_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/catalog/events/runtime_calls/tests.rs",
+      "capability": "Application function references in backups",
+      "workload": "Place an application call after 4,096 predicate children and compare one-step and grouped windows.",
+      "invariant": "Both windows reach the same call. Cancellation before the last child releases the private input and retains its original diagnostic.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "physical_event_records_preserve_original_selections_and_legacy_positional_fields",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/schema/events/persistence/runtime_calls/tests.rs",
+      "capability": "Application function references in backups",
+      "workload": "Read trigger and rewrite-rule records as named objects and positional arrays, including older records without analyzed conditions.",
+      "invariant": "Recorded selections, declaration order and existing accepted formats agree with the native event. Unknown catalog versions retain their original error.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "physical_event_records_bound_late_calls_cancellation_and_allocation",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/schema/events/persistence/runtime_calls/tests.rs",
+      "capability": "Application function references in backups",
+      "workload": "Read a physical catalog with the only reference in the final trigger under one-step and grouped work windows.",
+      "invariant": "Only the final trigger reports its call. Cancellation and a denied allocation release the original allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "restored_event_writes_follow_the_function_selected_at_capture",
+      "cases": 36,
+      "source": "crates/uqa-engine/src/backup/restore/tests/function_origins/events.rs",
+      "capability": "Application function references in backups",
+      "workload": "Restore a trigger predicate, a rewrite action and a rewrite condition on four providers with an active or retired application scalar or a selected builtin. Remove archives before prepared recovery on persistent providers.",
+      "invariant": "Published writes match the source before and after replacing or removing callbacks. Required and conflicting registrations are rejected before publication, and capture and restore never execute the callback.",
+      "case_names": [
+        "case_1_memory::event_1_Event__Trigger::origin_1_Origin__Builtin",
+        "case_1_memory::event_1_Event__Trigger::origin_2_Origin__Application",
+        "case_1_memory::event_1_Event__Trigger::origin_3_Origin__Retired",
+        "case_1_memory::event_2_Event__RuleAction::origin_1_Origin__Builtin",
+        "case_1_memory::event_2_Event__RuleAction::origin_2_Origin__Application",
+        "case_1_memory::event_2_Event__RuleAction::origin_3_Origin__Retired",
+        "case_1_memory::event_3_Event__RuleCondition::origin_1_Origin__Builtin",
+        "case_1_memory::event_3_Event__RuleCondition::origin_2_Origin__Application",
+        "case_1_memory::event_3_Event__RuleCondition::origin_3_Origin__Retired",
+        "case_2_sqlite_native::event_1_Event__Trigger::origin_1_Origin__Builtin",
+        "case_2_sqlite_native::event_1_Event__Trigger::origin_2_Origin__Application",
+        "case_2_sqlite_native::event_1_Event__Trigger::origin_3_Origin__Retired",
+        "case_2_sqlite_native::event_2_Event__RuleAction::origin_1_Origin__Builtin",
+        "case_2_sqlite_native::event_2_Event__RuleAction::origin_2_Origin__Application",
+        "case_2_sqlite_native::event_2_Event__RuleAction::origin_3_Origin__Retired",
+        "case_2_sqlite_native::event_3_Event__RuleCondition::origin_1_Origin__Builtin",
+        "case_2_sqlite_native::event_3_Event__RuleCondition::origin_2_Origin__Application",
+        "case_2_sqlite_native::event_3_Event__RuleCondition::origin_3_Origin__Retired",
+        "case_3_sqlite_kv::event_1_Event__Trigger::origin_1_Origin__Builtin",
+        "case_3_sqlite_kv::event_1_Event__Trigger::origin_2_Origin__Application",
+        "case_3_sqlite_kv::event_1_Event__Trigger::origin_3_Origin__Retired",
+        "case_3_sqlite_kv::event_2_Event__RuleAction::origin_1_Origin__Builtin",
+        "case_3_sqlite_kv::event_2_Event__RuleAction::origin_2_Origin__Application",
+        "case_3_sqlite_kv::event_2_Event__RuleAction::origin_3_Origin__Retired",
+        "case_3_sqlite_kv::event_3_Event__RuleCondition::origin_1_Origin__Builtin",
+        "case_3_sqlite_kv::event_3_Event__RuleCondition::origin_2_Origin__Application",
+        "case_3_sqlite_kv::event_3_Event__RuleCondition::origin_3_Origin__Retired",
+        "case_4_redb::event_1_Event__Trigger::origin_1_Origin__Builtin",
+        "case_4_redb::event_1_Event__Trigger::origin_2_Origin__Application",
+        "case_4_redb::event_1_Event__Trigger::origin_3_Origin__Retired",
+        "case_4_redb::event_2_Event__RuleAction::origin_1_Origin__Builtin",
+        "case_4_redb::event_2_Event__RuleAction::origin_2_Origin__Application",
+        "case_4_redb::event_2_Event__RuleAction::origin_3_Origin__Retired",
+        "case_4_redb::event_3_Event__RuleCondition::origin_1_Origin__Builtin",
+        "case_4_redb::event_3_Event__RuleCondition::origin_2_Origin__Application",
+        "case_4_redb::event_3_Event__RuleCondition::origin_3_Origin__Retired"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "restore_preserves_late_function_lookup_after_source_registration_retirement",
+      "cases": 8,
+      "source": "crates/uqa-engine/src/backup/restore/tests/function_origins/retired.rs",
+      "capability": "Application function references in backups",
+      "workload": "Remove an application scalar before capturing table defaults and checks or eager routines and argument defaults. Restore the captured state and change its registrations after publication.",
+      "invariant": "Both engines use the builtin while the registration is absent and use the replacement after registration. A view originally bound to the builtin keeps its value. Persistent requests also resume after archive removal.",
+      "case_names": [
+        "case_1_memory::routine_1_false",
+        "case_1_memory::routine_2_true",
+        "case_2_sqlite_native::routine_1_false",
+        "case_2_sqlite_native::routine_2_true",
+        "case_3_sqlite_kv::routine_1_false",
+        "case_3_sqlite_kv::routine_2_true",
+        "case_4_redb::routine_1_false",
+        "case_4_redb::routine_2_true"
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "backup_domain_declarations_select_named_and_positional_records_with_bounded_work",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/domain/input/tests.rs",
+      "capability": "Application function references in backups",
+      "workload": "Read current and positional domain records with short work windows and a large unrelated record field.",
+      "invariant": "Both forms preserve the stored constraint and default under the same allocation allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "raw_metadata_preserves_split_utf8_and_denies_oversized_or_invalid_text",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/backup/view_queries/tests.rs",
+      "capability": "Application function references in backups",
+      "workload": "Read raw metadata with split UTF-8, truncated characters and a restricted value size.",
+      "invariant": "Valid bytes stay intact and memory and encoding limits are enforced.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "stored_metadata_values_read_the_original_physical_cut",
+      "cases": 2,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/backup_target.rs",
+      "capability": "Application function references in backups",
+      "workload": "Select metadata with a literal text prefix after captured entries are deleted or replaced.",
+      "invariant": "Native and Key/Value mappings expose original bytes and exclude unrelated metadata under the reader allowance.",
+      "case_names": [
+        "mapping_1_SQLiteBackupMapping__Native",
+        "mapping_2_SQLiteBackupMapping__KeyValue"
+      ]
+    },
+    {
+      "package": "uqa-storage-redb",
+      "kind": "lib",
+      "test": "stored_metadata_values_read_the_original_physical_cut",
+      "cases": 1,
+      "source": "crates/uqa-storage-redb/src/backup_target.rs",
+      "capability": "Application function references in backups",
+      "workload": "Read metadata from the captured record cut after subsequent commits insert, replace and delete matching keys.",
+      "invariant": "Prefix selection yields only committed values from the captured sequence and honors cancellation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "runtime_calls_keep_placement_and_ignore_selected_builtins",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/view_dependencies/references/tests.rs",
+      "capability": "Application function references in backups",
+      "workload": "Observe a stored lowered query with nested, fixed and runtime-resolved calls using both native SQL and physical query input.",
+      "invariant": "The original SQL placements and bindings agree across both representations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "wide_and_deep_native_view_pauses_before_late_calls_and_honors_original_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/view_dependencies/references/native_tests.rs",
+      "capability": "Application function references in backups",
+      "workload": "Step through a wide and deeply nested native view and cancel before reaching its last calls.",
+      "invariant": "The traversal yields within the requested window and retires its admitted working memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "deep_native_query_children_retain_only_outstanding_siblings",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/view_dependencies/references/native_tests.rs",
+      "capability": "Application function references in backups",
+      "workload": "Visit a deeply nested native query under a limited reader allowance.",
+      "invariant": "Traversal retains only outstanding siblings and reaches the scalar call at the leaf.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_command_empty_rows_yield_before_returning_and_release_reader_scratch",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/view_dependencies/references/native_tests.rs",
+      "capability": "Application function references in backups",
+      "workload": "Traverse many empty input rows before a command output call under single-step windows.",
+      "invariant": "Empty rows consume bounded work and partial traversal releases its scratch.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_call_order_matches_ordinary_roots_across_queries_and_commands",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/view_dependencies/references/native_tests.rs",
+      "capability": "Application function references in backups",
+      "workload": "Compare stored call order under ordinary and resumable SQL traversal across queries and commands.",
+      "invariant": "Both entry points visit the same call names and placements in the same order.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "restored_sql_body_advances_through_each_statement",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/open/persistent_input/tests/routines/body_steps.rs",
+      "capability": "Private backup routine binding",
+      "workload": "Load one-statement and seventeen-statement routines in one-step windows on persistent stores.",
+      "invariant": "Additional stored statements consume additional steps and the fully compiled routines return their original results.",
+      "case_names": [
+        "case_1_sqlite_native",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "partial_sql_body_analysis_releases_its_registry_and_allowance",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/open/persistent_input/tests/routines/body_steps.rs",
+      "capability": "Private backup routine binding",
+      "workload": "Interrupt private SQL routine analysis with only part of its statement list processed.",
+      "invariant": "Cancellation and allocation denial retire the private transaction and temporary owners without publishing partial compiled bodies.",
+      "case_names": [
+        "case_1_sqlite_native",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "routine_statement_errors_keep_postgresql_order_during_creation_and_restore",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/open/persistent_input/tests/routines/body_steps.rs",
+      "capability": "Private backup routine binding",
+      "workload": "Reverse a missing-column and missing-relation statement in stored SQL.",
+      "invariant": "Creation and private restore report the first invalid statement with the original SQLSTATE.",
+      "case_names": [
+        "case_1_sqlite_native",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
+    },
+    {
       "package": "uqa-engine",
       "kind": "lib",
       "test": "persistent_restore_recovers_private_completion_and_retires_failed_or_cancelled_input",
-      "cases": 12,
+      "cases": 15,
       "source": "crates/uqa-engine/src/backup/restore/tests/persistent.rs",
       "capability": "Owned persistent restore lifecycle",
       "workload": "Recover private physical/prepared images and cancel active or failed jobs on all persistent providers.",
@@ -62199,14 +64153,17 @@
         "case_1_native::outcome_2___prepared__",
         "case_1_native::outcome_3___cancel__",
         "case_1_native::outcome_4___failure__",
+        "case_1_native::outcome_5___prepared_cancel__",
         "case_2_kv::outcome_1___validating__",
         "case_2_kv::outcome_2___prepared__",
         "case_2_kv::outcome_3___cancel__",
         "case_2_kv::outcome_4___failure__",
+        "case_2_kv::outcome_5___prepared_cancel__",
         "case_3_redb::outcome_1___validating__",
         "case_3_redb::outcome_2___prepared__",
         "case_3_redb::outcome_3___cancel__",
-        "case_3_redb::outcome_4___failure__"
+        "case_3_redb::outcome_4___failure__",
+        "case_3_redb::outcome_5___prepared_cancel__"
       ]
     },
     {
@@ -70246,6 +72203,90 @@
       "capability": "Captured routine declarations",
       "workload": "Run 66 PostgreSQL 18.4 declaration outcomes on all four providers with both body-validation settings.",
       "invariant": "Exact diagnostics, failed transaction state, rollback and absence of rejected or rolled-back routines match PostgreSQL.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "captured_layout_bounds_wide_duplicate_comparisons_and_keeps_the_first_diagnostic",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/routines/declaration/captured/tests.rs",
+      "capability": "Stored routine declaration validation",
+      "workload": "Compare long UTF-8 argument names in a stored declaration containing a later invalid return type.",
+      "invariant": "A bounded comparison preserves the spelling and precedence of the duplicate-parameter error.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "variadic_type_selection_matches_catalog_array_shapes_and_only_reads_the_selected_namespace",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/projection/regtypes/type_names/input_tests/resolution.rs",
+      "capability": "Stored routine declaration validation",
+      "workload": "Look up variadic argument types through the captured namespace, including builtins, arrays, domains and missing names.",
+      "invariant": "The native lookup preserves the ordinary catalog's array classification. Qualified names use their own schema and unqualified names read the selected search path only when needed.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "captured_overload_validation_yields_until_the_selected_variadic_lookup",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/routine_declarations/tests.rs",
+      "capability": "Stored routine declaration validation",
+      "workload": "Validate a catalog with a VARIADIC type alias after many overloads and compare one-step and grouped advances.",
+      "invariant": "Only the selected variadic argument needs a type lookup. Both work windows reach the same result.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "captured_overload_validation_releases_cancelled_denied_and_abandoned_work",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/routine_declarations/tests.rs",
+      "capability": "Stored routine declaration validation",
+      "workload": "Deny cursor admission, interrupt it between overloads and abandon its private input while a sibling reservation remains live.",
+      "invariant": "The cursor releases only its own workspace. Cancellation preserves the original diagnostic and stops before an unvisited type lookup.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "duplicate_parameter_positions_preserve_restore_windows_and_precede_invalid_results",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/backup/restore/tests/routine_declarations/corruption.rs",
+      "capability": "Stored routine declaration validation",
+      "workload": "Restore backups with an early or late duplicate argument and an invalid polymorphic result on each provider.",
+      "invariant": "The duplicate argument wins in both cases. Moving the duplicate later changes when the running job reports it.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "restored_variadic_catalog_array_alias_accepts_expanded_and_explicit_calls",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/backup/restore/tests/routine_declarations/corruption.rs",
+      "capability": "Stored routine declaration validation",
+      "workload": "Create a variadic function with pg_catalog._int4, restore it on each provider and reopen each persistent destination.",
+      "invariant": "Expanded and explicit arrays return their original cardinalities after publication and after a durable reopen.",
       "case_names": [
         "case_1_memory",
         "case_2_sqlite_native",

@@ -468,9 +468,19 @@ impl Engine {
 
     /// Reload the table catalog and the registries after a rollback, pushing their failures to `cleanup_errors`. Both read one snapshot: the open transaction's, or else a read transaction pinned for them, since separate captures would leave the reloaded tables at different states when another session commits in between. When both succeed, the cache revisions and the read view they read are recorded, as a refresh records them, so the next statement refreshes only what other sessions committed since instead of reloading every table again.
     pub(crate) fn reload_catalogs_after_rollback(&self, cleanup_errors: &mut Vec<String>) {
-        let Some(backend) = self.storage.backend.as_ref() else {
-            return;
-        };
+        if let Some(backend) = self.storage.backend.as_deref() {
+            // Undo must finish on this thread while the original cancellation remains observable.
+            self.runtime.cancellation.with_deferred_cancellation(|| {
+                self.restore_rollback_catalog_snapshot(backend, cleanup_errors);
+            });
+        }
+    }
+
+    fn restore_rollback_catalog_snapshot(
+        &self,
+        backend: &dyn uqa_storage::PersistentStorageBackend,
+        cleanup_errors: &mut Vec<String>,
+    ) {
         let table_data_epoch = self
             .epochs
             .table_data
@@ -480,7 +490,7 @@ impl Engine {
         let (pinned, stable_version) = if in_transaction {
             (false, None)
         } else {
-            match Self::pin_rollback_snapshot(backend.as_ref()) {
+            match Self::pin_rollback_snapshot(backend) {
                 Ok(stable_version) => (true, stable_version),
                 Err(error) => {
                     cleanup_errors.push(format!("rollback read snapshot: {error}"));
@@ -647,7 +657,7 @@ impl Engine {
             )?
         {
             let relation = schema.relation.clone();
-            let table = Self::load_session_table(
+            let table = self.load_session_table(
                 catalog.as_ref(),
                 backend.as_ref(),
                 schema,

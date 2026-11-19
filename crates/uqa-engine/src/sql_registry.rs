@@ -9,8 +9,10 @@ use super::{
     SQLFunctionVolatility, SQLScalarFunction, SQLTableFunction, Value,
 };
 
+mod declarations;
 mod owner;
 mod retained;
+pub(crate) use declarations::{CapturedDeclarations, RegisteredKinds};
 pub(crate) use owner::Registry;
 pub use owner::{SQLFunctionRegistration, SQLFunctionRegistrationError};
 

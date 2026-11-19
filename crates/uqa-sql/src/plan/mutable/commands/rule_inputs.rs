@@ -199,7 +199,7 @@ impl MutableCommandPlan {
             unreachable!()
         };
         update.assignments = values;
-        if let Some(owner) = &mut self.memory {
+        if let Some(owner) = self.memory.as_mut() {
             *owner
                 .field_mut("value0")
                 .as_mut()
@@ -215,5 +215,5 @@ fn clear_items(memory: &mut RewriteMemory, field: &str) {
     else {
         unreachable!("vector owner")
     };
-    fields.clear();
+    fields.truncate(0);
 }

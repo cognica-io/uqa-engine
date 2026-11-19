@@ -9,7 +9,9 @@
 use super::*;
 use crate::mvcc::write;
 use rusqlite::params;
-use uqa_storage::{mvcc::CommitSequence, read_control::StorageReadControl};
+use uqa_storage::{
+    backup::RecordImageHasher, mvcc::CommitSequence, read_control::StorageReadControl,
+};
 
 const FAMILIES: u8 = 6;
 const EXISTING: u64 = 2048;
@@ -31,6 +33,8 @@ fn frames(addressed: bool) -> u64 {
     let _permit = schema::WritePermit::acquire(&connection).unwrap();
     if !addressed {
         install_predecessor(&connection, 58).unwrap();
+        // Both payload layouts retain current record fingerprints during publication.
+        add_fingerprint_column_for_layout(&connection, false).unwrap();
     }
     let payload = [7_u8; 160];
     {
@@ -83,6 +87,27 @@ fn frames(addressed: bool) -> u64 {
         count,
         i64::try_from(u64::from(FAMILIES) * (EXISTING + COMMITS)).unwrap()
     );
+    let mut digests = connection
+        .prepare(
+            "SELECT image_digest FROM _uqa_mvcc_version_metadata WHERE key = ?1 AND sequence = ?2",
+        )
+        .unwrap();
+    for commit in 0..COMMITS {
+        let revision = CommitSequence::from_u64(commit + 2);
+        let expected = RecordImageHasher::for_value(revision, &payload, &control).unwrap();
+        for family in 0..FAMILIES {
+            let stored: Vec<u8> = digests
+                .query_row(
+                    params![
+                        key(family, EXISTING + commit).as_slice(),
+                        revision.as_u64().to_be_bytes().as_slice()
+                    ],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(stored.as_slice(), expected.as_bytes());
+        }
+    }
     (bytes - 32) / (4096 + 24)
 }
 

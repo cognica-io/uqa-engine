@@ -6,19 +6,17 @@
 
 //! Scan positions include new keys without extending the captured record domain.
 
-use std::ops::Bound;
-
 use redb::{ReadableDatabase, ReadableTable};
 use uqa_storage::{
     mvcc::{
-        BackupCursorKey, BackupRecordPositionVisitor, CommittedBackupSnapshot, VersionError,
+        BackupCursorKey, BackupRecordImageVisitor, CommittedBackupSnapshot, VersionError,
         VersionResult,
     },
     read_control::StorageReadControl,
 };
 
 use super::{Snapshot, EPOCH};
-use crate::mvcc::{codec, identifiers, read, redb_error, HEADS, METADATA, VERSIONS};
+use crate::mvcc::{codec, identifiers, image_fingerprints, redb_error, HEADS, METADATA};
 
 impl Snapshot {
     pub(super) fn read(&self) -> VersionResult<(redb::ReadTransaction, u64)> {
@@ -74,37 +72,17 @@ impl Snapshot {
         after: Option<&[u8]>,
         limit: usize,
         control: &StorageReadControl,
-        visit: &mut BackupRecordPositionVisitor<'_>,
+        visit: &mut BackupRecordImageVisitor<'_>,
     ) -> VersionResult<()> {
-        control.cancellation().check()?;
-        let (transaction, _) = self.read()?;
-        let heads = transaction.open_table(HEADS).map_err(redb_error)?;
-        let versions = transaction.open_table(VERSIONS).map_err(redb_error)?;
-        let start = after.map_or(Bound::Unbounded, Bound::Excluded);
-        for entry in heads
-            .range::<&[u8]>((start, Bound::Unbounded))
-            .map_err(redb_error)?
-            .take(limit)
-        {
-            control.cancellation().check()?;
-            let (key, head) = entry.map_err(redb_error)?;
-            let mut more = true;
-            read::visit_visible(
-                &versions,
-                key.value(),
-                head.value(),
-                self.records.sequence(),
-                &mut |record| {
-                    more = visit(key.value(), record.map(Into::into))?;
-                    Ok(())
-                },
-            )?;
-            if !more {
-                break;
-            }
-        }
-        control.cancellation().check()?;
-        Ok(())
+        image_fingerprints::visit_positions::<true>(
+            || self.read().map(|(transaction, _)| transaction),
+            self.records.sequence(),
+            b"",
+            after,
+            limit,
+            control,
+            &mut |key, position| visit(key, position).map(Some),
+        )
     }
 }
 

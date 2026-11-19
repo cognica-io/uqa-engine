@@ -110,6 +110,7 @@ pub(in crate::catalog) fn named_graph(
     if snapshot.contains_row(Family::NamedGraphs, owner(snapshot), &[text(name)])? != present {
         paths::invalidate_graph(snapshot, batch, name)?;
         if present {
+            super::lifecycle::retain_path_owners(snapshot, batch, name)?;
             snapshot.put_row(batch, Family::NamedGraphs, owner(snapshot), &[text(name)])?;
         } else {
             snapshot.delete_prefix(batch, Family::NamedGraphs, owner(snapshot), &[text(name)])?;

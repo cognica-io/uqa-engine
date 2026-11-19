@@ -81,7 +81,7 @@ fn identity_error(error: TypeIdentityInputError) -> StorageBackendError {
     }
 }
 
-pub(in crate::routines::catalog::input) fn restore_error(
+pub(in crate::routines) fn restore_error(
     error: RoutineRestoreInputError,
     control: &ProductionControl<'_>,
 ) -> StorageBackendError {

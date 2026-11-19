@@ -37,6 +37,7 @@ enum State<'a> {
 pub struct ImageReader<'a> {
     state: State<'a>,
     prepared: bool,
+    image_owner: Option<crate::memory_capture::MemoryImageOwner>,
     control: StorageReadControl,
 }
 
@@ -51,21 +52,36 @@ impl<'a> ImageReader<'a> {
         let reader = Self {
             state: State::Active(Budgeted::new(source, memory)),
             prepared: false,
+            image_owner: None,
             control: control.clone(),
         };
         control.check()?;
         Ok(reader)
     }
 
+    /// Associate the complete encoded unit with its immutable native owner. The owner is available before payload preparation and does not retain the source payload.
+    pub fn with_image_owner(
+        mut self,
+        owner: Option<crate::memory_capture::MemoryImageOwner>,
+    ) -> Self {
+        self.image_owner = owner;
+        self
+    }
+
+    pub(crate) fn take_image_owner(&mut self) -> Option<crate::memory_capture::MemoryImageOwner> {
+        self.image_owner.take()
+    }
+
     /// Keep the captured source's cancellation active during preparation and output, independently of the invoking allowance.
     pub fn with_source_control(
-        self,
+        mut self,
         original: Option<&'a StorageReadControl>,
         invoking: &StorageReadControl,
     ) -> StorageBackendResult<Self> {
         match original {
             Some(original) => {
                 original.check()?;
+                let owner = self.take_image_owner();
                 Self::new(
                     RetainedRead {
                         source: self,
@@ -73,6 +89,7 @@ impl<'a> ImageReader<'a> {
                     },
                     invoking,
                 )
+                .map(|reader| reader.with_image_owner(owner))
             }
             None => Ok(self),
         }

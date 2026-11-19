@@ -33,8 +33,7 @@ fn declarations(engine: &Engine, control: &StorageReadControl) -> PreparedTableD
 
 fn input(engine: &Engine, control: &StorageReadControl) -> PersistentTableInput {
     PersistentTableInput::from_catalog(
-        engine.storage.catalog.as_ref().unwrap().clone(),
-        engine.storage.backend.as_ref().unwrap().clone(),
+        TableSources::select(engine),
         engine.durable.roles.read().clone(),
         LIMITS,
         control,
@@ -203,8 +202,7 @@ fn persistent_table_hydration_rejects_wrong_or_exhausted_input_allowances() {
     let other = StorageReadControl::with_limit(8 << 20);
     let declarations = declarations(&engine, &control);
     assert!(PersistentTableInput::new(
-        engine.storage.catalog.as_ref().unwrap().clone(),
-        engine.storage.backend.as_ref().unwrap().clone(),
+        TableSources::select(&engine),
         declarations,
         KeyConstraintNames::load(&**engine.storage.catalog.as_ref().unwrap()).unwrap(),
         LIMITS,

@@ -118,6 +118,18 @@ impl Entries {
 }
 
 impl NativeImageEntries for Entries {
+    fn fingerprint_generation(
+        &self,
+        family: u16,
+    ) -> Option<&uqa_storage::memory_capture::MemoryImageGeneration> {
+        // The committed table and catalog sources share this registry. Live membership has one stable identity, and each outer transaction's original sources own a distinct one. The catalog OID counter in the header has independent admission.
+        if family == MemoryImageFamily::Header as u16 {
+            None
+        } else {
+            self.source.image_generation.as_ref()
+        }
+    }
+
     fn check(&self) -> BackupResult<()> {
         self.source.cut.check().map_err(Into::into)
     }

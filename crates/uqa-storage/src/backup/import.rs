@@ -122,7 +122,7 @@ impl<'a, M: BackupRecordImportMapping> MappedRecordImageImportReader<'a, M> {
         }
         let reader = self.reader.as_mut().ok_or(BackupError::Finished)?;
         self.current = None;
-        match reader.advance(maximum)? {
+        match reader.advance_provider(maximum)? {
             BackupReadStep::Pending => return Ok(BackupSourceStep::Pending),
             BackupReadStep::Complete => {
                 if !self.header || reader.verified().is_none() {

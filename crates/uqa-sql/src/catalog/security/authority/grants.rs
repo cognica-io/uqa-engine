@@ -6,7 +6,7 @@
 
 //! Every granted privilege has an owner-rooted grant-option path.
 
-use super::{invalid, AuthorityCatalog, RoleIdentity, SQLError};
+use super::{invalid, AuthorityCatalog, RoleIdentity, SQLError, Work};
 use uqa_core::memory::{BudgetedMap, BudgetedVec};
 
 #[derive(Clone, Copy)]
@@ -24,15 +24,17 @@ struct Link {
 }
 
 impl AuthorityCatalog<'_> {
-    pub(super) fn grants(
+    pub(super) async fn grants(
         &self,
         owner: RoleIdentity,
         entries: impl Iterator<Item = Grant> + Clone,
         inherited: impl Iterator<Item = Grant>,
+        work: &mut impl Work,
     ) -> Result<(), SQLError> {
         self.role(owner)?;
         let mut paths = BudgetedMap::new(self.memory);
         for grant in entries.clone() {
+            self.checkpoint(work).await?;
             self.role(grant.grantor)?;
             if let Some(grantee) = grant.grantee {
                 self.role(grantee)?;
@@ -45,11 +47,12 @@ impl AuthorityCatalog<'_> {
                 return Err(invalid("invalid or duplicate ACL grant path"));
             }
         }
-        drop(paths);
+        let control = self.control();
+        crate::catalog::work::retire_entries(paths.into_entries(), &control, work).await?;
         let mut heads = BudgetedMap::new(self.memory);
         let mut links = BudgetedVec::new(self.memory);
         for grant in entries.clone().chain(inherited) {
-            self.cancellation.check()?;
+            self.checkpoint(work).await?;
             if let Some(grantee) = grant.grantee.filter(|_| grant.options != 0) {
                 let index = links.len();
                 links.push(Link {
@@ -65,11 +68,11 @@ impl AuthorityCatalog<'_> {
         let mut pending = BudgetedVec::new(self.memory);
         pending.push(owner)?;
         while let Some(grantor) = pending.pop() {
-            self.cancellation.check()?;
+            self.checkpoint(work).await?;
             let options = *reached.get(&grantor).expect("queued grantor");
             let mut next = heads.get(&grantor).copied();
             while let Some(index) = next {
-                self.cancellation.check()?;
+                self.checkpoint(work).await?;
                 let link = &links[index];
                 let before = reached.get(&link.grantee).copied().unwrap_or(0);
                 let after = before | (options & link.options);
@@ -81,11 +84,13 @@ impl AuthorityCatalog<'_> {
             }
         }
         for grant in entries {
-            self.cancellation.check()?;
+            self.checkpoint(work).await?;
             if grant.privileges & !reached.get(&grant.grantor).copied().unwrap_or(0) != 0 {
                 return Err(invalid("ACL grantor has no owner-rooted grant option"));
             }
         }
+        crate::catalog::work::retire_entries(reached.into_entries(), &control, work).await?;
+        crate::catalog::work::retire_entries(heads.into_entries(), &control, work).await?;
         Ok(())
     }
 }

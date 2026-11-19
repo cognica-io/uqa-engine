@@ -20,6 +20,9 @@ use uqa_sql::{
 };
 use uqa_storage::{CatalogFacade, StorageBackendError, StorageBackendResult};
 
+mod input;
+pub use input::RetainedRoutineFinalization;
+
 pub struct PendingSQLFunctionRestore {
     definitions: BTreeMap<String, Vec<CreateFunction>>,
     migrated: bool,
@@ -158,14 +161,10 @@ pub fn finalize_sql_function_restore(
             let mut overloads = Vec::with_capacity(definitions.len());
             for mut def in definitions {
                 // A stored source body is not compiled here: the sessions that run it compile it, so a body that no longer compiles cannot keep the catalog from loading.
-                let bound = compile_catalog_bound_routine(
-                    &context.definition,
-                    &mut def,
-                    RoutineBodyCompilation::Stored,
-                )
-                .map_err(|err| StorageBackendError::Other(err.to_string()))?;
-                migrated |= bound.changed;
-                overloads.push(SQLUserFunction::new(def, bound.body).shared());
+                let (body, changed) = bind_stored(context, &mut def)
+                    .map_err(|err| StorageBackendError::Other(err.to_string()))?;
+                migrated |= changed;
+                overloads.push(SQLUserFunction::new(def, body).shared());
             }
             overloads.sort_by(|left, right| {
                 routine_signature_types(&left.def)
@@ -185,6 +184,28 @@ pub fn finalize_sql_function_restore(
             return Err(error);
         }
     };
+    publish_restored(context, previous, restored, migrated, allows_migration)
+}
+
+fn bind_stored(
+    context: &RoutineRestoreContext<'_>,
+    definition: &mut CreateFunction,
+) -> Result<(RoutineBody, bool), uqa_sql::SQLError> {
+    let bound = compile_catalog_bound_routine(
+        &context.definition,
+        definition,
+        RoutineBodyCompilation::Stored,
+    )?;
+    Ok((bound.body, bound.changed))
+}
+
+fn publish_restored(
+    context: &RoutineRestoreContext<'_>,
+    previous: RoutineRegistry,
+    restored: RoutineRegistry,
+    migrated: bool,
+    allows_migration: bool,
+) -> StorageBackendResult<()> {
     if migrated && !allows_migration {
         **context.registry.routines_write() = previous;
         return Err(StorageBackendError::Other(

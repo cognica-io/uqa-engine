@@ -78,10 +78,18 @@ impl KeyValueInvertedIndex {
         table: impl Into<String>,
         analyzer: Analyzer,
     ) -> Self {
+        Self::with_bindings(store, table, AnalyzerBindings::new(analyzer))
+    }
+
+    pub(crate) fn with_bindings(
+        store: Arc<dyn KeyValueStore>,
+        table: impl Into<String>,
+        bindings: AnalyzerBindings,
+    ) -> Self {
         Self::from_storage(
             Arc::new(storage::KeyValueOccurrences(store)),
             table,
-            AnalyzerBindings::new(analyzer),
+            bindings,
         )
     }
 

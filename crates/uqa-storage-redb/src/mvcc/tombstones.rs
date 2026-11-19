@@ -78,6 +78,9 @@ pub(super) fn reclaim(
         }
         let mut heads = transaction.open_table(HEADS).map_err(redb_error)?;
         let mut versions = transaction.open_table(VERSIONS).map_err(redb_error)?;
+        let mut fingerprints = transaction
+            .open_table(super::image_fingerprints::TABLE)
+            .map_err(redb_error)?;
         let page = candidates(&heads, &versions, request, control)?;
         if page.retired().len() != 0 {
             let mut identifiers = transaction
@@ -90,6 +93,7 @@ pub(super) fn reclaim(
             for (key, revision) in page.retired() {
                 control.check()?;
                 versions.remove((key, revision)).map_err(redb_error)?;
+                fingerprints.remove((key, revision)).map_err(redb_error)?;
                 heads.remove(key).map_err(redb_error)?;
             }
             for namespace in [RECLAMATION_EPOCH_NAMESPACE, &*domain] {
@@ -106,7 +110,7 @@ pub(super) fn reclaim(
 }
 
 fn candidates(
-    heads: &impl ReadableTable<&'static [u8], u64>,
+    heads: &impl ReadableTable<&'static [u8], &'static [u8]>,
     versions: &impl ReadableTable<(&'static [u8], u64), &'static [u8]>,
     request: &TombstoneReclamationRequest<'_>,
     control: &StorageReadControl,
@@ -123,27 +127,31 @@ fn candidates(
         if !key.starts_with(request.prefix) {
             break;
         }
-        if head.value() > request.through.as_u64() {
+        let head = super::heads::RecordHead::decode(head.value())?;
+        if head.revision > request.through.as_u64() {
             continue;
         }
         let mut history = versions
             .range((key, 0)..=(key, u64::MAX))
             .map_err(redb_error)?;
-        let (identity, value) = history
-            .next()
-            .transpose()
-            .map_err(redb_error)?
-            .ok_or(VersionError::InvalidEncoding("record head has no history"))?;
-        let mut retire = false;
-        if history.next().transpose().map_err(redb_error)?.is_none() {
-            if identity.value().1 != head.value() {
-                return Err(VersionError::InvalidEncoding(
-                    "record head has no matching history",
-                ));
+        let first = history.next().transpose().map_err(redb_error)?;
+        let retire = if let Some(bytes) = head.inline {
+            first.is_none() && codec::value_bytes(bytes)?.is_none()
+        } else {
+            let (identity, value) =
+                first.ok_or(VersionError::InvalidEncoding("record head has no history"))?;
+            if history.next().transpose().map_err(redb_error)?.is_some() {
+                false
+            } else {
+                if identity.value().1 != head.revision {
+                    return Err(VersionError::InvalidEncoding(
+                        "record head has no matching history",
+                    ));
+                }
+                super::large_values::tombstone(value.value())?
             }
-            retire = codec::value_bytes(value.value())?.is_none();
-        }
-        page.visit(key, head.value(), retire, control)?;
+        };
+        page.visit(key, head.revision, retire, control)?;
         if page.is_full() {
             break;
         }

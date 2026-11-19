@@ -24,6 +24,7 @@ pub struct ForeignRestoreContext<'a> {
     pub sequences: SequenceOwnerPublicationContext<'a>,
     pub roles: &'a dyn RoleCatalogGuards,
     pub routines: &'a dyn crate::routines::catalog::RoutineRegistryState,
+    pub cancellation: &'a uqa_core::CancellationToken,
 }
 
 pub struct RestoredForeignCatalog {
@@ -164,6 +165,13 @@ pub fn restore(
     }
     drop(declarations);
     let current = context.publication.foreign_catalog();
+    let control = uqa_core::memory::ProductionControl::new(
+        current.budget(),
+        context.cancellation,
+        context.cancellation,
+    );
+    super::reference::validate_live_servers(tables.values(), servers, &control)
+        .map_err(|error| StorageBackendError::backend("foreign table restoration", error))?;
     let mut relations = admit_restored(&tables, &securities, current.budget())?;
     merge_session_relations(&current, &mut relations)?;
     restored_servers.persist_migrations(catalog)?;
@@ -212,17 +220,29 @@ fn restore_wrappers(
     servers: &mut uqa_sql::catalog::foreign_server::ForeignServers,
     allow_migration: bool,
 ) -> StorageBackendResult<super::wrappers::RestoredWrappers> {
+    let memory = context.publication.foreign_catalog().budget().clone();
+    let control = uqa_core::memory::ProductionControl::new(
+        &memory,
+        context.cancellation,
+        context.cancellation,
+    );
     let restored = super::wrappers::restore(
         catalog,
         &context.roles.role_definitions(),
         servers,
         allow_migration,
+        &control,
     )?;
-    uqa_sql::catalog::foreign_wrapper::validate_functions(
+    uqa_sql::catalog::foreign_wrapper::validate_functions_with_control(
         &restored.definitions,
         &context.routines.routine_snapshot(),
+        &control,
     )
-    .map_err(|error| StorageBackendError::Other(error.to_string()))?;
+    .map_err(|error| match error {
+        uqa_sql::SQLError::Cancelled(cause) => StorageBackendError::Cancelled(cause),
+        error @ uqa_sql::SQLError::Internal(_) => StorageBackendError::Other(error.to_string()),
+        error => StorageBackendError::backend("foreign wrapper callback validation", error),
+    })?;
     Ok(restored)
 }
 

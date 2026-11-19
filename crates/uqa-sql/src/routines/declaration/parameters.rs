@@ -9,6 +9,7 @@
 use super::routine_definition_error;
 use crate::{
     ast::{FunctionParam, FunctionParamMode},
+    catalog::work::{self, Work},
     SQLError,
 };
 use uqa_core::memory::ProductionControl;
@@ -28,15 +29,21 @@ impl ParameterLayout {
         variadic_array: impl FnOnce() -> Result<bool, SQLError>,
         control: &ProductionControl<'_>,
     ) -> Result<(), SQLError> {
+        if self.begin(parameter.mode, procedure, control)? {
+            super::captured::require_variadic_array(variadic_array()?)?;
+        }
+        work::inline(self.finish(previous, parameter, procedure, control, &mut ()))
+    }
+
+    pub(super) fn begin(
+        &mut self,
+        mode: FunctionParamMode,
+        procedure: bool,
+        control: &ProductionControl<'_>,
+    ) -> Result<bool, SQLError> {
         control.check()?;
-        let input = !matches!(
-            parameter.mode,
-            FunctionParamMode::Out | FunctionParamMode::Table
-        );
-        let output = !matches!(
-            parameter.mode,
-            FunctionParamMode::In | FunctionParamMode::Variadic
-        );
+        let input = !matches!(mode, FunctionParamMode::Out | FunctionParamMode::Table);
+        let output = !matches!(mode, FunctionParamMode::In | FunctionParamMode::Variadic);
         if input && self.after_variadic {
             return Err(routine_definition_error(
                 "VARIADIC parameter must be the last input parameter",
@@ -47,22 +54,45 @@ impl ParameterLayout {
                 "VARIADIC parameter must be the last parameter",
             ));
         }
-        if parameter.mode == FunctionParamMode::Variadic {
-            self.after_variadic = true;
-            if !variadic_array()? {
-                return Err(routine_definition_error(
-                    "VARIADIC parameter must be an array",
-                ));
-            }
-        }
+        let variadic = mode == FunctionParamMode::Variadic;
+        self.after_variadic |= variadic;
+        Ok(variadic)
+    }
+
+    pub(super) async fn finish<W: Work + Send>(
+        &mut self,
+        previous: &[FunctionParam],
+        parameter: &FunctionParam,
+        procedure: bool,
+        control: &ProductionControl<'_>,
+        work: &mut W,
+    ) -> Result<(), SQLError> {
+        control.check()?;
+        let input = !matches!(
+            parameter.mode,
+            FunctionParamMode::Out | FunctionParamMode::Table
+        );
         if !parameter.name.is_empty() {
             for earlier in previous {
                 control.check()?;
-                if earlier.name == parameter.name && names_conflict(parameter.mode, earlier.mode) {
-                    return Err(routine_definition_error(format!(
-                        "parameter name \"{}\" used more than once",
-                        parameter.name
-                    )));
+                work.checkpoint().await?;
+                if earlier.name.len() == parameter.name.len()
+                    && work::compare_text(work, &earlier.name, &parameter.name, control)
+                        .await?
+                        .is_eq()
+                    && names_conflict(parameter.mode, earlier.mode)
+                {
+                    let message = work::text_parts(
+                        work,
+                        &[
+                            "parameter name \"",
+                            &parameter.name,
+                            "\" used more than once",
+                        ],
+                        control,
+                    )
+                    .await?;
+                    return Err(SQLError::admit_routine_message("42P13", message, control)?);
                 }
             }
         }

@@ -91,7 +91,7 @@ impl PersistentStorageProvider for SQLiteStorageProvider {
         uqa_storage::backup::BackupCapabilities {
             export: cfg!(any(windows, all(unix, not(target_os = "emscripten")))),
             import: cfg!(any(windows, all(unix, not(target_os = "emscripten")))),
-            snapshot_fingerprints: false,
+            snapshot_fingerprints: true,
         }
     }
 
@@ -305,6 +305,18 @@ impl PersistentStorageBackend for SQLiteStorageBackend {
         let value = uqa_core::memory::Budgeted::new(value, memory);
         control.check()?;
         Ok(value.into())
+    }
+
+    fn inverted_index_with_bindings(
+        &self,
+        table: &str,
+        bindings: uqa_storage::inverted_index::AnalyzerBindings,
+    ) -> StorageBackendResult<Box<dyn InvertedIndex>> {
+        Ok(Box::new(SQLiteInvertedIndex::from_bindings(
+            self.conn.clone(),
+            table.into(),
+            bindings,
+        )))
     }
 
     fn inverted_index_with_control(

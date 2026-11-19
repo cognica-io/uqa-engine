@@ -10,10 +10,12 @@ use rusqlite::types::ValueRef;
 use uqa_core::memory::BudgetedVec;
 use uqa_storage::{
     backup::{
-        BackupCut, BackupError, BackupImageSource, BackupRecordMapping, BackupResult,
-        BackupSourceStatistics, BackupSourceStep, BackupSourceUnit, ImageFormat, ImageProvider,
-        MappedRecordBackupImage, NamespaceId,
+        BackupCatalogField, BackupCatalogTextInput, BackupCut, BackupError, BackupImageSource,
+        BackupRecordMapping, BackupResult, BackupSourceStatistics, BackupSourceStep,
+        BackupSourceUnit, ImageFormat, ImageProvider, MappedRecordBackupImage, NamespaceId,
+        RecordImageCursor,
     },
+    catalog::input::CatalogInputLimits,
     key_value::diskann_backup_membership,
     mvcc::{CommittedRecordSnapshot, DatabaseId, NotificationRecordLayout, VersionError},
     read_control::StorageReadControl,
@@ -61,6 +63,65 @@ impl BackupRecordMapping for Mapping {
         &self.header
     }
 
+    fn stored_catalog_text(
+        &self,
+        records: &RecordImageCursor,
+        field: BackupCatalogField<'_>,
+        limits: CatalogInputLimits,
+        control: &StorageReadControl,
+    ) -> BackupResult<Option<BackupCatalogTextInput>> {
+        use uqa_storage::backup::BackupTableField;
+        let owner = NativeRecordOwner::Database(self.namespace);
+        match field {
+            BackupCatalogField::ViewQuery => {
+                let prefix = NativeRecordIdentity::new(NativeRecordFamily::Views, owner)?
+                    .encode_prefix(&[], control)?;
+                BackupCatalogTextInput::from_text_records(
+                    records,
+                    &prefix,
+                    super::row::view_definition_range,
+                    limits,
+                    control,
+                )
+            }
+            BackupCatalogField::MetadataPrefix(prefix) => {
+                control.check_value_size(prefix.len(), limits.maximum_key_bytes)?;
+                let key = NativeRecordIdentity::new(NativeRecordFamily::Metadata, owner)?
+                    .encode_text_prefix(prefix.as_bytes(), control)?;
+                BackupCatalogTextInput::from_metadata_records(
+                    records,
+                    &key,
+                    super::row::metadata_value_range,
+                    limits,
+                    control,
+                )
+            }
+            BackupCatalogField::Table(field) => {
+                let locate = match field {
+                    BackupTableField::Columns => super::row::table_columns_range,
+                    BackupTableField::Constraints => super::row::table_constraints_range,
+                };
+                let prefix =
+                    NativeRecordIdentity::family_prefix(NativeRecordFamily::Tables, control)?;
+                BackupCatalogTextInput::from_metadata_records(
+                    records, &prefix, locate, limits, control,
+                )
+            }
+            BackupCatalogField::Metadata(name) => {
+                control.check_value_size(name.len(), limits.maximum_key_bytes)?;
+                let key = NativeRecordIdentity::new(NativeRecordFamily::Metadata, owner)?
+                    .encode_key(&[ValueRef::Text(name.as_bytes())], control)?;
+                BackupCatalogTextInput::from_metadata_key(
+                    records,
+                    &key,
+                    Some(super::row::metadata_value_range),
+                    limits,
+                    control,
+                )
+            }
+        }
+        .map(Some)
+    }
     fn include(
         &self,
         records: &dyn CommittedRecordSnapshot,
@@ -181,8 +242,22 @@ impl SQLiteNativeBackupImage {
 }
 
 impl BackupImageSource for SQLiteNativeBackupImage {
+    fn reuse_current(
+        &mut self,
+        parent: uqa_storage::backup::UnitFingerprint,
+    ) -> BackupResult<bool> {
+        self.0.reuse_current(parent)
+    }
     fn cut(&self) -> BackupCut {
         self.cut()
+    }
+    fn stored_catalog_text(
+        &self,
+        field: BackupCatalogField<'_>,
+        limits: CatalogInputLimits,
+        control: &StorageReadControl,
+    ) -> BackupResult<Option<BackupCatalogTextInput>> {
+        self.0.stored_catalog_text(field, limits, control)
     }
     fn advance(&mut self, maximum_positions: usize) -> BackupResult<BackupSourceStep> {
         self.advance(maximum_positions)

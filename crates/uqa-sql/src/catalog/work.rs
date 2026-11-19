@@ -8,15 +8,19 @@
 
 use crate::SQLError;
 use std::{
+    borrow::Borrow,
+    cmp::Ordering,
     future::Future,
     task::{Context, Poll, Waker},
 };
 use uqa_core::{
     image_io::{AsyncImageInput, ImageIoError},
-    memory::{Produced, ProductionControl, ProductionString},
+    memory::{MapKeyInput, Produced, ProductionControl, ProductionString},
+    RelationIdentity,
 };
 
-pub(crate) trait Work {
+/// Schedule borrowed catalog validation and text construction through the invoking operation.
+pub trait Work {
     fn checkpoint(&mut self) -> impl Future<Output = Result<(), ImageIoError>> + Send;
 
     fn text(
@@ -59,18 +63,32 @@ pub(crate) async fn copy_text<W: Work + Send>(
     source: &str,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<String>, SQLError> {
+    text_parts(work, &[source], control).await
+}
+
+pub(crate) async fn text_parts<W: Work + Send>(
+    work: &mut W,
+    parts: &[&str],
+    control: &ProductionControl<'_>,
+) -> Result<Produced<String>, SQLError> {
     let mut value = ProductionString::new(*control);
-    value.reserve(source.len())?;
-    let mut begin = 0;
-    while begin < source.len() {
-        work.checkpoint().await?;
-        control.check()?;
-        begin += value.push_str_chunk(&source[begin..])?;
+    let length = parts
+        .iter()
+        .try_fold(0usize, |size, part| size.checked_add(part.len()))
+        .ok_or(uqa_core::memory::MemoryError::SizeOverflow)?;
+    value.reserve(length)?;
+    for source in parts {
+        let mut begin = 0;
+        while begin < source.len() {
+            work.checkpoint().await?;
+            control.check()?;
+            begin += value.push_str_chunk(&source[begin..])?;
+        }
     }
     Ok(value.finish()?)
 }
 
-pub(crate) async fn compare_text<W: Work + Send>(
+pub(crate) async fn compare_text<W: Work>(
     work: &mut W,
     left: &str,
     right: &str,
@@ -90,6 +108,21 @@ pub(crate) async fn compare_text<W: Work + Send>(
         }
     }
     Ok(left.len().cmp(&right.len()))
+}
+
+/// Retire one originally owned entry per work checkpoint. An interrupted continuation still owns all pending entries.
+pub(crate) async fn retire_entries(
+    mut entries: impl ExactSizeIterator,
+    control: &ProductionControl<'_>,
+    work: &mut impl Work,
+) -> Result<(), SQLError> {
+    while entries.len() != 0 {
+        control.check()?;
+        work.checkpoint().await?;
+        control.check()?;
+        drop(entries.next());
+    }
+    Ok(())
 }
 
 pub(crate) fn inline<F: Future>(future: F) -> F::Output {
@@ -129,16 +162,48 @@ pub(crate) async fn decoded_name<W: Work + Send>(
         .await
 }
 
-struct ReferenceWork<'a, 'c, W> {
-    control: &'a ProductionControl<'c>,
-    work: &'a mut W,
+pub(crate) struct ReferenceWork<'a, 'c, W> {
+    pub(crate) control: &'a ProductionControl<'c>,
+    pub(crate) work: &'a mut W,
 }
-impl<W: Work + Send> uqa_core::RelationReferenceWork for ReferenceWork<'_, '_, W> {
-    type Error = SQLError;
-    async fn checkpoint(&mut self) -> Result<(), SQLError> {
+
+impl<W: Work + Send> ReferenceWork<'_, '_, W> {
+    pub(crate) async fn checkpoint(&mut self) -> Result<(), SQLError> {
         self.control.check()?;
         self.work.checkpoint().await?;
         self.control.check()?;
         Ok(())
+    }
+}
+
+impl<W: Work + Send> uqa_core::RelationReferenceWork for ReferenceWork<'_, '_, W> {
+    type Error = SQLError;
+
+    async fn checkpoint(&mut self) -> Result<(), SQLError> {
+        ReferenceWork::checkpoint(self).await
+    }
+}
+
+impl<Q: Borrow<RelationIdentity> + Sync, W: Work + Send> MapKeyInput<Q, &RelationIdentity>
+    for ReferenceWork<'_, '_, W>
+{
+    type Error = SQLError;
+
+    async fn checkpoint(&mut self) -> Result<(), SQLError> {
+        ReferenceWork::checkpoint(self).await
+    }
+
+    async fn compare(
+        &mut self,
+        query: &Q,
+        stored: &&RelationIdentity,
+    ) -> Result<Ordering, SQLError> {
+        let query = query.borrow();
+        let schema = compare_text(self.work, &query.schema, &stored.schema, self.control).await?;
+        if schema.is_eq() {
+            compare_text(self.work, &query.name, &stored.name, self.control).await
+        } else {
+            Ok(schema)
+        }
     }
 }

@@ -66,6 +66,7 @@ mod source_visit;
 mod statement;
 pub mod subqueries;
 mod visit;
+pub(crate) use visit::visit_scalar_nodes_with_work;
 pub mod windows;
 
 pub use model::*;

@@ -40,7 +40,7 @@ pub struct RoutineMutationContext<'a> {
 use std::collections::BTreeMap;
 use uqa_sql::ast::CreateFunction;
 
-pub(crate) const FUNCTIONS_METADATA_KEY: &str = "sql_functions_json";
+pub const FUNCTIONS_METADATA_KEY: &str = "sql_functions_json";
 
 /// Select one complete metadata record so committed refresh cannot discard private routine definitions or ACL changes.
 pub fn merge_private(

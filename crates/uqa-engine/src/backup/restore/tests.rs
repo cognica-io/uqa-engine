@@ -22,12 +22,25 @@ fn capture(source: &Engine, repository: &LocalRepository, parent: Option<BackupI
     let control = StorageReadControl::with_limit(32 << 20);
     let mut options = BackupOptions::new(32 << 20, 16 << 20);
     options.parent = parent;
-    let mut job = source.begin_backup(repository, options, &control).unwrap();
-    while job.advance(8, 4096).unwrap() == BackupCaptureStep::Pending {}
-    let root = job.publish().unwrap();
-    drop(job);
+    let root = finish_capture(source.begin_backup(repository, options, &control).unwrap());
     assert_eq!(control.memory().used(), 0);
     root
+}
+
+fn finish_capture(mut job: crate::backup::BackupJob<'_>) -> BackupRoot {
+    while job.advance(8, 4096).unwrap() == BackupCaptureStep::Pending {}
+    job.publish().unwrap()
+}
+
+fn retire_ancestor(repository: &LocalRepository, parent: BackupRoot, control: &StorageReadControl) {
+    repository.remove_backup(parent.backup(), control).unwrap();
+    for _ in 0..100 {
+        let report = repository.collect_garbage(16, 16 << 20, control).unwrap();
+        if report.remaining_files == 0 {
+            return;
+        }
+    }
+    panic!("ancestor collection did not finish");
 }
 
 fn begin<'a>(
@@ -47,6 +60,19 @@ fn begin<'a>(
         .unwrap();
     drop(authority);
     job
+}
+
+fn assert_unusable(mut job: RestoreJob<'_>, expected: &str) {
+    let error = loop {
+        match job.advance(4096) {
+            Err(error) => break error,
+            Ok(RestorePhase::Reading | RestorePhase::Validating) => (),
+            Ok(phase) => panic!("unusable restore input reached {phase:?}"),
+        }
+    };
+    assert!(error.to_string().contains(expected), "{error}");
+    assert_eq!(job.phase(), RestorePhase::Failed);
+    assert!(matches!(job.publish(), Err(BackupError::Finished)));
 }
 
 fn prepare(job: &mut RestoreJob<'_>) {
@@ -87,14 +113,7 @@ fn memory_restore_job_activates_full_and_incremental_images_after_source_retirem
             .rows;
         if incremental {
             let cleanup = StorageReadControl::with_limit(32 << 20);
-            repository.remove_backup(parent.backup(), &cleanup).unwrap();
-            for attempt in 0..100 {
-                let report = repository.collect_garbage(16, 16 << 20, &cleanup).unwrap();
-                if report.remaining_files == 0 {
-                    break;
-                }
-                assert!(attempt < 99, "ancestor collection did not finish");
-            }
+            retire_ancestor(&repository, parent, &cleanup);
             assert_eq!(cleanup.memory().used(), 0);
         }
         let control = StorageReadControl::with_limit(32 << 20);
@@ -173,16 +192,34 @@ fn memory_restore_job_cancel_drop_and_failed_steps_retire_unpublished_state() {
         .unwrap();
     let root = capture(&source, &repository, None);
     drop(source);
-    for mode in ["drop", "cancel", "prepared", "token", "invalid_window"] {
+    for mode in [
+        "drop",
+        "cancel",
+        "prepared",
+        "token",
+        "invalid_window",
+        "catalog_cancel",
+        "catalog_drop",
+    ] {
         let control = StorageReadControl::with_limit(32 << 20);
         let mut job = begin(&repository, root, &control);
         for _ in 0..4 {
             job.advance(1024).unwrap();
         }
         assert!(control.memory().used() > 0);
+        if matches!(mode, "catalog_cancel" | "catalog_drop") {
+            while !matches!(
+                job.state,
+                State::Validating(_, CatalogValidation::Relationships(_), _)
+            ) {
+                assert_ne!(job.advance(1024).unwrap(), RestorePhase::Prepared);
+            }
+            assert_eq!(job.advance(1024).unwrap(), RestorePhase::Validating);
+            assert!(matches!(job.publish(), Err(BackupError::Finished)));
+        }
         match mode {
-            "drop" => (),
-            "cancel" | "prepared" => {
+            "drop" | "catalog_drop" => (),
+            "cancel" | "prepared" | "catalog_cancel" => {
                 if mode == "prepared" {
                     prepare(&mut job);
                 }
@@ -232,7 +269,16 @@ fn memory_restore_job_validation_failure_retires_the_candidate_and_archive_lease
         job.advance(1024).unwrap();
     }
     assert_eq!(job.phase(), RestorePhase::Validating);
-    let error = job.advance(1024).unwrap_err();
+    assert_eq!(job.advance(1024).unwrap(), RestorePhase::Validating);
+    let error = loop {
+        match job.advance(1024) {
+            Ok(RestorePhase::Validating) => {
+                assert!(matches!(job.publish(), Err(BackupError::Finished)));
+            }
+            Ok(phase) => panic!("unresolved view reached {phase:?}"),
+            Err(error) => break error,
+        }
+    };
     assert!(
         error.to_string().contains("missing native plan relation"),
         "{error}"
@@ -299,8 +345,16 @@ fn memory_restore_job_admission_preserves_authority_and_transaction_failures() {
     assert_eq!(denied.memory().used(), 0);
 }
 
+mod analyzer_resources;
+mod application_priority;
 mod constraint_bindings;
+mod external_functions;
+mod foreign_bindings;
+mod foreign_callbacks;
+mod function_origins;
+mod graph_path_indexes;
 mod index_bindings;
+mod legacy_graph_path_indexes;
 mod models;
 mod partition_bindings;
 mod persistent;

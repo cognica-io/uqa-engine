@@ -13,7 +13,7 @@ use crate::{
     plan::{MutableQueryPlan, SourcePlan},
     SQLError,
 };
-use uqa_core::memory::{BudgetedVec, Produced, ProductionControl};
+use uqa_core::memory::{Produced, ProductionControl};
 
 impl MutableSourcePlan {
     /// Replace an explicit source alias without changing the source's physical or function identity.
@@ -41,7 +41,7 @@ impl MutableSourcePlan {
         let (alias, lease) = control.finish(alias, lease)?.into_parts();
         let previous_capacity = current.as_ref().map_or(0, String::capacity);
         *current = Some(alias);
-        if let Some(memory) = &mut self.memory {
+        if let Some(memory) = self.memory.as_mut() {
             let RewriteMemory::Fields { direct, .. } = memory else {
                 unreachable!("source constructor")
             };
@@ -176,10 +176,7 @@ fn install<T>(
     *target = value;
     if let Some(memory) = memory {
         let direct = lease.expect("controlled source metadata");
-        *memory.field_mut(field) = Some(RewriteMemory::Fields {
-            fields: BudgetedVec::new(direct.budget()),
-            direct,
-        });
+        *memory.field_mut(field) = Some(RewriteMemory::direct(direct));
     }
     Ok(())
 }

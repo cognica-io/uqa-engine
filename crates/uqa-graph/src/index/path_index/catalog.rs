@@ -14,7 +14,9 @@ use uqa_storage::{CatalogFacade, PersistentStorageBackend, StorageBackendResult}
 
 mod capture;
 mod input;
+mod persistent;
 pub use capture::CapturedPathIndexes;
+pub use persistent::PathIndexCatalogInput;
 
 #[derive(Clone)]
 pub struct PathIndexCatalog {
@@ -34,6 +36,10 @@ impl PathIndexCatalog {
             indexes: RetainedMap::new(memory),
             non_memory: 0,
         }
+    }
+
+    pub fn budget(&self) -> &MemoryBudget {
+        self.indexes.budget()
     }
 
     pub fn len(&self) -> usize {
@@ -97,17 +103,22 @@ impl PathIndexCatalog {
 
     /// Build the complete successor before publishing removals. Prefix seeking avoids visiting other graph names or retaining a copied key list.
     pub fn remove_prefix(&mut self, prefix: &str) -> StorageBackendResult<()> {
+        self.remove_prefix_if(prefix, |_| true)
+    }
+
+    fn remove_prefix_if(
+        &mut self,
+        prefix: &str,
+        selected: impl Fn(&str) -> bool,
+    ) -> StorageBackendResult<()> {
         let mut candidate = self.clone();
-        while let Some((name, _)) = candidate
-            .indexes
-            .first_from(std::ops::Bound::Included(prefix))
-        {
+        for (name, _) in self.indexes.range_from(std::ops::Bound::Included(prefix)) {
             if !name.starts_with(prefix) {
                 break;
             }
-            let mut next = candidate.clone();
-            next.remove(name)?;
-            candidate = next;
+            if selected(name) {
+                candidate.remove(name)?;
+            }
         }
         self.publish(candidate);
         Ok(())
@@ -141,7 +152,11 @@ impl PathIndexCatalog {
         graph: &str,
         sequences: &[Vec<String>],
     ) -> GraphStoreResult<Self> {
-        let index = PathIndex::open_persistent(catalog, backend, key, graph, sequences)?;
+        let physical = self
+            .get(key)
+            .and_then(PathIndex::physical_key)
+            .unwrap_or(key);
+        let index = PathIndex::open_persistent(catalog, backend, physical, graph, sequences)?;
         let mut candidate = self.clone();
         candidate.insert(key, index.clone())?;
         let PathStorage::Persistent(durable) = &index.storage else {

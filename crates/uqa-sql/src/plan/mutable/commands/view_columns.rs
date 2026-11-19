@@ -8,7 +8,7 @@
 
 use super::{item, CommandPlan, MutableCommandPlan, RewriteMemory, SQLError};
 use crate::plan::{copy::Copying, MergeWhenPlan};
-use uqa_core::memory::{BudgetedVec, Produced, ProductionControl};
+use uqa_core::memory::{Produced, ProductionControl};
 
 impl MutableCommandPlan {
     pub fn map_insert_column(
@@ -92,7 +92,7 @@ impl MutableCommandPlan {
             )
         };
         *columns = output;
-        if let Some(owner) = &mut self.memory {
+        if let Some(owner) = self.memory.as_mut() {
             *item(body(owner), "when_clauses", clause).field_mut("columns") = memory;
         }
         Ok(self)
@@ -115,7 +115,7 @@ impl MutableCommandPlan {
             let (output, memory) = map(name)?.into_parts();
             let (output, memory) = control.finish(output, memory)?.into_parts();
             *name = output;
-            if let Some(owner) = &mut self.memory {
+            if let Some(owner) = self.memory.as_mut() {
                 *body(owner)
                     .field_mut("on_conflict")
                     .as_mut()
@@ -123,10 +123,7 @@ impl MutableCommandPlan {
                     .field_mut("conflict_columns")
                     .as_mut()
                     .expect("conflict columns")
-                    .item_mut(index) = memory.map(|direct| RewriteMemory::Fields {
-                    fields: BudgetedVec::new(direct.budget()),
-                    direct,
-                });
+                    .item_mut(index) = memory.map(RewriteMemory::direct);
             }
         }
         Ok(self)

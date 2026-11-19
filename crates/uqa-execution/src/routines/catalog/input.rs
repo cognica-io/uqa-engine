@@ -23,9 +23,13 @@ use uqa_storage::{
 use uqa_storage::{StorageBackendError, StorageBackendResult};
 
 mod authority;
+pub(in crate::routines) use authority::binding_error;
 pub use authority::RoutineCatalogAuthority;
 mod definitions;
+mod runtime_calls;
+pub(in crate::routines) use definitions::restore_error;
 pub use definitions::RoutineCatalogDefinitions;
+pub use runtime_calls::visit_stored_routine_runtime_calls;
 mod canonical;
 pub use canonical::{
     RoutineCatalogCanonicalInput, RoutineCatalogPlaceholderInput, RoutineCatalogTypeNames,
@@ -135,10 +139,23 @@ impl RoutineCatalogDocument {
         control: &ProductionControl<'_>,
         work: &mut W,
     ) -> StorageBackendResult<Self> {
+        Self::read_record_with_work(
+            json.unwrap_or("{}").as_bytes(),
+            allows_migration,
+            control,
+            work,
+        )
+        .await
+    }
+
+    async fn read_record_with_work<W: JsonReadWork<Error = JsonReadError>>(
+        record: &[u8],
+        allows_migration: bool,
+        control: &ProductionControl<'_>,
+        work: &mut W,
+    ) -> StorageBackendResult<Self> {
         let protocol = crate::catalog::type_records::marker::protocol::keys(control)?;
-        let document =
-            JsonDocument::read_with_work(json.unwrap_or("{}").as_bytes(), control, work, protocol)
-                .await?;
+        let document = JsonDocument::read_with_work(record, control, work, protocol).await?;
         let root = document.root();
         let (format, definitions) = if root.get("routine_catalog_format").is_some() {
             let mut format = None;

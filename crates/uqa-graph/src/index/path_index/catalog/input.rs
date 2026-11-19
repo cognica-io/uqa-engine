@@ -7,10 +7,23 @@
 //! Evaluated path input adopts names and immutable pairs without graph evaluation.
 
 use super::{PathIndex, PathIndexCatalog, PathStorage};
+use crate::{image_work::CatalogNames, GraphCatalog};
 use uqa_core::memory::{Budgeted, MemoryBudget, MemoryError, Produced};
 use uqa_storage::{read_control::StorageReadControl, StorageBackendError, StorageBackendResult};
 
 impl PathIndexCatalog {
+    /// Restore an Engine registration against the original graph catalog before accepting its materialized pairs. Standalone path images use the caller's opaque name.
+    pub async fn read_graph_image_from(
+        self,
+        name: Budgeted<String>,
+        graphs: &GraphCatalog,
+        input: &mut uqa_core::image_io::AsyncImageInput<'_>,
+    ) -> StorageBackendResult<Self> {
+        let name =
+            uqa_storage::catalog::path_index::canonicalized_from(name, graphs, input).await?;
+        self.read_image_from(name, input).await
+    }
+
     pub fn read_image(
         self,
         name: Budgeted<String>,
@@ -37,7 +50,11 @@ impl PathIndexCatalog {
         if !name.budget().shares_allowance(control.memory())
             || !self.indexes.budget().shares_allowance(control.memory())
             || name.reserved_bytes() < name.capacity()
-            || self.contains_key(name.as_str())
+            || self
+                .indexes
+                .get_from(name.as_str(), &mut CatalogNames(input))
+                .await?
+                .is_some()
         {
             return Err(StorageBackendError::Other(
                 "invalid path image admission or identity".into(),
@@ -51,7 +68,10 @@ impl PathIndexCatalog {
             .capacity()
             .checked_add(paths.retained_bytes())
             .ok_or(MemoryError::SizeOverflow)?;
-        self.indexes.insert(Produced::from(name), index, bytes)?;
+        self.indexes
+            .prepare_insert_from(Produced::from(name), bytes, &mut CatalogNames(input))
+            .await?
+            .publish(index);
         input.checkpoint().await?;
         Ok(self)
     }

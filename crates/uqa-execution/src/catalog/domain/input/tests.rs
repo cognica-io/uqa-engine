@@ -62,6 +62,69 @@ fn fixture(count: u32) -> Arc<dyn CatalogFacade> {
     catalog
 }
 
+#[test]
+fn backup_domain_declarations_select_named_and_positional_records_with_bounded_work() {
+    let domain = sample(2);
+    let expected = serde_json::to_value(&domain.definition).unwrap();
+    let mut named = serde_json::to_value(domain).unwrap();
+    named["unknown"] = "x".repeat(1 << 20).into();
+    let mut positional: Vec<_> = [
+        "object_id",
+        "oid",
+        "array_oid",
+        "identity",
+        "owner",
+        "definition",
+        "array_name",
+        "usage_acl",
+    ]
+    .iter()
+    .map(|key| named[*key].clone())
+    .collect();
+    positional[5] = [
+        "name",
+        "base",
+        "collation",
+        "collation_oid",
+        "default",
+        "not_null",
+        "checks",
+    ]
+    .iter()
+    .map(|key| expected[*key].clone())
+    .collect::<Vec<_>>()
+    .into();
+
+    for record in [named, serde_json::Value::Array(positional)] {
+        let control = StorageReadControl::with_limit(512 << 10);
+        let source = control.clone();
+        let bytes = serde_json::to_vec(&record).unwrap();
+        let mut input = ImageDecoder::new(
+            control.memory(),
+            control.cancellation(),
+            |mut reader| async move {
+                super::super::read_stored_domain_declaration(&bytes, &source, &mut reader.input())
+                    .await
+            },
+        )
+        .unwrap();
+        let window = ImageDecodeWindow {
+            bytes: 64,
+            steps: 8,
+        };
+        assert!(input
+            .advance(&mut std::io::empty(), window)
+            .unwrap()
+            .is_none());
+        let declaration = (0..1_000_000)
+            .find_map(|_| input.advance(&mut std::io::empty(), window).unwrap())
+            .expect("domain declaration did not finish");
+        assert_eq!(serde_json::to_value(&*declaration).unwrap(), expected);
+        drop(declaration);
+        assert_eq!(control.memory().used(), 0);
+    }
+}
+
 fn finish(
     input: &mut DomainCatalogInput,
     steps: usize,

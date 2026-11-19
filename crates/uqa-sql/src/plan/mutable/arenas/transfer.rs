@@ -83,7 +83,7 @@ impl MutableQueryPlan {
             None => ((0..count).map(|index| take(index).query).collect(), None),
         };
         *arena(&mut destination.query.root) = children;
-        if let Some(owner) = &mut destination.memory {
+        if let Some(owner) = destination.memory.as_mut() {
             *arena_memory(owner) = memory;
         }
         compact(&mut self, &selected);
@@ -114,7 +114,8 @@ fn take_query(query: &mut MutableQueryPlan, index: usize) -> MutableQueryPlan {
         memory: query
             .memory
             .as_mut()
-            .and_then(|memory| slot.memory_mut(memory).take()),
+            .and_then(|memory| slot.memory_mut(memory).take())
+            .into(),
     }
 }
 

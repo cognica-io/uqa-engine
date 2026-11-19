@@ -103,10 +103,11 @@ impl Engine {
     ) -> StorageBackendResult<()> {
         self.restore_schema_routine_identities(mode)?;
         self.restore_analyzers_from_catalog(catalog, mode)?;
-        self.restore_registries_after_analyzers(catalog, mode, domains, pending_sql_functions)
+        self.restore_registries_before_path_indexes(catalog, mode, domains, pending_sql_functions)?;
+        self.restore_path_indexes(None)
     }
 
-    pub(super) fn restore_registries_after_analyzers(
+    pub(super) fn restore_registries_before_path_indexes(
         &self,
         catalog: &dyn CatalogFacade,
         mode: super::CatalogRestoreMode,
@@ -115,14 +116,29 @@ impl Engine {
             uqa_execution::routines::restoration::PendingSQLFunctionRestore,
         >,
     ) -> StorageBackendResult<()> {
-        self.restore_foreign_registries_from_catalog(catalog, mode)?;
-        // Stored view plans are rebound only after every row-producing
-        // relation kind is present. Legacy unqualified sources may refer to a
-        // foreign table and must not be classified as missing during reopen.
-        self.restore_views_from_catalog(catalog, mode)?;
+        self.restore_relations_before_routine_bodies(catalog, mode)?;
         if let Some(pending) = pending_sql_functions {
             self.finalize_sql_function_restore(pending, mode)?;
         }
+        self.restore_registries_after_routine_bodies(catalog, mode, domains)
+    }
+
+    pub(super) fn restore_relations_before_routine_bodies(
+        &self,
+        catalog: &dyn CatalogFacade,
+        mode: super::CatalogRestoreMode,
+    ) -> StorageBackendResult<()> {
+        self.restore_foreign_registries_from_catalog(catalog, mode)?;
+        // Legacy unqualified view sources can refer to foreign tables.
+        self.restore_views_from_catalog(catalog, mode)
+    }
+
+    pub(super) fn restore_registries_after_routine_bodies(
+        &self,
+        catalog: &dyn CatalogFacade,
+        mode: super::CatalogRestoreMode,
+        domains: uqa_execution::catalog::domain::DomainRestoreState,
+    ) -> StorageBackendResult<()> {
         // Triggers and rules may target views, so both event registries must be
         // restored only after the complete relation namespace is available.
         self.event_restore_context()
@@ -138,9 +154,7 @@ impl Engine {
         )
         .map_err(|error| StorageBackendError::Other(error.to_string()))?;
         uqa_execution::catalog::range_type::validate_catalog(&self.restored_catalog_read_view())
-            .map_err(|error| StorageBackendError::Other(error.to_string()))?;
-        self.restore_path_indexes_from_catalog(catalog)?;
-        Ok(())
+            .map_err(|error| StorageBackendError::Other(error.to_string()))
     }
 
     fn restore_foreign_registries_from_catalog(
@@ -156,6 +170,7 @@ impl Engine {
                 schema: self.foreign_schema_context(),
                 sequences: self.sequence_owner_publication_context(),
                 roles: self,
+                cancellation: &self.runtime.cancellation,
             },
             catalog,
             mode.allows_migration(),
@@ -269,67 +284,21 @@ impl Engine {
         Ok(())
     }
 
-    fn restore_path_indexes_from_catalog(
+    pub(super) fn restore_path_indexes(
         &self,
-        catalog: &dyn CatalogFacade,
+        changed: Option<&std::collections::BTreeSet<String>>,
     ) -> StorageBackendResult<()> {
-        let mut indexes = self.durable.path_indexes.read().clone();
-        for (key, seq_json) in catalog.load_path_indexes()? {
-            let label_sequences: Vec<Vec<String>> = serde_json::from_str(&seq_json)?;
-            let (graph, name) = key.split_once("::").ok_or_else(|| {
-                StorageBackendError::Other(format!("invalid path-index key `{key}`"))
-            })?;
-            if graph.is_empty() || name.is_empty() {
-                return Err(StorageBackendError::Other(format!(
-                    "invalid path-index key `{key}`"
-                )));
-            }
-            let graphs = self.durable.graphs.read();
-            let store = graphs.get(graph).ok_or_else(|| {
-                StorageBackendError::Other(format!(
-                    "path index `{key}` references missing graph `{graph}`"
-                ))
-            })?;
-            let _ = store;
-            let idx = self.bind_path_index_definition(&key, graph, &label_sequences)?;
-            drop(graphs);
-            indexes.insert(&key, idx)?;
-        }
-        *self.durable.path_indexes.write() = indexes;
-        Ok(())
-    }
-
-    pub(super) fn refresh_changed_graph_path_indexes(
-        &self,
-        catalog: &dyn CatalogFacade,
-        changed: &std::collections::BTreeSet<String>,
-    ) -> StorageBackendResult<()> {
-        if changed.is_empty() {
+        if changed.is_some_and(std::collections::BTreeSet::is_empty) {
             return Ok(());
         }
-        let mut indexes = self.durable.path_indexes.read().clone();
-        indexes.remove_where(|key| {
-            key.split_once("::")
-                .is_some_and(|(graph, _)| changed.contains(graph))
-        })?;
-        for (key, json) in catalog.load_path_indexes()? {
-            let Some((graph, _)) = key.split_once("::") else {
-                continue;
-            };
-            if !changed.contains(graph) {
-                continue;
-            }
-            let sequences: Vec<Vec<String>> = serde_json::from_str(&json)?;
-            let graphs = self.durable.graphs.read();
-            let store = graphs.get(graph).ok_or_else(|| {
-                StorageBackendError::Other(format!(
-                    "path index `{key}` references missing graph `{graph}`"
-                ))
-            })?;
-            let _ = store;
-            let index = self.bind_path_index_definition(&key, graph, &sequences)?;
-            indexes.insert(&key, index)?;
-        }
+        let graphs = self.durable.graphs.read().clone();
+        let current = self.durable.path_indexes.read().clone();
+        let indexes = current.restored(
+            &graphs,
+            self.storage.catalog.as_ref().expect("persistent catalog"),
+            self.storage.backend.as_ref().expect("persistent backend"),
+            changed,
+        )?;
         *self.durable.path_indexes.write() = indexes;
         Ok(())
     }

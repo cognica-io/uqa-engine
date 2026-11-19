@@ -23,11 +23,26 @@ pub trait RoutineSupportAuthority {
     fn current_user_is_superuser(&self) -> bool;
 }
 pub(super) fn validate_routine_support_identity(support: &str) -> Result<(), SQLError> {
+    crate::catalog::work::inline(validate_routine_support_identity_with_work(
+        support,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+        &mut (),
+    ))
+}
+
+pub(super) async fn validate_routine_support_identity_with_work(
+    support: &str,
+    control: &uqa_core::memory::ProductionControl<'_>,
+    work: &mut (impl crate::catalog::work::Work + Send),
+) -> Result<(), SQLError> {
     if builtin_routine_support_oid(support).is_none() {
-        return Err(SQLError::Routine {
-            sqlstate: "42883".into(),
-            message: format!("function {support}(internal) does not exist"),
-        });
+        let message = crate::catalog::work::text_parts(
+            work,
+            &["function ", support, "(internal) does not exist"],
+            control,
+        )
+        .await?;
+        return Err(SQLError::admit_routine_message("42883", message, control)?);
     }
     Ok(())
 }

@@ -157,10 +157,7 @@ impl AsyncImageInput<'_> {
         self.cancellation.check()?;
         let mut text = BudgetedString::new(self.memory);
         text.reserve(source.len())?;
-        let mut utf8 = Utf8 {
-            bytes: [0; 4],
-            length: 0,
-        };
+        let mut utf8 = ImageUtf8::default();
         for fragment in source.as_bytes().chunks(CHUNK) {
             self.checkpoint().await?;
             utf8.append(fragment, &mut text)?;
@@ -174,10 +171,7 @@ impl AsyncImageInput<'_> {
         let mut text = BudgetedString::new(self.memory);
         text.reserve(length)?;
         let mut remaining = length;
-        let mut utf8 = Utf8 {
-            bytes: [0; 4],
-            length: 0,
-        };
+        let mut utf8 = ImageUtf8::default();
         while remaining != 0 {
             let count = self
                 .fragment(remaining, |fragment| {
@@ -188,9 +182,7 @@ impl AsyncImageInput<'_> {
             require_progress(count)?;
             remaining -= count;
         }
-        if utf8.length != 0 {
-            return Err(invalid());
-        }
+        utf8.finish()?;
         let (text, memory) = text.into_parts();
         Ok(Budgeted::new(text, memory))
     }
@@ -222,13 +214,23 @@ fn require_progress(count: usize) -> ImageIoResult<()> {
     Ok(())
 }
 
-struct Utf8 {
+/// Append arbitrary byte fragments to an admitted string, retaining at most one split UTF-8 code point.
+#[derive(Default)]
+pub struct ImageUtf8 {
     bytes: [u8; 4],
     length: usize,
 }
 
-impl Utf8 {
-    fn append(&mut self, mut bytes: &[u8], text: &mut BudgetedString) -> ImageIoResult<()> {
+impl ImageUtf8 {
+    pub fn finish(&self) -> ImageIoResult<()> {
+        if self.length == 0 {
+            Ok(())
+        } else {
+            Err(invalid())
+        }
+    }
+
+    pub fn append(&mut self, mut bytes: &[u8], text: &mut BudgetedString) -> ImageIoResult<()> {
         if self.length != 0 {
             let width = match self.bytes[0] {
                 0xc2..=0xdf => 2,

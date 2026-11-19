@@ -85,6 +85,7 @@ pub(super) fn restore(
     roles: &RoleDefinitions,
     servers: &mut uqa_sql::catalog::foreign_server::ForeignServers,
     allow_migration: bool,
+    control: &uqa_core::memory::ProductionControl<'_>,
 ) -> StorageBackendResult<RestoredWrappers> {
     let version = catalog_format(catalog)?;
     let current = version.is_some();
@@ -126,27 +127,18 @@ pub(super) fn restore(
     }
     validate_wrappers(&definitions, roles).map_err(|error| invalid(error.to_string()))?;
     let mut server_migrations = Vec::new();
-    let originals = servers.clone();
-    for server in originals.values() {
+    let mut candidate = servers.clone();
+    for server in servers.values() {
+        control
+            .check()
+            .map_err(|error| StorageBackendError::backend("foreign wrapper restoration", error))?;
         match server.metadata.wrapper_reference {
             Some(_) if !current => {
                 return Err(invalid(
                     "foreign-wrapper reference exists without its format marker",
                 ));
             }
-            Some(reference) => {
-                if reference.oid == 0 || reference.object_id == [0; 16] {
-                    return Err(invalid("invalid stored foreign-wrapper reference"));
-                }
-                if reference.oid < uqa_sql::catalog::oids::FIRST_NORMAL_OBJECT_ID {
-                    // Reserved host implementations cannot disappear through SQL callback deletion.
-                    server
-                        .bound_wrapper(&definitions)
-                        .map_err(|error| invalid(error.to_string()))?;
-                }
-                // PostgreSQL permits creation to finish after its callback deletes the wrapper.
-                // Preserve that original reference; access reports its missing OID without repairing it.
-            }
+            Some(_) => (),
             None if current || !allow_migration => {
                 return Err(invalid(format!(
                     "foreign server `{}` has no wrapper identity and requires an initial-open migration",
@@ -163,12 +155,15 @@ pub(super) fn restore(
                 let mut next = server.clone();
                 next.metadata.wrapper_reference = Some(wrapper.identity);
                 server_migrations.push(super::servers::catalog_row(&next)?);
-                servers
+                candidate
                     .insert(next.name.clone(), next)
                     .map_err(|error| StorageBackendError::backend("foreign servers", error))?;
             }
         }
     }
+    super::reference::validate_live_wrappers(&candidate, &definitions, control)
+        .map_err(|error| StorageBackendError::backend("foreign wrapper restoration", error))?;
+    *servers = candidate;
     Ok(RestoredWrappers {
         definitions,
         initialize: !current,

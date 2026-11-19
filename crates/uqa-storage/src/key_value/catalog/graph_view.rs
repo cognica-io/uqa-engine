@@ -54,7 +54,7 @@ impl GraphRead<'_> {
         Ok(keys)
     }
 
-    fn contains(&self, key: &[u8]) -> StorageBackendResult<bool> {
+    pub(super) fn contains(&self, key: &[u8]) -> StorageBackendResult<bool> {
         let mut found = false;
         self.read
             .visit_keys_after(key, None, 1, self.read.control(), &mut |candidate| {

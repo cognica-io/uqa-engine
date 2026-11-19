@@ -8,9 +8,15 @@
 
 use std::collections::BTreeMap;
 
-use super::{
-    CatalogFacade, GraphSnapshot, GraphVertexRow, StorageBackendError, StorageBackendResult,
-};
+use super::{CatalogFacade, EdgeRow, GraphVertexRow, StorageBackendError, StorageBackendResult};
+
+/// Complete persisted shape of one named graph. Catalog implementations replace the graph membership and entity rows as one atomic operation.
+#[derive(Debug, Clone)]
+pub struct GraphSnapshot {
+    pub vertices: Vec<GraphVertexRow>,
+    pub edges: Vec<EdgeRow>,
+    pub label_registry_json: String,
+}
 
 pub(crate) fn load<C: CatalogFacade + ?Sized>(
     catalog: &C,

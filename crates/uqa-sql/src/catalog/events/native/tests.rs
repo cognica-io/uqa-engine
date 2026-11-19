@@ -77,7 +77,7 @@ fn trigger() -> StoredTrigger {
     }
 }
 
-fn check(triggers: &TriggerCatalog, rules: &RuleCatalog) -> Result<(), SQLError> {
+fn check(triggers: &TriggerCatalog, rules: &RuleCatalog) -> Result<(), String> {
     let memory = MemoryBudget::new(1 << 20);
     let token = CancellationToken::new();
     let result = validate(
@@ -85,7 +85,8 @@ fn check(triggers: &TriggerCatalog, rules: &RuleCatalog) -> Result<(), SQLError>
         rules,
         &Catalog,
         &ProductionControl::new(&memory, &token, &token),
-    );
+    )
+    .map_err(|error| error.to_string());
     assert_eq!(memory.used(), 0);
     result
 }
@@ -259,7 +260,6 @@ fn native_rule_conditions_preserve_legacy_and_bound_reference_validation() {
             } else {
                 assert!(admitted
                     .unwrap_err()
-                    .to_string()
                     .contains("incomplete captured rule condition"));
             }
         }

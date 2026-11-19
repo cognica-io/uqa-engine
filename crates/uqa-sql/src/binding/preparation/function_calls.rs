@@ -272,10 +272,18 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
                 .routines
                 .has_untyped_function_with_control(name, &self.scope.control())?
         {
+            let kind = if self
+                .routines
+                .has_registered_aggregate_function_with_control(name, &self.scope.control())?
+            {
+                super::super::ordered_calls::Kind::Aggregate
+            } else {
+                super::super::ordered_calls::Kind::Ordinary
+            };
             return Ok(SelectedFunctionArguments {
                 overload: None,
                 positions: None,
-                kind: None,
+                kind: Some(kind),
             });
         }
         let types = arguments.types()?;

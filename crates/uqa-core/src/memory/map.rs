@@ -83,6 +83,11 @@ impl<K, V> BudgetedMap<K, V> {
         self.len == 0
     }
 
+    /// Consume the original tree one entry at a time. Each node keeps its allocation allowance until the iterator detaches that node; dropping a partial iterator retires its remaining nodes.
+    pub fn into_entries(self) -> OwnedMapIntoIter<K, V> {
+        OwnedMapIntoIter::new(self.root, self.len)
+    }
+
     pub fn budget(&self) -> &MemoryBudget {
         &self.memory
     }

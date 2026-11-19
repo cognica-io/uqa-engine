@@ -6,6 +6,7 @@
 
 //! Shared registry publication, session invalidation and registration retirement.
 
+use super::declarations::{CapturedDeclarations, Declarations, RegisteredKind};
 use super::{RegisteredSQLFunction, SQLAggregateFactory, SQLScalarFunction, SQLTableFunction};
 use crate::{state::StatementGate, SQLError, SessionContext};
 use parking_lot::{Mutex, RwLock};
@@ -67,8 +68,10 @@ struct Session {
 
 #[derive(Default)]
 struct Members {
+    declarations: Declarations,
     sessions: Vec<Session>,
     functions: Vec<WeakFunction>,
+    restore_readers: Weak<()>,
 }
 
 pub(crate) struct Registry {
@@ -76,6 +79,7 @@ pub(crate) struct Registry {
     pub(crate) table: Map<dyn SQLTableFunction>,
     pub(crate) aggregate: Map<dyn SQLAggregateFactory>,
     members: Mutex<Members>,
+    catalog_publication: RwLock<()>,
     revision: AtomicU64,
 }
 
@@ -86,6 +90,7 @@ impl Registry {
             table: RwLock::default(),
             aggregate: RwLock::default(),
             members: Mutex::default(),
+            catalog_publication: RwLock::default(),
             revision: AtomicU64::new(0),
         };
         registry.attach(session, gate);
@@ -94,6 +99,35 @@ impl Registry {
 
     pub(crate) fn revision(&self) -> u64 {
         self.revision.load(Ordering::Acquire)
+    }
+
+    /// Pin the installed declarations while a private maintenance session binds its stored catalog. The session never submits application statements or owns a foreground registration gate.
+    pub(crate) fn with_catalog_declarations<T>(&self, read: impl FnOnce() -> T) -> T {
+        let _declarations = self.catalog_publication.read();
+        read()
+    }
+
+    pub(crate) fn kinds(&self, name: &str) -> super::RegisteredKinds {
+        self.members.lock().declarations.get(name)
+    }
+
+    /// Retain declaration names at this statement's captured cut. A later installation or retirement can proceed while a backup is reading its catalog.
+    pub(crate) fn capture_declarations(
+        &self,
+        memory: &uqa_core::memory::MemoryBudget,
+    ) -> Result<CapturedDeclarations> {
+        Ok(self.members.lock().declarations.capture(memory)?)
+    }
+
+    /// Keep registered names and implementations fixed while a restore prepares and publishes its private database.
+    pub(crate) fn retain_for_restore(&self) -> Arc<()> {
+        let mut members = self.members.lock();
+        if let Some(active) = members.restore_readers.upgrade() {
+            return active;
+        }
+        let active = Arc::new(());
+        members.restore_readers = Arc::downgrade(&active);
+        active
     }
 
     pub(crate) fn attach(&self, session: &Arc<SessionContext>, gate: &Arc<StatementGate>) {
@@ -114,10 +148,14 @@ impl Registry {
         // Keep even replaced callbacks alive while invalidation drops plans.
         // Host destructors run only after all registry/session locks are gone.
         let mut retained = Vec::new();
+        let _publication = self.catalog_publication.write();
         let mut members = self
             .members
             .try_lock()
             .ok_or(SQLFunctionRegistrationError::Busy)?;
+        if members.restore_readers.strong_count() != 0 {
+            return Err(SQLFunctionRegistrationError::Busy);
+        }
         let sessions: Vec<_> = members
             .sessions
             .iter()
@@ -185,6 +223,9 @@ macro_rules! registration {
             ) -> Result<SQLFunctionRegistration> {
                 let previous = self.change(|members| {
                     members
+                        .declarations
+                        .set(&name, RegisteredKind::$kind, true)?;
+                    members
                         .functions
                         .push(WeakFunction::$kind(Arc::downgrade(&function)));
                     Ok(self.$field.write().insert(
@@ -222,19 +263,41 @@ impl SQLFunctionRegistration {
         let Some(active) = &self.active else {
             return Ok(());
         };
-        active.registry.change(|_| match &active.function {
-            Function::Scalar(function) => retire(&active.registry.scalar, &active.name, function),
-            Function::Table(function) => retire(&active.registry.table, &active.name, function),
-            Function::Aggregate(function) => {
-                retire(&active.registry.aggregate, &active.name, function)
-            }
+        active.registry.change(|members| match &active.function {
+            Function::Scalar(function) => retire(
+                &active.registry.scalar,
+                &active.name,
+                function,
+                &mut members.declarations,
+                RegisteredKind::Scalar,
+            ),
+            Function::Table(function) => retire(
+                &active.registry.table,
+                &active.name,
+                function,
+                &mut members.declarations,
+                RegisteredKind::Table,
+            ),
+            Function::Aggregate(function) => retire(
+                &active.registry.aggregate,
+                &active.name,
+                function,
+                &mut members.declarations,
+                RegisteredKind::Aggregate,
+            ),
         })?;
         self.active.take();
         Ok(())
     }
 }
 
-fn retire<F: ?Sized>(map: &Map<F>, name: &str, function: &Arc<F>) -> Result<()> {
+fn retire<F: ?Sized>(
+    map: &Map<F>,
+    name: &str,
+    function: &Arc<F>,
+    declarations: &mut Declarations,
+    kind: RegisteredKind,
+) -> Result<()> {
     let mut map = map.write();
     let current = map
         .get(name)
@@ -244,6 +307,7 @@ fn retire<F: ?Sized>(map: &Map<F>, name: &str, function: &Arc<F>) -> Result<()> 
         return Err(SQLFunctionRegistrationError::Busy);
     }
     if current {
+        declarations.set(name, kind, false)?;
         map.remove(name);
     }
     Ok(())

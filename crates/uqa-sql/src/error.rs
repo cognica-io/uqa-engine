@@ -58,7 +58,7 @@ pub enum SQLError {
     /// `SQLERRM` report the same code `PostgreSQL` would.
     #[error("{message}")]
     Routine { sqlstate: String, message: String },
-    /// A routine diagnostic whose original message allowance survives shared ownership and enclosing error context.
+    /// A SQL diagnostic whose original message allowance survives shared ownership and enclosing error context.
     #[error("{0}")]
     RetainedRoutine(#[source] std::sync::Arc<retained::RetainedRoutineDiagnostic>),
     /// A primary SQL error with separate `PostgreSQL` diagnostic fields. `SQLERRM` and `Display` expose only the primary message; protocol clients receive detail and hint independently.

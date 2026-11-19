@@ -36,11 +36,11 @@ fn admission_waited() {
 
 impl Engine {
     /// Admit a public committed-memory read before selecting its cut. A fresh operation owns an idle generation; a nested operation requires the outer frame's originals. Authorization and transaction failure handling precede selection, and temporary source owners retire after the operation gate closes.
-    pub(crate) fn capture_committed_memory_query(
+    pub(crate) fn capture_committed_memory_query<T>(
         &self,
         control: &StorageReadControl,
-        authorize: impl FnOnce(&Self) -> Result<(), SQLError>,
-    ) -> Result<SnapshotCut, SQLError> {
+        authorize: impl FnOnce(&Self) -> Result<T, SQLError>,
+    ) -> Result<(SnapshotCut, T), SQLError> {
         let mut retiring = None;
         let selected = {
             let nested_operation = self.runtime.statement_gate.owns_current_operation();
@@ -53,17 +53,15 @@ impl Engine {
                 !nested,
                 true,
                 |engine| {
-                    authorize(engine)?;
-                    loop {
+                    let admitted = authorize(engine)?;
+                    let snapshot = loop {
                         control.check().map_err(|error| capture_error(&error))?;
                         let Some(frames) = engine.session.transactions.try_lock_for(WAIT) else {
                             admission_waited();
                             continue;
                         };
                         if let Some(frame) = frames.first() {
-                            return engine
-                                .capture_original_memory(frame, control)
-                                .map_err(|error| capture_error(&error));
+                            break engine.capture_original_memory(frame, control);
                         }
                         if nested_operation {
                             return Err(capture_error(&unframed()));
@@ -75,19 +73,20 @@ impl Engine {
                         .map_err(|error| capture_error(&error))?;
                         let selected = sources.capture(engine.row_locks.catalog_oids(), control);
                         retiring = Some(sources);
-                        return selected.map_err(|error| capture_error(&error));
-                    }
+                        break selected;
+                    };
+                    Ok((snapshot.map_err(|error| capture_error(&error))?, admitted))
                 },
                 std::convert::identity,
             )
         };
         drop(retiring);
-        let selected = selected?;
+        let (selected, admitted) = selected?;
         selected
             .cut
             .check()
             .map_err(|error| capture_error(&error))?;
-        Ok(selected)
+        Ok((selected, admitted))
     }
 
     fn capture_original_memory(

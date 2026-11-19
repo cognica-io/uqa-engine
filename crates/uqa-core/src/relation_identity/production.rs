@@ -24,7 +24,7 @@ impl RelationReference<'_> {
         default_schema: RelationName<'_>,
         control: &ProductionControl<'_>,
     ) -> Result<Produced<super::RelationIdentity>, ValueRetentionError> {
-        inline(identity(*self, default_schema, control, &mut ()))
+        inline(self.identity_from(default_schema, control, &mut work::ReferenceWork(&mut ())))
     }
 
     /// Decode the same original components through retained work, admitting native schema/name buffers under the supplied production allowance.
@@ -34,7 +34,35 @@ impl RelationReference<'_> {
         control: &ProductionControl<'_>,
         input: &mut crate::image_io::AsyncImageInput<'_>,
     ) -> Result<Produced<super::RelationIdentity>, ValueRetentionError> {
-        identity(*self, default_schema, control, input).await
+        self.identity_from(default_schema, control, &mut work::ReferenceWork(input))
+            .await
+    }
+
+    /// Decode an identity through the same allocation, lexical and cancellation boundary as the invoking catalog reader.
+    pub async fn identity_from<W: crate::RelationReferenceWork>(
+        &self,
+        default_schema: RelationName<'_>,
+        control: &ProductionControl<'_>,
+        work: &mut W,
+    ) -> Result<Produced<super::RelationIdentity>, W::Error>
+    where
+        W::Error: From<ValueRetentionError>,
+    {
+        control.check()?;
+        work.checkpoint().await?;
+        control.check()?;
+        let schema = self
+            .schema
+            .unwrap_or(default_schema)
+            .decode_from(control, work)
+            .await?;
+        let name = self.name.decode_from(control, work).await?;
+        let (schema, schema_memory) = schema.into_parts();
+        let (name, name_memory) = name.into_parts();
+        Ok(control.finish(
+            super::RelationIdentity { schema, name },
+            control.combine(schema_memory, name_memory),
+        )?)
     }
 
     pub fn render_with_control(
@@ -68,35 +96,6 @@ impl RelationReference<'_> {
             .into_budgeted()
             .expect("native relation rendering retains its allowance"))
     }
-}
-
-async fn identity(
-    reference: RelationReference<'_>,
-    default_schema: RelationName<'_>,
-    control: &ProductionControl<'_>,
-    work: &mut impl Work,
-) -> Result<Produced<super::RelationIdentity>, ValueRetentionError> {
-    control.check()?;
-    work.checkpoint().await?;
-    control.check()?;
-    let schema =
-        decoded_component(reference.schema.unwrap_or(default_schema), control, work).await?;
-    let name = decoded_component(reference.name, control, work).await?;
-    let (schema, schema_memory) = schema.into_parts();
-    let (name, name_memory) = name.into_parts();
-    control.finish(
-        super::RelationIdentity { schema, name },
-        control.combine(schema_memory, name_memory),
-    )
-}
-
-async fn decoded_component(
-    name: RelationName<'_>,
-    control: &ProductionControl<'_>,
-    work: &mut impl Work,
-) -> Result<Produced<String>, ValueRetentionError> {
-    name.decode_from(control, &mut work::ReferenceWork(work))
-        .await
 }
 
 impl RelationName<'_> {

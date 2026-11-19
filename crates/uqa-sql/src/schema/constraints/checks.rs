@@ -74,20 +74,33 @@ pub fn bind_stored_check_expression(
     columns: &[ColumnDef],
     expression: &mut Expr,
 ) -> Result<bool, SQLError> {
-    let row_type = crate::FunctionTypeResolver::resolve_type_name(context.catalog, table)?
-        .ok_or_else(|| SQLError::UnknownTable(table.into()))?;
-    let relation = crate::RelationIdentity::from_legacy_name(table).map_err(SQLError::Internal)?;
-    let schema = check_row_schema(&relation.name, columns, &row_type)?;
-    let typed = super::super::expressions::bind_relation_row_references(
-        expression,
-        table,
-        qualifier,
-        &relation.name,
-        columns,
-    )?;
-    crate::schema::defaults::bind_stored_schema_expression_with_schema(
-        context, expression, typed, &schema,
-    )
+    crate::binding::stored_routines::StoredCallOrigin::Definition
+        .bind_check_expression(context, table, qualifier, columns, expression)
+}
+
+impl crate::binding::stored_routines::StoredCallOrigin {
+    pub(in crate::schema) fn bind_check_expression(
+        self,
+        context: &SchemaBindingContext<'_, '_>,
+        table: &str,
+        qualifier: &str,
+        columns: &[ColumnDef],
+        expression: &mut Expr,
+    ) -> Result<bool, SQLError> {
+        let row_type = crate::FunctionTypeResolver::resolve_type_name(context.catalog, table)?
+            .ok_or_else(|| SQLError::UnknownTable(table.into()))?;
+        let relation =
+            crate::RelationIdentity::from_legacy_name(table).map_err(SQLError::Internal)?;
+        let schema = check_row_schema(&relation.name, columns, &row_type)?;
+        let typed = super::super::expressions::bind_relation_row_references(
+            expression,
+            table,
+            qualifier,
+            &relation.name,
+            columns,
+        )?;
+        self.bind_schema_expression(context, expression, typed, &schema)
+    }
 }
 
 /// Analyze CHECKs against the actual declared row type, using the same SQL boundary for CREATE and ALTER.

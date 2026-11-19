@@ -232,6 +232,16 @@ impl SchemaScope {
         key.make_ascii_lowercase();
         let key = control.finish(key, memory)?;
         if !self.visiting_views.insert_with_control(&key, &control)? {
+            if let (super::super::RecursiveViewBinding::DeclaredColumns, Some(columns)) =
+                (&self.recursive_view, view.output_columns)
+            {
+                let schema = RowSchema::with_column_metadata_with_control(
+                    Some(qualifier),
+                    columns.iter().map(|column| (column.as_str(), None, None)),
+                    &control,
+                )?;
+                return self.alias_relation_schema(&schema, name, qualifier, aliases);
+            }
             return Err(SQLError::Internal(
                 control
                     .format(format_args!(

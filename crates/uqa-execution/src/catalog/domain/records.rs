@@ -13,7 +13,8 @@ use uqa_sql::catalog::domain::StoredDomain;
 use uqa_sql::catalog::roles::RoleDefinitions;
 use uqa_storage::{CatalogFacade, StorageBackendError, StorageBackendResult};
 
-pub(super) const PREFIX: &str = "uqa.sql.domain.v1:";
+pub const DOMAIN_RECORD_PREFIX: &str = "uqa.sql.domain.v1:";
+pub(super) use DOMAIN_RECORD_PREFIX as PREFIX;
 pub(super) const OID_PREFIX: &str = "uqa.sql.domain_oid.v1:";
 const FORMAT: &str = r#"{"domain_catalog_format":3}"#;
 

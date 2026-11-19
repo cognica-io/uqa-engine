@@ -23,7 +23,7 @@ impl TableFunctionPlan {
             let source = copying.function_group_member(self, None)?;
             return Ok(MutableSourcePlan {
                 source,
-                memory: Some(copying.into_rewrite_memory()),
+                memory: Some(copying.into_rewrite_memory()).into(),
             });
         }
         let function = self.clone();
@@ -39,7 +39,7 @@ impl TableFunctionPlan {
                 column_types: function.column_types,
                 ordinality: false,
             },
-            memory: None,
+            memory: None.into(),
         })
     }
 }
@@ -72,7 +72,7 @@ impl MutableSourcePlan {
             _ => unreachable!("selected function binding slot"),
         };
         *destination = binding;
-        if let Some(owner) = &mut self.memory {
+        if let Some(owner) = self.memory.as_mut() {
             *binding_memory(owner, member) = memory;
         }
         control.check()?;

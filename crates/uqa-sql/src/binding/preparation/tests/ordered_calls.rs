@@ -151,6 +151,18 @@ fn preparation_preserves_untyped_callback_identity_and_original_arguments() {
         }
     }
 
+    for (sql, modifier) in [
+        ("SELECT pg_get_viewdef(DISTINCT 1)", "DISTINCT"),
+        ("SELECT pg_get_viewdef(1) FILTER (WHERE true)", "FILTER"),
+        ("SELECT pg_get_viewdef(1 ORDER BY 1)", "ORDER BY"),
+    ] {
+        let mut plan = UnifiedPlan::lower(crate::compile(sql).unwrap().remove(0));
+        let error = read_prepared_inputs(&Callbacks, &mut plan, &[], &assignment_context(), None)
+            .unwrap_err();
+        assert_eq!(error.sqlstate(), Some("42809"), "{sql}: {error}");
+        assert!(error.to_string().contains(modifier), "{sql}: {error}");
+    }
+
     for sql in [
         "SELECT pg_get_viewdef(0::oid)",
         "SELECT pg_get_viewdef(true)",

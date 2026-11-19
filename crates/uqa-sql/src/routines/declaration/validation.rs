@@ -21,13 +21,6 @@ pub(super) fn validate_inline(def: &CreateFunction) -> Result<(), SQLError> {
     crate::catalog::work::inline(validate(def, &ProductionControl::uncontrolled(), &mut ()))
 }
 
-pub(super) fn validate_with_control(
-    def: &CreateFunction,
-    control: &ProductionControl<'_>,
-) -> Result<(), SQLError> {
-    crate::catalog::work::inline(validate(def, control, &mut ()))
-}
-
 /// Validate declared pseudo-types and polymorphic families without compiling a body or resolving catalog names. Type names and parameter traversal share the invoking continuation and native scratch allowance.
 pub async fn validate_routine_declaration_from_input(
     def: &CreateFunction,
@@ -37,7 +30,7 @@ pub async fn validate_routine_declaration_from_input(
     validate(def, control, input).await
 }
 
-async fn validate<W: Work>(
+pub(super) async fn validate<W: Work>(
     def: &CreateFunction,
     control: &ProductionControl<'_>,
     work: &mut W,
@@ -60,7 +53,7 @@ async fn validate<W: Work>(
     Ok(control.check()?)
 }
 
-trait Work: crate::catalog::work::Work + Send {
+pub(super) trait Work: crate::catalog::work::Work + Send {
     fn canonical(
         &mut self,
         name: &str,

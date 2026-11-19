@@ -17,6 +17,12 @@ impl Copying<'_> {
         aggregates: &dyn AggregateClassifier,
     ) -> Result<CommandPlan> {
         let mut scope = self.enter_plan_node()?;
+        scope.check()?;
+        if let Some(source) = super::mutations::Source::statement(statement) {
+            return scope.field("value0", |copying| {
+                copying.lower_mutation(source, aggregates)
+            });
+        }
         scope.lower_command_fields(statement, aggregates)
     }
 
@@ -29,10 +35,15 @@ impl Copying<'_> {
         statement: &Statement,
         aggregates: &dyn AggregateClassifier,
     ) -> Result<CommandPlan> {
-        self.check()?;
         Ok(match statement {
             Statement::Select(_) | Statement::Values { .. } => {
                 unreachable!("query lowering selected by statement owner")
+            }
+            Statement::Insert(_)
+            | Statement::Update(_)
+            | Statement::Delete(_)
+            | Statement::Merge(_) => {
+                unreachable!("mutation lowering selected by command owner")
             }
             Statement::CreateTableIfNotExists(value) => CommandPlan::CreateTableIfNotExists(
                 self.field("value0", |copying| value.copy_syntax(copying))?,
@@ -277,15 +288,6 @@ impl Copying<'_> {
                     copying.boxed(|copying| value.copy_syntax(copying))
                 })?)
             }
-            Statement::Insert(_)
-            | Statement::Update(_)
-            | Statement::Delete(_)
-            | Statement::Merge(_) => self.field("value0", |copying| {
-                copying.lower_mutation(
-                    super::mutations::Source::statement(statement).expect("selected mutation"),
-                    aggregates,
-                )
-            })?,
             Statement::CreateView {
                 name,
                 column_names,

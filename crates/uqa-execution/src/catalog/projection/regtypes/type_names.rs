@@ -20,7 +20,9 @@ pub use oid::resolve_catalog_user_type_by_oid_with_control;
 mod input;
 mod production;
 mod selection;
-pub use input::routine_type_name_identity_from_input;
+pub use input::{
+    routine_type_name_identity_from_input, routine_variadic_array_from_input, RoutineTypeNamespace,
+};
 pub use selection::catalog_user_type_name_identity_from_input;
 #[cfg(test)]
 mod input_tests;

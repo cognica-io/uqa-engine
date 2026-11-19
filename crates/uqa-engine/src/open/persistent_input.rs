@@ -62,7 +62,7 @@ enum Stage {
     NamedAnalyzers(NamedAnalyzers),
     GinAnalyzers(GinAnalyzers),
     FieldAnalyzers(FieldAnalyzers),
-    Registries(RestoredAuthorities),
+    Registries(RegistryInput),
     Caches(CacheInput),
 }
 
@@ -166,7 +166,7 @@ impl FieldAnalyzers {
             } => match input.advance(1)? {
                 Some(fields) => {
                     *engine.durable.table_field_analyzers.write() = fields;
-                    Ok(Stage::Registries(retained))
+                    Ok(Stage::Registries(RegistryInput::Relations(retained)))
                 }
                 None => Ok(Stage::FieldAnalyzers(Self::Installation {
                     input,
@@ -174,6 +174,65 @@ impl FieldAnalyzers {
                 })),
             },
         }
+    }
+}
+
+enum RegistryInput {
+    Relations(RestoredAuthorities),
+    Bodies(RestoredAuthorities),
+    Dependents(uqa_execution::catalog::domain::DomainRestoreState),
+    PathIndexes(uqa_graph::PathIndexCatalogInput),
+}
+
+impl RegistryInput {
+    fn advance(
+        self,
+        engine: &Engine,
+        catalog: Arc<dyn uqa_storage::CatalogFacade>,
+        limits: CatalogInputLimits,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Stage> {
+        let next = match self {
+            Self::Relations(retained) => {
+                engine.restore_relations_before_routine_bodies(
+                    catalog.as_ref(),
+                    CatalogRestoreMode::LoadOnly,
+                )?;
+                Self::Bodies(retained)
+            }
+            Self::Bodies(RestoredAuthorities { domains, routines }) => {
+                match routines.advance(&engine.routine_restore_context())? {
+                    Some(routines) => Self::Bodies(RestoredAuthorities { domains, routines }),
+                    None => Self::Dependents(domains),
+                }
+            }
+            Self::Dependents(domains) => {
+                engine.restore_registries_after_routine_bodies(
+                    catalog.as_ref(),
+                    CatalogRestoreMode::LoadOnly,
+                    domains,
+                )?;
+                Self::PathIndexes(uqa_graph::PathIndexCatalogInput::new(
+                    engine.durable.graphs.read().clone(),
+                    catalog,
+                    Arc::clone(engine.storage.backend.as_ref().expect("persistent backend")),
+                    engine.durable.path_indexes.read().budget().clone(),
+                    limits,
+                    control,
+                )?)
+            }
+            Self::PathIndexes(mut input) => match input.advance(1)? {
+                Some(paths) => {
+                    *engine.durable.path_indexes.write() = paths;
+                    uqa_execution::schema::types::relation_arrays::restoration::validate(
+                        &engine.restored_catalog_read_view(),
+                    )?;
+                    return Ok(Stage::Caches(CacheInput::Models));
+                }
+                None => Self::PathIndexes(input),
+            },
+        };
+        Ok(Stage::Registries(next))
     }
 }
 
@@ -190,6 +249,7 @@ impl PersistentEngineInput {
         provider: Arc<dyn PersistentStorageProvider>,
         retention: MemoryBudget,
         limits: CatalogInputLimits,
+        bindings: &crate::backup::RestoreBindings,
         control: &StorageReadControl,
     ) -> StorageBackendResult<Self> {
         control.check()?;
@@ -197,7 +257,7 @@ impl PersistentEngineInput {
         let memory = control.memory().reserve(size_of::<Engine>())?;
         let storage = provider.open_session()?;
         storage.validate_transaction_affinity()?;
-        let engine = Budgeted::new(
+        let mut engine = Budgeted::new(
             Box::new(Engine::empty_persistent_session_with_retention(
                 storage,
                 Some(provider),
@@ -205,6 +265,7 @@ impl PersistentEngineInput {
             )),
             memory,
         );
+        bindings.attach(engine.as_mut());
         let backend = engine.storage.backend.as_ref().expect("persistent backend");
         let version = backend.change_version()?;
         backend.begin_read_transaction()?;
@@ -231,7 +292,7 @@ impl PersistentEngineInput {
         })
     }
 
-    /// Constraint, role, schema, table, partition-counter, graph, sequence, graph OID, enum, shell, range, comment, composite, domain, system, database, built-in routine authority, named/GIN/field analyzer input, field installation and scoring parameters consume bounded native polls. The remaining registry and model owners retain their existing whole-operation boundaries. Any error or unwind consumes the private session, including its read transaction.
+    /// Read stored routines and graph path indexes across work windows and publish each complete registry in dependency order. A failure or unwind retires the private session and its read transaction.
     pub(crate) fn advance(
         &mut self,
         maximum_steps: usize,
@@ -353,11 +414,7 @@ impl Candidate {
             Stage::NamedAnalyzers(input) => input.advance(engine, self.limits, control)?,
             Stage::GinAnalyzers(input) => input.advance(engine, self.limits, control)?,
             Stage::FieldAnalyzers(input) => input.advance(engine, control)?,
-            Stage::Registries(retained) => {
-                self.session
-                    .restore_remaining_registries(catalog.as_ref(), retained)?;
-                Stage::Caches(CacheInput::Models)
-            }
+            Stage::Registries(input) => input.advance(engine, catalog, self.limits, control)?,
             Stage::Caches(input) => return input.advance(self.session, self.limits, control),
         };
         Ok(Progress::Pending(self))
@@ -375,7 +432,7 @@ impl Stage {
             AuthorityProgress::Pending(input) => Ok(Self::Authority(input)),
             AuthorityProgress::Complete(retained) => {
                 engine.restore_schema_routine_identities(CatalogRestoreMode::LoadOnly)?;
-                let resources = Arc::new(uqa_analysis::AnalyzerResources::default());
+                let resources = Arc::new(engine.analyzer_resources());
                 let catalog = engine.storage.catalog.as_ref().expect("persistent catalog");
                 let input = NamedAnalyzerCatalogInput::new(
                     Arc::clone(catalog),
@@ -459,24 +516,14 @@ impl PersistentEngineState {
         Ok(Progress::Complete(self))
     }
 
-    fn restore_remaining_registries(
-        &self,
-        catalog: &dyn uqa_storage::CatalogFacade,
-        restored: RestoredAuthorities,
-    ) -> StorageBackendResult<()> {
-        self.engine.restore_registries_after_analyzers(
-            catalog,
-            CatalogRestoreMode::LoadOnly,
-            restored.domains,
-            restored.routines,
-        )?;
-        uqa_execution::schema::types::relation_arrays::restoration::validate(
-            &self.engine.restored_catalog_read_view(),
-        )
-    }
-
     pub(crate) fn engine(&self) -> &Engine {
         &self.engine
+    }
+
+    pub(crate) fn activate(self) -> StorageBackendResult<Engine> {
+        let mut engine = self.finish()?;
+        engine.activate_persistent_provider()?;
+        Ok(engine)
     }
 
     pub(crate) fn finish(self) -> StorageBackendResult<Engine> {
@@ -507,25 +554,6 @@ impl PersistentEngineState {
         }
         let (engine, _memory) = self.engine.into_parts();
         Ok(*engine)
-    }
-}
-
-impl Engine {
-    pub(crate) fn from_restored_persistent_provider(
-        provider: &Arc<dyn PersistentStorageProvider>,
-        retention: MemoryBudget,
-        limits: CatalogInputLimits,
-        control: &StorageReadControl,
-    ) -> StorageBackendResult<Self> {
-        let mut input =
-            PersistentEngineInput::new(Arc::clone(provider), retention, limits, control)?;
-        let mut engine = loop {
-            if let Some(session) = input.advance(64)? {
-                break session.finish()?;
-            }
-        };
-        engine.activate_persistent_provider(provider)?;
-        Ok(engine)
     }
 }
 

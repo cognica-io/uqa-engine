@@ -13,8 +13,10 @@ mod authority;
 mod field_analyzers;
 mod gin_analyzers;
 mod graph_oids;
+mod graph_paths;
 mod graphs;
 mod models;
+mod routines;
 mod scoring;
 mod sequences;
 mod system_authority;
@@ -137,6 +139,7 @@ fn input(source: &Engine, control: &StorageReadControl) -> PersistentEngineInput
         Arc::clone(source.storage.provider.as_ref().unwrap()),
         MemoryBudget::new(16 << 20),
         LIMITS,
+        &crate::backup::RestoreBindings::default(),
         control,
     )
     .unwrap()

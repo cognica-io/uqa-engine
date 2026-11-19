@@ -41,6 +41,16 @@ pub trait RoutineCompilationSession {
     fn routine_search_path(&self) -> Vec<String>;
     fn replace_routine_search_path(&self, path: Vec<String>) -> Vec<String>;
     fn restore_routine_search_path(&self, path: Vec<String>);
+    fn replace_shared_routine_search_path(
+        &self,
+        path: std::sync::Arc<Vec<String>>,
+    ) -> std::sync::Arc<Vec<String>> {
+        self.replace_routine_search_path(std::sync::Arc::unwrap_or_clone(path))
+            .into()
+    }
+    fn restore_shared_routine_search_path(&self, path: std::sync::Arc<Vec<String>>) {
+        self.restore_routine_search_path(std::sync::Arc::unwrap_or_clone(path));
+    }
     /// Apply a routine's own settings, as a call of the routine applies them, until the returned scope is dropped.
     fn routine_settings_scope(
         &self,

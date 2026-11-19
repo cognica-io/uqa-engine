@@ -38,7 +38,7 @@ fn scalar_regrole_type_name(name: &str) -> bool {
     ColumnType::from_sql_name(name).is_ok_and(|ty| scalar_regrole_type(&ty))
 }
 
-fn regrole_constant_error() -> SQLError {
+pub(crate) fn regrole_constant_error() -> SQLError {
     SQLError::Routine {
         sqlstate: "0A000".into(),
         message: "constant of the type regrole cannot be used here".into(),
@@ -65,6 +65,32 @@ pub struct StoredRegroleConstants {
 }
 
 impl StoredRegroleConstants {
+    pub(crate) fn has_constants(&self) -> bool {
+        !self.inputs.is_empty() || self.has_bound_constant
+    }
+
+    pub(crate) fn retain(
+        self,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_core::memory::Produced<Self>, SQLError> {
+        if control.budget().is_none() {
+            return Ok(control.finish(self, None)?);
+        }
+        let mut inputs = uqa_core::memory::ProductionVec::new(*control);
+        inputs.reserve(self.inputs.len())?;
+        for input in self.inputs {
+            inputs.push_produced(control.copy_text(&input)?)?;
+        }
+        let (inputs, memory) = inputs.finish()?.into_parts();
+        Ok(control.finish(
+            Self {
+                inputs,
+                has_bound_constant: self.has_bound_constant,
+            },
+            memory,
+        )?)
+    }
+
     pub fn collect_expression(
         &mut self,
         expression: &Expr,
@@ -132,10 +158,10 @@ impl StoredRegroleConstants {
         context: &C,
     ) -> Result<(), SQLError> {
         self.validate_inputs_with(context)?;
-        if self.inputs.is_empty() && !self.has_bound_constant {
-            Ok(())
-        } else {
+        if self.has_constants() {
             Err(regrole_constant_error())
+        } else {
+            Ok(())
         }
     }
 }

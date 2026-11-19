@@ -47,7 +47,7 @@ pub use commands::{
     CommandAssignmentSlot, CommandQuerySlot, CommandScalarSlot, MutableCommandPlan,
 };
 pub use executable::MutableExecutablePlan;
-use memory::RewriteMemory;
+use memory::{RewriteMemory, RootMemory};
 pub use projections::{OwnedProjection, OwnedProjectionIter};
 pub use queries::QueryChildSlot;
 pub use slots::QueryScalarSlot;
@@ -59,7 +59,7 @@ pub use sources::{
 #[derive(Debug)]
 pub struct MutableQueryPlan {
     query: QueryPlan,
-    memory: Option<RewriteMemory>,
+    memory: RootMemory,
 }
 
 impl QueryPlan {
@@ -72,13 +72,13 @@ impl QueryPlan {
         let Some(mut copying) = Copying::for_rewrite(*control) else {
             return Ok(MutableQueryPlan {
                 query: self.clone(),
-                memory: None,
+                memory: None.into(),
             });
         };
         let query = copying.query_fields(self)?;
         let output = MutableQueryPlan {
             query,
-            memory: Some(copying.into_rewrite_memory()),
+            memory: Some(copying.into_rewrite_memory()).into(),
         };
         control.check()?;
         Ok(output)
@@ -90,13 +90,14 @@ impl MutableQueryPlan {
         query: QueryPlan,
         memory: Option<RewriteMemory>,
     ) -> Self {
-        Self { query, memory }
+        Self {
+            query,
+            memory: memory.into(),
+        }
     }
 
     pub fn reserved_bytes(&self) -> usize {
-        self.memory
-            .as_ref()
-            .map_or(0, RewriteMemory::reserved_bytes)
+        self.memory.reserved_bytes()
     }
 
     /// Rewrite one selected scalar root without copying parent containers or siblings. An absent optional scalar is left absent. Error or unwind destroys the complete private query.
@@ -175,11 +176,16 @@ impl MutableQueryPlan {
         self.assert_owner(control);
         control.check()?;
         let Self { query, memory } = self;
-        Ok(control.finish(query, memory.and_then(RewriteMemory::into_reservation))?)
+        Ok(control.finish(
+            query,
+            memory
+                .into_parts()
+                .and_then(RewriteMemory::into_reservation),
+        )?)
     }
 
     fn assert_owner(&self, control: &ProductionControl<'_>) {
-        match (&self.memory, control.budget()) {
+        match (self.memory.read().as_ref(), control.budget()) {
             (Some(RewriteMemory::Fields { direct, .. }), Some(budget)) => assert!(
                 direct.budget().shares_allowance(budget),
                 "query rewrite preserves its constructor allowance"

@@ -8,7 +8,7 @@
 
 use std::sync::Arc;
 
-use redb::{Database, ReadableDatabase, ReadableTable};
+use redb::{Database, ReadableDatabase};
 use uqa_storage::mvcc::{
     BorrowedRecord, CommitSequence, CommittedRecordSnapshot, DatabaseId, RecordKeyIterator,
     RecordPage, RecordPointVisitor, RecordVersion, ScannedRecord, SharedRecordValue, VersionError,
@@ -18,6 +18,7 @@ use uqa_storage::read_control::StorageReadControl;
 
 use super::{
     codec::{validate_metadata, value_bytes},
+    heads::RecordHead,
     HEADS, METADATA, VERSIONS,
 };
 use crate::error::redb_error;
@@ -69,8 +70,13 @@ impl CommittedRecordSnapshot for Snapshot {
             control.cancellation().check()?;
             return Ok(());
         };
-        let versions = transaction.open_table(VERSIONS).map_err(redb_error)?;
-        visit_visible(&versions, key, head.value(), self.sequence(), visit)?;
+        let mut versions = Versions::new(&transaction);
+        versions.visit(
+            key,
+            &RecordHead::decode(head.value())?,
+            self.sequence(),
+            visit,
+        )?;
         control.cancellation().check()?;
         Ok(())
     }
@@ -103,18 +109,14 @@ impl CommittedRecordSnapshot for Snapshot {
         let mut next = Some(first?);
         let transaction = self.begin_read()?;
         let heads = transaction.open_table(HEADS).map_err(redb_error)?;
-        let mut versions = None;
+        let mut versions = Versions::new(&transaction);
         while let Some(key) = next {
             control.check()?;
             let mut more = true;
             if let Some(head) = heads.get(&*key).map_err(redb_error)? {
-                if versions.is_none() {
-                    versions = Some(transaction.open_table(VERSIONS).map_err(redb_error)?);
-                }
-                visit_visible(
-                    versions.as_ref().expect("selected version table"),
+                versions.visit(
                     &key,
-                    head.value(),
+                    &RecordHead::decode(head.value())?,
                     self.sequence(),
                     &mut |record| {
                         more = visit(&key, record)?;
@@ -134,6 +136,70 @@ impl CommittedRecordSnapshot for Snapshot {
         Ok(())
     }
 
+    fn metadata(
+        &self,
+        key: &[u8],
+        control: &StorageReadControl,
+    ) -> VersionResult<Option<uqa_storage::mvcc::RecordMetadata>> {
+        control.cancellation().check()?;
+        let transaction = self.begin_read()?;
+        let heads = transaction.open_table(HEADS).map_err(redb_error)?;
+        let mut selected =
+            super::image_fingerprints::Selection::new(&transaction, self.sequence())?;
+        let record = selected.point(&heads, key)?;
+        control.cancellation().check()?;
+        Ok(record)
+    }
+
+    fn visit_metadata(
+        &self,
+        requests: &mut dyn uqa_storage::mvcc::RecordMetadataRequests,
+        control: &StorageReadControl,
+    ) -> VersionResult<()> {
+        control.check()?;
+        if !requests.advance()? {
+            return control.check().map_err(Into::into);
+        }
+        control.check()?;
+        let transaction = self.begin_read()?;
+        let heads = transaction.open_table(HEADS).map_err(redb_error)?;
+        let mut selected =
+            super::image_fingerprints::Selection::new(&transaction, self.sequence())?;
+        loop {
+            control.check()?;
+            let record = selected.point(&heads, requests.key())?;
+            requests.accept(record)?;
+            control.check()?;
+            if !requests.advance()? {
+                return control.check().map_err(Into::into);
+            }
+        }
+    }
+
+    fn visit_keys(
+        &self,
+        prefix: &[u8],
+        after: Option<&[u8]>,
+        limit: usize,
+        control: &StorageReadControl,
+        visit: &mut uqa_storage::mvcc::RecordKeyVisitor<'_>,
+    ) -> VersionResult<()> {
+        super::image_fingerprints::visit_positions::<false>(
+            || self.begin_read(),
+            self.sequence(),
+            prefix,
+            after,
+            limit,
+            control,
+            &mut |key, position| {
+                position
+                    .visible
+                    .map(|record| visit(key, record))
+                    .transpose()
+            },
+        )
+    }
+
     fn visit_prefix(
         &self,
         prefix: &[u8],
@@ -148,7 +214,7 @@ impl CommittedRecordSnapshot for Snapshot {
         }
         let transaction = self.begin_read()?;
         let heads = transaction.open_table(HEADS).map_err(redb_error)?;
-        let versions = transaction.open_table(VERSIONS).map_err(redb_error)?;
+        let mut versions = Versions::new(&transaction);
         let start = after.filter(|after| *after >= prefix).unwrap_or(prefix);
         let mut count = 0;
         for entry in heads.range(start..).map_err(redb_error)? {
@@ -162,10 +228,9 @@ impl CommittedRecordSnapshot for Snapshot {
                 continue;
             }
             let mut more = true;
-            visit_visible(
-                &versions,
+            versions.visit(
                 key,
-                head.value(),
+                &RecordHead::decode(head.value())?,
                 self.sequence(),
                 &mut |record| {
                     if let Some(record) = record {
@@ -218,7 +283,7 @@ impl CommittedRecordSnapshot for Snapshot {
         }
         let transaction = self.begin_read()?;
         let heads = transaction.open_table(HEADS).map_err(redb_error)?;
-        let versions = transaction.open_table(VERSIONS).map_err(redb_error)?;
+        let mut versions = Versions::new(&transaction);
         let start = after.filter(|after| *after >= prefix).unwrap_or(prefix);
         for entry in heads.range(start..).map_err(redb_error)? {
             control.cancellation().check()?;
@@ -230,10 +295,9 @@ impl CommittedRecordSnapshot for Snapshot {
             if after.is_some_and(|after| key <= after) {
                 continue;
             }
-            visit_visible(
-                &versions,
+            versions.visit(
                 key,
-                head.value(),
+                &RecordHead::decode(head.value())?,
                 self.sequence(),
                 &mut |record| {
                     if let Some(record) = record {
@@ -265,30 +329,59 @@ fn borrowed(sequence: u64, bytes: &[u8]) -> VersionResult<BorrowedRecord<'_>> {
     })
 }
 
-pub(super) fn visit_visible(
-    versions: &impl ReadableTable<(&'static [u8], u64), &'static [u8]>,
-    key: &[u8],
-    head: u64,
-    sequence: CommitSequence,
-    visit: &mut uqa_storage::mvcc::RecordValueVisitor<'_>,
-) -> VersionResult<()> {
-    if head <= sequence.as_u64() {
-        let bytes = versions
-            .get((key, head))
-            .map_err(redb_error)?
-            .ok_or(VersionError::InvalidEncoding("record head has no version"))?;
-        return visit(Some(borrowed(head, bytes.value())?));
+type VersionTable = redb::ReadOnlyTable<(&'static [u8], u64), &'static [u8]>;
+
+pub(super) struct Versions<'a> {
+    transaction: &'a redb::ReadTransaction,
+    table: Option<VersionTable>,
+    bodies: super::large_values::Reader<'a>,
+}
+
+impl<'a> Versions<'a> {
+    pub(super) const fn new(transaction: &'a redb::ReadTransaction) -> Self {
+        Self {
+            transaction,
+            table: None,
+            bodies: super::large_values::Reader::new(transaction),
+        }
     }
-    let entry = versions
-        .range((key, 0)..=(key, sequence.as_u64()))
-        .map_err(redb_error)?
-        .next_back()
-        .transpose()
-        .map_err(redb_error)?;
-    visit(
-        entry
-            .as_ref()
-            .map(|(key, bytes)| borrowed(key.value().1, bytes.value()))
-            .transpose()?,
-    )
+
+    pub(super) fn visit(
+        &mut self,
+        key: &[u8],
+        head: &RecordHead<'_>,
+        sequence: CommitSequence,
+        visit: &mut uqa_storage::mvcc::RecordValueVisitor<'_>,
+    ) -> VersionResult<()> {
+        if head.revision <= sequence.as_u64() {
+            if let Some(bytes) = head.inline {
+                return visit(Some(borrowed(head.revision, bytes)?));
+            }
+        }
+        if self.table.is_none() {
+            self.table = Some(self.transaction.open_table(VERSIONS).map_err(redb_error)?);
+        }
+        let versions = self.table.as_ref().expect("selected out-of-line versions");
+        if head.revision <= sequence.as_u64() {
+            let bytes = versions
+                .get((key, head.revision))
+                .map_err(redb_error)?
+                .ok_or(VersionError::InvalidEncoding("record head has no version"))?;
+            return self.bodies.with_value(bytes.value(), |raw| {
+                visit(Some(borrowed(head.revision, raw)?))
+            });
+        }
+        let entry = versions
+            .range((key, 0)..=(key, sequence.as_u64()))
+            .map_err(redb_error)?
+            .next_back()
+            .transpose()
+            .map_err(redb_error)?;
+        match entry {
+            Some((key, bytes)) => self.bodies.with_value(bytes.value(), |raw| {
+                visit(Some(borrowed(key.value().1, raw)?))
+            }),
+            None => visit(None),
+        }
+    }
 }

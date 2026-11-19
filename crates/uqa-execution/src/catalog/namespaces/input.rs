@@ -7,10 +7,10 @@
 //! Effective namespace order shares its selection while native ACLs and names retain bounded work.
 
 use super::{CatalogReadView, RelationNameResolution, RoleSubject, SchemaAclPrivilege};
-use std::{cmp::Ordering, future::Future};
+use std::future::Future;
 use uqa_core::{
     image_io::AsyncImageInput,
-    memory::{MapKeyInput, Produced, ProductionControl, ProductionString, ProductionVec},
+    memory::{Produced, ProductionControl, ProductionString, ProductionVec},
 };
 use uqa_sql::{
     catalog::{
@@ -133,9 +133,9 @@ impl Source for Retained<'_, '_, '_> {
             .schemas
             .get_from(
                 name,
-                &mut Comparison {
+                &mut crate::catalog::selection_work::NameComparison {
                     control: *control,
-                    input: self.input,
+                    work: self.input,
                 },
             )
             .await?;
@@ -285,29 +285,4 @@ async fn select(
         names.push_produced(source.text(name, control).await?)?;
     }
     Ok(names.finish()?)
-}
-
-struct Comparison<'a, 'b, 'c> {
-    control: ProductionControl<'a>,
-    input: &'b mut AsyncImageInput<'c>,
-}
-impl MapKeyInput<str, String> for Comparison<'_, '_, '_> {
-    type Error = SQLError;
-    async fn checkpoint(&mut self) -> Result<(), Self::Error> {
-        crate::catalog::selection_work::checkpoint(&self.control, self.input).await
-    }
-    async fn compare(&mut self, query: &str, stored: &String) -> Result<Ordering, Self::Error> {
-        for (left, right) in query
-            .as_bytes()
-            .chunks(4096)
-            .zip(stored.as_bytes().chunks(4096))
-        {
-            self.checkpoint().await?;
-            let order = left.cmp(right);
-            if order.is_ne() {
-                return Ok(order);
-            }
-        }
-        Ok(query.len().cmp(&stored.len()))
-    }
 }

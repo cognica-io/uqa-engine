@@ -52,10 +52,7 @@ fn mixed(
         })
         .unwrap();
     (
-        RewriteMemory::Fields {
-            direct: native.reserve(11).unwrap(),
-            fields,
-        },
+        RewriteMemory::fields(native.reserve(11).unwrap(), fields),
         16 + 8 * depth + scalar_depth * size_of::<ScalarExpr>(),
     )
 }
@@ -136,7 +133,8 @@ fn constructor_record_retirement_releases_every_suspended_and_cancelled_prefix()
         for cancel in 0..3 {
             let original = CancellationToken::new();
             let invoking = CancellationToken::new();
-            let (memory, expected) = mixed(4, 12, 8, &native);
+            let (mut memory, expected) = mixed(4, 12, 8, &native);
+            assert_eq!(memory.reserved_bytes(), native.used() - sibling.bytes());
             let mut reader = input(memory, &native, &work, &original, &invoking);
             for _ in 0..prefix {
                 assert!(advance(&mut reader).unwrap().is_none());

@@ -5,10 +5,11 @@
 //
 
 use super::*;
-use crate::{GraphStoreHandle, MemoryGraphStore};
+use crate::MemoryGraphStore;
 use uqa_storage::{read_control::StorageReadControl, StorageBackendError};
 
 mod input;
+mod ownership;
 
 #[test]
 fn decoded_path_catalog_retains_original_names_and_materializations_through_runtime_replacement() {
@@ -124,13 +125,7 @@ fn native_path_publication_and_removal_preserve_root_and_capability_on_admission
     let footprint = catalog.indexes.retained_bytes().unwrap();
     let used = memory.used();
     let exhausted = memory.reserve(memory.available()).unwrap();
-    let view = PathIndex {
-        storage: PathStorage::ReadView {
-            store: Arc::new(GraphStoreHandle::default()),
-            graph: "missing".into(),
-            sequences: vec![vec!["edge".into()]],
-        },
-    };
+    let view = PathIndex::test_read_view("missing");
     assert!(matches!(
         catalog.insert("g::a", view.clone()),
         Err(StorageBackendError::Memory(_))

@@ -9,7 +9,7 @@
 use super::{CommandPlan, MutableCommandPlan, RewriteMemory, SQLError, ScalarExpr};
 use crate::plan::ConflictPlan;
 use uqa_core::{
-    memory::{BudgetedVec, Produced, ProductionControl, ProductionVec},
+    memory::{Produced, ProductionControl, ProductionVec},
     Value,
 };
 
@@ -127,22 +127,14 @@ fn promote_columns(
         fields.truncate(retained);
         if retained == 0 {
             *owner.field_mut("expressions") =
-                control
-                    .empty_reservation()
-                    .map(|direct| RewriteMemory::Fields {
-                        fields: BudgetedVec::new(direct.budget()),
-                        direct,
-                    });
+                control.empty_reservation().map(RewriteMemory::direct);
         }
     }
     let (names, memory) = names.finish()?.into_parts();
     conflict.conflict_columns = names;
     if let Some(owner) = owner {
         // No further field edit follows this finalization; publication flattens the name buffer's owner with the complete command.
-        *owner.field_mut("conflict_columns") = memory.map(|direct| RewriteMemory::Fields {
-            fields: BudgetedVec::new(direct.budget()),
-            direct,
-        });
+        *owner.field_mut("conflict_columns") = memory.map(RewriteMemory::direct);
     }
     Ok(())
 }

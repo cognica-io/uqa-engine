@@ -99,7 +99,7 @@ impl MutableQueryPlan {
             ));
         };
         block.deferred_outer_rewrites = values;
-        if let Some(memory) = &mut self.memory {
+        if let Some(memory) = self.memory.as_mut() {
             *block_memory(memory).field_mut("deferred_outer_rewrites") = owner;
         }
         Ok(self)
@@ -158,7 +158,7 @@ impl MutableQueryPlan {
     }
     pub(super) fn restore_arena(&mut self, arena: ScalarQueryArena) {
         *arena_queries(&mut self.query.root) = arena.queries;
-        if let Some(memory) = &mut self.memory {
+        if let Some(memory) = self.memory.as_mut() {
             *arena_memory(memory) = arena.memory;
         }
     }

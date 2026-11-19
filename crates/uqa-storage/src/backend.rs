@@ -73,6 +73,9 @@ pub enum StorageBackendError {
     /// A native diagnostic retains its original owner instead of copying its message across the catalog boundary.
     #[error("{0}")]
     RetainedDiagnostic(#[source] Arc<dyn std::error::Error + Send + Sync>),
+    /// An analyzed object reference keeps its binding diagnostic and source when restoration reports an unusable catalog.
+    #[error("{0}")]
+    CatalogBinding(#[source] Arc<dyn std::error::Error + Send + Sync>),
 }
 
 impl StorageBackendError {
@@ -512,6 +515,17 @@ pub trait PersistentStorageBackend: Send + Sync {
     }
 
     fn inverted_index(&self, table: &str, analyzer: Analyzer) -> Box<dyn InvertedIndex>;
+
+    /// Open an ordinary text index with caller-selected analyzer resources and revisions.
+    fn inverted_index_with_bindings(
+        &self,
+        _table: &str,
+        _bindings: crate::inverted_index::AnalyzerBindings,
+    ) -> StorageBackendResult<Box<dyn InvertedIndex>> {
+        Err(StorageBackendError::Other(
+            "this backend cannot open a text index with supplied analyzer bindings".into(),
+        ))
+    }
 
     /// Restore a writable text-index handle sharing the original admitted name and lazy default. Construction must not resolve resources or retain the input cancellation signal.
     fn inverted_index_with_control(
