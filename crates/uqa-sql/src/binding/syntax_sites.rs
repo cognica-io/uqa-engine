@@ -551,7 +551,7 @@ where
                 operand = expr;
             }
             if crate::catalog::collations::expression::scalar_clause(operand)?.is_none() {
-                self.plain(ValueSite::DiscardCollation)?;
+                self.plain(ValueSite::DiscardCollation).await?;
                 return crate::catalog::work::nested!(
                     W::MAY_SUSPEND,
                     self.control,
@@ -562,7 +562,7 @@ where
         if crate::type_resolution::row_distinct::expanded(lowered, bound) {
             let mut rewritten = lowered.clone();
             crate::type_resolution::row_distinct::rewrite_scalar(&mut rewritten)?;
-            self.plain(ValueSite::RowDistinct)?;
+            self.plain(ValueSite::RowDistinct).await?;
             return crate::catalog::work::nested!(
                 W::MAY_SUSPEND,
                 self.control,
@@ -629,7 +629,7 @@ where
                 match bound {
                     ScalarExpr::TypedLiteral { value, ty, .. } => self.constant(value, ty).await?,
                     ScalarExpr::Literal(Value::Str(_) | Value::Null) => {
-                        self.plain(ValueSite::Literal)?;
+                        self.plain(ValueSite::Literal).await?;
                     }
                     _ => return Err(shape_error("literal")),
                 }
@@ -652,9 +652,9 @@ where
                 if !order_syntax.is_legacy() && order_syntax != bound {
                     return Err(shape_error("function ordering"));
                 }
-                self.plain(ValueSite::FunctionOrder(*bound))?;
+                self.plain(ValueSite::FunctionOrder(*bound)).await?;
             }
-            _ => self.plain(ValueSite::Node)?,
+            _ => self.plain(ValueSite::Node).await?,
         }
         match (lowered, bound) {
             (

@@ -75645,6 +75645,32 @@
       ]
     },
     {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "large_vector_growth_moves_ordered_slots_in_charged_byte_windows",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/vec.rs",
+      "capability": "Admitted vector growth",
+      "workload": "Move 4,096 independently identifiable 80-byte slots into a pre-admitted replacement vector.",
+      "invariant": "Each work step moves at most 4 KiB, allocates and frees zero buffers, and preserves the original slot order. Both buffer capacities stay charged until transfer completes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_syntax_sites_pause_while_relocating_existing_metadata_and_keep_the_last_site",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/syntax_sites/input.rs",
+      "capability": "Stored SQL syntax-site ownership",
+      "workload": "Append a function-ordering site after 1 or 4,096 existing nodes, then cancel during an admitted multi-window growth.",
+      "invariant": "Small buffers complete at once. Larger buffers yield between bounded slot transfers, preserve the selected metadata and release both reservations on cancellation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
       "package": "uqa-sql",
       "kind": "lib",
       "test": "stored_regclass_statement_edits_yield_before_late_lookup_and_release_failed_scratch",
