@@ -88,17 +88,22 @@ pub(crate) async fn text_parts<W: Work + Send>(
     Ok(value.finish()?)
 }
 
+pub(crate) fn text_chunks<'a, 'b>(
+    left: &'a str,
+    right: &'b str,
+) -> impl Iterator<Item = (&'a [u8], &'b [u8])> {
+    left.as_bytes()
+        .chunks(4096)
+        .zip(right.as_bytes().chunks(4096))
+}
+
 pub(crate) async fn compare_text<W: Work>(
     work: &mut W,
     left: &str,
     right: &str,
     control: &ProductionControl<'_>,
 ) -> Result<std::cmp::Ordering, SQLError> {
-    for (left, right) in left
-        .as_bytes()
-        .chunks(4096)
-        .zip(right.as_bytes().chunks(4096))
-    {
+    for (left, right) in text_chunks(left, right) {
         control.check()?;
         work.checkpoint().await?;
         control.check()?;
@@ -181,6 +186,22 @@ impl<W: Work + Send> uqa_core::RelationReferenceWork for ReferenceWork<'_, '_, W
 
     async fn checkpoint(&mut self) -> Result<(), SQLError> {
         ReferenceWork::checkpoint(self).await
+    }
+}
+
+impl<W: Work + Send> crate::ast::ColumnTypeInputWork for ReferenceWork<'_, '_, W> {
+    type Error = SQLError;
+
+    async fn checkpoint(&mut self) -> Result<(), SQLError> {
+        Ok(self.work.checkpoint().await?)
+    }
+
+    async fn text(
+        &mut self,
+        source: &str,
+        control: &ProductionControl<'_>,
+    ) -> Result<Produced<String>, SQLError> {
+        self.work.text(source, control).await
     }
 }
 

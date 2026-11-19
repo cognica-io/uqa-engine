@@ -93,15 +93,21 @@ impl<'a> Catalog<'a> {
         for (source, destination) in key.local.iter().zip(key.columns) {
             let source = self.column(local, source, input).await?;
             let destination = self.column(target, destination, input).await?;
-            crate::type_resolution::foreign_key_operand_type_with_control(
+            let comparison = match crate::type_resolution::foreign_key_operand_type_with_work(
                 &source.ty,
                 &destination.ty,
                 input.control,
+                input,
             )
-            .map_err(|error| match error.sqlstate() {
-                Some("53200" | "57014") => error,
-                _ => invalid("incompatible foreign-key column types"),
-            })?;
+            .await
+            {
+                Ok(Some(comparison)) => comparison,
+                Err(error) if matches!(error.sqlstate(), Some("53200" | "57014")) => {
+                    return Err(error)
+                }
+                Ok(None) | Err(_) => return Err(invalid("incompatible foreign-key column types")),
+            };
+            ColumnType::retire_with_work(comparison, input.control, input).await?;
         }
         let index = key
             .index

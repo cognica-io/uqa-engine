@@ -91,11 +91,25 @@ pub(super) fn numeric_type() -> ColumnType {
     }
 }
 
-pub(crate) fn base_type(mut ty: &ColumnType) -> &ColumnType {
+pub(crate) fn base_type(ty: &ColumnType) -> &ColumnType {
+    crate::catalog::work::inline(base_type_with_work(
+        ty,
+        &ProductionControl::uncontrolled(),
+        &mut (),
+    ))
+    .expect("ordinary base type lookup has no resource limit or cancellation")
+}
+
+pub(super) async fn base_type_with_work<'a, W: crate::ast::ColumnTypeInputWork>(
+    mut ty: &'a ColumnType,
+    control: &ProductionControl<'_>,
+    work: &mut W,
+) -> Result<&'a ColumnType, W::Error> {
     while let ColumnType::Domain { base, .. } = ty {
+        work.position(control).await?;
         ty = base;
     }
-    ty.without_temporal_modifiers()
+    Ok(ty.without_temporal_modifiers())
 }
 
 /// `coerce_type` reads a scalar domain through its base input, but array input keeps each element's domain checks. Input functions receive interval modifiers; other modifiers remain on the outer coercion.
@@ -694,28 +708,8 @@ pub(super) fn numeric_rank(ty: &ColumnType) -> Option<u8> {
     }
 }
 
-/// Array dimensions belong to values; `PostgreSQL` operator signatures identify an array by its scalar element type, including an element domain's identity.
-pub(super) fn same_operator_type_with_control(
-    left: &ColumnType,
-    right: &ColumnType,
-    control: &ProductionControl<'_>,
-) -> Result<bool, uqa_core::ValueRetentionError> {
-    fn element(mut ty: &ColumnType) -> &ColumnType {
-        while let ColumnType::Array(inner) = ty {
-            ty = inner;
-        }
-        ty
-    }
-    let left = base_type(left);
-    let right = base_type(right);
-    let (left, right) = match (left, right) {
-        (ColumnType::Array(left), ColumnType::Array(right)) => (element(left), element(right)),
-        _ => (left, right),
-    };
-    let left = left.without_type_modifiers_with_control(control)?;
-    let right = right.without_type_modifiers_with_control(control)?;
-    Ok(*left == *right)
-}
+mod operator_type;
+pub(super) use operator_type::{same_operator_type_with_control, same_operator_type_with_work};
 
 #[cfg(test)]
 mod production_tests;

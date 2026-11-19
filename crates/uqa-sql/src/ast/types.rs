@@ -219,14 +219,32 @@ impl ColumnType {
     /// `PostgreSQL`'s array element identity is independent of its number of dimensions. A domain element remains a domain even when its own base type is an array.
     #[must_use]
     pub fn array_element_type(&self) -> Option<&Self> {
-        let Self::Array(element) = self else {
+        if !matches!(self, Self::Array(_)) {
             return None;
-        };
-        let mut element = element;
-        while let Self::Array(inner) = element.as_ref() {
-            element = inner;
         }
-        Some(element)
+        Some(
+            crate::catalog::work::inline(self.array_shape_with_work(
+                &uqa_core::memory::ProductionControl::uncontrolled(),
+                &mut (),
+            ))
+            .expect("ordinary array element lookup has no resource limit or cancellation")
+            .0,
+        )
+    }
+
+    pub(crate) async fn array_shape_with_work<W: ColumnTypeInputWork>(
+        &self,
+        control: &uqa_core::memory::ProductionControl<'_>,
+        work: &mut W,
+    ) -> Result<(&Self, usize), W::Error> {
+        let mut source = self;
+        let mut dimensions = 0;
+        while let Self::Array(inner) = source {
+            work.position(control).await?;
+            source = inner;
+            dimensions += 1;
+        }
+        Ok((source, dimensions))
     }
 
     /// Whether modifier removal changes this type; a domain retains its declared base.

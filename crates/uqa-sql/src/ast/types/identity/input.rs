@@ -30,6 +30,14 @@ impl Work for AsyncImageInput<'_> {
 }
 
 impl UserTypeIdentity {
+    pub(crate) async fn parse_with_type_work<W: super::super::ColumnTypeInputWork>(
+        name: &str,
+        control: &ProductionControl<'_>,
+        mut work: &mut W,
+    ) -> Result<Option<Self>, W::Error> {
+        parse(name, control, &mut work).await
+    }
+
     /// Borrow an existing type identity without allocating or resolving it against a catalog. Whitespace, repeated array suffixes and decimal OIDs retain the ordinary grammar.
     pub async fn parse_from_input(
         name: &str,
@@ -75,6 +83,14 @@ pub(super) async fn parse<W: Work>(
 }
 
 struct CatalogInput<'a, W>(&'a mut W);
+
+impl<W: super::super::ColumnTypeInputWork> Work for &mut W {
+    type Error = W::Error;
+
+    async fn checkpoint(&mut self) -> Result<(), Self::Error> {
+        (**self).checkpoint().await
+    }
+}
 
 impl<W: crate::catalog::work::Work + Send> Work for CatalogInput<'_, W> {
     type Error = crate::SQLError;

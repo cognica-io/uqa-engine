@@ -123,6 +123,7 @@ pub use common::{
     select_common_input_type, values_column_types, CommonTypeContext,
     FunctionCallArgumentSignature,
 };
+pub(crate) use equality::foreign_key_operand_type_with_work;
 pub use equality::{
     equality_operand_type, equality_operand_type_with_control, foreign_key_operand_type,
     foreign_key_operand_type_with_control,

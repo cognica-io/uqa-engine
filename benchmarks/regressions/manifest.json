@@ -55251,6 +55251,32 @@
     {
       "package": "uqa-sql",
       "kind": "lib",
+      "test": "native_constraint_foreign_key_type_comparison_yields_within_one_nested_pair",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/constraints/native/tests/work.rs",
+      "capability": "Native foreign-key column type validation",
+      "workload": "Compare one- and 128-dimensional arrays in a single foreign key before validating its referenced index.",
+      "invariant": "The terminal error follows the established type and index order. Work scales with depth, batched windows make equivalent progress, and cancellation releases the allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "native_constraint_foreign_key_compares_each_nested_domain_before_accepting_the_index",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/constraints/native/tests/work.rs",
+      "capability": "Native foreign-key column type validation",
+      "workload": "Place the only changed name at the first or last of 128 domain layers inside an array, then validate an equal pair.",
+      "invariant": "Moving the difference alone advances at least 127 more single-step windows. Equal types finish, and cancellation returns SQLSTATE 57014 with no retained memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
       "test": "native_constraint_foreign_keys_yield_during_stored_index_matching_and_scratch_retirement",
       "cases": 1,
       "source": "crates/uqa-sql/src/schema/constraints/native/tests/work.rs",

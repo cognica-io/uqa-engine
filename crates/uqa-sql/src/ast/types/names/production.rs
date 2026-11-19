@@ -21,6 +21,8 @@ pub(super) fn name(
     control: &ProductionControl<'_>,
 ) -> Result<Produced<String>, ValueRetentionError> {
     control.check()?;
+    let (ty, dimensions) =
+        crate::catalog::work::inline(ty.array_shape_with_work(control, &mut ()))?;
     let reference = match ty {
         ColumnType::Enum(reference) => Some((&reference.schema, &reference.name)),
         ColumnType::Composite(reference) => Some((&reference.schema, &reference.name)),
@@ -28,18 +30,21 @@ pub(super) fn name(
             Some((&reference.schema, &reference.name))
         }
         ColumnType::Domain { schema, name, .. } if regtype => Some((schema, name)),
-        ColumnType::Array(element) => {
-            let element = name(element, regtype, control)?;
-            return control.format(format_args!("{}[]", element.as_str()));
-        }
         _ => None,
     };
-    if let Some((schema, name)) = reference {
-        return if regtype {
+    let scalar = if let Some((schema, name)) = reference {
+        if regtype {
             super::super::display::visible_type_name_with_control(schema, name, control)
         } else {
             crate::expr::quote_ident_with_control(name, control)
-        };
-    }
-    control.format(format_args!("{}", TypeName { ty, regtype }))
+        }
+    } else {
+        control.format(format_args!("{}", TypeName { ty, regtype }))
+    }?;
+    crate::catalog::work::inline(ColumnType::array_name_with_work(
+        scalar,
+        dimensions,
+        control,
+        &mut (),
+    ))
 }

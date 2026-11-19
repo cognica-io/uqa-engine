@@ -170,6 +170,10 @@ fn catalog_spelling_input_bounds_deep_arrays_without_recursive_formatting() {
                 format!("pg_catalog.\"int4\"{}", "[]".repeat(8192))
             );
             assert_eq!(source.catalog_name(), value.as_str());
+            assert_eq!(
+                source.display_name(),
+                format!("integer{}", "[]".repeat(8192))
+            );
             drop((source, value));
             assert_eq!((native.used(), work.used()), (0, 0));
         })

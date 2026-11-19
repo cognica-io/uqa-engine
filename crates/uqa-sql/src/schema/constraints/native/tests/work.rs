@@ -128,3 +128,114 @@ fn native_constraint_foreign_keys_yield_during_stored_index_matching_and_scratch
     let cancelled = run(wide_foreign_key(None), 1, Some(complete.calls - 30), false);
     assert_eq!(cancelled.error.unwrap().0.as_deref(), Some("57014"));
 }
+
+fn type_pair(
+    source: ColumnType,
+    target: ColumnType,
+    missing_index: bool,
+) -> (Vec<Table>, Vec<CatalogIndexRow>) {
+    let (mut tables, indexes) = fixture();
+    tables[0].columns[0].ty = target;
+    tables[1].columns[0].ty = source;
+    if missing_index {
+        tables[1].foreign_keys[0].referenced_index = None;
+    }
+    (tables, indexes)
+}
+
+#[test]
+fn native_constraint_foreign_key_type_comparison_yields_within_one_nested_pair() {
+    let array = |depth, leaf| (0..depth).fold(leaf, |inner, _| ColumnType::Array(Box::new(inner)));
+    let inspect = |depth, destination, steps, cancel_at| {
+        let pair = type_pair(
+            array(depth, ColumnType::Integer),
+            array(depth, destination),
+            true,
+        );
+        run(pair, steps, cancel_at, false)
+    };
+    let shallow = inspect(1, ColumnType::Text, 1, None);
+    let deep = inspect(128, ColumnType::Text, 1, None);
+    let grouped = inspect(128, ColumnType::Text, 16, None);
+    assert_eq!(shallow.error, deep.error);
+    assert_eq!(deep.error, grouped.error);
+    assert!(deep
+        .error
+        .unwrap()
+        .1
+        .contains("incompatible foreign-key column types"));
+    assert!(
+        deep.calls >= shallow.calls + 127,
+        "{} vs {}",
+        deep.calls,
+        shallow.calls
+    );
+    assert!(grouped.calls * 8 < deep.calls);
+    let cancelled = inspect(128, ColumnType::Text, 1, Some(shallow.calls + 32));
+    assert_eq!(cancelled.error.unwrap().0.as_deref(), Some("57014"));
+    let matching = inspect(128, ColumnType::Integer, 1, None);
+    assert!(matching
+        .error
+        .unwrap()
+        .1
+        .contains("missing original foreign-key index"));
+    let valid = type_pair(
+        array(127, ColumnType::Integer),
+        array(128, ColumnType::Integer),
+        false,
+    );
+    assert!(run(valid, 16, None, false).error.is_none());
+}
+
+#[test]
+fn native_constraint_foreign_key_compares_each_nested_domain_before_accepting_the_index() {
+    // Both normalized declarations have exactly the same size and shape. Only the
+    // position of the first unequal domain field changes the comparison work.
+    let domain = |mismatch| {
+        ColumnType::Array(Box::new((0..128).rev().fold(
+            ColumnType::Integer,
+            |base, index| ColumnType::Domain {
+                schema: "public".into(),
+                name: if Some(index) == mismatch { "b" } else { "a" }.into(),
+                oid: 20_000 + index,
+                array_oid: None,
+                collation_oid: None,
+                base: Box::new(base),
+            },
+        )))
+    };
+    let inspect = |mismatch, steps, cancel| {
+        run(
+            type_pair(domain(None), domain(mismatch), false),
+            steps,
+            cancel,
+            false,
+        )
+    };
+    let early = inspect(Some(0), 1, None);
+    let late = inspect(Some(127), 1, None);
+    let equal = inspect(None, 1, None);
+    assert_eq!(early.error, late.error);
+    assert!(late
+        .error
+        .unwrap()
+        .1
+        .contains("incompatible foreign-key column types"));
+    assert!(
+        late.calls >= early.calls + 127,
+        "{} vs {}",
+        late.calls,
+        early.calls
+    );
+    assert!(equal.error.is_none());
+    assert!(equal.calls > late.calls);
+    assert!(inspect(None, 16, None).calls * 8 < equal.calls);
+    assert_eq!(
+        inspect(None, 1, Some(early.calls))
+            .error
+            .unwrap()
+            .0
+            .as_deref(),
+        Some("57014")
+    );
+}

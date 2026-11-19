@@ -141,10 +141,32 @@ pub fn require_ordering_operator(ty: &ColumnType) -> Result<(), SQLError> {
 }
 
 fn equality_operator_available(ty: &ColumnType) -> bool {
-    match base_type(ty) {
-        ColumnType::Void | ColumnType::Json | ColumnType::Xml | ColumnType::RefCursor => false,
-        ColumnType::Array(element) => equality_operator_available(element),
-        _ => true,
+    crate::catalog::work::inline(equality_operator_available_with_work(
+        ty,
+        &ProductionControl::uncontrolled(),
+        &mut (),
+    ))
+    .expect("ordinary equality support has no resource limit or cancellation")
+}
+
+pub(super) async fn equality_operator_available_with_work<W: crate::ast::ColumnTypeInputWork>(
+    mut ty: &ColumnType,
+    control: &ProductionControl<'_>,
+    work: &mut W,
+) -> Result<bool, W::Error> {
+    loop {
+        match ty {
+            ColumnType::Array(child) | ColumnType::Domain { base: child, .. } => {
+                work.position(control).await?;
+                ty = child;
+            }
+            scalar => {
+                return Ok(!matches!(
+                    scalar,
+                    ColumnType::Void | ColumnType::Json | ColumnType::Xml | ColumnType::RefCursor
+                ))
+            }
+        }
     }
 }
 

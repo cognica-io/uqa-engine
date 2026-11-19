@@ -6,7 +6,7 @@
 
 //! Overload identity normalization streams through ordinary or admitted text owners.
 
-use crate::ast::ColumnType;
+use crate::ast::{ColumnType, ColumnTypeInputWork};
 use uqa_core::{
     memory::{Produced, ProductionControl},
     ValueRetentionError,
@@ -38,13 +38,6 @@ pub async fn canonical_routine_type_name_from_input(
     input: &mut uqa_core::image_io::AsyncImageInput<'_>,
 ) -> Result<Produced<String>, RoutineSignatureInputError> {
     input::normalize(type_name, control, input).await
-}
-
-fn array_element_spelling<'a>(
-    name: &'a str,
-    control: &ProductionControl<'_>,
-) -> Result<Option<&'a str>, ValueRetentionError> {
-    crate::catalog::work::inline(input::array_element_spelling(name, control, &mut ()))
 }
 
 #[must_use]
@@ -96,18 +89,35 @@ pub(in crate::type_resolution) fn canonical_column_type_name_with_control(
     ty: &ColumnType,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<String>, ValueRetentionError> {
+    crate::catalog::work::inline(canonical_column_type_name_with_work(ty, control, &mut ()))
+}
+
+pub(in crate::type_resolution) async fn canonical_column_type_name_with_work<
+    W: ColumnTypeInputWork,
+>(
+    ty: &ColumnType,
+    control: &ProductionControl<'_>,
+    work: &mut W,
+) -> Result<Produced<String>, W::Error> {
     if let Some(name) = builtin_canonical_type_name(ty) {
-        return control.copy_text(name);
+        return Ok(control.copy_text(name)?);
     }
+    let (scalar, dimensions) = ty.array_shape_with_work(control, work).await?;
     // User-defined type spellings are neither unique across schemas nor stable across renames, so overload matching identifies them by OID.
-    if let Some(identity) = ty.user_type_identity_with_control(control)? {
-        if let Some(element) = array_element_spelling(&identity, control)? {
-            return control.format(format_args!("{element}[]"));
+    if let Some(identity) = scalar.user_type_identity_with_control(control)? {
+        if dimensions != 0 {
+            return Ok(control.format(format_args!("{}[]", identity.as_str()))?);
         }
         return Ok(identity);
     }
-    let name = ty.sql_name_with_control(control)?;
-    canonical_routine_type_name_with_control(&name, control)
+    let name = match scalar {
+        ColumnType::Named(name) => work.text(name, control).await?,
+        scalar => scalar.sql_name_with_control(control)?,
+    };
+    // Every positive dimensionality normalizes to a single array suffix.
+    let name =
+        ColumnType::array_name_with_work(name, usize::from(dimensions != 0), control, work).await?;
+    input::normalize(&name, control, &mut input::TypeWork(work)).await
 }
 
 /// Parse a canonical enum identity produced by overload matching: the enum type OID and the number of array dimensions around it.

@@ -19,6 +19,38 @@ pub(crate) trait Work: Send {
         source: &str,
         control: &ProductionControl<'_>,
     ) -> impl Future<Output = Result<Produced<String>, Self::Error>> + Send;
+
+    fn position(
+        &mut self,
+        control: &ProductionControl<'_>,
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        async move {
+            control.check()?;
+            self.checkpoint().await?;
+            control.check()?;
+            Ok(())
+        }
+    }
+
+    fn same_text(
+        &mut self,
+        left: &str,
+        right: &str,
+        control: &ProductionControl<'_>,
+    ) -> impl Future<Output = Result<bool, Self::Error>> + Send {
+        async move {
+            if left.len() != right.len() {
+                return Ok(false);
+            }
+            for (left, right) in crate::catalog::work::text_chunks(left, right) {
+                self.position(control).await?;
+                if left != right {
+                    return Ok(false);
+                }
+            }
+            Ok(true)
+        }
+    }
 }
 
 impl Work for () {
@@ -59,9 +91,7 @@ pub(super) async fn copy<W: Work>(
     let mut value = ColumnType::Void;
     let mut target = &mut value;
     loop {
-        control.check()?;
-        work.checkpoint().await?;
-        control.check()?;
+        work.position(control).await?;
         let (node, node_memory) = node(source, control, work).await?.into_parts();
         memory = control.combine(memory, node_memory);
         *target = node;
