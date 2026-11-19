@@ -25,7 +25,7 @@ pub(super) async fn references_with_work<'a>(
     work: &mut (impl CatalogWork + Send),
 ) -> Result<TypeReferences<'a>, SQLError> {
     let d = &snapshot.definitions;
-    let rows = snapshot
+    let mut rows = snapshot
         .tables
         .iter()
         .map(|(_, table)| table.catalog_oids)
@@ -43,7 +43,7 @@ pub(super) async fn references_with_work<'a>(
             ranges: &d.ranges,
             shells: &d.shells,
         },
-        rows,
+        &mut rows,
         memory,
         cancellation,
         work,

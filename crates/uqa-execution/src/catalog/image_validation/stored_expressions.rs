@@ -14,6 +14,7 @@ use uqa_core::{
 };
 use uqa_sql::{
     catalog::scalar_bindings::{expression_type_with_work, NativeScalarContext},
+    catalog::CatalogWork,
     routines::RoutineResolution,
     RowSchema, SQLError,
 };
@@ -38,10 +39,22 @@ pub(super) async fn validate_with_work(
     routines: &dyn RoutineResolution,
     memory: &MemoryBudget,
     cancellation: &CancellationToken,
-    work: &mut (impl uqa_sql::catalog::CatalogWork + Send),
+    work: &mut (impl CatalogWork + Send),
 ) -> Result<(), SQLError> {
     let control = ProductionControl::new(memory, cancellation, cancellation);
     let scalar = ScalarBindings::with_work(catalog, memory, cancellation, work).await?;
+    validate_views(catalog, routines, &scalar.binding, &control, work).await?;
+    validate_defaults(catalog, routines, &scalar, &control, work).await?;
+    scalar.retire(work).await
+}
+
+async fn validate_views<W: CatalogWork + Send>(
+    catalog: &CatalogReadView,
+    routines: &dyn RoutineResolution,
+    binding: &uqa_sql::binding::production::ControlledBindingContext<'_>,
+    control: &ProductionControl<'_>,
+    work: &mut W,
+) -> Result<(), SQLError> {
     let snapshot = catalog.snapshot();
     for view in snapshot.definitions.views.values() {
         work.checkpoint().await?;
@@ -49,13 +62,24 @@ pub(super) async fn validate_with_work(
         view.rewrite_definition_ref()
             .validate_function_calls_with_work(
                 routines,
-                scalar.binding.copy_with_control(&control)?,
-                &control,
+                binding.copy_with_control(control)?,
+                control,
                 work,
             )
             .await?;
     }
 
+    Ok(())
+}
+
+async fn validate_defaults<W: CatalogWork + Send>(
+    catalog: &CatalogReadView,
+    routines: &dyn RoutineResolution,
+    scalar: &ScalarBindings<'_>,
+    control: &ProductionControl<'_>,
+    work: &mut W,
+) -> Result<(), SQLError> {
+    let snapshot = catalog.snapshot();
     let context = NativeScalarContext {
         subject: "default expression",
         routines,
@@ -82,7 +106,7 @@ pub(super) async fn validate_with_work(
             work.checkpoint().await?;
             control.check()?;
             if let Some(default) = &column.default {
-                expression_type_with_work(default, &empty_row, &context, &control, work).await?;
+                expression_type_with_work(default, &empty_row, &context, control, work).await?;
             }
         }
     }
@@ -90,8 +114,8 @@ pub(super) async fn validate_with_work(
         work.checkpoint().await?;
         control.check()?;
         if let Some(default) = &domain.definition.default {
-            expression_type_with_work(default, &empty_row, &context, &control, work).await?;
+            expression_type_with_work(default, &empty_row, &context, control, work).await?;
         }
     }
-    scalar.retire(work).await
+    Ok(())
 }

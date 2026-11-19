@@ -80,15 +80,23 @@ pub(super) async fn validate_with_work<W: CatalogWork + Send>(
                 .await?;
         }
     }
-    let references = NativeRoutineReferences::from_groups_with_work(
-        d.sql_user_functions.values().map(Vec::as_slice).map(group),
-        memory,
-        cancellation,
-        work,
-    )
-    .await?;
+    let references = references_with_work(d, memory, cancellation, work).await?;
     visit(snapshot, &references, &control, work).await?;
     references.retire_with_work(work).await
+}
+
+pub(super) async fn references_with_work<'a>(
+    definitions: &'a CatalogDefinitionSnapshot,
+    memory: &'a MemoryBudget,
+    cancellation: &'a CancellationToken,
+    work: &mut (impl CatalogWork + Send),
+) -> Result<NativeRoutineReferences<'a>, SQLError> {
+    let mut groups = definitions
+        .sql_user_functions
+        .values()
+        .map(Vec::as_slice)
+        .map(group);
+    NativeRoutineReferences::from_groups_with_work(&mut groups, memory, cancellation, work).await
 }
 
 pub(super) async fn visit<W: CatalogWork + Send>(

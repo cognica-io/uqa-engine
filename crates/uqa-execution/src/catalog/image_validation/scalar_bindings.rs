@@ -40,13 +40,8 @@ impl<'a> ScalarBindings<'a> {
         let control = ProductionControl::new(memory, cancellation, cancellation);
         control.check()?;
         let snapshot = catalog.snapshot();
-        let references = NativeRoutineReferences::from_groups_with_work(
-            snapshot
-                .definitions
-                .sql_user_functions
-                .values()
-                .map(Vec::as_slice)
-                .map(super::routine_dependencies::group),
+        let references = super::routine_dependencies::references_with_work(
+            &snapshot.definitions,
             memory,
             cancellation,
             work,

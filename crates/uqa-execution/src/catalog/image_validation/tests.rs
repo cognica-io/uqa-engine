@@ -155,6 +155,35 @@ fn retained_default_binding_reaches_late_scalar_nodes_and_releases_the_session()
 }
 
 #[test]
+fn a_small_stored_default_fits_the_catalog_validation_allowance() {
+    use crate::catalog::{test_support::NoRoutines, CatalogReadView};
+    let mut source = snapshot();
+    let mut column = ColumnDef::nullable("value", uqa_sql::ColumnType::BigInteger);
+    column.default = Some(uqa_sql::ast::Expr::Literal(uqa_core::Value::Int(1)));
+    source.tables.insert(
+        RelationIdentity::new("public", "saved"),
+        table_snapshot([1; 16], vec![column], TableConstraintSet::default()),
+    );
+    let catalog = CatalogReadView::new(source);
+    let token = CancellationToken::new();
+    for allowance in [20 << 10, 24 << 10] {
+        let ordinary = MemoryBudget::new(allowance);
+        let mut cursor = RelationshipValidation::new(catalog.clone(), &ordinary, &token);
+        while let Some(next) = cursor
+            .advance_with_steps(&NoRoutines, &NoRoutines, 1)
+            .unwrap()
+        {
+            cursor = next;
+        }
+        let retained = MemoryBudget::new(allowance);
+        retained_binding_windows(&catalog, &retained, &token, 1, None)
+            .1
+            .unwrap();
+        assert_eq!((ordinary.used(), retained.used()), (0, 0));
+    }
+}
+
+#[test]
 fn native_catalog_authority_rejects_missing_and_recreated_table_owners() {
     let mut snapshot = snapshot();
     let memory = MemoryBudget::new(64 << 10);
