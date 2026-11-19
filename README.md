@@ -192,6 +192,8 @@ Python and Node.js provide matching `local` and `cloud` project constructors; br
 
 `Engine::new()` keeps data in memory, while `Engine::open(path)` and `usql --db <path>` use the default persistent SQLite backend. Persistent engines restore schemas, documents, text postings, graphs, scoring parameters, models, views, and statistics when reopened.
 
+The Rust backup API captures a committed snapshot while the database stays open. Memory, native SQLite, SQLite Key/Value, and redb support full and incremental backups. Each incremental backup has a complete inventory and can be restored to a fresh destination after its parent is removed. [Runnable Rust example](crates/uqa-api/examples/backup.rs) · [Backup and restore options](docs/manual/reference/02-rust-engine-api.md#capture-a-backup)
+
 `uqa-storage` owns provider-independent contracts and shared data structures, while `uqa-storage-sqlite` owns SQLite connections, catalogs, indexes, transactions, graph persistence, and compressed storage. Rust callers using concrete storage types must use the [updated provider imports](docs/manual/reference/10-upgrading.md#sqlite-provider-ownership).
 
 Applications that want a pure-Rust single-file store can compose the engine with `uqa-storage-redb`. The provider owns the database, and every `Engine::new_session()` receives independent transaction state over the same file.
