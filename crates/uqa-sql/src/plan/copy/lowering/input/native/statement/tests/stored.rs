@@ -81,7 +81,7 @@ fn run(shape: Shape, steps: usize, stop: Stop) -> (usize, usize) {
     let original = CancellationToken::new();
     let token = CancellationToken::new();
     let observed = Arc::new(AtomicBool::new(false));
-    let mut observer = Admitted {
+    let mut visitor = Admitted {
         shape,
         observed: observed.clone(),
         pressure: None,
@@ -93,7 +93,7 @@ fn run(shape: Shape, steps: usize, stop: Stop) -> (usize, usize) {
             &statement,
             &control,
             &mut input,
-            &mut observer,
+            &mut visitor,
         )
         .await
     })
