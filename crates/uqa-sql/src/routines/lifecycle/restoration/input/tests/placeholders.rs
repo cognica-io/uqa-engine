@@ -486,12 +486,18 @@ fn final_placeholder_retirement_drains_projected_transform_names_and_nested_para
             let encoded = serde_json::to_string(&source).unwrap();
             let anchor = r#""Concrete":"Integer""#;
             assert!(encoded.contains(anchor));
-            let nested = format!(
-                r#""Concrete":{}"Integer"{}"#,
-                r#"{"Array":"#.repeat(width),
-                "}".repeat(width)
-            );
-            encoded.replace(anchor, &nested)
+            // Each generic JSON document observes the same container depth limit as durable input.
+            let mut element = r#""Integer""#.to_owned();
+            for _ in 0..width / 64 {
+                let raw = serde_json::to_string(&element).unwrap();
+                element = format!(
+                    r#"{}{{"{}":{raw}}}{}"#,
+                    r#"{"Array":"#.repeat(64),
+                    protocol.raw,
+                    "}".repeat(64)
+                );
+            }
+            encoded.replace(anchor, &format!(r#""Concrete":{element}"#))
         };
         let document =
             JsonDocument::read_with_control(encoded.as_bytes(), &control, protocol).unwrap();
@@ -505,12 +511,18 @@ fn final_placeholder_retirement_drains_projected_transform_names_and_nested_para
         if transforms {
             assert_eq!(value.attribute_clauses.transform_types.len(), width);
         } else {
-            assert!(matches!(
-                &value.params[0].default_type,
-                Some(crate::ast::RoutineDefaultType::Concrete(
-                    crate::ColumnType::Array(_)
-                ))
-            ));
+            let Some(crate::ast::RoutineDefaultType::Concrete(ty)) = &value.params[0].default_type
+            else {
+                panic!("missing concrete default type")
+            };
+            let mut ty = ty;
+            for _ in 0..width {
+                let crate::ColumnType::Array(inner) = ty else {
+                    panic!("missing nested array type")
+                };
+                ty = inner;
+            }
+            assert_eq!(ty, &crate::ColumnType::Integer);
         }
         drop(document);
         let (retirement, _) = original_retirement(value, &native, &work, &token, false);
