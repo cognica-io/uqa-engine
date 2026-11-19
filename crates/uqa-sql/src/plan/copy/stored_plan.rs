@@ -10,7 +10,7 @@ pub(crate) use super::syntax::native::{Field, Input, Nested, Window};
 use crate::construction;
 use crate::plan::{
     retirement::{
-        construction::{Context, Prefix},
+        construction::{Context, Prefix, Root},
         Node,
     },
     ExecutableMemory, OwnedExecutablePlan, UnifiedPlan,
@@ -117,24 +117,86 @@ impl Inline for crate::plan::CommandPlan {
 /// Stored-name and parameter binding edit scalar/metadata fields of the original structural tree. Its original constructor already admitted the frames needed to retire it.
 pub(crate) struct OriginalWorkspace(pub(in crate::plan) Context);
 
+/// A stored default retains the constructor's tree frames and its payload allowance while the binder compares original and resolved syntax.
+pub(crate) struct DefaultExpression {
+    plan: Original<crate::plan::ExpressionPlan>,
+    memory: Option<uqa_core::memory::MemoryReservation>,
+}
+
+impl DefaultExpression {
+    pub(crate) fn new(
+        value: Produced<crate::plan::ExpressionPlan>,
+        workspace: Option<&OriginalWorkspace>,
+    ) -> Self {
+        let (value, memory) = value.into_parts();
+        let plan = Original::new(value, workspace);
+        Self { plan, memory }
+    }
+
+    pub(crate) async fn retire<W: crate::catalog::work::Work>(
+        self,
+        control: &ProductionControl<'_>,
+        work: &mut W,
+    ) -> CaptureResult<()> {
+        if let Original::Native(plan) = self.plan {
+            let mut retirement = plan.context().prepare_retirement(control)?;
+            retirement.expression(plan.take());
+            retirement.retire_from(control, work).await?;
+        }
+        drop(self.memory);
+        Ok(())
+    }
+}
+
+impl std::ops::Deref for DefaultExpression {
+    type Target = crate::plan::ExpressionPlan;
+    fn deref(&self) -> &Self::Target {
+        &self.plan
+    }
+}
+
 pub(crate) struct BoundPlan {
-    original: Original,
+    original: Original<UnifiedPlan>,
     // Release the bound statement before its allocation receipt.
     memory: ExecutableMemory,
 }
 
-enum Original {
-    Native(Prefix<UnifiedPlan>),
-    Ordinary(UnifiedPlan),
+enum Original<T: Root> {
+    Native(Prefix<T>),
+    Ordinary(T),
+}
+
+impl<T: Root> Original<T> {
+    fn new(value: T, workspace: Option<&OriginalWorkspace>) -> Self {
+        match workspace {
+            Some(workspace) => Self::Native(workspace.0.retain(value)),
+            None => Self::Ordinary(value),
+        }
+    }
+}
+
+impl<T: Root> std::ops::Deref for Original<T> {
+    type Target = T;
+    fn deref(&self) -> &T {
+        match self {
+            Self::Native(value) => value,
+            Self::Ordinary(value) => value,
+        }
+    }
+}
+impl<T: Root> std::ops::DerefMut for Original<T> {
+    fn deref_mut(&mut self) -> &mut T {
+        match self {
+            Self::Native(value) => value,
+            Self::Ordinary(value) => value,
+        }
+    }
 }
 
 impl BoundPlan {
     pub(crate) fn new(plan: OwnedExecutablePlan, workspace: Option<OriginalWorkspace>) -> Self {
         let (plan, memory) = plan.into_parts();
-        let original = match workspace {
-            Some(workspace) => Original::Native(workspace.0.retain(plan)),
-            None => Original::Ordinary(plan),
-        };
+        let original = Original::new(plan, workspace.as_ref());
         Self { original, memory }
     }
 
@@ -169,19 +231,13 @@ impl BoundPlan {
 impl std::ops::Deref for BoundPlan {
     type Target = UnifiedPlan;
     fn deref(&self) -> &Self::Target {
-        match &self.original {
-            Original::Native(plan) => plan,
-            Original::Ordinary(plan) => plan,
-        }
+        &self.original
     }
 }
 
 impl std::ops::DerefMut for BoundPlan {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        match &mut self.original {
-            Original::Native(plan) => plan,
-            Original::Ordinary(plan) => plan,
-        }
+        &mut self.original
     }
 }
 
@@ -305,6 +361,31 @@ pub(crate) async fn capture<'s>(
         }
     };
     input.finish(plan)
+}
+
+impl crate::plan::MutableExpressionPlan {
+    /// Preserve the scalar syntax and its original query slots before routine binding edits the executable. Analyzed layouts and privilege metadata belong to the executable and never select a syntax site.
+    pub(crate) async fn capture_syntax_before_binding<W: crate::catalog::work::Work + Send>(
+        &self,
+        control: &ProductionControl<'_>,
+        work: &mut W,
+    ) -> CaptureResult<Produced<crate::plan::ExpressionPlan>> {
+        control.check()?;
+        let mut driver = construction::Driver::new(*control)?;
+        let output = driver.work().submit(move |work| async move {
+            let mut input = Input::new(*control, work);
+            let syntax = crate::plan::ExpressionPlan {
+                scalar: input.field(self.scalar()).await?,
+                subqueries: input.list(self.queries()).await?,
+            };
+            input.finish(syntax).map(|(syntax, _)| syntax)
+        })?;
+        while driver.advance().await? {
+            work.checkpoint().await?;
+        }
+        control.check()?;
+        construction::receive(output).await
+    }
 }
 
 #[cfg(test)]

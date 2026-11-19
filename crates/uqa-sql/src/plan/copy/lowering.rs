@@ -61,13 +61,7 @@ impl crate::plan::ExpressionPlan {
         }
         let mut arena = QueryArena::new(*control, None, Context::new(control)?.child(control)?);
         let scalar = lower_scalar_with_arena(expression, aggregates, &mut arena, *control)?;
-        let (queries, memory) = arena.queries.take().into_parts();
-        arena.copying.absorb(Some(memory));
-        let arena = crate::plan::ScalarQueryArena::from_rewrite_parts(
-            queries,
-            Some(arena.copying.into_rewrite_memory()),
-        );
-        crate::plan::MutableExpressionPlan::from_parts(scalar, arena, control)
+        arena.finish_expression(scalar, control)
     }
 }
 
@@ -162,6 +156,20 @@ struct QueryArena<'a> {
 }
 
 impl<'a> QueryArena<'a> {
+    fn finish_expression(
+        mut self,
+        scalar: crate::plan::OwnedScalarExpr,
+        control: &ProductionControl<'_>,
+    ) -> Result<crate::plan::MutableExpressionPlan> {
+        let (queries, memory) = self.queries.take().into_parts();
+        self.copying.absorb(Some(memory));
+        let arena = crate::plan::ScalarQueryArena::from_rewrite_parts(
+            queries,
+            Some(self.copying.into_rewrite_memory()),
+        );
+        crate::plan::MutableExpressionPlan::from_parts(scalar, arena, control)
+    }
+
     fn new(
         control: ProductionControl<'a>,
         parameters: Option<&'a ParameterLookup<'a>>,

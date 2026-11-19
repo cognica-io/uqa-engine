@@ -6,25 +6,25 @@
 
 //! Bind stored routine relation, column, and routine identities against fresh catalog inputs.
 
+mod defaults;
 mod progress;
+use defaults::bind_default;
+pub(crate) use defaults::bind_stored_parameter_default_from;
 pub use progress::{RoutineDeclaration, RoutineDefinitionDependencies};
 
 use super::compilation::RoutineCompilationContext;
 use crate::{
     ast::{CreateFunction, FunctionBody},
     binding::{
-        bind_expression_plan_routines_for_storage,
         stored_columns::StoredSourceCatalog,
         stored_relations::bind_stored_statement_relations,
         stored_routines::{
             bind_catalog_statement_routines, bind_prepared_catalog_statement_routines,
             CatalogRoutineContext,
         },
-        syntax_sites::expression_syntax_sites,
     },
     catalog::{resolution::RelationLookupMode, stored_ast},
-    plan::ExpressionPlan,
-    RowSchema, SQLError,
+    SQLError,
 };
 use uqa_core::memory::{Produced, ProductionControl, ProductionVec};
 
@@ -44,54 +44,6 @@ pub fn bind_routine_definition_dependencies(
             return Ok(changed);
         }
     }
-}
-
-fn bind_default(
-    context: &RoutineCompilationContext<'_>,
-    parameter: &mut crate::ast::FunctionParam,
-    mode: RoutineCompilationMode,
-) -> Result<bool, SQLError> {
-    let mut changed = false;
-    let Some(default) = &mut parameter.default else {
-        return Ok(false);
-    };
-    let lowered = ExpressionPlan::lower_with(default.clone(), &|name: &str| {
-        context.catalog.has_registered_aggregate_function(name)
-    });
-    let mut plan = lowered.clone();
-    let binding = context.catalog.binding_snapshot()?;
-    let default_type = bind_expression_plan_routines_for_storage(
-        context.routines,
-        &mut plan,
-        &[],
-        &binding.context(),
-        &RowSchema::default(),
-    )?;
-    let default_type =
-        if crate::type_resolution::routine_polymorphic_type(&parameter.type_name).is_some() {
-            default_type
-        } else {
-            Some(
-                context
-                    .types
-                    .resolve_catalog_column_type_name(&parameter.type_name)?
-                    .without_type_modifiers(),
-            )
-        };
-    let default_type =
-        super::defaults::default_expression_type(&parameter.type_name, default, default_type);
-    if parameter.default_type != default_type {
-        parameter.default_type = default_type;
-        changed = true;
-    }
-    let sites = expression_syntax_sites(&lowered, &plan)?;
-    changed |= mode.bind_expression_sites(default, &sites)?;
-    // A default is assigned to its parameter.
-    if let Some(ty) = user_defined_type(context, &parameter.type_name)? {
-        changed |=
-            stored_ast::fold_assigned_stored_literal(default, &ty, context.routines.enum_labels())?;
-    }
-    Ok(changed)
 }
 
 /// Bind a copy of every statement of a SQL-standard body and carry the bound routine identities, user-defined type identities and enum constants back into the stored statements, then convert the result literals the final statement assigns to the declared result. A name resolves to a parameter only when no column of its statement takes it, as `sql_fn_post_column_ref` resolves it; the final statement's result is checked when the body is validated.
@@ -205,17 +157,6 @@ impl SQLBodyInputs {
         changed |= mode.bind_statement_sites(statement, &routines.sites)?;
         Ok(changed)
     }
-}
-
-/// A declared routine type that is user-defined, the only kind whose `unknown` literals parse analysis converts to stored enum constants. Declarations name user-defined types by identity.
-fn user_defined_type(
-    context: &RoutineCompilationContext<'_>,
-    name: &str,
-) -> Result<Option<crate::ColumnType>, SQLError> {
-    if crate::ast::UserTypeIdentity::parse(name).is_none() {
-        return Ok(None);
-    }
-    context.routines.resolve_type_name(name)
 }
 
 /// The column types a SQL function's final statement is coerced to: the `OUT` and `TABLE` parameters, or else the declared result. Built-in and pseudo-type columns are `None`.

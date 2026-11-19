@@ -15,7 +15,7 @@ use crate::{
     plan::ScalarInputWork,
 };
 
-pub(in crate::binding) trait SiteInput: ScalarInputWork {
+pub(crate) trait SiteInput: ScalarInputWork {
     const MAY_SUSPEND: bool;
 }
 

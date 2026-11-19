@@ -18,6 +18,7 @@ use crate::{
 };
 
 mod blocks;
+mod expression_binding;
 mod queries;
 mod sources;
 use std::sync::Arc;

@@ -538,6 +538,21 @@ pub fn routine_returns_anonymous_record(def: &CreateFunction) -> bool {
     .expect("ordinary routine return category")
 }
 
+pub(super) struct AggregateLookup<'a, R: ?Sized>(pub(super) &'a R);
+impl<R: RoutineResolution + ?Sized> crate::plan::AggregateClassifier for AggregateLookup<'_, R> {
+    fn is_registered_aggregate(&self, name: &str) -> bool {
+        self.0.has_registered_aggregate_function(name)
+    }
+    fn is_registered_aggregate_with_control(
+        &self,
+        name: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<bool, SQLError> {
+        self.0
+            .has_registered_aggregate_function_with_control(name, control)
+    }
+}
+
 pub struct StaticFunctionMatch {
     pub function: crate::routines::SQLRoutine,
     pub invocation: Box<RoutineInvocationBinding>,

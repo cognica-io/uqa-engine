@@ -19,7 +19,8 @@ use uqa_core::{
 mod commands;
 use commands::syntax_expressions;
 mod input;
-use input::{SiteInput, Walk};
+pub(crate) use input::SiteInput;
+use input::Walk;
 
 /// An expression site of stored syntax and what binding recorded for it.
 #[derive(Debug, Clone, PartialEq)]
@@ -89,7 +90,7 @@ pub async fn expression_syntax_sites_with_work(
     expression_sites_from(lowered, bound, control, work).await
 }
 
-async fn expression_sites_from<W: SiteInput>(
+pub(crate) async fn expression_sites_from<W: SiteInput>(
     lowered: &ExpressionPlan,
     bound: &ExpressionPlan,
     control: &ProductionControl<'_>,

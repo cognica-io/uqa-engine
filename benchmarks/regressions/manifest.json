@@ -76710,6 +76710,19 @@
     {
       "package": "uqa-sql",
       "kind": "lib",
+      "test": "stored_default_syntax_preserves_query_slots_without_repeating_aggregate_lookups",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/copy/lowering/input/tests/expression_binding.rs",
+      "capability": "Stored routine parameter defaults",
+      "workload": "Lower a default with an aggregate call and two nested query slots, capture its original syntax and retire both plans one step at a time.",
+      "invariant": "Syntax retains its query ordinals, aggregate lookup runs only during lowering, and completion releases both memory allowances.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
       "test": "stored_routine_statements_copy_queries_and_dml_under_the_same_field_windows",
       "cases": 1,
       "source": "crates/uqa-sql/src/plan/copy/stored_routine/tests/statements.rs",

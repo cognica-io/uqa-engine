@@ -70,6 +70,10 @@ impl Retirement {
         self.node(Node::Query(query));
     }
 
+    pub(in crate::plan) fn expression(&mut self, expression: crate::plan::ExpressionPlan) {
+        self.node(Node::Expression(expression));
+    }
+
     pub(in crate::plan) fn source(&mut self, source: SourcePlan) {
         self.node(Node::Source(source));
     }

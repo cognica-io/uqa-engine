@@ -185,7 +185,8 @@ pub use reverse::{resolve_reverse_overload, ResolvedReverseOverload};
 #[doc(hidden)]
 pub(crate) use routine_signature::{
     match_routine_candidate, match_routine_candidate_with_control,
-    routine_polymorphic_type_with_control, RoutineInvocationParts, RoutineSignatureProductionError,
+    routine_polymorphic_type_with_control, routine_polymorphic_type_with_work,
+    RoutineInvocationParts, RoutineSignatureProductionError,
 };
 pub use routine_signature::{
     match_routine_signature, routine_polymorphic_type, MatchedRoutineSignature,

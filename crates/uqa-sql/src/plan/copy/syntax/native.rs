@@ -58,6 +58,15 @@ impl<'s> Input<'s> {
         value.copy_from(self).await
     }
 
+    pub(crate) async fn list<T: Field>(&mut self, source: &'s [T]) -> Result<Vec<T>> {
+        let mut values = self.copying.reserve_slots(source.len())?;
+        for value in source {
+            self.work.checkpoint().await;
+            values.push(self.field(value).await?);
+        }
+        Ok(values)
+    }
+
     pub(crate) fn finish<T>(self, value: T) -> Result<(Produced<T>, usize)> {
         let children = self.copying.retained_children;
         Ok((self.copying.finish(value)?, children))
@@ -340,12 +349,7 @@ impl<T: Field> Field for Vec<T> {
         window.slots(self.len()) && self.iter().all(|value| value.fits(window))
     }
     async fn copy_from<'s>(&'s self, input: &mut Input<'s>) -> Result<Self> {
-        let mut values = input.copying.reserve_slots(self.len())?;
-        for source in self {
-            input.work.checkpoint().await;
-            values.push(input.field(source).await?);
-        }
-        Ok(values)
+        input.list(self).await
     }
 }
 impl<A: Field, B: Field> Field for (A, B) {
