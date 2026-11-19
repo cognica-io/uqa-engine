@@ -117,26 +117,51 @@ struct Intent {
     request: DatabaseRestore,
     parent: [u8; 24],
     name: [u8; 32],
+    functions: Option<ImageDigest>,
+}
+
+struct Encoded<const N: usize> {
+    bytes: [u8; N],
+    length: usize,
+}
+
+impl<const N: usize> std::ops::Deref for Encoded<N> {
+    type Target = [u8];
+
+    fn deref(&self) -> &[u8] {
+        &self.bytes[..self.length]
+    }
 }
 
 impl Intent {
-    fn encode(self) -> [u8; 160] {
-        let mut bytes = [0; 160];
-        bytes[..8].copy_from_slice(b"UQARES01");
+    fn encode(self) -> Encoded<192> {
+        let mut bytes = [0; 192];
+        let length = if let Some(functions) = self.functions {
+            bytes[..8].copy_from_slice(b"UQARES02");
+            bytes[160..].copy_from_slice(&functions.as_bytes());
+            192
+        } else {
+            bytes[..8].copy_from_slice(b"UQARES01");
+            160
+        };
         bytes[8..24].copy_from_slice(&self.id.as_bytes());
         bytes[24..40].copy_from_slice(&self.backup.as_bytes());
         bytes[40..72].copy_from_slice(&self.root.as_bytes());
         bytes[72..88].copy_from_slice(&self.request.source().as_bytes());
         bytes[88..104].copy_from_slice(&self.request.target().as_bytes());
         bytes[104..128].copy_from_slice(&self.parent);
-        bytes[128..].copy_from_slice(&self.name);
-        bytes
+        bytes[128..160].copy_from_slice(&self.name);
+        Encoded { bytes, length }
     }
 
     fn decode(bytes: &[u8]) -> BackupResult<Self> {
-        if bytes.len() != 160 || &bytes[..8] != b"UQARES01" {
-            return Err(BackupError::Invalid("restore intent"));
-        }
+        let functions = match (bytes.len(), bytes.get(..8)) {
+            (160, Some(b"UQARES01")) => None,
+            (192, Some(b"UQARES02")) => {
+                Some(ImageDigest::from_bytes(bytes[160..].try_into().unwrap()))
+            }
+            _ => return Err(BackupError::Invalid("restore intent")),
+        };
         let source = DatabaseId::from_bytes(bytes[72..88].try_into().unwrap());
         let target = DatabaseId::from_bytes(bytes[88..104].try_into().unwrap());
         if source.as_bytes() == [0; 16] || target.as_bytes() == [0; 16] {
@@ -148,7 +173,8 @@ impl Intent {
             root: ImageDigest::from_bytes(bytes[40..72].try_into().unwrap()),
             request: DatabaseRestore::from_identities(source, target)?,
             parent: bytes[104..128].try_into().unwrap(),
-            name: bytes[128..].try_into().unwrap(),
+            name: bytes[128..160].try_into().unwrap(),
+            functions,
         })
     }
 
@@ -169,22 +195,28 @@ struct Target {
 }
 
 impl Target {
-    fn encode(self) -> [u8; 208] {
-        let mut bytes = [0; 208];
-        bytes[..160].copy_from_slice(&self.intent.encode());
-        bytes[160..184].copy_from_slice(&self.holder);
-        bytes[184..].copy_from_slice(&self.image);
-        bytes
+    fn encode(self) -> Encoded<240> {
+        let mut bytes = [0; 240];
+        let intent = self.intent.encode();
+        let offset = intent.len();
+        bytes[..offset].copy_from_slice(&intent);
+        bytes[offset..offset + 24].copy_from_slice(&self.holder);
+        bytes[offset + 24..offset + 48].copy_from_slice(&self.image);
+        Encoded {
+            bytes,
+            length: offset + 48,
+        }
     }
 
     fn decode(bytes: &[u8]) -> BackupResult<Self> {
-        if bytes.len() != 208 {
+        if !matches!(bytes.len(), 208 | 240) {
             return Err(BackupError::Invalid("restore directory identity"));
         }
+        let offset = bytes.len() - 48;
         Ok(Self {
-            intent: Intent::decode(&bytes[..160])?,
-            holder: bytes[160..184].try_into().unwrap(),
-            image: bytes[184..].try_into().unwrap(),
+            intent: Intent::decode(&bytes[..offset])?,
+            holder: bytes[offset..offset + 24].try_into().unwrap(),
+            image: bytes[offset + 24..].try_into().unwrap(),
         })
     }
 }
@@ -245,6 +277,9 @@ impl LocalRepository {
             request: DatabaseRestore::new(root.cut().source)?,
             parent: native::identity(&destination.parent)?,
             name: destination.name_digest(),
+            functions: self
+                .function_entry(root, control)?
+                .map(|entry| entry.digest()),
         };
         let restores = self.restore_directory(true, control)?;
         let name = directory::name(intent.id.as_bytes());
@@ -388,6 +423,11 @@ impl LocalRepository {
 }
 
 impl BackupRestoreOperation<'_> {
+    /// Commitment to source-selected SQL function declarations in the original, verified image. This is bound into the durable request and private directory marker, so Prepared recovery does not reopen the archive or persist function names in the target.
+    pub const fn function_reference_digest(&self) -> Option<ImageDigest> {
+        self.target.intent.functions
+    }
+
     pub const fn backup(&self) -> BackupId {
         self.target.intent.backup
     }

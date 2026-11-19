@@ -20,7 +20,7 @@ use std::{
 };
 
 mod input;
-pub use input::AsyncImageInput;
+pub use input::{AsyncImageInput, ImageUtf8};
 mod source;
 pub use source::{decode_image_from, AsyncImageRead};
 #[cfg(test)]

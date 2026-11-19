@@ -14,6 +14,18 @@ use super::{
 };
 
 impl InvertedIndex for MemoryInvertedIndex {
+    fn image_document_owner(
+        &self,
+        _id: DocId,
+        control: &crate::read_control::StorageReadControl,
+    ) -> StorageBackendResult<Option<crate::memory_capture::MemoryImageOwner>> {
+        control.check()?;
+        self.check_retained_read()?;
+        Ok(Some(crate::memory_capture::MemoryImageOwner::from_arc(
+            &self.state,
+        )))
+    }
+
     fn next_image_document_id(
         &self,
         after: Option<DocId>,

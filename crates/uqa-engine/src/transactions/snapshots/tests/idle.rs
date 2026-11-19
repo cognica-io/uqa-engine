@@ -218,7 +218,7 @@ fn memory_capture_rejects_reentrant_unframed_writes_but_accepts_original_frames(
     engine
         .transaction(|engine| {
             sql(engine, "UPDATE docs SET body='private'");
-            let selected = engine
+            let (selected, ()) = engine
                 .capture_committed_memory_query(&control, |_| Ok(()))
                 .unwrap();
             assert_eq!(
@@ -234,7 +234,7 @@ fn memory_capture_rejects_reentrant_unframed_writes_but_accepts_original_frames(
         })
         .unwrap();
     assert_eq!(control.memory().used(), 0);
-    let selected = engine
+    let (selected, ()) = engine
         .capture_committed_memory_query(&control, |_| Ok(()))
         .unwrap();
     assert_eq!(engine.transaction_depth(), 0);

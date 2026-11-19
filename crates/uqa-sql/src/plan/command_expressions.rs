@@ -12,51 +12,87 @@ use super::{
 };
 use crate::ast::AssignmentTarget;
 
+enum MutationExpressions<I, U, D, M> {
+    Insert(I),
+    Update(U),
+    Delete(D),
+    Merge(M),
+    Empty,
+}
+
+impl<I, U, D, M> Iterator for MutationExpressions<I, U, D, M>
+where
+    I: Iterator,
+    U: Iterator<Item = I::Item>,
+    D: Iterator<Item = I::Item>,
+    M: Iterator<Item = I::Item>,
+{
+    type Item = I::Item;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            Self::Insert(items) => items.next(),
+            Self::Update(items) => items.next(),
+            Self::Delete(items) => items.next(),
+            Self::Merge(items) => items.next(),
+            Self::Empty => None,
+        }
+    }
+}
+
 impl CommandPlan {
     /// Scalar roots owned by this mutation, excluding its relational children.
     pub fn expressions(&self) -> impl Iterator<Item = &ScalarExpr> {
-        let (insert, update, delete, merge) = match self {
-            Self::Insert(plan) => (Some(&**plan), None, None, None),
-            Self::Update(plan) => (None, Some(&**plan), None, None),
-            Self::Delete(plan) => (None, None, Some(&**plan), None),
-            Self::Merge(plan) => (None, None, None, Some(&**plan)),
-            _ => (None, None, None, None),
-        };
-        insert
-            .into_iter()
-            .flat_map(InsertPlan::expressions)
-            .chain(update.into_iter().flat_map(UpdatePlan::expressions))
-            .chain(delete.into_iter().flat_map(DeletePlan::expressions))
-            .chain(merge.into_iter().flat_map(MergePlan::expressions))
+        self.expression_steps().flatten()
+    }
+
+    pub(in crate::plan) fn expression_steps(&self) -> impl Iterator<Item = Option<&ScalarExpr>> {
+        match self {
+            Self::Insert(plan) => MutationExpressions::Insert(plan.expression_steps()),
+            Self::Update(plan) => MutationExpressions::Update(plan.expression_steps()),
+            Self::Delete(plan) => MutationExpressions::Delete(plan.expression_steps()),
+            Self::Merge(plan) => MutationExpressions::Merge(plan.expression_steps()),
+            _ => MutationExpressions::Empty,
+        }
     }
 
     /// Mutable scalar roots in the same ownership order as `expressions`.
     pub fn expressions_mut(&mut self) -> impl Iterator<Item = &mut ScalarExpr> {
-        let (insert, update, delete, merge) = match self {
-            Self::Insert(plan) => (Some(&mut **plan), None, None, None),
-            Self::Update(plan) => (None, Some(&mut **plan), None, None),
-            Self::Delete(plan) => (None, None, Some(&mut **plan), None),
-            Self::Merge(plan) => (None, None, None, Some(&mut **plan)),
-            _ => (None, None, None, None),
-        };
-        insert
-            .into_iter()
-            .flat_map(InsertPlan::expressions_mut)
-            .chain(update.into_iter().flat_map(UpdatePlan::expressions_mut))
-            .chain(delete.into_iter().flat_map(DeletePlan::expressions_mut))
-            .chain(merge.into_iter().flat_map(MergePlan::expressions_mut))
+        match self {
+            Self::Insert(plan) => MutationExpressions::Insert(plan.expressions_mut()),
+            Self::Update(plan) => MutationExpressions::Update(plan.expressions_mut()),
+            Self::Delete(plan) => MutationExpressions::Delete(plan.expressions_mut()),
+            Self::Merge(plan) => MutationExpressions::Merge(plan.expressions_mut()),
+            _ => MutationExpressions::Empty,
+        }
     }
 }
 
 impl InsertPlan {
     pub fn expressions(&self) -> impl Iterator<Item = &ScalarExpr> {
+        self.expression_steps().flatten()
+    }
+
+    fn expression_steps(&self) -> impl Iterator<Item = Option<&ScalarExpr>> {
         self.columns
             .iter()
-            .flat_map(AssignmentTarget::expressions)
-            .chain(self.rows.iter().flatten())
-            .chain(self.on_conflict.iter().flat_map(ConflictPlan::expressions))
-            .chain(self.returning.iter().map(|projection| &projection.expr))
-            .chain(self.view_checks.iter().map(|check| &check.predicate))
+            .flat_map(|target| std::iter::once(None).chain(target.expression_steps()))
+            .chain(
+                self.rows
+                    .iter()
+                    .flat_map(|row| std::iter::once(None).chain(row.iter().map(Some))),
+            )
+            .chain(
+                self.on_conflict
+                    .iter()
+                    .flat_map(ConflictPlan::expression_steps),
+            )
+            .chain(
+                self.returning
+                    .iter()
+                    .map(|projection| Some(&projection.expr)),
+            )
+            .chain(self.view_checks.iter().map(|check| Some(&check.predicate)))
     }
 
     fn expressions_mut(&mut self) -> impl Iterator<Item = &mut ScalarExpr> {
@@ -85,16 +121,17 @@ impl InsertPlan {
     pub fn conflict_update_expressions(&self) -> impl Iterator<Item = &ScalarExpr> {
         self.on_conflict
             .iter()
-            .flat_map(|conflict| conflict.action.expressions())
+            .flat_map(|conflict| conflict.action.expression_steps().flatten())
     }
 }
 
 impl ConflictPlan {
-    fn expressions(&self) -> impl Iterator<Item = &ScalarExpr> {
+    fn expression_steps(&self) -> impl Iterator<Item = Option<&ScalarExpr>> {
         self.expressions
             .iter()
-            .chain(self.predicate.as_deref())
-            .chain(self.action.expressions())
+            .map(Some)
+            .chain(self.predicate.as_deref().map(Some))
+            .chain(self.action.expression_steps())
     }
 
     fn expressions_mut(&mut self) -> impl Iterator<Item = &mut ScalarExpr> {
@@ -106,7 +143,7 @@ impl ConflictPlan {
 }
 
 impl ConflictActionPlan {
-    fn expressions(&self) -> impl Iterator<Item = &ScalarExpr> {
+    fn expression_steps(&self) -> impl Iterator<Item = Option<&ScalarExpr>> {
         let (assignments, predicate): (&[AssignmentPlan], _) = match self {
             Self::Nothing => (&[], None),
             Self::Update {
@@ -116,8 +153,8 @@ impl ConflictActionPlan {
         };
         assignments
             .iter()
-            .flat_map(AssignmentPlan::expressions)
-            .chain(predicate)
+            .flat_map(AssignmentPlan::expression_steps)
+            .chain(predicate.map(Some))
     }
 
     fn expressions_mut(&mut self) -> impl Iterator<Item = &mut ScalarExpr> {
@@ -137,12 +174,20 @@ impl ConflictActionPlan {
 
 impl UpdatePlan {
     pub fn expressions(&self) -> impl Iterator<Item = &ScalarExpr> {
+        self.expression_steps().flatten()
+    }
+
+    fn expression_steps(&self) -> impl Iterator<Item = Option<&ScalarExpr>> {
         self.assignments
             .iter()
-            .flat_map(AssignmentPlan::expressions)
-            .chain(self.predicate.as_ref())
-            .chain(self.returning.iter().map(|projection| &projection.expr))
-            .chain(self.view_checks.iter().map(|check| &check.predicate))
+            .flat_map(AssignmentPlan::expression_steps)
+            .chain(self.predicate.as_ref().map(Some))
+            .chain(
+                self.returning
+                    .iter()
+                    .map(|projection| Some(&projection.expr)),
+            )
+            .chain(self.view_checks.iter().map(|check| Some(&check.predicate)))
     }
 
     fn expressions_mut(&mut self) -> impl Iterator<Item = &mut ScalarExpr> {
@@ -165,9 +210,15 @@ impl UpdatePlan {
 
 impl DeletePlan {
     pub fn expressions(&self) -> impl Iterator<Item = &ScalarExpr> {
-        self.predicate
-            .iter()
-            .chain(self.returning.iter().map(|projection| &projection.expr))
+        self.expression_steps().flatten()
+    }
+
+    fn expression_steps(&self) -> impl Iterator<Item = Option<&ScalarExpr>> {
+        self.predicate.iter().map(Some).chain(
+            self.returning
+                .iter()
+                .map(|projection| Some(&projection.expr)),
+        )
     }
 
     fn expressions_mut(&mut self) -> impl Iterator<Item = &mut ScalarExpr> {
@@ -181,16 +232,25 @@ impl DeletePlan {
 
 impl MergePlan {
     pub fn expressions(&self) -> impl Iterator<Item = &ScalarExpr> {
+        self.expression_steps().flatten()
+    }
+
+    fn expression_steps(&self) -> impl Iterator<Item = Option<&ScalarExpr>> {
         self.target_predicate
             .iter()
-            .chain(std::iter::once(&self.join_condition))
+            .map(Some)
+            .chain(std::iter::once(Some(&self.join_condition)))
             .chain(
                 self.when_clauses
                     .iter()
-                    .flat_map(MergeWhenPlan::expressions),
+                    .flat_map(|arm| std::iter::once(None).chain(arm.expression_steps())),
             )
-            .chain(self.returning.iter().map(|projection| &projection.expr))
-            .chain(self.view_checks.iter().map(|check| &check.predicate))
+            .chain(
+                self.returning
+                    .iter()
+                    .map(|projection| Some(&projection.expr)),
+            )
+            .chain(self.view_checks.iter().map(|check| Some(&check.predicate)))
     }
 
     fn expressions_mut(&mut self) -> impl Iterator<Item = &mut ScalarExpr> {
@@ -228,6 +288,10 @@ impl MergeWhenPlan {
     }
 
     pub(crate) fn expressions(&self) -> impl Iterator<Item = &ScalarExpr> {
+        self.expression_steps().flatten()
+    }
+
+    fn expression_steps(&self) -> impl Iterator<Item = Option<&ScalarExpr>> {
         let (condition, assignments, columns, values): (
             _,
             &[AssignmentPlan],
@@ -256,9 +320,18 @@ impl MergeWhenPlan {
         };
         condition
             .into_iter()
-            .chain(assignments.iter().flat_map(AssignmentPlan::expressions))
-            .chain(columns.iter().flat_map(AssignmentTarget::expressions))
-            .chain(values)
+            .map(Some)
+            .chain(
+                assignments
+                    .iter()
+                    .flat_map(AssignmentPlan::expression_steps),
+            )
+            .chain(
+                columns
+                    .iter()
+                    .flat_map(|target| std::iter::once(None).chain(target.expression_steps())),
+            )
+            .chain(values.iter().map(Some))
     }
 
     pub(crate) fn expressions_mut(&mut self) -> impl Iterator<Item = &mut ScalarExpr> {

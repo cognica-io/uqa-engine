@@ -408,9 +408,13 @@ pub struct AssignmentPlan {
 
 impl AssignmentPlan {
     pub fn expressions(&self) -> impl Iterator<Item = &ScalarExpr> {
+        self.expression_steps().flatten()
+    }
+
+    pub(super) fn expression_steps(&self) -> impl Iterator<Item = Option<&ScalarExpr>> {
         self.target
-            .expressions()
-            .chain(std::iter::once(&self.value))
+            .expression_steps()
+            .chain(std::iter::once(Some(&self.value)))
     }
 
     pub fn expressions_mut(&mut self) -> impl Iterator<Item = &mut ScalarExpr> {

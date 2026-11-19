@@ -34,6 +34,20 @@ mod serializable;
 mod vector_spill;
 
 fn remove_backup_metadata_for_predecessor(transaction: &WriteTransaction) {
+    let format = read_u64(&transaction.open_table(METADATA).unwrap(), "format").unwrap();
+    if format < 65 {
+        transaction
+            .delete_table(super::image_fingerprints::TABLE)
+            .unwrap();
+        transaction
+            .open_table(METADATA)
+            .unwrap()
+            .remove(super::image_fingerprints::LEGACY_THROUGH)
+            .unwrap();
+    }
+    if format >= 64 {
+        return;
+    }
     transaction
         .delete_table(super::backup_metadata::BIRTHS)
         .unwrap();
@@ -51,6 +65,7 @@ fn remove_backup_metadata_for_predecessor(transaction: &WriteTransaction) {
 struct FaultBackend {
     storage: Arc<InMemoryBackend>,
     fail_sync: Arc<AtomicBool>,
+    read_bytes: Arc<AtomicUsize>,
     writes: Arc<AtomicUsize>,
     syncs: Arc<AtomicUsize>,
 }
@@ -60,6 +75,7 @@ impl StorageBackend for FaultBackend {
         self.storage.len()
     }
     fn read(&self, offset: u64, out: &mut [u8]) -> io::Result<()> {
+        self.read_bytes.fetch_add(out.len(), Ordering::Relaxed);
         self.storage.read(offset, out)
     }
     fn set_len(&self, len: u64) -> io::Result<()> {

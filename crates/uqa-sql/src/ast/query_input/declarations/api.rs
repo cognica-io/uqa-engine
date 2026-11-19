@@ -22,7 +22,7 @@ fn read<T: Stored>(text: &str, values: &Values<'_>) -> Result<Produced<T>, Input
     Ok(result.into())
 }
 
-macro_rules! entry {
+macro_rules! projected_entry {
     ($ty:ty) => {
         impl $ty {
             /// Reconstruct an already decoded generic declaration without reparsing its physical JSON. Work, allocation and both cancellation scopes belong to the caller; typed diagnostics retain their original unlocated messages.
@@ -42,7 +42,14 @@ macro_rules! entry {
                 };
                 input.run::<Self, _>(work)?.await.map(Into::into)
             }
+        }
+    };
+}
 
+macro_rules! entry {
+    ($ty:ty) => {
+        projected_entry!($ty);
+        impl $ty {
             /// Construct native stored syntax under the original allocation and cancellation owners, without executing or semantically binding it.
             pub fn from_stored_json(
                 text: &str,
@@ -64,6 +71,9 @@ macro_rules! entry {
 }
 entry!(Statement);
 entry!(CreateFunction);
+projected_entry!(crate::ast::CreateDomain);
+projected_entry!(crate::ast::ColumnDef);
+projected_entry!(crate::ast::TableCheck);
 
 impl CreateFunction {
     /// Consume prepared native authority in this declaration's original field order. Its allocations must belong to the supplied control. Nested declarations retain ordinary stored authority semantics.

@@ -12,6 +12,7 @@ use super::{ComputePlan, ProjectionPlan, QueryBlockPlan, ScalarExpr, SourcePlan}
 pub(in crate::plan) enum ExpressionOrder {
     Initialization,
     Rewrite,
+    Visit,
 }
 
 macro_rules! query_roots {
@@ -22,7 +23,7 @@ macro_rules! query_roots {
                 order: ExpressionOrder,
             ) -> impl Iterator<Item = Option<& $($mutable)* ScalarExpr>> {
                 let (before, after): (& $($mutable)* [ProjectionPlan], & $($mutable)* [ProjectionPlan]) =
-                    if matches!(order, ExpressionOrder::Rewrite) || matches!(self.compute, ComputePlan::Project) {
+                    if matches!(order, ExpressionOrder::Rewrite) || (matches!(order, ExpressionOrder::Initialization) && matches!(self.compute, ComputePlan::Project)) {
                         (self.projections.$slice(), & $($mutable)* [])
                     } else {
                         (& $($mutable)* [], self.projections.$slice())

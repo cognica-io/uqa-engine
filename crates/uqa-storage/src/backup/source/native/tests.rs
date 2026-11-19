@@ -266,10 +266,7 @@ fn native_image_source_failure_and_invalid_calls_release_all_retained_state() {
                 ));
             } else if action == 2 {
                 prepare(&mut source, 128);
-                let State::Active(active) = &mut source.state else {
-                    unreachable!()
-                };
-                active.entries.invalidated = true;
+                source.active.as_mut().unwrap().entries.invalidated = true;
                 assert!(matches!(
                     source.read_current(&mut [0; 1]),
                     Err(BackupError::Invalid(_))
@@ -293,10 +290,12 @@ fn native_image_source_failure_and_invalid_calls_release_all_retained_state() {
     let (mut source, dropped, codecs) = image(&[Some(1)], &control, false);
     prepare(&mut source, 128);
     drain(&mut source, 7);
-    let State::Active(active) = &mut source.state else {
-        unreachable!()
-    };
-    active.entries.invalidate_completion = true;
+    source
+        .active
+        .as_mut()
+        .unwrap()
+        .entries
+        .invalidate_completion = true;
     assert!(matches!(source.advance(1), Err(BackupError::Invalid(_))));
     assert_eq!(dropped.load(Ordering::SeqCst), 1);
     assert_eq!(codecs.load(Ordering::SeqCst), 1);

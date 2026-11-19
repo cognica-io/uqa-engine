@@ -106,19 +106,41 @@ impl SnapshotTableSources {
             &self.selection[1],
             control,
         )?;
-        let membership = self.membership.key()?.captured(&cut)?;
-        Ok(SnapshotTableCut { cut, membership })
+        let key = self.membership.key()?;
+        let image_generation = key.image_generation(&cut)?;
+        let membership = key.captured(&cut)?;
+        Ok(SnapshotTableCut {
+            cut,
+            image_generation,
+            membership,
+        })
     }
 }
 
 #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+#[derive(Clone)]
 pub(crate) struct SnapshotTableCut {
     pub(crate) cut: uqa_storage::memory_capture::MemoryCapture,
+    pub(crate) image_generation: Option<uqa_storage::memory_capture::MemoryImageGeneration>,
     membership: std::sync::Arc<uqa_core::memory::Budgeted<CapturedTableMembership>>,
 }
 
 #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 impl SnapshotTableCut {
+    pub(crate) fn stored_expressions(
+        &self,
+    ) -> StorageBackendResult<impl Iterator<Item = StorageBackendResult<StoredTableExpressions>> + '_>
+    {
+        self.cut.check()?;
+        let (membership, identity) = self.membership.get()?;
+        assert!(identity.matches(&self.cut));
+        Ok(membership.sources.iter().map(|(_, table)| {
+            let columns = table.columns.captured(&self.cut)?;
+            let checks = table.table_checks.captured(&self.cut)?;
+            Ok((columns.get()?.clone(), checks.get()?.clone()))
+        }))
+    }
+
     #[cfg(test)]
     pub(crate) fn assert_unread(&self) {
         for (_, source) in &self.membership.get().unwrap().0.sources {
@@ -169,3 +191,9 @@ impl SnapshotTableCut {
             .capture(&self.cut)
     }
 }
+
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+type StoredTableExpressions = (
+    uqa_sql::catalog::table_definition::TableDefinition<Vec<uqa_sql::ast::ColumnDef>>,
+    uqa_sql::catalog::table_definition::TableDefinition<Vec<uqa_sql::ast::TableCheck>>,
+);

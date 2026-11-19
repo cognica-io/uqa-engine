@@ -44,7 +44,7 @@ pub fn begin_restore<'a>(
     engine.begin_restore(repository, backup, destination, options, control)
 }
 
-/// Start the same authorized, bounded persistent export exposed by [`uqa_engine::Engine::begin_backup`].
+/// Start a full or incremental backup of committed data on a memory or persistent Engine.
 pub fn begin_backup<'a>(
     engine: &uqa_engine::Engine,
     repository: &'a LocalRepository,

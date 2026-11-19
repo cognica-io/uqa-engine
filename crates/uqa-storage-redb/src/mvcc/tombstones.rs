@@ -78,6 +78,9 @@ pub(super) fn reclaim(
         }
         let mut heads = transaction.open_table(HEADS).map_err(redb_error)?;
         let mut versions = transaction.open_table(VERSIONS).map_err(redb_error)?;
+        let mut fingerprints = transaction
+            .open_table(super::image_fingerprints::TABLE)
+            .map_err(redb_error)?;
         let page = candidates(&heads, &versions, request, control)?;
         if page.retired().len() != 0 {
             let mut identifiers = transaction
@@ -90,6 +93,7 @@ pub(super) fn reclaim(
             for (key, revision) in page.retired() {
                 control.check()?;
                 versions.remove((key, revision)).map_err(redb_error)?;
+                fingerprints.remove((key, revision)).map_err(redb_error)?;
                 heads.remove(key).map_err(redb_error)?;
             }
             for namespace in [RECLAMATION_EPOCH_NAMESPACE, &*domain] {

@@ -254,6 +254,9 @@ pub(super) fn insert_record(
         )
         .map_err(driver_error)?;
     let row = transaction.last_insert_rowid();
+    let mut hasher = uqa_storage::backup::RecordImageHasher::new(
+        uqa_storage::mvcc::CommitSequence::from_u64(revision),
+    );
     {
         let mut blob = transaction
             .blob_open("main", "_uqa_mvcc_versions", "value", row, false)
@@ -267,6 +270,7 @@ pub(super) fn insert_record(
                 return Err(BackupError::Invalid("truncated SQLite image value"));
             }
             blob.write_all(&buffer[..n])?;
+            hasher.update(&buffer[..n]);
             remaining -= n;
         }
         if read(&mut buffer[..1])? != 0 {
@@ -274,6 +278,13 @@ pub(super) fn insert_record(
         }
         blob.close().map_err(driver_error)?;
     }
+    super::version_metadata::set_image_digest(
+        &transaction,
+        key,
+        uqa_storage::mvcc::CommitSequence::from_u64(revision),
+        hasher.finish(),
+    )
+    .map_err(physical_error)?;
     transaction
         .execute(
             "INSERT INTO _uqa_mvcc_heads (key, sequence) VALUES (?1, ?2)",

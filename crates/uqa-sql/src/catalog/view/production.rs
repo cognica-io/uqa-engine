@@ -55,47 +55,20 @@ impl ViewRewriteDefinitionRef<'_> {
         control: &ProductionControl<'_>,
     ) -> Result<(), SQLError> {
         let mut needs_binding = false;
-        let mut observe = |name: &str, binding: Option<&crate::ast::FunctionBinding>| {
-            control.check()?;
-            if needs_binding
-                || binding.is_some_and(|binding| {
-                    binding.object_id.is_some()
-                        || binding.builtin
-                        || binding.dispatch.is_some()
-                        || binding.value_binding.is_some()
-                        || binding.resolution_error.is_some()
-                })
-            {
-                return Ok(());
-            }
-            let name =
-                crate::semantics::builtin_function_dispatch_name_with_control(name, control)?;
-            if crate::semantics::is_pg_catalog_function_name(&name)
-                || crate::semantics::is_builtin_table_function(&name)
-                || routines.has_visible_sql_functions_with_control(&name, control)?
-            {
-                return Ok(());
-            }
-            needs_binding = true;
-            Ok(())
-        };
-        self.query.try_visit_scalar_expressions(&mut |root| {
-            root.try_visit(&mut |expression| {
-                control.check()?;
-                match expression {
-                    crate::ScalarExpr::Func { name, binding, .. } => {
-                        observe(name, binding.as_ref())?;
-                    }
-                    crate::ScalarExpr::WindowCall { name, .. } => observe(name, None)?,
-                    _ => (),
-                }
-                Ok::<_, SQLError>(true)
-            })
-        })?;
-        crate::binding::view_dependencies::visit_table_function_calls(
+        crate::binding::view_dependencies::visit_stored_runtime_calls(
             crate::plan::PlanRef::Query(self.query),
             control,
-            &mut observe,
+            &mut |name, _| {
+                if !needs_binding {
+                    let name = crate::semantics::builtin_function_dispatch_name_with_control(
+                        name, control,
+                    )?;
+                    needs_binding = !crate::semantics::is_pg_catalog_function_name(&name)
+                        && !crate::semantics::is_builtin_table_function(&name)
+                        && !routines.has_visible_sql_functions_with_control(&name, control)?;
+                }
+                Ok(())
+            },
         )?;
         if needs_binding {
             crate::binding::production::validate_stored_view_calls(

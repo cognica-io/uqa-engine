@@ -59,6 +59,9 @@ pub(super) fn migrate(database: &Database, identity: DatabaseId) -> VersionResul
             let table = transaction.open_table(LEGACY).map_err(redb_error)?;
             let mut heads = transaction.open_table(HEADS).map_err(redb_error)?;
             let mut versions = transaction.open_table(VERSIONS).map_err(redb_error)?;
+            let mut fingerprints = transaction
+                .open_table(super::image_fingerprints::TABLE)
+                .map_err(redb_error)?;
             let mut sequence = current.as_u64().max(old_sequence);
             let mut populated = false;
             for entry in table.iter().map_err(redb_error)? {
@@ -84,8 +87,14 @@ pub(super) fn migrate(database: &Database, identity: DatabaseId) -> VersionResul
                     .insert_reserve((key, sequence), size)
                     .map_err(redb_error)?;
                 destination.as_mut()[0] = 1;
-                destination.as_mut()[1..].copy_from_slice(value);
+                let digest = copy_legacy_value(sequence, value, &mut destination.as_mut()[1..]);
                 drop(destination);
+                super::image_fingerprints::insert(
+                    &mut fingerprints,
+                    key,
+                    sequence,
+                    Some((value.len(), digest)),
+                )?;
                 heads.insert(key, sequence).map_err(redb_error)?;
             }
             metadata
@@ -106,6 +115,19 @@ pub(super) fn migrate(database: &Database, identity: DatabaseId) -> VersionResul
     }
     transaction.commit().map_err(redb_error)?;
     Ok(())
+}
+
+fn copy_legacy_value(
+    sequence: u64,
+    source: &[u8],
+    destination: &mut [u8],
+) -> uqa_storage::backup::ImageDigest {
+    let mut hash = uqa_storage::backup::RecordImageHasher::new(CommitSequence::from_u64(sequence));
+    for (out, part) in destination.chunks_mut(65536).zip(source.chunks(65536)) {
+        out.copy_from_slice(part);
+        hash.update(part);
+    }
+    hash.finish()
 }
 
 /// Install the typed legacy-writer fence with the new mapping's publication transaction.

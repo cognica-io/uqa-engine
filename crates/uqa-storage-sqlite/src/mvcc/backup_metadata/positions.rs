@@ -9,8 +9,8 @@
 use rusqlite::OptionalExtension;
 use uqa_storage::{
     mvcc::{
-        BackupCursorKey, BackupRecordPositionVisitor, CommitSequence, CommittedBackupSnapshot,
-        RecordMetadata, VersionError, VersionResult,
+        BackupCursorKey, BackupRecordImagePosition, BackupRecordImageVisitor, CommitSequence,
+        CommittedBackupSnapshot, RecordMetadata, VersionError, VersionResult,
     },
     read_control::StorageReadControl,
 };
@@ -61,19 +61,52 @@ impl Snapshot {
         after: Option<&[u8]>,
         limit: usize,
         control: &StorageReadControl,
-        visit: &mut BackupRecordPositionVisitor<'_>,
+        visit: &mut BackupRecordImageVisitor<'_>,
     ) -> VersionResult<()> {
         control.cancellation().check()?;
         self.read(|connection, _| {
             read::keys(connection, b"", after, limit, control, &mut |key| {
                 let _bindings = crate::read_control::reserve_bindings(control, &[key])?;
-                let metadata = read::info(connection, key, self.records.sequence())?.map(|info| {
-                    RecordMetadata {
-                        revision: Some(CommitSequence::from_u64(info.revision)),
-                        live: info.length.is_some(),
-                    }
-                });
-                Ok(Some(visit(key, metadata)?))
+                read::with_point_info(
+                    connection,
+                    key,
+                    self.records.sequence(),
+                    read::POINT_IMAGE_METADATA_SQL,
+                    |info, row| {
+                        let mut fingerprint = None;
+                        let visible = if let Some(info) = info {
+                            if let (Some(length), Some(row)) = (info.length, row) {
+                                if let rusqlite::types::ValueRef::Blob(bytes) = row.get_ref(4)? {
+                                    let digest = bytes.try_into().map_err(|_| {
+                                        VersionError::InvalidEncoding(
+                                            "invalid record image metadata",
+                                        )
+                                    })?;
+                                    fingerprint = Some(uqa_storage::backup::UnitFingerprint {
+                                        digest: uqa_storage::backup::ImageDigest::from_bytes(
+                                            digest,
+                                        ),
+                                        decoded_bytes: length as u64 + 8,
+                                    });
+                                }
+                            }
+                            Some(RecordMetadata {
+                                revision: Some(CommitSequence::from_u64(info.revision)),
+                                live: info.length.is_some(),
+                            })
+                        } else {
+                            None
+                        };
+                        Ok(Some(visit(
+                            key,
+                            BackupRecordImagePosition {
+                                visible,
+                                fingerprint,
+                                fingerprint_bytes: if fingerprint.is_some() { 32 } else { 0 },
+                            },
+                        )?))
+                    },
+                )
             })
         })
     }

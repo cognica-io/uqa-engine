@@ -55,8 +55,25 @@ impl RedbStorage {
         path: impl AsRef<Path>,
         options: VersionedSessionOptions,
     ) -> StorageBackendResult<Self> {
-        let path = path.as_ref();
-        let database = Arc::new(Database::create(path).map_err(redb_error)?);
+        Self::open_with_builder(path.as_ref(), options, &Database::builder())
+    }
+
+    /// Open a file with a controlled physical page-cache size for allocation tests.
+    #[cfg(feature = "test-support")]
+    pub fn open_with_page_cache(path: &Path, bytes: usize) -> StorageBackendResult<Self> {
+        Self::open_with_builder(
+            path,
+            VersionedSessionOptions::default(),
+            Database::builder().set_cache_size(bytes),
+        )
+    }
+
+    fn open_with_builder(
+        path: &Path,
+        options: VersionedSessionOptions,
+        builder: &redb::Builder,
+    ) -> StorageBackendResult<Self> {
+        let database = Arc::new(builder.create(path).map_err(redb_error)?);
         let records = RedbRecordStore::new(database)
             .map_err(uqa_storage::mvcc::VersionError::into_storage_error)?;
         Self::from_records(path, records, options)
@@ -141,7 +158,7 @@ impl PersistentStorageProvider for RedbStorage {
         uqa_storage::backup::BackupCapabilities {
             export: cfg!(any(windows, all(unix, not(target_os = "emscripten")))),
             import: cfg!(any(windows, all(unix, not(target_os = "emscripten")))),
-            snapshot_fingerprints: false,
+            snapshot_fingerprints: true,
         }
     }
 

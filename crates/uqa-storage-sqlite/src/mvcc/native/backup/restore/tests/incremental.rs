@@ -47,16 +47,23 @@ fn verify_incremental_restore(standalone: bool) {
             .begin_backup(image.cut(), Some(parent.backup()), 16 << 20, &control)
             .unwrap();
         let report = operation.prepare_image(image, 2 << 20, &control).unwrap();
-        assert!(report.image.reused_units > 0);
+        assert!(report.image.certified_reused_units > 0);
+        assert!(report.image.certified_reused_bytes > report.image.hashed_payload_bytes);
+        assert_eq!(
+            report.image.reused_payload_bytes + report.image.written_payload_bytes,
+            report.inventory.decoded_bytes
+        );
         assert!(report.image.written_units > 0);
         assert_eq!(report.image.parent_units, parent.summary().units);
         assert_eq!(
-            report.image.hashed_payload_bytes,
+            report.image.hashed_payload_bytes + report.image.certified_reused_bytes,
             report.inventory.decoded_bytes
         );
         assert_eq!(
-            report.source.copied_payload_bytes + 56 + 8 * expected.len() as u64,
-            report.inventory.decoded_bytes
+            report.source.copied_payload_bytes
+                + 56
+                + 8 * (expected.len() as u64 - report.image.certified_reused_units),
+            report.image.hashed_payload_bytes
         );
         let child = operation.publish(&control).unwrap();
         drop((operation, records, session, provider, connection));

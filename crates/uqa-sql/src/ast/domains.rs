@@ -22,6 +22,36 @@ pub struct CreateDomain {
     pub checks: Vec<DomainCheck>,
 }
 
+impl CreateDomain {
+    /// Observe application lookups reached by this stored default and its CHECK conditions. Constraint validation status does not affect their use for future values.
+    pub async fn visit_runtime_scalar_calls<'a, 'input: 'a, F>(
+        &'a self,
+        original: &'a uqa_core::CancellationToken,
+        input: &'a mut uqa_core::image_io::AsyncImageInput<'input>,
+        visit: &'a mut F,
+    ) -> Result<(), crate::SQLError>
+    where
+        F: FnMut(
+                &str,
+                crate::binding::view_dependencies::StoredFunctionSite,
+            ) -> Result<(), crate::SQLError>
+            + Send,
+    {
+        if let Some(default) = &self.default {
+            default
+                .visit_runtime_scalar_calls(original, input, visit)
+                .await?;
+        }
+        for check in &self.checks {
+            check
+                .expression
+                .visit_runtime_scalar_calls(original, input, visit)
+                .await?;
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DomainNotNull {
     pub name: Option<String>,

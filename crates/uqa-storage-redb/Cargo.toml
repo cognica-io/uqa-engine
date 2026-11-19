@@ -12,6 +12,9 @@ rust-version.workspace = true
 documentation = "https://docs.rs/uqa-storage-redb"
 exclude.workspace = true
 
+[features]
+test-support = []
+
 [dependencies]
 uqa-storage = { workspace = true }
 redb = { workspace = true }

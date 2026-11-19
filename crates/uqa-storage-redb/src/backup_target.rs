@@ -206,6 +206,20 @@ mod tests {
     use super::*;
 
     #[test]
+    fn stored_view_queries_read_the_original_physical_cut() {
+        let directory = tempfile::tempdir().unwrap();
+        let provider = RedbStorage::open(directory.path().join("views")).unwrap();
+        uqa_storage::key_value::conformance::verify_backup_view_queries(&provider).unwrap();
+    }
+
+    #[test]
+    fn stored_metadata_values_read_the_original_physical_cut() {
+        let directory = tempfile::tempdir().unwrap();
+        let provider = RedbStorage::open(directory.path().join("metadata")).unwrap();
+        uqa_storage::key_value::conformance::verify_backup_metadata_values(&provider).unwrap();
+    }
+
+    #[test]
     fn redb_destination_retains_validation_until_completion_and_recovers_cancellation() {
         let directory = tempfile::tempdir().unwrap();
         let provider = Arc::new(RedbStorage::open(directory.path().join("source")).unwrap());
