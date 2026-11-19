@@ -155,17 +155,9 @@ fn partial_sql_body_analysis_releases_its_registry_and_allowance(#[case] provide
         let control = StorageReadControl::with_limit(32 << 20);
         let mut candidate = input(&source, &control);
         reach_bodies(&mut candidate);
-        let path = candidate
-            .candidate
-            .as_ref()
-            .unwrap()
-            .session
-            .engine()
-            .session
-            .state
-            .read()
-            .search_path
-            .clone();
+        let private = candidate.candidate.as_ref().unwrap().session.engine_owner();
+        let lifetime = Arc::downgrade(private);
+        let path = private.session.state.read().search_path.clone();
         for _ in 0..halfway {
             assert!(candidate.advance(1).unwrap().is_none());
             assert!(compiling(&candidate));
@@ -217,6 +209,7 @@ fn partial_sql_body_analysis_releases_its_registry_and_allowance(#[case] provide
             }
         }
         drop((candidate, occupied));
+        assert!(lifetime.upgrade().is_none());
         assert!(!backend.in_transaction());
         assert_eq!(control.memory().used(), 0);
         assert_eq!(

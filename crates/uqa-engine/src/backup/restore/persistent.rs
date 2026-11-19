@@ -432,7 +432,7 @@ enum ValidationStage {
         Budgeted<Box<BackupFunctionDigestJob<crate::backup::functions::References>>>,
     ),
     Relationships(
-        Arc<Budgeted<crate::open::PersistentEngineState>>,
+        crate::open::PersistentEngineState,
         crate::backup::validation::CatalogValidation,
     ),
 }
@@ -466,27 +466,18 @@ impl BackupImageValidationWork for Validation {
                         session.engine(),
                         &self.control,
                     )?;
-                    let header = self.control.memory().empty_reservation();
-                    ValidationStage::Relationships(
-                        Budgeted::new(session, header).into_shared()?,
-                        checks,
-                    )
+                    ValidationStage::Relationships(session, checks)
                 }
                 None => ValidationStage::Catalog(input),
             },
             ValidationStage::Relationships(session, checks) => {
                 let Some(checks) = checks.advance(
-                    &session,
-                    |owner| owner.engine(),
+                    session.engine_owner(),
+                    |owner| owner,
                     &self.control,
                     maximum_steps,
                 )?
                 else {
-                    let (session, _header) = Arc::try_unwrap(session)
-                        .unwrap_or_else(|_| {
-                            unreachable!("completed binding released the private session")
-                        })
-                        .into_parts();
                     if self.expected.is_some() {
                         let source = crate::backup::functions::References::staged(
                             session.engine(),
