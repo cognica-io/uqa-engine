@@ -96,15 +96,15 @@ fn retained_default_binding_reaches_late_scalar_nodes_and_releases_the_session()
     use uqa_sql::ast::Expr;
     const WIDTH: usize = 512;
     let memory = MemoryBudget::new(2 << 20);
-    let input = |bad: Option<usize>| {
+    let input = |bad: Option<(usize, Expr)>| {
         let mut snapshot = snapshot();
         let mut column = ColumnDef::nullable(
             "values",
             uqa_sql::ColumnType::Array(Box::new(uqa_sql::ColumnType::BigInteger)),
         );
         let mut nodes = vec![Expr::Literal(uqa_core::Value::Int(1)); WIDTH];
-        if let Some(position) = bad {
-            nodes[position] = Expr::Default;
+        if let Some((position, expression)) = bad {
+            nodes[position] = expression;
         }
         column.default = Some(Expr::Array(nodes));
         snapshot.tables.insert(
@@ -114,34 +114,40 @@ fn retained_default_binding_reaches_late_scalar_nodes_and_releases_the_session()
         CatalogReadView::new(snapshot)
     };
     for steps in [1, 32] {
-        let reject = |position| {
-            let (windows, result) = retained_binding_windows(
-                &input(Some(position)),
-                &memory,
-                &CancellationToken::new(),
-                steps,
-                None,
+        for (invalid, diagnostic) in [
+            (
+                Expr::Default,
+                "invalid native default expression binding: non-scalar expression",
+            ),
+            (
+                Expr::Column("unknown_field".into()),
+                "column \"unknown_field\" does not exist",
+            ),
+        ] {
+            let reject = |position| {
+                let (windows, result) = retained_binding_windows(
+                    &input(Some((position, invalid.clone()))),
+                    &memory,
+                    &CancellationToken::new(),
+                    steps,
+                    None,
+                );
+                let error = result.unwrap_err();
+                assert!(error.to_string().contains(diagnostic), "{error}");
+                assert_eq!(memory.used(), 0);
+                windows
+            };
+            let first = reject(0);
+            let last = reject(WIDTH - 1);
+            eprintln!(
+                "stored default {diagnostic}, {steps} steps: first {first}, last {last}, peak {}",
+                memory.peak()
             );
-            let error = result.unwrap_err();
             assert!(
-                error
-                    .to_string()
-                    .contains("invalid native default expression binding: non-scalar expression"),
-                "{error}"
+                last >= first + (WIDTH - 1) / steps,
+                "{steps} steps: first {first}, last {last}"
             );
-            assert_eq!(memory.used(), 0);
-            windows
-        };
-        let first = reject(0);
-        let last = reject(WIDTH - 1);
-        eprintln!(
-            "stored default, {steps} steps: first {first}, last {last}, peak {}",
-            memory.peak()
-        );
-        assert!(
-            last >= first + (WIDTH - 1) / steps,
-            "{steps} steps: first {first}, last {last}"
-        );
+        }
     }
     let (_, result) =
         retained_binding_windows(&input(None), &memory, &CancellationToken::new(), 64, None);

@@ -424,13 +424,14 @@ struct Preparation<'a, I = InputCatalogs<'a>, C = Option<SchemaExpressionContext
 }
 
 /// Inspect an existing scalar in its original row scope without rewriting it or executing catalog input functions. A condition retains unknown-literal metadata through ordinary Boolean input analysis.
-pub(crate) fn analyze_stored_scalar_with_control(
+pub(crate) async fn analyze_stored_scalar_with_work<W: crate::catalog::work::Work + Send>(
     routines: &dyn RoutineResolution,
     expression: &ScalarExpr,
     input: &RowSchema,
     binding: super::production::ControlledBindingContext<'_>,
     boolean_context: Option<&str>,
     control: &uqa_core::memory::ProductionControl<'_>,
+    work: &mut W,
 ) -> Result<Option<uqa_core::memory::Produced<ColumnType>>, SQLError> {
     let mut scope = SchemaScope::for_analysis_with_control(binding, control)?;
     let mut analysis = Preparation {
@@ -441,25 +442,37 @@ pub(crate) fn analyze_stored_scalar_with_control(
         bound_condition_queries: None,
     };
     let value = match boolean_context {
-        Some(context) => analysis.boolean_expression(expression, input, &[], context)?,
-        None => analysis.expression(expression, input, &[])?,
+        Some(context) => {
+            analysis
+                .boolean_expression_with_work(expression, input, &[], context, work)
+                .await?
+        }
+        None => {
+            analysis
+                .expression_with_work(expression, input, &[], work)
+                .await?
+        }
     };
     analysis
         .parameters
         .collations
-        .validate_expression(expression)?;
+        .validate_expression_with_work(expression, work)
+        .await?;
     control.check()?;
     value.ty.map(|ty| ty.into_produced(control)).transpose()
 }
 
 /// Borrow a captured condition and its nested queries; retain only analysis scratch and never apply recorded input rewrites.
-pub(crate) fn validate_stored_rule_condition_with_control(
+pub(crate) async fn validate_stored_rule_condition_with_work<
+    W: crate::catalog::work::Work + Send,
+>(
     routines: &dyn RoutineResolution,
     expression: &crate::plan::ExpressionPlan,
     input: &RowSchema,
     binding: super::production::ControlledBindingContext<'_>,
     whole_rows: [Option<crate::plan::OwnedScalarExpr>; 2],
     control: &uqa_core::memory::ProductionControl<'_>,
+    work: &mut W,
 ) -> Result<(), SQLError> {
     let mut scope = SchemaScope::for_analysis_with_control(binding, control)?;
     scope.scalar_binding = super::ScalarBindingMode::References;
@@ -474,13 +487,22 @@ pub(crate) fn validate_stored_rule_condition_with_control(
         bound_condition_queries: None,
     };
     for query in &expression.subqueries {
-        analysis.query(query, Some(input))?;
+        analysis.query_with_work(query, Some(input), work).await?;
     }
-    analysis.boolean_expression(&expression.scalar, input, &expression.subqueries, "WHERE")?;
+    analysis
+        .boolean_expression_with_work(
+            &expression.scalar,
+            input,
+            &expression.subqueries,
+            "WHERE",
+            work,
+        )
+        .await?;
     analysis
         .parameters
         .collations
-        .validate_expression(&expression.scalar)?;
+        .validate_expression_with_work(&expression.scalar, work)
+        .await?;
     control.check()?;
     Ok(())
 }

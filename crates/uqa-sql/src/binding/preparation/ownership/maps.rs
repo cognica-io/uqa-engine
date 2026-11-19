@@ -30,6 +30,9 @@ impl<K: Ord, V> AnalysisMap<K, V> {
             control: control.capture(),
         }
     }
+    pub(in crate::binding::preparation) fn control(&self) -> ProductionControl<'_> {
+        self.control.control()
+    }
     pub(in crate::binding) fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }

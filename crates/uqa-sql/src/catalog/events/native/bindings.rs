@@ -48,12 +48,20 @@ pub async fn validate_condition_with_work(
         })
         .await?;
     let schema = binding.captured_row_schema(row, control)?;
-    references(&plan.scalar, context, control, work).await?;
+    context
+        .references
+        .scalar_with_work(&plan.scalar, work)
+        .await?;
+    let mut observer = ScalarTypes {
+        context,
+        control,
+        whole_row: false,
+    };
+    crate::ir::observation::visit_all(&plan.scalar, control, work, &mut observer).await?;
     for query in &plan.subqueries {
         let query = crate::plan::PlanRef::Query(query);
         work.checkpoint().await?;
         context.references.plan_with_work(query, work).await?;
-        let mut observer = ScalarTypes { context, control };
         crate::plan::visit_scalar_nodes_with_work(query, control, work, &mut observer).await?;
     }
     crate::ir::observation::visit_in(
@@ -93,28 +101,30 @@ pub async fn validate_condition_with_work(
     {
         return Err(super::invalid("set-valued rule condition"));
     }
-    let whole_rows =
-        if crate::semantics::rules::action_binding::rule_condition_plan_references_whole_row(plan) {
-            [
-                binding.current_whole_row("old", &rule.definition.table, row, control)?,
-                binding.current_whole_row("new", &rule.definition.table, row, control)?,
-            ]
-        } else {
-            [None, None]
-        };
-    crate::binding::validate_stored_rule_condition_with_control(
+    let whole_rows = if observer.whole_row {
+        [
+            binding.current_whole_row("old", &rule.definition.table, row, control)?,
+            binding.current_whole_row("new", &rule.definition.table, row, control)?,
+        ]
+    } else {
+        [None, None]
+    };
+    crate::binding::validate_stored_rule_condition_with_work(
         context.routines,
         plan,
         &schema,
         context.binding.copy_with_control(control)?,
         whole_rows,
         control,
+        work,
     )
+    .await
 }
 
 struct ScalarTypes<'a, 'c, 's> {
     context: &'a NativeScalarContext<'c, 's>,
     control: &'a ProductionControl<'a>,
+    whole_row: bool,
 }
 
 impl crate::ir::observation::ScalarObserver for ScalarTypes<'_, '_, '_> {
@@ -124,6 +134,10 @@ impl crate::ir::observation::ScalarObserver for ScalarTypes<'_, '_, '_> {
         work: &mut W,
     ) -> Result<(), SQLError> {
         self.control.check()?;
+        self.whole_row |=
+            crate::semantics::rules::action_binding::condition_plan_expression_references_whole_row(
+                node,
+            );
         match node {
             ScalarExpr::Cast { ty, .. } | ScalarExpr::TypedLiteral { ty, .. } => {
                 self.context.types.stored_name_with_work(ty, work).await?;
@@ -154,17 +168,6 @@ impl crate::ir::observation::ScalarObserver for ScalarTypes<'_, '_, '_> {
             _ => Ok(()),
         }
     }
-}
-
-async fn references(
-    scalar: &ScalarExpr,
-    context: &NativeScalarContext<'_, '_>,
-    control: &ProductionControl<'_>,
-    work: &mut (impl crate::catalog::CatalogWork + Send),
-) -> Result<(), SQLError> {
-    context.references.scalar_with_work(scalar, work).await?;
-    crate::ir::observation::visit_all(scalar, control, work, &mut ScalarTypes { context, control })
-        .await
 }
 
 #[cfg(test)]

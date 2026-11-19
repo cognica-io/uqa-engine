@@ -43,6 +43,14 @@ fn rule(condition: &str) -> StoredRule {
 }
 
 fn validate(rule: &StoredRule, control: &ProductionControl<'_>) -> Result<(), SQLError> {
+    crate::catalog::work::inline(validate_with_work(rule, control, &mut ()))
+}
+
+async fn validate_with_work<W: crate::catalog::CatalogWork + Send>(
+    rule: &StoredRule,
+    control: &ProductionControl<'_>,
+    work: &mut W,
+) -> Result<(), SQLError> {
     let memory = control.budget().unwrap();
     let token = CancellationToken::new();
     let binding = empty_binding_context().copy_with_control(control)?;
@@ -71,7 +79,7 @@ fn validate(rule: &StoredRule, control: &ProductionControl<'_>) -> Result<(), SQ
         ],
         control,
     )?;
-    validate_condition(rule, &row, &context, control)
+    validate_condition_with_work(rule, &row, &context, control, work).await
 }
 
 #[test]
@@ -163,4 +171,67 @@ fn native_rule_condition_type_analysis_retires_denied_and_cancelled_scratch() {
         assert!(validate(&rule, &control).is_err());
         assert_eq!(memory.used(), 0);
     }
+}
+
+#[test]
+fn captured_rule_conditions_yield_inside_a_values_subquery_before_a_late_unknown_column() {
+    use uqa_core::image_io::{ImageDecodeWindow, ImageDecoder};
+
+    const WIDTH: usize = 256;
+    let run = |invalid: Option<usize>, stop: Option<usize>| {
+        let values = (0..WIDTH)
+            .map(|position| {
+                if invalid == Some(position) {
+                    "(missing)"
+                } else {
+                    "(1)"
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+        let rule = rule(&format!("EXISTS(VALUES {values})"));
+        let memory = MemoryBudget::new(2 << 20);
+        let token = CancellationToken::new();
+        let original = token.clone();
+        let expected = validate(&rule, &ProductionControl::new(&memory, &token, &token))
+            .map_err(|error| error.to_string());
+        assert_eq!(memory.used(), 0);
+        let mut decoder = ImageDecoder::new(&memory, &token, move |mut channel| async move {
+            let mut input = channel.input();
+            let control = ProductionControl::new(input.memory, &original, input.cancellation);
+            validate_with_work(&rule, &control, &mut input).await
+        })
+        .unwrap();
+        let mut calls = 0;
+        let result = loop {
+            if stop == Some(calls) {
+                token.cancel();
+            }
+            calls += 1;
+            match decoder.advance(
+                &mut std::io::empty(),
+                ImageDecodeWindow { bytes: 1, steps: 1 },
+            ) {
+                Ok(None) => (),
+                Ok(Some(())) => break Ok(()),
+                Err(error) => break Err(error),
+            }
+        };
+        if stop.is_some() {
+            assert_eq!(result.unwrap_err().sqlstate(), Some("57014"));
+        } else {
+            if invalid.is_some() {
+                assert!(matches!(result, Err(ref error) if error.sqlstate() == Some("42703")));
+            }
+            assert_eq!(result.map_err(|error| error.to_string()), expected);
+        }
+        drop(decoder);
+        assert_eq!(memory.used(), 0);
+        calls
+    };
+    let first = run(Some(0), None);
+    let last = run(Some(WIDTH - 1), None);
+    assert!(last >= first + WIDTH - 1, "first {first}, last {last}");
+    run(Some(WIDTH - 1), Some(first + WIDTH / 2));
+    run(None, None);
 }

@@ -106,14 +106,16 @@ async fn analyze<W: Work + Send>(
     {
         return Err(context.invalid("set-valued expression"));
     }
-    let ty = crate::binding::analyze_stored_scalar_with_control(
+    let ty = crate::binding::analyze_stored_scalar_with_work(
         context.routines,
         &scalar,
         schema,
         context.binding.copy_with_control(control)?,
         boolean_context,
         control,
-    )?;
+        work,
+    )
+    .await?;
     if W::MAY_SUSPEND && control.budget().is_some() {
         scalar
             .retire_from(control, &mut ReferenceWork { control, work })
