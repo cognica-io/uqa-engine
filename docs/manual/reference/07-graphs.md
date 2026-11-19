@@ -152,6 +152,8 @@ Graph mutations participate in engine transaction state. Use an explicit SQL tra
 
 The Rust API identifies an index by both its graph name and its index name. For example, an index named `idx` on `company::archive` can coexist with an index named `archive::idx` on `company`. Each returns the vertex pairs from its own graph. Pass the original names separately to `get_path_index` and `drop_path_index`. The strings returned by `list_path_indexes` use the familiar `graph::index` spelling when it identifies a single split and a reversible encoding when the names would otherwise collide.
 
+When opening an older database, the engine can recover the owner of a path index if exactly one registered graph matches its stored name. Creating another graph that also matches records the original owner in the same transaction. The index stays with its original graph after reopening the database or restoring a backup. If an older database already has multiple matching graphs and no recorded owner, opening or restoring it reports an ambiguous path-index owner.
+
 The engine API can create, list, and drop path indexes for repeated graph path workloads. Persistent path definitions and reachability pairs live in storage; opening an engine or session binds handles without rebuilding or loading all pairs. `PathIndex::lookup` returns an owned, fallible `Result<Option<BTreeSet<(u64, u64)>>>`. Invalidated or legacy materializations evaluate only the requested sequence in the current read view, without rebuilding an in-memory index or writing during a read. Engine graph mutations invalidate dependent path-index registrations; storage-level mutations invalidate physical materializations atomically, including every graph sharing a changed entity.
 
 ## Related material

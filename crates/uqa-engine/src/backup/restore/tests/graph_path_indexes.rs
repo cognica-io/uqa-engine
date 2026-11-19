@@ -24,7 +24,7 @@ pub(super) fn create_graph_with_edge(engine: &Engine, graph: &str, first: u64) {
         .unwrap();
 }
 
-fn assert_pairs(engine: &Engine, graph: &str, index: &str, expected: &[(u64, u64)]) {
+pub(super) fn assert_pairs(engine: &Engine, graph: &str, index: &str, expected: &[(u64, u64)]) {
     let actual = engine
         .get_path_index(index, graph)
         .unwrap()
@@ -51,7 +51,7 @@ fn assert_both_indexes(engine: &Engine, company_pairs: &[(u64, u64)]) {
     engine.sql("ROLLBACK", &[]).unwrap();
 }
 
-fn restore_graphs(
+pub(super) fn restore_graphs(
     provider: Provider,
     path: &Path,
     repository: &LocalRepository,

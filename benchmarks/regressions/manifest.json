@@ -208,6 +208,32 @@
     {
       "package": "uqa-storage",
       "kind": "lib",
+      "test": "graph_creation_preserves_only_preexisting_unrecorded_path_owners",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/catalog/path_index/tests.rs",
+      "capability": "Graph path-index ownership",
+      "workload": "Add a competing graph name to historical keys with overlapping separators, known owners and unrelated prefixes.",
+      "invariant": "Only a previously unique graph can acquire an owner record. Opaque and unrelated keys require no catalog reads.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "new_graph_preserves_historical_owners_and_raw_cache_state_in_the_same_batch",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/key_value/catalog/path_index_data.rs",
+      "capability": "Graph path-index ownership",
+      "workload": "Add and replace a graph whose stored prefix matches historical path keys of several byte lengths, including an empty index name.",
+      "invariant": "The forward and reverse owner records commit with the graph. Rollback preserves the earlier membership, stored pairs and materialization state.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
       "test": "historical_owners_require_unique_catalog_evidence_and_scope_destructive_selection",
       "cases": 1,
       "source": "crates/uqa-storage/src/catalog/path_index/tests.rs",
@@ -229,6 +255,48 @@
       "invariant": "Each output retains its own allocation and earlier private buffers retire on interruption.",
       "case_names": [
         ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "graph_registration_retains_only_unrecorded_legacy_owners_across_rollback_and_reopen",
+      "cases": 2,
+      "source": "crates/uqa-storage-sqlite/src/catalog/tests/graph_path_owners.rs",
+      "capability": "Graph path-index ownership",
+      "workload": "Register, roll back and replace a graph in standalone and native SQLite beside invalid and materialized historical path indexes.",
+      "invariant": "Cold reopening preserves the original owner, definition, validity and stored pairs. Rolling back leaves the original catalog intact.",
+      "case_names": [
+        "case_1_sqlite",
+        "case_2_native"
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "ambiguous_legacy_owner_aborts_graph_creation_and_earlier_owner_changes",
+      "cases": 2,
+      "source": "crates/uqa-storage-sqlite/src/catalog/tests/graph_path_owners.rs",
+      "capability": "Graph path-index ownership",
+      "workload": "Create a graph alongside two historical path indexes, including one that already matches multiple graph names.",
+      "invariant": "A failed creation rolls back the graph and any owner records staged for earlier keys.",
+      "case_names": [
+        "case_1_sqlite",
+        "case_2_native"
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "concurrent_native_removal_cannot_publish_a_stale_legacy_owner",
+      "cases": 2,
+      "source": "crates/uqa-storage-sqlite/src/catalog/tests/graph_path_owners.rs",
+      "capability": "Graph path-index ownership",
+      "workload": "Register a graph while a second native SQLite session removes its matching path definition or the definition's original owner.",
+      "invariant": "Committing the stale registration fails. The competing deletion remains visible and no stale owner record survives rollback.",
+      "case_names": [
+        "case_1_index",
+        "case_2_owner"
       ]
     },
     {
@@ -273,6 +341,21 @@
       "capability": "Graph path-index ownership across restore",
       "workload": "Open and restore legacy definitions with either recorded materialization owner or one possible catalog graph. Replace the sequence and reopen before dropping the index.",
       "invariant": "The original graph supplies the exact reachability pairs in a selected snapshot. Replacement and deletion affect the same physical registration.",
+      "case_names": [
+        "case_1_sqlite_native",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "restored_legacy_path_index_keeps_its_owner_when_a_second_graph_is_created",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/backup/restore/tests/legacy_graph_path_indexes.rs",
+      "capability": "Graph path-index ownership across restore",
+      "workload": "Restore a database with a legacy path definition, roll back and then commit creation of a graph whose name also matches. Back up and restore the two independent indexes.",
+      "invariant": "Both graphs preserve their own vertex pairs across cold opens after the source and each selected archive have been removed.",
       "case_names": [
         "case_1_sqlite_native",
         "case_2_sqlite_kv",

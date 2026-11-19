@@ -9,6 +9,7 @@ use super::*;
 mod cache_revisions;
 mod foreign_provenance;
 mod foreign_servers;
+mod graph_path_owners;
 mod metadata;
 mod metadata_prefix;
 mod migration;

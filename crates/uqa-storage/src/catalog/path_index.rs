@@ -164,32 +164,48 @@ async fn select<'a>(
             canonical: true,
         }));
     }
-    let mut selected = None;
+    let selection = select_legacy(raw, recorded, graphs).await?;
+    match selection.pair {
+        Some(pair) => Ok(Some(Identity::raw(pair, selection.boundaries == 1))),
+        None if selection.boundaries == 0 => Ok(None),
+        None => Err(missing()),
+    }
+}
+
+#[derive(Default)]
+struct LegacySelection<'a> {
+    pair: Option<(&'a str, &'a str)>,
+    boundaries: usize,
+}
+
+async fn select_legacy<'a>(
+    raw: &'a str,
+    recorded: Option<&str>,
+    graphs: &mut impl Graphs,
+) -> StorageBackendResult<LegacySelection<'a>> {
+    let mut selection = LegacySelection::default();
     let mut recorded_boundary = false;
-    let mut count = 0_usize;
     for step in (Separators { raw, offset: 0 }) {
         graphs.checkpoint().await?;
         let Some((graph, name)) = step else { continue };
-        count += 1;
+        selection.boundaries += 1;
         if !matches_recorded(recorded, graph, graphs).await? {
             continue;
         }
         recorded_boundary = true;
         if graphs.contains(graph).await? {
-            if selected.is_some() {
+            if selection.pair.is_some() {
                 return Err(StorageBackendError::Other(
                     "ambiguous path-index owner".into(),
                 ));
             }
-            selected = Some((graph, name));
+            selection.pair = Some((graph, name));
         }
     }
-    match selected {
-        Some(pair) => Ok(Some(Identity::raw(pair, count == 1))),
-        None if count == 0 => Ok(None),
-        None if recorded.is_some() && !recorded_boundary => Err(disagrees()),
-        None => Err(missing()),
+    if selection.boundaries != 0 && recorded.is_some() && !recorded_boundary {
+        return Err(disagrees());
     }
+    Ok(selection)
 }
 
 async fn matches_recorded(
@@ -232,6 +248,24 @@ pub fn resolve<'a>(
         &MemoryBudget::new(key.len()),
     ))?
     .map(Identity::parts))
+}
+
+/// Return the existing graph whose historical index would acquire a second possible owner when `graph` is created. Read the catalog before adding the new graph in the same transaction.
+pub fn owner_before_graph_creation<'a>(
+    key: &'a str,
+    graph: &str,
+    has_recorded_owner: impl FnOnce() -> StorageBackendResult<bool>,
+    mut exists: impl FnMut(&str) -> StorageBackendResult<bool>,
+) -> StorageBackendResult<Option<&'a str>> {
+    let candidate = key
+        .strip_prefix(graph)
+        .is_some_and(|tail| tail.starts_with("::"));
+    if !candidate || legacy_candidates(key).nth(1).is_none() || has_recorded_owner()? {
+        return Ok(None);
+    }
+    let mut before = Catalog(|name: &str| Ok(name != graph && exists(name)?));
+    let selection = inline(select_legacy(key, None, &mut before))?;
+    Ok(selection.pair.map(|(owner, _)| owner))
 }
 
 /// Determine whether a selective refresh needs to resolve a key against its original catalog.

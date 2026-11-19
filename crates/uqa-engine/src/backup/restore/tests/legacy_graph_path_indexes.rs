@@ -4,12 +4,12 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use super::graph_path_indexes::create_graph_with_edge;
+use super::graph_path_indexes::{assert_pairs, create_graph_with_edge, restore_graphs};
 use super::providers::{capture_provider, destination};
 use super::*;
 use crate::tests::providers::Provider;
 use std::{collections::BTreeSet, path::Path, sync::Arc};
-use uqa_core::Edge;
+use uqa_core::{Edge, Vertex};
 use uqa_graph::PathIndex;
 use uqa_storage::PersistentStorageProvider;
 
@@ -90,6 +90,96 @@ fn check_owner(engine: &Engine, graph: &str, name: &str, label: &str, pair: (u64
     engine.sql("COMMIT", &[]).unwrap();
 }
 
+fn physical_registration(engine: &Engine) -> (Vec<(String, String)>, Option<String>) {
+    let catalog = engine.storage.catalog.as_ref().unwrap();
+    (
+        catalog.load_path_indexes().unwrap(),
+        catalog.path_index_graph(LEGACY_KEY).unwrap(),
+    )
+}
+
+#[rstest::rstest]
+#[case::sqlite_native(Provider::SQLiteNative)]
+#[case::sqlite_kv(Provider::SQLiteKeyValue)]
+#[case::redb(Provider::Redb)]
+fn restored_legacy_path_index_keeps_its_owner_when_a_second_graph_is_created(
+    #[case] provider: Provider,
+) {
+    let directory = tempfile::tempdir().unwrap();
+    let repository = repository(&directory.path().join("repository"));
+    let source_directory = tempfile::tempdir().unwrap();
+    let database = source_directory.path().join("database");
+    drop(old_database(provider, &database, &[ARCHIVE], None));
+    let source = provider.open(&database);
+    check_owner(&source, ARCHIVE, "idx", "edge", (1, 2));
+    let root = capture(&source, &repository, None);
+    assert_eq!(
+        physical_registration(&source),
+        (vec![(LEGACY_KEY.into(), DEFINITION.into())], None)
+    );
+    drop(source);
+    source_directory.close().unwrap();
+
+    let control = StorageReadControl::with_limit(32 << 20);
+    let path = directory.path().join("restored");
+    let installed = path.join("database");
+    let restored = restore_graphs(provider, &path, &repository, root, &control);
+    retire_ancestor(&repository, root, &control);
+    check_owner(&restored, ARCHIVE, "idx", "edge", (1, 2));
+    let before = physical_registration(&restored);
+    restored.sql("BEGIN", &[]).unwrap();
+    assert!(restored.create_graph(COMPANY).unwrap());
+    restored.sql("ROLLBACK", &[]).unwrap();
+    assert_eq!(physical_registration(&restored), before);
+    drop(restored);
+
+    let rolled_back = provider.open(&installed);
+    assert!(!rolled_back
+        .list_graphs()
+        .unwrap()
+        .iter()
+        .any(|name| name == COMPANY));
+    check_owner(&rolled_back, ARCHIVE, "idx", "edge", (1, 2));
+    rolled_back.sql("BEGIN", &[]).unwrap();
+    assert!(rolled_back.create_graph(COMPANY).unwrap());
+    rolled_back.sql("COMMIT", &[]).unwrap();
+    drop(rolled_back);
+
+    let reopened = provider.open(&installed);
+    assert!(reopened
+        .list_graphs()
+        .unwrap()
+        .iter()
+        .any(|name| name == COMPANY));
+    check_owner(&reopened, ARCHIVE, "idx", "edge", (1, 2));
+    reopened
+        .add_graph_vertex(Vertex::new(9, "Node"), COMPANY)
+        .unwrap();
+    reopened
+        .add_graph_edge(Edge::new(109, 9, 9, "edge"), COMPANY)
+        .unwrap();
+    assert!(reopened
+        .build_path_index("archive::idx", COMPANY, &[vec!["edge".into()]])
+        .unwrap());
+    let check_both = |engine: &Engine| {
+        assert_eq!(engine.list_path_indexes().unwrap().len(), 2);
+        assert_pairs(engine, ARCHIVE, "idx", &[(1, 2)]);
+        assert_pairs(engine, COMPANY, "archive::idx", &[(9, 9)]);
+    };
+    check_both(&reopened);
+    let next = capture(&reopened, &repository, None);
+    drop(reopened);
+    std::fs::remove_dir_all(path).unwrap();
+
+    let next_path = directory.path().join("next");
+    let recovered = restore_graphs(provider, &next_path, &repository, next, &control);
+    retire_ancestor(&repository, next, &control);
+    check_both(&recovered);
+    drop(recovered);
+    check_both(&provider.open(&next_path.join("database")));
+    assert_eq!(control.memory().used(), 0);
+}
+
 #[rstest::rstest]
 #[case::sqlite_native(Provider::SQLiteNative)]
 #[case::sqlite_kv(Provider::SQLiteKeyValue)]
@@ -122,18 +212,7 @@ fn legacy_path_indexes_reopen_restore_and_write_to_the_original_owner(#[case] pr
 
         let path = dir.path().join("restored");
         let control = StorageReadControl::with_limit(32 << 20);
-        let mut job = Engine::new()
-            .begin_restore(
-                &repository,
-                root.backup(),
-                destination(provider, &path),
-                RestoreOptions::new(16 << 20, 8 << 20),
-                &control,
-            )
-            .unwrap();
-        prepare(&mut job);
-        let restored = job.publish().unwrap();
-        drop(job);
+        let restored = restore_graphs(provider, &path, &repository, root, &control);
         check_owner(&restored, owner, name, "edge", (first, first + 1));
         restored
             .build_path_index(name, owner, &[vec!["back".into()]])

@@ -102,11 +102,10 @@ impl Catalog {
         {
             return Ok(());
         }
-        self.conn.with(|c| {
-            c.execute(
-                "INSERT OR IGNORE INTO _named_graphs (name) VALUES (?1)",
-                params![name],
-            )?;
+        self.conn.with_mut(|c| {
+            let tx = c.savepoint()?;
+            Self::register_named_graph_on(&tx, name)?;
+            tx.commit()?;
             Ok(())
         })
     }
@@ -478,10 +477,7 @@ impl Catalog {
         }
         self.conn.with_mut(|c| {
             let tx = c.savepoint()?;
-            tx.execute(
-                "INSERT OR IGNORE INTO _named_graphs (name) VALUES (?1)",
-                params![graph_name],
-            )?;
+            Self::register_named_graph_on(&tx, graph_name)?;
             tx.execute(
                 "DELETE FROM _graph_membership WHERE graph_name = ?1",
                 params![graph_name],

@@ -483,7 +483,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
-- Preserve graph ownership when path index names contain double colons or meet at a colon. Distinct graph and index names retain their own reachability pairs across graph edits, repeatable reads, cold opens and backup restores. Existing persistent indexes keep their recorded graph identities.
+- Preserve graph ownership when path index names contain double colons or meet at a colon. Distinct graph and index names retain their own reachability pairs across graph edits, repeatable reads, cold opens and backup restores. Creating a graph that could also match an older index name records the index's original graph in the same transaction.
 
 - Restore persistent graph path indexes within the backup job's work and memory limits. A restore reads registrations from its selected transaction and installs them together, so cancellation can interrupt a large registry before publication.
 

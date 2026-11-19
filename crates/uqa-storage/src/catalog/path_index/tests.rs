@@ -53,6 +53,64 @@ fn canonical_pairs_preserve_simple_keys_and_distinguish_overlapping_delimiters()
 }
 
 #[test]
+fn graph_creation_preserves_only_preexisting_unrecorded_path_owners() {
+    for (raw, graph) in [("opaque", "g"), ("g::idx", "g"), ("a::b::idx", "a:b")] {
+        assert_eq!(
+            owner_before_graph_creation(
+                raw,
+                graph,
+                || panic!("owner read"),
+                |_| panic!("graph lookup")
+            )
+            .unwrap(),
+            None
+        );
+    }
+    let raw = "company::archive::idx";
+    assert_eq!(
+        owner_before_graph_creation(
+            raw,
+            "company",
+            || Ok(false),
+            |g| Ok(g == "company::archive")
+        )
+        .unwrap(),
+        Some("company::archive")
+    );
+    assert_eq!(
+        owner_before_graph_creation(
+            raw,
+            "company::archive",
+            || Ok(false),
+            |g| Ok(g == "company")
+        )
+        .unwrap(),
+        Some("company")
+    );
+    assert_eq!(
+        owner_before_graph_creation(raw, "company", || Ok(false), |_| Ok(false)).unwrap(),
+        None
+    );
+    assert_eq!(
+        owner_before_graph_creation(raw, "company", || Ok(true), |_| panic!("graph lookup"))
+            .unwrap(),
+        None
+    );
+    assert_eq!(
+        owner_before_graph_creation("a:::idx", "a:", || Ok(false), |g| Ok(g == "a")).unwrap(),
+        Some("a")
+    );
+    let error = owner_before_graph_creation(
+        "a::b::c::idx",
+        "a::b",
+        || Ok(false),
+        |g| Ok(g == "a" || g == "a::b::c"),
+    )
+    .unwrap_err();
+    assert!(error.to_string().contains("ambiguous path-index owner"));
+}
+
+#[test]
 fn historical_owners_require_unique_catalog_evidence_and_scope_destructive_selection() {
     let legacy = "one::two::three";
     let both = |g: &str| Ok(["one", "one::two"].contains(&g));
