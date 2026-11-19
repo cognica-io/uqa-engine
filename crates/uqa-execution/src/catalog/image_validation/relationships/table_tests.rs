@@ -6,7 +6,7 @@
 
 use super::{Predicate, RelationshipValidation, Scheduled};
 use crate::catalog::{
-    image_validation::tests::snapshot,
+    image_validation::tests::{snapshot, windows_until_rejected},
     test_support::{table_snapshot, NoRoutines},
     CatalogReadView,
 };
@@ -303,24 +303,6 @@ fn key_columns(missing: usize) -> CatalogReadView {
         ),
     );
     CatalogReadView::new(catalog)
-}
-
-fn windows_until_rejected(catalog: &CatalogReadView, steps: usize, diagnostic: &str) -> usize {
-    let memory = MemoryBudget::new(16 << 20);
-    let cancel = CancellationToken::new();
-    let mut validation = RelationshipValidation::new(catalog.clone(), &memory, &cancel);
-    for window in 1..=2_000_000 {
-        match validation.advance_with_steps(&NoRoutines, &NoRoutines, steps) {
-            Ok(Some(next)) => validation = next,
-            Ok(None) => panic!("accepted a missing relationship"),
-            Err(error) => {
-                assert!(error.to_string().contains(diagnostic), "{error}");
-                assert_eq!(memory.used(), 0);
-                return window;
-            }
-        }
-    }
-    panic!("relationship validation did not complete")
 }
 
 fn check_windows(fixture: fn(usize) -> CatalogReadView, diagnostic: &str) {

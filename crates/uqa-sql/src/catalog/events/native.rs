@@ -8,8 +8,8 @@
 
 use super::{definition::EventAnalysisContext, RuleCatalog, StoredRule, TriggerCatalog};
 use crate::{
-    binding::view_dependencies::visit_stored_plan_relation_references,
-    catalog::resolution::bound_relation_identity_with_control,
+    binding::view_dependencies::visit_stored_plan_relation_references_with_work,
+    catalog::{resolution::bound_relation_identity_with_control, work::Work},
     plan::{ExpressionPlan, PlanRef, UnifiedPlan},
     SQLError,
 };
@@ -35,9 +35,28 @@ pub fn validate(
     catalog: &impl NativeEventCatalog,
     control: &ProductionControl<'_>,
 ) -> Result<(), SQLError> {
+    crate::catalog::work::inline(validate_with_work(
+        triggers,
+        rules,
+        catalog,
+        control,
+        &mut (),
+    ))
+}
+
+/// Inspect stored events in catalog order using the caller's work window.
+pub async fn validate_with_work<W: Work + Send>(
+    triggers: &TriggerCatalog,
+    rules: &RuleCatalog,
+    catalog: &impl NativeEventCatalog,
+    control: &ProductionControl<'_>,
+    work: &mut W,
+) -> Result<(), SQLError> {
     control.check()?;
     for (owner, definitions) in triggers {
+        work.checkpoint().await?;
         for (name, trigger) in definitions {
+            work.checkpoint().await?;
             control.check()?;
             let definition = &trigger.definition;
             declaration(owner, name, &definition.table, &definition.name, control)?;
@@ -50,12 +69,15 @@ pub fn validate(
                 }
             }
             for column in &definition.update_columns {
+                work.checkpoint().await?;
                 live_column(catalog, owner, column, control)?;
             }
         }
     }
     for (owner, definitions) in rules {
+        work.checkpoint().await?;
         for (name, rule) in definitions {
+            work.checkpoint().await?;
             control.check()?;
             declaration(
                 owner,
@@ -70,16 +92,19 @@ pub fn validate(
             condition(rule, owner, catalog, control)?;
             if let Some(dependencies) = &rule.dependencies {
                 for dependency in &dependencies.relations {
+                    work.checkpoint().await?;
                     relation(catalog, dependency, control)?;
                 }
                 for dependency in &dependencies.columns {
+                    work.checkpoint().await?;
                     live_column(catalog, &dependency.relation, &dependency.column, control)?;
                 }
             }
-            visit_rule_relations(rule, control, &mut |reference, _| {
+            visit_rule_relations_with_work(rule, control, work, &mut |reference, _| {
                 let identity = bound_relation_identity_with_control(reference, control)?;
                 relation(catalog, &identity, control).map(|_| ())
-            })?;
+            })
+            .await?;
         }
     }
     control.check()?;
@@ -159,20 +184,49 @@ pub fn visit_rule_relations(
     control: &ProductionControl<'_>,
     visit: &mut impl FnMut(&str, bool) -> Result<(), SQLError>,
 ) -> Result<(), SQLError> {
+    crate::catalog::work::inline(visit_rule_relations_with_work(
+        rule,
+        control,
+        &mut (),
+        visit,
+    ))
+}
+
+async fn visit_rule_relations_with_work<W: Work + Send>(
+    rule: &StoredRule,
+    control: &ProductionControl<'_>,
+    work: &mut W,
+    visit: &mut impl FnMut(&str, bool) -> Result<(), SQLError>,
+) -> Result<(), SQLError> {
     for action in &rule.definition.actions {
+        work.checkpoint().await?;
         control.check()?;
-        let plan = UnifiedPlan::lower_borrowed_for_rewrite(action, &|_: &str| false, control)?;
-        visit_stored_plan_relation_references(plan.as_plan_ref(), control, visit)?;
+        let plan = UnifiedPlan::lower_stored_statement_with_work(action, control, work).await?;
+        visit_stored_plan_relation_references_with_work(plan.as_plan_ref(), control, work, visit)
+            .await?;
+        plan.retire(control, work).await?;
     }
     if let Some(expression) = &rule.definition.condition {
         let condition = ExpressionPlan::lower_borrowed_for_rewrite(expression, control)?;
         for query in condition.queries() {
-            visit_stored_plan_relation_references(PlanRef::Query(query), control, visit)?;
+            visit_stored_plan_relation_references_with_work(
+                PlanRef::Query(query),
+                control,
+                work,
+                visit,
+            )
+            .await?;
         }
     }
     if let Some(condition) = &rule.condition_plan {
         for query in &condition.subqueries {
-            visit_stored_plan_relation_references(PlanRef::Query(query), control, visit)?;
+            visit_stored_plan_relation_references_with_work(
+                PlanRef::Query(query),
+                control,
+                work,
+                visit,
+            )
+            .await?;
         }
     }
     control.check()?;

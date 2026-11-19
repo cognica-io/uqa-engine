@@ -33,7 +33,6 @@ struct Inputs<'a> {
     types: &'a dyn RoutineTypeCatalog,
     memory: &'a MemoryBudget,
     cancellation: &'a CancellationToken,
-    production: ProductionControl<'a>,
 }
 
 #[derive(Clone, Copy)]
@@ -50,6 +49,7 @@ enum Scheduled {
     Authority,
     Foreign,
     Types,
+    PlanRelations,
     Hierarchies,
     Sequences,
     Indexes,
@@ -64,7 +64,7 @@ const ORDERED: &[Predicate] = &[
     Predicate::Scheduled(Scheduled::Authority),
     Predicate::Scheduled(Scheduled::Foreign),
     Predicate::Scheduled(Scheduled::Types),
-    Predicate::Direct(|input| validate_plan_relations(input.view, &input.production)),
+    Predicate::Scheduled(Scheduled::PlanRelations),
     Predicate::Direct(|input| {
         super::validate_stored_expressions(
             input.view,
@@ -185,11 +185,6 @@ impl RelationshipValidation {
                 types,
                 memory: &self.memory,
                 cancellation: &self.cancellation,
-                production: ProductionControl::new(
-                    &self.memory,
-                    &self.cancellation,
-                    &self.cancellation,
-                ),
             })?,
             Predicate::Declarations
                 if !self
@@ -263,6 +258,13 @@ impl Scheduled {
         match self {
             Self::Namespaces | Self::Names | Self::Authority | Self::Types => true,
             Self::Foreign => foreign::has_bindings(snapshot),
+            Self::PlanRelations => {
+                let definitions = &snapshot.definitions;
+                !definitions.views.is_empty()
+                    || !definitions.sql_user_functions.is_empty()
+                    || !definitions.triggers.is_empty()
+                    || !definitions.rules.is_empty()
+            }
             Self::Hierarchies => !snapshot.tables.is_empty(),
             Self::Sequences => {
                 !snapshot.tables.is_empty()
@@ -326,6 +328,11 @@ impl Scheduled {
             Self::Types => {
                 reader!(input => super::type_dependencies::from_input(catalog.snapshot(), &original, input))
             }
+            Self::PlanRelations => {
+                reader!(input => super::plan_dependencies::validate_with_work(
+                    &catalog, &ProductionControl::new(input.memory, &original, input.cancellation), input
+                ))
+            }
             Self::Hierarchies => {
                 reader!(input => super::validate_hierarchies_with_work(catalog.snapshot(), input.memory, &original, input))
             }
@@ -366,6 +373,10 @@ impl Scheduled {
             Self::Names => validate_name_uniqueness(catalog.snapshot(), memory, cancellation),
             Self::Authority => validate_authority(catalog.snapshot(), memory, cancellation),
             Self::Types => validate_types(catalog.snapshot(), memory, cancellation),
+            Self::PlanRelations => validate_plan_relations(
+                catalog,
+                &ProductionControl::new(memory, cancellation, cancellation),
+            ),
             Self::Hierarchies => validate_hierarchies(catalog.snapshot(), memory, cancellation),
             Self::Sequences => validate_sequences(catalog.snapshot(), memory, cancellation),
             Self::Indexes => validate_indexes(catalog.snapshot(), memory, cancellation),

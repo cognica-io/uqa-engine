@@ -26,8 +26,8 @@ pub(crate) use references::{
 };
 pub use references::{
     visit_stored_plan_function_bindings, visit_stored_plan_output_types,
-    visit_stored_plan_relation_references, visit_stored_runtime_calls,
-    visit_stored_runtime_calls_from, StoredFunctionSite,
+    visit_stored_plan_relation_references, visit_stored_plan_relation_references_with_work,
+    visit_stored_runtime_calls, visit_stored_runtime_calls_from, StoredFunctionSite,
 };
 pub(crate) use stored_query::visit_expression_plan_json_runtime_calls;
 pub use stored_query::visit_stored_query_json_runtime_calls;

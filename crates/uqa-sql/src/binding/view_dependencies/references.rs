@@ -33,7 +33,31 @@ pub fn visit_stored_plan_relation_references(
     control: &ProductionControl<'_>,
     visit: &mut impl FnMut(&str, bool) -> Result<(), SQLError>,
 ) -> Result<(), SQLError> {
-    visit_references(plan, control, visit, &mut |_| Ok(()))
+    crate::catalog::work::inline(visit_stored_plan_relation_references_with_work(
+        plan,
+        control,
+        &mut (),
+        visit,
+    ))
+}
+
+/// Schedule the same lexical CTE scopes, concrete sources and mutation targets on the caller's work window.
+pub async fn visit_stored_plan_relation_references_with_work<
+    W: crate::catalog::work::Work + Send,
+>(
+    plan: PlanRef<'_>,
+    control: &ProductionControl<'_>,
+    work: &mut W,
+    visit: &mut impl FnMut(&str, bool) -> Result<(), SQLError>,
+) -> Result<(), SQLError> {
+    visit_references_with_work(
+        plan,
+        control,
+        work,
+        visit,
+        &mut Immediate(|_: SourceMember<'_>| Ok(())),
+    )
+    .await
 }
 
 /// Observe the function targets owned by FROM items, including ROWS FROM groups. Scalar arguments remain owned by the ordinary expression visitor; this traversal shares the stored relation visitor's admitted, iterative plan walk.

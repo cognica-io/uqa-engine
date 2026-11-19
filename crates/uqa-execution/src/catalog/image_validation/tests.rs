@@ -27,6 +27,29 @@ pub(super) fn snapshot() -> CatalogReadSnapshot {
     snapshot
 }
 
+pub(super) fn windows_until_rejected(
+    catalog: &crate::catalog::CatalogReadView,
+    steps: usize,
+    diagnostic: &str,
+) -> usize {
+    use crate::catalog::test_support::NoRoutines;
+    let memory = MemoryBudget::new(16 << 20);
+    let cancel = CancellationToken::new();
+    let mut validation = RelationshipValidation::new(catalog.clone(), &memory, &cancel);
+    for window in 1..=2_000_000 {
+        match validation.advance_with_steps(&NoRoutines, &NoRoutines, steps) {
+            Ok(Some(next)) => validation = next,
+            Ok(None) => panic!("accepted a missing relationship"),
+            Err(error) => {
+                assert!(error.to_string().contains(diagnostic), "{error}");
+                assert_eq!(memory.used(), 0);
+                return window;
+            }
+        }
+    }
+    panic!("relationship validation did not complete")
+}
+
 #[test]
 fn native_catalog_authority_rejects_missing_and_recreated_table_owners() {
     let mut snapshot = snapshot();

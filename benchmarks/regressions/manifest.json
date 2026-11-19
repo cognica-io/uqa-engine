@@ -54523,6 +54523,45 @@
     {
       "package": "uqa-execution",
       "kind": "lib",
+      "test": "stored_plan_validation_yields_within_the_ctes_of_one_view",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/plan_dependencies/tests.rs",
+      "capability": "Native stored-plan relation validation",
+      "workload": "Move a missing relation from the first to the last of 128 common table expressions in one stored view.",
+      "invariant": "The original relation error follows its position across restore work windows and releases the validation budget.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "stored_rule_validation_yields_between_actions_before_the_first_missing_relation",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/plan_dependencies/tests/events.rs",
+      "capability": "Native rule relation validation",
+      "workload": "Move a missing relation from the first to the last action in a stored rule with 64 actions.",
+      "invariant": "Validation follows action order across restore work windows and releases its allowance on the original error.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "stored_rule_validation_yields_within_a_single_insert_action",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/catalog/image_validation/plan_dependencies/tests/events.rs",
+      "capability": "Native rule relation validation",
+      "workload": "Construct and retire a stored INSERT action with one or 128 rows before checking a missing relation in the next action.",
+      "invariant": "The number of work windows scales with the rows in the action and both restores release their temporary plans.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
       "test": "native_stored_relations_validate_bound_routines_but_keep_source_bodies_lazy",
       "cases": 1,
       "source": "crates/uqa-execution/src/catalog/image_validation/plan_dependencies/tests.rs",

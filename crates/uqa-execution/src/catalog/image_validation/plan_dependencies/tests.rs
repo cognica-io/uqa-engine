@@ -5,7 +5,10 @@
 //
 
 use super::*;
-use crate::catalog::test_support::{empty_catalog, table_snapshot};
+use crate::catalog::{
+    image_validation::tests::{snapshot, windows_until_rejected},
+    test_support::table_snapshot,
+};
 use uqa_core::{
     memory::{MemoryBudget, RetainedValue},
     CancellationToken, RelationIdentity,
@@ -26,7 +29,7 @@ use uqa_sql::{
 mod events;
 
 fn catalog(sql: &str) -> CatalogReadView {
-    let mut snapshot = empty_catalog().snapshot().clone();
+    let mut snapshot = snapshot();
     snapshot.tables.insert(
         RelationIdentity::new("public", "items"),
         table_snapshot(
@@ -117,6 +120,29 @@ fn native_stored_relations_accept_ctes_and_reject_missing_or_unqualified_sources
         "WITH items AS (SELECT * FROM items) SELECT * FROM items",
     ] {
         assert!(check(&catalog(sql)).is_err(), "{sql}");
+    }
+}
+
+#[test]
+fn stored_plan_validation_yields_within_the_ctes_of_one_view() {
+    const WIDTH: usize = 128;
+    let fixture = |missing| {
+        let definitions = (0..WIDTH)
+            .map(|i| {
+                let table = if i == missing { "missing" } else { "items" };
+                format!("entry{i} AS (SELECT id FROM public.{table})")
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+        catalog(&format!("WITH {definitions} SELECT id FROM entry0"))
+    };
+    let first = fixture(0);
+    let last = fixture(WIDTH - 1);
+    let diagnostic = "missing native plan relation";
+    for steps in [1, 32] {
+        let early = windows_until_rejected(&first, steps, diagnostic);
+        let late = windows_until_rejected(&last, steps, diagnostic);
+        assert!(late >= early + (WIDTH - 1) / steps, "{early} vs {late}");
     }
 }
 
