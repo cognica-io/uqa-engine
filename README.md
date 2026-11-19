@@ -380,7 +380,7 @@ python3 tests/parity/pg18/run_diff.py
 
 Stateful routine, constraint, type-and-temporal, trigger, and rewrite-rule oracles plus the pinned psycopg, pgx, and node-postgres matrix are documented in [PG18 differential probes](tests/parity/pg18/README.md). The current milestone and open-gate ledger is the [PostgreSQL 18 compatibility plan](docs/plans/0003-postgresql-18-compatibility.md).
 
-Current performance verification uses the [deterministic regression inventory](benchmarks/regressions/README.md) and the separate [controlled-runner protocol](benchmarks/regressions/controlled-runner.md). The [2026-11-01 controlled results](docs/design/performance.md#controlled-analytical-and-claim-qualification-2026-11-01) record all twenty accepted comparisons for source `e8abe2c88`, including Q1's calibrated interval below its unchanged 1.10 limit. The [TPC-H benchmark](benchmarks/tpch/README.md) records a dated comparison of the 0.6.0 release with PostgreSQL 18; posting and relevance measurements remain dated development snapshots in the performance design.
+The regression suite checks work, memory use and output on Linux and macOS. A dedicated EC2 host measures elapsed time. On main `c248aed70`, Q1’s calibrated interval crossed its limit and the cursor scan exceeded its limit. The TPC-H comparison covers UQA Engine 0.6.0 and PostgreSQL 18. [Regression inventory](benchmarks/regressions/README.md) · [Measurement protocol](benchmarks/regressions/controlled-runner.md) · [Controlled results](docs/design/performance.md#controlled-analytical-results-2026-11-19-utc) · [TPC-H benchmark](benchmarks/tpch/README.md)
 
 Contributor checks, benchmark build gates, and repository conventions are documented in [CONTRIBUTING.md](CONTRIBUTING.md).
 
