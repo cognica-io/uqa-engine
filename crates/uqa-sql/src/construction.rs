@@ -158,7 +158,7 @@ pub(crate) async fn suspend() {
             Poll::Pending
         }
     })
-    .await
+    .await;
 }
 
 enum Step<'a> {

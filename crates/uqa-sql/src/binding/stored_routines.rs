@@ -131,10 +131,12 @@ pub(super) fn bind_catalog_statement_composite_inputs(
     })
 }
 
+type CatalogQuery<'a> = (Cow<'a, QueryPlan>, Option<RowSchema>);
+
 fn catalog_query<'a>(
     context: &CatalogRoutineContext<'_, '_>,
     plan: &'a UnifiedPlan,
-) -> Result<Option<(Cow<'a, QueryPlan>, Option<RowSchema>)>, SQLError> {
+) -> Result<Option<CatalogQuery<'a>>, SQLError> {
     match plan {
         UnifiedPlan::Query(query) => Ok(Some((Cow::Borrowed(query), None))),
         UnifiedPlan::Command(command) => Ok(command_statement_query(context, command)?
