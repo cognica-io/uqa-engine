@@ -161,6 +161,69 @@ fn retained_default_binding_reaches_late_scalar_nodes_and_releases_the_session()
 }
 
 #[test]
+fn retained_table_checks_coerce_each_boolean_operand_in_its_original_position() {
+    use crate::catalog::CatalogReadView;
+    use uqa_sql::ast::Expr;
+    const WIDTH: usize = 256;
+    let memory = MemoryBudget::new(2 << 20);
+    for (name, chain) in [
+        ("AND", Expr::And as fn(Vec<Expr>) -> Expr),
+        ("OR", Expr::Or),
+    ] {
+        let input = |bad: Option<usize>| {
+            let mut source = snapshot();
+            let mut nodes = vec![Expr::Literal(uqa_core::Value::Bool(true)); WIDTH];
+            if let Some(position) = bad {
+                nodes[position] = Expr::Literal(uqa_core::Value::Int(1));
+            }
+            let mut column = ColumnDef::nullable("v", uqa_sql::ColumnType::BigInteger);
+            column.check = Some(chain(nodes));
+            source.tables.insert(
+                RelationIdentity::new("public", "saved"),
+                table_snapshot([1; 16], vec![column], TableConstraintSet::default()),
+            );
+            CatalogReadView::new(source)
+        };
+        for steps in [1, 32] {
+            let reject = |position| {
+                let (windows, result) = retained_binding_windows(
+                    &input(Some(position)),
+                    &memory,
+                    &CancellationToken::new(),
+                    steps,
+                    None,
+                );
+                let error = result.unwrap_err();
+                assert_eq!(error.sqlstate(), Some("42804"), "{error}");
+                assert!(error.to_string().contains(name), "{error}");
+                drop(error);
+                assert_eq!(memory.used(), 0);
+                windows
+            };
+            let first = reject(0);
+            let last = reject(WIDTH - 1);
+            assert!(
+                last >= first + (WIDTH - 1) / steps,
+                "{name} width {steps}: {first} vs {last}"
+            );
+            let (_, cancelled) = retained_binding_windows(
+                &input(Some(WIDTH - 1)),
+                &memory,
+                &CancellationToken::new(),
+                steps,
+                Some(first + 2),
+            );
+            assert_eq!(cancelled.unwrap_err().sqlstate(), Some("57014"));
+            assert_eq!(memory.used(), 0);
+        }
+        retained_binding_windows(&input(None), &memory, &CancellationToken::new(), 32, None)
+            .1
+            .unwrap();
+        assert_eq!(memory.used(), 0);
+    }
+}
+
+#[test]
 fn a_small_stored_default_fits_the_catalog_validation_allowance() {
     use crate::catalog::{test_support::NoRoutines, CatalogReadView};
     let mut source = snapshot();

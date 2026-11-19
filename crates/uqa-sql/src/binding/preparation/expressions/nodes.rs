@@ -110,16 +110,23 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
         ))
     }
 
-    pub(super) fn boolean_chain_expression(
+    pub(super) async fn boolean_chain_expression<W: crate::catalog::work::Work + Send>(
         &mut self,
         items: &[ScalarExpr],
         context: &str,
         input: &RowSchema,
         subqueries: &[QueryPlan],
+        work: &mut W,
     ) -> Result<ExpressionType, SQLError> {
+        let owner = self.scope.control().capture();
+        let control = owner.control();
         let mut selected = Derivation::None;
         for item in items {
-            let value = self.boolean_expression(item, input, subqueries, context)?;
+            let value = crate::catalog::work::nested!(
+                W::MAY_SUSPEND,
+                control,
+                self.boolean_expression_with_work(item, input, subqueries, context, work)
+            )?;
             selected = selected.combine(value.derivation.error_only());
         }
         let mut result = ExpressionType::resolved(Some(ColumnType::Boolean));
