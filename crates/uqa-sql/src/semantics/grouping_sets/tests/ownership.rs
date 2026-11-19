@@ -327,7 +327,7 @@ fn distinct_grouping_selection_schedules_each_normalized_set_and_its_keys() {
                     Some(0) => original.cancel(),
                     Some(1) => invoking.cancel(),
                     Some(2) => {
-                        pressure = Some(native.reserve(native.limit() - native.used()).unwrap())
+                        pressure = Some(native.reserve(native.limit() - native.used()).unwrap());
                     }
                     _ => (),
                 }

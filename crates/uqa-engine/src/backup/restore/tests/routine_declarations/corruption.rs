@@ -68,7 +68,7 @@ fn capture_changed(
         "CREATE FUNCTION saved(n integer DEFAULT 1,m integer DEFAULT 2) RETURNS integer LANGUAGE SQL AS 'SELECT 1'".into()
     };
     capture_definition(provider, path, repository, &sql, |definition| {
-        damage(definition, kind)
+        damage(definition, kind);
     })
 }
 
