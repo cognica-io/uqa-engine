@@ -575,12 +575,12 @@
     {
       "package": "uqa-engine",
       "kind": "lib",
-      "test": "catalog_validation_returns_the_original_cancellation_reason_from_sql",
+      "test": "catalog_validation_preserves_resource_errors_and_sql_diagnostics",
       "cases": 1,
       "source": "crates/uqa-engine/src/backup/validation/tests.rs",
       "capability": "Private restore validation",
-      "workload": "Forward cancellation raised inside SQL relationship validation through a stored routine context.",
-      "invariant": "The public restore error preserves the original cancellation reason.",
+      "workload": "Pass cancellation, a denied reservation and a user-raised SQLSTATE 53200 through catalog validation with SQL context.",
+      "invariant": "Restore preserves the native cancellation reason and exact memory request and limit. The user-raised error retains its diagnostic.",
       "case_names": [
         ""
       ]

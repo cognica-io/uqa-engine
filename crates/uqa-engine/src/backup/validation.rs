@@ -125,10 +125,7 @@ impl RoutineTypeNamespace for SessionNamespace {
 }
 
 fn sql_error(error: uqa_sql::SQLError) -> StorageBackendError {
-    match error.primary() {
-        uqa_sql::SQLError::Cancelled(reason) => (*reason).into(),
-        _ => StorageBackendError::backend("backup catalog validation", error),
-    }
+    uqa_execution::storage_errors::catalog_read_error("backup catalog validation", error)
 }
 
 #[cfg(test)]

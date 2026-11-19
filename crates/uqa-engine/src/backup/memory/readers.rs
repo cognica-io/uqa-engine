@@ -57,8 +57,5 @@ impl<F: FnMut(&mut [u8]) -> StorageBackendResult<usize> + Send> ImageRead for Re
 }
 
 pub(super) fn sql_error(error: uqa_sql::SQLError) -> StorageBackendError {
-    match error {
-        uqa_sql::SQLError::Cancelled(error) => error.into(),
-        error => StorageBackendError::backend("native memory image", error),
-    }
+    uqa_execution::storage_errors::catalog_read_error("native memory image", error)
 }

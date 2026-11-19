@@ -426,10 +426,7 @@ async fn statistics(
 }
 
 fn sql_error(error: uqa_sql::SQLError) -> StorageBackendError {
-    match error {
-        uqa_sql::SQLError::Cancelled(error) => error.into(),
-        error => StorageBackendError::backend("stored table declaration", error),
-    }
+    uqa_execution::storage_errors::catalog_read_error("stored table declaration", error)
 }
 
 #[cfg(test)]

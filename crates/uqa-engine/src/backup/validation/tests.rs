@@ -54,11 +54,34 @@ fn catalog_validation_keeps_the_selected_missing_namespace_after_the_live_table_
 }
 
 #[test]
-fn catalog_validation_returns_the_original_cancellation_reason_from_sql() {
+fn catalog_validation_preserves_resource_errors_and_sql_diagnostics() {
+    use uqa_core::memory::MemoryError;
+    use uqa_storage::backup::BackupError;
+
     let reason = uqa_core::QueryCancelled::USER_REQUEST;
-    let sql = uqa_sql::SQLError::from(reason).with_context("checking a stored catalog binding");
-    let error = uqa_storage::backup::BackupError::from(sql_error(sql));
-    assert!(
-        matches!(error, uqa_storage::backup::BackupError::Cancelled(actual) if actual == reason)
-    );
+    let convert = |error: SQLError| {
+        BackupError::from(sql_error(
+            error.with_context("checking a stored catalog binding"),
+        ))
+    };
+    assert!(matches!(convert(reason.into()), BackupError::Cancelled(actual) if actual == reason));
+    let memory = MemoryBudget::new(11);
+    let held = memory.reserve(7).unwrap();
+    let denied = memory.reserve(5).unwrap_err();
+    assert!(matches!(
+        convert(denied.into()),
+        BackupError::Memory(MemoryError::Limit {
+            required: 12,
+            limit: 11
+        })
+    ));
+    drop(held);
+    assert_eq!(memory.used(), 0);
+
+    let raised = convert(SQLError::Routine {
+        sqlstate: "53200".into(),
+        message: "user-defined diagnostic".into(),
+    });
+    assert!(matches!(raised, BackupError::Storage(_)));
+    assert!(raised.to_string().contains("user-defined diagnostic"));
 }

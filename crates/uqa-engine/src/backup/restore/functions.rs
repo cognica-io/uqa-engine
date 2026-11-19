@@ -74,7 +74,7 @@ impl<'a> Admission<'a> {
                     let error =
                         crate::SQLError::admit_routine_message("42883", message, &production)
                             .map_err(|error| {
-                                StorageBackendError::backend(
+                                uqa_execution::storage_errors::catalog_read_error(
                                     "application function diagnostic",
                                     error,
                                 )

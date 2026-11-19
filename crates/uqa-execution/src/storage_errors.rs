@@ -9,6 +9,27 @@
 use uqa_core::{JsonbKeyError, ValueRetentionError};
 use uqa_sql::SQLError;
 
+/// Preserve the native cause when a SQL catalog operation crosses a storage boundary.
+pub fn from_sql_error(
+    error: SQLError,
+    diagnostic: impl FnOnce(SQLError) -> uqa_storage::StorageBackendError,
+) -> uqa_storage::StorageBackendError {
+    match error.native_resource_error() {
+        Some(cause) => cause.into(),
+        None => diagnostic(error),
+    }
+}
+
+/// Attach the storage operation to an ordinary SQL diagnostic from a catalog read.
+pub fn catalog_read_error(
+    operation: &'static str,
+    error: SQLError,
+) -> uqa_storage::StorageBackendError {
+    from_sql_error(error, |error| {
+        uqa_storage::StorageBackendError::backend(operation, error)
+    })
+}
+
 /// Keep cancellation, memory limits and serialization conflicts typed across storage reads, observations and mutations.
 pub fn storage_error(action: &str, error: &uqa_storage::StorageBackendError) -> SQLError {
     use uqa_storage::mvcc::TransactionOutcome;

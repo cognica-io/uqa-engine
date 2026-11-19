@@ -130,7 +130,7 @@ impl MetadataInput {
 }
 
 pub(super) fn sql_error(error: uqa_sql::SQLError) -> StorageBackendError {
-    StorageBackendError::backend("memory table image", error)
+    uqa_execution::storage_errors::catalog_read_error("memory table image", error)
 }
 
 fn invalid() -> StorageBackendError {
