@@ -116,6 +116,52 @@ fn writable_document_images_preserve_exact_input_and_native_mutations() {
 }
 
 #[test]
+fn projected_pages_resume_after_a_stop_across_restored_and_replaced_rows() {
+    let control = StorageReadControl::with_limit(1 << 20);
+    let mut builder = MemoryDocumentStoreBuilder::new(&control);
+    for id in [2, 7, u64::MAX] {
+        builder = builder
+            .add_document(id, input(&control, "stored", 8))
+            .unwrap();
+    }
+    let mut store = builder.finish().unwrap();
+    let nested = Value::List(vec![Value::Map(Document::from([(
+        "inner".into(),
+        Value::Null,
+    )]))]);
+    store
+        .put(7, Document::from([("changed".into(), nested.clone())]))
+        .unwrap();
+
+    let fields = ["changed", "xmin", "changed"];
+    let mut seen = Vec::new();
+    let visited = store
+        .for_each_next_fields(None, 3, &fields, &mut |id, row| {
+            seen.push(id);
+            match id {
+                2 => assert_eq!(row, [&Value::Null, &Value::Int(-9), &Value::Null]),
+                7 => {
+                    assert_eq!(row, [&nested, &Value::Null, &nested]);
+                    assert!(std::ptr::eq(row[0], row[2]));
+                }
+                _ => panic!("visited a row after the stop"),
+            }
+            id != 7
+        })
+        .unwrap();
+    assert_eq!(seen, [2, 7]);
+    assert_eq!(visited, Some(2));
+    let remaining = store
+        .for_each_next_fields(Some(7), 3, &[], &mut |id, row| {
+            assert_eq!(id, u64::MAX);
+            assert!(row.is_empty());
+            true
+        })
+        .unwrap();
+    assert_eq!(remaining, Some(1));
+}
+
+#[test]
 fn shared_document_rows_retain_original_payload_after_all_store_roots_retire() {
     let control = StorageReadControl::with_limit(1 << 20);
     let document = input(&control, "kept", 32 << 10);

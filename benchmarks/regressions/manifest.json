@@ -7772,6 +7772,19 @@
     {
       "package": "uqa-storage",
       "kind": "lib",
+      "test": "projected_pages_resume_after_a_stop_across_restored_and_replaced_rows",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/document_store/memory/image/tests.rs",
+      "capability": "Bounded restored document projection",
+      "workload": "Read restored sparse document IDs and a replaced nested value with duplicate, missing and empty projections.",
+      "invariant": "The visitor stops after exactly two rows. Duplicate slots borrow the same nested value, and an exclusive resume reaches the last ID once with zero fields.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
       "test": "paged_memory_projection_compiles_only_encountered_layouts_once",
       "cases": 1,
       "source": "crates/uqa-storage/src/document_store/memory/projection/cache/tests.rs",

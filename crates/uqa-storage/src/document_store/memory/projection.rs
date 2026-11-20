@@ -31,29 +31,24 @@ impl MemoryDocumentStore {
         }
         let lower = after.as_ref().map_or(Unbounded, Excluded);
         if fields.is_empty() {
-            let mut visited = 0;
-            for (doc_id, _) in self.state.documents.range_from(lower).take(limit) {
-                visited += 1;
-                if !visitor(*doc_id, &[]) {
-                    break;
-                }
-            }
-            return visited;
+            return self
+                .state
+                .documents
+                .range_from(lower)
+                .visit_page(limit, |id, _| visitor(id, &[]));
         }
         let mut projection = self.projections.page(&self.state, fields);
         let null = Value::Null;
-        let mut values = Vec::with_capacity(fields.len());
-        let mut visited = 0usize;
-        for (doc_id, stored) in self.state.documents.range_from(lower).take(limit) {
-            visited += 1;
-            projection
-                .layout(stored.layout_id)
-                .project(stored, &null, &mut values);
-            if !visitor(*doc_id, &values) {
-                break;
-            }
-        }
-        visited
+        let mut values = vec![&null; fields.len()];
+        self.state
+            .documents
+            .range_from(lower)
+            .visit_page(limit, |id, stored| {
+                projection
+                    .layout(stored.layout_id)
+                    .project(stored, &null, &mut values);
+                visitor(id, &values)
+            })
     }
 
     pub(super) fn next_shared_rows(
@@ -73,9 +68,9 @@ impl MemoryDocumentStore {
             .documents
             .range_from(lower)
             .take(limit)
-            .map(|(doc_id, stored)| {
+            .map(|(id, stored)| {
                 (
-                    *doc_id,
+                    *id,
                     SharedDocumentRow::new(
                         stored.values.clone(),
                         projection.layout(stored.layout_id).slots.clone(),
@@ -92,18 +87,11 @@ impl MemoryDocumentStore {
         visitor: &mut dyn FnMut(DocId, bool, &[&Value]) -> bool,
     ) {
         let null = Value::Null;
-        let mut values = Vec::with_capacity(fields.len());
+        let mut values = vec![&null; fields.len()];
         let mut projection = self.projections.page(&self.state, fields);
 
         if should_merge_projected_scan(doc_ids, self.state.documents.len()) {
-            self.visit_merge_scan(
-                doc_ids,
-                &mut projection,
-                fields.len(),
-                &null,
-                &mut values,
-                visitor,
-            );
+            self.visit_merge_scan(doc_ids, &mut projection, &null, &mut values, visitor);
             return;
         }
 
@@ -112,7 +100,6 @@ impl MemoryDocumentStore {
             project_stored(
                 stored,
                 stored.map(|stored| projection.layout(stored.layout_id)),
-                fields.len(),
                 &null,
                 &mut values,
             );
@@ -144,9 +131,8 @@ impl MemoryDocumentStore {
         &'a self,
         doc_ids: &[DocId],
         projection: &mut ProjectionPage<'_>,
-        requested_len: usize,
         null: &'a Value,
-        values: &mut Vec<&'a Value>,
+        values: &mut [&'a Value],
         visitor: &mut dyn FnMut(DocId, bool, &[&Value]) -> bool,
     ) {
         let mut documents = self
@@ -165,7 +151,6 @@ impl MemoryDocumentStore {
             project_stored(
                 stored,
                 stored.map(|stored| projection.layout(stored.layout_id)),
-                requested_len,
                 null,
                 values,
             );
@@ -216,19 +201,22 @@ impl ProjectedLayout {
         &self,
         stored: &'a MemoryDocumentRow,
         null: &'a Value,
-        values: &mut Vec<&'a Value>,
+        values: &mut [&'a Value],
     ) {
-        values.clear();
+        let row = stored.values.as_slice();
+        let slots = values.iter_mut().zip(self.slots.iter());
         if self.complete {
-            values.extend(self.slots.iter().map(|slot| &stored.values[*slot]));
+            for (value, &slot) in slots {
+                *value = &row[slot];
+            }
         } else {
-            values.extend(self.slots.iter().map(|slot| {
-                if *slot == MISSING_SLOT {
+            for (value, &slot) in slots {
+                *value = if slot == MISSING_SLOT {
                     null
                 } else {
-                    &stored.values[*slot]
-                }
-            }));
+                    &row[slot]
+                };
+            }
         }
     }
 }
@@ -236,14 +224,12 @@ impl ProjectedLayout {
 fn project_stored<'a>(
     stored: Option<&'a MemoryDocumentRow>,
     projection: Option<&ProjectedLayout>,
-    requested_len: usize,
     null: &'a Value,
-    values: &mut Vec<&'a Value>,
+    values: &mut [&'a Value],
 ) {
     if let (Some(stored), Some(projection)) = (stored, projection) {
         projection.project(stored, null, values);
     } else {
-        values.clear();
-        values.resize(requested_len, null);
+        values.fill(null);
     }
 }

@@ -8,11 +8,12 @@
 
 use std::{
     collections::{btree_map, BTreeMap},
+    iter::FusedIterator,
     ops::{Bound, Index},
 };
 
 use uqa_core::{
-    memory::{BudgetedMapIter, OwnedMap},
+    memory::{OwnedMap, OwnedMapRange},
     DocId,
 };
 
@@ -76,16 +77,12 @@ impl DocumentRows {
         }
     }
 
-    pub(super) fn iter(&self) -> DocumentRowIter<'_> {
+    pub(super) fn iter(
+        &self,
+    ) -> impl ExactSizeIterator<Item = (&DocId, &MemoryDocumentRow)> + FusedIterator {
         match self {
-            Self::Ordinary(rows) => DocumentRowIter {
-                ordinary: Some(rows.iter()),
-                owned: None,
-            },
-            Self::Owned(rows) => DocumentRowIter {
-                ordinary: None,
-                owned: Some(rows.iter()),
-            },
+            Self::Ordinary(rows) => DocumentRowIter::Ordinary(rows.iter()),
+            Self::Owned(rows) => DocumentRowIter::Owned(rows.iter()),
         }
     }
 
@@ -93,19 +90,49 @@ impl DocumentRows {
         self.iter().map(|(id, _)| id)
     }
 
-    pub(super) fn range_from(
-        &self,
-        lower: Bound<&DocId>,
-    ) -> impl Iterator<Item = (&DocId, &MemoryDocumentRow)> {
-        let (ordinary, owned) = match self {
-            Self::Ordinary(rows) => (Some(rows.range((lower, Bound::Unbounded))), None),
-            Self::Owned(rows) => (None, Some(rows.range_from(lower))),
-        };
-        ordinary
-            .into_iter()
-            .flatten()
-            .chain(owned.into_iter().flatten())
+    #[inline]
+    pub(super) fn range_from(&self, lower: Bound<&DocId>) -> DocumentRowRange<'_> {
+        match self {
+            Self::Ordinary(rows) => {
+                DocumentRowIter::Ordinary(rows.range((lower, Bound::Unbounded)))
+            }
+            Self::Owned(rows) => DocumentRowIter::Owned(rows.range_from(lower)),
+        }
     }
+}
+
+pub(super) type DocumentRowRange<'a> = DocumentRowIter<
+    btree_map::Range<'a, DocId, MemoryDocumentRow>,
+    OwnedMapRange<'a, DocId, MemoryDocumentRow>,
+>;
+
+impl<'a> DocumentRowRange<'a> {
+    // A page drains one native iterator. Merge scans advance the same range on demand for each requested ID.
+    pub(super) fn visit_page(
+        self,
+        limit: usize,
+        visitor: impl FnMut(DocId, &'a MemoryDocumentRow) -> bool,
+    ) -> usize {
+        match self {
+            Self::Ordinary(rows) => visit_page(rows, limit, visitor),
+            Self::Owned(rows) => visit_page(rows, limit, visitor),
+        }
+    }
+}
+
+fn visit_page<'a>(
+    rows: impl Iterator<Item = (&'a DocId, &'a MemoryDocumentRow)>,
+    limit: usize,
+    mut visitor: impl FnMut(DocId, &'a MemoryDocumentRow) -> bool,
+) -> usize {
+    let mut visited = 0;
+    for (&id, row) in rows.take(limit) {
+        visited += 1;
+        if !visitor(id, row) {
+            break;
+        }
+    }
+    visited
 }
 
 impl Index<&DocId> for DocumentRows {
@@ -115,28 +142,37 @@ impl Index<&DocId> for DocumentRows {
     }
 }
 
-// Only one native cursor is active. Both stay on the stack, and complete row collection retains its original exact capacity hint.
-pub(super) struct DocumentRowIter<'a> {
-    ordinary: Option<btree_map::Iter<'a, DocId, MemoryDocumentRow>>,
-    owned: Option<BudgetedMapIter<'a, DocId, MemoryDocumentRow>>,
+pub(super) enum DocumentRowIter<Ordinary, Owned> {
+    Ordinary(Ordinary),
+    Owned(Owned),
 }
 
-impl<'a> Iterator for DocumentRowIter<'a> {
-    type Item = (&'a DocId, &'a MemoryDocumentRow);
+impl<Ordinary: Iterator, Owned: Iterator<Item = Ordinary::Item>> Iterator
+    for DocumentRowIter<Ordinary, Owned>
+{
+    type Item = Ordinary::Item;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.ordinary
-            .as_mut()
-            .and_then(Iterator::next)
-            .or_else(|| self.owned.as_mut().and_then(Iterator::next))
+        match self {
+            Self::Ordinary(rows) => rows.next(),
+            Self::Owned(rows) => rows.next(),
+        }
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        let remaining = self.ordinary.as_ref().map_or(0, ExactSizeIterator::len)
-            + self.owned.as_ref().map_or(0, ExactSizeIterator::len);
-        (remaining, Some(remaining))
+        match self {
+            Self::Ordinary(rows) => rows.size_hint(),
+            Self::Owned(rows) => rows.size_hint(),
+        }
     }
 }
 
-impl ExactSizeIterator for DocumentRowIter<'_> {}
-impl std::iter::FusedIterator for DocumentRowIter<'_> {}
+impl<Ordinary: ExactSizeIterator, Owned: ExactSizeIterator<Item = Ordinary::Item>> ExactSizeIterator
+    for DocumentRowIter<Ordinary, Owned>
+{
+}
+
+impl<Ordinary: FusedIterator, Owned: FusedIterator<Item = Ordinary::Item>> FusedIterator
+    for DocumentRowIter<Ordinary, Owned>
+{
+}
