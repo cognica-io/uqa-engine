@@ -76588,7 +76588,7 @@
       "source": "crates/uqa-sql/src/semantics/grouping_sets/tests/ownership.rs",
       "capability": "Grouping identities for resolved columns",
       "workload": "Validate qualified, unqualified, positional and aliased references alongside correlated inputs and equivalent cast or arithmetic expressions.",
-      "invariant": "Normalizing a resolved column allocates no heap memory. Equivalent expressions retain their grouping identity, cancellation returns 57014, and the first ungrouped column retains SQLSTATE 42803.",
+      "invariant": "Normalizing a resolved column allocates no heap memory. Equivalent expressions retain their grouping identity, cancellation returns 57014, and the first ungrouped column retains SQLSTATE 42803. Buffered ordinary keys fit the original expression-vector entry size.",
       "case_names": [
         ""
       ]

@@ -18,12 +18,12 @@ use uqa_core::ordering::{sort_by_with_progress, SortProgress};
 
 /// Resolved columns compare by physical slot. Other normalized expressions retain their exact serialized identity.
 #[derive(Debug, PartialEq)]
-pub(crate) enum GroupingKey {
+pub(crate) enum GroupingKey<Bytes> {
     Position(usize),
-    Expression(Produced<Vec<u8>>),
+    Expression(Bytes),
 }
 
-impl GroupingKey {
+impl GroupingKey<Produced<Vec<u8>>> {
     pub(super) fn new(
         engine: &dyn FunctionTypeResolver,
         expression: &ScalarExpr,

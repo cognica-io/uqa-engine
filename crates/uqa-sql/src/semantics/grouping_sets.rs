@@ -144,14 +144,23 @@ pub(crate) fn expression_identity(
     expression: &ScalarExpr,
     schema: &RowSchema,
     params: &[SQLParam],
-) -> Result<production::GroupingKey, SQLError> {
-    production::GroupingKey::new(
+) -> Result<production::GroupingKey<Vec<u8>>, SQLError> {
+    use production::GroupingKey;
+
+    let key = GroupingKey::new(
         engine,
         expression,
         schema,
         params,
         &uqa_core::memory::ProductionControl::uncontrolled(),
-    )
+    )?;
+    match key {
+        GroupingKey::Position(slot) => Ok(GroupingKey::Position(slot)),
+        GroupingKey::Expression(bytes) => bytes
+            .into_uncontrolled()
+            .map(GroupingKey::Expression)
+            .map_err(|_| SQLError::Internal("ordinary grouping identity owner".into())),
+    }
 }
 
 #[cfg(test)]

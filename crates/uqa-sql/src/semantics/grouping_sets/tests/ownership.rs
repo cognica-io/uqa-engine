@@ -113,6 +113,14 @@ fn grouped_column_slots_preserve_aliases_correlations_and_expression_identity() 
         column: "id".into(),
     };
     let alias = ScalarExpr::Column("alias_id".into());
+    let query = block("SELECT n + 1 FROM t");
+    let computed = &query.projections[0].expr;
+    let ordinary_key = super::super::expression_identity(&Catalog, computed, &source, &[]).unwrap();
+    assert!(matches!(ordinary_key, GroupingKey::Expression(_)));
+    assert_eq!(
+        std::mem::size_of_val(&(ordinary_key, computed)),
+        size_of::<(Vec<u8>, &ScalarExpr)>()
+    );
     for expression in [&column, &qualified, &alias, &ScalarExpr::Position(0)] {
         let count = allocation_counter::measure(|| {
             let key = GroupingKey::new(&Catalog, expression, &source, &[], &control).unwrap();
