@@ -8,6 +8,7 @@ UQA Engine exposes the same durable embedded engine through Rust, Python, Node.j
 | --- | --- | --- | --- | --- |
 | In-memory SQL | Yes | Yes | Yes | Yes |
 | Persistent SQLite | Yes | Yes | Yes | IndexedDB-backed filesystem |
+| Local full and incremental backup repositories | Yes | Yes | Yes | — |
 | SQLCipher | Yes | Yes | Yes | No |
 | Text, vector, and hybrid APIs | Yes | Yes | Yes | Yes |
 | Custom analyzer catalog through SQL | Yes | Yes | Yes | Yes |
@@ -129,6 +130,31 @@ Use `uqa_udf_context_fail(context, message)` or `uqa_callback_fail(status, messa
 The [scalar C client](../../../crates/uqa-ffi/tests/native/udf.c) registers `c_scalar`, copies its one argument into the callback context and checks that `SELECT c_scalar(42)` returns 42. The [table client](../../../crates/uqa-ffi/tests/native/udf_table.c) emits `n` one row at a time, and the [aggregate client](../../../crates/uqa-ffi/tests/native/udf_aggregate.c) covers independent groups, empty input, DISTINCT/ORDER BY and window frames. All three run as C11 and C++17 clients on Memory, native SQLite, SQLite KV and redb; the implementation ledger records source-specific qualification.
 
 The C header `<uqa/uqa_arrow.h>` defines the standard Arrow C Data Interface. With the `arrow-export` Cargo feature, `uqa_result_export_arrow` exports an existing result and `uqa_cursor_fetch_arrow` consumes a bounded batch. `UQA_ARROW_LOSSLESS` preserves declared integer/float widths, text, bytes, UUID, JSON/JSONB identity and qualifying NUMERIC modifiers; unsupported types, unconstrained decimals and special decimal values return `UQA_ERROR_UNSUPPORTED`. `UQA_ARROW_SQL_TEXT` is the explicit alternative for SQL-formatted values. Column order, duplicate labels, NULL validity and empty descriptors are preserved. Schema and array releases are independent of the original handles and each other. Moved structs and detached children keep their required buffers and allowance leases. A failed cursor conversion is terminal. Builds without export retain unsupported stubs; enabling export alone does not enable Arrow or DuckDB FDW.
+
+## Native backup and restore
+
+C, Python and Node.js can capture an online backup of an embedded database, verify it, and restore it as a new writable Engine. C clients include `<uqa/uqa_backup.h>` and check the returned `uqa_status`. Create a local repository in a new directory or open an existing repository. A full capture needs only the source Engine and repository. To capture an incremental backup, pass the 16-byte ID of a completed compatible parent from that repository. Each child has a complete inventory and remains restorable after the parent is removed.
+
+| Operation | C | Python | Node.js |
+| --- | --- | --- | --- |
+| Create or reopen a repository | `uqa_backup_repository_create`, `uqa_backup_repository_open` | `BackupRepository.create`, `BackupRepository.open` | `createBackupRepository`, `openBackupRepository` |
+| Start a full or incremental capture | `uqa_backup_job_create` | `engine.begin_backup(repo, parent=id)` | `engine.beginBackup(repo, { parent: id })` |
+| Capture, verify and publish | `uqa_backup_job_finish` writes a `uqa_backup_id` | `job.finish()` returns `bytes` | `await job.finish()` returns a root with an `id` Buffer |
+| Verify or remove a completed backup | `uqa_backup_repository_verify`, `uqa_backup_repository_remove` | `repo.verify(id)`, `repo.remove(id)` | `repo.verify(id)`, `repo.remove(id)` |
+| Reclaim unused files | `uqa_backup_repository_collect_garbage` | `repo.collect_garbage(maximum_files)` | `repo.collectGarbage(maximumFiles)` |
+| Copy a backup into another repository | `uqa_backup_repository_copy` | `repo.copy_to(id, destination)` | `repo.copyTo(id, destination)` |
+| Start or resume restore | `uqa_restore_job_create`, `uqa_restore_job_resume` | `engine.begin_restore`, `engine.resume_restore` | `engine.beginRestore`, `engine.resumeRestore` |
+| Publish the writable Engine | `uqa_restore_job_finish` writes a `uqa_engine` and releases the job | `job.finish()` | `await job.finish()` |
+
+Capture and restore require an effective superuser. Capture fixes the committed snapshot when the job starts. Later writes, uncommitted changes and temporary objects stay outside the image. An admitted job retains its repository and can finish after the originating Engine or repository handle closes. Use the job's bounded advance and explicit publication methods when scheduling work incrementally. Use its cancel method to retire an unpublished candidate.
+
+A memory image restores into memory. A persistent image restores to a fresh directory using the same storage mapping. The activated database lives at `database` inside that directory. C selects memory, native SQLite, SQLite Key/Value or redb with the Engine open flags. Python accepts `RestoreDestination.memory()` or `RestoreDestination.sqlite(directory, mapping="native")`. Use `mapping="kv"` for a SQLite Key/Value image. Node.js accepts a destination object with `provider` set to `"memory"`, `"sqlite"` or `"sqlite-kv"` and a `directory` for SQLite. Keep the separate restore ID to resume an interrupted persistent restore. Register required SQL callbacks on the authorizing Engine before starting or resuming the job.
+
+Removing a root releases its claim on the archived data. Garbage collection reclaims at most the requested number of unused files per call and reports the number remaining. Files shared with a retained child stay reachable. A standalone copy verifies the complete image and publishes a new root under the destination repository's protection. The new ID remains usable after the source repository is deleted. Copying protected input to a plaintext repository requires the same explicit opt-in as capturing an encrypted database.
+
+By default, capture allows 1 GiB of encoded output. An operation allows 256 MiB each for memory and temporary storage. Restore allows 64 MiB per value and uses the Engine's 64 MiB retained-session allowance. Repository defaults allow 4 KiB per address key and 256 KiB per frame. The binding options expose these limits. To protect a repository, supply a nonzero 16-byte protection domain and a 32-byte key at creation and reopening. Capturing an encrypted database into a plaintext repository requires an explicit plaintext-export option. Configure the destination database key and compression independently.
+
+The runnable examples capture a parent, change an account balance, remove the parent and query the restored child. The C example checks every status and releases each handle. [C example](../../../examples/c/storage_transactions.c) · [Python example](../../../examples/python/backup_restore.py) · [Node.js example](../../../examples/node/backup-restore.mjs) · [Rust backup and restore](02-rust-engine-api.md#capture-a-backup)
 
 ## Rust QueryBuilder
 

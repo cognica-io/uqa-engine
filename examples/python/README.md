@@ -10,6 +10,7 @@ For Nori-specific artifact verification, run `python -m pytest -q tests/python` 
 | [`vector_knn.py`](vector_knn.py) | Exact, HNSW, IVF and DiskANN access, canonical scores, filtering, mutation, rollback and persistent reopen |
 | [`graph_cypher.py`](graph_cypher.py) | Named graph construction, mutation, traversal, and relational composition |
 | [`storage_transactions.py`](storage_transactions.py) | Persistent reopen, rollback, savepoints, and independent sessions |
+| [`backup_restore.py`](backup_restore.py) | Full capture, incremental capture, parent retirement and restore into memory |
 | [`extensibility.py`](extensibility.py) | Scalar, table, and aggregate Python callbacks |
 
 For local or Cloud SQL without embedding storage, call `uqa.HttpEngine.local(project)`, `uqa.HttpEngine.cloud(project, organization=...)`, `uqa.HttpEngine.from_env()`, or the explicit constructor; see the [HTTP Engine reference](../../docs/manual/reference/09-http-engine.md). The Python binding test covers CLI project lookup, SQL, atomic batch, and streaming requests through this class.

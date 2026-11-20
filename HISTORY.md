@@ -390,6 +390,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- Expose online full and incremental backups in the native C, Python and Node.js bindings. Applications can open protected repositories, restore a child after retiring its parent, and resume a persistent restore by ID. [Native backup and restore](docs/manual/reference/08-bindings-and-extensions.md#native-backup-and-restore)
+
 - Reconstruct native evaluated value indexes with original admitted values, exact historical comparison policy and named capture membership. Normal writes and later spill preserve retained inputs.
 
 - Connect committed memory Engine catalogs, tables, evaluated data and resources to bounded full and incremental backup export.
@@ -609,7 +611,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
-- Add the embedded C ABI with `uqa_*` symbols, opaque handles, status returns and library-owned diagnostics. C11/C++17 applications can execute SQL messages, prepared statements, cursors and batches, bind typed values, register scalar/table/aggregate UDFs and use notices, notifications, backup and cancellation on memory, native SQLite, SQLite Key/Value and redb. Native shared/static packages provide installed headers, CMake and pkg-config targets on Linux x86_64/aarch64, macOS x86_64/arm64 and Windows x86_64. Host logging remains declaration-only. See the [C API](docs/manual/reference/08-bindings-and-extensions.md#c-source-api) and [installed-consumer guide](crates/uqa-ffi/README.md#native-builds-and-installed-consumers).
+- Add the embedded C ABI with `uqa_*` symbols, opaque handles, status returns and library-owned diagnostics. C11/C++17 applications can execute SQL messages, prepared statements, cursors and batches, bind typed values, register scalar/table/aggregate UDFs and use notices, notifications and cancellation on memory, native SQLite, SQLite Key/Value and redb. Native shared/static packages provide installed headers, CMake and pkg-config targets on Linux x86_64/aarch64, macOS x86_64/arm64 and Windows x86_64. Host logging remains declaration-only. See the [C API](docs/manual/reference/08-bindings-and-extensions.md#c-source-api) and [installed-consumer guide](crates/uqa-ffi/README.md#native-builds-and-installed-consumers).
 
 ### Changed
 

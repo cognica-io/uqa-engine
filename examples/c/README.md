@@ -6,7 +6,7 @@ These five programs exercise the embedded C source API with the same fixtures an
 cargo build -p uqa-ffi --no-default-features
 cc -std=c11 -Wall -Wextra -Werror -DUQA_USE_SHARED \
   -Icrates/uqa-ffi/include examples/c/unified_search.c \
-  -Ltarget/debug -luqa_ffi -lm -pthread \
+  -Ltarget/debug -luqa -lm -pthread \
   -Wl,-rpath,"$PWD/target/debug" -o /tmp/uqa-unified-search
 /tmp/uqa-unified-search
 ```
@@ -18,7 +18,7 @@ The command above works with the native Linux and macOS shared artifact. Use `c+
 | [unified_search.c](unified_search.c) | Relational filters, lexical and Bayesian retrieval, vectors, evidence pooling, operator joins, graph traversal, and a scalar recency callback |
 | [vector_knn.c](vector_knn.c) | Typed vector parameters, exact/HNSW/IVF/DiskANN search, canonical scores, rollback, committed replacement, and persistent reopen |
 | [graph_cypher.c](graph_cypher.c) | Graph creation, fixed traversals, MERGE, SET, typed relational joins, and nested traversal predicates |
-| [storage_transactions.c](storage_transactions.c) | Persistent reopen, rollback, savepoints, parameter binding, and independent sibling sessions |
+| [storage_transactions.c](storage_transactions.c) | Persistent reopen, rollback, savepoints, independent sessions and full and incremental backup with restore after parent retirement |
 | [extensibility.c](extensibility.c) | Immutable scalar, streaming table, and aggregate functions with explicit state and registration cleanup |
 
 Four programs default to memory. To use persistent storage, supply `sqlite-native`, `sqlite-kv`, or `redb`, followed by a new database path. The storage example requires these arguments. For example, `./storage_transactions sqlite-kv /tmp/accounts.uqa` exercises SQLite Key/Value. Use a fresh path for each run: examples create their schema and do not delete an existing database.

@@ -5,6 +5,7 @@
  */
 
 #include "example.h"
+#include <uqa/uqa_backup.h>
 
 static int64_t balance(uqa_engine engine) {
     uqa_value owner = NULL;
@@ -19,6 +20,37 @@ static int64_t balance(uqa_engine engine) {
     int64_t value = example_integer(result, 0, 0);
     CHECK(uqa_result_destroy(&result));
     return value;
+}
+
+static void restore_incremental(uqa_engine engine, example_database database) {
+    char repository_path[4096], destination[4096];
+    int written = snprintf(repository_path, sizeof(repository_path), "%s.backups", database.path);
+    REQUIRE(written > 0 && (size_t)written < sizeof(repository_path));
+    written = snprintf(destination, sizeof(destination), "%s.restored", database.path);
+    REQUIRE(written > 0 && (size_t)written < sizeof(destination));
+
+    uqa_backup_repository repository = NULL;
+    uqa_backup_job capture = NULL;
+    uqa_backup_id full, child;
+    CHECK(uqa_backup_repository_create(repository_path, NULL, NULL, &repository));
+    CHECK(uqa_backup_job_create(engine, repository, NULL, NULL, &capture));
+    CHECK(uqa_backup_job_finish(capture, &full));
+    CHECK(uqa_backup_job_destroy(&capture));
+    example_execute(engine, "UPDATE accounts SET balance = 105 WHERE id = 1");
+    CHECK(uqa_backup_job_create(engine, repository, &full, NULL, &capture));
+    CHECK(uqa_backup_job_finish(capture, &child));
+    CHECK(uqa_backup_job_destroy(&capture));
+    CHECK(uqa_backup_repository_remove(repository, &full));
+    CHECK(uqa_backup_repository_verify(repository, &child));
+
+    uqa_restore_job restore = NULL;
+    uqa_engine restored = NULL;
+    CHECK(uqa_restore_job_create(engine, repository, &child, destination, database.flags,
+                                 NULL, NULL, &restore));
+    CHECK(uqa_restore_job_finish(&restore, &restored));
+    CHECK(uqa_backup_repository_close(&repository));
+    REQUIRE(balance(restored) == 105);
+    CHECK(uqa_engine_close(&restored));
 }
 
 int main(int argc, char **argv) {
@@ -46,6 +78,7 @@ int main(int argc, char **argv) {
     CHECK(uqa_engine_open_session(engine, &session));
     REQUIRE(balance(session) == 90);
     CHECK(uqa_engine_close(&session));
+    restore_incremental(engine, database);
     CHECK(uqa_engine_close(&engine));
     puts("C storage and transactions example passed");
     return EXIT_SUCCESS;
