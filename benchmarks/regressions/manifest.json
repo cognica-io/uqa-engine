@@ -60549,8 +60549,8 @@
       "cases": 1,
       "source": "crates/uqa-engine/src/open/tests/resource_lifetime/storage_handles.rs",
       "capability": "Engine storage handle ownership",
-      "workload": "Install admitted native document/text handles in SQLite native, KV, legacy and redb Engine tables; cancel input, write through SQL, replace handles and roll back a later write.",
-      "invariant": "The original allowance remains with the installed handles until replacement, then retires while the same table and native SQL operations remain usable.",
+      "workload": "Install admitted document and text handles on native SQLite, SQLite KV, legacy SQLite and redb. Cancel the input, write through SQL, commit ANALYZE from a peer session, replace the retained handles and roll back a later write.",
+      "invariant": "Replacing storage handles in place preserves their owning table and releases their allowance. After a catalog refresh the durable relation keeps its object identity, storage generation, lifecycle and committed rows and postings.",
       "case_names": [
         ""
       ]

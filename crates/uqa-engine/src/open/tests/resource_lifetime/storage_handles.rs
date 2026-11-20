@@ -52,6 +52,11 @@ fn persistent_table_handles_keep_allowance_until_storage_replacement() {
             .rebind_persistent_table_stores("public.notes", &table)
             .unwrap();
         assert_eq!(control.memory().used(), 0, "provider {provider}");
+        let relation = uqa_core::RelationIdentity::new("public", "notes");
+        assert!(Arc::ptr_eq(
+            &table,
+            &engine.storage.tables.read()[&relation]
+        ));
         let control = install_handles(&engine, &table);
         engine
             .sql("INSERT INTO notes VALUES(2, 'retained')", &[])
@@ -63,21 +68,44 @@ fn persistent_table_handles_keep_allowance_until_storage_replacement() {
                 .rows[1]["body"],
             Value::Str("retained".into())
         );
-        // The standard analyzer stores Porter stems.
+        // A peer can publish statistics while this session holds the table and its stores.
+        engine
+            .new_session()
+            .unwrap()
+            .sql("ANALYZE notes", &[])
+            .unwrap();
+        let current = engine.require_table("notes").unwrap();
         assert_eq!(
-            table
-                .inverted_index
-                .read()
-                .doc_freq("body", "retain")
-                .unwrap(),
-            1
+            current.object_id(),
+            table.object_id(),
+            "provider {provider}"
         );
-        // Ordinary legacy session refresh can replace physical handles after its own writes.
+        assert_eq!(
+            current.storage_generation(),
+            table.storage_generation(),
+            "provider {provider}"
+        );
+        assert_eq!(
+            current.lifecycle_id(),
+            table.lifecycle_id(),
+            "provider {provider}"
+        );
+        // Both handles read the Porter stem stored by the standard analyzer.
+        for retained in [&table, &current] {
+            assert_eq!(
+                retained
+                    .inverted_index
+                    .read()
+                    .doc_freq("body", "retain")
+                    .unwrap(),
+                1,
+                "provider {provider}"
+            );
+        }
         engine
             .rebind_persistent_table_stores("public.notes", &table)
             .unwrap();
         assert_eq!(control.memory().used(), 0, "provider {provider}");
-        assert!(Arc::ptr_eq(&table, &engine.require_table("notes").unwrap()));
         engine
             .sql("BEGIN; UPDATE notes SET body='discarded'; ROLLBACK", &[])
             .unwrap();
