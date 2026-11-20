@@ -29,7 +29,10 @@ pub mod registry;
 pub mod resolution;
 pub mod result_check;
 pub mod security;
-pub use crate::plan::copy::StoredRoutineDefinition;
+pub use crate::plan::copy::{
+    StoredRoutineDefinition, StoredRoutineParameterEdit, StoredRoutineStatementEdit,
+    StoredStatementCompilation,
+};
 pub use ownership::{RetainedRoutineValue, SQLRoutine, SharedRoutineBody};
 
 use crate::ast::{
@@ -535,6 +538,21 @@ pub fn routine_returns_anonymous_record(def: &CreateFunction) -> bool {
     .expect("ordinary routine return category")
 }
 
+pub(super) struct AggregateLookup<'a, R: ?Sized>(pub(super) &'a R);
+impl<R: RoutineResolution + ?Sized> crate::plan::AggregateClassifier for AggregateLookup<'_, R> {
+    fn is_registered_aggregate(&self, name: &str) -> bool {
+        self.0.has_registered_aggregate_function(name)
+    }
+    fn is_registered_aggregate_with_control(
+        &self,
+        name: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<bool, SQLError> {
+        self.0
+            .has_registered_aggregate_function_with_control(name, control)
+    }
+}
+
 pub struct StaticFunctionMatch {
     pub function: crate::routines::SQLRoutine,
     pub invocation: Box<RoutineInvocationBinding>,
@@ -631,11 +649,11 @@ pub fn routine_local_name(name: &str) -> Result<String, SQLError> {
 }
 
 mod names_production;
+pub(crate) use names_production::signature_matches;
 pub use names_production::{
     routine_local_name_with_control, routine_returns_anonymous_record_with_control,
     routine_signature_types_from_input,
 };
-pub(crate) use names_production::{signature_matches, SignatureWork};
 
 pub fn routine_kind(def: &CreateFunction) -> &'static str {
     if def.is_procedure {

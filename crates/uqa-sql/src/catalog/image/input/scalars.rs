@@ -101,7 +101,7 @@ impl Input<'_> {
     pub(super) fn native_scalar(&mut self) -> Result<CapturedScalar, SQLError> {
         let mut owner = ScalarInput::new(self.binary.memory);
         while !owner.complete() {
-            self.fields(async |mut input| owner.advance(&mut input).await)?;
+            self.fields(async |mut input| await_field!(owner.advance(&mut input)))?;
         }
         owner.finish()
     }
@@ -112,7 +112,7 @@ impl Fields<'_> {
         let mut owner = ScalarInput::new(self.binary.memory);
         while !owner.complete() {
             self.binary.checkpoint().await?;
-            owner.advance(self).await?;
+            await_field!(owner.advance(self))?;
         }
         owner.finish()
     }

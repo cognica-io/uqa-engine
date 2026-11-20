@@ -140,5 +140,14 @@ impl<'m, K: Ord + Copy, V: Copy> IntoIterator for &'m ProductionMap<'_, K, V> {
     }
 }
 
+impl<K: Ord + Copy, V: Copy> IntoIterator for ProductionMap<'_, K, V> {
+    type Item = (K, V);
+    type IntoIter = crate::memory::OwnedMapIntoIter<K, V>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.buffer.into_iter()
+    }
+}
+
 #[cfg(test)]
 mod tests;

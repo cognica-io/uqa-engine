@@ -20,7 +20,7 @@ use crate::{
 };
 use uqa_core::memory::ProductionControl;
 
-mod nodes;
+pub(in crate::plan::mutable) mod nodes;
 mod owner;
 mod transfer;
 pub use nodes::ScalarArenaTransform;

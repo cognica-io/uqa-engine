@@ -62,6 +62,31 @@ fn restored_sql_body_advances_through_each_statement(#[case] provider: Provider)
 #[case::sqlite_native(Provider::SQLiteNative)]
 #[case::sqlite_kv(Provider::SQLiteKeyValue)]
 #[case::redb(Provider::Redb)]
+fn restored_sql_compiler_advances_within_one_values_statement(#[case] provider: Provider) {
+    let directory = tempfile::tempdir().unwrap();
+    let measure = |rows: usize| {
+        let source = provider.open(&directory.path().join(rows.to_string()));
+        let values = std::iter::repeat_n("(1)", rows)
+            .collect::<Vec<_>>()
+            .join(",");
+        source.sql(&format!(
+            "CREATE FUNCTION counted(delta bigint) RETURNS bigint LANGUAGE SQL BEGIN ATOMIC SELECT count(*) + delta FROM (VALUES {values}) AS items(n); END"
+        ), &[]).unwrap();
+        let expected = Value::Int(i64::try_from(rows).unwrap() + 7);
+        query_steps(&source, "SELECT counted(7) AS v", &expected)
+    };
+    let short = measure(1);
+    let wide = measure(128);
+    assert!(
+        wide > short + 128,
+        "{provider:?}: one row {short}, 128 rows {wide}"
+    );
+}
+
+#[rstest::rstest]
+#[case::sqlite_native(Provider::SQLiteNative)]
+#[case::sqlite_kv(Provider::SQLiteKeyValue)]
+#[case::redb(Provider::Redb)]
 fn restored_routine_configuration_advances_through_large_effective_values(
     #[case] provider: Provider,
 ) {
@@ -130,17 +155,9 @@ fn partial_sql_body_analysis_releases_its_registry_and_allowance(#[case] provide
         let control = StorageReadControl::with_limit(32 << 20);
         let mut candidate = input(&source, &control);
         reach_bodies(&mut candidate);
-        let path = candidate
-            .candidate
-            .as_ref()
-            .unwrap()
-            .session
-            .engine()
-            .session
-            .state
-            .read()
-            .search_path
-            .clone();
+        let private = candidate.candidate.as_ref().unwrap().session.engine_owner();
+        let lifetime = Arc::downgrade(private);
+        let path = private.session.state.read().search_path.clone();
         for _ in 0..halfway {
             assert!(candidate.advance(1).unwrap().is_none());
             assert!(compiling(&candidate));
@@ -192,6 +209,7 @@ fn partial_sql_body_analysis_releases_its_registry_and_allowance(#[case] provide
             }
         }
         drop((candidate, occupied));
+        assert!(lifetime.upgrade().is_none());
         assert!(!backend.in_transaction());
         assert_eq!(control.memory().used(), 0);
         assert_eq!(
@@ -199,6 +217,28 @@ fn partial_sql_body_analysis_releases_its_registry_and_allowance(#[case] provide
             definitions
         );
     }
+    let control = StorageReadControl::with_limit(32 << 20);
+    let mut candidate = input(&source, &control);
+    while !retiring(&candidate) {
+        assert!(candidate.advance(1).unwrap().is_none());
+    }
+    assert!(candidate.advance(1).unwrap().is_none());
+    assert!(retiring(&candidate));
+    let private = candidate.candidate.as_ref().unwrap().session.engine_owner();
+    let lifetime = Arc::downgrade(private);
+    let backend = Arc::clone(private.storage.backend.as_ref().unwrap());
+    control.cancellation().cancel();
+    assert!(matches!(
+        candidate.advance(1),
+        Err(StorageBackendError::Cancelled(_))
+    ));
+    assert!(lifetime.upgrade().is_none());
+    assert!(!backend.in_transaction());
+    assert_eq!(control.memory().used(), 0);
+    assert_eq!(
+        catalog.get_metadata("sql_functions_json").unwrap(),
+        definitions
+    );
 }
 
 #[rstest::rstest]

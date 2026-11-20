@@ -280,7 +280,7 @@ fn collect_condition_plan_row_column(
     }
 }
 
-fn condition_plan_expression_references_whole_row(expression: &ScalarExpr) -> bool {
+pub(crate) fn condition_plan_expression_references_whole_row(expression: &ScalarExpr) -> bool {
     matches!(
         expression,
         ScalarExpr::Column(qualifier) | ScalarExpr::QualifiedStar(qualifier)

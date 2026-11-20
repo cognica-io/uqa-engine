@@ -17,7 +17,7 @@ impl Fields<'_> {
     ) -> Result<(), SQLError> {
         self.binary.cancellation.check()?;
         let tag = self.binary.array::<1>().await?[0];
-        self.expression_tag(tag, memory, value).await
+        await_field!(self.expression_tag(tag, memory, value))
     }
 
     pub(in super::super) async fn expression_tag(
@@ -27,16 +27,16 @@ impl Fields<'_> {
         value: &mut Expr,
     ) -> Result<(), SQLError> {
         match tag {
-            0..=5 | 8 => self.scalar_reference(tag, memory, value).await,
+            0..=5 | 8 => await_field!(self.scalar_reference(tag, memory, value)),
             6 => {
-                *value = Expr::Literal(payload(self.scalar_value().await?, memory));
+                *value = Expr::Literal(payload(await_field!(self.scalar_value())?, memory));
                 Ok(())
             }
-            7 => self.typed_literal(memory, value).await,
-            9 => self.scalar_function(memory, value).await,
-            10..=12 | 16 | 17 => self.scalar_collection(tag, memory, value).await,
-            13..=15 | 18..=22 => self.scalar_operator(tag, memory, value).await,
-            23 => self.retained_literal(memory, value).await,
+            7 => await_field!(self.typed_literal(memory, value)),
+            9 => await_field!(self.scalar_function(memory, value)),
+            10..=12 | 16 | 17 => await_field!(self.scalar_collection(tag, memory, value)),
+            13..=15 | 18..=22 => await_field!(self.scalar_operator(tag, memory, value)),
+            23 => await_field!(self.retained_literal(memory, value)),
             _ => Err(invalid("stored scalar node tag")),
         }
     }
@@ -74,9 +74,9 @@ impl Fields<'_> {
         let ty = payload(self.binary.text().await?, memory);
         let collation_oid = self.optional_number().await?;
         let source = self.flag().await?;
-        let value = payload(self.scalar_value().await?, memory);
+        let value = payload(await_field!(self.scalar_value())?, memory);
         let composite_source = if source {
-            Some(boxed(self.composite_source(memory).await?, memory)?)
+            Some(boxed(await_field!(self.composite_source(memory))?, memory)?)
         } else {
             None
         };
@@ -108,7 +108,7 @@ impl Fields<'_> {
             }
             12 => {
                 let count = self.binary.count().await?;
-                let binding = self.scalar_row_binding(memory).await?;
+                let binding = await_field!(self.scalar_row_binding(memory))?;
                 Expr::CompositeRow {
                     items: self.scalar_slots(count, memory).await?,
                     binding,
@@ -126,7 +126,7 @@ impl Fields<'_> {
         value: &mut Expr,
     ) -> Result<(), SQLError> {
         if tag == 21 {
-            return self.scalar_case(memory, value).await;
+            return await_field!(self.scalar_case(memory, value));
         }
         *value = match tag {
             13 => {
@@ -235,7 +235,7 @@ impl Fields<'_> {
             if self.header(super::super::super::FUNCTION_BINDING).await? != 1 {
                 return Err(invalid("nested function binding count"));
             }
-            Some(payload(self.function_binding().await?, memory))
+            Some(payload(await_field!(self.function_binding())?, memory))
         } else {
             None
         };

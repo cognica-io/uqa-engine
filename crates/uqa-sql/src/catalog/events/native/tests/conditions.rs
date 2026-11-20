@@ -26,6 +26,86 @@ fn captured() -> StoredRule {
     value
 }
 
+fn retained_rules(rules: RuleCatalog, limit: usize, steps: usize) -> (Result<(), SQLError>, usize) {
+    use uqa_core::image_io::{ImageDecodeWindow, ImageDecoder};
+
+    let memory = MemoryBudget::new(limit);
+    let token = CancellationToken::new();
+    let mut count = 0;
+    let result = (|| {
+        let mut input = ImageDecoder::new(&memory, &token, |mut reader| async move {
+            let mut work = reader.input();
+            let control = ProductionControl::new(work.memory, work.cancellation, work.cancellation);
+            validate_with_work(
+                &TriggerCatalog::new(),
+                &rules,
+                &Catalog,
+                &control,
+                &mut work,
+            )
+            .await
+        })?;
+        loop {
+            count += 1;
+            if input
+                .advance(&mut std::io::empty(), ImageDecodeWindow { bytes: 1, steps })?
+                .is_some()
+            {
+                return Ok(());
+            }
+        }
+    })();
+    assert_eq!(memory.used(), 0);
+    (result, count)
+}
+
+#[test]
+fn small_rule_catalogs_retain_only_the_work_their_conditions_need() {
+    let ordinary = rules(rule(
+        "CREATE RULE saved AS ON UPDATE TO public.items DO NOTHING",
+    ));
+    for (definitions, limit) in [
+        (RuleCatalog::new(), 12 << 10),
+        (ordinary, 12 << 10),
+        (rules(captured()), 16 << 10),
+    ] {
+        retained_rules(definitions, limit, 1).0.unwrap();
+    }
+}
+
+#[test]
+fn captured_rule_conditions_yield_within_column_names_and_scalar_nodes() {
+    const WIDTH: usize = 128;
+    for steps in [1, 32] {
+        for (duplicate, diagnostic) in [
+            (true, "duplicate captured column"),
+            (false, "external parameter"),
+        ] {
+            let calls = [1, WIDTH - 1].map(|position| {
+                let mut rule = captured();
+                let mut columns: Vec<_> = (0..WIDTH).map(|i| format!("attribute_{i}")).collect();
+                columns[0] = "id".into();
+                if duplicate {
+                    columns[position] = columns[0].clone();
+                }
+                let binding = RuleConditionBinding::for_event(&columns, rule.definition.event);
+                if !duplicate {
+                    let mut fields =
+                        vec![ScalarExpr::InternalColumn(binding.old_column("id").unwrap()); WIDTH];
+                    fields[position] = ScalarExpr::Param(1);
+                    rule.condition_plan.as_mut().unwrap().scalar = ScalarExpr::Row(fields);
+                }
+                rule.condition_binding = Some(binding);
+                let (result, count) = retained_rules(rules(rule), 2 << 20, steps);
+                let error = result.unwrap_err();
+                assert!(error.to_string().contains(diagnostic), "{error}");
+                count
+            });
+            assert!(calls[1] >= calls[0] + (WIDTH - 2) / steps, "{calls:?}");
+        }
+    }
+}
+
 #[test]
 fn native_rule_conditions_reject_unowned_captured_row_references() {
     for (relation, attribute, valid) in [

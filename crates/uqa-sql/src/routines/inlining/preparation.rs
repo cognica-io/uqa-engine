@@ -184,27 +184,12 @@ impl RoutineInliningContext<'_> {
                     let syntax = statement.compile()?;
                     UnifiedPlan::lower_borrowed_for_rewrite(
                         &syntax,
-                        &AggregateLookup(self.routines),
+                        &crate::routines::AggregateLookup(self.routines),
                         control,
                     )
                     .map(Some)
                 })
             }
         }
-    }
-}
-
-struct AggregateLookup<'a>(&'a dyn crate::routines::RoutineResolution);
-impl crate::plan::AggregateClassifier for AggregateLookup<'_> {
-    fn is_registered_aggregate(&self, name: &str) -> bool {
-        self.0.has_registered_aggregate_function(name)
-    }
-    fn is_registered_aggregate_with_control(
-        &self,
-        name: &str,
-        control: &ProductionControl<'_>,
-    ) -> Result<bool, SQLError> {
-        self.0
-            .has_registered_aggregate_function_with_control(name, control)
     }
 }

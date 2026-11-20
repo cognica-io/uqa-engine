@@ -56,6 +56,21 @@ impl CommandPlan {
         }
     }
 
+    /// Written scalar roots in the command's syntax order. Missing positions still advance input. Planner-generated view checks and target filters have no syntax.
+    pub(crate) fn syntax_expression_steps(&self) -> impl Iterator<Item = Option<&ScalarExpr>> {
+        match self {
+            Self::Insert(plan) => MutationExpressions::Insert(
+                plan.target_steps()
+                    .chain(plan.row_steps())
+                    .chain(plan.written_result_steps()),
+            ),
+            Self::Update(plan) => MutationExpressions::Update(plan.written_steps()),
+            Self::Delete(plan) => MutationExpressions::Delete(plan.expression_steps()),
+            Self::Merge(plan) => MutationExpressions::Merge(plan.written_steps()),
+            _ => MutationExpressions::Empty,
+        }
+    }
+
     /// Mutable scalar roots in the same ownership order as `expressions`.
     pub fn expressions_mut(&mut self) -> impl Iterator<Item = &mut ScalarExpr> {
         match self {
@@ -74,25 +89,37 @@ impl InsertPlan {
     }
 
     fn expression_steps(&self) -> impl Iterator<Item = Option<&ScalarExpr>> {
+        self.target_steps()
+            .chain(self.row_steps())
+            .chain(self.result_steps())
+    }
+
+    pub(in crate::plan) fn target_steps(&self) -> impl Iterator<Item = Option<&ScalarExpr>> {
         self.columns
             .iter()
             .flat_map(|target| std::iter::once(None).chain(target.expression_steps()))
-            .chain(
-                self.rows
-                    .iter()
-                    .flat_map(|row| std::iter::once(None).chain(row.iter().map(Some))),
-            )
-            .chain(
-                self.on_conflict
-                    .iter()
-                    .flat_map(ConflictPlan::expression_steps),
-            )
+    }
+
+    pub(in crate::plan) fn row_steps(&self) -> impl Iterator<Item = Option<&ScalarExpr>> {
+        self.rows
+            .iter()
+            .flat_map(|row| std::iter::once(None).chain(row.iter().map(Some)))
+    }
+
+    pub(in crate::plan) fn result_steps(&self) -> impl Iterator<Item = Option<&ScalarExpr>> {
+        self.written_result_steps()
+            .chain(self.view_checks.iter().map(|check| Some(&check.predicate)))
+    }
+
+    fn written_result_steps(&self) -> impl Iterator<Item = Option<&ScalarExpr>> {
+        self.on_conflict
+            .iter()
+            .flat_map(ConflictPlan::expression_steps)
             .chain(
                 self.returning
                     .iter()
                     .map(|projection| Some(&projection.expr)),
             )
-            .chain(self.view_checks.iter().map(|check| Some(&check.predicate)))
     }
 
     fn expressions_mut(&mut self) -> impl Iterator<Item = &mut ScalarExpr> {
@@ -178,6 +205,11 @@ impl UpdatePlan {
     }
 
     fn expression_steps(&self) -> impl Iterator<Item = Option<&ScalarExpr>> {
+        self.written_steps()
+            .chain(self.view_checks.iter().map(|check| Some(&check.predicate)))
+    }
+
+    fn written_steps(&self) -> impl Iterator<Item = Option<&ScalarExpr>> {
         self.assignments
             .iter()
             .flat_map(AssignmentPlan::expression_steps)
@@ -187,7 +219,6 @@ impl UpdatePlan {
                     .iter()
                     .map(|projection| Some(&projection.expr)),
             )
-            .chain(self.view_checks.iter().map(|check| Some(&check.predicate)))
     }
 
     fn expressions_mut(&mut self) -> impl Iterator<Item = &mut ScalarExpr> {
@@ -239,7 +270,12 @@ impl MergePlan {
         self.target_predicate
             .iter()
             .map(Some)
-            .chain(std::iter::once(Some(&self.join_condition)))
+            .chain(self.written_steps())
+            .chain(self.view_checks.iter().map(|check| Some(&check.predicate)))
+    }
+
+    fn written_steps(&self) -> impl Iterator<Item = Option<&ScalarExpr>> {
+        std::iter::once(Some(&self.join_condition))
             .chain(
                 self.when_clauses
                     .iter()
@@ -250,7 +286,6 @@ impl MergePlan {
                     .iter()
                     .map(|projection| Some(&projection.expr)),
             )
-            .chain(self.view_checks.iter().map(|check| Some(&check.predicate)))
     }
 
     fn expressions_mut(&mut self) -> impl Iterator<Item = &mut ScalarExpr> {

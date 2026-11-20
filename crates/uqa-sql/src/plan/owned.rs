@@ -53,6 +53,13 @@ impl From<Option<MemoryReservation>> for ExecutableMemory {
 }
 
 impl ExecutableMemory {
+    pub(in crate::plan) fn with_root(
+        storage: Option<MemoryReservation>,
+        root: Option<MemoryReservation>,
+    ) -> Self {
+        Self { storage, root }
+    }
+
     pub fn reserved_bytes(&self) -> usize {
         self.storage.as_ref().map_or(0, MemoryReservation::bytes)
             + self.root.as_ref().map_or(0, MemoryReservation::bytes)
@@ -142,13 +149,7 @@ impl From<Produced<UnifiedPlan>> for OwnedExecutablePlan {
             UnifiedPlan::Command(_) => size_of::<super::CommandPlan>(),
         };
         let root = memory.as_mut().map(|memory| memory.split(root_bytes));
-        Self::from_parts(
-            plan,
-            ExecutableMemory {
-                storage: memory,
-                root,
-            },
-        )
+        Self::from_parts(plan, ExecutableMemory::with_root(memory, root))
     }
 }
 

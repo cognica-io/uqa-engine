@@ -13,6 +13,9 @@ use crate::{ScalarFrameBound, ScalarWindowFrame, ScalarWindowSpec};
 
 impl Copying<'_> {
     pub(crate) fn query(&mut self, query: &QueryPlan) -> Result<QueryPlan> {
+        if self.purpose == CopyPurpose::Stored {
+            return super::stored_plan::Inline::project(query, self);
+        }
         self.field("query", |copying| copying.query_fields(query))
     }
 

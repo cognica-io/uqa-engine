@@ -8,8 +8,10 @@
 
 use super::InheritanceContext;
 use crate::ast::{ColumnDef, CreateTable, Expr, PartitionStrategy};
+use crate::catalog::{work::ReferenceWork, CatalogWork};
 use crate::ir::ScalarExpr;
 use crate::schema::columns::POSTGRES_SYSTEM_COLUMNS;
+use crate::schema::dependencies::{observe_schema_expression, SchemaObserver};
 use crate::semantics::partition::{partition_key_type, validate_partition_key_type};
 use crate::SQLError;
 use std::collections::BTreeSet;
@@ -120,39 +122,36 @@ fn analyze_key_expression(
 }
 
 fn check_column_key(columns: &[ColumnDef], name: &str) -> Result<(), SQLError> {
-    check_column_key_with_control(
+    crate::catalog::work::inline(check_column_key_with_work(
         columns,
         name,
-        &uqa_core::memory::ProductionControl::uncontrolled(),
-    )
+        &mut ReferenceWork {
+            control: &uqa_core::memory::ProductionControl::uncontrolled(),
+            work: &mut (),
+        },
+    ))
 }
 
-fn check_column_key_with_control(
+async fn check_column_key_with_work<W: CatalogWork + Send>(
     columns: &[ColumnDef],
     name: &str,
-    control: &uqa_core::memory::ProductionControl<'_>,
+    input: &mut ReferenceWork<'_, '_, W>,
 ) -> Result<(), SQLError> {
-    control.check()?;
+    input.control.check()?;
     if POSTGRES_SYSTEM_COLUMNS.contains(&name) {
         return Err(error(
             "42P17",
             &format!("cannot use system column \"{name}\" in partition key"),
         ));
     }
-    let mut selected = None;
-    for column in columns {
-        control.check()?;
-        if column.name == name {
-            selected = Some(column);
-            break;
-        }
-    }
-    let column = selected.ok_or_else(|| {
-        error(
-            "42703",
-            &format!("column \"{name}\" named in partition key does not exist"),
-        )
-    })?;
+    let column = super::find_column(columns, name, input)
+        .await?
+        .ok_or_else(|| {
+            error(
+                "42703",
+                &format!("column \"{name}\" named in partition key does not exist"),
+            )
+        })?;
     if column.generated.is_some() {
         return Err(generated_column_key(name));
     }
@@ -160,26 +159,53 @@ fn check_column_key_with_control(
 }
 
 /// Captured keys retain structural column restrictions without reapplying the declaration-time volatility of their selected functions.
-pub(crate) fn validate_stored_key_references(
+pub(crate) async fn validate_stored_key_references<W: CatalogWork + Send>(
     expression: &Expr,
     columns: &[ColumnDef],
     control: &uqa_core::memory::ProductionControl<'_>,
+    work: &mut W,
 ) -> Result<(), SQLError> {
-    let mut referenced = false;
-    crate::schema::dependencies::walk_schema_expr_with_control(expression, control, &mut |node| {
-        if let Expr::Column(name) | Expr::QualifiedColumn { column: name, .. } = node {
-            check_column_key_with_control(columns, name, control)?;
-            referenced = true;
-        }
-        Ok(())
-    })?;
-    if !referenced {
+    let mut keys = StoredKeys {
+        columns,
+        control,
+        referenced: false,
+    };
+    observe_schema_expression(expression, control, work, &mut keys).await?;
+    if !keys.referenced {
         return Err(error(
             "42P17",
             "cannot use constant expression as partition key",
         ));
     }
     Ok(())
+}
+
+struct StoredKeys<'a, 'c> {
+    columns: &'a [ColumnDef],
+    control: &'a uqa_core::memory::ProductionControl<'c>,
+    referenced: bool,
+}
+
+impl SchemaObserver for StoredKeys<'_, '_> {
+    async fn expression<W: CatalogWork + Send>(
+        &mut self,
+        node: &Expr,
+        work: &mut W,
+    ) -> Result<(), SQLError> {
+        if let Expr::Column(name) | Expr::QualifiedColumn { column: name, .. } = node {
+            check_column_key_with_work(
+                self.columns,
+                name,
+                &mut ReferenceWork {
+                    control: self.control,
+                    work,
+                },
+            )
+            .await?;
+            self.referenced = true;
+        }
+        Ok(())
+    }
 }
 
 fn check_expression_key(

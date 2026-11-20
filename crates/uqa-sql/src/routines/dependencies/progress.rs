@@ -11,6 +11,9 @@ use super::{
 };
 use uqa_core::memory::ProductionControl;
 
+mod fields;
+use fields::{Fields, Inline, Native};
+
 /// Supply the same ordered edits against an ordinary definition or independently admitted stored syntax.
 pub trait RoutineDeclaration {
     fn declaration(&self) -> &CreateFunction;
@@ -98,12 +101,53 @@ impl RoutineDefinitionDependencies {
         def: &mut impl RoutineDeclaration,
         control: &ProductionControl<'_>,
     ) -> Result<Option<bool>, SQLError> {
+        crate::catalog::work::inline(self.advance_fields(
+            &mut Inline {
+                context,
+                sources,
+                overloads,
+                def,
+                control,
+            },
+            control,
+        ))
+    }
+
+    /// Perform one dependency edit against the same admitted declaration and defining catalog that selected it.
+    pub async fn advance_from<R>(
+        &mut self,
+        catalog: &R,
+        def: &mut crate::routines::StoredRoutineDefinition,
+        control: &ProductionControl<'_>,
+        input: &mut uqa_core::image_io::AsyncImageInput<'_>,
+    ) -> Result<Option<bool>, SQLError>
+    where
+        R: crate::routines::compilation::StoredRoutineCatalog
+            + StoredSourceCatalog
+            + crate::routines::resolution::RoutineOverloadCatalog
+            + crate::plan::AggregateClassifier,
+    {
+        self.advance_fields(
+            &mut Native {
+                catalog,
+                def,
+                control,
+                input,
+            },
+            control,
+        )
+        .await
+    }
+
+    async fn advance_fields(
+        &mut self,
+        fields: &mut impl Fields,
+        control: &ProductionControl<'_>,
+    ) -> Result<Option<bool>, SQLError> {
         control.check()?;
         match self.stage {
             Stage::LegacyStatements => {
-                if let Some(changed) = def.edit_statement(self.position, control, |statement| {
-                    crate::binding::legacy_patterns::restore_statement(statement, context.routines)
-                })? {
+                if let Some(changed) = fields.legacy_statement(self.position).await? {
                     self.changed |= changed;
                     self.position += 1;
                 } else {
@@ -111,15 +155,7 @@ impl RoutineDefinitionDependencies {
                 }
             }
             Stage::LegacyDefaults => {
-                if let Some(changed) = def.edit_parameter(self.position, control, |parameter| {
-                    parameter.default.as_mut().map_or(Ok(false), |default| {
-                        crate::binding::legacy_patterns::restore_expression(
-                            default,
-                            context.routines,
-                        )
-                        .map_err(SQLError::Internal)
-                    })
-                })? {
+                if let Some(changed) = fields.legacy_default(self.position).await? {
                     self.changed |= changed;
                     self.position += 1;
                 } else {
@@ -127,13 +163,8 @@ impl RoutineDefinitionDependencies {
                 }
             }
             Stage::Signature => {
-                if matches!(def.declaration().body, FunctionBody::Statements(_)) {
-                    self.inputs = Some(SQLBodyInputs::new(
-                        context,
-                        def.declaration(),
-                        self.mode,
-                        control,
-                    )?);
+                if matches!(fields.declaration().body, FunctionBody::Statements(_)) {
+                    self.inputs = Some(fields.signature(self.mode).await?);
                     self.enter(Stage::Statements);
                 } else {
                     self.enter(Stage::Defaults);
@@ -141,9 +172,7 @@ impl RoutineDefinitionDependencies {
             }
             Stage::Statements => {
                 let inputs = self.inputs.as_ref().expect("routine statement inputs");
-                if let Some(changed) = def.edit_statement(self.position, control, |statement| {
-                    inputs.bind(context, sources, overloads, statement, self.mode)
-                })? {
+                if let Some(changed) = fields.statement(self.position, inputs, self.mode).await? {
                     self.changed |= changed;
                     self.position += 1;
                 } else {
@@ -152,22 +181,15 @@ impl RoutineDefinitionDependencies {
             }
             Stage::Result => {
                 let inputs = self.inputs.take().expect("routine result inputs");
-                if let FunctionBody::Statements(statements) = &def.declaration().body {
+                if let FunctionBody::Statements(statements) = &fields.declaration().body {
                     if let Some(last) = statements.len().checked_sub(1) {
-                        self.changed |= def
-                            .edit_statement(last, control, |statement| {
-                                fold_sql_function_result(context, &inputs.result_types, statement)
-                            })?
-                            .expect("selected final SQL statement");
+                        self.changed |= fields.final_result(last, &inputs).await?;
                     }
                 }
                 self.enter(Stage::Defaults);
             }
             Stage::Defaults => {
-                let Some(changed) = def.edit_parameter(self.position, control, |parameter| {
-                    bind_default(context, parameter, self.mode)
-                })?
-                else {
+                let Some(changed) = fields.default(self.position, self.mode).await? else {
                     return Ok(Some(self.changed));
                 };
                 self.changed |= changed;

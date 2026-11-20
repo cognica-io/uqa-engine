@@ -506,18 +506,7 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
         if let Some(crate::ast::FunctionDispatch::NumericOperator(operator)) =
             binding.and_then(|binding| binding.dispatch)
         {
-            let selected = crate::type_resolution::numeric_operator_types_with_control(
-                operator,
-                &types,
-                &self.scope.control(),
-            )?;
-            for (value, target) in arguments.values.iter_mut().zip(&selected.arguments) {
-                self.parameters.coerce_unknown(value, target)?;
-            }
-            return Ok(FunctionResult::Selected(Some(AnalysisType::from_produced(
-                selected.result.clone_with_control(&self.scope.control())?,
-                &self.scope.control(),
-            )?)));
+            return self.coerce_numeric_arguments(operator, &types, arguments);
         }
         if binding.is_some_and(FunctionBinding::is_polymorphic_builtin_syntax) {
             if name == "nullif" {
@@ -543,6 +532,12 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
             }
             return Ok(FunctionResult::Unselected);
         }
+        let preserve_fixed_inputs = self.scope.preserve_syntax_shape
+            && selection
+                .overload
+                .as_ref()
+                .is_some_and(|call| call.binding.builtin)
+            && crate::is_fixed_builtin(name);
         let targets = self.function_argument_targets(name, binding, selection, types)?;
         for (index, value) in arguments.values.iter_mut().enumerate() {
             let position = selection
@@ -550,6 +545,13 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
                 .as_ref()
                 .map_or(index, |positions| positions[index]);
             if let Some(target) = targets.get(position).and_then(Option::as_ref) {
+                if preserve_fixed_inputs {
+                    self.retain_fixed_argument_cast(
+                        value.ty.as_deref(),
+                        original_args.get(index),
+                        target,
+                    )?;
+                }
                 self.parameters.coerce_unknown(value, target)?;
             }
         }
@@ -557,6 +559,51 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
             return Ok(FunctionResult::Selected(Some(ty)));
         }
         Ok(FunctionResult::Unselected)
+    }
+
+    fn coerce_numeric_arguments(
+        &mut self,
+        operator: crate::ast::NumericOperator,
+        types: &[Option<ColumnType>],
+        arguments: &mut ObservedFunctionArguments,
+    ) -> Result<FunctionResult, SQLError> {
+        let selected = crate::type_resolution::numeric_operator_types_with_control(
+            operator,
+            types,
+            &self.scope.control(),
+        )?;
+        for (value, target) in arguments.values.iter_mut().zip(&selected.arguments) {
+            self.parameters.coerce_unknown(value, target)?;
+        }
+        Ok(FunctionResult::Selected(Some(AnalysisType::from_produced(
+            selected.result.clone_with_control(&self.scope.control())?,
+            &self.scope.control(),
+        )?)))
+    }
+
+    fn retain_fixed_argument_cast(
+        &mut self,
+        original: Option<&ColumnType>,
+        argument: Option<&ScalarExpr>,
+        target: &ColumnType,
+    ) -> Result<(), SQLError> {
+        let (Some(original), Some(argument)) = (original, argument) else {
+            return Ok(());
+        };
+        let argument = crate::scalar_call_argument(argument)?.value;
+        let control = self.scope.control();
+        if crate::type_resolution::fixed_argument_requires_cast_with_control(
+            argument,
+            Some(original),
+            target,
+            &control,
+        )? {
+            self.parameters.retain_input_coercion(
+                argument,
+                AnalysisType::from_produced(target.clone_with_control(&control)?, &control)?,
+            )?;
+        }
+        Ok(())
     }
 
     fn coerce_concatenation_arguments(

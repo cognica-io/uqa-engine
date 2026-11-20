@@ -326,24 +326,47 @@ impl RetainedScalarLiteral {
         &self,
         control: &ProductionControl<'_>,
     ) -> Result<(Self, usize), SQLError> {
-        let value = self.value.capture_with_control(control)?.into_owned_value();
-        let ty = self
-            .ty
-            .as_ref()
-            .map(|ty| ty.clone_with_control(control))
-            .transpose()?;
-        let declaration = self
-            .declaration
-            .as_ref()
-            .map(|name| control.copy_text(name))
-            .transpose()?;
-        Self::from_produced(
+        Ok(crate::catalog::work::inline(
+            self.capture_with_footprint_from(control, &mut ()),
+        )?)
+    }
+
+    pub(crate) async fn capture_with_footprint_from<W: crate::plan::ScalarInputWork>(
+        &self,
+        control: &ProductionControl<'_>,
+        work: &mut W,
+    ) -> Result<(Self, usize), W::Error>
+    where
+        W::Error: From<crate::schema::retention::CatalogRetentionError>,
+    {
+        use crate::schema::retention::CatalogRetentionError;
+
+        control.check()?;
+        let value = match self.value.source.as_ref().expect("live retained constant") {
+            ConstantSource::Native(value) => work.value(value, control).await?,
+            ConstantSource::External(_) => self
+                .value
+                .capture_with_control(control)
+                .map_err(CatalogRetentionError::from)?,
+        }
+        .into_owned_value();
+        control.check()?;
+        let ty = match &self.ty {
+            Some(ty) => Some(work.ty(ty, control).await?),
+            None => None,
+        };
+        let declaration = match &self.declaration {
+            Some(name) => Some(work.text(name, control).await?),
+            None => None,
+        };
+        Ok(Self::from_produced(
             value.into_value(),
             ty,
             declaration,
             self.collation_oid,
             control,
         )
+        .map_err(CatalogRetentionError::from)?)
     }
 
     /// Construct independent retained payload and metadata owners and report their complete admitted footprint without walking or decoding the completed value.

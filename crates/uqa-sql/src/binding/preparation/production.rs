@@ -22,6 +22,7 @@ use uqa_core::memory::{Produced, ProductionControl, ProductionVec};
 
 mod procedural;
 pub(in crate::binding) use procedural::bind_routine_parameter_references;
+pub(crate) use procedural::bind_routine_parameter_references_from;
 pub use procedural::{
     bind_routine_parameter_references_owned, parameter_input_types_with_control,
     read_executable_inputs_owned, read_procedural_inputs_owned, ProceduralOwnedInputs,
@@ -30,6 +31,7 @@ mod explain;
 pub use explain::read_generic_explain_inputs_owned;
 mod stored;
 pub use stored::bind_expression_plan_routines_for_storage_owned;
+pub(crate) use stored::bind_expression_plan_routines_for_storage_with_work;
 pub(crate) use stored::bind_rule_inputs_owned;
 
 pub struct PreparedOwnedInputs {

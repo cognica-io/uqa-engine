@@ -182,7 +182,29 @@ mod tests {
         assert_eq!(bound_type.as_ref(), Some(&ty));
         assert_eq!(*collation_oid, Some(101));
         assert_eq!(*parameter_index, Some(3));
-        drop(selected);
+
+        let selected_name = ty.catalog_name();
+        let name = control.copy_text(&selected_name).unwrap();
+        let sibling = budget.reserve(budget.available()).unwrap();
+        let mut renamed = None;
+        let work = allocation_counter::measure(|| {
+            renamed = Some(selected.replace_type_name(name, &control).unwrap());
+        });
+        let renamed = renamed.unwrap();
+        assert_eq!(work.count_total, 0);
+        let ScalarExpr::TypedLiteral {
+            value: Value::Str(text),
+            ty: name,
+            bound_type,
+            ..
+        } = &*renamed
+        else {
+            panic!("renamed typed input");
+        };
+        assert_eq!(text.as_ptr(), pointer);
+        assert_eq!(name, &selected_name);
+        assert_eq!(bound_type.as_ref(), Some(&ty));
+        drop((renamed, sibling));
         assert_eq!(budget.used(), 0);
     }
 

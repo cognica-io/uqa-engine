@@ -137,6 +137,37 @@ impl<'a> Input for Native<'a> {
     }
 }
 
+impl Prefix<crate::plan::MutableExecutablePlan> {
+    pub(in crate::plan) async fn normalize_windows_from(
+        self,
+        control: &ProductionControl<'_>,
+        input: &mut uqa_core::image_io::AsyncImageInput<'_>,
+    ) -> Result<Self> {
+        use crate::plan::MutableExecutablePlan;
+        control.check()?;
+        input.checkpoint().await?;
+        let context = self.context().clone();
+        let task = match self.take() {
+            MutableExecutablePlan::Query(query) => Task::Query(context.retain(query)),
+            MutableExecutablePlan::Command(command) => Task::Command(context.retain(command)),
+        };
+        let mut driver = construction::Driver::new(*control)?;
+        let owner = control.capture();
+        let result = driver
+            .work()
+            .submit(move |work| async move { run(task, owner, work)?.await })?;
+        while driver.advance().await? {
+            input.checkpoint().await?;
+        }
+        control.check()?;
+        Ok(match construction::receive(result).await? {
+            Task::Query(value) => value.map(MutableExecutablePlan::Query),
+            Task::Command(value) => value.map(MutableExecutablePlan::Command),
+            Task::Source(..) => unreachable!("executable window root"),
+        })
+    }
+}
+
 impl Prefix<MutableQueryPlan> {
     /// Child query constructors have already completed their own normalization. Visit only this query's shared scalar scope and arena before returning to its parent.
     pub(in crate::plan) fn normalize_local_window_definitions_from<'a>(

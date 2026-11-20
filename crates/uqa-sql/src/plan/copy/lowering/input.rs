@@ -15,7 +15,7 @@ use std::future::{ready, Future};
 use uqa_core::memory::{Produced, ProductionControl};
 
 mod native;
-pub use native::RetainedExecutablePlan;
+pub use native::{RetainedExecutablePlan, StoredStatementObserver};
 
 pub(super) mod scalars;
 pub(in crate::plan::copy) mod text;
@@ -47,6 +47,16 @@ impl<'s> TextInput<&'s str> for () {
         control: ProductionControl<'_>,
     ) -> impl Future<Output = Result<Produced<String>>> + Send {
         ready(control.copy_text(source).map_err(Into::into))
+    }
+}
+
+impl TextInput<&str> for crate::construction::Work<'_> {
+    async fn text(
+        &mut self,
+        source: &str,
+        control: ProductionControl<'_>,
+    ) -> Result<Produced<String>> {
+        crate::catalog::work::copy_text(self, source, &control).await
     }
 }
 

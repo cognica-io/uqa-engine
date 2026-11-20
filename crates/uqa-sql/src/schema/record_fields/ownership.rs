@@ -30,11 +30,24 @@ impl RecordFields {
         types: impl IntoIterator<Item = Option<&'a ColumnType>>,
         control: &ProductionControl<'_>,
     ) -> Result<Self, SQLError> {
+        crate::catalog::work::inline(Self::from_types_with_work(types, control, &mut ()))
+    }
+
+    pub(crate) async fn from_types_with_work<'a, W: crate::catalog::work::Work + Send>(
+        types: impl IntoIterator<Item = Option<&'a ColumnType>>,
+        control: &ProductionControl<'_>,
+        work: &mut W,
+    ) -> Result<Self, SQLError> {
         control.check()?;
         let mut output = ProductionVec::new(*control);
+        let mut input = crate::catalog::work::ReferenceWork { control, work };
         for ty in types {
+            input.checkpoint().await?;
             let ty = if let Some(ty) = ty {
-                let (ty, memory) = ty.clone_with_control(control)?.into_parts();
+                let (ty, memory) = ty
+                    .clone_with_input_work(control, &mut input)
+                    .await?
+                    .into_parts();
                 control.finish(Some(ty), memory)?
             } else {
                 control.finish(None, control.empty_reservation())?

@@ -13,6 +13,7 @@ use super::{
 };
 use crate::{Engine, SQLError};
 use std::{fmt, mem, ops::Deref, path::PathBuf, sync::Arc};
+use uqa_core::image_io::ImageDecodeWindow;
 use uqa_core::memory::{Budgeted, MemoryBudget, RetainedValue};
 use uqa_storage::{
     backup::{
@@ -28,6 +29,13 @@ mod functions;
 pub(crate) use configuration::RestoreBindings;
 pub use configuration::RestoreConfiguration;
 use functions::Admission;
+
+pub(super) fn input_window(maximum_object_bytes: usize) -> ImageDecodeWindow {
+    ImageDecodeWindow {
+        bytes: maximum_object_bytes,
+        steps: maximum_object_bytes.min(64),
+    }
+}
 
 /// The new database's storage owner. It never replaces an existing Engine.
 #[derive(Clone)]
@@ -336,12 +344,12 @@ impl RestoreJob<'_> {
         }
     }
 
-    /// Advance repository input, catalog capture or validation. Catalog checks that span multiple work windows retain their progress. A persistent candidate retains its private read transaction until validation completes.
+    /// Advance repository input by at most `maximum_object_bytes`, or run up to `min(maximum_object_bytes, 64)` catalog steps. A persistent candidate retains its private read transaction until validation completes.
     pub fn advance(&mut self, maximum_object_bytes: usize) -> BackupResult<RestorePhase> {
         match self.phase() {
             RestorePhase::Prepared | RestorePhase::Complete => return Ok(self.phase()),
             RestorePhase::Publishing => {
-                self.advance_publication(maximum_object_bytes.min(64))?;
+                self.advance_publication(input_window(maximum_object_bytes).steps)?;
                 return Ok(self.phase());
             }
             RestorePhase::Cancelled | RestorePhase::Failed => return Err(BackupError::Finished),
@@ -383,7 +391,12 @@ impl RestoreJob<'_> {
                 State::Validating(engine, checks, bindings)
             }
             State::Validating(engine, checks, bindings) => {
-                match checks.advance(&engine, &self.control, 64)? {
+                match checks.advance(
+                    &engine,
+                    |restored| restored,
+                    &self.control,
+                    input_window(maximum_object_bytes).steps,
+                )? {
                     Some(checks) => State::Validating(engine, checks, bindings),
                     None => State::Prepared(engine, bindings),
                 }

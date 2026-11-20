@@ -13,10 +13,6 @@ use crate::{
 };
 
 impl Lowering<'_> {
-    #[expect(
-        clippy::too_many_lines,
-        reason = "the exhaustive AST constructor retains every scalar field"
-    )]
     pub(super) async fn scalar_node_from<
         's,
         W: ScalarInputWork,
@@ -58,26 +54,9 @@ impl Lowering<'_> {
                 parameter_index: None,
             },
             Expr::Param(number) => ScalarExpr::Param(*number),
-            Expr::Func {
-                name,
-                binding,
-                args,
-                distinct,
-                order_by,
-                order_syntax,
-                filter,
-            } => ScalarExpr::Func {
-                name: self.text_from(name, work).await?,
-                binding: match binding {
-                    Some(binding) => Some(self.binding_from(binding, None, work).await?),
-                    None => None,
-                },
-                args: self.scalar_slots(args.len(), work).await?,
-                distinct: *distinct,
-                order_by: self.order_slots(order_by, work).await?,
-                order_syntax: *order_syntax,
-                filter: self.optional_slot(filter.is_some(), work).await?,
-            },
+            Expr::Func { .. } | Expr::WindowCall { .. } => {
+                std::pin::pin!(self.call_node_from(source, work)).await?
+            }
             Expr::Array(items) => ScalarExpr::Array(self.scalar_slots(items.len(), work).await?),
             Expr::Row(items) => ScalarExpr::Row(self.scalar_slots(items.len(), work).await?),
             Expr::CompositeRow { items, binding } => ScalarExpr::CompositeRow {
@@ -108,19 +87,6 @@ impl Lowering<'_> {
                 list: self.scalar_slots(list.len(), work).await?,
                 negated: *negated,
             },
-            Expr::WindowCall {
-                name,
-                args,
-                spec,
-                filter,
-                modifiers,
-            } => ScalarExpr::WindowCall {
-                modifiers: *modifiers,
-                name: self.text_from(name, work).await?,
-                args: self.scalar_slots(args.len(), work).await?,
-                spec: self.window_slots(spec, work).await?,
-                filter: self.optional_slot(filter.is_some(), work).await?,
-            },
             Expr::Case {
                 base,
                 when,
@@ -150,6 +116,50 @@ impl Lowering<'_> {
                 subquery: 0,
                 negated: *negated,
             },
+        })
+    }
+
+    /// Calls retain their argument, binding and window metadata in the selected constructor.
+    async fn call_node_from<W: ScalarInputWork>(
+        &mut self,
+        source: &Expr,
+        work: &mut W,
+    ) -> Result<ScalarExpr, W::Error> {
+        Ok(match source {
+            Expr::Func {
+                name,
+                binding,
+                args,
+                distinct,
+                order_by,
+                order_syntax,
+                filter,
+            } => ScalarExpr::Func {
+                name: self.text_from(name, work).await?,
+                binding: match binding {
+                    Some(binding) => Some(self.binding_from(binding, None, work).await?),
+                    None => None,
+                },
+                args: self.scalar_slots(args.len(), work).await?,
+                distinct: *distinct,
+                order_by: self.order_slots(order_by, work).await?,
+                order_syntax: *order_syntax,
+                filter: self.optional_slot(filter.is_some(), work).await?,
+            },
+            Expr::WindowCall {
+                name,
+                args,
+                spec,
+                filter,
+                modifiers,
+            } => ScalarExpr::WindowCall {
+                modifiers: *modifiers,
+                name: self.text_from(name, work).await?,
+                args: self.scalar_slots(args.len(), work).await?,
+                spec: self.window_slots(spec, work).await?,
+                filter: self.optional_slot(filter.is_some(), work).await?,
+            },
+            _ => unreachable!("selected scalar call"),
         })
     }
 

@@ -8,20 +8,47 @@
 
 use crate::ast::FunctionBinding;
 use crate::plan::{
-    AccessPathPlan, CommandPlan, ComputePlan, ConflictActionPlan, CtePlan, DeletePlan, InsertPlan,
-    JoinExecutionStrategy, MergePlan, ProjectionPlan, QueryBlockPlan, QueryPlan, RelationalPlan,
-    SourcePlan, UnifiedPlan, UpdatePlan,
+    AccessPathPlan, CommandPlan, ComputePlan, ConflictActionPlan, CtePlan, JoinExecutionStrategy,
+    ProjectionPlan, QueryBlockPlan, QueryPlan, RelationalPlan, SourcePlan, UnifiedPlan,
 };
 use crate::SQLError;
 use crate::{RowSchema, ScalarExpr};
 
 use crate::{binding::context::BindingContext, routines::RoutineResolution};
+use std::borrow::Cow;
 use uqa_core::Value;
 
 /// Routine metadata and immutable namespace inputs for a stored statement.
 pub struct CatalogRoutineContext<'a, 'q> {
     pub routines: &'a dyn RoutineResolution,
     pub binding: &'a BindingContext<'q>,
+}
+
+/// The command projection needs only a table's analysis row. Each binding input supplies its original namespace and catalog.
+trait StatementSource {
+    fn schema(&self, source: &SourcePlan) -> Result<RowSchema, SQLError>;
+}
+impl StatementSource for CatalogRoutineContext<'_, '_> {
+    fn schema(&self, source: &SourcePlan) -> Result<RowSchema, SQLError> {
+        crate::binding::analyze_source_plan_schema(self.routines, source, &[], self.binding, None)
+    }
+}
+struct RetainedSource<'a> {
+    routines: &'a dyn RoutineResolution,
+    snapshot: &'a super::production::ControlledBindingSnapshot,
+    control: &'a uqa_core::memory::ProductionControl<'a>,
+}
+impl StatementSource for RetainedSource<'_> {
+    fn schema(&self, source: &SourcePlan) -> Result<RowSchema, SQLError> {
+        super::production::analyze_source_plan_schema_with_control(
+            self.routines,
+            source,
+            &[],
+            self.snapshot.context_with_control(self.control)?,
+            None,
+            self.control,
+        )
+    }
 }
 
 pub struct BoundStatementRoutines {
@@ -46,6 +73,16 @@ impl StoredCallOrigin {
         original: Option<&FunctionBinding>,
         selected: &FunctionBinding,
     ) -> bool {
+        self.keeps_unqualified_runtime_lookup(original, selected)
+            && uqa_core::RelationIdentity::try_borrowed_reference(name)
+                .is_ok_and(|identity| identity.schema.is_none())
+    }
+
+    pub(crate) fn keeps_unqualified_runtime_lookup(
+        self,
+        original: Option<&FunctionBinding>,
+        selected: &FunctionBinding,
+    ) -> bool {
         self == Self::Persisted
             && original.is_none()
             && selected.builtin
@@ -56,8 +93,6 @@ impl StoredCallOrigin {
             && selected.dispatch.is_none()
             && selected.input_collation.is_none()
             && !selected.is_polymorphic_builtin_syntax()
-            && uqa_core::RelationIdentity::try_borrowed_reference(name)
-                .is_ok_and(|identity| identity.schema.is_none())
     }
 }
 
@@ -67,13 +102,8 @@ pub struct BoundRoutineReference {
     pub binding: Option<FunctionBinding>,
 }
 
-struct CommandRoutineInputs {
-    ctes: Vec<CtePlan>,
-    source: Option<SourcePlan>,
-    expressions: Vec<ScalarExpr>,
-    subqueries: Vec<QueryPlan>,
-    outer: RowSchema,
-}
+mod command;
+use command::command_statement_query;
 
 /// Bind a copy of a catalog-owned statement lowered from its stored syntax; `params` types the positional parameters its syntax references.
 pub fn bind_catalog_statement_routines(
@@ -130,23 +160,26 @@ pub(super) fn bind_catalog_statement_composite_inputs(
     })
 }
 
+type CatalogQuery<'a> = (Cow<'a, QueryPlan>, Option<RowSchema>);
+
+fn catalog_query<'a>(
+    context: &impl StatementSource,
+    plan: &'a UnifiedPlan,
+) -> Result<Option<CatalogQuery<'a>>, SQLError> {
+    match plan {
+        UnifiedPlan::Query(query) => Ok(Some((Cow::Borrowed(query), None))),
+        UnifiedPlan::Command(command) => Ok(command_statement_query(context, command)?
+            .map(|(query, outer)| (Cow::Owned(query), outer))),
+    }
+}
+
 fn bind_catalog_statement(
     context: &CatalogRoutineContext<'_, '_>,
     plan: &UnifiedPlan,
     prepared: Option<&UnifiedPlan>,
     bind: impl FnOnce(&mut QueryPlan, Option<&RowSchema>) -> Result<RowSchema, SQLError>,
 ) -> Result<BoundStatementRoutines, SQLError> {
-    let lower = |plan: &UnifiedPlan| -> Result<_, SQLError> {
-        match plan {
-            UnifiedPlan::Query(query) => {
-                let mut query = (**query).clone();
-                mark_query_relations_bound(&mut query);
-                Ok(Some((query, None)))
-            }
-            UnifiedPlan::Command(command) => command_statement_query(context, command),
-        }
-    };
-    let lowered = lower(plan)?;
+    let lowered = catalog_query(context, plan)?;
     let Some((lowered, outer)) = lowered else {
         return Ok(BoundStatementRoutines {
             query: None,
@@ -155,17 +188,20 @@ fn bind_catalog_statement(
         });
     };
     let mut query = match prepared {
-        Some(prepared) => {
-            lower(prepared)?
-                .ok_or_else(|| {
-                    SQLError::Internal(
-                        "prepared catalog statement lost its analyzed expressions".into(),
-                    )
-                })?
-                .0
-        }
-        None => lowered.clone(),
+        Some(prepared) => catalog_query(context, prepared)?
+            .ok_or_else(|| {
+                SQLError::Internal(
+                    "prepared catalog statement lost its analyzed expressions".into(),
+                )
+            })?
+            .0
+            .into_owned(),
+        None => lowered.as_ref().clone(),
     };
+    // Syntax sites read the unchanged scalar positions. Only the private query being analyzed needs the stored relation lookup mode.
+    if matches!(prepared.unwrap_or(plan), UnifiedPlan::Query(_)) {
+        mark_query_relations_bound(&mut query);
+    }
     let output = bind(&mut query, outer.as_ref())?;
     let sites = if matches!(plan, UnifiedPlan::Command(_)) {
         super::syntax_sites::command_query_syntax_sites(&lowered, &query)?
@@ -177,6 +213,64 @@ fn bind_catalog_statement(
         sites,
         query_output: matches!(plan, UnifiedPlan::Query(_)).then_some(output),
     })
+}
+
+/// Bind the parameter-resolved statement in place. A private projection holds only the original written positions needed to pair each selected identity back to stored syntax.
+pub(crate) async fn statement_syntax_sites_from(
+    routines: &dyn RoutineResolution,
+    mut plan: crate::plan::copy::stored_plan::BoundPlan,
+    params: &[crate::SQLParam],
+    snapshot: &super::production::ControlledBindingSnapshot,
+    control: &uqa_core::memory::ProductionControl<'_>,
+    input: &mut uqa_core::image_io::AsyncImageInput<'_>,
+) -> Result<uqa_core::memory::Produced<super::syntax_sites::SyntaxSites>, SQLError> {
+    use crate::plan::copy::stored_plan::BindingSyntax;
+    let catalog = RetainedSource {
+        routines,
+        snapshot,
+        control,
+    };
+    let (statement, workspace) = plan.binding_parts();
+    let command = matches!(statement, UnifiedPlan::Command(_));
+    let mut adapter = None;
+    let (query, outer) = match statement {
+        UnifiedPlan::Query(query) => (query.as_mut(), None),
+        UnifiedPlan::Command(command) => {
+            let Some((query, outer)) =
+                command::project_from(&catalog, command, control, input).await?
+            else {
+                plan.retire(control, input).await?;
+                return Ok(control.finish(
+                    super::syntax_sites::SyntaxSites::default(),
+                    control.empty_reservation(),
+                )?);
+            };
+            (adapter.insert(workspace.query(query)).as_mut(), Some(outer))
+        }
+    };
+    let original = workspace.query(query.capture_syntax_before_binding(control, input).await?);
+    if !command {
+        mark_query_relations_bound(query);
+    }
+    let mut scope = super::SchemaScope::for_analysis_with_control(
+        snapshot.context_with_control(control)?,
+        control,
+    )?;
+    scope.preserve_syntax_shape = true;
+    StoredCallOrigin::Definition
+        .bind_query_in(&mut scope, routines, query, params, outer.as_ref(), input)
+        .await?;
+    let sites = super::syntax_sites::query_syntax_sites_with_work(
+        &original, query, command, control, input,
+    )
+    .await?;
+    original.retire(control, input).await?;
+    if let Some(adapter) = adapter {
+        adapter.retire(control, input).await?;
+    }
+    plan.retain_storage(scope.stored_binding_memory.take().into());
+    plan.retire(control, input).await?;
+    Ok(sites)
 }
 
 pub fn mark_catalog_statement_relations_bound(plan: &mut UnifiedPlan) -> Result<(), SQLError> {
@@ -239,281 +333,8 @@ pub fn mark_catalog_statement_relations_bound(plan: &mut UnifiedPlan) -> Result<
     Ok(())
 }
 
-/// A command's syntax as one query whose select list holds the command's expressions in syntax order, so the command binds and reads back like a query. `DEFAULT` markers have no scalar syntax to bind.
-fn command_statement_query(
-    context: &CatalogRoutineContext<'_, '_>,
-    command: &CommandPlan,
-) -> Result<Option<(QueryPlan, Option<RowSchema>)>, SQLError> {
-    let Some(inputs) = command_statement_routine_inputs(context, command)? else {
-        return Ok(None);
-    };
-    let projections = inputs
-        .expressions
-        .into_iter()
-        .map(|expr| ProjectionPlan {
-            // DEFAULT has a syntax position but no independently bound value in this analysis query.
-            expr: if matches!(expr, ScalarExpr::Default) {
-                ScalarExpr::Literal(Value::Int(1))
-            } else {
-                expr
-            },
-            alias: None,
-        })
-        .chain(std::iter::once(ProjectionPlan {
-            expr: ScalarExpr::Literal(Value::Int(1)),
-            alias: None,
-        }))
-        .collect();
-    let mut query = QueryPlan {
-        analyzed_output: None,
-        analyzed_source: None,
-        analyzed_grouping: None,
-        relation_privilege_subject: None,
-        relations_bound: true,
-        ctes: inputs.ctes,
-        root: RelationalPlan::QueryBlock(Box::new(QueryBlockPlan {
-            deferred_outer_rewrites: Vec::new(),
-            privilege_columns: uqa_core::memory::OwnedSet::new(),
-            windows: Vec::new(),
-            projections,
-            from: inputs.source,
-            r#where: None,
-            compute: ComputePlan::Project,
-            group_by: Vec::new(),
-            grouping_sets: Vec::new(),
-            group_distinct: false,
-            having: None,
-            order_by: Vec::new(),
-            limit: None,
-            with_ties: false,
-            offset: None,
-            distinct: false,
-            distinct_on: Vec::new(),
-            subqueries: inputs.subqueries,
-            access: AccessPathPlan::Row,
-            locking: Vec::new(),
-        })),
-    };
-    mark_query_relations_bound(&mut query);
-    Ok(Some((query, Some(inputs.outer))))
-}
-
-fn command_statement_routine_inputs(
-    context: &CatalogRoutineContext<'_, '_>,
-    command: &CommandPlan,
-) -> Result<Option<CommandRoutineInputs>, SQLError> {
-    match command {
-        CommandPlan::Insert(plan) => insert_statement_routine_inputs(context, plan).map(Some),
-        CommandPlan::Update(plan) => update_statement_routine_inputs(context, plan).map(Some),
-        CommandPlan::Delete(plan) => delete_statement_routine_inputs(context, plan).map(Some),
-        CommandPlan::Merge(plan) => Ok(Some(merge_statement_routine_inputs(plan))),
-        CommandPlan::Notify { .. } => Ok(None),
-        _ => Err(SQLError::Internal(
-            "catalog-owned statement lowered to an unsupported command".into(),
-        )),
-    }
-}
-
-fn merge_statement_routine_inputs(plan: &MergePlan) -> CommandRoutineInputs {
-    let target = SourcePlan::Table {
-        executable_query: None,
-        bound_columns: None,
-        name: plan.target.clone(),
-        qualifier: plan.target_qualifier.clone(),
-        alias: plan.target_alias.clone(),
-        column_aliases: Vec::new(),
-        include_descendants: plan.include_descendants,
-    };
-    let source = SourcePlan::Join {
-        comma: false,
-        left: Box::new(target),
-        right: plan.source.clone(),
-        kind: crate::ast::JoinKind::Cross,
-        on: None,
-        using: None,
-        natural: false,
-        alias: None,
-        column_aliases: Vec::new(),
-        lateral: false,
-        strategy: JoinExecutionStrategy::default(),
-    };
-    let mut expressions = vec![plan.join_condition.clone()];
-    for clause in &plan.when_clauses {
-        match clause {
-            crate::plan::MergeWhenPlan::UpdateMatched {
-                condition,
-                assignments,
-            }
-            | crate::plan::MergeWhenPlan::UpdateNotMatchedBySource {
-                condition,
-                assignments,
-            } => {
-                expressions.extend(condition.iter().cloned());
-                expressions.extend(
-                    assignments
-                        .iter()
-                        .flat_map(crate::plan::AssignmentPlan::expressions)
-                        .cloned(),
-                );
-            }
-            crate::plan::MergeWhenPlan::InsertNotMatched {
-                condition,
-                columns,
-                values,
-                ..
-            } => {
-                expressions.extend(condition.iter().cloned());
-                expressions.extend(
-                    columns
-                        .iter()
-                        .flat_map(crate::ast::AssignmentTarget::expressions)
-                        .cloned(),
-                );
-                expressions.extend(values.iter().cloned());
-            }
-            crate::plan::MergeWhenPlan::DeleteMatched { condition }
-            | crate::plan::MergeWhenPlan::DeleteNotMatchedBySource { condition }
-            | crate::plan::MergeWhenPlan::NothingMatched { condition }
-            | crate::plan::MergeWhenPlan::NothingNotMatched { condition }
-            | crate::plan::MergeWhenPlan::NothingNotMatchedBySource { condition } => {
-                expressions.extend(condition.iter().cloned());
-            }
-        }
-    }
-    expressions.extend(
-        plan.returning
-            .iter()
-            .map(|projection| projection.expr.clone()),
-    );
-    CommandRoutineInputs {
-        ctes: plan.ctes.clone(),
-        source: Some(source),
-        expressions,
-        subqueries: plan.subqueries.clone(),
-        outer: RowSchema::default(),
-    }
-}
-
-fn insert_statement_routine_inputs(
-    context: &CatalogRoutineContext<'_, '_>,
-    plan: &InsertPlan,
-) -> Result<CommandRoutineInputs, SQLError> {
-    let mut expressions = plan
-        .columns
-        .iter()
-        .flat_map(crate::ast::AssignmentTarget::expressions)
-        .chain(plan.rows.iter().flatten())
-        .cloned()
-        .collect::<Vec<_>>();
-    if let Some(conflict) = &plan.on_conflict {
-        expressions.extend(conflict.expressions.iter().cloned());
-        expressions.extend(conflict.predicate.iter().map(Box::as_ref).cloned());
-        if let ConflictActionPlan::Update {
-            assignments,
-            predicate,
-        } = &conflict.action
-        {
-            expressions.extend(
-                assignments
-                    .iter()
-                    .flat_map(crate::plan::AssignmentPlan::expressions)
-                    .cloned(),
-            );
-            expressions.extend(predicate.iter().map(Box::as_ref).cloned());
-        }
-    }
-    expressions.extend(
-        plan.returning
-            .iter()
-            .map(|projection| projection.expr.clone()),
-    );
-    let source = plan.source.as_ref().map(|source| SourcePlan::Subquery {
-        captured_output: None,
-        lateral: false,
-        body: Box::new((**source).clone()),
-        alias: Some("__uqa_catalog_statement_source".into()),
-        column_aliases: Vec::new(),
-    });
-    let mut outer = statement_target_outer_schema(
-        context,
-        &plan.table,
-        &plan.target_qualifier,
-        &plan.returning_aliases,
-    )?;
-    // `ON CONFLICT DO UPDATE` also sees the proposed row as `excluded`.
-    if matches!(
-        plan.on_conflict.as_ref().map(|conflict| &conflict.action),
-        Some(ConflictActionPlan::Update { .. })
-    ) {
-        let target = statement_target_schema(context, &plan.table, &plan.target_qualifier)?;
-        let excluded = RowSchema::with_relation_qualifier(&target, "excluded");
-        outer = RowSchema::join(&outer, &excluded, std::iter::empty::<String>());
-    }
-    Ok(CommandRoutineInputs {
-        ctes: plan.ctes.clone(),
-        source,
-        expressions,
-        subqueries: plan.subqueries.clone(),
-        outer,
-    })
-}
-
-fn update_statement_routine_inputs(
-    context: &CatalogRoutineContext<'_, '_>,
-    plan: &UpdatePlan,
-) -> Result<CommandRoutineInputs, SQLError> {
-    let mut expressions = plan
-        .assignments
-        .iter()
-        .flat_map(crate::plan::AssignmentPlan::expressions)
-        .cloned()
-        .collect::<Vec<_>>();
-    expressions.extend(plan.predicate.iter().cloned());
-    expressions.extend(
-        plan.returning
-            .iter()
-            .map(|projection| projection.expr.clone()),
-    );
-    Ok(CommandRoutineInputs {
-        ctes: plan.ctes.clone(),
-        source: plan.source.as_deref().cloned(),
-        expressions,
-        subqueries: plan.subqueries.clone(),
-        outer: statement_target_outer_schema(
-            context,
-            &plan.table,
-            &plan.target_qualifier,
-            &plan.returning_aliases,
-        )?,
-    })
-}
-
-fn delete_statement_routine_inputs(
-    context: &CatalogRoutineContext<'_, '_>,
-    plan: &DeletePlan,
-) -> Result<CommandRoutineInputs, SQLError> {
-    let mut expressions = plan.predicate.iter().cloned().collect::<Vec<_>>();
-    expressions.extend(
-        plan.returning
-            .iter()
-            .map(|projection| projection.expr.clone()),
-    );
-    Ok(CommandRoutineInputs {
-        ctes: plan.ctes.clone(),
-        source: plan.source.as_deref().cloned(),
-        expressions,
-        subqueries: plan.subqueries.clone(),
-        outer: statement_target_outer_schema(
-            context,
-            &plan.table,
-            &plan.target_qualifier,
-            &plan.returning_aliases,
-        )?,
-    })
-}
-
 fn statement_target_outer_schema(
-    context: &CatalogRoutineContext<'_, '_>,
+    context: &impl StatementSource,
     table: &str,
     target_qualifier: &str,
     aliases: &crate::ast::ReturningAliases,
@@ -528,25 +349,19 @@ fn statement_target_outer_schema(
 }
 
 fn statement_target_schema(
-    context: &CatalogRoutineContext<'_, '_>,
+    context: &impl StatementSource,
     table: &str,
     target_qualifier: &str,
 ) -> Result<RowSchema, SQLError> {
-    let target = crate::binding::analyze_source_plan_schema(
-        context.routines,
-        &SourcePlan::Table {
-            executable_query: None,
-            bound_columns: None,
-            name: table.to_string(),
-            qualifier: target_qualifier.to_string(),
-            alias: None,
-            column_aliases: Vec::new(),
-            include_descendants: true,
-        },
-        &[],
-        context.binding,
-        None,
-    )?;
+    let target = context.schema(&SourcePlan::Table {
+        executable_query: None,
+        bound_columns: None,
+        name: table.to_string(),
+        qualifier: target_qualifier.to_string(),
+        alias: None,
+        column_aliases: Vec::new(),
+        include_descendants: true,
+    })?;
     Ok(
         RowSchema::with_types(target.columns().to_vec(), target.column_types().to_vec())
             .with_column_collations(

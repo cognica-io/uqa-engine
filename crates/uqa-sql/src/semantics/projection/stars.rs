@@ -6,7 +6,10 @@
 
 //! Borrowed wildcard observation owns SQL namespace validation and admitted layout scratch.
 
-use crate::{RowSchema, SQLError, ScalarExpr};
+use crate::{
+    catalog::work::{inline, nested, ReferenceWork, Work},
+    RowSchema, SQLError, ScalarExpr,
+};
 use uqa_core::memory::ProductionControl;
 
 /// Generate a reference to one bound logical position. Ambiguous names retain an ordinal reference; uniquely addressable names preserve their original qualifier.
@@ -104,11 +107,30 @@ pub fn visit_bound_projection_star_metadata<'a>(
     control: &ProductionControl<'_>,
     observe: &mut dyn FnMut(ProjectionStarMetadata<'a>) -> Result<(), SQLError>,
 ) -> Result<bool, SQLError> {
+    inline(visit_bound_projection_star_metadata_from(
+        expression,
+        schema,
+        expression_schema,
+        control,
+        &mut (),
+        observe,
+    ))
+}
+
+pub(crate) async fn visit_bound_projection_star_metadata_from<'a, W: Work + Send>(
+    expression: &'a ScalarExpr,
+    schema: &'a RowSchema,
+    expression_schema: &'a RowSchema,
+    control: &ProductionControl<'_>,
+    work: &mut W,
+    observe: &mut (impl FnMut(ProjectionStarMetadata<'a>) -> Result<(), SQLError> + ?Sized),
+) -> Result<bool, SQLError> {
+    let mut input = ReferenceWork { control, work };
     control.check()?;
     match expression {
         ScalarExpr::Star => {
             for (position, column) in schema.columns().iter().enumerate() {
-                control.check()?;
+                input.checkpoint().await?;
                 if super::visible_projection_source_position(schema, position) {
                     observe(ProjectionStarMetadata {
                         name: schema.public_name(position).unwrap_or(column),
@@ -125,25 +147,29 @@ pub fn visit_bound_projection_star_metadata<'a>(
             let schema = expression_schema;
             schema.require_lateral_qualifier(qualifier)?;
             let mut found = false;
-            schema.visit_qualified_star_metadata(
-                qualifier,
+            nested!(
+                W::MAY_SUSPEND,
                 control,
-                |name, logical, ty, collation, record| {
-                    found = true;
-                    if logical.is_none_or(|position| {
-                        super::visible_projection_source_position(schema, position)
-                    }) {
-                        observe(ProjectionStarMetadata {
-                            name,
-                            logical,
-                            qualifier: Some(qualifier),
-                            ty,
-                            collation,
-                            record,
-                        })?;
-                    }
-                    Ok(())
-                },
+                schema.visit_qualified_star_metadata(
+                    qualifier,
+                    &mut input,
+                    |name, logical, ty, collation, record| {
+                        found = true;
+                        if logical.is_none_or(|position| {
+                            super::visible_projection_source_position(schema, position)
+                        }) {
+                            observe(ProjectionStarMetadata {
+                                name,
+                                logical,
+                                qualifier: Some(qualifier),
+                                ty,
+                                collation,
+                                record,
+                            })?;
+                        }
+                        Ok(())
+                    },
+                )
             )?;
             if !found && !schema.has_qualifier(qualifier) {
                 return Err(schema

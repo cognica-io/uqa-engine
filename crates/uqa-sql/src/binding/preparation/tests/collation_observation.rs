@@ -11,6 +11,73 @@ use uqa_core::{
 };
 
 #[test]
+fn pending_scalar_collations_report_the_first_conflict_in_source_order_across_windows() {
+    use crate::binding::preparation::collations::PendingCollations;
+    use crate::catalog::collations::derivation::Derivation;
+    use uqa_core::image_io::{ImageDecodeWindow, ImageDecoder};
+
+    const WIDTH: usize = 512;
+    let run = |position: usize, cancel_at: Option<usize>| {
+        let memory = MemoryBudget::new(64 << 10);
+        let token = CancellationToken::new();
+        let original = token.clone();
+        let mut decoder = ImageDecoder::new(&memory, &token, move |mut reader| async move {
+            let mut input = reader.input();
+            let control = ProductionControl::new(input.memory, &original, input.cancellation);
+            let expression = ScalarExpr::Array(
+                (0..WIDTH)
+                    .map(|_| ScalarExpr::Literal(Value::Null))
+                    .collect(),
+            );
+            let ScalarExpr::Array(children) = &expression else {
+                unreachable!()
+            };
+            let mut collations = PendingCollations::new(&control);
+            collations.record(&children[position], Derivation::InvalidExplicit(950, 951))?;
+            if position + 1 < WIDTH {
+                collations.record(&children[WIDTH - 1], Derivation::InvalidImplicit(951, 950))?;
+            }
+            let ordinary = collations.validate_expression(&expression).unwrap_err();
+            let error = collations
+                .validate_expression_with_work(&expression, &mut input)
+                .await
+                .unwrap_err();
+            if error.sqlstate() != Some("57014") {
+                assert_eq!(error.to_string(), ordinary.to_string());
+            }
+            Err::<(), _>(error)
+        })
+        .unwrap();
+        let mut windows = 0;
+        let error = loop {
+            if cancel_at == Some(windows) {
+                token.cancel();
+            }
+            windows += 1;
+            match decoder.advance(
+                &mut std::io::empty(),
+                ImageDecodeWindow { bytes: 1, steps: 1 },
+            ) {
+                Ok(None) => (),
+                Ok(Some(())) => panic!("accepted a conflicting collation"),
+                Err(error) => break error,
+            }
+        };
+        drop(decoder);
+        let state = error.sqlstate().unwrap().to_owned();
+        drop(error);
+        assert_eq!(memory.used(), 0);
+        (windows, state)
+    };
+    let first = run(0, None);
+    let last = run(WIDTH - 1, None);
+    assert_eq!(first.1, "42P21");
+    assert_eq!(last.1, first.1);
+    assert!(last.0 >= first.0 + WIDTH - 1);
+    assert_eq!(run(WIDTH - 1, Some(first.0 + WIDTH / 2)).1, "57014");
+}
+
+#[test]
 fn stored_observers_retain_analysis_selections_without_rebinding_inputs() {
     for sql in [
         "SELECT pg_collation_for('x'::text COLLATE \"C\")",

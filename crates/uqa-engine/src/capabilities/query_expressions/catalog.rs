@@ -113,19 +113,38 @@ impl uqa_sql::expr::composites::CompositeTypeCatalog for ScopedEngineHook<'_> {
         oid: u32,
         control: &uqa_core::memory::ProductionControl<'_>,
     ) -> Result<Option<uqa_sql::expr::composites::OwnedCompositeTypeDescriptor>, SQLError> {
-        let catalog = self.catalog_snapshot();
-        if let Some(descriptor) = self
-            .engine
-            .runtime
-            .composite_descriptor_cache
-            .descriptor_with_control(&catalog.snapshot().definitions.composites, oid, control)?
-        {
-            return Ok(Some(descriptor));
-        }
-        uqa_execution::catalog::composite_type::relations::descriptor_with_control(
-            &self.catalog_context(),
+        self.engine.select_composite_descriptor(
+            &self.catalog_snapshot().snapshot().definitions.composites,
             oid,
             control,
+            Some,
+            || {
+                uqa_execution::catalog::composite_type::relations::descriptor_with_control(
+                    &self.catalog_context(),
+                    oid,
+                    control,
+                )
+            },
+        )
+    }
+
+    fn begin_composite_type(
+        &self,
+        oid: u32,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_sql::expr::composites::CompositeDescriptorInput<'_>, SQLError> {
+        self.engine.select_composite_descriptor(
+            &self.catalog_snapshot().snapshot().definitions.composites,
+            oid,
+            control,
+            |value| uqa_sql::expr::composites::CompositeDescriptorInput::ready(Some(value)),
+            || {
+                uqa_execution::catalog::composite_type::relations::descriptor_input(
+                    self.catalog_context(),
+                    oid,
+                    control,
+                )
+            },
         )
     }
 

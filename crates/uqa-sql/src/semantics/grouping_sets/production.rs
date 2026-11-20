@@ -7,12 +7,14 @@
 //! Distinct sets retain admitted exact identities; hashes select candidates and never establish equality.
 
 use super::{normalization::Normalizer, AnalyzedGroupingSets};
+use crate::catalog::work::{compare_bytes, inline, retire_entries, ReferenceWork, Work};
 use crate::{
     plan::QueryBlockPlan, routines::RoutineResolution, FunctionTypeResolver, RowSchema, SQLError,
     SQLParam, ScalarExpr,
 };
 use std::hash::{BuildHasher, Hasher};
 use uqa_core::memory::{MemoryReservation, OwnedMap, Produced, ProductionControl, ProductionVec};
+use uqa_core::ordering::{sort_by_with_progress, SortProgress};
 
 pub(crate) fn expression_identity_with_control(
     engine: &dyn FunctionTypeResolver,
@@ -46,16 +48,39 @@ pub(crate) fn analyze_distinct_grouping_with_control(
     params: &[SQLParam],
     control: &ProductionControl<'_>,
 ) -> Result<Produced<AnalyzedGroupingSets>, SQLError> {
+    inline(analyze_distinct_grouping_from(
+        engine,
+        block,
+        schema,
+        outer,
+        params,
+        &mut ReferenceWork {
+            control,
+            work: &mut (),
+        },
+    ))
+}
+
+pub(crate) async fn analyze_distinct_grouping_from<W: Work + Send>(
+    engine: &dyn RoutineResolution,
+    block: &QueryBlockPlan,
+    schema: &RowSchema,
+    outer: Option<&RowSchema>,
+    params: &[SQLParam],
+    input: &mut ReferenceWork<'_, '_, W>,
+) -> Result<Produced<AnalyzedGroupingSets>, SQLError> {
+    let control = input.control;
     control.check()?;
     let hashing = std::collections::hash_map::RandomState::new();
     let mut seen = OwnedMap::<(u64, usize), Identity>::new();
     let mut retained = ProductionVec::new(*control);
     retained.reserve(block.grouping_sets.len())?;
     for (index, set) in block.grouping_sets.iter().enumerate() {
-        control.check()?;
+        input.checkpoint().await?;
         let mut keys = ProductionVec::new(*control);
         keys.reserve(set.len())?;
         for expression in set {
+            input.checkpoint().await?;
             let expression = super::resolve_grouping_expression_reference_with_control(
                 engine,
                 expression,
@@ -74,30 +99,24 @@ pub(crate) fn analyze_distinct_grouping_with_control(
             keys,
             _memory: memory,
         };
-        uqa_core::ordering::sort_by_with_control(
-            &mut identity.keys,
-            &mut || control.check().map_err(SQLError::from),
-            |left, right, _| Ok(uqa_core::compare_bytes_with_control(left, right, control)?),
-        )?;
+        sort_by_with_progress(&mut identity.keys, input).await?;
         let mut count = usize::from(!identity.keys.is_empty());
         for read in 1..identity.keys.len() {
-            if !uqa_core::compare_bytes_with_control(
-                &identity.keys[count - 1],
-                &identity.keys[read],
-                control,
-            )?
-            .is_eq()
+            if !input
+                .compare(&identity.keys[count - 1], &identity.keys[read])
+                .await?
+                .is_eq()
             {
                 identity.keys.swap(count, read);
                 count += 1;
             }
         }
-        identity.keys.truncate(count);
+        retire_entries(identity.keys.drain(count..), control, input.work).await?;
         let mut hash = hashing.build_hasher();
         for key in &identity.keys {
             hash.write_usize(key.len());
             for chunk in key.chunks(4096) {
-                control.check()?;
+                input.checkpoint().await?;
                 hash.write(chunk);
             }
         }
@@ -105,13 +124,15 @@ pub(crate) fn analyze_distinct_grouping_with_control(
         let mut collision = 0;
         let mut duplicate = false;
         while let Some(previous) = seen.get(&(hash, collision)) {
-            if previous.matches(&identity, control)? {
+            if previous.matches(&identity, input).await? {
                 duplicate = true;
                 break;
             }
             collision += 1;
         }
-        if !duplicate {
+        if duplicate {
+            retire_entries(identity.keys.into_iter(), control, input.work).await?;
+        } else {
             match control.budget() {
                 Some(budget) => {
                     seen.insert_budgeted((hash, collision), identity, budget)?;
@@ -122,6 +143,10 @@ pub(crate) fn analyze_distinct_grouping_with_control(
             }
             retained.push_copy(index)?;
         }
+    }
+    for (_, identity) in seen {
+        input.checkpoint().await?;
+        retire_entries(identity.keys.into_iter(), control, input.work).await?;
     }
     let (retained, memory) = retained.finish()?.into_parts();
     Ok(control.finish(
@@ -138,15 +163,32 @@ struct Identity {
     _memory: Option<MemoryReservation>,
 }
 impl Identity {
-    fn matches(&self, other: &Self, control: &ProductionControl<'_>) -> Result<bool, SQLError> {
+    async fn matches<W: Work + Send>(
+        &self,
+        other: &Self,
+        input: &mut ReferenceWork<'_, '_, W>,
+    ) -> Result<bool, SQLError> {
         if self.keys.len() != other.keys.len() {
             return Ok(false);
         }
         for (left, right) in self.keys.iter().zip(&other.keys) {
-            if !uqa_core::compare_bytes_with_control(left, right, control)?.is_eq() {
+            if !input.compare(left, right).await?.is_eq() {
                 return Ok(false);
             }
         }
         Ok(true)
+    }
+}
+
+impl<W: Work + Send> SortProgress<Produced<Vec<u8>>, SQLError> for ReferenceWork<'_, '_, W> {
+    async fn checkpoint(&mut self) -> Result<(), SQLError> {
+        Self::checkpoint(self).await
+    }
+    async fn compare(
+        &mut self,
+        left: &Produced<Vec<u8>>,
+        right: &Produced<Vec<u8>>,
+    ) -> Result<std::cmp::Ordering, SQLError> {
+        compare_bytes(self.work, left, right, self.control).await
     }
 }

@@ -1,6 +1,6 @@
 # Online and incremental backup
 
-Status: proposal based on UQA Engine 0.6.3 (`1b5c22971d75b8db0e6900c8aa7b7e5613962bcb`). This design and its [implementation plan](../plans/0031-online-and-incremental-backup.md) are independently implementable from the released storage interfaces. No replication journal, CDC event stream, replication position, or network service is a prerequisite. The proposal does not describe a released backup API.
+This design was written against UQA Engine 0.6.3 (`1b5c22971d75b8db0e6900c8aa7b7e5613962bcb`). Online and incremental backups use the engine's storage snapshots and a local repository. They run independently of replication, change data capture and network services. The Rust reference describes the API in the current source tree. [Implementation plan](../plans/0031-online-and-incremental-backup.md) · [Rust backup and restore API](../manual/reference/02-rust-engine-api.md#capture-a-backup)
 
 ## Decision and delivery scope
 

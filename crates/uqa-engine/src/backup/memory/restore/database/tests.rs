@@ -30,14 +30,15 @@ impl MemoryState {
         retention: MemoryBudget,
         control: &StorageReadControl,
     ) -> BackupResult<Engine> {
-        let engine = self.assemble(retention, control)?;
+        let engine = std::sync::Arc::new(self.assemble(retention, control)?);
         let mut validation = Some(crate::backup::validation::CatalogValidation::begin(
             &engine, control,
         )?);
         while let Some(work) = validation {
-            validation = work.advance(&engine, control, 64)?;
+            validation = work.advance(&engine, |owner| owner, control, 64)?;
         }
-        Ok(engine)
+        Ok(std::sync::Arc::try_unwrap(engine)
+            .unwrap_or_else(|_| unreachable!("completed catalog released its private engine")))
     }
 }
 

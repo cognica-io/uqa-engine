@@ -23,6 +23,16 @@ pub(in crate::binding::preparation) trait LiteralInput {
     }
 }
 
+/// Stored defaults borrow the routine catalog across work windows. Each input function is borrowed only for its synchronous invocation.
+impl LiteralInput for Option<&dyn crate::routines::RoutineResolution> {
+    fn enum_labels(&self) -> Option<&dyn EnumLabelCatalog> {
+        self.and_then(crate::type_resolution::FunctionTypeResolver::enum_labels)
+    }
+    fn catalog_inputs(&self) -> Option<&dyn CatalogInputFunctions> {
+        self.and_then(crate::type_resolution::FunctionTypeResolver::catalog_input_functions)
+    }
+}
+
 /// Fixed-parameter analysis has no external literal-input providers.
 impl LiteralInput for () {}
 

@@ -5,6 +5,7 @@
 //
 
 use super::*;
+use crate::routines::declaration::validate_routine_declaration;
 
 #[test]
 fn sql_standard_utilities_use_postgresql_command_diagnostics() {

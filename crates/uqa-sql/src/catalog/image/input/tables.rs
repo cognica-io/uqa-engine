@@ -203,7 +203,7 @@ impl Fields<'_> {
         };
         let count = self.binary.count().await?;
         memory.grow(size_of::<Expr>())?;
-        let expression = Box::new(payload(self.expression().await?, memory));
+        let expression = Box::new(payload(await_field!(self.expression())?, memory));
         let mut dependencies = BudgetedVec::new(self.binary.memory);
         dependencies.reserve(count)?;
         for _ in 0..count {
@@ -362,15 +362,12 @@ impl ColumnInput {
     async fn advance(&mut self, input: &mut Fields<'_>) -> Result<(), SQLError> {
         self.stage = match self.stage {
             ColumnStage::Declaration => {
-                self.present = input
-                    .column_declaration(&mut self.memory, &mut self.value)
-                    .await?;
+                self.present =
+                    await_field!(input.column_declaration(&mut self.memory, &mut self.value))?;
                 ColumnStage::Values
             }
             ColumnStage::Values => {
-                input
-                    .column_values(&mut self.memory, &mut self.value, self.present)
-                    .await?;
+                await_field!(input.column_values(&mut self.memory, &mut self.value, self.present))?;
                 ColumnStage::Default
             }
             ColumnStage::Default | ColumnStage::Check => {
@@ -388,19 +385,21 @@ impl ColumnInput {
                     )
                 };
                 if present {
-                    *target = Some(payload(input.expression().await?, &mut self.memory));
+                    *target = Some(payload(await_field!(input.expression())?, &mut self.memory));
                 }
                 next
             }
             ColumnStage::Generated => {
                 if self.present.generated {
-                    self.value.generated = Some(input.generated_column(&mut self.memory).await?);
+                    self.value.generated =
+                        Some(await_field!(input.generated_column(&mut self.memory))?);
                 }
                 ColumnStage::Check
             }
             ColumnStage::Reference => {
                 if self.present.reference {
-                    self.value.references = Some(input.foreign_reference(&mut self.memory).await?);
+                    self.value.references =
+                        Some(await_field!(input.foreign_reference(&mut self.memory))?);
                 }
                 ColumnStage::Complete
             }
@@ -425,7 +424,7 @@ impl ImageValue for ColumnDef {
     async fn read(input: &mut Fields<'_>) -> Result<Budgeted<Self>, SQLError> {
         let mut column = ColumnInput::new(input.binary.memory);
         while !column.complete() {
-            column.advance(input).await?;
+            await_field!(column.advance(input))?;
         }
         column.finish()
     }
@@ -433,7 +432,7 @@ impl ImageValue for ColumnDef {
     fn read_sync(input: &mut Input<'_>) -> Result<Budgeted<Self>, SQLError> {
         let mut column = ColumnInput::new(input.binary.memory);
         while !column.complete() {
-            input.fields(async |mut fields| column.advance(&mut fields).await)?;
+            input.fields(async |mut fields| await_field!(column.advance(&mut fields)))?;
         }
         column.finish()
     }

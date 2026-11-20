@@ -64,11 +64,18 @@ fn generated_lowering_preserves_typed_quota_and_both_cancellation_failures() {
             &generated,
             &control,
         );
+        let Err(error) = result else {
+            panic!("generated lowering must report its exhausted or cancelled input")
+        };
         match cancelled {
-            None => assert!(
-                matches!(result, Err(SQLError::Routine { sqlstate, .. }) if sqlstate == "53200")
-            ),
-            Some(_) => assert!(matches!(result, Err(SQLError::Cancelled(_)))),
+            None => {
+                assert_eq!(error.sqlstate(), Some("53200"));
+                assert!(matches!(
+                    error,
+                    SQLError::Memory(uqa_core::memory::MemoryError::Limit { limit: 64, .. })
+                ));
+            }
+            Some(_) => assert!(matches!(error, SQLError::Cancelled(_))),
         }
         assert_eq!(budget.used(), 0);
     }

@@ -9,59 +9,56 @@
 use super::RuleConditionBinding;
 use crate::{
     ast::RuleEvent,
-    plan::{ExpressionPlan, OwnedScalarExpr},
+    catalog::work::{inline, retire_entries, ReferenceWork, Work},
+    ir::observation::{visit_all, ScalarObserver},
+    plan::{visit_scalar_nodes_with_work, ExpressionPlan, OwnedScalarExpr, PlanRef},
     RowSchema, SQLError, ScalarExpr,
 };
 use uqa_core::memory::{ProductionControl, ProductionMap};
 
 impl RuleConditionBinding {
-    pub(crate) fn captured_row_schema(
+    pub(crate) async fn captured_row_schema_with_work<W: Work + Send>(
         &self,
         row: &RowSchema,
         control: &ProductionControl<'_>,
+        work: &mut W,
     ) -> Result<RowSchema, SQLError> {
         let mut positions = ProductionMap::new(*control);
         for (position, name) in self.columns.iter().enumerate() {
-            positions.insert_copy(name.as_str(), position)?;
+            positions
+                .insert_copy_from(
+                    name.as_str(),
+                    position,
+                    &mut ReferenceWork { control, work },
+                )
+                .await?;
         }
-        let mut schema = RowSchema::empty_with_control(control)?;
-        for (side, relation) in [("old", self.old_relation), ("new", self.new_relation)] {
-            let Some(relation) = relation else { continue };
-            let current = RowSchema::with_column_metadata_with_control(
-                Some(side),
-                row.columns().iter().enumerate().map(|(index, name)| {
-                    (
-                        row.public_name(index).unwrap_or(name),
-                        row.column_type(index),
-                        row.column_collation(index),
-                    )
-                }),
-                control,
-            )?;
-            let current = RowSchema::with_physical_internal_aliases_with_control(
-                &current,
-                row.columns()
-                    .iter()
-                    .enumerate()
-                    .filter_map(|(index, name)| {
-                        let name = row.public_name(index).unwrap_or(name);
-                        positions.get(name).map(|position| {
-                            (relation.column(*position), index, row.column_type(index))
-                        })
-                    }),
-                control,
-            )?;
-            schema = RowSchema::join_with_control(&schema, &current, std::iter::empty(), control)?;
+        let mut surviving = uqa_core::memory::ProductionVec::new(*control);
+        surviving.reserve(row.len())?;
+        for (index, name) in row.columns().iter().enumerate() {
+            let name = row.public_name(index).unwrap_or(name);
+            let position = positions
+                .get_from(name, &mut ReferenceWork { control, work })
+                .await?;
+            surviving.push_copy(position.copied())?;
         }
-        Ok(schema)
+        retire_entries(positions.into_iter(), control, work).await?;
+        row.with_captured_row_images(
+            [("old", self.old_relation), ("new", self.new_relation)],
+            &surviving,
+            control,
+            work,
+        )
+        .await
     }
 
-    pub(crate) fn current_whole_row(
+    pub(crate) async fn current_whole_row_with_work<W: Work + Send>(
         &self,
         side: &str,
         table: &str,
         row: &RowSchema,
         control: &ProductionControl<'_>,
+        work: &mut W,
     ) -> Result<Option<OwnedScalarExpr>, SQLError> {
         let present = match side {
             "old" => self.old_relation.is_some(),
@@ -73,28 +70,47 @@ impl RuleConditionBinding {
         }
         let mut columns = crate::production::Buffer::new(control);
         for (index, name) in row.columns().iter().enumerate() {
+            work.checkpoint().await?;
             columns.push(
                 OwnedScalarExpr::column(
-                    control.copy_text(row.public_name(index).unwrap_or(name))?,
-                    Some(control.copy_text(side)?),
+                    work.text(row.public_name(index).unwrap_or(name), control)
+                        .await?,
+                    Some(work.text(side, control).await?),
                     control,
                 )?,
                 control,
             )?;
         }
         Ok(Some(OwnedScalarExpr::cast(
-            OwnedScalarExpr::row(columns.into_iter(), control)?,
-            control.copy_text(table)?,
+            OwnedScalarExpr::row_from(
+                columns.into_iter(),
+                control,
+                &mut ReferenceWork { control, work },
+            )
+            .await?,
+            work.text(table, control).await?,
             false,
             control,
         )?))
     }
 
+    #[cfg(test)]
     pub(crate) fn validate_captured(
         &self,
         event: RuleEvent,
         plan: &ExpressionPlan,
         control: &ProductionControl<'_>,
+        column: &mut impl FnMut(&str) -> Result<(), SQLError>,
+    ) -> Result<(), SQLError> {
+        inline(self.validate_captured_with_work(event, plan, control, &mut (), column))
+    }
+
+    pub(crate) async fn validate_captured_with_work<W: Work + Send>(
+        &self,
+        event: RuleEvent,
+        plan: &ExpressionPlan,
+        control: &ProductionControl<'_>,
+        work: &mut W,
         column: &mut impl FnMut(&str) -> Result<(), SQLError>,
     ) -> Result<(), SQLError> {
         control.check()?;
@@ -115,41 +131,62 @@ impl RuleConditionBinding {
         }
         let mut names = ProductionMap::new(*control);
         for name in &self.columns {
-            if names.insert_copy(name.as_str(), ())?.is_some() {
+            if names
+                .insert_copy_from(name.as_str(), (), &mut ReferenceWork { control, work })
+                .await?
+                .is_some()
+            {
                 return Err(invalid("duplicate captured column", control));
             }
         }
-        let mut inspect = |expression: &ScalarExpr| {
-            expression.try_visit(&mut |node| {
-                control.check()?;
-                let reference = match node {
-                    ScalarExpr::InternalColumn(reference) => Some(*reference),
-                    ScalarExpr::Param(_) => {
-                        return Err(invalid("external parameter", control));
-                    }
-                    ScalarExpr::Func {
-                        binding: Some(binding),
-                        ..
-                    } if crate::semantics::function_has_implicit_row_input(binding) => {
-                        return Err(invalid("execution-only implicit row input", control));
-                    }
-                    _ => None,
-                };
-                if let Some(reference) = reference {
-                    let name = self.column_name(reference).ok_or_else(|| {
-                        invalid("unowned or out-of-range captured column", control)
-                    })?;
-                    column(name)?;
-                }
-                Ok::<_, SQLError>(true)
-            })
+        let mut observer = CapturedColumns {
+            binding: self,
+            control,
+            column,
         };
-        inspect(&plan.scalar)?;
+        visit_all(&plan.scalar, control, work, &mut observer).await?;
         for query in &plan.subqueries {
-            crate::plan::PlanRef::Query(query).try_visit_scalar_expressions(&mut inspect)?;
+            let read =
+                visit_scalar_nodes_with_work(PlanRef::Query(query), control, work, &mut observer);
+            if W::MAY_SUSPEND {
+                crate::construction::retain(*control, read)?.await?;
+            } else {
+                inline(read)?;
+            }
         }
+        retire_entries(names.into_iter(), control, work).await?;
         control.check()?;
         Ok(())
+    }
+}
+
+struct CapturedColumns<'a, 'c, F> {
+    binding: &'a RuleConditionBinding,
+    control: &'a ProductionControl<'c>,
+    column: &'a mut F,
+}
+
+impl<F: FnMut(&str) -> Result<(), SQLError>> ScalarObserver for CapturedColumns<'_, '_, F> {
+    fn scalar<W: Work + Send>(
+        &mut self,
+        node: &ScalarExpr,
+        _: &mut W,
+    ) -> impl std::future::Future<Output = Result<(), SQLError>> + Send {
+        std::future::ready(match node {
+            ScalarExpr::InternalColumn(reference) => self
+                .binding
+                .column_name(*reference)
+                .ok_or_else(|| invalid("unowned or out-of-range captured column", self.control))
+                .and_then(&mut *self.column),
+            ScalarExpr::Param(_) => Err(invalid("external parameter", self.control)),
+            ScalarExpr::Func {
+                binding: Some(binding),
+                ..
+            } if crate::semantics::function_has_implicit_row_input(binding) => {
+                Err(invalid("execution-only implicit row input", self.control))
+            }
+            _ => Ok(()),
+        })
     }
 }
 

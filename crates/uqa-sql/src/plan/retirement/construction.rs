@@ -18,7 +18,7 @@ use std::{
 use uqa_core::memory::{BudgetedVec, MemoryError, Produced, ProductionControl};
 
 mod retirement;
-pub(in crate::plan) use retirement::Retirement;
+pub(in crate::plan) use retirement::{CompletedTree, Retirement};
 mod local;
 use local::{Local, NodeRetirement};
 
@@ -59,8 +59,8 @@ impl<L: NodeRetirement> RetirementFrame for Frame<L> {
         }
         self.retiring
     }
-    fn retire_child(&mut self) -> Option<Node> {
-        self.node.retire_child(&mut self.position)
+    fn retire_child(&mut self) -> super::RetiredChild<Node> {
+        self.node.retire_child(&mut self.position).into()
     }
 }
 
@@ -182,6 +182,14 @@ impl<T: Root + std::fmt::Debug> std::fmt::Debug for Prefix<T> {
 impl<T: Root> Prefix<T> {
     pub(in crate::plan) fn context(&self) -> &Context {
         &self.context
+    }
+
+    /// Borrow the root and its retirement context together while its binding inputs are selected.
+    pub(in crate::plan) fn binding_parts(&mut self) -> (&mut T, &Context) {
+        (
+            self.value.as_mut().expect("pending plan root"),
+            &self.context,
+        )
     }
 
     /// Transfer a completed root into another native owner without an intervening fallible operation.

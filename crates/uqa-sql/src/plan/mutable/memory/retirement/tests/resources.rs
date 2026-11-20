@@ -70,7 +70,18 @@ fn input(
     ImageDecoder::new(work, invoking, |mut reader| async move {
         let mut work = reader.input();
         let control = ProductionControl::new(&native, &original, work.cancellation);
-        folding.retire_from(Some(&control), &mut work).await
+        let direct = size_of_val(&Folding::advance_from(
+            Folding::new(RewriteMemory::Scalar(None)),
+            Some(&control),
+            &mut work,
+        ));
+        let retirement = folding.retire_from(Some(&control), &mut work);
+        assert_eq!(
+            size_of_val(&retirement),
+            direct,
+            "detached fold retained an extra work frame"
+        );
+        retirement.await
     })
     .unwrap()
 }

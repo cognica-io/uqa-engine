@@ -41,10 +41,29 @@ pub fn validate<'a>(
     memory: &MemoryBudget,
     cancellation: &CancellationToken,
 ) -> Result<(), SQLError> {
+    crate::catalog::work::inline(validate_with_work(
+        tables,
+        &context.scalar,
+        || context.values,
+        memory,
+        cancellation,
+        &mut (),
+    ))
+}
+
+pub async fn validate_with_work<'a, 'v>(
+    tables: impl Iterator<Item = NativePartitionTable<'a>>,
+    context: &NativeScalarContext<'_, '_>,
+    values: impl Fn() -> Option<&'v dyn crate::expr::SQLValueCatalog>,
+    memory: &MemoryBudget,
+    cancellation: &CancellationToken,
+    work: &mut (impl crate::catalog::CatalogWork + Send),
+) -> Result<(), SQLError> {
     let control = ProductionControl::new(memory, cancellation, cancellation);
     let mut relations = BudgetedMap::new(memory);
     let mut children = BudgetedMap::new(memory);
     for table in tables {
+        work.checkpoint().await?;
         control.check()?;
         if relations.insert(table.name, table)?.is_some() {
             return Err(invalid("duplicate relation"));
@@ -58,42 +77,60 @@ pub fn validate<'a>(
         }
     }
     for (_, table) in &relations {
+        work.checkpoint().await?;
         control.check()?;
         if let Some(spec) = &table.hierarchy.partition_spec {
-            let types = key_types(table, spec, context, &control)?;
+            let types = key_types(table, spec, context, &control, work).await?;
             let mut siblings: ProductionVec<'_, &crate::ast::PartitionBound> =
                 ProductionVec::new(control);
             for (child, parent) in &children {
+                work.checkpoint().await?;
                 control.check()?;
                 if **parent == *table.name {
                     let child = relations.get(child).expect("captured child");
                     let bound = child.hierarchy.partition_bound.as_ref().expect("partition");
-                    crate::schema::inheritance::alter::validate_row_type_with_control(
+                    crate::schema::inheritance::alter::validate_row_type_with_work(
                         table.columns,
                         child.columns,
                         &table.name.name,
                         &child.name.name,
                         true,
                         false,
-                        &control,
-                    )?;
-                    bounds::validate(spec, &types, bound, context, &control)?;
+                        &mut crate::catalog::work::ReferenceWork {
+                            control: &control,
+                            work,
+                        },
+                    )
+                    .await?;
+                    bounds::validate(spec, &types, bound, context, &values, &control, work).await?;
                     for previous in &*siblings {
-                        bounds::disjoint(previous, bound, &types, context, &control)?;
+                        work.checkpoint().await?;
+                        bounds::disjoint(previous, bound, &types, &values, &control, work).await?;
                     }
                     siblings.push_copy(bound)?;
                 }
             }
         }
         for check in table.checks {
+            work.checkpoint().await?;
             control.check()?;
             if let Some(detached) = &check.partition_constraint {
-                let types = key_types(table, &detached.spec, context, &control)?;
-                bounds::validate(&detached.spec, &types, &detached.bound, context, &control)?;
+                let types = key_types(table, &detached.spec, context, &control, work).await?;
+                bounds::validate(
+                    &detached.spec,
+                    &types,
+                    &detached.bound,
+                    context,
+                    &values,
+                    &control,
+                    work,
+                )
+                .await?;
             }
         }
     }
     for (_, parent) in &children {
+        work.checkpoint().await?;
         control.check()?;
         if relations
             .get(&**parent)
@@ -102,15 +139,18 @@ pub fn validate<'a>(
             return Err(invalid("missing partitioned parent"));
         }
     }
+    crate::catalog::work::retire_entries(children.into_entries(), &control, work).await?;
+    crate::catalog::work::retire_entries(relations.into_entries(), &control, work).await?;
     control.check()?;
     Ok(())
 }
 
-fn key_types(
+async fn key_types(
     table: &NativePartitionTable<'_>,
     spec: &PartitionSpec,
-    context: &NativePartitionContext<'_, '_>,
+    context: &NativeScalarContext<'_, '_>,
     control: &ProductionControl<'_>,
+    work: &mut (impl crate::catalog::CatalogWork + Send),
 ) -> Result<Produced<Vec<ColumnType>>, SQLError> {
     control.check()?;
     if spec.keys.is_empty()
@@ -129,16 +169,21 @@ fn key_types(
     )?;
     let mut types = ProductionVec::new(*control);
     for key in &spec.keys {
+        work.checkpoint().await?;
         control.check()?;
-        crate::schema::inheritance::validate_stored_key_references(key, table.columns, control)?;
-        let ty = crate::catalog::scalar_bindings::expression_type(
+        crate::schema::inheritance::validate_stored_key_references(
             key,
-            &schema,
-            &context.scalar,
+            table.columns,
             control,
-        )?
+            work,
+        )
+        .await?;
+        let ty = crate::catalog::scalar_bindings::expression_type_with_work(
+            key, &schema, context, control, work,
+        )
+        .await?
         .ok_or_else(|| invalid("unresolved partition key type"))?;
-        context.scalar.types.column_type(&ty)?;
+        context.types.column_type_with_work(&ty, work).await?;
         super::validate_partition_key_type(spec.strategy, &ty)?;
         types.push_produced(ty)?;
     }

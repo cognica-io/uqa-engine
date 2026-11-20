@@ -31,6 +31,16 @@ impl Work for () {
     }
 }
 
+pub(super) struct TypeWork<'a, W>(pub(super) &'a mut W);
+
+impl<W: crate::ast::ColumnTypeInputWork> Work for TypeWork<'_, W> {
+    type Error = W::Error;
+
+    async fn checkpoint(&mut self) -> Result<(), Self::Error> {
+        self.0.checkpoint().await
+    }
+}
+
 impl Work for AsyncImageInput<'_> {
     type Error = RoutineSignatureInputError;
     async fn checkpoint(&mut self) -> Result<(), Self::Error> {

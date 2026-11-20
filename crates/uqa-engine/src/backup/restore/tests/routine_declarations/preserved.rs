@@ -64,6 +64,16 @@ fn restored_routine_declarations_preserve_modes_domain_arrays_and_lazy_bodies(
         "/../../tests/parity/pg18/backup_routine_declarations_oracle.expected.txt"
     ));
     source.sql(setup, &[]).unwrap();
+    let array = std::iter::repeat_n("abs(-1)", 256)
+        .collect::<Vec<_>>()
+        .join(",");
+    source.sql(&format!("CREATE FUNCTION wide_default(v integer[] DEFAULT ARRAY[{array}]) RETURNS integer LANGUAGE SQL AS 'SELECT cardinality(v)'"), &[]).unwrap();
+    let check_default = |engine: &Engine| {
+        assert_eq!(
+            engine.sql("SELECT wide_default() AS n", &[]).unwrap().rows[0]["n"],
+            Value::Int(256)
+        );
+    };
     let original = definitions(&source);
     let root = capture(&source, &repository, None);
     drop(source);
@@ -94,6 +104,7 @@ fn restored_routine_declarations_preserve_modes_domain_arrays_and_lazy_bodies(
         RoutineBody::Source
     ));
     assert_eq!(observations(&restored), expected);
+    check_default(&restored);
     restored.sql("BEGIN; CREATE FUNCTION declaration_rolled_back() RETURNS integer LANGUAGE SQL AS 'SELECT 1'; ROLLBACK", &[]).unwrap();
     assert!(!restored
         .durable
@@ -106,6 +117,7 @@ fn restored_routine_declarations_preserve_modes_domain_arrays_and_lazy_bodies(
     if !matches!(provider, Provider::Memory) {
         let reopened = provider.open(&path.join("database"));
         assert_eq!(observations(&reopened), expected);
+        check_default(&reopened);
         assert_eq!(definitions(&reopened), original);
     }
 }

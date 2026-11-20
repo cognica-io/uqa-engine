@@ -33,7 +33,31 @@ pub fn visit_stored_plan_relation_references(
     control: &ProductionControl<'_>,
     visit: &mut impl FnMut(&str, bool) -> Result<(), SQLError>,
 ) -> Result<(), SQLError> {
-    visit_references(plan, control, visit, &mut |_| Ok(()))
+    crate::catalog::work::inline(visit_stored_plan_relation_references_with_work(
+        plan,
+        control,
+        &mut (),
+        visit,
+    ))
+}
+
+/// Schedule the same lexical CTE scopes, concrete sources and mutation targets on the caller's work window.
+pub async fn visit_stored_plan_relation_references_with_work<
+    W: crate::catalog::work::Work + Send,
+>(
+    plan: PlanRef<'_>,
+    control: &ProductionControl<'_>,
+    work: &mut W,
+    visit: &mut impl FnMut(&str, bool) -> Result<(), SQLError>,
+) -> Result<(), SQLError> {
+    visit_references_with_work(
+        plan,
+        control,
+        work,
+        visit,
+        &mut Immediate(|_: SourceMember<'_>| Ok(())),
+    )
+    .await
 }
 
 /// Observe the function targets owned by FROM items, including ROWS FROM groups. Scalar arguments remain owned by the ordinary expression visitor; this traversal shares the stored relation visitor's admitted, iterative plan walk.
@@ -48,6 +72,35 @@ pub fn visit_stored_plan_function_bindings(
         }
         Ok(())
     })
+}
+
+pub(crate) trait StoredTableFunctionObserver {
+    fn function<W: crate::catalog::work::Work + Send>(
+        &mut self,
+        name: &str,
+        binding: Option<&crate::ast::FunctionBinding>,
+        work: &mut W,
+    ) -> impl std::future::Future<Output = Result<(), SQLError>> + Send;
+}
+
+struct TableFunctions<'a, V>(&'a mut V);
+impl<V: StoredTableFunctionObserver> SourceObserver for TableFunctions<'_, V> {
+    fn source<W: crate::catalog::work::Work + Send>(
+        &mut self,
+        member: SourceMember<'_>,
+        _: &ProductionControl<'_>,
+        work: &mut W,
+    ) -> impl std::future::Future<Output = Result<(), SQLError>> + Send {
+        let call = member
+            .function()
+            .map(|(name, binding)| self.0.function(name, binding, work));
+        async move {
+            if let Some(call) = call {
+                call.await?;
+            }
+            Ok(())
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -94,26 +147,39 @@ pub(crate) fn visit_table_function_calls(
     control: &ProductionControl<'_>,
     visit: &mut impl FnMut(&str, Option<&crate::ast::FunctionBinding>) -> Result<(), SQLError>,
 ) -> Result<(), SQLError> {
-    crate::catalog::work::inline(table_calls(plan, control, &mut (), visit))
+    struct Inline<'a, F>(&'a mut F);
+    impl<F: FnMut(&str, Option<&crate::ast::FunctionBinding>) -> Result<(), SQLError>>
+        StoredTableFunctionObserver for Inline<'_, F>
+    {
+        fn function<W: crate::catalog::work::Work + Send>(
+            &mut self,
+            name: &str,
+            binding: Option<&crate::ast::FunctionBinding>,
+            _: &mut W,
+        ) -> impl std::future::Future<Output = Result<(), SQLError>> + Send {
+            std::future::ready((self.0)(name, binding))
+        }
+    }
+    crate::catalog::work::inline(visit_table_function_calls_with_work(
+        plan,
+        control,
+        &mut (),
+        &mut Inline(visit),
+    ))
 }
 
-async fn table_calls<W: crate::catalog::work::Work + Send>(
+pub(crate) async fn visit_table_function_calls_with_work<W: crate::catalog::work::Work + Send>(
     plan: PlanRef<'_>,
     control: &ProductionControl<'_>,
-    scheduler: &mut W,
-    visit: &mut impl FnMut(&str, Option<&crate::ast::FunctionBinding>) -> Result<(), SQLError>,
+    work: &mut W,
+    visit: &mut impl StoredTableFunctionObserver,
 ) -> Result<(), SQLError> {
     visit_references_with_work(
         plan,
         control,
-        scheduler,
+        work,
         &mut |_, _| Ok(()),
-        &mut Immediate(|member: SourceMember<'_>| {
-            if let Some((name, binding)) = member.function() {
-                visit(name, binding)?;
-            }
-            Ok(())
-        }),
+        &mut TableFunctions(visit),
     )
     .await
 }
@@ -140,7 +206,7 @@ pub fn visit_stored_runtime_calls(
 pub async fn visit_stored_runtime_calls_from(
     plan: PlanRef<'_>,
     control: &ProductionControl<'_>,
-    input: &mut uqa_core::image_io::AsyncImageInput<'_>,
+    input: &mut (impl crate::catalog::CatalogWork + Send),
     visit: &mut (impl FnMut(&str, StoredFunctionSite) -> Result<(), SQLError> + Send),
 ) -> Result<(), SQLError> {
     runtime_calls(plan, control, input, visit).await

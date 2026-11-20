@@ -8,7 +8,7 @@
 
 use crate::Engine;
 use std::sync::Arc;
-use uqa_core::memory::RetainedValue;
+use uqa_core::memory::{ProductionControl, RetainedValue};
 use uqa_execution::catalog::composite_type::{
     CompositeRegistry, CompositeRegistryPublication, CompositeRegistryRead,
 };
@@ -16,7 +16,10 @@ use uqa_execution::schema::composites::attributes::CompositeAttributeContext;
 use uqa_execution::schema::composites::values::{CompositeValueContext, CompositeValueTables};
 use uqa_execution::schema::composites::CompositeTypeContext;
 use uqa_sql::catalog::roles::RoleDefinitions;
-use uqa_sql::expr::composites::{CompositeTypeCatalog, CompositeTypeDescriptor};
+use uqa_sql::expr::composites::{
+    CompositeDescriptorInput, CompositeTypeCatalog, CompositeTypeDescriptor,
+    OwnedCompositeTypeDescriptor,
+};
 use uqa_sql::SQLError;
 
 impl Engine {
@@ -84,6 +87,24 @@ impl Engine {
         Ok(())
     }
 
+    pub(super) fn select_composite_descriptor<T>(
+        &self,
+        registry: &RetainedValue<CompositeRegistry>,
+        oid: u32,
+        control: &ProductionControl<'_>,
+        registered: impl FnOnce(OwnedCompositeTypeDescriptor) -> T,
+        relation: impl FnOnce() -> Result<T, SQLError>,
+    ) -> Result<T, SQLError> {
+        if let Some(value) = self
+            .runtime
+            .composite_descriptor_cache
+            .descriptor_with_control(registry, oid, control)?
+        {
+            return Ok(registered(value));
+        }
+        relation()
+    }
+
     /// The composite registry generation of the running statement: the pinned query snapshot when one exists, otherwise the session's current definitions.
     pub(crate) fn composite_registry_snapshot(&self) -> RetainedValue<CompositeRegistry> {
         self.query_catalog_snapshot.as_ref().map_or_else(
@@ -96,20 +117,41 @@ impl Engine {
 impl CompositeTypeCatalog for Engine {
     fn composite_type_with_control(
         &self,
-        type_oid: u32,
-        control: &uqa_core::memory::ProductionControl<'_>,
-    ) -> Result<Option<uqa_sql::expr::composites::OwnedCompositeTypeDescriptor>, SQLError> {
-        if let Some(descriptor) = self
-            .runtime
-            .composite_descriptor_cache
-            .descriptor_with_control(&self.composite_registry_snapshot(), type_oid, control)?
-        {
-            return Ok(Some(descriptor));
-        }
-        uqa_execution::catalog::composite_type::relations::descriptor_with_control(
-            &self.catalog_execution(),
-            type_oid,
+        oid: u32,
+        control: &ProductionControl<'_>,
+    ) -> Result<Option<OwnedCompositeTypeDescriptor>, SQLError> {
+        self.select_composite_descriptor(
+            &self.composite_registry_snapshot(),
+            oid,
             control,
+            Some,
+            || {
+                uqa_execution::catalog::composite_type::relations::descriptor_with_control(
+                    &self.catalog_execution(),
+                    oid,
+                    control,
+                )
+            },
+        )
+    }
+
+    fn begin_composite_type(
+        &self,
+        oid: u32,
+        control: &ProductionControl<'_>,
+    ) -> Result<CompositeDescriptorInput<'_>, SQLError> {
+        self.select_composite_descriptor(
+            &self.composite_registry_snapshot(),
+            oid,
+            control,
+            |value| CompositeDescriptorInput::ready(Some(value)),
+            || {
+                uqa_execution::catalog::composite_type::relations::descriptor_input(
+                    self.catalog_execution(),
+                    oid,
+                    control,
+                )
+            },
         )
     }
 

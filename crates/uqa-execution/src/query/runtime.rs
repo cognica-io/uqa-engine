@@ -15,6 +15,29 @@ use std::collections::BTreeMap;
 use uqa_core::CancellationToken;
 use uqa_sql::SQLError;
 
+/// Classification borrows the registry itself. A stored SQL constructor can retain its existing registry owner independently of the foreground query services.
+pub struct RegisteredAggregates<'a>(
+    pub &'a RwLock<BTreeMap<String, RegisteredSQLFunction<dyn SQLAggregateFactory>>>,
+);
+
+impl uqa_sql::plan::AggregateClassifier for RegisteredAggregates<'_> {
+    fn is_registered_aggregate(&self, name: &str) -> bool {
+        self.0
+            .read()
+            .contains_key(runtime_function_name(name).as_str())
+    }
+
+    fn is_registered_aggregate_with_control(
+        &self,
+        name: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<bool, SQLError> {
+        let name = uqa_sql::semantics::lowercase_function_name_with_control(name, control)?;
+        control.check()?;
+        Ok(self.0.read().contains_key(name.as_str()))
+    }
+}
+
 /// Live memory settings are read at the same execution boundaries as the session setting.
 pub trait QueryMemorySettings: Send + Sync {
     fn work_mem_bytes(&self) -> Result<usize, SQLError>;
@@ -105,9 +128,8 @@ impl QueryRuntimeView<'_> {
     }
 
     pub fn has_aggregate_function(&self, name: &str) -> bool {
-        self.aggregate_functions
-            .read()
-            .contains_key(runtime_function_name(name).as_str())
+        use uqa_sql::plan::AggregateClassifier;
+        RegisteredAggregates(self.aggregate_functions).is_registered_aggregate(name)
     }
 
     pub fn registered_function_options(&self, name: &str) -> [Option<SQLFunctionOptions>; 3] {
@@ -133,9 +155,9 @@ impl QueryRuntimeView<'_> {
         name: &str,
         control: &uqa_core::memory::ProductionControl<'_>,
     ) -> Result<bool, SQLError> {
-        let name = uqa_sql::semantics::lowercase_function_name_with_control(name, control)?;
-        control.check()?;
-        Ok(self.aggregate_functions.read().contains_key(name.as_str()))
+        use uqa_sql::plan::AggregateClassifier;
+        RegisteredAggregates(self.aggregate_functions)
+            .is_registered_aggregate_with_control(name, control)
     }
 
     pub fn has_table_function_with_control(

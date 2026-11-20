@@ -38,16 +38,6 @@ pub(super) fn budgeted(
     })
 }
 
-pub(super) fn produced(
-    elements: &[Value],
-    rank: Option<usize>,
-    control: &crate::memory::ProductionControl<'_>,
-) -> Result<Option<crate::memory::Produced<Vec<usize>>>, ValueRetentionError> {
-    validate(elements, rank, control.budget(), &mut || control.check())?
-        .map(|(dimensions, memory)| control.finish(dimensions, memory))
-        .transpose()
-}
-
 pub(super) async fn produced_with_work<W: Work>(
     elements: &[Value],
     rank: Option<usize>,

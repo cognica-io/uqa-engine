@@ -6,13 +6,46 @@
 
 //! A detached discarded query retains its own admitted frames while the original context remains available for parent and sibling destruction.
 
-use super::{Frame, Local, Node, RetainedTree};
+use super::{Context, Frame, Local, Node, RetainedTree};
 use crate::{
     catalog::work::Work,
     plan::{QueryPlan, SourcePlan},
     SQLError,
 };
 use uqa_core::memory::{MemoryReservation, ProductionControl};
+
+/// The finished statement is the sole remaining owner of its constructor workspace. Partial-tree cleanup and successful scheduled retirement use the same admitted frames.
+pub(in crate::plan) struct CompletedTree(Context);
+
+impl Context {
+    pub(in crate::plan) fn completed_tree(mut self, node: Node) -> CompletedTree {
+        let private = std::sync::Arc::get_mut(&mut self.workspace)
+            .expect("finished statement owns its construction workspace");
+        let mut workspace = private.lock().expect("plan retirement workspace");
+        debug_assert!(matches!(workspace.0.root, Node::Empty) && workspace.0.frames.is_empty());
+        workspace.0.root = node;
+        drop(workspace);
+        CompletedTree(self)
+    }
+}
+
+impl CompletedTree {
+    pub(in crate::plan) async fn retire_from<W: Work>(
+        &mut self,
+        control: &ProductionControl<'_>,
+        work: &mut W,
+    ) -> Result<(), SQLError> {
+        retire_steps(control, work, || {
+            self.0
+                .workspace
+                .lock()
+                .expect("plan retirement workspace")
+                .0
+                .advance()
+        })
+        .await
+    }
+}
 
 pub(in crate::plan) struct Retirement {
     tree: Box<RetainedTree<Frame<Local>>>,
@@ -37,6 +70,10 @@ impl Retirement {
         self.node(Node::Query(query));
     }
 
+    pub(in crate::plan) fn expression(&mut self, expression: crate::plan::ExpressionPlan) {
+        self.node(Node::Expression(expression));
+    }
+
     pub(in crate::plan) fn source(&mut self, source: SourcePlan) {
         self.node(Node::Source(source));
     }
@@ -51,13 +88,21 @@ impl Retirement {
         control: &ProductionControl<'_>,
         work: &mut W,
     ) -> Result<(), SQLError> {
-        loop {
-            control.check()?;
-            work.checkpoint().await?;
-            control.check()?;
-            if self.tree.advance() {
-                return Ok(());
-            }
+        retire_steps(control, work, || self.tree.advance()).await
+    }
+}
+
+async fn retire_steps<W: Work>(
+    control: &ProductionControl<'_>,
+    work: &mut W,
+    mut advance: impl FnMut() -> bool + Send,
+) -> Result<(), SQLError> {
+    loop {
+        control.check()?;
+        work.checkpoint().await?;
+        control.check()?;
+        if advance() {
+            return Ok(());
         }
     }
 }

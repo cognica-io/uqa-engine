@@ -38,29 +38,47 @@ pub trait StoredSourceCatalog {
 }
 impl StoredSourceColumns {
     pub fn bind_statement(&self, statement: &mut Statement) -> Result<bool, SQLError> {
-        bind_stored_statement_source_columns(statement, |name| {
-            Ok(
-                if let Some(table) = self.catalog.table_resolved(&self.resolution, name)? {
-                    Some(
-                        table
-                            .columns
-                            .iter()
-                            .map(|column| column.name.clone())
-                            .collect(),
-                    )
-                } else {
-                    self.catalog
-                        .foreign_table_resolved(&self.resolution, name)?
-                        .map(|table| {
+        crate::catalog::work::inline(self.bind_statement_from(
+            statement,
+            &uqa_core::memory::ProductionControl::uncontrolled(),
+            &mut (),
+        ))
+    }
+    pub(crate) async fn bind_statement_from<W: crate::catalog::work::Work + Send>(
+        &self,
+        statement: &mut Statement,
+        control: &uqa_core::memory::ProductionControl<'_>,
+        work: &mut W,
+    ) -> Result<bool, SQLError> {
+        lifecycle::bind_stored_statement_source_columns_from(
+            statement,
+            |name| {
+                Ok(
+                    if let Some(table) = self.catalog.table_resolved(&self.resolution, name)? {
+                        Some(
                             table
                                 .columns
                                 .iter()
                                 .map(|column| column.name.clone())
-                                .collect()
-                        })
-                },
-            )
-        })
+                                .collect(),
+                        )
+                    } else {
+                        self.catalog
+                            .foreign_table_resolved(&self.resolution, name)?
+                            .map(|table| {
+                                table
+                                    .columns
+                                    .iter()
+                                    .map(|column| column.name.clone())
+                                    .collect()
+                            })
+                    },
+                )
+            },
+            control,
+            work,
+        )
+        .await
     }
 }
 

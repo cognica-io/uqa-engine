@@ -7,8 +7,7 @@
 //! The names in a `PL/pgSQL` statement that the function's variables take, checked against what the statement itself can see, as `PostgreSQL`'s `plpgsql_post_column_ref` checks them: a variable whose name a column or relation of the statement also takes is ambiguous unless `plpgsql.variable_conflict` chooses one of them, and an output column that a bare name in ORDER BY, GROUP BY or DISTINCT ON names takes the name before the parser asks for a variable.
 
 use super::{
-    projection_columns, BindingContext, QueryBlockPlan, RowSchema, SQLError, SQLParam, ScalarExpr,
-    SchemaScope,
+    projection_columns, BindingContext, RowSchema, SQLError, SQLParam, ScalarExpr, SchemaScope,
 };
 use crate::plan::{ProjectionPlan, UnifiedPlan};
 use crate::routines::RoutineResolution;
@@ -141,20 +140,17 @@ impl SchemaScope {
     }
 
     /// Replace each GROUP BY item that is a variable site whose bare name no column of the query's own sources has but an output column does with that output column's expression, as `findTargetlistEntrySQL92` resolves it; records the site.
-    pub(super) fn bind_grouping_variable_sites(
+    pub(super) fn bind_grouping_variable_sites<'a>(
         &mut self,
-        block: &mut QueryBlockPlan,
+        items: impl Iterator<Item = &'a mut ScalarExpr>,
+        projections: &[ProjectionPlan],
         source: &RowSchema,
     ) {
-        let output_names = self.output_names(&block.projections);
+        let output_names = self.output_names(projections);
         let Some(sites) = self.variable_sites.as_mut() else {
             return;
         };
-        for item in block
-            .group_by
-            .iter_mut()
-            .chain(block.grouping_sets.iter_mut().flatten())
-        {
+        for item in items {
             let Some(site) = sites.site(item) else {
                 continue;
             };
@@ -168,7 +164,7 @@ impl SchemaScope {
                 continue;
             };
             sites.resolutions.as_mut_slice()[site] = VariableSiteResolution::Output;
-            item.clone_from(&block.projections[position].expr);
+            item.clone_from(&projections[position].expr);
         }
     }
 }

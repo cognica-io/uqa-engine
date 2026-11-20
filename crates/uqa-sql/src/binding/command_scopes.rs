@@ -11,17 +11,46 @@ use super::{
     SourceScope,
 };
 use crate::ast::AssignmentTarget;
+use crate::catalog::work::Work;
 use crate::plan::{
-    AssignmentPlan, CommandPlan, ConflictActionPlan, DeletePlan, InsertPlan, MergePlan,
-    MergeWhenPlan, UpdatePlan,
+    AssignmentPlan, CommandPlan, ConflictActionPlan, DeletePlan, InsertPlan, MergePlan, UpdatePlan,
 };
 use crate::routines::RoutineResolution;
-use std::collections::BTreeSet;
+use uqa_core::memory::{Produced, ProductionControl, ProductionVec};
 
 /// The scalar expressions of one clause and the row scope they resolve against.
 struct ClauseScope<'a> {
     schema: RowSchema,
-    expressions: Vec<&'a mut ScalarExpr>,
+    expressions: Produced<Vec<&'a mut ScalarExpr>>,
+}
+
+impl<'a> ClauseScope<'a> {
+    async fn from_expressions(
+        schema: RowSchema,
+        values: impl Iterator<Item = &'a mut ScalarExpr> + Send,
+        control: &ProductionControl<'_>,
+        work: &mut (impl Work + Send),
+    ) -> Result<Self, SQLError> {
+        let mut expressions = ProductionVec::new(*control);
+        Self::append(&mut expressions, values, control, work).await?;
+        Ok(Self {
+            schema,
+            expressions: expressions.finish()?,
+        })
+    }
+
+    async fn append(
+        expressions: &mut ProductionVec<'_, &'a mut ScalarExpr>,
+        values: impl Iterator<Item = &'a mut ScalarExpr> + Send,
+        control: &ProductionControl<'_>,
+        work: &mut (impl Work + Send),
+    ) -> Result<(), SQLError> {
+        for value in values {
+            work.checkpoint().await?;
+            expressions.push_produced(control.finish(value, control.empty_reservation())?)?;
+        }
+        Ok(())
+    }
 }
 
 /// The row scopes of a data-modifying statement, each over the scope that encloses the statement.
@@ -43,34 +72,56 @@ impl SchemaScope {
         params: &[SQLParam],
         outer: Option<&RowSchema>,
     ) -> Result<(), SQLError> {
-        let previous = match command.ctes_mut() {
-            Some(ctes) => self.bind_cte_routine_schemas(routines, ctes, params, outer)?,
-            None => super::ctes::CteScopeStack::new(0, &self.control())?,
-        };
-        let result = self.bind_command_clauses_for_storage(routines, command, params, outer);
-        self.restore_cte_schemas(previous);
-        result
+        crate::catalog::work::inline(self.bind_command_routines_for_storage_with_work(
+            routines,
+            command,
+            params,
+            outer,
+            &mut (),
+        ))
     }
 
-    fn bind_command_clauses_for_storage(
+    pub(super) async fn bind_command_routines_for_storage_with_work<W: Work + Send>(
         &mut self,
         routines: &dyn RoutineResolution,
         command: &mut CommandPlan,
         params: &[SQLParam],
         outer: Option<&RowSchema>,
+        work: &mut W,
     ) -> Result<(), SQLError> {
-        let subqueries = command.scalar_subqueries().to_vec();
+        let previous = match command.ctes_mut() {
+            Some(ctes) => {
+                self.bind_cte_routine_schemas(routines, ctes, params, outer, work)
+                    .await?
+            }
+            None => super::ctes::CteScopeStack::new(0, &self.control())?,
+        };
+        let result = self
+            .bind_command_clauses_for_storage(routines, command, params, outer, work)
+            .await;
+        self.restore_cte_schemas(previous);
+        result
+    }
+
+    async fn bind_command_clauses_for_storage<W: Work + Send>(
+        &mut self,
+        routines: &dyn RoutineResolution,
+        command: &mut CommandPlan,
+        params: &[SQLParam],
+        outer: Option<&RowSchema>,
+        work: &mut W,
+    ) -> Result<(), SQLError> {
         let preceding = if command.source_input().is_some() {
             let target = self.bind_command_target(routines, command, params)?;
             SourceScope::command_target(command, &target)
         } else {
             None
         };
-        if let Some(source) = command.source_input_mut() {
-            self.bind_source_routines_in_scope(
+        if let Some((source, subqueries)) = command.source_and_subqueries_mut() {
+            self.bind_source_routines_in_scope_with_work(
                 routines,
                 source,
-                &subqueries,
+                subqueries,
                 params,
                 SourceScope {
                     outer,
@@ -78,35 +129,49 @@ impl SchemaScope {
                     inherited_lateral: false,
                     retain_names: true,
                 },
-            )?;
+                work,
+            )
+            .await?;
         }
-        let scopes = self.command_scopes(routines, command, params, outer)?;
+        let scopes = self
+            .command_scopes(routines, command, params, outer, work)
+            .await?;
         let labels = command
             .returning()
             .map(super::routine_parameters::column_labels)
             .unwrap_or_default();
-        self.bind_command_clause_scopes(routines, command, &scopes, params, outer)?;
+        self.bind_command_clause_scopes(routines, command, &scopes, params, outer, work)
+            .await?;
         if let Some(returning) = command.returning_mut() {
             super::routine_parameters::keep_column_labels(returning, labels);
         }
         Ok(())
     }
 
-    fn command_scopes(
+    async fn command_scopes<W: Work + Send>(
         &mut self,
         routines: &dyn RoutineResolution,
         command: &CommandPlan,
         params: &[SQLParam],
         outer: Option<&RowSchema>,
+        work: &mut W,
     ) -> Result<CommandScopes, SQLError> {
         let (target, returning, _) =
             self.command_expression_schema(routines, command, params, outer)?;
-        let source = command
-            .source_input()
-            .map(|source| {
-                self.bind_source(routines, source, command.scalar_subqueries(), params, outer)
-            })
-            .transpose()?;
+        let source = match command.source_input() {
+            Some(source) => Some(
+                self.bind_source_in_scope_with_work(
+                    routines,
+                    source,
+                    command.scalar_subqueries(),
+                    params,
+                    SourceScope::new(outer),
+                    work,
+                )
+                .await?,
+            ),
+            None => None,
+        };
         let qualifier = command.target_qualifier().unwrap_or_default();
         let mut clauses =
             crate::semantics::mutation_clause_schema(&target, qualifier, source.as_ref());
@@ -120,17 +185,21 @@ impl SchemaScope {
         })
     }
 
-    fn bind_command_clause_scopes(
+    async fn bind_command_clause_scopes<W: Work + Send>(
         &mut self,
         routines: &dyn RoutineResolution,
         command: &mut CommandPlan,
         scopes: &CommandScopes,
         params: &[SQLParam],
         outer: Option<&RowSchema>,
+        work: &mut W,
     ) -> Result<(), SQLError> {
+        let owner = self.production.clone();
+        let control = owner.control();
         match command {
             CommandPlan::Insert(insert) => {
-                self.bind_insert_clauses(routines, insert, scopes, params, outer)
+                self.bind_insert_clauses(routines, insert, scopes, params, outer, work)
+                    .await
             }
             CommandPlan::Update(update) => {
                 let UpdatePlan {
@@ -140,24 +209,34 @@ impl SchemaScope {
                     subqueries,
                     ..
                 } = update.as_mut();
-                let clauses = vec![
-                    ClauseScope {
-                        schema: scopes.clauses.clone(),
-                        expressions: assignments
+                let clauses = [
+                    ClauseScope::from_expressions(
+                        scopes.clauses.clone(),
+                        assignments
                             .iter_mut()
                             .flat_map(AssignmentPlan::expressions_mut)
-                            .chain(predicate.as_mut())
-                            .collect(),
-                    },
-                    ClauseScope {
-                        schema: scopes.returning.clone(),
-                        expressions: returning
-                            .iter_mut()
-                            .map(|projection| &mut projection.expr)
-                            .collect(),
-                    },
+                            .chain(predicate.as_mut()),
+                        &control,
+                        work,
+                    )
+                    .await?,
+                    ClauseScope::from_expressions(
+                        scopes.returning.clone(),
+                        returning.iter_mut().map(|projection| &mut projection.expr),
+                        &control,
+                        work,
+                    )
+                    .await?,
                 ];
-                self.bind_clause_scopes(routines, clauses, subqueries, &scopes.clauses, params)
+                self.bind_clause_scopes(
+                    routines,
+                    clauses,
+                    subqueries,
+                    &scopes.clauses,
+                    params,
+                    work,
+                )
+                .await
             }
             CommandPlan::Delete(delete) => {
                 let DeletePlan {
@@ -166,35 +245,48 @@ impl SchemaScope {
                     subqueries,
                     ..
                 } = delete.as_mut();
-                let clauses = vec![
-                    ClauseScope {
-                        schema: scopes.clauses.clone(),
-                        expressions: predicate.as_mut().into_iter().collect(),
-                    },
-                    ClauseScope {
-                        schema: scopes.returning.clone(),
-                        expressions: returning
-                            .iter_mut()
-                            .map(|projection| &mut projection.expr)
-                            .collect(),
-                    },
+                let clauses = [
+                    ClauseScope::from_expressions(
+                        scopes.clauses.clone(),
+                        predicate.iter_mut(),
+                        &control,
+                        work,
+                    )
+                    .await?,
+                    ClauseScope::from_expressions(
+                        scopes.returning.clone(),
+                        returning.iter_mut().map(|projection| &mut projection.expr),
+                        &control,
+                        work,
+                    )
+                    .await?,
                 ];
-                self.bind_clause_scopes(routines, clauses, subqueries, &scopes.clauses, params)
+                self.bind_clause_scopes(
+                    routines,
+                    clauses,
+                    subqueries,
+                    &scopes.clauses,
+                    params,
+                    work,
+                )
+                .await
             }
             CommandPlan::Merge(merge) => {
-                self.bind_merge_clauses(routines, merge, scopes, params, outer)
+                self.bind_merge_clauses(routines, merge, scopes, params, outer, work)
+                    .await
             }
             _ => Ok(()),
         }
     }
 
-    fn bind_insert_clauses(
+    async fn bind_insert_clauses<W: Work + Send>(
         &mut self,
         routines: &dyn RoutineResolution,
         insert: &mut InsertPlan,
         scopes: &CommandScopes,
         params: &[SQLParam],
         outer: Option<&RowSchema>,
+        work: &mut W,
     ) -> Result<(), SQLError> {
         let InsertPlan {
             columns,
@@ -205,68 +297,91 @@ impl SchemaScope {
             subqueries,
             ..
         } = insert;
+        let owner = self.production.clone();
+        let control = owner.control();
         if let Some(source) = source {
-            self.bind_query_routines_for_storage(routines, source, params, outer)?;
+            crate::catalog::work::nested!(
+                W::MAY_SUSPEND,
+                control,
+                self.bind_query_routines_for_storage_with_work(
+                    routines, source, params, outer, work
+                )
+            )?;
         }
         let excluded = RowSchema::with_relation_qualifier(&scopes.target, "excluded");
         let conflict_update = overlay_outer_schema(
             &RowSchema::join(&scopes.clauses, &excluded, std::iter::empty::<String>()),
             outer,
         );
-        let mut arbiter = Vec::new();
-        let mut update = Vec::new();
+        let mut arbiter = ProductionVec::new(control);
+        let mut update = ProductionVec::new(control);
         if let Some(conflict) = on_conflict {
-            arbiter.extend(conflict.expressions.iter_mut());
-            arbiter.extend(conflict.predicate.as_deref_mut());
+            ClauseScope::append(
+                &mut arbiter,
+                conflict
+                    .expressions
+                    .iter_mut()
+                    .chain(conflict.predicate.as_deref_mut()),
+                &control,
+                work,
+            )
+            .await?;
             if let ConflictActionPlan::Update {
                 assignments,
                 predicate,
             } = &mut conflict.action
             {
-                update.extend(
+                ClauseScope::append(
+                    &mut update,
                     assignments
                         .iter_mut()
-                        .flat_map(AssignmentPlan::expressions_mut),
-                );
-                update.extend(predicate.as_deref_mut());
+                        .flat_map(AssignmentPlan::expressions_mut)
+                        .chain(predicate.as_deref_mut()),
+                    &control,
+                    work,
+                )
+                .await?;
             }
         }
-        let clauses = vec![
-            // The target is in the range table but not in the namespace of the rows.
-            ClauseScope {
-                schema: outer.cloned().unwrap_or_default(),
-                expressions: columns
+        let clauses = [
+            ClauseScope::from_expressions(
+                outer.cloned().unwrap_or_default(),
+                columns
                     .iter_mut()
                     .flat_map(AssignmentTarget::expressions_mut)
-                    .chain(rows.iter_mut().flatten())
-                    .collect(),
-            },
+                    .chain(rows.iter_mut().flatten()),
+                &control,
+                work,
+            )
+            .await?,
             ClauseScope {
                 schema: scopes.clauses.clone(),
-                expressions: arbiter,
+                expressions: arbiter.finish()?,
             },
             ClauseScope {
                 schema: conflict_update,
-                expressions: update,
+                expressions: update.finish()?,
             },
-            ClauseScope {
-                schema: scopes.returning.clone(),
-                expressions: returning
-                    .iter_mut()
-                    .map(|projection| &mut projection.expr)
-                    .collect(),
-            },
+            ClauseScope::from_expressions(
+                scopes.returning.clone(),
+                returning.iter_mut().map(|projection| &mut projection.expr),
+                &control,
+                work,
+            )
+            .await?,
         ];
-        self.bind_clause_scopes(routines, clauses, subqueries, &scopes.clauses, params)
+        self.bind_clause_scopes(routines, clauses, subqueries, &scopes.clauses, params, work)
+            .await
     }
 
-    fn bind_merge_clauses(
+    async fn bind_merge_clauses<W: Work + Send>(
         &mut self,
         routines: &dyn RoutineResolution,
         merge: &mut MergePlan,
         scopes: &CommandScopes,
         params: &[SQLParam],
         outer: Option<&RowSchema>,
+        work: &mut W,
     ) -> Result<(), SQLError> {
         let qualifier = merge
             .target_alias
@@ -277,7 +392,16 @@ impl SchemaScope {
             outer,
         );
         let source = overlay_outer_schema(
-            &self.bind_source(routines, &merge.source, &merge.subqueries, params, None)?,
+            &self
+                .bind_source_in_scope_with_work(
+                    routines,
+                    &merge.source,
+                    &merge.subqueries,
+                    params,
+                    SourceScope::new(None),
+                    work,
+                )
+                .await?,
             outer,
         );
         let MergePlan {
@@ -288,89 +412,110 @@ impl SchemaScope {
             subqueries,
             ..
         } = merge;
-        let (mut matched, not_matched, not_matched_by_source) =
-            merge_action_expressions(when_clauses);
-        matched.insert(0, join_condition);
-        matched.extend(target_predicate.as_mut());
-        let clauses = vec![
+        let owner = self.production.clone();
+        let control = owner.control();
+        let mut matched = ProductionVec::new(control);
+        let mut missing_target = ProductionVec::new(control);
+        let mut missing_source = ProductionVec::new(control);
+        matched.push_produced(control.finish(join_condition, control.empty_reservation())?)?;
+        for clause in when_clauses {
+            work.checkpoint().await?;
+            let selected =
+                clause.input_scope(&mut matched, &mut missing_source, &mut missing_target);
+            ClauseScope::append(selected, clause.expressions_mut(), &control, work).await?;
+        }
+        ClauseScope::append(&mut matched, target_predicate.iter_mut(), &control, work).await?;
+        let clauses = [
             ClauseScope {
                 schema: scopes.clauses.clone(),
-                expressions: matched,
+                expressions: matched.finish()?,
             },
             ClauseScope {
                 schema: source,
-                expressions: not_matched,
+                expressions: missing_target.finish()?,
             },
             ClauseScope {
                 schema: target,
-                expressions: not_matched_by_source,
+                expressions: missing_source.finish()?,
             },
-            ClauseScope {
-                schema: scopes.returning.clone(),
-                expressions: returning
-                    .iter_mut()
-                    .map(|projection| &mut projection.expr)
-                    .collect(),
-            },
+            ClauseScope::from_expressions(
+                scopes.returning.clone(),
+                returning.iter_mut().map(|projection| &mut projection.expr),
+                &control,
+                work,
+            )
+            .await?,
         ];
-        self.bind_clause_scopes(routines, clauses, subqueries, &scopes.clauses, params)
+        self.bind_clause_scopes(routines, clauses, subqueries, &scopes.clauses, params, work)
+            .await
     }
 
     /// Bind each clause's subqueries within the clause's scope, and then the clause's expressions. A subquery that no clause expression names, such as one in a join condition of the statement's sources, is bound within `fallback`.
-    fn bind_clause_scopes(
+    async fn bind_clause_scopes<W: Work + Send, const N: usize>(
         &mut self,
         routines: &dyn RoutineResolution,
-        clauses: Vec<ClauseScope<'_>>,
+        clauses: [ClauseScope<'_>; N],
         subqueries: &mut [QueryPlan],
         fallback: &RowSchema,
         params: &[SQLParam],
+        work: &mut W,
     ) -> Result<(), SQLError> {
-        let mut owners = vec![None; subqueries.len()];
-        for (position, clause) in clauses.iter().enumerate() {
-            let mut referenced = BTreeSet::new();
-            for expression in &clause.expressions {
-                crate::semantics::collect_subquery_ids(expression, &mut referenced);
+        let owner = self.production.clone();
+        let control = owner.control();
+        if !subqueries.is_empty() {
+            let mut owners = ProductionVec::new(control);
+            for _ in 0..subqueries.len() {
+                work.checkpoint().await?;
+                owners.push_copy(None)?;
             }
-            for subquery in referenced {
-                if let Some(owner) = owners.get_mut(subquery) {
-                    owner.get_or_insert(position);
+            for (slot, clause) in clauses.iter().enumerate() {
+                for expression in clause.expressions.iter() {
+                    crate::ir::observation::visit_in(
+                        expression,
+                        &control,
+                        work,
+                        crate::ir::children::Scope::Complete,
+                        &mut |node| {
+                            if let Some(owner) = crate::semantics::subquery_reference(node)
+                                .and_then(|id| owners.as_mut_slice().get_mut(id))
+                            {
+                                owner.get_or_insert(slot);
+                            }
+                            Ok(crate::ir::observation::Decision::Descend)
+                        },
+                    )
+                    .await?;
                 }
             }
+            for (subquery, selected) in subqueries.iter_mut().zip(owners.iter()) {
+                let schema = selected.map_or(fallback, |slot| &clauses[slot].schema);
+                crate::catalog::work::nested!(
+                    W::MAY_SUSPEND,
+                    control,
+                    self.bind_query_routines_for_storage_with_work(
+                        routines,
+                        subquery,
+                        params,
+                        Some(schema),
+                        work
+                    )
+                )?;
+            }
         }
-        for (subquery, owner) in subqueries.iter_mut().zip(&owners) {
-            let scope = owner.map_or(fallback, |position| &clauses[position].schema);
-            self.bind_query_routines_for_storage(routines, subquery, params, Some(scope))?;
-        }
-        let subqueries = subqueries.to_vec();
         for clause in clauses {
-            for expression in clause.expressions {
-                self.bind_scalar_routines_for_storage(
+            let (expressions, _memory) = clause.expressions.into_parts();
+            for expression in expressions {
+                self.bind_scalar_routines_for_storage_with_work(
                     routines,
                     expression,
                     &clause.schema,
-                    &subqueries,
+                    subqueries,
                     params,
-                )?;
+                    work,
+                )
+                .await?;
             }
         }
         Ok(())
     }
-}
-
-/// The expressions of a MERGE statement's actions by the relations their match kind lets them see: those of matched rows, which see the target and the source, those of source rows the target lacks, which see the source, and those of target rows the source lacks, which see the target.
-type MergeActionExpressions<'a> = (
-    Vec<&'a mut ScalarExpr>,
-    Vec<&'a mut ScalarExpr>,
-    Vec<&'a mut ScalarExpr>,
-);
-
-fn merge_action_expressions(when_clauses: &mut [MergeWhenPlan]) -> MergeActionExpressions<'_> {
-    let mut matched = Vec::new();
-    let mut not_matched = Vec::new();
-    let mut not_matched_by_source = Vec::new();
-    for clause in when_clauses {
-        let scope = clause.input_scope(&mut matched, &mut not_matched_by_source, &mut not_matched);
-        scope.extend(clause.expressions_mut());
-    }
-    (matched, not_matched, not_matched_by_source)
 }

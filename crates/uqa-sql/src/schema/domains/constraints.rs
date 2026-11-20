@@ -67,15 +67,21 @@ pub fn assign_names(
 pub fn identities(
     definition: &CreateDomain,
 ) -> impl Iterator<Item = ConstraintCatalogIdentity> + '_ {
+    identity_slots(definition).flatten()
+}
+
+pub(crate) fn identity_slots(
+    definition: &CreateDomain,
+) -> impl Iterator<Item = Option<ConstraintCatalogIdentity>> + '_ {
     definition
         .not_null
         .iter()
-        .filter_map(|constraint| constraint.catalog_identity)
+        .map(|constraint| constraint.catalog_identity)
         .chain(
             definition
                 .checks
                 .iter()
-                .filter_map(|constraint| constraint.catalog_identity),
+                .map(|constraint| constraint.catalog_identity),
         )
 }
 

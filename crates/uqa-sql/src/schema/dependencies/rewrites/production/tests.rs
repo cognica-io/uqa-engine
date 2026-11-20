@@ -297,3 +297,77 @@ fn stored_sequence_reference_errors_admit_their_selected_text_before_copying() {
     drop(sibling);
     assert_eq!(budget.used(), 0);
 }
+
+#[test]
+fn stored_sequence_function_observation_yields_within_native_scalars_and_plans() {
+    use crate::plan::UnifiedPlan;
+    use std::sync::Arc;
+    use uqa_core::image_io::{ImageDecodeWindow, ImageDecoder};
+
+    struct Missing;
+    impl SequenceFunctionRelations for Missing {
+        async fn reference<W: Work + Send>(&self, name: &str, _: &mut W) -> Result<(), SQLError> {
+            Err(SQLError::Internal(name.into()))
+        }
+    }
+
+    const WIDTH: usize = 4096;
+    let fixture = |index: usize| {
+        let mut args = vec!["7"; WIDTH];
+        args[index] = "nextval('first_absent')";
+        args.push("currval('later_absent')");
+        Arc::new(UnifiedPlan::lower(
+            crate::compile(&format!("SELECT ARRAY[{}]", args.join(",")))
+                .unwrap()
+                .remove(0),
+        ))
+    };
+    let drain = |plan: Arc<UnifiedPlan>, standalone, steps| {
+        let memory = MemoryBudget::new(64 << 10);
+        let cancel = CancellationToken::new();
+        let token = cancel.clone();
+        let mut reader = ImageDecoder::new(&memory, &cancel, move |mut reader| async move {
+            let mut input = reader.input();
+            let control = ProductionControl::new(input.memory, &token, input.cancellation);
+            let source = if standalone {
+                let mut root = None;
+                plan.try_visit_scalar_expressions(&mut |scalar| {
+                    assert!(root.replace(scalar).is_none());
+                    Ok::<_, SQLError>(())
+                })?;
+                StoredSequenceInput::Scalar(root.unwrap())
+            } else {
+                StoredSequenceInput::Plan(plan.as_ref().into())
+            };
+            visit_stored_sequence_references_with_work(source, &control, &mut input, &Missing).await
+        })
+        .unwrap();
+        for call in 1..100_000 {
+            match reader.advance(&mut std::io::empty(), ImageDecodeWindow { bytes: 1, steps }) {
+                Ok(None) => {}
+                Ok(Some(())) => panic!("accepted absent sequence"),
+                Err(error) => {
+                    assert!(
+                        matches!(error, SQLError::Internal(ref message) if message == "first_absent")
+                    );
+                    drop(reader);
+                    assert_eq!(memory.used(), 0);
+                    return call;
+                }
+            }
+        }
+        panic!("native observation did not finish")
+    };
+    let early = fixture(1);
+    let late = fixture(WIDTH - 1);
+    for scalar in [true, false] {
+        for steps in [1, 64] {
+            let first = drain(early.clone(), scalar, steps);
+            let last = drain(late.clone(), scalar, steps);
+            assert!(
+                last >= first + (WIDTH - 2) / steps,
+                "early {first}, late {last}"
+            );
+        }
+    }
+}

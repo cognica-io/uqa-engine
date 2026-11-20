@@ -71,3 +71,21 @@ pub fn order_cte_plans_with_control<'p>(
     }
     Ok(selected.finish()?)
 }
+
+/// A caller editing the original CTEs needs declaration positions, in the same dependency order used for borrowed plans.
+pub(crate) async fn cte_positions_with_work<W: crate::catalog::work::Work>(
+    plans: &[CtePlan],
+    control: ProductionControl<'_>,
+    work: &mut W,
+) -> Result<Produced<Vec<usize>>, SQLError> {
+    let mut declared = ProductionVec::new(control);
+    for (position, plan) in plans.iter().enumerate() {
+        work.checkpoint().await?;
+        if plan.recursive {
+            drop(declared);
+            return CteAnalysis::new(plans, control)?.order();
+        }
+        declared.push_copy(position)?;
+    }
+    Ok(declared.finish()?)
+}

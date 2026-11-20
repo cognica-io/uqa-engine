@@ -14,7 +14,7 @@ use uqa_core::{
 };
 
 pub(crate) fn canonical_catalog_relation_with_control(
-    catalog: &dyn StoredRelationCatalog,
+    catalog: &(impl StoredRelationCatalog + ?Sized),
     reference: &str,
     lookup_mode: RelationLookupMode,
     loaded_catalog: bool,

@@ -8,11 +8,13 @@
 
 mod bidirectional;
 mod input;
+mod retirement;
 #[cfg(test)]
 mod tests;
 mod tree;
 
 pub use bidirectional::BudgetedSharedMapBidirectionalIter;
+pub(in crate::memory) use retirement::SharedMapRetirement;
 
 use std::{borrow::Borrow, cmp::Ordering, ops::Bound, sync::Arc};
 

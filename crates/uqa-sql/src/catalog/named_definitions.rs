@@ -11,7 +11,7 @@ use std::{borrow::Borrow, iter::Peekable};
 use uqa_core::{
     memory::{
         Budgeted, MemoryBudget, MemoryError, Produced, ProductionControl, RetainedMap,
-        RetainedMapIter, RetainedMapSnapshot,
+        RetainedMapIter, RetainedMapRetirement, RetainedMapSnapshot,
     },
     CancellationToken,
 };
@@ -155,6 +155,15 @@ impl<K: Ord, T> Clone for DefinitionRegistry<K, T> {
             durable: self.durable.clone(),
             temporary: self.temporary.clone(),
         }
+    }
+}
+
+impl<K, T> DefinitionRegistry<K, T> {
+    pub(crate) fn prepare_retirement(
+        &self,
+        memory: &MemoryBudget,
+    ) -> Result<RetainedMapRetirement<K, DefinitionEntry<T>>, MemoryError> {
+        RetainedMapRetirement::prepare([&self.durable, &self.temporary], memory)
     }
 }
 

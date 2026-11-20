@@ -16,7 +16,7 @@ fn catalog_validation_keeps_the_selected_missing_namespace_after_the_live_table_
     #[case] provider: Provider,
 ) {
     let directory = tempfile::tempdir().unwrap();
-    let engine = provider.open(&directory.path().join("selection"));
+    let engine = std::sync::Arc::new(provider.open(&directory.path().join("selection")));
     engine.sql("CREATE SCHEMA original; CREATE TABLE original.item(id integer); CREATE TABLE keep(id integer)", &[]).unwrap();
     let complete = engine.durable.schemas.read().clone();
     assert!(engine.durable.schemas.write().remove("original").unwrap());
@@ -27,12 +27,15 @@ fn catalog_validation_keeps_the_selected_missing_namespace_after_the_live_table_
 
     let mut polls = 0;
     while matches!(checks, CatalogValidation::Capture(_)) {
-        checks = checks.advance(&engine, &control, 1).unwrap().unwrap();
+        checks = checks
+            .advance(&engine, |owner| owner, &control, 1)
+            .unwrap()
+            .unwrap();
         polls += 1;
     }
     assert!(polls > 2);
     let error = loop {
-        match checks.advance(&engine, &control, 1) {
+        match checks.advance(&engine, |owner| owner, &control, 1) {
             Ok(Some(next)) => checks = next,
             Ok(None) => panic!("validation accepted the original table without its schema"),
             Err(error) => break error,
@@ -48,17 +51,40 @@ fn catalog_validation_keeps_the_selected_missing_namespace_after_the_live_table_
 
     let mut remaining = Some(CatalogValidation::begin(&engine, &control).unwrap());
     while let Some(work) = remaining {
-        remaining = work.advance(&engine, &control, 64).unwrap();
+        remaining = work.advance(&engine, |owner| owner, &control, 64).unwrap();
     }
     assert_eq!(control.memory().used(), 0);
 }
 
 #[test]
-fn catalog_validation_returns_the_original_cancellation_reason_from_sql() {
+fn catalog_validation_preserves_resource_errors_and_sql_diagnostics() {
+    use uqa_core::memory::MemoryError;
+    use uqa_storage::backup::BackupError;
+
     let reason = uqa_core::QueryCancelled::USER_REQUEST;
-    let sql = uqa_sql::SQLError::from(reason).with_context("checking a stored catalog binding");
-    let error = uqa_storage::backup::BackupError::from(sql_error(sql));
-    assert!(
-        matches!(error, uqa_storage::backup::BackupError::Cancelled(actual) if actual == reason)
-    );
+    let convert = |error: SQLError| {
+        BackupError::from(sql_error(
+            error.with_context("checking a stored catalog binding"),
+        ))
+    };
+    assert!(matches!(convert(reason.into()), BackupError::Cancelled(actual) if actual == reason));
+    let memory = MemoryBudget::new(11);
+    let held = memory.reserve(7).unwrap();
+    let denied = memory.reserve(5).unwrap_err();
+    assert!(matches!(
+        convert(denied.into()),
+        BackupError::Memory(MemoryError::Limit {
+            required: 12,
+            limit: 11
+        })
+    ));
+    drop(held);
+    assert_eq!(memory.used(), 0);
+
+    let raised = convert(SQLError::Routine {
+        sqlstate: "53200".into(),
+        message: "user-defined diagnostic".into(),
+    });
+    assert!(matches!(raised, BackupError::Storage(_)));
+    assert!(raised.to_string().contains("user-defined diagnostic"));
 }

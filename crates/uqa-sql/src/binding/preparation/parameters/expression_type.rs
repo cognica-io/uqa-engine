@@ -30,6 +30,13 @@ impl ExpressionType {
         let selected = values.iter().fold(Derivation::None, |state, value| {
             state.combine(value.derivation)
         });
+        Self::with_derivation(ty, selected)
+    }
+
+    pub(in crate::binding::preparation) fn with_derivation(
+        ty: Option<AnalysisType>,
+        selected: Derivation,
+    ) -> Self {
         let mut result = Self::resolved_owned(ty);
         result.derivation = selected.result(result.derivation.oid());
         result
@@ -59,10 +66,18 @@ impl ExpressionType {
         values: &[Self],
     ) -> Self {
         let mut result = Self::resolved_owned(ty);
-        result.derivation = values.iter().fold(result.derivation, |state, value| {
-            state.combine(value.derivation.error_only())
-        });
+        for value in values {
+            result.include_independent(value);
+        }
         result
+    }
+
+    pub(in crate::binding::preparation) fn field_type(&self) -> Option<&ColumnType> {
+        self.ty.as_deref()
+    }
+
+    pub(in crate::binding::preparation) fn include_independent(&mut self, value: &Self) {
+        self.derivation = self.derivation.combine(value.derivation.error_only());
     }
 
     pub(in crate::binding::preparation) fn resolved(ty: Option<ColumnType>) -> Self {
@@ -174,6 +189,14 @@ impl ExpressionType {
             })
             .transpose()?;
         Ok(output)
+    }
+
+    /// Common VALUES typing, collation and record-field selection need one observation per run of equivalent resolved inputs. SQL unknowns retain their individual coercion sites.
+    pub(in crate::binding::preparation) fn same_resolved_values_input(&self, other: &Self) -> bool {
+        self.ty.is_some()
+            && self.ty == other.ty
+            && self.derivation == other.derivation
+            && self.record_fields == other.record_fields
     }
 
     pub(in crate::binding::preparation) fn is_deferred(&self) -> bool {

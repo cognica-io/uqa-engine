@@ -30,10 +30,33 @@ pub use shells::RoutineShellTypes;
 
 /// `PostgreSQL` identifies a trigger handler by its result type, including a declaration that retains the `SETOF` flag.
 pub fn routine_returns_trigger(definition: &CreateFunction) -> bool {
-    matches!(
-        &definition.returns,
-        FunctionReturns::Scalar { type_name } | FunctionReturns::SetOf { type_name }
-            if canonical_routine_type_name(type_name) == "trigger"
+    crate::catalog::work::inline(routine_returns_trigger_with_work(
+        definition,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+        &mut (),
+    ))
+    .expect("ordinary trigger type normalization cannot be cancelled or limited")
+}
+
+pub(crate) async fn routine_returns_trigger_with_work(
+    definition: &CreateFunction,
+    control: &uqa_core::memory::ProductionControl<'_>,
+    work: &mut (impl crate::catalog::work::Work + Send),
+) -> Result<bool, SQLError> {
+    let (FunctionReturns::Scalar { type_name } | FunctionReturns::SetOf { type_name }) =
+        &definition.returns
+    else {
+        return Ok(false);
+    };
+    control.check()?;
+    if type_name.eq_ignore_ascii_case("trigger") {
+        return Ok(true);
+    }
+    Ok(
+        crate::type_resolution::canonical_routine_type_name_with_work(type_name, control, work)
+            .await?
+            .as_str()
+            == "trigger",
     )
 }
 
@@ -512,21 +535,36 @@ pub(super) fn validate_routine_declaration(def: &CreateFunction) -> Result<(), S
     validation::validate_inline(def)
 }
 
-pub(super) fn routine_parameter_regrole_constants(
-    catalog: &dyn RoutineTypeCatalog,
-    def: &CreateFunction,
-) -> crate::catalog::regrole_dependencies::StoredRegroleConstants {
-    let mut constants = crate::catalog::regrole_dependencies::StoredRegroleConstants::default();
-    for parameter in &def.params {
-        let Some(default) = parameter.default.as_ref() else {
-            continue;
-        };
-        let target = catalog
-            .resolve_catalog_column_type(&parameter.type_name)
-            .or_else(|| ColumnType::from_sql_name(&parameter.type_name).ok());
-        constants.collect_expression(default, target.as_ref());
-    }
-    constants
+pub(super) fn signature_dependencies(
+    context: &super::compilation::RoutineCompilationContext<'_>,
+    definition: &CreateFunction,
+) -> Result<crate::catalog::regrole_dependencies::StoredRegroleConstants, SQLError> {
+    let roles = crate::catalog::work::inline(validation::signature(
+        context.types,
+        context.regroles,
+        definition,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+        &mut (),
+    ))?;
+    Ok(roles
+        .into_uncontrolled()
+        .expect("ordinary routine signature"))
+}
+
+/// Validate a restored declaration against the destination catalog in declaration order, retaining the parameter role inputs for its subsequent body checks.
+pub async fn validate_stored_routine_signature_from<C>(
+    catalog: &C,
+    definition: &CreateFunction,
+    control: &uqa_core::memory::ProductionControl<'_>,
+    input: &mut uqa_core::image_io::AsyncImageInput<'_>,
+) -> Result<
+    uqa_core::memory::Produced<crate::catalog::regrole_dependencies::StoredRegroleConstants>,
+    SQLError,
+>
+where
+    C: RoutineTypeCatalog + crate::catalog::regrole_dependencies::StoredRegroleResolver + Sync,
+{
+    validation::signature(catalog, catalog, definition, control, input).await
 }
 
 pub(super) fn routine_definition_error(message: impl Into<String>) -> SQLError {

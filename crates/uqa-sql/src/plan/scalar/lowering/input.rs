@@ -167,6 +167,24 @@ impl crate::plan::ExpressionPlan {
         Self::lower_scalar_with_query_input(expression, &mut NoQueries, control, input)?.await
     }
 
+    /// Lower syntax whose dependency walk already established that it has no subquery, retaining only a suspending caller's constructor.
+    pub(crate) async fn lower_stored_scalar_with_work<W: crate::catalog::work::Work + Send>(
+        expression: &Expr,
+        control: &ProductionControl<'_>,
+        work: &mut W,
+    ) -> Result<OwnedScalarExpr, SQLError> {
+        if !W::MAY_SUSPEND || control.budget().is_none() {
+            return Ok(Self::lower_scalar_for_rewrite(expression, control)?);
+        }
+        Self::lower_scalar_with_query_input(
+            expression,
+            &mut NoQueries,
+            control,
+            &mut crate::catalog::work::ReferenceWork { control, work },
+        )?
+        .await
+    }
+
     /// Lower a retained scalar into an enclosing private query arena. Query callbacks run in ordinary lowering order, and a parameter replacement suppresses traversal of its replaced syntax. The arena keeps every completed query owner until its enclosing constructor publishes or retires it.
     pub(in crate::plan) fn lower_scalar_with_query_input<
         's: 'a,
@@ -206,13 +224,17 @@ where
     control.check()?;
     let memory = control.budget().expect("admitted scalar construction");
     let mut frames = BudgetedSmallVec::<[Frame<'_, '_>; 4]>::new(memory);
-    frames
-        .reserve(1)
-        .map_err(uqa_core::ValueRetentionError::from)?;
-    frames
-        .push(Frame::new(expression, *control, queries, input, retain_children).await?)
-        .map_err(uqa_core::ValueRetentionError::from)?;
+    let mut next = Some(expression);
     loop {
+        if let Some(source) = next.take() {
+            frames
+                .reserve(1)
+                .map_err(uqa_core::ValueRetentionError::from)?;
+            let frame = Frame::new(source, *control, queries, input, retain_children).await?;
+            frames
+                .push(frame)
+                .map_err(uqa_core::ValueRetentionError::from)?;
+        }
         control.check()?;
         input.checkpoint().await?;
         control.check()?;
@@ -227,12 +249,7 @@ where
                     .reserve_children(1)
                     .map_err(uqa_core::ValueRetentionError::from)?;
             }
-            frames
-                .reserve(1)
-                .map_err(uqa_core::ValueRetentionError::from)?;
-            frames
-                .push(Frame::new(child, *control, queries, input, retain_children).await?)
-                .map_err(uqa_core::ValueRetentionError::from)?;
+            next = Some(child);
         } else {
             let value = frames
                 .pop()

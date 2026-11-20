@@ -22,6 +22,16 @@ use crate::{
 };
 use uqa_core::image_io::AsyncImageInput;
 
+mod observation;
+pub use observation::StoredStatementObserver;
+mod legacy;
+
+#[derive(Clone, Copy)]
+enum Purpose {
+    Executable,
+    StoredReferences,
+}
+
 /// A completed private executable with its original mutable field leases and admitted retirement workspace. Observation borrows the native plan; dropping the owner retires its complete tree before returning those leases.
 #[derive(Debug)]
 pub struct RetainedExecutablePlan(Prefix<MutableExecutablePlan>);
@@ -61,6 +71,31 @@ impl TryFrom<RetainedExecutablePlan> for QueryReplacement {
 mod tests;
 
 impl RetainedExecutablePlan {
+    /// Transfer the complete constructor, including each field's allocation leases, to the next SQL analysis owner.
+    pub(crate) fn into_mutable(
+        self,
+    ) -> (
+        MutableExecutablePlan,
+        crate::plan::copy::stored_plan::OriginalWorkspace,
+    ) {
+        let workspace = crate::plan::copy::stored_plan::OriginalWorkspace(self.0.context().clone());
+        (self.0.take(), workspace)
+    }
+
+    /// Publish the finished native fields and their original workspace for stored call binding.
+    pub(crate) async fn into_bound_from(
+        self,
+        control: &ProductionControl<'_>,
+        input: &mut AsyncImageInput<'_>,
+    ) -> Result<crate::plan::copy::stored_plan::BoundPlan> {
+        use crate::plan::copy::stored_plan::{BoundPlan, OriginalWorkspace};
+        let workspace = OriginalWorkspace(self.0.context().clone());
+        Ok(BoundPlan::new(
+            self.0.finish_from(control, input).await?,
+            Some(workspace),
+        ))
+    }
+
     pub(crate) async fn bind_relation_names_from_input(
         self,
         resolve: &crate::binding::view_dependencies::owned::fields::StoredRelationResolver<'_>,
@@ -89,8 +124,32 @@ impl RetainedExecutablePlan {
         Ok(plan)
     }
 
+    pub(crate) fn stored_projection(
+        plan: MutableExecutablePlan,
+        workspace: &crate::plan::copy::stored_plan::OriginalWorkspace,
+    ) -> Self {
+        Self(workspace.0.retain(plan))
+    }
+
+    pub(crate) async fn edit_stored_scalars_from<E, I>(
+        self,
+        edit: E,
+        control: &ProductionControl<'_>,
+        input: &mut (impl crate::catalog::work::Work + Send),
+    ) -> Result<(Self, E)>
+    where
+        E: crate::plan::ArenaEdit + for<'w> ScalarEdit<construction::Work<'w>, Identity = I> + Send,
+        I: Copy + Send,
+    {
+        let (plan, edit) = self
+            .0
+            .edit_stored_scalars_from(edit, control, input)
+            .await?;
+        Ok((Self(plan), edit))
+    }
+
     /// Share the native structural and scalar traversal while preserving each original scalar selection identity.
-    pub(in crate::plan) async fn edit_scalars_from_input<E, I>(
+    pub(crate) async fn edit_scalars_from_input<E, I>(
         self,
         edit: E,
         control: &ProductionControl<'_>,
@@ -102,6 +161,26 @@ impl RetainedExecutablePlan {
     {
         let (plan, edit) = self.0.edit_scalars_from_input(edit, control, input).await?;
         Ok((Self(plan), edit))
+    }
+
+    pub(crate) async fn normalize_windows_from(
+        self,
+        control: &ProductionControl<'_>,
+        input: &mut AsyncImageInput<'_>,
+    ) -> Result<Self> {
+        self.0
+            .normalize_windows_from(control, input)
+            .await
+            .map(Self)
+    }
+
+    pub(crate) fn mark_catalog_relations_bound(
+        self,
+        control: &ProductionControl<'_>,
+    ) -> Result<Self> {
+        let context = self.0.context().clone();
+        let plan = self.0.take().mark_catalog_relations_bound(control)?;
+        Ok(Self(context.retain(plan)))
     }
 
     pub fn as_plan_ref(&self) -> PlanRef<'_> {
@@ -133,6 +212,25 @@ impl UnifiedPlan {
         control: &ProductionControl<'_>,
         parameters: Option<&ParameterLookup<'_>>,
         input: &mut AsyncImageInput<'_>,
+    ) -> Result<RetainedExecutablePlan> {
+        Self::lower_retained_statement(
+            statement,
+            aggregates,
+            control,
+            parameters,
+            Purpose::Executable,
+            input,
+        )
+        .await
+    }
+
+    async fn lower_retained_statement<W: crate::catalog::work::Work + Send>(
+        statement: &Statement,
+        aggregates: &(dyn AggregateClassifier + Sync),
+        control: &ProductionControl<'_>,
+        parameters: Option<&ParameterLookup<'_>>,
+        purpose: Purpose,
+        input: &mut W,
     ) -> Result<RetainedExecutablePlan> {
         control.check()?;
         if control.budget().is_none() {
@@ -169,16 +267,24 @@ impl UnifiedPlan {
                     query.map(MutableExecutablePlan::Query)
                 }
                 statement => {
-                    let source =
-                        crate::plan::copy::lowering::mutations::Source::statement(statement)
-                            .ok_or_else(|| {
-                                SQLError::Unsupported(
-                                    "native executable construction requires a query or mutation"
-                                        .into(),
-                                )
-                            })?;
-                    let command =
-                        mutations::child(source, &mut copying, &mut work, aggregates).await?;
+                    let command = match crate::plan::copy::lowering::mutations::Source::statement(
+                        statement,
+                    ) {
+                        Some(source) => {
+                            mutations::child(source, &mut copying, &mut work, aggregates).await?
+                        }
+                        None if matches!(purpose, Purpose::StoredReferences) => {
+                            copying
+                                .stored_utility(statement, aggregates, &mut work)
+                                .await?
+                        }
+                        None => {
+                            return Err(SQLError::Unsupported(
+                                "native executable construction requires a query or mutation"
+                                    .into(),
+                            ))
+                        }
+                    };
                     command.map(|command| {
                         MutableExecutablePlan::Command(MutableCommandPlan::from_rewrite_parts(
                             command,

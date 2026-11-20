@@ -6,29 +6,38 @@
 
 //! Validate captured named builtin sequence arguments without evaluating numeric or dynamic inputs.
 
-use super::routine_dependencies::{self, References};
+use super::routine_dependencies::{self, Reference, References};
 use crate::catalog::{relation_names::RelationNameCatalog, CatalogReadView};
 use uqa_core::memory::ProductionControl;
 use uqa_sql::{
-    ast::{Expr, FunctionBinding, Statement},
-    plan::{PlanRef, UnifiedPlan},
+    catalog::CatalogWork,
+    plan::{PlanRef, StoredStatementObserver, UnifiedPlan},
     schema::dependencies::rewrites::{
-        visit_scalar_sequence_function_references_with_control,
-        visit_sequence_function_references_with_control,
+        visit_stored_sequence_references_with_work, SequenceFunctionRelations, StoredSequenceInput,
     },
-    SQLError, ScalarExpr,
+    SQLError,
 };
 
 pub fn validate(
     catalog: &CatalogReadView,
     control: &ProductionControl<'_>,
 ) -> Result<(), SQLError> {
+    crate::catalog::selection_work::inline(validate_with_work(catalog, control, &mut ()))
+}
+
+pub(super) async fn validate_with_work<W: CatalogWork + Send>(
+    catalog: &CatalogReadView,
+    control: &ProductionControl<'_>,
+    work: &mut W,
+) -> Result<(), SQLError> {
     control.check()?;
     routine_dependencies::visit(
         catalog.snapshot(),
         &SequenceReferences { catalog, control },
         control,
+        work,
     )
+    .await
 }
 
 struct SequenceReferences<'a, 'b> {
@@ -36,10 +45,18 @@ struct SequenceReferences<'a, 'b> {
     control: &'a ProductionControl<'b>,
 }
 
-impl SequenceReferences<'_, '_> {
-    fn reference(&self, reference: &str) -> Result<(), SQLError> {
-        let Some(identity) =
-            uqa_sql::schema::sequences::native::function_relation(reference, self.control)?
+impl SequenceFunctionRelations for SequenceReferences<'_, '_> {
+    async fn reference<W: CatalogWork + Send>(
+        &self,
+        reference: &str,
+        work: &mut W,
+    ) -> Result<(), SQLError> {
+        let Some(identity) = uqa_sql::schema::sequences::native::function_relation_with_work(
+            reference,
+            self.control,
+            work,
+        )
+        .await?
         else {
             return Ok(());
         };
@@ -61,40 +78,49 @@ impl SequenceReferences<'_, '_> {
     }
 }
 
-impl References for SequenceReferences<'_, '_> {
-    fn expression(&self, expression: &Expr) -> Result<(), SQLError> {
-        visit_sequence_function_references_with_control(expression, self.control, &mut |name| {
-            self.reference(name)
-        })
-    }
-    fn scalar(&self, expression: &ScalarExpr) -> Result<(), SQLError> {
-        visit_scalar_sequence_function_references_with_control(
-            expression,
-            self.control,
-            &mut |name| self.reference(name),
+impl StoredStatementObserver for &SequenceReferences<'_, '_> {
+    async fn plan<W: CatalogWork + Send>(
+        &mut self,
+        plan: PlanRef<'_>,
+        control: &ProductionControl<'_>,
+        work: &mut W,
+    ) -> Result<(), SQLError> {
+        visit_stored_sequence_references_with_work(
+            StoredSequenceInput::Plan(plan),
+            control,
+            work,
+            *self,
         )
+        .await
     }
-    fn plan(&self, plan: PlanRef<'_>) -> Result<(), SQLError> {
-        self.control.check()?;
-        plan.try_visit_scalar_expressions(&mut |expression| self.scalar(expression))
-    }
-    fn statement(&self, statement: &Statement) -> Result<(), SQLError> {
-        let plan =
-            UnifiedPlan::lower_borrowed_for_rewrite(statement, &|_: &str| false, self.control)?;
-        self.plan(plan.as_plan_ref())
-    }
-    // These carry no argument expression. The independent routine predicate validates their concrete identities.
-    fn binding(&self, _: &FunctionBinding) -> Result<(), SQLError> {
-        self.control.check()?;
-        Ok(())
-    }
-    fn identity(&self, _: [u8; 16], _: &[String], _: bool) -> Result<(), SQLError> {
-        self.control.check()?;
-        Ok(())
-    }
-    fn trigger(&self, _: &str, _: Option<[u8; 16]>) -> Result<(), SQLError> {
-        self.control.check()?;
-        Ok(())
+}
+
+impl References for SequenceReferences<'_, '_> {
+    async fn inspect<W: CatalogWork + Send>(
+        &self,
+        reference: Reference<'_>,
+        work: &mut W,
+    ) -> Result<(), SQLError> {
+        let input = match reference {
+            Reference::Expression(expr) => StoredSequenceInput::Expression(expr),
+            Reference::Scalar(expr) => StoredSequenceInput::Scalar(expr),
+            Reference::Plan(plan) => StoredSequenceInput::Plan(plan),
+            Reference::Statement(statement) => {
+                let mut observer = self;
+                return UnifiedPlan::visit_stored_statement_with_work(
+                    statement,
+                    self.control,
+                    work,
+                    &mut observer,
+                )
+                .await;
+            }
+            // These carry no argument expression. The independent routine predicate checks their concrete identities.
+            Reference::Binding(_) | Reference::Routine(..) | Reference::Trigger(..) => {
+                return Ok(())
+            }
+        };
+        visit_stored_sequence_references_with_work(input, self.control, work, self).await
     }
 }
 

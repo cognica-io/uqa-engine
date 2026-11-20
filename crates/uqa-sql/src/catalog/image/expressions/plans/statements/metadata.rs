@@ -21,7 +21,7 @@ image_struct!(WindowDefinition {
     inherited,
     spec
 });
-image_struct!(WindowSpec { definition, reference, partition_by, order_by, frame } skip { raw_definition });
+projected_struct!(recursive, WindowSpec { definition, reference, partition_by, order_by, frame } skip { raw_definition });
 image_struct!(WindowReference { name, kind });
 image_enum!(WindowReferenceKind { 0 => Direct, 1 => Copy });
 image_struct!(WindowFrame {

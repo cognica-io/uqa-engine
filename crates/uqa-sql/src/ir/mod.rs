@@ -7,7 +7,9 @@
 //! Serializable scalar SQL IR shared by analysis, planning, and execution.
 
 mod call_arguments;
-pub(crate) use call_arguments::scalar_call_argument_value_owned;
+pub(crate) use call_arguments::{
+    scalar_call_argument_value_owned, scalar_call_arguments_with_work,
+};
 pub(crate) mod children;
 mod collation;
 mod equality;
@@ -236,6 +238,30 @@ pub enum ScalarFrameBound {
 }
 
 impl ScalarExpr {
+    pub(crate) fn written_type_name(&self) -> Option<&str> {
+        match self {
+            Self::Cast { ty, .. }
+            | Self::TypedLiteral { ty, .. }
+            | Self::CompositeRow {
+                binding: crate::ast::CompositeRowBinding { ty, .. },
+                ..
+            } => Some(ty),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn written_type_name_mut(&mut self) -> Option<&mut String> {
+        match self {
+            Self::Cast { ty, .. }
+            | Self::TypedLiteral { ty, .. }
+            | Self::CompositeRow {
+                binding: crate::ast::CompositeRowBinding { ty, .. },
+                ..
+            } => Some(ty),
+            _ => None,
+        }
+    }
+
     #[must_use]
     /// Relation qualifier of a named attribute or qualified wildcard.
     pub fn reference_qualifier(&self) -> Option<&str> {

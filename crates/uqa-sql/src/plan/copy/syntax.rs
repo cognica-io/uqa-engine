@@ -9,6 +9,8 @@
 use super::{Copying, Result};
 use uqa_core::memory::{OwnedMap, OwnedSet};
 
+pub(in crate::plan::copy) mod native;
+
 pub(crate) trait SyntaxCopy: Sized {
     fn copy_syntax(&self, copying: &mut Copying<'_>) -> Result<Self>;
 }
@@ -51,6 +53,46 @@ macro_rules! syntax_enum {
     };
 }
 
+/// Check variable payloads in projection order and stop at the end of the work window.
+macro_rules! fields_fit {
+    ($window:ident;) => { true };
+    ($window:ident; $first:expr $(, $next:expr)* $(,)?) => {
+        $window.field($first)
+        $(&& $window.field($next))*
+    };
+}
+
+/// The native field list is shared with the synchronous syntax projection, including allocation and diagnostic order.
+macro_rules! native_struct {
+    ($ty:ty { $($field:ident),* $(,)? }) => {
+        native_struct!(inline, $ty { $($field),* });
+    };
+    ($mode:ident, $ty:ty { $($field:ident),* $(,)? } $(observe $observe:ident)?) => {
+        syntax_struct!($ty { $($field),* });
+        crate::plan::copy::stored_plan::projection!($mode, $ty, source, input, {
+            $(input.$observe(source);)?
+            Self { $($field: input.field(&source.$field).await?),* }
+        }; window => fields_fit!(window; $(&source.$field,)*));
+    };
+}
+
+macro_rules! native_enum {
+    ($ty:ty { $($variants:tt)* }) => {
+        native_enum!(inline, $ty { $($variants)* });
+    };
+    ($mode:ident, $ty:ty { $($variant:ident $(($item:ident))? $({$($field:ident),*})?),* $(,)? }) => {
+        syntax_enum!($ty { $($variant $(($item))? $({$($field),*})?),* });
+        crate::plan::copy::stored_plan::projection!($mode, $ty, source, input, match source {
+            $(Self::$variant $(($item))? $({$($field),*})? =>
+                Self::$variant $((input.field($item).await?))? $({$($field: input.field($field).await?),*})?),*
+        }; window => match source {
+            $(Self::$variant $(($item))? $({$($field),*})? =>
+                fields_fit!(window; $($item,)? $($($field,)*)?)
+            ),*
+        });
+    };
+}
+
 macro_rules! copy_inline {
     ($($ty:ty),+ $(,)?) => {$ (
         impl SyntaxCopy for $ty {
@@ -90,6 +132,14 @@ impl<T: Copy, const N: usize> SyntaxCopy for [T; N] {
 }
 impl SyntaxCopy for String {
     fn copy_syntax(&self, copying: &mut Copying<'_>) -> Result<Self> {
+        if let super::CopyPurpose::StoredHeader(timing) = copying.purpose {
+            if timing == super::HeaderText::WhenSelected {
+                return Ok(String::new());
+            }
+            let mut value = uqa_core::memory::ProductionString::new(copying.control);
+            value.reserve(self.len())?;
+            return Ok(copying.take(value.finish()?));
+        }
         copying.text(self)
     }
 }
@@ -102,6 +152,10 @@ impl<T: SyntaxCopy> SyntaxCopy for Option<T> {
 }
 impl<T: SyntaxCopy> SyntaxCopy for Vec<T> {
     fn copy_syntax(&self, copying: &mut Copying<'_>) -> Result<Self> {
+        if matches!(copying.purpose, super::CopyPurpose::StoredHeader(_)) {
+            copying.check()?;
+            return Ok(Vec::new());
+        }
         copying.map(self.iter(), |copying, value| value.copy_syntax(copying))
     }
 }
@@ -147,6 +201,9 @@ impl SyntaxCopy for crate::plan::UnifiedPlan {
     fn copy_syntax(&self, copying: &mut Copying<'_>) -> Result<Self> {
         Ok(match self {
             Self::Query(query) => Self::Query(copying.boxed(|copying| copying.query(query))?),
+            Self::Command(command) if copying.purpose == super::CopyPurpose::Stored => {
+                Self::Command(super::stored_plan::Inline::project(command, copying)?)
+            }
             Self::Command(command) => Self::Command(copying.boxed(|copying| {
                 copying.field("command", |copying| command.as_ref().copy_syntax(copying))
             })?),
@@ -242,7 +299,7 @@ syntax_struct!(crate::ast::ObjectAclEntry {
     grantor,
     grant_option
 });
-syntax_struct!(crate::expr::composites::CompositeConstantSource { value, descriptors });
+native_struct!(crate::expr::composites::CompositeConstantSource { value, descriptors });
 syntax_struct!(crate::explain::ExplainOptions { options });
 syntax_struct!(crate::explain::ExplainOption { name, value });
 syntax_enum!(crate::explain::ExplainOptionValue { Boolean(value), Integer(value), Float(value), String(value) });

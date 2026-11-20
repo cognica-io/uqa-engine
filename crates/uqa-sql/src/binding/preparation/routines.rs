@@ -12,13 +12,14 @@ use super::{
 };
 
 /// Inspect a captured statement with its original parameter namespace. Analysis may retain scratch metadata but never applies input conversions or rewrites to the stored plan.
-pub(crate) fn analyze_stored_routine_statement(
+pub(crate) async fn analyze_stored_routine_statement<W: crate::catalog::work::Work + Send>(
     routines: &dyn RoutineResolution,
     plan: crate::plan::PlanRef<'_>,
     params: &[crate::SQLParam],
     parameters: Option<&crate::binding::RoutineParameterScope>,
     binding: crate::binding::production::ControlledBindingContext<'_>,
     control: &uqa_core::memory::ProductionControl<'_>,
+    work: &mut W,
 ) -> Result<crate::binding::statements::AnalyzedResult, SQLError> {
     let mut scope = SchemaScope::for_analysis_with_control(binding, control)?;
     scope.scalar_binding = crate::binding::ScalarBindingMode::References;
@@ -32,10 +33,10 @@ pub(crate) fn analyze_stored_routine_statement(
         schema_expression: (),
     };
     let result = match plan {
-        crate::plan::PlanRef::Query(query) => Some(analysis.query(
-            query,
-            parameters.map(crate::binding::RoutineParameterScope::schema),
-        )?),
+        crate::plan::PlanRef::Query(query) => {
+            let outer = parameters.map(crate::binding::RoutineParameterScope::schema);
+            Some(analysis.query_with_work(query, outer, work).await?)
+        }
         crate::plan::PlanRef::Command(command) => analysis.command(command)?,
     };
     control.check()?;

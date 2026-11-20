@@ -33,5 +33,21 @@ pub fn column_oid(column: &ColumnDef) -> i64 {
     )
 }
 
+pub(crate) async fn column_oid_with_work<W: crate::catalog::CatalogWork + Send>(
+    column: &ColumnDef,
+    input: &mut crate::catalog::work::ReferenceWork<'_, '_, W>,
+) -> Result<i64, SQLError> {
+    if let Some(oid) = column.collation_oid {
+        return Ok(i64::from(oid));
+    }
+    for step in crate::catalog::type_metadata::type_collation_steps(&column.ty) {
+        input.checkpoint().await?;
+        if let Some(oid) = step {
+            return Ok(oid);
+        }
+    }
+    unreachable!("a type has a collation OID")
+}
+
 #[cfg(test)]
 mod tests;

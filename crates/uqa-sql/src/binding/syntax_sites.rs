@@ -10,7 +10,16 @@ use super::stored_routines::BoundRoutineReference;
 use crate::plan::CommandPlan;
 use crate::plan::{CtePlanBody, ExpressionPlan, QueryPlan, RelationalPlan, SourcePlan};
 use crate::{SQLError, ScalarExpr, ScalarFrameBound};
-use uqa_core::Value;
+use uqa_core::{
+    image_io::AsyncImageInput,
+    memory::{Produced, ProductionControl, ProductionVec},
+    Value,
+};
+
+mod commands;
+mod input;
+pub(crate) use input::SiteInput;
+use input::Walk;
 
 /// An expression site of stored syntax and what binding recorded for it.
 #[derive(Debug, Clone, PartialEq)]
@@ -62,20 +71,46 @@ pub fn expression_syntax_sites(
     lowered: &ExpressionPlan,
     bound: &ExpressionPlan,
 ) -> Result<SyntaxSites, SQLError> {
-    let mut walk = Walk::default();
+    let control = ProductionControl::uncontrolled();
+    Ok(
+        crate::catalog::work::inline(expression_sites_from(lowered, bound, &control, &mut ()))?
+            .into_uncontrolled()
+            .expect("ordinary syntax sites"),
+    )
+}
+
+/// Capture the correspondence with its original source pair and admitted position buffers until all stored edits finish.
+pub async fn expression_syntax_sites_with_work(
+    lowered: &ExpressionPlan,
+    bound: &ExpressionPlan,
+    control: &ProductionControl<'_>,
+    work: &mut AsyncImageInput<'_>,
+) -> Result<Produced<SyntaxSites>, SQLError> {
+    expression_sites_from(lowered, bound, control, work).await
+}
+
+pub(crate) async fn expression_sites_from<W: SiteInput>(
+    lowered: &ExpressionPlan,
+    bound: &ExpressionPlan,
+    control: &ProductionControl<'_>,
+    work: &mut W,
+) -> Result<Produced<SyntaxSites>, SQLError>
+where
+    W::Error: Into<SQLError>,
+{
+    let mut walk = Walk::new(*control, work);
     walk.scalar(
         &lowered.scalar,
         &bound.scalar,
         (&lowered.subqueries, &bound.subqueries),
-    )?;
-    Ok(walk.sites)
+    )
+    .await?;
+    walk.finish()
 }
 
 /// Sites of a stored statement lowered to a query.
 pub fn query_syntax_sites(lowered: &QueryPlan, bound: &QueryPlan) -> Result<SyntaxSites, SQLError> {
-    let mut walk = Walk::default();
-    walk.query(lowered, bound, false)?;
-    Ok(walk.sites)
+    ordinary_query_sites(lowered, bound, false)
 }
 
 /// Sites from the query adapter for a stored command; its final output is synthetic and has no syntax node.
@@ -83,9 +118,39 @@ pub(super) fn command_query_syntax_sites(
     lowered: &QueryPlan,
     bound: &QueryPlan,
 ) -> Result<SyntaxSites, SQLError> {
-    let mut walk = Walk::default();
-    walk.query(lowered, bound, true)?;
-    Ok(walk.sites)
+    ordinary_query_sites(lowered, bound, true)
+}
+
+fn ordinary_query_sites(
+    lowered: &QueryPlan,
+    bound: &QueryPlan,
+    command: bool,
+) -> Result<SyntaxSites, SQLError> {
+    let control = ProductionControl::uncontrolled();
+    Ok(crate::catalog::work::inline(query_syntax_sites_with_work(
+        lowered,
+        bound,
+        command,
+        &control,
+        &mut (),
+    ))?
+    .into_uncontrolled()
+    .expect("ordinary syntax sites"))
+}
+
+pub(super) async fn query_syntax_sites_with_work<W: SiteInput>(
+    lowered: &QueryPlan,
+    bound: &QueryPlan,
+    command: bool,
+    control: &ProductionControl<'_>,
+    work: &mut W,
+) -> Result<Produced<SyntaxSites>, SQLError>
+where
+    W::Error: Into<SQLError>,
+{
+    let mut walk = Walk::new(*control, work);
+    walk.query(lowered, bound, command).await?;
+    walk.finish()
 }
 
 fn syntax_projections(
@@ -131,70 +196,31 @@ fn optional_pair<'a, T>(
     }
 }
 
-#[derive(Default)]
-struct Walk {
-    sites: SyntaxSites,
-}
-
-impl Walk {
-    fn query(
+impl<W: SiteInput> Walk<'_, '_, W>
+where
+    W::Error: Into<SQLError>,
+{
+    async fn query(
         &mut self,
         lowered: &QueryPlan,
         bound: &QueryPlan,
         command_root: bool,
     ) -> Result<(), SQLError> {
+        self.checkpoint().await?;
         for (lowered, bound) in pairs(&lowered.ctes, &bound.ctes, "common table expressions")? {
-            self.cte_body(&lowered.body, &bound.body)?;
+            self.cte_body(&lowered.body, &bound.body).await?;
             if let Some((lowered, bound)) =
                 optional_pair(lowered.cycle.as_ref(), bound.cycle.as_ref(), "CYCLE clause")?
             {
-                self.scalar(&lowered.mark_value, &bound.mark_value, (&[], &[]))?;
-                self.scalar(&lowered.mark_default, &bound.mark_default, (&[], &[]))?;
+                self.scalar(&lowered.mark_value, &bound.mark_value, (&[], &[]))
+                    .await?;
+                self.scalar(&lowered.mark_default, &bound.mark_default, (&[], &[]))
+                    .await?;
             }
         }
         match (&lowered.root, &bound.root) {
             (RelationalPlan::QueryBlock(lowered), RelationalPlan::QueryBlock(bound)) => {
-                let subqueries = (&lowered.subqueries[..], &bound.subqueries[..]);
-                if let Some((lowered, bound)) =
-                    optional_pair(lowered.from.as_ref(), bound.from.as_ref(), "FROM clause")?
-                {
-                    self.source(lowered, bound, subqueries)?;
-                }
-                for (lowered, bound) in pairs(
-                    syntax_projections(&lowered.projections, command_root)?,
-                    syntax_projections(&bound.projections, command_root)?,
-                    "select list",
-                )? {
-                    self.scalar(&lowered.expr, &bound.expr, subqueries)?;
-                }
-                self.optional(lowered.r#where.as_ref(), bound.r#where.as_ref(), subqueries)?;
-                self.scalars(&lowered.group_by, &bound.group_by, subqueries)?;
-                if lowered.grouping_sets.len() != bound.grouping_sets.len() {
-                    return Err(shape_error("grouping sets"));
-                }
-                for (lowered, bound) in lowered.grouping_sets.iter().zip(&bound.grouping_sets) {
-                    self.scalars(lowered, bound, subqueries)?;
-                }
-                self.optional(lowered.having.as_ref(), bound.having.as_ref(), subqueries)?;
-                for (lowered, bound) in pairs(&lowered.order_by, &bound.order_by, "ORDER BY")? {
-                    self.scalar(&lowered.expr, &bound.expr, subqueries)?;
-                }
-                self.optional(lowered.limit.as_ref(), bound.limit.as_ref(), subqueries)?;
-                self.optional(lowered.offset.as_ref(), bound.offset.as_ref(), subqueries)?;
-                self.scalars(&lowered.distinct_on, &bound.distinct_on, subqueries)?;
-                for (lowered, bound) in
-                    pairs(&lowered.windows, &bound.windows, "WINDOW definitions")?
-                {
-                    if lowered.name != bound.name || lowered.inherited != bound.inherited {
-                        return Err(shape_error("WINDOW identity"));
-                    }
-                    let lowered: Vec<_> = lowered.spec.expressions().collect();
-                    let bound: Vec<_> = bound.spec.expressions().collect();
-                    for (lowered, bound) in pairs(&lowered, &bound, "WINDOW expressions")? {
-                        self.scalar(lowered, bound, subqueries)?;
-                    }
-                }
-                Ok(())
+                self.query_block(lowered, bound, command_root).await
             }
             (
                 RelationalPlan::SetOp {
@@ -216,14 +242,24 @@ impl Walk {
                     ..
                 },
             ) => {
-                self.query(left, bound_left, false)?;
-                self.query(right, bound_right, false)?;
+                crate::catalog::work::nested!(
+                    W::MAY_SUSPEND,
+                    self.control,
+                    self.query(left, bound_left, false)
+                )?;
+                crate::catalog::work::nested!(
+                    W::MAY_SUSPEND,
+                    self.control,
+                    self.query(right, bound_right, false)
+                )?;
                 let subqueries = (&subqueries[..], &bound_subqueries[..]);
                 for (lowered, bound) in pairs(order_by, bound_order, "ORDER BY")? {
-                    self.scalar(&lowered.expr, &bound.expr, subqueries)?;
+                    self.scalar(&lowered.expr, &bound.expr, subqueries).await?;
                 }
-                self.optional(limit.as_deref(), bound_limit.as_deref(), subqueries)?;
+                self.optional(limit.as_deref(), bound_limit.as_deref(), subqueries)
+                    .await?;
                 self.optional(offset.as_deref(), bound_offset.as_deref(), subqueries)
+                    .await
             }
             (
                 RelationalPlan::Values { rows, subqueries },
@@ -234,7 +270,7 @@ impl Walk {
             ) => {
                 let subqueries = (&subqueries[..], &bound_subqueries[..]);
                 for (lowered, bound) in pairs(rows, bound_rows, "VALUES list")? {
-                    self.scalars(lowered, bound, subqueries)?;
+                    self.scalars(lowered, bound, subqueries).await?;
                 }
                 Ok(())
             }
@@ -242,27 +278,99 @@ impl Walk {
         }
     }
 
+    async fn query_block(
+        &mut self,
+        lowered: &crate::plan::QueryBlockPlan,
+        bound: &crate::plan::QueryBlockPlan,
+        command_root: bool,
+    ) -> Result<(), SQLError> {
+        let subqueries = (&lowered.subqueries[..], &bound.subqueries[..]);
+        if let Some((lowered, bound)) =
+            optional_pair(lowered.from.as_ref(), bound.from.as_ref(), "FROM clause")?
+        {
+            self.source(lowered, bound, subqueries).await?;
+        }
+        for (lowered, bound) in pairs(
+            syntax_projections(&lowered.projections, command_root)?,
+            syntax_projections(&bound.projections, command_root)?,
+            "select list",
+        )? {
+            self.scalar(&lowered.expr, &bound.expr, subqueries).await?;
+        }
+        self.optional(lowered.r#where.as_ref(), bound.r#where.as_ref(), subqueries)
+            .await?;
+        self.scalars(&lowered.group_by, &bound.group_by, subqueries)
+            .await?;
+        if lowered.grouping_sets.len() != bound.grouping_sets.len() {
+            return Err(shape_error("grouping sets"));
+        }
+        for (lowered, bound) in lowered.grouping_sets.iter().zip(&bound.grouping_sets) {
+            self.scalars(lowered, bound, subqueries).await?;
+        }
+        self.optional(lowered.having.as_ref(), bound.having.as_ref(), subqueries)
+            .await?;
+        for (lowered, bound) in pairs(&lowered.order_by, &bound.order_by, "ORDER BY")? {
+            self.scalar(&lowered.expr, &bound.expr, subqueries).await?;
+        }
+        self.optional(lowered.limit.as_ref(), bound.limit.as_ref(), subqueries)
+            .await?;
+        self.optional(lowered.offset.as_ref(), bound.offset.as_ref(), subqueries)
+            .await?;
+        self.scalars(&lowered.distinct_on, &bound.distinct_on, subqueries)
+            .await?;
+        for (lowered, bound) in pairs(&lowered.windows, &bound.windows, "WINDOW definitions")? {
+            if lowered.name != bound.name || lowered.inherited != bound.inherited {
+                return Err(shape_error("WINDOW identity"));
+            }
+            let lowered: Vec<_> = lowered.spec.expressions().collect();
+            let bound: Vec<_> = bound.spec.expressions().collect();
+            for (lowered, bound) in pairs(&lowered, &bound, "WINDOW expressions")? {
+                self.scalar(lowered, bound, subqueries).await?;
+            }
+        }
+        Ok(())
+    }
+
     /// A data-modifying `WITH` query, in the order the syntax visitor walks the statement.
-    fn cte_body(&mut self, lowered: &CtePlanBody, bound: &CtePlanBody) -> Result<(), SQLError> {
+    async fn cte_body(
+        &mut self,
+        lowered: &CtePlanBody,
+        bound: &CtePlanBody,
+    ) -> Result<(), SQLError> {
         match (lowered, bound) {
             (CtePlanBody::Query(lowered), CtePlanBody::Query(bound)) => {
-                self.query(lowered, bound, false)
+                crate::catalog::work::nested!(
+                    W::MAY_SUSPEND,
+                    self.control,
+                    self.query(lowered, bound, false)
+                )
             }
             (CtePlanBody::Command(lowered), CtePlanBody::Command(bound)) => {
-                self.command(lowered, bound)
+                crate::catalog::work::nested!(
+                    W::MAY_SUSPEND,
+                    self.control,
+                    self.command(lowered, bound)
+                )
             }
             _ => Err(shape_error("WITH query")),
         }
     }
 
-    fn command(&mut self, lowered: &CommandPlan, bound: &CommandPlan) -> Result<(), SQLError> {
+    async fn command(
+        &mut self,
+        lowered: &CommandPlan,
+        bound: &CommandPlan,
+    ) -> Result<(), SQLError> {
+        self.checkpoint().await?;
         for (lowered, bound) in pairs(lowered.ctes(), bound.ctes(), "common table expressions")? {
-            self.cte_body(&lowered.body, &bound.body)?;
+            self.cte_body(&lowered.body, &bound.body).await?;
             if let Some((lowered, bound)) =
                 optional_pair(lowered.cycle.as_ref(), bound.cycle.as_ref(), "CYCLE clause")?
             {
-                self.scalar(&lowered.mark_value, &bound.mark_value, (&[], &[]))?;
-                self.scalar(&lowered.mark_default, &bound.mark_default, (&[], &[]))?;
+                self.scalar(&lowered.mark_value, &bound.mark_value, (&[], &[]))
+                    .await?;
+                self.scalar(&lowered.mark_default, &bound.mark_default, (&[], &[]))
+                    .await?;
             }
         }
         let subqueries = (lowered.scalar_subqueries(), bound.scalar_subqueries());
@@ -273,7 +381,11 @@ impl Walk {
                     bound.source.as_deref(),
                     "INSERT source",
                 )? {
-                    self.query(lowered, bound, false)?;
+                    crate::catalog::work::nested!(
+                        W::MAY_SUSPEND,
+                        self.control,
+                        self.query(lowered, bound, false)
+                    )?;
                 }
             }
             (CommandPlan::Update(_), CommandPlan::Update(_))
@@ -284,25 +396,21 @@ impl Walk {
                     bound.source_input(),
                     "command source",
                 )? {
-                    self.source(lowered, bound, subqueries)?;
+                    self.source(lowered, bound, subqueries).await?;
                 }
             }
             _ => return Err(shape_error("WITH command")),
         }
-        let lowered = syntax_expressions(lowered);
-        let bound = syntax_expressions(bound);
-        for (lowered, bound) in pairs(&lowered, &bound, "command expressions")? {
-            self.scalar(lowered, bound, subqueries)?;
-        }
-        Ok(())
+        self.command_scalar_fields(lowered, bound, subqueries).await
     }
 
-    fn source(
+    async fn source(
         &mut self,
         lowered: &SourcePlan,
         bound: &SourcePlan,
         subqueries: Subqueries<'_>,
     ) -> Result<(), SQLError> {
+        self.checkpoint().await?;
         match (lowered, bound) {
             (SourcePlan::Table { .. }, SourcePlan::Table { .. }) => Ok(()),
             (
@@ -316,9 +424,18 @@ impl Walk {
                     ..
                 },
             ) => {
-                self.source(left, bound_left, subqueries)?;
-                self.source(right, bound_right, subqueries)?;
+                crate::catalog::work::nested!(
+                    W::MAY_SUSPEND,
+                    self.control,
+                    self.source(left, bound_left, subqueries)
+                )?;
+                crate::catalog::work::nested!(
+                    W::MAY_SUSPEND,
+                    self.control,
+                    self.source(right, bound_right, subqueries)
+                )?;
                 self.optional(on.as_ref(), bound_on.as_ref(), subqueries)
+                    .await
             }
             (
                 SourcePlan::Values { rows, .. },
@@ -327,7 +444,7 @@ impl Walk {
                 },
             ) => {
                 for (lowered, bound) in pairs(rows, bound_rows, "VALUES list")? {
-                    self.scalars(lowered, bound, subqueries)?;
+                    self.scalars(lowered, bound, subqueries).await?;
                 }
                 Ok(())
             }
@@ -340,11 +457,8 @@ impl Walk {
                     ..
                 },
             ) => {
-                self.sites.routines.push(BoundRoutineReference {
-                    name: name.clone(),
-                    binding: binding.clone(),
-                });
-                self.scalars(args, bound_args, subqueries)
+                self.routine(name, binding.as_ref()).await?;
+                self.scalars(args, bound_args, subqueries).await
             }
             (
                 SourcePlan::FunctionGroup { functions, .. },
@@ -354,53 +468,62 @@ impl Walk {
                 },
             ) => {
                 for (lowered, bound) in pairs(functions, bound_functions, "ROWS FROM list")? {
-                    self.sites.routines.push(BoundRoutineReference {
-                        name: bound.name.clone(),
-                        binding: bound.binding.clone(),
-                    });
-                    self.scalars(&lowered.args, &bound.args, subqueries)?;
+                    self.routine(&bound.name, bound.binding.as_ref()).await?;
+                    self.scalars(&lowered.args, &bound.args, subqueries).await?;
                 }
                 Ok(())
             }
             (SourcePlan::Subquery { body, .. }, SourcePlan::Subquery { body: bound, .. }) => {
-                self.query(body, bound, false)
+                crate::catalog::work::nested!(
+                    W::MAY_SUSPEND,
+                    self.control,
+                    self.query(body, bound, false)
+                )
             }
             _ => Err(shape_error("FROM item")),
         }
     }
 
-    fn optional(
+    async fn optional(
         &mut self,
         lowered: Option<&ScalarExpr>,
         bound: Option<&ScalarExpr>,
         subqueries: Subqueries<'_>,
     ) -> Result<(), SQLError> {
         if let Some((lowered, bound)) = optional_pair(lowered, bound, "clause")? {
-            self.scalar(lowered, bound, subqueries)?;
+            crate::catalog::work::nested!(
+                W::MAY_SUSPEND,
+                self.control,
+                self.scalar(lowered, bound, subqueries)
+            )?;
         }
         Ok(())
     }
 
-    fn scalars(
+    async fn scalars(
         &mut self,
         lowered: &[ScalarExpr],
         bound: &[ScalarExpr],
         subqueries: Subqueries<'_>,
     ) -> Result<(), SQLError> {
         for (lowered, bound) in pairs(lowered, bound, "expression list")? {
-            self.scalar(lowered, bound, subqueries)?;
+            self.scalar(lowered, bound, subqueries).await?;
         }
         Ok(())
     }
 
-    fn subquery(
+    async fn subquery(
         &mut self,
         index: usize,
         bound_index: usize,
         subqueries: Subqueries<'_>,
     ) -> Result<(), SQLError> {
         match (subqueries.0.get(index), subqueries.1.get(bound_index)) {
-            (Some(lowered), Some(bound)) => self.query(lowered, bound, false),
+            (Some(lowered), Some(bound)) => crate::catalog::work::nested!(
+                W::MAY_SUSPEND,
+                self.control,
+                self.query(lowered, bound, false)
+            ),
             _ => Err(SQLError::Internal(format!(
                 "stored syntax cannot resolve subquery slot {index}"
             ))),
@@ -411,12 +534,13 @@ impl Walk {
         clippy::too_many_lines,
         reason = "one syntax-order walk covers every scalar variant"
     )]
-    fn scalar(
+    async fn scalar(
         &mut self,
         lowered: &ScalarExpr,
         bound: &ScalarExpr,
         subqueries: Subqueries<'_>,
     ) -> Result<(), SQLError> {
+        self.checkpoint().await?;
         let mut bound = bound;
         while let ScalarExpr::Collated { expr, .. } = bound {
             bound = expr;
@@ -427,15 +551,23 @@ impl Walk {
                 operand = expr;
             }
             if crate::catalog::collations::expression::scalar_clause(operand)?.is_none() {
-                self.sites.values.push(ValueSite::DiscardCollation);
-                return self.scalar(clause.argument, bound, subqueries);
+                self.plain(ValueSite::DiscardCollation).await?;
+                return crate::catalog::work::nested!(
+                    W::MAY_SUSPEND,
+                    self.control,
+                    self.scalar(clause.argument, bound, subqueries)
+                );
             }
         }
         if crate::type_resolution::row_distinct::expanded(lowered, bound) {
             let mut rewritten = lowered.clone();
             crate::type_resolution::row_distinct::rewrite_scalar(&mut rewritten)?;
-            self.sites.values.push(ValueSite::RowDistinct);
-            return self.scalar(&rewritten, bound, subqueries);
+            self.plain(ValueSite::RowDistinct).await?;
+            return crate::catalog::work::nested!(
+                W::MAY_SUSPEND,
+                self.control,
+                self.scalar(&rewritten, bound, subqueries)
+            );
         }
         if let ScalarExpr::CompositeRow { items, binding, .. } = bound {
             let mut source = match lowered {
@@ -453,10 +585,12 @@ impl Walk {
                 items: original, ..
             } = source
             {
-                self.sites
-                    .values
-                    .push(ValueSite::CompositeRow(binding.clone()));
-                return self.scalars(original, items, subqueries);
+                self.composite(binding).await?;
+                return crate::catalog::work::nested!(
+                    W::MAY_SUSPEND,
+                    self.control,
+                    self.scalars(original, items, subqueries)
+                );
             }
         }
         if let Some(shape) = crate::type_resolution::membership::stored_shape(lowered, bound) {
@@ -468,9 +602,7 @@ impl Walk {
             else {
                 unreachable!()
             };
-            self.sites.values.push(ValueSite::Membership {
-                array_items: shape.array_items.clone(),
-            });
+            self.membership(&shape.array_items).await?;
             let rewritten = crate::type_resolution::membership::rewrite(
                 expr.clone(),
                 list.clone(),
@@ -478,33 +610,36 @@ impl Walk {
                 &shape,
                 &uqa_core::memory::ProductionControl::uncontrolled(),
             )?;
-            return self.scalar(&rewritten, bound, subqueries);
+            return crate::catalog::work::nested!(
+                W::MAY_SUSPEND,
+                self.control,
+                self.scalar(&rewritten, bound, subqueries)
+            );
         }
         // Binding wraps an operand in the casts its operator needs, outside the casts the syntax writes.
         for _ in 0..cast_depth(bound).saturating_sub(cast_depth(lowered)) {
             let ScalarExpr::Cast { expr, ty, .. } = bound else {
                 return Err(shape_error("relabel"));
             };
-            self.sites.values.push(ValueSite::Relabel(ty.clone()));
+            self.text(ty, ValueSite::Relabel).await?;
             bound = expr;
         }
         match lowered {
             ScalarExpr::Literal(Value::Str(_) | Value::Null) => {
-                self.sites.values.push(match bound {
-                    ScalarExpr::TypedLiteral { value, ty, .. } => ValueSite::Constant {
-                        value: value.clone(),
-                        ty: ty.clone(),
-                    },
-                    ScalarExpr::Literal(Value::Str(_) | Value::Null) => ValueSite::Literal,
+                match bound {
+                    ScalarExpr::TypedLiteral { value, ty, .. } => self.constant(value, ty).await?,
+                    ScalarExpr::Literal(Value::Str(_) | Value::Null) => {
+                        self.plain(ValueSite::Literal).await?;
+                    }
                     _ => return Err(shape_error("literal")),
-                });
+                }
                 return Ok(());
             }
             ScalarExpr::Cast { .. } => {
                 let ScalarExpr::Cast { ty, .. } = bound else {
                     return Err(shape_error("cast"));
                 };
-                self.sites.values.push(ValueSite::Cast(ty.clone()));
+                self.text(ty, ValueSite::Cast).await?;
             }
             ScalarExpr::Func { order_syntax, .. } => {
                 let ScalarExpr::Func {
@@ -517,9 +652,9 @@ impl Walk {
                 if !order_syntax.is_legacy() && order_syntax != bound {
                     return Err(shape_error("function ordering"));
                 }
-                self.sites.values.push(ValueSite::FunctionOrder(*bound));
+                self.plain(ValueSite::FunctionOrder(*bound)).await?;
             }
-            _ => self.sites.values.push(ValueSite::Node),
+            _ => self.plain(ValueSite::Node).await?,
         }
         match (lowered, bound) {
             (
@@ -538,22 +673,32 @@ impl Walk {
                     ..
                 },
             ) => {
-                self.scalars(args, bound_args, subqueries)?;
+                crate::catalog::work::nested!(
+                    W::MAY_SUSPEND,
+                    self.control,
+                    self.scalars(args, bound_args, subqueries)
+                )?;
                 for (lowered, bound) in pairs(order_by, bound_order, "aggregate ORDER BY")? {
-                    self.scalar(&lowered.expr, &bound.expr, subqueries)?;
+                    crate::catalog::work::nested!(
+                        W::MAY_SUSPEND,
+                        self.control,
+                        self.scalar(&lowered.expr, &bound.expr, subqueries)
+                    )?;
                 }
-                self.optional(filter.as_deref(), bound_filter.as_deref(), subqueries)?;
-                self.sites.routines.push(BoundRoutineReference {
-                    name: name.clone(),
-                    binding: binding.clone(),
-                });
+                self.optional(filter.as_deref(), bound_filter.as_deref(), subqueries)
+                    .await?;
+                self.routine(name, binding.as_ref()).await?;
                 Ok(())
             }
             (ScalarExpr::Array(items), ScalarExpr::Array(bound))
             | (ScalarExpr::Row(items), ScalarExpr::Row(bound))
             | (ScalarExpr::And(items), ScalarExpr::And(bound))
             | (ScalarExpr::Or(items), ScalarExpr::Or(bound)) => {
-                self.scalars(items, bound, subqueries)
+                crate::catalog::work::nested!(
+                    W::MAY_SUSPEND,
+                    self.control,
+                    self.scalars(items, bound, subqueries)
+                )
             }
             (
                 ScalarExpr::Binary { lhs, rhs, .. },
@@ -563,14 +708,26 @@ impl Walk {
                     ..
                 },
             ) => {
-                self.scalar(lhs, bound_lhs, subqueries)?;
-                self.scalar(rhs, bound_rhs, subqueries)
+                crate::catalog::work::nested!(
+                    W::MAY_SUSPEND,
+                    self.control,
+                    self.scalar(lhs, bound_lhs, subqueries)
+                )?;
+                crate::catalog::work::nested!(
+                    W::MAY_SUSPEND,
+                    self.control,
+                    self.scalar(rhs, bound_rhs, subqueries)
+                )
             }
             (ScalarExpr::UnaryMinus(inner), ScalarExpr::UnaryMinus(bound))
             | (ScalarExpr::Not(inner), ScalarExpr::Not(bound))
             | (ScalarExpr::IsNull { expr: inner, .. }, ScalarExpr::IsNull { expr: bound, .. })
             | (ScalarExpr::Cast { expr: inner, .. }, ScalarExpr::Cast { expr: bound, .. }) => {
-                self.scalar(inner, bound, subqueries)
+                crate::catalog::work::nested!(
+                    W::MAY_SUSPEND,
+                    self.control,
+                    self.scalar(inner, bound, subqueries)
+                )
             }
             (
                 ScalarExpr::Between { expr, low, high },
@@ -580,9 +737,21 @@ impl Walk {
                     high: bound_high,
                 },
             ) => {
-                self.scalar(expr, bound_expr, subqueries)?;
-                self.scalar(low, bound_low, subqueries)?;
-                self.scalar(high, bound_high, subqueries)
+                crate::catalog::work::nested!(
+                    W::MAY_SUSPEND,
+                    self.control,
+                    self.scalar(expr, bound_expr, subqueries)
+                )?;
+                crate::catalog::work::nested!(
+                    W::MAY_SUSPEND,
+                    self.control,
+                    self.scalar(low, bound_low, subqueries)
+                )?;
+                crate::catalog::work::nested!(
+                    W::MAY_SUSPEND,
+                    self.control,
+                    self.scalar(high, bound_high, subqueries)
+                )
             }
             (
                 ScalarExpr::InList { expr, list, .. },
@@ -592,8 +761,16 @@ impl Walk {
                     ..
                 },
             ) => {
-                self.scalar(expr, bound_expr, subqueries)?;
-                self.scalars(list, bound_list, subqueries)
+                crate::catalog::work::nested!(
+                    W::MAY_SUSPEND,
+                    self.control,
+                    self.scalar(expr, bound_expr, subqueries)
+                )?;
+                crate::catalog::work::nested!(
+                    W::MAY_SUSPEND,
+                    self.control,
+                    self.scalars(list, bound_list, subqueries)
+                )
             }
             (
                 ScalarExpr::WindowCall {
@@ -607,30 +784,45 @@ impl Walk {
                     ..
                 },
             ) => {
-                self.scalars(args, bound_args, subqueries)?;
+                crate::catalog::work::nested!(
+                    W::MAY_SUSPEND,
+                    self.control,
+                    self.scalars(args, bound_args, subqueries)
+                )?;
                 if let Some((lowered, bound)) =
                     optional_pair(filter.as_deref(), bound_filter.as_deref(), "window FILTER")?
                 {
-                    self.scalar(lowered, bound, subqueries)?;
+                    crate::catalog::work::nested!(
+                        W::MAY_SUSPEND,
+                        self.control,
+                        self.scalar(lowered, bound, subqueries)
+                    )?;
                 }
-                self.scalars(&spec.partition_by, &bound_spec.partition_by, subqueries)?;
+                crate::catalog::work::nested!(
+                    W::MAY_SUSPEND,
+                    self.control,
+                    self.scalars(&spec.partition_by, &bound_spec.partition_by, subqueries)
+                )?;
                 for (lowered, bound) in
                     pairs(&spec.order_by, &bound_spec.order_by, "window ORDER BY")?
                 {
-                    self.scalar(&lowered.expr, &bound.expr, subqueries)?;
+                    crate::catalog::work::nested!(
+                        W::MAY_SUSPEND,
+                        self.control,
+                        self.scalar(&lowered.expr, &bound.expr, subqueries)
+                    )?;
                 }
                 if let Some((lowered, bound)) = optional_pair(
                     spec.frame.as_ref(),
                     bound_spec.frame.as_ref(),
                     "window frame",
                 )? {
-                    self.frame_bound(&lowered.start, &bound.start, subqueries)?;
-                    self.frame_bound(&lowered.end, &bound.end, subqueries)?;
+                    self.frame_bound(&lowered.start, &bound.start, subqueries)
+                        .await?;
+                    self.frame_bound(&lowered.end, &bound.end, subqueries)
+                        .await?;
                 }
-                self.sites.routines.push(BoundRoutineReference {
-                    name: name.clone(),
-                    binding: None,
-                });
+                self.routine(name, None).await?;
                 Ok(())
             }
             (
@@ -645,14 +837,24 @@ impl Walk {
                     else_branch: bound_else,
                 },
             ) => {
-                self.optional(base.as_deref(), bound_base.as_deref(), subqueries)?;
+                self.optional(base.as_deref(), bound_base.as_deref(), subqueries)
+                    .await?;
                 for ((condition, result), (bound_condition, bound_result)) in
                     pairs(when, bound_when, "CASE arms")?
                 {
-                    self.scalar(condition, bound_condition, subqueries)?;
-                    self.scalar(result, bound_result, subqueries)?;
+                    crate::catalog::work::nested!(
+                        W::MAY_SUSPEND,
+                        self.control,
+                        self.scalar(condition, bound_condition, subqueries)
+                    )?;
+                    crate::catalog::work::nested!(
+                        W::MAY_SUSPEND,
+                        self.control,
+                        self.scalar(result, bound_result, subqueries)
+                    )?;
                 }
                 self.optional(else_branch.as_deref(), bound_else.as_deref(), subqueries)
+                    .await
             }
             (ScalarExpr::ScalarSubquery(index), ScalarExpr::ScalarSubquery(bound))
             | (
@@ -662,7 +864,7 @@ impl Walk {
                 ScalarExpr::Exists {
                     subquery: bound, ..
                 },
-            ) => self.subquery(*index, *bound, subqueries),
+            ) => self.subquery(*index, *bound, subqueries).await,
             (
                 ScalarExpr::InSubquery {
                     expr,
@@ -675,8 +877,12 @@ impl Walk {
                     ..
                 },
             ) => {
-                self.scalar(expr, bound_expr, subqueries)?;
-                self.subquery(*index, *bound, subqueries)
+                crate::catalog::work::nested!(
+                    W::MAY_SUSPEND,
+                    self.control,
+                    self.scalar(expr, bound_expr, subqueries)
+                )?;
+                self.subquery(*index, *bound, subqueries).await
             }
             // Leaves: binding may replace a column by its structural reference or a typed placeholder.
             (
@@ -696,7 +902,7 @@ impl Walk {
         }
     }
 
-    fn frame_bound(
+    async fn frame_bound(
         &mut self,
         lowered: &ScalarFrameBound,
         bound: &ScalarFrameBound,
@@ -705,7 +911,11 @@ impl Walk {
         match (lowered, bound) {
             (ScalarFrameBound::Preceding(lowered), ScalarFrameBound::Preceding(bound))
             | (ScalarFrameBound::Following(lowered), ScalarFrameBound::Following(bound)) => {
-                self.scalar(lowered, bound, subqueries)
+                crate::catalog::work::nested!(
+                    W::MAY_SUSPEND,
+                    self.control,
+                    self.scalar(lowered, bound, subqueries)
+                )
             }
             (
                 ScalarFrameBound::UnboundedPreceding
@@ -716,96 +926,4 @@ impl Walk {
             _ => Err(shape_error("window frame")),
         }
     }
-}
-
-/// The scalar expressions a data-modifying `WITH` query owns in syntax order; planner-added view checks and target predicates have no syntax.
-fn syntax_expressions(command: &CommandPlan) -> Vec<&ScalarExpr> {
-    use crate::plan::{ConflictActionPlan, MergeWhenPlan};
-    let mut expressions = Vec::new();
-    match command {
-        CommandPlan::Insert(plan) => {
-            expressions.extend(
-                plan.columns
-                    .iter()
-                    .flat_map(crate::ast::AssignmentTarget::expressions),
-            );
-            expressions.extend(plan.rows.iter().flatten());
-            if let Some(conflict) = &plan.on_conflict {
-                expressions.extend(&conflict.expressions);
-                expressions.extend(conflict.predicate.as_deref());
-                if let ConflictActionPlan::Update {
-                    assignments,
-                    predicate,
-                } = &conflict.action
-                {
-                    expressions.extend(
-                        assignments
-                            .iter()
-                            .flat_map(crate::plan::AssignmentPlan::expressions),
-                    );
-                    expressions.extend(predicate.as_deref());
-                }
-            }
-            expressions.extend(plan.returning.iter().map(|projection| &projection.expr));
-        }
-        CommandPlan::Update(plan) => {
-            expressions.extend(
-                plan.assignments
-                    .iter()
-                    .flat_map(crate::plan::AssignmentPlan::expressions),
-            );
-            expressions.extend(plan.predicate.as_ref());
-            expressions.extend(plan.returning.iter().map(|projection| &projection.expr));
-        }
-        CommandPlan::Delete(plan) => {
-            expressions.extend(plan.predicate.as_ref());
-            expressions.extend(plan.returning.iter().map(|projection| &projection.expr));
-        }
-        CommandPlan::Merge(plan) => {
-            expressions.push(&plan.join_condition);
-            for clause in &plan.when_clauses {
-                match clause {
-                    MergeWhenPlan::UpdateMatched {
-                        condition,
-                        assignments,
-                    }
-                    | MergeWhenPlan::UpdateNotMatchedBySource {
-                        condition,
-                        assignments,
-                    } => {
-                        expressions.extend(condition.as_ref());
-                        expressions.extend(
-                            assignments
-                                .iter()
-                                .flat_map(crate::plan::AssignmentPlan::expressions),
-                        );
-                    }
-                    MergeWhenPlan::InsertNotMatched {
-                        condition,
-                        columns,
-                        values,
-                        ..
-                    } => {
-                        expressions.extend(condition.as_ref());
-                        expressions.extend(
-                            columns
-                                .iter()
-                                .flat_map(crate::ast::AssignmentTarget::expressions),
-                        );
-                        expressions.extend(values.iter());
-                    }
-                    MergeWhenPlan::DeleteMatched { condition }
-                    | MergeWhenPlan::DeleteNotMatchedBySource { condition }
-                    | MergeWhenPlan::NothingMatched { condition }
-                    | MergeWhenPlan::NothingNotMatched { condition }
-                    | MergeWhenPlan::NothingNotMatchedBySource { condition } => {
-                        expressions.extend(condition.as_ref());
-                    }
-                }
-            }
-            expressions.extend(plan.returning.iter().map(|projection| &projection.expr));
-        }
-        _ => {}
-    }
-    expressions
 }

@@ -26,16 +26,19 @@ impl CommonInputType {
         }
     }
 
-    fn from_inputs<'a>(
+    async fn from_inputs_with_work<'a, W: crate::catalog::work::Work + Send>(
         mut types: impl Iterator<Item = Option<&'a ColumnType>>,
         control: &ProductionControl<'_>,
+        work: &mut W,
     ) -> Result<Self, SQLError> {
         control.check()?;
         let mut same_type = false;
         if let Some(Some(first)) = types.next() {
             same_type = true;
             for ty in types {
-                control.check()?;
+                crate::catalog::work::ReferenceWork { control, work }
+                    .checkpoint()
+                    .await?;
                 if ty != Some(first) {
                     same_type = false;
                     break;
@@ -138,9 +141,30 @@ pub(crate) fn select_common_input_type_in_with_control<'a>(
     types: impl Iterator<Item = Option<&'a ColumnType>> + Clone,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<ColumnType>, SQLError> {
+    crate::catalog::work::inline(select_common_input_type_in_with_work(
+        context,
+        types,
+        control,
+        &mut (),
+    ))
+}
+
+pub(crate) async fn select_common_input_type_in_with_work<
+    'a,
+    W: crate::catalog::work::Work + Send,
+>(
+    context: CommonTypeContext,
+    types: impl Iterator<Item = Option<&'a ColumnType>> + Clone,
+    control: &ProductionControl<'_>,
+    work: &mut W,
+) -> Result<Produced<ColumnType>, SQLError> {
     // Inspect borrowed identities before copying so a later unknown does not charge discarded domain names.
-    let mut selection = CommonInputType::from_inputs(types.clone(), control)?;
+    let mut selection =
+        CommonInputType::from_inputs_with_work(types.clone(), control, work).await?;
     for ty in types {
+        crate::catalog::work::ReferenceWork { control, work }
+            .checkpoint()
+            .await?;
         selection.include(context, ty, control)?;
     }
     selection.finish(control)
@@ -151,9 +175,25 @@ pub(crate) fn select_common_input_type_with_control(
     types: &[Option<&ColumnType>],
     control: &ProductionControl<'_>,
 ) -> Result<Option<Produced<ColumnType>>, SQLError> {
-    let mut selection = CommonInputType::from_inputs(types.iter().copied(), control)?;
+    crate::catalog::work::inline(select_common_input_type_with_work(
+        types.iter().copied(),
+        control,
+        &mut (),
+    ))
+}
+
+pub(crate) async fn select_common_input_type_with_work<'a, W: crate::catalog::work::Work + Send>(
+    types: impl Iterator<Item = Option<&'a ColumnType>> + Clone,
+    control: &ProductionControl<'_>,
+    work: &mut W,
+) -> Result<Option<Produced<ColumnType>>, SQLError> {
+    let mut selection =
+        CommonInputType::from_inputs_with_work(types.clone(), control, work).await?;
     for ty in types {
-        match selection.select(*ty, control) {
+        crate::catalog::work::ReferenceWork { control, work }
+            .checkpoint()
+            .await?;
+        match selection.select(ty, control) {
             Ok(()) => {}
             Err(CommonTypeFailure::Failed(error))
                 if matches!(error.sqlstate(), Some("53200" | "57014")) =>

@@ -161,11 +161,24 @@ impl CompositeTypeDescriptor {
         &self,
         control: &ProductionControl<'_>,
     ) -> Result<Produced<Self>, ValueRetentionError> {
+        crate::catalog::work::inline(self.clone_with_input_work(control, &mut ()))
+    }
+
+    pub(crate) async fn clone_with_input_work<W: crate::ast::ColumnTypeInputWork>(
+        &self,
+        control: &ProductionControl<'_>,
+        work: &mut W,
+    ) -> Result<Produced<Self>, W::Error> {
         let mut attributes = ProductionVec::new(*control);
         attributes.reserve(self.attributes.len())?;
         for attribute in &self.attributes {
-            let (name, name_memory) = control.copy_text(&attribute.name)?.into_parts();
-            let (ty, type_memory) = attribute.ty.clone_with_control(control)?.into_parts();
+            work.checkpoint().await?;
+            let (name, name_memory) = work.text(&attribute.name, control).await?.into_parts();
+            let (ty, type_memory) = attribute
+                .ty
+                .clone_with_input_work(control, work)
+                .await?
+                .into_parts();
             attributes.push_produced(control.finish(
                 CompositeAttribute {
                     name,
@@ -177,10 +190,14 @@ impl CompositeTypeDescriptor {
             )?)?;
         }
         let mut dropped = ProductionVec::new(*control);
-        dropped.extend_from_slice(&self.dropped)?;
+        dropped.reserve(self.dropped.len())?;
+        for attribute in &self.dropped {
+            work.checkpoint().await?;
+            dropped.push_copy(*attribute)?;
+        }
         let (attributes, memory) = attributes.finish()?.into_parts();
         let (dropped, dropped_memory) = dropped.finish()?.into_parts();
-        control.finish(
+        Ok(control.finish(
             Self {
                 attributes,
                 dropped,
@@ -188,6 +205,6 @@ impl CompositeTypeDescriptor {
                 relation_oid: self.relation_oid,
             },
             control.combine(memory, dropped_memory),
-        )
+        )?)
     }
 }

@@ -24,42 +24,6 @@ use uqa_core::{
     Value,
 };
 
-pub(crate) struct ResolvedArrayTransformCall {
-    pub(crate) overload: Option<ResolvedFunctionOverload>,
-}
-
-/// Select the same candidate during preparation and expression binding, before
-/// unknown arguments run their selected input conversions.
-pub(crate) fn resolve_array_transform_call(
-    name: &str,
-    binding: Option<&FunctionBinding>,
-    args: &[ScalarExpr],
-    argument_types: &[Option<ColumnType>],
-    params: &[SQLParam],
-    explicit_variadic: bool,
-    resolver: &dyn FunctionTypeResolver,
-) -> Result<Option<ResolvedArrayTransformCall>, SQLError> {
-    Ok(resolve_array_transform_call_with_control(
-        name,
-        binding,
-        ArrayTransformArguments {
-            expressions: args,
-            types: argument_types,
-            parameters: params,
-            explicit_variadic,
-        },
-        resolver,
-        &ProductionControl::uncontrolled(),
-    )?
-    .map(|call| ResolvedArrayTransformCall {
-        overload: call.overload.map(|selected| {
-            selected
-                .into_uncontrolled()
-                .expect("ordinary array selection")
-        }),
-    }))
-}
-
 pub(crate) struct ControlledArrayTransformCall {
     pub(crate) overload: Option<Produced<ResolvedFunctionOverload>>,
     pub(crate) builtin_argument_positions: Option<Produced<Vec<usize>>>,

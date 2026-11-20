@@ -10,6 +10,21 @@ use super::{ColumnType, OwnedBinder, OwnedScalarExpr, SQLError, ScalarExpr};
 use crate::{expr::enums::is_enum_bearing, type_resolution::common::base_type};
 use uqa_core::{memory::Produced, Value};
 
+/// Resolve the storage-preserving part of a selected common coercion from previously observed source and target declarations.
+pub(crate) fn common_input_keeps_type(
+    source: &ColumnType,
+    target: &ColumnType,
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<bool, SQLError> {
+    if source == target {
+        return Ok(true);
+    }
+    let source = source.without_type_modifiers_with_control(control)?;
+    let target = target.without_type_modifiers_with_control(control)?;
+    Ok(*source == *target
+        || crate::type_resolution::cast_compatibility::preserves_record_identity(&source, &target))
+}
+
 impl OwnedBinder<'_> {
     pub(super) fn common_cast(
         &self,
@@ -23,12 +38,7 @@ impl OwnedBinder<'_> {
             .semantic(self.context.common_context(&expression))?
             .flatten();
         if let Some(source) = source {
-            let source = source.without_type_modifiers_with_control(control)?;
-            if *source == *target
-                || crate::type_resolution::cast_compatibility::preserves_record_identity(
-                    &source, &target,
-                )
-            {
+            if common_input_keeps_type(&source, &target, control)? {
                 return Ok(expression);
             }
         }

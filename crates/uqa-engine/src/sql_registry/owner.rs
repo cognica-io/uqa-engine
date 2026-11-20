@@ -6,6 +6,7 @@
 
 //! Shared registry publication, session invalidation and registration retirement.
 
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 use super::declarations::{CapturedDeclarations, Declarations, RegisteredKind};
 use super::{RegisteredSQLFunction, SQLAggregateFactory, SQLScalarFunction, SQLTableFunction};
 use crate::{state::StatementGate, SQLError, SessionContext};
@@ -68,9 +69,11 @@ struct Session {
 
 #[derive(Default)]
 struct Members {
+    #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
     declarations: Declarations,
     sessions: Vec<Session>,
     functions: Vec<WeakFunction>,
+    #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
     restore_readers: Weak<()>,
 }
 
@@ -106,7 +109,10 @@ impl Registry {
         let _declarations = self.catalog_publication.read();
         read()
     }
+}
 
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+impl Registry {
     pub(crate) fn kinds(&self, name: &str) -> super::RegisteredKinds {
         self.members.lock().declarations.get(name)
     }
@@ -129,7 +135,9 @@ impl Registry {
         members.restore_readers = Arc::downgrade(&active);
         active
     }
+}
 
+impl Registry {
     pub(crate) fn attach(&self, session: &Arc<SessionContext>, gate: &Arc<StatementGate>) {
         let mut members = self.members.lock();
         members
@@ -153,6 +161,7 @@ impl Registry {
             .members
             .try_lock()
             .ok_or(SQLFunctionRegistrationError::Busy)?;
+        #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
         if members.restore_readers.strong_count() != 0 {
             return Err(SQLFunctionRegistrationError::Busy);
         }
@@ -222,6 +231,7 @@ macro_rules! registration {
                 options: crate::SQLFunctionOptions,
             ) -> Result<SQLFunctionRegistration> {
                 let previous = self.change(|members| {
+                    #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
                     members
                         .declarations
                         .set(&name, RegisteredKind::$kind, true)?;
@@ -264,25 +274,25 @@ impl SQLFunctionRegistration {
             return Ok(());
         };
         active.registry.change(|members| match &active.function {
-            Function::Scalar(function) => retire(
+            Function::Scalar(function) => members.retire(
                 &active.registry.scalar,
                 &active.name,
                 function,
-                &mut members.declarations,
+                #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
                 RegisteredKind::Scalar,
             ),
-            Function::Table(function) => retire(
+            Function::Table(function) => members.retire(
                 &active.registry.table,
                 &active.name,
                 function,
-                &mut members.declarations,
+                #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
                 RegisteredKind::Table,
             ),
-            Function::Aggregate(function) => retire(
+            Function::Aggregate(function) => members.retire(
                 &active.registry.aggregate,
                 &active.name,
                 function,
-                &mut members.declarations,
+                #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
                 RegisteredKind::Aggregate,
             ),
         })?;
@@ -291,24 +301,27 @@ impl SQLFunctionRegistration {
     }
 }
 
-fn retire<F: ?Sized>(
-    map: &Map<F>,
-    name: &str,
-    function: &Arc<F>,
-    declarations: &mut Declarations,
-    kind: RegisteredKind,
-) -> Result<()> {
-    let mut map = map.write();
-    let current = map
-        .get(name)
-        .is_some_and(|entry| Arc::ptr_eq(&entry.function, function));
-    // This handle, change's temporary destructor hold, and optionally the map.
-    if Arc::strong_count(function) != 2 + usize::from(current) {
-        return Err(SQLFunctionRegistrationError::Busy);
+impl Members {
+    fn retire<F: ?Sized>(
+        &mut self,
+        map: &Map<F>,
+        name: &str,
+        function: &Arc<F>,
+        #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))] kind: RegisteredKind,
+    ) -> Result<()> {
+        let mut map = map.write();
+        let current = map
+            .get(name)
+            .is_some_and(|entry| Arc::ptr_eq(&entry.function, function));
+        // This handle, change's temporary destructor hold, and optionally the map.
+        if Arc::strong_count(function) != 2 + usize::from(current) {
+            return Err(SQLFunctionRegistrationError::Busy);
+        }
+        if current {
+            #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+            self.declarations.set(name, kind, false)?;
+            map.remove(name);
+        }
+        Ok(())
     }
-    if current {
-        declarations.set(name, kind, false)?;
-        map.remove(name);
-    }
-    Ok(())
 }

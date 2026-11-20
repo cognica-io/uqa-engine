@@ -21,7 +21,7 @@ fn captured(statement_parameter: usize, plan_parameter: usize) -> uqa_sql::routi
     .shared()
 }
 
-fn check_routine(routine: uqa_sql::routines::SQLRoutine) -> Result<(), SQLError> {
+fn check_routine(routine: uqa_sql::routines::SQLRoutine) -> Result<(), String> {
     let mut snapshot = empty_catalog().snapshot().clone();
     RetainedValue::make_mut(&mut snapshot.definitions.sql_user_functions)
         .insert("public.renamed".into(), vec![routine])
@@ -35,7 +35,7 @@ fn native_routine_closure_rejects_parameter_ordinals_in_each_captured_owner() {
     for (syntax, plan) in [(0, 1), (2, 1), (1, 0), (1, 2)] {
         let error = check_routine(captured(syntax, plan))
             .expect_err("an out-of-range routine parameter reached private activation");
-        assert!(error.to_string().contains("routine"), "{error}");
+        assert!(error.contains("routine"), "{error}");
     }
 }
 

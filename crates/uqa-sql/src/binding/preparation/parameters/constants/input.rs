@@ -98,3 +98,109 @@ impl Application<()> for Inline<'_> {
         self.0
     }
 }
+
+use crate::construction::{self, Read, Work};
+
+type AppliedInput = Result<(OwnedScalarExpr, InputConstants), SQLError>;
+
+/// A nested replacement transfers its original position table to the selected child and takes it back on completion.
+pub(in crate::binding::preparation::parameters) struct Selected {
+    constants: Option<InputConstants>,
+    arena: Option<usize>,
+}
+impl Selected {
+    pub(in crate::binding::preparation::parameters) fn new(constants: InputConstants) -> Self {
+        Self {
+            constants: Some(constants),
+            arena: None,
+        }
+    }
+    pub(in crate::binding::preparation::parameters) fn into_constants(mut self) -> InputConstants {
+        self.constants
+            .take()
+            .expect("completed reference edit owns its positions")
+    }
+    pub(in crate::binding::preparation::parameters) fn set_arena(&mut self, width: Option<usize>) {
+        self.arena = width;
+    }
+    pub(in crate::binding::preparation::parameters) fn inputs(&mut self) -> &mut InputConstants {
+        self.constants
+            .as_mut()
+            .expect("active scalar editor owns its positions")
+    }
+}
+impl ScalarEditIdentity for Selected {
+    type Identity = AnalysisIdentity<ScalarExpr>;
+    const BEFORE_CHILDREN: bool = false;
+    fn identity(expression: &ScalarExpr) -> Self::Identity {
+        expression.into()
+    }
+}
+impl Application<Work<'_>> for Selected {
+    fn constants(&mut self) -> &mut InputConstants {
+        self.inputs()
+    }
+}
+impl<'a> ScalarEdit<Work<'a>> for Selected {
+    async fn apply(
+        &mut self,
+        identity: Self::Identity,
+        expression: OwnedScalarExpr,
+        control: &ProductionControl<'_>,
+        work: &mut Work<'a>,
+    ) -> Result<OwnedScalarExpr, SQLError> {
+        let constants = self
+            .constants
+            .take()
+            .expect("parent transfers input selections");
+        let arena = self.arena;
+        let owner = control.capture();
+        let output = work.submit(move |work| async move {
+            apply_node(constants, arena, identity, expression, owner, work)?.await
+        })?;
+        let (expression, constants) = construction::receive(output).await?;
+        self.constants = Some(constants);
+        Ok(expression)
+    }
+}
+
+pub(in crate::binding::preparation::parameters) fn apply_node(
+    constants: InputConstants,
+    arena: Option<usize>,
+    identity: AnalysisIdentity<ScalarExpr>,
+    expression: OwnedScalarExpr,
+    owner: uqa_core::memory::OwnedProductionControl,
+    mut work: Work<'_>,
+) -> Result<Read<'_, AppliedInput>, SQLError> {
+    let admission = owner.clone();
+    Ok(Read::new(admission.control(), async move {
+        let control = owner.control();
+        let mut edit = Selected::new(constants);
+        edit.set_arena(arena);
+        let expression = match (arena, edit.inputs().2.remove(&identity)) {
+            (Some(width), Some(membership)) => {
+                construction::retain_with(control, || {
+                    membership.apply_stored_from(expression, width, &control, &mut work)
+                })?
+                .await?
+            }
+            (_, None) => expression,
+            (None, Some(_)) => {
+                return Err(SQLError::Internal(
+                    "stored membership has no owning query arena".into(),
+                ))
+            }
+        };
+        let output = Read::new(
+            control,
+            apply_from(&mut edit, identity, expression, &control, &mut work),
+        )?
+        .await?;
+        Ok((
+            output,
+            edit.constants
+                .take()
+                .expect("completed node owns its input selections"),
+        ))
+    })?)
+}

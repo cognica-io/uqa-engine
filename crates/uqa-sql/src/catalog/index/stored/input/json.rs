@@ -7,8 +7,10 @@
 //! Borrow stored index fields using Core's iterative admitted JSON grammar.
 
 use super::{invalid, ProductionControl, SQLError};
-use uqa_core::json::{
-    decode_json_string_with_control, JsonEvent, JsonReadError, JsonReader, JsonToken,
+use crate::catalog::work::Work;
+use uqa_core::{
+    json::{decode_json_string_with_work, JsonReadError, JsonReadWork, JsonReader, JsonToken},
+    memory::Produced,
 };
 
 pub(super) struct FieldSet {
@@ -44,89 +46,133 @@ impl FieldSet {
     }
 }
 
-pub(super) fn fields<'a>(
-    text: &'a str,
-    control: &ProductionControl<'_>,
-    mut visit: impl FnMut(&str, &'a str) -> Result<(), SQLError>,
-) -> Result<(), SQLError> {
-    let mut reader = JsonReader::with_control(text, control);
-    if next(&mut reader)?.token != JsonToken::StartObject {
-        return Err(invalid());
+struct JsonWork<'a, W>(&'a mut W);
+
+impl<W: Work + Send> JsonReadWork for JsonWork<'_, W> {
+    type Error = JsonReadError;
+
+    async fn checkpoint(&mut self) -> Result<(), JsonReadError> {
+        self.0.checkpoint().await.map_err(Into::into)
     }
-    loop {
-        let event = next(&mut reader)?;
+}
+
+/// Preserve the original ordered spans and error positions while Core owns each JSON token.
+pub(super) struct Input<'a, 'c> {
+    text: &'a str,
+    reader: JsonReader<'a, 'c>,
+    control: ProductionControl<'c>,
+}
+
+impl<'a, 'c> Input<'a, 'c> {
+    pub(super) async fn begin<W: Work + Send>(
+        text: &'a str,
+        start: JsonToken<'_, &[u8]>,
+        control: &ProductionControl<'c>,
+        work: &mut W,
+    ) -> Result<Self, SQLError> {
+        control.check()?;
+        let mut reader = JsonReader::with_control(text, control);
+        if reader
+            .next_event_with_work(&mut JsonWork(work))
+            .await
+            .map_err(read_error)?
+            .is_none_or(|event| event.token != start)
+        {
+            return Err(invalid());
+        }
+        Ok(Self {
+            text,
+            reader,
+            control: *control,
+        })
+    }
+
+    async fn value<W: Work + Send>(&mut self, work: &mut W) -> Result<&'a str, SQLError> {
+        let span = self
+            .reader
+            .read_value_span_with_work(&mut JsonWork(work))
+            .await
+            .map_err(read_error)?;
+        let end = self.reader.position().byte_offset;
+        Ok(&self.text[end - span.len()..end])
+    }
+
+    async fn end<W: Work + Send>(&mut self, work: &mut W) -> Result<(), SQLError> {
+        if self
+            .reader
+            .next_event_with_work(&mut JsonWork(work))
+            .await
+            .map_err(read_error)?
+            .is_some()
+        {
+            return Err(invalid());
+        }
+        Ok(())
+    }
+
+    pub(super) async fn field<W: Work + Send>(
+        &mut self,
+        work: &mut W,
+    ) -> Result<Option<(Produced<String>, &'a str)>, SQLError> {
+        let event = self
+            .reader
+            .next_event_with_work(&mut JsonWork(work))
+            .await
+            .map_err(read_error)?
+            .ok_or_else(invalid)?;
         match event.token {
-            JsonToken::EndObject => break,
-            JsonToken::Key(key) => {
-                let key = decode_json_string_with_control(key, control).map_err(read_error)?;
-                let value = next(&mut reader)?;
-                visit(&key, value_text(text, &mut reader, value)?)?;
+            JsonToken::EndObject => {
+                self.end(work).await?;
+                Ok(None)
             }
-            _ => return Err(invalid()),
+            JsonToken::Key(key) => {
+                let key = self.string(key, work).await?;
+                Ok(Some((key, self.value(work).await?)))
+            }
+            _ => Err(invalid()),
         }
     }
-    if reader.next_event().map_err(read_error)?.is_some() {
-        return Err(invalid());
+
+    pub(super) async fn element<W: Work + Send>(
+        &mut self,
+        work: &mut W,
+    ) -> Result<Option<&'a str>, SQLError> {
+        if self
+            .reader
+            .next_array_value_with_work(&mut JsonWork(work))
+            .await
+            .map_err(read_error)?
+        {
+            self.value(work).await.map(Some)
+        } else {
+            self.end(work).await?;
+            Ok(None)
+        }
     }
-    Ok(())
+
+    pub(super) async fn string<W: Work + Send>(
+        &self,
+        bytes: &[u8],
+        work: &mut W,
+    ) -> Result<Produced<String>, SQLError> {
+        decode_json_string_with_work(bytes, &self.control, &mut JsonWork(work))
+            .await
+            .map_err(read_error)
+    }
 }
 
-pub(super) fn array<'a>(
-    text: &'a str,
+pub(super) async fn object_id<W: Work + Send>(
+    text: &str,
     control: &ProductionControl<'_>,
-    mut visit: impl FnMut(&'a str) -> Result<(), SQLError>,
-) -> Result<(), SQLError> {
-    let mut reader = JsonReader::with_control(text, control);
-    if next(&mut reader)?.token != JsonToken::StartArray {
-        return Err(invalid());
-    }
-    loop {
-        let event = next(&mut reader)?;
-        if event.token == JsonToken::EndArray {
-            break;
-        }
-        visit(value_text(text, &mut reader, event)?)?;
-    }
-    if reader.next_event().map_err(read_error)?.is_some() {
-        return Err(invalid());
-    }
-    Ok(())
-}
-
-fn next<'a>(reader: &mut JsonReader<'a, '_>) -> Result<JsonEvent<'a>, SQLError> {
-    reader.next_event().map_err(read_error)?.ok_or_else(invalid)
-}
-
-fn value_text<'a>(
-    text: &'a str,
-    reader: &mut JsonReader<'a, '_>,
-    first: JsonEvent<'a>,
-) -> Result<&'a str, SQLError> {
-    let mut end = first.range.end;
-    let mut depth = usize::from(matches!(
-        first.token,
-        JsonToken::StartArray | JsonToken::StartObject
-    ));
-    while depth != 0 {
-        let event = next(reader)?;
-        match event.token {
-            JsonToken::StartArray | JsonToken::StartObject => depth += 1,
-            JsonToken::EndArray | JsonToken::EndObject => depth -= 1,
-            _ => {}
-        }
-        end = event.range.end;
-    }
-    Ok(&text[first.range.start..end])
-}
-
-pub(super) fn object_id(text: &str, control: &ProductionControl<'_>) -> Result<[u8; 16], SQLError> {
+    work: &mut W,
+) -> Result<[u8; 16], SQLError> {
     let mut result = [0; 16];
     let mut position = 0;
-    array(text, control, |value| {
+    let mut input = Input::begin(text, JsonToken::StartArray, control, work).await?;
+    while let Some(value) = input.element(work).await? {
         *result.get_mut(position).ok_or_else(invalid)? = value.parse().map_err(|_| invalid())?;
         position += 1;
-        Ok(())
-    })?;
+    }
     if position != result.len() {
         return Err(invalid());
     }

@@ -19,7 +19,7 @@ use uqa_sql::{
 };
 
 mod production;
-pub use production::descriptor_with_control;
+pub use production::{descriptor_input, descriptor_with_control};
 
 fn definitions(
     catalog: &CatalogReadView,

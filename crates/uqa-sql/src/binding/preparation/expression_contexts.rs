@@ -17,23 +17,39 @@ use crate::semantics::sets::placement::SetPlacement;
 use uqa_core::Value;
 
 impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
-    pub(super) fn cast_expression(
+    pub(super) fn cast_expression_inline<W: crate::catalog::work::Work + Send>(
         &mut self,
         expr: &ScalarExpr,
         ty: &str,
         input: &RowSchema,
         subqueries: &[QueryPlan],
+        work: &mut W,
     ) -> Result<ExpressionType, SQLError> {
-        let target = self.type_name(ty)?;
-        self.cast_to_type(expr, &target, input, subqueries)
+        crate::catalog::work::inline_with(|| {
+            self.cast_expression(expr, ty, input, subqueries, work)
+        })
     }
 
-    fn cast_to_type(
+    pub(super) async fn cast_expression<W: crate::catalog::work::Work + Send>(
+        &mut self,
+        expr: &ScalarExpr,
+        ty: &str,
+        input: &RowSchema,
+        subqueries: &[QueryPlan],
+        work: &mut W,
+    ) -> Result<ExpressionType, SQLError> {
+        let target = self.type_name(ty)?;
+        self.cast_to_type(expr, &target, input, subqueries, work)
+            .await
+    }
+
+    async fn cast_to_type<W: crate::catalog::work::Work + Send>(
         &mut self,
         expr: &ScalarExpr,
         target: &ColumnType,
         input: &RowSchema,
         subqueries: &[QueryPlan],
+        work: &mut W,
     ) -> Result<ExpressionType, SQLError> {
         // Parse analysis converts an untyped literal with the enum's input function before any assignment checks.
         if let ScalarExpr::Literal(value @ (Value::Str(_) | Value::Null)) = expr {
@@ -43,17 +59,29 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
         let mut source = if let (ScalarExpr::Array(expressions), ColumnType::Array(element)) =
             (expr, array_type)
         {
-            let mut items = expressions
-                .iter()
-                .map(|item| {
-                    if matches!(item, ScalarExpr::Array(_)) {
-                        self.cast_to_type(item, array_type, input, subqueries)
-                    } else {
-                        self.expression(item, input, subqueries)
-                    }
-                })
-                .collect::<Result<Vec<_>, _>>()?;
+            let owner = self.scope.control().capture();
+            let control = owner.control();
+            let mut items = super::ownership::AnalysisVec::new(&control);
+            for item in expressions {
+                let value = if matches!(item, ScalarExpr::Array(_)) {
+                    crate::catalog::work::nested!(
+                        W::MAY_SUSPEND,
+                        control,
+                        self.cast_to_type(item, array_type, input, subqueries, work)
+                    )?
+                } else {
+                    self.expression_with_work(item, input, subqueries, work)
+                        .await?
+                };
+                items.push(value, &control)?;
+            }
             for (expression, item) in expressions.iter().zip(&mut items) {
+                crate::catalog::work::ReferenceWork {
+                    control: &control,
+                    work,
+                }
+                .checkpoint()
+                .await?;
                 let element = if matches!(item.ty.as_deref(), Some(ColumnType::Array(_))) {
                     array_type
                 } else {
@@ -76,10 +104,11 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
             }
             ExpressionType::combined(Some(array_type.clone()), &items)
         } else {
-            self.expression(expr, input, subqueries)?
+            self.expression_with_work(expr, input, subqueries, work)
+                .await?
         };
         if let Some(fields) = &mut source.row_constructor {
-            self.coerce_row_constructor(fields, target)?;
+            self.coerce_row_constructor(fields, target, work).await?;
         }
         let initial_collation = cast_initial_collation(expr, &source, target)?;
         self.parameters.coerce_unknown(&mut source, target)?;
@@ -114,6 +143,27 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
             result.record_variable = source.record_variable;
         }
         Ok(result)
+    }
+
+    pub(super) fn retain_common_input(
+        &mut self,
+        expression: &ScalarExpr,
+        value: &ExpressionType,
+        target: Option<&super::ownership::AnalysisType>,
+    ) -> Result<(), SQLError> {
+        if self.scope.preserve_syntax_shape {
+            if let (Some(source), Some(target)) = (value.ty.as_deref(), target) {
+                if !crate::type_resolution::common_input_keeps_type(
+                    source,
+                    target,
+                    &self.scope.control(),
+                )? {
+                    self.parameters
+                        .retain_input_coercion(expression, target.clone())?;
+                }
+            }
+        }
+        Ok(())
     }
 
     pub(super) fn case_expression(
@@ -179,6 +229,13 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
                 .is_some_and(|(position, _)| *position == index)
             {
                 selected = selected.combine(conditions.next().unwrap().1);
+            }
+            if let Some(expression) = when
+                .get(index)
+                .map(|(_, expression)| expression)
+                .or(else_branch)
+            {
+                self.retain_common_input(expression, value, ty.as_ref())?;
             }
             selected = selected.combine(value.derivation);
         }

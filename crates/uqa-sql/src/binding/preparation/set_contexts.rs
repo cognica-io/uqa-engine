@@ -31,12 +31,22 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
         &mut self,
         level: impl FnOnce(&mut Self) -> Result<T, SQLError>,
     ) -> Result<T, SQLError> {
-        let placement = std::mem::replace(&mut self.scope.set_placement, SetPlacement::Expanding);
-        let calls = self.scope.set_calls;
+        let saved = self.enter_query_level();
         let result = level(self);
+        self.restore_query_level(saved);
+        result
+    }
+
+    pub(super) fn enter_query_level(&mut self) -> (SetPlacement, usize) {
+        (
+            std::mem::replace(&mut self.scope.set_placement, SetPlacement::Expanding),
+            self.scope.set_calls,
+        )
+    }
+
+    pub(super) fn restore_query_level(&mut self, (placement, calls): (SetPlacement, usize)) {
         self.scope.set_placement = placement;
         self.scope.set_calls = calls;
-        result
     }
 
     /// The set-returning calls analyzed so far at this query level.

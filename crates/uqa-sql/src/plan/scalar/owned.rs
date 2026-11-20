@@ -31,13 +31,16 @@ mod literals;
 mod metadata;
 pub(in crate::plan::scalar) mod publication;
 mod query_ids;
+pub(crate) use query_ids::QueryIndexInput;
 mod references;
 mod replacement;
 mod selection;
 mod sequences;
 mod traversal;
 pub(in crate::plan) use sequences::Bind as SequenceBinding;
-pub(crate) use traversal::{Edit as ScalarEdit, EditIdentity as ScalarEditIdentity};
+pub(crate) use traversal::{
+    edit_statement_scalar, Edit as ScalarEdit, EditIdentity as ScalarEditIdentity,
+};
 pub(in crate::plan) mod windows;
 pub use iteration::OwnedScalarChildren;
 pub use replacement::ScalarNodeTransform;

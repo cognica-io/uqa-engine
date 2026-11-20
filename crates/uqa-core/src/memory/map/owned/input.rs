@@ -77,7 +77,8 @@ impl<K: Ord, V> OwnedMap<K, V> {
             .await
     }
 
-    pub(crate) async fn insert_produced_key_from<C>(
+    /// Insert an already produced key using the caller's comparison work. A controlled key funds its new node, and an ordinary key leaves node accounting with the caller.
+    pub async fn insert_produced_key_from<C>(
         &mut self,
         key: Produced<K>,
         value: V,

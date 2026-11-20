@@ -212,7 +212,7 @@ pub(super) fn valid_positions(
         })
 }
 
-pub(super) fn requires_cast(
+pub(crate) fn requires_cast(
     argument: &ScalarExpr,
     actual: Option<&ColumnType>,
     declared: &ColumnType,

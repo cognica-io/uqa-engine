@@ -7,9 +7,13 @@
 //! Admitted projection of stored index addresses and ownership, without materializing expression trees.
 
 use super::super::{IndexCatalogIdentity, IndexRelationships};
-use crate::SQLError;
+use crate::{
+    catalog::work::{compare_text, inline, Work},
+    SQLError,
+};
 use uqa_core::{
     catalog_identity::CatalogObjectIdentity,
+    json::JsonToken,
     memory::{Produced, ProductionControl},
 };
 
@@ -17,7 +21,7 @@ mod definition;
 pub use definition::definition;
 
 mod json;
-use json::{fields, object_id, read_error, FieldSet};
+use json::{object_id, FieldSet, Input};
 
 /// Borrowed definition payloads retain their original catalog owner. The only copied payload is the physical key, whose original decoding allowance stays with the result. This projection validates ownership metadata; expression and type semantics remain separate predicates.
 #[derive(Default)]
@@ -33,6 +37,15 @@ pub struct IndexMetadata<'a> {
 pub fn metadata<'a>(
     definition: Option<&'a str>,
     control: &ProductionControl<'_>,
+) -> Result<IndexMetadata<'a>, SQLError> {
+    inline(metadata_with_work(definition, control, &mut ()))
+}
+
+/// Select the same ownership fields through Core's borrowed, resumable JSON reader.
+pub async fn metadata_with_work<'a, W: Work + Send>(
+    definition: Option<&'a str>,
+    control: &ProductionControl<'_>,
+    work: &mut W,
 ) -> Result<IndexMetadata<'a>, SQLError> {
     control.check()?;
     let Some(text) = definition else {
@@ -50,10 +63,11 @@ pub fn metadata<'a>(
         "unique",
         "nulls_not_distinct",
     ]);
-    fields(text, control, |key, value| {
-        match seen.field(key)? {
-            0 if value != "null" => result.catalog = Some(catalog(value, control)?),
-            1 => result.relationships = relationships(value, control)?,
+    let mut input = Input::begin(text, JsonToken::StartObject, control, work).await?;
+    while let Some((key, value)) = input.field(work).await? {
+        match seen.field(&key)? {
+            0 if value != "null" => result.catalog = Some(catalog(value, control, work).await?),
+            1 => result.relationships = relationships(value, control, work).await?,
             2 => {
                 json::require_array(value)?;
                 result.included_columns = Some(value);
@@ -64,34 +78,31 @@ pub fn metadata<'a>(
             8 => result.nulls_not_distinct = json::boolean(value)?,
             _ => {}
         }
-        Ok(())
-    })?;
+    }
     seen.require((1 << 7) | (1 << 8))?;
     Ok(result)
 }
 
-fn catalog(
+async fn catalog<W: Work + Send>(
     text: &str,
     control: &ProductionControl<'_>,
+    work: &mut W,
 ) -> Result<Produced<IndexCatalogIdentity>, SQLError> {
     let mut seen = FieldSet::new(&["identity", "table_object_id", "physical_key"]);
     let mut identity = None;
     let mut table_object_id = None;
     let mut physical_key = None;
-    fields(text, control, |key, value| {
-        match seen.field(key)? {
-            0 => identity = Some(address(value, control)?),
-            1 => table_object_id = Some(object_id(value, control)?),
+    let mut input = Input::begin(text, JsonToken::StartObject, control, work).await?;
+    while let Some((key, value)) = input.field(work).await? {
+        match seen.field(&key)? {
+            0 => identity = Some(address(value, control, work).await?),
+            1 => table_object_id = Some(object_id(value, control, work).await?),
             2 => {
-                physical_key = Some(
-                    uqa_core::json::decode_json_string_with_control(value, control)
-                        .map_err(read_error)?,
-                );
+                physical_key = Some(input.string(value.as_bytes(), work).await?);
             }
             _ => unreachable!("known catalog field"),
         }
-        Ok(())
-    })?;
+    }
     seen.require(7)?;
     let (physical_key, memory) = physical_key.ok_or_else(invalid)?.into_parts();
     Ok(control.finish(
@@ -104,18 +115,22 @@ fn catalog(
     )?)
 }
 
-fn address(text: &str, control: &ProductionControl<'_>) -> Result<CatalogObjectIdentity, SQLError> {
+async fn address<W: Work + Send>(
+    text: &str,
+    control: &ProductionControl<'_>,
+    work: &mut W,
+) -> Result<CatalogObjectIdentity, SQLError> {
     let mut seen = FieldSet::new(&["object_id", "oid"]);
     let mut object = None;
     let mut oid = None;
-    fields(text, control, |key, value| {
-        match seen.field(key)? {
-            0 => object = Some(object_id(value, control)?),
+    let mut input = Input::begin(text, JsonToken::StartObject, control, work).await?;
+    while let Some((key, value)) = input.field(work).await? {
+        match seen.field(&key)? {
+            0 => object = Some(object_id(value, control, work).await?),
             1 => oid = Some(value.parse().map_err(|_| invalid())?),
             _ => unreachable!("known identity field"),
         }
-        Ok(())
-    })?;
+    }
     seen.require(3)?;
     Ok(CatalogObjectIdentity {
         object_id: object.ok_or_else(invalid)?,
@@ -123,27 +138,72 @@ fn address(text: &str, control: &ProductionControl<'_>) -> Result<CatalogObjectI
     })
 }
 
-fn relationships(
+async fn relationships<W: Work + Send>(
     text: &str,
     control: &ProductionControl<'_>,
+    work: &mut W,
 ) -> Result<IndexRelationships, SQLError> {
     let mut seen = FieldSet::new(&["owning_constraint", "parent_index"]);
     let mut result = IndexRelationships::default();
-    fields(text, control, |key, value| {
-        let field = seen.field(key)?;
+    let mut input = Input::begin(text, JsonToken::StartObject, control, work).await?;
+    while let Some((key, value)) = input.field(work).await? {
+        let field = seen.field(&key)?;
         let id = if value == "null" {
             None
         } else {
-            Some(object_id(value, control)?)
+            Some(object_id(value, control, work).await?)
         };
         match field {
             0 => result.owning_constraint = id,
             1 => result.parent_index = id,
             _ => unreachable!("known relationship field"),
         }
-        Ok(())
-    })?;
+    }
     Ok(result)
+}
+
+/// One stored key after validating its original value span. Expressions remain borrowed in the source and are never evaluated.
+pub enum StoredColumnKey {
+    Column(Produced<String>),
+    Expression,
+}
+
+/// A cursor over the original list; each key is decoded only when its caller visits it.
+pub struct ColumnKeys<'a, 'c> {
+    input: Input<'a, 'c>,
+    complete: bool,
+}
+
+impl<'a, 'c> ColumnKeys<'a, 'c> {
+    pub async fn new<W: Work + Send>(
+        text: &'a str,
+        control: &ProductionControl<'c>,
+        work: &mut W,
+    ) -> Result<Self, SQLError> {
+        Ok(Self {
+            input: Input::begin(text, JsonToken::StartArray, control, work).await?,
+            complete: false,
+        })
+    }
+
+    pub async fn next<W: Work + Send>(
+        &mut self,
+        work: &mut W,
+    ) -> Result<Option<StoredColumnKey>, SQLError> {
+        if self.complete {
+            return Ok(None);
+        }
+        let Some(value) = self.input.element(work).await? else {
+            self.complete = true;
+            return Ok(None);
+        };
+        let key = if value.starts_with('"') {
+            StoredColumnKey::Column(self.input.string(value.as_bytes(), work).await?)
+        } else {
+            StoredColumnKey::Expression
+        };
+        Ok(Some(key))
+    }
 }
 
 /// Compare a stored column-key or INCLUDE list without allocating a complete list or interpreting an expression as a column.
@@ -152,25 +212,31 @@ pub fn columns_match(
     expected: &[String],
     control: &ProductionControl<'_>,
 ) -> Result<bool, SQLError> {
+    inline(columns_match_with_work(text, expected, control, &mut ()))
+}
+
+pub async fn columns_match_with_work<W: Work + Send>(
+    text: Option<&str>,
+    expected: &[String],
+    control: &ProductionControl<'_>,
+    work: &mut W,
+) -> Result<bool, SQLError> {
     control.check()?;
     let Some(text) = text else {
         return Ok(expected.is_empty());
     };
+    let mut keys = ColumnKeys::new(text, control, work).await?;
     let mut matches = true;
     let mut position = 0;
-    json::array(text, control, |value| {
-        if value.starts_with('"') {
-            let name = uqa_core::json::decode_json_string_with_control(value, control)
-                .map_err(read_error)?;
-            matches &= expected
-                .get(position)
-                .is_some_and(|expected| name.as_str() == expected.as_str());
-        } else {
-            matches = false;
-        }
+    while let Some(key) = keys.next(work).await? {
+        matches &= match (key, expected.get(position)) {
+            (StoredColumnKey::Column(name), Some(expected)) => {
+                compare_text(work, &name, expected, control).await?.is_eq()
+            }
+            _ => false,
+        };
         position += 1;
-        Ok(())
-    })?;
+    }
     Ok(matches && position == expected.len())
 }
 
@@ -180,19 +246,17 @@ pub fn visit_column_keys(
     control: &ProductionControl<'_>,
     mut visit: impl FnMut(&str) -> Result<(), SQLError>,
 ) -> Result<bool, SQLError> {
-    control.check()?;
-    let mut ordinary = true;
-    json::array(text, control, |value| {
-        if value.starts_with('"') {
-            let name = uqa_core::json::decode_json_string_with_control(value, control)
-                .map_err(read_error)?;
-            visit(&name)?;
-        } else {
-            ordinary = false;
+    inline(async {
+        let mut keys = ColumnKeys::new(text, control, &mut ()).await?;
+        let mut ordinary = true;
+        while let Some(key) = keys.next(&mut ()).await? {
+            match key {
+                StoredColumnKey::Column(name) => visit(&name)?,
+                StoredColumnKey::Expression => ordinary = false,
+            }
         }
-        Ok(())
-    })?;
-    Ok(ordinary)
+        Ok(ordinary)
+    })
 }
 
 fn invalid() -> SQLError {

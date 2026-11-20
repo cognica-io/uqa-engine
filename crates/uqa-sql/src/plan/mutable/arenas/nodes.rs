@@ -22,7 +22,7 @@ use nodes::transformation::{ctes_from, input::checkpoint};
 use std::ptr::NonNull;
 use uqa_core::memory::ProductionControl;
 
-mod input;
+pub(in crate::plan::mutable) mod input;
 
 pub type ScalarArenaTransform<'a> = dyn FnMut(
         NonNull<ScalarExpr>,
@@ -92,9 +92,9 @@ impl MutableQueryPlan {
     }
 }
 
-struct Walker<'a, 'c, I> {
-    control: &'a ProductionControl<'c>,
-    input: &'a mut I,
+pub(in crate::plan::mutable) struct Walker<'a, 'c, I> {
+    pub(in crate::plan::mutable) control: &'a ProductionControl<'c>,
+    pub(in crate::plan::mutable) input: &'a mut I,
 }
 
 fn field<'a>(memory: Option<&'a mut RewriteMemory>, name: &str) -> Option<&'a mut RewriteMemory> {
@@ -142,7 +142,7 @@ impl<I: Input> Walker<'_, '_, I> {
         }
     }
 
-    async fn query(
+    pub(in crate::plan::mutable) async fn query(
         &mut self,
         query: &mut QueryPlan,
         mut memory: Option<&mut RewriteMemory>,
@@ -247,7 +247,7 @@ impl<I: Input> Walker<'_, '_, I> {
         Ok(())
     }
 
-    async fn command(
+    pub(in crate::plan::mutable) async fn command(
         &mut self,
         command: &mut CommandPlan,
         mut memory: Option<&mut RewriteMemory>,

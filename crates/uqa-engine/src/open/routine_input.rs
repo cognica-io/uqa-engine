@@ -77,10 +77,7 @@ impl RoutineTypeIdentityInput for RoutineNames {
 }
 
 fn catalog_error(error: SQLError) -> StorageBackendError {
-    match error {
-        SQLError::Cancelled(error) => error.into(),
-        error => StorageBackendError::backend("routine type catalog", error),
-    }
+    uqa_execution::storage_errors::catalog_read_error("routine type catalog", error)
 }
 
 impl Engine {

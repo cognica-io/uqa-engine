@@ -9,9 +9,11 @@ use super::{
     SQLFunctionVolatility, SQLScalarFunction, SQLTableFunction, Value,
 };
 
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 mod declarations;
 mod owner;
 mod retained;
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 pub(crate) use declarations::{CapturedDeclarations, RegisteredKinds};
 pub(crate) use owner::Registry;
 pub use owner::{SQLFunctionRegistration, SQLFunctionRegistrationError};

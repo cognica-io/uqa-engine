@@ -78,3 +78,20 @@ impl Lowering<'_> {
         })
     }
 }
+
+impl CompositeRowBinding {
+    pub(crate) async fn clone_with_input_work<W: Work>(
+        &self,
+        control: &uqa_core::memory::ProductionControl<'_>,
+        work: &mut W,
+    ) -> Result<uqa_core::memory::Produced<Self>, W::Error> {
+        let mut copying = Lowering {
+            control: control
+                .budget()
+                .map(|_| super::super::Control::from_production(*control)),
+            owned_children: None,
+        };
+        let value = copying.composite_binding_from(self, work).await?;
+        Ok(control.finish(value, copying.control.map(|owner| owner.memory))?)
+    }
+}

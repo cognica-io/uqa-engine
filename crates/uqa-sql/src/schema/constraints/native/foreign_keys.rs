@@ -8,10 +8,18 @@
 
 use super::partitions::Partitions;
 use super::{
-    bound_relation_identity_with_control, invalid, BudgetedMap, Catalog, ColumnDef, ForeignKey,
-    Index, NativeConstraintTable, SQLError,
+    bound_relation_identity_with_work, invalid, retire_entries, Budgeted, BudgetedMap, Catalog,
+    CatalogWork, ColumnDef, ForeignKey, Index, NativeConstraintTable, OwnedMap, ReferenceWork,
+    SQLError,
 };
 use crate::ast::{ColumnType, ForeignKeyAction, ForeignKeyRef, ReferencedPartitionConstraint};
+
+use crate::catalog::{
+    index::stored::input::{ColumnKeys, StoredColumnKey},
+    work::compare_text,
+};
+use crate::schema::inheritance::foreign_keys::attachment::same_columns;
+use uqa_core::memory::MapKeyInput;
 
 pub(super) struct Reference<'a> {
     local: &'a [String],
@@ -59,39 +67,47 @@ impl<'a> Reference<'a> {
 }
 
 impl<'a> Catalog<'a> {
-    pub(super) fn foreign_key(
+    pub(super) async fn foreign_key(
         &self,
         local: NativeConstraintTable<'a>,
         key: Reference<'_>,
         partitions: &Partitions<'_>,
+        input: &mut ReferenceWork<'_, '_, impl CatalogWork + Send>,
     ) -> Result<(), SQLError> {
-        self.control.check()?;
+        input.checkpoint().await?;
         if local.hierarchy.is_none() || key.local.is_empty() || key.local.len() != key.columns.len()
         {
             return Err(invalid("foreign-key relation or column arity"));
         }
-        let name = bound_relation_identity_with_control(key.target, &self.control)?;
+        let name = bound_relation_identity_with_work(key.target, input.control, input.work).await?;
         let target = *self
             .tables
-            .get(&*name)
+            .get_from(&*name, input)
+            .await?
             .ok_or_else(|| invalid("missing foreign-key table"))?;
         if target.hierarchy.is_none() {
             return Err(invalid("foreign-key target is not an ordinary table"));
         }
-        self.column_list(local, key.local, false)?;
-        self.column_list(target, key.columns, true)?;
+        self.column_list(local, key.local, false, input).await?;
+        self.column_list(target, key.columns, true, input).await?;
         for (source, destination) in key.local.iter().zip(key.columns) {
-            let source = self.column(local, source)?;
-            let destination = self.column(target, destination)?;
-            crate::type_resolution::foreign_key_operand_type_with_control(
+            let source = self.column(local, source, input).await?;
+            let destination = self.column(target, destination, input).await?;
+            let comparison = match crate::type_resolution::foreign_key_operand_type_with_work(
                 &source.ty,
                 &destination.ty,
-                &self.control,
+                input.control,
+                input,
             )
-            .map_err(|error| match error.sqlstate() {
-                Some("53200" | "57014") => error,
-                _ => invalid("incompatible foreign-key column types"),
-            })?;
+            .await
+            {
+                Ok(Some(comparison)) => comparison,
+                Err(error) if matches!(error.sqlstate(), Some("53200" | "57014")) => {
+                    return Err(error)
+                }
+                Ok(None) | Err(_) => return Err(invalid("incompatible foreign-key column types")),
+            };
+            ColumnType::retire_with_work(comparison, input.control, input).await?;
         }
         let index = key
             .index
@@ -99,8 +115,9 @@ impl<'a> Catalog<'a> {
             .ok_or_else(|| invalid("missing original foreign-key index"))?;
         let address = index.metadata.catalog.as_ref().expect("addressed index");
         let index_table =
-            bound_relation_identity_with_control(&index.row.table_name, &self.control)?;
-        if *index_table != *target.name
+            bound_relation_identity_with_work(&index.row.table_name, input.control, input.work)
+                .await?;
+        if input.compare(&*index_table, &target.name).await?.is_ne()
             || address.table_object_id != target.object_id
             || !address.identity.is_valid()
             || !index.metadata.unique
@@ -108,9 +125,9 @@ impl<'a> Catalog<'a> {
         {
             return Err(invalid("foreign-key index incarnation or eligibility"));
         }
-        self.index_columns(index, key.columns)?;
+        self.index_columns(index, key.columns, input).await?;
         if key.period {
-            self.period(local, target, &key, index)?;
+            self.period(local, target, &key, index, input).await?;
         }
         if !key.set_columns.is_empty() {
             if !matches!(
@@ -119,50 +136,73 @@ impl<'a> Catalog<'a> {
             ) {
                 return Err(invalid("foreign-key SET column action"));
             }
-            self.column_list(local, key.set_columns, false)?;
+            self.column_list(local, key.set_columns, false, input)
+                .await?;
             for column in key.set_columns {
-                self.control.check()?;
-                if !key.local.contains(column) {
+                input.checkpoint().await?;
+                let mut matched = false;
+                for name in key.local {
+                    input.checkpoint().await?;
+                    if compare_text(input.work, name, column, input.control)
+                        .await?
+                        .is_eq()
+                    {
+                        matched = true;
+                        break;
+                    }
+                }
+                if !matched {
                     return Err(invalid("foreign-key SET column membership"));
                 }
             }
         }
-        self.referenced_partitions(local, target, &key, partitions)
+        self.referenced_partitions(local, target, &key, partitions, input)
+            .await
     }
 
-    fn index_columns(&self, index: &Index<'_>, columns: &[String]) -> Result<(), SQLError> {
-        let mut selected = BudgetedMap::new(self.memory);
+    async fn index_columns(
+        &self,
+        index: &Index<'_>,
+        columns: &[String],
+        input: &mut ReferenceWork<'_, '_, impl CatalogWork + Send>,
+    ) -> Result<(), SQLError> {
+        let mut selected = OwnedMap::new();
         for column in columns {
-            self.control.check()?;
-            selected.insert(column.as_str(), false)?;
+            let name = Budgeted::new(column.as_str(), self.memory.reserve(0)?);
+            selected
+                .insert_admitted_key_from(name, false, input)
+                .await?;
         }
+        let mut keys = ColumnKeys::new(&index.row.columns_json, input.control, input.work).await?;
+        let mut ordinary = true;
         let mut count = 0;
-        let ordinary = crate::catalog::index::stored::input::visit_column_keys(
-            &index.row.columns_json,
-            &self.control,
-            |name| {
-                let seen = selected
-                    .get_mut(name)
-                    .ok_or_else(|| invalid("foreign-key index columns"))?;
-                if std::mem::replace(seen, true) {
-                    return Err(invalid("duplicate foreign-key index column"));
-                }
-                count += 1;
-                Ok(())
-            },
-        )?;
+        while let Some(key) = keys.next(input.work).await? {
+            let StoredColumnKey::Column(name) = key else {
+                ordinary = false;
+                continue;
+            };
+            let seen = selected
+                .get_mut_from(name.as_str(), input)
+                .await?
+                .ok_or_else(|| invalid("foreign-key index columns"))?;
+            if std::mem::replace(seen, true) {
+                return Err(invalid("duplicate foreign-key index column"));
+            }
+            count += 1;
+        }
         if !ordinary || count != columns.len() {
             return Err(invalid("foreign-key index expressions or arity"));
         }
-        Ok(())
+        retire_entries(selected.into_iter(), input.control, input.work).await
     }
 
-    fn period(
+    async fn period(
         &self,
         local: NativeConstraintTable<'a>,
         target: NativeConstraintTable<'a>,
         key: &Reference<'_>,
         index: &Index<'_>,
+        input: &mut ReferenceWork<'_, '_, impl CatalogWork + Send>,
     ) -> Result<(), SQLError> {
         if key.local.len() < 2
             || key.on_update != ForeignKeyAction::NoAction
@@ -171,10 +211,16 @@ impl<'a> Catalog<'a> {
             return Err(invalid("PERIOD foreign-key shape or action"));
         }
         let source = &self
-            .column(local, key.local.last().expect("nonempty key"))?
+            .column(local, key.local.last().expect("nonempty key"), input)
+            .await?
             .ty;
         let destination = &self
-            .column(target, key.columns.last().expect("matching key arity"))?
+            .column(
+                target,
+                key.columns.last().expect("matching key arity"),
+                input,
+            )
+            .await?
             .ty;
         if !matches!(source, ColumnType::Range(_) | ColumnType::Multirange(_))
             || source != destination
@@ -187,12 +233,12 @@ impl<'a> Catalog<'a> {
             .owning_constraint
             .ok_or_else(|| invalid("PERIOD foreign-key index has no owning constraint"))?;
         for candidate in target.keys {
-            self.control.check()?;
+            input.checkpoint().await?;
             if candidate
                 .catalog_identity
                 .is_some_and(|id| id.object_id == owner)
                 && candidate.without_overlaps
-                && candidate.columns == key.columns
+                && same_columns(&candidate.columns, key.columns, input).await?
             {
                 return Ok(());
             }
@@ -200,12 +246,13 @@ impl<'a> Catalog<'a> {
         Err(invalid("PERIOD foreign-key referenced key"))
     }
 
-    fn referenced_partitions(
+    async fn referenced_partitions(
         &self,
         local: NativeConstraintTable<'a>,
         target: NativeConstraintTable<'a>,
         key: &Reference<'_>,
         partitions: &Partitions<'_>,
+        input: &mut ReferenceWork<'_, '_, impl CatalogWork + Send>,
     ) -> Result<(), SQLError> {
         if partitions.inherits_family(&local.object_id, key.family) {
             return if key.partitions.is_empty() {
@@ -218,7 +265,7 @@ impl<'a> Catalog<'a> {
         }
         let mut seen = BudgetedMap::new(self.memory);
         for derived in key.partitions {
-            self.control.check()?;
+            input.checkpoint().await?;
             if !derived.catalog_identity.is_valid()
                 || derived.partition == target.object_id
                 || seen.insert(derived.partition, ())?.is_some()
@@ -234,6 +281,7 @@ impl<'a> Catalog<'a> {
                 return Err(invalid("referenced partition parent incarnation"));
             }
         }
-        partitions.complete(target.object_id, &seen)
+        partitions.complete(target.object_id, &seen, input).await?;
+        retire_entries(seen.into_entries(), input.control, input.work).await
     }
 }

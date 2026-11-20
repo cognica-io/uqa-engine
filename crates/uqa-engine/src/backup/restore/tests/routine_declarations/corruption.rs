@@ -11,6 +11,8 @@ use uqa_sql::{
     routines::SQLUserFunction,
 };
 
+mod stored_defaults;
+
 fn damage(definition: &mut CreateFunction, kind: &str) {
     match kind {
         "cost" => definition.cost = Some(0.0),
@@ -54,18 +56,31 @@ fn capture_changed(
     repository: &LocalRepository,
     kind: &str,
 ) -> BackupRoot {
-    let source = provider.open(path);
-    if matches!(kind, "early_duplicate" | "late_duplicate") {
+    let sql = if matches!(kind, "early_duplicate" | "late_duplicate") {
         let parameters = (0..96)
             .map(|index| format!("p{index:03} integer"))
             .collect::<Vec<_>>()
             .join(",");
-        source.sql(&format!("CREATE FUNCTION saved({parameters}) RETURNS integer LANGUAGE SQL AS 'SELECT 1'"), &[]).unwrap();
+        format!("CREATE FUNCTION saved({parameters}) RETURNS integer LANGUAGE SQL AS 'SELECT 1'")
     } else if kind == "variadic_domain" {
-        source.sql("CREATE DOMAIN declaration_ints AS integer[]; CREATE FUNCTION saved(n integer,m integer) RETURNS integer LANGUAGE SQL AS 'SELECT 1'", &[]).unwrap();
+        "CREATE DOMAIN declaration_ints AS integer[]; CREATE FUNCTION saved(n integer,m integer) RETURNS integer LANGUAGE SQL AS 'SELECT 1'".into()
     } else {
-        source.sql("CREATE FUNCTION saved(n integer DEFAULT 1,m integer DEFAULT 2) RETURNS integer LANGUAGE SQL AS 'SELECT 1'", &[]).unwrap();
-    }
+        "CREATE FUNCTION saved(n integer DEFAULT 1,m integer DEFAULT 2) RETURNS integer LANGUAGE SQL AS 'SELECT 1'".into()
+    };
+    capture_definition(provider, path, repository, &sql, |definition| {
+        damage(definition, kind);
+    })
+}
+
+fn capture_definition(
+    provider: Provider,
+    path: &std::path::Path,
+    repository: &LocalRepository,
+    sql: &str,
+    edit: impl FnOnce(&mut CreateFunction),
+) -> BackupRoot {
+    let source = provider.open(path);
+    source.sql(sql, &[]).unwrap();
     if let Some(persistent) = source.storage.provider.clone() {
         drop(source);
         let session = persistent.open_session().unwrap();
@@ -74,7 +89,7 @@ fn capture_changed(
             serde_json::from_str(&session.catalog.get_metadata(key).unwrap().unwrap()).unwrap();
         let selected = &mut record["definitions"]["public.saved"][0];
         let mut definition: CreateFunction = serde_json::from_value(selected.clone()).unwrap();
-        damage(&mut definition, kind);
+        edit(&mut definition);
         *selected = serde_json::to_value(definition).unwrap();
         session
             .catalog
@@ -87,7 +102,7 @@ fn capture_changed(
             let mut routines = source.durable.sql_user_functions.write();
             let original = &routines["public.saved"][0];
             let mut definition = original.def.clone();
-            damage(&mut definition, kind);
+            edit(&mut definition);
             let changed = SQLUserFunction::new(definition, original.body.clone()).shared();
             routines
                 .insert("public.saved".into(), vec![changed])
@@ -206,13 +221,24 @@ fn reject(provider: Provider, kind: &str, expected: &str) -> usize {
         &repository,
         kind,
     );
-    let control = StorageReadControl::with_limit(32 << 20);
     let path = directory.path().join("restored");
+    reject_root(provider, &repository, root, &path, kind, expected)
+}
+
+fn reject_root(
+    provider: Provider,
+    repository: &LocalRepository,
+    root: BackupRoot,
+    path: &std::path::Path,
+    kind: &str,
+    expected: &str,
+) -> usize {
+    let control = StorageReadControl::with_limit(32 << 20);
     let mut job = Engine::new()
         .begin_restore(
-            &repository,
+            repository,
             root.backup(),
-            destination(provider, &path),
+            destination(provider, path),
             RestoreOptions::new(16 << 20, 8 << 20),
             &control,
         )

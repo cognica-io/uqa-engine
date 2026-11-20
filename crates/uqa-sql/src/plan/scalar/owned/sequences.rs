@@ -95,6 +95,19 @@ where
 }
 
 impl OwnedScalarExpr {
+    /// Install an already resolved reference at this call's first regclass argument, preserving casts and argument storage.
+    pub(crate) fn replace_sequence_reference(
+        self,
+        name: Produced<String>,
+        control: &ProductionControl<'_>,
+    ) -> Result<Self, SQLError> {
+        let mut name = Some(name);
+        let resolve = |_: &str, _: &ProductionControl<'_>| {
+            Ok(name.take().expect("one selected sequence argument"))
+        };
+        crate::catalog::work::inline(Bind(resolve).apply((), self, control, &mut ()))
+    }
+
     /// Bind sequence string arguments in the existing children-before-parent order. Only builtin sequence names and regclass casts select a reference; the resolver returns an already admitted canonical name.
     pub fn bind_sequence_references_with_control<F>(
         self,

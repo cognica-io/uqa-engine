@@ -6,7 +6,9 @@
 
 //! Read stored index expressions against their original row and routine declarations.
 
-use crate::catalog::scalar_bindings::{expression_type, validate_boolean, NativeScalarContext};
+use crate::catalog::scalar_bindings::{
+    expression_type_with_work, validate_boolean_with_work, NativeScalarContext,
+};
 use crate::{
     ast::{ColumnDef, IndexKey},
     binding::production::ControlledBindingContext,
@@ -33,12 +35,31 @@ pub fn validate_bindings(
     context: &IndexBindingContext<'_, '_>,
     control: &ProductionControl<'_>,
 ) -> Result<(), SQLError> {
+    crate::catalog::work::inline(validate_bindings_with_work(
+        keys,
+        definition,
+        columns,
+        context,
+        control,
+        &mut (),
+    ))
+}
+
+pub async fn validate_bindings_with_work(
+    keys: &[IndexKey],
+    definition: &IndexDefinition,
+    columns: Option<&[ColumnDef]>,
+    context: &IndexBindingContext<'_, '_>,
+    control: &ProductionControl<'_>,
+    work: &mut (impl crate::catalog::CatalogWork + Send),
+) -> Result<(), SQLError> {
     control.check()?;
     if !definition.key_types.is_empty() && definition.key_types.len() != keys.len() {
         return Err(invalid("key type count"));
     }
     for ty in &definition.key_types {
-        context.types.column_type(ty)?;
+        work.checkpoint().await?;
+        context.types.column_type_with_work(ty, work).await?;
     }
     let schema = crate::schema::indexes::row_schema_with_control(
         context.relation.map(|relation| relation.name.as_str()),
@@ -54,33 +75,54 @@ pub fn validate_bindings(
         binding: context.binding,
     };
     for (position, key) in keys.iter().enumerate() {
+        work.checkpoint().await?;
         control.check()?;
         let expected = definition.key_types.get(position);
         match key {
             IndexKey::Column(name) => {
-                if let Some(column) = columns
-                    .into_iter()
-                    .flatten()
-                    .find(|column| column.name == *name)
-                {
-                    if expected.is_some_and(|expected| *expected != column.ty) {
-                        return Err(invalid("column key type"));
+                for column in columns.into_iter().flatten() {
+                    work.checkpoint().await?;
+                    if crate::catalog::work::compare_text(work, &column.name, name, control)
+                        .await?
+                        .is_eq()
+                    {
+                        if let Some(expected) = expected {
+                            if !crate::type_resolution::same_declaration_with_work(
+                                expected,
+                                &column.ty,
+                                control,
+                                &mut crate::catalog::work::ReferenceWork { control, work },
+                            )
+                            .await?
+                            {
+                                return Err(invalid("column key type"));
+                            }
+                        }
+                        break;
                     }
                 }
             }
             IndexKey::Expression(expression) => {
-                let ty = expression_type(expression, &schema, &scalar, control)?;
+                let ty =
+                    expression_type_with_work(expression, &schema, &scalar, control, work).await?;
                 // Ordinary index declaration resolves an unknown result to text.
-                if expected.is_some_and(|expected| {
-                    *expected != *ty.as_deref().unwrap_or(&ColumnType::Text)
-                }) {
-                    return Err(invalid("expression key type"));
+                if let Some(expected) = expected {
+                    if !crate::type_resolution::same_declaration_with_work(
+                        expected,
+                        ty.as_deref().unwrap_or(&ColumnType::Text),
+                        control,
+                        &mut crate::catalog::work::ReferenceWork { control, work },
+                    )
+                    .await?
+                    {
+                        return Err(invalid("expression key type"));
+                    }
                 }
             }
         }
     }
     if let Some(predicate) = &definition.predicate {
-        validate_boolean(predicate, &schema, &scalar, control)?;
+        validate_boolean_with_work(predicate, &schema, &scalar, control, work).await?;
     }
     control.check()?;
     Ok(())

@@ -51,9 +51,10 @@ impl CatalogValidation {
     }
 
     /// Advance immutable table capture or the next ordered catalog relationship check.
-    pub(super) fn advance(
+    pub(super) fn advance<S: Clone + Send + Sync + 'static>(
         self,
-        engine: &Engine,
+        owner: &S,
+        engine: fn(&S) -> &Engine,
         control: &StorageReadControl,
         steps: usize,
     ) -> StorageBackendResult<Option<Self>> {
@@ -70,7 +71,7 @@ impl CatalogValidation {
                     control.cancellation(),
                     control.cancellation(),
                 );
-                let catalog = engine
+                let catalog = engine(owner)
                     .with_sequence_positions_with_control(catalog, &production)
                     .map_err(sql_error)?;
                 Ok(Some(Self::Relationships(RelationshipValidation::new(
@@ -81,7 +82,7 @@ impl CatalogValidation {
             }
             Self::Relationships(checks) => {
                 let next = checks
-                    .advance_with_declaration_types(engine, engine, engine, steps)
+                    .advance_with_retained_services(owner, engine, engine(owner), steps)
                     .map_err(sql_error)?;
                 control.check()?;
                 Ok(next.map(Self::Relationships))
@@ -125,10 +126,7 @@ impl RoutineTypeNamespace for SessionNamespace {
 }
 
 fn sql_error(error: uqa_sql::SQLError) -> StorageBackendError {
-    match error.primary() {
-        uqa_sql::SQLError::Cancelled(reason) => (*reason).into(),
-        _ => StorageBackendError::backend("backup catalog validation", error),
-    }
+    uqa_execution::storage_errors::catalog_read_error("backup catalog validation", error)
 }
 
 #[cfg(test)]

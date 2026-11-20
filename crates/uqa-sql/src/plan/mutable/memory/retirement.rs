@@ -8,6 +8,7 @@
 
 use super::{footprint::FieldPath, MemoryReservation, RewriteField, RewriteMemory};
 use crate::{catalog::work::Work, plan::scalar::ScalarMemoryFolding, SQLError};
+use std::{borrow::BorrowMut, future::Future};
 use uqa_core::memory::ProductionControl;
 
 impl Drop for RewriteField {
@@ -20,7 +21,7 @@ impl Drop for RewriteField {
 
 pub(super) fn fold(memory: RewriteMemory) -> Option<MemoryReservation> {
     let mut folding = Folding::new(memory);
-    while !folding.advance() {}
+    folding.drain();
     folding.finish()
 }
 
@@ -49,12 +50,22 @@ impl Folding {
         }
     }
 
-    pub(in crate::plan::mutable) async fn retire_from<W: Work>(
-        mut self,
+    pub(in crate::plan::mutable) fn retire_from<'a, W: Work>(
+        self,
+        control: Option<&'a ProductionControl<'a>>,
+        work: &'a mut W,
+    ) -> impl Future<Output = Result<(), SQLError>> + 'a {
+        Self::advance_from(self, control, work)
+    }
+
+    /// Detached records move into this frame. Publication borrows its records so the payload
+    /// still retires before its allocation reservations when an unfinished operation is dropped.
+    pub(in crate::plan::mutable) async fn advance_from<W: Work>(
+        mut fields: impl BorrowMut<Self>,
         control: Option<&ProductionControl<'_>>,
         work: &mut W,
     ) -> Result<(), SQLError> {
-        while !self.is_complete() {
+        while !fields.borrow_mut().is_complete() {
             if let Some(control) = control {
                 control.check()?;
             }
@@ -62,10 +73,13 @@ impl Folding {
             if let Some(control) = control {
                 control.check()?;
             }
-            self.advance();
+            fields.borrow_mut().advance();
         }
-        drop(self.finish());
         Ok(())
+    }
+
+    pub(in crate::plan::mutable) fn drain(&mut self) {
+        while !self.advance() {}
     }
 
     /// Detach one constructor field or scalar owner, advance one scalar-fold edge, or release one completed record.
@@ -152,7 +166,7 @@ impl Folding {
         self.current.is_none() && self.path.parent.is_none() && self.scalar.is_none()
     }
 
-    fn finish(mut self) -> Option<MemoryReservation> {
+    pub(in crate::plan::mutable) fn finish(mut self) -> Option<MemoryReservation> {
         assert!(self.is_complete());
         self.retained.take()
     }
@@ -160,7 +174,7 @@ impl Folding {
 
 impl Drop for Folding {
     fn drop(&mut self) {
-        while !self.advance() {}
+        self.drain();
     }
 }
 

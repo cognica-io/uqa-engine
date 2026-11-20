@@ -242,6 +242,10 @@ fn memory_document_retained_reads_keep_original_control_and_cannot_detach_writab
     ));
     assert_eq!(visited, 1);
     assert!(matches!(
+        retained.for_each_next_fields(None, 0, &["value"], &mut |_, _| panic!()),
+        Err(StorageBackendError::Cancelled(_))
+    ));
+    assert!(matches!(
         alias.snapshot(),
         Err(StorageBackendError::Cancelled(_))
     ));

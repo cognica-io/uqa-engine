@@ -21,8 +21,30 @@ pub trait RoutineRelationOids {
 }
 
 pub fn is_regclass(name: &str) -> bool {
-    crate::ast::ColumnType::from_sql_name(name)
-        .is_ok_and(|ty| matches!(ty, crate::ast::ColumnType::Regclass))
+    crate::catalog::work::inline(is_regclass_with_work(
+        name,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+        &mut (),
+    ))
+    .unwrap_or(false)
+}
+
+pub(crate) async fn is_regclass_with_work<W: crate::catalog::work::Work + Send>(
+    name: &str,
+    control: &uqa_core::memory::ProductionControl<'_>,
+    work: &mut W,
+) -> Result<bool, SQLError> {
+    use crate::{ast::ColumnType, catalog::work::ReferenceWork};
+    let mut work = ReferenceWork { control, work };
+    match ColumnType::from_sql_name_with_input_work(name, control, &mut work).await {
+        Ok(ty) => {
+            let result = matches!(*ty, ColumnType::Regclass);
+            ColumnType::retire_with_work(ty, control, &mut work).await?;
+            Ok(result)
+        }
+        Err(error) if matches!(error.sqlstate(), Some("53200" | "57014")) => Err(error),
+        Err(_) => Ok(false),
+    }
 }
 
 pub fn regclass_oid(expression: &Expr) -> Option<i64> {

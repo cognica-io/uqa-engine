@@ -9,16 +9,24 @@
 use super::{publish_restored, RoutineRegistry, RoutineRegistryState, RoutineRestoreContext};
 use crate::routines::{
     catalog::input::binding_error,
-    definition::{CatalogRoutineBinding, RoutineBodyCompilation},
+    definition::{BindingStep, CatalogRoutineBinding, RoutineBodyCompilation},
 };
+use std::sync::Arc;
 use uqa_core::{
     image_io::{ImageDecodeWindow, ImageDecoder},
     memory::{Budgeted, BudgetedVec, ProductionControl},
 };
-use uqa_sql::routines::{
-    dependencies::RoutineDeclaration,
-    lifecycle::restoration::{PendingRoutineDefinitions, RoutineRestorePlaceholders},
-    SQLRoutine, StoredRoutineDefinition,
+use uqa_sql::{
+    plan::{AggregateClassifier, RetainedExecutablePlan},
+    routines::{
+        dependencies::RoutineDeclaration,
+        lifecycle::restoration::{
+            PendingRoutineDefinitions, RoutinePlaceholderRetirement, RoutineRestorePlaceholders,
+        },
+        registry::RoutineRegistryRetirement,
+        SQLRoutine, StoredRoutineDefinition,
+    },
+    semantics::sets::placement_scope::SetPlacementScope,
 };
 use uqa_storage::{read_control::StorageReadControl, StorageBackendError, StorageBackendResult};
 
@@ -29,6 +37,7 @@ pub struct RetainedRoutineFinalization {
 struct Finalization {
     previous: RoutineRegistry,
     read: StorageReadControl,
+    aggregates: Arc<dyn AggregateClassifier + Send + Sync>,
     stage: Option<Stage>,
 }
 
@@ -43,7 +52,18 @@ struct Bodies {
 enum Stage {
     Bind(Bodies),
     Declaration(Bodies, Budgeted<Box<Declaration>>),
+    Statement(
+        Bodies,
+        ImageDecoder<(Budgeted<Box<Declaration>>, RetainedExecutablePlan), StorageBackendError>,
+    ),
+    Analysis(
+        Bodies,
+        super::super::definition::BindingScope,
+        ImageDecoder<Budgeted<Box<Declaration>>, StorageBackendError>,
+    ),
     Group(ImageDecoder<Bodies, StorageBackendError>),
+    RetireRegistry(RoutineRegistryRetirement, RoutinePlaceholderRetirement),
+    RetireDeclarations(RoutinePlaceholderRetirement),
 }
 
 struct Declaration {
@@ -69,6 +89,7 @@ impl RetainedRoutineFinalization {
         registry: &dyn RoutineRegistryState,
         prepared: RoutineRestorePlaceholders,
         read: &StorageReadControl,
+        aggregates: Arc<dyn AggregateClassifier + Send + Sync>,
     ) -> StorageBackendResult<Self> {
         let lease = read.memory().reserve(size_of::<Finalization>())?;
         let (placeholders, definitions) = prepared.into_parts();
@@ -79,6 +100,7 @@ impl RetainedRoutineFinalization {
         let state = Finalization {
             previous,
             read: read.clone(),
+            aggregates,
             stage: Some(Stage::Bind(Bodies {
                 definitions,
                 restored,
@@ -92,44 +114,151 @@ impl RetainedRoutineFinalization {
         })
     }
 
+    /// The compiled registry has replaced every placeholder. The private session now owns only their original release work.
+    pub fn retiring_placeholders(&self) -> bool {
+        matches!(
+            self.state.stage,
+            Some(Stage::RetireRegistry(..) | Stage::RetireDeclarations(_))
+        )
+    }
+
     /// A call advances one declaration field, body statement, or private registry step.
     /// The compiler borrows the Engine only during that call. The owning private session retires
     /// both the placeholders and the saved predecessor if an open operation is abandoned.
     pub fn advance(
+        self,
+        context: &RoutineRestoreContext<'_>,
+    ) -> StorageBackendResult<Option<Self>> {
+        self.advance_using(context, Bodies::advance_declaration)
+    }
+
+    /// Keep the original catalog session available throughout a stored definition's binding work.
+    pub fn advance_with_routines<S, R>(
+        self,
+        context: &RoutineRestoreContext<'_>,
+        services: &S,
+        catalog: fn(&S) -> &R,
+    ) -> StorageBackendResult<Option<Self>>
+    where
+        S: Clone + Send + Sync + 'static,
+        R: uqa_sql::routines::compilation::StoredRoutineCatalog
+            + uqa_sql::binding::stored_columns::StoredSourceCatalog
+            + uqa_sql::routines::resolution::RoutineOverloadCatalog
+            + uqa_sql::routines::regclass::RoutineRegclassCatalog
+            + uqa_sql::plan::AggregateClassifier
+            + 'static,
+    {
+        self.advance_using(
+            context,
+            |bodies, mut declaration, lowered, context, read, aggregates| {
+                let scope = declaration.binding.as_ref().and_then(|binding| {
+                    binding.retained_scope(declaration.definition.declaration(), lowered.is_some())
+                });
+                if let Some(scope) = scope {
+                    let services = services.clone();
+                    let original = read.cancellation().clone();
+                    let analysis = ImageDecoder::new(
+                        read.memory(),
+                        read.cancellation(),
+                        |mut reader| async move {
+                            let mut input = reader.input();
+                            let control =
+                                ProductionControl::new(input.memory, &original, input.cancellation);
+                            let record = declaration.as_mut();
+                            record
+                                .binding
+                                .as_mut()
+                                .expect("selected catalog compilation")
+                                .advance_input(
+                                    catalog(&services),
+                                    &mut record.definition,
+                                    lowered,
+                                    &control,
+                                    &mut input,
+                                )
+                                .await
+                                .map_err(|error| catalog_message(error, &control))?;
+                            Ok(declaration)
+                        },
+                    )?;
+                    return Ok(Stage::Analysis(bodies, scope, analysis));
+                }
+                bodies.advance_declaration(declaration, lowered, context, read, aggregates)
+            },
+        )
+    }
+
+    fn advance_using(
         mut self,
         context: &RoutineRestoreContext<'_>,
+        declaration: impl FnOnce(
+            Bodies,
+            Budgeted<Box<Declaration>>,
+            Option<RetainedExecutablePlan>,
+            &RoutineRestoreContext<'_>,
+            &StorageReadControl,
+            &Arc<dyn AggregateClassifier + Send + Sync>,
+        ) -> StorageBackendResult<Stage>,
     ) -> StorageBackendResult<Option<Self>> {
         let Finalization {
             previous,
             read,
+            aggregates,
             stage,
         } = self.state.as_mut();
         let result = match (read.check(), stage.take().expect("active finalization")) {
             (Err(error), _) => Err(error),
             (Ok(()), Stage::Bind(bodies)) if bodies.definitions.group(bodies.group).is_none() => {
                 let restored = bodies.restored.into_mutation_budget(previous.budget());
-                return publish_restored(
-                    context,
-                    previous.clone(),
-                    restored,
-                    bodies.migrated,
-                    false,
-                )
-                .map(|()| None);
+                publish_restored(context, restored, bodies.migrated, false, |placeholders| {
+                    Ok(placeholders.prepare_placeholder_retirement(read.memory())?)
+                })
+                .map(|registry| {
+                    Stage::RetireRegistry(registry, bodies.definitions.into_retirement())
+                })
+            }
+            (Ok(()), Stage::RetireRegistry(mut registry, originals)) => {
+                if registry.advance() {
+                    Ok(Stage::RetireDeclarations(originals))
+                } else {
+                    Ok(Stage::RetireRegistry(registry, originals))
+                }
+            }
+            (Ok(()), Stage::RetireDeclarations(mut originals)) => {
+                if originals.advance() {
+                    return Ok(None);
+                }
+                Ok(Stage::RetireDeclarations(originals))
             }
             (Ok(()), Stage::Bind(bodies)) => bodies.advance(read),
             (Ok(()), Stage::Declaration(bodies, input)) => {
-                bodies.advance_declaration(input, context, read)
+                declaration(bodies, input, None, context, read, aggregates)
             }
-            (Ok(()), Stage::Group(mut input)) => input
-                .advance(
-                    &mut std::io::empty(),
-                    ImageDecodeWindow { bytes: 1, steps: 1 },
-                )
-                .map(|bodies| match bodies {
+            (Ok(()), Stage::Statement(bodies, mut input)) => {
+                let lowered = {
+                    let _placement = SetPlacementScope::stored_definition();
+                    advance_one(&mut input)
+                };
+                match lowered {
+                    Ok(Some((value, plan))) => {
+                        declaration(bodies, value, Some(plan), context, read, aggregates)
+                    }
+                    Ok(None) => Ok(Stage::Statement(bodies, input)),
+                    Err(error) => Err(error),
+                }
+            }
+            (Ok(()), Stage::Analysis(bodies, scope, mut input)) => scope
+                .run(&context.definition, || advance_one(&mut input))
+                .map(|record| match record {
+                    Some(record) => Stage::Declaration(bodies, record),
+                    None => Stage::Analysis(bodies, scope, input),
+                }),
+            (Ok(()), Stage::Group(mut input)) => {
+                advance_one(&mut input).map(|bodies| match bodies {
                     Some(bodies) => Stage::Bind(bodies),
                     None => Stage::Group(input),
-                }),
+                })
+            }
         };
         match result {
             Ok(next) => {
@@ -142,6 +271,15 @@ impl RetainedRoutineFinalization {
             }
         }
     }
+}
+
+fn advance_one<T: 'static>(
+    input: &mut ImageDecoder<T, StorageBackendError>,
+) -> StorageBackendResult<Option<T>> {
+    input.advance(
+        &mut std::io::empty(),
+        ImageDecodeWindow { bytes: 1, steps: 1 },
+    )
 }
 
 impl Bodies {
@@ -205,25 +343,57 @@ impl Bodies {
     fn advance_declaration(
         mut self,
         mut input: Budgeted<Box<Declaration>>,
+        lowered: Option<RetainedExecutablePlan>,
         context: &RoutineRestoreContext<'_>,
         read: &StorageReadControl,
+        aggregates: &Arc<dyn AggregateClassifier + Send + Sync>,
     ) -> StorageBackendResult<Stage> {
         let control =
             ProductionControl::new(read.memory(), read.cancellation(), read.cancellation());
         let declaration = input.as_mut();
         if let Some(binding) = &mut declaration.binding {
-            if let Some(bound) = binding
-                .advance(&context.definition, &mut declaration.definition, &control)
+            match binding
+                .advance_restored(
+                    &context.definition,
+                    &mut declaration.definition,
+                    lowered,
+                    &control,
+                )
                 .map_err(|error| catalog_message(error, &control))?
             {
-                let (input, _state_lease) = input.into_parts();
-                let routine = input
-                    .definition
-                    .publish(bound.body, &control)
-                    .map_err(|error| catalog_message(error, &control))?;
-                self.compiled.push(routine)?;
-                self.migrated |= bound.changed;
-                return Ok(Stage::Bind(self));
+                BindingStep::Pending => {}
+                BindingStep::Statement(source) => {
+                    let original = read.cancellation().clone();
+                    let aggregates = Arc::clone(aggregates);
+                    let lowering = ImageDecoder::new(
+                        read.memory(),
+                        read.cancellation(),
+                        |mut reader| async move {
+                            let mut work = reader.input();
+                            let control =
+                                ProductionControl::new(work.memory, &original, work.cancellation);
+                            let plan = source
+                                .lower(&input.definition, aggregates.as_ref(), &control, &mut work)
+                                .await
+                                .map_err(|error| catalog_message(error, &control))?;
+                            Ok((input, plan))
+                        },
+                    )?;
+                    return Ok(Stage::Statement(self, lowering));
+                }
+                BindingStep::Complete(bound) => {
+                    let (input, _state_lease) = input.into_parts();
+                    self.definitions
+                        .prepare_retirement(&input.definition)
+                        .map_err(|error| catalog_message(error, &control))?;
+                    let routine = input
+                        .definition
+                        .publish(bound.body, &control)
+                        .map_err(|error| catalog_message(error, &control))?;
+                    self.compiled.push(routine)?;
+                    self.migrated |= bound.changed;
+                    return Ok(Stage::Bind(self));
+                }
             }
         } else if declaration
             .definition

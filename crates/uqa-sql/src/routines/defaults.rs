@@ -123,7 +123,17 @@ pub(super) fn default_expression_type(
         return Some(RoutineDefaultType::Concrete(source));
     }
     let polymorphic = routine_polymorphic_type(type_name)?;
-    if matches!(expression, Expr::Literal(Value::Null))
+    if null_default_retains_declared_type(expression, polymorphic) {
+        return Some(RoutineDefaultType::Polymorphic(type_name.into()));
+    }
+    None
+}
+
+pub(super) fn null_default_retains_declared_type(
+    expression: &Expr,
+    polymorphic: RoutinePolymorphicType,
+) -> bool {
+    matches!(expression, Expr::Literal(Value::Null))
         && !matches!(
             polymorphic,
             RoutinePolymorphicType::AnyElement
@@ -131,10 +141,6 @@ pub(super) fn default_expression_type(
                 | RoutinePolymorphicType::AnyCompatible
                 | RoutinePolymorphicType::AnyCompatibleNonArray
         )
-    {
-        return Some(RoutineDefaultType::Polymorphic(type_name.into()));
-    }
-    None
 }
 
 fn check_polymorphic_default(

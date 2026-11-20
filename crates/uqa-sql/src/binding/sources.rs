@@ -289,6 +289,25 @@ impl SchemaScope {
         params: &[SQLParam],
         scope: SourceScope<'_>,
     ) -> Result<RowSchema, SQLError> {
+        crate::catalog::work::inline(self.bind_source_in_scope_with_work(
+            routines,
+            source,
+            subqueries,
+            params,
+            scope,
+            &mut (),
+        ))
+    }
+
+    pub(super) async fn bind_source_in_scope_with_work<W: crate::catalog::work::Work + Send>(
+        &mut self,
+        routines: &dyn RoutineResolution,
+        source: &SourcePlan,
+        subqueries: &[QueryPlan],
+        params: &[SQLParam],
+        scope: SourceScope<'_>,
+        work: &mut W,
+    ) -> Result<RowSchema, SQLError> {
         let bound = matches!(
             source,
             SourcePlan::Table {
@@ -300,7 +319,9 @@ impl SchemaScope {
             self.resolution
                 .set_lookup_mode(crate::catalog::resolution::RelationLookupMode::Bound)
         });
-        let result = self.bind_source_inner(routines, source, subqueries, params, scope);
+        let result = self
+            .bind_source_inner_with_work(routines, source, subqueries, params, scope, work)
+            .await;
         if let Some(previous) = previous {
             self.resolution.set_lookup_mode(previous);
         }
@@ -323,26 +344,52 @@ impl SchemaScope {
         params: &[SQLParam],
         outer: Option<&RowSchema>,
     ) -> Result<RowSchema, SQLError> {
-        self.bind_source_for_execution_in_scope(
+        crate::catalog::work::inline(self.bind_source_for_execution_with_work(
+            routines,
+            source,
+            subqueries,
+            params,
+            outer,
+            &mut (),
+        ))
+    }
+
+    pub(super) async fn bind_source_for_execution_with_work<
+        W: crate::catalog::work::Work + Send,
+    >(
+        &mut self,
+        routines: &dyn RoutineResolution,
+        source: &mut SourcePlan,
+        subqueries: &[QueryPlan],
+        params: &[SQLParam],
+        outer: Option<&RowSchema>,
+        work: &mut W,
+    ) -> Result<RowSchema, SQLError> {
+        self.bind_source_for_execution_in_scope_with_work(
             routines,
             source,
             subqueries,
             params,
             SourceScope::new(outer),
+            work,
         )
+        .await
     }
 
-    fn bind_source_for_execution_in_scope(
+    async fn bind_source_for_execution_in_scope_with_work<W: crate::catalog::work::Work + Send>(
         &mut self,
         routines: &dyn RoutineResolution,
         source: &mut SourcePlan,
         subqueries: &[QueryPlan],
         params: &[SQLParam],
         scope: SourceScope<'_>,
+        work: &mut W,
     ) -> Result<RowSchema, SQLError> {
-        let schema = self.bind_source_for_execution_in_scope_inner(
-            routines, source, subqueries, params, scope,
-        )?;
+        let schema = self
+            .bind_source_for_execution_in_scope_inner_with_work(
+                routines, source, subqueries, params, scope, work,
+            )
+            .await?;
         Ok(if scope.retain_names {
             SourceScope::describe_output_with_control(source, schema, &self.control())?
         } else {
@@ -350,13 +397,16 @@ impl SchemaScope {
         })
     }
 
-    fn bind_source_for_execution_in_scope_inner(
+    async fn bind_source_for_execution_in_scope_inner_with_work<
+        W: crate::catalog::work::Work + Send,
+    >(
         &mut self,
         routines: &dyn RoutineResolution,
         source: &mut SourcePlan,
         subqueries: &[QueryPlan],
         params: &[SQLParam],
         scope: SourceScope<'_>,
+        work: &mut W,
     ) -> Result<RowSchema, SQLError> {
         let input = (!matches!(source, SourcePlan::Join { .. }))
             .then(|| scope.input_with_control(source, &self.control()))
@@ -365,58 +415,10 @@ impl SchemaScope {
         let outer = input.as_ref();
         match source {
             crate::plan::SourcePlan::RetainedRows(_) => {}
-            SourcePlan::Join {
-                left,
-                right,
-                kind,
-                on,
-                using,
-                natural,
-                alias,
-                column_aliases,
-                lateral,
-                ..
-            } => {
-                let left_schema = self.bind_source_for_execution_in_scope(
-                    routines,
-                    left,
-                    subqueries,
-                    params,
-                    scope.with_names(),
-                )?;
-                let preceding = scope.right_namespace_with_control(
-                    left,
-                    &left_schema,
-                    *kind,
-                    &self.control(),
-                )?;
-                let right_schema = self.bind_source_for_execution_in_scope(
-                    routines,
-                    right,
-                    subqueries,
-                    params,
-                    SourceScope {
-                        outer: scope.outer,
-                        preceding: Some(&preceding),
-                        inherited_lateral: *lateral,
-                        retain_names: true,
-                    },
-                )?;
-                let condition = scope.condition_with_control(&self.control())?;
-                return self.bind_join_output_schema(JoinSchemaBinding {
-                    routines,
-                    kind: *kind,
-                    on: on.as_ref(),
-                    using: using.as_ref(),
-                    natural: *natural,
-                    alias: alias.as_deref(),
-                    column_aliases,
-                    left: &left_schema,
-                    right: &right_schema,
-                    subqueries,
-                    params,
-                    outer: condition.as_ref(),
-                });
+            SourcePlan::Join { .. } => {
+                return self
+                    .bind_execution_join(routines, source, subqueries, params, scope, work)
+                    .await;
             }
             SourcePlan::Function {
                 name, relations, ..
@@ -428,7 +430,16 @@ impl SchemaScope {
                         &self.resolution,
                         relations.as_ref(),
                     )?;
-                    return self.bind_source(routines, source, subqueries, params, outer);
+                    return self
+                        .bind_source_in_scope_with_work(
+                            routines,
+                            source,
+                            subqueries,
+                            params,
+                            SourceScope::new(outer),
+                            work,
+                        )
+                        .await;
                 }
                 self.bind_table_function_for_execution(
                     routines, source, subqueries, params, outer,
@@ -437,13 +448,20 @@ impl SchemaScope {
             SourcePlan::FunctionGroup { functions, .. } => {
                 for function in functions {
                     let mut member = table_function_member_source(function);
-                    self.bind_source_for_execution(
-                        routines,
-                        &mut member,
-                        subqueries,
-                        params,
-                        outer,
-                    )?;
+                    crate::construction::retain_with(
+                        self.production.control().capture().control(),
+                        || {
+                            self.bind_source_for_execution_with_work(
+                                routines,
+                                &mut member,
+                                subqueries,
+                                params,
+                                outer,
+                                work,
+                            )
+                        },
+                    )?
+                    .await?;
                     let SourcePlan::Function { binding, .. } = member else {
                         unreachable!("table-function member changed source kind during binding")
                     };
@@ -452,7 +470,91 @@ impl SchemaScope {
             }
             SourcePlan::Table { .. } | SourcePlan::Values { .. } | SourcePlan::Subquery { .. } => {}
         }
-        self.bind_source(routines, source, subqueries, params, outer)
+        self.bind_source_in_scope_with_work(
+            routines,
+            source,
+            subqueries,
+            params,
+            SourceScope::new(outer),
+            work,
+        )
+        .await
+    }
+
+    async fn bind_execution_join<W: crate::catalog::work::Work + Send>(
+        &mut self,
+        routines: &dyn RoutineResolution,
+        source: &mut SourcePlan,
+        subqueries: &[QueryPlan],
+        params: &[SQLParam],
+        scope: SourceScope<'_>,
+        work: &mut W,
+    ) -> Result<RowSchema, SQLError> {
+        let SourcePlan::Join {
+            left,
+            right,
+            kind,
+            on,
+            using,
+            natural,
+            alias,
+            column_aliases,
+            lateral,
+            ..
+        } = source
+        else {
+            unreachable!("selected execution join")
+        };
+        let left_schema = crate::construction::retain_with(
+            self.production.control().capture().control(),
+            || {
+                self.bind_source_for_execution_in_scope_with_work(
+                    routines,
+                    left,
+                    subqueries,
+                    params,
+                    scope.with_names(),
+                    work,
+                )
+            },
+        )?
+        .await?;
+        let preceding =
+            scope.right_namespace_with_control(left, &left_schema, *kind, &self.control())?;
+        let right_schema = crate::construction::retain_with(
+            self.production.control().capture().control(),
+            || {
+                self.bind_source_for_execution_in_scope_with_work(
+                    routines,
+                    right,
+                    subqueries,
+                    params,
+                    SourceScope {
+                        outer: scope.outer,
+                        preceding: Some(&preceding),
+                        inherited_lateral: *lateral,
+                        retain_names: true,
+                    },
+                    work,
+                )
+            },
+        )?
+        .await?;
+        let condition = scope.condition_with_control(&self.control())?;
+        self.bind_join_output_schema(JoinSchemaBinding {
+            routines,
+            kind: *kind,
+            on: on.as_ref(),
+            using: using.as_ref(),
+            natural: *natural,
+            alias: alias.as_deref(),
+            column_aliases,
+            left: &left_schema,
+            right: &right_schema,
+            subqueries,
+            params,
+            outer: condition.as_ref(),
+        })
     }
 
     /// Select a table function's binding against the row it reads. A built-in that reads its input collation also records the collation of its arguments, as analysis records every other call's.

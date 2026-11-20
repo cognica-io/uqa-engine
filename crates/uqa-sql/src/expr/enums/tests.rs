@@ -250,3 +250,70 @@ fn selected_enum_production_retains_key_and_indirect_metadata() {
         assert_eq!(budget.used(), 0);
     }
 }
+
+#[test]
+fn stored_enum_default_input_finishes_array_syntax_before_each_label_lookup() {
+    use crate::{ast::Expr, catalog::stored_ast::fold_assigned_stored_literal_from};
+    use uqa_core::image_io::{ImageDecodeWindow, ImageDecoder};
+    let mut calls = Vec::new();
+    for (width, malformed) in [(2, false), (4096, false), (4096, true)] {
+        let catalog = Catalog(Arc::new(EnumTypeLabels {
+            type_oid: 16_400,
+            labels: vec![EnumTypeLabel {
+                oid: 16_402,
+                key: EnumLabelKey::from_bytes(vec![64]).unwrap(),
+                label: "blue".into(),
+            }],
+        }));
+        let ty = ColumnType::Array(Box::new(ColumnType::Enum(crate::ast::EnumTypeReference {
+            schema: "public".into(),
+            name: "label_type".into(),
+            oid: 16_400,
+            array_oid: 16_401,
+        })));
+        let mut text = String::from("{");
+        text.push_str(&"blue,".repeat(width - 1));
+        text.push_str(if malformed { "invalid,}" } else { "invalid}" });
+        let token = CancellationToken::new();
+        let original = token.clone();
+        let memory = MemoryBudget::new(8 << 20);
+        let native = memory.clone();
+        let mut operation = ImageDecoder::new(&memory, &token, |mut reader| async move {
+            let mut input = reader.input();
+            let control = ProductionControl::new(&native, &original, input.cancellation);
+            let mut expression = Expr::Literal(Value::Str(text));
+            let labels = || Some(&catalog as &dyn EnumLabelCatalog);
+            fold_assigned_stored_literal_from(&mut expression, &ty, &labels, &control, &mut input)
+                .await
+        })
+        .unwrap();
+        let mut steps = 0;
+        let error = loop {
+            steps += 1;
+            match operation.advance(
+                &mut std::io::empty(),
+                ImageDecodeWindow {
+                    bytes: 1,
+                    steps: 16,
+                },
+            ) {
+                Ok(None) => assert!(steps < 32_768),
+                Ok(Some(_)) => panic!("invalid array or label was accepted"),
+                Err(error) => break error,
+            }
+        };
+        assert_eq!(error.sqlstate(), Some("22P02"));
+        if malformed {
+            assert_eq!(error.detail(), Some("Unexpected \"}\" character."));
+        } else {
+            assert_eq!(
+                error.to_string(),
+                "invalid input value for enum label_type: \"invalid\""
+            );
+            calls.push(steps);
+        }
+        drop(operation);
+        assert_eq!(memory.used(), 0);
+    }
+    assert!(calls[1] > calls[0] + 256, "{calls:?}");
+}

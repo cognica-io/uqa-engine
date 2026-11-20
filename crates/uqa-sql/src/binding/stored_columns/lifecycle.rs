@@ -13,25 +13,46 @@ use super::{
 
 pub fn bind_stored_statement_source_columns(
     statement: &mut Statement,
+    source_columns: impl FnMut(&str) -> Result<Option<Vec<String>>, SQLError>,
+) -> Result<bool, SQLError> {
+    crate::catalog::work::inline(bind_stored_statement_source_columns_from(
+        statement,
+        source_columns,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+        &mut (),
+    ))
+}
+pub(super) async fn bind_stored_statement_source_columns_from<
+    W: crate::catalog::work::Work + Send,
+>(
+    statement: &mut Statement,
     mut source_columns: impl FnMut(&str) -> Result<Option<Vec<String>>, SQLError>,
+    control: &uqa_core::memory::ProductionControl<'_>,
+    work: &mut W,
 ) -> Result<bool, SQLError> {
     let mut changed = false;
-    crate::catalog::stored_ast::visit_stored_statement_sources(statement, &mut |source| {
-        let crate::ast::FromClause::Table {
-            name,
-            bound_columns,
-            ..
-        } = source
-        else {
-            return Ok(());
-        };
-        if bound_columns.is_some() {
-            return Ok(());
-        }
-        *bound_columns = source_columns(name)?;
-        changed |= bound_columns.is_some();
-        Ok(())
-    })?;
+    crate::catalog::stored_ast::visit_stored_statement_sources_from(
+        statement,
+        |source| {
+            let crate::ast::FromClause::Table {
+                name,
+                bound_columns,
+                ..
+            } = source
+            else {
+                return Ok(());
+            };
+            if bound_columns.is_some() {
+                return Ok(());
+            }
+            *bound_columns = source_columns(name)?;
+            changed |= bound_columns.is_some();
+            Ok(())
+        },
+        control,
+        work,
+    )
+    .await?;
     Ok(changed)
 }
 

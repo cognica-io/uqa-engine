@@ -114,6 +114,26 @@ impl Body for Expr {
     fn first_field(&self) -> usize {
         1
     }
+    fn retire(
+        &mut self,
+        position: &mut usize,
+    ) -> crate::plan::retirement::RetiredChild<super::Node> {
+        use crate::plan::retirement::RetiredChild;
+        use uqa_core::memory::RetirementNode;
+        if let Some(sibling) = self.take_remaining_child() {
+            return RetiredChild::Child(super::Node::Expression(sibling));
+        }
+        if let Some(first) = self
+            .first_child()
+            .filter(|child| !matches!(child, Self::Star))
+        {
+            return RetiredChild::Child(super::Node::Expression(std::mem::replace(
+                first,
+                Self::Star,
+            )));
+        }
+        self.retire_fields(position)
+    }
     fn field(&mut self, position: usize) -> Option<&mut dyn Field> {
         expression_fields!(self, position.checked_sub(1)?, borrowed_syntax_fields)
     }

@@ -12,10 +12,7 @@ pub use ownership::bind_analyzed_sql_body_types_owned;
 pub use standard::SQLStandardBodyCompilation;
 
 use super::{
-    declaration::{
-        resolve_plpgsql_datum_types, routine_parameter_regrole_constants,
-        validate_routine_declaration, validate_routine_language, RoutineTypeCatalog,
-    },
+    declaration::{resolve_plpgsql_datum_types, RoutineTypeCatalog},
     merge_columns::StoredMergeColumnCatalog,
     CompiledFunctionBody, RoutineResolution,
 };
@@ -76,6 +73,45 @@ pub struct RoutineCompilationContext<'a> {
     pub regroles: &'a dyn StoredRegroleResolver,
 }
 
+/// The catalog services a single native session supplies when it compiles a restored definition.
+pub trait StoredRoutineCatalog:
+    RoutineTypeCatalog
+    + RoutineParserCatalog
+    + RoutineCompilationCatalog
+    + RoutineResolution
+    + StoredRelationCatalog
+    + StoredQuerySequences
+    + StoredMergeColumnCatalog
+    + StoredRegroleResolver
+{
+}
+impl<C> StoredRoutineCatalog for C where
+    C: RoutineTypeCatalog
+        + RoutineParserCatalog
+        + RoutineCompilationCatalog
+        + RoutineResolution
+        + StoredRelationCatalog
+        + StoredQuerySequences
+        + StoredMergeColumnCatalog
+        + StoredRegroleResolver
+{
+}
+
+impl<'a> RoutineCompilationContext<'a> {
+    pub fn from_catalog(catalog: &'a impl StoredRoutineCatalog) -> Self {
+        Self {
+            types: catalog,
+            parsers: catalog,
+            catalog,
+            routines: catalog,
+            relations: catalog,
+            sequences: catalog,
+            merge: catalog,
+            regroles: catalog,
+        }
+    }
+}
+
 pub fn compile_function_body(
     context: &RoutineCompilationContext<'_>,
     def: &CreateFunction,
@@ -130,11 +166,7 @@ pub(super) fn validate_routine_signature(
     context: &RoutineCompilationContext<'_>,
     def: &CreateFunction,
 ) -> Result<StoredRegroleConstants, SQLError> {
-    validate_routine_language(def)?;
-    let stored_regrole_constants = routine_parameter_regrole_constants(context.types, def);
-    stored_regrole_constants.validate_inputs_with(context.regroles)?;
-    validate_routine_declaration(def)?;
-    Ok(stored_regrole_constants)
+    super::declaration::signature_dependencies(context, def)
 }
 
 /// PL/pgSQL's compiler rejects declared arguments of a trigger function, which reads its arguments from `TG_ARGV`.
@@ -169,7 +201,15 @@ pub fn with_parser_context<T>(
     parsers: &dyn RoutineParserCatalog,
     compile: impl FnOnce() -> Result<T, SQLError>,
 ) -> Result<T, SQLError> {
-    let (result, metadata) = crate::parser::with_settings(parsers.parser_settings(), compile);
+    with_routine_parser_settings(parsers, compile)
+}
+
+/// Apply the defining parser settings to one step and forward the notices produced by that step.
+pub fn with_routine_parser_settings<T>(
+    parsers: &dyn RoutineParserCatalog,
+    action: impl FnOnce() -> T,
+) -> T {
+    let (result, metadata) = crate::parser::in_settings_scope(parsers.parser_settings(), action);
     for notice in metadata.notices.iter() {
         parsers.parser_notice(notice.clone());
     }
@@ -243,6 +283,51 @@ pub struct SQLRoutineLowering {
     pub preserve_target_expressions: bool,
 }
 
+/// Retain the original private constructor through catalog identity selection and parameter substitution.
+pub(super) async fn bind_stored_statement_from(
+    catalog: &impl StoredRoutineCatalog,
+    plan: crate::plan::RetainedExecutablePlan,
+    positional: &[crate::SQLParam],
+    parameters: &crate::binding::RoutineParameterScope,
+    control: &uqa_core::memory::ProductionControl<'_>,
+    input: &mut uqa_core::image_io::AsyncImageInput<'_>,
+) -> Result<
+    (
+        crate::plan::copy::stored_plan::BoundPlan,
+        crate::binding::production::ControlledBindingSnapshot,
+    ),
+    SQLError,
+> {
+    let plan = if matches!(plan.as_plan_ref(), crate::plan::PlanRef::Query(_)) {
+        let namespace = catalog.stored_query_namespace_with_control(control)?;
+        let names = StoredQueryBindingContext {
+            relations: catalog,
+            lookup_mode: RelationLookupMode::Bound,
+            sequences: catalog,
+            temporary_schema: &namespace.temporary_schema,
+            transition_relations: &namespace.transition_relations,
+        };
+        names
+            .bind_query_names_from_input(plan, "SQL routine body", false, true, control, input)
+            .await?
+            .0
+    } else {
+        plan.mark_catalog_relations_bound(control)?
+    };
+    let snapshot = catalog.binding_snapshot_with_control(control)?;
+    let plan = crate::binding::bind_routine_parameter_references_from(
+        catalog,
+        plan,
+        positional,
+        snapshot.context_with_control(control)?,
+        parameters,
+        control,
+        input,
+    )
+    .await?;
+    Ok((plan.into_bound_from(control, input).await?, snapshot))
+}
+
 /// Lower one statement of a SQL routine body with its relations bound, before routine calls are bound.
 pub fn lower_sql_routine_statement(
     context: &RoutineCompilationContext<'_>,
@@ -308,7 +393,7 @@ pub fn lower_sql_routine_statement(
 }
 
 /// SQL-standard bodies retain analyzed queries and DML, never utility commands. Use the same command name as ordinary SQL diagnostics.
-pub(super) fn validate_sql_standard_statement(statement: &Statement) -> Result<(), SQLError> {
+pub(crate) fn validate_sql_standard_statement(statement: &Statement) -> Result<(), SQLError> {
     match sql_standard_utility(statement) {
         Some(command) => Err(sql_standard_utility_error(&command)),
         None => Ok(()),

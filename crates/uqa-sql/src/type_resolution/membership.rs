@@ -141,11 +141,7 @@ syntax!(
     |value: &ScalarExpr, control: &ProductionControl<'_>| Ok(value.clone_with_control(control)?)
 );
 syntax!(Expr, |value: &Expr, control: &ProductionControl<'_>| {
-    assert!(
-        control.budget().is_none(),
-        "stored syntax is rewritten by its ordinary catalog owner"
-    );
-    Ok(control.finish(value.clone(), None)?)
+    crate::plan::copy::copy_syntax_with_control(value, control)
 });
 
 /// The caller retains admission for the moved input nodes; the returned owner admits all newly allocated structure and copies.

@@ -6,7 +6,7 @@
 
 use super::{Copying, Result, SyntaxCopy};
 
-syntax_enum!(crate::ast::FromClause {
+native_enum!(recursive, crate::ast::FromClause {
     RetainedRows(value0),
     Table { name, qualifier, alias, column_aliases, bound_columns, include_descendants },
     Join { comma, left, right, kind, on, using, natural, alias, column_aliases, lateral },
@@ -28,7 +28,7 @@ syntax_struct!(crate::ast::JoinUsing { columns, alias });
 
 syntax_struct!(crate::ast::OperatorJoinRelations { left, right });
 
-syntax_struct!(crate::ast::TableFunction {
+native_struct!(crate::ast::TableFunction {
     name,
     binding,
     output_name,

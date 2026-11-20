@@ -23,18 +23,22 @@ impl Work for () {
     }
 }
 
+impl From<ImageIoError> for ValueRetentionError {
+    fn from(error: ImageIoError) -> Self {
+        match error {
+            ImageIoError::Memory(error) => Self::Memory(error),
+            ImageIoError::Cancelled(error) => Self::Cancelled(error),
+            error => Self::Malformed {
+                kind: "value copy continuation",
+                reason: error.to_string(),
+            },
+        }
+    }
+}
+
 impl Work for crate::image_io::AsyncImageInput<'_> {
     async fn checkpoint(&mut self) -> Result<(), ValueRetentionError> {
-        crate::image_io::AsyncImageInput::checkpoint(self)
-            .await
-            .map_err(|error| match error {
-                ImageIoError::Memory(error) => ValueRetentionError::Memory(error),
-                ImageIoError::Cancelled(error) => ValueRetentionError::Cancelled(error),
-                error => ValueRetentionError::Malformed {
-                    kind: "value copy continuation",
-                    reason: error.to_string(),
-                },
-            })
+        Ok(crate::image_io::AsyncImageInput::checkpoint(self).await?)
     }
 }
 

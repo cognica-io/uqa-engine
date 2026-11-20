@@ -127,3 +127,55 @@ impl MembershipAnalysis {
 
 #[cfg(test)]
 mod tests;
+
+/// Stored syntax keeps each occurrence paired with its written query. The executable binder can instead allocate an independent initialization slot for each occurrence.
+struct WrittenQueries(usize);
+
+impl<W: ScalarInputWork> crate::plan::QueryIndexInput<W> for WrittenQueries {
+    async fn index(
+        &mut self,
+        index: usize,
+        _: &ProductionControl<'_>,
+        _: &mut W,
+    ) -> Result<usize, SQLError> {
+        if index < self.0 {
+            Ok(index)
+        } else {
+            Err(SQLError::Internal(
+                "copied scalar subquery is outside its owning arena".into(),
+            ))
+        }
+    }
+}
+
+impl<W: ScalarInputWork> Occurrences<W> for WrittenQueries
+where
+    W::Error: Into<SQLError>,
+{
+    async fn copy(
+        &mut self,
+        expression: OwnedScalarExpr,
+        control: &ProductionControl<'_>,
+        work: &mut W,
+    ) -> Result<OwnedScalarExpr, SQLError> {
+        expression
+            .remap_query_occurrences_from(control, work, self)
+            .await
+    }
+}
+
+impl MembershipAnalysis {
+    pub(in crate::binding::preparation) async fn apply_stored_from<W: ScalarInputWork>(
+        self,
+        expression: OwnedScalarExpr,
+        width: usize,
+        control: &ProductionControl<'_>,
+        work: &mut W,
+    ) -> Result<OwnedScalarExpr, SQLError>
+    where
+        W::Error: From<SQLError> + From<CatalogRetentionError> + Into<SQLError>,
+    {
+        self.apply_from(expression, control, work, &mut WrittenQueries(width))
+            .await
+    }
+}

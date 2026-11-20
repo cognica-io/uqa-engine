@@ -7,13 +7,18 @@
 //! Carry what binding recorded for stored syntax back into that syntax: exact routine identities and ordering, the OID identities of user-defined cast types, and the enum constants that binding converted from `unknown` literals.
 
 use super::{
-    routines::apply_routine_reference, BTreeSet, Expr, SQLError, Statement, StoredAstVisitor,
+    input::{Actions, Reader},
+    routines::apply_routine_reference_from,
+    BTreeSet, Expr, SQLError, Statement,
 };
 use crate::binding::{
     stored_routines::StoredCallOrigin,
     syntax_sites::{SyntaxSites, ValueSite},
 };
-use uqa_core::Value;
+use uqa_core::{
+    memory::{MemoryReservation, Produced, ProductionControl},
+    Value,
+};
 
 /// Apply the sites of a bound copy of `expression`. Returns whether the syntax changed.
 pub fn bind_stored_expression_sites(
@@ -47,6 +52,36 @@ impl StoredCallOrigin {
     ) -> Result<bool, SQLError> {
         apply_sites(sites, Syntax::Statement(statement), self)
     }
+    /// The caller keeps the returned lease with its edited syntax until the field is reprojected.
+    pub(crate) async fn bind_expression_sites_with_work<
+        W: crate::catalog::work::Work + crate::plan::ScalarInputWork,
+    >(
+        self,
+        expression: &mut Expr,
+        sites: &SyntaxSites,
+        control: &ProductionControl<'_>,
+        work: &mut W,
+    ) -> Result<Produced<bool>, SQLError>
+    where
+        W::Error: Into<SQLError> + Send,
+    {
+        apply_from(sites, Syntax::Expression(expression), self, control, work).await
+    }
+
+    pub(crate) async fn bind_statement_sites_with_work<
+        W: crate::catalog::work::Work + crate::plan::ScalarInputWork,
+    >(
+        self,
+        statement: &mut Statement,
+        sites: &SyntaxSites,
+        control: &ProductionControl<'_>,
+        work: &mut W,
+    ) -> Result<Produced<bool>, SQLError>
+    where
+        W::Error: Into<SQLError> + Send,
+    {
+        apply_from(sites, Syntax::Statement(statement), self, control, work).await
+    }
 }
 
 enum Syntax<'a> {
@@ -59,51 +94,103 @@ fn apply_sites(
     syntax: Syntax<'_>,
     origin: StoredCallOrigin,
 ) -> Result<bool, SQLError> {
-    let mut routines = sites.routines.iter();
-    let mut values = sites.values.iter().peekable();
-    let mut routines_changed = false;
-    let mut values_changed = false;
-    let mut relation = |_: &mut String| -> Result<(), SQLError> { Ok(()) };
-    let mut routine = |name: &mut String,
-                       binding: Option<&mut Option<crate::ast::FunctionBinding>>|
-     -> Result<(), SQLError> {
-        let reference = routines.next().ok_or_else(|| {
-            SQLError::Internal(format!(
-                "stored catalog routine binding has no entry for call `{name}`"
-            ))
-        })?;
-        routines_changed |= apply_routine_reference(name, binding, reference, origin)?;
-        Ok(())
-    };
-    let mut expression = |node: &mut Expr| -> Result<(), SQLError> {
-        values_changed |= apply_value_site(node, &mut values)?;
-        Ok(())
-    };
-    let mut visitor = StoredAstVisitor {
-        source: None,
-        merge: None,
-        expression: Some(&mut expression),
-        projection: None,
-        ty: None,
-        relation: &mut relation,
-        routine: &mut routine,
-    };
-    match syntax {
-        Syntax::Expression(expression) => visitor.bind_expr(expression, &BTreeSet::new())?,
-        Syntax::Statement(statement) => visitor.bind_statement(statement)?,
+    let control = ProductionControl::uncontrolled();
+    let edited = match syntax {
+        Syntax::Expression(expression) => crate::catalog::work::inline(
+            origin.bind_expression_sites_with_work(expression, sites, &control, &mut ()),
+        ),
+        Syntax::Statement(statement) => crate::catalog::work::inline(
+            origin.bind_statement_sites_with_work(statement, sites, &control, &mut ()),
+        ),
+    }?;
+    Ok(edited.into_uncontrolled().expect("ordinary syntax binding"))
+}
+
+struct Selected<'a> {
+    routines: std::slice::Iter<'a, crate::binding::stored_routines::BoundRoutineReference>,
+    values: std::iter::Peekable<std::slice::Iter<'a, ValueSite>>,
+    origin: StoredCallOrigin,
+    changed: bool,
+    memory: Option<MemoryReservation>,
+}
+
+impl Selected<'_> {
+    fn take<T>(&mut self, produced: Produced<T>, control: &ProductionControl<'_>) -> T {
+        let (value, lease) = produced.into_parts();
+        self.memory = control.combine(self.memory.take(), lease);
+        value
     }
-    if let Some(reference) = routines.next() {
+}
+
+async fn apply_from<W: crate::catalog::work::Work + crate::plan::ScalarInputWork>(
+    sites: &SyntaxSites,
+    syntax: Syntax<'_>,
+    origin: StoredCallOrigin,
+    control: &ProductionControl<'_>,
+    work: &mut W,
+) -> Result<Produced<bool>, SQLError>
+where
+    W::Error: Into<SQLError> + Send,
+{
+    let mut selected = Selected {
+        routines: sites.routines.iter(),
+        values: sites.values.iter().peekable(),
+        origin,
+        changed: false,
+        memory: control.empty_reservation(),
+    };
+    let mut reader = Reader::new(&mut selected, control, work);
+    match syntax {
+        Syntax::Expression(expression) => reader.bind_expr(expression, &BTreeSet::new()).await?,
+        Syntax::Statement(statement) => reader.bind_statement(statement).await?,
+    }
+    if let Some(reference) = selected.routines.next() {
         return Err(SQLError::Internal(format!(
             "stored catalog routine binding entry `{}` has no matching call",
             reference.name
         )));
     }
-    if values.next().is_some() {
+    if selected.values.next().is_some() {
         return Err(SQLError::Internal(
             "stored catalog binding has an expression site without matching syntax".into(),
         ));
     }
-    Ok(routines_changed || values_changed)
+    Ok(control.finish(selected.changed, selected.memory)?)
+}
+
+impl<W: crate::catalog::work::Work + crate::plan::ScalarInputWork> Actions<W> for Selected<'_>
+where
+    W::Error: Into<SQLError> + Send,
+{
+    async fn routine(
+        &mut self,
+        name: &mut String,
+        binding: Option<&mut Option<crate::ast::FunctionBinding>>,
+        control: &ProductionControl<'_>,
+        work: &mut W,
+    ) -> Result<(), SQLError> {
+        let reference = self.routines.next().ok_or_else(|| {
+            SQLError::Internal(format!(
+                "stored catalog routine binding has no entry for call `{name}`"
+            ))
+        })?;
+        let result =
+            apply_routine_reference_from(name, binding, reference, self.origin, control, work)
+                .await?;
+        let changed = self.take(result, control);
+        self.changed |= changed;
+        Ok(())
+    }
+    async fn expression(
+        &mut self,
+        node: &mut Expr,
+        control: &ProductionControl<'_>,
+        work: &mut W,
+    ) -> Result<(), SQLError> {
+        let changed = self.apply_value_site(node, control, work).await?;
+        self.changed |= changed;
+        Ok(())
+    }
 }
 
 fn mismatch(what: &str) -> SQLError {
@@ -112,109 +199,156 @@ fn mismatch(what: &str) -> SQLError {
     ))
 }
 
-fn apply_value_site<'a>(
-    node: &mut Expr,
-    sites: &mut std::iter::Peekable<impl Iterator<Item = &'a ValueSite>>,
-) -> Result<bool, SQLError> {
-    if let Some(ValueSite::DiscardCollation) = sites.peek() {
-        sites.next();
-        if !crate::catalog::collations::expression::discard_ast_clause(node)? {
-            return Err(mismatch("discarded collation"));
-        }
-        apply_value_site(node, sites)?;
-        return Ok(true);
-    }
-    if let Some(ValueSite::RowDistinct) = sites.peek() {
-        sites.next();
-        crate::type_resolution::row_distinct::rewrite_ast(node)?;
-        apply_value_site(node, sites)?;
-        return Ok(true);
-    }
-    if let Some(ValueSite::CompositeRow(binding)) = sites.peek() {
-        let binding = (*binding).clone();
-        sites.next();
-        return bind_composite_constructor(node, binding);
-    }
-    if let Some(ValueSite::Membership { array_items }) = sites.peek() {
-        let shape = crate::type_resolution::membership::MembershipShape {
-            array_items: array_items.clone(),
-        };
-        sites.next();
-        let mut original = std::mem::replace(node, Expr::Literal(Value::Null));
-        let Expr::InList {
-            expr,
-            list,
-            negated,
-        } = &mut original
-        else {
-            return Err(mismatch("membership comparison"));
-        };
-        *node = crate::type_resolution::membership::rewrite(
-            Box::new(std::mem::replace(expr.as_mut(), Expr::Star)),
-            std::mem::take(list),
-            *negated,
-            &shape,
-            &uqa_core::memory::ProductionControl::uncontrolled(),
-        )?
-        .into_uncontrolled()
-        .expect("ordinary stored syntax");
-        apply_value_site(node, sites)?;
-        return Ok(true);
-    }
-    // A relabel wraps the node, whose own site the visitor reads when it descends into the wrapped node.
-    if let Some(ValueSite::Relabel(ty)) = sites.peek() {
-        let ty = (*ty).clone();
-        sites.next();
-        let inner = std::mem::replace(node, Expr::Literal(Value::Null));
-        *node = Expr::Cast {
-            implicit: true,
-            expr: Box::new(inner),
-            ty,
-        };
-        return Ok(true);
-    }
-    match node {
-        Expr::Cast { ty, .. } => {
-            let Some(ValueSite::Cast(bound)) = sites.next() else {
-                return Err(mismatch("cast"));
-            };
-            // The bound name keeps the selected catalog identity independently of the caller's later search_path.
-            if ty != bound {
-                ty.clone_from(bound);
+impl Selected<'_> {
+    async fn apply_value_site<W: crate::catalog::work::Work + crate::plan::ScalarInputWork>(
+        &mut self,
+        node: &mut Expr,
+        control: &ProductionControl<'_>,
+        work: &mut W,
+    ) -> Result<bool, SQLError>
+    where
+        W::Error: Into<SQLError> + Send,
+    {
+        let mut changed = false;
+        loop {
+            crate::catalog::work::ReferenceWork { control, work }
+                .checkpoint()
+                .await?;
+            if let Some(ValueSite::DiscardCollation) = self.values.peek() {
+                self.values.next();
+                if !crate::catalog::collations::expression::discard_ast_clause(node)? {
+                    return Err(mismatch("discarded collation"));
+                }
+                changed = true;
+                continue;
+            }
+            if let Some(ValueSite::RowDistinct) = self.values.peek() {
+                self.values.next();
+                crate::type_resolution::row_distinct::rewrite_ast(node)?;
+                changed = true;
+                continue;
+            }
+            if let Some(ValueSite::CompositeRow(binding)) = self.values.peek() {
+                let copy = binding
+                    .clone_with_input_work(control, work)
+                    .await
+                    .map_err(Into::into)?;
+                let binding = self.take(copy, control);
+                self.values.next();
+                return bind_composite_constructor(node, binding).map(|field| changed || field);
+            }
+            if let Some(ValueSite::Membership { array_items }) = self.values.peek() {
+                let mut positions = uqa_core::memory::ProductionVec::new(*control);
+                positions.reserve(array_items.len())?;
+                for chunk in array_items.chunks(4096 / size_of::<usize>()) {
+                    crate::catalog::work::ReferenceWork { control, work }
+                        .checkpoint()
+                        .await?;
+                    positions.extend_from_slice(chunk)?;
+                }
+                let (array_items, _positions) = positions.finish()?.into_parts();
+                let shape = crate::type_resolution::membership::MembershipShape { array_items };
+                self.values.next();
+                let mut original = std::mem::replace(node, Expr::Star);
+                let Expr::InList {
+                    expr,
+                    list,
+                    negated,
+                } = &mut original
+                else {
+                    return Err(mismatch("membership comparison"));
+                };
+                self.memory =
+                    control.combine(self.memory.take(), control.reserve(size_of::<Expr>())?);
+                let result = crate::type_resolution::membership::rewrite(
+                    Box::new(std::mem::replace(expr.as_mut(), Expr::Star)),
+                    std::mem::take(list),
+                    *negated,
+                    &shape,
+                    control,
+                )?;
+                *node = self.take(result, control);
+                changed = true;
+                continue;
+            }
+            // A relabel wraps the node, whose own site the visitor reads when it descends into the wrapped node.
+            if let Some(ValueSite::Relabel(ty)) = self.values.peek() {
+                let spelling = crate::catalog::work::Work::text(work, ty, control).await?;
+                let ty = self.take(spelling, control);
+                self.values.next();
+                let inner = std::mem::replace(node, Expr::Literal(Value::Null));
+                self.memory =
+                    control.combine(self.memory.take(), control.reserve(size_of::<Expr>())?);
+                *node = Expr::Cast {
+                    implicit: true,
+                    expr: Box::new(inner),
+                    ty,
+                };
                 return Ok(true);
             }
-            Ok(false)
+            return self.apply_terminal_site(node, changed, control, work).await;
         }
-        Expr::Literal(Value::Str(_) | Value::Null) => match sites.next() {
-            Some(ValueSite::Literal) => Ok(false),
-            Some(ValueSite::Constant { value, ty }) => {
-                *node = Expr::TypedLiteral {
-                    collation_oid: None,
-                    composite_source: None,
-                    value: value.clone(),
-                    ty: ty.clone(),
+    }
+
+    // The structural changes above can expose another syntax node. Consume its final site once.
+    async fn apply_terminal_site<W: crate::catalog::work::Work + crate::plan::ScalarInputWork>(
+        &mut self,
+        node: &mut Expr,
+        changed: bool,
+        control: &ProductionControl<'_>,
+        work: &mut W,
+    ) -> Result<bool, SQLError>
+    where
+        W::Error: Into<SQLError> + Send,
+    {
+        match node {
+            Expr::Cast { ty, .. } => {
+                let Some(ValueSite::Cast(bound)) = self.values.next() else {
+                    return Err(mismatch("cast"));
                 };
+                // The bound name keeps the selected catalog identity independently of the caller's later search_path.
+                if ty != bound {
+                    let spelling = crate::catalog::work::Work::text(work, bound, control).await?;
+                    *ty = self.take(spelling, control);
+                    return Ok(true);
+                }
+                Ok(changed)
+            }
+            Expr::Literal(Value::Str(_) | Value::Null) => match self.values.next() {
+                Some(ValueSite::Literal) => Ok(changed),
+                Some(ValueSite::Constant { value, ty }) => {
+                    let value = crate::plan::ScalarInputWork::value(work, value, control)
+                        .await
+                        .map_err(Into::into)?;
+                    let ty = crate::catalog::work::Work::text(work, ty, control).await?;
+                    *node = Expr::TypedLiteral {
+                        collation_oid: None,
+                        composite_source: None,
+                        value: self.take(value, control),
+                        ty: self.take(ty, control),
+                    };
+                    Ok(true)
+                }
+                _ => Err(mismatch("literal")),
+            },
+            Expr::Func { order_syntax, .. } => {
+                let Some(ValueSite::FunctionOrder(bound)) = self.values.next() else {
+                    return Err(mismatch("function ordering"));
+                };
+                if order_syntax == bound {
+                    return Ok(changed);
+                }
+                if !order_syntax.is_legacy() {
+                    return Err(mismatch("function ordering"));
+                }
+                *order_syntax = *bound;
                 Ok(true)
             }
-            _ => Err(mismatch("literal")),
-        },
-        Expr::Func { order_syntax, .. } => {
-            let Some(ValueSite::FunctionOrder(bound)) = sites.next() else {
-                return Err(mismatch("function ordering"));
-            };
-            if order_syntax == bound {
-                return Ok(false);
-            }
-            if !order_syntax.is_legacy() {
-                return Err(mismatch("function ordering"));
-            }
-            *order_syntax = *bound;
-            Ok(true)
+            _ => match self.values.next() {
+                Some(ValueSite::Node) => Ok(changed),
+                _ => Err(mismatch("expression")),
+            },
         }
-        _ => match sites.next() {
-            Some(ValueSite::Node) => Ok(false),
-            _ => Err(mismatch("expression")),
-        },
     }
 }
 
@@ -230,7 +364,7 @@ fn bind_composite_constructor(
         *current = binding;
         return Ok(changed);
     }
-    let mut original = std::mem::replace(node, Expr::Literal(Value::Null));
+    let mut original = std::mem::replace(node, Expr::Star);
     let mut row = match &mut original {
         Expr::Cast { expr, .. } => std::mem::replace(expr.as_mut(), Expr::Star),
         _ => original,
@@ -262,27 +396,55 @@ pub fn fold_assigned_stored_literal(
     target: &crate::ast::ColumnType,
     catalog: Option<&dyn crate::expr::enums::EnumLabelCatalog>,
 ) -> Result<bool, SQLError> {
+    crate::catalog::work::inline(fold_assigned_stored_literal_from(
+        expression,
+        target,
+        &|| catalog,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+        &mut (),
+    ))
+    .map(|changed| *changed)
+}
+
+pub(crate) async fn fold_assigned_stored_literal_from<'a, W: crate::catalog::work::Work + Send>(
+    expression: &mut Expr,
+    target: &crate::ColumnType,
+    catalog: &impl Fn() -> Option<&'a dyn crate::expr::enums::EnumLabelCatalog>,
+    control: &uqa_core::memory::ProductionControl<'_>,
+    work: &mut W,
+) -> Result<uqa_core::memory::Produced<bool>, SQLError> {
+    let unchanged = || Ok(control.finish(false, control.empty_reservation())?);
     let Expr::Literal(value @ (Value::Str(_) | Value::Null)) = expression else {
-        return Ok(false);
+        return unchanged();
     };
     let mut base = target;
-    while let crate::ast::ColumnType::Domain { base: inner, .. } = base {
+    while let crate::ColumnType::Domain { base: inner, .. } = base {
+        control.check()?;
+        work.checkpoint().await?;
         base = inner;
     }
-    if !crate::expr::enums::is_enum_bearing(base) {
-        return Ok(false);
+    if catalog().is_none() {
+        return unchanged();
     }
-    let Some(catalog) = catalog else {
-        return Ok(false);
+    let Some(value) =
+        crate::expr::enums::fold_unknown_literal_with_work(catalog, value, base, control, work)
+            .await?
+    else {
+        return unchanged();
     };
-    let Some(value) = crate::expr::enums::fold_unknown_literal(Some(catalog), value, base)? else {
-        return Ok(false);
-    };
+    let (name, name_memory) = base
+        .catalog_name_with_input_work(
+            control,
+            &mut crate::catalog::work::ReferenceWork { control, work },
+        )
+        .await?
+        .into_parts();
+    let (value, value_memory) = value.into_parts();
     *expression = Expr::TypedLiteral {
         collation_oid: None,
         composite_source: None,
         value,
-        ty: base.catalog_name(),
+        ty: name,
     };
-    Ok(true)
+    Ok(control.finish(true, control.combine(name_memory, value_memory))?)
 }

@@ -45,29 +45,59 @@ impl<T> BudgetedVec<T> {
     }
 
     pub fn reserve(&mut self, additional: usize) -> Result<(), MemoryError> {
+        if let Some(buffer) = self.growth_buffer(additional)? {
+            self.replace_buffer(buffer)?;
+        }
+        Ok(())
+    }
+
+    fn growth_buffer(&self, additional: usize) -> Result<Option<Self>, MemoryError> {
         let required = self
             .values
             .len()
             .checked_add(additional)
             .ok_or(MemoryError::SizeOverflow)?;
-        if required <= self.values.capacity() {
-            return Ok(());
+        if required <= self.capacity() {
+            return Ok(None);
         }
-        let (capacity, memory) = replacement::<T>(self.memory.budget(), self.capacity(), required)?;
-        let mut buffer = Self {
-            values: Vec::new(),
-            memory,
-        };
-        buffer.values.try_reserve_exact(capacity)?;
-        self.replace_buffer(buffer)
+        let (capacity, memory) = replacement::<T>(self.budget(), self.capacity(), required)?;
+        Self::allocate_buffer(capacity, memory).map(Some)
     }
 
-    fn replace_buffer(&mut self, mut buffer: Self) -> Result<(), MemoryError> {
-        reconcile_buffer_capacity::<T>(&mut buffer.memory, buffer.values.capacity())?;
+    fn allocate_buffer(capacity: usize, memory: MemoryReservation) -> Result<Self, MemoryError> {
+        let mut values = Vec::new();
+        values.try_reserve_exact(capacity)?;
+        Ok(Self { values, memory })
+    }
+
+    fn reconciled(mut self) -> Result<Self, MemoryError> {
+        reconcile_buffer_capacity::<T>(&mut self.memory, self.values.capacity())?;
+        Ok(self)
+    }
+
+    fn replace_buffer(&mut self, buffer: Self) -> Result<(), MemoryError> {
+        let mut buffer = buffer.reconciled()?;
         buffer.values.append(&mut self.values);
         // Field order frees the old buffer before releasing its reservation.
         *self = buffer;
         Ok(())
+    }
+
+    pub(super) fn push_needs_work(&self) -> bool {
+        self.values.len() == self.capacity() && self.values.len() > relocation_slots::<T>()
+    }
+
+    pub(super) fn relocate_for_push(self) -> Result<Relocation<T>, MemoryError> {
+        let destination = self
+            .growth_buffer(1)?
+            .expect("full vector selected for relocation")
+            .reconciled()?;
+        let (values, memory) = self.into_parts();
+        Ok(Relocation {
+            source: values.into_iter(),
+            destination,
+            _source_memory: memory,
+        })
     }
 
     pub fn push(&mut self, value: T) -> Result<(), MemoryError> {
@@ -96,12 +126,7 @@ impl<T> BudgetedVec<T> {
             return Ok(());
         }
         let memory = self.memory.budget().reserve(buffer_bytes::<T>(capacity)?)?;
-        let mut buffer = Self {
-            values: Vec::new(),
-            memory,
-        };
-        buffer.values.try_reserve_exact(capacity)?;
-        self.replace_buffer(buffer)
+        self.replace_buffer(Self::allocate_buffer(capacity, memory)?)
     }
 
     pub fn pop(&mut self) -> Option<T> {
@@ -111,6 +136,34 @@ impl<T> BudgetedVec<T> {
     /// Transfer the buffer and its reservation together; element allocations have separate owners.
     pub fn into_parts(self) -> (Vec<T>, MemoryReservation) {
         (self.values, self.memory)
+    }
+}
+
+fn relocation_slots<T>() -> usize {
+    (4096 / size_of::<T>().max(1)).max(1)
+}
+
+/// Both buffers stay charged while their slots move. Dropping unfinished construction drops each element once.
+pub(super) struct Relocation<T> {
+    source: std::vec::IntoIter<T>,
+    destination: BudgetedVec<T>,
+    _source_memory: MemoryReservation,
+}
+
+impl<T> Relocation<T> {
+    pub(super) fn remaining(&self) -> usize {
+        self.source.len()
+    }
+
+    pub(super) fn advance(&mut self) {
+        self.destination
+            .values
+            .extend(self.source.by_ref().take(relocation_slots::<T>()));
+    }
+
+    pub(super) fn finish(self) -> BudgetedVec<T> {
+        assert_eq!(self.remaining(), 0, "all vector slots transferred");
+        self.destination
     }
 }
 
@@ -151,6 +204,47 @@ impl BudgetedVec<crate::Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn large_vector_growth_moves_ordered_slots_in_charged_byte_windows() {
+        type Slot = [usize; 10];
+        let empty_budget = MemoryBudget::new(0);
+        let mut empty = BudgetedVec::new(&empty_budget);
+        for _ in 0..4096 {
+            empty.push(()).unwrap();
+        }
+        assert!(!empty.push_needs_work());
+        assert_eq!(empty_budget.used(), 0);
+
+        let count = 4_096;
+        let bytes = count * size_of::<Slot>();
+        let budget = MemoryBudget::new(3 * bytes);
+        let mut values = BudgetedVec::new(&budget);
+        values.reserve(count).unwrap();
+        for index in 0..count {
+            values.push([index; 10]).unwrap();
+        }
+        assert!(values.push_needs_work());
+        let mut moving = values.relocate_for_push().unwrap();
+        assert_eq!(moving.remaining(), count);
+        assert_eq!(budget.used(), 3 * bytes);
+        let mut steps = 0;
+        while moving.remaining() != 0 {
+            let before = moving.remaining();
+            let measured = allocation_counter::measure(|| moving.advance());
+            let moved = (before - moving.remaining()) * size_of::<Slot>();
+            assert!(moved > 0 && moved <= 4096);
+            assert_eq!(measured.count_total, 0);
+            assert_eq!(measured.count_current, 0);
+            steps += 1;
+        }
+        assert_eq!(steps, count.div_ceil(4096 / size_of::<Slot>()));
+        let result = moving.finish();
+        assert_eq!(budget.used(), result.capacity() * size_of::<Slot>());
+        assert!(result.iter().enumerate().all(|(i, slot)| *slot == [i; 10]));
+        drop(result);
+        assert_eq!(budget.used(), 0);
+    }
 
     #[test]
     fn rejoining_vector_parts_preserves_admission_and_original_allocation() {

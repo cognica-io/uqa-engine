@@ -28,8 +28,8 @@ mod merge_scopes;
 mod ordered_calls;
 mod preparation;
 pub(crate) use preparation::analyze_stored_routine_statement;
-pub(crate) use preparation::analyze_stored_scalar_with_control;
-pub(crate) use preparation::validate_stored_rule_condition_with_control;
+pub(crate) use preparation::analyze_stored_scalar_with_work;
+pub(crate) use preparation::validate_stored_rule_condition_with_work;
 pub mod production;
 pub use production::{
     analyze_query_plan_schema_with_control, analyze_source_plan_schema_with_control,
@@ -56,6 +56,8 @@ pub use execution::{
     ExecutionSourceBindings, SharedExecutionSourceBindings,
 };
 pub use preparation::bind_expression_plan_routines_for_storage_owned;
+pub(crate) use preparation::bind_expression_plan_routines_for_storage_with_work;
+pub(crate) use preparation::bind_routine_parameter_references_from;
 pub use preparation::{
     analyze_column_type_transform, assign_stored_query_input_collations,
     bind_routine_parameter_references_owned, infer_prepared_parameter_types,
@@ -115,7 +117,7 @@ use sources::{alias_table_schema, JoinSchemaBinding};
 use type_resolution::QueryFunctionTypeResolver;
 
 use crate::plan::{QueryBlockPlan, QueryPlan, RelationalPlan, SourcePlan};
-use crate::semantics::{cte_references_own_name, projection_columns};
+use crate::semantics::projection_columns;
 use crate::{SQLError, SQLParam, ScalarExpr};
 pub use context::BindingContext;
 
@@ -171,6 +173,7 @@ struct SchemaScope {
     /// Select reference resolution, complete stored binding, or prepared composite identity retention.
     scalar_binding: ScalarBindingMode,
     stored_call_origin: stored_routines::StoredCallOrigin,
+    stored_binding_memory: Option<uqa_core::memory::MemoryReservation>,
     /// The names of a `PL/pgSQL` statement that the function's variables take, checked against what the statement can see.
     variable_sites: Option<variable_sites::VariableSites>,
     /// Keep `*` projections and `GROUP BY` output-name references as written, so a bound copy of stored syntax still corresponds to that syntax node for node.
@@ -219,27 +222,49 @@ impl SchemaScope {
         params: &[SQLParam],
         outer: Option<&RowSchema>,
     ) -> Result<RowSchema, SQLError> {
+        crate::catalog::work::inline(self.bind_query_with_work(
+            routines,
+            plan,
+            params,
+            outer,
+            &mut (),
+        ))
+    }
+
+    async fn bind_query_with_work<W: crate::catalog::work::Work + Send>(
+        &mut self,
+        routines: &dyn RoutineResolution,
+        plan: &QueryPlan,
+        params: &[SQLParam],
+        outer: Option<&RowSchema>,
+        work: &mut W,
+    ) -> Result<RowSchema, SQLError> {
         let lookup_mode = if plan.relations_bound {
             crate::catalog::resolution::RelationLookupMode::Bound
         } else {
             crate::catalog::resolution::RelationLookupMode::Dynamic
         };
         let previous = self.resolution.set_lookup_mode(lookup_mode);
-        let result = self.bind_query_inner(routines, plan, params, outer);
+        let result = self
+            .bind_query_inner_with_work(routines, plan, params, outer, work)
+            .await;
         self.resolution.set_lookup_mode(previous);
         result
     }
 
-    fn bind_query_inner(
+    async fn bind_query_inner_with_work<W: crate::catalog::work::Work + Send>(
         &mut self,
         routines: &dyn RoutineResolution,
         plan: &QueryPlan,
         params: &[SQLParam],
         outer: Option<&RowSchema>,
+        work: &mut W,
     ) -> Result<RowSchema, SQLError> {
         let previous = self.bind_cte_schemas(routines, &plan.ctes, params, outer)?;
 
-        let result = self.bind_root(routines, &plan.root, params, outer);
+        let result = self
+            .bind_root_with_work(routines, &plan.root, params, outer, work)
+            .await;
         self.restore_cte_schemas(previous);
         let output = result?;
         self.collations.validate_query(plan)?;
@@ -266,25 +291,45 @@ impl SchemaScope {
         params: &[SQLParam],
         outer: Option<&RowSchema>,
     ) -> Result<RowSchema, SQLError> {
+        crate::catalog::work::inline(self.bind_root_with_work(
+            routines,
+            root,
+            params,
+            outer,
+            &mut (),
+        ))
+    }
+
+    async fn bind_root_with_work<W: crate::catalog::work::Work + Send>(
+        &mut self,
+        routines: &dyn RoutineResolution,
+        root: &RelationalPlan,
+        params: &[SQLParam],
+        outer: Option<&RowSchema>,
+        work: &mut W,
+    ) -> Result<RowSchema, SQLError> {
         match root {
             RelationalPlan::QueryBlock(block) => {
-                self.bind_query_block(routines, block, params, outer)
+                self.bind_query_block_with_work(routines, block, params, outer, work)
+                    .await
             }
             RelationalPlan::SetOp { .. } => {
                 preparation::set_metadata(self, routines, root, outer, params)
             }
             RelationalPlan::Values { rows, subqueries } => {
-                self.bind_values_schema(routines, rows, subqueries, outer, params)
+                self.bind_values_schema_with_work(routines, rows, subqueries, outer, params, work)
+                    .await
             }
         }
     }
 
-    fn bind_query_block(
+    async fn bind_query_block_with_work<W: crate::catalog::work::Work + Send>(
         &mut self,
         routines: &dyn RoutineResolution,
         block: &QueryBlockPlan,
         params: &[SQLParam],
         outer: Option<&RowSchema>,
+        work: &mut W,
     ) -> Result<RowSchema, SQLError> {
         let production = self.production.clone();
         let control = production.control();
@@ -318,12 +363,42 @@ impl SchemaScope {
             None => block,
         };
         let source = match block.from.as_ref() {
-            Some(source) => self.bind_source(routines, source, &block.subqueries, params, outer)?,
+            Some(source) => {
+                self.bind_source_in_scope_with_work(
+                    routines,
+                    source,
+                    &block.subqueries,
+                    params,
+                    SourceScope::new(outer),
+                    work,
+                )
+                .await?
+            }
             None => RowSchema::new_with_control(
                 control.finish(Vec::new(), control.empty_reservation())?,
                 &control,
             )?,
         };
+        // Output analysis starts after FROM is bound. A parent waiting on a derived source has no output state to retain.
+        let output = || self.bind_query_block_output(routines, block, source, params, outer, work);
+        if W::MAY_SUSPEND {
+            crate::construction::Read::with_constructor(control, output)?.await
+        } else {
+            crate::catalog::work::inline_with(output)
+        }
+    }
+
+    async fn bind_query_block_output<W: crate::catalog::work::Work + Send>(
+        &mut self,
+        routines: &dyn RoutineResolution,
+        block: &QueryBlockPlan,
+        source: RowSchema,
+        params: &[SQLParam],
+        outer: Option<&RowSchema>,
+        work: &mut W,
+    ) -> Result<RowSchema, SQLError> {
+        let production = self.production.clone();
+        let control = production.control();
         if let Some(sources) = &mut self.execution_sources {
             sources.record(block, &source, outer);
         }
@@ -350,7 +425,9 @@ impl SchemaScope {
             None => block,
         };
         let expression_schema = overlay_outer_schema_with_control(&source, outer, &control)?;
-        let output = preparation::block_metadata(self, routines, block, &source, outer, params)?;
+        let output =
+            preparation::block_metadata(self, routines, block, &source, outer, params, work)
+                .await?;
         let output = analysis::with_projected_open_columns_with_control(
             &output,
             &block.projections,
@@ -358,14 +435,19 @@ impl SchemaScope {
             &control,
         )?;
         if self.validate_references {
-            self.validate_query_block_clauses(
-                routines,
+            self.validate_query_block_clauses_with_work(
+                type_resolution::ValidatedSubqueries::new(routines, &block.subqueries, params)
+                    .retaining(),
                 block,
                 &expression_schema,
                 &output,
-                params,
                 outer,
-            )?;
+                &mut crate::catalog::work::ReferenceWork {
+                    control: &control,
+                    work,
+                },
+            )
+            .await?;
         }
         Ok(output)
     }
@@ -422,13 +504,14 @@ impl SchemaScope {
         clippy::too_many_lines,
         reason = "preserves SELECT schema and row identity"
     )]
-    fn bind_source_inner(
+    async fn bind_source_inner_with_work<W: crate::catalog::work::Work + Send>(
         &mut self,
         routines: &dyn RoutineResolution,
         source: &SourcePlan,
         subqueries: &[QueryPlan],
         params: &[SQLParam],
         scope: SourceScope<'_>,
+        work: &mut W,
     ) -> Result<RowSchema, SQLError> {
         #[cfg(test)]
         SOURCE_BINDINGS.with(|count| count.set(count.get() + 1));
@@ -451,8 +534,11 @@ impl SchemaScope {
                     && internal_column_types.iter().any(Option::is_none)
                     && !rows.is_empty()
                 {
-                    let inferred =
-                        self.bind_values_schema(routines, rows, subqueries, outer, params)?;
+                    let inferred = self
+                        .bind_values_schema_with_work(
+                            routines, rows, subqueries, outer, params, work,
+                        )
+                        .await?;
                     if let Some(schema) = source
                         .internal_values_schema_with_control(Some(&inferred), &self.control())?
                     {
@@ -464,7 +550,9 @@ impl SchemaScope {
                 {
                     return Ok(schema);
                 }
-                let schema = self.bind_values_schema(routines, rows, subqueries, outer, params)?;
+                let schema = self
+                    .bind_values_schema_with_work(routines, rows, subqueries, outer, params, work)
+                    .await?;
                 projection::rename_schema_with_control(
                     &schema,
                     column_aliases,
@@ -485,7 +573,11 @@ impl SchemaScope {
                 column_aliases,
                 ..
             } => {
-                let schema = self.bind_query(routines, body, params, outer)?;
+                let schema = crate::construction::retain_with(
+                    self.production.control().capture().control(),
+                    || self.bind_query_with_work(routines, body, params, outer, work),
+                )?
+                .await?;
                 Ok(match source {
                     SourcePlan::Subquery {
                         captured_output: Some(relation),
@@ -518,31 +610,45 @@ impl SchemaScope {
                 lateral,
                 ..
             } => {
-                let left_schema = self.bind_source_in_scope(
-                    routines,
-                    left,
-                    subqueries,
-                    params,
-                    scope.with_names(),
-                )?;
+                let left_schema = crate::construction::retain_with(
+                    self.production.control().capture().control(),
+                    || {
+                        self.bind_source_in_scope_with_work(
+                            routines,
+                            left,
+                            subqueries,
+                            params,
+                            scope.with_names(),
+                            work,
+                        )
+                    },
+                )?
+                .await?;
                 let preceding = scope.right_namespace_with_control(
                     left,
                     &left_schema,
                     *kind,
                     &self.control(),
                 )?;
-                let right_schema = self.bind_source_in_scope(
-                    routines,
-                    right,
-                    subqueries,
-                    params,
-                    SourceScope {
-                        outer: scope.outer,
-                        preceding: Some(&preceding),
-                        inherited_lateral: *lateral,
-                        retain_names: true,
+                let right_schema = crate::construction::retain_with(
+                    self.production.control().capture().control(),
+                    || {
+                        self.bind_source_in_scope_with_work(
+                            routines,
+                            right,
+                            subqueries,
+                            params,
+                            SourceScope {
+                                outer: scope.outer,
+                                preceding: Some(&preceding),
+                                inherited_lateral: *lateral,
+                                retain_names: true,
+                            },
+                            work,
+                        )
                     },
-                )?;
+                )?
+                .await?;
                 let condition = scope.condition_with_control(&self.control())?;
                 self.bind_join_output_schema(JoinSchemaBinding {
                     routines,

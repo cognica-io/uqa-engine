@@ -10,7 +10,10 @@ use crate::binding::preparation::{LiteralInput, SchemaContext};
 
 use super::ownership::{AnalysisType, AnalysisVec};
 use super::{ColumnType, ExpressionType, Preparation, QueryPlan, RowSchema, SQLError, ScalarExpr};
-use crate::catalog::collations::derivation::Derivation;
+use crate::catalog::{
+    collations::derivation::Derivation,
+    work::{ReferenceWork, Work},
+};
 use crate::{
     ast::BinaryOp,
     plan::{OwnedScalarExpr, ScalarQueryArena},
@@ -26,11 +29,23 @@ pub(super) struct MembershipAnalysis {
 }
 
 impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
-    pub(super) fn in_list(
+    /// Construct the ordinary membership future on the selected call frame.
+    pub(super) fn in_list_inline<W: Work + Send>(
         &mut self,
         expression: &ScalarExpr,
         input: &RowSchema,
         subqueries: &[QueryPlan],
+        work: &mut W,
+    ) -> Result<ExpressionType, SQLError> {
+        crate::catalog::work::inline_with(|| self.in_list(expression, input, subqueries, work))
+    }
+
+    pub(super) async fn in_list<W: Work + Send>(
+        &mut self,
+        expression: &ScalarExpr,
+        input: &RowSchema,
+        subqueries: &[QueryPlan],
+        work: &mut W,
     ) -> Result<ExpressionType, SQLError> {
         let ScalarExpr::InList {
             expr,
@@ -42,24 +57,29 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
         };
         let owner = self.scope.control().capture();
         let control = owner.control();
-        let needle = self.expression(expr, input, subqueries)?;
+        let needle = self
+            .membership_operand(expr, input, subqueries, &control, work)
+            .await?;
+        let mut deferred = needle.is_deferred();
+        let mut output = ExpressionType::resolved(Some(ColumnType::Boolean));
         let mut values = AnalysisVec::new(&control);
         values.reserve(list.len(), &control)?;
         for item in list {
-            values.push(self.expression(item, input, subqueries)?, &control)?;
+            let value = self
+                .membership_operand(item, input, subqueries, &control, work)
+                .await?;
+            deferred |= value.is_deferred();
+            output.derivation = output.derivation.combine(value.derivation.error_only());
+            values.push(value, &control)?;
         }
-        if needle.is_deferred() || values.iter().any(ExpressionType::is_deferred) {
-            let mut output = ExpressionType::independent(Some(ColumnType::Boolean), &values);
+        if deferred {
             output.derivation = needle.derivation.error_only().combine(output.derivation);
             return Ok(output);
         }
-        let mut array_items = AnalysisVec::new(&control);
-        for (index, item) in list.iter().enumerate() {
-            if !self.membership_item_references_row(item, input, subqueries)? {
-                array_items.push(index, &control)?;
-            }
-        }
-        let common = membership_array_type(&needle, &values, &array_items, &control)?;
+        let mut array_items = self
+            .membership_array_candidates(list, input, subqueries, &control, work)
+            .await?;
+        let common = membership_array_type(&needle, &values, &array_items, &control, work).await?;
         if common.is_none() {
             array_items.clear();
         }
@@ -75,27 +95,17 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
         };
         let mut selected = Derivation::None;
         if let Some(common) = common {
-            for index in &analysis.array_items {
-                let item = &mut values[*index];
-                if item.ty.as_deref().is_some_and(|ty| *ty != *common)
-                    || matches!(list[*index], ScalarExpr::Literal(uqa_core::Value::Null))
-                {
-                    analysis
-                        .array_coercions
-                        .push((*index, common.clone()), &control)?;
-                }
-                self.parameters.coerce_unknown(item, &common)?;
-            }
-            let mut left = needle.copy_with_control(&self.scope.control())?;
             let array = analysis
-                .array_items
-                .iter()
-                .fold(Derivation::None, |state, index| {
-                    state.combine(values[*index].derivation)
-                })
-                .result(crate::catalog::type_metadata::pg_type_collation_oid(
+                .coerce_array_items(
+                    list,
+                    &mut values,
                     &common,
-                ));
+                    &mut self.parameters,
+                    &control,
+                    work,
+                )
+                .await?;
+            let mut left = needle.copy_with_control(&control)?;
             self.binary(
                 op,
                 &mut left,
@@ -106,11 +116,18 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
                 .left_constants
                 .push(self.parameters.take_literal(expr)?, &control)?;
         }
+        let mut array_items = analysis.array_items.iter().copied().peekable();
         for (index, item) in values.iter_mut().enumerate() {
-            if analysis.array_items.contains(&index) {
+            ReferenceWork {
+                control: &control,
+                work,
+            }
+            .checkpoint()
+            .await?;
+            if array_items.next_if_eq(&index).is_some() {
                 continue;
             }
-            let mut left = needle.copy_with_control(&self.scope.control())?;
+            let mut left = needle.copy_with_control(&control)?;
             self.binary(op, &mut left, item)?;
             selected = selected.combine(ExpressionType::comparison(&left, item));
             self.validate_membership_operands(expr, &list[index], input)?;
@@ -119,9 +136,27 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
                 .push(self.parameters.take_literal(expr)?, &control)?;
         }
         self.parameters.retain_membership(expression, analysis)?;
-        let mut output = ExpressionType::resolved(Some(ColumnType::Boolean));
         output.derivation = selected;
         Ok(output)
+    }
+
+    async fn membership_operand<W: Work + Send>(
+        &mut self,
+        operand: &ScalarExpr,
+        input: &RowSchema,
+        subqueries: &[QueryPlan],
+        control: &ProductionControl<'_>,
+        work: &mut W,
+    ) -> Result<ExpressionType, SQLError> {
+        ReferenceWork { control, work }.checkpoint().await?;
+        if W::MAY_SUSPEND && !matches!(operand, ScalarExpr::Literal(_) | ScalarExpr::Param(_)) {
+            crate::construction::retain_with(*control, || {
+                self.expression_with_work(operand, input, subqueries, work)
+            })?
+            .await
+        } else {
+            self.expression(operand, input, subqueries)
+        }
     }
 
     /// `PostgreSQL` checks each boolean comparison after operator resolution; its array comparison permits set-valued inputs.
@@ -150,17 +185,53 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
         Ok(())
     }
 
-    fn membership_item_references_row(
+    async fn membership_array_candidates(
+        &self,
+        list: &[ScalarExpr],
+        input: &RowSchema,
+        subqueries: &[QueryPlan],
+        control: &ProductionControl<'_>,
+        work: &mut (impl Work + Send),
+    ) -> Result<AnalysisVec<usize>, SQLError> {
+        let mut candidates = AnalysisVec::new(control);
+        for (index, item) in list.iter().enumerate() {
+            if !self
+                .membership_item_references_row(item, input, subqueries, control, work)
+                .await?
+            {
+                candidates.push(index, control)?;
+            }
+        }
+        Ok(candidates)
+    }
+
+    async fn membership_item_references_row<W: Work + Send>(
         &self,
         expression: &ScalarExpr,
         input: &RowSchema,
         subqueries: &[QueryPlan],
+        control: &ProductionControl<'_>,
+        work: &mut W,
     ) -> Result<bool, SQLError> {
-        if crate::semantics::references_current_row(expression, Some(input)) {
+        use crate::ir::{
+            children::Scope,
+            observation::{visit_in, Decision},
+        };
+        if visit_in(expression, control, work, Scope::Complete, &mut |node| {
+            Ok(
+                if crate::semantics::node_references_current_row(node, Some(input)) {
+                    Decision::Stop
+                } else {
+                    Decision::Descend
+                },
+            )
+        })
+        .await?
+        {
             return Ok(true);
         }
         let mut dependent = false;
-        expression.try_visit(&mut |node| {
+        visit_in(expression, control, work, Scope::Complete, &mut |node| {
             let query = match node {
                 ScalarExpr::ScalarSubquery(index)
                 | ScalarExpr::Exists {
@@ -186,13 +257,43 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
                     input,
                 )?;
             }
-            Ok::<_, SQLError>(!dependent)
-        })?;
+            Ok(if dependent {
+                Decision::Prune
+            } else {
+                Decision::Descend
+            })
+        })
+        .await?;
         Ok(dependent)
     }
 }
 
 impl MembershipAnalysis {
+    async fn coerce_array_items<I: LiteralInput>(
+        &mut self,
+        list: &[ScalarExpr],
+        values: &mut [ExpressionType],
+        common: &AnalysisType,
+        parameters: &mut super::ParameterTypes<'_, I>,
+        control: &ProductionControl<'_>,
+        work: &mut (impl Work + Send),
+    ) -> Result<Derivation, SQLError> {
+        let mut derivation = Derivation::None;
+        for &index in &self.array_items {
+            ReferenceWork { control, work }.checkpoint().await?;
+            let item = &mut values[index];
+            if item.ty.as_deref().is_some_and(|ty| ty != &**common)
+                || matches!(list[index], ScalarExpr::Literal(uqa_core::Value::Null))
+            {
+                self.array_coercions
+                    .push((index, common.clone()), control)?;
+            }
+            parameters.coerce_unknown(item, common)?;
+            derivation = derivation.combine(item.derivation);
+        }
+        Ok(derivation.result(crate::catalog::type_metadata::pg_type_collation_oid(common)))
+    }
+
     pub(super) fn apply(
         self,
         expression: &mut ScalarExpr,
@@ -245,22 +346,20 @@ impl MembershipAnalysis {
     }
 }
 
-fn membership_array_type(
+async fn membership_array_type<W: Work + Send>(
     needle: &ExpressionType,
     values: &[ExpressionType],
     array_items: &[usize],
     control: &ProductionControl<'_>,
+    work: &mut W,
 ) -> Result<Option<AnalysisType>, SQLError> {
     if array_items.len() <= 1 {
         return Ok(None);
     }
-    let mut types = AnalysisVec::new(control);
-    types.reserve(1 + array_items.len(), control)?;
-    types.push(needle.ty.as_deref(), control)?;
-    for index in array_items {
-        types.push(values[*index].ty.as_deref(), control)?;
-    }
-    crate::type_resolution::select_common_input_type_with_control(&types, control)?
+    let types = std::iter::once(needle.ty.as_deref())
+        .chain(array_items.iter().map(|index| values[*index].ty.as_deref()));
+    crate::type_resolution::select_common_input_type_with_work(types, control, work)
+        .await?
         .filter(|ty| !matches!(**ty, ColumnType::Array(_) | ColumnType::Record))
         .map(|ty| AnalysisType::from_produced(ty, control))
         .transpose()

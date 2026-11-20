@@ -48,13 +48,7 @@ pub fn bind_scalar_type_identities(
         if failure.is_some() {
             return;
         }
-        if let ScalarExpr::Cast { ty, .. }
-        | ScalarExpr::TypedLiteral { ty, .. }
-        | ScalarExpr::CompositeRow {
-            binding: crate::ast::CompositeRowBinding { ty, .. },
-            ..
-        } = node
-        {
+        if let Some(ty) = node.written_type_name_mut() {
             match identity(ty, resolve) {
                 Ok(Some(identity)) => *ty = identity,
                 Ok(None) => {}
@@ -90,13 +84,7 @@ fn bind_plan_type_identities(
         if failure.is_some() {
             return;
         }
-        if let ScalarExpr::Cast { ty, .. }
-        | ScalarExpr::TypedLiteral { ty, .. }
-        | ScalarExpr::CompositeRow {
-            binding: crate::ast::CompositeRowBinding { ty, .. },
-            ..
-        } = expression
-        {
+        if let Some(ty) = expression.written_type_name_mut() {
             match identity(ty, resolve) {
                 Ok(Some(identity)) => *ty = identity,
                 Ok(None) => {}

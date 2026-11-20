@@ -151,3 +151,220 @@ fn grouping_production_rejects_large_payload_and_observes_each_cancellation_owne
         assert_eq!(budget.used(), 0);
     }
 }
+
+fn grouped_input(
+    block: QueryBlockPlan,
+    native: &MemoryBudget,
+    work: &MemoryBudget,
+    original: &CancellationToken,
+    invoking: &CancellationToken,
+    selected: &std::sync::Arc<std::sync::atomic::AtomicUsize>,
+) -> uqa_core::image_io::ImageDecoder<(), SQLError> {
+    let budget = native.clone();
+    let original = original.clone();
+    let selected = selected.clone();
+    uqa_core::image_io::ImageDecoder::new(work, invoking, |mut reader| async move {
+        let mut channel = reader.input();
+        let control = ProductionControl::new(&budget, &original, channel.cancellation);
+        let schema = input();
+        super::super::validate_grouped_expressions_with_inputs(
+            &Catalog,
+            &block,
+            &schema,
+            None,
+            &[],
+            block.grouping_sets.iter().flatten().inspect(|_| {
+                selected.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            }),
+            &mut crate::catalog::work::ReferenceWork {
+                control: &control,
+                work: &mut channel,
+            },
+        )
+        .await
+    })
+    .unwrap()
+}
+
+#[test]
+fn grouped_validation_schedules_identities_and_projection_errors_in_original_order() {
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+    use uqa_core::image_io::ImageDecodeWindow;
+
+    let native = MemoryBudget::new(16 << 10);
+    let work = MemoryBudget::new(1 << 20);
+    let group = |count| {
+        std::iter::repeat_n("(n)", count)
+            .collect::<Vec<_>>()
+            .join(",")
+    };
+    let complete = |width, target: &str, steps| {
+        let query = block(&format!(
+            "SELECT {target} FROM t GROUP BY DISTINCT GROUPING SETS ({})",
+            group(width)
+        ));
+        let expected = validate_grouped_expressions(&Catalog, &query, &input(), None, &[])
+            .err()
+            .map(|error| (error.sqlstate().unwrap().to_owned(), error.to_string()));
+        let selected = Arc::new(AtomicUsize::new(0));
+        let token = CancellationToken::new();
+        let mut job = grouped_input(query, &native, &work, &token, &token, &selected);
+        let mut calls = 0;
+        let seen = loop {
+            calls += 1;
+            let before = selected.load(Ordering::Relaxed);
+            let result = job.advance(&mut std::io::empty(), ImageDecodeWindow { bytes: 1, steps });
+            // The iterator may have selected the next expression when its first checkpoint yields.
+            assert!(selected.load(Ordering::Relaxed) - before <= steps + usize::from(calls == 1));
+            match result {
+                Ok(None) => (),
+                Ok(Some(())) => break None,
+                Err(error) => {
+                    break Some((error.sqlstate().unwrap().to_owned(), error.to_string()))
+                }
+            }
+        };
+        assert_eq!(seen, expected);
+        assert_eq!(selected.load(Ordering::Relaxed), width);
+        drop(job);
+        assert_eq!((native.used(), work.used()), (0, 0));
+        calls
+    };
+    let small = complete(2, "count(*)", 1);
+    let wide = complete(32, "count(*)", 1);
+    assert!(
+        wide >= small + 60,
+        "one checkpoint per additional identity and its release: {small}/{wide}"
+    );
+    assert!(complete(32, "count(*)", 8) < wide / 4);
+    let first = complete(32, "id,n,n,n,n,n,n,n", 1);
+    let last = complete(32, "n,n,n,n,n,n,n,id", 1);
+    eprintln!("grouped validation, one-step calls: 2 sets {small}, 32 sets {wide}, first/last error {first}/{last}");
+    assert_eq!(last - first, 7);
+    for interrupted in 0..3 {
+        let original = CancellationToken::new();
+        let invoking = CancellationToken::new();
+        let selected = Arc::new(AtomicUsize::new(0));
+        let query = block(&format!(
+            "SELECT count(*) FROM t GROUP BY DISTINCT GROUPING SETS ({})",
+            group(32)
+        ));
+        let mut job = grouped_input(query, &native, &work, &original, &invoking, &selected);
+        let window = ImageDecodeWindow { bytes: 1, steps: 1 };
+        while selected.load(Ordering::Relaxed) < 8 {
+            assert!(job
+                .advance(&mut std::io::empty(), window)
+                .unwrap()
+                .is_none());
+        }
+        assert!(native.used() > 0);
+        let pressure = match interrupted {
+            0 => {
+                original.cancel();
+                None
+            }
+            1 => {
+                invoking.cancel();
+                None
+            }
+            _ => Some(native.reserve(native.limit() - native.used()).unwrap()),
+        };
+        let error = job.advance(&mut std::io::empty(), window).unwrap_err();
+        assert_eq!(
+            error.sqlstate(),
+            Some(if interrupted == 2 { "53200" } else { "57014" })
+        );
+        drop((job, pressure));
+        assert_eq!((native.used(), work.used()), (0, 0));
+    }
+}
+
+#[test]
+fn distinct_grouping_selection_schedules_each_normalized_set_and_its_keys() {
+    use uqa_core::image_io::{ImageDecodeWindow, ImageDecoder};
+
+    let progress = |width: usize, steps, interruption| {
+        let keys = std::iter::repeat_n("n", width)
+            .collect::<Vec<_>>()
+            .join(",");
+        let sql = format!(
+            "SELECT id AS item FROM t GROUP BY DISTINCT GROUPING SETS (({keys}),(n),(item),(),())"
+        );
+        let query = block(&sql);
+        let native = MemoryBudget::new(1 << 20);
+        let work = MemoryBudget::new(1 << 20);
+        let original = CancellationToken::new();
+        let invoking = CancellationToken::new();
+        let budget = native.clone();
+        let owner = original.clone();
+        let mut job = ImageDecoder::new(&work, &invoking, |mut reader| async move {
+            let mut channel = reader.input();
+            let control = ProductionControl::new(&budget, &owner, channel.cancellation);
+            let schema = input();
+            super::super::analyze_distinct_grouping_from(
+                &Catalog,
+                &query,
+                &schema,
+                None,
+                &[],
+                &mut crate::catalog::work::ReferenceWork {
+                    control: &control,
+                    work: &mut channel,
+                },
+            )
+            .await
+        })
+        .unwrap();
+        let mut calls = 0;
+        let mut pressure = None;
+        loop {
+            calls += 1;
+            if calls == 12 {
+                match interruption {
+                    Some(0) => original.cancel(),
+                    Some(1) => invoking.cancel(),
+                    Some(2) => {
+                        pressure = Some(native.reserve(native.limit() - native.used()).unwrap());
+                    }
+                    _ => (),
+                }
+            }
+            match job.advance(&mut std::io::empty(), ImageDecodeWindow { bytes: 1, steps }) {
+                Ok(None) => (),
+                Ok(Some(output)) => {
+                    assert!(interruption.is_none());
+                    assert_eq!(output.original_count, 5);
+                    assert_eq!(output.retained, [0, 2, 3]);
+                    assert_eq!(native.used(), output.reserved_bytes());
+                    break;
+                }
+                Err(error) => {
+                    assert_eq!(
+                        error.sqlstate(),
+                        Some(if interruption == Some(2) {
+                            "53200"
+                        } else {
+                            "57014"
+                        })
+                    );
+                    assert!(interruption.is_some());
+                    break;
+                }
+            }
+        }
+        drop((job, pressure));
+        assert_eq!((native.used(), work.used()), (0, 0));
+        calls
+    };
+    let small = progress(2, 1, None);
+    let wide = progress(64, 1, None);
+    eprintln!("distinct sets, one-step calls: 2 keys {small}, 64 keys {wide}");
+    assert!(wide >= small + 62 * 2);
+    assert!(progress(64, 32, None) < wide / 8);
+    for interruption in 0..3 {
+        progress(64, 1, Some(interruption));
+    }
+}

@@ -42,7 +42,34 @@ impl SchemaScope {
         schema: Option<&RowSchema>,
         params: &[SQLParam],
     ) -> Result<RowSchema, SQLError> {
-        super::preparation::values_metadata(self, routines, rows, subqueries, schema, params)
+        let mut work = ();
+        crate::catalog::work::inline_with(|| {
+            super::preparation::values_metadata_with_work(
+                self, routines, rows, subqueries, schema, params, &mut work,
+            )
+        })
+    }
+
+    pub(super) async fn bind_values_schema_with_work<W: crate::catalog::work::Work + Send>(
+        &mut self,
+        routines: &dyn RoutineResolution,
+        rows: &[Vec<ScalarExpr>],
+        subqueries: &[QueryPlan],
+        schema: Option<&RowSchema>,
+        params: &[SQLParam],
+        work: &mut W,
+    ) -> Result<RowSchema, SQLError> {
+        if W::MAY_SUSPEND {
+            let owner = self.production.clone();
+            crate::construction::retain_with(owner.control(), || {
+                super::preparation::values_metadata_with_work(
+                    self, routines, rows, subqueries, schema, params, work,
+                )
+            })?
+            .await
+        } else {
+            self.bind_values_schema(routines, rows, subqueries, schema, params)
+        }
     }
 
     pub(super) fn bind_join_output_schema(

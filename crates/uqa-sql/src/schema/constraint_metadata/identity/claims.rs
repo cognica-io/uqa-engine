@@ -37,7 +37,7 @@ pub fn row_identities<'a>(
     row_slots(columns, checks, keys, foreign_keys).flatten()
 }
 
-fn row_slots<'a>(
+pub(crate) fn row_slots<'a>(
     columns: &'a [ColumnDef],
     checks: &'a [TableCheck],
     keys: &'a [TableKeyConstraint],

@@ -10,14 +10,16 @@ use super::{
     checkpoint, CanonicalRoutineDefinitions, CanonicalRoutineGroup, Comparison,
     RoutineRestoreInputError,
 };
+use crate::catalog::image::StoredSyntaxRetirement;
 use crate::routines::{
     registry::RoutineRegistry, routine_signature_types_from_input, CompiledFunctionBody,
-    RetainedRoutineValue, RoutineBody, SQLRoutine, SQLUserFunction,
+    RetainedRoutineValue, RoutineBody, SQLRoutine, SQLUserFunction, StoredRoutineDefinition,
 };
 use uqa_core::{
     image_io::AsyncImageInput,
     memory::{
-        Budgeted, BudgetedVec, MemoryBudget, MemoryError, OwnedMap, Produced, ProductionControl,
+        Budgeted, BudgetedVec, MemoryBudget, MemoryError, MemoryReservation, OwnedMap, Produced,
+        ProductionControl,
     },
     CancellationToken,
 };
@@ -25,6 +27,8 @@ use uqa_core::{
 /// The native declarations remain in canonical-name and original overload order, independently of the registry's signature-sorted publication. Body finalization borrows these owners instead of retaining a second AST copy.
 pub struct PendingRoutineDefinitions {
     groups: BudgetedVec<PendingGroup>,
+    retirement: Option<StoredSyntaxRetirement>,
+    max_depth: usize,
 }
 
 struct PendingGroup {
@@ -40,6 +44,32 @@ impl PendingRoutineDefinitions {
 
     pub fn group(&self, index: usize) -> Option<&[SQLRoutine]> {
         self.groups.get(index).map(|group| &*group.original)
+    }
+
+    /// Reserve the original syntax depth recorded by the declaration's existing field copy.
+    pub fn prepare_retirement(
+        &mut self,
+        declaration: &StoredRoutineDefinition,
+    ) -> Result<(), crate::SQLError> {
+        let (depth, wide) = declaration.original_retirement_shape();
+        self.max_depth = self.max_depth.max(depth);
+        if wide || self.retirement.is_some() {
+            StoredSyntaxRetirement::prepare_routine(
+                &mut self.retirement,
+                self.max_depth,
+                self.groups.budget(),
+            )?;
+        }
+        Ok(())
+    }
+
+    /// After atomically replacing the placeholders, release the original declarations
+    /// only when no other generation still owns them.
+    pub fn into_retirement(self) -> RoutinePlaceholderRetirement {
+        RoutinePlaceholderRetirement {
+            pending: self,
+            active: None,
+        }
     }
 
     /// Move completed bodies into the same signature order already established before binding.
@@ -59,6 +89,47 @@ impl PendingRoutineDefinitions {
         group
             .publish(name, &compiled, registry, &control, input)
             .await
+    }
+}
+
+/// The field traversal and its original lease stay together until the last native syntax node retires.
+pub struct RoutinePlaceholderRetirement {
+    pending: PendingRoutineDefinitions,
+    active: Option<MemoryReservation>,
+}
+
+impl RoutinePlaceholderRetirement {
+    /// Release one active syntax frame, declaration reference or overload group.
+    pub fn advance(&mut self) -> bool {
+        if self.active.is_some() {
+            let tree = self
+                .pending
+                .retirement
+                .as_mut()
+                .expect("selected original syntax");
+            if tree.advance_routine() {
+                self.active = None;
+            }
+            return false;
+        }
+        let Some(group) = self.pending.groups.last_mut() else {
+            return true;
+        };
+        if let Some(original) = group.original.pop() {
+            if let Some((tree, original)) = self
+                .pending
+                .retirement
+                .as_mut()
+                .zip(std::sync::Arc::into_inner(original))
+            {
+                let (function, lease) = original.into_native_placeholder().into_parts();
+                tree.routine(function.def);
+                self.active = Some(lease.expect("original native placeholder allowance"));
+            }
+        } else {
+            self.pending.groups.pop();
+        }
+        false
     }
 }
 
@@ -155,7 +226,11 @@ impl CanonicalRoutineDefinitions {
         checkpoint(&control, input).await?;
         Ok(RoutineRestorePlaceholders {
             registry,
-            definitions: PendingRoutineDefinitions { groups: pending },
+            definitions: PendingRoutineDefinitions {
+                groups: pending,
+                retirement: None,
+                max_depth: 0,
+            },
         })
     }
 }

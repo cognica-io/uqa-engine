@@ -7,10 +7,8 @@
 //! Ordinary migration and retained observation share marker spelling and range-operation selection.
 
 use super::{FunctionBinding, FunctionDispatch, RangeFunctionOperation, RangeSubtype};
-use uqa_core::{
-    image_io::{AsyncImageInput, ImageIoError},
-    CancellationToken,
-};
+use crate::catalog::work::Work;
+use uqa_core::{image_io::ImageIoError, memory::ProductionControl};
 
 impl FunctionDispatch {
     /// Decode function spellings in older durable expressions. This is a catalog migration primitive, never a SQL routine lookup path.
@@ -24,23 +22,23 @@ impl FunctionDispatch {
         })
     }
 
-    async fn legacy_name_from_input(
+    async fn legacy_name_with_work(
         name: &str,
-        original: &CancellationToken,
-        input: &mut AsyncImageInput<'_>,
+        control: &ProductionControl<'_>,
+        work: &mut impl Work,
     ) -> Result<Option<Self>, ImageIoError> {
-        original.check()?;
-        input.checkpoint().await?;
-        original.check()?;
+        control.check_cancellation()?;
+        work.checkpoint().await?;
+        control.check_cancellation()?;
         if let Some(dispatch) = Self::fixed_legacy_name(name) {
             return Ok(Some(dispatch));
         }
         for (operation, subtype, multirange) in range_candidates(name) {
             let mut end = operation.len();
             while end > 0 {
-                original.check()?;
-                input.checkpoint().await?;
-                original.check()?;
+                control.check_cancellation()?;
+                work.checkpoint().await?;
+                control.check_cancellation()?;
                 let begin = end.saturating_sub(4096);
                 while end > begin && operation.as_bytes()[end - 1] == b'_' {
                     end -= 1;
@@ -115,14 +113,14 @@ impl FunctionBinding {
         !binding.is_some_and(|binding| binding.dispatch.is_some() || !binding.builtin)
     }
 
-    pub(crate) async fn legacy_serialized_dispatch_from_input(
+    pub(crate) async fn legacy_serialized_dispatch_with_work(
         name: &str,
         binding: Option<&Self>,
-        original: &CancellationToken,
-        input: &mut AsyncImageInput<'_>,
+        control: &ProductionControl<'_>,
+        work: &mut impl Work,
     ) -> Result<Option<FunctionDispatch>, ImageIoError> {
         if Self::accepts_legacy_dispatch(binding) {
-            FunctionDispatch::legacy_name_from_input(name, original, input).await
+            FunctionDispatch::legacy_name_with_work(name, control, work).await
         } else {
             Ok(None)
         }

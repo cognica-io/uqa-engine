@@ -6,17 +6,14 @@
 
 use crate::{ast::InternalColumnRef, schema::ColumnIdentity, SQLError};
 use std::cmp::Ordering;
-use uqa_core::{
-    image_io::AsyncImageInput,
-    memory::{MapKeyInput, OwnedMap, Produced, ProductionControl},
-};
+use uqa_core::memory::{MapKeyInput, OwnedMap, Produced, ProductionControl};
 
-pub(super) struct Work<'a, 'b, 'c> {
+pub(super) struct Work<'a, 'b, W> {
     pub control: ProductionControl<'a>,
-    pub input: &'b mut AsyncImageInput<'c>,
+    pub input: &'b mut W,
 }
 
-impl Work<'_, '_, '_> {
+impl<W: crate::catalog::CatalogWork + Send> Work<'_, '_, W> {
     pub async fn checkpoint(&mut self) -> Result<(), SQLError> {
         self.control.check()?;
         self.input.checkpoint().await?;
@@ -39,33 +36,12 @@ impl Work<'_, '_, '_> {
         qualifier: &str,
         name: &str,
     ) -> Result<Produced<ColumnIdentity>, SQLError> {
-        let qualifier = self.boxed_text(qualifier).await?;
-        let name = self.boxed_text(name).await?;
-        let (qualifier, qualifier_memory) = qualifier.into_parts();
-        let (column, column_memory) = name.into_parts();
-        Ok(self.control.finish(
-            ColumnIdentity {
-                qualifier: Some(qualifier),
-                column,
-            },
-            self.control.combine(qualifier_memory, column_memory),
-        )?)
+        ColumnIdentity::copy_from_work(Some(qualifier), name, &self.control, self.input).await
     }
 
     pub async fn compare_text(&mut self, left: &str, right: &str) -> Result<Ordering, SQLError> {
         self.checkpoint().await?;
-        for (left, right) in left
-            .as_bytes()
-            .chunks(4096)
-            .zip(right.as_bytes().chunks(4096))
-        {
-            self.checkpoint().await?;
-            let order = left.cmp(right);
-            if order.is_ne() {
-                return Ok(order);
-            }
-        }
-        Ok(left.len().cmp(&right.len()))
+        crate::catalog::work::compare_text(self.input, left, right, &self.control).await
     }
 
     pub async fn insert<K: Ord, V>(
@@ -78,18 +54,13 @@ impl Work<'_, '_, '_> {
         Self: MapKeyInput<K, Error = SQLError>,
     {
         Ok(map
-            .insert_admitted_key_from(
-                key.into_budgeted()
-                    .unwrap_or_else(|_| panic!("native schema key")),
-                value,
-                self,
-            )
+            .insert_produced_key_from(key, value, self)
             .await?
             .is_some())
     }
 }
 
-impl MapKeyInput<Box<str>> for Work<'_, '_, '_> {
+impl<W: crate::catalog::CatalogWork + Send> MapKeyInput<Box<str>> for Work<'_, '_, W> {
     type Error = SQLError;
 
     async fn checkpoint(&mut self) -> Result<(), SQLError> {
@@ -101,7 +72,7 @@ impl MapKeyInput<Box<str>> for Work<'_, '_, '_> {
     }
 }
 
-impl MapKeyInput<ColumnIdentity> for Work<'_, '_, '_> {
+impl<W: crate::catalog::CatalogWork + Send> MapKeyInput<ColumnIdentity> for Work<'_, '_, W> {
     type Error = SQLError;
 
     async fn checkpoint(&mut self) -> Result<(), SQLError> {
@@ -113,21 +84,16 @@ impl MapKeyInput<ColumnIdentity> for Work<'_, '_, '_> {
         left: &ColumnIdentity,
         right: &ColumnIdentity,
     ) -> Result<Ordering, SQLError> {
-        self.checkpoint().await?;
-        let qualifier = match (left.qualifier(), right.qualifier()) {
-            (None, None) => Ordering::Equal,
-            (None, Some(_)) => Ordering::Less,
-            (Some(_), None) => Ordering::Greater,
-            (Some(left), Some(right)) => self.compare_text(left, right).await?,
-        };
-        if qualifier.is_ne() {
-            return Ok(qualifier);
+        crate::catalog::work::ReferenceWork {
+            control: &self.control,
+            work: self.input,
         }
-        self.compare_text(left.column(), right.column()).await
+        .compare(left, right)
+        .await
     }
 }
 
-impl MapKeyInput<InternalColumnRef> for Work<'_, '_, '_> {
+impl<W: crate::catalog::CatalogWork + Send> MapKeyInput<InternalColumnRef> for Work<'_, '_, W> {
     type Error = SQLError;
 
     async fn checkpoint(&mut self) -> Result<(), SQLError> {

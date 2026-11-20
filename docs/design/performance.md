@@ -2,6 +2,17 @@
 
 This document records dated UQA Engine measurements, including controlled CI qualification and historical developer-machine comparisons. Each section identifies its source and measurement boundary; absolute times remain specific to the measured host. Controlled qualification uses independently authenticated host control and reference-only noise calibration. Unless a section explicitly compares another engine, its ratios compare UQA revisions. Measurements use the `bench` profile (release + debug symbols, thin LTO, `codegen-units = 1`) unless a section explicitly records a package-scoped `release` runner or a published package.
 
+## Controlled analytical results (2026-11-19 UTC)
+
+After the row-schema release fix, Q1’s paired ratio fell from 1.118499 on `4c98f23f2` to 1.102068 on `c248aed70`. Its calibrated interval still crossed the 1.10 limit. The cursor scan exceeded its 1.15 limit. Q6, the materialized scan and all 16 claim comparisons passed. The dedicated m7g.4xlarge compared eight counterbalanced pairs per workload and used 32 independent reference pairs to estimate noise. Times are median Criterion slopes against analytical reference `0e8be6892`. [Controlled run](https://github.com/cognica-io/uqa-engine/actions/runs/44600125266) · [Signed measurements](https://github.com/cognica-io/uqa-engine/actions/runs/44600125266/artifacts/14573902089)
+
+| Workload | Reference ms | Head ms | Paired ratio | Noise factor | Calibrated interval | Limit | Decision |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| Q1 grouped aggregate | 3.850854 | 4.242435 | 1.102068 | 1.004942 | 1.096648–1.107515 | 1.10 | inconclusive |
+| Q6 filtered aggregate | 3.558498 | 2.941212 | 0.827316 | 1.005982 | 0.822397–0.832265 | 1.10 | accepted |
+| Materialized result scan | 9.906246 | 10.134412 | 1.024242 | 1.007250 | 1.016870–1.031668 | 1.15 | accepted |
+| Cursor result scan | 4.897368 | 5.899806 | 1.205035 | 1.009291 | 1.193942–1.216231 | 1.15 | regression |
+
 ## Controlled analytical results (2026-11-18 UTC)
 
 On main `4c98f23f2`, the Q1 grouped aggregate exceeded its 1.10 limit against reference `0e8be6892`. The cursor interval crossed its 1.15 limit. All sixteen claim comparisons passed. The m7g.4xlarge run used eight counterbalanced comparison pairs per workload and 32 independent calibration pairs. Absolute times below are median Criterion slopes. The paired ratio and its interval determine each decision. [Controlled run](https://github.com/cognica-io/uqa-engine/actions/runs/44390798718) · [Signed measurements](https://github.com/cognica-io/uqa-engine/actions/runs/44390798718/artifacts/14470663312)

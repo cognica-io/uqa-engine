@@ -15,13 +15,14 @@ mod attached_queries;
 mod command;
 mod generated_sources;
 mod lowering;
-pub use lowering::RetainedExecutablePlan;
+pub use lowering::{RetainedExecutablePlan, StoredStatementObserver};
 mod owned_mutation;
 mod production;
 mod query;
 mod retained;
 mod source;
 mod specialization;
+pub(crate) mod stored_plan;
 mod syntax;
 pub(crate) use production::{CollectSyntax, SyntaxProduction, SyntaxVector};
 pub(crate) use specialization::copy_specialized_function;
@@ -225,6 +226,14 @@ enum CopyPurpose {
     Executable,
     Definition,
     Stored,
+    /// Construct a raw routine header field from its existing syntax shape. Its text and list entries advance in the stored declaration cursor.
+    StoredHeader(HeaderText),
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum HeaderText {
+    BeforeBody,
+    WhenSelected,
 }
 
 pub(crate) fn capture_stored_with_control<T: syntax::SyntaxCopy>(
@@ -238,11 +247,19 @@ pub(crate) fn capture_stored_with_footprint<T: syntax::SyntaxCopy>(
     value: &T,
     control: &ProductionControl<'_>,
 ) -> Result<(Produced<T>, usize)> {
+    capture_stored(value, control, |copying| copying.retained_children)
+}
+
+fn capture_stored<T: syntax::SyntaxCopy, F>(
+    value: &T,
+    control: &ProductionControl<'_>,
+    fields: impl FnOnce(&Copying<'_>) -> F,
+) -> Result<(Produced<T>, F)> {
     control.check()?;
     let mut copying = Copying::capture(*control, CopyPurpose::Stored);
     let value = value.copy_syntax(&mut copying)?;
-    let children = copying.retained_children;
-    Ok((copying.finish(value)?, children))
+    let fields = fields(&copying);
+    Ok((copying.finish(value)?, fields))
 }
 
 pub(crate) struct Copying<'a> {
@@ -250,6 +267,7 @@ pub(crate) struct Copying<'a> {
     purpose: CopyPurpose,
     memory: Option<MemoryReservation>,
     retained_children: usize,
+    has_merge_targets: bool,
     fields: Option<BudgetedVec<RewriteField>>,
     scalar_items: Option<BudgetedVec<Option<super::scalar::ScalarMemory>>>,
     parameters: Option<&'a ParameterLookup<'a>>,
@@ -276,7 +294,10 @@ mod owned_projection;
 mod owned_query;
 mod owned_scalar;
 mod stored_routine;
-pub use stored_routine::StoredRoutineDefinition;
+pub use stored_routine::{
+    StoredRoutineDefinition, StoredRoutineParameterEdit, StoredRoutineStatementEdit,
+    StoredStatementCompilation,
+};
 
 impl<'a> Copying<'a> {
     fn new(control: ProductionControl<'a>) -> Option<Self> {
@@ -291,6 +312,7 @@ impl<'a> Copying<'a> {
             purpose,
             memory: control.empty_reservation(),
             retained_children: 0,
+            has_merge_targets: false,
             fields: None,
             scalar_items: None,
             parameters: None,
@@ -376,6 +398,14 @@ impl<'a> Copying<'a> {
         let (value, memory) = output.into_parts();
         self.absorb(memory);
         value
+    }
+
+    fn reserve_slots<T>(&mut self, len: usize) -> Result<Vec<T>> {
+        let mut slots = BudgetedVec::new(self.control.budget().expect("stored definition"));
+        slots.reserve(len)?;
+        let (slots, lease) = slots.into_parts();
+        self.absorb(Some(lease));
+        Ok(slots)
     }
 
     pub(crate) fn map<I: ExactSizeIterator, T>(

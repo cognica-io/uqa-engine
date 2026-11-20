@@ -168,6 +168,12 @@ fn long_namespace_claims_yield_during_comparison_and_successful_retirement() {
         let original = token.clone();
         let mut decoder = ImageDecoder::new(&memory, &token, move |mut reader| async move {
             let mut input = reader.input();
+            let control = ProductionControl::new(input.memory, &original, &original);
+            let text = std::mem::size_of_val(&compare_text(&mut input, "a", "b", &control));
+            let bytes = std::mem::size_of_val(&crate::catalog::work::compare_bytes(
+                &mut input, b"a", b"b", &control,
+            ));
+            assert_eq!(text, bytes, "text comparison retained an extra work frame");
             let declarations = names.iter().map(|identity| {
                 entered.fetch_add(1, Ordering::Relaxed);
                 NativeNameInput::RowRelation(identity, None)

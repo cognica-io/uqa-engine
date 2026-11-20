@@ -27,7 +27,7 @@ mod ctes;
 mod mutations;
 mod statement;
 mod trees;
-pub use statement::RetainedExecutablePlan;
+pub use statement::{RetainedExecutablePlan, StoredStatementObserver};
 
 struct Native<'a, Q> {
     aggregates: &'a (dyn AggregateClassifier + Sync),
@@ -125,6 +125,51 @@ impl<'a> Arena<'a> {
             value: copying.query_arena(),
             work,
         }
+    }
+}
+
+impl ExpressionPlan {
+    /// Lower a standalone expression and its private query namespace using the same field owners as a statement. Each nested query contributes its slot before any later scalar occurrence is visited.
+    pub(crate) async fn lower_borrowed_with_work<W: crate::catalog::work::Work + Send>(
+        source: &Expr,
+        aggregates: &(dyn AggregateClassifier + Sync),
+        control: &ProductionControl<'_>,
+        input: &mut W,
+    ) -> Result<(
+        crate::plan::MutableExpressionPlan,
+        Option<crate::plan::copy::stored_plan::OriginalWorkspace>,
+    )> {
+        control.check()?;
+        if !W::MAY_SUSPEND || control.budget().is_none() {
+            return Ok((
+                Self::lower_borrowed_with(source, aggregates, control)?,
+                None,
+            ));
+        }
+        input.checkpoint().await?;
+        let mut driver = construction::Driver::new(*control)?;
+        let output = driver.work().submit(move |mut work| async move {
+            let retirement = crate::plan::retirement::construction::Context::new(control)?;
+            let mut arena = Arena {
+                aggregates,
+                value: QueryArena::new(*control, None, retirement.child(control)?),
+                work: work.clone(),
+            };
+            let scalar =
+                Self::lower_scalar_with_query_input(source, &mut arena, control, &mut work)?
+                    .await?;
+            Ok((
+                arena.value.finish_expression(scalar, control)?,
+                Some(crate::plan::copy::stored_plan::OriginalWorkspace(
+                    retirement,
+                )),
+            ))
+        })?;
+        while driver.advance().await? {
+            input.checkpoint().await?;
+        }
+        control.check()?;
+        construction::receive(output).await
     }
 }
 

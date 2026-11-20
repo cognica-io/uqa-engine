@@ -10,36 +10,41 @@ use super::routine_declarations::{
     BorrowedTypes, Cursor as DeclarationCursor, DeclarationTypeLookup,
 };
 use super::{
-    validate_authority, validate_constraint_bindings, validate_constraints,
-    validate_event_bindings, validate_hierarchies, validate_index_bindings, validate_indexes,
-    validate_name_uniqueness, validate_namespaces, validate_partition_bindings,
-    validate_plan_relations, validate_routine_bindings, validate_routine_declarations,
-    validate_routines, validate_sequence_functions, validate_sequences, validate_types,
+    validate_authority, validate_constraints, validate_hierarchies, validate_indexes,
+    validate_name_uniqueness, validate_namespaces, validate_plan_relations,
+    validate_routine_declarations, validate_routines, validate_sequence_functions,
+    validate_sequences, validate_types,
 };
 use crate::catalog::{foreign::relationships as foreign, CatalogReadSnapshot, CatalogReadView};
 use uqa_core::{
-    image_io::{decode_image, AsyncImageInput, ImageDecodeWindow, ImageDecoder},
+    image_io::{decode_image, ImageDecodeWindow, ImageDecoder},
     memory::{Budgeted, MemoryBudget, ProductionControl},
     CancellationToken,
 };
 use uqa_sql::{
+    catalog::CatalogValidation,
     routines::{declaration::RoutineTypeCatalog, RoutineResolution},
     SQLError,
 };
 
+mod bindings;
+use bindings::Binding;
+
+type CatalogReader = Budgeted<Box<ImageDecoder<(), SQLError>>>;
+type OpenBinding<'a> =
+    dyn Fn(Binding, &RelationshipValidation) -> Result<CatalogValidation, SQLError> + 'a;
+
 struct Inputs<'a> {
     view: &'a CatalogReadView,
-    snapshot: &'a CatalogReadSnapshot,
     routines: &'a dyn RoutineResolution,
     types: &'a dyn RoutineTypeCatalog,
     memory: &'a MemoryBudget,
     cancellation: &'a CancellationToken,
-    production: ProductionControl<'a>,
 }
 
 #[derive(Clone, Copy)]
 enum Predicate {
-    Direct(fn(&Inputs<'_>) -> Result<(), SQLError>),
+    Binding(Binding),
     Scheduled(Scheduled),
     Declarations,
 }
@@ -51,8 +56,13 @@ enum Scheduled {
     Authority,
     Foreign,
     Types,
+    PlanRelations,
     Hierarchies,
     Sequences,
+    Indexes,
+    Constraints,
+    Routines,
+    SequenceFunctions,
 }
 
 const ORDERED: &[Predicate] = &[
@@ -61,49 +71,23 @@ const ORDERED: &[Predicate] = &[
     Predicate::Scheduled(Scheduled::Authority),
     Predicate::Scheduled(Scheduled::Foreign),
     Predicate::Scheduled(Scheduled::Types),
-    Predicate::Direct(|input| validate_plan_relations(input.view, &input.production)),
-    Predicate::Direct(|input| {
-        super::validate_stored_expressions(
-            input.view,
-            input.routines,
-            input.memory,
-            input.cancellation,
-        )
-    }),
+    Predicate::Scheduled(Scheduled::PlanRelations),
+    Predicate::Binding(Binding::Expressions),
     Predicate::Declarations,
     Predicate::Scheduled(Scheduled::Hierarchies),
     Predicate::Scheduled(Scheduled::Sequences),
-    Predicate::Direct(|input| validate_indexes(input.snapshot, input.memory, input.cancellation)),
-    Predicate::Direct(|input| {
-        validate_constraints(input.snapshot, input.memory, input.cancellation)
-    }),
-    Predicate::Direct(|input| {
-        validate_constraint_bindings(input.view, input.routines, input.memory, input.cancellation)
-    }),
-    Predicate::Direct(|input| {
-        validate_index_bindings(input.view, input.routines, input.memory, input.cancellation)
-    }),
-    Predicate::Direct(|input| {
-        validate_partition_bindings(input.view, input.routines, input.memory, input.cancellation)
-    }),
-    Predicate::Direct(|input| validate_routines(input.snapshot, input.memory, input.cancellation)),
-    Predicate::Direct(|input| {
-        validate_routine_bindings(
-            input.view,
-            input.routines,
-            input.types,
-            input.memory,
-            input.cancellation,
-        )
-    }),
-    Predicate::Direct(|input| {
-        validate_event_bindings(input.view, input.routines, input.memory, input.cancellation)
-    }),
-    Predicate::Direct(|input| validate_sequence_functions(input.view, &input.production)),
+    Predicate::Scheduled(Scheduled::Indexes),
+    Predicate::Scheduled(Scheduled::Constraints),
+    Predicate::Binding(Binding::Constraints),
+    Predicate::Binding(Binding::Indexes),
+    Predicate::Binding(Binding::Partitions),
+    Predicate::Scheduled(Scheduled::Routines),
+    Predicate::Binding(Binding::Routines),
+    Predicate::Binding(Binding::Events),
+    Predicate::Scheduled(Scheduled::SequenceFunctions),
 ];
 
-/// The outstanding predicates of an unpublished catalog. Each advance borrows the private
-/// session only for its own call and preserves the same first error as synchronous validation.
+/// Ordered predicates of one immutable unpublished catalog. Retained binding validation keeps the original lookup session until the predicate completes.
 pub struct RelationshipValidation {
     catalog: CatalogReadView,
     memory: MemoryBudget,
@@ -113,7 +97,8 @@ pub struct RelationshipValidation {
 }
 
 enum Reading {
-    Catalog(Budgeted<Box<ImageDecoder<(), SQLError>>>),
+    Catalog(CatalogReader),
+    Binding(CatalogValidation),
     Declarations(Budgeted<Box<DeclarationCursor>>),
 }
 
@@ -157,12 +142,55 @@ impl RelationshipValidation {
         declarations: &dyn DeclarationTypeLookup,
         steps: usize,
     ) -> Result<Option<Self>, SQLError> {
-        if steps == 0 {
-            return Err(SQLError::Internal(
-                "catalog validation requires a nonzero work window".into(),
-            ));
-        }
-        self.next(routines, types, declarations, Some(steps))
+        self.next(routines, types, declarations, Some(steps), None)
+    }
+
+    /// Retain the private session serving captured routine and type lookups while a binding crosses work windows.
+    pub fn advance_with_retained_services<S, R>(
+        self,
+        owner: &S,
+        services: fn(&S) -> &R,
+        declarations: &dyn DeclarationTypeLookup,
+        steps: usize,
+    ) -> Result<Option<Self>, SQLError>
+    where
+        S: Clone + Send + Sync + 'static,
+        R: RoutineResolution + RoutineTypeCatalog + Send + Sync + 'static,
+    {
+        let begin = |binding: Binding, state: &Self| binding.begin(state, owner.clone(), services);
+        self.next(
+            services(owner),
+            services(owner),
+            declarations,
+            Some(steps),
+            Some(&begin),
+        )
+    }
+
+    fn advance_catalog(
+        &mut self,
+        steps: usize,
+        begin: impl FnOnce(&Self) -> Result<Reading, SQLError>,
+    ) -> Result<bool, SQLError> {
+        let reading = match self.reading.take() {
+            Some(reading) => reading,
+            None => begin(self)?,
+        };
+        self.reading = match reading {
+            Reading::Catalog(mut input) => input
+                .as_mut()
+                .advance(&mut std::io::empty(), ImageDecodeWindow { bytes: 1, steps })?
+                .is_none()
+                .then_some(Reading::Catalog(input)),
+            Reading::Binding(input) => input
+                .advance(
+                    &ProductionControl::new(&self.memory, &self.cancellation, &self.cancellation),
+                    steps,
+                )?
+                .map(Reading::Binding),
+            Reading::Declarations(_) => unreachable!("catalog predicate owns its reader"),
+        };
+        Ok(self.reading.is_none())
     }
 
     fn next(
@@ -171,26 +199,38 @@ impl RelationshipValidation {
         types: &dyn RoutineTypeCatalog,
         declarations: &dyn DeclarationTypeLookup,
         steps: Option<usize>,
+        bindings: Option<&OpenBinding<'_>>,
     ) -> Result<Option<Self>, SQLError> {
+        if steps == Some(0) {
+            return Err(SQLError::Internal(
+                "catalog validation requires a nonzero work window".into(),
+            ));
+        }
         self.cancellation.check()?;
         let (predicate, remaining) = self
             .remaining
             .split_first()
             .expect("active relationship predicate");
         match *predicate {
-            Predicate::Direct(predicate) => predicate(&Inputs {
-                view: &self.catalog,
-                snapshot: self.catalog.snapshot(),
-                routines,
-                types,
-                memory: &self.memory,
-                cancellation: &self.cancellation,
-                production: ProductionControl::new(
-                    &self.memory,
-                    &self.cancellation,
-                    &self.cancellation,
-                ),
-            })?,
+            Predicate::Binding(binding) => {
+                if let Some(steps) = steps.filter(|_| self.reading.is_some() || bindings.is_some())
+                {
+                    if !self.advance_catalog(steps, |state| {
+                        bindings.expect("new binding owns its lookup services")(binding, state)
+                            .map(Reading::Binding)
+                    })? {
+                        return Ok(Some(self));
+                    }
+                } else {
+                    binding.inline(&Inputs {
+                        view: &self.catalog,
+                        routines,
+                        types,
+                        memory: &self.memory,
+                        cancellation: &self.cancellation,
+                    })?;
+                }
+            }
             Predicate::Declarations
                 if !self
                     .catalog
@@ -203,7 +243,7 @@ impl RelationshipValidation {
                     let mut cursor = match self.reading.take() {
                         Some(Reading::Declarations(cursor)) => cursor,
                         None => DeclarationCursor::new(&self.catalog, &self.memory)?,
-                        Some(Reading::Catalog(_)) => {
+                        Some(Reading::Binding(_) | Reading::Catalog(_)) => {
                             unreachable!("declaration validation owns its cursor")
                         }
                     };
@@ -231,19 +271,11 @@ impl RelationshipValidation {
             }
             Predicate::Scheduled(check) if check.applies(self.catalog.snapshot()) => {
                 if let Some(steps) = steps {
-                    let mut reading = match self.reading.take() {
-                        Some(Reading::Catalog(reading)) => reading,
-                        Some(Reading::Declarations(_)) => {
-                            unreachable!("catalog predicate owns its reader")
-                        }
-                        None => check.begin(&self.catalog, &self.memory, &self.cancellation)?,
-                    };
-                    if reading
-                        .as_mut()
-                        .advance(&mut std::io::empty(), ImageDecodeWindow { bytes: 1, steps })?
-                        .is_none()
-                    {
-                        self.reading = Some(Reading::Catalog(reading));
+                    if !self.advance_catalog(steps, |state| {
+                        check
+                            .begin(&state.catalog, &state.memory, &state.cancellation)
+                            .map(Reading::Catalog)
+                    })? {
                         return Ok(Some(self));
                     }
                 } else {
@@ -263,11 +295,38 @@ impl Scheduled {
         match self {
             Self::Namespaces | Self::Names | Self::Authority | Self::Types => true,
             Self::Foreign => foreign::has_bindings(snapshot),
+            Self::PlanRelations => {
+                let definitions = &snapshot.definitions;
+                !definitions.views.is_empty()
+                    || !definitions.sql_user_functions.is_empty()
+                    || !definitions.triggers.is_empty()
+                    || !definitions.rules.is_empty()
+            }
             Self::Hierarchies => !snapshot.tables.is_empty(),
             Self::Sequences => {
                 !snapshot.tables.is_empty()
                     || !snapshot.definitions.foreign_tables.is_empty()
                     || !snapshot.definitions.sequences.is_empty()
+            }
+            Self::Indexes => {
+                !snapshot.tables.is_empty() || !snapshot.definitions.catalog_indexes.is_empty()
+            }
+            Self::Constraints => {
+                !snapshot.tables.is_empty()
+                    || !snapshot.definitions.foreign_tables.is_empty()
+                    || !snapshot.definitions.domains.is_empty()
+                    || !snapshot.definitions.triggers.is_empty()
+                    || !snapshot.definitions.catalog_indexes.is_empty()
+            }
+            Self::Routines | Self::SequenceFunctions => {
+                let d = &snapshot.definitions;
+                !snapshot.tables.is_empty()
+                    || !d.foreign_tables.is_empty()
+                    || !d.domains.is_empty()
+                    || !d.views.is_empty()
+                    || !d.sql_user_functions.is_empty()
+                    || !d.triggers.is_empty()
+                    || !d.rules.is_empty()
             }
         }
     }
@@ -281,9 +340,59 @@ impl Scheduled {
         let header = memory.reserve(size_of::<ImageDecoder<(), SQLError>>())?;
         let catalog = catalog.clone();
         let original = cancellation.clone();
-        let input = ImageDecoder::new(memory, cancellation, |mut reader| async move {
-            self.read(&catalog, &original, &mut reader.input()).await
-        })?;
+        // Select the actual continuation before admitting its frame. A match inside the future would reserve the largest unrelated predicate on every step.
+        macro_rules! reader {
+            ($input:ident => $read:expr) => {
+                ImageDecoder::new(memory, cancellation, |mut reader| async move {
+                    let $input = &mut reader.input();
+                    $read.await
+                })
+            };
+        }
+        let input = match self {
+            Self::Namespaces => {
+                reader!(input => super::namespaces::from_input(&catalog, &original, input))
+            }
+            Self::Names => {
+                reader!(input => super::name_claims::from_input(&catalog, &original, input))
+            }
+            Self::Authority => {
+                reader!(input => super::authority::validate(catalog.snapshot(), input.memory, &original, input))
+            }
+            Self::Foreign => {
+                reader!(input => foreign::validate(catalog.snapshot(), &original, input))
+            }
+            Self::Types => {
+                reader!(input => super::type_dependencies::from_input(catalog.snapshot(), &original, input))
+            }
+            Self::PlanRelations => {
+                reader!(input => super::plan_dependencies::validate_with_work(
+                    &catalog, &ProductionControl::new(input.memory, &original, input.cancellation), input
+                ))
+            }
+            Self::Hierarchies => {
+                reader!(input => super::validate_hierarchies_with_work(catalog.snapshot(), input.memory, &original, input))
+            }
+            Self::Sequences => {
+                reader!(input => super::validate_sequences_with_work(catalog.snapshot(), input.memory, &original, input))
+            }
+            Self::Indexes => {
+                reader!(input => super::validate_indexes_with_work(catalog.snapshot(), input.memory, &original, input))
+            }
+            Self::Constraints => {
+                reader!(input => super::validate_constraints_with_work(catalog.snapshot(), input.memory, &original, input))
+            }
+            Self::Routines => {
+                reader!(input => super::routine_dependencies::validate_with_work(
+                    catalog.snapshot(), input.memory, &original, input
+                ))
+            }
+            Self::SequenceFunctions => {
+                reader!(input => super::sequence_functions::validate_with_work(
+                    &catalog, &ProductionControl::new(input.memory, &original, input.cancellation), input
+                ))
+            }
+        }?;
         Ok(Budgeted::new(Box::new(input), header))
     }
 
@@ -301,52 +410,27 @@ impl Scheduled {
             Self::Names => validate_name_uniqueness(catalog.snapshot(), memory, cancellation),
             Self::Authority => validate_authority(catalog.snapshot(), memory, cancellation),
             Self::Types => validate_types(catalog.snapshot(), memory, cancellation),
+            Self::PlanRelations => validate_plan_relations(
+                catalog,
+                &ProductionControl::new(memory, cancellation, cancellation),
+            ),
             Self::Hierarchies => validate_hierarchies(catalog.snapshot(), memory, cancellation),
             Self::Sequences => validate_sequences(catalog.snapshot(), memory, cancellation),
+            Self::Indexes => validate_indexes(catalog.snapshot(), memory, cancellation),
+            Self::Constraints => validate_constraints(catalog.snapshot(), memory, cancellation),
+            Self::Routines => validate_routines(catalog.snapshot(), memory, cancellation),
+            Self::SequenceFunctions => validate_sequence_functions(
+                catalog,
+                &ProductionControl::new(memory, cancellation, cancellation),
+            ),
             Self::Foreign => decode_image(
                 &mut std::io::empty(),
                 memory,
                 cancellation,
-                async |mut input| self.read(catalog, cancellation, &mut input).await,
+                async |mut input| {
+                    foreign::validate(catalog.snapshot(), cancellation, &mut input).await
+                },
             ),
-        }
-    }
-
-    async fn read(
-        self,
-        catalog: &CatalogReadView,
-        cancellation: &CancellationToken,
-        input: &mut AsyncImageInput<'_>,
-    ) -> Result<(), SQLError> {
-        match self {
-            Self::Namespaces => super::namespaces::from_input(catalog, cancellation, input).await,
-            Self::Names => super::name_claims::from_input(catalog, cancellation, input).await,
-            Self::Authority => {
-                super::authority::validate(catalog.snapshot(), input.memory, cancellation, input)
-                    .await
-            }
-            Self::Foreign => foreign::validate(catalog.snapshot(), cancellation, input).await,
-            Self::Types => {
-                super::type_dependencies::from_input(catalog.snapshot(), cancellation, input).await
-            }
-            Self::Hierarchies => {
-                super::validate_hierarchies_with_work(
-                    catalog.snapshot(),
-                    input.memory,
-                    cancellation,
-                    input,
-                )
-                .await
-            }
-            Self::Sequences => {
-                super::validate_sequences_with_work(
-                    catalog.snapshot(),
-                    input.memory,
-                    cancellation,
-                    input,
-                )
-                .await
-            }
         }
     }
 }
@@ -364,7 +448,7 @@ pub fn validate(
         cancellation,
     ));
     while let Some(checks) = remaining {
-        remaining = checks.next(routines, types, &BorrowedTypes(types), None)?;
+        remaining = checks.next(routines, types, &BorrowedTypes(types), None, None)?;
     }
     Ok(())
 }

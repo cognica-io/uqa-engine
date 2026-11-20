@@ -25,8 +25,26 @@ pub fn validate(
     memory: &MemoryBudget,
     cancellation: &CancellationToken,
 ) -> Result<(), SQLError> {
+    crate::catalog::selection_work::inline(validate_with_work(
+        catalog,
+        routines,
+        || types,
+        memory,
+        cancellation,
+        &mut (),
+    ))
+}
+
+pub(super) async fn validate_with_work<'a>(
+    catalog: &CatalogReadView,
+    routines: &dyn RoutineResolution,
+    types: impl Fn() -> &'a dyn RoutineTypeCatalog,
+    memory: &MemoryBudget,
+    cancellation: &CancellationToken,
+    work: &mut (impl uqa_sql::catalog::CatalogWork + Send),
+) -> Result<(), SQLError> {
     let control = ProductionControl::new(memory, cancellation, cancellation);
-    let scalar = ScalarBindings::new(catalog, memory, cancellation)?;
+    let scalar = ScalarBindings::with_work(catalog, memory, cancellation, work).await?;
     let context = NativeScalarContext {
         subject: "routine default",
         routines,
@@ -41,7 +59,12 @@ pub fn validate(
         .values()
         .flatten()
     {
-        uqa_sql::routines::native::validate_captured_bindings(routine, types, &context, &control)?;
+        work.checkpoint().await?;
+        uqa_sql::routines::native::validate_captured_bindings_with_work(
+            routine, &types, &context, &control, work,
+        )
+        .await?;
     }
-    Ok(control.check()?)
+    control.check()?;
+    scalar.retire(work).await
 }

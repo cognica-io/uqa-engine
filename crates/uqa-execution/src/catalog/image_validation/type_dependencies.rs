@@ -18,27 +18,14 @@ use uqa_sql::{
     SQLError,
 };
 
-pub(super) fn references<'a>(
-    snapshot: &'a CatalogReadSnapshot,
-    memory: &'a MemoryBudget,
-    cancellation: &'a CancellationToken,
-) -> Result<TypeReferences<'a>, SQLError> {
-    crate::catalog::selection_work::inline(references_with_work(
-        snapshot,
-        memory,
-        cancellation,
-        &mut (),
-    ))
-}
-
-async fn references_with_work<'a>(
+pub(super) async fn references_with_work<'a>(
     snapshot: &'a CatalogReadSnapshot,
     memory: &'a MemoryBudget,
     cancellation: &'a CancellationToken,
     work: &mut (impl CatalogWork + Send),
 ) -> Result<TypeReferences<'a>, SQLError> {
     let d = &snapshot.definitions;
-    let rows = snapshot
+    let mut rows = snapshot
         .tables
         .iter()
         .map(|(_, table)| table.catalog_oids)
@@ -56,7 +43,7 @@ async fn references_with_work<'a>(
             ranges: &d.ranges,
             shells: &d.shells,
         },
-        rows,
+        &mut rows,
         memory,
         cancellation,
         work,

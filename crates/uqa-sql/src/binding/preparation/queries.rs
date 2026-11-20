@@ -9,12 +9,13 @@
 use crate::binding::preparation::{LiteralInput, SchemaContext};
 
 use super::super::{analysis, overlay_outer_schema_with_control};
-use super::ownership::{AnalysisIdentity, AnalysisVec};
+use super::ownership::AnalysisVec;
 use super::{
     error, ColumnType, ExpressionType, Preparation, QueryOutput, QueryPlan, RowSchema, SQLError,
     ScalarExpr,
 };
-use crate::plan::{ProjectionPlan, QueryBlockPlan, RelationalPlan};
+use crate::catalog::work::{inline, ReferenceWork, Work};
+use crate::plan::{QueryBlockPlan, RelationalPlan};
 use crate::semantics::sets::placement::SetPlacement;
 
 #[cfg(test)]
@@ -29,6 +30,16 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
         input: &RowSchema,
         subqueries: &[QueryPlan],
     ) -> Result<RowSchema, SQLError> {
+        inline(self.scalar_query_schema_with_work(index, input, subqueries, &mut ()))
+    }
+
+    pub(super) async fn scalar_query_schema_with_work<W: Work + Send>(
+        &mut self,
+        index: usize,
+        input: &RowSchema,
+        subqueries: &[QueryPlan],
+        work: &mut W,
+    ) -> Result<RowSchema, SQLError> {
         if let Some(schema) = self
             .bound_condition_queries
             .and_then(|queries| queries.get(index, input, subqueries))
@@ -38,7 +49,11 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
         let query = subqueries
             .get(index)
             .ok_or_else(|| error("XX000", "scalar subquery slot is outside its plan".into()))?;
-        self.query(query, Some(input))
+        crate::catalog::work::nested!(
+            W::MAY_SUSPEND,
+            self.scope.control(),
+            self.query_with_work(query, Some(input), work)
+        )
     }
 
     pub(super) fn query(
@@ -46,7 +61,18 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
         plan: &QueryPlan,
         outer: Option<&RowSchema>,
     ) -> Result<RowSchema, SQLError> {
-        let output = self.query_output(plan, outer, false)?;
+        inline(self.query_with_work(plan, outer, &mut ()))
+    }
+
+    pub(super) async fn query_with_work<W: Work + Send>(
+        &mut self,
+        plan: &QueryPlan,
+        outer: Option<&RowSchema>,
+        work: &mut W,
+    ) -> Result<RowSchema, SQLError> {
+        let output = self
+            .query_output_with_work(plan, outer, false, work)
+            .await?;
         self.parameters
             .query_output_schema(plan)
             .cloned()
@@ -59,14 +85,30 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
         outer: Option<&RowSchema>,
         preserve_unknown: bool,
     ) -> Result<QueryOutput, SQLError> {
-        self.in_query_level(|analysis| analysis.query_level_output(plan, outer, preserve_unknown))
+        inline(self.query_output_with_work(plan, outer, preserve_unknown, &mut ()))
     }
 
-    fn query_level_output(
+    async fn query_output_with_work<W: Work + Send>(
         &mut self,
         plan: &QueryPlan,
         outer: Option<&RowSchema>,
         preserve_unknown: bool,
+        work: &mut W,
+    ) -> Result<QueryOutput, SQLError> {
+        let saved = self.enter_query_level();
+        let result = self
+            .query_level_output(plan, outer, preserve_unknown, work)
+            .await;
+        self.restore_query_level(saved);
+        result
+    }
+
+    async fn query_level_output<W: Work + Send>(
+        &mut self,
+        plan: &QueryPlan,
+        outer: Option<&RowSchema>,
+        preserve_unknown: bool,
+        work: &mut W,
     ) -> Result<QueryOutput, SQLError> {
         let mode = if plan.relations_bound {
             crate::catalog::resolution::RelationLookupMode::Bound
@@ -74,9 +116,11 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
             crate::catalog::resolution::RelationLookupMode::Dynamic
         };
         let lookup = self.scope.resolution.set_lookup_mode(mode);
-        let result = (|| {
+        let result = async {
             let previous = self.ctes(&plan.ctes, outer)?;
-            let result = self.root(&plan.root, outer, preserve_unknown);
+            let result = self
+                .root_with_work(&plan.root, outer, preserve_unknown, work)
+                .await;
             self.scope.restore_cte_schemas(previous);
             let output = result?;
             self.parameters.collations.validate_query(plan)?;
@@ -85,7 +129,8 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
             }
             self.parameters.retain_query_output(plan, &output)?;
             Ok(output)
-        })();
+        }
+        .await;
         self.scope.resolution.set_lookup_mode(lookup);
         result
     }
@@ -96,9 +141,23 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
         outer: Option<&RowSchema>,
         preserve_unknown: bool,
     ) -> Result<QueryOutput, SQLError> {
+        inline(self.root_with_work(root, outer, preserve_unknown, &mut ()))
+    }
+
+    async fn root_with_work<W: Work + Send>(
+        &mut self,
+        root: &RelationalPlan,
+        outer: Option<&RowSchema>,
+        preserve_unknown: bool,
+        work: &mut W,
+    ) -> Result<QueryOutput, SQLError> {
         match root {
-            RelationalPlan::QueryBlock(block) => self.block(block, outer, preserve_unknown),
-            RelationalPlan::Values { rows, subqueries } => self.values(rows, subqueries, outer),
+            RelationalPlan::QueryBlock(block) => {
+                self.block(block, outer, preserve_unknown, work).await
+            }
+            RelationalPlan::Values { rows, subqueries } => {
+                self.values_with_work(rows, subqueries, outer, work).await
+            }
             RelationalPlan::SetOp {
                 kind,
                 all,
@@ -110,8 +169,8 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
                 subqueries,
                 ..
             } => {
-                let mut left_output = self.query_output(left, outer, true)?;
-                let mut right_output = self.query_output(right, outer, true)?;
+                let mut left_output = self.set_operand_with_work(left, outer, work).await?;
+                let mut right_output = self.set_operand_with_work(right, outer, work).await?;
                 left_output.retain_set_operand_names(left)?;
                 right_output.retain_set_operand_names(right)?;
                 let owner = self.scope.control().capture();
@@ -141,6 +200,23 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
                 self.slice(limit.as_deref(), offset.as_deref(), &input, subqueries)?;
                 Ok(output)
             }
+        }
+    }
+
+    async fn set_operand_with_work<W: Work + Send>(
+        &mut self,
+        operand: &QueryPlan,
+        outer: Option<&RowSchema>,
+        work: &mut W,
+    ) -> Result<QueryOutput, SQLError> {
+        if W::MAY_SUSPEND {
+            let owner = self.scope.control().capture();
+            crate::construction::retain_with(owner.control(), || {
+                self.query_output_with_work(operand, outer, true, work)
+            })?
+            .await
+        } else {
+            self.query_output(operand, outer, true)
         }
     }
 
@@ -207,11 +283,12 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
         Ok(left)
     }
 
-    fn block(
+    async fn block<W: Work + Send>(
         &mut self,
         block: &QueryBlockPlan,
         outer: Option<&RowSchema>,
         preserve_unknown: bool,
+        work: &mut W,
     ) -> Result<QueryOutput, SQLError> {
         let captured_outer = outer
             .map(|schema| {
@@ -224,24 +301,31 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
             .transpose()?;
         let outer = captured_outer.as_deref();
         if !block.deferred_outer_rewrites.is_empty() {
-            return self.rewritten_block(block, outer, preserve_unknown);
+            return self
+                .rewritten_block(block, outer, preserve_unknown, work)
+                .await;
         }
-        self.analyzed_block(block, outer, preserve_unknown)
+        self.analyzed_block(block, outer, preserve_unknown, work)
+            .await
     }
 
-    fn analyzed_block(
+    async fn analyzed_block<W: Work + Send>(
         &mut self,
         block: &QueryBlockPlan,
         outer: Option<&RowSchema>,
         preserve_unknown: bool,
+        work: &mut W,
     ) -> Result<QueryOutput, SQLError> {
-        let source = block
-            .from
-            .as_ref()
-            .map(|source| self.source(source, &block.subqueries, outer))
-            .transpose()?;
-        let source = match source {
-            Some(source) => source,
+        let source = match &block.from {
+            Some(source) => {
+                self.source_in_scope_with_work(
+                    source,
+                    &block.subqueries,
+                    crate::binding::SourceScope::new(outer),
+                    work,
+                )
+                .await?
+            }
             None => RowSchema::empty_with_control(&self.scope.control())?,
         };
         let source = analysis::with_query_source_columns_with_control(
@@ -252,22 +336,24 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
         if let Some(from) = &block.from {
             self.parameters.retain_source_schema(from, &source)?;
         }
-        self.in_query_level(|analysis| {
-            analysis.block_level_output(block, &source, outer, preserve_unknown)
-        })
+        self.scoped_block_output(block, &source, outer, preserve_unknown, work)
+            .await
     }
 
-    fn rewritten_block(
+    async fn rewritten_block<W: Work + Send>(
         &mut self,
         original: &QueryBlockPlan,
         outer: Option<&RowSchema>,
         preserve_unknown: bool,
+        work: &mut W,
     ) -> Result<QueryOutput, SQLError> {
         if let Some(block) = self.parameters.take_rewritten_block(original) {
             let RelationalPlan::QueryBlock(rewritten) = &block.root else {
                 unreachable!("rewritten query block");
             };
-            let result = self.analyzed_block(rewritten, outer, preserve_unknown);
+            let result = self
+                .analyzed_block(rewritten, outer, preserve_unknown, work)
+                .await;
             self.parameters.retain_rewritten_block(original, block)?;
             return result;
         }
@@ -301,17 +387,20 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
         let RelationalPlan::QueryBlock(query) = &block.root else {
             unreachable!("rewritten query block");
         };
-        let result = self.analyzed_block(query, outer, preserve_unknown);
+        let result = self
+            .analyzed_block(query, outer, preserve_unknown, work)
+            .await;
         self.parameters.retain_rewritten_block(original, block)?;
         result
     }
 
-    pub(super) fn block_with_source(
+    pub(super) async fn block_with_source<W: Work + Send>(
         &mut self,
         block: &QueryBlockPlan,
         source: &RowSchema,
         outer: Option<&RowSchema>,
         preserve_unknown: bool,
+        work: &mut W,
     ) -> Result<QueryOutput, SQLError> {
         let captured_outer = outer
             .map(|schema| {
@@ -324,9 +413,9 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
             .transpose()?;
         let outer = captured_outer.as_deref();
         if block.deferred_outer_rewrites.is_empty() {
-            return self.in_query_level(|analysis| {
-                analysis.block_level_output(block, source, outer, preserve_unknown)
-            });
+            return self
+                .scoped_block_output(block, source, outer, preserve_unknown, work)
+                .await;
         }
         let owner = self.scope.control().capture();
         let control = owner.control();
@@ -338,25 +427,44 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
         let RelationalPlan::QueryBlock(query) = &rewritten.root else {
             unreachable!("rewritten query block");
         };
-        let result = self.in_query_level(|analysis| {
-            analysis.block_level_output(query, source, outer, preserve_unknown)
-        });
+        let result = self
+            .scoped_block_output(query, source, outer, preserve_unknown, work)
+            .await;
         self.parameters.retain_rewritten_block(block, rewritten)?;
         result
     }
 
-    fn block_level_output(
+    async fn scoped_block_output<W: Work + Send>(
         &mut self,
         block: &QueryBlockPlan,
         source: &RowSchema,
         outer: Option<&RowSchema>,
         preserve_unknown: bool,
+        work: &mut W,
+    ) -> Result<QueryOutput, SQLError> {
+        let enclosing = self.enter_query_level();
+        let result = self
+            .block_level_output(block, source, outer, preserve_unknown, work)
+            .await;
+        self.restore_query_level(enclosing);
+        result
+    }
+
+    async fn block_level_output<W: Work + Send>(
+        &mut self,
+        block: &QueryBlockPlan,
+        source: &RowSchema,
+        outer: Option<&RowSchema>,
+        preserve_unknown: bool,
+        work: &mut W,
     ) -> Result<QueryOutput, SQLError> {
         #[cfg(test)]
         BLOCK_ANALYSES.with(|count| count.set(count.get() + 1));
         let input = overlay_outer_schema_with_control(source, outer, &self.scope.control())?;
         let input = self.scope.with_stored_outer_internal_aliases(&input)?;
-        let mut output = self.projections(&block.projections, source, &input, &block.subqueries)?;
+        let mut output = self
+            .projections_with_work(&block.projections, source, &input, &block.subqueries, work)
+            .await?;
         if let Some(predicate) = &block.r#where {
             self.in_placement(SetPlacement::Where, |analysis| {
                 analysis.require_boolean(predicate, &input, &block.subqueries, "WHERE")
@@ -367,34 +475,46 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
                 analysis.require_boolean(having, &input, &block.subqueries, "HAVING")
             })?;
         }
-        let projected = output.schema(&self.scope.control())?;
+        let owner = self.scope.control().capture();
+        let control = owner.control();
+        let projected = output.schema(&control)?;
+        let mut input_work = ReferenceWork {
+            control: &control,
+            work,
+        };
         for order in &block.order_by {
-            let value = self.alias_expression(
-                &order.expr,
-                &output,
-                &projected,
-                &input,
-                &block.subqueries,
-                "ORDER BY",
-            )?;
+            input_work.checkpoint().await?;
+            let value = self
+                .alias_expression_with_work(
+                    &order.expr,
+                    &output,
+                    (&projected, &input),
+                    &block.subqueries,
+                    "ORDER BY",
+                    input_work.work,
+                )
+                .await?;
             if let Some(ty) = &value.ty {
                 crate::type_resolution::ComparisonSupport::Ordering
                     .require_in_catalog(ty, self.routines)?;
             }
             self.query_key(&order.expr, value.derivation, block, &input)?;
         }
-        let owner = self.scope.control().capture();
-        let control = owner.control();
-        let grouping_inputs = self.grouping_inputs(block, source, &input, outer, &projected)?;
+        let grouping_inputs = self
+            .grouping_inputs(block, source, &input, outer, &projected, input_work.work)
+            .await?;
         for expression in &block.distinct_on {
-            let value = self.alias_expression(
-                expression,
-                &output,
-                &projected,
-                &input,
-                &block.subqueries,
-                "DISTINCT ON",
-            )?;
+            input_work.checkpoint().await?;
+            let value = self
+                .alias_expression_with_work(
+                    expression,
+                    &output,
+                    (&projected, &input),
+                    &block.subqueries,
+                    "DISTINCT ON",
+                    input_work.work,
+                )
+                .await?;
             if let Some(ty) = &value.ty {
                 crate::type_resolution::ComparisonSupport::Equality
                     .require_in_catalog(ty, self.routines)?;
@@ -403,6 +523,7 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
         }
         if block.distinct && block.distinct_on.is_empty() {
             for (position, value) in output.types.iter().enumerate() {
+                input_work.checkpoint().await?;
                 if let Some(ty) = &value.ty {
                     crate::type_resolution::ComparisonSupport::Equality
                         .require_in_catalog(ty, self.routines)?;
@@ -426,8 +547,9 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
             outer,
             &self.parameters.values()?,
             grouping_inputs.iter().copied(),
-            &control,
-        )?;
+            &mut input_work,
+        )
+        .await?;
         self.parameters
             .retain_distinct_grouping(block, &input, outer)?;
         if !preserve_unknown {
@@ -436,38 +558,45 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
         Ok(output)
     }
 
-    fn grouping_inputs<'a>(
+    async fn grouping_inputs<'a, W: Work + Send>(
         &mut self,
         block: &'a QueryBlockPlan,
         source: &RowSchema,
         input: &RowSchema,
         outer: Option<&RowSchema>,
         projected: &RowSchema,
+        work: &mut W,
     ) -> Result<uqa_core::memory::Produced<Vec<&'a ScalarExpr>>, SQLError> {
         let owner = self.scope.control().capture();
         let control = owner.control();
         let mut grouping_inputs = uqa_core::memory::ProductionVec::new(control);
-        for expression in block
-            .group_by
-            .iter()
-            .chain(block.grouping_sets.iter().flatten())
+        let mut input_work = ReferenceWork {
+            control: &control,
+            work,
+        };
+        for set in std::iter::once(&block.group_by)
+            .filter(|group| !group.is_empty())
+            .chain(&block.grouping_sets)
         {
-            let site_output = self.scope.variable_sites.as_mut().and_then(|sites| {
-                let site = sites.site(expression)?;
-                let name = sites.bare_name(site)?;
-                if source.has_unqualified_column(name) || source.column_is_ambiguous(name) {
-                    return None;
-                }
-                let slot = projected.column_slot(name)?;
-                sites.resolutions.as_mut_slice()[site] =
-                    super::super::VariableSiteResolution::Output;
-                block
-                    .projections
-                    .get(slot)
-                    .map(|projection| &projection.expr)
-            });
-            let expression = site_output.unwrap_or(expression);
-            let expression =
+            input_work.checkpoint().await?;
+            for expression in set {
+                input_work.checkpoint().await?;
+                let site_output = self.scope.variable_sites.as_mut().and_then(|sites| {
+                    let site = sites.site(expression)?;
+                    let name = sites.bare_name(site)?;
+                    if source.has_unqualified_column(name) || source.column_is_ambiguous(name) {
+                        return None;
+                    }
+                    let slot = projected.column_slot(name)?;
+                    sites.resolutions.as_mut_slice()[site] =
+                        super::super::VariableSiteResolution::Output;
+                    block
+                        .projections
+                        .get(slot)
+                        .map(|projection| &projection.expr)
+                });
+                let expression = site_output.unwrap_or(expression);
+                let expression =
                 crate::semantics::grouping_sets::resolve_grouping_expression_reference_with_control(
                     self.routines,
                     expression,
@@ -477,15 +606,16 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
                     &self.parameters.values()?,
                     &control,
                 )?;
-            grouping_inputs.push_copy(expression)?;
-            let mut value = self.expression(expression, input, &block.subqueries)?;
-            self.parameters
-                .coerce_unknown(&mut value, &ColumnType::Text)?;
-            if let Some(ty) = &value.ty {
-                crate::type_resolution::ComparisonSupport::Equality
-                    .require_in_catalog(ty, self.routines)?;
+                grouping_inputs.push_copy(expression)?;
+                let mut value = self.expression(expression, input, &block.subqueries)?;
+                self.parameters
+                    .coerce_unknown(&mut value, &ColumnType::Text)?;
+                if let Some(ty) = &value.ty {
+                    crate::type_resolution::ComparisonSupport::Equality
+                        .require_in_catalog(ty, self.routines)?;
+                }
+                self.query_key(expression, value.derivation, block, input)?;
             }
-            self.query_key(expression, value.derivation, block, input)?;
         }
         Ok(grouping_inputs.finish()?)
     }
@@ -540,135 +670,46 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
         result
     }
 
-    pub(super) fn projections<'a>(
-        &mut self,
-        projections: impl IntoIterator<Item = &'a ProjectionPlan>,
-        source: &RowSchema,
-        input: &RowSchema,
-        subqueries: &[QueryPlan],
-    ) -> Result<QueryOutput, SQLError> {
-        let owner = self.scope.control().capture();
-        let control = owner.control();
-        let mut output = QueryOutput::new(&control);
-        for projection in projections {
-            let expansion = if matches!(projection.expr, ScalarExpr::QualifiedStar(_)) {
-                input
-            } else {
-                source
-            };
-            if super::super::projection::visit_projection_star_metadata(
-                &projection.expr,
-                expansion,
-                &control,
-                &mut |field| {
-                    output
-                        .columns
-                        .push(control.copy_text(field.name)?, &control)?;
-                    let mut value = ExpressionType::resolved_produced(
-                        field
-                            .ty
-                            .map(|ty| ty.clone_with_control(&control))
-                            .transpose()?,
-                        &control,
-                    )?;
-                    if let Some(oid) = field.collation {
-                        value.derivation =
-                            crate::catalog::collations::derivation::Derivation::implicit(
-                                i64::from(oid),
-                            );
-                    }
-                    if let Some(record) = field.record {
-                        value.record_fields.clone_from(&record.types);
-                        value.record_descriptor.clone_from(&record.descriptor);
-                    }
-                    output.types.push(value, &control)?;
-                    Ok(())
-                },
-            )? {
-                output.open |= match &projection.expr {
-                    ScalarExpr::QualifiedStar(qualifier) => {
-                        expansion.columns_are_open(Some(qualifier))
-                    }
-                    _ => expansion.columns_are_open(None),
-                };
-            } else {
-                let mut value = self.expression(&projection.expr, input, subqueries)?;
-                if matches!(value.ty.as_deref(), Some(ColumnType::Composite(_))) {
-                    value.record_fields = self.scope.bind_record_fields(
-                        self.routines,
-                        &projection.expr,
-                        input,
-                        subqueries,
-                        &self.parameters.values()?,
-                    )?;
-                }
-                if matches!(
-                    value.derivation,
-                    crate::catalog::collations::derivation::Derivation::Conflict(..)
-                ) {
-                    output.key_origins.push(
-                        (output.types.len(), AnalysisIdentity::from(&projection.expr)),
-                        &control,
-                    )?;
-                    self.parameters
-                        .collations
-                        .record_target(&projection.expr, value.derivation)?;
-                }
-                let site_label = projection
-                    .alias
-                    .is_none()
-                    .then(|| {
-                        self.scope.variable_sites.as_ref().and_then(|sites| {
-                            sites
-                                .site(&projection.expr)
-                                .and_then(|site| sites.label(site))
-                        })
-                    })
-                    .flatten();
-                let name = if let Some(name) = site_label {
-                    control.copy_text(name)?
-                } else {
-                    crate::semantics::with_projection_label(projection, &control, |name| {
-                        Ok(control.copy_text(name)?)
-                    })?
-                };
-                output.columns.push(name, &control)?;
-                output.types.push(value, &control)?;
-            }
-        }
-        Ok(output)
-    }
-
-    pub(super) fn resolve_targets(&mut self, output: &mut QueryOutput) -> Result<(), SQLError> {
-        for ty in &mut output.types {
-            self.parameters.coerce_unknown(ty, &ColumnType::Text)?;
-        }
-        Ok(())
-    }
-
-    pub(super) fn values(
+    pub(super) async fn values_with_work(
         &mut self,
         rows: &[Vec<ScalarExpr>],
         subqueries: &[QueryPlan],
         outer: Option<&RowSchema>,
+        work: &mut (impl crate::catalog::work::Work + Send),
     ) -> Result<QueryOutput, SQLError> {
         let owner = self.scope.control().capture();
         let control = owner.control();
+        let mut input_work = ReferenceWork {
+            control: &control,
+            work,
+        };
         let width = rows.first().map_or(0, Vec::len);
         let mut columns = AnalysisVec::new(&control);
         columns.reserve(width, &control)?;
         for _ in 0..width {
+            input_work.checkpoint().await?;
             columns.push(AnalysisVec::new(&control), &control)?;
         }
-        let empty = RowSchema::empty_with_control(&control)?;
-        let input = outer.unwrap_or(&empty);
+        let empty;
+        let input = if let Some(row) = outer {
+            row
+        } else {
+            empty = RowSchema::empty_with_control(&control)?;
+            &empty
+        };
         for row in rows {
+            input_work.checkpoint().await?;
             for (position, expression) in row.iter().enumerate() {
+                input_work.checkpoint().await?;
                 let value = self.in_placement(SetPlacement::Values, |analysis| {
                     analysis.expression(expression, input, subqueries)
                 })?;
                 if let Some(column) = columns.get_mut(position) {
-                    column.push(value, &control)?;
+                    if !column.last().is_some_and(|previous: &ExpressionType| {
+                        previous.same_resolved_values_input(&value)
+                    }) {
+                        column.push(value, &control)?;
+                    }
                 }
             }
             if row.len() != width {
@@ -682,7 +723,14 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
         output.types.reserve(width, &control)?;
         output.columns.reserve(width, &control)?;
         for (index, column) in columns.iter_mut().enumerate() {
-            let ty = self.common(crate::type_resolution::CommonTypeContext::Values, column)?;
+            input_work.checkpoint().await?;
+            let ty = self
+                .common_with_work(
+                    crate::type_resolution::CommonTypeContext::Values,
+                    column,
+                    input_work.work,
+                )
+                .await?;
             let mut value = ExpressionType::combined_owned(ty, column);
             // Resolve each column after all row expressions, retaining the relation's implicit output selection.
             let oid = value.derivation.common_oid(true)?;
@@ -708,6 +756,26 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
         subqueries: &[QueryPlan],
         clause: &str,
     ) -> Result<ExpressionType, SQLError> {
+        inline(self.alias_expression_with_work(
+            expression,
+            output,
+            (primary, fallback),
+            subqueries,
+            clause,
+            &mut (),
+        ))
+    }
+
+    async fn alias_expression_with_work<W: Work + Send>(
+        &mut self,
+        expression: &ScalarExpr,
+        output: &QueryOutput,
+        schemas: (&RowSchema, &RowSchema),
+        subqueries: &[QueryPlan],
+        clause: &str,
+        work: &mut W,
+    ) -> Result<ExpressionType, SQLError> {
+        let (primary, fallback) = schemas;
         let site_output = self.scope.variable_sites.as_mut().and_then(|sites| {
             let site = sites.site(expression)?;
             let name = sites.bare_name(site)?;
@@ -740,9 +808,11 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
         let mut value = if matches!(expression, ScalarExpr::Column(_) | ScalarExpr::Position(_)) {
             let input =
                 overlay_outer_schema_with_control(primary, Some(fallback), &self.scope.control())?;
-            self.expression(expression, &input, subqueries)?
+            self.expression_with_work(expression, &input, subqueries, work)
+                .await?
         } else {
-            self.expression(expression, fallback, subqueries)?
+            self.expression_with_work(expression, fallback, subqueries, work)
+                .await?
         };
         self.parameters
             .coerce_unknown(&mut value, &ColumnType::Text)?;

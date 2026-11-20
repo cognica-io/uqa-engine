@@ -312,15 +312,18 @@ fn impossible_subquery_shapes_fail_without_retaining_partial_generations() {
 
 #[test]
 fn catalog_admission_errors_preserve_memory_cancellation_and_invariant_sqlstates() {
+    for error in [
+        CatalogRetentionError::Memory(MemoryError::SizeOverflow),
+        CatalogRetentionError::from(ValueRetentionError::Memory(MemoryError::SizeOverflow)),
+    ] {
+        let error = crate::SQLError::from(error);
+        assert_eq!(error.sqlstate(), Some("53200"));
+        assert!(matches!(
+            error,
+            crate::SQLError::Memory(MemoryError::SizeOverflow)
+        ));
+    }
     for (error, expected) in [
-        (
-            CatalogRetentionError::Memory(MemoryError::SizeOverflow),
-            "53200",
-        ),
-        (
-            CatalogRetentionError::from(ValueRetentionError::Memory(MemoryError::SizeOverflow)),
-            "53200",
-        ),
         (
             CatalogRetentionError::from(ValueRetentionError::Cancelled(
                 QueryCancelled::USER_REQUEST,

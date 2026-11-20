@@ -84,9 +84,12 @@ impl<'a> ProductionString<'a> {
         self.control.check()
     }
 
+    /// Largest byte count copied by one native text-construction step.
+    pub const CHUNK_BYTES: usize = 4096;
+
     /// Borrow one complete UTF-8 chunk for a producer that already admitted its destination buffer.
     pub fn first_chunk(text: &str) -> &str {
-        let mut end = text.len().min(4096);
+        let mut end = text.len().min(Self::CHUNK_BYTES);
         while !text.is_char_boundary(end) {
             end -= 1;
         }

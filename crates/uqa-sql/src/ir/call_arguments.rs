@@ -42,6 +42,14 @@ pub fn scalar_call_arguments_with_control<'a>(
     arguments: &'a [ScalarExpr],
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Vec<ScalarCallArgument<'a>>>, SQLError> {
+    crate::catalog::work::inline(scalar_call_arguments_with_work(arguments, control, &mut ()))
+}
+
+pub(crate) async fn scalar_call_arguments_with_work<'a, W: crate::catalog::work::Work>(
+    arguments: &'a [ScalarExpr],
+    control: &ProductionControl<'_>,
+    work: &mut W,
+) -> Result<Produced<Vec<ScalarCallArgument<'a>>>, SQLError> {
     let mut decoded = ProductionVec::new(*control);
     if matches!(arguments, [ScalarExpr::Star]) {
         control.check()?;
@@ -49,10 +57,11 @@ pub fn scalar_call_arguments_with_control<'a>(
     }
     decoded.reserve(arguments.len())?;
     for argument in arguments {
+        work.checkpoint().await?;
         control.check()?;
         decoded.push_copy(scalar_call_argument(argument)?)?;
     }
-    validate_scalar_call_arguments(&decoded)?;
+    validate_arguments(&decoded, work).await?;
     decoded.finish().map_err(Into::into)
 }
 
@@ -61,9 +70,17 @@ pub fn scalar_call_arguments_with_control<'a>(
 pub fn validate_scalar_call_arguments(
     arguments: &[ScalarCallArgument<'_>],
 ) -> Result<bool, SQLError> {
+    crate::catalog::work::inline(validate_arguments(arguments, &mut ()))
+}
+
+async fn validate_arguments<W: crate::catalog::work::Work>(
+    arguments: &[ScalarCallArgument<'_>],
+    work: &mut W,
+) -> Result<bool, SQLError> {
     let mut count = 0;
     let mut last_position = None;
     for (position, argument) in arguments.iter().enumerate() {
+        work.checkpoint().await?;
         if argument.explicit_variadic {
             count += 1;
             last_position = Some(position);

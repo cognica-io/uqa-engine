@@ -109,11 +109,10 @@ impl RoutineCatalogDocument {
 }
 
 pub(in crate::routines) fn binding_error(error: SQLError) -> StorageBackendError {
-    match error {
-        SQLError::Cancelled(error) => error.into(),
+    crate::storage_errors::from_sql_error(error, |error| match error {
         SQLError::RetainedRoutine(source) => StorageBackendError::RetainedDiagnostic(source),
         error => StorageBackendError::Other(error.to_string()),
-    }
+    })
 }
 
 #[cfg(test)]

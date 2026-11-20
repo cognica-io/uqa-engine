@@ -19,13 +19,12 @@ pub(crate) use array_transform::{
 };
 pub(crate) mod between;
 pub(crate) mod boolean;
-pub(crate) use array_transform::resolve_array_transform_call;
 mod call;
 pub use call::{FunctionBindingParts, OwnedBindingCall};
 mod cast_compatibility;
 mod checksum;
 mod common;
-pub(crate) use common::common_context_expression_type_with_control;
+pub(crate) use common::{common_context_expression_type_with_control, signature_with_work};
 pub(crate) use common::{function_arguments_have_runtime_types_with_control, runtime_input};
 pub(crate) use common::{parameter_type_matches, parameter_type_with_control};
 pub(crate) mod concatenation;
@@ -33,9 +32,9 @@ pub(crate) use common::literal_input_type_with_control;
 pub use common::runtime_value_type_with_control;
 pub(crate) use common::value_type;
 pub(crate) use common::value_type_with_control;
-pub(crate) use common::{array_element_type, base_type};
+pub(crate) use common::{array_element_type, base_type, base_type_with_work};
 pub(crate) use common::{
-    select_common_input_type_in_with_control, select_common_input_type_with_control,
+    select_common_input_type_in_with_work, select_common_input_type_with_work,
 };
 mod containment;
 pub(crate) mod enums;
@@ -47,6 +46,7 @@ mod fixed_builtin;
 #[cfg(test)]
 pub(crate) use fixed_builtin::overloads as fixed_builtin_overloads;
 pub(crate) use fixed_builtin::overloads_with_control as fixed_builtin_overloads_with_control;
+pub(crate) use fixed_builtin::requires_argument_cast_with_control as fixed_argument_requires_cast_with_control;
 pub(crate) use fixed_builtin::resolve_fixed_builtin_call_with_control;
 pub(crate) use overload_resolution::builtin_binding_matches_with_control;
 mod function_inputs;
@@ -60,6 +60,7 @@ mod production;
 use inference::scalar_type_inner_with_control;
 mod introspection;
 pub(crate) use introspection::bind_stored_inputs_owned;
+pub(crate) use introspection::common_input_keeps_type;
 pub(crate) mod json_path;
 mod json_strip;
 mod length;
@@ -116,6 +117,7 @@ pub(crate) use cast_compatibility::{cast_catalog_entry_with_control, preserves_r
 #[doc(hidden)]
 pub use checksum::{resolve_checksum_overload, ResolvedChecksumOverload};
 pub(crate) use common::effective_overload_argument_type_ref_with_params;
+pub(crate) use common::same_declaration_with_work;
 pub use common::{
     common_context_expression_type, common_type, common_type_in, common_type_in_with_control,
     effective_overload_argument_type, effective_overload_argument_type_with_params,
@@ -123,6 +125,7 @@ pub use common::{
     select_common_input_type, values_column_types, CommonTypeContext,
     FunctionCallArgumentSignature,
 };
+pub(crate) use equality::foreign_key_operand_type_with_work;
 pub use equality::{
     equality_operand_type, equality_operand_type_with_control, foreign_key_operand_type,
     foreign_key_operand_type_with_control,
@@ -173,14 +176,16 @@ pub use overload_resolution::{
     MatchedBuiltinFunction, MatchedFunctionSignature, RankedFunctionMatch,
 };
 pub(crate) use overload_resolution::{
-    match_builtin_with_control, rank_function_matches_with_control, Candidates, RankingCandidates,
+    canonical_routine_type_name_with_work, match_builtin_with_control,
+    rank_function_matches_with_control, Candidates, RankingCandidates,
 };
 #[doc(hidden)]
 pub use reverse::{resolve_reverse_overload, ResolvedReverseOverload};
 #[doc(hidden)]
 pub(crate) use routine_signature::{
     match_routine_candidate, match_routine_candidate_with_control,
-    routine_polymorphic_type_with_control, RoutineInvocationParts, RoutineSignatureProductionError,
+    routine_polymorphic_type_with_control, routine_polymorphic_type_with_work,
+    RoutineInvocationParts, RoutineSignatureProductionError,
 };
 pub use routine_signature::{
     match_routine_signature, routine_polymorphic_type, MatchedRoutineSignature,

@@ -172,10 +172,9 @@ pub(super) fn matches(reference: BackupFunctionReference<'_>, kinds: RegisteredK
 }
 
 fn sql_error(error: SQLError) -> StorageBackendError {
-    match error {
-        SQLError::Cancelled(reason) => reason.into(),
-        error => StorageBackendError::CatalogBinding(Arc::new(error)),
-    }
+    uqa_execution::storage_errors::from_sql_error(error, |error| {
+        StorageBackendError::CatalogBinding(Arc::new(error))
+    })
 }
 
 impl BackupFunctionSource for References {

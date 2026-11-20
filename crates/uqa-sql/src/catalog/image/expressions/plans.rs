@@ -79,16 +79,30 @@ macro_rules! image_struct {
 }
 
 macro_rules! image_enum {
-    ($ty:ty { $($tag:literal => $name:ident $(($value:ident))? $({ $($field:ident),* $(,)? })?),* $(,)? } $(reject { $($rejected:pat => $message:literal),* $(,)? })?) => {
+    ($ty:ty { $($tag:literal => $name:ident $(($value:ident))? $({ $($field:ident),* $(,)? $(; $($skip:ident),+)? })?),* $(,)? } $(reject { $($rejected:pat => $message:literal),* $(,)? })?) => {
         impl Node for $ty {
             fn part(&self, position: usize) -> Result<Option<Part<'_>>, SQLError> {
                 Ok(match self {
-                    $(Self::$name $(($value))? $({$($field),*})? =>
+                    $(Self::$name $(($value))? $({$($field,)* $($($skip: _,)*)?})? =>
                         variant(position, $tag, &[$($value,)? $($($field,)*)?]),)*
                     $($($rejected => return Err(invalid($message)),)*)?
                 })
             }
         }
+    };
+}
+
+macro_rules! projected_struct {
+    ($mode:ident, $($shape:tt)*) => {
+        image_struct!($($shape)*);
+        crate::plan::copy::stored_plan::project_struct!($mode, $($shape)*);
+    };
+}
+
+macro_rules! projected_enum {
+    ($mode:ident, $ty:ty { $($shape:tt)* } $(reject { $bad:pat => $image:literal, $capture:literal })?) => {
+        image_enum!($ty { $($shape)* } $(reject { $bad => $image })?);
+        crate::plan::copy::stored_plan::project_enum!($mode, $ty { $($shape)* } $(reject { $bad => $capture })?);
     };
 }
 

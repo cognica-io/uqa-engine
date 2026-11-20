@@ -20,12 +20,12 @@ impl Fields<'_> {
         value: &mut ScalarExpr,
     ) -> Result<(), SQLError> {
         match tag {
-            0..=5 | 8 | 24 | 26 | 27 => self.native_reference(tag, memory, value).await,
-            6 | 7 | 23 => self.native_literal(tag, memory, value).await,
-            9 => self.native_scalar_function(memory, value).await,
-            10..=12 | 16 | 17 => self.native_collection(tag, memory, value).await,
-            13..=15 | 18..=22 | 25 | 28 => self.native_operator(tag, memory, value).await,
-            29 => self.native_scalar_window(memory, value).await,
+            0..=5 | 8 | 24 | 26 | 27 => await_field!(self.native_reference(tag, memory, value)),
+            6 | 7 | 23 => await_field!(self.native_literal(tag, memory, value)),
+            9 => await_field!(self.native_scalar_function(memory, value)),
+            10..=12 | 16 | 17 => await_field!(self.native_collection(tag, memory, value)),
+            13..=15 | 18..=22 | 25 | 28 => await_field!(self.native_operator(tag, memory, value)),
+            29 => await_field!(self.native_scalar_window(memory, value)),
             _ => Err(invalid("native scalar node tag")),
         }
     }
@@ -37,9 +37,9 @@ impl Fields<'_> {
         value: &mut ScalarExpr,
     ) -> Result<(), SQLError> {
         match tag {
-            6 => *value = ScalarExpr::Literal(payload(self.scalar_value().await?, memory)),
-            7 => return self.native_typed_literal(memory, value).await,
-            23 => *value = ScalarExpr::RetainedLiteral(self.retained_scalar_data().await?),
+            6 => *value = ScalarExpr::Literal(payload(await_field!(self.scalar_value())?, memory)),
+            7 => return await_field!(self.native_typed_literal(memory, value)),
+            23 => *value = ScalarExpr::RetainedLiteral(await_field!(self.retained_scalar_data())?),
             _ => unreachable!("native scalar literal tag"),
         }
         Ok(())
@@ -90,14 +90,14 @@ impl Fields<'_> {
         } else {
             None
         };
-        let value = payload(self.scalar_value().await?, memory);
+        let value = payload(await_field!(self.scalar_value())?, memory);
         let bound_type = if bound {
-            Some(payload(self.column_type().await?, memory))
+            Some(payload(await_field!(self.column_type())?, memory))
         } else {
             None
         };
         let composite_source = if source {
-            Some(boxed(self.composite_source(memory).await?, memory)?)
+            Some(boxed(await_field!(self.composite_source(memory))?, memory)?)
         } else {
             None
         };
@@ -132,9 +132,9 @@ impl Fields<'_> {
             12 => {
                 let count = self.binary.count().await?;
                 let bound = self.flag().await?;
-                let binding = self.scalar_row_binding(memory).await?;
+                let binding = await_field!(self.scalar_row_binding(memory))?;
                 let bound_type = if bound {
-                    Some(payload(self.column_type().await?, memory))
+                    Some(payload(await_field!(self.column_type())?, memory))
                 } else {
                     None
                 };
@@ -156,7 +156,7 @@ impl Fields<'_> {
         value: &mut ScalarExpr,
     ) -> Result<(), SQLError> {
         if tag == 21 {
-            return self.native_case(memory, value).await;
+            return await_field!(self.native_case(memory, value));
         }
         *value = match tag {
             13 => {
@@ -210,7 +210,7 @@ impl Fields<'_> {
             }
             25 => {
                 let collation = self.native_scalar_collation().await?;
-                let ty = payload(self.column_type().await?, memory);
+                let ty = payload(await_field!(self.column_type())?, memory);
                 ScalarExpr::Collated {
                     collation,
                     ty,
@@ -279,7 +279,7 @@ impl Fields<'_> {
             if self.header(super::super::super::FUNCTION_BINDING).await? != 1 {
                 return Err(invalid("nested function binding count"));
             }
-            Some(payload(self.function_binding().await?, memory))
+            Some(payload(await_field!(self.function_binding())?, memory))
         } else {
             None
         };

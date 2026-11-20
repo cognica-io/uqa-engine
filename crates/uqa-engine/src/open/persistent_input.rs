@@ -180,6 +180,7 @@ impl FieldAnalyzers {
 enum RegistryInput {
     Relations(RestoredAuthorities),
     Bodies(RestoredAuthorities),
+    RetiringPlaceholders(RestoredAuthorities),
     Dependents(uqa_execution::catalog::domain::DomainRestoreState),
     PathIndexes(uqa_graph::PathIndexCatalogInput),
 }
@@ -187,11 +188,12 @@ enum RegistryInput {
 impl RegistryInput {
     fn advance(
         self,
-        engine: &Engine,
+        owner: &PrivateEngine,
         catalog: Arc<dyn uqa_storage::CatalogFacade>,
         limits: CatalogInputLimits,
         control: &StorageReadControl,
     ) -> StorageBackendResult<Stage> {
+        let engine: &Engine = owner;
         let next = match self {
             Self::Relations(retained) => {
                 engine.restore_relations_before_routine_bodies(
@@ -200,8 +202,16 @@ impl RegistryInput {
                 )?;
                 Self::Bodies(retained)
             }
-            Self::Bodies(RestoredAuthorities { domains, routines }) => {
-                match routines.advance(&engine.routine_restore_context())? {
+            Self::Bodies(RestoredAuthorities { domains, routines })
+            | Self::RetiringPlaceholders(RestoredAuthorities { domains, routines }) => {
+                match routines.advance_with_routines(
+                    &engine.routine_restore_context(),
+                    owner,
+                    |private| -> &Engine { private },
+                )? {
+                    Some(routines) if routines.retiring_placeholders() => {
+                        Self::RetiringPlaceholders(RestoredAuthorities { domains, routines })
+                    }
                     Some(routines) => Self::Bodies(RestoredAuthorities { domains, routines }),
                     None => Self::Dependents(domains),
                 }
@@ -236,9 +246,11 @@ impl RegistryInput {
     }
 }
 
+pub(crate) type PrivateEngine = Arc<Budgeted<Box<Engine>>>;
+
 /// The complete private catalog still owns its read transaction. Closing or dropping this owner releases that transaction before the provider can publish its files.
 pub(crate) struct PersistentEngineState {
-    engine: Budgeted<Box<Engine>>,
+    engine: PrivateEngine,
     version: Option<u64>,
     read_view: Option<KeyValueReadRevision>,
     revisions: Option<CatalogCacheRevisions>,
@@ -266,6 +278,7 @@ impl PersistentEngineInput {
             memory,
         );
         bindings.attach(engine.as_mut());
+        let engine = engine.into_shared()?;
         let backend = engine.storage.backend.as_ref().expect("persistent backend");
         let version = backend.change_version()?;
         backend.begin_read_transaction()?;
@@ -324,7 +337,7 @@ enum Progress {
 impl Candidate {
     fn advance(mut self, control: &StorageReadControl) -> StorageBackendResult<Progress> {
         control.check()?;
-        let engine = self.session.engine.as_mut();
+        let engine = self.session.engine();
         let catalog = Arc::clone(engine.storage.catalog.as_ref().expect("persistent catalog"));
         self.stage = match self.stage {
             Stage::Metadata => {
@@ -362,6 +375,9 @@ impl Candidate {
             },
             Stage::Tables(mut input) => match input.advance(1)? {
                 Some(tables) => {
+                    let engine = Arc::get_mut(&mut self.session.engine)
+                        .expect("table storage is installed before sharing the private Engine")
+                        .as_mut();
                     engine.storage.tables = Arc::new(tables);
                     Stage::Watermarks(engine.partition_watermark_input(control)?)
                 }
@@ -414,7 +430,9 @@ impl Candidate {
             Stage::NamedAnalyzers(input) => input.advance(engine, self.limits, control)?,
             Stage::GinAnalyzers(input) => input.advance(engine, self.limits, control)?,
             Stage::FieldAnalyzers(input) => input.advance(engine, control)?,
-            Stage::Registries(input) => input.advance(engine, catalog, self.limits, control)?,
+            Stage::Registries(input) => {
+                input.advance(self.session.engine_owner(), catalog, self.limits, control)?
+            }
             Stage::Caches(input) => return input.advance(self.session, self.limits, control),
         };
         Ok(Progress::Pending(self))
@@ -520,6 +538,10 @@ impl PersistentEngineState {
         &self.engine
     }
 
+    pub(crate) fn engine_owner(&self) -> &PrivateEngine {
+        &self.engine
+    }
+
     pub(crate) fn activate(self) -> StorageBackendResult<Engine> {
         let mut engine = self.finish()?;
         engine.activate_persistent_provider()?;
@@ -527,7 +549,10 @@ impl PersistentEngineState {
     }
 
     pub(crate) fn finish(self) -> StorageBackendResult<Engine> {
-        let engine = &self.engine;
+        let owner = Arc::try_unwrap(self.engine).unwrap_or_else(|_| {
+            unreachable!("completed catalog readers released the private Engine")
+        });
+        let engine = &owner;
         let catalog = engine.storage.catalog.as_ref().expect("persistent catalog");
         let backend = engine.storage.backend.as_ref().expect("persistent backend");
         let revisions = catalog.cache_revisions()?;
@@ -552,7 +577,7 @@ impl PersistentEngineState {
                 .store(self.version.unwrap_or_default(), Ordering::Release);
             *engine.epochs.seen_storage_read_view.lock() = None;
         }
-        let (engine, _memory) = self.engine.into_parts();
+        let (engine, _memory) = owner.into_parts();
         Ok(*engine)
     }
 }

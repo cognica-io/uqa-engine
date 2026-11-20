@@ -32,6 +32,62 @@ fn encoded(source: &CapturedRoutines) -> serde_json::Value {
 }
 
 #[test]
+fn placeholder_registry_handoff_releases_one_group_node_or_overload_reference_per_step() {
+    for (groups, overloads, keep_reader) in [(4096, 1, false), (1, 4096, false), (32, 4, true)] {
+        let native = MemoryBudget::new(16 << 20);
+        let work = MemoryBudget::new(4096);
+        let mut registry = RoutineRegistry::with_budget(&native);
+        let routine = routine("CREATE FUNCTION f() RETURNS integer LANGUAGE SQL AS 'SELECT 1'");
+        registry
+            .insert("public.seed".into(), vec![routine.shared()])
+            .unwrap();
+        let original = Arc::clone(&registry["public.seed"][0]);
+        for index in 0..groups {
+            let schema = if index % 2 == 0 {
+                "public"
+            } else {
+                "pg_temp_7"
+            };
+            let name = format!("{schema}.f_{index:04}");
+            registry
+                .insert(name.clone(), vec![Arc::clone(&original); overloads])
+                .unwrap();
+            assert!(Arc::ptr_eq(&registry[&name][0], &original));
+        }
+        let reader = keep_reader.then(|| registry.clone());
+        let mut retirement = registry.prepare_placeholder_retirement(&work).unwrap();
+        let references = Arc::strong_count(&original);
+        let handoff = allocation_counter::measure(|| drop(registry));
+        assert_eq!(handoff.count_total, 0);
+        assert_eq!(Arc::strong_count(&original), references);
+        let occupied = work.reserve(work.available()).unwrap();
+        let mut calls = 0;
+        loop {
+            let before = Arc::strong_count(&original);
+            let mut complete = false;
+            let measured = allocation_counter::measure(|| complete = retirement.advance());
+            assert_eq!(measured.count_total, 0);
+            assert!(-measured.count_current <= 16);
+            assert!(before - Arc::strong_count(&original) <= 1);
+            calls += 1;
+            if complete {
+                break;
+            }
+        }
+        if let Some(reader) = reader {
+            assert_eq!(reader.len(), groups + 1);
+            assert_eq!(Arc::strong_count(&original), references);
+            assert_eq!(calls, 2);
+        } else {
+            assert!(calls >= groups * overloads);
+        }
+        assert_eq!(Arc::strong_count(&original), 1);
+        drop((retirement, original, occupied));
+        assert_eq!((work.used(), native.used()), (0, 0));
+    }
+}
+
+#[test]
 fn native_routines_preserve_exact_overloads_and_the_original_capture_encoding() {
     let mut entries = Vec::new();
     for (index, sql) in [

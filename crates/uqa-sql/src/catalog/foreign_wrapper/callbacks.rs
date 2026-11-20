@@ -10,8 +10,8 @@ use super::{
     ForeignWrapperDefinition, ForeignWrapperFunction, ForeignWrapperHandler, ForeignWrappers,
 };
 use crate::{
-    catalog::work::inline,
-    routines::{registry::RoutineRegistry, signature_matches, SQLRoutine, SignatureWork},
+    catalog::work::{inline, Work},
+    routines::{registry::RoutineRegistry, signature_matches, SQLRoutine},
     SQLError,
 };
 use uqa_core::{
@@ -53,7 +53,7 @@ async fn validate(
     wrappers: &ForeignWrappers,
     routines: &RoutineRegistry,
     control: &ProductionControl<'_>,
-    work: &mut impl SignatureWork,
+    work: &mut (impl Work + Send),
 ) -> Result<(), SQLError> {
     control.check()?;
     if routines.is_empty() {
@@ -72,7 +72,7 @@ async fn validate_groups<'r, I: Iterator<Item = &'r SQLRoutine> + Send>(
     wrappers: &ForeignWrappers,
     mut groups: impl Iterator<Item = I> + Send,
     control: &ProductionControl<'_>,
-    work: &mut impl SignatureWork,
+    work: &mut (impl Work + Send),
 ) -> Result<(), SQLError> {
     let mut selected = ProductionMap::new(*control);
     for wrapper in wrappers.values() {

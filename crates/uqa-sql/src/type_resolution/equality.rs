@@ -6,14 +6,17 @@
 
 //! `PostgreSQL` equality-operator operand binding.
 
-use crate::ast::ColumnType;
+use crate::ast::{ColumnType, ColumnTypeInputWork};
+use crate::catalog::work::{inline, ReferenceWork};
 use crate::SQLError;
 use uqa_core::memory::{Produced, ProductionControl};
 
 use super::{
-    common::base_type, common::common_type_with_control,
-    overload_resolution::canonical_column_type_name_with_control, require_equality_operator,
-    routine_type_accepts_implicit_cast,
+    common::{
+        base_type, base_type_with_work, common_type_with_control, same_operator_type_with_work,
+    },
+    operators::equality_operator_available_with_work,
+    overload_resolution::{canonical_column_type_name_with_work, implicit_cast_with_work},
 };
 
 pub fn equality_operand_type(
@@ -32,37 +35,53 @@ pub fn equality_operand_type_with_control(
     right: &ColumnType,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<ColumnType>, SQLError> {
+    inline(equality_with_work(
+        left,
+        right,
+        control,
+        &mut ReferenceWork {
+            control,
+            work: &mut (),
+        },
+    ))?
+    .ok_or_else(|| undefined_equality_operator(left, right))
+}
+
+async fn equality_with_work<W: ColumnTypeInputWork<Error = SQLError>>(
+    left: &ColumnType,
+    right: &ColumnType,
+    control: &ProductionControl<'_>,
+    work: &mut W,
+) -> Result<Option<Produced<ColumnType>>, SQLError> {
     control.check()?;
-    require_equality_operator(left).map_err(|_| undefined_equality_operator(left, right))?;
-    require_equality_operator(right).map_err(|_| undefined_equality_operator(left, right))?;
-    if matches!(left, ColumnType::Json) || matches!(right, ColumnType::Json) {
-        return Err(undefined_equality_operator(left, right));
+    if !equality_operator_available_with_work(left, control, work).await?
+        || !equality_operator_available_with_work(right, control, work).await?
+    {
+        return Ok(None);
     }
     if matches!(left, ColumnType::Array(_)) || matches!(right, ColumnType::Array(_)) {
-        if super::common::same_operator_type_with_control(left, right, control)? {
-            return left.clone_with_control(control).map_err(Into::into);
+        if same_operator_type_with_work(left, right, control, work).await? {
+            return left.clone_with_input_work(control, work).await.map(Some);
         }
-        return Err(undefined_equality_operator(left, right));
+        return Ok(None);
     }
     if left.is_character_string() && right.is_character_string() {
-        if matches!(left, ColumnType::Bpchar | ColumnType::Character(_))
+        let comparison = if matches!(left, ColumnType::Bpchar | ColumnType::Character(_))
             || matches!(right, ColumnType::Bpchar | ColumnType::Character(_))
         {
-            return control
-                .finish(ColumnType::Bpchar, control.empty_reservation())
-                .map_err(Into::into);
-        }
-        return control
-            .finish(ColumnType::Text, control.empty_reservation())
-            .map_err(Into::into);
-    }
-    common_type_with_control(left, right, control).map_err(|error| {
-        if matches!(error.sqlstate(), Some("53200" | "57014")) {
-            error
+            ColumnType::Bpchar
         } else {
-            undefined_equality_operator(left, right)
-        }
-    })
+            ColumnType::Text
+        };
+        return Ok(Some(
+            control.finish(comparison, control.empty_reservation())?,
+        ));
+    }
+    match common_type_with_control(left, right, control) {
+        Ok(value) => Ok(Some(value)),
+        Err(error) if matches!(error.sqlstate(), Some("53200" | "57014")) => Err(error),
+        Err(_) => Ok(None),
+    }
 }
 
 /// Resolve the comparison type accepted by a `PostgreSQL` foreign key. The referenced key's operator class makes compatibility directional: an implicit cast from the referencing type to the referenced type is valid, while the reverse cast alone is not. Integer widths, floating widths, character strings, and date/timestamp types additionally have cross-type equality operators in their shared operator families.
@@ -87,23 +106,43 @@ pub fn foreign_key_operand_type_with_control(
     referenced: &ColumnType,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<ColumnType>, SQLError> {
+    inline(foreign_key_operand_type_with_work(
+        referencing,
+        referenced,
+        control,
+        &mut ReferenceWork {
+            control,
+            work: &mut (),
+        },
+    ))?
+    .ok_or_else(|| undefined_equality_operator(base_type(referencing), base_type(referenced)))
+}
+
+pub(crate) async fn foreign_key_operand_type_with_work<W: ColumnTypeInputWork<Error = SQLError>>(
+    referencing: &ColumnType,
+    referenced: &ColumnType,
+    control: &ProductionControl<'_>,
+    work: &mut W,
+) -> Result<Option<Produced<ColumnType>>, SQLError> {
     control.check()?;
-    let referencing = base_type(referencing);
-    let referenced = base_type(referenced);
-    let comparison = equality_operand_type_with_control(referencing, referenced, control)?;
-    let referencing_name = canonical_column_type_name_with_control(referencing, control)?;
-    let referenced_name = canonical_column_type_name_with_control(referenced, control)?;
+    let referencing = base_type_with_work(referencing, control, work).await?;
+    let referenced = base_type_with_work(referenced, control, work).await?;
+    let Some(comparison) = equality_with_work(referencing, referenced, control, work).await? else {
+        return Ok(None);
+    };
+    let referencing_name = canonical_column_type_name_with_work(referencing, control, work).await?;
+    let referenced_name = canonical_column_type_name_with_work(referenced, control, work).await?;
     let shared_operator_family = is_integral(referencing) && is_integral(referenced)
         || is_float(referencing) && is_float(referenced)
         || is_date_timestamp(referencing) && is_date_timestamp(referenced)
         || referencing.is_character_string() && referenced.is_character_string();
-    if referencing == referenced
-        || routine_type_accepts_implicit_cast(&referencing_name, &referenced_name)
+    if implicit_cast_with_work(&referencing_name, &referenced_name, control, work).await?
         || shared_operator_family
     {
-        return Ok(comparison);
+        return Ok(Some(comparison));
     }
-    Err(undefined_equality_operator(referencing, referenced))
+    ColumnType::retire_with_work(comparison, control, work).await?;
+    Ok(None)
 }
 
 fn is_integral(ty: &ColumnType) -> bool {

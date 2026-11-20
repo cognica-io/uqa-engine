@@ -69,6 +69,64 @@ fn rule() -> StoredRule {
     }
 }
 
+fn action_catalog(actions: Vec<Statement>) -> CatalogReadView {
+    let mut snapshot = catalog("SELECT id FROM public.items").snapshot().clone();
+    let mut rule = rule();
+    rule.definition.actions = actions;
+    RetainedValue::make_mut(&mut snapshot.definitions.rules)
+        .insert_event(
+            RelationIdentity::new("public", "items"),
+            "saved".into(),
+            rule,
+        )
+        .unwrap();
+    CatalogReadView::new(snapshot)
+}
+
+#[test]
+fn stored_rule_validation_yields_between_actions_before_the_first_missing_relation() {
+    const WIDTH: usize = 64;
+    let fixture = |missing| {
+        let select = uqa_sql::compile("SELECT id FROM public.items")
+            .unwrap()
+            .remove(0);
+        let mut actions = vec![select; WIDTH];
+        actions[missing] = uqa_sql::compile("SELECT id FROM public.missing")
+            .unwrap()
+            .remove(0);
+        action_catalog(actions)
+    };
+    let first = fixture(0);
+    let last = fixture(WIDTH - 1);
+    let diagnostic = "invalid native event reference: missing relation";
+    for steps in [1, 32] {
+        let early = windows_until_rejected(&first, steps, diagnostic);
+        let late = windows_until_rejected(&last, steps, diagnostic);
+        assert!(late >= early + (WIDTH - 1) / steps, "{early} vs {late}");
+    }
+}
+
+#[test]
+fn stored_rule_validation_yields_within_a_single_insert_action() {
+    const WIDTH: usize = 128;
+    let fixture = |rows| {
+        let values = vec!["(1)"; rows].join(",");
+        let actions = uqa_sql::compile(&format!(
+            "INSERT INTO public.items VALUES {values}; SELECT id FROM public.missing"
+        ))
+        .unwrap();
+        action_catalog(actions)
+    };
+    let narrow = fixture(1);
+    let wide = fixture(WIDTH);
+    let diagnostic = "invalid native event reference: missing relation";
+    for steps in [1, 32] {
+        let early = windows_until_rejected(&narrow, steps, diagnostic);
+        let late = windows_until_rejected(&wide, steps, diagnostic);
+        assert!(late >= early + (WIDTH - 1) / steps, "{early} vs {late}");
+    }
+}
+
 #[test]
 fn native_event_dependencies_use_captured_table_view_foreign_system_and_graph_columns() {
     for (name, column) in [

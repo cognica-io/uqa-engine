@@ -21,11 +21,28 @@ use uqa_core::Value;
 
 /// A selected trigger handler shares this result and language contract across definition, catalog projection and native restoration.
 pub fn validate_trigger_function(function: &crate::ast::CreateFunction) -> Result<(), SQLError> {
-    if !crate::routines::declaration::routine_returns_trigger(function) {
-        return Err(SQLError::Routine {
-            sqlstate: "42P17".into(),
-            message: format!("function {} must return type trigger", function.name),
-        });
+    crate::catalog::work::inline(validate_trigger_function_with_work(
+        function,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+        &mut (),
+    ))
+}
+
+pub(crate) async fn validate_trigger_function_with_work(
+    function: &crate::ast::CreateFunction,
+    control: &uqa_core::memory::ProductionControl<'_>,
+    work: &mut (impl crate::catalog::work::Work + Send),
+) -> Result<(), SQLError> {
+    if !crate::routines::declaration::routine_returns_trigger_with_work(function, control, work)
+        .await?
+    {
+        let message = crate::catalog::work::text_parts(
+            work,
+            &["function ", &function.name, " must return type trigger"],
+            control,
+        )
+        .await?;
+        return Err(SQLError::admit_routine_message("42P17", message, control)?);
     }
     if function.language != "plpgsql" {
         return Err(SQLError::Routine {

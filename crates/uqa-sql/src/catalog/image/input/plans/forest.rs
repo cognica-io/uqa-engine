@@ -7,6 +7,7 @@
 //! One admitted traversal owns native plans and original syntax without inflating either node representation.
 
 use super::{driver::Step, Fields, Frame, Input, Kind, Node, PlanMemory, SQLError};
+use crate::plan::retirement::RetiredChild;
 
 pub(in super::super) trait NativeNode: Sized {
     type Kind;
@@ -27,7 +28,7 @@ pub(in super::super) trait NativeNode: Sized {
     fn validate_step(frame: &mut Frame<Self>, position: usize) -> Result<bool, SQLError>;
     fn attach(frame: &mut Frame<Self>, child: Frame<Self>);
     fn retire_scalars(frame: &mut Frame<Self>);
-    fn retire_child(frame: &mut Frame<Self>) -> Option<Self>;
+    fn retire_child(frame: &mut Frame<Self>) -> RetiredChild<Self>;
 }
 
 impl NativeNode for Node {
@@ -67,7 +68,7 @@ impl NativeNode for Node {
     fn retire_scalars(frame: &mut Frame) {
         frame.retire_scalars();
     }
-    fn retire_child(frame: &mut Frame) -> Option<Self> {
-        frame.retire_child()
+    fn retire_child(frame: &mut Frame) -> RetiredChild<Self> {
+        frame.retire_child().into()
     }
 }

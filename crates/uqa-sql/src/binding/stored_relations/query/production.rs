@@ -79,7 +79,7 @@ struct Names<'a, R: ?Sized> {
     relations: &'a R,
     lookup_mode: RelationLookupMode,
     temporary_schema: &'a str,
-    transition_relations: &'a std::collections::BTreeSet<String>,
+    transition_relations: &'a dyn super::TransitionRelationNames,
 }
 
 impl<R: super::StoredRelationCatalog + ?Sized> Names<'_, R> {

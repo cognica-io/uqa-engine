@@ -10,7 +10,7 @@ use crate::ast::ColumnType;
 mod schema_production;
 pub(crate) mod work;
 use schema_production::CatalogColumnType::{self, Array, Domain, Inline};
-pub use work::Work as CatalogWork;
+pub use work::{CatalogSteps, CatalogValidation, Work as CatalogWork};
 
 pub mod access_methods;
 pub mod collations;

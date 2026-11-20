@@ -15,6 +15,7 @@ mod families;
 mod identities;
 mod partitions;
 mod triggers;
+mod work;
 
 struct Table {
     name: RelationIdentity,
@@ -81,6 +82,20 @@ fn reference() -> ForeignKey {
     key
 }
 
+impl Table {
+    fn declaration(&self) -> NativeConstraintTable<'_> {
+        NativeConstraintTable {
+            name: &self.name,
+            object_id: self.id,
+            columns: &self.columns,
+            checks: &self.checks,
+            keys: &self.keys,
+            foreign_keys: &self.foreign_keys,
+            hierarchy: self.hierarchy.as_ref(),
+        }
+    }
+}
+
 fn check(
     tables: &[Table],
     indexes: &[CatalogIndexRow],
@@ -88,15 +103,7 @@ fn check(
     token: &CancellationToken,
 ) -> Result<(), SQLError> {
     validate(
-        tables.iter().map(|table| NativeConstraintTable {
-            name: &table.name,
-            object_id: table.id,
-            columns: &table.columns,
-            checks: &table.checks,
-            keys: &table.keys,
-            foreign_keys: &table.foreign_keys,
-            hierarchy: table.hierarchy.as_ref(),
-        }),
+        tables.iter().map(Table::declaration),
         indexes.iter(),
         std::iter::empty(),
         std::iter::empty(),

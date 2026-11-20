@@ -22,16 +22,7 @@ use uqa_sql::{
 
 impl Engine {
     pub(crate) fn routine_compilation_context(&self) -> RoutineCompilationContext<'_> {
-        RoutineCompilationContext {
-            types: self,
-            parsers: self,
-            catalog: self,
-            routines: self,
-            relations: self,
-            sequences: self,
-            merge: self,
-            regroles: self,
-        }
+        RoutineCompilationContext::from_catalog(self)
     }
 }
 impl RoutineTypeCatalog for Engine {

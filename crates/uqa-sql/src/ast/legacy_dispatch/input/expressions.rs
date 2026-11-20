@@ -8,6 +8,7 @@ use super::{fixed, Child, Node};
 use crate::ast::{Expr, FrameBound, FunctionBinding, WindowSpec};
 use uqa_core::{
     image_io::{AsyncImageInput, ImageIoError},
+    memory::ProductionControl,
     CancellationToken,
 };
 
@@ -27,10 +28,11 @@ pub(super) async fn needs_migration(
             ..
         } = expression
         {
-            FunctionBinding::legacy_serialized_dispatch_from_input(
+            let control = ProductionControl::new(input.memory, original, input.cancellation);
+            FunctionBinding::legacy_serialized_dispatch_with_work(
                 name,
                 binding.as_ref(),
-                original,
+                &control,
                 input,
             )
             .await?

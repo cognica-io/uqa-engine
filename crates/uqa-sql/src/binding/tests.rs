@@ -22,6 +22,7 @@ mod collations;
 mod empty_relations;
 mod repeated_query_binding;
 mod retained_sources;
+mod stored_dispatch;
 
 struct EmptyRoutineResolution;
 

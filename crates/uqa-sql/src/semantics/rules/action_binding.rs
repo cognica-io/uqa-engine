@@ -32,6 +32,7 @@ mod row_expansion;
 mod scope;
 #[cfg(test)]
 mod tests;
+pub(crate) use references::condition_plan_expression_references_whole_row;
 pub use references::{
     first_rule_row_reference_in_expr, first_rule_row_reference_in_select,
     first_rule_row_reference_in_statement, relation_rule_row_columns_with_control,

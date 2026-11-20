@@ -381,6 +381,65 @@ impl crate::expr::CatalogInputFunctions for DomainInputs {
 }
 
 #[test]
+fn stored_default_application_calls_the_catalog_input_once_and_keeps_the_canonical_datum() {
+    use crate::binding::bind_expression_plan_routines_for_storage_with_work;
+    use crate::plan::ExpressionPlan;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use uqa_core::{
+        image_io::ImageDecoder,
+        memory::{MemoryBudget, ProductionControl},
+        CancellationToken,
+    };
+
+    let crate::Statement::Select(mut select) = crate::compile("SELECT '{1,2}'::positive[]")
+        .unwrap()
+        .remove(0)
+    else {
+        unreachable!()
+    };
+    let source = select.projections.remove(0).expr;
+    let memory = MemoryBudget::new(1 << 20);
+    let token = CancellationToken::new();
+    let context = crate::binding::fixture::empty_binding_context();
+    let mut ordinary = ExpressionPlan::lower(source.clone());
+    crate::binding::bind_expression_plan_routines_for_storage(
+        &DomainInputs(AtomicUsize::new(0)),
+        &mut ordinary,
+        &[],
+        &context,
+        &crate::RowSchema::default(),
+    )
+    .unwrap();
+    let job = ImageDecoder::<_, SQLError>::new(&memory, &token, |mut reader| async move {
+        let mut work = reader.input();
+        let control = ProductionControl::new(work.memory, work.cancellation, work.cancellation);
+        let (plan, owner) = ExpressionPlan::lower_borrowed_with_work(
+            &source,
+            &|_: &str| false,
+            &control,
+            &mut work,
+        )
+        .await?;
+        let catalog = DomainInputs(AtomicUsize::new(0));
+        let (bound, _) = bind_expression_plan_routines_for_storage_with_work(
+            &catalog,
+            (plan, owner.as_ref()),
+            &[],
+            context.copy_with_control(&control)?,
+            &crate::RowSchema::default(),
+            &control,
+            &mut work,
+        )
+        .await?;
+        assert_eq!(bound.scalar, ordinary.scalar);
+        Ok(catalog.0.load(Ordering::SeqCst))
+    })
+    .unwrap();
+    assert_eq!(job.read(&mut std::io::empty()).unwrap(), 1);
+    assert_eq!(memory.used(), 0);
+}
+
+#[test]
 fn executable_input_constants_survive_query_and_command_analysis_once() {
     for sql in [
         "SELECT '{1,2}'::positive[]",

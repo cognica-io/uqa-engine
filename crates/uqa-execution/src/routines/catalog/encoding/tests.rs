@@ -51,6 +51,65 @@ fn fixture() -> (Definitions, RoleDefinitions) {
 }
 
 #[test]
+fn current_routine_catalog_retains_raw_header_fields_through_stored_capture() {
+    use uqa_core::{
+        memory::{MemoryBudget, ProductionControl},
+        CancellationToken,
+    };
+    use uqa_sql::{
+        ast::{RoutineConfigAction, RoutineTransformType},
+        routines::{
+            dependencies::RoutineDeclaration, RoutineBody, SQLUserFunction, StoredRoutineDefinition,
+        },
+    };
+    let (mut definitions, roles) = fixture();
+    let d = &mut definitions.get_mut("public.f").unwrap()[0];
+    let written = "형".repeat(32 << 10);
+    d.return_written_type = Some(written.clone());
+    d.config_actions = vec![RoutineConfigAction::FromCurrent {
+        name: "my.setting".into(),
+    }];
+    d.attribute_clauses.transform_types = vec![RoutineTransformType {
+        type_name: "public.example".into(),
+        written: written.clone(),
+    }];
+    let encoded = encode(definitions).unwrap();
+    let (mut reloaded, migrated) = decode(Some(&encoded), &roles, false).unwrap();
+    assert!(!migrated);
+    let d = reloaded.remove("public.f").unwrap().pop().unwrap();
+    let source = SQLUserFunction::new(d, RoutineBody::Source).shared();
+    let memory = MemoryBudget::new(1 << 20);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&memory, &token, &token);
+    let mut capture = StoredRoutineDefinition::new(source.clone(), &control).unwrap();
+    assert!(
+        capture
+            .declaration()
+            .return_written_type
+            .as_ref()
+            .unwrap()
+            .len()
+            <= 4096
+    );
+    assert!(capture.declaration().config_actions.is_empty());
+    while !capture.copy_next_field(&control).unwrap() {}
+    assert_eq!(
+        capture.declaration().return_written_type.as_ref().unwrap(),
+        &written
+    );
+    assert_eq!(
+        capture.declaration().config_actions,
+        source.def.config_actions
+    );
+    assert_eq!(
+        capture.declaration().attribute_clauses,
+        source.def.attribute_clauses
+    );
+    drop(capture);
+    assert_eq!(memory.used(), 0);
+}
+
+#[test]
 fn legacy_formats_preserve_revoked_owner_execute_and_default_public_execution() {
     let (definitions, roles) = fixture();
     for format in [0, 1] {

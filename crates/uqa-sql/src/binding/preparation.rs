@@ -22,7 +22,9 @@ mod membership;
 mod ownership;
 mod parameters;
 mod production;
+pub(crate) use production::bind_expression_plan_routines_for_storage_with_work;
 pub(in crate::binding) use production::bind_routine_parameter_references;
+pub(crate) use production::bind_routine_parameter_references_from;
 pub(crate) use production::bind_rule_inputs_owned;
 pub(in crate::binding) use production::retain_input_metadata_owned;
 pub use production::{
@@ -37,6 +39,7 @@ pub use production::{
 pub(in crate::binding) use production::{
     read_executable_inputs_owned, read_generic_explain_inputs_owned,
 };
+mod projections;
 mod queries;
 mod query_layouts;
 #[cfg(test)]
@@ -423,13 +426,14 @@ struct Preparation<'a, I = InputCatalogs<'a>, C = Option<SchemaExpressionContext
 }
 
 /// Inspect an existing scalar in its original row scope without rewriting it or executing catalog input functions. A condition retains unknown-literal metadata through ordinary Boolean input analysis.
-pub(crate) fn analyze_stored_scalar_with_control(
+pub(crate) async fn analyze_stored_scalar_with_work<W: crate::catalog::work::Work + Send>(
     routines: &dyn RoutineResolution,
     expression: &ScalarExpr,
     input: &RowSchema,
     binding: super::production::ControlledBindingContext<'_>,
     boolean_context: Option<&str>,
     control: &uqa_core::memory::ProductionControl<'_>,
+    work: &mut W,
 ) -> Result<Option<uqa_core::memory::Produced<ColumnType>>, SQLError> {
     let mut scope = SchemaScope::for_analysis_with_control(binding, control)?;
     let mut analysis = Preparation {
@@ -440,31 +444,44 @@ pub(crate) fn analyze_stored_scalar_with_control(
         bound_condition_queries: None,
     };
     let value = match boolean_context {
-        Some(context) => analysis.boolean_expression(expression, input, &[], context)?,
-        None => analysis.expression(expression, input, &[])?,
+        Some(context) => {
+            analysis
+                .boolean_expression_with_work(expression, input, &[], context, work)
+                .await?
+        }
+        None => {
+            analysis
+                .expression_with_work(expression, input, &[], work)
+                .await?
+        }
     };
     analysis
         .parameters
         .collations
-        .validate_expression(expression)?;
+        .validate_expression_with_work(expression, work)
+        .await?;
     control.check()?;
     value.ty.map(|ty| ty.into_produced(control)).transpose()
 }
 
 /// Borrow a captured condition and its nested queries; retain only analysis scratch and never apply recorded input rewrites.
-pub(crate) fn validate_stored_rule_condition_with_control(
+pub(crate) async fn validate_stored_rule_condition_with_work<
+    W: crate::catalog::work::Work + Send,
+>(
     routines: &dyn RoutineResolution,
     expression: &crate::plan::ExpressionPlan,
     input: &RowSchema,
     binding: super::production::ControlledBindingContext<'_>,
     whole_rows: [Option<crate::plan::OwnedScalarExpr>; 2],
     control: &uqa_core::memory::ProductionControl<'_>,
+    work: &mut W,
 ) -> Result<(), SQLError> {
     let mut scope = SchemaScope::for_analysis_with_control(binding, control)?;
     scope.scalar_binding = super::ScalarBindingMode::References;
     scope.preserve_syntax_shape = true;
     scope.stored_expression_outer = Some(input.clone());
     scope.stored_whole_rows = whole_rows;
+    let mut outputs = crate::production::Buffer::new(control);
     let mut analysis = Preparation {
         routines,
         scope: &mut scope,
@@ -473,14 +490,44 @@ pub(crate) fn validate_stored_rule_condition_with_control(
         bound_condition_queries: None,
     };
     for query in &expression.subqueries {
-        analysis.query(query, Some(input))?;
+        outputs.push(
+            Some(analysis.query_with_work(query, Some(input), work).await?),
+            control,
+        )?;
     }
-    analysis.boolean_expression(&expression.scalar, input, &expression.subqueries, "WHERE")?;
+    let queries = super::type_resolution::BoundConditionQueries {
+        plans: &expression.subqueries,
+        input,
+        schemas: Some(&outputs),
+    };
+    analysis.bound_condition_queries = Some(&queries);
+    analysis
+        .boolean_expression_with_work(
+            &expression.scalar,
+            input,
+            &expression.subqueries,
+            "WHERE",
+            work,
+        )
+        .await?;
     analysis
         .parameters
         .collations
-        .validate_expression(&expression.scalar)?;
+        .validate_expression_with_work(&expression.scalar, work)
+        .await?;
     control.check()?;
+    drop(analysis);
+    for row in scope.stored_whole_rows.into_iter().flatten() {
+        let mut input = crate::catalog::work::ReferenceWork { control, work };
+        crate::catalog::work::nested!(
+            W::MAY_SUSPEND,
+            control,
+            row.retire_from(control, &mut input)
+        )?;
+    }
+    for output in outputs.into_iter().flatten() {
+        crate::catalog::work::nested!(W::MAY_SUSPEND, control, output.retire_from(control, work))?;
+    }
     Ok(())
 }
 
@@ -623,13 +670,14 @@ pub(super) fn condition_metadata(
 }
 
 /// VALUES relation typing and collation selection share preparation's row-then-column order.
-pub(super) fn values_metadata(
+pub(super) async fn values_metadata_with_work<W: crate::catalog::work::Work + Send>(
     scope: &mut SchemaScope,
     routines: &dyn RoutineResolution,
     rows: &[Vec<ScalarExpr>],
     subqueries: &[QueryPlan],
     outer: Option<&RowSchema>,
     params: &[crate::SQLParam],
+    work: &mut W,
 ) -> Result<RowSchema, SQLError> {
     let mut analysis = Preparation {
         bound_condition_queries: None,
@@ -639,7 +687,8 @@ pub(super) fn values_metadata(
         schema_expression: (),
     };
     analysis
-        .values(rows, subqueries, outer)
+        .values_with_work(rows, subqueries, outer, work)
+        .await
         .and_then(|output| output.schema(&analysis.scope.control()))
 }
 
@@ -667,13 +716,14 @@ pub(super) fn set_metadata(
 }
 
 /// Ordinary query blocks retain the same original output observations through clause and key selection.
-pub(super) fn block_metadata(
+pub(super) async fn block_metadata<W: crate::catalog::work::Work + Send>(
     scope: &mut SchemaScope,
     routines: &dyn RoutineResolution,
     block: &crate::plan::QueryBlockPlan,
     source: &RowSchema,
     outer: Option<&RowSchema>,
     params: &[crate::SQLParam],
+    work: &mut W,
 ) -> Result<RowSchema, SQLError> {
     let mut analysis = Preparation {
         bound_condition_queries: None,
@@ -682,7 +732,9 @@ pub(super) fn block_metadata(
         scope,
         schema_expression: (),
     };
-    let output = analysis.block_with_source(block, source, outer, false)?;
+    let output = analysis
+        .block_with_source(block, source, outer, false, work)
+        .await?;
     analysis
         .scope
         .collations
@@ -833,8 +885,27 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
         subqueries: &[QueryPlan],
         context: &str,
     ) -> Result<ExpressionType, SQLError> {
+        crate::catalog::work::inline(self.boolean_expression_with_work(
+            expression,
+            input,
+            subqueries,
+            context,
+            &mut (),
+        ))
+    }
+
+    async fn boolean_expression_with_work<W: crate::catalog::work::Work + Send>(
+        &mut self,
+        expression: &ScalarExpr,
+        input: &RowSchema,
+        subqueries: &[QueryPlan],
+        context: &str,
+        work: &mut W,
+    ) -> Result<ExpressionType, SQLError> {
         let calls = self.set_calls();
-        let mut observed = self.expression(expression, input, subqueries)?;
+        let mut observed = self
+            .expression_with_work(expression, input, subqueries, work)
+            .await?;
         self.parameters
             .coerce_unknown(&mut observed, &ColumnType::Boolean)?;
         crate::type_resolution::boolean::require_argument_type(

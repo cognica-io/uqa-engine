@@ -7,6 +7,9 @@
 //! Fresh retained statements share their scalar editor and original identities across independent child tasks.
 
 use super::{command_from, query_from, source_from, Input, Result};
+use crate::plan::mutable::arenas::nodes::{input::Input as ArenaInput, Walker};
+use crate::plan::mutable::nodes::{local_source_from, transformation::source_children_from};
+use crate::plan::{QueryMetadataUpdate, ScalarQueryArena};
 use crate::{
     construction::{self, Read, Work},
     plan::{
@@ -24,12 +27,17 @@ use crate::{
     SQLError, ScalarExpr,
 };
 use std::future::{ready, Future};
+
+mod scope;
+pub(crate) use scope::ArenaEdit;
+use scope::{Flat, Mode, Scoped, SourcePass};
 use uqa_core::{
     image_io::AsyncImageInput,
     memory::{OwnedProductionControl, ProductionControl},
 };
 
-struct Native<'a, E, I> {
+struct Native<'a, E, I, M> {
+    mode: M,
     work: Work<'a>,
     retirement: Context,
     edit: Option<E>,
@@ -38,11 +46,11 @@ struct Native<'a, E, I> {
 enum Task<I> {
     Query(Prefix<MutableQueryPlan>),
     Command(Prefix<MutableCommandPlan>),
-    Source(Prefix<MutableSourcePlan>, Option<I>),
+    Source(Prefix<MutableSourcePlan>, Option<I>, SourcePass),
 }
 type TaskRead<'a, E, I> = Read<'a, Result<(Task<I>, E)>>;
 
-fn run<'a, E, I>(
+fn run<'a, E, I, M>(
     mut task: Task<I>,
     owner: OwnedProductionControl,
     work: Work<'a>,
@@ -51,20 +59,22 @@ fn run<'a, E, I>(
 where
     E: for<'w> ScalarEdit<Work<'w>, Identity = I> + Send + 'a,
     I: Copy + Send + 'a,
+    M: Mode<E> + 'a,
 {
     let admission = owner.clone();
     Ok(Read::new(admission.control(), async move {
         let retirement = match &task {
             Task::Query(value) => value.context(),
             Task::Command(value) => value.context(),
-            Task::Source(value, _) => value.context(),
+            Task::Source(value, ..) => value.context(),
         }
         .clone();
         let inline_identity = match &mut task {
-            Task::Source(_, identity) => identity.take(),
+            Task::Source(_, identity, _) => identity.take(),
             _ => None,
         };
         let mut input = Native {
+            mode: M::default(),
             work,
             retirement,
             edit: Some(edit),
@@ -74,43 +84,54 @@ where
         match &mut task {
             Task::Query(value) => {
                 let value = &mut **value;
-                Read::new(
-                    control,
-                    query_from(
-                        &mut value.query,
-                        value.memory.as_mut(),
-                        &control,
-                        &mut input,
-                    ),
-                )?
-                .await?;
+                let query = &mut value.query;
+                let memory = value.memory.as_mut();
+                if M::SCOPED {
+                    let mut walker = Walker {
+                        control: &control,
+                        input: &mut input,
+                    };
+                    Read::new(control, walker.query(query, memory))?.await?;
+                } else {
+                    Read::new(control, query_from(query, memory, &control, &mut input))?.await?;
+                }
             }
             Task::Command(value) => {
                 let value = &mut **value;
-                Read::new(
-                    control,
-                    command_from(
-                        &mut value.command,
-                        value.memory.as_mut(),
-                        &control,
-                        &mut input,
-                        true,
-                    ),
-                )?
-                .await?;
+                let command = &mut value.command;
+                let memory = value.memory.as_mut();
+                if M::SCOPED {
+                    let mut walker = Walker {
+                        control: &control,
+                        input: &mut input,
+                    };
+                    Read::new(control, walker.command(command, memory))?.await?;
+                } else {
+                    Read::new(
+                        control,
+                        command_from(command, memory, &control, &mut input, true),
+                    )?
+                    .await?;
+                }
             }
-            Task::Source(value, _) => {
+            Task::Source(value, _, pass) => {
                 let value = &mut **value;
-                Read::new(
-                    control,
-                    source_from(
-                        &mut value.source,
-                        value.memory.as_mut(),
-                        &control,
-                        &mut input,
-                    ),
-                )?
-                .await?;
+                let source = &mut value.source;
+                let memory = value.memory.as_mut();
+                let scan = match pass {
+                    SourcePass::Full => {
+                        Read::new(control, source_from(source, memory, &control, &mut input))?
+                    }
+                    SourcePass::Children => Read::new(
+                        control,
+                        source_children_from(source, memory, &control, &mut input),
+                    )?,
+                    SourcePass::Local => Read::new(
+                        control,
+                        local_source_from(source, memory, &control, &mut input),
+                    )?,
+                };
+                scan.await?;
             }
         }
         control.check()?;
@@ -121,11 +142,36 @@ where
     })?)
 }
 
-impl<'a, E, I> Native<'a, E, I>
+impl<'a, E, I, M> Native<'a, E, I, M>
 where
     E: for<'w> ScalarEdit<Work<'w>, Identity = I> + Send + 'a,
     I: Copy + Send + 'a,
+    M: Mode<E> + 'a,
 {
+    async fn source_part<'v>(
+        &mut self,
+        value: &'v mut SourcePlan,
+        memory: Option<&'v mut Option<RewriteMemory>>,
+        control: &ProductionControl<'_>,
+        pass: SourcePass,
+    ) -> Result<()> {
+        // JOIN ON is inline in SourcePlan; its identity must travel with the detached source.
+        // Other scalar roots remain in their original boxes or vector allocations.
+        let identity = match value {
+            SourcePlan::Join { on: Some(on), .. } => Some(<E as ScalarEditIdentity>::identity(on)),
+            _ => None,
+        };
+        let mut slot = Slot::<MutableSourcePlan>::new(value, memory);
+        let task = Task::Source(self.retirement.retain(slot.take()), identity, pass);
+        let child = self.child(task, control)?;
+        let (task, edit) = child.await?;
+        self.edit = Some(edit);
+        let Task::Source(value, ..) = task else {
+            unreachable!("source scalar traversal")
+        };
+        slot.restore(value.take());
+        Ok(())
+    }
     fn child(
         &mut self,
         task: Task<I>,
@@ -139,16 +185,19 @@ where
             .expect("parent transfers its editor to the child");
         Ok(Read::new(*control, async move {
             let output =
-                work.submit(move |work| async move { run(task, owner, work, edit)?.await })?;
+                work.submit(
+                    move |work| async move { run::<_, _, M>(task, owner, work, edit)?.await },
+                )?;
             construction::receive(output).await
         })?)
     }
 }
 
-impl<'a, E, I> roots::Input for Native<'a, E, I>
+impl<'a, E, I, M> roots::Input for Native<'a, E, I, M>
 where
     E: for<'w> ScalarEdit<Work<'w>, Identity = I> + Send + 'a,
     I: Copy + Send + 'a,
+    M: Mode<E> + 'a,
 {
     type Work = Work<'a>;
     fn work(&mut self) -> &mut Self::Work {
@@ -165,25 +214,26 @@ where
             .take()
             .unwrap_or_else(|| <E as ScalarEditIdentity>::identity(expression));
         let mut slot = Slot::<OwnedScalarExpr>::new(expression, memory);
-        let value = slot
-            .take()
-            .edit_from::<Work<'a>, E>(
-                identity,
-                control,
-                &mut self.work,
-                self.edit
-                    .as_mut()
-                    .expect("active traversal owns its editor"),
-            )
-            .await?;
+        let value = slot.take();
+        let mut edit = self.edit.take().expect("active traversal owns its editor");
+        let owner = control.capture();
+        let output = self.work.submit(move |mut work| async move {
+            let value = value
+                .edit_from(identity, &owner.control(), &mut work, &mut edit)
+                .await?;
+            Ok::<_, SQLError>((value, edit))
+        })?;
+        let (value, edit) = construction::receive(output).await?;
+        self.edit = Some(edit);
         slot.restore(value);
         Ok(())
     }
 }
-impl<'a, E, I> Input for Native<'a, E, I>
+impl<'a, E, I, M> Input for Native<'a, E, I, M>
 where
     E: for<'w> ScalarEdit<Work<'w>, Identity = I> + Send + 'a,
     I: Copy + Send + 'a,
+    M: Mode<E> + 'a,
 {
     fn query<'v>(
         &mut self,
@@ -210,24 +260,16 @@ where
         memory: Option<&'v mut Option<RewriteMemory>>,
         control: &ProductionControl<'_>,
     ) -> Result<impl Future<Output = Result<()>> + Send> {
-        // JOIN ON is inline in SourcePlan; its identity must travel with the detached source.
-        // Other scalar roots remain in their original boxes or vector allocations.
-        let identity = match value {
-            SourcePlan::Join { on: Some(on), .. } => Some(<E as ScalarEditIdentity>::identity(on)),
-            _ => None,
-        };
-        let mut slot = Slot::<MutableSourcePlan>::new(value, memory);
-        let task = Task::Source(self.retirement.retain(slot.take()), identity);
-        let child = self.child(task, control)?;
-        Ok(async move {
-            let (task, edit) = child.await?;
-            self.edit = Some(edit);
-            let Task::Source(value, _) = task else {
-                unreachable!("source scalar traversal")
-            };
-            slot.restore(value.take());
-            Ok(())
-        })
+        Ok(self.source_part(
+            value,
+            memory,
+            control,
+            if M::SCOPED {
+                SourcePass::Children
+            } else {
+                SourcePass::Full
+            },
+        ))
     }
     fn command<'v>(
         &mut self,
@@ -261,15 +303,17 @@ where
 }
 
 impl Prefix<MutableExecutablePlan> {
-    pub(in crate::plan) async fn edit_scalars_from_input<E, I>(
+    async fn edit_with<E, I, M, W>(
         self,
         edit: E,
         control: &ProductionControl<'_>,
-        input: &mut AsyncImageInput<'_>,
+        input: &mut W,
     ) -> Result<(Self, E)>
     where
         E: for<'w> ScalarEdit<Work<'w>, Identity = I> + Send,
         I: Copy + Send,
+        M: Mode<E>,
+        W: crate::catalog::work::Work + Send,
     {
         control.check()?;
         input.checkpoint().await?;
@@ -282,7 +326,7 @@ impl Prefix<MutableExecutablePlan> {
         let owner = control.capture();
         let output = driver
             .work()
-            .submit(move |work| async move { run(task, owner, work, edit)?.await })?;
+            .submit(move |work| async move { run::<_, _, M>(task, owner, work, edit)?.await })?;
         while driver.advance().await? {
             input.checkpoint().await?;
         }
@@ -294,5 +338,32 @@ impl Prefix<MutableExecutablePlan> {
             Task::Source(..) => unreachable!("executable binding root"),
         };
         Ok((plan, edit))
+    }
+
+    pub(in crate::plan) async fn edit_scalars_from_input<E, I>(
+        self,
+        edit: E,
+        control: &ProductionControl<'_>,
+        input: &mut AsyncImageInput<'_>,
+    ) -> Result<(Self, E)>
+    where
+        E: for<'w> ScalarEdit<Work<'w>, Identity = I> + Send,
+        I: Copy + Send,
+    {
+        self.edit_with::<_, _, Flat, _>(edit, control, input).await
+    }
+
+    pub(in crate::plan) async fn edit_stored_scalars_from<E, I>(
+        self,
+        edit: E,
+        control: &ProductionControl<'_>,
+        input: &mut (impl crate::catalog::work::Work + Send),
+    ) -> Result<(Self, E)>
+    where
+        E: ArenaEdit + for<'w> ScalarEdit<Work<'w>, Identity = I> + Send,
+        I: Copy + Send,
+    {
+        self.edit_with::<_, _, Scoped, _>(edit, control, input)
+            .await
     }
 }

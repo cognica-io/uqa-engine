@@ -19,8 +19,24 @@ use uqa_core::{
     RelationIdentity,
 };
 
+/// Run nested input on the caller's stack for inline work and in an admitted frame when it can suspend.
+macro_rules! nested {
+    ($suspend:expr, $control:expr, $future:expr) => {{
+        if $suspend {
+            let control = $control.capture();
+            $crate::construction::retain_with(control.control(), || $future)?.await
+        } else {
+            $crate::catalog::work::inline($future)
+        }
+    }};
+}
+pub(crate) use nested;
+
 /// Schedule borrowed catalog validation and text construction through the invoking operation.
 pub trait Work {
+    /// An inline caller can finish a selected field on its stack. Other callers retain that field across checkpoints.
+    const MAY_SUSPEND: bool = true;
+
     fn checkpoint(&mut self) -> impl Future<Output = Result<(), ImageIoError>> + Send;
 
     fn text(
@@ -30,7 +46,75 @@ pub trait Work {
     ) -> impl Future<Output = Result<Produced<String>, SQLError>> + Send;
 }
 
+/// Work checkpoints for a catalog operation that already owns its typed input.
+pub struct CatalogSteps(());
+
+impl CatalogSteps {
+    pub(crate) fn read<'a, T, F>(
+        control: &ProductionControl<'_>,
+        create: impl FnOnce(Self) -> F,
+    ) -> Result<crate::construction::Read<'a, Result<T, SQLError>>, SQLError>
+    where
+        F: Future<Output = Result<T, SQLError>> + Send + 'a,
+    {
+        control.check()?;
+        Ok(crate::construction::Read::with_constructor(
+            *control,
+            || create(Self(())),
+        )?)
+    }
+}
+
+impl Work for CatalogSteps {
+    async fn checkpoint(&mut self) -> Result<(), ImageIoError> {
+        crate::construction::suspend().await;
+        Ok(())
+    }
+
+    async fn text(
+        &mut self,
+        source: &str,
+        control: &ProductionControl<'_>,
+    ) -> Result<Produced<String>, SQLError> {
+        copy_text(self, source, control).await
+    }
+}
+
+/// An admitted catalog predicate on immutable native input. Each advance polls only its original validation and releases that input on completion or error.
+pub struct CatalogValidation(crate::construction::Read<'static, Result<(), SQLError>>);
+
+impl CatalogValidation {
+    pub fn new<F>(
+        control: &ProductionControl<'_>,
+        create: impl FnOnce(CatalogSteps) -> F,
+    ) -> Result<Self, SQLError>
+    where
+        F: Future<Output = Result<(), SQLError>> + Send + 'static,
+    {
+        Ok(Self(CatalogSteps::read(control, create)?))
+    }
+
+    pub fn advance(
+        mut self,
+        control: &ProductionControl<'_>,
+        steps: usize,
+    ) -> Result<Option<Self>, SQLError> {
+        if steps == 0 {
+            return Err(SQLError::Internal(
+                "catalog validation requires a nonzero work window".into(),
+            ));
+        }
+        Ok(self
+            .0
+            .advance_window(control, steps)?
+            .is_none()
+            .then_some(self))
+    }
+}
+
 impl Work for () {
+    const MAY_SUSPEND: bool = false;
+
     async fn checkpoint(&mut self) -> Result<(), ImageIoError> {
         Ok(())
     }
@@ -88,17 +172,36 @@ pub(crate) async fn text_parts<W: Work + Send>(
     Ok(value.finish()?)
 }
 
-pub(crate) async fn compare_text<W: Work>(
+pub(crate) fn text_chunks<'a, 'b>(
+    left: &'a str,
+    right: &'b str,
+) -> impl Iterator<Item = (&'a [u8], &'b [u8])> {
+    byte_chunks(left.as_bytes(), right.as_bytes())
+}
+
+fn byte_chunks<'a, 'b>(
+    left: &'a [u8],
+    right: &'b [u8],
+) -> impl Iterator<Item = (&'a [u8], &'b [u8])> {
+    left.chunks(4096).zip(right.chunks(4096))
+}
+
+pub(crate) fn compare_text<'a, W: Work>(
+    work: &'a mut W,
+    left: &'a str,
+    right: &'a str,
+    control: &'a ProductionControl<'a>,
+) -> impl Future<Output = Result<Ordering, SQLError>> + 'a {
+    compare_bytes(work, left.as_bytes(), right.as_bytes(), control)
+}
+
+pub(crate) async fn compare_bytes<W: Work>(
     work: &mut W,
-    left: &str,
-    right: &str,
+    left: &[u8],
+    right: &[u8],
     control: &ProductionControl<'_>,
 ) -> Result<std::cmp::Ordering, SQLError> {
-    for (left, right) in left
-        .as_bytes()
-        .chunks(4096)
-        .zip(right.as_bytes().chunks(4096))
-    {
+    for (left, right) in byte_chunks(left, right) {
         control.check()?;
         work.checkpoint().await?;
         control.check()?;
@@ -134,6 +237,11 @@ pub(crate) fn inline<F: Future>(future: F) -> F::Output {
         Poll::Ready(value) => value,
         Poll::Pending => unreachable!("inline catalog work never suspends"),
     }
+}
+
+/// Construct only the selected inline future on this frame so unrelated fields do not grow the enclosing traversal's stack.
+pub(crate) fn inline_with<F: Future>(construct: impl FnOnce() -> F) -> F::Output {
+    inline(construct())
 }
 
 pub(crate) async fn reference<'a, W: Work + Send>(
@@ -176,11 +284,72 @@ impl<W: Work + Send> ReferenceWork<'_, '_, W> {
     }
 }
 
+impl<W: Work + Send> uqa_core::ValueInputWork for ReferenceWork<'_, '_, W> {
+    type Error = SQLError;
+    async fn checkpoint(&mut self) -> Result<(), Self::Error> {
+        ReferenceWork::checkpoint(self).await
+    }
+}
+
 impl<W: Work + Send> uqa_core::RelationReferenceWork for ReferenceWork<'_, '_, W> {
     type Error = SQLError;
 
     async fn checkpoint(&mut self) -> Result<(), SQLError> {
         ReferenceWork::checkpoint(self).await
+    }
+}
+
+impl<W: Work + Send> crate::ast::ColumnTypeInputWork for ReferenceWork<'_, '_, W> {
+    type Error = SQLError;
+
+    async fn checkpoint(&mut self) -> Result<(), SQLError> {
+        Ok(self.work.checkpoint().await?)
+    }
+
+    async fn text(
+        &mut self,
+        source: &str,
+        control: &ProductionControl<'_>,
+    ) -> Result<Produced<String>, SQLError> {
+        self.work.text(source, control).await
+    }
+}
+
+impl<W: Work + Send> uqa_core::ValueCopyWork for ReferenceWork<'_, '_, W> {
+    async fn checkpoint(&mut self) -> Result<(), uqa_core::ValueRetentionError> {
+        Ok(self.work.checkpoint().await?)
+    }
+}
+
+impl<W: Work + Send> crate::plan::ScalarInputWork for ReferenceWork<'_, '_, W> {
+    type Error = SQLError;
+
+    async fn checkpoint(&mut self) -> Result<(), SQLError> {
+        ReferenceWork::checkpoint(self).await
+    }
+
+    async fn text(
+        &mut self,
+        value: &str,
+        control: &ProductionControl<'_>,
+    ) -> Result<Produced<String>, SQLError> {
+        self.work.text(value, control).await
+    }
+
+    async fn ty(
+        &mut self,
+        value: &crate::ColumnType,
+        control: &ProductionControl<'_>,
+    ) -> Result<Produced<crate::ColumnType>, SQLError> {
+        value.clone_with_input_work(control, self).await
+    }
+
+    async fn value(
+        &mut self,
+        value: &uqa_core::Value,
+        control: &ProductionControl<'_>,
+    ) -> Result<Produced<uqa_core::Value>, SQLError> {
+        Ok(value.clone_from_input(control, self).await?)
     }
 }
 
@@ -204,6 +373,43 @@ impl<Q: Borrow<RelationIdentity> + Sync, W: Work + Send> MapKeyInput<Q, &Relatio
             compare_text(self.work, &query.name, &stored.name, self.control).await
         } else {
             Ok(schema)
+        }
+    }
+}
+
+impl<Q: Borrow<str> + Sync + ?Sized, W: Work + Send> MapKeyInput<Q, &str>
+    for ReferenceWork<'_, '_, W>
+{
+    type Error = SQLError;
+
+    async fn checkpoint(&mut self) -> Result<(), SQLError> {
+        Self::checkpoint(self).await
+    }
+
+    async fn compare(&mut self, query: &Q, stored: &&str) -> Result<Ordering, SQLError> {
+        compare_text(self.work, query.borrow(), stored, self.control).await
+    }
+}
+
+impl<'q, 's, W: Work + Send> MapKeyInput<([u8; 16], &'q str), ([u8; 16], &'s str)>
+    for ReferenceWork<'_, '_, W>
+{
+    type Error = SQLError;
+
+    async fn checkpoint(&mut self) -> Result<(), SQLError> {
+        Self::checkpoint(self).await
+    }
+
+    async fn compare(
+        &mut self,
+        query: &([u8; 16], &'q str),
+        stored: &([u8; 16], &'s str),
+    ) -> Result<Ordering, SQLError> {
+        let table = query.0.cmp(&stored.0);
+        if table.is_eq() {
+            compare_text(self.work, query.1, stored.1, self.control).await
+        } else {
+            Ok(table)
         }
     }
 }

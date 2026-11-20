@@ -54,10 +54,26 @@ impl ViewRewriteDefinitionRef<'_> {
         scope: crate::binding::production::ControlledBindingContext<'_>,
         control: &ProductionControl<'_>,
     ) -> Result<(), SQLError> {
+        crate::catalog::work::inline(self.validate_function_calls_with_work(
+            routines,
+            scope,
+            control,
+            &mut (),
+        ))
+    }
+
+    pub async fn validate_function_calls_with_work(
+        self,
+        routines: &dyn crate::routines::RoutineResolution,
+        scope: crate::binding::production::ControlledBindingContext<'_>,
+        control: &ProductionControl<'_>,
+        work: &mut (impl crate::catalog::CatalogWork + Send),
+    ) -> Result<(), SQLError> {
         let mut needs_binding = false;
-        crate::binding::view_dependencies::visit_stored_runtime_calls(
+        crate::binding::view_dependencies::visit_stored_runtime_calls_from(
             crate::plan::PlanRef::Query(self.query),
             control,
+            work,
             &mut |name, _| {
                 if !needs_binding {
                     let name = crate::semantics::builtin_function_dispatch_name_with_control(
@@ -69,7 +85,8 @@ impl ViewRewriteDefinitionRef<'_> {
                 }
                 Ok(())
             },
-        )?;
+        )
+        .await?;
         if needs_binding {
             crate::binding::production::validate_stored_view_calls(
                 routines, self.query, scope, control,

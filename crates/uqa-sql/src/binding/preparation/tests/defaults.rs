@@ -256,3 +256,211 @@ fn default_membership_inputs_finish_before_enclosing_call_replacement() {
         }
     }
 }
+
+#[test]
+fn wide_routine_defaults_keep_the_first_query_window_or_name_error() {
+    let row = std::iter::repeat_n("(1)", 1024)
+        .collect::<Vec<_>>()
+        .join(",");
+    let order = std::iter::repeat_n("1", 1024).collect::<Vec<_>>().join(",");
+    let query = format!("(SELECT v FROM (VALUES {row}) AS s(v))");
+    let window = format!("row_number() OVER (ORDER BY {order})");
+    for (first, last, state, diagnostic) in [
+        (
+            query.as_str(),
+            "absent",
+            "0A000",
+            "cannot use subquery in DEFAULT expression",
+        ),
+        (
+            window.as_str(),
+            "absent",
+            "42P20",
+            "window functions are not allowed in DEFAULT expressions",
+        ),
+        (
+            "absent",
+            query.as_str(),
+            "42703",
+            "column \"absent\" does not exist",
+        ),
+        (
+            "absent",
+            window.as_str(),
+            "42703",
+            "column \"absent\" does not exist",
+        ),
+    ] {
+        let crate::Statement::CreateFunction(definition) = crate::compile(&format!(
+            "CREATE FUNCTION f(v bigint[] DEFAULT ARRAY[{first},{last}]) RETURNS bigint[] LANGUAGE sql AS 'SELECT v'"
+        )).unwrap().remove(0) else { unreachable!() };
+        let original = crate::routines::SQLUserFunction::new(
+            *definition,
+            crate::routines::RoutineBody::Source,
+        )
+        .shared();
+        let token = uqa_core::CancellationToken::new();
+        let memory = uqa_core::memory::MemoryBudget::new(16 << 20);
+        let control = uqa_core::memory::ProductionControl::new(&memory, &token, &token);
+        let mut capture =
+            crate::routines::StoredRoutineDefinition::new(original, &control).unwrap();
+        while !capture.copy_next_field(&control).unwrap() {}
+        let (definition, _) = capture.into_definition(&control).unwrap();
+        let mut plan = ExpressionPlan::lower(definition.params[0].default.clone().unwrap());
+        let error = analyze_default_inputs(
+            &NoRoutines,
+            &|_: &str| false,
+            &Aliases,
+            &mut plan,
+            &assignment_context(),
+        )
+        .unwrap_err();
+        assert_eq!(
+            (error.sqlstate(), error.to_string()),
+            (Some(state), diagnostic.to_owned())
+        );
+        drop(definition);
+        assert_eq!(memory.used(), 0);
+    }
+}
+
+fn observe_stored_default(
+    text: &str,
+    steps: usize,
+    cancel: bool,
+    limit: usize,
+) -> (
+    Result<(crate::ast::Expr, Option<ColumnType>), SQLError>,
+    usize,
+) {
+    use crate::binding::{
+        bind_expression_plan_routines_for_storage_with_work, stored_routines::StoredCallOrigin,
+        syntax_sites::expression_syntax_sites_with_work,
+    };
+    use uqa_core::{
+        image_io::{ImageDecodeWindow, ImageDecoder},
+        memory::{MemoryBudget, ProductionControl},
+        CancellationToken,
+    };
+    let crate::Statement::CreateFunction(mut definition) = crate::compile(&format!(
+        "CREATE FUNCTION f(v integer DEFAULT {text}) RETURNS integer LANGUAGE sql AS 'SELECT v'"
+    ))
+    .unwrap()
+    .remove(0) else {
+        unreachable!()
+    };
+    let mut syntax = definition.params[0].default.take().unwrap();
+    let mut ordinary_syntax = syntax.clone();
+    let original = ExpressionPlan::lower(syntax.clone());
+    let diagnostic = text.to_owned();
+    let memory = MemoryBudget::new(32 << 20);
+    let native = MemoryBudget::new(limit);
+    let native_input = native.clone();
+    let token = CancellationToken::new();
+    let original_token = CancellationToken::new();
+    let mut decoder = ImageDecoder::new(&memory, &token, move |mut reader| async move {
+        let mut input = reader.input();
+        let control = ProductionControl::new(&native_input, &original_token, input.cancellation);
+        let (expression, workspace) = ExpressionPlan::lower_borrowed_with_work(
+            &syntax,
+            &|_: &str| false,
+            &control,
+            &mut input,
+        )
+        .await?;
+        let context = assignment_context();
+        let (bound, ty) = bind_expression_plan_routines_for_storage_with_work(
+            &NoRoutines,
+            (expression, workspace.as_ref()),
+            &[],
+            context.copy_with_control(&control)?,
+            &RowSchema::default(),
+            &control,
+            &mut input,
+        )
+        .await?;
+        let mut ordinary = original.clone();
+        let ordinary_ty = crate::binding::bind_expression_plan_routines_for_storage(
+            &NoRoutines,
+            &mut ordinary,
+            &[],
+            &context,
+            &RowSchema::default(),
+        )?;
+        assert_eq!(
+            bound.scalar, ordinary.scalar,
+            "retained routine input and ordinary binding for {diagnostic}"
+        );
+        let ordinary_sites =
+            crate::binding::syntax_sites::expression_syntax_sites(&original, &ordinary)?;
+        let ordinary_changed = StoredCallOrigin::Persisted
+            .bind_expression_sites(&mut ordinary_syntax, &ordinary_sites)?;
+        let sites =
+            expression_syntax_sites_with_work(&original, &bound, &control, &mut input).await?;
+        let edited = StoredCallOrigin::Persisted
+            .bind_expression_sites_with_work(&mut syntax, &sites, &control, &mut input)
+            .await?;
+        assert_eq!(((*edited), &syntax), (ordinary_changed, &ordinary_syntax));
+        let ty = ty.map(|ty| ty.into_parts().0);
+        assert_eq!(ty, ordinary_ty);
+        Ok((syntax, ty))
+    })
+    .unwrap();
+    let mut calls = 0;
+    let result = loop {
+        calls += 1;
+        if cancel && calls == 8 {
+            token.cancel();
+        }
+        match decoder.advance(&mut std::io::empty(), ImageDecodeWindow { bytes: 1, steps }) {
+            Ok(Some(result)) => break Ok(result),
+            Ok(None) => (),
+            Err(error) => break Err(error),
+        }
+    };
+    drop(decoder);
+    assert_eq!((native.used(), memory.used()), (0, 0));
+    if limit == 16 << 10 {
+        eprintln!(
+            "simple default {text} used {} native bytes; {calls} work windows",
+            native.peak()
+        );
+    }
+    (result, calls)
+}
+
+#[test]
+fn stored_scalar_analysis_pairs_the_original_syntax_in_admitted_work_windows() {
+    observe_stored_default("1", 1, false, 16 << 10).0.unwrap();
+    for text in [
+        "abs(-1)",
+        "random(max => 2::bigint, min => 1)",
+        "ARRAY[40::bigint, 2]",
+        "1 IN (1, 2, 3)",
+        "'1' IN (1::bigint, 2)",
+        "CASE WHEN false THEN 1::bigint ELSE 2 END",
+        "2 NOT IN (1, 2::bigint, 3)",
+        "(SELECT 2) IN (1, 2)",
+        "CAST('42' AS bigint)",
+        "(SELECT ROW(1, 2)) IN (ROW(1, 2), ROW(3, 4))",
+    ] {
+        observe_stored_default(text, 1, false, 32 << 20)
+            .0
+            .unwrap_or_else(|error| panic!("{text}: {error}"));
+    }
+    let small = observe_stored_default("ARRAY[1]", 1, false, 32 << 20);
+    small.0.unwrap();
+    let wide = format!("ARRAY[{}]", vec!["1"; 4096].join(","));
+    let single = observe_stored_default(&wide, 1, false, 32 << 20);
+    single.0.unwrap();
+    let batched = observe_stored_default(&wide, 32, false, 32 << 20);
+    batched.0.unwrap();
+    assert!(single.1 > small.1 + 4096 && batched.1 < single.1 / 8);
+    let cancelled = observe_stored_default(&wide, 1, true, 32 << 20);
+    assert_eq!(cancelled.0.unwrap_err().sqlstate(), Some("57014"));
+    assert_eq!(cancelled.1, 8);
+    let error = observe_stored_default("ARRAY[missing, $1]", 1, false, 32 << 20)
+        .0
+        .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("42703"));
+}

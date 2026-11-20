@@ -13,7 +13,7 @@ use super::{
 };
 use crate::{
     ast::{FromClause, SelectStmt},
-    construction::{retain, Read},
+    construction::{retain_with, Read},
     plan::{
         retirement::construction::Prefix, AggregateClassifier, JoinExecutionStrategy, QueryPlan,
         SourcePlan,
@@ -87,12 +87,15 @@ pub(super) async fn construct<'s, 'c, I: Input<'s, 'c>>(
 ) -> Result<Prefix<SourcePlan>> {
     copying.check()?;
     match source {
-        FromClause::Join { .. } => retain(copying.control, join(source, copying, input))?.await,
+        FromClause::Join { .. } => {
+            retain_with(copying.control, || join(source, copying, input))?.await
+        }
         FromClause::Subquery { .. } => {
-            retain(copying.control, subquery(source, copying, input))?.await
+            retain_with(copying.control, || subquery(source, copying, input))?.await
         }
         _ => {
-            let source = retain(copying.control, leaf::construct(source, copying, input))?.await?;
+            let source =
+                retain_with(copying.control, || leaf::construct(source, copying, input))?.await?;
             Ok(copying.retain_plan(source.take()))
         }
     }

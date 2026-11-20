@@ -36,32 +36,27 @@ impl ColumnType {
         control: &ProductionControl<'_>,
         work: &mut W,
     ) -> Result<Produced<String>, W::Error> {
-        let mut leaf = self;
-        let mut dimensions = 0;
-        loop {
-            control.check()?;
-            work.checkpoint().await?;
-            control.check()?;
-            match leaf {
-                Self::Array(element) => {
-                    leaf = element;
-                    dimensions += 1;
-                }
-                _ => break,
-            }
-        }
+        let (leaf, dimensions) = self.array_shape_with_work(control, work).await?;
+        work.position(control).await?;
         let scalar = match leaf {
             Self::Named(name) => work.text(name, control).await?,
             scalar => control.format(format_args!("{}", CatalogName(scalar)))?,
         };
+        Self::array_name_with_work(scalar, dimensions, control, work).await
+    }
+
+    pub(crate) async fn array_name_with_work<W: ColumnTypeInputWork>(
+        scalar: Produced<String>,
+        dimensions: usize,
+        control: &ProductionControl<'_>,
+        work: &mut W,
+    ) -> Result<Produced<String>, W::Error> {
         if dimensions == 0 {
             return Ok(scalar);
         }
         let mut output = ProductionString::from_produced(scalar, *control)?;
         for _ in 0..dimensions {
-            control.check()?;
-            work.checkpoint().await?;
-            control.check()?;
+            work.position(control).await?;
             output.push_str("[]")?;
         }
         Ok(output.finish()?)

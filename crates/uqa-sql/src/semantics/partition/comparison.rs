@@ -17,6 +17,24 @@ pub(super) fn range_points(
     catalog: Option<&dyn SQLValueCatalog>,
     control: &ProductionControl<'_>,
 ) -> Result<Ordering, SQLError> {
+    crate::catalog::work::inline(range_points_with_work(
+        left,
+        right,
+        types,
+        &|| catalog,
+        control,
+        &mut (),
+    ))
+}
+
+pub(super) async fn range_points_with_work<'a>(
+    left: &[PartitionRangeDatum],
+    right: &[PartitionRangeDatum],
+    types: &[ColumnType],
+    catalog: &impl Fn() -> Option<&'a dyn SQLValueCatalog>,
+    control: &ProductionControl<'_>,
+    work: &mut (impl crate::catalog::CatalogWork + Send),
+) -> Result<Ordering, SQLError> {
     control.check()?;
     if left.len() != right.len() || left.len() != types.len() {
         return Err(SQLError::Internal(
@@ -24,6 +42,7 @@ pub(super) fn range_points(
         ));
     }
     for ((left, right), ty) in left.iter().zip(right).zip(types) {
+        work.checkpoint().await?;
         control.check()?;
         let ordering = match (left, right) {
             (PartitionRangeDatum::MinValue, PartitionRangeDatum::MinValue)
@@ -40,7 +59,7 @@ pub(super) fn range_points(
                     super::stored_datum(right)?,
                     Some(ty),
                     control,
-                    catalog,
+                    catalog(),
                     None,
                 )?
             }

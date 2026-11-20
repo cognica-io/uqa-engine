@@ -8,19 +8,25 @@
 
 use crate::catalog::{relation_names::RelationNameCatalog, CatalogReadView};
 use uqa_core::{memory::ProductionControl, RelationIdentity};
-use uqa_sql::{catalog::events::native::NativeEventCatalog, SQLError};
+use uqa_sql::{
+    catalog::{events::native::NativeEventCatalog, CatalogWork},
+    SQLError,
+};
 
-pub(super) fn validate(
+pub(super) async fn validate_with_work<W: CatalogWork + Send>(
     catalog: &CatalogReadView,
     control: &ProductionControl<'_>,
+    work: &mut W,
 ) -> Result<(), SQLError> {
     let definitions = &catalog.snapshot().definitions;
-    uqa_sql::catalog::events::native::validate(
+    uqa_sql::catalog::events::native::validate_with_work(
         &definitions.triggers,
         &definitions.rules,
         &Events(catalog),
         control,
+        work,
     )
+    .await
 }
 
 struct Events<'a>(&'a CatalogReadView);

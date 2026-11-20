@@ -10,6 +10,18 @@ use uqa_core::{memory::MemoryBudget, CancellationToken};
 
 struct Types;
 
+impl crate::catalog::regrole_dependencies::StoredRegroleResolver for Types {
+    fn resolve_stored_regrole(&self, role: &str) -> Result<Option<i64>, SQLError> {
+        match role {
+            "reader" => Ok(Some(10)),
+            _ => Err(SQLError::Routine {
+                sqlstate: "42704".into(),
+                message: format!("role \"{role}\" does not exist"),
+            }),
+        }
+    }
+}
+
 impl RoutineTypeCatalog for Types {
     fn try_describe_table(&self, _: &str) -> Result<Option<Vec<ColumnDef>>, String> {
         panic!("declaration validation must not prepare a table")
@@ -58,6 +70,67 @@ fn outcome(value: Result<(), SQLError>) -> serde_json::Value {
             serde_json::json!({"sqlstate": error.sqlstate(), "message": error.to_string()})
         }
     }
+}
+
+#[test]
+fn captured_signature_checks_large_defaults_before_the_declared_result_and_releases_input() {
+    use crate::ast::Expr;
+    use uqa_core::{
+        image_io::{ImageDecodeWindow, ImageDecoder},
+        Value,
+    };
+    let mut counts = Vec::new();
+    for width in [2, 4096] {
+        let mut definition = declaration(
+            "CREATE FUNCTION f(a integer[] DEFAULT ARRAY[1, 'missing'::regrole]) RETURNS anyelement LANGUAGE sql AS 'SELECT 1'",
+        );
+        let Some(Expr::Array(items)) = &mut definition.params[0].default else {
+            panic!("stored array default")
+        };
+        let missing = items.pop().unwrap();
+        items.resize(width - 1, Expr::Literal(Value::Int(1)));
+        items.push(missing);
+        let memory = MemoryBudget::new(64 << 10);
+        let scratch = MemoryBudget::new(1 << 20);
+        let token = CancellationToken::new();
+        let native = memory.clone();
+        let original = token.clone();
+        let mut reader = ImageDecoder::new(&scratch, &token, |mut reader| async move {
+            let mut input = reader.input();
+            let control = ProductionControl::new(&native, &original, input.cancellation);
+            super::super::validate_stored_routine_signature_from(
+                &Types,
+                &definition,
+                &control,
+                &mut input,
+            )
+            .await
+        })
+        .unwrap();
+        let mut calls = 0;
+        loop {
+            calls += 1;
+            match reader.advance(
+                &mut std::io::empty(),
+                ImageDecodeWindow {
+                    bytes: 1,
+                    steps: 16,
+                },
+            ) {
+                Ok(None) => assert!(calls < 32_768),
+                Ok(Some(_)) => panic!("missing role was accepted"),
+                Err(error) => {
+                    assert_eq!(error.sqlstate(), Some("42704"));
+                    assert_eq!(error.to_string(), "role \"missing\" does not exist");
+                    break;
+                }
+            }
+        }
+        drop(reader);
+        assert_eq!((memory.used(), scratch.used()), (0, 0));
+        counts.push(calls);
+    }
+    assert!(counts[1] > counts[0] + 200, "{counts:?}");
 }
 
 #[test]

@@ -186,6 +186,33 @@ fn read_inputs_owned(
     })
 }
 
+pub(crate) async fn bind_routine_parameter_references_from(
+    routines: &dyn RoutineResolution,
+    plan: crate::plan::RetainedExecutablePlan,
+    params: &[SQLParam],
+    binding: ControlledBindingContext<'_>,
+    parameters: &RoutineParameterScope,
+    control: &ProductionControl<'_>,
+    input: &mut uqa_core::image_io::AsyncImageInput<'_>,
+) -> Result<crate::plan::RetainedExecutablePlan, SQLError> {
+    let scope = SchemaScope::for_analysis_with_control(binding, control)?;
+    let references = routine_parameter_references_with_work(
+        routines,
+        plan.as_plan_ref(),
+        params,
+        scope,
+        parameters,
+        control,
+        input,
+    )
+    .await?;
+    references
+        .apply_references_from(plan, control, input)
+        .await?
+        .normalize_windows_from(control, input)
+        .await
+}
+
 pub fn bind_routine_parameter_references_owned(
     routines: &dyn RoutineResolution,
     mut plan: MutableExecutablePlan,
@@ -232,9 +259,28 @@ fn routine_parameter_references(
     routines: &dyn RoutineResolution,
     plan: PlanRef<'_>,
     params: &[SQLParam],
+    scope: SchemaScope,
+    parameters: &RoutineParameterScope,
+    control: &ProductionControl<'_>,
+) -> Result<super::super::parameters::InputConstants, SQLError> {
+    crate::catalog::work::inline(routine_parameter_references_with_work(
+        routines,
+        plan,
+        params,
+        scope,
+        parameters,
+        control,
+        &mut (),
+    ))
+}
+async fn routine_parameter_references_with_work<W: crate::catalog::work::Work + Send>(
+    routines: &dyn RoutineResolution,
+    plan: PlanRef<'_>,
+    params: &[SQLParam],
     mut scope: SchemaScope,
     parameters: &RoutineParameterScope,
     control: &ProductionControl<'_>,
+    work: &mut W,
 ) -> Result<super::super::parameters::InputConstants, SQLError> {
     scope.routine_parameters = Some(parameters.clone());
     scope.scalar_binding = crate::binding::ScalarBindingMode::RoutineParameters;
@@ -246,39 +292,61 @@ fn routine_parameter_references(
         parameters: ParameterTypes::fixed_with_control(params, control)?.with_reference_retention(),
         schema_expression: (),
     };
-    analysis.observe_routine_parameter_references(plan, parameters.schema())?;
+    analysis
+        .observe_routine_parameter_references_with_work(plan, parameters.schema(), work)
+        .await?;
     Ok(analysis.parameters.take_reference_constants())
 }
 
 impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
     /// Parameter binding follows statement namespaces without selecting the calls that later statement analysis owns.
+    #[cfg(test)]
     pub(in crate::binding::preparation) fn observe_routine_parameter_references(
         &mut self,
         plan: PlanRef<'_>,
         outer: &crate::RowSchema,
     ) -> Result<(), SQLError> {
+        crate::catalog::work::inline(self.observe_routine_parameter_references_with_work(
+            plan,
+            outer,
+            &mut (),
+        ))
+    }
+    pub(in crate::binding::preparation) async fn observe_routine_parameter_references_with_work<
+        W: crate::catalog::work::Work + Send,
+    >(
+        &mut self,
+        plan: PlanRef<'_>,
+        outer: &crate::RowSchema,
+        work: &mut W,
+    ) -> Result<(), SQLError> {
         match plan {
             PlanRef::Query(query) => {
-                self.query(query, Some(outer))?;
+                self.query_with_work(query, Some(outer), work).await?;
             }
             PlanRef::Command(CommandPlan::Explain { body, .. }) => {
                 let body = match &**body {
                     crate::plan::UnifiedPlan::Query(query) => PlanRef::Query(query),
                     crate::plan::UnifiedPlan::Command(command) => PlanRef::Command(command),
                 };
-                self.observe_routine_parameter_references(body, outer)?;
+                let captured = self.scope.control().capture();
+                crate::catalog::work::nested!(
+                    W::MAY_SUSPEND,
+                    captured.control(),
+                    self.observe_routine_parameter_references_with_work(body, outer, work)
+                )?;
             }
             PlanRef::Command(
                 CommandPlan::CreateTableAs { query, .. }
                 | CommandPlan::CreateMaterializedView { query, .. }
                 | CommandPlan::DeclareCursor { query, .. },
             ) => {
-                self.query(query, Some(outer))?;
+                self.query_with_work(query, Some(outer), work).await?;
             }
             PlanRef::Command(CommandPlan::Call { args, .. }) => {
                 for argument in args {
                     for query in &argument.subqueries {
-                        self.query(query, Some(outer))?;
+                        self.query_with_work(query, Some(outer), work).await?;
                     }
                     argument.scalar.try_visit(&mut |node| {
                         self.scope.control().check()?;

@@ -142,4 +142,4 @@ impl Input for Immediate<'_, '_> {
     }
 }
 
-mod native;
+pub(in crate::plan) mod native;

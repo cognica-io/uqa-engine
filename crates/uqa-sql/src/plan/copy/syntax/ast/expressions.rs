@@ -5,6 +5,14 @@
 //
 
 use super::{Copying, Result, SyntaxCopy};
+use crate::{
+    ast::Expr,
+    construction,
+    plan::copy::syntax::native::{Field, Input, Nested},
+};
+use uqa_core::{memory::ProductionControl, Value};
+
+type StoredExpression = construction::Output<Result<Nested<Expr>>>;
 
 syntax_enum!(crate::ast::BinaryOp {
     Equal,
@@ -19,8 +27,51 @@ syntax_enum!(crate::ast::BinaryOp {
     Divide
 });
 
+macro_rules! expression_fields {
+    ($source:expr, $input:ident, $field:ident; $($variant:ident $(($($item:ident),+))? $({$($member:ident),*})?),* $(,)?) => {
+        match $source {
+            $(Self::$variant $(($($item),+))? $({$($member),*})? =>
+                Self::$variant $(($($field!($input, $item)),+))? $({$($member: $field!($input, $member)),*})?),*
+        }
+    };
+}
+macro_rules! inline_field {
+    ($input:ident, $field:ident) => {
+        $input.field(stringify!($field), |copying| $field.copy_syntax(copying))?
+    };
+}
+macro_rules! native_field {
+    ($input:ident, $field:ident) => {
+        $input.field($field).await?
+    };
+}
+
+impl Field for Expr {
+    fn fits(&self, window: &mut crate::plan::copy::syntax::native::Window) -> bool {
+        self.fits_stored_window(window)
+    }
+
+    async fn copy_from<'s>(&'s self, parent: &mut Input<'s>) -> Result<Self> {
+        if matches!(
+            self,
+            Self::Star
+                | Self::Default
+                | Self::Param(_)
+                | Self::InternalColumn(_)
+                | Self::Literal(
+                    Value::Void | Value::Null | Value::Bool(_) | Value::Int(_) | Value::Float(_)
+                )
+        ) {
+            return parent.inline(self);
+        }
+        // The driver polls each recursive expression constructor independently of its parent.
+        let output = self.submit_stored_fields(parent.control(), &mut parent.work)?;
+        parent.take_nested(construction::receive(output).await?)
+    }
+}
+
 macro_rules! syntax_expression {
-    ($($variant:ident $(($($item:ident),+))? $({$($field:ident),*})?),* $(,)?) => {
+    ($($variant:ident $(($($item:ident),+))? $({$($member:ident),*})?),* $(,)?) => {
         impl SyntaxCopy for crate::ast::Expr {
             fn copy_syntax(&self, copying: &mut Copying<'_>) -> Result<Self> {
                 copying.check()?;
@@ -28,10 +79,30 @@ macro_rules! syntax_expression {
                     return Err(crate::SQLError::Internal("stored definition contains a query or window expression".into()));
                 }
                 if let Some(number) = copying.parameters.and_then(|parameters| parameters(self)) { return Ok(Self::Param(number)); }
-                Ok(match self {
-                    $(Self::$variant $(($($item),+))? $({$($field),*})? =>
-                        Self::$variant $(($(copying.field(stringify!($item), |copying| $item.copy_syntax(copying))?),+))? $({$($field: copying.field(stringify!($field), |copying| $field.copy_syntax(copying))?),*})?),*
-                })
+                Ok(expression_fields!(self, copying, inline_field; $($variant $(($($item),+))? $({$($member),*})?),*))
+            }
+        }
+
+        impl Expr {
+            fn fits_stored_window(&self, window: &mut crate::plan::copy::syntax::native::Window) -> bool {
+                if !window.slots(1) {
+                    return false;
+                }
+                match self {
+                    $(Self::$variant $(($($item),+))? $({$($member),*})? =>
+                        fields_fit!(window; $($($item,)+)? $($($member,)*)?)
+                    ),*
+                }
+            }
+
+            fn submit_stored_fields<'s>(
+                &'s self, control: ProductionControl<'s>, work: &mut construction::Work<'s>,
+            ) -> Result<StoredExpression> {
+                Ok(work.submit(move |work| async move {
+                    let mut input = Input::new(control, work);
+                    let value = expression_fields!(self, input, native_field; $($variant $(($($item),+))? $({$($member),*})?),*);
+                    input.finish_nested(value)
+                })?)
             }
         }
     };
@@ -68,7 +139,7 @@ syntax_expression! {
     RetainedLiteral(value0)
 }
 
-syntax_enum!(crate::ast::FrameBound {
+native_enum!(crate::ast::FrameBound {
     UnboundedPreceding,
     UnboundedFollowing,
     CurrentRow,
@@ -91,13 +162,13 @@ syntax_enum!(crate::ast::FrameMode {
 
 syntax_enum!(crate::ast::NullsOrder { First, Last });
 
-syntax_struct!(crate::ast::OrderBy {
+native_struct!(crate::ast::OrderBy {
     expr,
     descending,
     nulls
 });
 
-syntax_struct!(crate::ast::Projection { expr, alias });
+native_struct!(crate::ast::Projection { expr, alias });
 
 syntax_struct!(crate::ast::WindowCallModifiers {
     distinct,
@@ -105,13 +176,13 @@ syntax_struct!(crate::ast::WindowCallModifiers {
     within_group
 });
 
-syntax_struct!(crate::ast::WindowDefinition {
+native_struct!(crate::ast::WindowDefinition {
     name,
     inherited,
     spec
 });
 
-syntax_struct!(crate::ast::WindowFrame {
+native_struct!(crate::ast::WindowFrame {
     mode,
     start,
     end,
@@ -119,17 +190,18 @@ syntax_struct!(crate::ast::WindowFrame {
     exclusion
 });
 
-syntax_struct!(crate::ast::WindowReference { name, kind });
+native_struct!(crate::ast::WindowReference { name, kind });
 
 syntax_enum!(crate::ast::WindowReferenceKind { Direct, Copy });
 
 impl SyntaxCopy for crate::ast::WindowSpec {
     fn copy_syntax(&self, copying: &mut Copying<'_>) -> Result<Self> {
+        if copying.purpose == crate::plan::copy::CopyPurpose::Stored {
+            return crate::plan::copy::stored_plan::Inline::project(self, copying);
+        }
         Ok(Self {
             raw_definition: copying.field("raw_definition", |copying| {
-                if copying.parameters.is_some()
-                    || copying.purpose == crate::plan::copy::CopyPurpose::Stored
-                {
+                if copying.parameters.is_some() {
                     Ok(None)
                 } else {
                     self.raw_definition.copy_syntax(copying)

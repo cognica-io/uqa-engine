@@ -8,6 +8,7 @@
 
 use crate::ast::{ColumnType, FunctionBinding};
 use crate::SQLError;
+use uqa_core::memory::ProductionControl;
 
 use super::BuiltinFunctionOverload;
 
@@ -47,6 +48,8 @@ pub use signature::match_function_signature;
 pub(super) use signature::{match_signature_with_control, SignatureParameters};
 
 mod type_names;
+pub(super) use type_names::canonical_column_type_name_with_work;
+pub(crate) use type_names::canonical_routine_type_name_with_work;
 pub(super) use type_names::{builtin_canonical_type_name, canonical_column_type_name_with_control};
 pub use type_names::{
     canonical_column_type_name, canonical_routine_type_name, parse_enum_type_identity,
@@ -58,26 +61,49 @@ pub use type_names::{
 
 #[must_use]
 pub fn routine_type_accepts_implicit_cast(actual: &str, declared: &str) -> bool {
-    if actual == declared {
-        return true;
-    }
-    if declared == "anyarray"
-        && (actual.ends_with("[]") || matches!(actual, "int2vector" | "oidvector"))
-    {
-        return true;
-    }
-    if let (Some(actual), Some(declared)) = (actual.strip_suffix("[]"), declared.strip_suffix("[]"))
-    {
-        return routine_type_accepts_implicit_cast(actual, declared);
+    crate::catalog::work::inline(implicit_cast_with_work(
+        actual,
+        declared,
+        &ProductionControl::uncontrolled(),
+        &mut (),
+    ))
+    .expect("ordinary implicit casts have no resource limit or cancellation")
+}
+
+pub(super) async fn implicit_cast_with_work<W: crate::ast::ColumnTypeInputWork>(
+    mut actual: &str,
+    mut declared: &str,
+    control: &ProductionControl<'_>,
+    work: &mut W,
+) -> Result<bool, W::Error> {
+    loop {
+        if work.same_text(actual, declared, control).await?
+            || declared == "anyarray"
+                && (actual.ends_with("[]") || matches!(actual, "int2vector" | "oidvector"))
+        {
+            return Ok(true);
+        }
+        let (Some(a), Some(d)) = (actual.strip_suffix("[]"), declared.strip_suffix("[]")) else {
+            break;
+        };
+        work.position(control).await?;
+        actual = a;
+        declared = d;
     }
     // Every composite value is a record, as `can_coerce_type` accepts.
     if declared == "record"
-        && crate::ast::UserTypeIdentity::parse(actual).is_some_and(|identity| {
-            identity.kind == crate::ast::UserTypeKind::Composite && identity.dimensions == 0
-        })
+        && crate::ast::UserTypeIdentity::parse_with_type_work(actual, control, work)
+            .await?
+            .is_some_and(|identity| {
+                identity.kind == crate::ast::UserTypeKind::Composite && identity.dimensions == 0
+            })
     {
-        return true;
+        return Ok(true);
     }
+    Ok(scalar_implicit_cast(actual, declared))
+}
+
+fn scalar_implicit_cast(actual: &str, declared: &str) -> bool {
     matches!(
         (actual, declared),
         (

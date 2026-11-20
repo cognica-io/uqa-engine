@@ -31,25 +31,25 @@ pub(super) struct ScalarBindings<'a> {
 }
 
 impl<'a> ScalarBindings<'a> {
-    pub fn new(
+    pub(super) async fn with_work(
         catalog: &'a CatalogReadView,
         memory: &'a MemoryBudget,
         cancellation: &'a CancellationToken,
+        work: &mut (impl uqa_sql::catalog::CatalogWork + Send),
     ) -> Result<Self, SQLError> {
         let control = ProductionControl::new(memory, cancellation, cancellation);
         control.check()?;
         let snapshot = catalog.snapshot();
-        let references = NativeRoutineReferences::new(
-            snapshot
-                .definitions
-                .sql_user_functions
-                .values()
-                .flatten()
-                .map(|routine| &routine.def),
+        let references = super::routine_dependencies::references_with_work(
+            &snapshot.definitions,
             memory,
             cancellation,
-        )?;
-        let types = super::type_dependencies::references(snapshot, memory, cancellation)?;
+            work,
+        )
+        .await?;
+        let types =
+            super::type_dependencies::references_with_work(snapshot, memory, cancellation, work)
+                .await?;
         // Stored scalar declarations have no query or session namespace. Their declared row and concrete routine bindings supply every lookup.
         let binding = ControlledBindingContext {
             catalog: control
@@ -75,5 +75,12 @@ impl<'a> ScalarBindings<'a> {
             types,
             binding,
         })
+    }
+    pub(super) async fn retire(
+        self,
+        work: &mut (impl uqa_sql::catalog::CatalogWork + Send),
+    ) -> Result<(), SQLError> {
+        self.references.retire_with_work(work).await?;
+        self.types.retire(work).await
     }
 }

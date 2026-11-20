@@ -69,6 +69,9 @@ impl<T, const N: usize> Stack<T, N> {
         Ok(())
     }
     pub(crate) fn push(&mut self, task: T) -> Result<()> {
+        Ok(self.try_push(task)?)
+    }
+    pub(crate) fn try_push(&mut self, task: T) -> std::result::Result<(), MemoryError> {
         if self.len < N {
             self.inline[self.len] = Some(task);
             self.len += 1;

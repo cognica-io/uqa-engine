@@ -21,6 +21,36 @@ pub(super) fn validate_inline(def: &CreateFunction) -> Result<(), SQLError> {
     crate::catalog::work::inline(validate(def, &ProductionControl::uncontrolled(), &mut ()))
 }
 
+pub(super) async fn signature<T, R, W>(
+    types: &T,
+    roles: &R,
+    def: &CreateFunction,
+    control: &ProductionControl<'_>,
+    work: &mut W,
+) -> Result<Produced<crate::catalog::regrole_dependencies::StoredRegroleConstants>, SQLError>
+where
+    T: super::RoutineTypeCatalog + ?Sized,
+    R: crate::catalog::regrole_dependencies::StoredRegroleResolver + ?Sized,
+    W: Work + Send,
+{
+    control.check()?;
+    super::validate_routine_language(def)?;
+    let constants =
+        crate::catalog::regrole_dependencies::StoredRegroleConstants::from_routine_parameters(
+            types,
+            &def.params,
+            control,
+            work,
+        )
+        .await?;
+    let mut next = 0;
+    while constants.validate_next_input(roles, &mut next)? {
+        checkpoint(control, work).await?;
+    }
+    validate(def, control, work).await?;
+    Ok(constants)
+}
+
 /// Validate declared pseudo-types and polymorphic families without compiling a body or resolving catalog names. Type names and parameter traversal share the invoking continuation and native scratch allowance.
 pub async fn validate_routine_declaration_from_input(
     def: &CreateFunction,

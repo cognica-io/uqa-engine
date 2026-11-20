@@ -14,7 +14,7 @@ use crate::{
         children::Scope,
         observation::{visit_all, ScalarObserver},
     },
-    plan::{query::ExpressionOrder, ExpressionPlan, PlanRef},
+    plan::{query::ExpressionOrder, ExpressionPlan, InsertPlan, PlanRef},
     semantics::view_rewrite::DeferredOuterRewrite,
     SQLError,
 };
@@ -32,6 +32,8 @@ enum Node<'a, D> {
     Replacements(D),
     Parameters(&'a [ExpressionPlan]),
     Command(&'a CommandPlan),
+    MutationExpressions(&'a CommandPlan),
+    InsertResults(&'a InsertPlan),
     Scalar(&'a ScalarExpr),
 }
 
@@ -42,6 +44,32 @@ pub(crate) async fn visit_scalar_nodes_with_work<W: Work + Send>(
     control: &ProductionControl<'_>,
     work: &mut W,
     visit: &mut impl ScalarObserver,
+) -> Result<(), SQLError> {
+    walk(plan, control, work, visit, MutationOrder::Visit).await
+}
+
+/// Preserve the order of stored-definition diagnostics when a mutation interleaves scalar roots, WITH queries and its input relation.
+pub(crate) async fn visit_stored_definition_scalars<W: Work + Send>(
+    plan: PlanRef<'_>,
+    control: &ProductionControl<'_>,
+    work: &mut W,
+    visit: &mut impl ScalarObserver,
+) -> Result<(), SQLError> {
+    walk(plan, control, work, visit, MutationOrder::Definition).await
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum MutationOrder {
+    Visit,
+    Definition,
+}
+
+async fn walk<W: Work + Send>(
+    plan: PlanRef<'_>,
+    control: &ProductionControl<'_>,
+    work: &mut W,
+    visit: &mut impl ScalarObserver,
+    order: MutationOrder,
 ) -> Result<(), SQLError> {
     let mut nodes = Nodes::new(*control);
     nodes.push(Node::Plan(plan))?;
@@ -58,6 +86,11 @@ pub(crate) async fn visit_scalar_nodes_with_work<W: Work + Send>(
                 nodes.push(Node::Command(command))?;
                 if !command.ctes().is_empty() {
                     nodes.push(Node::Ctes(command.ctes()))?;
+                }
+                if order == MutationOrder::Definition {
+                    if let CommandPlan::Insert(insert) = command {
+                        expressions(insert.target_steps(), control, work, visit).await?;
+                    }
                 }
             }
             Node::Root(root) => push_root(root, &mut nodes)?,
@@ -105,34 +138,73 @@ pub(crate) async fn visit_scalar_nodes_with_work<W: Work + Send>(
                     push_expression(param, &mut nodes)?;
                 }
             }
-            Node::Command(command) => match command {
-                CommandPlan::CreateView { query, .. }
-                | CommandPlan::CreateMaterializedView { query, .. }
-                | CommandPlan::CreateTableAs { query, .. }
-                | CommandPlan::DeclareCursor { query, .. } => {
-                    nodes.push(Node::Plan(PlanRef::Query(query)))?;
-                }
-                CommandPlan::Explain { body, .. } | CommandPlan::Prepare { body, .. } => {
-                    nodes.push(Node::Plan(body.as_ref().into()))?;
-                }
-                CommandPlan::Call { args, .. } | CommandPlan::Execute { params: args, .. } => {
-                    nodes.push(Node::Parameters(args))?;
-                }
-                _ => {
-                    if let Some(source) = command.source_input() {
-                        nodes.push(Node::Source(source))?;
-                    }
-                    let (first, queries) = command.query_input_parts();
-                    if !queries.is_empty() {
-                        nodes.push(Node::Queries(queries))?;
-                    }
-                    if let Some(first) = first {
-                        nodes.push(Node::Plan(PlanRef::Query(first)))?;
-                    }
-                    expressions(command.expression_steps(), control, work, visit).await?;
-                }
-            },
+            Node::Command(command) => {
+                visit_command(command, &mut nodes, control, work, visit, order).await?;
+            }
+            Node::MutationExpressions(command) => {
+                expressions(command.expression_steps(), control, work, visit).await?;
+            }
+            Node::InsertResults(insert) => {
+                expressions(insert.result_steps(), control, work, visit).await?;
+            }
             Node::Scalar(root) => expression(root, control, work, visit).await?,
+        }
+    }
+    Ok(())
+}
+
+async fn visit_command<'a, W: Work + Send, D: Send>(
+    command: &'a CommandPlan,
+    nodes: &mut Nodes<'a, D>,
+    control: &ProductionControl<'_>,
+    work: &mut W,
+    visit: &mut impl ScalarObserver,
+    order: MutationOrder,
+) -> Result<(), SQLError> {
+    match command {
+        CommandPlan::CreateView { query, .. }
+        | CommandPlan::CreateMaterializedView { query, .. }
+        | CommandPlan::CreateTableAs { query, .. }
+        | CommandPlan::DeclareCursor { query, .. } => {
+            nodes.push(Node::Plan(PlanRef::Query(query)))?;
+        }
+        CommandPlan::Explain { body, .. } | CommandPlan::Prepare { body, .. } => {
+            nodes.push(Node::Plan(body.as_ref().into()))?;
+        }
+        CommandPlan::Call { args, .. } | CommandPlan::Execute { params: args, .. } => {
+            nodes.push(Node::Parameters(args))?;
+        }
+        CommandPlan::Insert(insert) if order == MutationOrder::Definition => {
+            if !insert.subqueries.is_empty() {
+                nodes.push(Node::Queries(&insert.subqueries))?;
+            }
+            nodes.push(Node::InsertResults(insert))?;
+            if let Some(source) = &insert.source {
+                nodes.push(Node::Plan(PlanRef::Query(source)))?;
+            }
+            expressions(insert.row_steps(), control, work, visit).await?;
+        }
+        _ => {
+            if order == MutationOrder::Visit {
+                if let Some(source) = command.source_input() {
+                    nodes.push(Node::Source(source))?;
+                }
+            }
+            let (first, queries) = command.query_input_parts();
+            if !queries.is_empty() {
+                nodes.push(Node::Queries(queries))?;
+            }
+            if let Some(first) = first {
+                nodes.push(Node::Plan(PlanRef::Query(first)))?;
+            }
+            if order == MutationOrder::Definition {
+                nodes.push(Node::MutationExpressions(command))?;
+                if let Some(source) = command.source_input() {
+                    nodes.push(Node::Source(source))?;
+                }
+            } else {
+                expressions(command.expression_steps(), control, work, visit).await?;
+            }
         }
     }
     Ok(())

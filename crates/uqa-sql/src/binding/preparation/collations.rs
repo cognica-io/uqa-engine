@@ -73,18 +73,34 @@ impl PendingCollations {
         &self,
         expression: &ScalarExpr,
     ) -> Result<(), SQLError> {
+        crate::catalog::work::inline(self.validate_expression_with_work(expression, &mut ()))
+    }
+
+    pub(super) async fn validate_expression_with_work<W: crate::catalog::work::Work + Send>(
+        &self,
+        expression: &ScalarExpr,
+        work: &mut W,
+    ) -> Result<(), SQLError> {
+        use crate::ir::{
+            children::Scope,
+            observation::{visit_in, Decision},
+        };
         if self.0.is_empty() {
             return Ok(());
         }
-        let mut result = Ok(());
-        expression.visit(&mut |node| {
-            if result.is_ok() {
-                if let Some(selected) = self.0.get(&AnalysisIdentity::from(node)) {
-                    result = selected.validate();
-                }
+        let control = self.0.control();
+        let mut validate = |node: &ScalarExpr| {
+            if let Some(selected) = self.0.get(&AnalysisIdentity::from(node)) {
+                selected.validate()?;
             }
-        });
-        result
+            Ok(Decision::Descend)
+        };
+        crate::catalog::work::nested!(
+            W::MAY_SUSPEND,
+            control,
+            visit_in(expression, &control, work, Scope::Complete, &mut validate)
+        )?;
+        Ok(())
     }
 
     pub(in crate::binding) fn validate_query(&self, query: &QueryPlan) -> Result<(), SQLError> {

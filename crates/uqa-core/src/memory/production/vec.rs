@@ -47,6 +47,34 @@ impl<'a, T> ProductionVec<'a, T> {
         Ok(())
     }
 
+    /// Whether admitting the next slot would relocate more than one native copy window.
+    pub fn push_needs_work(&self) -> bool {
+        matches!(&self.buffer, Buffer::Controlled(values) if values.push_needs_work())
+    }
+
+    /// Admit space for one more element. The private producer owns both buffers and their original payload leases across suspension.
+    pub async fn into_reserved_for_push(
+        mut self,
+        work: &mut impl crate::ValueCopyWork,
+    ) -> Result<Self, ValueRetentionError> {
+        self.control.check()?;
+        if self.push_needs_work() {
+            let Buffer::Controlled(values) = self.buffer else {
+                unreachable!("selected controlled buffer")
+            };
+            let mut moving = values.relocate_for_push()?;
+            while moving.remaining() != 0 {
+                work.checkpoint().await?;
+                self.control.check()?;
+                moving.advance();
+            }
+            self.buffer = Buffer::Controlled(moving.finish());
+        } else {
+            self.reserve(1)?;
+        }
+        Ok(self)
+    }
+
     pub fn push_produced(&mut self, value: Produced<T>) -> Result<(), ValueRetentionError> {
         self.control.assert_owner(value.memory.as_ref());
         self.reserve(1)?;

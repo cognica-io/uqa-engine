@@ -24,7 +24,7 @@ syntax_struct!(crate::ast::CompositeAttributeRemoval {
     cascade
 });
 
-syntax_struct!(crate::ast::CompositeRowBinding {
+native_struct!(crate::ast::CompositeRowBinding {
     ty,
     attributes,
     layout,

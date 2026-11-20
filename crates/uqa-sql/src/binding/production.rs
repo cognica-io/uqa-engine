@@ -201,6 +201,7 @@ impl SchemaScope {
             routine_parameters: None,
             scalar_binding: super::ScalarBindingMode::Stored,
             stored_call_origin: super::stored_routines::StoredCallOrigin::Definition,
+            stored_binding_memory: control.empty_reservation(),
             variable_sites: None,
             preserve_syntax_shape: false,
             prepared_dependencies: None,

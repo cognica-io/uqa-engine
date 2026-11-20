@@ -44,14 +44,16 @@ impl ScalarInput {
                 self.stage = Stage::Header(input.binary.array::<1>().await?[0]);
             }
             Stage::Header(tag) => {
-                input
-                    .native_scalar_tag(tag, &mut self.memory, &mut self.frame.value)
-                    .await?;
+                await_field!(input.native_scalar_tag(
+                    tag,
+                    &mut self.memory,
+                    &mut self.frame.value
+                ))?;
                 self.references.observe(&self.frame.value);
                 self.stage = Stage::Children;
             }
             Stage::Children => {
-                if self.frame.prepare_child(input).await? {
+                if await_field!(self.frame.prepare_child(input))? {
                     let parent = std::mem::replace(
                         &mut self.frame,
                         Frame {

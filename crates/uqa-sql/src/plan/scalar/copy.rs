@@ -22,6 +22,17 @@ impl ScalarExpr {
         iterative::immutable(self, *control)
     }
 
+    pub(crate) async fn clone_with_work<W: Work>(
+        &self,
+        control: &ProductionControl<'_>,
+        work: &mut W,
+    ) -> std::result::Result<Produced<Self>, W::Error>
+    where
+        W::Error: From<crate::schema::retention::CatalogRetentionError>,
+    {
+        iterative::immutable_from(self, *control, work).await
+    }
+
     /// Capture scalar syntax and evaluated literals under independent ownership; query-arena references keep their original positions.
     pub(crate) fn capture_with_footprint(
         &self,
@@ -30,31 +41,35 @@ impl ScalarExpr {
         iterative::capture(self, *control)
     }
 
+    pub(in crate::plan) async fn capture_with_footprint_from<W: Work>(
+        &self,
+        control: &ProductionControl<'_>,
+        work: &mut W,
+    ) -> std::result::Result<(Produced<Self>, usize), W::Error>
+    where
+        W::Error: From<crate::schema::retention::CatalogRetentionError>,
+    {
+        iterative::capture_from(self, *control, work).await
+    }
+
     /// Copy into a mutable scalar owner with independent direct and child reservations. Iterative constructors preserve field order, destination admission and query-arena identities in both ordinary and controlled modes.
     pub fn copy_for_rewrite(&self, control: &ProductionControl<'_>) -> Result<OwnedScalarExpr> {
         iterative::mutable(self, *control)
     }
 
-    pub(crate) async fn copy_for_rewrite_from<W: Work>(
-        &self,
-        control: &ProductionControl<'_>,
-        work: &mut W,
-    ) -> std::result::Result<OwnedScalarExpr, W::Error>
+    pub(crate) fn copy_for_rewrite_from<'a, W: Work>(
+        &'a self,
+        control: &ProductionControl<'a>,
+        work: &'a mut W,
+    ) -> impl std::future::Future<Output = std::result::Result<OwnedScalarExpr, W::Error>> + 'a
     where
         W::Error: From<crate::schema::retention::CatalogRetentionError>,
     {
-        iterative::mutable_from(self, *control, work).await
+        iterative::mutable_from(self, *control, work)
     }
 }
 
 impl Lowering<'_> {
-    pub(super) fn scalar_type_copy(
-        &mut self,
-        ty: Option<&crate::ast::ColumnType>,
-    ) -> Result<Option<crate::ast::ColumnType>> {
-        crate::catalog::work::inline(self.type_from(ty, &mut ()))
-    }
-
     async fn scalar_leaf_from<W: Work>(
         &mut self,
         expression: &ScalarExpr,

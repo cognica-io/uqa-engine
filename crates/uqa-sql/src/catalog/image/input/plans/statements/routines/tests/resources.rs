@@ -102,17 +102,19 @@ fn native_routine_images_match_independent_wire_and_reject_invalid_catalog_membe
 }
 
 pub(super) fn deep_image() -> Vec<u8> {
+    // Unary minus has no field bytes; IS NULL reads its negation flag before its operand.
+    let unary_headers = [14, 18, 0].repeat(5_000);
     let mut original = vec![1]; // Original VALUES.
     original.extend(1u64.to_le_bytes());
     original.extend(1u64.to_le_bytes());
-    original.extend(std::iter::repeat_n(14, 10_000)); // Original unary parents.
+    original.extend_from_slice(&unary_headers);
     original.push(0);
     let mut bound = vec![0, 0]; // Bound query, original relation binding flag.
     bound.extend(0u64.to_le_bytes()); // CTEs.
     bound.push(2); // Bound VALUES.
     bound.extend(1u64.to_le_bytes());
     bound.extend(1u64.to_le_bytes());
-    bound.extend(std::iter::repeat_n(14, 10_000));
+    bound.extend_from_slice(&unary_headers);
     bound.push(0);
     bound.extend(0u64.to_le_bytes());
     independent(Some(&original), Some(&bound))

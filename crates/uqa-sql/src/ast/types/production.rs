@@ -184,13 +184,15 @@ impl ColumnType {
         &self,
         control: &ProductionControl<'_>,
     ) -> Result<Produced<Self>, ValueRetentionError> {
-        let mut dimensions = 0;
-        let mut element = self;
-        while let Self::Array(child) = element {
-            control.check()?;
-            dimensions += 1;
-            element = child;
-        }
+        crate::catalog::work::inline(self.without_modifiers_with_work(control, &mut ()))
+    }
+
+    pub(crate) async fn without_modifiers_with_work<W: ColumnTypeInputWork>(
+        &self,
+        control: &ProductionControl<'_>,
+        work: &mut W,
+    ) -> Result<Produced<Self>, W::Error> {
+        let (element, dimensions) = self.array_shape_with_work(control, work).await?;
         let scalar = match element {
             Self::Varchar(_) => Some(Self::Varchar(None)),
             Self::Bit(_) => Some(Self::Bit(None)),
@@ -204,11 +206,15 @@ impl ColumnType {
         };
         let mut output = match scalar {
             Some(scalar) => control.finish(scalar, control.empty_reservation())?,
-            None => element
-                .without_temporal_modifiers()
-                .clone_with_control(control)?,
+            None => {
+                element
+                    .without_temporal_modifiers()
+                    .clone_with_input_work(control, work)
+                    .await?
+            }
         };
         for _ in 0..dimensions {
+            work.position(control).await?;
             output = Self::array_with_control(output, control)?;
         }
         Ok(output)

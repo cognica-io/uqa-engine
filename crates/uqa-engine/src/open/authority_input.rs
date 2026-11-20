@@ -106,7 +106,12 @@ impl PersistentAuthorityInput {
             Self::Routines { mut input, domains } => match input.advance(1)? {
                 None => Self::Routines { input, domains },
                 Some(prepared) => {
-                    let routines = RetainedRoutineFinalization::install(engine, prepared, control)?;
+                    let routines = RetainedRoutineFinalization::install(
+                        engine,
+                        prepared,
+                        control,
+                        engine.extensions.functions.clone(),
+                    )?;
                     Self::Builtins {
                         input: BuiltinRoutineCatalogInput::new(
                             Arc::clone(catalog),

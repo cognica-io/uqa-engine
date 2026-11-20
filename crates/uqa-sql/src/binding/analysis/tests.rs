@@ -167,6 +167,9 @@ fn registered_table_calls_are_validated_before_set_placement() {
 
 #[test]
 fn expression_analysis_resolves_parameters_in_its_supplied_scope() {
+    let budget = uqa_core::memory::MemoryBudget::new(1 << 20);
+    let token = uqa_core::CancellationToken::new();
+    let control = uqa_core::memory::ProductionControl::new(&budget, &token, &token);
     let context = empty_binding_context();
     let parameters = [SQLParam::typed_scalar(
         uqa_core::Value::Int(7),
@@ -185,13 +188,25 @@ fn expression_analysis_resolves_parameters_in_its_supplied_scope() {
             supplied,
             &context,
         );
+        let stored = crate::binding::bind_expression_plan_routines_for_storage_owned(
+            &Routines,
+            expression.copy_for_rewrite(&control).unwrap(),
+            supplied,
+            context.copy_with_control(&control).unwrap(),
+            &RowSchema::default(),
+            &control,
+        )
+        .map(drop);
         if let Some(expected) = expected {
-            let error = result.unwrap_err();
-            assert_eq!(error.sqlstate(), Some("42P02"));
-            assert_eq!(error.to_string(), expected);
+            for error in [result.unwrap_err(), stored.unwrap_err()] {
+                assert_eq!(error.sqlstate(), Some("42P02"));
+                assert_eq!(error.to_string(), expected);
+            }
         } else {
             assert_eq!(result.unwrap(), Some(ColumnType::Integer));
+            stored.unwrap();
         }
+        assert_eq!(budget.used(), 0);
     }
 }
 

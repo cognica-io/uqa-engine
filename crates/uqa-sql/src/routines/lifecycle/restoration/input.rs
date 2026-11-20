@@ -17,7 +17,9 @@ mod diagnostics;
 mod placeholders;
 mod work;
 pub use diagnostics::{RoutineRestoreDiagnostic, RoutineRestoreInputError};
-pub use placeholders::{PendingRoutineDefinitions, RoutineRestorePlaceholders};
+pub use placeholders::{
+    PendingRoutineDefinitions, RoutinePlaceholderRetirement, RoutineRestorePlaceholders,
+};
 use work::{checkpoint, compare, message, text, Comparison};
 
 struct Group {

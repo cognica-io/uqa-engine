@@ -13,11 +13,12 @@ use uqa_core::{
     LegacyVectorKind, TemporalValue, Value,
 };
 
-pub(super) fn validate(
+pub(super) async fn validate<'v>(
     value: &Value,
     ty: &ColumnType,
-    catalog: Option<&dyn SQLValueCatalog>,
+    catalog: &impl Fn() -> Option<&'v dyn SQLValueCatalog>,
     control: &ProductionControl<'_>,
+    work: &mut (impl crate::catalog::CatalogWork + Send),
 ) -> Result<(), SQLError> {
     enum Pending<'a, 'c> {
         Value(&'a Value, &'a ColumnType),
@@ -30,6 +31,7 @@ pub(super) fn validate(
     );
     pending.push(Pending::Value(value, ty))?;
     'next: while let Some(item) = pending.pop() {
+        work.checkpoint().await?;
         control.check()?;
         let (value, mut ty) = match item {
             Pending::Value(value, ty) => (value, ty),
@@ -45,6 +47,7 @@ pub(super) fn validate(
             continue;
         }
         loop {
+            work.checkpoint().await?;
             control.check()?;
             // Physical identity inspection keeps retained tuples lazy and never repeats newer domain checks.
             if let Value::Datum(datum) = value {
@@ -80,20 +83,23 @@ pub(super) fn validate(
             (ColumnType::OidVector, Value::LegacyVector(vector)) => {
                 vector.kind() == LegacyVectorKind::Oid
             }
-            (ColumnType::Vector(width), Value::List(values)) => vector(values, *width, control)?,
+            (ColumnType::Vector(width), Value::List(values)) => {
+                vector(values, *width, control, work).await?
+            }
             (ColumnType::Tensor(width), Value::List(values)) => {
                 for value in values {
+                    work.checkpoint().await?;
                     control.check()?;
                     let Value::List(values) = value else {
                         return Err(invalid("tensor bound carrier"));
                     };
-                    if !vector(values, *width, control)? {
+                    if !vector(values, *width, control, work).await? {
                         return Err(invalid("tensor bound width"));
                     }
                 }
                 true
             }
-            _ => scalar(value, ty, catalog)?,
+            _ => scalar(value, ty, catalog())?,
         };
         if !valid {
             return Err(invalid("constant carrier differs from partition key type"));
@@ -192,11 +198,17 @@ fn temporal(ty: &ColumnType, value: &TemporalValue) -> bool {
     )
 }
 
-fn vector(values: &[Value], width: u32, control: &ProductionControl<'_>) -> Result<bool, SQLError> {
+async fn vector(
+    values: &[Value],
+    width: u32,
+    control: &ProductionControl<'_>,
+    work: &mut (impl crate::catalog::CatalogWork + Send),
+) -> Result<bool, SQLError> {
     if values.len() != width as usize {
         return Ok(false);
     }
     for value in values {
+        work.checkpoint().await?;
         control.check()?;
         if !matches!(value, Value::Float(_)) {
             return Ok(false);

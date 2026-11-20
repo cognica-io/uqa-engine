@@ -6,7 +6,8 @@
 
 //! Native unary type ownership retires with constant stack and no temporary allocation.
 
-use super::ColumnType;
+use super::{ColumnType, ColumnTypeInputWork};
+use uqa_core::memory::{Produced, ProductionControl};
 
 impl Clone for ColumnType {
     fn clone(&self) -> Self {
@@ -18,6 +19,19 @@ impl Clone for ColumnType {
 }
 
 impl ColumnType {
+    pub(crate) async fn retire_with_work<W: ColumnTypeInputWork>(
+        value: Produced<Self>,
+        control: &ProductionControl<'_>,
+        work: &mut W,
+    ) -> Result<(), W::Error> {
+        let (value, _memory) = value.into_parts();
+        let mut ty = value;
+        while !ty.retire_step() {
+            work.position(control).await?;
+        }
+        Ok(())
+    }
+
     /// Retire one unary wrapper while retaining its child for the next work window.
     pub(crate) fn retire_step(&mut self) -> bool {
         let Some(child) = self.take_owned_child() else {

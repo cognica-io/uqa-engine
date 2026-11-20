@@ -6,7 +6,7 @@
 
 use super::{Copying, Result, SyntaxCopy};
 
-syntax_struct!(crate::ast::CTE {
+native_struct!(crate::ast::CTE {
     name,
     columns,
     recursive,
@@ -16,7 +16,7 @@ syntax_struct!(crate::ast::CTE {
     body
 });
 
-syntax_enum!(crate::ast::CteBody {
+native_enum!(recursive, crate::ast::CteBody {
     Query(value0),
     Insert(value0),
     Update(value0),
@@ -24,7 +24,7 @@ syntax_enum!(crate::ast::CteBody {
     Merge(value0)
 });
 
-syntax_struct!(crate::ast::CteCycleClause {
+native_struct!(crate::ast::CteCycleClause {
     columns,
     mark_column,
     mark_value,
@@ -38,7 +38,7 @@ syntax_enum!(crate::ast::CteMaterialization {
     NotMaterialized
 });
 
-syntax_struct!(crate::ast::CteSearchClause {
+native_struct!(crate::ast::CteSearchClause {
     columns,
     breadth_first,
     sequence_column

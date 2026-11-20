@@ -55,8 +55,15 @@ impl MemoryDocumentState {
     }
 }
 
+#[cfg(test)]
+thread_local! {
+    pub(super) static RETAINED_READ_CHECKS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 impl MemoryDocumentStore {
     pub(super) fn check_retained_read(&self) -> StorageBackendResult<()> {
+        #[cfg(test)]
+        RETAINED_READ_CHECKS.set(RETAINED_READ_CHECKS.get() + 1);
         self.retention
             .as_ref()
             .map_or(Ok(()), |retention| retention.control.check())

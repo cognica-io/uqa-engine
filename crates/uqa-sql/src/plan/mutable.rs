@@ -17,6 +17,7 @@ pub(crate) use analysis::{
     QueryMetadataUpdate, QueryReplacement, SourceMetadataUpdate, SourceReplacement,
 };
 pub use arenas::{ScalarArenaTransform, ScalarQueryArena};
+pub(crate) use nodes::transformation::input::native::ArenaEdit;
 pub(crate) mod commands;
 pub(crate) mod construction;
 mod ctes;

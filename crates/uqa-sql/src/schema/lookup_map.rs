@@ -84,7 +84,7 @@ impl<K, V> SchemaMap<K, V> {
     pub(in crate::schema) async fn from_ordered(
         index: OwnedMap<K, Produced<V>>,
         control: &ProductionControl<'_>,
-        input: &mut uqa_core::image_io::AsyncImageInput<'_>,
+        input: &mut (impl crate::catalog::CatalogWork + Send),
     ) -> Result<Self, crate::SQLError> {
         control.check()?;
         let mut entries = uqa_core::memory::ProductionVec::new(*control);

@@ -11,6 +11,51 @@ use crate::{
 };
 
 impl Copying<'_> {
+    pub(super) async fn stored_utility<W: crate::catalog::work::Work + Send>(
+        &mut self,
+        statement: &Statement,
+        aggregates: &(dyn AggregateClassifier + Sync),
+        work: &mut W,
+    ) -> Result<crate::plan::retirement::construction::Prefix<CommandPlan>> {
+        let mut scope = self.enter_plan_node()?;
+        let command = match statement {
+            Statement::Notify { channel, payload } => {
+                scope.notification(channel, payload, work).await?
+            }
+            _ => scope.lower_command_fields(statement, aggregates)?,
+        };
+        Ok(scope.retain_plan(command))
+    }
+
+    async fn notification<W: crate::catalog::work::Work + Send>(
+        &mut self,
+        channel: &str,
+        payload: &str,
+        work: &mut W,
+    ) -> Result<CommandPlan> {
+        async fn text<W: crate::catalog::work::Work + Send>(
+            copying: &mut Copying<'_>,
+            name: &'static str,
+            value: &str,
+            work: &mut W,
+        ) -> Result<String> {
+            if copying.fields.is_some() {
+                let mut field = copying.begin_input_field()?;
+                let text = work.text(value, &field.control).await?;
+                let text = field.take(text);
+                copying.finish_input_field(name, field);
+                Ok(text)
+            } else {
+                let text = work.text(value, &copying.control).await?;
+                Ok(copying.take(text))
+            }
+        }
+        Ok(CommandPlan::Notify {
+            channel: text(self, "channel", channel, work).await?,
+            payload: text(self, "payload", payload, work).await?,
+        })
+    }
+
     pub(super) fn lower_command(
         &mut self,
         statement: &Statement,
@@ -92,10 +137,9 @@ impl Copying<'_> {
                 name: self.field("name", |copying| name.copy_syntax(copying))?,
                 new_name: self.field("new_name", |copying| new_name.copy_syntax(copying))?,
             },
-            Statement::Notify { channel, payload } => CommandPlan::Notify {
-                channel: self.field("channel", |copying| channel.copy_syntax(copying))?,
-                payload: self.field("payload", |copying| payload.copy_syntax(copying))?,
-            },
+            Statement::Notify { channel, payload } => {
+                crate::catalog::work::inline(self.notification(channel, payload, &mut ()))?
+            }
             Statement::Listen { channel } => CommandPlan::Listen {
                 channel: self.field("channel", |copying| channel.copy_syntax(copying))?,
             },

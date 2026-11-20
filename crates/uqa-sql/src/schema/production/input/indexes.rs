@@ -20,12 +20,12 @@ pub(super) struct Names {
 }
 
 impl Names {
-    pub async fn insert(
+    pub async fn insert<W: crate::catalog::CatalogWork + Send>(
         &mut self,
         qualifier: &str,
         name: &str,
         position: usize,
-        work: &mut Work<'_, '_, '_>,
+        work: &mut Work<'_, '_, W>,
     ) -> Result<(), SQLError> {
         let control = work.control;
         let key = work.boxed_text(name).await?;
@@ -37,12 +37,13 @@ impl Names {
             )
             .await?;
         let key = work.identity(qualifier, name).await?;
-        work.insert(
-            &mut self.qualified,
-            key,
-            control.finish(position, control.empty_reservation())?,
-        )
-        .await?;
+        let qualified_duplicate = work
+            .insert(
+                &mut self.qualified,
+                key,
+                control.finish(position, control.empty_reservation())?,
+            )
+            .await?;
         if duplicate {
             let key = work.boxed_text(name).await?;
             work.insert(
@@ -51,6 +52,8 @@ impl Names {
                 control.finish((), control.empty_reservation())?,
             )
             .await?;
+        }
+        if qualified_duplicate {
             let key = work.identity(qualifier, name).await?;
             work.insert(
                 &mut self.ambiguous_qualified,
@@ -62,8 +65,11 @@ impl Names {
         Ok(())
     }
 
-    pub async fn finish(self, work: &mut Work<'_, '_, '_>) -> Result<Indexes, SQLError> {
-        // Every parameter has the same qualifier, so these two views have identical last-insertion membership.
+    pub async fn finish<W: crate::catalog::CatalogWork + Send>(
+        self,
+        work: &mut Work<'_, '_, W>,
+    ) -> Result<Indexes, SQLError> {
+        // A visible column’s display name is its unqualified name. Both indexes select its last position.
         let exact = SchemaMap::from_ordered(self.exact, &work.control, work.input).await?;
         Ok(Indexes {
             unqualified: exact.clone(),

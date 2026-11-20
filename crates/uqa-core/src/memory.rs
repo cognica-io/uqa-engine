@@ -44,7 +44,7 @@ pub use production::{
 };
 pub use retained_map::{
     PreparedRetainedMapInsert, RetainedMap, RetainedMapBidirectionalIter, RetainedMapIter,
-    RetainedMapSnapshot,
+    RetainedMapRetirement, RetainedMapSnapshot,
 };
 pub(crate) use retained_value::{Admitted as AdmittedRetainedValue, Owner as RetainedValueOwner};
 pub use retained_value::{RetainedValue, RetainedValueIdentity};
@@ -53,7 +53,7 @@ pub use small_vec::BudgetedSmallVec;
 pub use string::BudgetedString;
 pub use vec::BudgetedVec;
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Clone, Debug, thiserror::Error)]
 pub enum MemoryError {
     #[error("memory requires {required} bytes, exceeding limit {limit}")]
     Limit { required: usize, limit: usize },

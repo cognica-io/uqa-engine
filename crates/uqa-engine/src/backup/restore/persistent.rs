@@ -346,7 +346,10 @@ impl Work<'_> {
                 BackupImageImportStep::Imported => Stage::Validating(input),
             },
             Stage::Validating(mut input) => {
-                match input.advance_validation(&mut self.validator, 1)? {
+                match input.advance_validation(
+                    &mut self.validator,
+                    super::input_window(maximum_object_bytes).steps,
+                )? {
                     BackupImageValidationStep::Pending => Stage::Validating(input),
                     BackupImageValidationStep::Complete => Stage::Complete,
                 }
@@ -468,8 +471,12 @@ impl BackupImageValidationWork for Validation {
                 None => ValidationStage::Catalog(input),
             },
             ValidationStage::Relationships(session, checks) => {
-                let Some(checks) =
-                    checks.advance(session.engine(), &self.control, maximum_steps)?
+                let Some(checks) = checks.advance(
+                    session.engine_owner(),
+                    |owner| owner,
+                    &self.control,
+                    maximum_steps,
+                )?
                 else {
                     if self.expected.is_some() {
                         let source = crate::backup::functions::References::staged(

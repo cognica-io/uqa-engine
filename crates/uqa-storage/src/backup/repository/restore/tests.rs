@@ -21,11 +21,13 @@ mod scheduled;
 
 #[test]
 fn durable_restore_cancellation_needs_neither_live_input_nor_an_active_token() {
-    for stage in ["admitted", "started", "complete"] {
+    for stage in ["admitted", "started", "prepared", "complete"] {
         let fixture = Fixture::new();
         let mut operation = fixture.begin();
         let id = operation.id();
         let request = operation.request();
+        let (holder, image) = operation.stage().unwrap();
+        drop(image);
         let completed = match stage {
             "started" => {
                 assert!(operation
@@ -34,6 +36,10 @@ fn durable_restore_cancellation_needs_neither_live_input_nor_an_active_token() {
                         ..Importer::default()
                     })
                     .is_err());
+                None
+            }
+            "prepared" => {
+                operation.prepare(Importer::default()).unwrap();
                 None
             }
             "complete" => {
@@ -45,6 +51,9 @@ fn durable_restore_cancellation_needs_neither_live_input_nor_an_active_token() {
             }
             _ => None,
         };
+        if matches!(stage, "started" | "prepared") {
+            assert!(holder.symlink_metadata("image/database").unwrap().is_file());
+        }
         drop(operation);
         fixture
             .repository
@@ -60,6 +69,7 @@ fn durable_restore_cancellation_needs_neither_live_input_nor_an_active_token() {
             assert_eq!(cancelled.completed(), completed);
             assert_eq!(cancelled.backup(), fixture.backup);
             drop(cancelled);
+            assert_eq!(holder.entries().unwrap().count(), 0, "{stage}");
             assert_eq!(fixture.control.memory().used(), 0);
         }
         if completed.is_some() {
@@ -402,6 +412,14 @@ fn restore_validates_staging_identity_and_certificate_before_publication() {
         }
         assert!(restore.publish().is_err());
         assert!(!fixture.path().exists());
+        if substitution {
+            assert!(matches!(restore.cancel(), Err(BackupError::Integrity)));
+            assert!(holder
+                .symlink_metadata("original/database")
+                .unwrap()
+                .is_file());
+            assert!(holder.symlink_metadata("image").unwrap().is_dir());
+        }
         assert!(restore.completed().is_none());
     }
 }
@@ -515,11 +533,15 @@ fn restore_resolves_an_unacknowledged_cancellation_record_before_returning() {
     let fixture = Fixture::new();
     let mut restore = fixture.begin();
     let id = restore.id();
+    restore.prepare(Importer::default()).unwrap();
+    let (holder, image) = restore.stage().unwrap();
+    drop(image);
     *fixture.repository.fault.lock() = Some(Fault::RestoreRecordSync);
     assert!(restore.cancel().is_err());
     assert!(restore
         .has_record("cancelled", FrameKind::RestoreCancelled)
         .unwrap());
+    assert!(holder.symlink_metadata("image/database").unwrap().is_file());
     drop(restore);
     let mut restore = fixture
         .repository
@@ -527,6 +549,7 @@ fn restore_resolves_an_unacknowledged_cancellation_record_before_returning() {
         .unwrap();
     assert_eq!(restore.cancel().unwrap(), None);
     assert!(matches!(restore.publish(), Err(BackupError::Finished)));
+    assert_eq!(holder.entries().unwrap().count(), 0);
     assert!(!fixture.path().exists());
     assert_eq!(fixture.control.memory().used(), 0);
 }

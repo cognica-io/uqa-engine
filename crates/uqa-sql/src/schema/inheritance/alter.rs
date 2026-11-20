@@ -5,12 +5,18 @@
 //
 
 //! ALTER inheritance and partition declaration rules over immutable column and constraint definitions.
+#[cfg(test)]
+mod tests;
+
 use crate::ast::{
     AutoIncrement, BinaryOp, ColumnDef, DetachedPartitionConstraint, Expr, PartitionBound,
     PartitionIdentityOverride, PartitionRangeDatum, PartitionSpec, RelationPersistence, TableCheck,
     TableHierarchy, TableKeyConstraint,
 };
-use crate::SQLError;
+use crate::{
+    catalog::{work::ReferenceWork, CatalogWork},
+    SQLError,
+};
 use uqa_core::Value;
 pub fn validate_row_type(
     parent_columns: &[ColumnDef],
@@ -41,7 +47,30 @@ pub fn validate_row_type_with_control(
     reject_child_identity: bool,
     control: &uqa_core::memory::ProductionControl<'_>,
 ) -> Result<(), SQLError> {
-    control.check()?;
+    crate::catalog::work::inline(validate_row_type_with_work(
+        parent_columns,
+        child_columns,
+        parent,
+        child,
+        exact_columns,
+        reject_child_identity,
+        &mut ReferenceWork {
+            control,
+            work: &mut (),
+        },
+    ))
+}
+
+pub(crate) async fn validate_row_type_with_work<W: CatalogWork + Send>(
+    parent_columns: &[ColumnDef],
+    child_columns: &[ColumnDef],
+    parent: &str,
+    child: &str,
+    exact_columns: bool,
+    reject_child_identity: bool,
+    input: &mut ReferenceWork<'_, '_, W>,
+) -> Result<(), SQLError> {
+    input.control.check()?;
     validate_attached_columns(
         parent_columns,
         child_columns,
@@ -49,41 +78,36 @@ pub fn validate_row_type_with_control(
         child,
         exact_columns,
         reject_child_identity,
-        control,
-    )?;
+        input,
+    )
+    .await?;
     for parent_column in parent_columns {
-        control.check()?;
-        let mut child_column = None;
-        for candidate in child_columns {
-            control.check()?;
-            if candidate.name == parent_column.name {
-                child_column = Some(candidate);
-                break;
-            }
-        }
-        let Some(child_column) = child_column else {
+        input.checkpoint().await?;
+        let Some(child_column) =
+            super::find_column(child_columns, &parent_column.name, input).await?
+        else {
             return Err(routine(
                 "42804",
                 format!("child table is missing column \"{}\"", parent_column.name),
             ));
         };
-        validate_inherited_column(parent_column, child_column, child)?;
+        validate_inherited_column(parent_column, child_column, child, input).await?;
     }
     Ok(())
 }
 
 /// Check the columns of a table being attached as a partition in their order, as `ATExecAttachPartition` does before it merges the parent's columns: the partition may contain no identity column (`reject_child_identity`) and no column the parent lacks (`exact_columns`).
-fn validate_attached_columns(
+async fn validate_attached_columns<W: CatalogWork + Send>(
     parent_columns: &[ColumnDef],
     child_columns: &[ColumnDef],
     parent: &str,
     child: &str,
     exact_columns: bool,
     reject_child_identity: bool,
-    control: &uqa_core::memory::ProductionControl<'_>,
+    input: &mut ReferenceWork<'_, '_, W>,
 ) -> Result<(), SQLError> {
     for column in child_columns {
-        control.check()?;
+        input.checkpoint().await?;
         if reject_child_identity
             && column
                 .auto_increment
@@ -101,17 +125,11 @@ fn validate_attached_columns(
                 hint: None,
             });
         }
-        let mut found = !exact_columns;
-        if exact_columns {
-            for parent_column in parent_columns {
-                control.check()?;
-                if parent_column.name == column.name {
-                    found = true;
-                    break;
-                }
-            }
-        }
-        if !found {
+        if exact_columns
+            && super::find_column(parent_columns, &column.name, input)
+                .await?
+                .is_none()
+        {
             return Err(SQLError::Diagnostic {
                 sqlstate: "42804".into(),
                 message: format!(
@@ -131,12 +149,20 @@ fn validate_attached_columns(
 }
 
 /// Check that a child's column matches the parent column it inherits, as `MergeAttributesIntoExisting` does.
-fn validate_inherited_column(
+async fn validate_inherited_column<W: CatalogWork + Send>(
     parent_column: &ColumnDef,
     child_column: &ColumnDef,
     child: &str,
+    input: &mut ReferenceWork<'_, '_, W>,
 ) -> Result<(), SQLError> {
-    if parent_column.ty != child_column.ty {
+    if !crate::type_resolution::same_declaration_with_work(
+        &parent_column.ty,
+        &child_column.ty,
+        input.control,
+        input,
+    )
+    .await?
+    {
         return Err(routine(
             "42804",
             format!(
@@ -146,8 +172,9 @@ fn validate_inherited_column(
             ),
         ));
     }
-    if crate::catalog::collations::declarations::column_oid(parent_column)
-        != crate::catalog::collations::declarations::column_oid(child_column)
+    if crate::catalog::collations::declarations::column_oid_with_work(parent_column, input).await?
+        != crate::catalog::collations::declarations::column_oid_with_work(child_column, input)
+            .await?
     {
         return Err(routine(
             "42P21",

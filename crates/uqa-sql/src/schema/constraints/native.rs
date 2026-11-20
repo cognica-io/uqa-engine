@@ -12,14 +12,16 @@ use crate::{
     },
     catalog::{
         events::StoredTrigger,
-        index::stored::input::{metadata, IndexMetadata},
-        resolution::bound_relation_identity_with_control,
+        index::stored::input::{metadata_with_work, IndexMetadata},
+        resolution::bound_relation_identity_with_work,
+        work::{inline, retire_entries, ReferenceWork},
+        CatalogWork,
     },
     SQLError,
 };
 use uqa_core::{
     catalog_index::CatalogIndexRow,
-    memory::{BudgetedMap, MemoryBudget, ProductionControl},
+    memory::{Budgeted, BudgetedMap, MemoryBudget, OwnedMap, ProductionControl},
     CancellationToken, RelationIdentity,
 };
 
@@ -46,12 +48,11 @@ struct Index<'a> {
 }
 
 struct Catalog<'a> {
-    tables: BudgetedMap<&'a RelationIdentity, NativeConstraintTable<'a>>,
+    tables: OwnedMap<&'a RelationIdentity, NativeConstraintTable<'a>>,
     identities: BudgetedMap<[u8; 16], ()>,
-    columns: BudgetedMap<([u8; 16], &'a str), &'a ColumnDef>,
+    columns: OwnedMap<([u8; 16], &'a str), &'a ColumnDef>,
     indexes: BudgetedMap<[u8; 16], Index<'a>>,
     memory: &'a MemoryBudget,
-    control: ProductionControl<'a>,
 }
 
 /// Validate supplied constraint identities across ordinary/foreign tables, domains and constraint triggers, live key/CHECK columns and original foreign-key targets without inferring identities, evaluating expressions, reading rows or changing validation flags. Index ownership and full expression typing are separate predicates. Both ordinary and foreign CHECK declarations use their captured row layout.
@@ -63,46 +64,56 @@ pub fn validate<'a>(
     memory: &'a MemoryBudget,
     cancellation: &'a CancellationToken,
 ) -> Result<(), SQLError> {
+    inline(validate_with_work(
+        tables,
+        indexes,
+        domains,
+        triggers,
+        memory,
+        cancellation,
+        &mut (),
+    ))
+}
+
+/// Validate and retire the same borrowed constraints within the caller's work windows.
+pub async fn validate_with_work<'a, W: CatalogWork + Send>(
+    tables: impl Iterator<Item = NativeConstraintTable<'a>>,
+    indexes: impl Iterator<Item = &'a CatalogIndexRow>,
+    domains: impl Iterator<Item = &'a CreateDomain>,
+    triggers: impl Iterator<Item = &'a StoredTrigger>,
+    memory: &'a MemoryBudget,
+    cancellation: &'a CancellationToken,
+    work: &mut W,
+) -> Result<(), SQLError> {
+    let control = ProductionControl::new(memory, cancellation, cancellation);
+    control.check()?;
+    let mut input = ReferenceWork {
+        control: &control,
+        work,
+    };
     let mut catalog = Catalog {
-        tables: BudgetedMap::new(memory),
+        tables: OwnedMap::new(),
         identities: BudgetedMap::new(memory),
-        columns: BudgetedMap::new(memory),
+        columns: OwnedMap::new(),
         indexes: BudgetedMap::new(memory),
         memory,
-        control: ProductionControl::new(memory, cancellation, cancellation),
     };
-    catalog.control.check()?;
-    let mut constraint_identities = identities::Identities::new(catalog.control);
+    let mut constraints = identities::Identities::new(memory);
     for table in tables {
-        catalog.control.check()?;
-        if table.object_id == [0; 16]
-            || catalog.tables.insert(table.name, table)?.is_some()
-            || catalog.identities.insert(table.object_id, ())?.is_some()
-        {
-            return Err(invalid("duplicate or invalid relation"));
-        }
-        for column in table.columns {
-            catalog.control.check()?;
-            if catalog
-                .columns
-                .insert((table.object_id, column.name.as_str()), column)?
-                .is_some()
-            {
-                return Err(invalid("duplicate live column"));
-            }
-        }
-        constraint_identities.table(table)?;
+        catalog.insert(table, &mut input).await?;
+        constraints.table(table, &mut input).await?;
     }
     for domain in domains {
-        constraint_identities.domain(domain)?;
+        constraints.domain(domain, &mut input).await?;
     }
     for trigger in triggers {
-        constraint_identities.trigger(trigger)?;
+        constraints.trigger(trigger, &mut input).await?;
     }
-    drop(constraint_identities);
+    constraints.retire(&mut input).await?;
     for row in indexes {
-        catalog.control.check()?;
-        let metadata = metadata(row.definition_json.as_deref(), &catalog.control)?;
+        input.checkpoint().await?;
+        let metadata =
+            metadata_with_work(row.definition_json.as_deref(), &control, input.work).await?;
         if let Some(address) = &metadata.catalog {
             if catalog
                 .indexes
@@ -113,74 +124,136 @@ pub fn validate<'a>(
             }
         }
     }
-    let partitions = partitions::Partitions::new(&catalog)?;
+    let partitions = partitions::Partitions::new(&catalog, &mut input).await?;
     for (_, table) in &catalog.tables {
-        catalog.table(*table, &partitions)?;
+        input.checkpoint().await?;
+        catalog.table(*table, &partitions, &mut input).await?;
     }
-    catalog.control.check()?;
-    Ok(())
+    control.check()?;
+    partitions.retire(&mut input).await?;
+    retire_entries(catalog.indexes.into_entries(), &control, work).await?;
+    retire_entries(catalog.columns.into_iter(), &control, work).await?;
+    retire_entries(catalog.identities.into_entries(), &control, work).await?;
+    retire_entries(catalog.tables.into_iter(), &control, work).await
 }
 
 impl<'a> Catalog<'a> {
-    fn column(
+    async fn insert(
+        &mut self,
+        table: NativeConstraintTable<'a>,
+        input: &mut ReferenceWork<'_, '_, impl CatalogWork + Send>,
+    ) -> Result<(), SQLError> {
+        input.checkpoint().await?;
+        if table.object_id == [0; 16]
+            || self
+                .tables
+                .insert_admitted_key_from(
+                    Budgeted::new(table.name, self.memory.reserve(0)?),
+                    table,
+                    input,
+                )
+                .await?
+                .is_some()
+            || self.identities.insert(table.object_id, ())?.is_some()
+        {
+            return Err(invalid("duplicate or invalid relation"));
+        }
+        for column in table.columns {
+            let key = Budgeted::new(
+                (table.object_id, column.name.as_str()),
+                self.memory.reserve(0)?,
+            );
+            if self
+                .columns
+                .insert_admitted_key_from(key, column, input)
+                .await?
+                .is_some()
+            {
+                return Err(invalid("duplicate live column"));
+            }
+        }
+        Ok(())
+    }
+
+    async fn column(
         &self,
         table: NativeConstraintTable<'a>,
         name: &str,
+        input: &mut ReferenceWork<'_, '_, impl CatalogWork + Send>,
     ) -> Result<&'a ColumnDef, SQLError> {
-        self.control.check()?;
         self.columns
-            .get(&(table.object_id, name))
+            .get_from(&(table.object_id, name), input)
+            .await?
             .copied()
             .ok_or_else(|| invalid("missing live column"))
     }
 
-    fn table(
+    async fn table(
         &self,
         table: NativeConstraintTable<'a>,
         partitions: &partitions::Partitions<'_>,
+        input: &mut ReferenceWork<'_, '_, impl CatalogWork + Send>,
     ) -> Result<(), SQLError> {
         for key in table.keys {
+            input.checkpoint().await?;
             if key.columns.is_empty() {
                 return Err(invalid("empty key"));
             }
-            self.column_list(table, &key.columns, true)?;
-            self.column_list(table, &key.included_columns, false)?;
+            self.column_list(table, &key.columns, true, input).await?;
+            self.column_list(table, &key.included_columns, false, input)
+                .await?;
         }
         for check in table.checks {
-            self.expression(table, &check.expr)?;
+            self.expression(table, &check.expr, input).await?;
             if let Some(partition) = &check.partition_constraint {
                 for key in &partition.spec.keys {
-                    self.expression(table, key)?;
+                    self.expression(table, key, input).await?;
                 }
             }
         }
         for column in table.columns {
+            input.checkpoint().await?;
             if let Some(check) = &column.check {
-                self.expression(table, check)?;
+                self.expression(table, check, input).await?;
             }
             if let Some(reference) = &column.references {
                 self.foreign_key(
                     table,
                     foreign_keys::Reference::column(column, reference),
                     partitions,
-                )?;
+                    input,
+                )
+                .await?;
             }
         }
         for key in table.foreign_keys {
-            self.foreign_key(table, foreign_keys::Reference::table(key), partitions)?;
+            self.foreign_key(
+                table,
+                foreign_keys::Reference::table(key),
+                partitions,
+                input,
+            )
+            .await?;
         }
         if let Some(hierarchy) = table.hierarchy {
             if let Some(partition) = &hierarchy.partition_spec {
                 for key in &partition.keys {
-                    self.expression(table, key)?;
+                    self.expression(table, key, input).await?;
                 }
             }
             for inherited in &hierarchy.partition_inherited_foreign_keys {
-                self.control.check()?;
-                if !table.foreign_keys.iter().any(|key| {
-                    key.catalog_identity == inherited.catalog_identity
+                input.checkpoint().await?;
+                let mut found = false;
+                for key in table.foreign_keys {
+                    input.checkpoint().await?;
+                    if key.catalog_identity == inherited.catalog_identity
                         && key.object_id == inherited.object_id
-                }) {
+                    {
+                        found = true;
+                        break;
+                    }
+                }
+                if !found {
                     return Err(invalid("partition foreign-key provenance"));
                 }
             }
@@ -188,39 +261,53 @@ impl<'a> Catalog<'a> {
         Ok(())
     }
 
-    fn column_list(
+    async fn column_list(
         &self,
         table: NativeConstraintTable<'a>,
         names: &[String],
         distinct: bool,
+        input: &mut ReferenceWork<'_, '_, impl CatalogWork + Send>,
     ) -> Result<(), SQLError> {
-        let mut seen = BudgetedMap::new(self.memory);
+        let mut seen = OwnedMap::new();
         for name in names {
-            self.column(table, name)?;
-            if distinct && seen.insert(name.as_str(), ())?.is_some() {
+            self.column(table, name, input).await?;
+            if distinct
+                && seen
+                    .insert_admitted_key_from(
+                        Budgeted::new(name.as_str(), self.memory.reserve(0)?),
+                        (),
+                        input,
+                    )
+                    .await?
+                    .is_some()
+            {
                 return Err(invalid("duplicate key column"));
             }
         }
-        Ok(())
+        retire_entries(seen.into_iter(), input.control, input.work).await
     }
 
-    fn expression(
+    async fn expression(
         &self,
         table: NativeConstraintTable<'a>,
         expression: &Expr,
+        input: &mut ReferenceWork<'_, '_, impl CatalogWork + Send>,
     ) -> Result<(), SQLError> {
-        crate::schema::dependencies::walk_schema_expr_with_control(
-            expression,
-            &self.control,
-            &mut |node| {
-                if let Expr::Column(name) | Expr::QualifiedColumn { column: name, .. } = node {
-                    if name != "tableoid" {
-                        self.column(table, name)?;
-                    }
+        let mut nodes = expression.stored_nodes(self.memory)?;
+        while let Some(node) = nodes.next(input.control, input.work).await? {
+            match node {
+                Expr::Column(name) | Expr::QualifiedColumn { column: name, .. }
+                    if name != "tableoid" =>
+                {
+                    self.column(table, name, input).await?;
                 }
-                Ok(())
-            },
-        )
+                Expr::ScalarSubquery(_) | Expr::Exists { .. } | Expr::InSubquery { .. } => {
+                    return Err(crate::schema::dependencies::subquery_error(input.control));
+                }
+                _ => {}
+            }
+        }
+        Ok(())
     }
 }
 
