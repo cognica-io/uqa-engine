@@ -128,11 +128,14 @@ fn rename_platform(from: &Dir, source: &OsStr, to: &Dir, target: &OsStr) -> io::
     use cap_fs_ext::{FollowSymlinks, OpenOptionsFollowExt, OpenOptionsMaybeDirExt};
     use cap_std::fs::{OpenOptions, OpenOptionsExt};
     use std::os::windows::{ffi::OsStrExt, io::AsRawHandle};
-    use windows_sys::Win32::Foundation::HANDLE;
-    use windows_sys::Win32::Storage::FileSystem::{
-        FileRenameInfo, SetFileInformationByHandle, DELETE, FILE_READ_ATTRIBUTES, FILE_RENAME_INFO,
-        FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
+    use windows_sys::Wdk::Storage::FileSystem::{
+        FileRenameInformation, NtSetInformationFile, FILE_RENAME_INFORMATION,
     };
+    use windows_sys::Win32::Foundation::{RtlNtStatusToDosError, HANDLE};
+    use windows_sys::Win32::Storage::FileSystem::{
+        DELETE, FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
+    };
+    use windows_sys::Win32::System::IO::IO_STATUS_BLOCK;
     #[repr(C)]
     struct RenameInfo {
         flags: u32,
@@ -143,7 +146,7 @@ fn rename_platform(from: &Dir, source: &OsStr, to: &Dir, target: &OsStr) -> io::
     const {
         assert!(
             std::mem::offset_of!(RenameInfo, name)
-                == std::mem::offset_of!(FILE_RENAME_INFO, FileName)
+                == std::mem::offset_of!(FILE_RENAME_INFORMATION, FileName)
         );
     }
     let mut information = RenameInfo {
@@ -172,17 +175,21 @@ fn rename_platform(from: &Dir, source: &OsStr, to: &Dir, target: &OsStr) -> io::
             "publication source directory",
         ));
     }
-    // SAFETY: RenameInfo has the SDK prefix layout and a bounded inline UTF-16 tail. The source and destination handles are live; zero flags selects ReplaceIfExists=false.
-    let result = unsafe {
-        SetFileInformationByHandle(
+    let mut io_status = IO_STATUS_BLOCK::default();
+    // SAFETY: The source handle is synchronous and has DELETE access. The native rename record addresses a single UTF-16 component relative to the live destination handle. Its zero flags prohibit replacement.
+    let status = unsafe {
+        NtSetInformationFile(
             source.as_raw_handle(),
-            FileRenameInfo,
+            &raw mut io_status,
             (&raw const information).cast(),
             std::mem::size_of::<RenameInfo>() as u32,
+            FileRenameInformation,
         )
     };
-    if result == 0 {
-        return Err(io::Error::last_os_error());
+    if status < 0 {
+        // SAFETY: The conversion accepts any NTSTATUS and returns its Windows error code.
+        let error = unsafe { RtlNtStatusToDosError(status) };
+        return Err(io::Error::from_raw_os_error(error as i32));
     }
     Ok(())
 }

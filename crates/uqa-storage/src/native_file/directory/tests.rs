@@ -10,8 +10,11 @@ use super::*;
 fn exclusive_directory_rename_never_replaces_an_existing_entry() {
     let temporary = tempfile::tempdir().unwrap();
     let directory = Dir::open_ambient_dir(temporary.path(), cap_std::ambient_authority()).unwrap();
-    directory.create_dir("source").unwrap();
-    directory.write("source/content", b"source bytes").unwrap();
+    directory.create_dir("private").unwrap();
+    let private = directory.open_dir("private").unwrap();
+    private.create_dir("source").unwrap();
+    private.write("source/content", b"source bytes").unwrap();
+    private.write("published", b"private entry").unwrap();
     directory.create_dir("empty").unwrap();
     directory.create_dir("populated").unwrap();
     directory
@@ -19,8 +22,8 @@ fn exclusive_directory_rename_never_replaces_an_existing_entry() {
         .unwrap();
     directory.write("file", b"existing file").unwrap();
     for name in ["empty", "populated", "file"] {
-        assert!(rename_new(&directory, "source".as_ref(), &directory, name.as_ref()).is_err());
-        assert_eq!(directory.read("source/content").unwrap(), b"source bytes");
+        assert!(rename_new(&private, "source".as_ref(), &directory, name.as_ref()).is_err());
+        assert_eq!(private.read("source/content").unwrap(), b"source bytes");
     }
     assert_eq!(
         directory.read("populated/content").unwrap(),
@@ -30,12 +33,12 @@ fn exclusive_directory_rename_never_replaces_an_existing_entry() {
     #[cfg(unix)]
     {
         directory.symlink("missing", "link").unwrap();
-        assert!(rename_new(&directory, "source".as_ref(), &directory, "link".as_ref()).is_err());
+        assert!(rename_new(&private, "source".as_ref(), &directory, "link".as_ref()).is_err());
         assert!(directory.symlink_metadata("link").unwrap().is_symlink());
     }
-    let before = identity(&directory.open_dir("source").unwrap()).unwrap();
+    let before = identity(&private.open_dir("source").unwrap()).unwrap();
     rename_new(
-        &directory,
+        &private,
         "source".as_ref(),
         &directory,
         "published".as_ref(),
@@ -49,7 +52,8 @@ fn exclusive_directory_rename_never_replaces_an_existing_entry() {
         directory.read("published/content").unwrap(),
         b"source bytes"
     );
-    assert!(directory.symlink_metadata("source").is_err());
+    assert!(private.symlink_metadata("source").is_err());
+    assert_eq!(private.read("published").unwrap(), b"private entry");
 }
 
 #[test]

@@ -535,6 +535,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Fix Windows error 87 when publishing a restored database. Restoring to a fresh directory now succeeds and preserves any existing destination.
 - Preserve application function selection in views, materialized view refreshes, domain defaults and domain `CHECK` constraints when an application and a builtin share a name. Full and standalone incremental restores check the captured selection before publishing the destination.
 
 - Retire obsolete source layouts when reanalyzing an owned query, including queries without a FROM clause. Complete layout observations replace both optional descriptors through the same installer as ordinary analysis, releasing superseded descriptor handles before publication.
