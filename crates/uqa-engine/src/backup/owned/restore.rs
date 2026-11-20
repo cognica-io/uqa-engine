@@ -16,7 +16,32 @@ use std::{
     thread,
 };
 
-type Operation = Box<dyn FnOnce(&mut RestoreJob<'_>) + Send>;
+type Reply<T> = mpsc::SyncSender<BackupResult<T>>;
+
+enum Operation {
+    Phase(Reply<RestorePhase>),
+    Advance(usize, Reply<RestorePhase>),
+    AdvancePublication(usize, Reply<Option<RestoredEngine>>),
+    Publish(Reply<RestoredEngine>),
+    Finish(Reply<RestoredEngine>),
+    Cancel(Reply<Option<RestoredEngine>>),
+}
+
+impl Operation {
+    fn run(self, job: &mut RestoreJob<'_>) {
+        fn reply<T>(to: &Reply<T>, result: BackupResult<T>) {
+            let _ = to.send(result);
+        }
+        match self {
+            Self::Phase(to) => reply(&to, Ok(job.phase())),
+            Self::Advance(bytes, to) => reply(&to, job.advance(bytes)),
+            Self::AdvancePublication(steps, to) => reply(&to, job.advance_publication(steps)),
+            Self::Publish(to) => reply(&to, job.publish()),
+            Self::Finish(to) => reply(&to, job.finish()),
+            Self::Cancel(to) => reply(&to, job.cancel()),
+        }
+    }
+}
 
 /// A restore handle usable across host threads. Private provider transactions and validation continuations stay on the thread that admitted them. Dropping the handle releases the repository lease and provider resources before returning.
 pub struct OwnedRestoreJob {
@@ -69,7 +94,7 @@ impl OwnedRestoreJob {
                 Ok(mut job) => {
                     if ready.send(Ok((job.backup(), job.id()))).is_ok() {
                         while let Ok(Some(operation)) = operations.recv() {
-                            operation(&mut job);
+                            operation.run(&mut job);
                         }
                     }
                 }
@@ -89,15 +114,10 @@ impl OwnedRestoreJob {
         })
     }
 
-    fn call<T: Send + 'static>(
-        &self,
-        operation: impl FnOnce(&mut RestoreJob<'_>) -> BackupResult<T> + Send + 'static,
-    ) -> BackupResult<T> {
+    fn call<T>(&self, request: impl FnOnce(Reply<T>) -> Operation) -> BackupResult<T> {
         let (reply, result) = mpsc::sync_channel(0);
         self.requests
-            .send(Some(Box::new(move |job| {
-                let _ = reply.send(operation(job));
-            })))
+            .send(Some(request(reply)))
             .map_err(|_| disconnected())?;
         result.recv().map_err(|_| disconnected())?
     }
@@ -111,31 +131,30 @@ impl OwnedRestoreJob {
     }
 
     pub fn phase(&self) -> RestorePhase {
-        self.call(|job| Ok(job.phase()))
-            .unwrap_or(RestorePhase::Failed)
+        self.call(Operation::Phase).unwrap_or(RestorePhase::Failed)
     }
 
     pub fn advance(&mut self, maximum_object_bytes: usize) -> BackupResult<RestorePhase> {
-        self.call(move |job| job.advance(maximum_object_bytes))
+        self.call(|reply| Operation::Advance(maximum_object_bytes, reply))
     }
 
     pub fn advance_publication(
         &mut self,
         maximum_steps: usize,
     ) -> BackupResult<Option<RestoredEngine>> {
-        self.call(move |job| job.advance_publication(maximum_steps))
+        self.call(|reply| Operation::AdvancePublication(maximum_steps, reply))
     }
 
     pub fn publish(&mut self) -> BackupResult<RestoredEngine> {
-        self.call(|job| job.publish())
+        self.call(Operation::Publish)
     }
 
     pub fn finish(&mut self) -> BackupResult<RestoredEngine> {
-        self.call(|job| job.finish())
+        self.call(Operation::Finish)
     }
 
     pub fn cancel(&mut self) -> BackupResult<Option<RestoredEngine>> {
-        self.call(|job| job.cancel())
+        self.call(Operation::Cancel)
     }
 }
 

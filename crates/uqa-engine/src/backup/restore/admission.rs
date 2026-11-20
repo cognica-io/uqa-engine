@@ -59,115 +59,122 @@ impl AuthorizedRestore {
         self,
         repository: &LocalRepository,
     ) -> Result<RestoreJob<'_>, SQLError> {
-        let Self {
-            request,
-            destination,
-            configuration,
-            control,
-        } = self;
-        let options = configuration.options;
-        match request {
-            RestoreRequest::Begin(backup) => {
-                let admitted = configuration.admit();
-                let control = control.with_temporary_limit(options.maximum_workspace_bytes);
-                let lease = repository
-                    .open_backup(backup, &control)
-                    .map_err(start_error)?;
-                let root = lease.root();
-                match destination {
-                    RestoreDestination::Memory => {
-                        if root.cut().format.provider() != ImageProvider::Memory {
-                            return Err(start_error(BackupError::Unsupported(
-                                "restore destination mapping",
-                            )));
-                        }
-                        let memory = control
-                            .memory()
-                            .reserve(size_of::<Input<'_>>())
-                            .map_err(|e| start_error(e.into()))?;
-                        let functions = Admission::open(&lease, &control).map_err(start_error)?;
-                        let input = Input::new(
-                            MemoryImageImportReader::new(
-                                lease,
-                                options.maximum_workspace_bytes,
-                                &control,
-                            )
-                            .map_err(start_error)?,
-                            admitted.bindings.analyzers.clone().unwrap_or_default(),
-                            DiskANNTemporaryBudget::new(options.maximum_workspace_bytes),
-                            options.maximum_value_bytes,
-                            &control,
-                        )
-                        .map_err(start_error)?;
-                        Ok(RestoreJob {
-                            state: State::Reading(
-                                Budgeted::new(Box::new(input), memory),
-                                admitted.bindings,
-                                functions,
-                            ),
-                            backup,
-                            root: Some(root),
-                            id: None,
-                            retained: MemoryBudget::new(options.retained_bytes),
-                            control,
-                        })
-                    }
-                    RestoreDestination::Persistent { directory, target } => {
-                        if root.cut().format.provider() != target.image_provider() {
-                            return Err(start_error(BackupError::Unsupported(
-                                "restore destination mapping",
-                            )));
-                        }
-                        drop(lease);
-                        let memory = control
-                            .memory()
-                            .reserve(size_of::<persistent::Persistent<'_>>())
-                            .map_err(|e| start_error(e.into()))?;
-                        let candidate = persistent::Persistent::begin(
-                            repository, backup, directory, target, admitted, &control,
-                        )
-                        .map_err(start_error)?;
-                        let id = candidate.id();
-                        Ok(RestoreJob {
-                            state: State::Persistent(Budgeted::new(Box::new(candidate), memory)),
-                            backup,
-                            root: Some(root),
-                            id: Some(id),
-                            retained: MemoryBudget::new(options.retained_bytes),
-                            control,
-                        })
-                    }
-                }
-            }
-            RestoreRequest::Resume(id) => {
-                let RestoreDestination::Persistent { directory, target } = destination else {
+        match self.request {
+            RestoreRequest::Begin(backup) => self.begin(repository, backup),
+            RestoreRequest::Resume(id) => self.resume(repository, id),
+        }
+    }
+
+    fn begin(
+        self,
+        repository: &LocalRepository,
+        backup: BackupId,
+    ) -> Result<RestoreJob<'_>, SQLError> {
+        let options = self.configuration.options;
+        let admitted = self.configuration.admit();
+        let control = self
+            .control
+            .with_temporary_limit(options.maximum_workspace_bytes);
+        let lease = repository
+            .open_backup(backup, &control)
+            .map_err(start_error)?;
+        let root = lease.root();
+        match self.destination {
+            RestoreDestination::Memory => {
+                if root.cut().format.provider() != ImageProvider::Memory {
                     return Err(start_error(BackupError::Unsupported(
-                        "durable memory restore recovery",
+                        "restore destination mapping",
                     )));
-                };
-                let control = control.with_temporary_limit(options.maximum_workspace_bytes);
+                }
                 let memory = control
                     .memory()
-                    .reserve(size_of::<persistent::Persistent<'_>>())
+                    .reserve(size_of::<Input<'_>>())
                     .map_err(|e| start_error(e.into()))?;
-                let (candidate, backup) = persistent::Persistent::resume(
-                    repository,
-                    id,
-                    directory,
-                    target,
-                    configuration.admit(),
+                let functions = Admission::open(&lease, &control).map_err(start_error)?;
+                let input = Input::new(
+                    MemoryImageImportReader::new(lease, options.maximum_workspace_bytes, &control)
+                        .map_err(start_error)?,
+                    admitted.bindings.analyzers.clone().unwrap_or_default(),
+                    DiskANNTemporaryBudget::new(options.maximum_workspace_bytes),
+                    options.maximum_value_bytes,
                     &control,
                 )
                 .map_err(start_error)?;
                 Ok(RestoreJob {
+                    state: State::Reading(
+                        Budgeted::new(Box::new(input), memory),
+                        admitted.bindings,
+                        functions,
+                    ),
+                    backup,
+                    root: Some(root),
+                    id: None,
+                    retained: MemoryBudget::new(options.retained_bytes),
+                    control,
+                })
+            }
+            RestoreDestination::Persistent { directory, target } => {
+                if root.cut().format.provider() != target.image_provider() {
+                    return Err(start_error(BackupError::Unsupported(
+                        "restore destination mapping",
+                    )));
+                }
+                drop(lease);
+                let memory = control
+                    .memory()
+                    .reserve(size_of::<persistent::Persistent<'_>>())
+                    .map_err(|e| start_error(e.into()))?;
+                let candidate = persistent::Persistent::begin(
+                    repository, backup, directory, target, admitted, &control,
+                )
+                .map_err(start_error)?;
+                let id = candidate.id();
+                Ok(RestoreJob {
                     state: State::Persistent(Budgeted::new(Box::new(candidate), memory)),
                     backup,
-                    root: None,
+                    root: Some(root),
                     id: Some(id),
                     retained: MemoryBudget::new(options.retained_bytes),
                     control,
                 })
             }
         }
+    }
+
+    fn resume(
+        self,
+        repository: &LocalRepository,
+        id: RestoreId,
+    ) -> Result<RestoreJob<'_>, SQLError> {
+        let RestoreDestination::Persistent { directory, target } = self.destination else {
+            return Err(start_error(BackupError::Unsupported(
+                "durable memory restore recovery",
+            )));
+        };
+        let options = self.configuration.options;
+        let control = self
+            .control
+            .with_temporary_limit(options.maximum_workspace_bytes);
+        let memory = control
+            .memory()
+            .reserve(size_of::<persistent::Persistent<'_>>())
+            .map_err(|e| start_error(e.into()))?;
+        let (candidate, backup) = persistent::Persistent::resume(
+            repository,
+            id,
+            directory,
+            target,
+            self.configuration.admit(),
+            &control,
+        )
+        .map_err(start_error)?;
+        Ok(RestoreJob {
+            state: State::Persistent(Budgeted::new(Box::new(candidate), memory)),
+            backup,
+            root: None,
+            id: Some(id),
+            retained: MemoryBudget::new(options.retained_bytes),
+            control,
+        })
     }
 }
