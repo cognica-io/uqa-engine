@@ -3957,6 +3957,7 @@ dependencies = [
  "proptest",
  "regex",
  "rstest",
+ "self_cell",
  "serde",
  "serde_json",
  "sha2",

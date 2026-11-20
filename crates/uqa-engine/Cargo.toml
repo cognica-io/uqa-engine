@@ -63,6 +63,7 @@ arrow-schema = { workspace = true, optional = true }
 
 [target.'cfg(any(windows, all(unix, not(target_os = "emscripten"))))'.dependencies]
 fs2 = { workspace = true }
+self_cell = { workspace = true }
 
 [target.'cfg(target_os = "emscripten")'.dependencies]
 rusqlite = { package = "uqa-rusqlite", version = "=0.39.3", default-features = false, features = ["bundled", "blob", "cache"] }

@@ -48,6 +48,19 @@ pub enum RestoreDestination {
     },
 }
 
+impl RestoreDestination {
+    /// Restore into a new directory using the supplied provider and file settings.
+    pub fn persistent(
+        directory: impl Into<PathBuf>,
+        target: impl PersistentBackupTarget + 'static,
+    ) -> Self {
+        Self::Persistent {
+            directory: directory.into(),
+            target: Arc::new(target),
+        }
+    }
+}
+
 impl fmt::Debug for RestoreDestination {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -78,6 +91,12 @@ impl RestoreOptions {
     }
 }
 
+impl Default for RestoreOptions {
+    fn default() -> Self {
+        Self::new(super::DEFAULT_BACKUP_WORKSPACE_BYTES, 64 << 20)
+    }
+}
+
 /// Reading and validation retain an unpublished candidate. Publication is explicit and remains stable after a lost reply or late cancellation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RestorePhase {
@@ -94,6 +113,13 @@ pub enum RestorePhase {
 /// An independently retained restored runtime. Clones refer to the same published Engine and preserve later writes.
 #[derive(Clone)]
 pub struct RestoredEngine(RetainedValue<Engine>);
+
+impl RestoredEngine {
+    /// Transfer the published session and its memory reservation to a host Engine handle.
+    pub fn into_retained(self) -> RetainedValue<Engine> {
+        self.0
+    }
+}
 
 impl Deref for RestoredEngine {
     type Target = Engine;
@@ -459,6 +485,18 @@ impl RestoreJob<'_> {
         loop {
             if let Some(engine) = self.advance_publication(64)? {
                 return Ok(engine);
+            }
+        }
+    }
+
+    /// Drive a fresh or resumed restoration through verification and publication.
+    pub fn finish(&mut self) -> BackupResult<RestoredEngine> {
+        loop {
+            match self.advance(16 * 1024)? {
+                RestorePhase::Prepared | RestorePhase::Publishing | RestorePhase::Complete => {
+                    return self.publish();
+                }
+                _ => (),
             }
         }
     }

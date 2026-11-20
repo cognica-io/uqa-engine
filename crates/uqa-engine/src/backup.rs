@@ -8,8 +8,10 @@
 
 mod functions;
 mod memory;
+mod owned;
 mod restore;
 mod validation;
+pub use owned::{OwnedBackupJob, OwnedRestoreJob};
 pub(crate) use restore::RestoreBindings;
 pub use restore::{
     RestoreConfiguration, RestoreDestination, RestoreJob, RestoreOptions, RestorePhase,
@@ -21,15 +23,23 @@ use std::sync::Arc;
 
 pub use uqa_storage::backup::{
     BackupCapabilities, BackupCapturePhase, BackupCaptureProgress, BackupCaptureReport,
-    BackupCaptureStep, BackupCut, BackupError, BackupId, BackupKey, BackupLimits, BackupResult,
-    BackupRoot, LocalRepository, PersistentBackupTarget, Protection, ProtectionId, RestoreId,
+    BackupCaptureStep, BackupCut, BackupError, BackupId, BackupKey, BackupLimits, BackupListing,
+    BackupResult, BackupRoot, LocalRepository, PersistentBackupTarget, Protection, ProtectionId,
+    RestoreId,
 };
 pub use uqa_storage::read_control::StorageReadControl;
+pub use uqa_storage::StorageEncryptionKey;
 pub use uqa_storage_sqlite::{SQLiteBackupMapping, SQLiteBackupTarget};
 
 /// The repository owner implements progress, cancellation, verification and publication. The source Engine and provider may be dropped after construction.
 pub type BackupJob<'a> =
     uqa_storage::backup::BackupImageCapture<'a, uqa_storage::backup::OwnedBackupImage>;
+
+/// Default retained and working memory allowance for each native binding operation.
+pub const DEFAULT_BACKUP_MEMORY_BYTES: usize = 256 << 20;
+
+/// Default temporary file allowance for capture, restore and repository operations.
+pub const DEFAULT_BACKUP_WORKSPACE_BYTES: u64 = 256 << 20;
 
 /// Explicit limits and lineage for one full or incremental export. Source and working memory are separately limited by the supplied read control.
 #[derive(Clone, Copy, Debug)]
@@ -48,6 +58,12 @@ impl BackupOptions {
             maximum_workspace_bytes,
             allow_plaintext_export: false,
         }
+    }
+}
+
+impl Default for BackupOptions {
+    fn default() -> Self {
+        Self::new(1 << 30, DEFAULT_BACKUP_WORKSPACE_BYTES)
     }
 }
 
