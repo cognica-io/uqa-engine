@@ -8,7 +8,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
-- SQL now compares resolved `GROUP BY` columns by their input positions. In-memory scans select the row iterator once per page and fill the same projection buffer for each row. Both optimizations also apply to queries on a restored memory database. [Query measurements](docs/design/performance.md#grouping-and-in-memory-scan-instruction-counts-2026-11-20-utc)
+- SQL now compares resolved `GROUP BY` columns by their input positions. In-memory scans select the row iterator once per page and fill the same projection buffer for each row. Both optimizations also apply to queries on a restored memory database. [Query measurements](docs/design/performance.md#grouping-and-in-memory-scan-instruction-counts-2026-11-20-utc) · [Controlled timing](docs/design/performance.md#controlled-analytical-results-after-grouped-column-and-scan-improvements-2026-11-20-utc)
 - Ordinary in-memory queries now pass each page of projected rows directly to its visitor. Reads from a retained backup snapshot still check for cancellation during the page. [Q1 performance measurement](docs/design/performance.md#controlled-analytical-results-after-ordinary-memory-projection-2026-11-20-utc)
 - Backup and restore preserve the application functions used by trigger predicates and rewrite rules. An insert after restore now fires the same trigger and writes the same values as on the source, including when a function shares its name with a builtin.
 - Copy long deferred SQL and PL/pgSQL function bodies in chunks of at most 4,096 bytes during restore. The original source text remains available in `pg_proc`. Restore also checks long argument lists incrementally and preserves the original SQL diagnostic when a declaration has multiple errors. Restore copies scalar and set-returning type names, the saved search path, per-function settings and execution privileges in bounded steps before binding the routine.
@@ -390,6 +390,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- Add full and incremental backup, verification, retention and restore to the standalone `usql backup` command and the interactive `\backup` command. [CLI reference](docs/manual/reference/03-cli.md)
+- Expose online full and incremental backups in the native C, Python and Node.js bindings. Applications can open protected repositories, restore a child after retiring its parent, and resume a persistent restore by ID. [Native backup and restore](docs/manual/reference/08-bindings-and-extensions.md#native-backup-and-restore)
+
 - Reconstruct native evaluated value indexes with original admitted values, exact historical comparison policy and named capture membership. Normal writes and later spill preserve retained inputs.
 
 - Connect committed memory Engine catalogs, tables, evaluated data and resources to bounded full and incremental backup export.
@@ -533,6 +536,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Fix Windows error 87 when publishing a restored database. Restoring to a fresh directory now succeeds and preserves any existing destination.
 - Preserve application function selection in views, materialized view refreshes, domain defaults and domain `CHECK` constraints when an application and a builtin share a name. Full and standalone incremental restores check the captured selection before publishing the destination.
 
 - Retire obsolete source layouts when reanalyzing an owned query, including queries without a FROM clause. Complete layout observations replace both optional descriptors through the same installer as ordinary analysis, releasing superseded descriptor handles before publication.
@@ -609,7 +613,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
-- Add the embedded C ABI with `uqa_*` symbols, opaque handles, status returns and library-owned diagnostics. C11/C++17 applications can execute SQL messages, prepared statements, cursors and batches, bind typed values, register scalar/table/aggregate UDFs and use notices, notifications, backup and cancellation on memory, native SQLite, SQLite Key/Value and redb. Native shared/static packages provide installed headers, CMake and pkg-config targets on Linux x86_64/aarch64, macOS x86_64/arm64 and Windows x86_64. Host logging remains declaration-only. See the [C API](docs/manual/reference/08-bindings-and-extensions.md#c-source-api) and [installed-consumer guide](crates/uqa-ffi/README.md#native-builds-and-installed-consumers).
+- Add the embedded C ABI with `uqa_*` symbols, opaque handles, status returns and library-owned diagnostics. C11/C++17 applications can execute SQL messages, prepared statements, cursors and batches, bind typed values, register scalar/table/aggregate UDFs and use notices, notifications and cancellation on memory, native SQLite, SQLite Key/Value and redb. Native shared/static packages provide installed headers, CMake and pkg-config targets on Linux x86_64/aarch64, macOS x86_64/arm64 and Windows x86_64. Host logging remains declaration-only. See the [C API](docs/manual/reference/08-bindings-and-extensions.md#c-source-api) and [installed-consumer guide](crates/uqa-ffi/README.md#native-builds-and-installed-consumers).
 
 ### Changed
 

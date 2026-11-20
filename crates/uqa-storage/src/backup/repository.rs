@@ -272,6 +272,20 @@ impl LocalRepository {
         }
     }
 
+    /// Require explicit permission to write protected input to a plaintext archive.
+    pub fn check_export_protection(
+        &self,
+        encrypted_source: bool,
+        allow_plaintext_export: bool,
+    ) -> BackupResult<()> {
+        if encrypted_source && self.protection_domain().is_none() && !allow_plaintext_export {
+            return Err(BackupError::Invalid(
+                "encrypted source requires a protected repository or explicit plaintext export",
+            ));
+        }
+        Ok(())
+    }
+
     fn header(&self) -> [u8; HEADER_BYTES] {
         let mut bytes = [0; HEADER_BYTES];
         bytes[..8].copy_from_slice(b"UQAREP01");

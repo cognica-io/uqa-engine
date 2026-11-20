@@ -123,6 +123,8 @@ typedef struct uqa_container_anchor {
 #define UQA_ERROR_LIMIT             (-INT32_C(11))
 #define UQA_ERROR_NULL              (-INT32_C(12))
 #define UQA_ERROR_NOTIFICATION      (-INT32_C(13))
+#define UQA_ERROR_INTEGRITY         (-INT32_C(14))
+#define UQA_ERROR_CANCELLED         (-INT32_C(15))
 
 #define UQA_NOTIFICATION_FAILURE_INVALID_REQUEST UINT32_C(1)
 #define UQA_NOTIFICATION_FAILURE_AUTHENTICATION UINT32_C(2)

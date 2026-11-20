@@ -42,6 +42,21 @@ const Engine = new Proxy(function Engine(...args) {
   },
 });
 
+function nativeHandle(name) {
+  return new Proxy(function () {
+    throw new TypeError(`${name} is created by its backup or restore operation`);
+  }, {
+    get(target, key, receiver) {
+      if (key === Symbol.hasInstance) {
+        return (value) => binding !== undefined && value instanceof binding[name];
+      }
+      if (key === "prototype") return loadNativeBinding()[name].prototype;
+      if (key === "name") return name;
+      return Reflect.get(target, key, receiver);
+    },
+  });
+}
+
 let sqlCallbackDepth = 0;
 
 function runSQLCallback(callback, receiver, args) {
@@ -167,6 +182,12 @@ function installRegistrationWrappers(engineClass) {
 
 guardEngineMethods(HttpEngine);
 
+module.exports.BackupJob = nativeHandle("BackupJob");
+module.exports.BackupListing = nativeHandle("BackupListing");
+module.exports.BackupRepository = nativeHandle("BackupRepository");
+module.exports.RestoreJob = nativeHandle("RestoreJob");
+module.exports.createBackupRepository = (...args) => loadNativeBinding().createBackupRepository(...args);
+module.exports.openBackupRepository = (...args) => loadNativeBinding().openBackupRepository(...args);
 module.exports.Engine = Engine;
 module.exports.HttpEngine = HttpEngine;
 module.exports.HttpEngineError = HttpEngineError;

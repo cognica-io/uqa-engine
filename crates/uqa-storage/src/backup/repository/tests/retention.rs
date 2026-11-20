@@ -177,10 +177,10 @@ fn collection_preserves_branched_children_and_counts_partial_packs_once() {
         repository.remove_backup(left.backup(), &control).unwrap();
         collect_all(&repository, &control);
         assert_eq!(read(&repository, right, &control)[0].0, units[2]);
-        let name = directory::name(spans[2].1.object().as_bytes());
         #[cfg(unix)]
         {
             use std::os::unix::fs::MetadataExt;
+            let name = directory::name(spans[2].1.object().as_bytes());
             assert_eq!(
                 directory::open_file(&repository.objects, directory::text(&name), false)
                     .unwrap()

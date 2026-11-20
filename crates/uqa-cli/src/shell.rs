@@ -7,8 +7,8 @@
 //! Client-side input state. SQL compilation and transaction execution remain Engine-owned.
 
 use super::{
-    io, open_engine, print_result_copy_text_with_engine, statement_is_pure_comment, BufRead,
-    IsTerminal, Path, PathBuf, PromptLineOutcome, SQLResult, Session, Value, Write,
+    io, print_result_copy_text_with_engine, statement_is_pure_comment, BufRead, IsTerminal, Path,
+    PathBuf, PromptLineOutcome, SQLResult, Session, Value, Write,
 };
 use std::io::Read;
 
@@ -302,6 +302,9 @@ impl Session {
                 self.include_script(&path, out)?;
             }
             "w" | "s" | "e" | "edit" => self.file_command(name, &args, buffer, out)?,
+            "backup" => crate::backup::Command::parse(&args)?
+                .execute(self, out, true)
+                .map_err(|error| error.to_string())?,
             "watch" => self.watch_query(&args, buffer, out)?,
             "c" | "connect" | "open" => {
                 if name == "open" && args.len() != 1 {
@@ -317,18 +320,7 @@ impl Session {
                     .map(PathBuf::from)
                     .or_else(|| self.db_path.clone());
                 let path = if memory { None } else { path };
-                let key = if path == self.db_path {
-                    self.db_key.as_deref()
-                } else {
-                    None
-                };
-                let (engine, location, key) = open_engine(path.as_deref(), key)?;
-                crate::shell_notifications::configure(&engine)?;
-                self.engine = engine;
-                self.db_path = path;
-                self.db_key = key;
-                self.location = location;
-                self.shell.listen_seen = false;
+                self.reconnect(path)?;
                 self.connection_info(out)?;
             }
             "conninfo" => {
@@ -439,7 +431,7 @@ impl Session {
                         crate::output::value_to_display_typed(
                             value,
                             result.column_types.get(column).and_then(Option::as_ref),
-                            Some(&self.engine),
+                            Some(self.engine.as_ref()),
                         )
                         .map_err(|e| crate::diagnostics::sql_error_text(&e))?,
                     ),
@@ -542,11 +534,11 @@ impl Session {
         if self.copy_text {
             let mut error = Ok(());
             self.write_query_output(out, |writer| {
-                error = print_result_copy_text_with_engine(result, &self.engine, writer);
+                error = print_result_copy_text_with_engine(result, self.engine.as_ref(), writer);
             })?;
             return error.map_err(|e| crate::diagnostics::sql_error_text(&e));
         }
-        let table = DisplayTable::from_result(result, Some(&self.engine))
+        let table = DisplayTable::from_result(result, Some(self.engine.as_ref()))
             .map_err(|e| crate::diagnostics::sql_error_text(&e))?;
         let terminal = self.output_path.is_none() && io::stdout().is_terminal();
         let rendered = if terminal {

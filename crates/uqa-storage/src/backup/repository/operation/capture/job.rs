@@ -175,6 +175,12 @@ impl<S: BackupImageSource> BackupImageCapture<'_, S> {
         self.operation.publish(&self.control)
     }
 
+    /// Drive the remaining capture and verification steps, then publish the root.
+    pub fn finish(&mut self) -> BackupResult<BackupRoot> {
+        while self.advance(128, 16 * 1024)? == BackupCaptureStep::Pending {}
+        self.publish()
+    }
+
     /// Retire source/workspace ownership before recording cancellation; an already published root remains completed.
     pub fn cancel(&mut self) -> BackupResult<Option<BackupRoot>> {
         self.machine = None;

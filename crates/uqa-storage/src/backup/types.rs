@@ -166,6 +166,15 @@ pub struct BackupLimits {
     max_frame_bytes: u32,
 }
 
+impl Default for BackupLimits {
+    fn default() -> Self {
+        Self {
+            max_key_bytes: 4096,
+            max_frame_bytes: 256 << 10,
+        }
+    }
+}
+
 impl BackupLimits {
     /// Encoded keys and decoded frames have independent limits. Heap buffers also use the job's shared memory budget.
     pub fn new(max_key_bytes: u32, max_frame_bytes: u32) -> BackupResult<Self> {

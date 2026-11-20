@@ -46,6 +46,10 @@ on:
         description: Run the Rust validation jobs for a Rust-affecting change
         required: true
         type: boolean
+      run_windows_packages:
+        description: Build and test the native Windows C and usql release packages
+        type: boolean
+        default: false
       run_transactions:
         description: Run concurrent transaction owner and public API acceptance without measurements
         required: false
@@ -81,7 +85,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}-${{ inputs.run_transactions && inputs.transaction_platform || 'default' }}-${{ inputs.run_transactions && inputs.transaction_suite || 'default' }}
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ inputs.run_windows_packages && 'windows-packages' || inputs.run_transactions && inputs.transaction_platform || 'default' }}-${{ inputs.run_transactions && inputs.transaction_suite || 'default' }}
   cancel-in-progress: true
 
 env:
@@ -319,7 +323,7 @@ jobs:
   gate:
     name: pre-merge CI
     if: ${{ always() }}
-    needs: [test-linux, test-macos, clippy, msrv, doc, deny, upstream-regression-oracle, nori-reference, nori-benchmark, concurrent-transactions]
+    needs: [test-linux, test-macos, clippy, msrv, doc, deny, upstream-regression-oracle, nori-reference, nori-benchmark, concurrent-transactions, windows-c-package, windows-usql]
     runs-on: ubuntu-24.04
     env:
       RESULTS: ${{ join(needs.*.result, ' ') }}
@@ -329,6 +333,21 @@ jobs:
           case " $RESULTS " in
             *" failure "*|*" cancelled "*) exit 1 ;;
           esac
+
+  windows-c-package:
+    name: Windows C distribution
+    if: github.event_name == 'workflow_dispatch' && inputs.run_windows_packages
+    uses: ./.github/workflows/c-packages.yml
+    with:
+      force_all: true
+      windows_only: true
+
+  windows-usql:
+    name: Windows CLI distributions
+    if: github.event_name == 'workflow_dispatch' && inputs.run_windows_packages
+    uses: ./.github/workflows/usql-release-checks.yml
+    with:
+      windows_only: true
 
   concurrent-transactions:
     name: concurrent transactions ${{ matrix.os }} (${{ inputs.transaction_suite }})

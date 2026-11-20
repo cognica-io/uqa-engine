@@ -10,6 +10,8 @@
 mod boundary;
 pub mod abi;
 mod arrow;
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+mod backup;
 mod callback;
 mod config;
 mod copy;
@@ -33,6 +35,8 @@ pub mod test_support;
 
 pub use abi::*;
 pub use arrow::*;
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+pub use backup::*;
 pub use callback::{uqa_callback_fail, uqa_callback_fail_n};
 pub use config::*;
 pub use copy::*;

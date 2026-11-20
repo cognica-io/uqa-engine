@@ -7,8 +7,8 @@
 //! Engine creation, file detection, compression, and session creation.
 
 use super::{
-    compression_options, database_file_format_name, pyfunction, pymethods, runtime_error, Arc,
-    Engine, PathBuf, PyEngine, PyIOError, PyResult,
+    compression_options, database_file_format_name, pyfunction, pymethods, runtime_error, Engine,
+    PathBuf, PyEngine, PyIOError, PyResult, RetainedValue,
 };
 
 #[pymethods]
@@ -16,14 +16,16 @@ impl PyEngine {
     #[new]
     fn new() -> Self {
         Self {
-            inner: Some(Arc::new(Engine::new())),
+            inner: Some(RetainedValue::new(Engine::new())),
         }
     }
 
     #[staticmethod]
     fn open(path: PathBuf) -> PyResult<Self> {
         Ok(Self {
-            inner: Some(Arc::new(Engine::open(&path).map_err(runtime_error)?)),
+            inner: Some(RetainedValue::new(
+                Engine::open(&path).map_err(runtime_error)?,
+            )),
         })
     }
 
@@ -32,7 +34,7 @@ impl PyEngine {
     /// cancellation are isolated while durable data remains shared.
     fn new_session(&self) -> PyResult<Self> {
         Ok(Self {
-            inner: Some(Arc::new(
+            inner: Some(RetainedValue::new(
                 self.inner()?.new_session().map_err(runtime_error)?,
             )),
         })
@@ -41,7 +43,7 @@ impl PyEngine {
     #[staticmethod]
     fn open_encrypted(path: PathBuf, key: &str) -> PyResult<Self> {
         Ok(Self {
-            inner: Some(Arc::new(
+            inner: Some(RetainedValue::new(
                 Engine::open_encrypted(&path, key).map_err(runtime_error)?,
             )),
         })
@@ -51,7 +53,7 @@ impl PyEngine {
     #[pyo3(signature = (path, key=None))]
     fn open_auto(path: PathBuf, key: Option<&str>) -> PyResult<Self> {
         Ok(Self {
-            inner: Some(Arc::new(
+            inner: Some(RetainedValue::new(
                 Engine::open_auto(&path, key).map_err(runtime_error)?,
             )),
         })
@@ -75,7 +77,7 @@ impl PyEngine {
     ) -> PyResult<Self> {
         let compression = compression_options(codec, page_size, chunk_pages, level)?;
         Ok(Self {
-            inner: Some(Arc::new(
+            inner: Some(RetainedValue::new(
                 Engine::open_compressed(&path, compression).map_err(runtime_error)?,
             )),
         })
@@ -93,7 +95,7 @@ impl PyEngine {
     ) -> PyResult<Self> {
         let compression = compression_options(codec, page_size, chunk_pages, level)?;
         Ok(Self {
-            inner: Some(Arc::new(
+            inner: Some(RetainedValue::new(
                 Engine::open_compressed_encrypted(&path, key, compression)
                     .map_err(runtime_error)?,
             )),

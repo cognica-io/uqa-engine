@@ -24,6 +24,8 @@ use uqa_storage::{
     read_control::StorageReadControl,
 };
 
+mod admission;
+pub(in crate::backup) use admission::{AuthorizedRestore, RestoreRequest};
 mod configuration;
 mod functions;
 pub(crate) use configuration::RestoreBindings;
@@ -46,6 +48,19 @@ pub enum RestoreDestination {
         directory: PathBuf,
         target: Arc<dyn PersistentBackupTarget>,
     },
+}
+
+impl RestoreDestination {
+    /// Restore into a new directory using the supplied provider and file settings.
+    pub fn persistent(
+        directory: impl Into<PathBuf>,
+        target: impl PersistentBackupTarget + 'static,
+    ) -> Self {
+        Self::Persistent {
+            directory: directory.into(),
+            target: Arc::new(target),
+        }
+    }
 }
 
 impl fmt::Debug for RestoreDestination {
@@ -78,6 +93,12 @@ impl RestoreOptions {
     }
 }
 
+impl Default for RestoreOptions {
+    fn default() -> Self {
+        Self::new(super::DEFAULT_BACKUP_WORKSPACE_BYTES, 64 << 20)
+    }
+}
+
 /// Reading and validation retain an unpublished candidate. Publication is explicit and remains stable after a lost reply or late cancellation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RestorePhase {
@@ -94,6 +115,13 @@ pub enum RestorePhase {
 /// An independently retained restored runtime. Clones refer to the same published Engine and preserve later writes.
 #[derive(Clone)]
 pub struct RestoredEngine(RetainedValue<Engine>);
+
+impl RestoredEngine {
+    /// Transfer the published session and its memory reservation to a host Engine handle.
+    pub fn into_retained(self) -> RetainedValue<Engine> {
+        self.0
+    }
+}
 
 impl Deref for RestoredEngine {
     type Target = Engine;
@@ -137,86 +165,9 @@ impl Engine {
         options: impl Into<RestoreConfiguration>,
         control: &StorageReadControl,
     ) -> Result<RestoreJob<'a>, SQLError> {
-        self.with_direct_query_snapshot(
-            true,
-            |engine| {
-                control.check().map_err(|e| start_error(e.into()))?;
-                let configuration = options.into();
-                let options = configuration.options;
-                engine.authorize_restore(options)?;
-                let admitted = configuration.admit();
-                let control = control.with_temporary_limit(options.maximum_workspace_bytes);
-                let lease = repository
-                    .open_backup(backup, &control)
-                    .map_err(start_error)?;
-                let root = lease.root();
-                match destination {
-                    RestoreDestination::Memory => {
-                        if root.cut().format.provider() != ImageProvider::Memory {
-                            return Err(start_error(BackupError::Unsupported(
-                                "restore destination mapping",
-                            )));
-                        }
-                        let memory = control
-                            .memory()
-                            .reserve(size_of::<Input<'_>>())
-                            .map_err(|e| start_error(e.into()))?;
-                        let functions = Admission::open(&lease, &control).map_err(start_error)?;
-                        let input = Input::new(
-                            MemoryImageImportReader::new(
-                                lease,
-                                options.maximum_workspace_bytes,
-                                &control,
-                            )
-                            .map_err(start_error)?,
-                            admitted.bindings.analyzers.clone().unwrap_or_default(),
-                            DiskANNTemporaryBudget::new(options.maximum_workspace_bytes),
-                            options.maximum_value_bytes,
-                            &control,
-                        )
-                        .map_err(start_error)?;
-                        Ok(RestoreJob {
-                            state: State::Reading(
-                                Budgeted::new(Box::new(input), memory),
-                                admitted.bindings,
-                                functions,
-                            ),
-                            backup,
-                            root: Some(root),
-                            id: None,
-                            retained: MemoryBudget::new(options.retained_bytes),
-                            control,
-                        })
-                    }
-                    RestoreDestination::Persistent { directory, target } => {
-                        if root.cut().format.provider() != target.image_provider() {
-                            return Err(start_error(BackupError::Unsupported(
-                                "restore destination mapping",
-                            )));
-                        }
-                        drop(lease);
-                        let memory = control
-                            .memory()
-                            .reserve(size_of::<persistent::Persistent<'_>>())
-                            .map_err(|e| start_error(e.into()))?;
-                        let candidate = persistent::Persistent::begin(
-                            repository, backup, directory, target, admitted, &control,
-                        )
-                        .map_err(start_error)?;
-                        let id = candidate.id();
-                        Ok(RestoreJob {
-                            state: State::Persistent(Budgeted::new(Box::new(candidate), memory)),
-                            backup,
-                            root: Some(root),
-                            id: Some(id),
-                            retained: MemoryBudget::new(options.retained_bytes),
-                            control,
-                        })
-                    }
-                }
-            },
-            std::convert::identity,
-        )
+        RestoreRequest::Begin(backup).admit(self, destination, options, control, |request| {
+            request.open(repository)
+        })
     }
 
     /// Resolve a durable persistent restore through the same authority and transaction boundary. Prepared and completed requests do not require the source archive; completion remains authoritative after cancellation.
@@ -228,42 +179,9 @@ impl Engine {
         options: impl Into<RestoreConfiguration>,
         control: &StorageReadControl,
     ) -> Result<RestoreJob<'a>, SQLError> {
-        self.with_direct_query_snapshot(
-            true,
-            |engine| {
-                let configuration = options.into();
-                let options = configuration.options;
-                engine.authorize_restore(options)?;
-                let RestoreDestination::Persistent { directory, target } = destination else {
-                    return Err(start_error(BackupError::Unsupported(
-                        "durable memory restore recovery",
-                    )));
-                };
-                let control = control.with_temporary_limit(options.maximum_workspace_bytes);
-                let memory = control
-                    .memory()
-                    .reserve(size_of::<persistent::Persistent<'_>>())
-                    .map_err(|e| start_error(e.into()))?;
-                let (candidate, backup) = persistent::Persistent::resume(
-                    repository,
-                    id,
-                    directory,
-                    target,
-                    configuration.admit(),
-                    &control,
-                )
-                .map_err(start_error)?;
-                Ok(RestoreJob {
-                    state: State::Persistent(Budgeted::new(Box::new(candidate), memory)),
-                    backup,
-                    root: None,
-                    id: Some(id),
-                    retained: MemoryBudget::new(options.retained_bytes),
-                    control,
-                })
-            },
-            std::convert::identity,
-        )
+        RestoreRequest::Resume(id).admit(self, destination, options, control, |request| {
+            request.open(repository)
+        })
     }
 
     /// Cancel an interrupted persistent request by its durable identity, including after a failed job has released its files. A previously published request returns its current runtime without replacing later writes.
@@ -459,6 +377,18 @@ impl RestoreJob<'_> {
         loop {
             if let Some(engine) = self.advance_publication(64)? {
                 return Ok(engine);
+            }
+        }
+    }
+
+    /// Drive a fresh or resumed restoration through verification and publication.
+    pub fn finish(&mut self) -> BackupResult<RestoredEngine> {
+        loop {
+            match self.advance(16 * 1024)? {
+                RestorePhase::Prepared | RestorePhase::Publishing | RestorePhase::Complete => {
+                    return self.publish();
+                }
+                _ => (),
             }
         }
     }

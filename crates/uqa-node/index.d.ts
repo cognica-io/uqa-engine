@@ -1,4 +1,5 @@
 export type JSValue = null | boolean | number | bigint | string | Buffer | Uint8Array | Float32Array | Float64Array | Array<JSValue> | { [key: string]: JSValue }
+export type RestorePhase = "reading" | "validating" | "prepared" | "publishing" | "complete" | "cancelled" | "failed"
 export type ParamInput = SQLParam | JSValue
 export type SQLTableFunctionRows = JSValue[][] | Array<Record<string, JSValue>>
 export type SQLTableFunctionResult = { columns: string[]; rows: SQLTableFunctionRows } | [string[], SQLTableFunctionRows]
@@ -19,7 +20,40 @@ export declare class _NativeNotificationHandle {
 }
 export type NativeNotificationHandle = _NativeNotificationHandle
 
+export declare class BackupJob {
+  /** Release the capture and its repository leases. Use cancel to record cancellation. */
+  close(): Promise<void>
+  get id(): Buffer
+  progress(): Promise<BackupProgress>
+  report(): Promise<BackupReport | null>
+  advance(maximumPositions: number, maximumBytes: number): Promise<'pending' | 'prepared' | 'complete'>
+  publish(): Promise<BackupRoot>
+  finish(): Promise<BackupRoot>
+  cancel(): Promise<BackupRoot | null>
+}
+
+export declare class BackupListing {
+  next(): Promise<BackupRoot | null>
+  close(): Promise<void>
+}
+
+export declare class BackupRepository {
+  collectGarbage(maximumFiles: number, maximumWorkspaceBytes?: number | undefined | null): Promise<BackupCollectionReport>
+  copyTo(id: Buffer, destination: BackupRepository, options?: BackupOptions | undefined | null): Promise<BackupRoot>
+  resumePublication(id: Buffer, maximumWorkspaceBytes?: number | undefined | null): Promise<BackupRoot>
+  /** Release this handle. Active jobs and listings retain their own repository resources. */
+  close(): Promise<void>
+  get id(): Buffer
+  verify(id: Buffer, maximumWorkspaceBytes?: number | undefined | null): Promise<BackupRoot>
+  remove(id: Buffer): Promise<void>
+  list(maximumWorkspaceBytes?: number | undefined | null): Promise<BackupListing>
+}
+
 export declare class Engine {
+  backupCapabilities(): BackupCapabilities
+  beginBackup(repository: BackupRepository, options?: BackupOptions | undefined | null): Promise<BackupJob>
+  beginRestore(repository: BackupRepository, backup: Buffer, destination: RestoreDestination, options?: RestoreOptions | undefined | null): Promise<RestoreJob>
+  resumeRestore(repository: BackupRepository, id: Buffer, destination: RestoreDestination, options?: RestoreOptions | undefined | null): Promise<RestoreJob>
   /** Create an in-memory engine. */
   constructor()
   static open(path: string): Engine
@@ -103,10 +137,94 @@ export declare class HttpSQLStream {
   nextFrame(): Promise<HttpSQLStreamFrame | null>
 }
 
+export declare class RestoreJob {
+  /** Release this handle and its leases. A durable restore can be resumed by ID. */
+  close(): Promise<void>
+  get id(): Buffer | null
+  get backup(): Buffer
+  phase(): Promise<RestorePhase>
+  advance(maximumObjectBytes: number): Promise<RestorePhase>
+  advancePublication(maximumSteps: number): Promise<Engine | null>
+  publish(): Promise<Engine>
+  finish(): Promise<Engine>
+  cancel(): Promise<Engine | null>
+}
+
 export declare class SQLParam {
   static scalar(value: unknown): SQLParam
   static vector(values: Float32Array | Array<number>): SQLParam
   static tensor(values: Array<Array<number>>): SQLParam
+}
+
+export interface BackupCapabilities {
+  export: boolean
+  import: boolean
+  snapshotFingerprints: boolean
+}
+
+export interface BackupCollectionReport {
+  completedBackups: bigint
+  preparedBackups: bigint
+  activeOperations: bigint
+  referencedFrameBytes: bigint
+  retainedObjectBytes: bigint
+  unreferencedObjectBytes: bigint
+  removedObjects: bigint
+  removedObjectBytes: bigint
+  removedStagingFiles: bigint
+  removedStagingBytes: bigint
+  remainingFiles: bigint
+  workspacePeakBytes: bigint
+}
+
+export interface BackupOptions {
+  parent?: Buffer
+  maximumEncodedBytes?: number
+  maximumWorkspaceBytes?: number
+  memoryBytes?: number
+  allowPlaintextExport?: boolean
+}
+
+export interface BackupProgress {
+  phase: string
+  visitedPositions: bigint
+  copiedPayloadBytes: bigint
+  metadataReadBytes: bigint
+  excludedUnits: bigint
+  parentUnits: bigint
+  hashedPayloadBytes: bigint
+  certifiedReusedUnits: bigint
+  certifiedReusedBytes: bigint
+  reusedUnits: bigint
+  reusedPayloadBytes: bigint
+  writtenUnits: bigint
+  writtenPayloadBytes: bigint
+  writtenObjectBytes: bigint
+  verifiedObjectBytes: bigint
+}
+
+export interface BackupReport {
+  units: bigint
+  decodedBytes: bigint
+  imageDigest: Buffer
+  progress: BackupProgress
+}
+
+export interface BackupRepositoryOptions {
+  maxKeyBytes?: number
+  maxFrameBytes?: number
+  memoryBytes?: number
+  protectionDomain?: Buffer
+  key?: Buffer
+}
+
+export interface BackupRoot {
+  id: Buffer
+  parent?: Buffer
+  repository: Buffer
+  units: bigint
+  decodedBytes: bigint
+  imageDigest: Buffer
 }
 
 export interface CalibrationReport {
@@ -122,6 +240,8 @@ export interface CompressionOptions {
   chunkPages?: number
   level?: number
 }
+
+export declare function createBackupRepository(path: string, options?: BackupRepositoryOptions | undefined | null): Promise<BackupRepository>
 
 export declare function detectDatabaseFile(path: string): string
 
@@ -213,6 +333,8 @@ export declare function open(path: string): Engine
 
 export declare function openAuto(path: string, key?: string | undefined | null): Engine
 
+export declare function openBackupRepository(path: string, options?: BackupRepositoryOptions | undefined | null): Promise<BackupRepository>
+
 export declare function openCompressed(path: string, options?: CompressionOptions | undefined | null): Engine
 
 export declare function openCompressedEncrypted(path: string, key: string, options?: CompressionOptions | undefined | null): Engine
@@ -223,6 +345,20 @@ export interface ReliabilityBin {
   avgPredicted: number
   avgActual: number
   count: number
+}
+
+export interface RestoreDestination {
+  provider: "memory" | "sqlite" | "sqlite-kv"
+  directory?: string
+  compression?: CompressionOptions
+  key?: string
+}
+
+export interface RestoreOptions {
+  maximumWorkspaceBytes?: number
+  maximumValueBytes?: number
+  retainedBytes?: number
+  memoryBytes?: number
 }
 
 export interface SearchHit {

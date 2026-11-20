@@ -10,6 +10,7 @@ For Nori-specific artifact verification, run `node --test tests/node/test_uqa_no
 | [`vector-knn.mjs`](vector-knn.mjs) | Exact, HNSW, IVF and DiskANN access, canonical scores, filtering, mutation, rollback and persistent reopen |
 | [`graph-cypher.mjs`](graph-cypher.mjs) | Named graph construction, mutation, traversal, and relational composition |
 | [`storage-transactions.mjs`](storage-transactions.mjs) | Persistent reopen, rollback, savepoints, and independent sessions |
+| [`backup-restore.mjs`](backup-restore.mjs) | Full capture, incremental capture, parent retirement and restore into memory |
 | [`extensibility.mjs`](extensibility.mjs) | Scalar, table, and aggregate JavaScript callbacks |
 
 The Node.js and browser WASM examples share the SQL scenario modules in [`../javascript`](../javascript), while their entry points retain platform-specific engine construction, persistence, and close behavior.

@@ -39,6 +39,15 @@ impl From<RestoreOptions> for RestoreConfiguration {
 }
 
 impl RestoreOptions {
+    /// Use the authorizing runtime's SQL registrations and configured analyzer resources.
+    pub fn with_runtime(self, runtime: &Engine) -> RestoreConfiguration {
+        let mut configuration = self.with_registered_functions(runtime);
+        configuration
+            .analyzers
+            .clone_from(&runtime.extensions.analyzer_resources);
+        configuration
+    }
+
     /// Supply process-local SQL registrations for restore and the resulting writable Engine.
     pub fn with_registered_functions(self, runtime: &Engine) -> RestoreConfiguration {
         RestoreConfiguration::from(self).with_registered_functions(runtime)

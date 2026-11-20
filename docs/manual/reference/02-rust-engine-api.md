@@ -44,6 +44,8 @@ fn capture(engine: &Engine, repository: &LocalRepository,
 
 `advance` performs one bounded source, payload, frame or verification step; filesystem synchronization may wait independently. `progress`, `report`, `id`, `cut` and `completed` expose the existing repository state and actual work counters. `publish` requires complete verification and resolves a repeated completed publication without rewriting it. `cancel` retires unfinished source/workspace ownership; dropping a job releases its leases. Use the job's original cancellation token after source retirement. Source admission errors use `SQLError` with typed backup causes; later job errors use `BackupError`. The [repository contract](../internals/03-storage.md) describes root verification, retirement and independent incremental references.
 
+Use `job.finish()` to run capture, verification and publication to completion. `OwnedBackupJob::begin` accepts an `Arc<LocalRepository>` when a host handle needs an independent lifetime. Its bounded operations and `finish` drive the same capture job.
+
 ## Restore a backup
 
 `Engine::begin_restore(repository, backup, destination, options, control)` and `uqa_api::backup::begin_restore` open a full or incremental backup by its `BackupId`. Each incremental backup has a complete inventory and can be restored after its parent has been removed. The authorizing session needs superuser privileges. The returned job can outlive that session.
@@ -61,6 +63,8 @@ Call `advance(maximum_object_bytes)` with a positive byte window until it return
 To abandon a pending job, call `cancel()`. On a persistent destination, cancellation removes the unpublished database files. Keep the job's `RestoreId` and use `resume_restore` or `cancel_restore` with the same destination after an interruption. An already published database retains its subsequent writes. Persistent cancellation and recovery of a prepared or completed operation can finish after removal of the archive. Memory jobs live in the process that owns them.
 
 On native filesystem targets, memory, native SQLite, SQLite Key/Value and redb report `backup_capabilities().import == true` for full and standalone incremental restore. For a custom persistent provider, the Engine reports the import capability declared by that provider. The [Rust example](../../../crates/uqa-api/examples/backup.rs) captures a full backup and a child, verifies the child after removing the parent, then restores it and writes another row. From a repository checkout, run `cargo run --locked -p uqa-api --example backup`.
+
+`RestoreJob::finish()` drives reading, validation and publication to completion. Use `OwnedRestoreJob::begin` or `OwnedRestoreJob::resume` for a job scheduled across host threads. It retains the repository and returns the same writable runtime as the borrowed job. [Native language APIs](08-bindings-and-extensions.md#native-backup-and-restore)
 
 ## Execute SQL
 

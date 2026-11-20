@@ -3878,6 +3878,8 @@ dependencies = [
  "uqa-graph",
  "uqa-pg-query",
  "uqa-sql",
+ "uqa-storage-redb",
+ "uqa-storage-sqlite",
 ]
 
 [[package]]
@@ -3957,6 +3959,7 @@ dependencies = [
  "proptest",
  "regex",
  "rstest",
+ "self_cell",
  "serde",
  "serde_json",
  "sha2",

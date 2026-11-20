@@ -68,6 +68,19 @@ pub(super) fn f32_from_f64(value: f64, context: &str) -> Result<f32> {
     Ok(value as f32)
 }
 
+pub(super) fn positive_safe_usize(value: f64) -> Option<usize> {
+    if !value.is_finite()
+        || value < 1.0
+        || value.fract() != 0.0
+        || value > crate::MAX_SAFE_INTEGER as f64
+        || value > usize::MAX as f64
+    {
+        return None;
+    }
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    Some(value as usize)
+}
+
 pub(super) fn usize_from_u32(value: u32, context: &str) -> Result<usize> {
     usize::try_from(value)
         .map_err(|_| Error::from_reason(format!("{context} exceeds the platform usize range")))

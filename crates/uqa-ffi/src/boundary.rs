@@ -100,24 +100,29 @@ pub(crate) unsafe fn release<T>(slot: *mut *mut T) -> Result<UQAStatus> {
 }
 
 pub(crate) fn boxed<T>(value: T) -> Result<Box<T>> {
+    boxed_with(|| Ok(value))
+}
+
+/// Reserve the public handle before an operation acquires durable resources.
+pub(crate) fn boxed_with<T>(construct: impl FnOnce() -> Result<T>) -> Result<Box<T>> {
     let layout = Layout::new::<T>();
     if layout.size() == 0 {
-        return Ok(Box::new(value));
+        return Ok(Box::new(construct()?));
     }
     #[cfg(feature = "test-support")]
     crate::test_support::before_handle_allocation::<T>();
     // The allocation is checked before initialization; Box receives exactly its own layout.
-    unsafe {
-        let pointer = alloc(layout).cast::<T>();
+    let slot = unsafe {
+        let pointer = alloc(layout).cast::<std::mem::MaybeUninit<T>>();
         if pointer.is_null() {
             return Err(UQAError::new(
                 UQA_ERROR_OUT_OF_MEMORY,
                 "handle allocation failed",
             ));
         }
-        pointer.write(value);
-        Ok(Box::from_raw(pointer))
-    }
+        Box::from_raw(pointer)
+    };
+    Ok(Box::write(slot, construct()?))
 }
 
 pub(crate) unsafe fn span<'a, T>(data: *const T, count: usize) -> Result<&'a [T]> {
@@ -168,4 +173,25 @@ pub(crate) fn copy_text(text: &str) -> Result<String> {
         .map_err(|_| UQAError::new(UQA_ERROR_OUT_OF_MEMORY, "text allocation failed"))?;
     copy.push_str(text);
     Ok(copy)
+}
+
+#[repr(C)]
+struct Header {
+    struct_size: u32,
+    version: u32,
+}
+
+pub(crate) unsafe fn versioned_options<'a, T>(pointer: *const T) -> Result<&'a T> {
+    let header = input(pointer.cast::<Header>())?;
+    let size = header.struct_size as usize;
+    if header.version != 1 || size < size_of::<T>() {
+        return Err(UQAError::invalid(
+            "options require version 1 and all defined fields",
+        ));
+    }
+    let bytes = span(pointer.cast::<u8>(), size)?;
+    if bytes[size_of::<T>()..].iter().any(|byte| *byte != 0) {
+        return Err(UQAError::invalid("unknown option bytes must be zero"));
+    }
+    input(pointer)
 }

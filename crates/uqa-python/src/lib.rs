@@ -10,12 +10,12 @@
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
-use std::sync::Arc;
 
 use pyo3::conversion::IntoPyObjectExt;
 use pyo3::exceptions::{PyIOError, PyRuntimeError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyBool, PyBytes, PyDict, PyFloat, PyInt, PyIterator, PyList, PyString, PyTuple};
+use uqa_core::memory::RetainedValue;
 use uqa_core::{DecimalValue, TemporalValue, Value};
 use uqa_engine::migration::{migrate_python_database, PythonMigrationReport};
 use uqa_engine::{
@@ -27,6 +27,7 @@ use uqa_scoring::{BM25Params, CalibrationReport};
 use uqa_sql::SQLError;
 use uqa_storage_sqlite::{DatabaseFileFormat, SQLiteCompressionOptions};
 
+mod backup;
 mod callbacks;
 mod cli;
 mod conversions;
@@ -71,11 +72,11 @@ use value_conversion::{
 
 #[pyclass(name = "Engine", module = "uqa._uqa")]
 struct PyEngine {
-    inner: Option<Arc<Engine>>,
+    inner: Option<RetainedValue<Engine>>,
 }
 
 impl PyEngine {
-    fn inner(&self) -> PyResult<&Arc<Engine>> {
+    fn inner(&self) -> PyResult<&RetainedValue<Engine>> {
         self.inner
             .as_ref()
             .ok_or_else(|| PyRuntimeError::new_err("engine is closed"))
@@ -86,6 +87,7 @@ impl PyEngine {
 #[pyo3(name = "_uqa")]
 fn uqa_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyEngine>()?;
+    backup::register(m)?;
     m.add_class::<PyHttpEngine>()?;
     m.add_class::<PyHttpSQLStream>()?;
     m.add(

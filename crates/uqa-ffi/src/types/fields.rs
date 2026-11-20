@@ -56,7 +56,7 @@ fn descriptor(ty: &UQAType) -> boundary::Result<Option<Arc<CompositeTypeDescript
     let ColumnType::Composite(reference) = &*ty.native else {
         return Ok(None);
     };
-    let catalog = ty.session.as_ref().map(|session| &session.native);
+    let catalog = ty.session.as_ref().map(|session| session.native.as_ref());
     Ok(Some(uqa_sql::expr::composites::descriptor(
         catalog.and_then(|engine| engine.composite_types()),
         reference.oid,

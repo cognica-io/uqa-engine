@@ -27,16 +27,7 @@ pub struct NativeNotificationOptions {
 }
 
 fn positive(value: f64) -> Result<usize> {
-    if !value.is_finite()
-        || value < 1.0
-        || value.fract() != 0.0
-        || value > crate::MAX_SAFE_INTEGER as f64
-        || value > usize::MAX as f64
-    {
-        return Err(super::failure(Kind::InvalidRequest));
-    }
-    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-    Ok(value as usize)
+    crate::input::positive_safe_usize(value).ok_or_else(|| super::failure(Kind::InvalidRequest))
 }
 
 impl NativeNotificationOptions {

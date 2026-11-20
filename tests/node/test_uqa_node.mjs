@@ -16,6 +16,7 @@ import { bindingFeatures, noriEnabled, runBindings } from "../parity/bindings.mj
 import { concurrentIsolationLevels, runConcurrentWriterCase } from "../parity/concurrent_transactions.mjs";
 import { runVectorKNN, verifyVectorKNNReopen } from "../../examples/javascript/vector-knn.mjs";
 import { registerNativeNotificationTests } from "./notifications/native.mjs";
+import { registerBackupTests } from "./backup.mjs";
 import { runCLIFixture } from "./http_cli.mjs";
 import { temporalOracle } from "../parity/http_temporal.mjs";
 import { runBitStringBinding } from "../parity/bit_strings.core.mjs";
@@ -23,6 +24,7 @@ import { runBitStringBinding } from "../parity/bit_strings.core.mjs";
 const require = createRequire(import.meta.url);
 const packagePath = require.resolve(process.env.UQA_TEST_PACKAGE ? resolve(process.env.UQA_TEST_PACKAGE) : "../../crates/uqa-node");
 const uqa = require(packagePath);
+registerBackupTests(uqa);
 registerNativeNotificationTests(uqa, packagePath);
 const concurrentWriterOracle = JSON.parse(readFileSync(new URL("../parity/pg18/concurrent_writes.expected.json", import.meta.url), "utf8"));
 
@@ -255,6 +257,15 @@ test("CommonJS and ESM package exports agree", async () => {
   assert.equal(esm.NotificationError, uqa.NotificationError);
   assert.equal(esm.vector, uqa.vector);
   assert.equal(esm.JSFunctionVolatility, uqa.JSFunctionVolatility);
+  assert.equal(esm.createBackupRepository, uqa.createBackupRepository);
+  assert.equal(esm.openBackupRepository, uqa.openBackupRepository);
+  for (const name of ["BackupJob", "BackupListing", "BackupRepository", "RestoreJob"]) {
+    assert.equal(esm[name], uqa[name]);
+    assert.equal(typeof esm[name], "function");
+    assert.throws(() => new esm[name](), {
+      name: "TypeError", message: `${name} is created by its backup or restore operation`,
+    });
+  }
 });
 
 test("DiskANN example preserves canonical scores and committed rows through reopen", async () => {

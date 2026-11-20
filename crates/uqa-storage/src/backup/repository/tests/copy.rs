@@ -10,6 +10,44 @@ use std::io::{Seek, SeekFrom, Write};
 
 mod failures;
 
+#[test]
+fn publish_copy_checks_protection_and_resolves_an_installed_root_after_io_failure() {
+    let directory = tempfile::tempdir().unwrap();
+    let control = control();
+    let source = repository(directory.path().join("source"), 1, &control);
+    let target = repository(directory.path().join("target"), 0, &control);
+    let limit = 4 << 20;
+    let (original, _) = capture(
+        &source,
+        None,
+        vec![Unit::record(0, b"one")],
+        &control,
+        limit,
+    );
+    let copy =
+        |allow| source.copy_backup_to(original.backup(), &target, limit, limit, allow, &control);
+    assert!(matches!(copy(false), Err(BackupError::Invalid(_))));
+    assert_eq!(objects(&target), (0, 0));
+    *target.fault.lock() = Some(Fault::ObjectSync);
+    assert!(copy(true).is_err());
+    assert!(target
+        .list_backups(limit, &control)
+        .unwrap()
+        .next_backup()
+        .unwrap()
+        .is_none());
+    *target.fault.lock() = Some(Fault::RootSync);
+    let root = copy(true).unwrap();
+    assert_eq!(root.summary(), original.summary());
+    assert_eq!(root.parent(), None);
+    source.remove_backup(original.backup(), &control).unwrap();
+    target
+        .open_backup(root.backup(), &control)
+        .unwrap()
+        .verify(limit, &control)
+        .unwrap();
+}
+
 fn protection(index: u8) -> Protection {
     if index == 0 {
         Protection::Plaintext

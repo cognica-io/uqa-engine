@@ -29,6 +29,7 @@ use rustyline::validate::Validator;
 use rustyline::{
     CompletionType, Config, Context, EditMode, Editor, Helper, Result as RustylineResult,
 };
+use uqa_core::memory::RetainedValue;
 use uqa_core::Value;
 use uqa_engine::migration::{migrate_python_database, PythonMigrationReport};
 use uqa_engine::{Engine, SQLResult};
@@ -85,6 +86,7 @@ impl<W: Write> Write for TrackedWriter<W> {
     }
 }
 mod arguments;
+mod backup;
 mod completion;
 mod diagnostics;
 mod display;
@@ -112,7 +114,9 @@ use display::{
     print_backslash_help, print_columns, result_row, sequence_row, sql_type_name, u64_count_value,
     usize_count_value,
 };
-use migration_io::{open_engine, print_migration_report, print_migration_report_stdout};
+use migration_io::{
+    open_engine, print_migration_report, print_migration_report_stdout, DatabaseBackend,
+};
 use output::{history_path, print_result, print_result_copy_text_with_engine, value_to_display};
 use repl::{PromptLineOutcome, Session};
 #[cfg(test)]
@@ -143,7 +147,7 @@ pub fn run_from_args(args: &[String]) -> ExitCode {
         }
     };
     match action {
-        CliAction::Help => match print_usage_stdout() {
+        CliAction::Help(text) => match writeln!(io::stdout().lock(), "{text}") {
             Ok(()) => ExitCode::SUCCESS,
             Err(error) => {
                 eprintln!("write help output: {error}");
@@ -171,18 +175,36 @@ pub fn run_from_args(args: &[String]) -> ExitCode {
 }
 
 fn run_cli(args: CliArgs) -> ExitCode {
-    let key = match args.resolve_key() {
-        Ok(key) => key,
-        Err(err) => {
-            eprintln!("{err}");
-            return ExitCode::FAILURE;
-        }
-    };
-    let session = if args.command.is_some() {
-        Session::new_without_history(args.db_path.clone(), key.as_deref())
+    let uses_database = args
+        .backup
+        .as_deref()
+        .is_none_or(backup::Command::uses_database);
+    let path = if uses_database {
+        args.db_path.clone()
     } else {
-        Session::new(args.db_path.clone(), key.as_deref())
+        None
     };
+    if args.backup.is_some() && path.as_ref().is_some_and(|source| !source.is_file()) {
+        eprintln!("backup requires an existing source database for --db");
+        return ExitCode::FAILURE;
+    }
+    let key = if uses_database {
+        match args.resolve_key() {
+            Ok(key) => key,
+            Err(error) => {
+                eprintln!("{error}");
+                return ExitCode::FAILURE;
+            }
+        }
+    } else {
+        None
+    };
+    let history = if args.command.is_some() || args.backup.is_some() {
+        None
+    } else {
+        history_path()
+    };
+    let session = Session::new_with_history_path(path, key.as_deref(), args.backend, history);
     let mut session = match session {
         Ok(session) => session,
         Err(err) => {
@@ -197,7 +219,15 @@ fn run_cli(args: CliArgs) -> ExitCode {
     // flushes stdout from the interrupt thread.
     let mut out = TrackedWriter::new(stdout);
 
-    let exit = if let Some(command) = args.command {
+    let exit = if let Some(command) = args.backup {
+        match command.execute(&mut session, &mut out, false) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(error) => {
+                eprintln!("backup: {error}");
+                ExitCode::FAILURE
+            }
+        }
+    } else if let Some(command) = args.command {
         let result = if command.trim_start().starts_with('\\') {
             match session.process_line(&command, &mut String::new(), &mut out, false) {
                 PromptLineOutcome::Failed => Err("shell command failed".into()),
@@ -248,7 +278,7 @@ fn run_cli(args: CliArgs) -> ExitCode {
 
 #[derive(Debug)]
 enum CliAction {
-    Help,
+    Help(&'static str),
     Migrate {
         source: PathBuf,
         destination: PathBuf,
@@ -258,6 +288,8 @@ enum CliAction {
 
 #[derive(Debug, Default)]
 struct CliArgs {
+    backend: DatabaseBackend,
+    backup: Option<Box<backup::Command>>,
     db_path: Option<PathBuf>,
     command: Option<String>,
     scripts: Vec<PathBuf>,
@@ -275,14 +307,7 @@ impl CliArgs {
             return Ok(Some(key.clone()));
         }
         if let Some(path) = &self.key_file {
-            let raw = std::fs::read_to_string(path)
-                .map_err(|err| format!("failed to read key file {}: {err}", path.display()))?;
-            let key = raw.strip_suffix('\n').unwrap_or(&raw);
-            let key = key.strip_suffix('\r').unwrap_or(key);
-            if key.is_empty() {
-                return Err(format!("key file {} is empty", path.display()));
-            }
-            return Ok(Some(key.to_string()));
+            return database_key_file(path).map(Some);
         }
         match std::env::var("UQA_KEY") {
             Ok(key) if !key.is_empty() => Ok(Some(key)),
@@ -291,10 +316,21 @@ impl CliArgs {
     }
 }
 
+fn database_key_file(path: &Path) -> Result<String, String> {
+    let raw = std::fs::read_to_string(path)
+        .map_err(|err| format!("failed to read key file {}: {err}", path.display()))?;
+    let key = raw.strip_suffix('\n').unwrap_or(&raw);
+    let key = key.strip_suffix('\r').unwrap_or(key);
+    if key.is_empty() {
+        return Err(format!("key file {} is empty", path.display()));
+    }
+    Ok(key.to_owned())
+}
+
 impl CliAction {
     fn parse(args: &[String]) -> Result<Self, String> {
         match args {
-            [cmd] if cmd == "-h" || cmd == "--help" => return Ok(Self::Help),
+            [cmd] if cmd == "-h" || cmd == "--help" => return Ok(Self::Help(usage_text())),
             [cmd, source, destination]
                 if cmd == "migrate-python-db" || cmd == "--migrate-python-db" =>
             {
@@ -307,9 +343,19 @@ impl CliAction {
         }
 
         let mut parsed = CliArgs::default();
+        let mut backup_arguments = None::<Vec<String>>;
         let mut i = 0;
         while i < args.len() {
             match args[i].as_str() {
+                "backup" if backup_arguments.is_none() && parsed.scripts.is_empty() => {
+                    backup_arguments = Some(Vec::new());
+                    i += 1;
+                }
+                "--storage" => {
+                    let name = args.get(i + 1).ok_or("--storage requires a backend")?;
+                    parsed.backend = name.parse()?;
+                    i += 2;
+                }
                 "--db" => {
                     let Some(path) = args.get(i + 1) else {
                         return Err("--db requires a path".into());
@@ -348,7 +394,11 @@ impl CliAction {
                     parsed.copy_text = true;
                     i += 1;
                 }
-                "-h" | "--help" => return Ok(Self::Help),
+                _ if let Some(commands) = backup_arguments.as_mut() => {
+                    commands.push(args[i].clone());
+                    i += 1;
+                }
+                "-h" | "--help" => return Ok(Self::Help(usage_text())),
                 arg if arg.starts_with('-') => return Err(format!("unknown option: {arg}")),
                 script => {
                     parsed.scripts.push(PathBuf::from(script));
@@ -356,12 +406,18 @@ impl CliAction {
                 }
             }
         }
+        if let Some(arguments) = backup_arguments {
+            if parsed.command.is_some() || parsed.copy_text {
+                return Err("backup cannot be combined with -c or --copy-text".into());
+            }
+            let command = backup::Command::parse(&arguments)?;
+            if matches!(command, backup::Command::Help) {
+                return Ok(Self::Help(backup::USAGE));
+            }
+            parsed.backup = Some(Box::new(command));
+        }
         Ok(Self::Run(parsed))
     }
-}
-
-fn print_usage_stdout() -> io::Result<()> {
-    writeln!(io::stdout().lock(), "{}", usage_text())
 }
 
 fn print_usage_stderr() {
@@ -369,7 +425,7 @@ fn print_usage_stderr() {
 }
 
 fn usage_text() -> &'static str {
-    "Usage:\n    usql                        Start with an in-memory database\n    usql --db mydata.db         Start with persistent storage\n    usql script.sql             Execute a SQL script then enter REPL when stdin is a terminal\n    usql --db mydata.db s.sql   Persistent + script\n    usql -c \"SELECT 1\"          Execute a command string and exit\n    usql --copy-text -c \"...\"  Emit rows in PostgreSQL COPY text format\n    usql migrate-python-db <source> <destination>\n\nEncrypted databases:\n    usql --db enc.db --key <key>        Open (or create) an encrypted database\n    usql --db enc.db --key-file <file>  Read the key from a file\n    UQA_KEY=<key> usql --db enc.db      Read the key from the environment\n    Interactive sessions prompt for the key when an encrypted database\n    is opened without one. Compressed containers are detected and\n    opened automatically, including encrypted ones."
+    "Usage:\n    usql                        Start with an in-memory database\n    usql --db mydata.db         Start with persistent storage\n    usql script.sql             Execute a SQL script then enter REPL when stdin is a terminal\n    usql --db mydata.db s.sql   Persistent + script\n    usql -c \"SELECT 1\"          Execute a command string and exit\n    usql --copy-text -c \"...\"  Emit rows in PostgreSQL COPY text format\n    usql migrate-python-db <source> <destination>\n    usql [--db FILE] [--storage sqlite-native|sqlite-kv|redb] backup --help\n\nEncrypted databases:\n    usql --db enc.db --key <key>        Open (or create) an encrypted database\n    usql --db enc.db --key-file <file>  Read the key from a file\n    UQA_KEY=<key> usql --db enc.db      Read the key from the environment\n    Interactive sessions prompt for the key when an encrypted database\n    is opened without one. Compressed containers are detected and\n    opened automatically, including encrypted ones."
 }
 
 #[cfg(test)]

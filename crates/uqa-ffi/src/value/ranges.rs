@@ -80,7 +80,7 @@ fn observed(value: &UQAValue, multirange: bool) -> boundary::Result<&RangeViews>
     let catalog = value
         .session
         .as_ref()
-        .map(|session| EngineValueCatalog(&session.native));
+        .map(|session| EngineValueCatalog(session.native.as_ref()));
     let catalog = catalog
         .as_ref()
         .map(|catalog| catalog as &dyn SQLValueCatalog);
@@ -158,7 +158,7 @@ ffi_fn!(uqa_value_get_range(value: *const UQAValue, index: u32, out: *mut *const
     if index as usize >= ranges.native.member_count().ok_or_else(wrong_type)? { return Err(UQAError::new(UQA_ERROR_RANGE, "multirange member index is out of range")); }
     let control = value.control();
     *out = ranges.members.lock().get_or_create(u64::from(index), &control, || {
-        let catalog = value.session.as_ref().map(|session| EngineValueCatalog(&session.native));
+        let catalog = value.session.as_ref().map(|session| EngineValueCatalog(session.native.as_ref()));
         let native = ranges.native.member_value_with_control(index as usize, catalog.as_ref().map(|catalog| catalog as &dyn SQLValueCatalog), &control)?
             .ok_or_else(|| UQAError::state("multirange has no requested member"))?;
         let (native, memory) = native.into_parts();

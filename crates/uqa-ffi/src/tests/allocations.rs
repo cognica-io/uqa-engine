@@ -18,6 +18,12 @@ use std::{
 #[cfg(all(feature = "test-support", feature = "arrow-export"))]
 #[path = "allocations/arrow.rs"]
 mod arrow;
+#[cfg(all(
+    feature = "test-support",
+    any(windows, all(unix, not(target_os = "emscripten")))
+))]
+#[path = "allocations/backup.rs"]
+mod backup;
 #[cfg(feature = "test-support")]
 #[path = "allocations/callbacks.rs"]
 mod callbacks;

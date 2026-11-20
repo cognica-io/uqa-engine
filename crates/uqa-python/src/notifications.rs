@@ -27,11 +27,11 @@ use pyo3::{
 };
 use registration::Target;
 use std::sync::Arc;
-use uqa_core::notifications::NotificationFailureKind;
+use uqa_core::{memory::RetainedValue, notifications::NotificationFailureKind};
 
 fn direct_registration(
     py: Python<'_>,
-    engine: Arc<uqa_engine::Engine>,
+    engine: RetainedValue<uqa_engine::Engine>,
     channels: Vec<String>,
     options: uqa_engine::NotificationSubscriptionOptions,
 ) -> PyResult<PyNotificationRegistration> {
@@ -93,7 +93,7 @@ impl PyEngine {
         options: PyRef<'_, PyNotificationOptions>,
     ) -> PyResult<PyNotificationSubscription> {
         let channels = channels_from_py(channels, options.0.max_channels)?;
-        direct_registration(py, Arc::clone(self.inner()?), channels, options.0)?.run(py)
+        direct_registration(py, self.inner()?.clone(), channels, options.0)?.run(py)
     }
 
     #[pyo3(signature = (channels, *, options))]
@@ -106,7 +106,7 @@ impl PyEngine {
         let channels = channels_from_py(channels, options.0.max_channels)?;
         async_registration(
             py,
-            direct_registration(py, Arc::clone(self.inner()?), channels, options.0)?,
+            direct_registration(py, self.inner()?.clone(), channels, options.0)?,
         )
     }
 }

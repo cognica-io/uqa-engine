@@ -189,6 +189,13 @@ def validate_declared_files(
         raise ReleaseError(f"npm archive omits declared files: {path}: {missing}")
 
 
+def root_entrypoint_files(manifest: dict[str, object]) -> tuple[str, ...]:
+    types = manifest.get("types", "index.d.ts")
+    if not isinstance(types, str) or not types:
+        raise ReleaseError("Node.js root package has no valid types entrypoint")
+    return (*ROOT_ENTRYPOINT_FILES, types.removeprefix("./"))
+
+
 def validate_node_source(
     manifest: dict[str, object], source_root: pathlib.Path = NODE_ROOT,
     legal_files: tuple[str, ...] = LEGAL_FILES,
@@ -203,7 +210,7 @@ def validate_node_source(
         manifest.get("publishConfig"), PUBLISH_CONFIG, "Node.js publishConfig"
     )
     files = declared_package_files(manifest)
-    missing_files = sorted(set((*ROOT_ENTRYPOINT_FILES, *legal_files)) - set(files))
+    missing_files = sorted(set((*root_entrypoint_files(manifest), *legal_files)) - set(files))
     if missing_files:
         raise ReleaseError(f"Node.js root package omits files: {missing_files}")
     if any(isinstance(item, str) and item.endswith(".node") for item in files):
@@ -506,7 +513,7 @@ def validate_root_package(
             f"root uqa package bundles native addons: {path}: {native_members}"
         )
     validate_declared_files(path, manifest, members)
-    for relative in ROOT_ENTRYPOINT_FILES:
+    for relative in root_entrypoint_files(manifest):
         if relative not in members:
             raise ReleaseError(f"root uqa package omits {relative}: {path}")
     try:

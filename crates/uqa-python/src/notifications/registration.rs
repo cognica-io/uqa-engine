@@ -17,11 +17,11 @@ use uqa_client::{
     notifications::{HttpNotificationOptions, NotificationCancellation},
     HttpEngine,
 };
-use uqa_core::{notifications::NotificationFailureKind, CancellationToken};
+use uqa_core::{memory::RetainedValue, notifications::NotificationFailureKind, CancellationToken};
 use uqa_engine::{Engine, NotificationSubscriptionPermit};
 
 pub(super) enum Target {
-    Direct(Arc<Engine>, NotificationSubscriptionPermit),
+    Direct(RetainedValue<Engine>, NotificationSubscriptionPermit),
     Http(Arc<HttpEngine>, HttpNotificationOptions),
 }
 

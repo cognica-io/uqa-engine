@@ -6,6 +6,8 @@
 
 //! Node-API Engine class and synchronous/asynchronous methods.
 
+use uqa_core::memory::RetainedValue;
+
 use super::callbacks::{
     function_options, CallbackArguments, JSAggregateCallbacks, JSAggregateFunction,
     JSFunctionOptions, JSScalarFunction, JSTableFunction, SynchronousJSValue,
@@ -26,8 +28,8 @@ use super::tasks::{
 };
 use super::value::{document_from_js, JSValue};
 use super::{
-    napi, Arc, AsyncTask, BTreeMap, CoreEngine, CoreSQLParam, Either, Error, Float32Array,
-    Function, Path, Result,
+    napi, AsyncTask, BTreeMap, CoreEngine, CoreSQLParam, Either, Error, Float32Array, Function,
+    Path, Result,
 };
 
 // ---------------------------------------------------------------------
@@ -36,11 +38,17 @@ use super::{
 
 #[napi]
 pub struct Engine {
-    inner: Option<Arc<CoreEngine>>,
+    inner: Option<RetainedValue<CoreEngine>>,
 }
 
 impl Engine {
-    pub(super) fn inner(&self) -> Result<&Arc<CoreEngine>> {
+    pub(super) fn from_restored(runtime: uqa_engine::backup::RestoredEngine) -> Self {
+        Self {
+            inner: Some(runtime.into_retained()),
+        }
+    }
+
+    pub(super) fn inner(&self) -> Result<&RetainedValue<CoreEngine>> {
         self.inner
             .as_ref()
             .ok_or_else(|| Error::from_reason("engine is closed"))
@@ -54,14 +62,14 @@ impl Engine {
     #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         Self {
-            inner: Some(Arc::new(CoreEngine::new())),
+            inner: Some(RetainedValue::new(CoreEngine::new())),
         }
     }
 
     #[napi(factory)]
     pub fn open(path: String) -> Result<Engine> {
         Ok(Engine {
-            inner: Some(Arc::new(
+            inner: Some(RetainedValue::new(
                 CoreEngine::open(Path::new(&path)).map_err(runtime_error)?,
             )),
         })
@@ -71,7 +79,7 @@ impl Engine {
     #[napi]
     pub fn new_session(&self) -> Result<Engine> {
         Ok(Engine {
-            inner: Some(Arc::new(
+            inner: Some(RetainedValue::new(
                 self.inner()?.new_session().map_err(runtime_error)?,
             )),
         })
@@ -80,7 +88,7 @@ impl Engine {
     #[napi(factory)]
     pub fn open_encrypted(path: String, key: String) -> Result<Engine> {
         Ok(Engine {
-            inner: Some(Arc::new(
+            inner: Some(RetainedValue::new(
                 CoreEngine::open_encrypted(Path::new(&path), &key).map_err(runtime_error)?,
             )),
         })
@@ -89,7 +97,7 @@ impl Engine {
     #[napi(factory)]
     pub fn open_auto(path: String, key: Option<String>) -> Result<Engine> {
         Ok(Engine {
-            inner: Some(Arc::new(
+            inner: Some(RetainedValue::new(
                 CoreEngine::open_auto(Path::new(&path), key.as_deref()).map_err(runtime_error)?,
             )),
         })
@@ -98,7 +106,7 @@ impl Engine {
     #[napi(factory)]
     pub fn open_compressed(path: String, options: Option<CompressionOptions>) -> Result<Engine> {
         Ok(Engine {
-            inner: Some(Arc::new(
+            inner: Some(RetainedValue::new(
                 CoreEngine::open_compressed(Path::new(&path), compression_options(options)?)
                     .map_err(runtime_error)?,
             )),
@@ -112,7 +120,7 @@ impl Engine {
         options: Option<CompressionOptions>,
     ) -> Result<Engine> {
         Ok(Engine {
-            inner: Some(Arc::new(
+            inner: Some(RetainedValue::new(
                 CoreEngine::open_compressed_encrypted(
                     Path::new(&path),
                     &key,

@@ -112,7 +112,7 @@ impl Arguments {
         for value in values {
             types.push(uqa_sql::type_resolution::runtime_value_type_with_control(
                 value,
-                Some(&session.native),
+                Some(session.native.as_ref()),
                 &session.control(),
             )?)?;
         }

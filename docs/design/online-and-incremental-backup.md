@@ -8,9 +8,9 @@ A full backup captures a consistent snapshot of committed database state. An inc
 
 Every completed backup has a complete inventory root. An incremental backup shares immutable repository objects with its parent but does not require replaying a chain of delta manifests. Its parent ID records provenance and the comparison input, not an instruction to fetch missing state. Removing a parent backup cannot remove objects still reachable from a retained child. A standalone copy materializes all objects reachable from one root into another repository without opening the source database.
 
-The first public interface is embedded Rust with a local filesystem repository. The source continues to accept reads and writes while the snapshot is exported. Initial restore creates a new database using the same provider and data mapping: memory to memory, native SQLite to native SQLite, SQLite KV to SQLite KV, and redb to redb. Native SQLite and SQLite KV remain distinct archive formats even though both use SQLite. Destination encryption and compression can differ where that provider's verified import capabilities permit it.
+Rust, C, Python and Node.js expose the local filesystem repository through their embedded Engine APIs. The source continues to accept reads and writes while the snapshot is exported. Initial restore creates a new database using the same provider and data mapping: memory to memory, native SQLite to native SQLite, SQLite KV to SQLite KV, and redb to redb. Native SQLite and SQLite KV remain distinct archive formats even though both use SQLite. Destination encryption and compression can differ where that provider's verified import capabilities permit it.
 
-Cross-provider conversion, SQL dump formats, arbitrary-time recovery between backup snapshots, continuous archiving, online replacement of an existing database, remote repository protocols, scheduling, and language-binding expansion are separate work. The backup core does not require any of them.
+Cross-provider conversion, SQL dump formats, arbitrary-time recovery between backup snapshots, continuous archiving, online replacement of an existing database, remote repository protocols and scheduling are separate work. The backup core does not require any of them.
 
 ```mermaid
 flowchart LR
@@ -49,7 +49,7 @@ A record snapshot alone is insufficient. `allocate_identifiers` changes durable 
 | Existing memory Storage, Graph, Analysis, and ML owners | Immutable image units, resource definitions, and import of their own evaluated state |
 | `uqa-sql` and `uqa-execution` | Existing catalog/type/resource interpretation and restoration contracts where those owners are needed; no new SQL statement replay algorithm |
 | `uqa-engine` | Export/import authority, committed session/state adapters, source admission, retained handles, and public lifecycle orchestration |
-| `uqa-api` and later bindings | Adapters for the verified embedded contract |
+| `uqa-api`, `uqa-ffi`, `uqa-python` and `uqa-node` | Adapters for the embedded repository, capture and restore contract |
 
 The audited Engine default Cargo feature set is empty; redb is an Engine development dependency. Common Storage depends on Core and Analysis, SQLite also uses Graph, and redb's only workspace runtime dependency is Common Storage. Preserve these directions and the [workspace dependency policy](../../scripts/workspace-dependency-policy.json). Common Storage cannot import Engine, Execution, SQL, or a concrete provider to understand a backup unit. Semantic or numerical algorithms stay with their owners. No new crate is required by this proposal.
 
@@ -211,7 +211,7 @@ The embedded Rust API provides a repository, a capture job and a restore job. Pr
 | Restore job | Create a new target from a backup ID, advance bounded import, inspect progress, cancel/close before activation, and resolve the new database |
 | Provider image adapter | Capture/release a cut, enumerate units, read bounded images/fingerprints, validate formats, and import owned state |
 
-Handles have deterministic Rust resource ownership. Closing a handle releases its temporary resources; deleting a completed backup is an explicit repository operation. The owning job state machine admits retries and resolves uncertain completion. Application code chooses scheduling and I/O pacing without owning internal transition repair. Later C exposure uses the established `uqa_*`, `UQA_API`, `uqa_status`, error-lifetime, and paired resource-lifecycle conventions.
+Handles have deterministic Rust resource ownership. Closing a handle releases its temporary resources; deleting a completed backup is an explicit repository operation. The owning job state machine admits retries and resolves uncertain completion. Application code chooses scheduling and I/O pacing without owning internal transition repair. Native language jobs retain the repository while delegating each operation to its original Rust owner. A capture can move with its immutable provider cut. A restore keeps its private provider transactions and validation continuations on the thread that created them, including when the host schedules successive calls on different threads. Publication transfers the existing Engine and its retained memory allowance into the normal binding handle. [Native backup and restore](../manual/reference/08-bindings-and-extensions.md#native-backup-and-restore)
 
 ## Acceptance and implementation boundary
 

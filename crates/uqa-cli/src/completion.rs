@@ -211,6 +211,10 @@ pub(super) const BACKSLASH_COMMANDS: &[(&str, &str)] = &[
     ("\\?", "Backslash help"),
     ("\\help", "Backslash help"),
     ("\\q", "Quit"),
+    (
+        "\\backup",
+        "Manage full and incremental backups (\\backup help)",
+    ),
     ("\\migrate-python-db", "Migrate Python DB"),
 ];
 pub(super) type UsqlEditor = Editor<UsqlHelper, rustyline::history::DefaultHistory>;

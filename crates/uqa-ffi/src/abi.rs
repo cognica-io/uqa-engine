@@ -25,6 +25,8 @@ pub const UQA_ERROR_PANIC: UQAStatus = -10;
 pub const UQA_ERROR_LIMIT: UQAStatus = -11;
 pub const UQA_ERROR_NULL: UQAStatus = -12;
 pub const UQA_ERROR_NOTIFICATION: UQAStatus = -13;
+pub const UQA_ERROR_INTEGRITY: UQAStatus = -14;
+pub const UQA_ERROR_CANCELLED: UQAStatus = -15;
 
 pub const UQA_SUBSCRIPTION_OPTIONS_VERSION: u32 = 1;
 pub const UQA_SQL_NOTIFICATION_OPTIONS_VERSION: u32 = 1;

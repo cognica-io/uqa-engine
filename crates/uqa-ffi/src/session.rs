@@ -13,7 +13,7 @@ use std::sync::{
     Arc, OnceLock,
 };
 use uqa_core::{
-    memory::{MemoryBudget, ProductionControl},
+    memory::{MemoryBudget, ProductionControl, RetainedValue},
     CancellationToken,
 };
 use uqa_engine::Engine;
@@ -38,7 +38,7 @@ pub struct UQAEngine {
 }
 
 pub(crate) struct Session {
-    pub(crate) native: Engine,
+    pub(crate) native: RetainedValue<Engine>,
     pub(crate) memory: MemoryBudget,
     pub(crate) cancellation: CancellationToken,
     pub(crate) sql_notification_error: OnceLock<RetainedError>,
@@ -48,7 +48,7 @@ pub(crate) struct Session {
 }
 
 impl Session {
-    fn new(native: Engine, persistent: bool, memory_limit: usize) -> Self {
+    fn new(native: RetainedValue<Engine>, persistent: bool, memory_limit: usize) -> Self {
         let cancellation = native.cancellation_token();
         Self {
             native,
@@ -184,42 +184,74 @@ fn publish_engine(
     persistent: bool,
     limit: usize,
 ) -> boundary::Result<*mut UQAEngine> {
-    let session = Arc::new(Session::new(native, persistent, limit));
-    if let Err(error) =
-        session
-            .native
-            .install_sql_function_context(uqa_engine::SQLFunctionContext::new(Arc::downgrade(
-                &session,
-            )))
-    {
-        let error = uqa_sql::SQLError::from(error);
-        return Err(match session.native.close() {
-            Ok(()) => error,
-            Err(cleanup) => error.with_cleanup(
-                cleanup,
-                "close session after callback context installation failed",
-            ),
-        }
-        .into());
-    }
-    // On a recoverable handle-allocation failure, clean up the native session before returning.
-    let handle = boundary::boxed(UQAEngine {
+    let session = Arc::new(Session::new(RetainedValue::new(native), persistent, limit));
+    let handle = match boundary::boxed(UQAEngine {
         session: Arc::clone(&session),
-    });
-    match handle {
-        Ok(handle) => Ok(Box::into_raw(handle)),
+    }) {
+        Ok(handle) => handle,
         Err(error) => {
             session.execute(Engine::close)?;
-            Err(error)
+            return Err(error);
         }
-    }
+    };
+    attach_session(handle).map_err(|error| match session.native.close() {
+        Ok(()) => error.into(),
+        Err(cleanup) => error
+            .with_cleanup(
+                cleanup,
+                "close session after callback context installation failed",
+            )
+            .into(),
+    })
+}
+
+fn attach_session(handle: Box<UQAEngine>) -> Result<*mut UQAEngine, uqa_sql::SQLError> {
+    handle
+        .session
+        .native
+        .install_sql_function_context(uqa_engine::SQLFunctionContext::new(Arc::downgrade(
+            &handle.session,
+        )))?;
+    Ok(Box::into_raw(handle))
+}
+
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+pub(crate) fn publish_restored(
+    native: RetainedValue<Engine>,
+    persistent: bool,
+    limit: usize,
+) -> boundary::Result<*mut UQAEngine> {
+    // The restore job owns the published runtime across a failed handle allocation.
+    let session = Arc::new(Session::new(native, persistent, limit));
+    Ok(attach_session(boundary::boxed(UQAEngine { session })?)?)
 }
 
 #[derive(Clone, Copy)]
-enum PersistentBackend {
+pub(crate) enum PersistentBackend {
     SQLiteNative { auto: bool },
     SQLiteKeyValue { auto: bool },
     Redb,
+}
+
+impl PersistentBackend {
+    pub(crate) fn from_flags(flags: UQAOpenFlags) -> boundary::Result<Self> {
+        Ok(match flags {
+            UQA_OPEN_SQLITE_NATIVE => PersistentBackend::SQLiteNative { auto: false },
+            UQA_OPEN_REDB => PersistentBackend::Redb,
+            flags if flags == UQA_OPEN_SQLITE_NATIVE | UQA_OPEN_SQLITE_AUTO => {
+                PersistentBackend::SQLiteNative { auto: true }
+            }
+            UQA_OPEN_SQLITE_KV => PersistentBackend::SQLiteKeyValue { auto: false },
+            flags if flags == UQA_OPEN_SQLITE_KV | UQA_OPEN_SQLITE_AUTO => {
+                PersistentBackend::SQLiteKeyValue { auto: true }
+            }
+            _ => {
+                return Err(UQAError::invalid(
+                    "open requires exactly one storage flag; SQLITE_AUTO modifies SQLite only",
+                ))
+            }
+        })
+    }
 }
 
 fn sqlite_connection(
@@ -323,14 +355,7 @@ macro_rules! engine_open {
                 *out = publish_engine(Engine::new(), false, config.memory_limit)?;
                 return Ok(UQA_OK);
             }
-            let backend = match flags {
-                UQA_OPEN_SQLITE_NATIVE => PersistentBackend::SQLiteNative { auto: false },
-                UQA_OPEN_REDB => PersistentBackend::Redb,
-                flags if flags == UQA_OPEN_SQLITE_NATIVE | UQA_OPEN_SQLITE_AUTO => PersistentBackend::SQLiteNative { auto: true },
-                UQA_OPEN_SQLITE_KV => PersistentBackend::SQLiteKeyValue { auto: false },
-                flags if flags == UQA_OPEN_SQLITE_KV | UQA_OPEN_SQLITE_AUTO => PersistentBackend::SQLiteKeyValue { auto: true },
-                _ => return Err(UQAError::invalid("open requires exactly one storage flag; SQLITE_AUTO modifies SQLite only")),
-            };
+            let backend = PersistentBackend::from_flags(flags)?;
             let path = boundary::$read(path $(, $size)?)?;
             *out = open(path, config, backend)?;
             Ok(UQA_OK)
