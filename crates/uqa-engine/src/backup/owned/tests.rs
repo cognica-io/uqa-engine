@@ -7,7 +7,7 @@
 use super::{OwnedBackupJob, OwnedRestoreJob};
 use crate::{
     backup::{
-        BackupLimits, BackupOptions, LocalRepository, Protection, RestoreDestination,
+        BackupId, BackupLimits, BackupOptions, LocalRepository, Protection, RestoreDestination,
         RestoreOptions, StorageReadControl,
     },
     Engine,
@@ -77,26 +77,7 @@ fn host_jobs_outlive_the_source_and_repository_and_preserve_the_published_runtim
         .unwrap(),
     );
     repository.remove_backup(parent, &control).unwrap();
-    let authority = Engine::new();
-    // An embedded callback can already own the calling session's statement gate.
-    let mut restore = authority
-        .with_direct_query_snapshot(
-            true,
-            |session| {
-                OwnedRestoreJob::begin(
-                    session,
-                    repository,
-                    child,
-                    RestoreDestination::Memory,
-                    RestoreOptions::default().with_runtime(session),
-                    &control,
-                )
-            },
-            std::convert::identity,
-        )
-        .unwrap();
-    authority.close().unwrap();
-    drop(authority);
+    let mut restore = restore_from_open_statement(repository, child, &control);
     let (first, repeated) = thread::spawn(move || {
         let first = restore.finish().unwrap().into_retained();
         let repeated = restore.cancel().unwrap().unwrap().into_retained();
@@ -121,4 +102,31 @@ fn host_jobs_outlive_the_source_and_repository_and_preserve_the_published_runtim
     assert!(control.memory().used() > 0);
     drop((first, repeated));
     assert_eq!(control.memory().used(), 0);
+}
+
+fn restore_from_open_statement(
+    repository: Arc<LocalRepository>,
+    backup: BackupId,
+    control: &StorageReadControl,
+) -> OwnedRestoreJob {
+    let authority = Engine::new();
+    // An embedded callback can already own the calling session's statement gate.
+    let restore = authority
+        .with_direct_query_snapshot(
+            true,
+            |session| {
+                OwnedRestoreJob::begin(
+                    session,
+                    repository,
+                    backup,
+                    RestoreDestination::Memory,
+                    RestoreOptions::default().with_runtime(session),
+                    control,
+                )
+            },
+            std::convert::identity,
+        )
+        .unwrap();
+    authority.close().unwrap();
+    restore
 }
