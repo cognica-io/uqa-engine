@@ -83,6 +83,49 @@ Key precedence is `--key`, then `--key-file`, then `UQA_KEY`. Interactive sessio
 
 Command-line secrets can be visible to process inspection and shell history. Prefer a protected key file or a deployment-specific secret injection mechanism.
 
+## Back up and restore a database
+
+Use `usql [--db FILE] [--storage BACKEND] backup COMMAND REPOSITORY` from a terminal or `\backup COMMAND REPOSITORY` inside an open shell. Capture and restore use the current database session and its SQL authority. Listing, verification, copying and retention operate directly on the repository. Persistent backends are `sqlite-native` (the default), `sqlite-kv`, and `redb`. When a running shell already owns a redb file, use its `\backup` command to capture the live database. redb grants exclusive access to that process. In a shell without `--db`, `\backup create` captures the current in-memory database.
+
+This example captures a full backup, changes the database, and captures an incremental backup. After the full backup is retired, the incremental backup restores the changed order into a fresh directory.
+
+```sh
+usql --db orders.uqa -c "CREATE TABLE orders(id INT PRIMARY KEY, status TEXT); INSERT INTO orders VALUES (1, 'open')"
+usql backup init archives
+full=$(usql --db orders.uqa backup create archives)
+
+usql --db orders.uqa -c "UPDATE orders SET status = 'shipped' WHERE id = 1"
+incremental=$(usql --db orders.uqa backup create archives --parent "$full")
+usql backup verify archives "$incremental"
+usql backup remove archives "$full"
+usql backup gc archives --max-files 256
+
+usql backup restore archives "$incremental" recovered --target-storage sqlite-native
+usql --db recovered/database -c "SELECT id, status FROM orders"
+```
+
+| Command and arguments | Result |
+| --- | --- |
+| `init REPO` | Create a new repository directory and print its repository ID. |
+| `create REPO [--parent ID]` | Capture the committed database. Providing a parent backup ID creates an incremental backup of the same source. |
+| `list REPO` | Print each backup ID followed by a tab and its parent ID. A full backup has `-` in the parent column. |
+| `verify REPO ID` | Verify the backup and print the verified ID. |
+| `copy REPO ID DEST_REPO` | Copy a standalone backup into another initialized repository and print its destination ID. |
+| `remove REPO ID` | Retire this backup while keeping independently restorable descendants. |
+| `gc REPO [--max-files N]` | Remove up to `N` unused files, defaulting to 256. Repeat while the reported `remaining_files` is positive. |
+| `restore REPO ID DEST` | Install the backup in a fresh directory. The database file is `DEST/database`. In an open shell, `DEST` can also be `:memory:` for a memory image. |
+| `resume-publication REPO ID` | Publish a backup whose capture reached preparation before interruption. |
+| `resume-restore REPO REQUEST_ID DEST` | Resume the original persistent request at the same destination. |
+| `cancel-restore REPO REQUEST_ID DEST` | Cancel the persistent request. If publication already took effect, return its installed database. |
+
+The client prints backup IDs and restore request IDs as 32 lowercase hexadecimal characters. The standalone `create` and `copy` commands write the resulting backup ID on a single line of standard output. Capture writes the admitted backup ID to standard error. A persistent restore writes its request ID there before continuing. Keep that request ID and the original destination to resume or cancel an interrupted restore.
+
+Specify byte counts for larger archives or tighter resource limits. `--memory-bytes` and `--workspace-bytes` each default to 256 MiB. `create` and `copy` accept `--max-encoded-bytes` for the encoded backup size, which defaults to 1 GiB. Restore accepts `--max-value-bytes` for an individual value and `--retained-bytes` for retained database state. Both default to 64 MiB. For a SQLite destination, choose `--target-compression lz4` or `--target-compression zstd`.
+
+Choose the matching provider with `--target-storage sqlite-native|sqlite-kv|redb` when restoring into a directory. The current storage selection supplies the default. Restore preserves an existing destination. After a successful `\backup restore`, subsequent SQL runs on the restored database. A memory image uses `\backup restore REPO ID :memory:` in the shell. Capture any later writes before leaving that memory session if they need to survive the process.
+
+An encrypted repository requires `--domain HEX --repository-key-file FILE` for each command that opens it. The domain is a nonzero 16-byte identifier written as 32 hexadecimal characters. The key file holds exactly 32 raw bytes. For `copy`, use `--destination-domain HEX --destination-key-file FILE` for an encrypted destination. A protected source requires a protected repository unless `create` or `copy` receives `--allow-plaintext`. The database passphrase is independent of both archive credentials. Use the existing `--key-file FILE` before `backup` to open an encrypted SQLite source and `--target-key-file FILE` after `restore`, `resume-restore`, or `cancel-restore` for an encrypted SQLite destination.
+
 ## Editing and output
 
 The Rust shell accepts multiline SQL, PostgreSQL dollar and escape strings, quoted identifiers and nested comments. Highlighting and bracket matching use the complete query buffer; parentheses inside quoted text never block Enter. Tab completion reads the live catalog and accepts unqualified, schema-qualified and quoted relation names, columns, variables, settings and paths. It does not insert SQL keywords into strings or comments. `NO_COLOR` disables color; `\set HIGHLIGHT off` disables it for the current session.
@@ -103,6 +146,7 @@ SQL owns typed text output, including booleans, arrays, enums, retained composit
 | `\open path`, `\connect [path]`, `\c [path]` | Open or reconnect to an embedded database; `:memory:` selects a fresh memory database |
 | `\new` | Replace the current engine with a fresh in-memory engine |
 | `\reset` | Reopen the current database and reset session state |
+| `\backup command repository ...` | Capture the current database, manage backups, or switch to a restored database |
 | `\where`, `\conninfo` | Print the current database location or connection information |
 | `\timing [on\|off]` | Configure timing output |
 | `\expanded [on\|off\|auto]`, `\x [on\|off\|auto]` | Configure expanded display |

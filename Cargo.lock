@@ -3878,6 +3878,8 @@ dependencies = [
  "uqa-graph",
  "uqa-pg-query",
  "uqa-sql",
+ "uqa-storage-redb",
+ "uqa-storage-sqlite",
 ]
 
 [[package]]

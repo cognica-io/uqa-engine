@@ -34,6 +34,8 @@ uqa-core = { workspace = true }
 uqa-graph = { workspace = true }
 uqa-pg-query = { workspace = true }
 uqa-sql = { workspace = true }
+uqa-storage-redb.workspace = true
+uqa-storage-sqlite.workspace = true
 rustyline = "19.0.0"
 rpassword = "7.4"
 unicode-width = "0.2"

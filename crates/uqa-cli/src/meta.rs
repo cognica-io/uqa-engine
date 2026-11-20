@@ -9,10 +9,6 @@
 use super::*;
 
 impl Session {
-    #[expect(
-        clippy::too_many_lines,
-        reason = "preserves meta-command output contracts"
-    )]
     pub(super) fn handle_meta(&mut self, command: &str, out: &mut impl Write) -> PromptLineOutcome {
         let mut parts = command.trim().splitn(2, char::is_whitespace);
         let cmd = parts.next().unwrap_or("");
@@ -53,34 +49,13 @@ impl Session {
                 }
                 other => Err(format!("usage: \\history [clear] (got {other:?})")),
             },
-            "new" => {
-                self.engine = Engine::new();
-                if let Err(error) = crate::shell_notifications::configure(&self.engine) {
-                    let _ = writeln!(out, "ERROR: {error}");
-                    return PromptLineOutcome::Failed;
-                }
-                self.shell.listen_seen = false;
-                self.db_path = None;
-                self.db_key = None;
-                self.location = ":memory:".into();
-                let _ = writeln!(out, "fresh in-memory engine");
-                Ok(())
-            }
-            "reset" => match open_engine(self.db_path.as_deref(), self.db_key.as_deref()) {
-                Ok((engine, location, key)) => {
-                    if let Err(error) = crate::shell_notifications::configure(&engine) {
-                        let _ = writeln!(out, "ERROR: {error}");
-                        return PromptLineOutcome::Failed;
-                    }
-                    self.shell.listen_seen = false;
-                    self.engine = engine;
-                    self.db_key = key;
-                    self.location = location;
-                    let _ = writeln!(out, "Engine reset.");
-                    Ok(())
-                }
-                Err(err) => Err(format!("reset failed: {err}")),
-            },
+            "new" => self.reconnect(None).and_then(|()| {
+                writeln!(out, "fresh in-memory engine").map_err(|error| error.to_string())
+            }),
+            "reset" => self
+                .reconnect(self.db_path.clone())
+                .map_err(|error| format!("reset failed: {error}"))
+                .and_then(|()| writeln!(out, "Engine reset.").map_err(|error| error.to_string())),
             "where" => {
                 let _ = writeln!(out, "{}", crate::printing::terminal_text(&self.location));
                 Ok(())
@@ -436,10 +411,12 @@ impl Session {
             .map_err(|error| format!("write migration report failed: {error}"))?;
         let engine = Engine::open(destination)
             .map_err(|err| format!("open migrated database failed: {err}"))?;
-        self.engine = engine;
-        self.db_path = Some(destination.to_path_buf());
-        self.db_key = None;
-        self.location = destination.display().to_string();
+        self.install_engine(
+            RetainedValue::new(engine),
+            Some(destination.to_path_buf()),
+            None,
+            DatabaseBackend::default(),
+        )?;
         let _ = writeln!(out, "opened {}", self.location);
         Ok(())
     }

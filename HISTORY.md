@@ -390,6 +390,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- Add full and incremental backup, verification, retention and restore to the standalone `usql backup` command and the interactive `\backup` command. [CLI reference](docs/manual/reference/03-cli.md)
 - Expose online full and incremental backups in the native C, Python and Node.js bindings. Applications can open protected repositories, restore a child after retiring its parent, and resume a persistent restore by ID. [Native backup and restore](docs/manual/reference/08-bindings-and-extensions.md#native-backup-and-restore)
 
 - Reconstruct native evaluated value indexes with original admitted values, exact historical comparison policy and named capture membership. Normal writes and later spill preserve retained inputs.

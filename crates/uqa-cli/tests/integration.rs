@@ -6,6 +6,8 @@
 
 //! Consolidated CLI integration tests.
 
+#[path = "backup/mod.rs"]
+mod backup;
 #[path = "encrypted.rs"]
 mod encrypted;
 #[path = "history.rs"]

@@ -12,7 +12,8 @@ use rustyline::history::MemHistory;
 #[test]
 fn legacy_vector_expanded_output_reports_invalid_layout() {
     let mut session = Session {
-        engine: Engine::new(),
+        engine: RetainedValue::new(Engine::new()),
+        backend: DatabaseBackend::default(),
         db_path: None,
         db_key: None,
         location: ":memory:".into(),
@@ -169,7 +170,8 @@ fn psql_escaped_semicolons_keep_one_simple_query_transaction() {
         .sql("CREATE TABLE escaped_batch (id INTEGER PRIMARY KEY)", &[])
         .unwrap();
     let mut session = Session {
-        engine,
+        engine: RetainedValue::new(engine),
+        backend: DatabaseBackend::default(),
         db_path: None,
         db_key: None,
         location: ":memory:".into(),
@@ -252,7 +254,8 @@ fn command_text_uses_one_implicit_transaction_for_multiple_statements() {
         )
         .unwrap();
     let mut session = Session {
-        engine,
+        engine: RetainedValue::new(engine),
+        backend: DatabaseBackend::default(),
         db_path: None,
         db_key: None,
         location: ":memory:".into(),
@@ -343,7 +346,8 @@ fn command_text_uses_one_implicit_transaction_for_multiple_statements() {
 fn command_text_applies_each_discard_targets_transaction_contract() {
     let engine = Engine::new();
     let mut session = Session {
-        engine,
+        engine: RetainedValue::new(engine),
+        backend: DatabaseBackend::default(),
         db_path: None,
         db_key: None,
         location: ":memory:".into(),
@@ -427,7 +431,8 @@ fn meta_ds_lists_sequences_using_search_path() {
     assert!(engine.create_sequence("acct_seq", 10, 2, false).unwrap());
     assert_eq!(engine.nextval("acct_seq").unwrap(), 10);
     let mut session = Session {
-        engine,
+        engine: RetainedValue::new(engine),
+        backend: DatabaseBackend::default(),
         db_path: None,
         db_key: None,
         location: ":memory:".into(),

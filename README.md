@@ -194,6 +194,8 @@ Python and Node.js provide matching `local` and `cloud` project constructors; br
 
 The Rust backup API captures a committed snapshot while the database stays open. Memory, native SQLite, SQLite Key/Value, and redb support full and incremental backups. Each incremental backup has a complete inventory and can be restored to a fresh destination after its parent is removed. [Runnable Rust example](crates/uqa-api/examples/backup.rs) · [Backup and restore options](docs/manual/reference/02-rust-engine-api.md#capture-a-backup)
 
+Use `usql backup` from a script or `\backup` in the shell to capture the current database, verify a backup or restore it to a new destination. [CLI backup commands](docs/manual/reference/03-cli.md#back-up-and-restore-a-database)
+
 `uqa-storage` owns provider-independent contracts and shared data structures, while `uqa-storage-sqlite` owns SQLite connections, catalogs, indexes, transactions, graph persistence, and compressed storage. Rust callers using concrete storage types must use the [updated provider imports](docs/manual/reference/10-upgrading.md#sqlite-provider-ownership).
 
 Applications that want a pure-Rust single-file store can compose the engine with `uqa-storage-redb`. The provider owns the database, and every `Engine::new_session()` receives independent transaction state over the same file.

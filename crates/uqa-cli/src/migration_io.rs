@@ -8,6 +8,29 @@
 
 use super::{io, Engine, IsTerminal, Path, PythonMigrationReport, Write};
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) enum DatabaseBackend {
+    #[default]
+    SQLiteNative,
+    SQLiteKeyValue,
+    Redb,
+}
+
+impl std::str::FromStr for DatabaseBackend {
+    type Err = String;
+
+    fn from_str(input: &str) -> Result<Self, Self::Err> {
+        match input {
+            "sqlite-native" => Ok(Self::SQLiteNative),
+            "sqlite-kv" => Ok(Self::SQLiteKeyValue),
+            "redb" => Ok(Self::Redb),
+            _ => Err(format!(
+                "unknown storage {input:?}; expected sqlite-native, sqlite-kv or redb"
+            )),
+        }
+    }
+}
+
 pub(super) fn print_migration_report_stdout(report: &PythonMigrationReport) -> io::Result<()> {
     let stdout = io::stdout();
     let mut out = stdout.lock();
@@ -51,7 +74,18 @@ pub(super) fn print_migration_report(
 pub(super) fn open_engine_with_key(
     path: &Path,
     key: Option<&str>,
+    backend: DatabaseBackend,
 ) -> Result<(Engine, String, Option<String>), String> {
+    if backend == DatabaseBackend::Redb {
+        if key.is_some() {
+            return Err("redb does not support a database encryption key".into());
+        }
+        let provider = uqa_storage_redb::RedbStorage::open(path)
+            .map_err(|error| format!("open failed: {}: {error}", path.display()))?;
+        let engine = Engine::from_persistent_provider(std::sync::Arc::new(provider))
+            .map_err(|error| format!("open failed: {}: {error}", path.display()))?;
+        return Ok((engine, path.display().to_string(), None));
+    }
     let mut key = key.map(str::to_string);
     if key.is_none() {
         let format = Engine::detect_database_file(path)
@@ -77,23 +111,34 @@ pub(super) fn open_engine_with_key(
             }
         }
     }
-    let engine = Engine::open_auto(path, key.as_deref()).map_err(|err| {
+    let sqlite_error = |err: uqa_engine::SQLiteError| {
         let hint = if key.is_some() && matches!(err, uqa_engine::SQLiteError::SQLite(_)) {
             " (wrong encryption key, or the file is not a database)"
         } else {
             ""
         };
         format!("open failed: {}: {err}{hint}", path.display())
-    })?;
+    };
+    let engine = if backend == DatabaseBackend::SQLiteKeyValue {
+        let connection = uqa_storage_sqlite::ManagedConnection::open_auto(path, key.as_deref())
+            .map_err(sqlite_error)?;
+        let provider = uqa_storage_sqlite::SQLiteKeyValueStorage::from_connection(connection)
+            .map_err(sqlite_error)?;
+        Engine::from_persistent_provider(std::sync::Arc::new(provider))
+            .map_err(|error| format!("open failed: {}: {error}", path.display()))?
+    } else {
+        Engine::open_auto(path, key.as_deref()).map_err(sqlite_error)?
+    };
     Ok((engine, path.display().to_string(), key))
 }
 
 pub(super) fn open_engine(
     db_path: Option<&Path>,
     key: Option<&str>,
+    backend: DatabaseBackend,
 ) -> Result<(Engine, String, Option<String>), String> {
     match db_path {
-        Some(path) => open_engine_with_key(path, key),
+        Some(path) => open_engine_with_key(path, key, backend),
         None => Ok((Engine::new(), ":memory:".into(), None)),
     }
 }

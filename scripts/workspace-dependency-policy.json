@@ -50,7 +50,9 @@
       "uqa-engine",
       "uqa-graph",
       "uqa-pg-query",
-      "uqa-sql"
+      "uqa-sql",
+      "uqa-storage-redb",
+      "uqa-storage-sqlite"
     ],
     "uqa-client": [
       "uqa-core",

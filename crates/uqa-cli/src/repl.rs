@@ -232,7 +232,8 @@ pub(super) enum PromptLineOutcome {
 }
 
 pub(super) struct Session {
-    pub(super) engine: Engine,
+    pub(super) engine: RetainedValue<Engine>,
+    pub(super) backend: DatabaseBackend,
     pub(super) db_path: Option<PathBuf>,
     /// Encryption key of the currently open database, kept so `\reset`
     /// and re-opens go through the same keyed path.
@@ -248,27 +249,26 @@ pub(super) struct Session {
 }
 
 impl Session {
-    pub(super) fn new(db_path: Option<PathBuf>, key: Option<&str>) -> Result<Self, String> {
-        Self::new_with_history_path(db_path, key, history_path())
-    }
-
+    #[cfg(test)]
     pub(super) fn new_without_history(
         db_path: Option<PathBuf>,
         key: Option<&str>,
     ) -> Result<Self, String> {
-        Self::new_with_history_path(db_path, key, None)
+        Self::new_with_history_path(db_path, key, DatabaseBackend::default(), None)
     }
 
-    fn new_with_history_path(
+    pub(super) fn new_with_history_path(
         db_path: Option<PathBuf>,
         key: Option<&str>,
+        backend: DatabaseBackend,
         history_path: Option<PathBuf>,
     ) -> Result<Self, String> {
         let history = crate::shell_history::load(history_path.as_deref())?;
-        let (engine, location, db_key) = open_engine(db_path.as_deref(), key)?;
+        let (engine, location, db_key) = open_engine(db_path.as_deref(), key, backend)?;
         crate::shell_notifications::configure(&engine)?;
         Ok(Self {
-            engine,
+            engine: RetainedValue::new(engine),
+            backend,
             db_path,
             db_key,
             location,
@@ -280,6 +280,43 @@ impl Session {
             output_path: None,
             shell: crate::shell::ShellState::default(),
         })
+    }
+
+    pub(super) fn install_engine(
+        &mut self,
+        engine: RetainedValue<Engine>,
+        path: Option<PathBuf>,
+        key: Option<String>,
+        backend: DatabaseBackend,
+    ) -> Result<(), String> {
+        crate::shell_notifications::configure(&engine)?;
+        self.location = path
+            .as_deref()
+            .map_or_else(|| ":memory:".to_owned(), |p| p.display().to_string());
+        self.engine = engine;
+        self.backend = backend;
+        self.db_path = path;
+        self.db_key = key;
+        self.shell.listen_seen = false;
+        Ok(())
+    }
+
+    pub(super) fn reconnect(&mut self, path: Option<PathBuf>) -> Result<(), String> {
+        let same = path == self.db_path;
+        let key = self.db_key.as_deref().filter(|_| same);
+        // redb grants one physical owner per file. A new logical session reuses that owner.
+        let (engine, key) = if self.backend == DatabaseBackend::Redb && same && path.is_some() {
+            (
+                self.engine
+                    .new_session()
+                    .map_err(|error| error.to_string())?,
+                None,
+            )
+        } else {
+            let (engine, _, key) = open_engine(path.as_deref(), key, self.backend)?;
+            (engine, key)
+        };
+        self.install_engine(RetainedValue::new(engine), path, key, self.backend)
     }
 
     pub(super) fn repl_helper(&self) -> Result<UsqlHelper, String> {
