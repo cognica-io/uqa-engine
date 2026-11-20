@@ -6,7 +6,11 @@
 
 //! C option layouts and native default conversion.
 
-use crate::{abi::*, boundary, error::UQAError};
+use crate::{
+    abi::{UQA_ERROR_RANGE, UQA_OK},
+    boundary,
+    error::UQAError,
+};
 use uqa_engine::backup::{
     BackupLimits, BackupOptions, RestoreOptions, DEFAULT_BACKUP_MEMORY_BYTES,
     DEFAULT_BACKUP_WORKSPACE_BYTES,

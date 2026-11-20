@@ -12,7 +12,7 @@ use uqa_engine::backup::{
 
 use super::{options, UQABackupId, UQABackupRepository, UQARestoreOptions};
 use crate::{
-    abi::*,
+    abi::{UQAOpenFlags, UQA_DONE, UQA_OK, UQA_OPEN_MEMORY},
     boundary,
     config::UQAConfig,
     error::UQAError,

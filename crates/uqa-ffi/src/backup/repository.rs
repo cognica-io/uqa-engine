@@ -11,7 +11,10 @@ use uqa_engine::backup::{
 };
 
 use super::{options, UQABackupId, UQABackupOptions, UQABackupRepositoryOptions};
-use crate::{abi::*, boundary};
+use crate::{
+    abi::{UQA_DONE, UQA_OK},
+    boundary,
+};
 
 #[repr(C)]
 pub struct UQABackupEncryption {
