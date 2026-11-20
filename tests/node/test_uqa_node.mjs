@@ -16,6 +16,7 @@ import { bindingFeatures, noriEnabled, runBindings } from "../parity/bindings.mj
 import { concurrentIsolationLevels, runConcurrentWriterCase } from "../parity/concurrent_transactions.mjs";
 import { runVectorKNN, verifyVectorKNNReopen } from "../../examples/javascript/vector-knn.mjs";
 import { registerNativeNotificationTests } from "./notifications/native.mjs";
+import { registerBackupTests } from "./backup.mjs";
 import { runCLIFixture } from "./http_cli.mjs";
 import { temporalOracle } from "../parity/http_temporal.mjs";
 import { runBitStringBinding } from "../parity/bit_strings.core.mjs";
@@ -23,6 +24,7 @@ import { runBitStringBinding } from "../parity/bit_strings.core.mjs";
 const require = createRequire(import.meta.url);
 const packagePath = require.resolve(process.env.UQA_TEST_PACKAGE ? resolve(process.env.UQA_TEST_PACKAGE) : "../../crates/uqa-node");
 const uqa = require(packagePath);
+registerBackupTests(uqa);
 registerNativeNotificationTests(uqa, packagePath);
 const concurrentWriterOracle = JSON.parse(readFileSync(new URL("../parity/pg18/concurrent_writes.expected.json", import.meta.url), "utf8"));
 

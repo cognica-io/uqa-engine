@@ -22,7 +22,6 @@
 
 use std::collections::BTreeMap;
 use std::path::Path;
-use std::sync::Arc;
 
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
@@ -39,6 +38,7 @@ use uqa_storage_sqlite::{DatabaseFileFormat, SQLiteCompressionOptions};
 const MAX_SAFE_INTEGER: i64 = 9_007_199_254_740_991;
 
 mod api;
+mod backup;
 mod callbacks;
 mod engine;
 mod http_engine;

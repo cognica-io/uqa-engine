@@ -6,10 +6,12 @@
 
 //! Asynchronous Node-API tasks executed on the libuv worker pool.
 
+use uqa_core::memory::RetainedValue;
+
 use super::input::{runtime_error, scoring_mode};
 use super::results::{cypher_result, search_hits, CalibrationReport, SQLResult, SearchHit};
 use super::{
-    Arc, BTreeMap, CoreCalibrationReport, CoreEngine, CoreSQLParam, CoreSQLResult, Env,
+    BTreeMap, CoreCalibrationReport, CoreEngine, CoreSQLParam, CoreSQLResult, Env,
     HybridSearchParams, Result, RobustHybridSearchParams, ScoredEntry, Task, Value,
 };
 
@@ -18,7 +20,7 @@ use super::{
 // ---------------------------------------------------------------------
 
 pub struct SQLTask {
-    pub(super) engine: Arc<CoreEngine>,
+    pub(super) engine: RetainedValue<CoreEngine>,
     pub(super) query: String,
     pub(super) params: Vec<CoreSQLParam>,
 }
@@ -44,7 +46,7 @@ impl Task for SQLTask {
 }
 
 pub struct SQLBatchTask {
-    pub(super) engine: Arc<CoreEngine>,
+    pub(super) engine: RetainedValue<CoreEngine>,
     pub(super) statements: Vec<(String, Vec<CoreSQLParam>)>,
 }
 
@@ -69,7 +71,7 @@ impl Task for SQLBatchTask {
 }
 
 pub struct SearchTask {
-    pub(super) engine: Arc<CoreEngine>,
+    pub(super) engine: RetainedValue<CoreEngine>,
     pub(super) table: String,
     pub(super) field: String,
     pub(super) query: String,
@@ -94,7 +96,7 @@ impl Task for SearchTask {
 }
 
 pub struct KNNSearchTask {
-    pub(super) engine: Arc<CoreEngine>,
+    pub(super) engine: RetainedValue<CoreEngine>,
     pub(super) table: String,
     pub(super) field: String,
     pub(super) vector: Vec<f32>,
@@ -117,7 +119,7 @@ impl Task for KNNSearchTask {
 }
 
 pub struct VectorSimilarityTask {
-    pub(super) engine: Arc<CoreEngine>,
+    pub(super) engine: RetainedValue<CoreEngine>,
     pub(super) table: String,
     pub(super) field: String,
     pub(super) vector: Vec<f32>,
@@ -145,7 +147,7 @@ impl Task for VectorSimilarityTask {
 }
 
 pub struct HybridSearchTask {
-    pub(super) engine: Arc<CoreEngine>,
+    pub(super) engine: RetainedValue<CoreEngine>,
     pub(super) table: String,
     pub(super) text_field: String,
     pub(super) text_query: String,
@@ -178,7 +180,7 @@ impl Task for HybridSearchTask {
 }
 
 pub struct RobustHybridSearchTask {
-    pub(super) engine: Arc<CoreEngine>,
+    pub(super) engine: RetainedValue<CoreEngine>,
     pub(super) table: String,
     pub(super) text_field: String,
     pub(super) text_query: String,
@@ -215,7 +217,7 @@ impl Task for RobustHybridSearchTask {
 }
 
 pub struct RunCypherTask {
-    pub(super) engine: Arc<CoreEngine>,
+    pub(super) engine: RetainedValue<CoreEngine>,
     pub(super) graph: String,
     pub(super) query: String,
     pub(super) params: BTreeMap<String, Value>,
@@ -237,7 +239,7 @@ impl Task for RunCypherTask {
 }
 
 pub struct EstimateScoringParamsTask {
-    pub(super) engine: Arc<CoreEngine>,
+    pub(super) engine: RetainedValue<CoreEngine>,
     pub(super) table: String,
     pub(super) field: String,
     pub(super) n_samples: usize,
@@ -267,7 +269,7 @@ impl Task for EstimateScoringParamsTask {
 }
 
 pub struct LearnScoringParamsTask {
-    pub(super) engine: Arc<CoreEngine>,
+    pub(super) engine: RetainedValue<CoreEngine>,
     pub(super) table: String,
     pub(super) field: String,
     pub(super) query: String,
@@ -290,7 +292,7 @@ impl Task for LearnScoringParamsTask {
 }
 
 pub struct CalibrationReportTask {
-    pub(super) engine: Arc<CoreEngine>,
+    pub(super) engine: RetainedValue<CoreEngine>,
     pub(super) table: String,
     pub(super) field: String,
     pub(super) query: String,

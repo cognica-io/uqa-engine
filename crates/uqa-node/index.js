@@ -700,6 +700,12 @@ if (!nativeBinding) {
 }
 
 module.exports = nativeBinding
+module.exports.BackupJob = nativeBinding.BackupJob
+module.exports.BackupListing = nativeBinding.BackupListing
+module.exports.BackupRepository = nativeBinding.BackupRepository
+module.exports.RestoreJob = nativeBinding.RestoreJob
+module.exports.createBackupRepository = nativeBinding.createBackupRepository
+module.exports.openBackupRepository = nativeBinding.openBackupRepository
 module.exports.Engine = nativeBinding.Engine
 module.exports.HttpEngine = nativeBinding.HttpEngine
 module.exports.HttpSQLStream = nativeBinding.HttpSQLStream

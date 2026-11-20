@@ -47,7 +47,7 @@ impl Engine {
     ) -> Result<NativeNotificationHandle> {
         let options = options.validate()?;
         let channels = options::channels(channels, options.max_channels)?;
-        let engine = Arc::clone(self.inner()?);
+        let engine = self.inner()?.clone();
         let state = State::new(engine, channels, options)?;
         let cleanup = Cleanup::new(env, Arc::clone(&state))?;
         Ok(NativeNotificationHandle { state, cleanup })

@@ -13,6 +13,7 @@ use std::sync::{
 
 use napi::{Env, Result, Task};
 use tokio::sync::Notify;
+use uqa_core::memory::RetainedValue;
 use uqa_core::{notifications::NotificationFailureKind as Kind, CancellationToken};
 use uqa_engine::{
     Engine, NotificationSubscription, NotificationSubscriptionError,
@@ -22,7 +23,7 @@ use uqa_engine::{
 use super::{failure, NativeNotificationEvent, NativeNotificationIdentity};
 
 struct Input {
-    engine: Arc<Engine>,
+    engine: RetainedValue<Engine>,
     channels: Vec<String>,
     permit: NotificationSubscriptionPermit,
 }
@@ -48,7 +49,7 @@ pub(super) struct State {
 
 impl State {
     pub(super) fn new(
-        engine: Arc<Engine>,
+        engine: RetainedValue<Engine>,
         channels: Vec<String>,
         options: NotificationSubscriptionOptions,
     ) -> Result<Arc<Self>> {
