@@ -125,8 +125,13 @@ pub(crate) fn publish(
     } else {
         ArrowExportPolicy::SQLText
     };
-    let output = export_arrow(&data.native, policy, Some(&data.session.native), &control)
-        .map_err(conversion_error)?;
+    let output = export_arrow(
+        &data.native,
+        policy,
+        Some(data.session.native.as_ref()),
+        &control,
+    )
+    .map_err(conversion_error)?;
     // Native FFI owners copy field names/metadata and allocate child/borrowed-buffer
     // tables. Charge those capacities separately from the already-owned Arrow data.
     let mut bytes = 4096usize;

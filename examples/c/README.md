@@ -28,8 +28,10 @@ All calls check `uqa_status`; diagnostics are borrowed and require no destructio
 Run both C11 and C++17 consumers on every applicable storage provider with the actual built shared library:
 
 ```sh
-# macOS; use libuqa_ffi.so on Linux.
-python3 scripts/verify-c-examples.py --library target/debug/libuqa_ffi.dylib
+# macOS
+python3 scripts/verify-c-examples.py --library target/debug/libuqa.dylib
+# Linux
+python3 scripts/verify-c-examples.py --library target/debug/libuqa.so
 ```
 
 The runner executes 38 scenarios: both languages on Memory, native SQLite, SQLite Key/Value and redb, with the persistence-only example on the three durable providers. It prints the tested library's SHA-256. `--sanitize` instruments the consumer programs with AddressSanitizer and UndefinedBehaviorSanitizer; this does not instrument Rust or establish full-library sanitizer coverage. `--static --link-args '...'` accepts an actual static archive and its platform dependencies.
