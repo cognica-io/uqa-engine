@@ -303,13 +303,14 @@ fn grouped_validation_schedules_identities_and_projection_errors_in_original_ord
         let original = CancellationToken::new();
         let invoking = CancellationToken::new();
         let selected = Arc::new(AtomicUsize::new(0));
+        let simple_keys = 7;
         let query = block(&format!(
-            "SELECT count(*) FROM t GROUP BY DISTINCT GROUPING SETS ({})",
-            group(32)
+            "SELECT count(*) FROM t GROUP BY DISTINCT GROUPING SETS ({},(n + 1))",
+            group(simple_keys)
         ));
         let mut job = grouped_input(query, &native, &work, &original, &invoking, &selected);
         let window = ImageDecodeWindow { bytes: 1, steps: 1 };
-        while selected.load(Ordering::Relaxed) < 8 {
+        while selected.load(Ordering::Relaxed) < simple_keys {
             assert!(job
                 .advance(&mut std::io::empty(), window)
                 .unwrap()
@@ -325,7 +326,16 @@ fn grouped_validation_schedules_identities_and_projection_errors_in_original_ord
                 invoking.cancel();
                 None
             }
-            _ => Some(native.reserve(native.limit() - native.used()).unwrap()),
+            _ => {
+                let pressure = native.reserve(native.limit() - native.used()).unwrap();
+                // The last column fits the reserved slots. The following computed key needs storage.
+                assert!(job
+                    .advance(&mut std::io::empty(), window)
+                    .unwrap()
+                    .is_none());
+                assert_eq!(selected.load(Ordering::Relaxed), simple_keys + 1);
+                Some(pressure)
+            }
         };
         let error = job.advance(&mut std::io::empty(), window).unwrap_err();
         assert_eq!(
