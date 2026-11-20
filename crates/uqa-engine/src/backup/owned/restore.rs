@@ -4,6 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
+use crate::backup::restore::{AuthorizedRestore, RestoreRequest};
 use crate::backup::{
     start_error, BackupError, BackupId, BackupResult, LocalRepository, RestoreConfiguration,
     RestoreDestination, RestoreId, RestoreJob, RestorePhase, RestoredEngine, StorageReadControl,
@@ -14,7 +15,6 @@ use std::{
     sync::{mpsc, Arc},
     thread,
 };
-use uqa_core::memory::RetainedValue;
 
 type Operation = Box<dyn FnOnce(&mut RestoreJob<'_>) + Send>;
 
@@ -32,61 +32,49 @@ fn disconnected() -> BackupError {
 
 impl OwnedRestoreJob {
     pub fn begin(
-        engine: &RetainedValue<Engine>,
+        engine: &Engine,
         repository: Arc<LocalRepository>,
         backup: BackupId,
         destination: RestoreDestination,
         options: impl Into<RestoreConfiguration>,
         control: &StorageReadControl,
     ) -> Result<Self, SQLError> {
-        let options = options.into();
-        let control = control.clone();
-        Self::start(engine, repository, move |engine, repo| {
-            engine.begin_restore(repo, backup, destination, options, &control)
+        RestoreRequest::Begin(backup).admit(engine, destination, options, control, |request| {
+            Self::start(repository, request)
         })
     }
 
     pub fn resume(
-        engine: &RetainedValue<Engine>,
+        engine: &Engine,
         repository: Arc<LocalRepository>,
         id: RestoreId,
         destination: RestoreDestination,
         options: impl Into<RestoreConfiguration>,
         control: &StorageReadControl,
     ) -> Result<Self, SQLError> {
-        let options = options.into();
-        let control = control.clone();
-        Self::start(engine, repository, move |engine, repo| {
-            engine.resume_restore(repo, id, destination, options, &control)
+        RestoreRequest::Resume(id).admit(engine, destination, options, control, |request| {
+            Self::start(repository, request)
         })
     }
 
     fn start(
-        engine: &RetainedValue<Engine>,
         repository: Arc<LocalRepository>,
-        admit: impl for<'a> FnOnce(&Engine, &'a LocalRepository) -> Result<RestoreJob<'a>, SQLError>
-            + Send
-            + 'static,
+        request: AuthorizedRestore,
     ) -> Result<Self, SQLError> {
-        let engine = engine.clone();
         let (requests, operations) = mpsc::sync_channel::<Option<Operation>>(0);
         let (ready, admission) = mpsc::sync_channel(0);
         let worker = thread::Builder::new()
             .name("uqa-restore".into())
-            .spawn(move || {
-                let result = admit(&engine, &repository);
-                drop(engine);
-                match result {
-                    Ok(mut job) => {
-                        if ready.send(Ok((job.backup(), job.id()))).is_ok() {
-                            while let Ok(Some(operation)) = operations.recv() {
-                                operation(&mut job);
-                            }
+            .spawn(move || match request.open(&repository) {
+                Ok(mut job) => {
+                    if ready.send(Ok((job.backup(), job.id()))).is_ok() {
+                        while let Ok(Some(operation)) = operations.recv() {
+                            operation(&mut job);
                         }
                     }
-                    Err(error) => {
-                        let _ = ready.send(Err(error));
-                    }
+                }
+                Err(error) => {
+                    let _ = ready.send(Err(error));
                 }
             })
             .map_err(|error| start_error(error.into()))?;

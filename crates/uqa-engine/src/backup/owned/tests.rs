@@ -77,16 +77,24 @@ fn host_jobs_outlive_the_source_and_repository_and_preserve_the_published_runtim
         .unwrap(),
     );
     repository.remove_backup(parent, &control).unwrap();
-    let authority = RetainedValue::new(Engine::new());
-    let mut restore = OwnedRestoreJob::begin(
-        &authority,
-        repository,
-        child,
-        RestoreDestination::Memory,
-        RestoreOptions::default().with_runtime(&authority),
-        &control,
-    )
-    .unwrap();
+    let authority = Engine::new();
+    // An embedded callback can already own the calling session's statement gate.
+    let mut restore = authority
+        .with_direct_query_snapshot(
+            true,
+            |session| {
+                OwnedRestoreJob::begin(
+                    session,
+                    repository,
+                    child,
+                    RestoreDestination::Memory,
+                    RestoreOptions::default().with_runtime(session),
+                    &control,
+                )
+            },
+            std::convert::identity,
+        )
+        .unwrap();
     authority.close().unwrap();
     drop(authority);
     let (first, repeated) = thread::spawn(move || {
