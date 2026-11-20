@@ -126,7 +126,7 @@ ffi_fn!(uqa_value_get_field_count(value: *const UQAValue, out: *mut u32) {
     let out = boundary::output(out)?;
     let value = boundary::input(value)?;
     let _call = value.session.as_ref().map(|session| session.enter_value()).transpose()?;
-    let catalog = value.session.as_ref().map(|session| EngineValueCatalog(&session.native));
+    let catalog = value.session.as_ref().map(|session| EngineValueCatalog(session.native.as_ref()));
     let view = record(value, catalog.as_ref().map(|catalog| catalog as &dyn SQLValueCatalog))?;
     *out = u32::try_from(view.len()).map_err(|_| UQAError::new(UQA_ERROR_RANGE, "record field count exceeds the C range"))?;
     Ok(UQA_OK)
@@ -136,7 +136,7 @@ ffi_fn!(uqa_value_get_field(value: *const UQAValue, index: u32, out: *mut *const
     let out = boundary::output(out)?;
     let value = boundary::input(value)?;
     let _call = value.session.as_ref().map(|session| session.enter_value()).transpose()?;
-    let catalog = value.session.as_ref().map(|session| EngineValueCatalog(&session.native));
+    let catalog = value.session.as_ref().map(|session| EngineValueCatalog(session.native.as_ref()));
     let catalog = catalog.as_ref().map(|catalog| catalog as &dyn SQLValueCatalog);
     let view = record(value, catalog)?;
     if index as usize >= view.len() {

@@ -16,6 +16,7 @@ fn installed_headers_compile_independently_in_each_linkage_mode() {
     for header in [
         "uqa_export.h",
         "uqa.h",
+        "uqa_backup.h",
         "uqa_udf.h",
         "uqa_arrow.h",
         "uqa_log.h",

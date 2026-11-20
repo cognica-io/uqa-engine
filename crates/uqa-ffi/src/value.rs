@@ -213,7 +213,7 @@ impl UQAValue {
             datum,
             self.session
                 .as_ref()
-                .map(|session| &session.native as &dyn uqa_sql::expr::EngineHook),
+                .map(|session| session.native.as_ref() as &dyn uqa_sql::expr::EngineHook),
             &self.control(),
         )?;
         // A concurrent immutable reader may publish first; the losing candidate releases its reservation.
@@ -610,7 +610,7 @@ ffi_fn!(uqa_value_format_sql(value: *const UQAValue, buffer: *mut UQABuffer) {
         &fallback
     };
     let text = uqa_sql::result::format_postgres_text_with_control(
-        native, ty, value.session.as_ref().map(|session| &session.native as &dyn uqa_sql::expr::EngineHook), &control,
+        native, ty, value.session.as_ref().map(|session| session.native.as_ref() as &dyn uqa_sql::expr::EngineHook), &control,
     )?;
     boundary::input_mut(buffer)?.text = Some(text);
     Ok(UQA_OK)
