@@ -215,18 +215,49 @@ def smoke(target: str, directory: pathlib.Path, binstall: str | None = None) -> 
             if (cargo_destination / executable(target)).read_bytes() != binary.read_bytes():
                 raise ValueError("cargo-binstall did not install the exact release executable")
 
-        def query(sql: str) -> str:
-            result = subprocess.run([str(binary), "--db", str(work / "smoke.uqa"), "--copy-text", "-c", sql],
+        def run(*arguments: str | pathlib.Path) -> str:
+            result = subprocess.run([binary, *arguments],
                                     cwd=work, input="", encoding="utf-8", capture_output=True)
             if result.returncode:
-                raise RuntimeError(f"installed CLI failed for {sql!r}: {result.stdout}{result.stderr}")
+                raise RuntimeError(f"installed CLI failed for {arguments!r}: {result.stdout}{result.stderr}")
             return result.stdout.strip()
+
+        source = work / "smoke.uqa"
+
+        def query(sql: str, database: pathlib.Path = source) -> str:
+            return run("--db", database, "--copy-text", "-c", sql)
 
         if query("SELECT 1") != "1":
             raise ValueError("installed CLI did not execute SQL")
-        query("CREATE TABLE kept(id INTEGER PRIMARY KEY); INSERT INTO kept VALUES (7)")
+        query("CREATE TABLE kept(id INTEGER PRIMARY KEY, note TEXT); INSERT INTO kept VALUES (7, 'unchanged')")
         if query("SELECT id FROM kept") != "7":
             raise ValueError("installed CLI did not reopen stored data")
+
+        repository = work / "backup repository"
+        destination = work / "restored database"
+        run("backup", "init", repository)
+        query("INSERT INTO kept VALUES (8, 'old'), (9, 'deleted')")
+        full = run("--db", source, "backup", "create", repository)
+        query("UPDATE kept SET note = 'latest' WHERE id = 8; DELETE FROM kept WHERE id = 9; "
+              "INSERT INTO kept VALUES (10, 'new')")
+        incremental = run("--db", source, "backup", "create", repository, "--parent", full)
+        run("backup", "remove", repository, full)
+        collection = run("backup", "gc", repository, "--max-files", "4096")
+        if not collection.endswith(" remaining_files=0"):
+            raise ValueError(f"installed CLI left garbage collection incomplete: {collection}")
+        if run("backup", "list", repository) != f"{incremental}\t{full}":
+            raise ValueError("installed CLI did not retire the full backup and retain its incremental")
+        run("backup", "verify", repository, incremental)
+        run("backup", "restore", repository, incremental, destination, "--target-storage", "sqlite-native")
+        restored = destination / "database"
+        rows = "SELECT id, note FROM kept ORDER BY id"
+        expected = "7\tunchanged\n8\tlatest\n10\tnew"
+        if query(rows, restored) != expected:
+            raise ValueError("installed CLI restored incorrect incremental rows")
+        query("INSERT INTO kept VALUES (11, 'later')", restored)
+        if query(rows, restored) != expected + "\n11\tlater":
+            raise ValueError("installed CLI did not retain the later write on cold reopen")
+
         for analyzer, text, index, expected in (("nori", "한국 경제", 0, "한국"), ("kuromoji", "ＵＱＡで走りました", 1, "走る")):
             if query(f"SELECT analysis -> 'tokens' -> {index} ->> 'term' FROM analyze_text('{analyzer}', '{text}')") != expected:
                 raise ValueError(f"installed CLI does not include {analyzer}")
@@ -241,7 +272,7 @@ def smoke(target: str, directory: pathlib.Path, binstall: str | None = None) -> 
                                  cwd=work, input="", text=True, capture_output=True)
         if invalid.returncode == 0:
             raise ValueError("installed CLI hides SQL failure")
-    print(f"Installed CLI SQL, persistence, analyzers and foreign handlers passed: {target}")
+    print(f"Installed CLI SQL, persistence, incremental backup and restore, analyzers and foreign handlers passed: {target}")
 
 
 def main() -> None:

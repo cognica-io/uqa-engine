@@ -6,6 +6,7 @@ on:
     types: [ready_for_review]
     paths:
       - .gitattributes
+      - crates/uqa-cli/**
       - .github/actions/package-usql/**
       - .github/actions/setup-python/**
       - .github/workflows/usql-release-checks.yml
@@ -18,6 +19,13 @@ on:
       - scripts/fixtures/usql-release/**
       - scripts/tests/test_usql_release.py
       - scripts/check-release-licenses.py
+
+  workflow_call:
+    inputs:
+      windows_only:
+        description: Qualify the supported Windows release targets.
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -36,17 +44,15 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - os: ubuntu-24.04
-            target: x86_64-unknown-linux-gnu
-          - os: ubuntu-24.04-arm
-            target: aarch64-unknown-linux-gnu
-          - os: macos-26-arm64
-            target: aarch64-apple-darwin
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-          - os: windows-11-arm
-            target: aarch64-pc-windows-msvc
+        include: >-
+          ${{ fromJSON(inputs.windows_only &&
+              '[{"os":"windows-latest","target":"x86_64-pc-windows-msvc"},
+               {"os":"windows-11-arm","target":"aarch64-pc-windows-msvc"}]' ||
+              '[{"os":"ubuntu-24.04","target":"x86_64-unknown-linux-gnu"},
+               {"os":"ubuntu-24.04-arm","target":"aarch64-unknown-linux-gnu"},
+               {"os":"macos-26-arm64","target":"aarch64-apple-darwin"},
+               {"os":"windows-latest","target":"x86_64-pc-windows-msvc"},
+               {"os":"windows-11-arm","target":"aarch64-pc-windows-msvc"}]') }}
     steps:
       - name: Limit shared macOS worker parallelism
         if: runner.os == 'macOS' && runner.environment == 'self-hosted'
