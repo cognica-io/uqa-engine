@@ -16,28 +16,59 @@ use std::hash::{BuildHasher, Hasher};
 use uqa_core::memory::{MemoryReservation, OwnedMap, Produced, ProductionControl, ProductionVec};
 use uqa_core::ordering::{sort_by_with_progress, SortProgress};
 
-pub(crate) fn expression_identity_with_control(
+/// Resolved columns compare by physical slot. Other normalized expressions retain their exact serialized identity.
+#[derive(Debug, PartialEq)]
+pub(crate) enum GroupingKey {
+    Position(usize),
+    Expression(Produced<Vec<u8>>),
+}
+
+impl GroupingKey {
+    pub(super) fn new(
+        engine: &dyn FunctionTypeResolver,
+        expression: &ScalarExpr,
+        schema: &RowSchema,
+        params: &[SQLParam],
+        control: &ProductionControl<'_>,
+    ) -> Result<Self, SQLError> {
+        control.check()?;
+        if let Some(slot) = super::normalization::column_slot(schema, expression) {
+            return Ok(Self::Position(slot));
+        }
+        let expression = crate::type_resolution::bind_type_introspection_owned(
+            expression.copy_for_rewrite(control)?,
+            schema,
+            params,
+            Some(engine),
+            control,
+        )?;
+        let expression = Normalizer {
+            engine,
+            schema,
+            params,
+            control: *control,
+        }
+        .normalize(expression)?;
+        match &*expression {
+            ScalarExpr::Position(slot) => Ok(Self::Position(*slot)),
+            _ => super::serialization::identity(&expression, control).map(Self::Expression),
+        }
+    }
+}
+
+pub(super) fn expression_identity_with_control(
     engine: &dyn FunctionTypeResolver,
     expression: &ScalarExpr,
     schema: &RowSchema,
     params: &[SQLParam],
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Vec<u8>>, SQLError> {
-    let expression = crate::type_resolution::bind_type_introspection_owned(
-        expression.copy_for_rewrite(control)?,
-        schema,
-        params,
-        Some(engine),
-        control,
-    )?;
-    let expression = Normalizer {
-        engine,
-        schema,
-        params,
-        control: *control,
+    match GroupingKey::new(engine, expression, schema, params, control)? {
+        GroupingKey::Position(slot) => {
+            super::serialization::identity(&ScalarExpr::Position(slot), control)
+        }
+        GroupingKey::Expression(bytes) => Ok(bytes),
     }
-    .normalize(expression)?;
-    super::serialization::identity(&expression, control)
 }
 
 pub(crate) fn analyze_distinct_grouping_with_control(

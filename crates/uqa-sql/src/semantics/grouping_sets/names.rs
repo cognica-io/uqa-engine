@@ -78,12 +78,12 @@ pub(crate) fn resolve_grouping_expression_reference_with_control<'a>(
                 control.check()?;
                 let first_identity = match &identity {
                     Some(identity) => identity,
-                    None => identity.insert(super::expression_identity_with_control(
+                    None => identity.insert(super::production::GroupingKey::new(
                         routines, resolved, schema, params, control,
                     )?),
                 };
                 if *first_identity
-                    != super::expression_identity_with_control(
+                    != super::production::GroupingKey::new(
                         routines,
                         &candidate.expr,
                         schema,
