@@ -13,6 +13,15 @@ On main `3ba81f592`, Q1 met its 1.10 limit with a paired ratio of 1.077738 and a
 | Materialized result scan | 9.904260 | 10.129763 | 1.023860 | 1.008163 | 1.015570–1.032218 | 1.15 | accepted |
 | Cursor result scan | 4.873099 | 5.901058 | 1.211542 | 1.009835 | 1.199742–1.223457 | 1.15 | regression |
 
+## Grouping and in-memory scan instruction counts (2026-11-20 UTC)
+
+Release builds of `3ba81f592` and `3cba2c044` ran the public SQL workload on macOS ARM64 with Rust 1.95.0. Both loaded the original 20,000 rows in one INSERT and used 4 MB of work memory. Q1 returned the same six groups over 19,700 matching rows, and the cursor returned the same 15,602 ordered rows. The table reports medians from twelve warmed calls per build across four counterbalanced process pairs. The measured work includes query preparation, execution and result consumption. On Q1, grouping validation reduced top-level expression serializations from 5 to 1 and expression rewriting reduced them from 11 to 4. [SQL and storage changes](https://github.com/cognica-io/uqa-engine/pull/1436)
+
+| Public query | Instructions before | Instructions after | Change | Allocations before | Allocations after |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Q1 grouped aggregate | 20,460,646 | 18,925,557 | -7.50% | 3,403 | 3,357 |
+| Cursor result scan | 26,038,738.5 | 25,672,811 | -1.41% | 2,178 | 2,178 |
+
 ## Controlled analytical results (2026-11-19 UTC)
 
 After the row-schema release fix, Q1’s paired ratio fell from 1.118499 on `4c98f23f2` to 1.102068 on `c248aed70`. Its calibrated interval still crossed the 1.10 limit. The cursor scan exceeded its 1.15 limit. Q6, the materialized scan and all 16 claim comparisons passed. The dedicated m7g.4xlarge compared eight counterbalanced pairs per workload and used 32 independent reference pairs to estimate noise. Times are median Criterion slopes against analytical reference `0e8be6892`. [Controlled run](https://github.com/cognica-io/uqa-engine/actions/runs/44600125266) · [Signed measurements](https://github.com/cognica-io/uqa-engine/actions/runs/44600125266/artifacts/14573902089)
