@@ -49,6 +49,7 @@ mod tasks;
 mod value;
 
 pub use api::*;
+pub use backup::{create_backup_repository, open_backup_repository};
 pub use callbacks::{JSFunctionOptions, JSFunctionVolatility};
 pub use engine::Engine;
 pub use http_engine::{

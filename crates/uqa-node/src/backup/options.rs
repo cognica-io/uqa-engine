@@ -148,7 +148,8 @@ impl BackupOptions {
 pub struct RestoreOptions {
     pub maximum_workspace_bytes: Option<f64>,
     pub maximum_value_bytes: Option<f64>,
-    pub retained_bytes: Option<f64>,
+    #[napi(js_name = "retainedBytes")]
+    pub retained_allowance: Option<f64>,
     pub memory_bytes: Option<f64>,
 }
 
@@ -171,7 +172,7 @@ impl RestoreOptions {
                     "maximumValueBytes",
                 )?,
                 retained_bytes: size(
-                    self.retained_bytes,
+                    self.retained_allowance,
                     defaults.retained_bytes,
                     "retainedBytes",
                 )?,
