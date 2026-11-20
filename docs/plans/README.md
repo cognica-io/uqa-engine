@@ -1,6 +1,6 @@
 # Implementation plans
 
-The [online and incremental backup plan](0031-online-and-incremental-backup.md) tracks independent delivery of online full backup and restore, followed by incremental inventory comparison and fingerprint acceleration in [#1322](https://github.com/cognica-io/uqa-engine/issues/1322). Common Storage image/repository codecs are in implementation and qualification. Actual memory, native SQLite, SQLite KV and redb capture/import, repository publication and public operations remain outstanding; replication and CDC are not prerequisites.
+Memory, native SQLite, SQLite Key/Value and redb support online full and incremental backups through the embedded Rust API. A standalone incremental backup can restore a fresh database after its parent has been removed. [Backup and restore API](../manual/reference/02-rust-engine-api.md#capture-a-backup) · [Completed implementation plan](0031-online-and-incremental-backup.md)
 
 The [replication and change data capture plan](0030-replication-and-change-data-capture.md) proposes a transport-independent core. It records owner-based delivery units, journal and snapshot contracts, and four-provider source/sixteen-pair replication acceptance. Implementation has not started; networking and distributed failover remain separate work.
 

@@ -4,6 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
+use super::super::production::{expression_identity_with_control, GroupingKey};
 use super::*;
 use uqa_core::{
     memory::{MemoryBudget, ProductionControl},
@@ -85,6 +86,68 @@ fn controlled_grouping_identity_keeps_only_serialized_output_until_release() {
             assert_eq!(budget.used(), 0);
         }
     }
+}
+
+#[test]
+fn grouped_column_slots_preserve_aliases_correlations_and_expression_identity() {
+    let source = RowSchema::with_identities(
+        vec!["id".into(), "n".into(), "outer_id".into()],
+        vec![
+            crate::ColumnIdentity::qualified("t", "id"),
+            crate::ColumnIdentity::qualified("t", "n"),
+            crate::ColumnIdentity::qualified("o", "outer_id"),
+        ],
+        vec![Some(ColumnType::Integer); 3],
+    );
+    let source = RowSchema::with_identity_aliases(
+        &source,
+        &[(crate::ColumnIdentity::unqualified("alias_id"), 0)],
+    );
+    let outer = RowSchema::with_types(vec!["outer_id".into()], vec![Some(ColumnType::Integer)]);
+    let budget = MemoryBudget::new(0);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&budget, &token, &token);
+    let column = ScalarExpr::Column("id".into());
+    let qualified = ScalarExpr::QualifiedColumn {
+        qualifier: "t".into(),
+        column: "id".into(),
+    };
+    let alias = ScalarExpr::Column("alias_id".into());
+    let query = block("SELECT n + 1 FROM t");
+    let computed = &query.projections[0].expr;
+    let ordinary_key = super::super::expression_identity(&Catalog, computed, &source, &[]).unwrap();
+    assert!(matches!(ordinary_key, GroupingKey::Expression(_)));
+    assert_eq!(
+        std::mem::size_of_val(&(ordinary_key, computed)),
+        size_of::<(Vec<u8>, &ScalarExpr)>()
+    );
+    for expression in [&column, &qualified, &alias, &ScalarExpr::Position(0)] {
+        let count = allocation_counter::measure(|| {
+            let key = GroupingKey::new(&Catalog, expression, &source, &[], &control).unwrap();
+            assert_eq!(key, GroupingKey::Position(0));
+        });
+        assert_eq!(count.count_total, 0);
+    }
+    for sql in [
+        "SELECT alias_id, t.id::integer, o.outer_id, count(*) FROM t GROUP BY t.id",
+        "SELECT id, alias_id, count(*) FROM t GROUP BY t.id::integer",
+        "SELECT alias_id + 1, o.outer_id, count(*) FROM t GROUP BY t.id + 1",
+    ] {
+        validate_grouped_expressions(&Catalog, &block(sql), &source, Some(&outer), &[]).unwrap();
+    }
+    let error = validate_grouped_expressions(
+        &Catalog,
+        &block("SELECT t.n, t.id FROM t GROUP BY o.outer_id"),
+        &source,
+        Some(&outer),
+        &[],
+    )
+    .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("42803"));
+    assert!(error.to_string().contains("column \"t.n\""));
+    token.cancel();
+    let error = GroupingKey::new(&Catalog, &column, &source, &[], &control).unwrap_err();
+    assert_eq!(error.sqlstate(), Some("57014"));
 }
 
 #[test]
@@ -248,13 +311,14 @@ fn grouped_validation_schedules_identities_and_projection_errors_in_original_ord
         let original = CancellationToken::new();
         let invoking = CancellationToken::new();
         let selected = Arc::new(AtomicUsize::new(0));
+        let simple_keys = 7;
         let query = block(&format!(
-            "SELECT count(*) FROM t GROUP BY DISTINCT GROUPING SETS ({})",
-            group(32)
+            "SELECT count(*) FROM t GROUP BY DISTINCT GROUPING SETS ({},(n + 1))",
+            group(simple_keys)
         ));
         let mut job = grouped_input(query, &native, &work, &original, &invoking, &selected);
         let window = ImageDecodeWindow { bytes: 1, steps: 1 };
-        while selected.load(Ordering::Relaxed) < 8 {
+        while selected.load(Ordering::Relaxed) < simple_keys {
             assert!(job
                 .advance(&mut std::io::empty(), window)
                 .unwrap()
@@ -270,7 +334,16 @@ fn grouped_validation_schedules_identities_and_projection_errors_in_original_ord
                 invoking.cancel();
                 None
             }
-            _ => Some(native.reserve(native.limit() - native.used()).unwrap()),
+            _ => {
+                let pressure = native.reserve(native.limit() - native.used()).unwrap();
+                // The last column fits the reserved slots. The following computed key needs storage.
+                assert!(job
+                    .advance(&mut std::io::empty(), window)
+                    .unwrap()
+                    .is_none());
+                assert_eq!(selected.load(Ordering::Relaxed), simple_keys + 1);
+                Some(pressure)
+            }
         };
         let error = job.advance(&mut std::io::empty(), window).unwrap_err();
         assert_eq!(

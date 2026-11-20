@@ -7772,6 +7772,19 @@
     {
       "package": "uqa-storage",
       "kind": "lib",
+      "test": "projected_pages_resume_after_a_stop_across_restored_and_replaced_rows",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/document_store/memory/image/tests.rs",
+      "capability": "Bounded restored document projection",
+      "workload": "Read restored sparse document IDs and a replaced nested value with duplicate, missing and empty projections.",
+      "invariant": "The visitor stops after exactly two rows. Duplicate slots borrow the same nested value, and an exclusive resume reaches the last ID once with zero fields.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
       "test": "paged_memory_projection_compiles_only_encountered_layouts_once",
       "cases": 1,
       "source": "crates/uqa-storage/src/document_store/memory/projection/cache/tests.rs",
@@ -76563,6 +76576,19 @@
       "capability": "Stored SQL output ordering and equality",
       "workload": "Move an out-of-range ORDER BY or DISTINCT ON position, or a JSON output without equality, from first to last among 32 output keys.",
       "invariant": "One-step work reaches the final invalid key at least 31 steps after the first. Batching preserves each clause's original PostgreSQL diagnostic.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "grouped_column_slots_preserve_aliases_correlations_and_expression_identity",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/semantics/grouping_sets/tests/ownership.rs",
+      "capability": "Grouping identities for resolved columns",
+      "workload": "Validate qualified, unqualified, positional and aliased references alongside correlated inputs and equivalent cast or arithmetic expressions.",
+      "invariant": "Normalizing a resolved column allocates no heap memory. Equivalent expressions retain their grouping identity, cancellation returns 57014, and the first ungrouped column retains SQLSTATE 42803. Buffered ordinary keys fit the original expression-vector entry size.",
       "case_names": [
         ""
       ]

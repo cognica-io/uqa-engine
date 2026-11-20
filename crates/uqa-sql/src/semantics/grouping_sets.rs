@@ -19,7 +19,6 @@ mod production;
 mod serialization;
 pub(crate) use production::{
     analyze_distinct_grouping_from, analyze_distinct_grouping_with_control,
-    expression_identity_with_control,
 };
 mod names;
 pub(crate) use names::{bind_grouping_items, resolve_grouping_expression_reference_with_control};
@@ -145,16 +144,23 @@ pub(crate) fn expression_identity(
     expression: &ScalarExpr,
     schema: &RowSchema,
     params: &[SQLParam],
-) -> Result<Vec<u8>, SQLError> {
-    expression_identity_with_control(
+) -> Result<production::GroupingKey<Vec<u8>>, SQLError> {
+    use production::GroupingKey;
+
+    let key = GroupingKey::new(
         engine,
         expression,
         schema,
         params,
         &uqa_core::memory::ProductionControl::uncontrolled(),
-    )?
-    .into_uncontrolled()
-    .map_err(|_| SQLError::Internal("ordinary grouping identity owner".into()))
+    )?;
+    match key {
+        GroupingKey::Position(slot) => Ok(GroupingKey::Position(slot)),
+        GroupingKey::Expression(bytes) => bytes
+            .into_uncontrolled()
+            .map(GroupingKey::Expression)
+            .map_err(|_| SQLError::Internal("ordinary grouping identity owner".into())),
+    }
 }
 
 #[cfg(test)]

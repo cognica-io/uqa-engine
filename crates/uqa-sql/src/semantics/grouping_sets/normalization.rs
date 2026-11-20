@@ -22,6 +22,17 @@ pub(super) struct Normalizer<'a> {
     pub(super) control: ProductionControl<'a>,
 }
 
+pub(super) fn column_slot(schema: &RowSchema, expression: &ScalarExpr) -> Option<usize> {
+    match expression {
+        ScalarExpr::Column(name) => schema.column_slot(name),
+        ScalarExpr::QualifiedColumn { qualifier, column } => {
+            schema.qualified_slot(qualifier, column)
+        }
+        ScalarExpr::Position(slot) => Some(*slot),
+        _ => None,
+    }
+}
+
 impl Normalizer<'_> {
     pub(super) fn normalize(
         &self,
@@ -205,12 +216,8 @@ impl Normalizer<'_> {
         let control = &self.control;
         match &*expression {
             ScalarExpr::RetainedLiteral(_) => self.retained(expression),
-            ScalarExpr::Column(column) => match self.schema.column_slot(column) {
-                Some(slot) => Ok(ScalarExpr::Position(slot).copy_for_rewrite(control)?),
-                None => Ok(expression),
-            },
-            ScalarExpr::QualifiedColumn { qualifier, column } => {
-                match self.schema.qualified_slot(qualifier, column) {
+            ScalarExpr::Column(_) | ScalarExpr::QualifiedColumn { .. } => {
+                match column_slot(self.schema, &expression) {
                     Some(slot) => Ok(ScalarExpr::Position(slot).copy_for_rewrite(control)?),
                     None => Ok(expression),
                 }

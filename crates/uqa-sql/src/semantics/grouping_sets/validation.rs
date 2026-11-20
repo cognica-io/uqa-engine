@@ -6,7 +6,7 @@
 
 //! Validate group inputs before constant folding or row production can erase their analyzed identity.
 
-use super::{expression_identity_with_control, resolve_grouping_expression_reference_with_control};
+use super::{production::GroupingKey, resolve_grouping_expression_reference_with_control};
 use crate::catalog::work::{ReferenceWork, Work};
 use crate::plan::QueryBlockPlan;
 use crate::routines::RoutineResolution;
@@ -95,8 +95,7 @@ pub(crate) async fn validate_grouped_expressions_with_inputs<'a, W: Work + Send>
             params,
             control,
         )?;
-        let identity =
-            expression_identity_with_control(routines, expression, schema, params, control)?;
+        let identity = GroupingKey::new(routines, expression, schema, params, control)?;
         groups.push_produced(control.finish(identity, control.empty_reservation())?)?;
     }
     let (groups, _memory) = groups.finish()?.into_parts();
@@ -106,8 +105,8 @@ pub(crate) async fn validate_grouped_expressions_with_inputs<'a, W: Work + Send>
             if is_aggregate(&aggregates, part) {
                 return Ok(false);
             }
-            let identity = expression_identity_with_control(routines, part, schema, params, control)?;
-            if groups.iter().any(|group| group.as_slice() == identity.as_slice()) {
+            let identity = GroupingKey::new(routines, part, schema, params, control)?;
+            if groups.contains(&identity) {
                 return Ok(false);
             }
             let position = match part {

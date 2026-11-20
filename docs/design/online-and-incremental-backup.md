@@ -4,13 +4,13 @@ This design was written against UQA Engine 0.6.3 (`1b5c22971d75b8db0e6900c8aa7b7
 
 ## Decision and delivery scope
 
-Build online full backup first, using a consistent snapshot of committed database-owned state. Add incremental backup by comparing that snapshot's storage-unit inventory with a completed backup's inventory. Reuse unchanged immutable data objects and store replacements for changed units; remove deleted units from the new inventory. Backup describes the state at a selected snapshot, not the operations that produced it.
+A full backup captures a consistent snapshot of committed database state. An incremental backup compares the new snapshot with a completed backup, reuses unchanged immutable objects, stores replacements for changed units and leaves deleted units out of its inventory.
 
 Every completed backup has a complete inventory root. An incremental backup shares immutable repository objects with its parent but does not require replaying a chain of delta manifests. Its parent ID records provenance and the comparison input, not an instruction to fetch missing state. Removing a parent backup cannot remove objects still reachable from a retained child. A standalone copy materializes all objects reachable from one root into another repository without opening the source database.
 
 The first public interface is embedded Rust with a local filesystem repository. The source continues to accept reads and writes while the snapshot is exported. Initial restore creates a new database using the same provider and data mapping: memory to memory, native SQLite to native SQLite, SQLite KV to SQLite KV, and redb to redb. Native SQLite and SQLite KV remain distinct archive formats even though both use SQLite. Destination encryption and compression can differ where that provider's verified import capabilities permit it.
 
-Cross-provider conversion, SQL dump formats, arbitrary-time recovery between backup snapshots, continuous archiving, online replacement of an existing database, remote repository protocols, scheduling, and language-binding expansion are separate work. The backup core does not require any of them. Full backup remains useful and deliverable before incremental comparison or fingerprint acceleration is implemented.
+Cross-provider conversion, SQL dump formats, arbitrary-time recovery between backup snapshots, continuous archiving, online replacement of an existing database, remote repository protocols, scheduling, and language-binding expansion are separate work. The backup core does not require any of them.
 
 ```mermaid
 flowchart LR
@@ -23,7 +23,7 @@ flowchart LR
     ROOT --> VERIFY[Verify and import into a new database]
 ```
 
-## Existing implementation and missing interfaces
+## Storage interfaces at the 0.6.3 design baseline
 
 | Existing owner | Foundation | Required extension |
 | --- | --- | --- |
@@ -35,7 +35,7 @@ flowchart LR
 | [DatabaseRestore](../../crates/uqa-storage/src/mvcc/restore.rs) | Caller-retained source/target incarnation identities and idempotent completion | Repository-owned durable restore intent and staging around the existing provider transition |
 | [DiskANN backup restoration](diskann-backup-restoration.md) | Closed-file restoration preserves namespaces, selected artifacts, uncovered changes, and subsequent writes | Online capture and archive import with the same data-preservation obligations |
 
-Current restore acceptance starts from a closed, consistent provider-file copy. It is not evidence for copying a database while it is open. SQLite's [public Online Backup API](https://www.sqlite.org/backup.html) provides a SQLite-native copying mechanism, but does not define a common UQA archive or cover the memory and redb engines. The current `uqa-rusqlite` feature configuration does not enable its `backup` module. This design uses the UQA-owned snapshot boundary and requires no dependency patch, private page hook, or dependency upgrade.
+At the 0.6.3 baseline, restore tests started from a closed, consistent provider-file copy. Online capture now takes a committed snapshot while the source stays open. SQLite's [public Online Backup API](https://www.sqlite.org/backup.html) provides a SQLite-native copying mechanism, but does not define a common UQA archive or cover the memory and redb engines. The current `uqa-rusqlite` feature configuration does not enable its `backup` module. This design uses the UQA-owned snapshot boundary and requires no dependency patch, private page hook, or dependency upgrade.
 
 A record snapshot alone is insufficient. `allocate_identifiers` changes durable watermarks without advancing record visibility; native SQLite can defer synchronization of sequence-only publications; data namespaces are distinct from transaction-history identities; and memory Engine does not use the reference `MemoryVersionStore`. These are explicit integration requirements, not values to collect from the latest database after a data scan finishes.
 
@@ -200,9 +200,9 @@ Verification has distinct levels. Manifest verification checks root authenticity
 
 Backup reports distinguish snapshot cut, capture completion, durable repository completion, verification level, units scanned, source bytes read, bytes reused/written, and retained source/repository resources. “Online” means source operations can progress during bounded capture/export; it does not mean zero I/O cost or zero lock waits. No latency or throughput improvement is claimed before controlled measurement.
 
-## Proposed API responsibilities
+## Backup API responsibilities
 
-Names below describe proposed responsibilities, not released signatures or C ABI symbols.
+The embedded Rust API provides a repository, a capture job and a restore job. Provider adapters supply the storage operations these jobs use. [Public API](../manual/reference/02-rust-engine-api.md#capture-a-backup)
 
 | Resource | Operations |
 | --- | --- |
@@ -219,7 +219,7 @@ Required acceptance includes actual memory, native SQLite, SQLite KV, and redb e
 
 Correctness requires that importing a completed root reconstructs the selected owned state, that every reused reference denotes the same image bytes, that publication cannot expose an incomplete root, and that retention cannot delete reachable content. Preservation arguments cover existing SQL values, graph carriers, decorated text postings, ranked scores, and approximate-index artifacts; matching document IDs alone is insufficient. Product feature delivery supplies the argument required by [AI_POLICY.md](../../AI_POLICY.md#prove-feature-additions) alongside owner tests.
 
-Full backup, incremental comparison, fingerprint acceleration, repository retention, and public adapters are separate coherent implementation units, each subject to the 10,000-changed-line limit. The [implementation plan](../plans/0031-online-and-incremental-backup.md) and [#1322](https://github.com/cognica-io/uqa-engine/issues/1322) track completed owner primitives and remaining delivery requirements. An implemented primitive does not establish complete Engine backup support.
+Full and incremental capture, verification, retention and restore are available on memory, native SQLite, SQLite Key/Value and redb. The implementation plan records the provider-specific checks and their results. [Implementation plan](../plans/0031-online-and-incremental-backup.md) · [Delivery checklist](https://github.com/cognica-io/uqa-engine/issues/1322)
 
 ## Evaluated value and memory document images
 
@@ -269,7 +269,7 @@ Admission uses the root's tracked footprint before publishing a reader. The cach
 
 The read owner carries its original cancellation independently of the shared reservation. Re-capture cannot replace that scope with a fresh token or larger allowance. Every fallible read enters that owner, borrowed callback traversal checks it between rows, and image output checks it between writes while preserving the original typed error. Controlled copies use the invoking read allowance and retain their own returned payload charges. Infallible shared-row carriers have no reservation slot, so controlled readers do not advertise those optional capabilities. Ordinary source snapshots and transaction rollback retain their existing writable behavior; controlled readers reject mutation within the storage owner.
 
-The six owner tests cover one and 20,000 rows with less than 2 KiB of capture allocation, exact captured bytes/metadata after source replacement and loss, oversized capacity and dormant-layout retention, failed admission and cancellation, independent and nested readers, final-owner retirement, read-only admission and callback cancellation, and four MiB of image output under a separate 512-byte allowance. These guarantees cover one document generation. Joint committed Engine capture and complete catalog, index, graph, model and resource images remain separate requirements of #1322.
+The six owner tests cover one and 20,000 rows with less than 2 KiB of capture allocation, exact captured bytes/metadata after source replacement and loss, oversized capacity and dormant-layout retention, failed admission and cancellation, independent and nested readers, final-owner retirement, read-only admission and callback cancellation, and four MiB of image output under a separate 512-byte allowance. These guarantees cover one document generation. Engine combines that generation with the catalog, indexes, graphs, models and resources from the same committed snapshot. [Backup and restore API](../manual/reference/02-rust-engine-api.md#capture-a-backup)
 
 
 ## Evaluated memory graph images
