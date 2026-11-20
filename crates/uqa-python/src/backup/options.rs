@@ -94,7 +94,7 @@ impl PyRestoreDestination {
         Self(RestoreDestination::Memory)
     }
 
-    /// Install a native or key/value SQLite database in a new destination directory.
+    /// Install a native or key/value database in a new destination directory.
     #[staticmethod]
     #[pyo3(signature = (directory, *, mapping="native", key=None, codec=None, page_size=None, chunk_pages=None, level=None))]
     fn sqlite(
