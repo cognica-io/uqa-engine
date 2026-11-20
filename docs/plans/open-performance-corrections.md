@@ -6,7 +6,7 @@ On main `3ba81f592`, Q1 met its 1.10 limit with a paired ratio of 1.077738 and a
 
 ## Controlled qualification (2026-11-19 UTC)
 
-On main `c248aed70`, Q1’s calibrated interval of 1.096648–1.107515 crossed its 1.10 limit. The cursor scan measured 1.205035 with an interval of 1.193942–1.216231, above its 1.15 limit. Q6, the materialized scan and all 16 claim comparisons passed. The remaining work covers Q1’s execution cost, the cursor regression and the historical instruction-throughput investigation. [Measurements](../design/performance.md#controlled-analytical-results-2026-11-19-utc) · [Performance issue](https://github.com/cognica-io/uqa-engine/issues/653)
+On main `c248aed70`, Q1’s calibrated interval of 1.096648–1.107515 crossed its 1.10 limit. The cursor scan measured 1.205035 with an interval of 1.193942–1.216231, above its 1.15 limit. Q6, the materialized scan and all 16 claim comparisons passed. At that revision, Q1, the cursor regression and historical instruction-throughput attribution remained open. [Measurements](../design/performance.md#controlled-analytical-results-2026-11-19-utc) · [Performance issue](https://github.com/cognica-io/uqa-engine/issues/653)
 
 ## Controlled cursor regression (2026-11-15 UTC)
 

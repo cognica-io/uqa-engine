@@ -8,6 +8,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- SQL now compares resolved `GROUP BY` columns by their input positions. In-memory scans select the row iterator once per page and fill the same projection buffer for each row. Both optimizations also apply to queries on a restored memory database.
 - Ordinary in-memory queries now pass each page of projected rows directly to its visitor. Reads from a retained backup snapshot still check for cancellation during the page. [Q1 performance measurement](docs/design/performance.md#controlled-analytical-results-after-ordinary-memory-projection-2026-11-20-utc)
 - Backup and restore preserve the application functions used by trigger predicates and rewrite rules. An insert after restore now fires the same trigger and writes the same values as on the source, including when a function shares its name with a builtin.
 - Copy long deferred SQL and PL/pgSQL function bodies in chunks of at most 4,096 bytes during restore. The original source text remains available in `pg_proc`. Restore also checks long argument lists incrementally and preserves the original SQL diagnostic when a declaration has multiple errors. Restore copies scalar and set-returning type names, the saved search path, per-function settings and execution privileges in bounded steps before binding the routine.
