@@ -6,8 +6,9 @@
 
 use crate::{
     backup::{
-        BackupCut, BackupError, BackupImageReader, BackupImageSource, BackupLease, BackupReadStep,
-        BackupResult, BackupSourceStatistics, BackupSourceStep, BackupSourceUnit, InventorySummary,
+        BackupCut, BackupError, BackupId, BackupImageReader, BackupImageSource, BackupLease,
+        BackupReadStep, BackupResult, BackupRoot, BackupSourceStatistics, BackupSourceStep,
+        BackupSourceUnit, InventorySummary, LocalRepository,
     },
     read_control::StorageReadControl,
     temporary_file::FileBudget,
@@ -24,6 +25,36 @@ pub struct BackupCopyReport {
     pub written_object_bytes: u64,
     /// Peak physical ciphertext workspace shared by source verification, inventory production and destination verification; excludes repository output and filesystem allocation metadata.
     pub workspace_peak_bytes: u64,
+}
+
+impl LocalRepository {
+    /// Copy and publish a completed image in another repository. The destination owns an independent root under its own protection. A failed preparation retires its private operation. If publication already installed the root, return that durable result.
+    pub fn copy_backup_to(
+        &self,
+        backup: BackupId,
+        destination: &LocalRepository,
+        maximum_encoded_bytes: u64,
+        maximum_workspace_bytes: u64,
+        allow_plaintext_export: bool,
+        control: &StorageReadControl,
+    ) -> BackupResult<BackupRoot> {
+        control.check()?;
+        if maximum_encoded_bytes == 0 || maximum_workspace_bytes == 0 {
+            return Err(BackupError::Invalid("zero backup copy limit"));
+        }
+        destination
+            .check_export_protection(self.protection_domain().is_some(), allow_plaintext_export)?;
+        let source = self.open_backup(backup, control)?;
+        let mut copy =
+            destination.begin_backup(source.root().cut(), None, maximum_encoded_bytes, control)?;
+        let result = copy
+            .prepare_copy(&source, maximum_workspace_bytes, control)
+            .and_then(|_| copy.publish(control));
+        match result {
+            Ok(root) => Ok(root),
+            Err(error) => copy.cancel()?.ok_or(error),
+        }
+    }
 }
 
 impl BackupOperation<'_> {

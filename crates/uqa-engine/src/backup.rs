@@ -23,9 +23,9 @@ use std::sync::Arc;
 
 pub use uqa_storage::backup::{
     BackupCapabilities, BackupCapturePhase, BackupCaptureProgress, BackupCaptureReport,
-    BackupCaptureStep, BackupCut, BackupError, BackupId, BackupKey, BackupLimits, BackupListing,
-    BackupResult, BackupRoot, LocalRepository, PersistentBackupTarget, Protection, ProtectionId,
-    RestoreId,
+    BackupCaptureStep, BackupCollectionReport, BackupCut, BackupError, BackupId, BackupKey,
+    BackupLimits, BackupListing, BackupResult, BackupRoot, LocalRepository, PersistentBackupTarget,
+    Protection, ProtectionId, RestoreId,
 };
 pub use uqa_storage::read_control::StorageReadControl;
 pub use uqa_storage::StorageEncryptionKey;
@@ -127,22 +127,25 @@ impl Engine {
                         .provider
                         .as_ref()
                         .filter(|provider| provider.backup_capabilities().export)
-                        .ok_or_else(|| start_error(BackupError::Unsupported("Engine backup export")))?;
-                    if provider.auxiliary_encryption_key().is_some()
-                        && repository.protection_domain().is_none()
-                        && !options.allow_plaintext_export
-                    {
-                        return Err(start_error(BackupError::Invalid(
-                            "encrypted source requires a protected repository or explicit plaintext export",
-                        )));
-                    }
-                    let image = provider.capture_backup_image(&control).map_err(start_error)?;
+                        .ok_or_else(|| {
+                            start_error(BackupError::Unsupported("Engine backup export"))
+                        })?;
+                    repository
+                        .check_export_protection(
+                            provider.auxiliary_encryption_key().is_some(),
+                            options.allow_plaintext_export,
+                        )
+                        .map_err(start_error)?;
+                    let image = provider
+                        .capture_backup_image(&control)
+                        .map_err(start_error)?;
                     let limit = control.memory().limit();
                     let limits = uqa_storage::catalog::input::CatalogInputLimits {
                         maximum_key_bytes: limit,
                         maximum_value_bytes: limit,
                     };
-                    let catalogs = functions::Catalogs::provider(&image, limits, &control).map_err(start_error)?;
+                    let catalogs = functions::Catalogs::provider(&image, limits, &control)
+                        .map_err(start_error)?;
                     Ok((image, catalogs, declarations))
                 },
                 std::convert::identity,
