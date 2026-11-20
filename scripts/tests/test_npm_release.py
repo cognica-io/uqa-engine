@@ -68,6 +68,18 @@ class NPMReleaseArchiveTest(unittest.TestCase):
         return Namespace(source_dir=self.source, archive=self.archive,
                          version=self.version, result_file=self.directory / "repair.json", npm="npm")
 
+    def test_root_requires_its_public_types_in_the_file_list_and_archive(self) -> None:
+        types = self.manifest["types"]
+        self.members.pop(types)
+        with self.assertRaisesRegex(NPM_RELEASE.ReleaseError, types):
+            NPM_RELEASE.validate_root_package(self.archive, self.packed_manifest, self.members, self.version)
+
+        files = [name for name in self.manifest["files"] if name != types]
+        with self.assertRaisesRegex(NPM_RELEASE.ReleaseError, types):
+            NPM_RELEASE.validate_node_source({**self.manifest, "files": files}, self.source)
+        with self.assertRaisesRegex(NPM_RELEASE.ReleaseError, types):
+            NPM_RELEASE.validate_root_package(self.archive, {**self.packed_manifest, "files": files}, self.members, self.version)
+
     def use_legacy_source(self) -> None:
         self.source = self.directory / "legacy-source"
         self.manifest = json.loads(json.dumps(self.manifest))

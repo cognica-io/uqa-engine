@@ -10,10 +10,10 @@
   },
   "homepage": "https://github.com/cognica-io/uqa-engine",
   "main": "api.js",
-  "types": "index.d.ts",
+  "types": "api.d.ts",
   "exports": {
     ".": {
-      "types": "./index.d.ts",
+      "types": "./api.d.ts",
       "import": "./api.js",
       "require": "./api.js",
       "default": "./api.js"
@@ -28,6 +28,7 @@
   "files": [
     "README.md",
     "api.js",
+    "api.d.ts",
     "index.js",
     "index.d.ts",
     "LICENSE-NOTICE.md",
@@ -92,7 +93,8 @@
   },
   "scripts": {
     "build": "napi build --platform --no-js --release --features nori,kuromoji",
-    "build:debug": "napi build --platform --no-js --features nori,kuromoji"
+    "build:debug": "napi build --platform --no-js --features nori,kuromoji",
+    "test:types": "tsc --strict --skipLibCheck --noEmit --target ES2022 --module node16 tests/backup-handles.types.ts"
   },
   "devDependencies": {
     "@napi-rs/cli": "3.8.6"

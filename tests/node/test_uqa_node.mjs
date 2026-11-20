@@ -257,6 +257,15 @@ test("CommonJS and ESM package exports agree", async () => {
   assert.equal(esm.NotificationError, uqa.NotificationError);
   assert.equal(esm.vector, uqa.vector);
   assert.equal(esm.JSFunctionVolatility, uqa.JSFunctionVolatility);
+  assert.equal(esm.createBackupRepository, uqa.createBackupRepository);
+  assert.equal(esm.openBackupRepository, uqa.openBackupRepository);
+  for (const name of ["BackupJob", "BackupListing", "BackupRepository", "RestoreJob"]) {
+    assert.equal(esm[name], uqa[name]);
+    assert.equal(typeof esm[name], "function");
+    assert.throws(() => new esm[name](), {
+      name: "TypeError", message: `${name} is created by its backup or restore operation`,
+    });
+  }
 });
 
 test("DiskANN example preserves canonical scores and committed rows through reopen", async () => {
