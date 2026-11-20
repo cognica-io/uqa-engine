@@ -9,6 +9,10 @@
 from __future__ import annotations
 
 from ._uqa import (
+    BackupJob,
+    BackupListing,
+    BackupOptions,
+    BackupRepository,
     Engine,
     HttpEngine,
     HttpEngineError,
@@ -20,6 +24,9 @@ from ._uqa import (
     NotificationRetryOptions,
     NotificationSubscription,
     NotificationSubscriptionOptions,
+    RestoreDestination,
+    RestoreJob,
+    RestoreOptions,
     SQLParam,
     SQLResult,
     __version__,
@@ -38,6 +45,10 @@ from ._uqa import (
 from ._notifications import AsyncNotificationSubscription
 
 __all__ = [
+    "BackupJob",
+    "BackupListing",
+    "BackupOptions",
+    "BackupRepository",
     "Engine",
     "HttpEngine",
     "HttpEngineError",
@@ -50,6 +61,9 @@ __all__ = [
     "NotificationSubscription",
     "NotificationSubscriptionOptions",
     "AsyncNotificationSubscription",
+    "RestoreDestination",
+    "RestoreJob",
+    "RestoreOptions",
     "SQLParam",
     "SQLResult",
     "__version__",
