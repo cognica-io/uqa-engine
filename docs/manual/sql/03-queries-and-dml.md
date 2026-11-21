@@ -259,7 +259,7 @@ INSERT INTO cte_archive SELECT id, body FROM moved RETURNING id, body;
 
 ## Set operations
 
-`UNION`, `INTERSECT`, and `EXCEPT` support distinct and `ALL` forms where specified:
+`EXCEPT` returns each distinct left row that has no equal right row. If a row occurs `m` times on the left and `n` times on the right, `EXCEPT ALL` returns `max(m - n, 0)` copies and `INTERSECT ALL` returns `min(m, n)` copies. Corresponding NULLs count as equal when matching rows. `UNION ALL` retains every row from both operands.
 
 ```sql
 SELECT id FROM current_items

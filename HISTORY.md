@@ -8,6 +8,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- `EXCEPT` and `EXCEPT ALL` now return an unmatched final left row when the remaining right values sort before it. This also fixes `NOT EXISTS` checks over those results. Set operations match columns by position when output labels repeat.
 - A SQL cursor reuses the byte count of an unchanged physical row batch when buffering it for fetch. Renamed and repeated output columns retain their positions, and the destination schema still counts toward `work_mem`. [Cursor measurements](docs/design/performance.md#cursor-scan-instruction-counts-2026-11-21-utc)
 - SQL now compares resolved `GROUP BY` columns by their input positions. In-memory scans select the row iterator once per page and fill the same projection buffer for each row. Both optimizations also apply to queries on a restored memory database. [Query measurements](docs/design/performance.md#grouping-and-in-memory-scan-instruction-counts-2026-11-20-utc) · [Controlled timing](docs/design/performance.md#controlled-analytical-results-after-grouped-column-and-scan-improvements-2026-11-20-utc)
 - Ordinary in-memory queries now pass each page of projected rows directly to its visitor. Reads from a retained backup snapshot still check for cancellation during the page. [Q1 performance measurement](docs/design/performance.md#controlled-analytical-results-after-ordinary-memory-projection-2026-11-20-utc)

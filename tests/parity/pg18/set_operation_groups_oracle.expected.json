@@ -29,7 +29,7 @@
     {"sql": "SELECT EXISTS (SELECT 2 EXCEPT SELECT 1) AS has_difference, NOT EXISTS (SELECT 2 EXCEPT SELECT 1) AS is_subset, NOT EXISTS (SELECT 2 EXCEPT ALL SELECT 2) AS same","command_tags": ["SELECT 1"],"error": null,"results": [{"columns": ["has_difference","is_subset","same"],"type_oids": [16,16,16],"rows": [["t","f","t"]]}]},
     {"sql": "SELECT 2 AS v EXCEPT SELECT 1 WHERE false","command_tags": ["SELECT 1"],"error": null,"results": [{"columns": ["v"],"type_oids": [23],"rows": [["2"]]}]},
     {"sql": "SELECT 2 AS v WHERE false EXCEPT ALL SELECT 1","command_tags": ["SELECT 0"],"error": null,"results": [{"columns": ["v"],"type_oids": [23],"rows": []}]},
-    {"sql": "CREATE TEMP TABLE except_repro (id BIGINT PRIMARY KEY, status TEXT NOT NULL)","command_tags": ["CREATE TABLE"],"error": null,"results": [{"columns": [],"type_oids": [],"rows": []}]},
+    {"sql": "CREATE TABLE except_repro (id BIGINT PRIMARY KEY, status TEXT NOT NULL)","command_tags": ["CREATE TABLE"],"error": null,"results": [{"columns": [],"type_oids": [],"rows": []}]},
     {"sql": "INSERT INTO except_repro VALUES (1, 'old'), (2, 'current')","command_tags": ["INSERT 0 2"],"error": null,"results": [{"columns": [],"type_oids": [],"rows": []}]},
     {"sql": "SELECT id FROM except_repro WHERE status = 'current' EXCEPT SELECT 1::bigint","command_tags": ["SELECT 1"],"error": null,"results": [{"columns": ["id"],"type_oids": [20],"rows": [["2"]]}]},
     {"sql": "SELECT NOT EXISTS (SELECT id FROM except_repro WHERE status = 'current' EXCEPT SELECT id FROM except_repro WHERE status = 'old') AS is_subset","command_tags": ["SELECT 1"],"error": null,"results": [{"columns": ["is_subset"],"type_oids": [16],"rows": [["f"]]}]}
