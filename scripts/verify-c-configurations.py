@@ -35,8 +35,11 @@ def commands(configuration: str, *, target: str | None = None) -> list[list[str]
     common = ["--locked", "-p", "uqa-ffi", *features]
     if target:
         common += ["-Zbuild-std", "--target", target]
+    # With build-std, selecting the test target up front shares instrumented libtest
+    # and its dependency graph between the native library and the Rust unit tests.
+    build_targets = ["--lib", "--tests"] if target == "x86_64-unknown-linux-gnu" else []
     result = [
-        [*cargo, "build", *common, "--profile", "test"],
+        [*cargo, "build", *common, "--profile", "test", *build_targets],
         [*cargo, "test", *common, "--lib"],
     ]
     if configuration == "minimal" and not target:
