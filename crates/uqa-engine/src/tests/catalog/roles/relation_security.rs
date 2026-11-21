@@ -16,7 +16,11 @@ use uqa_core::{catalog_acl::LegacyRelationSecurity, RelationIdentity, Value};
 use uqa_sql::catalog::security::BoundTableSecurity;
 use uqa_storage::{CatalogFacade, RelationSecurityRow};
 
-const RELATIONS: [&str; 4] = ["secured", "secured_view", "secured_mat", "secured_foreign"];
+const TABLE: &str = "secured";
+const VIEW: &str = "secured_view";
+const MATERIALIZED_VIEW: &str = "secured_mat";
+const FOREIGN_TABLE: &str = "secured_foreign";
+const RELATIONS: [&str; 4] = [TABLE, VIEW, MATERIALIZED_VIEW, FOREIGN_TABLE];
 
 fn setup(engine: &Engine) {
     sql(engine, "CREATE ROLE reader; CREATE ROLE other; CREATE TABLE secured(id int); INSERT INTO secured VALUES (7); CREATE VIEW secured_view AS SELECT id FROM secured; CREATE MATERIALIZED VIEW secured_mat AS SELECT id FROM secured; CREATE SERVER remote FOREIGN DATA WRAPPER memory_fdw; CREATE FOREIGN TABLE secured_foreign(id int) SERVER remote");
@@ -292,55 +296,56 @@ fn relation_acl_conversion_rolls_back_when_later_catalog_restoration_fails() {
     }
 }
 
-#[test]
-fn relation_acl_corruption_rejects_owner_grantee_and_grantor_incarnations() {
-    for provider in 0..3 {
-        for name in RELATIONS {
-            for endpoint in ["owner", "grantee", "grantor"] {
-                let (_directory, first, second) = sessions(provider);
-                setup(&first);
-                sql(&first, &format!("GRANT SELECT(id) ON {name} TO reader"));
-                let factory = Arc::clone(first.storage.provider.as_ref().unwrap());
-                let raw = factory.open_session().unwrap();
-                let original = stored(raw.catalog.as_ref(), name);
-                let RelationSecurityRow::Bound(mut bound) = original.clone() else {
-                    unreachable!()
-                };
-                bound.acl_revisions = uqa_core::catalog_acl::RelationAclRevisions::default();
-                let reference = match endpoint {
-                    "owner" => &mut bound.role_owner,
-                    "grantee" => bound.column_acls.get_mut("id").unwrap()[0]
-                        .role
-                        .as_mut()
-                        .unwrap(),
-                    _ => &mut bound.column_acls.get_mut("id").unwrap()[0].grantor,
-                };
-                reference.object_id = [42; 16];
-                let corrupt = RelationSecurityRow::Bound(bound);
-                replace(raw.catalog.as_ref(), name, corrupt.clone());
-                let Err(error) = first.new_session() else {
-                    panic!("corrupt relation endpoint accepted")
-                };
-                assert!(
-                    error.to_string().contains("missing role incarnation"),
-                    "{error}"
-                );
-                drop(second);
-                drop(first);
-                let Err(error) = Engine::from_persistent_provider(Arc::clone(&factory)) else {
-                    panic!("corrupt relation endpoint rebound")
-                };
-                assert!(
-                    error.to_string().contains("missing role incarnation"),
-                    "{error}"
-                );
-                assert_eq!(stored(raw.catalog.as_ref(), name), corrupt);
-                replace(raw.catalog.as_ref(), name, original);
-                let restored = Engine::from_persistent_provider(factory).unwrap();
-                assert!(can_select(&restored, "reader", name));
-            }
-        }
-    }
+#[rstest::rstest]
+#[case::native_sqlite(0)]
+#[case::sqlite_key_value(1)]
+#[case::redb(2)]
+fn relation_acl_corruption_rejects_owner_grantee_and_grantor_incarnations(
+    #[case] provider: usize,
+    #[values(TABLE, VIEW, MATERIALIZED_VIEW, FOREIGN_TABLE)] name: &str,
+    #[values("owner", "grantee", "grantor")] endpoint: &str,
+) {
+    let (_directory, first, second) = sessions(provider);
+    setup(&first);
+    sql(&first, &format!("GRANT SELECT(id) ON {name} TO reader"));
+    let factory = Arc::clone(first.storage.provider.as_ref().unwrap());
+    let raw = factory.open_session().unwrap();
+    let original = stored(raw.catalog.as_ref(), name);
+    let RelationSecurityRow::Bound(mut bound) = original.clone() else {
+        unreachable!()
+    };
+    bound.acl_revisions = uqa_core::catalog_acl::RelationAclRevisions::default();
+    let reference = match endpoint {
+        "owner" => &mut bound.role_owner,
+        "grantee" => bound.column_acls.get_mut("id").unwrap()[0]
+            .role
+            .as_mut()
+            .unwrap(),
+        _ => &mut bound.column_acls.get_mut("id").unwrap()[0].grantor,
+    };
+    reference.object_id = [42; 16];
+    let corrupt = RelationSecurityRow::Bound(bound);
+    replace(raw.catalog.as_ref(), name, corrupt.clone());
+    let Err(error) = first.new_session() else {
+        panic!("corrupt relation endpoint accepted")
+    };
+    assert!(
+        error.to_string().contains("missing role incarnation"),
+        "{error}"
+    );
+    drop(second);
+    drop(first);
+    let Err(error) = Engine::from_persistent_provider(Arc::clone(&factory)) else {
+        panic!("corrupt relation endpoint rebound")
+    };
+    assert!(
+        error.to_string().contains("missing role incarnation"),
+        "{error}"
+    );
+    assert_eq!(stored(raw.catalog.as_ref(), name), corrupt);
+    replace(raw.catalog.as_ref(), name, original);
+    let restored = Engine::from_persistent_provider(factory).unwrap();
+    assert!(can_select(&restored, "reader", name));
 }
 
 #[test]
