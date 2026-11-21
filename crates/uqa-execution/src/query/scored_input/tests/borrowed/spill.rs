@@ -80,7 +80,7 @@ fn cursor_buffers_measured_scan_records_once_through_schema_only_projection() {
     for shared in [false, true] {
         let mut source = source(shared);
         let schema = source.physical_schema().unwrap().clone();
-        let (_, scanned) = PhysicalRow::count_fragment_width_reads(|| loop {
+        let ((), scanned) = PhysicalRow::count_fragment_width_reads(|| loop {
             let rows = source
                 .next_physical_batch(crate::DEFAULT_BATCH_SIZE)
                 .unwrap();

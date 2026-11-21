@@ -111,7 +111,10 @@ mod tests {
             } else {
                 assert_eq!(output.in_memory_bytes(), bytes);
             }
-            assert_eq!(output.drain_all().unwrap(), [expected.clone()]);
+            assert_eq!(
+                output.drain_all().unwrap().as_slice(),
+                std::slice::from_ref(&expected)
+            );
         }
     }
 
