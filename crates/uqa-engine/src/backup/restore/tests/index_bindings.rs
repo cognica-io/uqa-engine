@@ -79,92 +79,94 @@ fn corrupt(row: &mut CatalogIndexRow, kind: &str) {
 }
 
 #[rstest::rstest]
-#[case::memory(Provider::Memory)]
-#[case::sqlite_native(Provider::SQLiteNative)]
-#[case::sqlite_kv(Provider::SQLiteKeyValue)]
-#[case::redb(Provider::Redb)]
-fn restored_index_bindings_reject_corrupt_archives_before_activation(#[case] provider: Provider) {
-    for corruption in [
-        "key_column",
-        "routine_identity",
-        "result_type",
-        "type_count",
-        "type_identity",
-        "predicate_column",
-        "predicate_type",
-        "predicate_child",
-    ] {
-        let directory = tempfile::tempdir().unwrap();
-        let repository = repository(&directory.path().join("repository"));
-        let source = fixture(provider, &directory.path().join("source"));
-        let name = RelationIdentity::new(
-            "public",
-            if corruption == "type_identity" {
-                "typed_saved"
-            } else {
-                "saved"
-            },
-        );
-        let mut row = source
-            .durable
-            .catalog_indexes
-            .read()
-            .get(&name)
-            .unwrap()
-            .clone();
-        corrupt(&mut row, corruption);
-        let root = if let Some(persistent) = source.storage.provider.clone() {
-            drop(source);
-            let session = persistent.open_session().unwrap();
-            session.catalog.save_catalog_index_row(&row).unwrap();
-            drop(session);
-            capture_provider(persistent.as_ref(), &repository)
+#[case::key_column("key_column")]
+#[case::routine_identity("routine_identity")]
+#[case::result_type("result_type")]
+#[case::type_count("type_count")]
+#[case::type_identity("type_identity")]
+#[case::predicate_column("predicate_column")]
+#[case::predicate_type("predicate_type")]
+#[case::predicate_child("predicate_child")]
+fn restored_index_bindings_reject_corrupt_archives_before_activation(
+    #[case] corruption: &str,
+    #[values(
+        Provider::Memory,
+        Provider::SQLiteNative,
+        Provider::SQLiteKeyValue,
+        Provider::Redb
+    )]
+    provider: Provider,
+) {
+    let directory = tempfile::tempdir().unwrap();
+    let repository = repository(&directory.path().join("repository"));
+    let source = fixture(provider, &directory.path().join("source"));
+    let name = RelationIdentity::new(
+        "public",
+        if corruption == "type_identity" {
+            "typed_saved"
         } else {
-            source.durable.catalog_indexes.write().replace(row).unwrap();
-            let root = capture(&source, &repository, None);
-            drop(source);
-            root
-        };
-        let path = directory.path().join("restored");
-        let control = StorageReadControl::with_limit(32 << 20);
-        let authority = Engine::new();
-        let mut job = authority
-            .begin_restore(
-                &repository,
-                root.backup(),
-                destination(provider, &path),
-                RestoreOptions::new(16 << 20, 8 << 20),
-                &control,
-            )
-            .unwrap();
-        let mut failure = None;
-        for _ in 0..65536 {
-            match job.advance(1024) {
-                Err(error) => {
-                    failure = Some(error);
-                    break;
-                }
-                Ok(RestorePhase::Reading | RestorePhase::Validating) => (),
-                Ok(phase) => panic!("{provider:?} {corruption}: invalid index reached {phase:?}"),
+            "saved"
+        },
+    );
+    let mut row = source
+        .durable
+        .catalog_indexes
+        .read()
+        .get(&name)
+        .unwrap()
+        .clone();
+    corrupt(&mut row, corruption);
+    let root = if let Some(persistent) = source.storage.provider.clone() {
+        drop(source);
+        let session = persistent.open_session().unwrap();
+        session.catalog.save_catalog_index_row(&row).unwrap();
+        drop(session);
+        capture_provider(persistent.as_ref(), &repository)
+    } else {
+        source.durable.catalog_indexes.write().replace(row).unwrap();
+        let root = capture(&source, &repository, None);
+        drop(source);
+        root
+    };
+    let path = directory.path().join("restored");
+    let control = StorageReadControl::with_limit(32 << 20);
+    let authority = Engine::new();
+    let mut job = authority
+        .begin_restore(
+            &repository,
+            root.backup(),
+            destination(provider, &path),
+            RestoreOptions::new(16 << 20, 8 << 20),
+            &control,
+        )
+        .unwrap();
+    let mut failure = None;
+    for _ in 0..65536 {
+        match job.advance(1024) {
+            Err(error) => {
+                failure = Some(error);
+                break;
             }
+            Ok(RestorePhase::Reading | RestorePhase::Validating) => (),
+            Ok(phase) => panic!("{provider:?} {corruption}: invalid index reached {phase:?}"),
         }
-        let error = failure.expect("index validation must finish");
-        assert!(
-            error.to_string().contains("native index")
-                || error.to_string().contains("native routine")
-                || error.to_string().contains("native type")
-                || error.to_string().contains("absent")
-                || error.to_string().contains("boolean"),
-            "{provider:?} {corruption}: {error}"
-        );
-        assert_eq!(job.phase(), RestorePhase::Failed);
-        assert!(!path.exists());
-        assert_eq!(control.memory().used(), 0);
-        assert!(matches!(job.publish(), Err(BackupError::Finished)));
-        drop(job);
-        repository.remove_backup(root.backup(), &control).unwrap();
-        assert_eq!(control.memory().used(), 0);
     }
+    let error = failure.expect("index validation must finish");
+    assert!(
+        error.to_string().contains("native index")
+            || error.to_string().contains("native routine")
+            || error.to_string().contains("native type")
+            || error.to_string().contains("absent")
+            || error.to_string().contains("boolean"),
+        "{provider:?} {corruption}: {error}"
+    );
+    assert_eq!(job.phase(), RestorePhase::Failed);
+    assert!(!path.exists());
+    assert_eq!(control.memory().used(), 0);
+    assert!(matches!(job.publish(), Err(BackupError::Finished)));
+    drop(job);
+    repository.remove_backup(root.backup(), &control).unwrap();
+    assert_eq!(control.memory().used(), 0);
 }
 
 #[rstest::rstest]
