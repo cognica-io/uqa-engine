@@ -113,6 +113,10 @@ impl Drop for Allowance {
     }
 }
 
+/// Process-local identity for indexing live allowances. Keep a budget or one of its reservations alive while using its identity as a key.
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub struct MemoryBudgetIdentity(usize);
+
 /// Clones share one allowance, including reservations retained by completed producers.
 #[derive(Debug, Clone)]
 pub struct MemoryBudget(StrongArc<Allowance>);
@@ -162,8 +166,12 @@ impl MemoryBudget {
             .expect("a budget has its own allowance")
     }
 
+    pub fn identity(&self) -> MemoryBudgetIdentity {
+        MemoryBudgetIdentity(self.0.as_ptr().addr())
+    }
+
     pub fn shares_allowance(&self, other: &Self) -> bool {
-        StrongArc::ptr_eq(&self.0, &other.0)
+        self.identity() == other.identity()
     }
 
     /// Largest simultaneous reservation, including old and replacement buffers.

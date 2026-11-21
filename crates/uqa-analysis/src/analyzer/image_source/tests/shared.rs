@@ -55,3 +55,80 @@ fn restored_analyzer_image_keeps_request_ownership_out_of_shared_pipeline_caches
         );
     }
 }
+
+#[test]
+fn catalog_image_owners_release_each_publication_allowance_independently() {
+    let resources = AnalyzerResources::new(AnalyzerLimits::default());
+    let compiled = [
+        resources.compile(&crate::whitespace_analyzer()).unwrap(),
+        resources.compile(&crate::keyword_analyzer()).unwrap(),
+    ];
+    let first = MemoryBudget::new(1 << 20);
+    let second = MemoryBudget::new(1 << 20);
+    let cancellation = CancellationToken::new();
+    let images = |memory| {
+        let control = ProductionControl::new(memory, &cancellation, &cancellation);
+        compiled
+            .each_ref()
+            .map(|analyzer| analyzer.image_source_with_control(&control).unwrap())
+    };
+    let a = images(&first);
+    let required = first.used();
+    assert!(required > 0);
+    let b = images(&second);
+    drop(a);
+    let after_first = (first.used(), second.used());
+    drop(b);
+    assert_eq!((first.used(), second.used()), (0, 0));
+    assert_eq!(after_first, (0, required));
+}
+
+#[test]
+fn interleaved_publishers_reuse_only_their_own_live_image() {
+    let resources = AnalyzerResources::new(AnalyzerLimits::default());
+    let compiled = resources.compile(&crate::whitespace_analyzer()).unwrap();
+    let token = CancellationToken::new();
+    let parent = MemoryBudget::new(1 << 20);
+    let first = parent.child(1 << 16);
+    let control = ProductionControl::new(&first, &token, &token);
+    let a = compiled.image_source_with_control(&control).unwrap();
+    let required = first.used();
+    let ordinary = compiled
+        .image_source_with_control(&ProductionControl::uncontrolled())
+        .unwrap();
+    let second = parent.child(required);
+    let other = compiled
+        .image_source_with_control(&ProductionControl::new(&second, &token, &token))
+        .unwrap();
+    assert!(!Arc::ptr_eq(&a.0, &ordinary.0));
+    assert!(!Arc::ptr_eq(&a.0, &other.0));
+    assert_eq!(second.used(), required);
+    assert_eq!(parent.used(), 2 * required);
+
+    let short = parent.child(required - 1);
+    assert!(matches!(
+        compiled.image_source_with_control(&ProductionControl::new(&short, &token, &token)),
+        Err(ValueRetentionError::Memory(_))
+    ));
+    assert_eq!(short.used(), 0);
+    let full = first.reserve(first.available()).unwrap();
+    let alias = first.clone();
+    let same = compiled
+        .image_source_with_control(&ProductionControl::new(&alias, &token, &token))
+        .unwrap();
+    assert!(Arc::ptr_eq(&a.0, &same.0));
+    let ordinary_again = compiled
+        .image_source_with_control(&ProductionControl::uncontrolled())
+        .unwrap();
+    assert!(Arc::ptr_eq(&ordinary.0, &ordinary_again.0));
+
+    drop((full, a, same));
+    assert_eq!(first.used(), 0);
+    assert_eq!(parent.used(), required);
+    drop(other);
+    assert_eq!(parent.used(), 0);
+    assert_eq!(
+        ordinary.canonical_json(),
+        compiled.descriptor().canonical_json()
+    );
+}

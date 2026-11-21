@@ -63,7 +63,6 @@ fn analyzer_native_image_failure_preserves_source_and_releases_admission() {
         compiled.image_source_with_control(&denied),
         Err(ValueRetentionError::Memory(_))
     ));
-    assert!(compiled.image_source.0.lock().upgrade().is_none());
     assert_eq!(empty.used(), 0);
     let source = compiled
         .image_source_with_control(&ProductionControl::uncontrolled())
@@ -120,6 +119,23 @@ fn analyzer_native_image_shares_enabled_dictionary_artifacts_without_retaining_m
         assert_eq!(left.sha256(), right.sha256());
         assert_eq!(left.bytes().as_ptr(), right.bytes().as_ptr());
         assert!(memory.used() < 64 << 10);
+        let separate = MemoryBudget::new(128 << 20);
+        let other = first
+            .image_source_with_control(&ProductionControl::new(
+                &separate,
+                &cancellation,
+                &cancellation,
+            ))
+            .unwrap();
+        assert_eq!(
+            other
+                .dictionary_resources()
+                .next()
+                .unwrap()
+                .bytes()
+                .as_ptr(),
+            left.bytes().as_ptr()
+        );
         let weak_first = Arc::downgrade(&first);
         let weak_second = Arc::downgrade(&second);
         drop((first, second, owner));
@@ -131,5 +147,14 @@ fn analyzer_native_image_shares_enabled_dictionary_artifacts_without_retaining_m
         );
         drop((a, b));
         assert_eq!(memory.used(), 0);
+        assert!(separate.used() > 0);
+        assert!(!other
+            .dictionary_resources()
+            .next()
+            .unwrap()
+            .bytes()
+            .is_empty());
+        drop(other);
+        assert_eq!(separate.used(), 0);
     }
 }

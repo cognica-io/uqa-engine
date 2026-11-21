@@ -98,8 +98,12 @@ fn private_analyzer_image_publication_retains_progress_and_preserves_cached_capt
     assert_eq!(compiled.analyze("keep skip").unwrap(), ["keep"]);
     assert_eq!(source.canonical_json(), descriptor.canonical_json());
     let denied = MemoryBudget::new(0);
+    assert!(matches!(
+        compiled.image_source_with_control(&ProductionControl::new(&denied, &token, &token)),
+        Err(ValueRetentionError::Memory(_))
+    ));
     let cached = compiled
-        .image_source_with_control(&ProductionControl::new(&denied, &token, &token))
+        .image_source_with_control(&ProductionControl::new(&memory, &token, &token))
         .unwrap();
     assert!(Arc::ptr_eq(&source.0, &cached.0));
     assert_eq!(denied.used(), 0);

@@ -252,3 +252,37 @@ fn native_field_children_preserve_admission_and_original_cancellation_after_pare
     drop(image);
     assert_eq!(control.memory().used(), 0);
 }
+
+#[test]
+fn overlapping_field_and_named_catalogs_release_their_own_image_reservations() {
+    let resources = AnalyzerResources::new(AnalyzerLimits::default());
+    let index = resources
+        .compile(&uqa_analysis::whitespace_analyzer())
+        .unwrap();
+    let search = resources
+        .compile(&uqa_analysis::keyword_analyzer())
+        .unwrap();
+    let fields_memory = MemoryBudget::new(1 << 20);
+    let names_memory = MemoryBudget::new(1 << 20);
+    let mut fields = FieldAnalyzerCatalog::new(&fields_memory);
+    let mut names = crate::analyzer_catalog::AnalyzerCatalog::new(&names_memory);
+    fields
+        .insert(
+            &("public.docs".into(), "body".into()),
+            FieldAnalyzerBinding::unassigned(index.clone(), search.clone()),
+            false,
+            &CancellationToken::new(),
+        )
+        .unwrap();
+    names.insert("index", index).unwrap();
+    names.insert("search", search).unwrap();
+    drop(fields);
+    assert_eq!(fields_memory.used(), 0);
+    assert!(names_memory.used() > 0);
+    assert_eq!(
+        names.get("search").unwrap().analyze("Two words").unwrap(),
+        ["Two words"]
+    );
+    drop(names);
+    assert_eq!(names_memory.used(), 0);
+}
