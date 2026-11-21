@@ -6,9 +6,9 @@
 
 //! Ordinary cache ownership and unpublished image ownership share the same encoded constructor.
 
+use super::cache::{Image, SharedImage};
 use super::{CompiledAnalyzer, ImageData};
 use crate::work::Work;
-use std::sync::Arc;
 use uqa_core::{
     image_io::{AsyncImageInput, ImageIoError},
     memory::{MemoryError, Produced, ProductionControl, ProductionString},
@@ -92,7 +92,7 @@ pub(super) async fn prepare(
     analyzer: &CompiledAnalyzer,
     control: &ProductionControl<'_>,
     work: &mut impl Sources,
-) -> Result<Arc<Produced<ImageData>>, ValueRetentionError> {
+) -> Result<SharedImage<ImageData>, ValueRetentionError> {
     control.check()?;
     let text = analyzer.descriptor().canonical_json();
     let mut descriptor = ProductionString::new(*control);
@@ -150,7 +150,7 @@ pub(super) async fn prepare(
     };
     #[cfg(not(any(feature = "nori", feature = "kuromoji")))]
     let resource_bytes = 0;
-    let retained_bytes = size_of::<Produced<ImageData>>()
+    let retained_bytes = size_of::<Produced<Image<ImageData>>>()
         .checked_add(descriptor.capacity())
         .and_then(|bytes| bytes.checked_add(resource_bytes))
         .ok_or(MemoryError::SizeOverflow)?;
@@ -161,12 +161,12 @@ pub(super) async fn prepare(
     let resource_memory = control.empty_reservation();
     control
         .finish(
-            ImageData {
+            Image::new(ImageData {
                 descriptor,
                 #[cfg(any(feature = "nori", feature = "kuromoji"))]
                 resources,
                 retained_bytes,
-            },
+            }),
             control.combine(descriptor_memory, resource_memory),
         )?
         .into_shared(control)

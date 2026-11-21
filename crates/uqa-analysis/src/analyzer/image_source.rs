@@ -9,14 +9,16 @@
 #[cfg(any(feature = "nori", feature = "kuromoji"))]
 use super::AnalyzerResourceKind;
 use super::{AnalyzerResource, CompiledAnalyzer};
-use parking_lot::Mutex;
-use std::sync::{Arc, Weak};
+use std::sync::Arc;
 use uqa_core::{
     memory::{Produced, ProductionControl},
     ValueRetentionError,
 };
 
+mod cache;
 mod preparation;
+
+use cache::{ImageCache, SharedImage};
 
 #[cfg(any(feature = "nori", feature = "kuromoji"))]
 mod dictionary;
@@ -25,8 +27,7 @@ pub(crate) use dictionary::DictionaryImage;
 #[cfg(any(feature = "nori", feature = "kuromoji"))]
 pub(crate) use dictionary::DictionaryImageCache;
 
-#[derive(Debug, Default)]
-pub(super) struct AnalyzerImageCache(Mutex<Weak<Produced<ImageData>>>);
+pub(super) type AnalyzerImageCache = ImageCache<ImageData>;
 
 #[cfg(any(feature = "nori", feature = "kuromoji"))]
 #[derive(Debug)]
@@ -37,7 +38,7 @@ struct ImageResource {
 }
 
 #[derive(Debug)]
-struct ImageData {
+pub(super) struct ImageData {
     descriptor: String,
     #[cfg(any(feature = "nori", feature = "kuromoji"))]
     resources: Vec<ImageResource>,
@@ -46,23 +47,19 @@ struct ImageData {
 
 /// Immutable wire inputs prepared before native catalog publication. This owner retains neither a compiled pipeline nor decoded dictionary models or an imported input allowance.
 #[derive(Debug, Clone)]
-pub struct AnalyzerImageSource(Arc<Produced<ImageData>>);
+pub struct AnalyzerImageSource(SharedImage<ImageData>);
 
 impl CompiledAnalyzer {
-    /// Prepare this revision's encoded owner once while it remains in use. Dictionary owners are shared across revisions of the same resolved artifact; the cache itself retains only weak references.
+    /// Reuse the live encoded owner for this construction allowance. Revisions sharing a dictionary also share its encoded owner within the same allowance.
     pub fn image_source_with_control(
         &self,
         control: &ProductionControl<'_>,
     ) -> Result<AnalyzerImageSource, ValueRetentionError> {
-        control.check()?;
-        let mut cached = self.image_source.0.lock();
-        control.check()?;
-        if let Some(source) = cached.upgrade() {
-            return Ok(AnalyzerImageSource(source));
-        }
-        let source = crate::work::inline(preparation::prepare(self, control, &mut ()))?;
-        *cached = Arc::downgrade(&source);
-        Ok(AnalyzerImageSource(source))
+        self.image_source
+            .get_or_prepare(control, || {
+                crate::work::inline(preparation::prepare(self, control, &mut ()))
+            })
+            .map(AnalyzerImageSource)
     }
 }
 
@@ -88,7 +85,7 @@ impl CompiledAnalyzer {
         let control = ProductionControl::new(input.memory, input.cancellation, input.cancellation);
         let source =
             preparation::prepare(&self, &control, &mut preparation::Retained(input)).await?;
-        *self.image_source.0.get_mut() = Arc::downgrade(&source);
+        let source = self.image_source.publish_prepared(&control, source)?;
         Ok((Arc::new(self), AnalyzerImageSource(source)))
     }
 }

@@ -6,6 +6,7 @@
 
 //! Encoded resource owners never retain imported admission or decoded dictionary models.
 
+use super::cache::{Image, ImageCache, SharedImage};
 use std::sync::Arc;
 use uqa_core::memory::Produced;
 
@@ -17,13 +18,13 @@ enum Bytes {
 }
 
 #[derive(Debug)]
-struct DictionaryData {
+pub(crate) struct DictionaryData {
     bytes: Bytes,
     retained_bytes: usize,
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct DictionaryImage(Arc<Produced<DictionaryData>>);
+pub(crate) struct DictionaryImage(SharedImage<DictionaryData>);
 
 impl DictionaryImage {
     pub(super) fn bytes(&self) -> &[u8] {
@@ -71,15 +72,15 @@ impl DictionaryImage {
                 (Bytes::Owned(bytes), memory, payload_bytes)
             }
         };
-        let retained_bytes = size_of::<Produced<DictionaryData>>()
+        let retained_bytes = size_of::<Produced<Image<DictionaryData>>>()
             .checked_add(payload_bytes)
             .ok_or(MemoryError::SizeOverflow)?;
         let source = control
             .finish(
-                DictionaryData {
+                Image::new(DictionaryData {
                     bytes,
                     retained_bytes,
-                },
+                }),
                 memory,
             )?
             .into_shared(control)?;
@@ -87,36 +88,18 @@ impl DictionaryImage {
     }
 }
 
-#[cfg(any(feature = "nori", feature = "kuromoji"))]
-mod preparation {
-    use super::{Arc, DictionaryData, DictionaryImage, Produced};
-    use crate::morphology::resources::DictionaryBytes;
-    use parking_lot::Mutex;
-    use std::sync::Weak;
-    use uqa_core::{memory::ProductionControl, ValueRetentionError};
+pub(crate) type DictionaryImageCache = ImageCache<DictionaryData>;
 
-    #[derive(Debug, Default)]
-    pub(crate) struct DictionaryImageCache(Mutex<Weak<Produced<DictionaryData>>>);
-
-    impl DictionaryImageCache {
-        pub(crate) fn prepare(
-            &self,
-            source: &DictionaryBytes,
-            control: &ProductionControl<'_>,
-        ) -> Result<DictionaryImage, ValueRetentionError> {
-            control.check()?;
-            let mut cached = self.0.lock();
-            control.check()?;
-            if let Some(source) = cached.upgrade() {
-                return Ok(DictionaryImage(source));
-            }
-            let source =
-                crate::work::inline(DictionaryImage::prepare_with(source, control, &mut ()))?;
-            *cached = Arc::downgrade(&source.0);
-            Ok(source)
-        }
+impl DictionaryImageCache {
+    pub(crate) fn prepare(
+        &self,
+        source: &crate::morphology::resources::DictionaryBytes,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<DictionaryImage, uqa_core::ValueRetentionError> {
+        self.get_or_prepare(control, || {
+            crate::work::inline(DictionaryImage::prepare_with(source, control, &mut ()))
+                .map(|image| image.0)
+        })
+        .map(DictionaryImage)
     }
 }
-
-#[cfg(any(feature = "nori", feature = "kuromoji"))]
-pub(crate) use preparation::DictionaryImageCache;

@@ -72448,6 +72448,45 @@
     {
       "package": "uqa-analysis",
       "kind": "lib",
+      "test": "catalog_image_owners_release_each_publication_allowance_independently",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/analyzer/image_source/tests/shared.rs",
+      "capability": "Analyzer image retirement",
+      "workload": "Publish the whitespace and keyword analyzer images under two independent budgets, then drop the first pair while the second is live.",
+      "invariant": "Each budget admits the same bytes and reaches zero when its own image pair drops.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "interleaved_publishers_reuse_only_their_own_live_image",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/analyzer/image_source/tests/shared.rs",
+      "capability": "Analyzer image publication admission",
+      "workload": "Interleave uncontrolled publication, sibling budgets, a budget one byte short and a fully reserved clone of the first budget.",
+      "invariant": "Each child charges its parent exactly once. A same-budget lookup reuses its live owner, and a failed publication releases every provisional byte.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "overlapping_field_and_named_catalogs_release_their_own_image_reservations",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/analyzer_binding/registry/tests.rs",
+      "capability": "Field and named analyzer catalog retirement",
+      "workload": "Install whitespace and keyword revisions in two independent catalogs, close the field catalog first, then use the named catalog.",
+      "invariant": "Closing each catalog returns its memory usage to zero and preserves keyword analysis in the surviving catalog.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
       "test": "restored_analyzer_image_keeps_request_ownership_out_of_shared_pipeline_caches",
       "cases": 1,
       "source": "crates/uqa-analysis/src/analyzer/image_source/tests/shared.rs",
