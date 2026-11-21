@@ -156,9 +156,14 @@ jobs:
           "$llvm_bin/clang" --version
           echo "$llvm_bin" >> "$GITHUB_PATH"
           echo 'MACOSX_DEPLOYMENT_TARGET=15.0' >> "$GITHUB_ENV"
-      - name: Free Linux runner disk
+      - name: Prepare the Linux sanitizer build
         if: runner.os == 'Linux'
-        run: bash .github/scripts/free-linux-runner-disk.sh
+        shell: bash
+        run: |
+          bash .github/scripts/free-linux-runner-disk.sh
+          # Instrument the large SQL and Engine crates in small, serial LLVM units.
+          printf '%s\n' 'CARGO_BUILD_JOBS=1' 'CARGO_PROFILE_TEST_CODEGEN_UNITS=256' \
+            "RUSTFLAGS=$RUSTFLAGS -Zunstable-options --jobs-backend=1" >> "$GITHUB_ENV"
       - name: Verify shared Rust and native sanitizer linkage and diagnostics
         run: python3 scripts/verify-c-sanitizer-link.py
       - name: Instrument Rust, its standard library and native dependencies
