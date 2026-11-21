@@ -188,47 +188,48 @@ fn relation_owners_and_delegated_grants_keep_identity_through_view_execution() {
     sql(&engine, "ROLLBACK");
 }
 
-#[test]
-fn column_acl_private_changes_survive_catalog_refresh_undo_and_reopen() {
-    for provider in 0..3 {
-        for isolation in ["READ COMMITTED", "REPEATABLE READ", "SERIALIZABLE"] {
-            for finish in ["COMMIT", "ROLLBACK", "ROLLBACK TO private; COMMIT"] {
-                let (directory, first, second) = sessions(provider);
-                setup(&first);
-                sql(&first, &format!("BEGIN ISOLATION LEVEL {isolation}; SELECT * FROM t; SAVEPOINT private; GRANT SELECT(id) ON secured, secured_view, secured_mat, secured_foreign TO reader"));
-                let catalog = first.storage.catalog.as_ref().unwrap();
-                let encoded = RELATIONS.map(|name| stored(catalog.as_ref(), name));
-                let reader = first.durable.roles.read()["reader"].identity();
-                for row in &encoded {
-                    let RelationSecurityRow::Bound(bound) = row else {
-                        panic!("new relations must retain role identities")
-                    };
-                    assert!(bound.column_acls["id"]
-                        .iter()
-                        .any(|entry| entry.role == Some(reader)));
-                }
-                sql(
-                    &second,
-                    "ALTER ROLE other LOGIN; CREATE TABLE unrelated(id int)",
-                );
-                refresh_catalog(&first, isolation);
-                for (name, row) in RELATIONS.into_iter().zip(&encoded) {
-                    assert!(can_select(&first, "reader", name));
-                    assert!(!can_select(&second, "reader", name));
-                    assert_eq!(&stored(catalog.as_ref(), name), row);
-                }
-                sql(&first, finish);
-                for name in RELATIONS {
-                    assert_eq!(can_select(&second, "reader", name), finish == "COMMIT");
-                }
-                drop(second);
-                drop(first);
-                let reopened = reopen(provider, &directory.path().join("table-locks.db"));
-                for name in RELATIONS {
-                    assert_eq!(can_select(&reopened, "reader", name), finish == "COMMIT");
-                }
-            }
-        }
+#[rstest::rstest]
+#[case::native_sqlite(0)]
+#[case::sqlite_key_value(1)]
+#[case::redb(2)]
+fn column_acl_private_changes_survive_catalog_refresh_undo_and_reopen(
+    #[case] provider: usize,
+    #[values("READ COMMITTED", "REPEATABLE READ", "SERIALIZABLE")] isolation: &str,
+    #[values("COMMIT", "ROLLBACK", "ROLLBACK TO private; COMMIT")] finish: &str,
+) {
+    let (directory, first, second) = sessions(provider);
+    setup(&first);
+    sql(&first, &format!("BEGIN ISOLATION LEVEL {isolation}; SELECT * FROM t; SAVEPOINT private; GRANT SELECT(id) ON secured, secured_view, secured_mat, secured_foreign TO reader"));
+    let catalog = first.storage.catalog.as_ref().unwrap();
+    let encoded = RELATIONS.map(|name| stored(catalog.as_ref(), name));
+    let reader = first.durable.roles.read()["reader"].identity();
+    for row in &encoded {
+        let RelationSecurityRow::Bound(bound) = row else {
+            panic!("new relations must retain role identities")
+        };
+        assert!(bound.column_acls["id"]
+            .iter()
+            .any(|entry| entry.role == Some(reader)));
+    }
+    sql(
+        &second,
+        "ALTER ROLE other LOGIN; CREATE TABLE unrelated(id int)",
+    );
+    refresh_catalog(&first, isolation);
+    for (name, row) in RELATIONS.into_iter().zip(&encoded) {
+        assert!(can_select(&first, "reader", name));
+        assert!(!can_select(&second, "reader", name));
+        assert_eq!(&stored(catalog.as_ref(), name), row);
+    }
+    sql(&first, finish);
+    for name in RELATIONS {
+        assert_eq!(can_select(&second, "reader", name), finish == "COMMIT");
+    }
+    drop(second);
+    drop(first);
+    let reopened = reopen(provider, &directory.path().join("table-locks.db"));
+    for name in RELATIONS {
+        assert_eq!(can_select(&reopened, "reader", name), finish == "COMMIT");
     }
 }
 
