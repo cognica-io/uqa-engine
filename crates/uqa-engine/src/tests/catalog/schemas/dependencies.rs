@@ -20,35 +20,36 @@ fn schema_lock(engine: &Engine) -> SharedCatalogLock<'static> {
     }
 }
 
-#[test]
-fn relation_creation_blocks_schema_removal_until_commit_or_undo() {
-    for provider in 0..3 {
-        for create in [
-            "CREATE TABLE s.child(id integer)",
-            "CREATE TABLE s.child AS SELECT 1 AS id",
-            "CREATE VIEW s.child AS SELECT 1 AS id",
-            "CREATE MATERIALIZED VIEW s.child AS SELECT 1 AS id",
-            "CREATE SEQUENCE s.child",
-            "CREATE FOREIGN TABLE s.child(id integer) SERVER remote",
-        ] {
-            for finish in ["COMMIT", "ROLLBACK", "ROLLBACK TO before_create"] {
-                let (_directory, first, second) = sessions(provider);
-                sql(
-                    &first,
-                    "CREATE SCHEMA s; CREATE SERVER remote FOREIGN DATA WRAPPER memory_fdw",
-                );
-                let target = schema_lock(&first);
-                sql(&first, &format!("BEGIN; SAVEPOINT before_create; {create}"));
-                let (_, result) =
-                    after_shared_wait(&first, second, "DROP SCHEMA s CASCADE", target, finish);
-                result.unwrap_or_else(|error| panic!("{provider}/{create}/{finish}: {error}"));
-                if finish.starts_with("ROLLBACK TO") {
-                    sql(&first, "ROLLBACK");
-                }
-                assert!(!first.new_session().unwrap().has_schema("s").unwrap());
-            }
-        }
+#[rstest::rstest]
+#[case::native_sqlite(0)]
+#[case::sqlite_key_value(1)]
+#[case::redb(2)]
+fn relation_creation_blocks_schema_removal_until_commit_or_undo(
+    #[case] provider: usize,
+    #[values(
+        "CREATE TABLE s.child(id integer)",
+        "CREATE TABLE s.child AS SELECT 1 AS id",
+        "CREATE VIEW s.child AS SELECT 1 AS id",
+        "CREATE MATERIALIZED VIEW s.child AS SELECT 1 AS id",
+        "CREATE SEQUENCE s.child",
+        "CREATE FOREIGN TABLE s.child(id integer) SERVER remote"
+    )]
+    create: &str,
+    #[values("COMMIT", "ROLLBACK", "ROLLBACK TO before_create")] finish: &str,
+) {
+    let (_directory, first, second) = sessions(provider);
+    sql(
+        &first,
+        "CREATE SCHEMA s; CREATE SERVER remote FOREIGN DATA WRAPPER memory_fdw",
+    );
+    let target = schema_lock(&first);
+    sql(&first, &format!("BEGIN; SAVEPOINT before_create; {create}"));
+    let (_, result) = after_shared_wait(&first, second, "DROP SCHEMA s CASCADE", target, finish);
+    result.unwrap_or_else(|error| panic!("{provider}/{create}/{finish}: {error}"));
+    if finish.starts_with("ROLLBACK TO") {
+        sql(&first, "ROLLBACK");
     }
+    assert!(!first.new_session().unwrap().has_schema("s").unwrap());
 }
 
 #[test]
