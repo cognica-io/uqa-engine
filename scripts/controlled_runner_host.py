@@ -74,7 +74,7 @@ class ControlledHost:
 
     def make_writable(self, path: Path):
         path.mkdir(parents=True, exist_ok=True)
-        os.chown(path, self.account.pw_uid, self.account.pw_gid)
+        os.chown(path, self.account.pw_uid, self.account.pw_gid, follow_symlinks=False)
 
     def progress(self, stage: str, **details):
         record = {"stage": stage, **details}
@@ -229,6 +229,9 @@ class ControlledHost:
             raise QualificationError(
                 f"insufficient build storage{stage}: {after} bytes free; "
                 f"{MIN_BUILD_FREE_BYTES} required")
+        if not target.exists():
+            # Older controllers could leave a root-owned parent when the cache was retired.
+            self.make_writable(target.parent)
         yield target
         if cached != identity:
             marker.write_text(json.dumps(identity) + "\n")

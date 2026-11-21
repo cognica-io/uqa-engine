@@ -318,6 +318,20 @@ class ControlledBuildTest(unittest.TestCase):
         storage = json.loads((self.host.output / "head-build-storage.json").read_text())
         self.assertIsNone(storage["cleanup_reason"])
 
+    def test_build_account_owns_the_parent_of_a_replacement_cargo_target(self):
+        reference, _ = self.benchmark_revisions()
+        parent = self.repository / "target"
+        parent.mkdir()
+        retained = parent / "other-output"
+        retained.write_text("keep")
+        with patch.object(runner.os, "chown", wraps=os.chown) as ownership:
+            artifact = self.host.build(reference, "reference", False)["analytical_comparison"]
+        ownership.assert_called_once_with(parent, self.host.account.pw_uid, self.host.account.pw_gid,
+                                          follow_symlinks=False)
+        self.assertTrue((parent / "reference/CACHEDIR.TAG").is_file())
+        self.assertEqual(subprocess.check_output([artifact["path"]], text=True).strip(), "reference")
+        self.assertEqual(retained.read_text(), "keep")
+
     def test_legacy_untagged_cache_preserves_the_selected_cargos_cleanup_decision(self):
         reference, _ = self.benchmark_revisions()
         target = self.admitted_cache()
