@@ -188,7 +188,7 @@ class ControlledBuildTest(unittest.TestCase):
                     self.assertEqual(artifact["sha256"], runner.file_hash(Path(artifact["path"])))
                 self.assertEqual(self.host.unit.call_count, 3 if role == "claims-reference" else 2)
 
-    def test_canonical_build_cannot_reuse_another_checkouts_executable(self):
+    def benchmark_revisions(self):
         cargo = shutil.which("cargo")
         self.assertIsNotNone(cargo, "the controlled build regression requires Cargo")
         self.host.rust_bin = Path(cargo).parent
@@ -217,12 +217,19 @@ class ControlledBuildTest(unittest.TestCase):
             env.pop("CC", None)
             env.pop("CXX", None)
             result = subprocess.run(args, cwd=source, env=env, text=True, capture_output=True)
-            self.assertEqual(result.returncode, 0, result.stderr)
+            if result.returncode:
+                raise runner.QualificationError(f"{label} failed ({result.returncode}): {result.stderr}")
             output = self.root / (label + ".stdout")
             output.write_text(result.stdout)
             return output
 
         self.host.unit = Mock(side_effect=build_unit)
+        return reference, candidate
+
+    def test_canonical_build_cannot_reuse_another_checkouts_executable(self):
+        reference, candidate = self.benchmark_revisions()
+        target = self.repository / "target/reference"
+        self.assertFalse(target.exists())
         artifacts = []
         for role, revision, expected in [("reference", reference, "reference"), ("head", candidate, "candidate")]:
             stale = self.repository / "target/reference/release/obsolete-output"
@@ -235,9 +242,12 @@ class ControlledBuildTest(unittest.TestCase):
             self.assertEqual(observed, expected)
             self.assertEqual(artifact["source_path"], str(self.repository.resolve()))
             self.assertFalse(stale.exists())
+            self.assertTrue((target / "CACHEDIR.TAG").is_file())
+            self.assertEqual(json.loads((target / "source-checkout.json").read_text()),
+                             {"schema": 1, "source_path": str(self.repository.resolve())})
             artifacts.append(artifact)
         self.assertNotEqual(artifacts[0]["sha256"], artifacts[1]["sha256"])
-        self.assertEqual(sum(call.args[0] == "clean-legacy-build-output" for call in self.host.unit.call_args_list), 1)
+        self.assertNotIn("clean-legacy-build-output", [call.args[0] for call in self.host.unit.call_args_list])
         self.assertEqual(sum(call.args[0] == "clean-build-capacity-head" for call in self.host.unit.call_args_list), 1)
         self.assertEqual(runner.file_hash(Path(artifacts[0]["path"])), artifacts[0]["sha256"])
         with patch.object(runner.shutil, "disk_usage", side_effect=AssertionError("verified binary reuse needs no build space")):
@@ -254,12 +264,14 @@ class ControlledBuildTest(unittest.TestCase):
         target = self.admitted_cache()
         self.host.unit = Mock()
         with patch.object(runner.shutil, "disk_usage", return_value=SimpleNamespace(free=runner.MIN_BUILD_FREE_BYTES)):
-            self.host.prepare_build_cache(self.repository, "head")
+            with self.host.build_cache(self.repository, "head") as admitted:
+                self.assertEqual(admitted, target)
         self.host.unit.assert_not_called()
         with patch.object(runner.shutil, "disk_usage", side_effect=[
                 SimpleNamespace(free=runner.MIN_BUILD_FREE_BYTES - 1),
                 SimpleNamespace(free=runner.MIN_BUILD_FREE_BYTES)]):
-            self.host.prepare_build_cache(self.repository, "head")
+            with self.host.build_cache(self.repository, "head") as admitted:
+                self.assertEqual(admitted, target)
         self.host.unit.assert_called_once_with("clean-build-capacity-head",
             [str(self.host.rust_bin / "cargo"), "clean", "--profile", "bench", "--target-dir", str(target)], self.repository)
         storage = json.loads((self.host.output / "head-build-storage.json").read_text())
@@ -280,7 +292,11 @@ class ControlledBuildTest(unittest.TestCase):
         self.assertEqual((storage["free_before"], storage["free_after"]), (0, 0))
 
     def test_failed_cache_reclamation_stops_without_retry_or_compilation(self):
-        self.admitted_cache()
+        target = self.admitted_cache()
+        marker = target / "source-checkout.json"
+        identity = marker.read_bytes()
+        unrelated = target / "user-file"
+        unrelated.write_text("retained")
         self.host.unit = Mock(side_effect=runner.QualificationError("cleanup failed"))
         with patch.object(runner.shutil, "disk_usage", return_value=SimpleNamespace(free=0)):
             with self.assertRaisesRegex(runner.QualificationError, "cleanup failed"):
@@ -289,35 +305,122 @@ class ControlledBuildTest(unittest.TestCase):
         self.assertEqual(self.host.unit.call_args.args[0], "clean-build-capacity-head")
         self.assertEqual(self.git("rev-parse", "HEAD"), self.head)
         self.assertEqual(self.git("status", "--porcelain"), "")
+        self.assertEqual(marker.read_bytes(), identity)
+        self.assertEqual(unrelated.read_text(), "retained")
+        self.assertFalse((target / "CACHEDIR.TAG").exists())
 
-    def test_canonical_cache_transition_rejects_another_source_path(self):
-        target = self.repository / "target/reference"
-        target.mkdir(parents=True)
+    def test_fresh_target_without_build_space_is_left_to_cargo(self):
+        with patch.object(runner.shutil, "disk_usage", return_value=SimpleNamespace(free=0)):
+            with self.assertRaisesRegex(runner.QualificationError, "insufficient build storage"):
+                self.host.build(self.head, "head", False)
+        self.host.unit.assert_not_called()
+        self.assertFalse((self.repository / "target/reference").exists())
+        storage = json.loads((self.host.output / "head-build-storage.json").read_text())
+        self.assertIsNone(storage["cleanup_reason"])
+
+    def test_build_account_owns_the_parent_of_a_replacement_cargo_target(self):
+        reference, _ = self.benchmark_revisions()
+        parent = self.repository / "target"
+        parent.mkdir()
+        retained = parent / "other-output"
+        retained.write_text("keep")
+        with patch.object(runner.os, "chown", wraps=os.chown) as ownership:
+            artifact = self.host.build(reference, "reference", False)["analytical_comparison"]
+        ownership.assert_called_once_with(parent, self.host.account.pw_uid, self.host.account.pw_gid,
+                                          follow_symlinks=False)
+        self.assertTrue((parent / "reference/CACHEDIR.TAG").is_file())
+        self.assertEqual(subprocess.check_output([artifact["path"]], text=True).strip(), "reference")
+        self.assertEqual(retained.read_text(), "keep")
+
+    def test_legacy_untagged_cache_preserves_the_selected_cargos_cleanup_decision(self):
+        reference, _ = self.benchmark_revisions()
+        target = self.admitted_cache()
+        probe = self.root / "cargo-clean-probe"
+        probe.mkdir()
         marker = target / "source-checkout.json"
-        marker.write_text(json.dumps({"schema": 1, "source_path": str(self.shared)}))
-        self.host.unit = Mock()
-        self.host.prepare_build_cache(self.repository)
-        self.host.unit.assert_called_once()
-        args = self.host.unit.call_args.args[1]
-        self.assertIn("clean", args)
-        self.assertEqual(args[args.index("--target-dir") + 1], str(target))
+        identity = marker.read_bytes()
+        for directory in (target, probe):
+            (directory / "release").mkdir()
+            (directory / "release/previous-build").write_text("derived")
+            (directory / "unrelated").write_text("keep")
+        (probe / marker.name).write_bytes(identity)
+        clean = subprocess.run([str(self.host.rust_bin / "cargo"), "clean", "--profile", "bench",
+                               "--target-dir", str(probe)], cwd=self.repository,
+                               env=self.git_environment, capture_output=True, text=True)
+        with patch.object(runner.shutil, "disk_usage", side_effect=[
+                SimpleNamespace(free=0), SimpleNamespace(free=runner.MIN_BUILD_FREE_BYTES)]):
+            if clean.returncode:
+                with self.assertRaises(runner.QualificationError) as refusal:
+                    self.host.build(reference, "reference", False)
+                self.assertIn(f"clean-build-capacity-reference failed ({clean.returncode})", str(refusal.exception))
+                self.assertEqual([call.args[0] for call in self.host.unit.call_args_list], ["clean-build-capacity-reference"])
+                self.assertFalse((self.binaries / "reference/artifacts.json").exists())
+            else:
+                artifact = self.host.build(reference, "reference", False)["analytical_comparison"]
+                self.assertEqual(subprocess.check_output([artifact["path"]], text=True).strip(), "reference")
+        self.assertEqual((target / "release/previous-build").exists(), (probe / "release/previous-build").exists())
+        self.assertEqual((target / "unrelated").read_text(), "keep")
+        self.assertEqual(marker.read_bytes(), identity)
+
+    def test_foreign_checkout_cache_is_cleaned_before_building_the_canonical_revision(self):
+        reference, _ = self.benchmark_revisions()
+        target = self.repository / "target/reference"
+        self.host.unit("seed-foreign", [str(self.host.rust_bin / "cargo"), "build", "--bench",
+                       "analytical_comparison", "--profile", "bench", "--target-dir", str(target)], self.shared)
+        marker = target / "source-checkout.json"
+        marker.write_text(json.dumps({"schema": 1, "source_path": str(self.shared.resolve())}))
+        stale = target / "release/obsolete-output"
+        stale.write_text("foreign checkout")
+        artifact = self.host.build(reference, "reference", False)["analytical_comparison"]
+        self.assertEqual(subprocess.check_output([artifact["path"]], text=True).strip(), "reference")
+        self.assertFalse(stale.exists())
         self.assertEqual(json.loads(marker.read_text())["source_path"], str(self.repository.resolve()))
-        self.host.prepare_build_cache(self.repository)
-        self.host.unit.assert_called_once()
+        self.assertEqual([call.args[0] for call in self.host.unit.call_args_list],
+                         ["seed-foreign", "clean-legacy-build-output", "metadata-reference", "build-reference"])
+
+    def test_interrupted_first_build_leaves_the_cargo_target_unclaimed_until_retry(self):
+        reference, candidate = self.benchmark_revisions()
+        target = self.repository / "target/reference"
+        marker = target / "source-checkout.json"
+        run = self.host.unit.side_effect
+
+        def interrupt(label, args, source, **kwargs):
+            output = run(label, args, source, **kwargs)
+            if label == "build-reference":
+                raise runner.QualificationError("interrupted after compilation")
+            return output
+
+        self.host.unit.side_effect = interrupt
+        with self.assertRaisesRegex(runner.QualificationError, "interrupted after compilation"):
+            self.host.build(reference, "reference", False)
+        self.assertTrue((target / "CACHEDIR.TAG").is_file())
+        self.assertFalse(marker.exists())
+        self.assertFalse((self.binaries / "reference/artifacts.json").exists())
+        self.host.unit.side_effect = run
+        artifact = self.host.build(candidate, "head", False)["analytical_comparison"]
+        self.assertEqual(subprocess.check_output([artifact["path"]], text=True).strip(), "candidate")
+        self.assertEqual(json.loads(marker.read_text())["source_path"], str(self.repository.resolve()))
+        self.assertEqual([call.args[0] for call in self.host.unit.call_args_list],
+                         ["metadata-reference", "build-reference", "clean-legacy-build-output", "metadata-head", "build-head"])
 
     def test_invalid_cache_marker_is_replaced_only_in_the_canonical_checkout(self):
         target = self.repository / "target/reference"
         target.mkdir(parents=True)
         marker = target / "source-checkout.json"
         marker.write_text("incomplete marker")
+        previous = self.root / "retained-source-checkout.json"
+        os.link(marker, previous)
         self.host.unit = Mock()
         with self.assertRaisesRegex(runner.QualificationError, "canonical source checkout"):
-            self.host.prepare_build_cache(self.shared)
+            with self.host.build_cache(self.shared, "head"):
+                self.fail("noncanonical checkout reached compilation")
         self.host.unit.assert_not_called()
-        self.host.prepare_build_cache(self.repository)
+        with self.host.build_cache(self.repository, "head"):
+            self.assertEqual(marker.read_text(), "incomplete marker")
         self.host.unit.assert_called_once()
         self.assertEqual(json.loads(marker.read_text()),
                          {"schema": 1, "source_path": str(self.repository.resolve())})
+        self.assertEqual(previous.read_text(), "incomplete marker")
 
     def test_build_rejects_artifacts_from_another_checkout_or_mutated_source(self):
         for invalid in ("manifest", "target", "modified source"):
