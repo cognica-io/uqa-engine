@@ -63,18 +63,23 @@ class ConfigurationTests(unittest.TestCase):
 
     def test_native_sanitizers_keep_both_features_and_instrument_every_consumer(self):
         self.assertEqual(set(CONFIGURATIONS.GROUPS["sanitizers"]), {"minimal", "arrow-export"})
-        for name in CONFIGURATIONS.GROUPS["sanitizers"]:
-            with self.subTest(name=name), patch.dict(os.environ, {"CARGO_TARGET_DIR": "/tmp/c-target"}):
-                commands = CONFIGURATIONS.commands(name, target="aarch64-apple-darwin")
+        targets = ("aarch64-apple-darwin", "x86_64-unknown-linux-gnu")
+        for name, target in itertools.product(CONFIGURATIONS.GROUPS["sanitizers"], targets):
+            with self.subTest(name=name, target=target), patch.dict(os.environ, {"CARGO_TARGET_DIR": "/tmp/c-target"}):
+                commands = CONFIGURATIONS.commands(name, target=target)
+                self.assertEqual("--tests" in commands[0], target == "x86_64-unknown-linux-gnu")
+                if target == "x86_64-unknown-linux-gnu":
+                    self.assertIn("--lib", commands[0])
+                self.assertIn("--lib", commands[1])
                 for command in commands[:2]:
                     self.assertEqual(command[:2], ["cargo", "+nightly"])
                     self.assertIn("-Zbuild-std", command)
-                    self.assertEqual(command[command.index("--target") + 1], "aarch64-apple-darwin")
+                    self.assertEqual(command[command.index("--target") + 1], target)
                 self.assertEqual(len(commands[2:]), 3)
                 for command in commands[2:]:
                     self.assertIn("--sanitize", command)
                     self.assertEqual(Path(command[command.index("--library") + 1]).parent,
-                                     Path("/tmp/c-target/aarch64-apple-darwin/debug"))
+                                     Path("/tmp/c-target") / target / "debug")
 
     def test_failed_build_never_runs_stale_consumers_and_other_configurations_still_run(self):
         calls = []

@@ -14,7 +14,7 @@ impl ScoredDocumentSource {
     pub(super) fn next_borrowed_physical_batch(
         &mut self,
         max_rows: usize,
-    ) -> ExecResult<Option<Vec<PhysicalRow>>> {
+    ) -> ExecResult<Option<crate::spill::SpillBatchRows>> {
         if self.lock_origin.is_some()
             || self.recheck_pinned
             || self.projection_properties.requires_materialization
@@ -25,7 +25,7 @@ impl ScoredDocumentSource {
             return Ok(None);
         };
         if max_rows == 0 {
-            return Ok(Some(Vec::new()));
+            return Ok(Some(Vec::new().into()));
         }
         self.serializable.observe_relation()?;
         let fields = self
@@ -77,7 +77,7 @@ impl ScoredDocumentSource {
                 return Err(error);
             }
             let Some(visited) = visited? else {
-                return Ok((!rows.is_empty()).then_some(rows));
+                return Ok((!rows.is_empty()).then(|| size.finish_rows(rows)));
             };
             if let Some(last) = last {
                 after = Some(last);
@@ -87,6 +87,6 @@ impl ScoredDocumentSource {
                 break;
             }
         }
-        Ok(Some(rows))
+        Ok(Some(size.finish_rows(rows)))
     }
 }

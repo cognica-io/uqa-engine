@@ -388,6 +388,11 @@ impl<'a> Project<'a> {
 }
 
 impl Project<'_> {
+    fn preserves_physical_rows(&self) -> bool {
+        self.computed.is_empty()
+            && self.schema.physical_width() == self.child.row_schema().physical_width()
+    }
+
     fn pull(&mut self, demand: Option<std::num::NonZeroUsize>) -> ExecResult<Option<Batch>> {
         if let Some(batch) = self.next_pending()? {
             return Ok(Some(batch));
@@ -412,12 +417,21 @@ impl PhysicalOperator for Project<'_> {
         &mut self,
         sink: &mut crate::query::output::MaterializedResultSink<'_>,
     ) -> ExecResult<bool> {
-        if !self.computed.is_empty()
-            || self.schema.physical_width() != self.child.row_schema().physical_width()
-        {
+        if !self.preserves_physical_rows() {
             return Ok(false);
         }
         self.child.collect_materialized(sink)
+    }
+
+    fn collect_spill(
+        &mut self,
+        buffer: &mut crate::SpillBuffer,
+        schema: &RowSchema,
+    ) -> ExecResult<bool> {
+        if !self.preserves_physical_rows() || !self.input_pending.is_empty() {
+            return Ok(false);
+        }
+        self.child.collect_spill(buffer, schema)
     }
 
     fn output_ordering(&self) -> &[crate::PhysicalOrder] {

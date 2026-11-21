@@ -4,10 +4,59 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Reuse only the immutable schema portion of exact batch sizing.
+//! Preserve exact encoded lengths while schemas or completed row batches remain unchanged.
 
 use super::EncodedBatchSizer;
-use crate::{ExecResult, RowSchema};
+use crate::{Batch, ExecResult, PhysicalRow, RowSchema};
+
+/// An unchanged sequence of physical rows can keep its validated record length across schema-only projections. The spill buffer still sizes the destination schema.
+pub(crate) struct SpillBatchRows {
+    rows: Vec<PhysicalRow>,
+    records: Option<(usize, usize)>,
+}
+
+impl From<Vec<PhysicalRow>> for SpillBatchRows {
+    fn from(rows: Vec<PhysicalRow>) -> Self {
+        Self {
+            rows,
+            records: None,
+        }
+    }
+}
+
+impl SpillBatchRows {
+    pub(crate) fn into_rows(self) -> Vec<PhysicalRow> {
+        self.rows
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        self.rows.is_empty()
+    }
+
+    pub(crate) fn push_to(
+        self,
+        output: &mut super::SpillBuffer,
+        schema: &RowSchema,
+    ) -> ExecResult<bool> {
+        let records = self
+            .records
+            .and_then(|(width, bytes)| (width == schema.physical_width()).then_some(bytes));
+        output.push_batch(
+            Batch::from_physical_rows(schema.clone(), self.rows),
+            records,
+        )
+    }
+}
+
+impl EncodedBatchSizer {
+    pub(crate) fn finish_rows(self, rows: Vec<PhysicalRow>) -> SpillBatchRows {
+        debug_assert_eq!(self.origin_free_rows + self.lock_origin_rows, rows.len());
+        SpillBatchRows {
+            rows,
+            records: Some((self.physical_width, self.bytes - self.header_bytes)),
+        }
+    }
+}
 
 /// Retain one successful schema observation. Every returned sizer starts with no rows or lock origins; a different immutable schema is validated before replacing the retained layout.
 #[derive(Default)]
@@ -34,6 +83,40 @@ mod tests {
     use crate::{Batch, PhysicalRow, RowLockOrigin};
     use uqa_core::Value;
     use uqa_sql::ColumnType;
+
+    #[test]
+    fn measured_records_use_the_destination_header_and_preserve_lock_origin_bytes() {
+        let source = RowSchema::new(vec!["v".into()]);
+        let destination = RowSchema::new(vec!["a longer destination label".into()]);
+        let plain = PhysicalRow::from_values(vec![Value::Null]);
+        let locked = PhysicalRow::from_values(vec![Value::Str("한".repeat(64))])
+            .with_lock_origin(RowLockOrigin::new("t", "public.t", 9));
+        let rows = vec![plain.clone(), locked, plain];
+        let expected = Batch::from_physical_rows(destination.clone(), rows.clone());
+        let bytes = super::super::SpillBuffer::encoded_size(&expected).unwrap();
+        for budget in [bytes, bytes - 1] {
+            let mut output = super::super::SpillBuffer::new(budget);
+            let mut size = EncodedBatchSizer::new(&source).unwrap();
+            for row in &rows {
+                size.append(row).unwrap();
+            }
+            let wrote = size
+                .finish_rows(rows.clone())
+                .push_to(&mut output, &destination)
+                .unwrap();
+            assert_eq!(wrote, budget < bytes);
+            if wrote {
+                assert_eq!(output.spilled_rows(), rows.len());
+                assert_eq!(output.in_memory_bytes(), 0);
+            } else {
+                assert_eq!(output.in_memory_bytes(), bytes);
+            }
+            assert_eq!(
+                output.drain_all().unwrap().as_slice(),
+                std::slice::from_ref(&expected)
+            );
+        }
+    }
 
     #[test]
     fn retained_batch_layout_keeps_exact_sizes_and_independent_lock_origin_state() {

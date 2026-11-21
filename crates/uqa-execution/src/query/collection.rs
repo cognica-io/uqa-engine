@@ -94,22 +94,27 @@ fn collect_spilled_rows(
     if let Err(error) = operator.open() {
         return Err(close_after_physical_failure(operator, error, "open"));
     }
-    loop {
-        let batch = match operator.next() {
-            Ok(batch) => batch,
-            Err(error) => {
-                return Err(close_after_physical_failure(operator, error, "execution"));
+    let complete = operator
+        .collect_spill(&mut buffer, &internal_schema)
+        .map_err(|error| close_after_physical_failure(operator, error, "spill buffering"))?;
+    if !complete {
+        loop {
+            let batch = match operator.next() {
+                Ok(batch) => batch,
+                Err(error) => {
+                    return Err(close_after_physical_failure(operator, error, "execution"));
+                }
+            };
+            let Some(batch) = batch else {
+                break;
+            };
+            if let Err(error) = buffer.push(batch) {
+                return Err(close_after_physical_failure(
+                    operator,
+                    error,
+                    "spill buffering",
+                ));
             }
-        };
-        let Some(batch) = batch else {
-            break;
-        };
-        if let Err(error) = buffer.push(batch) {
-            return Err(close_after_physical_failure(
-                operator,
-                error,
-                "spill buffering",
-            ));
         }
     }
     operator.close().map_err(physical_exec_error)?;

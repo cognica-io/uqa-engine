@@ -97,10 +97,33 @@ impl ScoredDocumentSource {
         Ok(Some(visited == 0))
     }
 
-    pub(super) fn next_shared_physical_batch(
+    pub(super) fn pull_physical_rows(
         &mut self,
         max_rows: usize,
-    ) -> ExecResult<Option<Vec<crate::PhysicalRow>>> {
+    ) -> ExecResult<crate::spill::SpillBatchRows> {
+        if let Some(rows) = self.next_shared_physical_batch(max_rows)? {
+            return Ok(rows);
+        }
+        if let Some(rows) = self.next_borrowed_physical_batch(max_rows)? {
+            return Ok(rows);
+        }
+        loop {
+            let entries = self.next_entries(max_rows)?;
+            if entries.is_empty() {
+                return Ok(Vec::new().into());
+            }
+            let reached_end = entries.len() < max_rows;
+            let rows = self.materialize_physical_entries(&entries)?;
+            if !rows.is_empty() || reached_end {
+                return Ok(rows.into());
+            }
+        }
+    }
+
+    fn next_shared_physical_batch(
+        &mut self,
+        max_rows: usize,
+    ) -> ExecResult<Option<crate::spill::SpillBatchRows>> {
         if self.lock_origin.is_some()
             || self.recheck_pinned
             || self.projection_properties.requires_materialization
@@ -114,7 +137,7 @@ impl ScoredDocumentSource {
             | super::ScoredInputCursor::Captured(_) => return Ok(None),
         };
         if max_rows == 0 {
-            return Ok(Some(Vec::new()));
+            return Ok(Some(Vec::new().into()));
         }
         self.serializable.observe_relation()?;
         let fields = self
@@ -138,7 +161,7 @@ impl ScoredDocumentSource {
                 return Ok(None);
             };
             if shared_rows.is_empty() {
-                return Ok(Some(Vec::new()));
+                return Ok(Some(Vec::new().into()));
             }
             let mut rows = Vec::with_capacity(shared_rows.len());
             let mut size = self.batch_layout.for_schema(&self.schema)?;
@@ -169,7 +192,7 @@ impl ScoredDocumentSource {
                     .scan_batch_bytes
                     .div_ceil(largest_row.max(1))
                     .clamp(1, crate::DEFAULT_BATCH_SIZE);
-                return Ok(Some(rows));
+                return Ok(Some(size.finish_rows(rows)));
             }
         }
     }

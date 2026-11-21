@@ -305,3 +305,4 @@ fn borrowed_scored_points_keep_duplicate_ranking_positions() {
 }
 
 mod point_aggregate;
+mod spill;

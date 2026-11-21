@@ -7,7 +7,7 @@
 //! Append positional rows in byte- and row-bounded batches while preserving their complete schema.
 
 use super::{EncodedBatchSizer, SpillBuffer};
-use crate::{Batch, ExecResult, PhysicalRow, RowSchema};
+use crate::{ExecResult, PhysicalRow, RowSchema};
 
 pub(crate) struct SpillBatchWriter {
     schema: RowSchema,
@@ -54,11 +54,9 @@ impl SpillBatchWriter {
         if self.pending.is_empty() {
             return Ok(());
         }
-        output.push(Batch::from_physical_rows(
-            self.schema.clone(),
-            std::mem::take(&mut self.pending),
-        ))?;
-        self.pending_size = self.empty_size;
+        let size = std::mem::replace(&mut self.pending_size, self.empty_size);
+        size.finish_rows(std::mem::take(&mut self.pending))
+            .push_to(output, &self.schema)?;
         Ok(())
     }
 }

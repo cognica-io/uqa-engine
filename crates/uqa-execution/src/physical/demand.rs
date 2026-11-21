@@ -22,6 +22,10 @@ impl PendingRows {
         self.rows = batch.rows.into_iter();
     }
 
+    pub(crate) fn is_empty(&self) -> bool {
+        self.rows.len() == 0
+    }
+
     pub(crate) fn clear(&mut self) {
         self.rows = Vec::new().into_iter();
     }

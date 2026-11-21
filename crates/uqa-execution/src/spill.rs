@@ -46,7 +46,7 @@ pub(crate) use format::{
 mod batch_writer;
 pub(crate) use batch_writer::SpillBatchWriter;
 mod batch_layout;
-pub(crate) use batch_layout::EncodedBatchLayout;
+pub(crate) use batch_layout::{EncodedBatchLayout, SpillBatchRows};
 pub(crate) use indexed::BufferedIndexedSpill;
 pub use indexed::IndexedSpill;
 
@@ -56,6 +56,7 @@ const SPILL_MAGIC: &[u8] = b"UQA-SPILL\x02\n";
 #[derive(Clone, Copy)]
 pub(crate) struct EncodedBatchSizer {
     physical_width: usize,
+    header_bytes: usize,
     bytes: usize,
     origin_free_rows: usize,
     lock_origin_rows: usize,
@@ -63,9 +64,11 @@ pub(crate) struct EncodedBatchSizer {
 
 impl EncodedBatchSizer {
     pub(crate) fn new(schema: &RowSchema) -> ExecResult<Self> {
+        let header_bytes = encoded_batch_overhead_size(schema)?;
         Ok(Self {
             physical_width: schema.physical_width(),
-            bytes: encoded_batch_overhead_size(schema)?,
+            header_bytes,
+            bytes: header_bytes,
             origin_free_rows: 0,
             lock_origin_rows: 0,
         })
@@ -231,6 +234,10 @@ impl SpillBuffer {
     /// creation, encoding, or writing fails, the new batch and all earlier
     /// batches remain owned by the buffer and the error is returned.
     pub fn push(&mut self, batch: Batch) -> ExecResult<bool> {
+        self.push_batch(batch, None)
+    }
+
+    fn push_batch(&mut self, batch: Batch, record_bytes: Option<usize>) -> ExecResult<bool> {
         if let Some(schema) = self.schema.as_ref() {
             if schema != &batch.schema {
                 return Err(spill_error(format!(
@@ -247,7 +254,15 @@ impl SpillBuffer {
             .rows
             .checked_add(batch_rows)
             .ok_or_else(|| spill_error("spill buffer row count overflow"))?;
-        let batch_bytes = match Self::encoded_size(&batch) {
+        let size = match record_bytes {
+            Some(records) => encoded_batch_overhead_size(&batch.schema).and_then(|header| {
+                header
+                    .checked_add(records)
+                    .ok_or_else(|| spill_error("physical row record size overflow"))
+            }),
+            None => Self::encoded_size(&batch),
+        };
+        let batch_bytes = match size {
             Ok(bytes) => bytes,
             Err(error) => {
                 // Preserve ownership even when an exotic value or an encoded

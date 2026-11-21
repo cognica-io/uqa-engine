@@ -192,9 +192,9 @@ Python and Node.js provide matching `local` and `cloud` project constructors; br
 
 `Engine::new()` keeps data in memory, while `Engine::open(path)` and `usql --db <path>` use the default persistent SQLite backend. Persistent engines restore schemas, documents, text postings, graphs, scoring parameters, models, views, and statistics when reopened.
 
-The Rust backup API captures a committed snapshot while the database stays open. Memory, native SQLite, SQLite Key/Value, and redb support full and incremental backups. Each incremental backup has a complete inventory and can be restored to a fresh destination after its parent is removed. [Runnable Rust example](crates/uqa-api/examples/backup.rs) · [Backup and restore options](docs/manual/reference/02-rust-engine-api.md#capture-a-backup)
+The Rust backup API captures a committed snapshot while the database stays open. Memory, native SQLite, SQLite Key/Value, and redb support full and incremental backups. Each incremental backup has a complete inventory and can be restored to a fresh destination after its parent is removed. [Runnable Rust example](https://github.com/cognica-io/uqa-engine/blob/main/crates/uqa-api/examples/backup.rs) · [Backup and restore options](https://github.com/cognica-io/uqa-engine/blob/main/docs/manual/reference/02-rust-engine-api.md#capture-a-backup)
 
-Use `usql backup` from a script or `\backup` in the shell to capture the current database, verify a backup or restore it to a new destination. [CLI backup commands](docs/manual/reference/03-cli.md#back-up-and-restore-a-database)
+Use `usql backup` from a script or `\backup` in the shell to capture the current database, verify a backup or restore it to a new destination. [CLI backup commands](https://github.com/cognica-io/uqa-engine/blob/main/docs/manual/reference/03-cli.md#back-up-and-restore-a-database)
 
 `uqa-storage` owns provider-independent contracts and shared data structures, while `uqa-storage-sqlite` owns SQLite connections, catalogs, indexes, transactions, graph persistence, and compressed storage. Rust callers using concrete storage types must use the [updated provider imports](docs/manual/reference/10-upgrading.md#sqlite-provider-ownership).
 
