@@ -29,12 +29,14 @@ struct ColumnEvaluator;
 
 impl ExpressionEvaluator for ColumnEvaluator {
     fn evaluate(&self, expression: &ScalarExpr, row: &dyn RowLookup) -> ExecResult<Value> {
-        let ScalarExpr::Column(column) = expression else {
+        let ScalarExpr::Position(position) = expression else {
             return Err(ExecError::Other(
-                "set-operation sort key must be a column".into(),
+                "set-operation sort key must be a column position".into(),
             ));
         };
-        Ok(row.column(column).cloned().unwrap_or(Value::Null))
+        row.positional_column(*position)
+            .cloned()
+            .ok_or_else(|| ExecError::Other(format!("missing set-operation column {position}")))
     }
 }
 
@@ -486,73 +488,55 @@ impl ExternalSetOperation<'_> {
             .ok_or_else(|| ExecError::Other("set-operation selected a missing right group".into()))
     }
 
-    fn choose_group(&mut self) -> ExecResult<Option<(PhysicalRow, usize)>> {
-        self.load_groups()?;
-        let ordering = match (&self.left_group, &self.right_group) {
-            (Some(left), Some(right)) => Some(compare_rows(
-                &left.row,
-                &right.row,
-                &self.schema,
-                self.evaluator.enum_labels(),
-            )?),
-            (Some(_), None) => Some(Ordering::Less),
-            (None, Some(_)) => Some(Ordering::Greater),
-            (None, None) => None,
-        };
-        let Some(ordering) = ordering else {
-            return Ok(None);
-        };
+    fn next_group(&mut self) -> ExecResult<Option<RowGroup>> {
+        loop {
+            self.load_groups()?;
+            let ordering = match (&self.left_group, &self.right_group) {
+                (Some(left), Some(right)) => compare_rows(
+                    &left.row,
+                    &right.row,
+                    &self.schema,
+                    self.evaluator.enum_labels(),
+                )?,
+                (Some(_), None) => Ordering::Less,
+                (None, Some(_)) => Ordering::Greater,
+                (None, None) => return Ok(None),
+            };
 
-        let selected = match (self.kind, ordering) {
-            (SetOpKind::Union, Ordering::Less) => {
-                let group = self.take_left_group()?;
-                Some((group.row, 1))
+            let mut group = match ordering {
+                Ordering::Less => {
+                    let left = self.take_left_group()?;
+                    if self.kind == SetOpKind::Intersect {
+                        continue;
+                    }
+                    left
+                }
+                Ordering::Greater => {
+                    let right = self.take_right_group()?;
+                    if self.kind != SetOpKind::Union {
+                        continue;
+                    }
+                    right
+                }
+                Ordering::Equal => {
+                    let mut left = self.take_left_group()?;
+                    let right = self.take_right_group()?;
+                    match self.kind {
+                        SetOpKind::Union => {}
+                        SetOpKind::Intersect => left.count = left.count.min(right.count),
+                        SetOpKind::Except if self.all && left.count > right.count => {
+                            left.count -= right.count;
+                        }
+                        SetOpKind::Except => continue,
+                    }
+                    left
+                }
+            };
+            if !self.all {
+                group.count = 1;
             }
-            (SetOpKind::Union, Ordering::Greater) => {
-                let group = self.take_right_group()?;
-                Some((group.row, 1))
-            }
-            (SetOpKind::Union, Ordering::Equal) => {
-                let group = self.take_left_group()?;
-                self.right_group = None;
-                Some((group.row, 1))
-            }
-            (SetOpKind::Intersect, Ordering::Less) => {
-                self.left_group = None;
-                None
-            }
-            (SetOpKind::Intersect | SetOpKind::Except, Ordering::Greater) => {
-                self.right_group = None;
-                None
-            }
-            (SetOpKind::Intersect, Ordering::Equal) => {
-                let left = self.take_left_group()?;
-                let right = self.take_right_group()?;
-                Some((
-                    left.row,
-                    if self.all {
-                        left.count.min(right.count)
-                    } else {
-                        1
-                    },
-                ))
-            }
-            (SetOpKind::Except, Ordering::Less) => {
-                let left = self.take_left_group()?;
-                Some((left.row, if self.all { left.count } else { 1 }))
-            }
-            (SetOpKind::Except, Ordering::Equal) => {
-                let left = self.take_left_group()?;
-                let right = self.take_right_group()?;
-                let count = if self.all {
-                    left.count.saturating_sub(right.count)
-                } else {
-                    0
-                };
-                Some((left.row, count))
-            }
-        };
-        Ok(selected.filter(|(_, count)| *count > 0))
+            return Ok(Some(group));
+        }
     }
 }
 
@@ -611,14 +595,11 @@ impl PhysicalOperator for ExternalSetOperation<'_> {
                 }
                 continue;
             }
-            match self.choose_group()? {
-                Some((row, count)) => {
-                    self.pending_row = Some(row.without_lock_origins());
-                    self.pending_count = count;
-                }
-                None if self.left.exhausted && self.right.exhausted => break,
-                None => {}
-            }
+            let Some(group) = self.next_group()? else {
+                break;
+            };
+            self.pending_row = Some(group.row.without_lock_origins());
+            self.pending_count = group.count;
         }
         if rows.is_empty() {
             Ok(None)
@@ -734,6 +715,17 @@ mod tests {
             execute(SetOpKind::Except, false, &[1, 1, 2], &[1, 3]),
             vec![2]
         );
+    }
+
+    #[test]
+    fn except_emits_the_unmatched_final_left_group() {
+        for all in [false, true] {
+            assert_eq!(execute(SetOpKind::Except, all, &[2], &[1]), vec![2]);
+            assert_eq!(
+                execute(SetOpKind::Except, all, &[3, 1, 3], &[2, 1]),
+                if all { vec![3, 3] } else { vec![3] }
+            );
+        }
     }
 
     #[test]

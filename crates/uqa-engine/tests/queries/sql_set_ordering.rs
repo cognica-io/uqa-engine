@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! `PostgreSQL` set-operation ordering diagnostics through public queries and stored definitions.
+//! `PostgreSQL` set-operation results and ordering diagnostics through public queries and stored definitions.
 
 use std::{path::Path, sync::Arc};
 use uqa_engine::Engine;
@@ -23,6 +23,20 @@ fn open(provider: usize, path: &Path) -> Engine {
         .unwrap(),
         _ => unreachable!(),
     }
+}
+
+#[rstest::rstest]
+#[case::memory(0)]
+#[case::sqlite(1)]
+#[case::sqlite_key_value(2)]
+#[case::redb(3)]
+fn set_operation_groups_match_postgresql(#[case] provider: usize) {
+    let directory = tempfile::tempdir().unwrap();
+    let engine = open(provider, &directory.path().join("set-groups.db"));
+    crate::pg18_oracle::verify(
+        &engine,
+        include_str!("../../../../tests/parity/pg18/set_operation_groups_oracle.expected.json"),
+    );
 }
 
 #[rstest::rstest]

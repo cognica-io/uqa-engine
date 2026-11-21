@@ -165,10 +165,9 @@ impl<'a> ExternalSetOperation<'a> {
         let (left, right) = if matches!((kind, all), (SetOpKind::Union, true)) {
             (left, right)
         } else {
-            let keys = output
-                .iter()
-                .map(|column| SortKey {
-                    expr: ScalarExpr::Column(column.clone().into()),
+            let keys = (0..output.len())
+                .map(|position| SortKey {
+                    expr: ScalarExpr::Position(position),
                     descending: false,
                     nulls_first: Some(true),
                 })
