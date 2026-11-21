@@ -424,6 +424,13 @@ impl<'a> ColumnSelection<'a> {
         self
     }
 
+    fn preserves_physical_rows(&self) -> bool {
+        self.compact_slots.is_none()
+            && self.rebind_lock_qualifier.is_none()
+            && !self.discard_lock_origins
+            && self.schema.physical_width() == self.child.row_schema().physical_width()
+    }
+
     fn select_batch(&self, batch: Batch) -> Batch {
         let mut rows = match self.compact_slots.as_ref() {
             Some(slots) => batch
@@ -478,14 +485,21 @@ impl PhysicalOperator for ColumnSelection<'_> {
         &mut self,
         sink: &mut crate::query::output::MaterializedResultSink<'_>,
     ) -> ExecResult<bool> {
-        if self.compact_slots.is_some()
-            || self.rebind_lock_qualifier.is_some()
-            || self.discard_lock_origins
-            || self.schema.physical_width() != self.child.row_schema().physical_width()
-        {
+        if !self.preserves_physical_rows() {
             return Ok(false);
         }
         self.child.collect_materialized(sink)
+    }
+
+    fn collect_spill(
+        &mut self,
+        buffer: &mut crate::SpillBuffer,
+        schema: &RowSchema,
+    ) -> ExecResult<bool> {
+        if !self.preserves_physical_rows() {
+            return Ok(false);
+        }
+        self.child.collect_spill(buffer, schema)
     }
 
     fn estimated_cardinality(&self) -> Option<u64> {

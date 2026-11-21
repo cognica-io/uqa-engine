@@ -78,6 +78,15 @@ pub trait RowSource: Send {
         })
     }
 
+    /// Transfer a complete scan to a spill buffer when the source can reuse its physical batch sizing. An unsupported source declines before advancing.
+    fn collect_spill(
+        &mut self,
+        _buffer: &mut crate::SpillBuffer,
+        _schema: &RowSchema,
+    ) -> ExecResult<bool> {
+        Ok(false)
+    }
+
     /// Feed backend-native projected rows directly to an aggregate. Sources
     /// that cannot preserve their normal filter and virtual-column semantics
     /// return `false` without advancing their cursor.
@@ -516,6 +525,21 @@ impl PhysicalOperator for TableScan {
         let complete = source.collect_materialized(sink)?;
         self.exhausted |= complete;
         Ok(complete)
+    }
+
+    fn collect_spill(
+        &mut self,
+        buffer: &mut crate::SpillBuffer,
+        schema: &RowSchema,
+    ) -> ExecResult<bool> {
+        if self.exhausted {
+            return Ok(true);
+        }
+        let Some(source) = self.source.as_mut() else {
+            return Ok(true);
+        };
+        self.exhausted = source.collect_spill(buffer, schema)?;
+        Ok(self.exhausted)
     }
 
     fn open(&mut self) -> ExecResult<()> {

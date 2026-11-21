@@ -926,22 +926,20 @@ impl crate::RowSource for ScoredDocumentSource {
     }
 
     fn next_physical_batch(&mut self, max_rows: usize) -> ExecResult<Vec<crate::PhysicalRow>> {
-        if let Some(rows) = self.next_shared_physical_batch(max_rows)? {
-            return Ok(rows);
-        }
-        if let Some(rows) = self.next_borrowed_physical_batch(max_rows)? {
-            return Ok(rows);
-        }
+        Ok(self.pull_physical_rows(max_rows)?.into_rows())
+    }
+
+    fn collect_spill(
+        &mut self,
+        buffer: &mut crate::SpillBuffer,
+        schema: &crate::RowSchema,
+    ) -> ExecResult<bool> {
         loop {
-            let entries = self.next_entries(max_rows)?;
-            if entries.is_empty() {
-                return Ok(Vec::new());
+            let rows = self.pull_physical_rows(crate::DEFAULT_BATCH_SIZE)?;
+            if rows.is_empty() {
+                return Ok(true);
             }
-            let reached_end = entries.len() < max_rows;
-            let rows = self.materialize_physical_entries(&entries)?;
-            if !rows.is_empty() || reached_end {
-                return Ok(rows);
-            }
+            rows.push_to(buffer, schema)?;
         }
     }
 

@@ -145,6 +145,15 @@ pub trait PhysicalOperator: Send {
     fn open(&mut self) -> ExecResult<()>;
     fn next(&mut self) -> ExecResult<Option<Batch>>;
 
+    /// Drain an open, row-preserving pipeline into its final spill buffer. The destination descriptor may rename or hide slots while retaining the same physical records. An operator that declines leaves its input untouched for the ordinary batch pulls.
+    fn collect_spill(
+        &mut self,
+        _buffer: &mut crate::SpillBuffer,
+        _schema: &RowSchema,
+    ) -> ExecResult<bool> {
+        Ok(false)
+    }
+
     /// Whether a complete, effect-free consumer may use native batches without changing SQL expression, side-effect or first-error order relative to singleton demand. Unclassified pipelines retain singleton demand. A producer with additional per-row evaluation above its child must establish that ordering independently; row order alone is insufficient.
     fn supports_batched_consumption(&self) -> bool {
         false

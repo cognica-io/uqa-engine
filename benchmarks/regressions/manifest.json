@@ -7418,6 +7418,32 @@
     {
       "package": "uqa-execution",
       "kind": "lib",
+      "test": "cursor_buffers_measured_scan_records_once_through_schema_only_projection",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/scored_input/tests/borrowed/spill.rs",
+      "capability": "Cursor spill accounting",
+      "workload": "Filter shared and borrowed document pages, retain repeated output labels and a missing field, and collect the result in memory and on disk.",
+      "invariant": "Buffering a schema-only projection performs no additional physical value traversal beyond the bounded scan. Both storage modes return the same ordered positional values.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "measured_records_use_the_destination_header_and_preserve_lock_origin_bytes",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/spill/batch_layout.rs",
+      "capability": "Exact spill record sizes",
+      "workload": "Buffer measured rows with and without lock identities under a renamed descriptor, at its exact byte threshold and one byte below it.",
+      "invariant": "The destination header and every lock-origin byte contribute to the spill decision. Both read paths preserve rows, schema and identities.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
       "test": "shared_scan_reuses_immutable_projection_classification",
       "cases": 1,
       "source": "crates/uqa-execution/src/query/scored_input/tests/memory.rs",
