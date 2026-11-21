@@ -8,6 +8,7 @@ import copy
 import json
 import os
 from pathlib import Path
+import resource
 import shutil
 import subprocess
 import sys
@@ -421,6 +422,33 @@ class ControlledBuildTest(unittest.TestCase):
         self.assertEqual(json.loads(marker.read_text()),
                          {"schema": 1, "source_path": str(self.repository.resolve())})
         self.assertEqual(previous.read_text(), "incomplete marker")
+
+    def test_failed_marker_write_preserves_the_previous_checkout_identity(self):
+        target = self.repository / "target/reference"
+        target.mkdir(parents=True)
+        marker = target / "source-checkout.json"
+        prior = json.dumps({"schema": 1, "source_path": str(self.shared)}) + "\n"
+        marker.write_text(prior)
+        self.host.unit = Mock()
+        spawn = subprocess.run
+
+        def limit_output():
+            resource.setrlimit(resource.RLIMIT_FSIZE, (8, 8))
+
+        def write_with_small_file_limit(*args, **kwargs):
+            return spawn(*args, **kwargs, preexec_fn=limit_output, stderr=subprocess.PIPE)
+
+        with patch.object(runner.subprocess, "run", side_effect=write_with_small_file_limit):
+            with self.assertRaises(subprocess.CalledProcessError):
+                with self.host.build_cache(self.repository, "head"):
+                    pass
+
+        self.assertEqual(marker.read_text(), prior)
+        self.assertEqual(list(target.iterdir()), [marker])
+        with self.host.build_cache(self.repository, "head"):
+            pass
+        self.assertEqual(json.loads(marker.read_text())["source_path"], str(self.repository.resolve()))
+        self.assertEqual(marker.stat().st_mode & 0o777, 0o644)
 
     def test_build_rejects_artifacts_from_another_checkout_or_mutated_source(self):
         for invalid in ("manifest", "target", "modified source"):

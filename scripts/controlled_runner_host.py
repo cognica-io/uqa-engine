@@ -16,7 +16,6 @@ from pathlib import Path
 import pwd
 import shutil
 import subprocess
-import tempfile
 
 from controlled_performance import analytical_observations, claim_observations
 from performance_noise import ANALYTICAL_FILTER
@@ -235,16 +234,21 @@ class ControlledHost:
             self.make_writable(target.parent)
         yield target
         if cached != identity:
-            # Cargo owns this directory. Replace its entry as the build user so retained copies keep their original identity.
-            with tempfile.TemporaryFile(mode="w+") as record:
-                record.write(json.dumps(identity) + "\n")
-                record.seek(0)
-                os.fchmod(record.fileno(), 0o444)
-                subprocess.run(
-                    ["/usr/bin/install", "-m", "0644", "/dev/stdin", str(marker)],
-                    stdin=record, check=True, user=self.account.pw_uid, group=self.account.pw_gid,
-                    extra_groups=[] if os.geteuid() == 0 else None,
-                )
+            # The build account stages the record on Cargo's filesystem. Moving its basename
+            # into the target replaces the directory entry with a single rename.
+            subprocess.run(
+                ["/bin/sh", "-eu", "-c", """
+                    stage=$(mktemp -d .source-checkout.XXXXXXXX)
+                    record="$stage/$1"
+                    trap 'rm -f "$record"; rmdir "$stage"' EXIT
+                    cat > "$record"
+                    chmod 0644 "$record"
+                    mv -f "$record" .
+                """, "publish-checkout-identity", marker.name],
+                cwd=target, input=json.dumps(identity) + "\n", text=True, check=True,
+                env={"PATH": os.defpath}, user=self.account.pw_uid, group=self.account.pw_gid,
+                extra_groups=[] if os.geteuid() == 0 else None,
+            )
 
     def isolate(self) -> dict:
         self.progress("establish-host-control")
