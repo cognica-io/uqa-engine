@@ -408,6 +408,8 @@ class ControlledBuildTest(unittest.TestCase):
         target.mkdir(parents=True)
         marker = target / "source-checkout.json"
         marker.write_text("incomplete marker")
+        previous = self.root / "retained-source-checkout.json"
+        os.link(marker, previous)
         self.host.unit = Mock()
         with self.assertRaisesRegex(runner.QualificationError, "canonical source checkout"):
             with self.host.build_cache(self.shared, "head"):
@@ -418,6 +420,7 @@ class ControlledBuildTest(unittest.TestCase):
         self.host.unit.assert_called_once()
         self.assertEqual(json.loads(marker.read_text()),
                          {"schema": 1, "source_path": str(self.repository.resolve())})
+        self.assertEqual(previous.read_text(), "incomplete marker")
 
     def test_build_rejects_artifacts_from_another_checkout_or_mutated_source(self):
         for invalid in ("manifest", "target", "modified source"):

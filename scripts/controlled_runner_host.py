@@ -16,6 +16,7 @@ from pathlib import Path
 import pwd
 import shutil
 import subprocess
+import tempfile
 
 from controlled_performance import analytical_observations, claim_observations
 from performance_noise import ANALYTICAL_FILTER
@@ -234,7 +235,16 @@ class ControlledHost:
             self.make_writable(target.parent)
         yield target
         if cached != identity:
-            marker.write_text(json.dumps(identity) + "\n")
+            # Cargo owns this directory. Replace its entry as the build user so retained copies keep their original identity.
+            with tempfile.TemporaryFile(mode="w+") as record:
+                record.write(json.dumps(identity) + "\n")
+                record.seek(0)
+                os.fchmod(record.fileno(), 0o444)
+                subprocess.run(
+                    ["/usr/bin/install", "-m", "0644", "/dev/stdin", str(marker)],
+                    stdin=record, check=True, user=self.account.pw_uid, group=self.account.pw_gid,
+                    extra_groups=[] if os.geteuid() == 0 else None,
+                )
 
     def isolate(self) -> dict:
         self.progress("establish-host-control")
