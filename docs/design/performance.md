@@ -2,6 +2,29 @@
 
 This document records dated UQA Engine measurements, including controlled CI qualification and historical developer-machine comparisons. Each section identifies its source and measurement boundary; absolute times remain specific to the measured host. Controlled qualification uses independently authenticated host control and reference-only noise calibration. Unless a section explicitly compares another engine, its ratios compare UQA revisions. Measurements use the `bench` profile (release + debug symbols, thin LTO, `codegen-units = 1`) unless a section explicitly records a package-scoped `release` runner or a published package.
 
+## Cursor scan instruction counts (2026-11-21 UTC)
+
+The public SQL cursor returned the same 15,602 ordered integer pairs on all three revisions. Each build used Rust 1.95.0 on macOS ARM64 at optimization level 3 with 16 code-generation units and LTO disabled. The observer loaded the original 20,000-row fixture in one statement, set `work_mem` to 4 MB and used the benchmark’s cursor collector. Each column reports the median of five warmed calls. The complete query, cursor opening and result iteration were measured separately. [Cursor change and regression tests](https://github.com/cognica-io/uqa-engine/pull/1438)
+
+| Revision | Complete query instructions | Cursor open instructions | Iteration and collection instructions | Batches | Allocations |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Analytical reference `0e8be6892` | 21,903,116 | 15,537,067 | 6,363,601 | 20 | 4,043 |
+| Main `ec8f2340f` | 26,172,398 | 19,645,454 | 6,527,978 | 21 | 2,178 |
+| Cursor fix `e17a871b1` | 20,906,849 | 14,587,339 | 6,326,063 | 21 | 2,178 |
+
+The cursor called the row-size function 31,204 times on `ec8f2340f` and 15,602 times after the change, once per output row. Reusing each batch’s measured row-record length removed 5,265,549 instructions per complete cursor call, a 20.12% reduction from `ec8f2340f`. The two builds produced identical batch boundaries and allocation counts. The controlled Linux run uses elapsed time to enforce its 1.15 limit.
+
+## Controlled cursor and aggregate measurements on main (2026-11-20 UTC)
+
+On main `ec8f2340f`, the cursor scan exceeded its 1.15 limit. The other three analytical workloads and all 16 claim comparisons passed. The dedicated c7g.4xlarge compared eight counterbalanced pairs per workload against analytical reference `0e8be6892`, with 32 independent reference pairs for calibration. The cursor consumed 15,602 ordered rows from the original 20,000-row input under a 4 MB work-memory limit. [Controlled run](https://github.com/cognica-io/uqa-engine/actions/runs/44798092402) · [Signed measurements](https://github.com/cognica-io/uqa-engine/actions/runs/44798092402/artifacts/14666947204)
+
+| Workload | Reference ms | Head ms | Paired ratio | Calibrated interval | Limit | Decision |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| Q1 grouped aggregate | 3.846981 | 4.030851 | 1.048318 | 1.043128–1.053534 | 1.10 | accepted |
+| Q6 filtered aggregate | 3.548588 | 2.751115 | 0.774803 | 0.769272–0.780373 | 1.10 | accepted |
+| Materialized result scan | 9.884482 | 10.164151 | 1.028537 | 1.020937–1.036193 | 1.15 | accepted |
+| Cursor result scan | 4.871577 | 5.851135 | 1.203106 | 1.193285–1.213008 | 1.15 | regression |
+
 ## Controlled analytical results after grouped-column and scan improvements (2026-11-20 UTC)
 
 On main `eed2c8127`, Q1 met its 1.10 limit with a paired ratio of 1.049514 and a calibrated interval of 1.044156–1.054899. The cursor scan exceeded its 1.15 limit with a paired ratio of 1.197301 and a calibrated interval of 1.187012–1.207679. All 16 claim comparisons passed their 1.15 limit. The dedicated c7g.4xlarge used eight counterbalanced comparison pairs per workload against analytical reference `0e8be6892` and 32 independent reference pairs for calibration. [Controlled run](https://github.com/cognica-io/uqa-engine/actions/runs/44717583671) · [Signed measurements](https://github.com/cognica-io/uqa-engine/actions/runs/44717583671/artifacts/14625796636)
