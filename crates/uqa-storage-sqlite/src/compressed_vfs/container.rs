@@ -10,11 +10,12 @@ use super::{
     allocate_payload, build_entry, build_header, chunk_aad, chunk_payload_tag,
     commit_authentication_tag, compress_chunk, decompress_chunk, fill_random, fs, invalid_data,
     keys_from_key, parse_header, scan_committed_records, usize_to_u64,
-    verify_header_authentication, Aead, AuthenticatedChunkRecord, BTreeMap, BTreeSet, ChunkEntry,
+    verify_header_authentication, Aead, AuthenticatedChunkRecord, BTreeMap, ChunkCache, ChunkEntry,
     ContainerFile, File, HeaderMetadata, OpenOptions, OpenOptionsEntry, PathBuf, Payload, Read,
     SQLiteCompressedContainerAnchor, Seek, SeekFrom, Write, AEAD_TAG_LEN, AUTH_TAG_LEN,
-    CHUNK_AUTHENTICATED, CHUNK_COMMIT, CHUNK_COMPRESSED, CHUNK_ENCRYPTED, COMMIT_CHUNK_ID,
-    ENTRY_SIZE, FILE_ID_LEN, FLAG_ENCRYPTED, HEADER_SIZE, NONCE_LEN, SALT_LEN,
+    CHUNK_AUTHENTICATED, CHUNK_COMMIT, CHUNK_COMPRESSED, CHUNK_ENCRYPTED, CLEAN_CHUNK_CACHE_BYTES,
+    COMMIT_CHUNK_ID, DIRTY_CHUNK_PUBLISH_BYTES, ENTRY_SIZE, FILE_ID_LEN, FLAG_ENCRYPTED,
+    HEADER_SIZE, NONCE_LEN, SALT_LEN,
 };
 
 impl ContainerFile {
@@ -42,8 +43,8 @@ impl ContainerFile {
             logical_len: 0,
             append_offset: usize_to_u64(HEADER_SIZE, "container header size")?,
             chunks: BTreeMap::new(),
-            cache: BTreeMap::new(),
-            dirty_chunks: BTreeSet::new(),
+            cache: ChunkCache::new(CLEAN_CHUNK_CACHE_BYTES),
+            dirty_publish_bytes: DIRTY_CHUNK_PUBLISH_BYTES,
             compression,
             keys,
             initial_key: key.as_deref().map(uqa_storage::StorageEncryptionKey::new),
@@ -79,8 +80,8 @@ impl ContainerFile {
             logical_len: committed.logical_len,
             append_offset: committed.end_offset,
             chunks: committed.chunks,
-            cache: BTreeMap::new(),
-            dirty_chunks: BTreeSet::new(),
+            cache: ChunkCache::new(CLEAN_CHUNK_CACHE_BYTES),
+            dirty_publish_bytes: DIRTY_CHUNK_PUBLISH_BYTES,
             compression: header.compression,
             keys,
             initial_key: None,
@@ -91,6 +92,17 @@ impl ContainerFile {
             committed_file_len,
             dirty_header: false,
         })
+    }
+
+    /// Bound the decompressed clean chunks this handle retains and the changed
+    /// chunks it holds before publishing them.
+    pub(super) fn set_memory_limits(
+        &mut self,
+        clean_cache_bytes: usize,
+        dirty_publish_bytes: usize,
+    ) {
+        self.cache.set_clean_budget(clean_cache_bytes);
+        self.dirty_publish_bytes = dirty_publish_bytes;
     }
 
     pub(super) fn authenticated_anchor(&self) -> SQLiteCompressedContainerAnchor {
@@ -148,7 +160,7 @@ impl ContainerFile {
     }
 
     fn refresh_committed_state_inner(&mut self) -> std::io::Result<()> {
-        if !self.dirty_chunks.is_empty() || self.dirty_header {
+        if self.cache.has_dirty() || self.dirty_header {
             return Err(invalid_data(
                 "cannot refresh a compressed container with unflushed changes",
             ));
@@ -172,6 +184,7 @@ impl ContainerFile {
                     .map(uqa_storage::StorageEncryptionKey::expose_secret),
             )?;
             committed.live_anchor.clone_from(&self.live_anchor);
+            committed.set_memory_limits(self.cache.clean_budget(), self.dirty_publish_bytes);
             *self = committed;
             return Ok(());
         }
@@ -232,7 +245,7 @@ impl ContainerFile {
     }
 
     pub(super) fn flush(&mut self) -> std::io::Result<()> {
-        if self.dirty_chunks.is_empty() && !self.dirty_header {
+        if !self.cache.has_dirty() && !self.dirty_header {
             return Ok(());
         }
         let live_anchor = self.live_anchor.clone();
@@ -271,18 +284,20 @@ impl ContainerFile {
         file.set_len(self.append_offset)?;
         file.seek(SeekFrom::Start(self.append_offset))?;
         let active_chunk_count = usize_to_u64(self.chunk_count()?, "active chunk count")?;
-        let dirty_chunks: Vec<u64> = self
-            .dirty_chunks
-            .iter()
-            .copied()
-            .filter(|chunk_id| *chunk_id < active_chunk_count)
-            .collect();
+        self.cache.retain_below(active_chunk_count);
+        let dirty_chunks = self.cache.dirty_ids();
         let mut append_offset = self.append_offset;
         let entry_size = usize_to_u64(ENTRY_SIZE, "container entry size")?;
         let mut pending_records = Vec::with_capacity(dirty_chunks.len());
         for chunk_id in dirty_chunks {
+            let expected_len = self.expected_chunk_len(chunk_id)?;
+            self.cache.get_mut(chunk_id, expected_len);
+            let raw = self
+                .cache
+                .peek(chunk_id)
+                .ok_or_else(|| invalid_data(format!("dirty chunk {chunk_id} is not cached")))?;
             let (entry, stored) =
-                self.encode_dirty_chunk(chunk_id, append_offset, next_generation)?;
+                self.encode_chunk(chunk_id, raw, append_offset, next_generation)?;
             file.write_all(&build_entry(&entry)?)?;
             file.write_all(&stored)?;
             let allocated_len = usize_to_u64(entry.allocated_len, "chunk allocated length")?;
@@ -339,7 +354,7 @@ impl ContainerFile {
         }
         self.chunks
             .retain(|chunk_id, _| *chunk_id < active_chunk_count);
-        self.dirty_chunks.clear();
+        self.cache.publish_dirty();
         self.dirty_header = false;
         let header_result = self
             .write_current_header(&mut file)
@@ -415,20 +430,20 @@ impl ContainerFile {
         }
     }
 
-    pub(super) fn encode_dirty_chunk(
-        &mut self,
+    pub(super) fn encode_chunk(
+        &self,
         chunk_id: u64,
+        raw: &[u8],
         append_offset: u64,
         generation: u64,
     ) -> std::io::Result<(ChunkEntry, Vec<u8>)> {
-        let raw = self.load_chunk(chunk_id)?.clone();
-        let compressed = compress_chunk(self.compression, &raw)?;
+        let compressed = compress_chunk(self.compression, raw)?;
         let mut flags = 0_u32;
         let mut stored = if compressed.len() < raw.len() {
             flags |= CHUNK_COMPRESSED;
             compressed
         } else {
-            raw.clone()
+            raw.to_vec()
         };
         let mut nonce = [0_u8; NONCE_LEN];
         if self.keys.is_some() {
@@ -451,7 +466,7 @@ impl ContainerFile {
             stored_len,
             raw_len: raw.len(),
             flags,
-            crc32: crc32fast::hash(&raw),
+            crc32: crc32fast::hash(raw),
             nonce,
             generation,
             allocated_len: stored_len,
@@ -518,8 +533,12 @@ impl ContainerFile {
             let chunk = self.load_chunk(chunk_id)?;
             chunk[chunk_offset..chunk_offset + copy_len]
                 .copy_from_slice(&source[copied..copied + copy_len]);
-            self.dirty_chunks.insert(chunk_id);
+            self.cache.mark_dirty(chunk_id)?;
             copied += copy_len;
+        }
+        // SQLite writes a main database only under its exclusive lock, and its synced rollback journal restores every page that an unfinished or failed transaction changed. Publishing changed chunks before the transaction commits therefore keeps it atomic while bounding what this handle holds in memory; a journal container is written under the reserved lock that keeps other connections from treating it as hot.
+        if self.cache.dirty_bytes() > self.dirty_publish_bytes {
+            self.flush()?;
         }
         Ok(())
     }
@@ -536,10 +555,7 @@ impl ContainerFile {
         let active_chunk_count = usize_to_u64(new_chunk_count, "active chunk count")?;
         self.chunks
             .retain(|chunk_id, _| *chunk_id < active_chunk_count);
-        self.cache
-            .retain(|chunk_id, _| *chunk_id < active_chunk_count);
-        self.dirty_chunks
-            .retain(|chunk_id| *chunk_id < active_chunk_count);
+        self.cache.retain_below(active_chunk_count);
         if size > 0 {
             let chunk_size = self.compression.chunk_size().map_err(invalid_data)?;
             let changed_chunk = if size < old_len && !size.is_multiple_of(chunk_size) {
@@ -552,28 +568,24 @@ impl ContainerFile {
                 None
             };
             if let Some(chunk_id) = changed_chunk {
-                let expected_len = self.expected_chunk_len(chunk_id)?;
-                let chunk = self.load_chunk(chunk_id)?;
-                chunk.resize(expected_len, 0);
-                self.dirty_chunks.insert(chunk_id);
+                self.load_chunk(chunk_id)?;
+                self.cache.mark_dirty(chunk_id)?;
             }
         }
         Ok(())
     }
 
-    pub(super) fn load_chunk(&mut self, chunk_id: u64) -> std::io::Result<&mut Vec<u8>> {
-        if !self.cache.contains_key(&chunk_id) {
-            let raw = self.read_chunk_from_disk(chunk_id)?;
-            self.cache.insert(chunk_id, raw);
-        }
+    /// Borrow a chunk sized to the current logical length, decoding it from
+    /// its committed record when this handle does not retain it.
+    pub(super) fn load_chunk(&mut self, chunk_id: u64) -> std::io::Result<&mut [u8]> {
         let expected_len = self.expected_chunk_len(chunk_id)?;
-        let chunk = self.cache.get_mut(&chunk_id).ok_or_else(|| {
-            invalid_data(format!(
-                "chunk {chunk_id} disappeared from the cache after loading"
-            ))
-        })?;
-        chunk.resize(expected_len, 0);
-        Ok(chunk)
+        if self.cache.contains(chunk_id) {
+            return self.cache.get_mut(chunk_id, expected_len).ok_or_else(|| {
+                invalid_data(format!("chunk {chunk_id} disappeared from the cache"))
+            });
+        }
+        let raw = self.read_chunk_from_disk(chunk_id)?;
+        Ok(self.cache.insert_clean(chunk_id, raw))
     }
 
     pub(super) fn read_chunk_from_disk(&self, chunk_id: u64) -> std::io::Result<Vec<u8>> {

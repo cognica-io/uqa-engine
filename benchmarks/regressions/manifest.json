@@ -2,6 +2,84 @@
   "schema_version": 1,
   "checks": [
     {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "reading_more_than_the_clean_budget_retains_only_the_budget",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/compressed_vfs/tests/memory.rs",
+      "capability": "Bounded compressed chunk cache",
+      "workload": "Read every chunk of a 256-chunk container twice with an eight-chunk clean budget.",
+      "invariant": "Every read returns the committed bytes while the handle retains at most the budget and exactly eight chunks.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "changes_beyond_the_dirty_budget_are_published_before_the_final_flush",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/compressed_vfs/tests/memory.rs",
+      "capability": "Early publication of changed chunks",
+      "workload": "Write 256 chunks of an encrypted container with a sixteen-chunk dirty budget before one final flush.",
+      "invariant": "Changed chunks never exceed the budget, early publications advance the generation and every chunk survives reopening.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "compaction_keeps_the_clean_budget_and_the_live_contents",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/compressed_vfs/tests/memory.rs",
+      "capability": "Streaming compaction",
+      "workload": "Rewrite all 256 chunks three times with an eight-chunk clean budget until compaction replaces the container.",
+      "invariant": "Compaction runs without exceeding the clean budget, leaves no pending compaction and preserves the latest contents.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "compaction_waits_until_stale_records_exceed_the_live_records",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/compressed_vfs/tests/memory.rs",
+      "capability": "Proportional compaction",
+      "workload": "Rewrite 300 of 640 incompressible 32 KiB chunks, then the remaining 340.",
+      "invariant": "More than 8 MiB of stale records below the live size are retained; exceeding the live size compacts to one record per chunk.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "a_transaction_larger_than_the_dirty_budget_commits_atomically",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/compressed_vfs/tests/memory.rs",
+      "capability": "Large compressed transaction commit",
+      "workload": "Commit 1,299 incompressible 32 KiB rows in one transaction on an encrypted compressed database.",
+      "invariant": "Every row is visible after commit and reopening, and the integrity check passes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "an_interrupted_transaction_after_early_publication_rolls_back_from_its_journal",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/compressed_vfs/tests/memory.rs",
+      "capability": "Atomicity after early publication",
+      "workload": "Copy an encrypted compressed database and its rollback journal after early publication inside an open transaction, then roll back the original and open the copy.",
+      "invariant": "Both the original and the recovered copy keep only the committed row, pass the integrity check and the copy's hot journal is removed.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
       "package": "uqa-graph",
       "kind": "lib",
       "test": "a_single_wide_path_definition_yields_for_sequences_labels_and_utf8_fragments",
