@@ -22951,6 +22951,22 @@
     {
       "package": "uqa-engine",
       "kind": "test",
+      "test": "set_operation_groups_match_postgresql",
+      "cases": 4,
+      "source": "crates/uqa-engine/tests/queries/sql_set_ordering.rs",
+      "capability": "SQL set-operation groups",
+      "workload": "Single and repeated rows from constants, VALUES and filtered tables through EXCEPT, INTERSECT and UNION on all four storage providers.",
+      "invariant": "Rows, column types and command tags match PostgreSQL 18 for the final group, multicolumn rows, NULLs, multiplicities and EXISTS predicates.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite",
+        "case_3_sqlite_key_value",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
       "test": "set_operation_ordering_matches_postgresql_after_reopen",
       "cases": 4,
       "source": "crates/uqa-engine/tests/queries/sql_set_ordering.rs",

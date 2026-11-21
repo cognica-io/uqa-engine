@@ -737,6 +737,17 @@ mod tests {
     }
 
     #[test]
+    fn except_emits_the_unmatched_final_left_group() {
+        for all in [false, true] {
+            assert_eq!(execute(SetOpKind::Except, all, &[2], &[1]), vec![2]);
+            assert_eq!(
+                execute(SetOpKind::Except, all, &[3, 1, 3], &[2, 1]),
+                if all { vec![3, 3] } else { vec![3] }
+            );
+        }
+    }
+
+    #[test]
     fn set_inputs_compact_schema_only_projections_before_alignment() {
         let left = TableScan::from_rows(
             vec!["v".into(), "hidden".into()],
