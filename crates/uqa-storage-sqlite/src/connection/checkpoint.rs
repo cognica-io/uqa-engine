@@ -29,12 +29,14 @@ struct Signal {
     #[cfg(test)]
     work_gate: Mutex<()>,
     #[cfg(test)]
-    completed: std::sync::atomic::AtomicUsize,
+    shutdown_gate: Mutex<()>,
 }
 
 pub(super) struct Checkpoint {
     signal: Arc<Signal>,
     worker: Option<JoinHandle<()>>,
+    #[cfg(test)]
+    events: std::sync::Weak<tests::Events>,
 }
 
 impl Checkpoint {
@@ -48,6 +50,10 @@ impl Checkpoint {
         }
         let signal = Arc::new(Signal::default());
         let worker_signal = Arc::clone(&signal);
+        #[cfg(test)]
+        let worker_events = Arc::new(tests::Events::default());
+        #[cfg(test)]
+        let events = Arc::downgrade(&worker_events);
         let spec = spec.clone();
         let worker = std::thread::Builder::new()
             .name("uqa-sqlite-checkpoint".into())
@@ -82,7 +88,7 @@ impl Checkpoint {
                         break;
                     }
                     #[cfg(test)]
-                    let _test_gate = worker_signal.work_gate.lock();
+                    let _gate = worker_events.enter(&worker_signal, stopping);
                     let result = (|| -> Result<bool> {
                         source.check()?;
                         if connection.is_none() {
@@ -99,11 +105,7 @@ impl Checkpoint {
                         Ok(busy != 0 || copied < frames)
                     })();
                     #[cfg(test)]
-                    if matches!(result, Ok(false)) {
-                        worker_signal
-                            .completed
-                            .fetch_add(1, std::sync::atomic::Ordering::Release);
-                    }
+                    worker_events.finished(&result);
                     if stopping {
                         break;
                     }
@@ -114,6 +116,8 @@ impl Checkpoint {
         Ok(Some(Self {
             signal,
             worker: Some(worker),
+            #[cfg(test)]
+            events,
         }))
     }
 
