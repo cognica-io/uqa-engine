@@ -8,7 +8,7 @@
 
 from __future__ import annotations
 
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
 import hashlib
 import json
 import os
@@ -147,83 +147,91 @@ class ControlledHost:
                 return cached
         # Cargo fingerprints are shared by workspace targets. A second checkout's old timestamps can make another revision's executable appear fresh.
         source = self.source(revision, "reference")
-        self.prepare_build_cache(source, role)
-        metadata_output = self.unit("metadata-" + role,
-            [str(self.rust_bin / "cargo"), "metadata", "--no-deps", "--format-version", "1", "--locked", "--offline"],
-            source)
-        metadata = json.loads(metadata_output.read_text())
-        args = [str(self.rust_bin / "cargo"), "build", "--profile", "bench", "--locked", "-p", "uqa-engine",
-                "--bench", "analytical_comparison", "--message-format=json-render-diagnostics",
-                *feature_arguments(metadata, "uqa-engine", "analytical_comparison")]
-        if claims:
-            args += ["-p", "uqa-execution", "--example", "row_claim_contention"]
-        output = self.unit("build-" + role, args, source, environment={
-            "CARGO_INCREMENTAL": "0", "CARGO_TARGET_DIR": str(REPOSITORY / "target" / "reference"),
-            "CC": "ccache gcc", "CXX": "ccache g++"})
-        artifacts = {}
-        for line in output.read_text().splitlines():
-            row = json.loads(line)
-            name = row.get("target", {}).get("name")
-            if row.get("reason") != "compiler-artifact" or not row.get("executable"):
-                continue
-            if name not in {"analytical_comparison", "row_claim_contention"}:
-                continue
-            manifest_path = Path(row["manifest_path"]).resolve()
-            source_path = Path(row["target"]["src_path"]).resolve()
-            if not manifest_path.is_relative_to(source.resolve()) or not source_path.is_relative_to(source.resolve()):
-                raise QualificationError("Cargo artifact does not belong to the canonical source checkout")
-            profile = row["profile"]
-            if profile["opt_level"] != "3" or profile["debug_assertions"]:
-                raise QualificationError("timing requires the optimized benchmark profile")
-            binary = Path(row["executable"]).resolve()
-            if not binary.is_relative_to((REPOSITORY / "target" / "reference").resolve()):
-                raise QualificationError("Cargo executable escapes its isolated target directory")
-            destination = BINARY_ROOT / role / name
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(binary, destination)
-            destination.chmod(0o555)
-            artifacts[name] = {"path": str(destination), "sha256": file_hash(destination),
-                               "revision": revision, "profile": profile, "features": row["features"],
-                               "build_environment": self.build_environment,
-                               "source_path": str(source.resolve()), "source_tree": source_tree,
-                               "artifact_manifest_path": str(manifest_path), "artifact_src_path": str(source_path)}
-        if set(artifacts) != expected:
-            raise QualificationError("Cargo omitted a required controlled workload")
-        if self.git("rev-parse", "HEAD", cwd=source) != revision or self.git("status", "--porcelain", cwd=source):
-            raise QualificationError("canonical source changed during the build")
+        with self.build_cache(source, role) as target:
+            metadata_output = self.unit("metadata-" + role,
+                [str(self.rust_bin / "cargo"), "metadata", "--no-deps", "--format-version", "1", "--locked", "--offline"],
+                source)
+            metadata = json.loads(metadata_output.read_text())
+            args = [str(self.rust_bin / "cargo"), "build", "--profile", "bench", "--locked", "-p", "uqa-engine",
+                    "--bench", "analytical_comparison", "--message-format=json-render-diagnostics",
+                    *feature_arguments(metadata, "uqa-engine", "analytical_comparison")]
+            if claims:
+                args += ["-p", "uqa-execution", "--example", "row_claim_contention"]
+            output = self.unit("build-" + role, args, source, environment={
+                "CARGO_INCREMENTAL": "0", "CARGO_TARGET_DIR": str(target),
+                "CC": "ccache gcc", "CXX": "ccache g++"})
+            artifacts = {}
+            for line in output.read_text().splitlines():
+                row = json.loads(line)
+                name = row.get("target", {}).get("name")
+                if row.get("reason") != "compiler-artifact" or not row.get("executable"):
+                    continue
+                if name not in {"analytical_comparison", "row_claim_contention"}:
+                    continue
+                manifest_path = Path(row["manifest_path"]).resolve()
+                source_path = Path(row["target"]["src_path"]).resolve()
+                if not manifest_path.is_relative_to(source.resolve()) or not source_path.is_relative_to(source.resolve()):
+                    raise QualificationError("Cargo artifact does not belong to the canonical source checkout")
+                profile = row["profile"]
+                if profile["opt_level"] != "3" or profile["debug_assertions"]:
+                    raise QualificationError("timing requires the optimized benchmark profile")
+                binary = Path(row["executable"]).resolve()
+                if not binary.is_relative_to(target.resolve()):
+                    raise QualificationError("Cargo executable escapes its isolated target directory")
+                destination = BINARY_ROOT / role / name
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(binary, destination)
+                destination.chmod(0o555)
+                artifacts[name] = {"path": str(destination), "sha256": file_hash(destination),
+                                   "revision": revision, "profile": profile, "features": row["features"],
+                                   "build_environment": self.build_environment,
+                                   "source_path": str(source.resolve()), "source_tree": source_tree,
+                                   "artifact_manifest_path": str(manifest_path), "artifact_src_path": str(source_path)}
+            if set(artifacts) != expected:
+                raise QualificationError("Cargo omitted a required controlled workload")
+            if self.git("rev-parse", "HEAD", cwd=source) != revision or self.git("status", "--porcelain", cwd=source):
+                raise QualificationError("canonical source changed during the build")
         (BINARY_ROOT / role / "artifacts.json").write_text(json.dumps(artifacts, indent=2) + "\n")
         (self.output / (role + "-build.json")).write_text(json.dumps(artifacts, indent=2) + "\n")
         return artifacts
 
-    def prepare_build_cache(self, source: Path, role: str = "build"):
-        """Admit compilation against the canonical checkout and reclaim its derived cache when space is low."""
+    @contextmanager
+    def build_cache(self, source: Path, role: str):
+        """Let Cargo own its target and publish the checkout identity after a verified build."""
         if source.resolve() != REPOSITORY.resolve():
             raise QualificationError("build cache requires the canonical source checkout")
-        target = REPOSITORY / "target" / "reference"
+        target = source / "target" / "reference"
         marker = target / "source-checkout.json"
         identity = {"schema": 1, "source_path": str(source.resolve())}
         try:
             cached = json.loads(marker.read_text())
         except (OSError, ValueError):
             cached = None
-        before = shutil.disk_usage(target if target.exists() else source).free
-        reason = ("source-checkout" if cached != identity else
-                  "capacity" if before < MIN_BUILD_FREE_BYTES else None)
+        filesystem = next(path for path in (target, target.parent, source) if path.exists())
+        before = shutil.disk_usage(filesystem).free
+        reason = None
+        if target.exists():
+            if cached != identity:
+                reason = "source-checkout"
+            elif before < MIN_BUILD_FREE_BYTES:
+                reason = "capacity"
         if reason:
             label = "clean-legacy-build-output" if reason == "source-checkout" else "clean-build-capacity-" + role
             self.unit(label, [str(self.rust_bin / "cargo"), "clean", "--profile", "bench",
                       "--target-dir", str(target)], source)
-            self.make_writable(target)
-            marker.write_text(json.dumps(identity) + "\n")
-        after = shutil.disk_usage(target).free
+        after = shutil.disk_usage(filesystem).free
         storage = {"source_path": str(source.resolve()), "target_path": str(target),
                    "minimum_free_bytes": MIN_BUILD_FREE_BYTES, "free_before": before,
                    "free_after": after, "cleanup_reason": reason}
         (self.output / (role + "-build-storage.json")).write_text(json.dumps(storage, indent=2) + "\n")
         if after < MIN_BUILD_FREE_BYTES:
+            stage = " after cache reclamation" if reason else ""
             raise QualificationError(
-                f"insufficient build storage after cache reclamation: {after} bytes free; "
+                f"insufficient build storage{stage}: {after} bytes free; "
                 f"{MIN_BUILD_FREE_BYTES} required")
+        yield target
+        if cached != identity:
+            marker.write_text(json.dumps(identity) + "\n")
 
     def isolate(self) -> dict:
         self.progress("establish-host-control")

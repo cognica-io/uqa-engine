@@ -560,6 +560,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Retire deeply nested native scalar expressions with constant stack and no traversal allocation, including cleanup after a retained resource unwinds. Native AST payloads move into execution plans without replacement boxes or declaration copies; Rust consumers borrow expression variants when inspecting their fields.
 
 - Reclaim derived benchmark build output before controlled performance compilation exhausts disk space, preserving retained reference executables and measurement records.
+- Let Cargo create the controlled benchmark target before recording its checkout. Cargo 1.100 can now reclaim that target when disk space runs low.
 
 - Retire, copy and validate deeply nested native SQL types with constant stack. Range-subtype validation and array-OID projection visit each nested node once; failed catalog-image input, exhausted memory admission and cancellation release partial type chains without recursive destruction; array modifier removal preserves domain boundaries. Rust matches that extract payload fields must now borrow `ColumnType` because it implements `Drop`.
 
