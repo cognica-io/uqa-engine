@@ -598,6 +598,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Security
 
+- Update the locked URL dependency to url 2.5.9 with form_urlencoded 1.2.3, incorporating the fix for RUSTSEC-2026-0592: `Url::origin()` of a `blob:` URL that nests further `blob:` URLs called itself without a bound and overflowed the stack, which ends the process. The Engine does not call `Url::origin()`; the dependency policy check refused the locked 2.5.8.
 - Update Parquet and Arrow to 58.4.1 with Thrift 0.23.0, and DuckDB's build-time archive dependencies to tar 0.4.46 and zip 9.0.5, addressing excessive allocation and inconsistent archive-header parsing.
 - Update the BEIR embedding dependency to sentence-transformers 6.0.0 to enforce `trust_remote_code=False` when loading local model directories. Preserve the pinned model revision and invalidate prepared embeddings produced with the previous dependency version.
 
