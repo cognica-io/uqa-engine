@@ -70,13 +70,14 @@ jobs:
           name: performance-binaries-ubuntu-24.04
           path: ${{ runner.temp }}
       - name: Check bounded work, memory and output correctness
+        id: regression
         run: python3 scripts/run-performance-checks.py --archive-file "$RUNNER_TEMP/uqa-performance-tests.tar.zst"
       - name: Verify independent-process claim workload without timing
         run: |
           tar -xzf "$RUNNER_TEMP/uqa-claim-fixture.tar.gz" -C "$RUNNER_TEMP"
           "$RUNNER_TEMP/row_claim_contention" --verify > target/performance-checks/claim-contention.json
       - name: Retain regression results
-        if: always()
+        if: always() && steps.regression.outcome != '' && steps.regression.outcome != 'skipped'
         uses: actions/upload-artifact@v7.0.2
         with:
           name: performance-checks-ubuntu-24.04

@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import pathlib
 import re
@@ -206,6 +207,29 @@ class PremergeCIWorkflowContractTest(unittest.TestCase):
         self.assertLess(build.index("name: Retain macOS workspace test results"), build.index("--workspace-results"))
         self.assertNotIn("macos-26-arm64", (workflows / "performance-checks.yml").read_text())
         self.assertNotIn("self-hosted", (workflows / "performance-platform.yml").read_text())
+
+    def test_result_uploads_follow_the_step_that_can_produce_results(self) -> None:
+        workflows = ROOT / ".github/workflows"
+        uploads = {
+            "workspace-tests.yml": [("build", "workspace", "Retain macOS workspace test results"),
+                                    ("test", "workspace", "Retain individual test results")],
+            "performance-platform.yml": [("deterministic-work", "regression", "Retain regression results")],
+        }
+        for workflow, cases in uploads.items():
+            jobs = json.loads(subprocess.check_output([
+                "perl", "-MCPAN::Meta::YAML=LoadFile", "-MJSON::PP=encode_json", "-e",
+                "print encode_json(LoadFile($ARGV[0])->{jobs})", str(workflows / workflow),
+            ]))
+            for job, owner, name in cases:
+                with self.subTest(workflow=workflow, job=job, step=name):
+                    steps = jobs[job]["steps"]
+                    producer, = (i for i, step in enumerate(steps) if step.get("id") == owner)
+                    upload, = (i for i, step in enumerate(steps) if step.get("name") == name)
+                    self.assertLess(producer, upload)
+                    self.assertTrue(steps[upload]["uses"].startswith("actions/upload-artifact@"))
+                    self.assertEqual(steps[upload]["if"],
+                                     f"always() && steps.{owner}.outcome != '' && steps.{owner}.outcome != 'skipped'")
+                    self.assertEqual(steps[upload]["with"]["if-no-files-found"], "error")
 
     def test_self_hosted_macos_does_not_run_privileged_cache_saving(self) -> None:
         main_only = {"c-bindings.yml", "c-packages.yml", "ci.yml", "fdw-features.yml",
