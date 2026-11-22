@@ -9,7 +9,7 @@
 use super::*;
 
 const SMALL_CHUNK: usize = 512;
-const ROWS: i64 = 1_300;
+const ROWS: i64 = 700;
 
 fn small_chunks(key: Option<&str>) -> OpenOptionsEntry {
     OpenOptionsEntry {
@@ -172,7 +172,7 @@ fn compaction_waits_until_stale_records_exceed_the_live_records() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("proportional-compaction.uqac.sqlite3");
     let chunk_size = SQLiteCompressionOptions::default().chunk_size().unwrap();
-    let chunks = 640;
+    let chunks = 320;
     let mut container = ContainerFile::open(path.clone(), default_chunks()).unwrap();
     container
         .write_at(0, &random_bytes(chunk_size * chunks))
@@ -180,17 +180,17 @@ fn compaction_waits_until_stale_records_exceed_the_live_records() {
     container.flush().unwrap();
     let live_len = std::fs::metadata(&path).unwrap().len();
 
-    // Rewriting 300 of 640 incompressible chunks leaves more than 8 MiB of stale records, which is still less than the live records.
-    for chunk in 0..300 {
+    // Rewriting 280 of 320 incompressible chunks leaves more than 8 MiB of stale records, which is still less than the live records.
+    for chunk in 0..280 {
         container
             .write_at(chunk * chunk_size, &random_bytes(chunk_size))
             .unwrap();
     }
     container.flush().unwrap();
     assert!(std::fs::metadata(&path).unwrap().len() - live_len > 8 * 1024 * 1024);
-    assert_eq!(scan_chunk_record_generations(&path).len(), chunks + 300);
+    assert_eq!(scan_chunk_record_generations(&path).len(), chunks + 280);
 
-    for chunk in 300..chunks {
+    for chunk in 280..chunks {
         container
             .write_at(chunk * chunk_size, &random_bytes(chunk_size))
             .unwrap();

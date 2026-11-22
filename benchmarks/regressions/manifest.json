@@ -62,7 +62,7 @@
       "cases": 1,
       "source": "crates/uqa-storage-sqlite/src/compressed_vfs/tests/refresh.rs",
       "capability": "Commit visibility between compressed connections",
-      "workload": "One encrypted compressed connection commits 100 updates beside 4 MB of rows while another reads after each.",
+      "workload": "One encrypted compressed connection commits 40 updates beside 1 MB of rows while another reads after each.",
       "invariant": "The reader observes every committed value, counts every row and passes the integrity check.",
       "case_names": [
         ""
@@ -114,7 +114,7 @@
       "cases": 1,
       "source": "crates/uqa-storage-sqlite/src/compressed_vfs/tests/memory.rs",
       "capability": "Proportional compaction",
-      "workload": "Rewrite 300 of 640 incompressible 32 KiB chunks, then the remaining 340.",
+      "workload": "Rewrite 280 of 320 incompressible 32 KiB chunks, then the remaining 40.",
       "invariant": "More than 8 MiB of stale records below the live size are retained; exceeding the live size compacts to one record per chunk.",
       "case_names": [
         ""
@@ -127,7 +127,7 @@
       "cases": 1,
       "source": "crates/uqa-storage-sqlite/src/compressed_vfs/tests/memory.rs",
       "capability": "Large compressed transaction commit",
-      "workload": "Commit 1,299 incompressible 32 KiB rows in one transaction on an encrypted compressed database.",
+      "workload": "Commit 699 incompressible 32 KiB rows in one transaction on an encrypted compressed database.",
       "invariant": "Every row is visible after commit and reopening, and the integrity check passes.",
       "case_names": [
         ""

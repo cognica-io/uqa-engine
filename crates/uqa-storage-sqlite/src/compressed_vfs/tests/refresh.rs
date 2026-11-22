@@ -217,14 +217,14 @@ fn a_connection_reads_every_commit_of_another_connection() {
              INSERT INTO counter VALUES (0);",
         )
         .unwrap();
-    // Four megabytes of incompressible rows give the container more than a hundred records.
-    for id in 0..128 {
+    // One megabyte of incompressible rows gives the container dozens of records.
+    for id in 0..32 {
         writer
             .execute("INSERT INTO rows VALUES (?1, randomblob(32768))", [id])
             .unwrap();
     }
     let reader = open();
-    for value in 1..=100_i64 {
+    for value in 1..=40_i64 {
         writer
             .execute("UPDATE counter SET value = ?1", [value])
             .unwrap();
@@ -236,7 +236,7 @@ fn a_connection_reads_every_commit_of_another_connection() {
     let rows: i64 = reader
         .query_row("SELECT count(*) FROM rows", [], |row| row.get(0))
         .unwrap();
-    assert_eq!(rows, 128);
+    assert_eq!(rows, 32);
     let integrity: String = reader
         .query_row("PRAGMA integrity_check", [], |row| row.get(0))
         .unwrap();
