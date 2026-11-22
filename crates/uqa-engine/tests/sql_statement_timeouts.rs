@@ -40,20 +40,23 @@ fn persistent() -> (tempfile::TempDir, Engine, Engine) {
 fn a_statement_that_outlasts_statement_timeout_is_canceled_once() {
     let engine = Engine::new();
     sql(&engine, "SET statement_timeout = 50");
-    assert_eq!(
-        sql(&engine, "SHOW statement_timeout").rows[0]["statement_timeout"],
-        Value::Str("50ms".into())
-    );
+    assert_eq!(engine.show_variable("statement_timeout").unwrap(), "50ms");
     let (error, elapsed) = timed_error(&engine, "SELECT pg_sleep(60)");
     assert_eq!(error.sqlstate(), Some("57014"));
     assert_eq!(
         error.to_string(),
         "canceling statement due to statement timeout"
     );
-    assert!(elapsed < LATE, "{elapsed:?}");
+    assert!(
+        (Duration::from_millis(50)..LATE).contains(&elapsed),
+        "{elapsed:?}"
+    );
+    assert!(!engine.is_cancelled());
+    // Give the next query its own deadline before it starts, so its execution time cannot be
+    // mistaken for an interrupt left over from the canceled statement.
+    engine.set_variable("statement_timeout", "1min").unwrap();
     sql(&engine, "SELECT 1");
-    sql(&engine, "SET statement_timeout = '1min'");
-    sql(&engine, "SELECT pg_sleep(0.05)");
+    sql(&engine, "SELECT pg_sleep(0.1)");
     sql(&engine, "RESET statement_timeout");
     assert_eq!(
         sql(&engine, "SHOW statement_timeout").rows[0]["statement_timeout"],

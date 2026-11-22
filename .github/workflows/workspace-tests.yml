@@ -6,6 +6,9 @@ on:
       os:
         type: string
         required: true
+      check-regressions:
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -24,6 +27,10 @@ jobs:
   build:
     name: Build workspace tests and validate local macOS suites
     runs-on: ${{ inputs.os == 'macos-26-arm64' && fromJSON('["self-hosted","macOS","ARM64","macos-arm64","macos-26-arm64"]') || inputs.os }}
+    # The macOS workers share one disk. Keep the complete test and regression batch on one worker.
+    concurrency:
+      group: workspace-tests-${{ inputs.os }}-${{ inputs.os == 'macos-26-arm64' && 'shared-host' || github.run_id }}
+      queue: max
     # macOS also executes the full suite here. Linux compiles two optimized test targets at a time.
     timeout-minutes: ${{ inputs.os == 'macos-26-arm64' && 240 || 90 }}
     outputs:
@@ -40,6 +47,13 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+      - name: Select macOS regression inputs
+        if: runner.os == 'macOS' && inputs.check-regressions
+        id: regression
+        uses: ./.github/actions/select-validation-inputs
+        with:
+          kind: regression
+          base: ${{ github.event.pull_request.base.sha || github.event.before }}
       - uses: dtolnay/rust-toolchain@stable
       - name: Free Linux runner disk
         if: runner.os == 'Linux'
@@ -67,19 +81,77 @@ jobs:
           echo "sha256=${archive_checksum%% *}" >> "$GITHUB_OUTPUT"
       - name: Run every macOS workspace test on its build worker
         if: runner.os == 'macOS'
+        id: workspace
         # The whole-suite budget is separate from the unchanged per-case CI deadlines.
         timeout-minutes: 180
         env:
           # Bound durable test concurrency independently of the other workers sharing this host.
           NEXTEST_TEST_THREADS: "8"
-        run: cargo nextest run --profile ci --workspace --locked
+          CHECK_REGRESSIONS: ${{ steps.regression.outputs.required }}
+        shell: bash
+        run: |
+          if [[ "$CHECK_REGRESSIONS" == true ]]; then
+            python3 scripts/run-performance-checks.py --record-workspace "$RUNNER_TEMP/workspace-results"
+          else
+            cargo nextest run --profile ci --workspace --locked
+          fi
       - name: Retain macOS workspace test results
         if: always() && runner.os == 'macOS'
         uses: actions/upload-artifact@v4
         with:
           name: workspace-results-${{ inputs.os }}
-          path: target/nextest/ci/junit.xml
+          path: ${{ steps.regression.outputs.required == 'true' && format('{0}/workspace-results/junit.xml', runner.temp) || 'target/nextest/ci/junit.xml' }}
           retention-days: 7
+          if-no-files-found: error
+      - name: Build macOS regression targets and independent-process claim fixture
+        id: regression_build
+        if: ${{ !cancelled() && steps.regression.outputs.required == 'true' && steps.archive.outcome == 'success' }}
+        timeout-minutes: 60
+        env:
+          CARGO_PROFILE_DEV_DEBUG: "0"
+        run: |
+          python3 -m unittest discover -s scripts/tests -p test_performance_checks.py
+          python3 scripts/run-performance-checks.py --build-archive "$RUNNER_TEMP/uqa-performance-tests.tar.zst"
+          python3 scripts/run-performance-checks.py --build-claim-fixture
+          tar -czf "$RUNNER_TEMP/uqa-claim-fixture.tar.gz" -C target/debug/examples row_claim_contention
+      - name: Verify macOS bounded work, memory and output correctness
+        if: ${{ !cancelled() && steps.regression_build.outcome == 'success' }}
+        timeout-minutes: 120
+        env:
+          CARGO_PROFILE_DEV_DEBUG: "0"
+          WORKSPACE_OUTCOME: ${{ steps.workspace.outcome }}
+        shell: bash
+        run: |
+          if [[ "$WORKSPACE_OUTCOME" == success ]]; then
+            python3 scripts/run-performance-checks.py --workspace-results "$RUNNER_TEMP/workspace-results"
+          else
+            python3 scripts/run-performance-checks.py --built-in-place
+          fi
+      - name: Verify macOS independent-process claim workload
+        if: ${{ !cancelled() && steps.regression_build.outcome == 'success' }}
+        run: |
+          mkdir -p target/performance-checks
+          target/debug/examples/row_claim_contention --verify > target/performance-checks/claim-contention.json
+      - name: Retain macOS regression results
+        if: ${{ always() && steps.regression_build.outcome == 'success' }}
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: performance-checks-${{ inputs.os }}
+          path: |
+            target/nextest/ci/junit.xml
+            target/performance-checks/
+          if-no-files-found: error
+          retention-days: 7
+      - name: Retain macOS regression executables
+        if: ${{ !cancelled() && steps.regression_build.outcome == 'success' }}
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: performance-binaries-${{ inputs.os }}
+          path: |
+            ${{ runner.temp }}/uqa-performance-tests.tar.zst
+            ${{ runner.temp }}/uqa-claim-fixture.tar.gz
+          compression-level: 0
+          retention-days: 1
           if-no-files-found: error
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() && steps.archive.outcome == 'success' }}

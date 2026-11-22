@@ -28,7 +28,8 @@ class PerformanceChangeScopeTest(unittest.TestCase):
         for path in ["crates/uqa-engine/src/queries.rs", "crates/uqa-sql/Cargo.toml",
                      "crates/uqa-sql/src/tests/fixture.md", "Cargo.toml", "Cargo.lock", "rust-toolchain.toml",
                      ".config/nextest.toml", ".github/actions/setup-nextest/action.yml",
-                     ".github/workflows/performance-platform.yml", "scripts/run-performance-checks.py",
+                     ".github/workflows/workspace-tests.yml", ".github/workflows/performance-platform.yml",
+                     "scripts/run-performance-checks.py",
                      "scripts/tests/test_performance_checks.py", "benchmarks/regressions/manifest.json",
                      "benchmarks/regressions/new workload/input.bin"]:
             with self.subTest(path=path):

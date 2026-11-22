@@ -8,6 +8,12 @@
 
 use super::*;
 
+fn read_rollback_journal(coordinator: &FileLockCoordinator) -> Vec<u8> {
+    let mut path = coordinator.relation_path.as_os_str().to_owned();
+    path.push("-journal");
+    std::fs::read(path).unwrap()
+}
+
 #[test]
 fn different_relations_with_colliding_hashes_never_conflict_between_processes() {
     let left = b"public.collision_3158";
@@ -108,6 +114,17 @@ fn identity_comparison_keeps_binary_suffixes_and_registry_reuse_is_bounded() {
     }
     assert_eq!(coordinator.relation_registry_counts(), (0, 3));
     assert!(std::fs::metadata(&coordinator.relation_path).unwrap().len() < 128 * 1024);
+    // Replacing this key journals more pages than the registry keeps between allocations.
+    let large = vec![0xff; 128 * 1024];
+    drop(coordinator.pin_relation(&large, &cancel).unwrap());
+    drop(
+        coordinator
+            .pin_relation(b"small replacement", &cancel)
+            .unwrap(),
+    );
+    let journal = read_rollback_journal(&coordinator);
+    assert!((8..=64 * 1024).contains(&journal.len()));
+    assert_eq!(&journal[..8], &[0; 8]);
 }
 
 #[test]
@@ -134,9 +151,14 @@ fn encrypted_relation_identities_share_credentials_and_reject_live_mismatches() 
     assert_eq!(peer.request("release 0"), "released");
     drop((peer, wrong));
     let registry = coordinator.relation_path.clone();
+    let cancel = uqa_core::CancellationToken::new();
+    drop(coordinator.pin_relation(b"replacement", &cancel).unwrap());
+    let journal_bytes = read_rollback_journal(&coordinator);
     drop(coordinator);
-    let bytes = std::fs::read(registry).unwrap();
-    assert!(!bytes
-        .windows(relation.len())
-        .any(|window| window == relation));
+    for bytes in [std::fs::read(registry).unwrap(), journal_bytes] {
+        assert!(bytes.len() >= relation.len());
+        assert!(!bytes
+            .windows(relation.len())
+            .any(|window| window == relation));
+    }
 }
