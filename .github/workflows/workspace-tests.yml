@@ -96,7 +96,7 @@ jobs:
             cargo nextest run --profile ci --workspace --locked
           fi
       - name: Retain macOS workspace test results
-        if: always() && runner.os == 'macOS'
+        if: always() && steps.workspace.outcome != '' && steps.workspace.outcome != 'skipped'
         uses: actions/upload-artifact@v4
         with:
           name: workspace-results-${{ inputs.os }}
@@ -252,6 +252,7 @@ jobs:
           test -n "$UQA_TEST_ARCHIVE_SHA256"
           printf '%s  %s\n' "$UQA_TEST_ARCHIVE_SHA256" "$RUNNER_TEMP/uqa-tests.tar.zst" | shasum -a 256 --check
       - name: Run prebuilt workspace tests
+        id: workspace
         run: >-
           cargo nextest run --profile ci
           --archive-file "$RUNNER_TEMP/uqa-tests.tar.zst"
@@ -259,7 +260,7 @@ jobs:
           --workspace-remap "$GITHUB_WORKSPACE"
           --partition slice:${{ matrix.shard }}/8
       - name: Retain individual test results
-        if: always()
+        if: always() && steps.workspace.outcome != '' && steps.workspace.outcome != 'skipped'
         uses: actions/upload-artifact@v4
         with:
           name: workspace-results-${{ inputs.os }}-${{ matrix.shard }}

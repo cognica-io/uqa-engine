@@ -18,11 +18,6 @@ runs:
             ;;
           *) echo "Unsupported nextest runner: ${RUNNER_OS}" >&2; exit 1 ;;
         esac
-        directory="$(mktemp -d "${RUNNER_TEMP}/nextest.XXXXXX")"
         archive="cargo-nextest-${version}-${platform}.tar.gz"
-        curl --fail --location --retry 2 --retry-all-errors --connect-timeout 30 --max-time 180 \
-          "https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-${version}/${archive}" \
-          --output "${directory}/${archive}"
-        (cd "$directory" && echo "${checksum}  ${archive}" | shasum -a 256 --check)
-        tar -xzf "${directory}/${archive}" -C "$directory" cargo-nextest
-        echo "$directory" >> "$GITHUB_PATH"
+        bash "$GITHUB_ACTION_PATH/install.sh" \
+          "https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-${version}/${archive}" "$checksum"

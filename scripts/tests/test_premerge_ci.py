@@ -207,6 +207,19 @@ class PremergeCIWorkflowContractTest(unittest.TestCase):
         self.assertNotIn("macos-26-arm64", (workflows / "performance-checks.yml").read_text())
         self.assertNotIn("self-hosted", (workflows / "performance-platform.yml").read_text())
 
+    def test_result_uploads_follow_the_step_that_can_produce_results(self) -> None:
+        workflows = ROOT / ".github/workflows"
+        for workflow, name, owner in [
+            ("workspace-tests.yml", "Retain macOS workspace test results", "workspace"),
+            ("workspace-tests.yml", "Retain individual test results", "workspace"),
+            ("performance-platform.yml", "Retain regression results", "regression"),
+        ]:
+            with self.subTest(step=name):
+                source = (workflows / workflow).read_text(encoding="utf-8")
+                step = source.split(f"      - name: {name}\n", 1)[1].split("\n      - ", 1)[0]
+                self.assertIn(f"if: always() && steps.{owner}.outcome != '' && steps.{owner}.outcome != 'skipped'", step)
+                self.assertIn("if-no-files-found: error", step)
+
     def test_self_hosted_macos_does_not_run_privileged_cache_saving(self) -> None:
         main_only = {"c-bindings.yml", "c-packages.yml", "ci.yml", "fdw-features.yml",
                      "workspace-tests.yml"}
