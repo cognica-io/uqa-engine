@@ -24,6 +24,10 @@ jobs:
   build:
     name: Build workspace tests and validate local macOS suites
     runs-on: ${{ inputs.os == 'macos-26-arm64' && fromJSON('["self-hosted","macOS","ARM64","macos-arm64","macos-26-arm64"]') || inputs.os }}
+    # The macOS workers share one disk. Run one complete workspace suite alongside the regression suite.
+    concurrency:
+      group: workspace-tests-${{ inputs.os }}-${{ inputs.os == 'macos-26-arm64' && 'shared-host' || github.run_id }}
+      queue: max
     # macOS also executes the full suite here. Linux compiles two optimized test targets at a time.
     timeout-minutes: ${{ inputs.os == 'macos-26-arm64' && 240 || 90 }}
     outputs:

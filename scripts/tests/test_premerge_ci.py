@@ -190,6 +190,19 @@ class PremergeCIWorkflowContractTest(unittest.TestCase):
         self.assertIn("performance-checks-${{ inputs.os }}", build)
         self.assertNotIn("actions/download-artifact", build)
 
+    def test_shared_macos_workspace_and_regression_jobs_have_separate_queues(self) -> None:
+        workflows = ROOT / ".github/workflows"
+        suffix = "${{ inputs.os }}-${{ inputs.os == 'macos-26-arm64' && 'shared-host' || github.run_id }}"
+        for filename, suite in (("workspace-tests.yml", "workspace-tests"),
+                                ("performance-platform.yml", "performance-checks")):
+            with self.subTest(workflow=filename):
+                jobs = (workflows / filename).read_text(encoding="utf-8").split("\njobs:\n", 1)[1]
+                build = re.split(r"(?m)^  [\w-]+:\n", jobs.split("  build:\n", 1)[1], maxsplit=1)[0]
+                group = f"      group: {suite}-{suffix}\n"
+                self.assertIn(f"    concurrency:\n{group}      queue: max\n", build)
+                self.assertNotIn("cancel-in-progress:", build)
+                self.assertEqual(jobs.count(group), 1)
+
     def test_self_hosted_macos_does_not_run_privileged_cache_saving(self) -> None:
         main_only = {"c-bindings.yml", "c-packages.yml", "ci.yml", "fdw-features.yml",
                      "performance-platform.yml", "workspace-tests.yml"}

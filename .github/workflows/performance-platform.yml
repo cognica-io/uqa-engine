@@ -25,6 +25,10 @@ jobs:
   build:
     name: Build regression tests and validate local macOS checks (${{ inputs.os }})
     runs-on: ${{ inputs.os == 'macos-26-arm64' && fromJSON('["self-hosted","macOS","ARM64","macos-arm64","macos-26-arm64"]') || inputs.os }}
+    # Keep one regression inventory active across the shared macOS workers, independently of workspace tests.
+    concurrency:
+      group: performance-checks-${{ inputs.os }}-${{ inputs.os == 'macos-26-arm64' && 'shared-host' || github.run_id }}
+      queue: max
     # macOS also executes the inventory. The Linux build runs with two Cargo jobs.
     timeout-minutes: ${{ inputs.os == 'macos-26-arm64' && 180 || 90 }}
     steps:
