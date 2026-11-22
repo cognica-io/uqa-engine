@@ -64,6 +64,7 @@ class PremergeCIWorkflowContractTest(unittest.TestCase):
             "      - rust-toolchain.toml\n"
             '      - ".cargo/**"\n'
             "      - .github/workflows/workspace-tests.yml\n"
+            "      - .github/workflows/performance-platform.yml\n"
             '      - ".github/actions/setup-nextest/**"\n'
             "      - .config/nextest.toml\n"
         )
@@ -169,7 +170,8 @@ class PremergeCIWorkflowContractTest(unittest.TestCase):
         run = build.split("      - name: Run every macOS workspace test on its build worker\n", 1)[1].split("      - name:", 1)[0]
         self.assertIn("if: runner.os == 'macOS'", run)
         self.assertIn('NEXTEST_TEST_THREADS: "8"', run)
-        self.assertEqual(run.split("        run: ", 1)[1].strip(), "cargo nextest run --profile ci --workspace --locked")
+        self.assertIn('scripts/run-performance-checks.py --record-workspace "$RUNNER_TEMP/workspace-results"', run)
+        self.assertIn("cargo nextest run --profile ci --workspace --locked", run)
         self.assertIn("timeout-minutes: 180", run)
         self.assertNotIn("continue-on-error", run)
         self.assertIn("workspace-results-${{ inputs.os }}", build)
@@ -180,32 +182,34 @@ class PremergeCIWorkflowContractTest(unittest.TestCase):
             self.assertIn("if: ${{ !cancelled() && steps.archive.outcome == 'success' }}", step)
         self.assertNotIn("actions/download-artifact", build)
         performance = (ROOT / ".github/workflows/performance-platform.yml").read_text(encoding="utf-8")
-        build, downstream = performance.split("  deterministic-work:\n", 1)
-        self.assertIn("if: inputs.os != 'macos-26-arm64'", downstream)
-        self.assertIn("scripts/run-performance-checks.py --built-in-place", build)
-        self.assertNotIn("scripts/run-performance-checks.py --archive-file", build)
+        linux, downstream = performance.split("  deterministic-work:\n", 1)
+        self.assertIn("runs-on: ubuntu-24.04", downstream)
+        self.assertIn("--build-archive", linux)
         self.assertIn('scripts/run-performance-checks.py --archive-file "$RUNNER_TEMP/uqa-performance-tests.tar.zst"', downstream)
-        self.assertIn("!cancelled() && runner.os == 'macOS' && steps.claim_fixture.outcome == 'success'", build)
+        self.assertIn('scripts/run-performance-checks.py --workspace-results "$RUNNER_TEMP/workspace-results"', build)
+        self.assertIn('if [[ "$WORKSPACE_OUTCOME" == success ]]', build)
+        self.assertIn("scripts/run-performance-checks.py --built-in-place", build)
+        self.assertIn("!cancelled() && steps.regression_build.outcome == 'success'", build)
         self.assertIn("row_claim_contention --verify > target/performance-checks/claim-contention.json", build)
         self.assertIn("performance-checks-${{ inputs.os }}", build)
         self.assertNotIn("actions/download-artifact", build)
 
-    def test_shared_macos_workspace_and_regression_jobs_have_separate_queues(self) -> None:
+    def test_one_macos_job_owns_workspace_and_selected_regressions(self) -> None:
         workflows = ROOT / ".github/workflows"
-        suffix = "${{ inputs.os }}-${{ inputs.os == 'macos-26-arm64' && 'shared-host' || github.run_id }}"
-        for filename, suite in (("workspace-tests.yml", "workspace-tests"),
-                                ("performance-platform.yml", "performance-checks")):
-            with self.subTest(workflow=filename):
-                jobs = (workflows / filename).read_text(encoding="utf-8").split("\njobs:\n", 1)[1]
-                build = re.split(r"(?m)^  [\w-]+:\n", jobs.split("  build:\n", 1)[1], maxsplit=1)[0]
-                group = f"      group: {suite}-{suffix}\n"
-                self.assertIn(f"    concurrency:\n{group}      queue: max\n", build)
-                self.assertNotIn("cancel-in-progress:", build)
-                self.assertEqual(jobs.count(group), 1)
+        workspace = (workflows / "workspace-tests.yml").read_text(encoding="utf-8")
+        build = workspace.split("  build:\n", 1)[1].split("  features:\n", 1)[0]
+        self.assertIn("group: workspace-tests-${{ inputs.os }}-${{ inputs.os == 'macos-26-arm64' && 'shared-host' || github.run_id }}\n      queue: max", build)
+        self.assertIn("if: runner.os == 'macOS' && inputs.check-regressions", build)
+        self.assertIn("uses: ./.github/actions/select-validation-inputs", build)
+        self.assertIn("steps.regression.outputs.required == 'true'", build)
+        self.assertIn("os: macos-26-arm64\n      check-regressions: ${{ github.event_name == 'push' || github.event_name == 'pull_request' }}", self.workflow)
+        self.assertLess(build.index("name: Retain macOS workspace test results"), build.index("--workspace-results"))
+        self.assertNotIn("macos-26-arm64", (workflows / "performance-checks.yml").read_text())
+        self.assertNotIn("self-hosted", (workflows / "performance-platform.yml").read_text())
 
     def test_self_hosted_macos_does_not_run_privileged_cache_saving(self) -> None:
         main_only = {"c-bindings.yml", "c-packages.yml", "ci.yml", "fdw-features.yml",
-                     "performance-platform.yml", "workspace-tests.yml"}
+                     "workspace-tests.yml"}
         checked = 0
         for path in (ROOT / ".github/workflows").glob("*.yml"):
             source = path.read_text(encoding="utf-8")
@@ -235,7 +239,7 @@ class PremergeCIWorkflowContractTest(unittest.TestCase):
                             with self.subTest(workflow=path.name, job=job.splitlines()[0],
                                               os=operating_system, environment=environment, ref=ref):
                                 self.assertIs(allowed, expected)
-        self.assertEqual(checked, 13)
+        self.assertEqual(checked, 12)
 
     def test_self_hosted_workers_use_distinct_toolchains_and_cargo_homes(self) -> None:
         scripts = []
@@ -245,7 +249,7 @@ class PremergeCIWorkflowContractTest(unittest.TestCase):
                 self.assertIn("if: runner.os == 'macOS' && runner.environment == 'self-hosted'", block)
                 script = block.split("        run: |\n", 1)[1]
                 scripts.append(textwrap.dedent(script))
-        self.assertEqual(len(scripts), 16)
+        self.assertEqual(len(scripts), 14)
         with tempfile.TemporaryDirectory() as temporary:
             directory = pathlib.Path(temporary)
             for index, script in enumerate(scripts):

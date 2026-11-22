@@ -16,10 +16,12 @@ import os
 import pathlib
 import platform
 import re
+import shutil
 import signal
 import subprocess
 import sys
 import tempfile
+import xml.etree.ElementTree as ET
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -123,6 +125,133 @@ def extract_archive(archive: pathlib.Path) -> pathlib.Path:
     return ROOT / "target/nextest"
 
 
+def file_sha256(path: pathlib.Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def runtime_paths(build: dict) -> dict:
+    return {key: build[key] for key in ("target-directory", "platforms", "base-output-directories", "linked-paths")}
+
+
+def binary_identity(suite: dict, build: dict) -> dict:
+    path = pathlib.Path(suite["binary-path"]).resolve(strict=True)
+    package = suite["package-id"]
+    target = pathlib.Path(build["target-directory"])
+    # Integration tests can launch package binaries such as usql through CARGO_BIN_EXE_*.
+    helpers = {binary["path"]: file_sha256(target / binary["path"])
+               for binary in build["non-test-binaries"].get(package, [])}
+    return {"path": str(path), "sha256": file_sha256(path), "helpers": helpers,
+            "platform": suite["build-platform"], "out_dir": build["build-script-out-dirs"].get(package),
+            "build_script": build.get("build-script-info", {}).get(package)}
+
+
+def record_workspace(directory: pathlib.Path) -> None:
+    directory.mkdir(parents=True, exist_ok=True)
+    record = directory / "workspace.json"
+    record.unlink(missing_ok=True)
+    workspace_junit = directory / "junit.xml"
+    workspace_junit.unlink(missing_ok=True)
+    junit = ROOT / "target/nextest/ci/junit.xml"
+    junit.unlink(missing_ok=True)
+    source = ["--workspace", "--locked"]
+    metadata = directory / "binaries-metadata.json"
+    listing_json = capture("cargo", "nextest", "list", "--list-type", "binaries-only",
+                           "--message-format", "json", *source)
+    metadata.write_text(listing_json, encoding="utf-8")
+    listing = json.loads(listing_json)
+    build = listing["rust-build-meta"]
+    binaries = {key: binary_identity(suite, build) for key, suite in listing["rust-binaries"].items()}
+    try:
+        subprocess.run(["cargo", "nextest", "run", "--profile", "ci",
+                        "--binaries-metadata", str(metadata.resolve())], cwd=ROOT, check=True)
+    finally:
+        if junit.is_file():
+            shutil.move(junit, workspace_junit)
+    record.write_text(json.dumps({
+        "revision": capture("git", "rev-parse", "HEAD"), "run_id": os.environ.get("GITHUB_RUN_ID"),
+        "run_attempt": os.environ.get("GITHUB_RUN_ATTEMPT"), "junit_sha256": file_sha256(workspace_junit),
+        "binaries": binaries, "runtime_paths": runtime_paths(build),
+    }), encoding="utf-8")
+
+
+def selected_cases(listing: dict) -> set[tuple[str, str]]:
+    return {
+        (suite_id, name)
+        for suite_id, suite in listing["rust-suites"].items()
+        for name, case in suite.get("testcases", {}).items()
+        if case["filter-match"]["status"] == "matches"
+    }
+
+
+def passed_cases(path: pathlib.Path, expected: set, *, exact: bool) -> dict:
+    root = ET.parse(path).getroot()
+    if root.tag != "testsuites" or root.get("failures") != "0" or root.get("errors") != "0":
+        raise ValueError(f"unsuccessful nextest report: {path}")
+    found = {}
+    for suite in root.findall("testsuite"):
+        for case in suite.findall("testcase"):
+            identity = (suite.attrib["name"], case.attrib["name"])
+            if identity not in expected and not exact:
+                continue
+            if (identity not in expected or identity in found or case.get("classname") != identity[0]
+                    or any(child.tag not in {"system-out", "system-err", "properties"} for child in case)):
+                raise ValueError(f"unexpected, repeated or unsuccessful nextest case: {identity}")
+            found[identity] = case
+    missing = expected - found.keys()
+    if missing:
+        raise ValueError(f"missing nextest results for {len(missing)} cases, including {min(missing)}")
+    return found
+
+
+def run_with_workspace(directory: pathlib.Path, listing: dict, selection: list[str], result: dict,
+                       standalone_junit: pathlib.Path) -> None:
+    record = json.loads((directory / "workspace.json").read_text(encoding="utf-8"))
+    workspace_junit = directory / "junit.xml"
+    if (any(record[key] != result[key] for key in ("revision", "run_id", "run_attempt"))
+            or file_sha256(workspace_junit) != record["junit_sha256"]):
+        raise ValueError("workspace test results do not belong to the current build")
+    required = selected_cases(listing)
+    build = listing["rust-build-meta"]
+    same_runtime = record["runtime_paths"] == runtime_paths(build)
+    standalone = set()
+    for suite_id in {suite_id for suite_id, _ in required}:
+        if not same_runtime or binary_identity(listing["rust-suites"][suite_id], build) != record["binaries"].get(suite_id):
+            standalone.add(suite_id)
+    separate = {key for key in required if key[0] in standalone}
+    shared = required - separate
+    completed = passed_cases(workspace_junit, shared, exact=False)
+    result["workspace_junit_sha256"] = record["junit_sha256"]
+    junit = ROOT / "target/nextest/ci/junit.xml"
+    if separate:
+        # Nextest intersects the binary filter with the reviewed profile default filter.
+        if any(not re.fullmatch(r"[A-Za-z0-9_.:-]+", suite) for suite in standalone):
+            raise ValueError("unexpected nextest binary ID")
+        harnesses = " | ".join(f"binary_id(={suite})" for suite in sorted(standalone))
+        subprocess.run(["cargo", "nextest", "run", *selection, "-E", harnesses], cwd=ROOT, check=True)
+        completed.update(passed_cases(junit, separate, exact=True))
+        shutil.copyfile(junit, standalone_junit)
+    # Preserve the original nextest testcase elements, including their timestamps and durations.
+    nodes = {}
+    root = ET.Element("testsuites", name="Deterministic performance checks", tests=str(len(required)),
+                      failures="0", errors="0", skipped="0")
+    for (suite, _), case in sorted(completed.items()):
+        if suite not in nodes:
+            nodes[suite] = ET.SubElement(root, "testsuite", name=suite, failures="0", errors="0", skipped="0")
+        nodes[suite].append(case)
+    for suite in nodes.values():
+        suite.set("tests", str(len(suite)))
+    ET.ElementTree(root).write(junit, encoding="utf-8", xml_declaration=True)
+    result["workspace_cases"] = len(shared)
+    result["standalone_cases"] = len(separate)
+    result["standalone_binaries"] = sorted(standalone)
+    print(f"Verified {len(shared)} cases from identical workspace executables and {len(separate)} "
+          "from separately built executables", file=sys.stderr, flush=True)
+
+
 def verify_selection(checks: list[dict], listing: dict) -> list[dict]:
     selected = set()
     results = []
@@ -160,13 +289,7 @@ def verify_selection(checks: list[dict], listing: dict) -> list[dict]:
             "selected_cases": len(matches),
             "source_sha256": hashlib.sha256((ROOT / check["source"]).read_bytes()).hexdigest(),
         })
-    actual = {
-        (suite_id, name)
-        for suite_id, suite in listing["rust-suites"].items()
-        for name, case in suite.get("testcases", {}).items()
-        if case["filter-match"]["status"] == "matches"
-    }
-    if actual != selected:
+    if selected_cases(listing) != selected:
         raise ValueError("nextest selected tests outside the reviewed inventory")
     return results
 
@@ -286,7 +409,12 @@ def main() -> int:
     mode.add_argument("--build-claim-fixture", action="store_true", help="compile the claim example with the archive's package features and test profile")
     mode.add_argument("--archive-file", type=pathlib.Path, help="verify and run an already compiled nextest archive")
     mode.add_argument("--built-in-place", action="store_true", help="verify tests already built in this checkout with a bounded discovery step")
+    mode.add_argument("--record-workspace", type=pathlib.Path, help="run the whole workspace and record its executable identities and results")
+    mode.add_argument("--workspace-results", type=pathlib.Path, help="verify the inventory on the same worker after a successful workspace run")
     args = parser.parse_args()
+    if args.record_workspace is not None:
+        record_workspace(args.record_workspace)
+        return 0
     checks = inventory()
     if args.check:
         print(f"{len(checks)} deterministic checks, {sum(check['cases'] for check in checks)} required cases")
@@ -321,6 +449,8 @@ def main() -> int:
         (ROOT / "target/nextest/ci/junit.xml").unlink(missing_ok=True)
         discovered = args.output / "test-inventory.json"
         discovered.unlink(missing_ok=True)
+        standalone_junit = args.output / "standalone-junit.xml"
+        standalone_junit.unlink(missing_ok=True)
         args.output.mkdir(parents=True, exist_ok=True)
         selection_file = args.output / "selection.toml"
         selection_file.write_text(selection_config(checks), encoding="utf-8")
@@ -334,7 +464,7 @@ def main() -> int:
         print("Discovering the exact regression inventory", file=sys.stderr, flush=True)
         listing_text = capture(
             "cargo", "nextest", "list", "--message-format", "json", *selection,
-            timeout=120 if args.built_in_place or args.archive_file is not None else None,
+            timeout=120 if args.built_in_place or args.archive_file is not None or args.workspace_results is not None else None,
         )
         discovered.write_text(listing_text + "\n", encoding="utf-8")
         result["stage"] = "selection"
@@ -342,11 +472,14 @@ def main() -> int:
         listing = json.loads(listing_text)
         result["checks"] = verify_selection(checks, listing)
         result["stage"] = "execution"
-        print(f"Executing {sum(check['selected_cases'] for check in result['checks'])} verified regression cases", file=sys.stderr, flush=True)
-        subprocess.run(["cargo", "nextest", "run", *selection], cwd=ROOT, check=True)
+        if args.workspace_results is not None:
+            run_with_workspace(args.workspace_results, listing, selection, result, standalone_junit)
+        else:
+            print(f"Executing {sum(check['selected_cases'] for check in result['checks'])} verified regression cases", file=sys.stderr, flush=True)
+            subprocess.run(["cargo", "nextest", "run", *selection], cwd=ROOT, check=True)
         result["status"] = "passed"
         result["stage"] = "completed"
-    except (ValueError, KeyError, OSError, subprocess.SubprocessError, KeyboardInterrupt) as error:
+    except (ValueError, KeyError, OSError, ET.ParseError, subprocess.SubprocessError, KeyboardInterrupt) as error:
         result["error"] = f"{result['stage']} interrupted by SIGINT" if isinstance(error, KeyboardInterrupt) else str(error)
         print(result["error"], file=sys.stderr)
     finally:

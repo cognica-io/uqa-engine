@@ -18,6 +18,7 @@ import sys
 import tempfile
 import time
 import unittest
+import xml.etree.ElementTree as ET
 from unittest import mock
 
 
@@ -313,6 +314,106 @@ class PerformanceChecksTest(unittest.TestCase):
             status = runner.main()
         self.assertFalse(junit.exists())
         return status, json.loads((output / "summary.json").read_text()), capture, run
+
+    def write_junit(self, path, suites):
+        root = ET.Element("testsuites", failures="0", errors="0")
+        for name, cases in suites.items():
+            suite = ET.SubElement(root, "testsuite", name=name)
+            for case_name in cases:
+                ET.SubElement(suite, "testcase", name=case_name, classname=name, time="0.123")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        ET.ElementTree(root).write(path)
+
+    def test_workspace_execution_uses_the_same_binary_and_preserves_separate_feature_builds(self):
+        directory = self.root / "results"
+        junit = self.root / "target/nextest/ci/junit.xml"
+        suites = {}
+        for key in ("uqa-shared", "uqa-features", "uqa-helper", "uqa-rebuilt"):
+            binary = self.root / key
+            binary.write_bytes(key.encode())
+            suites[key] = {"binary-path": str(binary), "package-id": key, "build-platform": "target", "testcases": {
+                "bounded": {"filter-match": {"status": "matches"}},
+                "other": {"filter-match": {"status": "mismatch"}},
+            }}
+        helper = self.root / "cli"
+        helper.write_bytes(b"workspace CLI")
+        build = {"target-directory": str(self.root), "platforms": {}, "base-output-directories": ["debug"],
+                 "linked-paths": [], "non-test-binaries": {"uqa-helper": [{"path": "cli"}]}, "build-script-out-dirs": {}}
+        metadata = json.dumps({"rust-binaries": suites, "rust-build-meta": build})
+        def workspace_run(args, **kwargs):
+            self.assertEqual(args, ["cargo", "nextest", "run", "--profile", "ci", "--binaries-metadata",
+                                    str((directory / "binaries-metadata.json").resolve())])
+            self.write_junit(junit, {key: ["bounded", "other"] for key in suites})
+
+        revision = "a" * 40
+        with mock.patch.object(runner, "capture", side_effect=[metadata, revision]), \
+                mock.patch.object(runner.subprocess, "run", side_effect=workspace_run):
+            runner.record_workspace(directory)
+        self.assertFalse(junit.exists())
+        different = self.root / "another-feature-build"
+        different.write_bytes(b"another feature build")
+        suites["uqa-features"]["binary-path"] = str(different)
+        (self.root / "uqa-rebuilt").write_bytes(b"changed at the original path")
+        helper.write_bytes(b"separately compiled CLI")
+
+        def standalone_run(args, **kwargs):
+            self.assertEqual(args, ["cargo", "nextest", "run", "selection", "-E",
+                                    "binary_id(=uqa-features) | binary_id(=uqa-helper) | binary_id(=uqa-rebuilt)"])
+            self.write_junit(junit, {key: ["bounded"] for key in ("uqa-features", "uqa-helper", "uqa-rebuilt")})
+
+        info = {"revision": revision, "run_id": os.environ.get("GITHUB_RUN_ID"),
+                "run_attempt": os.environ.get("GITHUB_RUN_ATTEMPT")}
+        listing = {"rust-suites": suites, "rust-build-meta": build}
+        raw = self.root / "standalone.xml"
+        with mock.patch.object(runner.subprocess, "run", side_effect=standalone_run) as run:
+            runner.run_with_workspace(directory, listing, ["selection"], info, raw)
+            run.assert_called_once()
+        self.assertEqual((info["workspace_cases"], info["standalone_cases"]), (1, 3))
+        self.assertEqual(runner.passed_cases(junit, runner.selected_cases(listing), exact=True).keys(),
+                         {(key, "bounded") for key in suites})
+        self.assertEqual(ET.parse(junit).getroot().get("tests"), "4")
+        self.assertEqual(len(ET.parse(raw).findall(".//testcase")), 3)
+        info["revision"] = "b" * 40
+        with self.assertRaisesRegex(ValueError, "current build"):
+            runner.run_with_workspace(directory, listing, [], info, raw)
+        info["revision"] = revision
+        (directory / "junit.xml").write_text("<stale/>")
+        with self.assertRaisesRegex(ValueError, "current build"):
+            runner.run_with_workspace(directory, listing, [], info, raw)
+
+    def test_missing_repeated_failed_or_skipped_workspace_cases_cannot_satisfy_the_inventory(self):
+        junit = self.root / "workspace.xml"
+        required = {("uqa-example", "required")}
+        for case_names, status in [([], None), (["required", "required"], None),
+                                   (["required"], "failure"), (["required"], "error"),
+                                   (["required"], "skipped"), (["required"], "flakyFailure")]:
+            with self.subTest(names=case_names, status=status):
+                self.write_junit(junit, {"uqa-example": case_names})
+                if status:
+                    document = ET.parse(junit)
+                    ET.SubElement(document.find(".//testcase"), status)
+                    document.write(junit)
+                with self.assertRaises(ValueError):
+                    runner.passed_cases(junit, required, exact=False)
+        self.write_junit(junit, {"uqa-example": ["required", "outside"]})
+        self.assertEqual(runner.passed_cases(junit, required, exact=False).keys(), required)
+        with self.assertRaisesRegex(ValueError, "unexpected"):
+            runner.passed_cases(junit, required, exact=True)
+
+    def test_failed_workspace_run_cannot_publish_a_previous_success(self):
+        directory = self.root / "results"
+        directory.mkdir()
+        (directory / "workspace.json").write_text("previous success")
+        (directory / "junit.xml").write_text("previous cases")
+        junit = self.root / "target/nextest/ci/junit.xml"
+        self.write_junit(junit, {"old": ["success"]})
+        with mock.patch.object(runner, "capture", return_value='{"rust-binaries":{},"rust-build-meta":{}}'), \
+                mock.patch.object(runner.subprocess, "run", side_effect=subprocess.CalledProcessError(1, "nextest")):
+            with self.assertRaises(subprocess.CalledProcessError):
+                runner.record_workspace(directory)
+        self.assertFalse((directory / "workspace.json").exists())
+        self.assertFalse((directory / "junit.xml").exists())
+        self.assertFalse(junit.exists())
 
     def test_success_runs_exactly_the_validated_selection(self):
         status, result, capture, run = self.run_main()

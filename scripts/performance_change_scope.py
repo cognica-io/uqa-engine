@@ -16,7 +16,7 @@ import sys
 
 def requires_regression_build(paths):
     exact = {"Cargo.toml", "Cargo.lock", "rust-toolchain.toml", ".config/nextest.toml",
-             ".github/workflows/performance-platform.yml", "scripts/run-performance-checks.py",
+             ".github/workflows/workspace-tests.yml", ".github/workflows/performance-platform.yml", "scripts/run-performance-checks.py",
              "scripts/tests/test_performance_checks.py"}
     for path in paths:
         if path in exact or path.startswith(("crates/", ".github/actions/setup-nextest/")):
