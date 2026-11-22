@@ -542,6 +542,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Bound the memory of compressed SQLite connections. A connection retains at most 4 MiB of decoded unchanged chunks and publishes changed chunks once they exceed 16 MiB, instead of keeping every chunk it has read and every chunk a transaction changed; the rollback journal still restores an unfinished transaction. Compaction encodes live chunks one at a time instead of decoding the whole database into memory, and starts when stale records exceed the live records instead of rewriting any database larger than 4 MiB after every 8 MiB of updates.
 - Fix Windows error 87 when publishing a restored database. Restoring to a fresh directory now succeeds and preserves any existing destination.
 - Preserve application function selection in views, materialized view refreshes, domain defaults and domain `CHECK` constraints when an application and a builtin share a name. Full and standalone incremental restores check the captured selection before publishing the destination.
 

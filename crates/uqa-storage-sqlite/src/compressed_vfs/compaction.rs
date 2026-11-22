@@ -6,11 +6,13 @@
 
 //! Authenticated stale-record compaction for compressed containers.
 
+use std::borrow::Cow;
+
 use super::{
     build_commit_entry, build_entry, build_header, chunk_payload_tag, commit_authentication_tag,
     fs, invalid_data, sync_parent_directory, usize_to_u64, AuthenticatedChunkRecord, BTreeMap,
     ChunkEntry, ContainerFile, File, OpenOptions, Path, PathBuf, Write, AEAD_TAG_LEN, AUTH_TAG_LEN,
-    ENTRY_SIZE, FLAG_ENCRYPTED, HEADER_SIZE, MAX_COMPACT_STALE_BYTES, MIN_COMPACT_STALE_BYTES,
+    ENTRY_SIZE, FLAG_ENCRYPTED, HEADER_SIZE, MIN_COMPACT_STALE_BYTES,
 };
 
 struct CompactedState {
@@ -45,7 +47,11 @@ impl ContainerFile {
         sync_parent_directory(&self.path)
     }
 
-    fn needs_compaction(&self) -> std::io::Result<bool> {
+    /// Compaction rewrites every live record. Waiting until the stale records
+    /// exceed the live ones spreads each rewrite over at least as many bytes of
+    /// new records, so the container writes stay within a constant factor of
+    /// the bytes `SQLite` changes, and the file stays within twice its live size.
+    pub(super) fn needs_compaction(&self) -> std::io::Result<bool> {
         let active_record_bytes = self.active_record_bytes()?;
         let commit_authentication_bytes = if self.keys.is_some() {
             usize_to_u64(AUTH_TAG_LEN, "commit authentication tag length")?
@@ -57,9 +63,7 @@ impl ContainerFile {
             .and_then(|length| length.checked_add(commit_authentication_bytes))
             .ok_or_else(|| invalid_data("compacted container length overflow"))?;
         let stale_bytes = self.append_offset.saturating_sub(compact_len);
-        let threshold = (active_record_bytes.saturating_mul(2))
-            .clamp(MIN_COMPACT_STALE_BYTES, MAX_COMPACT_STALE_BYTES);
-        Ok(stale_bytes > threshold)
+        Ok(stale_bytes > active_record_bytes.max(MIN_COMPACT_STALE_BYTES))
     }
 
     fn active_record_bytes(&self) -> std::io::Result<u64> {
@@ -88,7 +92,7 @@ impl ContainerFile {
     }
 
     fn write_compacted_file(
-        &mut self,
+        &self,
         path: &Path,
         generation: u64,
     ) -> std::io::Result<CompactedState> {
@@ -125,8 +129,10 @@ impl ContainerFile {
         )?)
     }
 
+    /// Encode each live chunk from this handle's cache or its committed record
+    /// without retaining it, so compaction holds one chunk at a time.
     fn write_compacted_chunks(
-        &mut self,
+        &self,
         file: &mut File,
         generation: u64,
     ) -> std::io::Result<(
@@ -145,7 +151,17 @@ impl ContainerFile {
         let mut chunks = BTreeMap::new();
         let mut records = Vec::with_capacity(chunk_ids.len());
         for chunk_id in chunk_ids {
-            let (entry, payload) = self.encode_dirty_chunk(chunk_id, offset, generation)?;
+            let expected_len = self.expected_chunk_len(chunk_id)?;
+            let raw = match self.cache.peek(chunk_id) {
+                Some(cached) if cached.len() == expected_len => Cow::Borrowed(cached),
+                Some(cached) => {
+                    let mut resized = cached.to_vec();
+                    resized.resize(expected_len, 0);
+                    Cow::Owned(resized)
+                }
+                None => Cow::Owned(self.read_chunk_from_disk(chunk_id)?),
+            };
+            let (entry, payload) = self.encode_chunk(chunk_id, &raw, offset, generation)?;
             file.write_all(&build_entry(&entry)?)?;
             file.write_all(&payload)?;
             offset = entry

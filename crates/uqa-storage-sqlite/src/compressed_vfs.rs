@@ -17,7 +17,7 @@
 //! per-file identity. A valid whole-file snapshot rollback remains outside the
 //! format's threat boundary because it requires an external freshness anchor.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::ffi::CStr;
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
@@ -55,6 +55,7 @@ impl FileExt {
     }
 }
 
+mod chunk_cache;
 mod codec;
 mod compaction;
 mod container;
@@ -71,6 +72,7 @@ mod vfs_callbacks;
 pub use options::{SQLiteCompressionCodec, SQLiteCompressionOptions};
 pub use registration::{register_database, register_database_with_anchor};
 
+use chunk_cache::ChunkCache;
 use codec::{compress_chunk, decompress_chunk, keys_from_key};
 use container::{build_commit_entry, chunk_count_for};
 use directory_sync::sync_parent_directory;
@@ -145,7 +147,10 @@ const CHUNK_COMMIT: u32 = 4;
 const CHUNK_AUTHENTICATED: u32 = 8;
 const COMMIT_CHUNK_ID: u64 = u64::MAX;
 const MIN_COMPACT_STALE_BYTES: u64 = 4 * 1024;
-const MAX_COMPACT_STALE_BYTES: u64 = 8 * 1024 * 1024;
+/// Decompressed clean chunks one container handle retains for reads.
+const CLEAN_CHUNK_CACHE_BYTES: usize = 4 * 1024 * 1024;
+/// Changed chunks one container handle holds before it publishes them.
+const DIRTY_CHUNK_PUBLISH_BYTES: usize = 16 * 1024 * 1024;
 const SALT_LEN: usize = 16;
 const FILE_ID_LEN: usize = 16;
 const NONCE_LEN: usize = 24;
@@ -234,8 +239,8 @@ struct ContainerFile {
     logical_len: usize,
     append_offset: u64,
     chunks: BTreeMap<u64, ChunkEntry>,
-    cache: BTreeMap<u64, Vec<u8>>,
-    dirty_chunks: BTreeSet<u64>,
+    cache: ChunkCache,
+    dirty_publish_bytes: usize,
     compression: SQLiteCompressionOptions,
     keys: Option<ContainerKeys>,
     initial_key: Option<uqa_storage::StorageEncryptionKey>,
