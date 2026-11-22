@@ -3,8 +3,8 @@
   "cases": [
     {"sql":"SELECT version()","command_tags":["SELECT 1"],"error":null,"results":[{"columns":["version"],"type_oids":[25],"rows":[["PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"]]}],"notices":[],"session":0},
     {"sql":"SELECT version()","command_tags":["SELECT 1"],"error":null,"results":[{"columns":["version"],"type_oids":[25],"rows":[["PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"]]}],"notices":[],"session":1},
-    {"sql":"SET statement_timeout='2s'","command_tags":["SET"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}],"notices":[],"session":0},
-    {"sql":"SET statement_timeout='2s'","command_tags":["SET"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}],"notices":[],"session":1},
+    {"sql":"SET lock_timeout='2s'","command_tags":["SET"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}],"notices":[],"session":0},
+    {"sql":"SET lock_timeout='2s'","command_tags":["SET"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}],"notices":[],"session":1},
     {"sql":"CREATE TABLE constraint_peer(n integer,CHECK(n>0))","command_tags":["CREATE TABLE"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}],"notices":[],"session":0},
     {"sql":"SELECT conname,convalidated,conkey::text,conbin IS NOT NULL AS has_node FROM pg_constraint WHERE conrelid='constraint_peer'::regclass ORDER BY conname","command_tags":["SELECT 1"],"error":null,"results":[{"columns":["conname","convalidated","conkey","has_node"],"type_oids":[19,16,25,16],"rows":[["constraint_peer_n_check","t","{1}","t"]]}],"notices":[],"session":1},
     {"sql":"BEGIN ISOLATION LEVEL READ COMMITTED","command_tags":["BEGIN"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}],"notices":[],"session":1},
