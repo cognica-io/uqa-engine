@@ -84,7 +84,9 @@ use format::{
 };
 use io_callbacks::IO_METHODS;
 use locking::FileLocks;
-use record_scan::scan_committed_records;
+use record_scan::{
+    scan_committed_records, scan_committed_records_after, CommittedState, ResumePoint,
+};
 use registration::{normalize_path, options_for_path};
 use vfs_callbacks::{
     vfs_access, vfs_current_time, vfs_delete, vfs_full_pathname, vfs_get_last_error, vfs_open,
