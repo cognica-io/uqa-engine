@@ -11,6 +11,7 @@ mod compatibility;
 mod initialization;
 mod memory;
 mod read_generation;
+mod refresh;
 
 #[test]
 fn read_only_database_reopens_with_read_only_lock_sidecars() {

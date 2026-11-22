@@ -4,6 +4,73 @@
     {
       "package": "uqa-storage-sqlite",
       "kind": "lib",
+      "test": "an_appended_commit_replaces_only_the_chunks_it_published",
+      "cases": 2,
+      "source": "crates/uqa-storage-sqlite/src/compressed_vfs/tests/refresh.rs",
+      "capability": "Incremental compressed refresh",
+      "workload": "A reader holding all 64 decoded chunks of a plain and an encrypted container observes three commits that each rewrite one chunk.",
+      "invariant": "Each refresh keeps the other 63 decoded chunks, adopts the writer's generation and state tag and reads the rewritten chunk; the final chunk map equals a fresh load.",
+      "case_names": [
+        "case_1",
+        "case_2"
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "a_resumed_scan_reads_only_the_records_after_its_resume_point",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/compressed_vfs/tests/refresh.rs",
+      "capability": "Resumed record scan",
+      "workload": "Commit two rewritten chunks after a reader's state, damage a record before that state, then scan the whole file and scan from the reader's state.",
+      "invariant": "The whole-file scan rejects the damaged record; the resumed scan returns exactly the two rewritten chunks with the writer's generation and state tag.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "a_compacted_file_is_read_from_its_beginning",
+      "cases": 2,
+      "source": "crates/uqa-storage-sqlite/src/compressed_vfs/tests/refresh.rs",
+      "capability": "Refresh after compaction",
+      "workload": "Rewrite every chunk twice so that the writer replaces the file, for a plain and an encrypted container, then commit one more chunk.",
+      "invariant": "The reader discards its decoded chunks, reads the replaced file from its beginning and resumes from that file's commit afterwards.",
+      "case_names": [
+        "case_1",
+        "case_2"
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "a_shrunk_file_loses_the_chunks_beyond_its_end_and_reads_zeros_when_it_grows_again",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/compressed_vfs/tests/refresh.rs",
+      "capability": "Resumed refresh across truncation",
+      "workload": "Truncate four chunks without replacing the file, then grow it again by writing only its last chunk.",
+      "invariant": "The reader drops the truncated chunks, keeps the others and reads zeros between the old end and the rewritten last chunk.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "a_connection_reads_every_commit_of_another_connection",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/compressed_vfs/tests/refresh.rs",
+      "capability": "Commit visibility between compressed connections",
+      "workload": "One encrypted compressed connection commits 100 updates beside 4 MB of rows while another reads after each.",
+      "invariant": "The reader observes every committed value, counts every row and passes the integrity check.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
       "test": "reading_more_than_the_clean_budget_retains_only_the_budget",
       "cases": 1,
       "source": "crates/uqa-storage-sqlite/src/compressed_vfs/tests/memory.rs",
