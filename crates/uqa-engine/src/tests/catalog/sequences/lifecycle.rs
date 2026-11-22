@@ -99,63 +99,66 @@ fn sequence_schema_move_rebinds_deleted_recreated_and_rolled_back_destinations()
     }
 }
 
-#[test]
-fn sequence_lifecycle_rechecks_source_names_kinds_and_definitions_after_waits() {
-    for provider in 0..3 {
-        for (action, target) in [
-            ("RENAME TO renamed", "public.renamed"),
-            ("SET SCHEMA s", "s.child"),
-            ("INCREMENT BY 3", "public.child"),
-            ("SET LOGGED", "public.child"),
-        ] {
-            for (holder, expected) in [
-                ("ALTER SEQUENCE public.child RENAME TO moved", Some("42P01")),
-                ("DROP SEQUENCE public.child", Some("42P01")),
-                (
-                    "DROP SEQUENCE public.child; CREATE TABLE public.child(id integer)",
-                    Some("42809"),
-                ),
-                (
-                    "DROP SEQUENCE public.child; CREATE SEQUENCE public.child START WITH 17",
-                    None,
-                ),
-                ("ALTER SEQUENCE public.child INCREMENT BY 2", None),
-            ] {
-                eprintln!(
-                    "sequence source wait: provider={provider}, holder={holder}, action={action}"
-                );
-                let (_directory, first, second) = sessions(provider);
-                sql(&first, "CREATE SCHEMA s; CREATE SEQUENCE public.child");
-                sql(&first, &format!("BEGIN; {holder}"));
-                let (second, result) = after_wait(
-                    &first,
-                    second,
-                    &format!("ALTER SEQUENCE public.child {action}"),
-                    "public.child",
-                    "COMMIT",
-                );
-                if let Some(state) = expected {
-                    let error = result.unwrap_err();
-                    assert_eq!(
-                        error.sqlstate(),
-                        Some(state),
-                        "{provider}/{action}/{holder}: {error}"
-                    );
-                } else {
-                    result.unwrap_or_else(|error| panic!("{provider}/{action}/{holder}: {error}"));
-                    let value = if holder.starts_with("DROP") { 17 } else { 1 };
-                    let increment = if action == "INCREMENT BY 3" {
-                        3
-                    } else if value == 17 {
-                        1
-                    } else {
-                        2
-                    };
-                    assert_eq!(second.nextval(target).unwrap(), value);
-                    assert_eq!(second.nextval(target).unwrap(), value + increment);
-                }
-            }
-        }
+#[rstest::rstest]
+#[case::native_sqlite(0)]
+#[case::sqlite_key_value(1)]
+#[case::redb(2)]
+fn sequence_lifecycle_rechecks_source_names_kinds_and_definitions_after_waits(
+    #[case] provider: usize,
+    #[values(
+        ("RENAME TO renamed", "public.renamed"),
+        ("SET SCHEMA s", "s.child"),
+        ("INCREMENT BY 3", "public.child"),
+        ("SET LOGGED", "public.child")
+    )]
+    alteration: (&str, &str),
+    #[values(
+        ("ALTER SEQUENCE public.child RENAME TO moved", Some("42P01")),
+        ("DROP SEQUENCE public.child", Some("42P01")),
+        (
+            "DROP SEQUENCE public.child; CREATE TABLE public.child(id integer)",
+            Some("42809")
+        ),
+        (
+            "DROP SEQUENCE public.child; CREATE SEQUENCE public.child START WITH 17",
+            None
+        ),
+        ("ALTER SEQUENCE public.child INCREMENT BY 2", None)
+    )]
+    concurrent_change: (&str, Option<&str>),
+) {
+    let (action, target) = alteration;
+    let (holder, expected) = concurrent_change;
+    eprintln!("sequence source wait: provider={provider}, holder={holder}, action={action}");
+    let (_directory, first, second) = sessions(provider);
+    sql(&first, "CREATE SCHEMA s; CREATE SEQUENCE public.child");
+    sql(&first, &format!("BEGIN; {holder}"));
+    let (second, result) = after_wait(
+        &first,
+        second,
+        &format!("ALTER SEQUENCE public.child {action}"),
+        "public.child",
+        "COMMIT",
+    );
+    if let Some(state) = expected {
+        let error = result.unwrap_err();
+        assert_eq!(
+            error.sqlstate(),
+            Some(state),
+            "{provider}/{action}/{holder}: {error}"
+        );
+    } else {
+        result.unwrap_or_else(|error| panic!("{provider}/{action}/{holder}: {error}"));
+        let value = if holder.starts_with("DROP") { 17 } else { 1 };
+        let increment = if action == "INCREMENT BY 3" {
+            3
+        } else if value == 17 {
+            1
+        } else {
+            2
+        };
+        assert_eq!(second.nextval(target).unwrap(), value);
+        assert_eq!(second.nextval(target).unwrap(), value + increment);
     }
 }
 

@@ -164,27 +164,30 @@ fn restored_variadic_catalog_array_alias_accepts_expanded_and_explicit_calls(
 }
 
 #[rstest::rstest]
-#[case::memory(Provider::Memory)]
-#[case::sqlite_native(Provider::SQLiteNative)]
-#[case::sqlite_kv(Provider::SQLiteKeyValue)]
-#[case::redb(Provider::Redb)]
-fn restored_routine_declarations_reject_invalid_original_signatures(#[case] provider: Provider) {
-    for (kind, expected) in [
-        ("cost", "COST must be positive"),
-        ("rows", "ROWS must be positive"),
-        ("scalar_rows", "ROWS is not applicable"),
-        ("support", "missing_support"),
-        ("missing_language", "no language specified"),
-        ("language", "language"),
-        ("duplicate", "used more than once"),
-        ("output_default", "only input parameters"),
-        ("variadic", "VARIADIC parameter must be an array"),
-        ("variadic_domain", "VARIADIC parameter must be an array"),
-        ("default_gap", "must also have defaults"),
-        ("polymorphic_result", "cannot determine result data type"),
-    ] {
-        reject(provider, kind, expected);
-    }
+#[case::cost("cost", "COST must be positive")]
+#[case::rows("rows", "ROWS must be positive")]
+#[case::scalar_rows("scalar_rows", "ROWS is not applicable")]
+#[case::support("support", "missing_support")]
+#[case::missing_language("missing_language", "no language specified")]
+#[case::language("language", "language")]
+#[case::duplicate("duplicate", "used more than once")]
+#[case::output_default("output_default", "only input parameters")]
+#[case::variadic("variadic", "VARIADIC parameter must be an array")]
+#[case::variadic_domain("variadic_domain", "VARIADIC parameter must be an array")]
+#[case::default_gap("default_gap", "must also have defaults")]
+#[case::polymorphic_result("polymorphic_result", "cannot determine result data type")]
+fn restored_routine_declarations_reject_invalid_original_signatures(
+    #[case] kind: &str,
+    #[case] expected: &str,
+    #[values(
+        Provider::Memory,
+        Provider::SQLiteNative,
+        Provider::SQLiteKeyValue,
+        Provider::Redb
+    )]
+    provider: Provider,
+) {
+    reject(provider, kind, expected);
 }
 
 #[rstest::rstest]

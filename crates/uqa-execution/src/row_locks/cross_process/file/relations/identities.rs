@@ -331,7 +331,14 @@ impl FileLockCoordinator {
         if (!first && version != 2) || (first && version != 0) {
             return Err("invalid relation registry version".into());
         }
-        connection.execute_batch("PRAGMA synchronous=OFF; PRAGMA temp_store=MEMORY; PRAGMA cache_size=-64; PRAGMA secure_delete=ON;").map_err(sql)?;
+        // Every new mapping commits before releasing admission. Reuse its rollback journal across
+        // mappings and cap the space it retains after a large identity is replaced.
+        connection
+            .execute_batch(
+                "PRAGMA synchronous=OFF; PRAGMA temp_store=MEMORY; PRAGMA cache_size=-64;
+                 PRAGMA secure_delete=ON; PRAGMA journal_mode=PERSIST; PRAGMA journal_size_limit=65536;",
+            )
+            .map_err(sql)?;
         if first {
             connection.execute_batch("CREATE TABLE generation(value INTEGER NOT NULL); INSERT INTO generation VALUES(0); CREATE TABLE identities(slot INTEGER PRIMARY KEY CHECK(slot>=0 AND slot<1048576), identity BLOB NOT NULL UNIQUE, generation INTEGER NOT NULL CHECK(generation>0)); PRAGMA user_version=2;").map_err(sql)?;
         }

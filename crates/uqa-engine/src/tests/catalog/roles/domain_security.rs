@@ -16,79 +16,80 @@ use std::sync::Arc;
 use uqa_core::Value;
 use uqa_execution::catalog::domain::DOMAINS_METADATA_KEY;
 
-#[test]
-fn private_domain_authority_survives_refresh_savepoint_and_reopen() {
-    for provider in 0..3 {
-        for isolation in ["READ COMMITTED", "REPEATABLE READ", "SERIALIZABLE"] {
-            for finish in ["COMMIT", "ROLLBACK", "ROLLBACK TO private; COMMIT"] {
-                let (directory, first, second) = sessions(provider);
-                sql(
-                    &first,
-                    "CREATE ROLE other; CREATE DOMAIN removed_domain AS integer",
-                );
-                sql(&first, &format!("BEGIN ISOLATION LEVEL {isolation}; SELECT * FROM t; SAVEPOINT private; CREATE ROLE private_owner; GRANT CREATE ON SCHEMA public TO private_owner; SET ROLE private_owner; CREATE DOMAIN private_domain AS integer; RESET ROLE; REVOKE CREATE ON SCHEMA public FROM private_owner; DROP DOMAIN removed_domain"));
-                let owner = first.durable.roles.read()["private_owner"].identity();
-                let original = first.durable.domains.read()["public.private_domain"].clone();
-                assert_eq!(original.owner, owner);
-                sql(
-                    &second,
-                    "ALTER ROLE other LOGIN; CREATE TABLE unrelated(id int)",
-                );
-                refresh_catalog(&first, isolation);
-                assert_eq!(
-                    first.durable.domains.read()["public.private_domain"].owner,
-                    owner,
-                    "provider {provider}, {isolation}, {finish}"
-                );
-                assert!(!first
-                    .durable
-                    .domains
-                    .read()
-                    .contains_key("public.removed_domain"));
-                assert_eq!(
-                    sql(
-                        &first,
-                        "SELECT typowner FROM pg_type WHERE typname = 'private_domain'"
-                    )
-                    .rows[0]["typowner"],
-                    Value::Int(owner.oid)
-                );
-                assert_eq!(
-                    sql(
-                        &second,
-                        "SELECT typowner FROM pg_type WHERE typname = 'private_domain'"
-                    )
-                    .rows
-                    .len(),
-                    0
-                );
-                sql(&first, finish);
-                assert_eq!(
-                    sql(
-                        &second,
-                        "SELECT typowner FROM pg_type WHERE typname = 'private_domain'"
-                    )
-                    .rows
-                    .len(),
-                    usize::from(finish == "COMMIT")
-                );
-                drop(second);
-                drop(first);
-                let restored = reopen(provider, &directory.path().join("table-locks.db"));
-                let registry = restored.durable.domains.read();
-                assert_eq!(
-                    registry.contains_key("public.removed_domain"),
-                    finish != "COMMIT"
-                );
-                let domain = registry.get("public.private_domain");
-                assert_eq!(domain.is_some(), finish == "COMMIT");
-                if let Some(domain) = domain {
-                    assert_eq!(domain.owner, owner);
-                    assert_eq!(domain.object_id, original.object_id);
-                    assert_eq!(domain.oid, original.oid);
-                }
-            }
-        }
+#[rstest::rstest]
+#[case::native_sqlite(0)]
+#[case::sqlite_key_value(1)]
+#[case::redb(2)]
+fn private_domain_authority_survives_refresh_savepoint_and_reopen(
+    #[case] provider: usize,
+    #[values("READ COMMITTED", "REPEATABLE READ", "SERIALIZABLE")] isolation: &str,
+    #[values("COMMIT", "ROLLBACK", "ROLLBACK TO private; COMMIT")] finish: &str,
+) {
+    let (directory, first, second) = sessions(provider);
+    sql(
+        &first,
+        "CREATE ROLE other; CREATE DOMAIN removed_domain AS integer",
+    );
+    sql(&first, &format!("BEGIN ISOLATION LEVEL {isolation}; SELECT * FROM t; SAVEPOINT private; CREATE ROLE private_owner; GRANT CREATE ON SCHEMA public TO private_owner; SET ROLE private_owner; CREATE DOMAIN private_domain AS integer; RESET ROLE; REVOKE CREATE ON SCHEMA public FROM private_owner; DROP DOMAIN removed_domain"));
+    let owner = first.durable.roles.read()["private_owner"].identity();
+    let original = first.durable.domains.read()["public.private_domain"].clone();
+    assert_eq!(original.owner, owner);
+    sql(
+        &second,
+        "ALTER ROLE other LOGIN; CREATE TABLE unrelated(id int)",
+    );
+    refresh_catalog(&first, isolation);
+    assert_eq!(
+        first.durable.domains.read()["public.private_domain"].owner,
+        owner,
+        "provider {provider}, {isolation}, {finish}"
+    );
+    assert!(!first
+        .durable
+        .domains
+        .read()
+        .contains_key("public.removed_domain"));
+    assert_eq!(
+        sql(
+            &first,
+            "SELECT typowner FROM pg_type WHERE typname = 'private_domain'"
+        )
+        .rows[0]["typowner"],
+        Value::Int(owner.oid)
+    );
+    assert_eq!(
+        sql(
+            &second,
+            "SELECT typowner FROM pg_type WHERE typname = 'private_domain'"
+        )
+        .rows
+        .len(),
+        0
+    );
+    sql(&first, finish);
+    assert_eq!(
+        sql(
+            &second,
+            "SELECT typowner FROM pg_type WHERE typname = 'private_domain'"
+        )
+        .rows
+        .len(),
+        usize::from(finish == "COMMIT")
+    );
+    drop(second);
+    drop(first);
+    let restored = reopen(provider, &directory.path().join("table-locks.db"));
+    let registry = restored.durable.domains.read();
+    assert_eq!(
+        registry.contains_key("public.removed_domain"),
+        finish != "COMMIT"
+    );
+    let domain = registry.get("public.private_domain");
+    assert_eq!(domain.is_some(), finish == "COMMIT");
+    if let Some(domain) = domain {
+        assert_eq!(domain.owner, owner);
+        assert_eq!(domain.object_id, original.object_id);
+        assert_eq!(domain.oid, original.oid);
     }
 }
 
