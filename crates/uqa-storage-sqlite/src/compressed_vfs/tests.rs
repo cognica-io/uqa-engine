@@ -9,6 +9,7 @@ use super::*;
 mod anchors;
 mod compatibility;
 mod initialization;
+mod memory;
 mod read_generation;
 
 #[test]
