@@ -112,15 +112,16 @@ class ConfigurationTests(unittest.TestCase):
         with patch.object(CONFIGURATIONS.subprocess, "run", side_effect=execute), \
                 patch.dict(os.environ, {}, clear=True), redirect_stdout(io.StringIO()):
             self.assertEqual(CONFIGURATIONS.run("sanitizers", target="native-host"), 1)
-        self.assertEqual(calls, CONFIGURATIONS.commands("minimal", target="native-host")[:3]
-                         + CONFIGURATIONS.commands("arrow-export", target="native-host"))
+            expected = (CONFIGURATIONS.commands("minimal", target="native-host")[:3]
+                        + CONFIGURATIONS.commands("arrow-export", target="native-host"))
+        self.assertEqual(calls, expected)
 
     def test_success_requires_every_command_in_every_configuration(self):
         with patch.object(CONFIGURATIONS.subprocess, "run") as execute, \
                 patch.dict(os.environ, {}, clear=True), redirect_stdout(io.StringIO()):
             self.assertEqual(CONFIGURATIONS.run("duckdb"), 0)
-        expected = [command for name in CONFIGURATIONS.GROUPS["duckdb"]
-                    for command in CONFIGURATIONS.commands(name)]
+            expected = [command for name in CONFIGURATIONS.GROUPS["duckdb"]
+                        for command in CONFIGURATIONS.commands(name)]
         self.assertEqual([call.args[0] for call in execute.call_args_list], expected)
         self.assertTrue(all(call.kwargs == {"cwd": ROOT, "check": True}
                             for call in execute.call_args_list))
