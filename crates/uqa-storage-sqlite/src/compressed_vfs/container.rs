@@ -9,9 +9,10 @@
 use super::{
     allocate_payload, build_entry, build_header, chunk_aad, chunk_payload_tag,
     commit_authentication_tag, compress_chunk, decompress_chunk, fill_random, fs, invalid_data,
-    keys_from_key, parse_header, scan_committed_records, usize_to_u64,
-    verify_header_authentication, Aead, AuthenticatedChunkRecord, BTreeMap, ChunkCache, ChunkEntry,
-    ContainerFile, File, HeaderMetadata, OpenOptions, OpenOptionsEntry, PathBuf, Payload, Read,
+    keys_from_key, parse_header, scan_committed_records, scan_committed_records_after,
+    usize_to_u64, verify_header_authentication, Aead, AuthenticatedChunkRecord, BTreeMap,
+    ChunkCache, ChunkEntry, CommittedState, ContainerFile, File, Header, HeaderMetadata,
+    OpenOptions, OpenOptionsEntry, PathBuf, Payload, Read, ResumePoint,
     SQLiteCompressedContainerAnchor, Seek, SeekFrom, Write, AEAD_TAG_LEN, AUTH_TAG_LEN,
     CHUNK_AUTHENTICATED, CHUNK_COMMIT, CHUNK_COMPRESSED, CHUNK_ENCRYPTED, CLEAN_CHUNK_CACHE_BYTES,
     COMMIT_CHUNK_ID, DIRTY_CHUNK_PUBLISH_BYTES, ENTRY_SIZE, FILE_ID_LEN, FLAG_ENCRYPTED,
@@ -213,7 +214,7 @@ impl ContainerFile {
             return Ok(());
         }
         let chunk_size = header.compression.chunk_size().map_err(invalid_data)?;
-        let committed = scan_committed_records(&mut file, &header, self.keys.as_ref(), chunk_size)?;
+        let (committed, resumed) = self.read_committed_state(&mut file, &header, chunk_size)?;
         if committed.generation < self.generation {
             return Err(invalid_data(format!(
                 "compressed container generation moved backwards from {} to {}",
@@ -225,23 +226,105 @@ impl ContainerFile {
                 "compressed container state diverged at the current generation",
             ));
         }
-        if committed.generation == self.generation
-            && committed.logical_len == self.logical_len
-            && committed.end_offset == self.append_offset
+        if committed.generation != self.generation
+            || committed.logical_len != self.logical_len
+            || committed.end_offset != self.append_offset
         {
-            self.committed_file_len = metadata.len();
-            self.committed_file = Some(file);
-            return Ok(());
+            self.adopt_committed_state(committed, resumed)?;
         }
-        self.logical_len = committed.logical_len;
-        self.append_offset = committed.end_offset;
-        self.chunks = committed.chunks;
-        self.cache.clear();
-        self.generation = committed.generation;
-        self.state_tag = committed.state_tag;
         self.committed_file_len = metadata.len();
         self.committed_file = Some(file);
         Ok(())
+    }
+
+    /// Reads the committed state of `file`, and whether it was read from this handle's own
+    /// commit on. The file that still holds that commit at its offset was only appended to
+    /// since, so the records after it are all there is to read. A compacted file is another
+    /// file: it is read from its beginning.
+    fn read_committed_state(
+        &self,
+        file: &mut File,
+        header: &Header,
+        chunk_size: usize,
+    ) -> std::io::Result<(CommittedState, bool)> {
+        if !self.holds_own_commit(file)? {
+            let committed = scan_committed_records(file, header, self.keys.as_ref(), chunk_size)?;
+            return Ok((committed, false));
+        }
+        let committed = scan_committed_records_after(
+            file,
+            header,
+            self.keys.as_ref(),
+            chunk_size,
+            ResumePoint {
+                offset: self.append_offset,
+                generation: self.generation,
+                state_tag: self.state_tag,
+                logical_len: self.logical_len,
+                chunk_count: self.chunk_count()?,
+            },
+        )?;
+        Ok((committed, true))
+    }
+
+    fn adopt_committed_state(
+        &mut self,
+        committed: CommittedState,
+        resumed: bool,
+    ) -> std::io::Result<()> {
+        if resumed {
+            // Only the chunks the appended commits published differ from what this handle
+            // holds: their records replace the ones it knew, and its other decoded chunks
+            // stay valid.
+            let surviving = usize_to_u64(committed.minimum_chunk_count, "surviving chunk count")?;
+            self.chunks.retain(|chunk_id, _| *chunk_id < surviving);
+            self.cache.retain_below(surviving);
+            for (chunk_id, entry) in committed.chunks {
+                self.cache.remove(chunk_id);
+                self.chunks.insert(chunk_id, entry);
+            }
+        } else {
+            self.chunks = committed.chunks;
+            self.cache.clear();
+        }
+        self.logical_len = committed.logical_len;
+        self.append_offset = committed.end_offset;
+        self.generation = committed.generation;
+        self.state_tag = committed.state_tag;
+        Ok(())
+    }
+
+    /// Whether `file` holds this handle's last commit record, with its authentication tag,
+    /// at the offset where this handle read or wrote it.
+    fn holds_own_commit(&self, file: &mut File) -> std::io::Result<bool> {
+        if self.generation == 0 {
+            return Ok(false);
+        }
+        let encrypted = self.keys.is_some();
+        let tag_len = if encrypted { AUTH_TAG_LEN } else { 0 };
+        let record_len = usize_to_u64(ENTRY_SIZE + tag_len, "commit record length")?;
+        let header_len = usize_to_u64(HEADER_SIZE, "container header size")?;
+        let Some(offset) = self
+            .append_offset
+            .checked_sub(record_len)
+            .filter(|offset| *offset >= header_len)
+        else {
+            return Ok(false);
+        };
+        if file.metadata()?.len() < self.append_offset {
+            return Ok(false);
+        }
+        let mut record = [0_u8; ENTRY_SIZE + AUTH_TAG_LEN];
+        file.seek(SeekFrom::Start(offset))?;
+        file.read_exact(&mut record[..ENTRY_SIZE + tag_len])?;
+        let expected = build_entry(&build_commit_entry(
+            self.generation,
+            self.logical_len,
+            self.chunk_count()?,
+            encrypted,
+        )?)?;
+        Ok(record[..ENTRY_SIZE] == expected
+            && record[ENTRY_SIZE..ENTRY_SIZE + tag_len] == self.state_tag[..tag_len])
     }
 
     pub(super) fn flush(&mut self) -> std::io::Result<()> {

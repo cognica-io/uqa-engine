@@ -170,6 +170,13 @@ impl ChunkCache {
         self.dirty_count = 0;
     }
 
+    /// Discard one chunk whose committed record another handle replaced.
+    pub(super) fn remove(&mut self, chunk_id: u64) {
+        if let Some(chunk) = self.chunks.remove(&chunk_id) {
+            self.forget(&chunk);
+        }
+    }
+
     /// Remove the chunks at or beyond `chunk_count`.
     pub(super) fn retain_below(&mut self, chunk_count: u64) {
         let removed = self.chunks.split_off(&chunk_count);

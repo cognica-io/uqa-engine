@@ -16,9 +16,23 @@ use super::{
 pub(super) struct CommittedState {
     pub(super) logical_len: usize,
     pub(super) end_offset: u64,
+    /// The committed chunk records the scan read: every live chunk for a scan of the whole
+    /// file, and only the chunks published after the resume point for a resumed scan.
     pub(super) chunks: BTreeMap<u64, ChunkEntry>,
     pub(super) generation: u64,
     pub(super) state_tag: [u8; AUTH_TAG_LEN],
+    /// The smallest chunk count any scanned commit published. Chunks at or beyond it that a
+    /// reader knew before the scan no longer exist unless `chunks` names them.
+    pub(super) minimum_chunk_count: usize,
+}
+
+/// An authenticated committed state from which the records appended after it are read.
+pub(super) struct ResumePoint {
+    pub(super) offset: u64,
+    pub(super) generation: u64,
+    pub(super) state_tag: [u8; AUTH_TAG_LEN],
+    pub(super) logical_len: usize,
+    pub(super) chunk_count: usize,
 }
 
 pub(super) fn scan_committed_records(
@@ -27,7 +41,21 @@ pub(super) fn scan_committed_records(
     keys: Option<&ContainerKeys>,
     chunk_size: usize,
 ) -> std::io::Result<CommittedState> {
-    RecordScanner::new(file, header, keys, chunk_size)?.scan()
+    RecordScanner::new(file, header, keys, chunk_size, None)?.scan()
+}
+
+/// Reads only the records appended after `resume`. The commit chain authenticates each new
+/// commit against the state tag of the one before it, so the caller's own authenticated state
+/// stands for everything before the resume point, and the cost of observing another
+/// connection's commit follows the size of that commit instead of the size of the file.
+pub(super) fn scan_committed_records_after(
+    file: &mut File,
+    header: &Header,
+    keys: Option<&ContainerKeys>,
+    chunk_size: usize,
+    resume: ResumePoint,
+) -> std::io::Result<CommittedState> {
+    RecordScanner::new(file, header, keys, chunk_size, Some(resume))?.scan()
 }
 
 struct RecordScanner<'a> {
@@ -49,23 +77,34 @@ impl<'a> RecordScanner<'a> {
         header: &'a Header,
         keys: Option<&'a ContainerKeys>,
         chunk_size: usize,
+        resume: Option<ResumePoint>,
     ) -> std::io::Result<Self> {
-        let record_offset = usize_to_u64(HEADER_SIZE, "container header size")?;
+        let resume = match resume {
+            Some(resume) => resume,
+            None => ResumePoint {
+                offset: usize_to_u64(HEADER_SIZE, "container header size")?,
+                generation: 0,
+                state_tag: [0_u8; AUTH_TAG_LEN],
+                logical_len: 0,
+                chunk_count: 0,
+            },
+        };
         Ok(Self {
             file_len: file.metadata()?.len(),
             file,
             header,
             keys,
             chunk_size,
-            record_offset,
+            record_offset: resume.offset,
             committed: CommittedState {
-                logical_len: 0,
-                end_offset: record_offset,
+                logical_len: resume.logical_len,
+                end_offset: resume.offset,
                 chunks: BTreeMap::new(),
-                generation: 0,
-                state_tag: [0_u8; AUTH_TAG_LEN],
+                generation: resume.generation,
+                state_tag: resume.state_tag,
+                minimum_chunk_count: resume.chunk_count,
             },
-            committed_chunk_count: 0,
+            committed_chunk_count: resume.chunk_count,
             pending_generation: None,
             pending_records: Vec::new(),
         })
@@ -192,6 +231,7 @@ impl<'a> RecordScanner<'a> {
         self.committed.generation = entry.generation;
         self.committed.state_tag = state_tag;
         self.committed.logical_len = logical_len;
+        self.committed.minimum_chunk_count = self.committed.minimum_chunk_count.min(chunk_count);
         self.committed_chunk_count = chunk_count;
         Ok(())
     }
