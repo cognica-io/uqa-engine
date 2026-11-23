@@ -47,7 +47,8 @@ impl BackupRecordImportMapping for Mapping {
             || bytes[8..24] != cut.source.as_bytes()
             || bytes[24..32] != cut.sequence.unwrap().as_u64().to_be_bytes()
             || bytes[32..48] == [0; 16]
-            || bytes[48..52] != super::super::format::CURRENT_VERSION.to_be_bytes()
+            || !(super::super::format::RECORD_IMAGE_VERSION..=super::super::format::CURRENT_VERSION)
+                .contains(&u32::from_be_bytes(bytes[48..52].try_into().unwrap()))
             || bytes[52..54] != NativeRecordFamily::ForeignServerMetadata.id().to_be_bytes()
             || bytes[54..] != 49u16.to_be_bytes()
         {

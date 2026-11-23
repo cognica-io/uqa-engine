@@ -238,7 +238,7 @@ fn verify_image(
             header.extend_from_slice(&captured.source.as_bytes());
             header.extend_from_slice(&captured.sequence.unwrap().as_u64().to_be_bytes());
             header.extend_from_slice(&namespace.as_bytes());
-            header.extend_from_slice(&17u32.to_be_bytes());
+            header.extend_from_slice(&18u32.to_be_bytes());
             header.extend_from_slice(&63u16.to_be_bytes());
             header.extend_from_slice(&49u16.to_be_bytes());
             header

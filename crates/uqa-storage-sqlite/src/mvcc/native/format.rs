@@ -59,6 +59,8 @@ pub(super) const CURRENT_VERSION: u32 = 18;
 /// The first format whose lookup keys order as their values do, so that one interval of them holds a range.
 const ORDERED_KEYS_VERSION: u32 = 18;
 const STORED_EQUALITY_KEYS_VERSION: u32 = 17;
+/// The earliest format whose record image an import admits. The formats after it changed the keys of the lookup index, which are derived from the records and are no part of an image, and no record: an import derives them again.
+pub(super) const RECORD_IMAGE_VERSION: u32 = STORED_EQUALITY_KEYS_VERSION;
 const EQUALITY_INDEX_VERSION: u32 = 16;
 const FOREIGN_SERVER_METADATA_VERSION: u32 = 15;
 

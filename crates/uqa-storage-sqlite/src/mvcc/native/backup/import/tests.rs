@@ -95,6 +95,28 @@ fn native_backup_import_reader_rejects_incompatible_roots_before_input() {
 }
 
 #[test]
+fn native_backup_import_reader_admits_the_formats_with_the_same_records() {
+    // The formats from 17 on differ in what they derive from the records, not in the records: an image names one of them.
+    for (format, admitted) in [(16_u32, false), (17, true), (18, true), (19, false)] {
+        let temporary = tempfile::tempdir().unwrap();
+        let control = StorageReadControl::with_limit(64 << 10);
+        let mut image = Image::new(vec![]);
+        image.units[0].bytes[48..52].copy_from_slice(&format.to_be_bytes());
+        let (repository, root) = repository(&temporary.path().join("backup"), image, &control);
+        let lease = repository.open_backup(root.backup(), &control).unwrap();
+        let mut input = SQLiteNativeImageImportReader::new(&lease, 2 << 20, &control).unwrap();
+        // The first step reads the header and nothing after it.
+        let header = input.advance(1);
+        assert_eq!(header.is_ok(), admitted, "format {format}: {header:?}");
+        assert_eq!(
+            input.native_namespace().is_some(),
+            admitted,
+            "format {format}"
+        );
+    }
+}
+
+#[test]
 fn native_backup_import_reader_rejects_verified_but_invalid_mapping_envelopes() {
     for fault in 0..22 {
         let temporary = tempfile::tempdir().unwrap();
