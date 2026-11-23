@@ -30,6 +30,8 @@ const ROWS_AFTER: &str = "SELECT doc_id, octet_length(body), CASE WHEN octet_len
 const BODY: &str = "SELECT body FROM _documents WHERE table_name = ?1 AND doc_id = ?2";
 const COUNT: &str = "SELECT count(*) FROM _documents WHERE table_name = ?1";
 const IDS: &str = "SELECT doc_id FROM _documents WHERE table_name = ?1 ORDER BY doc_id";
+const MAXIMUM: &str =
+    "SELECT doc_id FROM _documents WHERE table_name = ?1 ORDER BY doc_id DESC LIMIT 1";
 const IDS_AFTER: &str =
     "SELECT doc_id FROM _documents WHERE table_name = ?1 AND doc_id > ?2 ORDER BY doc_id";
 const STORED: &str =
@@ -101,6 +103,12 @@ impl LatestDocuments<'_> {
             .map_err(|error| error.into_version().into())
     }
 
+    /// The greatest identity among the stored rows, found at the end of the table's key without reading a row, or `None` for a table without rows. The session's private records are not merged in: one of them can delete that row or add a later one.
+    pub(crate) fn stored_maximum(&self) -> Result<Option<i64>> {
+        stored_maximum(self.connection, self.table, self.control)
+            .map_err(|error| error.into_version().into())
+    }
+
     /// The session's private document records of the table after document `after`, in document order, or `None` when it holds none. The rows [`Self::visit`] yields have them merged in already.
     pub(crate) fn private_documents(&self, after: Option<i64>) -> Result<Option<PrivateRows<'_>>> {
         Ok(self
@@ -168,6 +176,20 @@ pub(super) fn stores_alone(
         .prepare_cached(NAMES_OF_OWNER)?
         .query_row([table], |row| row.get(0))?;
     Ok(names == 1)
+}
+
+fn stored_maximum(
+    connection: &Connection,
+    table: &str,
+    control: &StorageReadControl,
+) -> PhysicalResult<Option<i64>> {
+    let _bindings = reserve_bindings(control, &[table.as_bytes()])?;
+    let maximum = connection
+        .prepare_cached(MAXIMUM)?
+        .query_row([table], |row| row.get(0))
+        .optional()?;
+    control.check().map_err(VersionError::from)?;
+    Ok(maximum)
 }
 
 fn count_rows(

@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Native maximum lookup keeps its reverse key order and yields after each deleted slot.
+//! Native maximum lookup reads the end of the latest committed rows, and for any other view keeps its reverse key order and yields after each deleted slot.
 
 use super::{NativeDocumentRead, NativeSnapshot, SQLiteDocumentStore};
 use crate::{
@@ -79,6 +79,19 @@ impl NativeDocumentRead<'_> {
         let Some(owner) = self.owner else {
             return Ok(0);
         };
+        // The latest committed rows end at their greatest identity, whatever was deleted after it. A session with private records of the table and any other snapshot step back over the deleted slots of their records instead.
+        let stored = self
+            .snapshot
+            .read_latest_documents(self.table, owner, control, &mut |latest| {
+                if latest.private_documents(None)?.is_some() {
+                    return Ok(None);
+                }
+                latest.stored_maximum().map(Some)
+            })?
+            .flatten();
+        if let Some(maximum) = stored {
+            return maximum.map_or(Ok(0), document_id_from_sqlite);
+        }
         let prefix =
             NativeRecordIdentity::new(Family::Documents, owner)?.encode_prefix(&[], control)?;
         let mut before = BudgetedVec::new(control.memory());
