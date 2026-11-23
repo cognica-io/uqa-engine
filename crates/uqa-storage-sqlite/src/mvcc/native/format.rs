@@ -53,8 +53,11 @@ const FORMAT_FOURTEEN: &str = "CREATE TABLE _uqa_mvcc_native_format (singleton I
 const FORMAT_FIFTEEN: &str = "CREATE TABLE _uqa_mvcc_native_format (singleton INTEGER PRIMARY KEY CHECK(singleton = 1), format INTEGER NOT NULL CHECK(format = 15), catalog_version INTEGER NOT NULL CHECK(catalog_version = 49), record_namespace BLOB NOT NULL CHECK(typeof(record_namespace) = 'blob' AND length(record_namespace) = 16))";
 
 const FORMAT_SIXTEEN: &str = "CREATE TABLE _uqa_mvcc_native_format (singleton INTEGER PRIMARY KEY CHECK(singleton = 1), format INTEGER NOT NULL CHECK(format = 16), catalog_version INTEGER NOT NULL CHECK(catalog_version = 49), record_namespace BLOB NOT NULL CHECK(typeof(record_namespace) = 'blob' AND length(record_namespace) = 16))";
+const FORMAT_SEVENTEEN: &str = "CREATE TABLE _uqa_mvcc_native_format (singleton INTEGER PRIMARY KEY CHECK(singleton = 1), format INTEGER NOT NULL CHECK(format = 17), catalog_version INTEGER NOT NULL CHECK(catalog_version = 49), record_namespace BLOB NOT NULL CHECK(typeof(record_namespace) = 'blob' AND length(record_namespace) = 16))";
 
-pub(super) const CURRENT_VERSION: u32 = 17;
+pub(super) const CURRENT_VERSION: u32 = 18;
+/// The first format whose lookup keys order as their values do, so that one interval of them holds a range.
+const ORDERED_KEYS_VERSION: u32 = 18;
 const STORED_EQUALITY_KEYS_VERSION: u32 = 17;
 const EQUALITY_INDEX_VERSION: u32 = 16;
 const FOREIGN_SERVER_METADATA_VERSION: u32 = 15;
@@ -66,7 +69,7 @@ const SEQUENCE_VALUES_VERSION: u32 = 14;
 mod tests;
 
 const TABLES: [(&str, &str); 4] = [
-    ("_uqa_mvcc_native_format", "CREATE TABLE _uqa_mvcc_native_format (singleton INTEGER PRIMARY KEY CHECK(singleton = 1), format INTEGER NOT NULL CHECK(format = 17), catalog_version INTEGER NOT NULL CHECK(catalog_version = 49), record_namespace BLOB NOT NULL CHECK(typeof(record_namespace) = 'blob' AND length(record_namespace) = 16))"),
+    ("_uqa_mvcc_native_format", "CREATE TABLE _uqa_mvcc_native_format (singleton INTEGER PRIMARY KEY CHECK(singleton = 1), format INTEGER NOT NULL CHECK(format = 18), catalog_version INTEGER NOT NULL CHECK(catalog_version = 49), record_namespace BLOB NOT NULL CHECK(typeof(record_namespace) = 'blob' AND length(record_namespace) = 16))"),
     ("_uqa_mvcc_native_owners", "CREATE TABLE _uqa_mvcc_native_owners (name TEXT PRIMARY KEY NOT NULL, object_id BLOB NOT NULL CHECK(typeof(object_id) = 'blob' AND length(object_id) = 16 AND object_id != zeroblob(16)), generation BLOB NOT NULL CHECK(typeof(generation) = 'blob' AND length(generation) = 16 AND generation != zeroblob(16)), catalog_owned INTEGER NOT NULL CHECK(catalog_owned IN (0, 1))) WITHOUT ROWID"),
     ("_uqa_mvcc_native_expected", "CREATE TABLE _uqa_mvcc_native_expected (family INTEGER NOT NULL, physical_key BLOB NOT NULL, old_key BLOB, new_key BLOB, new_value BLOB, PRIMARY KEY(family, physical_key), CHECK((new_key IS NULL) = (new_value IS NULL))) WITHOUT ROWID"),
     ("_uqa_mvcc_native_changes", "CREATE TABLE _uqa_mvcc_native_changes (family INTEGER NOT NULL, physical_key BLOB NOT NULL, PRIMARY KEY(family, physical_key)) WITHOUT ROWID"),
@@ -340,6 +343,7 @@ fn stored_version(connection: &Connection) -> PhysicalResult<u32> {
         FORMAT_FOURTEEN,
         FORMAT_FIFTEEN,
         FORMAT_SIXTEEN,
+        FORMAT_SEVENTEEN,
     ]) {
         if schema::definition_matches(connection, TABLES[0].0, definition)? == Some(true) {
             return Ok(version);
@@ -438,7 +442,8 @@ fn reopen(
     }
     if version < EQUALITY_INDEX_VERSION {
         install_equality_projection(connection)?;
-    } else if version < STORED_EQUALITY_KEYS_VERSION {
+    } else if version < ORDERED_KEYS_VERSION {
+        // The keys of an earlier format are equal for equal values and in no order: every key is written again.
         install_equality_keys(connection)?;
     }
     if version < CURRENT_VERSION {
@@ -517,6 +522,7 @@ fn validate_format(connection: &Connection, version: u32) -> PhysicalResult<()> 
                 14 => FORMAT_FOURTEEN,
                 15 => FORMAT_FIFTEEN,
                 16 => FORMAT_SIXTEEN,
+                17 => FORMAT_SEVENTEEN,
                 _ => sql,
             }
         } else {
@@ -646,7 +652,12 @@ fn validate_equality_index(connection: &Connection, version: u32) -> PhysicalRes
                 let (name, sql) = schema::trigger(crate::btree_index::equality::TABLE_NAME, action);
                 require_definition(connection, &name, &sql)?;
             }
-            for (name, sql) in crate::btree_index::equality::triggers() {
+            let triggers = if version >= ORDERED_KEYS_VERSION {
+                crate::btree_index::equality::triggers()
+            } else {
+                crate::btree_index::equality::equal_key_triggers()
+            };
+            for (name, sql) in triggers {
                 require_definition(connection, &name, &sql)?;
             }
         }

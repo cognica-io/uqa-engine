@@ -23,6 +23,7 @@ pub(crate) mod coverage;
 mod entries;
 pub(crate) mod equality;
 mod native;
+mod order;
 pub(crate) mod probe;
 pub(crate) use native::columns::change_column as change_native_column;
 pub(crate) use native::delete_document as delete_native_document_entries;

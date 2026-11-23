@@ -93,7 +93,7 @@ fn unchanged_native_btree_writes_keep_history_conflicts_and_reopen() {
                 )?,
                 r#"{"type":"Int","value":2}"#
             );
-            assert_eq!(sqlite.query_row("SELECT count(*) FROM _btree_equality_keys WHERE doc_id=1 AND equality_key=__uqa_btree_equal_v1('{\"type\":\"Int\",\"value\":2}')",[],|row|row.get::<_,i64>(0))?,1);
+            assert_eq!(sqlite.query_row("SELECT count(*) FROM _btree_equality_keys WHERE doc_id=1 AND equality_key=__uqa_btree_order_v1('{\"type\":\"Int\",\"value\":2}')",[],|row|row.get::<_,i64>(0))?,1);
             Ok(())
         });
         (transaction, receipt)
