@@ -282,6 +282,8 @@ fn secondary_session_rejects_constructor_migration_without_changing_durable_reco
     let path = directory.path().join("load-only-constructors.db");
     let engine = super::open(1, &path);
     let input = setup(&engine);
+    // Finish statistics collection before comparing the live database's full catalog.
+    exec(&engine, "ANALYZE");
     let before = catalog(1, &path, |catalog| {
         downgrade_catalog(catalog, &input);
         catalog_snapshot(catalog)
