@@ -93,10 +93,12 @@ pub(super) fn needs_sql_comparison(predicate: &Predicate, stored_can_fail: bool)
         Predicate::Between { low, high } => {
             stored_can_fail || value_comparison_can_fail(low) || value_comparison_can_fail(high)
         }
+        // An index holds what a range selects as one interval only when its two ends order as its keys do.
         Predicate::Range { low, high } => {
             stored_can_fail
                 || value_comparison_can_fail(low.value())
                 || value_comparison_can_fail(high.value())
+                || !Predicate::range_orders_as_values(low, high)
         }
         Predicate::InSet(values) => {
             !values.is_empty() && (stored_can_fail || values.iter().any(value_comparison_can_fail))

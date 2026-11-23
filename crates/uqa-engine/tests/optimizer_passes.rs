@@ -772,3 +772,60 @@ fn fuse_log_odds_calibrated_scores_lie_in_unit_interval() {
         assert!(*s > 0.0 && *s < 1.0, "score {s} not in (0, 1)");
     }
 }
+
+#[test]
+fn a_range_whose_bounds_are_of_two_kinds_selects_what_its_two_comparisons_select() {
+    let eng = Engine::new();
+    eng.sql(
+        "CREATE TABLE kinds (id INTEGER PRIMARY KEY, c CHAR(5), d DATE, t TEXT)",
+        &[],
+    )
+    .unwrap();
+    for column in ["c", "d", "t"] {
+        eng.sql(
+            &format!("CREATE INDEX kinds_{column} ON kinds ({column})"),
+            &[],
+        )
+        .unwrap();
+    }
+    eng.sql(
+        "INSERT INTO kinds VALUES \
+         (1, 'a', '2020-01-01', 'a'), (2, 'b', '2020-01-02', 'b'), (3, 'c', '2020-01-03', 'c'), \
+         (4, 'm', '2020-01-04', 'm'), (5, 'z', '2020-01-05', 'z'), (6, NULL, NULL, NULL)",
+        &[],
+    )
+    .unwrap();
+    let ids = |predicate: &str| -> Vec<i64> {
+        eng.sql(
+            &format!("SELECT id FROM kinds WHERE {predicate} ORDER BY id"),
+            &[],
+        )
+        .unwrap_or_else(|error| panic!("{predicate}: {error}"))
+        .rows
+        .iter()
+        .map(|row| match row.get("id") {
+            Some(uqa_core::Value::Int(id)) => *id,
+            other => panic!("unexpected id: {other:?}"),
+        })
+        .collect()
+    };
+    for (predicate, expected) in [
+        ("c > 'a' AND c <= 'm'", vec![2, 3, 4]),
+        ("c > 'a'::char(5) AND c <= 'm'::text", vec![2, 3, 4]),
+        ("c > 'a'::text AND c <= 'm'::char(5)", vec![2, 3, 4]),
+        ("c >= 'b'::text AND c < 'z'::char(5)", vec![2, 3, 4]),
+        ("t > 'a'::char(5) AND t <= 'm'", vec![2, 3, 4]),
+        ("t >= 'b' AND t < 'z'::char(5)", vec![2, 3, 4]),
+        ("d > '2020-01-01' AND d <= '2020-01-04'", vec![2, 3, 4]),
+        ("d > DATE '2020-01-01' AND d <= '2020-01-04'", vec![2, 3, 4]),
+        ("d >= '2020-01-02' AND d < DATE '2020-01-05'", vec![2, 3, 4]),
+        ("c > 'm'::text AND c <= 'b'::char(5)", vec![]),
+        ("d > DATE '2020-01-04' AND d <= '2020-01-02'", vec![]),
+    ] {
+        assert_eq!(ids(predicate), expected, "{predicate}");
+        // The same bounds as two predicates that cannot form a range.
+        let (lower, upper) = predicate.split_once(" AND ").unwrap();
+        let apart = format!("({lower} OR id < 0) AND ({upper} OR id < 0)");
+        assert_eq!(ids(&apart), expected, "{apart}");
+    }
+}

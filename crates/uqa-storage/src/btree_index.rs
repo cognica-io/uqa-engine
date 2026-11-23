@@ -148,6 +148,10 @@ impl BTreeIndex {
             Predicate::Between { low, high } => self
                 .entries
                 .range((Bound::Included(low.clone()), Bound::Included(high.clone()))),
+            // What a range between such ends selects is not one interval of the map: every key is evaluated.
+            Predicate::Range { low, high } if !Predicate::range_orders_as_values(low, high) => {
+                self.entries.iter()
+            }
             Predicate::Range { low, high } if Predicate::range_is_empty(low, high) => {
                 Box::new(std::iter::empty())
             }
@@ -172,6 +176,9 @@ impl BTreeIndex {
     fn entry_matches(predicate: &Predicate, value: &Value) -> bool {
         match predicate {
             Predicate::NotEquals(_) | Predicate::IsNotNull => predicate.evaluate(Some(value)),
+            Predicate::Range { low, high } if !Predicate::range_orders_as_values(low, high) => {
+                predicate.evaluate(Some(value))
+            }
             Predicate::IsNull => false,
             _ => true,
         }
@@ -322,6 +329,38 @@ mod tests {
                     }
                 }
             }
+        }
+    }
+
+    #[test]
+    fn a_range_whose_ends_order_by_kind_evaluates_every_key() {
+        use uqa_core::RangeEnd;
+        let fixed = |text: &str| Value::FixedChar(text.into());
+        let text = |text: &str| Value::Str(text.into());
+        let mut index = BTreeIndex::new("c");
+        for (id, key) in [
+            (1, "a    "),
+            (2, "b    "),
+            (3, "c    "),
+            (4, "m    "),
+            (5, "z    "),
+        ] {
+            index.insert(id, fixed(key));
+        }
+        // A fixed-length string compares with a string by its text, and the map places one kind before the other: the interval between such ends is not what the range selects, and can be one the map rejects.
+        for (low, high) in [(fixed("b    "), text("m")), (text("b"), fixed("m    "))] {
+            let range = Predicate::Range {
+                low: RangeEnd::Exclusive(low),
+                high: RangeEnd::Inclusive(high),
+            };
+            assert_eq!(ids(&index.scan(&range)), vec![3, 4], "{range:?}");
+            assert_eq!(index.estimate_cardinality(&range), 2, "{range:?}");
+            let mut visited = Vec::new();
+            assert!(index.visit_matching_ids(&range, &mut |id| {
+                visited.push(id);
+                true
+            }));
+            assert_eq!(visited, vec![3, 4], "{range:?}");
         }
     }
 

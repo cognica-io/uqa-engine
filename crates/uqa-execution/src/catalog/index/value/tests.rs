@@ -515,3 +515,41 @@ fn a_range_matches_a_stored_value_as_its_two_comparisons_do() {
         }
     }
 }
+
+#[test]
+fn an_index_declines_a_range_whose_ends_it_orders_by_kind() {
+    use uqa_core::RangeEnd;
+    let fixed = |text: &str| Value::FixedChar(text.into());
+    let text = |text: &str| Value::Str(text.into());
+    let range = |low: Value, high: Value| Predicate::Range {
+        low: RangeEnd::Exclusive(low),
+        high: RangeEnd::Inclusive(high),
+    };
+    let index = ColumnValueIndex::build("c", [(1, fixed("c    "))].into_iter());
+    // The comparison of a fixed-length string with a string is by their text; the index orders the two kinds.
+    for predicate in [
+        range(fixed("b    "), text("m")),
+        range(text("b"), fixed("m    ")),
+    ] {
+        assert!(
+            comparison::needs_sql_comparison(&predicate, false),
+            "{predicate:?}"
+        );
+        assert!(!index.supports(&predicate), "{predicate:?}");
+        assert!(index.scan(&predicate).is_none(), "{predicate:?}");
+    }
+    // Ends of one kind remain an interval of the index.
+    for predicate in [
+        range(fixed("b    "), fixed("m    ")),
+        range(text("b"), text("m")),
+    ] {
+        assert!(
+            !comparison::needs_sql_comparison(&predicate, false),
+            "{predicate:?}"
+        );
+    }
+    assert_eq!(
+        ids(&index.scan(&range(fixed("b    "), fixed("m    "))).unwrap()),
+        vec![1]
+    );
+}

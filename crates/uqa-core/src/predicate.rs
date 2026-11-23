@@ -125,7 +125,7 @@ impl Predicate {
         }
     }
 
-    /// Whether no value lies between the two ends of a range: they are in the wrong order, or equal with one of them excluded. An ordered container rejects such an interval instead of yielding nothing.
+    /// Whether a container that orders values as `Value` does holds nothing between the two ends of a range: they are in the wrong order there, or equal with one of them excluded. An ordered container rejects such an interval instead of yielding nothing. It speaks for `evaluate` only where `range_orders_as_values` holds.
     #[must_use]
     pub fn range_is_empty(low: &RangeEnd, high: &RangeEnd) -> bool {
         match low.value().cmp(high.value()) {
@@ -133,6 +133,16 @@ impl Predicate {
             std::cmp::Ordering::Equal => !(low.is_inclusive() && high.is_inclusive()),
             std::cmp::Ordering::Greater => true,
         }
+    }
+
+    /// Whether `evaluate` orders the two ends of a range as `Value` does. It compares a fixed-length string or a date with a string by its text, where the order of `Value` compares the two kinds: what a range between such ends selects is not one interval of a container ordered as `Value`.
+    #[must_use]
+    pub fn range_orders_as_values(low: &RangeEnd, high: &RangeEnd) -> bool {
+        !matches!(
+            (low.value(), high.value()),
+            (Value::Temporal(_) | Value::FixedChar(_), Value::Str(_))
+                | (Value::Str(_), Value::Temporal(_) | Value::FixedChar(_))
+        )
     }
 }
 
@@ -253,6 +263,40 @@ mod tests {
                     }
                 }
             }
+        }
+    }
+
+    #[test]
+    fn a_range_between_a_fixed_length_string_and_a_string_compares_their_text() {
+        let fixed = |text: &str| Value::FixedChar(text.into());
+        let text = |text: &str| Value::Str(text.into());
+        for (low, high) in [(fixed("b    "), text("m")), (text("b"), fixed("m    "))] {
+            let (low, high) = (RangeEnd::Exclusive(low), RangeEnd::Inclusive(high));
+            // The order of `Value` places one kind before the other whatever their text.
+            assert!(!Predicate::range_orders_as_values(&low, &high));
+            let range = Predicate::Range { low, high };
+            for (value, selected) in [
+                ("b    ", false),
+                ("c    ", true),
+                ("m    ", true),
+                ("z    ", false),
+            ] {
+                assert_eq!(
+                    range.evaluate(Some(&fixed(value))),
+                    selected,
+                    "{range:?} of {value:?}"
+                );
+            }
+        }
+        for (low, high) in [
+            (fixed("b    "), fixed("m    ")),
+            (text("b"), text("m")),
+            (Value::Int(1), Value::Float(2.5)),
+        ] {
+            assert!(Predicate::range_orders_as_values(
+                &RangeEnd::Inclusive(low),
+                &RangeEnd::Inclusive(high)
+            ));
         }
     }
 
