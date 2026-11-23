@@ -87,27 +87,16 @@ pub fn probe_durable(
 ) -> uqa_storage::StorageBackendResult<Option<PostingList>> {
     let ids = if let Some(value) = durable_equality_value(predicate) {
         backend.probe_btree_index_equal(table, field, value)?
+    } else if let Some((low, high)) = durable_range(predicate) {
+        backend.probe_btree_index_range(table, field, low, high)?
     } else {
-        match durable_range(predicate) {
-            Some(DurableRange::Empty) => Some(Vec::new()),
-            Some(DurableRange::Between(low, high)) => {
-                backend.probe_btree_index_range(table, field, low, high)?
-            }
-            None => None,
-        }
+        None
     };
     Ok(ids.map(|ids| posting_list_from_sorted_ids(ids.into_iter())))
 }
 
-/// What a comparison selects among the values of a durable index, which orders them as Core does.
-enum DurableRange<'a> {
-    /// Its ends are in the wrong order, or equal with one of them excluded.
-    Empty,
-    Between(Bound<&'a Value>, Bound<&'a Value>),
-}
-
-/// The interval of a comparison with scalar ends of the durable domain. A comparison selects no null, which Core orders before every other value, so an open low end begins after it. A null end and ends that the comparison orders differently from Core have no interval.
-fn durable_range(predicate: &Predicate) -> Option<DurableRange<'_>> {
+/// The interval of a comparison with scalar ends of the durable domain. A comparison selects no null, which Core orders before every other value, so an open low end begins after it. A null end and ends that the comparison orders differently from Core have no interval. Ends in the wrong order still have one: it holds nothing among values that the index orders as the comparison does, and only the provider knows whether the stored values are of such a domain, so the catalog does not answer for it.
+fn durable_range(predicate: &Predicate) -> Option<(Bound<&Value>, Bound<&Value>)> {
     // A row compares field by field with the meaning of its declared types, which the order of the index does not have.
     let durable = |value: &Value| {
         !matches!(value, Value::Row(_)) && durable_equality_value_of(value).is_some()
@@ -123,9 +112,6 @@ fn durable_range(predicate: &Predicate) -> Option<DurableRange<'_>> {
         Predicate::LessThan(value) if durable(value) => (after_null, Bound::Excluded(value)),
         Predicate::LessThanOrEqual(value) if durable(value) => (after_null, Bound::Included(value)),
         Predicate::Between { low, high } if durable(low) && durable(high) => {
-            if low > high {
-                return Some(DurableRange::Empty);
-            }
             (Bound::Included(low), Bound::Included(high))
         }
         Predicate::Range { low, high }
@@ -133,14 +119,11 @@ fn durable_range(predicate: &Predicate) -> Option<DurableRange<'_>> {
                 && durable(high.value())
                 && Predicate::range_orders_as_values(low, high) =>
         {
-            if Predicate::range_is_empty(low, high) {
-                return Some(DurableRange::Empty);
-            }
             (low.bound(), high.bound())
         }
         _ => return None,
     };
-    Some(DurableRange::Between(low, high))
+    Some((low, high))
 }
 
 fn durable_equality_value(predicate: &Predicate) -> Option<&Value> {
@@ -171,19 +154,16 @@ pub fn visit_durable(
 ) -> Result<bool, uqa_sql::SQLError> {
     let Some(value) = durable_equality_value(predicate) else {
         // The postings of an interval follow in key order: the provider orders them by identity within the session's memory, and declines an interval beyond it.
-        let ids = match durable_range(predicate) {
-            Some(DurableRange::Empty) => Vec::new(),
-            Some(DurableRange::Between(low, high)) => {
-                match backend
-                    .probe_btree_index_range(table, field, low, high)
-                    .map_err(|error| {
-                        crate::storage_errors::storage_error("visit stored value index", &error)
-                    })? {
-                    Some(ids) => ids,
-                    None => return Ok(false),
-                }
-            }
-            None => return Ok(false),
+        let Some((low, high)) = durable_range(predicate) else {
+            return Ok(false);
+        };
+        let Some(ids) = backend
+            .probe_btree_index_range(table, field, low, high)
+            .map_err(|error| {
+                crate::storage_errors::storage_error("visit stored value index", &error)
+            })?
+        else {
+            return Ok(false);
         };
         for id in ids {
             visit(id)?;

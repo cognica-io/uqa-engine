@@ -35,6 +35,10 @@ impl NativeSnapshot {
             }
         })?;
         if let Some(error) = failure {
+            // The provider's seek holds an interval while its postings are merged with the session's changes into this result. One that does not fit beside itself is declined as one that does not fit at all, and the caller answers without the index.
+            if probe.is_interval() {
+                return Ok(None);
+            }
             return Err(error.into());
         }
         Ok(supported.then(|| crate::btree_index::probe::into_ids(ids)))
@@ -116,11 +120,8 @@ impl NativeSnapshot {
             &self.control,
         )?;
         while rows.peek().is_some() {
-            if rows.visit(&mut |row| {
-                Ok(probe
-                    .matches(&private_value(row)?, &self.control)?
-                    .is_some())
-            })? == Some(false)
+            if rows.visit(&mut |row| probe.answers(&private_value(row)?, &self.control))?
+                == Some(false)
             {
                 return Ok(false);
             }

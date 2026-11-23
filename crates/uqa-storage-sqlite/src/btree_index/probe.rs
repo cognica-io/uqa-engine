@@ -80,6 +80,21 @@ impl IndexProbe {
         }))
     }
 
+    /// Whether the index answers for a value that a session changed: the value has a key, and for an interval that key is a scalar's. A row orders its fields by their declared types where a comparison does, so an interval declines one that a session wrote as it declines one that is stored.
+    pub(crate) fn answers(&self, value: &Value, control: &StorageReadControl) -> Result<bool> {
+        Ok(
+            equality::key(value, control)?.is_some_and(|key| match &self.keys {
+                Keys::One(_) => true,
+                Keys::Between(..) => *key < super::order::AFTER_SCALARS[..],
+            }),
+        )
+    }
+
+    /// An interval is collected and ordered before it is delivered; the postings of one key arrive in document order.
+    pub(crate) fn is_interval(&self) -> bool {
+        matches!(self.keys, Keys::Between(..))
+    }
+
     #[cfg(test)]
     pub(crate) fn read(
         &self,

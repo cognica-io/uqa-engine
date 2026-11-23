@@ -670,6 +670,95 @@ fn a_range_probe_declines_postings_beyond_the_session_allowance() {
 }
 
 #[test]
+fn a_range_probe_declines_a_result_that_does_not_fit_beside_its_interval() {
+    let count = 20_000_u64;
+    let values: Vec<_> = (1..=count)
+        .map(|id| (id, Value::Int(i64::try_from(id).unwrap())))
+        .collect();
+    let (connection, index) = fixture(&values);
+    connection
+        .bind_native_records(VersionedSessionOptions {
+            retained_bytes: 64 * 1024,
+        })
+        .unwrap();
+    // The seek holds its interval while the postings are merged into the result, so an interval of half the allowance fits and its result does not. Every size is an answer or a decline, never a failure, and no size is answered after a smaller one was declined.
+    let (mut answered, mut declined) = (0, 0);
+    for size in (250..=count).step_by(250) {
+        let high = Value::Int(i64::try_from(size).unwrap());
+        match index
+            .probe_range(
+                "items",
+                &"key".into(),
+                Bound::Unbounded,
+                Bound::Included(&high),
+            )
+            .unwrap()
+        {
+            Some(ids) => {
+                assert_eq!(
+                    declined, 0,
+                    "{size} answered after a smaller interval declined"
+                );
+                assert_eq!(ids, (1..=size).collect::<Vec<_>>());
+                answered += 1;
+            }
+            None => declined += 1,
+        }
+    }
+    assert!(
+        answered > 0 && declined > 0,
+        "{answered} answered, {declined} declined"
+    );
+}
+
+#[test]
+fn a_range_probe_declines_a_row_or_a_bit_string_that_a_session_wrote() {
+    let bits = Value::BitString(uqa_core::BitStringValue::try_from_packed(vec![0x80], 1).unwrap());
+    let (connection, index) = fixture(&[
+        (1, Value::Int(10)),
+        (2, Value::Int(20)),
+        (3, Value::Int(30)),
+    ]);
+    connection
+        .bind_native_records(VersionedSessionOptions::default())
+        .unwrap();
+    let low = Value::Int(15);
+    let range = |index: &SQLiteBTreeIndexStore| {
+        index
+            .probe_range(
+                "items",
+                &"key".into(),
+                Bound::Included(&low),
+                Bound::Unbounded,
+            )
+            .unwrap()
+    };
+    assert_eq!(range(&index), Some(vec![2, 3]));
+    for composite in [Value::Row(vec![Value::Int(99)].into()), bits] {
+        connection.begin_transaction().unwrap();
+        index
+            .apply_write(
+                "items",
+                1,
+                Some(&[("key".into(), composite.clone())].into()),
+            )
+            .unwrap();
+        // The key of a row or a bit string follows that of every scalar, and so would lie in an interval that is open above: the interval declines it as it declines a stored one.
+        assert_eq!(range(&index), None, "{composite:?}");
+        // One value is still found by its key.
+        assert_eq!(
+            index
+                .probe_equal("items", &"key".into(), &composite)
+                .unwrap(),
+            Some(vec![1]),
+            "{composite:?}"
+        );
+        connection.rollback_transaction().unwrap();
+        assert_eq!(range(&index), Some(vec![2, 3]));
+    }
+}
+
+#[test]
 fn a_range_probe_declines_an_index_that_holds_a_row_or_a_bit_string() {
     let bits = Value::BitString(uqa_core::BitStringValue::try_from_packed(vec![0x80], 1).unwrap());
     for composite in [Value::Row(vec![Value::Int(1), Value::Int(2)].into()), bits] {
