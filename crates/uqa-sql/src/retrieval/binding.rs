@@ -176,17 +176,19 @@ pub fn lower_where_bound(
     }
     match expression {
         ScalarExpr::And(parts) => {
-            if let Some(range) = super::predicates::lower_range(parts, constants) {
-                return Ok(Some(range));
-            }
             let mut children = Vec::with_capacity(parts.len());
-            for part in parts {
-                let Some(child) = lower_where_bound(source, part, constants)? else {
-                    return Ok(None);
-                };
-                children.push(child);
+            for conjunct in super::predicates::conjuncts(parts, constants) {
+                children.push(match conjunct {
+                    super::predicates::Conjunct::Range(range) => range,
+                    super::predicates::Conjunct::Part(part) => {
+                        let Some(child) = lower_where_bound(source, part, constants)? else {
+                            return Ok(None);
+                        };
+                        child
+                    }
+                });
             }
-            Ok(Some(lower_document_boolean(children, false)))
+            Ok(Some(super::predicates::conjunction(children, parts.len())))
         }
         ScalarExpr::Or(parts) => {
             let mut children = Vec::with_capacity(parts.len());

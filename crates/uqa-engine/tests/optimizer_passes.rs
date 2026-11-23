@@ -402,6 +402,126 @@ fn between_lowers_to_filter_with_between_predicate() {
 }
 
 #[test]
+fn two_bounds_of_a_column_lower_to_one_filter_whatever_their_strictness() {
+    use uqa_core::RangeEnd::{Exclusive, Inclusive};
+    use uqa_core::{Predicate, Value};
+    for (bounds, low, high) in [
+        (
+            "year > 2023 AND year <= 2025",
+            Exclusive(Value::Int(2023)),
+            Inclusive(Value::Int(2025)),
+        ),
+        (
+            "year >= 2024 AND year < 2026",
+            Inclusive(Value::Int(2024)),
+            Exclusive(Value::Int(2026)),
+        ),
+        (
+            "2026 > year AND 2023 < year",
+            Exclusive(Value::Int(2023)),
+            Exclusive(Value::Int(2026)),
+        ),
+    ] {
+        let expr = where_of(&format!("SELECT id FROM notes WHERE {bounds}"));
+        let OperatorTree::Filter {
+            field, predicate, ..
+        } = lower_where(&expr, &[]).expect("lowers")
+        else {
+            panic!("expected Filter: {bounds}");
+        };
+        assert_eq!(field, "year", "{bounds}");
+        assert_eq!(predicate, Predicate::Range { low, high }, "{bounds}");
+    }
+}
+
+#[test]
+fn a_range_selects_the_rows_between_its_bounds_whatever_their_strictness() {
+    let eng = Engine::new();
+    eng.sql(
+        "CREATE TABLE points (id INTEGER PRIMARY KEY, n INTEGER, label TEXT, x DOUBLE PRECISION)",
+        &[],
+    )
+    .unwrap();
+    eng.sql("CREATE INDEX points_n ON points (n)", &[]).unwrap();
+    eng.sql("CREATE INDEX points_label ON points (label)", &[])
+        .unwrap();
+    eng.sql(
+        "INSERT INTO points \
+         SELECT i, CASE WHEN i % 11 = 0 THEN NULL ELSE i % 10 END, \
+                'l' || CAST(i % 7 AS TEXT), (i % 10) / 2.0 \
+         FROM generate_series(1, 40) AS t(i)",
+        &[],
+    )
+    .unwrap();
+    let ids = |predicate: &str| -> Vec<i64> {
+        eng.sql(
+            &format!("SELECT id FROM points WHERE {predicate} ORDER BY id"),
+            &[],
+        )
+        .unwrap_or_else(|error| panic!("{predicate}: {error}"))
+        .rows
+        .iter()
+        .map(|row| match row.get("id") {
+            Some(uqa_core::Value::Int(id)) => *id,
+            other => panic!("unexpected id: {other:?}"),
+        })
+        .collect()
+    };
+    let between = |value: i64, low: i64, low_inclusive: bool, high: i64, high_inclusive: bool| {
+        (value > low || (low_inclusive && value == low))
+            && (value < high || (high_inclusive && value == high))
+    };
+    // The comparison whose column is its right operand.
+    let flipped = |operator: &str| match operator {
+        ">" => "<",
+        ">=" => "<=",
+        "<" => ">",
+        _ => ">=",
+    };
+    for (lower, low_inclusive) in [(">", false), (">=", true)] {
+        for (upper, high_inclusive) in [("<", false), ("<=", true)] {
+            for (low, high) in [(2, 7), (5, 5), (7, 2), (-1, 100)] {
+                let expected: Vec<i64> = (1..=40)
+                    .filter(|i| {
+                        i % 11 != 0 && between(i % 10, low, low_inclusive, high, high_inclusive)
+                    })
+                    .collect();
+                for bounds in [
+                    format!("n {lower} {low} AND n {upper} {high}"),
+                    format!("n {upper} {high} AND n {lower} {low}"),
+                    format!("{high} {} n AND {low} {} n", flipped(upper), flipped(lower)),
+                ] {
+                    assert_eq!(ids(&bounds), expected, "{bounds}");
+                }
+                // The range forms beside another predicate of the conjunction.
+                let bounds = format!("n {lower} {low} AND label <> 'l3' AND n {upper} {high}");
+                assert_eq!(
+                    ids(&bounds),
+                    expected
+                        .iter()
+                        .copied()
+                        .filter(|i| i % 7 != 3)
+                        .collect::<Vec<_>>(),
+                    "{bounds}"
+                );
+            }
+            // The label of a row is 'l' and its number modulo seven.
+            let expected: Vec<i64> = (1..=40)
+                .filter(|i| between(i % 7, 1, low_inclusive, 4, high_inclusive))
+                .collect();
+            let bounds = format!("label {lower} 'l1' AND label {upper} 'l4'");
+            assert_eq!(ids(&bounds), expected, "{bounds}");
+            // The coordinate of a row is half its number modulo ten: 1.0 is two halves, 3.5 seven.
+            let expected: Vec<i64> = (1..=40)
+                .filter(|i| between(i % 10, 2, low_inclusive, 7, high_inclusive))
+                .collect();
+            let bounds = format!("x {lower} 1.0 AND x {upper} 3.5");
+            assert_eq!(ids(&bounds), expected, "{bounds}");
+        }
+    }
+}
+
+#[test]
 fn in_list_lowers_to_filter_with_inset_predicate() {
     let expr = where_of("SELECT id FROM notes WHERE year IN (2024, 2025)");
     let lowered = lower_where(&expr, &[]).expect("lowers");

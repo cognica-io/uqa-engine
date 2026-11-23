@@ -65,6 +65,25 @@ fn verify(domain: impl Into<IndexDomain>, values: &[Value], targets: &[Value]) {
         ]);
     }
     predicates.push(Predicate::InSet(targets.iter().cloned().collect()));
+    let end = |value: &Value, inclusive| {
+        if inclusive {
+            uqa_core::RangeEnd::Inclusive(value.clone())
+        } else {
+            uqa_core::RangeEnd::Exclusive(value.clone())
+        }
+    };
+    for low in targets {
+        for high in targets {
+            for (low_inclusive, high_inclusive) in
+                [(true, true), (true, false), (false, true), (false, false)]
+            {
+                predicates.push(Predicate::Range {
+                    low: end(low, low_inclusive),
+                    high: end(high, high_inclusive),
+                });
+            }
+        }
+    }
     for predicate in predicates {
         if empty.scan(&predicate).is_none() {
             continue;
@@ -298,6 +317,28 @@ fn empty_and_open_intervals_keep_their_exact_endpoints() {
                 observed(ScalarIndexDomain::Integer, &predicate, &Value::Int(key)),
                 (low..=high).contains(&key)
             );
+        }
+        // An end that is outside a range is outside its interval, whichever end it is.
+        for (low_inclusive, high_inclusive) in [(true, false), (false, true), (false, false)] {
+            let end = |value, inclusive| {
+                if inclusive {
+                    uqa_core::RangeEnd::Inclusive(Value::Int(value))
+                } else {
+                    uqa_core::RangeEnd::Exclusive(Value::Int(value))
+                }
+            };
+            let predicate = Predicate::Range {
+                low: end(low, low_inclusive),
+                high: end(high, high_inclusive),
+            };
+            for key in [i64::MIN, 0, 1, 2, 3, i64::MAX] {
+                assert_eq!(
+                    observed(ScalarIndexDomain::Integer, &predicate, &Value::Int(key)),
+                    (key > low || (low_inclusive && key == low))
+                        && (key < high || (high_inclusive && key == high)),
+                    "{predicate:?}, {key}"
+                );
+            }
         }
     }
     let control = StorageReadControl::with_limit(1 << 20);

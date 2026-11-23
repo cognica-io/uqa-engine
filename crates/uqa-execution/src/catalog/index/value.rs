@@ -72,6 +72,7 @@ fn predicate_targets_are_index_safe(predicate: &Predicate) -> bool {
         | Predicate::LessThanOrEqual(v) => safe(v),
         Predicate::InSet(values) => values.iter().all(safe),
         Predicate::Between { low, high } => safe(low) && safe(high),
+        Predicate::Range { low, high } => safe(low.value()) && safe(high.value()),
         Predicate::IsNull | Predicate::IsNotNull => true,
     }
 }

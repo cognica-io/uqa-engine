@@ -31,7 +31,7 @@ pub use joins::lower_operator_join_table_function;
 use std::collections::BTreeSet;
 use uqa_core::{
     retrieval::{Direction as DeepGraphDirection, ExternalPriorMode, GatingSpec, MultiStageCutoff},
-    Predicate, Value,
+    Predicate, RangeEnd, Value,
 };
 type BindingResult<T> = Result<T, SQLError>;
 
@@ -96,7 +96,7 @@ use fusion::{
     try_lower_attention_fusion,
 };
 use graph::lower_graph_function;
-use predicates::{column_name, lower_comparison, lower_document_boolean, lower_function};
+use predicates::{column_name, lower_comparison, lower_document_boolean, lower_function, Conjunct};
 
 enum OptionalStringConstant {
     Null,
@@ -123,14 +123,14 @@ pub fn lower_where(expr: &ScalarExpr, constants: &RetrievalConstants<'_>) -> Opt
     }
     match expr {
         ScalarExpr::And(parts) => {
-            if let Some(range) = predicates::lower_range(parts, constants) {
-                return Some(range);
-            }
             let mut out: Vec<RetrievalExpr> = Vec::with_capacity(parts.len());
-            for p in parts {
-                out.push(lower_where(p, constants)?);
+            for conjunct in predicates::conjuncts(parts, constants) {
+                out.push(match conjunct {
+                    Conjunct::Range(range) => range,
+                    Conjunct::Part(part) => lower_where(part, constants)?,
+                });
             }
-            Some(lower_document_boolean(out, false))
+            Some(predicates::conjunction(out, parts.len()))
         }
         ScalarExpr::Or(parts) => {
             let mut out: Vec<RetrievalExpr> = Vec::with_capacity(parts.len());

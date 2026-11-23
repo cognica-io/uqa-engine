@@ -148,6 +148,12 @@ impl BTreeIndex {
             Predicate::Between { low, high } => self
                 .entries
                 .range((Bound::Included(low.clone()), Bound::Included(high.clone()))),
+            Predicate::Range { low, high } if Predicate::range_is_empty(low, high) => {
+                Box::new(std::iter::empty())
+            }
+            Predicate::Range { low, high } => self
+                .entries
+                .range((low.bound().cloned(), high.bound().cloned())),
             Predicate::InSet(values) => Box::new(
                 values
                     .iter()
@@ -275,6 +281,48 @@ mod tests {
         assert!(index.visit_matching_ids(&predicate, &mut |_| {
             panic!("reversed range returned an identity")
         }));
+    }
+
+    #[test]
+    fn a_range_scans_what_its_two_comparisons_have_in_common() {
+        use uqa_core::RangeEnd;
+        type End = fn(Value) -> RangeEnd;
+        type Comparison = fn(Value) -> Predicate;
+        let index = idx_with_ints();
+        let lower: [(End, Comparison); 2] = [
+            (RangeEnd::Inclusive, Predicate::GreaterThanOrEqual),
+            (RangeEnd::Exclusive, Predicate::GreaterThan),
+        ];
+        let upper: [(End, Comparison); 2] = [
+            (RangeEnd::Inclusive, Predicate::LessThanOrEqual),
+            (RangeEnd::Exclusive, Predicate::LessThan),
+        ];
+        let keys = [2019, 2020, 2022, 2024, 2025, 2030, 2031];
+        for (low_end, low_comparison) in lower {
+            for (high_end, high_comparison) in upper {
+                for low in keys {
+                    for high in keys {
+                        let range = Predicate::Range {
+                            low: low_end(Value::Int(low)),
+                            high: high_end(Value::Int(high)),
+                        };
+                        let above = ids(&index.scan(&low_comparison(Value::Int(low))));
+                        let below = ids(&index.scan(&high_comparison(Value::Int(high))));
+                        let expected: Vec<DocId> =
+                            above.into_iter().filter(|id| below.contains(id)).collect();
+                        assert_eq!(ids(&index.scan(&range)), expected, "{range:?}");
+                        assert_eq!(index.estimate_cardinality(&range), expected.len());
+                        let mut visited = Vec::new();
+                        assert!(index.visit_matching_ids(&range, &mut |id| {
+                            visited.push(id);
+                            true
+                        }));
+                        visited.sort_unstable();
+                        assert_eq!(visited, expected, "{range:?}");
+                    }
+                }
+            }
+        }
     }
 
     #[test]

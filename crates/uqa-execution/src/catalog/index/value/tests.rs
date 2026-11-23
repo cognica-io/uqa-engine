@@ -461,3 +461,57 @@ fn null_candidate_eligibility_preserves_row_and_carried_index_fallbacks() {
         )
         .unwrap());
 }
+
+#[test]
+fn a_range_matches_a_stored_value_as_its_two_comparisons_do() {
+    use uqa_core::RangeEnd;
+    type End = fn(Value) -> RangeEnd;
+    type Comparison = fn(Value) -> Predicate;
+    let lower: [(End, Comparison); 2] = [
+        (RangeEnd::Inclusive, Predicate::GreaterThanOrEqual),
+        (RangeEnd::Exclusive, Predicate::GreaterThan),
+    ];
+    let upper: [(End, Comparison); 2] = [
+        (RangeEnd::Inclusive, Predicate::LessThanOrEqual),
+        (RangeEnd::Exclusive, Predicate::LessThan),
+    ];
+    let ends = [Value::Null, Value::Int(1), Value::Int(4), Value::Int(7)];
+    let stored = [
+        Value::Null,
+        Value::Int(0),
+        Value::Int(1),
+        Value::Float(1.0),
+        Value::Int(4),
+        Value::Int(7),
+        Value::Int(8),
+    ];
+    for (low_end, low_comparison) in lower {
+        for (high_end, high_comparison) in upper {
+            for low in &ends {
+                for high in &ends {
+                    let range = Predicate::Range {
+                        low: low_end(low.clone()),
+                        high: high_end(high.clone()),
+                    };
+                    let above = low_comparison(low.clone());
+                    let below = high_comparison(high.clone());
+                    assert_eq!(
+                        comparison::needs_sql_comparison(&range, false),
+                        comparison::needs_sql_comparison(&above, false)
+                            || comparison::needs_sql_comparison(&below, false),
+                        "{range:?}"
+                    );
+                    assert!(comparison::needs_sql_comparison(&range, true));
+                    for value in &stored {
+                        assert_eq!(
+                            comparison::matches(value, &range, None).unwrap(),
+                            comparison::matches(value, &above, None).unwrap()
+                                && comparison::matches(value, &below, None).unwrap(),
+                            "{range:?} of {value:?}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
