@@ -8,11 +8,11 @@
 
 pub(super) mod columns;
 
-pub(super) fn probe_equal(
+pub(super) fn probe(
     snapshot: &NativeSnapshot,
     table: &str,
     field: &ValueIndexKey,
-    probe: &super::probe::EqualityProbe,
+    probe: &super::probe::IndexProbe,
 ) -> Result<Option<Vec<DocId>>> {
     let Some(owner) = snapshot.table_owner(table)? else {
         return Ok(None);
@@ -23,14 +23,14 @@ pub(super) fn probe_equal(
     {
         return Ok(None);
     }
-    snapshot.probe_index_equal(table, owner, field.as_value_ref(), probe)
+    snapshot.probe_index(table, owner, field.as_value_ref(), probe)
 }
 
-pub(super) fn visit_equal(
+pub(super) fn visit(
     snapshot: &NativeSnapshot,
     table: &str,
     field: &ValueIndexKey,
-    probe: &super::probe::EqualityProbe,
+    probe: &super::probe::IndexProbe,
     visit: &mut dyn FnMut(DocId) -> bool,
 ) -> Result<bool> {
     let Some(owner) = snapshot.table_owner(table)? else {
@@ -42,7 +42,7 @@ pub(super) fn visit_equal(
     {
         return Ok(false);
     }
-    snapshot.visit_index_equal(table, owner, field.as_value_ref(), probe, visit)
+    snapshot.visit_index(table, owner, field.as_value_ref(), probe, visit)
 }
 
 use rusqlite::types::{FromSql, ValueRef};

@@ -182,13 +182,30 @@ impl SQLiteBTreeIndexStore {
         value: &Value,
     ) -> Result<Option<Vec<DocId>>> {
         if let Some(snapshot) = self.conn.native_snapshot()? {
-            let Some(probe) = probe::EqualityProbe::new(value, &snapshot.control)? else {
+            let Some(probe) = probe::IndexProbe::equal(value, &snapshot.control)? else {
                 return Ok(None);
             };
-            return native::probe_equal(&snapshot, table, field, &probe);
+            return native::probe(&snapshot, table, field, &probe);
         }
         // Unmanaged legacy writers cannot certify population maintenance. Their original hydration and sparse-repair path remains authoritative.
         Ok(None)
+    }
+
+    /// Seek the persisted values between two ends as Core orders them, with the same visibility and the same declined cases as an equality.
+    pub fn probe_range(
+        &self,
+        table: &str,
+        field: &uqa_storage::ValueIndexKey,
+        low: std::ops::Bound<&Value>,
+        high: std::ops::Bound<&Value>,
+    ) -> Result<Option<Vec<DocId>>> {
+        let Some(snapshot) = self.conn.native_snapshot()? else {
+            return Ok(None);
+        };
+        let Some(probe) = probe::IndexProbe::range(low, high, &snapshot.control)? else {
+            return Ok(None);
+        };
+        native::probe(&snapshot, table, field, &probe)
     }
 
     /// Visit ordered equality candidates without retaining their population. Unsupported snapshots or domains decline before invoking the callback.
@@ -202,10 +219,10 @@ impl SQLiteBTreeIndexStore {
         let Some(snapshot) = self.conn.native_snapshot()? else {
             return Ok(false);
         };
-        let Some(probe) = probe::EqualityProbe::new(value, &snapshot.control)? else {
+        let Some(probe) = probe::IndexProbe::equal(value, &snapshot.control)? else {
             return Ok(false);
         };
-        native::visit_equal(&snapshot, table, field, &probe, visit)
+        native::visit(&snapshot, table, field, &probe, visit)
     }
 
     pub fn fields(&self, table: &str) -> Result<Vec<uqa_storage::ValueIndexKey>> {
