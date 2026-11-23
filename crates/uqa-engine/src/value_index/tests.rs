@@ -204,6 +204,102 @@ fn relation_key_suffix_preserves_quoted_components() {
 }
 
 #[test]
+fn a_comparison_is_answered_by_the_durable_index_without_an_accelerator() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("durable-range.db");
+    let engine = crate::Engine::open(&path).unwrap();
+    engine
+        .sql(
+            "CREATE TABLE items (id INTEGER PRIMARY KEY, n INTEGER, label TEXT)",
+            &[],
+        )
+        .unwrap();
+    engine
+        .sql("CREATE INDEX items_n ON items (n)", &[])
+        .unwrap();
+    engine
+        .sql("CREATE INDEX items_label ON items (label)", &[])
+        .unwrap();
+    engine
+        .sql(
+            "INSERT INTO items \
+             SELECT i, CASE WHEN i % 40 = 0 THEN NULL ELSE i % 50 END, 'l' || CAST(i % 7 AS TEXT) \
+             FROM generate_series(1, 400) AS t(i)",
+            &[],
+        )
+        .unwrap();
+    drop(engine);
+    // A session that has read nothing holds no accelerator.
+    let engine = crate::Engine::open(&path).unwrap();
+    let table = engine.try_table("items").unwrap().unwrap();
+    assert!(table.value_indexes.read().is_empty());
+    let count = |predicate: &str| -> i64 {
+        let result = engine
+            .sql(
+                &format!("SELECT count(*) AS rows FROM items WHERE {predicate}"),
+                &[],
+            )
+            .unwrap_or_else(|error| panic!("{predicate}: {error}"));
+        match result.rows[0].get("rows") {
+            Some(uqa_core::Value::Int(rows)) => *rows,
+            other => panic!("{predicate}: {other:?}"),
+        }
+    };
+    let n = |i: i64| (i % 40 != 0).then_some(i % 50);
+    let rows = |select: &dyn Fn(i64) -> bool| -> i64 {
+        i64::try_from((1..=400).filter(|i| select(*i)).count()).unwrap()
+    };
+    for (predicate, expected) in [
+        ("id > 100 AND id <= 110", 10),
+        ("id >= 100 AND id < 110", 10),
+        ("id BETWEEN 5 AND 9", 5),
+        ("id >= 395", 6),
+        ("id > 395", 5),
+        ("id < 4", 3),
+        ("id <= 4", 4),
+        ("id > 10 AND id < 5", 0),
+        ("id > 7 AND id <= 7", 0),
+        ("n > 47", rows(&|i| n(i).is_some_and(|n| n > 47))),
+        (
+            "n >= 10 AND n < 12",
+            rows(&|i| n(i).is_some_and(|n| (10..12).contains(&n))),
+        ),
+        ("n < 3", rows(&|i| n(i).is_some_and(|n| n < 3))),
+        ("n <= 49.5 AND n > 48.5", rows(&|i| n(i) == Some(49))),
+        ("label > 'l4'", rows(&|i| i % 7 > 4)),
+        (
+            "label >= 'l2' AND label < 'l4'",
+            rows(&|i| (2..4).contains(&(i % 7))),
+        ),
+    ] {
+        assert_eq!(count(predicate), expected, "{predicate}");
+        assert!(
+            table.value_indexes.read().is_empty(),
+            "{predicate} built an accelerator"
+        );
+    }
+    // The session's own uncommitted rows are in the answer, and gone from it when they are undone.
+    engine.sql("BEGIN", &[]).unwrap();
+    engine
+        .sql(
+            "INSERT INTO items VALUES (401, 49, 'l9'), (402, 7, 'l9')",
+            &[],
+        )
+        .unwrap();
+    engine.sql("DELETE FROM items WHERE id = 105", &[]).unwrap();
+    engine
+        .sql("UPDATE items SET n = 60 WHERE id = 49", &[])
+        .unwrap();
+    assert_eq!(count("id > 100 AND id <= 110"), 9);
+    assert_eq!(count("id >= 395"), 8);
+    assert_eq!(count("n > 47"), rows(&|i| n(i).is_some_and(|n| n > 47)) + 1);
+    assert_eq!(count("label > 'l4'"), rows(&|i| i % 7 > 4) + 2);
+    engine.sql("ROLLBACK", &[]).unwrap();
+    assert_eq!(count("id > 100 AND id <= 110"), 10);
+    assert_eq!(count("n > 47"), rows(&|i| n(i).is_some_and(|n| n > 47)));
+}
+
+#[test]
 fn query_builds_missing_durable_index_in_memory_only() {
     let directory = tempfile::tempdir().unwrap();
     let engine = crate::Engine::open(&directory.path().join("memory-only-btree.db")).unwrap();

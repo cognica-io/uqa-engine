@@ -550,6 +550,16 @@ impl PersistentStorageBackend for SQLiteStorageBackend {
         Ok(SQLiteBTreeIndexStore::new(self.conn.clone()).probe_equal(table, field, value)?)
     }
 
+    fn probe_btree_index_range(
+        &self,
+        table: &str,
+        field: &uqa_storage::ValueIndexKey,
+        low: std::ops::Bound<&Value>,
+        high: std::ops::Bound<&Value>,
+    ) -> StorageBackendResult<Option<Vec<DocId>>> {
+        Ok(SQLiteBTreeIndexStore::new(self.conn.clone()).probe_range(table, field, low, high)?)
+    }
+
     fn visit_btree_index_entries(
         &self,
         table: &str,
