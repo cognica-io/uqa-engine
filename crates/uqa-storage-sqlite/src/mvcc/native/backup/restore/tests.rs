@@ -15,7 +15,7 @@ use uqa_storage::{
         verify_diskann_restore_source, verify_diskann_restored, verify_diskann_restored_writes,
     },
     mvcc::{IdentifierRequest, VersionedPersistence},
-    PersistentStorageProvider, StorageEncryptionKey,
+    DocumentStore, PersistentStorageProvider, StorageEncryptionKey,
 };
 
 mod incremental;
@@ -187,6 +187,59 @@ fn native_backup_import_preserves_projection_history_artifacts_and_allocators(
     assert_eq!(rows(&records, &control), later);
     control.cancellation().cancel();
     assert_eq!(import.advance().unwrap(), SQLiteBackupImportStep::Complete);
+}
+
+#[test]
+fn native_backup_import_derives_the_ordered_lookup_keys_of_its_index_postings() {
+    let directory = tempfile::tempdir().unwrap();
+    let source = directory.path().join("source");
+    std::fs::create_dir(&source).unwrap();
+    let control = StorageReadControl::with_limit(8 << 20);
+    let connection = open(&source.join("database"), 0).unwrap();
+    let provider = SQLiteStorageProvider::new(connection.clone());
+    let session = provider.open_session().unwrap();
+    let postings: Vec<_> = (1..=40_u64)
+        .map(|id| {
+            (
+                id,
+                uqa_core::Value::Int(i64::try_from(id).unwrap() * 10 - 200),
+            )
+        })
+        .collect();
+    connection.begin_transaction().unwrap();
+    let mut documents = crate::SQLiteDocumentStore::new(connection.clone(), "items");
+    for (id, value) in &postings {
+        documents
+            .put(*id, [("key".into(), value.clone())].into())
+            .unwrap();
+    }
+    crate::SQLiteBTreeIndexStore::new(connection.clone())
+        .replace("items", &"key".into(), &postings)
+        .unwrap();
+    connection.commit_transaction().unwrap();
+    let (repository, root) = capture(&provider, &directory.path().join("backup"), &control);
+    drop((session, provider, connection));
+    std::fs::remove_dir_all(source).unwrap();
+    let lease = repository.open_backup(root.backup(), &control).unwrap();
+    let request = DatabaseRestore::new(root.cut().source).unwrap();
+    let destination = directory.path().join("destination");
+    empty(&destination);
+    let mut import =
+        SQLiteNativeBackupImport::new(&destination, lease, request, options(0), &control).unwrap();
+    complete(&mut import);
+    let restored = open(&destination, 0).unwrap();
+    let provider = SQLiteStorageProvider::new(restored.clone());
+    let _session = provider.open_session().unwrap();
+    // An image holds the postings and no key: the import derives each key, and the keys order as the values do.
+    let between = crate::SQLiteBTreeIndexStore::new(restored)
+        .probe_range(
+            "items",
+            &"key".into(),
+            std::ops::Bound::Included(&uqa_core::Value::Int(-100)),
+            std::ops::Bound::Excluded(&uqa_core::Value::Int(0)),
+        )
+        .unwrap();
+    assert_eq!(between, Some((10..=19).collect::<Vec<_>>()));
 }
 
 #[test]

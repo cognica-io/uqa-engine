@@ -129,9 +129,9 @@ fn cold_scalar_probes_seek_instead_of_visiting_the_posting_collection() {
 #[test]
 fn equality_probe_keys_and_candidates_keep_the_original_allowance_and_cancellation() {
     let control = StorageReadControl::with_limit(256);
-    assert!(EqualityProbe::new(&Value::Str("x".repeat(4096)), &control).is_err());
+    assert!(IndexProbe::equal(&Value::Str("x".repeat(4096)), &control).is_err());
     assert_eq!(control.memory().used(), 0);
-    let probe = EqualityProbe::new(&Value::Int(1), &control)
+    let probe = IndexProbe::equal(&Value::Int(1), &control)
         .unwrap()
         .unwrap();
     assert!(control.memory().used() > 0);
@@ -147,7 +147,7 @@ fn equality_probe_keys_and_candidates_keep_the_original_allowance_and_cancellati
     drop(probe);
     assert_eq!(control.memory().used(), 0);
     control.cancellation().cancel();
-    assert!(EqualityProbe::new(&Value::Int(1), &control).is_err());
+    assert!(IndexProbe::equal(&Value::Int(1), &control).is_err());
     assert_eq!(control.memory().used(), 0);
 }
 
@@ -160,7 +160,7 @@ fn equality_candidate_visitors_keep_fixed_memory_and_stop_at_the_consumer() {
         .bind_native_records(VersionedSessionOptions::default())
         .unwrap();
     let control = StorageReadControl::with_limit(256);
-    let probe = EqualityProbe::new(&Value::Int(1), &control)
+    let probe = IndexProbe::equal(&Value::Int(1), &control)
         .unwrap()
         .unwrap();
     let mut next = 1;
@@ -460,4 +460,341 @@ fn incomplete_native_index_support_declines_until_repaired_and_keeps_undo() {
     assert_eq!(probe(), None);
     connection.rollback_transaction().unwrap();
     assert_eq!(probe(), Some(vec![2]));
+}
+
+fn within(value: &Value, low: Bound<&Value>, high: Bound<&Value>) -> bool {
+    (match low {
+        Bound::Unbounded => true,
+        Bound::Included(low) => value >= low,
+        Bound::Excluded(low) => value > low,
+    }) && (match high {
+        Bound::Unbounded => true,
+        Bound::Included(high) => value <= high,
+        Bound::Excluded(high) => value < high,
+    })
+}
+
+#[test]
+fn a_range_probe_selects_what_core_orders_between_its_ends() {
+    let mut values = Vec::new();
+    let mut add = |value: Value| values.push((values.len() as DocId + 1, value));
+    for number in -20..=20 {
+        add(Value::Int(number * 3));
+    }
+    for number in -8..=8 {
+        add(Value::Float(f64::from(number) * 2.5));
+    }
+    add(Value::Bool(true));
+    add(Value::Bool(false));
+    for text in ["", "a", "ab", "b", "m", "z"] {
+        add(Value::Str(text.into()));
+    }
+    for _ in 0..3 {
+        add(Value::Null);
+    }
+    add(Value::Bytes(vec![1, 2]));
+    let (connection, index) = fixture(&values);
+    connection
+        .bind_native_records(VersionedSessionOptions::default())
+        .unwrap();
+    let ends = [
+        Value::Null,
+        Value::Int(-30),
+        Value::Int(-7),
+        Value::Float(-7.5),
+        Value::Int(0),
+        Value::Float(2.5),
+        Value::Bool(true),
+        Value::Int(60),
+        Value::Float(1e300),
+        Value::Str("a".into()),
+        Value::Str("m".into()),
+        Value::Bytes(vec![1]),
+    ];
+    let mut bounds = vec![Bound::Unbounded];
+    for end in &ends {
+        bounds.extend([Bound::Included(end), Bound::Excluded(end)]);
+    }
+    for &low in &bounds {
+        for &high in &bounds {
+            let expected: Vec<DocId> = values
+                .iter()
+                .filter(|(_, value)| within(value, low, high))
+                .map(|(id, _)| *id)
+                .collect();
+            assert_eq!(
+                index
+                    .probe_range("items", &"key".into(), low, high)
+                    .unwrap(),
+                Some(expected),
+                "{low:?} to {high:?}"
+            );
+        }
+    }
+    // An end outside the domain of the keys has no interval.
+    let fixed = Value::FixedChar("a".into());
+    assert_eq!(
+        index
+            .probe_range(
+                "items",
+                &"key".into(),
+                Bound::Included(&fixed),
+                Bound::Unbounded
+            )
+            .unwrap(),
+        None
+    );
+}
+
+#[test]
+fn a_range_probe_seeks_its_interval_whatever_the_index_holds() {
+    let mut steps = Vec::new();
+    for count in [64_u64, 4096] {
+        let values: Vec<_> = (1..=count)
+            .map(|id| (id, Value::Int(i64::try_from(id).unwrap())))
+            .collect();
+        let (connection, index) = fixture(&values);
+        connection
+            .bind_native_records(VersionedSessionOptions::default())
+            .unwrap();
+        PROBE_VM_STEPS.set(0);
+        assert_eq!(
+            index
+                .probe_range(
+                    "items",
+                    &"key".into(),
+                    Bound::Excluded(&Value::Int(20)),
+                    Bound::Included(&Value::Int(30)),
+                )
+                .unwrap(),
+            Some((21..=30).collect())
+        );
+        steps.push(PROBE_VM_STEPS.get());
+    }
+    assert!(
+        steps[0] > 0 && steps[1] == steps[0],
+        "ten postings of 64 and of 4,096 consumed {steps:?} SQLite instructions"
+    );
+}
+
+#[test]
+fn a_range_probe_merges_private_changes_and_declines_what_it_cannot_order() {
+    let (connection, index) = fixture(&[
+        (1, Value::Int(10)),
+        (2, Value::Int(20)),
+        (3, Value::Int(30)),
+        (4, Value::Int(40)),
+        (5, Value::Null),
+    ]);
+    connection
+        .bind_native_records(VersionedSessionOptions::default())
+        .unwrap();
+    let (low, high) = (Value::Int(15), Value::Int(40));
+    let range = |index: &SQLiteBTreeIndexStore| {
+        index
+            .probe_range(
+                "items",
+                &"key".into(),
+                Bound::Included(&low),
+                Bound::Excluded(&high),
+            )
+            .unwrap()
+    };
+    assert_eq!(range(&index), Some(vec![2, 3]));
+    let other = connection.new_session();
+    let old = SQLiteBTreeIndexStore::new(other.clone());
+    other.begin_deferred_transaction().unwrap();
+    assert_eq!(range(&old), Some(vec![2, 3]));
+    connection.begin_transaction().unwrap();
+    connection.savepoint("original").unwrap();
+    let write = |id, value: Value| {
+        index
+            .apply_write("items", id, Some(&[("key".into(), value)].into()))
+            .unwrap();
+    };
+    // One row leaves the interval, one enters it, one is new at its inclusive end and one is deleted.
+    write(2, Value::Int(50));
+    write(4, Value::Int(35));
+    let mut documents = SQLiteDocumentStore::new(connection.clone(), "items");
+    documents
+        .put(6, [("key".into(), Value::Float(15.0))].into())
+        .unwrap();
+    write(6, Value::Float(15.0));
+    index.apply_write("items", 3, None).unwrap();
+    documents.delete(3).unwrap();
+    assert_eq!(range(&index), Some(vec![4, 6]));
+    // A private value without a key leaves the index unable to answer.
+    write(1, Value::FixedChar("x".into()));
+    assert_eq!(range(&index), None);
+    connection.rollback_to_savepoint("original").unwrap();
+    assert_eq!(range(&index), Some(vec![2, 3]));
+    write(2, Value::Int(50));
+    connection.commit_transaction().unwrap();
+    assert_eq!(range(&index), Some(vec![3]));
+    // A historical view must never answer from a newer physical projection.
+    assert_eq!(range(&old), None);
+    other.rollback_transaction().unwrap();
+    assert_eq!(range(&old), Some(vec![3]));
+}
+
+#[test]
+fn a_range_probe_declines_postings_beyond_the_session_allowance() {
+    let count = 20_000_u64;
+    let values: Vec<_> = (1..=count)
+        .map(|id| (id, Value::Int(i64::try_from(id).unwrap())))
+        .collect();
+    let (connection, index) = fixture(&values);
+    connection
+        .bind_native_records(VersionedSessionOptions {
+            retained_bytes: 64 * 1024,
+        })
+        .unwrap();
+    // 20,000 identities need 160,000 bytes: the caller answers without the index.
+    assert_eq!(
+        index
+            .probe_range("items", &"key".into(), Bound::Unbounded, Bound::Unbounded)
+            .unwrap(),
+        None
+    );
+    assert_eq!(
+        index
+            .probe_range(
+                "items",
+                &"key".into(),
+                Bound::Included(&Value::Int(19_999)),
+                Bound::Unbounded,
+            )
+            .unwrap(),
+        Some(vec![19_999, 20_000])
+    );
+}
+
+#[test]
+fn a_range_probe_declines_a_result_that_does_not_fit_beside_its_interval() {
+    let count = 20_000_u64;
+    let values: Vec<_> = (1..=count)
+        .map(|id| (id, Value::Int(i64::try_from(id).unwrap())))
+        .collect();
+    let (connection, index) = fixture(&values);
+    connection
+        .bind_native_records(VersionedSessionOptions {
+            retained_bytes: 64 * 1024,
+        })
+        .unwrap();
+    // The seek holds its interval while the postings are merged into the result, so an interval of half the allowance fits and its result does not. Every size is an answer or a decline, never a failure, and no size is answered after a smaller one was declined.
+    let (mut answered, mut declined) = (0, 0);
+    for size in (250..=count).step_by(250) {
+        let high = Value::Int(i64::try_from(size).unwrap());
+        match index
+            .probe_range(
+                "items",
+                &"key".into(),
+                Bound::Unbounded,
+                Bound::Included(&high),
+            )
+            .unwrap()
+        {
+            Some(ids) => {
+                assert_eq!(
+                    declined, 0,
+                    "{size} answered after a smaller interval declined"
+                );
+                assert_eq!(ids, (1..=size).collect::<Vec<_>>());
+                answered += 1;
+            }
+            None => declined += 1,
+        }
+    }
+    assert!(
+        answered > 0 && declined > 0,
+        "{answered} answered, {declined} declined"
+    );
+}
+
+#[test]
+fn a_range_probe_declines_a_row_or_a_bit_string_that_a_session_wrote() {
+    let bits = Value::BitString(uqa_core::BitStringValue::try_from_packed(vec![0x80], 1).unwrap());
+    let (connection, index) = fixture(&[
+        (1, Value::Int(10)),
+        (2, Value::Int(20)),
+        (3, Value::Int(30)),
+    ]);
+    connection
+        .bind_native_records(VersionedSessionOptions::default())
+        .unwrap();
+    let low = Value::Int(15);
+    let range = |index: &SQLiteBTreeIndexStore| {
+        index
+            .probe_range(
+                "items",
+                &"key".into(),
+                Bound::Included(&low),
+                Bound::Unbounded,
+            )
+            .unwrap()
+    };
+    assert_eq!(range(&index), Some(vec![2, 3]));
+    for composite in [Value::Row(vec![Value::Int(99)].into()), bits] {
+        connection.begin_transaction().unwrap();
+        index
+            .apply_write(
+                "items",
+                1,
+                Some(&[("key".into(), composite.clone())].into()),
+            )
+            .unwrap();
+        // The key of a row or a bit string follows that of every scalar, and so would lie in an interval that is open above: the interval declines it as it declines a stored one.
+        assert_eq!(range(&index), None, "{composite:?}");
+        // One value is still found by its key.
+        assert_eq!(
+            index
+                .probe_equal("items", &"key".into(), &composite)
+                .unwrap(),
+            Some(vec![1]),
+            "{composite:?}"
+        );
+        connection.rollback_transaction().unwrap();
+        assert_eq!(range(&index), Some(vec![2, 3]));
+    }
+}
+
+#[test]
+fn a_range_probe_declines_an_index_that_holds_a_row_or_a_bit_string() {
+    let bits = Value::BitString(uqa_core::BitStringValue::try_from_packed(vec![0x80], 1).unwrap());
+    for composite in [Value::Row(vec![Value::Int(1), Value::Int(2)].into()), bits] {
+        let (connection, index) = fixture(&[
+            (1, Value::Int(10)),
+            (2, Value::Int(20)),
+            (3, composite.clone()),
+        ]);
+        connection
+            .bind_native_records(VersionedSessionOptions::default())
+            .unwrap();
+        let low = Value::Int(5);
+        assert_eq!(
+            index
+                .probe_range(
+                    "items",
+                    &"key".into(),
+                    Bound::Included(&low),
+                    Bound::Unbounded
+                )
+                .unwrap(),
+            None,
+            "{composite:?}"
+        );
+        // One value is still found by its key.
+        assert_eq!(
+            index
+                .probe_equal("items", &"key".into(), &Value::Int(20))
+                .unwrap(),
+            Some(vec![2])
+        );
+        assert_eq!(
+            index
+                .probe_equal("items", &"key".into(), &composite)
+                .unwrap(),
+            Some(vec![3])
+        );
+    }
 }

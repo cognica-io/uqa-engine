@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Versioned equality keys for the physical scalar and tuple lookup index. Unsupported SQL comparison domains remain NULL so a probe can decline them with one index seek.
+//! Versioned keys of the physical scalar and tuple lookup index. A key is equal for equal values and orders as its value does, so one seek finds a value and one interval holds a range. Unsupported SQL comparison domains remain NULL so a probe can decline them with one index seek.
 
 use super::{decode_value, Result, Value};
 use rusqlite::{functions::FunctionFlags, Connection};
@@ -17,12 +17,26 @@ pub(crate) const TABLE_NAME: &str = "_btree_equality_keys";
 pub(crate) const TABLE_SQL: &str = "CREATE TABLE _btree_equality_keys (table_name TEXT NOT NULL, field TEXT NOT NULL, doc_id INTEGER NOT NULL, equality_key BLOB, PRIMARY KEY(table_name, field, doc_id)) WITHOUT ROWID";
 pub(crate) const INDEX_SQL: &str = "CREATE INDEX _btree_index_equal_v1 ON _btree_equality_keys(table_name, field, equality_key, doc_id)";
 
+/// The function of the keys that are equal for equal values and nothing more. A database whose keys it wrote names it in its schema until the keys are written again.
+const EQUAL_FUNCTION: &str = "__uqa_btree_equal_v1";
+/// The function of the keys that also order as their values do.
+const ORDER_FUNCTION: &str = "__uqa_btree_order_v1";
+
 /// Maintain the derived projection inside the same guarded transaction as its source posting. Maintenance tools copy stored keys and never evaluate the private encoding function.
 pub(crate) fn triggers() -> Vec<(String, String)> {
-    let insert = "INSERT INTO _btree_equality_keys(table_name, field, doc_id, equality_key) VALUES(NEW.table_name, NEW.field, NEW.doc_id, __uqa_btree_equal_v1(NEW.value_json));";
+    triggers_of(ORDER_FUNCTION)
+}
+
+/// The triggers of a database whose keys do not order as their values do.
+pub(crate) fn equal_key_triggers() -> Vec<(String, String)> {
+    triggers_of(EQUAL_FUNCTION)
+}
+
+fn triggers_of(function: &str) -> Vec<(String, String)> {
+    let insert = format!("INSERT INTO _btree_equality_keys(table_name, field, doc_id, equality_key) VALUES(NEW.table_name, NEW.field, NEW.doc_id, {function}(NEW.value_json));");
     let delete = "DELETE FROM _btree_equality_keys WHERE table_name = OLD.table_name AND field = OLD.field AND doc_id = OLD.doc_id;";
     [
-        ("insert", "INSERT", insert.to_owned()),
+        ("insert", "INSERT", insert.clone()),
         ("delete", "DELETE", delete.to_owned()),
         (
             "update",
@@ -40,21 +54,26 @@ pub(crate) fn triggers() -> Vec<(String, String)> {
     .collect()
 }
 
-/// Register once per physical connection, before any schema or statement uses the function. Replacing it on every probe would invalidate the prepared statement cache.
+/// Register once per physical connection, before any schema or statement uses a function. Replacing one on every probe would invalidate the prepared statement cache.
 pub(crate) fn register(connection: &Connection) -> rusqlite::Result<()> {
-    let registered: bool = connection.query_row(
-        "SELECT EXISTS(SELECT 1 FROM pragma_function_list WHERE name = '__uqa_btree_equal_v1')",
-        [],
-        |row| row.get(0),
-    )?;
-    if !registered {
+    type Key = fn(&Value, &StorageReadControl) -> Result<Option<BudgetedVec<u8>>>;
+    let functions: [(&str, Key); 2] = [(EQUAL_FUNCTION, equal_key), (ORDER_FUNCTION, key)];
+    for (name, key) in functions {
+        let registered: bool = connection.query_row(
+            "SELECT EXISTS(SELECT 1 FROM pragma_function_list WHERE name = ?1)",
+            [name],
+            |row| row.get(0),
+        )?;
+        if registered {
+            continue;
+        }
         connection.create_scalar_function(
-            "__uqa_btree_equal_v1",
+            name,
             1,
             FunctionFlags::SQLITE_UTF8
                 | FunctionFlags::SQLITE_INNOCUOUS
                 | FunctionFlags::SQLITE_DETERMINISTIC,
-            |context| {
+            move |context| {
                 let encoded = context.get_raw(0).as_str()?;
                 let value = decode_value(encoded)
                     .map_err(|error| rusqlite::Error::UserFunctionError(Box::new(error)))?;
@@ -77,20 +96,25 @@ pub(crate) fn install(connection: &Connection) -> Result<()> {
         "CREATE TABLE IF NOT EXISTS",
         1,
     ))?;
-    connection.execute_batch("DELETE FROM _btree_equality_keys; INSERT INTO _btree_equality_keys SELECT table_name, field, doc_id, __uqa_btree_equal_v1(value_json) FROM _btree_index_entries;")?;
+    connection.execute_batch(&format!("DELETE FROM _btree_equality_keys; INSERT INTO _btree_equality_keys SELECT table_name, field, doc_id, {ORDER_FUNCTION}(value_json) FROM _btree_index_entries;"))?;
     connection.execute_batch(INDEX_SQL)?;
-    for (_, sql) in triggers() {
-        connection.execute_batch(&sql.replacen(
-            "CREATE TRIGGER",
-            "CREATE TRIGGER IF NOT EXISTS",
-            1,
-        ))?;
+    // The triggers of a database whose keys were written by the earlier function have the same names.
+    for (name, sql) in triggers() {
+        connection.execute_batch(&format!("DROP TRIGGER IF EXISTS {name}; {sql}"))?;
     }
     Ok(())
 }
 
-/// Core equality for the infallible scalar domain and rows composed of it. Every component has an explicit tag and length; integral floats, booleans and integers share a key only when Core compares their exact represented values as equal.
+/// The key of a value in the lookup index: equal for two values exactly when Core compares them equal, and ordered as Core orders them, for the infallible scalar domain and rows composed of it. Fallible and distinct SQL operator domains decline.
 pub(super) fn key(value: &Value, control: &StorageReadControl) -> Result<Option<BudgetedVec<u8>>> {
+    super::order::key(value, control)
+}
+
+/// The key that the earlier function wrote: equal for the same values and in no order. Every component has an explicit tag and length; integral floats, booleans and integers share a key only when Core compares them equal.
+pub(super) fn equal_key(
+    value: &Value,
+    control: &StorageReadControl,
+) -> Result<Option<BudgetedVec<u8>>> {
     let mut output = BudgetedVec::new(control.memory());
     let mut pending = BudgetedVec::new(control.memory());
     pending.push(value)?;

@@ -122,7 +122,7 @@ impl crate::Engine {
                     )
                 })?;
             if let Some((name, backend)) = selected {
-                if uqa_execution::catalog::index::value::visit_durable_equality(
+                if uqa_execution::catalog::index::value::visit_durable(
                     backend, &name, field, predicate, visit,
                 )? {
                     return Ok(true);
@@ -181,7 +181,7 @@ impl crate::Engine {
                     )
                 })?
             {
-                if uqa_execution::catalog::index::value::visit_durable_equality(
+                if uqa_execution::catalog::index::value::visit_durable(
                     backend, &name, &field, predicate, visit,
                 )? {
                     if let Some(read) = &read {
@@ -259,9 +259,7 @@ impl crate::Engine {
         let Some((name, backend)) = self.value_index_probe_backend(table, state, field)? else {
             return Ok(None);
         };
-        uqa_execution::catalog::index::value::probe_durable_equality(
-            backend, &name, field, predicate,
-        )
+        uqa_execution::catalog::index::value::probe_durable(backend, &name, field, predicate)
     }
 
     fn value_index_probe_backend(

@@ -553,3 +553,37 @@ fn an_index_declines_a_range_whose_ends_it_orders_by_kind() {
         vec![1]
     );
 }
+
+#[test]
+fn an_interval_whose_ends_are_in_the_wrong_order_is_the_providers_to_answer() {
+    // Text ends in the wrong order hold nothing among text. Among the values of another domain, which a provider declines, the comparison decides: the catalog asks and does not answer for the provider.
+    let (low, high) = (
+        Value::Str("2024-9-1".into()),
+        Value::Str("2024-10-31".into()),
+    );
+    assert!(low > high);
+    assert_eq!(
+        durable_range(&Predicate::Between {
+            low: low.clone(),
+            high: high.clone(),
+        }),
+        Some((Bound::Included(&low), Bound::Included(&high)))
+    );
+    let five = Value::Int(5);
+    let empty = Predicate::Range {
+        low: uqa_core::RangeEnd::Exclusive(five.clone()),
+        high: uqa_core::RangeEnd::Inclusive(five.clone()),
+    };
+    assert_eq!(
+        durable_range(&empty),
+        Some((Bound::Excluded(&five), Bound::Included(&five)))
+    );
+    // An end without a key, a row and a null end have no interval.
+    for end in [
+        Value::Float(f64::NAN),
+        Value::Row(vec![Value::Int(1)].into()),
+        Value::Null,
+    ] {
+        assert_eq!(durable_range(&Predicate::GreaterThan(end)), None);
+    }
+}

@@ -77,7 +77,7 @@ impl Image {
         header.extend_from_slice(&[5; 16]);
         header.extend_from_slice(&9u64.to_be_bytes());
         header.extend_from_slice(&[11; 16]);
-        header.extend_from_slice(&17u32.to_be_bytes());
+        header.extend_from_slice(&18u32.to_be_bytes());
         header.extend_from_slice(&63u16.to_be_bytes());
         header.extend_from_slice(&49u16.to_be_bytes());
         let mut bytes = 7u64.to_be_bytes().to_vec();

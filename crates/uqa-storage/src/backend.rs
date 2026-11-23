@@ -659,6 +659,17 @@ pub trait PersistentStorageBackend: Send + Sync {
         Ok(None)
     }
 
+    /// Probe complete durable postings whose values lie between two ends as Core orders them, each end inclusive, exclusive or open, on the caller's transaction boundary and without hydrating the field. Identities are returned in increasing order. `None` declines the same cases as `probe_btree_index_equal`, an end without a key, and a selection that exceeds the session's memory.
+    fn probe_btree_index_range(
+        &self,
+        _table: &str,
+        _field: &crate::ValueIndexKey,
+        _low: std::ops::Bound<&Value>,
+        _high: std::ops::Bound<&Value>,
+    ) -> StorageBackendResult<Option<Vec<DocId>>> {
+        Ok(None)
+    }
+
     /// Visit complete equality candidates in increasing identity order without retaining the result population. Returns false, without calling `visit`, for the same unsupported cases as `probe_btree_index_equal`. Returning false from `visit` stops a supported probe. The callback runs inside the provider read and must not reenter that provider.
     fn visit_btree_index_equal(
         &self,

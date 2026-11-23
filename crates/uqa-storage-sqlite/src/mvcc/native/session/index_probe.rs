@@ -4,12 +4,12 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Direct value seeks over the latest projection with private replacements reconciled before publication.
+//! Direct seeks of a value and of the values of an interval over the latest projection, with private replacements reconciled before publication.
 
 use super::latest_documents::stores_alone;
 use super::{Family, NativeRecordIdentity, NativeRecordOwner, NativeSnapshot, PrivateRows};
 use crate::{
-    btree_index::{decode_value, probe::EqualityProbe},
+    btree_index::{decode_value, probe::IndexProbe},
     connection::Result,
     SQLiteError,
 };
@@ -17,16 +17,16 @@ use rusqlite::types::ValueRef;
 use uqa_core::{memory::BudgetedVec, DocId};
 
 impl NativeSnapshot {
-    pub(crate) fn probe_index_equal(
+    pub(crate) fn probe_index(
         &self,
         table: &str,
         owner: NativeRecordOwner,
         field: ValueRef<'_>,
-        probe: &EqualityProbe,
+        probe: &IndexProbe,
     ) -> Result<Option<Vec<DocId>>> {
         let mut ids = BudgetedVec::new(self.control.memory());
         let mut failure = None;
-        let supported = self.visit_index_equal(table, owner, field, probe, &mut |id| {
+        let supported = self.visit_index(table, owner, field, probe, &mut |id| {
             if let Err(error) = ids.push(id) {
                 failure = Some(error);
                 false
@@ -35,18 +35,22 @@ impl NativeSnapshot {
             }
         })?;
         if let Some(error) = failure {
+            // The provider's seek holds an interval while its postings are merged with the session's changes into this result. One that does not fit beside itself is declined as one that does not fit at all, and the caller answers without the index.
+            if probe.is_interval() {
+                return Ok(None);
+            }
             return Err(error.into());
         }
         Ok(supported.then(|| crate::btree_index::probe::into_ids(ids)))
     }
 
-    /// Merge ordered physical equality hits with private replacements without collecting either population. A declined probe never invokes `visit`.
-    pub(crate) fn visit_index_equal(
+    /// Merge the physical hits of a probe, in document order, with private replacements without collecting either population. A declined probe never invokes `visit`.
+    pub(crate) fn visit_index(
         &self,
         table: &str,
         owner: NativeRecordOwner,
         field: ValueRef<'_>,
-        probe: &EqualityProbe,
+        probe: &IndexProbe,
         visit: &mut dyn FnMut(DocId) -> bool,
     ) -> Result<bool> {
         let control = &self.control;
@@ -54,7 +58,7 @@ impl NativeSnapshot {
         let private = self.view.private_revision().is_some();
         if private
             && (!self.private_index_support_complete(owner, field)?
-                || !self.private_equality_supported(owner, field, probe)?)
+                || !self.private_values_supported(owner, field, probe)?)
         {
             return Ok(false);
         }
@@ -76,7 +80,7 @@ impl NativeSnapshot {
                             break;
                         }
                         replaced |= next == id;
-                        if !visit_private_equal(private, probe, control, visit)? {
+                        if !visit_private(private, probe, control, visit)? {
                             stopped = true;
                             return Ok(false);
                         }
@@ -90,7 +94,7 @@ impl NativeSnapshot {
             if supported && !stopped {
                 if let Some(private) = &mut private {
                     while private.peek().is_some() {
-                        if !visit_private_equal(private, probe, control, visit)? {
+                        if !visit_private(private, probe, control, visit)? {
                             break;
                         }
                     }
@@ -102,11 +106,11 @@ impl NativeSnapshot {
     }
 
     /// Validate private comparison domains before the first candidate is delivered. The second sequential pass merges their keys without a resident mask.
-    fn private_equality_supported(
+    fn private_values_supported(
         &self,
         owner: NativeRecordOwner,
         field: ValueRef<'_>,
-        probe: &EqualityProbe,
+        probe: &IndexProbe,
     ) -> Result<bool> {
         let mut rows = PrivateRows::after(
             &self.view,
@@ -116,11 +120,8 @@ impl NativeSnapshot {
             &self.control,
         )?;
         while rows.peek().is_some() {
-            if rows.visit(&mut |row| {
-                Ok(probe
-                    .matches(&private_value(row)?, &self.control)?
-                    .is_some())
-            })? == Some(false)
+            if rows.visit(&mut |row| probe.answers(&private_value(row)?, &self.control))?
+                == Some(false)
             {
                 return Ok(false);
             }
@@ -176,9 +177,9 @@ fn private_value(row: &[ValueRef<'_>]) -> Result<uqa_core::Value> {
     decode_value(value)
 }
 
-fn visit_private_equal(
+fn visit_private(
     private: &mut PrivateRows<'_>,
-    probe: &EqualityProbe,
+    probe: &IndexProbe,
     control: &uqa_storage::read_control::StorageReadControl,
     visit: &mut dyn FnMut(DocId) -> bool,
 ) -> Result<bool> {

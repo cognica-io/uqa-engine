@@ -8,6 +8,7 @@
 //!
 //! An accelerator holds the stored value of its field for every row. A search key also orders its non-null values in a B-tree for predicates. A column that an index only carries beside its key holds the values alone: it answers the projection of an index-only read and no predicate, and a write maintains no value bucket for it.
 
+use std::ops::Bound;
 use uqa_core::{DocId, Payload, PostingEntry, PostingList, Predicate, Value};
 use uqa_storage::BTreeIndex;
 
@@ -77,38 +78,74 @@ fn predicate_targets_are_index_safe(predicate: &Predicate) -> bool {
     }
 }
 
-/// Ask a durable scalar index for exact equality candidates without creating an accelerator. Providers decline unsupported stored comparison domains. SQL null tests retain their ordinary path because a row's null test examines its fields rather than comparing its storage key with `Value::Null`.
-pub fn probe_durable_equality(
+/// Ask a durable scalar index for the exact candidates of an equality, or of the interval of a comparison, without creating an accelerator. Providers decline unsupported stored comparison domains. SQL null tests retain their ordinary path because a row's null test examines its fields rather than comparing its storage key with `Value::Null`.
+pub fn probe_durable(
     backend: &dyn uqa_storage::PersistentStorageBackend,
     table: &str,
     field: &uqa_storage::ValueIndexKey,
     predicate: &Predicate,
 ) -> uqa_storage::StorageBackendResult<Option<PostingList>> {
-    let Some(value) = durable_equality_value(predicate) else {
-        return Ok(None);
+    let ids = if let Some(value) = durable_equality_value(predicate) {
+        backend.probe_btree_index_equal(table, field, value)?
+    } else if let Some((low, high)) = durable_range(predicate) {
+        backend.probe_btree_index_range(table, field, low, high)?
+    } else {
+        None
     };
-    let Some(ids) = backend.probe_btree_index_equal(table, field, value)? else {
-        return Ok(None);
+    Ok(ids.map(|ids| posting_list_from_sorted_ids(ids.into_iter())))
+}
+
+/// The interval of a comparison with scalar ends of the durable domain. A comparison selects no null, which Core orders before every other value, so an open low end begins after it. A null end and ends that the comparison orders differently from Core have no interval. Ends in the wrong order still have one: it holds nothing among values that the index orders as the comparison does, and only the provider knows whether the stored values are of such a domain, so the catalog does not answer for it.
+fn durable_range(predicate: &Predicate) -> Option<(Bound<&Value>, Bound<&Value>)> {
+    // A row compares field by field with the meaning of its declared types, which the order of the index does not have.
+    let durable = |value: &Value| {
+        !matches!(value, Value::Row(_)) && durable_equality_value_of(value).is_some()
     };
-    Ok(Some(posting_list_from_sorted_ids(ids.into_iter())))
+    let after_null = Bound::Excluded(&Value::Null);
+    let (low, high) = match predicate {
+        Predicate::GreaterThan(value) if durable(value) => {
+            (Bound::Excluded(value), Bound::Unbounded)
+        }
+        Predicate::GreaterThanOrEqual(value) if durable(value) => {
+            (Bound::Included(value), Bound::Unbounded)
+        }
+        Predicate::LessThan(value) if durable(value) => (after_null, Bound::Excluded(value)),
+        Predicate::LessThanOrEqual(value) if durable(value) => (after_null, Bound::Included(value)),
+        Predicate::Between { low, high } if durable(low) && durable(high) => {
+            (Bound::Included(low), Bound::Included(high))
+        }
+        Predicate::Range { low, high }
+            if durable(low.value())
+                && durable(high.value())
+                && Predicate::range_orders_as_values(low, high) =>
+        {
+            (low.bound(), high.bound())
+        }
+        _ => return None,
+    };
+    Some((low, high))
 }
 
 fn durable_equality_value(predicate: &Predicate) -> Option<&Value> {
     match predicate {
-        Predicate::Equals(
-            value @ (Value::Bool(_)
-            | Value::Int(_)
-            | Value::Str(_)
-            | Value::Bytes(_)
-            | Value::Row(_)),
-        ) => Some(value),
-        Predicate::Equals(value @ Value::Float(number)) if !number.is_nan() => Some(value),
+        Predicate::Equals(value) => durable_equality_value_of(value),
+        _ => None,
+    }
+}
+
+/// A value that a durable index can be asked for: of its domain, and not null, which no comparison selects.
+fn durable_equality_value_of(value: &Value) -> Option<&Value> {
+    match value {
+        Value::Bool(_) | Value::Int(_) | Value::Str(_) | Value::Bytes(_) | Value::Row(_) => {
+            Some(value)
+        }
+        Value::Float(number) if !number.is_nan() => Some(value),
         _ => None,
     }
 }
 
 /// The callback retains only identities and must not reenter the provider. Preserve its typed SQL error separately from provider diagnostics.
-pub fn visit_durable_equality(
+pub fn visit_durable(
     backend: &dyn uqa_storage::PersistentStorageBackend,
     table: &str,
     field: &uqa_storage::ValueIndexKey,
@@ -116,7 +153,22 @@ pub fn visit_durable_equality(
     visit: &mut dyn FnMut(DocId) -> Result<(), uqa_sql::SQLError>,
 ) -> Result<bool, uqa_sql::SQLError> {
     let Some(value) = durable_equality_value(predicate) else {
-        return Ok(false);
+        // The postings of an interval follow in key order: the provider orders them by identity within the session's memory, and declines an interval beyond it.
+        let Some((low, high)) = durable_range(predicate) else {
+            return Ok(false);
+        };
+        let Some(ids) = backend
+            .probe_btree_index_range(table, field, low, high)
+            .map_err(|error| {
+                crate::storage_errors::storage_error("visit stored value index", &error)
+            })?
+        else {
+            return Ok(false);
+        };
+        for id in ids {
+            visit(id)?;
+        }
+        return Ok(true);
     };
     let mut failure = None;
     let result = backend.visit_btree_index_equal(table, field, value, &mut |id| match visit(id) {
