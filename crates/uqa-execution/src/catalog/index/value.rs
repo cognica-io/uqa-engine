@@ -106,9 +106,12 @@ enum DurableRange<'a> {
     Between(Bound<&'a Value>, Bound<&'a Value>),
 }
 
-/// The interval of a comparison with ends of the durable domain. A comparison selects no null, which Core orders before every other value, so an open low end begins after it. A null end and ends that the comparison orders differently from Core have no interval.
+/// The interval of a comparison with scalar ends of the durable domain. A comparison selects no null, which Core orders before every other value, so an open low end begins after it. A null end and ends that the comparison orders differently from Core have no interval.
 fn durable_range(predicate: &Predicate) -> Option<DurableRange<'_>> {
-    let durable = |value: &Value| durable_equality_value_of(value).is_some();
+    // A row compares field by field with the meaning of its declared types, which the order of the index does not have.
+    let durable = |value: &Value| {
+        !matches!(value, Value::Row(_)) && durable_equality_value_of(value).is_some()
+    };
     let after_null = Bound::Excluded(&Value::Null);
     let (low, high) = match predicate {
         Predicate::GreaterThan(value) if durable(value) => {

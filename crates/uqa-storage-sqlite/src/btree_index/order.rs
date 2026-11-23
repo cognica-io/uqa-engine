@@ -19,6 +19,8 @@ const NUMBER: u8 = 2;
 const TEXT: u8 = 3;
 const BYTES: u8 = 5;
 const ROW: u8 = 11;
+/// The first key of a value that is no scalar: every row and every bit string follows it, and every scalar precedes it.
+pub(super) const AFTER_SCALARS: [u8; 1] = [ROW];
 const BITS: u8 = 17;
 /// Follows the last field of a row, before every kind, so that a row sorts after its own beginnings.
 const ROW_END: u8 = 1;

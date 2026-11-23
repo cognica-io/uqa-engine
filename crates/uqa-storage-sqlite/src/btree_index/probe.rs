@@ -132,6 +132,10 @@ impl IndexProbe {
                 Ok(true)
             }
             Keys::Between(low, high) => {
+                // A row orders its fields by their declared types where a comparison does, and the keys order them as Core does: an index that holds one has no interval for a comparison.
+                if !scalar_domain(connection, table, field, control)? {
+                    return Ok(false);
+                }
                 let Some(ids) = interval(connection, table, field, low, high, control)? else {
                     return Ok(false);
                 };
@@ -207,6 +211,30 @@ pub(crate) fn into_ids(mut ids: BudgetedVec<DocId>) -> Vec<DocId> {
     }
     ids.truncate(retained);
     ids.into_parts().0
+}
+
+/// Whether every key of the index is the key of a scalar. The keys of rows and bit strings follow those of every scalar, so this is one seek.
+fn scalar_domain(
+    connection: &Connection,
+    table: &str,
+    field: ValueRef<'_>,
+    control: &StorageReadControl,
+) -> Result<bool> {
+    control.check()?;
+    let mut statement = connection.prepare_cached("SELECT EXISTS(SELECT 1 FROM _btree_equality_keys WHERE table_name = ?1 AND field = ?2 AND equality_key >= ?3)")?;
+    let found: bool = statement.query_row(
+        params![
+            table,
+            ToSqlOutput::Borrowed(field),
+            &super::order::AFTER_SCALARS[..]
+        ],
+        |row| row.get(0),
+    )?;
+    #[cfg(test)]
+    PROBE_VM_STEPS.set(
+        PROBE_VM_STEPS.get() + statement.reset_status(rusqlite::StatementStatus::VmStep) as usize,
+    );
+    Ok(!found)
 }
 
 /// Unsupported keys are indexed as SQL NULL. This check is one equality seek, independent of the number of scalar or composite values.

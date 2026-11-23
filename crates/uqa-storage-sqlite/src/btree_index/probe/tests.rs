@@ -669,3 +669,44 @@ fn a_range_probe_declines_postings_beyond_the_session_allowance() {
         Some(vec![19_999, 20_000])
     );
 }
+
+#[test]
+fn a_range_probe_declines_an_index_that_holds_a_row_or_a_bit_string() {
+    let bits = Value::BitString(uqa_core::BitStringValue::try_from_packed(vec![0x80], 1).unwrap());
+    for composite in [Value::Row(vec![Value::Int(1), Value::Int(2)].into()), bits] {
+        let (connection, index) = fixture(&[
+            (1, Value::Int(10)),
+            (2, Value::Int(20)),
+            (3, composite.clone()),
+        ]);
+        connection
+            .bind_native_records(VersionedSessionOptions::default())
+            .unwrap();
+        let low = Value::Int(5);
+        assert_eq!(
+            index
+                .probe_range(
+                    "items",
+                    &"key".into(),
+                    Bound::Included(&low),
+                    Bound::Unbounded
+                )
+                .unwrap(),
+            None,
+            "{composite:?}"
+        );
+        // One value is still found by its key.
+        assert_eq!(
+            index
+                .probe_equal("items", &"key".into(), &Value::Int(20))
+                .unwrap(),
+            Some(vec![2])
+        );
+        assert_eq!(
+            index
+                .probe_equal("items", &"key".into(), &composite)
+                .unwrap(),
+            Some(vec![3])
+        );
+    }
+}
