@@ -58,6 +58,69 @@ fn maximum_native_id_uses_bounded_work_independent_of_live_document_count() {
 }
 
 #[test]
+fn maximum_native_id_uses_bounded_work_independent_of_deleted_documents() {
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+    let work = Arc::new(AtomicUsize::new(0));
+    let mut instructions = Vec::new();
+    for deleted in [32, 4096] {
+        let connection = ManagedConnection::open_in_memory().unwrap();
+        Catalog::open(connection.clone()).unwrap();
+        connection
+            .bind_native_records(VersionedSessionOptions::default())
+            .unwrap();
+        let mut documents = SQLiteDocumentStore::new(connection.clone(), "docs");
+        connection.begin_transaction().unwrap();
+        for id in 1..=deleted + 8 {
+            documents.put(id, BTreeMap::new()).unwrap();
+        }
+        connection.commit_transaction().unwrap();
+        // The rows after the eighth are deleted: their slots remain in the records.
+        connection.begin_transaction().unwrap();
+        for id in 9..=deleted + 8 {
+            documents.delete(id).unwrap();
+        }
+        assert_eq!(documents.max_doc_id().unwrap(), 8);
+        connection.commit_transaction().unwrap();
+        let counter = Arc::clone(&work);
+        connection
+            .with_physical(|sqlite| {
+                sqlite.progress_handler(
+                    1,
+                    Some(move || {
+                        counter.fetch_add(1, Ordering::Relaxed);
+                        false
+                    }),
+                )?;
+                Ok(())
+            })
+            .unwrap();
+        work.store(0, Ordering::Relaxed);
+        assert_eq!(documents.max_doc_id().unwrap(), 8);
+        instructions.push(work.load(Ordering::Relaxed));
+        connection
+            .with_physical(|sqlite| {
+                sqlite.progress_handler(0, None::<fn() -> bool>)?;
+                Ok(())
+            })
+            .unwrap();
+        // Every row deleted leaves no greatest identity.
+        connection.begin_transaction().unwrap();
+        for id in 1..=8 {
+            documents.delete(id).unwrap();
+        }
+        connection.commit_transaction().unwrap();
+        assert_eq!(documents.max_doc_id().unwrap(), 0);
+    }
+    assert!(
+        instructions[0] < 2000 && instructions[1] == instructions[0],
+        "the greatest identity after 32 and after 4,096 deleted rows used {instructions:?} SQLite VM instructions"
+    );
+}
+
+#[test]
 fn maximum_native_id_follows_private_deletes_undo_and_retained_snapshots() {
     let connection = ManagedConnection::open_in_memory().unwrap();
     Catalog::open(connection.clone()).unwrap();
