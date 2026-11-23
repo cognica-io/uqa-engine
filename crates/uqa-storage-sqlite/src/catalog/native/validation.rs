@@ -38,6 +38,9 @@ impl Definition {
     }
 }
 
+/// Entries read at a time from an index that does not exist.
+const MISSING_INDEX_PAGE: usize = 64;
+
 const DEFINITIONS: [(Family, RelationKind); 5] = [
     (Family::Tables, RelationKind::Table),
     (Family::Views, RelationKind::View),
@@ -147,18 +150,22 @@ impl NativeSnapshot {
         Ok(())
     }
 
+    /// Every live entry belongs to an index that exists. The entries of one index are contiguous in key order and share its record, so the first of them answers for all the others and the scan continues after the last key they can have: the work follows the number of indexes, not of their entries. Only the entries of an index that does not exist are read one by one, because any of them may be live.
     fn validate_btree_parents(&self) -> Result<()> {
         let control = &self.control;
         let prefix = NativeRecordIdentity::family_prefix(Family::BtreeIndexEntries, control)?;
         let mut after: Option<BudgetedVec<u8>> = None;
-        let mut previous = BudgetedVec::new(control.memory());
+        // The entries of the index that was last found missing, which need no second lookup of its record.
+        let mut missing: Option<BudgetedVec<u8>> = None;
+        // One key shows whether its index exists. A missing index is paged through.
+        let mut limit = 1;
         loop {
             control.check()?;
             let mut page = BudgetedVec::new(control.memory());
             self.view.visit_keys(
                 &prefix,
                 after.as_deref(),
-                64,
+                limit,
                 control,
                 &mut |key, metadata| {
                     let mut owned = BudgetedVec::new(control.memory());
@@ -171,25 +178,38 @@ impl NativeSnapshot {
                 return Ok(());
             }
             // Release the key visitor before reading parent metadata. Entry values and unrelated document/index payloads are never hydrated.
+            let mut indexed = None;
             for (key, live) in page.iter() {
                 control.check()?;
-                if !live {
-                    continue;
-                }
-                let parent = btree_parent(key, control)?;
-                if *parent == *previous {
-                    continue;
-                }
-                if !self
-                    .view
-                    .metadata(&parent, control)?
-                    .is_some_and(|record| record.live)
+                if !missing
+                    .as_deref()
+                    .is_some_and(|entries| key.starts_with(entries))
                 {
+                    let (index, entries) = btree_index(key, control)?;
+                    if self
+                        .view
+                        .metadata(&index, control)?
+                        .is_some_and(|record| record.live)
+                    {
+                        indexed = Some(entries);
+                        break;
+                    }
+                    missing = Some(entries);
+                }
+                if *live {
                     return Err(invalid("native B-tree entry references a missing index"));
                 }
-                previous = parent;
             }
-            after = page.pop().map(|(key, _)| key);
+            (after, limit) = match indexed {
+                Some(entries) => {
+                    match crate::read_control::prefix_upper_bound(&entries, control)? {
+                        Some(end) => (Some(end), 1),
+                        // No key follows a prefix that has no successor.
+                        None => return Ok(()),
+                    }
+                }
+                None => (page.pop().map(|(key, _)| key), MISSING_INDEX_PAGE),
+            };
         }
     }
 }
@@ -200,7 +220,11 @@ fn contains(definitions: &[Definition], expected: &Definition) -> bool {
         .is_ok_and(|position| definitions[position].kind == expected.kind)
 }
 
-fn btree_parent(key: &[u8], control: &StorageReadControl) -> Result<BudgetedVec<u8>> {
+/// The record of the index that an entry belongs to, and the prefix that every entry of that index begins with.
+fn btree_index(
+    key: &[u8],
+    control: &StorageReadControl,
+) -> Result<(BudgetedVec<u8>, BudgetedVec<u8>)> {
     let mut field = BudgetedVec::new(control.memory());
     let mut binary = false;
     let identity = NativeRecordIdentity::visit_key_components(key, control, |position, value| {
@@ -222,10 +246,11 @@ fn btree_parent(key: &[u8], control: &StorageReadControl) -> Result<BudgetedVec<
     } else {
         ValueRef::Text(&field)
     };
-    Ok(
+    Ok((
         NativeRecordIdentity::new(Family::BtreeIndexes, identity.owner())?
             .encode_key(&[field], control)?,
-    )
+        identity.encode_prefix(&[field], control)?,
+    ))
 }
 
 fn copy_text(value: ValueRef<'_>, control: &StorageReadControl) -> Result<BudgetedVec<u8>> {
