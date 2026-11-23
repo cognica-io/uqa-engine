@@ -391,7 +391,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Added native query and expression-plan images with bounded output and admitted reconstruction, including data-modifying CTEs, original stored metadata and query/window arena validation. Immutable owners retire deep complete and partial plans without recursive stack growth or further allocation.
 
 - Require Apple Silicon ARM64 for macOS support and native release packages. macOS CI uses the self-hosted macOS 26 ARM64 runner; releases through 0.6.3 retain their original macOS x86_64 artifacts.
-- Group C binding qualification into six Linux/macOS jobs instead of twenty-two, reusing Cargo dependencies while retaining all nine feature configurations per platform, both native sanitizer configurations and all four storage providers.
+- Group C binding qualification into six Linux/macOS jobs instead of twenty-two, reusing Cargo dependencies while retaining all nine feature configurations per platform, both native sanitizer configurations and all four storage providers. On Linux the ordinary configurations share a Cargo target directory, and each native sanitizer configuration has its own 120-minute job.
 - Keep self-hosted macOS Rust toolchains private to each worker and execute complete workspace and deterministic performance suites on their build workers, eliminating repeated test-archive downloads while retaining the full test selection and result artifacts.
 
 ### Added

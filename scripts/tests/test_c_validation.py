@@ -7,6 +7,8 @@
 from __future__ import annotations
 
 import importlib.util
+import json
+import os
 from pathlib import Path
 import subprocess
 import tempfile
@@ -214,6 +216,43 @@ class GitSelectionTests(unittest.TestCase):
 
 
 class WorkflowContractTests(unittest.TestCase):
+    def test_binding_jobs_execute_the_matrices_from_the_configuration_runner(self):
+        path = ROOT / SCOPE.WORKFLOWS["bindings"]
+        jobs = json.loads(subprocess.check_output([
+            "perl", "-MCPAN::Meta::YAML=LoadFile", "-MJSON::PP=encode_json", "-e",
+            "print encode_json(LoadFile($ARGV[0])->{jobs})", str(path),
+        ]))
+        scope = jobs["scope"]
+        self.assertEqual(scope["outputs"]["matrices"], "${{ steps.plan.outputs.matrices }}")
+        planner = next(step for step in scope["steps"] if step.get("id") == "plan")
+        self.assertEqual(planner["env"], {"C_PLATFORM": "${{ inputs.platform || 'all' }}",
+                                          "C_GROUP": "${{ inputs.group || 'all' }}"})
+        for job, key, arguments in (
+            ("consumers", "consumers", "--group '${{ matrix.group }}'"),
+            ("native-sanitizers", "sanitizers", "--group sanitizers --configuration '${{ matrix.configuration }}'"),
+        ):
+            include = "${{ fromJSON(needs.scope.outputs.matrices)." + key + " }}"
+            self.assertEqual(jobs[job]["strategy"]["matrix"], {"include": include})
+            self.assertEqual(jobs[job]["steps"][-1]["run"], "python3 scripts/verify-c-configurations.py " + arguments)
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "output"
+            subprocess.run(["bash", "-e", "-c", planner["run"]], cwd=ROOT, check=True,
+                           env={**os.environ, "C_PLATFORM": "ubuntu-24.04", "C_GROUP": "sanitizers",
+                                "GITHUB_OUTPUT": str(output)})
+            name, value = output.read_text().strip().split("=", 1)
+            self.assertEqual(name, "matrices")
+            self.assertEqual(json.loads(value), {"consumers": [], "sanitizers": [
+                {"os": "ubuntu-24.04", "configuration": "minimal"},
+                {"os": "ubuntu-24.04", "configuration": "arrow-export"},
+            ]})
+        source = path.read_bytes()
+        changed = source.replace(b'--matrix "$C_PLATFORM" "$C_GROUP"', b'--matrix all all')
+        expected = SCOPE.execution_definition("bindings", source)
+        self.assertNotEqual(expected, SCOPE.execution_definition("bindings", changed))
+        policy_change = source.replace(b"fetch-depth: 2", b"fetch-depth: 3")
+        self.assertNotEqual(source, policy_change)
+        self.assertEqual(expected, SCOPE.execution_definition("bindings", policy_change))
+
     def test_scopes_gate_all_heavy_jobs_and_full_callers_are_preserved(self):
         for kind, path in SCOPE.WORKFLOWS.items():
             source = (ROOT / path).read_text()

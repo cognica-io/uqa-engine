@@ -53,7 +53,7 @@ def affected(kind: str, path: str) -> bool:
 
 
 def execution_definition(kind: str, contents: bytes) -> bytes:
-    """Ignore event, concurrency and selection wiring; commands, matrices, environments and tools remain inputs."""
+    """Ignore event and concurrency policy, retaining the jobs that define what runs."""
     before, separator, remaining = contents.partition(b"\non:\n")
     if not separator:
         raise ValueError("workflow event declaration is unavailable")
@@ -71,9 +71,19 @@ def execution_definition(kind: str, contents: bytes) -> bytes:
         raise ValueError("workflow validation jobs changed")
     blocks = []
     for index, match in enumerate(starts):
-        if match[1] == b"scope":
-            continue
         block = jobs[match.start():starts[index + 1].start() if index + 1 < len(starts) else len(jobs)]
+        if match[1] == b"scope":
+            if b"fromJSON(needs.scope.outputs.matrices)" in jobs:
+                # Include the matrix output and its producer in the execution fingerprint.
+                output = re.search(rb"(?m)^      matrices: \$\{\{ steps\.([\w-]+)\.outputs\.[\w-]+ \}\}$", block)
+                if output is None:
+                    raise ValueError("workflow matrix output is unavailable")
+                steps = re.split(rb"(?m)^      - ", block)[1:]
+                producers = [step for step in steps if b"\n        id: " + output[1] + b"\n" in step]
+                if len(producers) != 1:
+                    raise ValueError("workflow matrix producer is unavailable")
+                blocks.extend((output[0], producers[0].rstrip()))
+            continue
         lines = [line for line in block.splitlines(keepends=True)
                  if line not in (b"    needs: scope\n",
                                  b"    if: needs.scope.outputs.required == 'true'\n")]
