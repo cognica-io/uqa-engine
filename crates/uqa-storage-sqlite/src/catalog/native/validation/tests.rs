@@ -8,6 +8,10 @@
 
 use super::*;
 use crate::{Catalog, ManagedConnection};
+use std::sync::{
+    atomic::{AtomicUsize, Ordering},
+    Arc,
+};
 use uqa_storage::{
     catalog::{ForeignTableRow, ViewRow},
     mvcc::VersionedSessionOptions,
@@ -52,6 +56,11 @@ fn private_native_sequence_provenance_follows_generation_replacement_and_undo() 
 }
 
 fn fixture() -> (ManagedConnection, Catalog) {
+    fixture_with_entries(70)
+}
+
+/// Two indexes of `app.docs`, a column index and a named one, of `entries` entries each. The last entry of each has a large value.
+fn fixture_with_entries(entries: i64) -> (ManagedConnection, Catalog) {
     let connection = ManagedConnection::open_in_memory().unwrap();
     let catalog = Catalog::open(connection.clone()).unwrap();
     catalog.save_schema("app").unwrap();
@@ -113,12 +122,12 @@ fn fixture() -> (ManagedConnection, Catalog) {
         .save_model("unrelated", &"x".repeat(128 * 1024))
         .unwrap();
     connection.with(|raw| {
-        raw.execute("WITH RECURSIVE ids(id) AS (VALUES (1) UNION ALL SELECT id + 1 FROM ids WHERE id < 70) INSERT INTO _documents(table_name, doc_id, body) SELECT 'app.docs', id, '{}' FROM ids", [])?;
+        raw.execute("WITH RECURSIVE ids(id) AS (VALUES (1) UNION ALL SELECT id + 1 FROM ids WHERE id < ?1) INSERT INTO _documents(table_name, doc_id, body) SELECT 'app.docs', id, '{}' FROM ids", [entries])?;
         for field in [rusqlite::types::Value::Text("id".into()), rusqlite::types::Value::Blob(b"id".to_vec())] {
             raw.execute("INSERT INTO _btree_indexes VALUES ('app.docs', ?1)", [&field])?;
             raw.execute(
-                "WITH RECURSIVE ids(id) AS (VALUES (1) UNION ALL SELECT id + 1 FROM ids WHERE id < 70) INSERT INTO _btree_index_entries SELECT 'app.docs', ?1, id, CASE WHEN id = 70 THEN ?2 ELSE '{\"type\":\"Int\",\"value\":1}' END FROM ids",
-                rusqlite::params![field, serde_json::json!({"type": "Str", "value": "x".repeat(64 * 1024)}).to_string()],
+                "WITH RECURSIVE ids(id) AS (VALUES (1) UNION ALL SELECT id + 1 FROM ids WHERE id < ?3) INSERT INTO _btree_index_entries SELECT 'app.docs', ?1, id, CASE WHEN id = ?3 THEN ?2 ELSE '{\"type\":\"Int\",\"value\":1}' END FROM ids",
+                rusqlite::params![field, serde_json::json!({"type": "Str", "value": "x".repeat(64 * 1024)}).to_string(), entries],
             )?;
         }
         Ok(())
@@ -303,4 +312,96 @@ fn validation_pages_past_deleted_entries_without_loading_large_values() {
     snapshot.control.cancellation().cancel();
     assert!(snapshot.validate_catalog_namespace().is_err());
     assert_eq!(snapshot.control.memory().used(), 0);
+}
+
+#[test]
+fn validation_reads_one_entry_of_an_index_that_exists() {
+    let work = |entries| {
+        let (connection, catalog) = fixture_with_entries(entries);
+        let steps = Arc::new(AtomicUsize::new(0));
+        let counter = Arc::clone(&steps);
+        connection
+            .with_physical(|sqlite| {
+                sqlite.progress_handler(
+                    1,
+                    Some(move || {
+                        counter.fetch_add(1, Ordering::Relaxed);
+                        false
+                    }),
+                )?;
+                Ok(())
+            })
+            .unwrap();
+        catalog.migrate_relation_namespace().unwrap();
+        connection
+            .with_physical(|sqlite| {
+                sqlite.progress_handler(0, None::<fn() -> bool>)?;
+                Ok(())
+            })
+            .unwrap();
+        steps.load(Ordering::Relaxed)
+    };
+    let few = work(70);
+    assert_ne!(few, 0, "the validation ran on the observed connection");
+    assert_eq!(
+        work(7_000),
+        few,
+        "an index is validated by one of its entries, however many it has"
+    );
+}
+
+#[test]
+fn validation_reads_every_entry_of_an_index_that_does_not_exist() {
+    let (connection, catalog) = fixture();
+    let change = |change: &dyn Fn(
+        &NativeSnapshot,
+        &mut dyn uqa_storage::KeyValueBatch,
+        NativeRecordOwner,
+    ) -> Result<()>| {
+        connection
+            .with_native_write(|snapshot, batch| {
+                let table = snapshot.table_owner("app.docs")?.unwrap();
+                change(snapshot, batch, table)
+            })
+            .unwrap()
+            .unwrap();
+    };
+    connection.begin_transaction().unwrap();
+    // The column index is dropped, and more of its first entries than one page holds with it.
+    change(&|snapshot, batch, table| {
+        snapshot.delete_prefix(batch, Family::BtreeIndexes, table, &[text("id")])?;
+        for id in 1..=65 {
+            snapshot.delete_prefix(
+                batch,
+                Family::BtreeIndexEntries,
+                table,
+                &[text("id"), ValueRef::Integer(id)],
+            )?;
+        }
+        Ok(())
+    });
+    let error = catalog.migrate_relation_namespace().unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("B-tree entry references a missing index"),
+        "an entry after the deleted ones is live: {error}"
+    );
+    // With every entry of the dropped index deleted, the entries of the named index that follow still have theirs.
+    change(&|snapshot, batch, table| {
+        snapshot.delete_prefix(batch, Family::BtreeIndexEntries, table, &[text("id")])
+    });
+    catalog.migrate_relation_namespace().unwrap();
+    change(&|snapshot, batch, table| {
+        snapshot.delete_prefix(batch, Family::BtreeIndexes, table, &[ValueRef::Blob(b"id")])
+    });
+    let error = catalog.migrate_relation_namespace().unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("B-tree entry references a missing index"),
+        "the index after a dropped one is validated: {error}"
+    );
+    connection.rollback_transaction().unwrap();
+    catalog.migrate_relation_namespace().unwrap();
 }
