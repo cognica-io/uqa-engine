@@ -647,7 +647,6 @@ fn a_range_probe_declines_postings_beyond_the_session_allowance() {
     connection
         .bind_native_records(VersionedSessionOptions {
             retained_bytes: 64 * 1024,
-            ..VersionedSessionOptions::default()
         })
         .unwrap();
     // 20,000 identities need 160,000 bytes: the caller answers without the index.

@@ -177,26 +177,9 @@ fn expression_index_upgrade_preserves_history_and_rolls_back_atomically() {
     });
 }
 
-#[test]
-fn ordered_key_upgrade_writes_every_key_again_and_rolls_back_with_its_format_marker() {
-    let connection = ManagedConnection::open_in_memory().unwrap();
-    Catalog::open(connection.clone()).unwrap();
-    let mut documents = SQLiteDocumentStore::new(connection.clone(), "items");
-    let entries: Vec<_> = (1..=40_u64)
-        .map(|id| (id, Value::Int(i64::try_from(id).unwrap() * 10 - 200)))
-        .collect();
-    for (id, value) in &entries {
-        documents
-            .put(*id, [("key".into(), value.clone())].into())
-            .unwrap();
-    }
-    let indexes = SQLiteBTreeIndexStore::new(connection.clone());
-    indexes.replace("items", &"key".into(), &entries).unwrap();
-    let control = StorageReadControl::with_limit(1 << 22);
-    let records = SQLiteRecordStore::for_native(&connection, &control).unwrap();
-    let namespace = records.native_namespace().unwrap();
-    // The format before this one: the same projection, with keys that are equal for equal values and in no order.
-    with(&connection, |sqlite| {
+/// Put a database back into the format before the ordered keys: the same projection, with keys that are equal for equal values and in no order.
+fn write_the_keys_of_the_format_before(connection: &ManagedConnection, namespace: DatabaseId) {
+    with(connection, |sqlite| {
         let _permit = schema::WritePermit::acquire(sqlite)?;
         let transaction = schema::begin(sqlite)?;
         for (name, _) in crate::btree_index::equality::triggers() {
@@ -219,6 +202,27 @@ fn ordered_key_upgrade_writes_every_key_again_and_rolls_back_with_its_format_mar
         assert!(validate_format(sqlite, CURRENT_VERSION).is_err());
         Ok(())
     });
+}
+
+#[test]
+fn ordered_key_upgrade_writes_every_key_again_and_rolls_back_with_its_format_marker() {
+    let connection = ManagedConnection::open_in_memory().unwrap();
+    Catalog::open(connection.clone()).unwrap();
+    let mut documents = SQLiteDocumentStore::new(connection.clone(), "items");
+    let entries: Vec<_> = (1..=40_u64)
+        .map(|id| (id, Value::Int(i64::try_from(id).unwrap() * 10 - 200)))
+        .collect();
+    for (id, value) in &entries {
+        documents
+            .put(*id, [("key".into(), value.clone())].into())
+            .unwrap();
+    }
+    let indexes = SQLiteBTreeIndexStore::new(connection.clone());
+    indexes.replace("items", &"key".into(), &entries).unwrap();
+    let control = StorageReadControl::with_limit(1 << 22);
+    let records = SQLiteRecordStore::for_native(&connection, &control).unwrap();
+    let namespace = records.native_namespace().unwrap();
+    write_the_keys_of_the_format_before(&connection, namespace);
     let unordered = |sqlite: &Connection| -> rusqlite::Result<i64> {
         // A key that orders as its value does puts a negative number before a positive one.
         sqlite.query_row(
