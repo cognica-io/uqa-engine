@@ -148,6 +148,16 @@ impl BTreeIndex {
             Predicate::Between { low, high } => self
                 .entries
                 .range((Bound::Included(low.clone()), Bound::Included(high.clone()))),
+            // What a range between such ends selects is not one interval of the map: every key is evaluated.
+            Predicate::Range { low, high } if !Predicate::range_orders_as_values(low, high) => {
+                self.entries.iter()
+            }
+            Predicate::Range { low, high } if Predicate::range_is_empty(low, high) => {
+                Box::new(std::iter::empty())
+            }
+            Predicate::Range { low, high } => self
+                .entries
+                .range((low.bound().cloned(), high.bound().cloned())),
             Predicate::InSet(values) => Box::new(
                 values
                     .iter()
@@ -166,6 +176,9 @@ impl BTreeIndex {
     fn entry_matches(predicate: &Predicate, value: &Value) -> bool {
         match predicate {
             Predicate::NotEquals(_) | Predicate::IsNotNull => predicate.evaluate(Some(value)),
+            Predicate::Range { low, high } if !Predicate::range_orders_as_values(low, high) => {
+                predicate.evaluate(Some(value))
+            }
             Predicate::IsNull => false,
             _ => true,
         }
@@ -275,6 +288,80 @@ mod tests {
         assert!(index.visit_matching_ids(&predicate, &mut |_| {
             panic!("reversed range returned an identity")
         }));
+    }
+
+    #[test]
+    fn a_range_scans_what_its_two_comparisons_have_in_common() {
+        use uqa_core::RangeEnd;
+        type End = fn(Value) -> RangeEnd;
+        type Comparison = fn(Value) -> Predicate;
+        let index = idx_with_ints();
+        let lower: [(End, Comparison); 2] = [
+            (RangeEnd::Inclusive, Predicate::GreaterThanOrEqual),
+            (RangeEnd::Exclusive, Predicate::GreaterThan),
+        ];
+        let upper: [(End, Comparison); 2] = [
+            (RangeEnd::Inclusive, Predicate::LessThanOrEqual),
+            (RangeEnd::Exclusive, Predicate::LessThan),
+        ];
+        let keys = [2019, 2020, 2022, 2024, 2025, 2030, 2031];
+        for (low_end, low_comparison) in lower {
+            for (high_end, high_comparison) in upper {
+                for low in keys {
+                    for high in keys {
+                        let range = Predicate::Range {
+                            low: low_end(Value::Int(low)),
+                            high: high_end(Value::Int(high)),
+                        };
+                        let above = ids(&index.scan(&low_comparison(Value::Int(low))));
+                        let below = ids(&index.scan(&high_comparison(Value::Int(high))));
+                        let expected: Vec<DocId> =
+                            above.into_iter().filter(|id| below.contains(id)).collect();
+                        assert_eq!(ids(&index.scan(&range)), expected, "{range:?}");
+                        assert_eq!(index.estimate_cardinality(&range), expected.len());
+                        let mut visited = Vec::new();
+                        assert!(index.visit_matching_ids(&range, &mut |id| {
+                            visited.push(id);
+                            true
+                        }));
+                        visited.sort_unstable();
+                        assert_eq!(visited, expected, "{range:?}");
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_range_whose_ends_order_by_kind_evaluates_every_key() {
+        use uqa_core::RangeEnd;
+        let fixed = |text: &str| Value::FixedChar(text.into());
+        let text = |text: &str| Value::Str(text.into());
+        let mut index = BTreeIndex::new("c");
+        for (id, key) in [
+            (1, "a    "),
+            (2, "b    "),
+            (3, "c    "),
+            (4, "m    "),
+            (5, "z    "),
+        ] {
+            index.insert(id, fixed(key));
+        }
+        // A fixed-length string compares with a string by its text, and the map places one kind before the other: the interval between such ends is not what the range selects, and can be one the map rejects.
+        for (low, high) in [(fixed("b    "), text("m")), (text("b"), fixed("m    "))] {
+            let range = Predicate::Range {
+                low: RangeEnd::Exclusive(low),
+                high: RangeEnd::Inclusive(high),
+            };
+            assert_eq!(ids(&index.scan(&range)), vec![3, 4], "{range:?}");
+            assert_eq!(index.estimate_cardinality(&range), 2, "{range:?}");
+            let mut visited = Vec::new();
+            assert!(index.visit_matching_ids(&range, &mut |id| {
+                visited.push(id);
+                true
+            }));
+            assert_eq!(visited, vec![3, 4], "{range:?}");
+        }
     }
 
     #[test]

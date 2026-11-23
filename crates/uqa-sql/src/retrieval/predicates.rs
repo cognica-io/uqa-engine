@@ -11,8 +11,8 @@ use super::{
     lower_calibrated_vector_match, lower_graph_function, lower_learned_fusion,
     lower_multi_field_match, lower_operator_arg, lower_positive_evidence_pool,
     lower_staged_retrieval, try_lower_attention_fusion, try_lower_fts_match, try_lower_knn_match,
-    try_lower_text_match, BinaryOp, Predicate, RetrievalConstants, RetrievalExpr, ScalarExpr,
-    TextScoringMode, Value,
+    try_lower_text_match, BinaryOp, Predicate, RangeEnd, RetrievalConstants, RetrievalExpr,
+    ScalarExpr, TextScoringMode, Value,
 };
 
 /// Build document-level SQL Boolean algebra without weakening the carrier
@@ -147,34 +147,120 @@ pub(super) fn lower_comparison(
     })
 }
 
-/// Independent analyzed bounds on one unchanged column retain a single range access path. Coerced or differently qualified columns must keep their separate comparisons.
-pub(super) fn lower_range(
-    parts: &[ScalarExpr],
-    constants: &RetrievalConstants<'_>,
-) -> Option<RetrievalExpr> {
-    let [ScalarExpr::Binary {
-        op: BinaryOp::GreaterEqual,
-        lhs: lower_column,
-        rhs: low,
-    }, ScalarExpr::Binary {
-        op: BinaryOp::LessEqual,
-        lhs: upper_column,
-        rhs: high,
-    }] = parts
-    else {
+/// What a conjunction holds once two bounds of one column have become one range.
+pub(super) enum Conjunct<'a> {
+    /// A lower and an upper comparison of one column, at the place of the first of the two.
+    Range(RetrievalExpr),
+    /// A predicate that is lowered by itself.
+    Part(&'a ScalarExpr),
+}
+
+/// One bound of a column: its comparison with another operand, read in either operand order.
+struct ColumnBound<'a> {
+    column: &'a ScalarExpr,
+    operand: &'a ScalarExpr,
+    lower: bool,
+    inclusive: bool,
+}
+
+fn column_bound(part: &ScalarExpr) -> Option<ColumnBound<'_>> {
+    let ScalarExpr::Binary { op, lhs, rhs } = part else {
         return None;
     };
-    if lower_column != upper_column {
-        return None;
-    }
-    let field = filter_field(lower_column, constants)?;
-    let low = filter_constant(low, constants)?;
-    let high = filter_constant(high, constants)?;
+    let (column, operand, swap) = match (column_name(lhs), column_name(rhs)) {
+        (Some(_), _) => (lhs.as_ref(), rhs.as_ref(), false),
+        (None, Some(_)) => (rhs.as_ref(), lhs.as_ref(), true),
+        _ => return None,
+    };
+    let (lower, inclusive) = match (op, swap) {
+        (BinaryOp::Greater, false) | (BinaryOp::Less, true) => (true, false),
+        (BinaryOp::GreaterEqual, false) | (BinaryOp::LessEqual, true) => (true, true),
+        (BinaryOp::Less, false) | (BinaryOp::Greater, true) => (false, false),
+        (BinaryOp::LessEqual, false) | (BinaryOp::GreaterEqual, true) => (false, true),
+        _ => return None,
+    };
+    Some(ColumnBound {
+        column,
+        operand,
+        lower,
+        inclusive,
+    })
+}
+
+fn range(
+    low: &ColumnBound<'_>,
+    high: &ColumnBound<'_>,
+    constants: &RetrievalConstants<'_>,
+) -> Option<RetrievalExpr> {
+    let field = filter_field(low.column, constants)?;
+    let end = |bound: &ColumnBound<'_>| {
+        let value = filter_constant(bound.operand, constants)?;
+        Some(if bound.inclusive {
+            RangeEnd::Inclusive(value)
+        } else {
+            RangeEnd::Exclusive(value)
+        })
+    };
+    let predicate = match (end(low)?, end(high)?) {
+        (RangeEnd::Inclusive(low), RangeEnd::Inclusive(high)) => Predicate::Between { low, high },
+        (low, high) => Predicate::Range { low, high },
+    };
     Some(RetrievalExpr::Filter {
         field,
-        predicate: Predicate::Between { low, high },
+        predicate,
         source: None,
     })
+}
+
+/// Independent analyzed bounds on one unchanged column retain a single range access path, whichever of them are strict, in whichever operand order and whatever else the conjunction holds: a bound that stays a comparison of its own selects every row on its side of the column. Coerced or differently qualified columns keep their separate comparisons, and so does a further bound on a column whose range is formed.
+pub(super) fn conjuncts<'a>(
+    parts: &'a [ScalarExpr],
+    constants: &RetrievalConstants<'_>,
+) -> Vec<Conjunct<'a>> {
+    let bounds: Vec<Option<ColumnBound<'_>>> = parts.iter().map(column_bound).collect();
+    let mut joined = vec![false; parts.len()];
+    let mut conjuncts = Vec::with_capacity(parts.len());
+    for (index, part) in parts.iter().enumerate() {
+        if joined[index] {
+            continue;
+        }
+        let formed = bounds[index].as_ref().and_then(|first| {
+            bounds
+                .iter()
+                .enumerate()
+                .skip(index + 1)
+                .find_map(|(other, second)| {
+                    let second = second.as_ref()?;
+                    if joined[other] || second.lower == first.lower || second.column != first.column
+                    {
+                        return None;
+                    }
+                    let (low, high) = if first.lower {
+                        (first, second)
+                    } else {
+                        (second, first)
+                    };
+                    Some((other, range(low, high, constants)?))
+                })
+        });
+        conjuncts.push(match formed {
+            Some((other, range)) => {
+                joined[other] = true;
+                Conjunct::Range(range)
+            }
+            None => Conjunct::Part(part),
+        });
+    }
+    conjuncts
+}
+
+/// The lowered conjuncts as one expression. Two bounds that were the whole conjunction are their range itself, as an inclusive pair always was.
+pub(super) fn conjunction(mut children: Vec<RetrievalExpr>, parts: usize) -> RetrievalExpr {
+    if children.len() == 1 && parts > 1 {
+        children.remove(0)
+    } else {
+        lower_document_boolean(children, false)
+    }
 }
 
 /// A storage predicate has no declared operand type or invoking session, so it cannot replace a selected temporal SQL operator.

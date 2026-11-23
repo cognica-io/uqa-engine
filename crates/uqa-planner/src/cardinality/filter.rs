@@ -29,6 +29,10 @@ impl CardinalityEstimator {
                 .sum::<f64>()
                 .min(1.0),
             Predicate::Between { low, high } => self.range_selectivity_for(cs, low, high),
+            // The statistics do not tell an end that is part of a range from one that is not.
+            Predicate::Range { low, high } => {
+                self.range_selectivity_for(cs, low.value(), high.value())
+            }
             Predicate::GreaterThan(target) | Predicate::GreaterThanOrEqual(target) => {
                 self.gt_selectivity(cs, target)
             }

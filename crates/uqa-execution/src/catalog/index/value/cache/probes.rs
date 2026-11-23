@@ -207,6 +207,20 @@ fn ranges(predicate: &Predicate, visit: &mut RangeVisitor<'_>) -> Result<(), SQL
             },
             Included(high),
         ),
+        // The two comparisons of a range have nothing in common when its upper one compares with null, as that one alone selects nothing.
+        Predicate::Range { low, high }
+            if matches!(high.value(), Value::Null) || Predicate::range_is_empty(low, high) =>
+        {
+            Ok(())
+        }
+        Predicate::Range { low, high } => visit(
+            if matches!(low.value(), Value::Null) {
+                non_null
+            } else {
+                low.bound()
+            },
+            high.bound(),
+        ),
         Predicate::InSet(values) => {
             // InSet already uses Core-ordered distinct values; posting results restore document order at their existing output boundary.
             for value in values {

@@ -93,6 +93,88 @@ fn retained_index_cache_matches_resident_predicates_cardinality_and_full_identit
 }
 
 #[test]
+fn a_range_selects_what_its_two_comparisons_have_in_common_resident_and_spilled() {
+    use uqa_core::RangeEnd;
+    type End = fn(Value) -> RangeEnd;
+    type Comparison = fn(Value) -> Predicate;
+    let values = [
+        (u64::MAX, Value::Int(1)),
+        (0, Value::Float(1.0)),
+        (9, Value::Null),
+        (1, Value::Int(7)),
+        (4, Value::Int(7)),
+        (5, Value::Int(9)),
+    ];
+    let lower: [(End, Comparison); 2] = [
+        (RangeEnd::Inclusive, Predicate::GreaterThanOrEqual),
+        (RangeEnd::Exclusive, Predicate::GreaterThan),
+    ];
+    let upper: [(End, Comparison); 2] = [
+        (RangeEnd::Inclusive, Predicate::LessThanOrEqual),
+        (RangeEnd::Exclusive, Predicate::LessThan),
+    ];
+    let ends = [
+        Value::Null,
+        Value::Int(0),
+        Value::Int(1),
+        Value::Float(1.0),
+        Value::Int(4),
+        Value::Int(7),
+        Value::Int(9),
+        Value::Int(10),
+    ];
+    let control = StorageReadControl::with_limit(64 * 1024);
+    for allowance in [0, 64 * 1024] {
+        let index = build(&values, false, allowance);
+        assert_eq!(index.is_spilled(), allowance == 0);
+        let scan = |predicate: &Predicate| {
+            ids(index
+                .scan_observing_with_catalog(predicate, None, &control, || Ok(()))
+                .unwrap())
+            .unwrap_or_else(|| panic!("an index scan: {predicate:?}"))
+        };
+        for (low_end, low_comparison) in lower {
+            for (high_end, high_comparison) in upper {
+                for low in &ends {
+                    for high in &ends {
+                        let range = Predicate::Range {
+                            low: low_end(low.clone()),
+                            high: high_end(high.clone()),
+                        };
+                        let below = scan(&high_comparison(high.clone()));
+                        let expected: Vec<DocId> = scan(&low_comparison(low.clone()))
+                            .into_iter()
+                            .filter(|id| below.contains(id))
+                            .collect();
+                        assert_eq!(scan(&range), expected, "{range:?} spilled={allowance}");
+                        assert_eq!(
+                            index.estimate_cardinality(&range, &control).unwrap(),
+                            Some(expected.len()),
+                            "{range:?} spilled={allowance}"
+                        );
+                        let mut visited = Vec::new();
+                        assert!(index
+                            .visit_observing_with_catalog(
+                                &range,
+                                None,
+                                &control,
+                                || Ok(()),
+                                &mut |id| {
+                                    visited.push(id);
+                                    Ok(())
+                                },
+                            )
+                            .unwrap());
+                        visited.sort_unstable();
+                        assert_eq!(visited, expected, "{range:?} spilled={allowance}");
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn retained_index_cache_preserves_carried_values_and_eligibility_changes() {
     let control = StorageReadControl::with_limit(64 * 1024);
     for value in [

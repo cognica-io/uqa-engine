@@ -25,9 +25,49 @@ pub enum Predicate {
     LessThan(Value),
     LessThanOrEqual(Value),
     InSet(BTreeSet<Value>),
-    Between { low: Value, high: Value },
+    Between {
+        low: Value,
+        high: Value,
+    },
+    /// A lower and an upper comparison on one field as one range, each end part of it or not. `Between` is the range that includes both ends.
+    Range {
+        low: RangeEnd,
+        high: RangeEnd,
+    },
     IsNull,
     IsNotNull,
+}
+
+/// One end of a [`Predicate::Range`].
+#[derive(Debug, Clone, PartialEq)]
+pub enum RangeEnd {
+    /// The value is part of the range.
+    Inclusive(Value),
+    /// The value is outside the range.
+    Exclusive(Value),
+}
+
+impl RangeEnd {
+    #[must_use]
+    pub fn value(&self) -> &Value {
+        match self {
+            Self::Inclusive(value) | Self::Exclusive(value) => value,
+        }
+    }
+
+    #[must_use]
+    pub fn is_inclusive(&self) -> bool {
+        matches!(self, Self::Inclusive(_))
+    }
+
+    /// The end as a bound of an ordered interval.
+    #[must_use]
+    pub fn bound(&self) -> std::ops::Bound<&Value> {
+        match self {
+            Self::Inclusive(value) => std::ops::Bound::Included(value),
+            Self::Exclusive(value) => std::ops::Bound::Excluded(value),
+        }
+    }
 }
 
 impl Predicate {
@@ -73,7 +113,36 @@ impl Predicate {
                         compare_values(v, low).is_ge() && compare_values(v, high).is_le()
                     })
             }
+            Predicate::Range { low, high } => {
+                !is_null
+                    && value.is_some_and(|v| {
+                        let above = compare_values(v, low.value());
+                        let below = compare_values(v, high.value());
+                        (above.is_gt() || (low.is_inclusive() && above.is_eq()))
+                            && (below.is_lt() || (high.is_inclusive() && below.is_eq()))
+                    })
+            }
         }
+    }
+
+    /// Whether a container that orders values as `Value` does holds nothing between the two ends of a range: they are in the wrong order there, or equal with one of them excluded. An ordered container rejects such an interval instead of yielding nothing. It speaks for `evaluate` only where `range_orders_as_values` holds.
+    #[must_use]
+    pub fn range_is_empty(low: &RangeEnd, high: &RangeEnd) -> bool {
+        match low.value().cmp(high.value()) {
+            std::cmp::Ordering::Less => false,
+            std::cmp::Ordering::Equal => !(low.is_inclusive() && high.is_inclusive()),
+            std::cmp::Ordering::Greater => true,
+        }
+    }
+
+    /// Whether `evaluate` orders the two ends of a range as `Value` does. It compares a fixed-length string or a date with a string by its text, where the order of `Value` compares the two kinds: what a range between such ends selects is not one interval of a container ordered as `Value`.
+    #[must_use]
+    pub fn range_orders_as_values(low: &RangeEnd, high: &RangeEnd) -> bool {
+        !matches!(
+            (low.value(), high.value()),
+            (Value::Temporal(_) | Value::FixedChar(_), Value::Str(_))
+                | (Value::Str(_), Value::Temporal(_) | Value::FixedChar(_))
+        )
     }
 }
 
@@ -159,6 +228,87 @@ mod tests {
         assert!(p.evaluate(Some(&iv(3))));
         assert!(!p.evaluate(Some(&iv(0))));
         assert!(!p.evaluate(Some(&iv(4))));
+    }
+
+    #[test]
+    fn a_range_is_the_conjunction_of_its_two_comparisons() {
+        type End = fn(Value) -> RangeEnd;
+        type Comparison = fn(Value) -> Predicate;
+        let lower: [(End, Comparison); 2] = [
+            (RangeEnd::Inclusive, Predicate::GreaterThanOrEqual),
+            (RangeEnd::Exclusive, Predicate::GreaterThan),
+        ];
+        let upper: [(End, Comparison); 2] = [
+            (RangeEnd::Inclusive, Predicate::LessThanOrEqual),
+            (RangeEnd::Exclusive, Predicate::LessThan),
+        ];
+        for (low_end, low_comparison) in lower {
+            for (high_end, high_comparison) in upper {
+                for (low, high) in [(1, 3), (2, 2), (3, 1)] {
+                    let range = Predicate::Range {
+                        low: low_end(iv(low)),
+                        high: high_end(iv(high)),
+                    };
+                    for value in [None, Some(Value::Null)]
+                        .into_iter()
+                        .chain((0..=4).map(|n| Some(iv(n))))
+                    {
+                        let value = value.as_ref();
+                        assert_eq!(
+                            range.evaluate(value),
+                            low_comparison(iv(low)).evaluate(value)
+                                && high_comparison(iv(high)).evaluate(value),
+                            "{range:?} of {value:?}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_range_between_a_fixed_length_string_and_a_string_compares_their_text() {
+        let fixed = |text: &str| Value::FixedChar(text.into());
+        let text = |text: &str| Value::Str(text.into());
+        for (low, high) in [(fixed("b    "), text("m")), (text("b"), fixed("m    "))] {
+            let (low, high) = (RangeEnd::Exclusive(low), RangeEnd::Inclusive(high));
+            // The order of `Value` places one kind before the other whatever their text.
+            assert!(!Predicate::range_orders_as_values(&low, &high));
+            let range = Predicate::Range { low, high };
+            for (value, selected) in [
+                ("b    ", false),
+                ("c    ", true),
+                ("m    ", true),
+                ("z    ", false),
+            ] {
+                assert_eq!(
+                    range.evaluate(Some(&fixed(value))),
+                    selected,
+                    "{range:?} of {value:?}"
+                );
+            }
+        }
+        for (low, high) in [
+            (fixed("b    "), fixed("m    ")),
+            (text("b"), text("m")),
+            (Value::Int(1), Value::Float(2.5)),
+        ] {
+            assert!(Predicate::range_orders_as_values(
+                &RangeEnd::Inclusive(low),
+                &RangeEnd::Inclusive(high)
+            ));
+        }
+    }
+
+    #[test]
+    fn a_range_is_empty_unless_a_value_lies_between_its_ends() {
+        let inclusive = |n| RangeEnd::Inclusive(iv(n));
+        let exclusive = |n| RangeEnd::Exclusive(iv(n));
+        assert!(!Predicate::range_is_empty(&exclusive(1), &exclusive(2)));
+        assert!(!Predicate::range_is_empty(&inclusive(2), &inclusive(2)));
+        assert!(Predicate::range_is_empty(&exclusive(2), &inclusive(2)));
+        assert!(Predicate::range_is_empty(&inclusive(2), &exclusive(2)));
+        assert!(Predicate::range_is_empty(&inclusive(3), &inclusive(2)));
     }
 
     #[test]

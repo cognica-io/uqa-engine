@@ -257,7 +257,7 @@ fn temporal_filters_retain_sql_comparison_instead_of_carrier_order() {
                     rhs: Box::new(high.clone()),
                 },
             ];
-            assert!(predicates::lower_range(&bounds, &constants).is_none());
+            assert!(range(&bounds, &constants).is_none());
             assert!(lower_where(&ScalarExpr::And(bounds.to_vec()), &constants).is_none());
             assert!(lower_where(
                 &ScalarExpr::Between {
@@ -350,6 +350,168 @@ fn analyzed_range_keeps_one_access_path_only_for_the_same_uncoerced_column() {
                 rhs: Box::new(ScalarExpr::Literal(Value::Int(3))),
             },
         ];
-        assert!(predicates::lower_range(&parts, &constants).is_none());
+        assert!(range(&parts, &constants).is_none());
     }
+}
+
+/// The range that two bounds form when they are a whole conjunction.
+fn range(parts: &[ScalarExpr], constants: &RetrievalConstants<'_>) -> Option<RetrievalExpr> {
+    match predicates::conjuncts(parts, constants).as_slice() {
+        [Conjunct::Range(range)] => Some(range.clone()),
+        _ => None,
+    }
+}
+
+fn filter(expression: &RetrievalExpr) -> (&str, &Predicate) {
+    let RetrievalExpr::Filter {
+        field,
+        predicate,
+        source: None,
+    } = expression
+    else {
+        panic!("a filter of the whole relation: {expression:?}");
+    };
+    (field, predicate)
+}
+
+#[test]
+fn two_bounds_of_one_column_are_one_range_whatever_their_strictness_and_order() {
+    use uqa_core::RangeEnd::{Exclusive, Inclusive};
+    let (one, three) = (Value::Int(1), Value::Int(3));
+    for (sql, low, high) in [
+        (
+            "c > 1 AND c <= 3",
+            Exclusive(one.clone()),
+            Inclusive(three.clone()),
+        ),
+        (
+            "c >= 1 AND c < 3",
+            Inclusive(one.clone()),
+            Exclusive(three.clone()),
+        ),
+        (
+            "c > 1 AND c < 3",
+            Exclusive(one.clone()),
+            Exclusive(three.clone()),
+        ),
+        (
+            "c <= 3 AND c > 1",
+            Exclusive(one.clone()),
+            Inclusive(three.clone()),
+        ),
+        (
+            "1 < c AND 3 >= c",
+            Exclusive(one.clone()),
+            Inclusive(three.clone()),
+        ),
+        (
+            "3 > c AND c >= 1",
+            Inclusive(one.clone()),
+            Exclusive(three.clone()),
+        ),
+    ] {
+        let lowered = lower(sql).unwrap_or_else(|| panic!("one range access path: {sql}"));
+        assert_eq!(
+            filter(&lowered),
+            ("c", &Predicate::Range { low, high }),
+            "{sql}"
+        );
+    }
+    // The pair that includes both ends stays the range it always was, in either order of its bounds and of their operands.
+    let between = format!("{:?}", lower("c BETWEEN 1 AND 3").unwrap());
+    for sql in [
+        "c >= 1 AND c <= 3",
+        "c <= 3 AND c >= 1",
+        "1 <= c AND 3 >= c",
+    ] {
+        assert_eq!(format!("{:?}", lower(sql).unwrap()), between, "{sql}");
+    }
+}
+
+#[test]
+fn a_range_forms_beside_the_other_predicates_of_a_conjunction() {
+    use uqa_core::RangeEnd::Exclusive;
+    let children = |sql: &str| {
+        let Some(RetrievalExpr::Intersect(children)) = lower(sql) else {
+            panic!("a conjunction: {sql}");
+        };
+        children
+    };
+    let range = |low: i64, high: i64| Predicate::Range {
+        low: Exclusive(Value::Int(low)),
+        high: Exclusive(Value::Int(high)),
+    };
+
+    // The range stands where the first of its two bounds stood.
+    let lowered = children("c <> 2 AND c > 1 AND c <> 4 AND c < 9");
+    assert_eq!(
+        lowered.iter().map(filter).collect::<Vec<_>>(),
+        [
+            ("c", &Predicate::NotEquals(Value::Int(2))),
+            ("c", &range(1, 9)),
+            ("c", &Predicate::NotEquals(Value::Int(4))),
+        ]
+    );
+
+    // A further bound of a column whose range is formed keeps its comparison.
+    let lowered = children("c > 1 AND c < 9 AND c < 3 AND c > 2");
+    assert_eq!(
+        lowered.iter().map(filter).collect::<Vec<_>>(),
+        [("c", &range(1, 9)), ("c", &range(2, 3))]
+    );
+    let lowered = children("c > 1 AND c < 9 AND c < 3");
+    assert_eq!(
+        lowered.iter().map(filter).collect::<Vec<_>>(),
+        [
+            ("c", &range(1, 9)),
+            ("c", &Predicate::LessThan(Value::Int(3))),
+        ]
+    );
+
+    // Two bounds on the same side are no range.
+    let lowered = children("c > 1 AND c >= 2");
+    assert_eq!(
+        lowered.iter().map(filter).collect::<Vec<_>>(),
+        [
+            ("c", &Predicate::GreaterThan(Value::Int(1))),
+            ("c", &Predicate::GreaterThanOrEqual(Value::Int(2))),
+        ]
+    );
+}
+
+#[test]
+fn a_bound_that_cannot_be_an_end_leaves_the_next_one_to_form_the_range() {
+    use uqa_core::RangeEnd::Exclusive;
+    let constants = RetrievalConstants {
+        params: &[],
+        evaluate: &|expression, _| constant(expression),
+        stores: &|_| true,
+    };
+    let column = ScalarExpr::Column("c".into());
+    let comparison = |op, rhs: ScalarExpr| ScalarExpr::Binary {
+        op,
+        lhs: Box::new(column.clone()),
+        rhs: Box::new(rhs),
+    };
+    // `c < other` compares two columns and is no constant end.
+    let parts = [
+        comparison(BinaryOp::Greater, ScalarExpr::Literal(Value::Int(1))),
+        comparison(BinaryOp::Less, ScalarExpr::Column("other".into())),
+        comparison(BinaryOp::Less, ScalarExpr::Literal(Value::Int(9))),
+    ];
+    let conjuncts = predicates::conjuncts(&parts, &constants);
+    let [Conjunct::Range(formed), Conjunct::Part(left)] = conjuncts.as_slice() else {
+        panic!("a range and the comparison of two columns");
+    };
+    assert_eq!(
+        filter(formed),
+        (
+            "c",
+            &Predicate::Range {
+                low: Exclusive(Value::Int(1)),
+                high: Exclusive(Value::Int(9)),
+            }
+        )
+    );
+    assert_eq!(*left, &parts[1]);
 }

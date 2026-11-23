@@ -120,6 +120,12 @@ impl IndexDomain {
             Predicate::Between { low, high } => {
                 self.visit_comparison(Some((low, true)), Some((high, true)), control, visitor)
             }
+            Predicate::Range { low, high } => self.visit_comparison(
+                Some((low.value(), low.is_inclusive())),
+                Some((high.value(), high.is_inclusive())),
+                control,
+                visitor,
+            ),
             Predicate::NotEquals(_) => Err(SQLError::Internal(
                 "complement predicate was not selected as a value-index scan".into(),
             )),
