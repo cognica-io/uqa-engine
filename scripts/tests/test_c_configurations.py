@@ -10,9 +10,11 @@ from contextlib import redirect_stdout
 import importlib.util
 import io
 import itertools
+import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -30,6 +32,7 @@ class ConfigurationTests(unittest.TestCase):
         expected = {frozenset(combination) for size in range(4)
                     for combination in itertools.combinations(features, size)}
         configurations = CONFIGURATIONS.GROUPS["core"] + CONFIGURATIONS.GROUPS["duckdb"]
+        self.assertEqual(CONFIGURATIONS.GROUPS["consumers"], configurations)
         actual = [frozenset(name.split(",")) if name != "minimal" else frozenset()
                   for name in configurations if name != "default"]
         self.assertEqual(len(configurations), 9)
@@ -38,6 +41,38 @@ class ConfigurationTests(unittest.TestCase):
         self.assertEqual(configurations.count("default"), 1)
         self.assertTrue(all("duckdb" not in name for name in CONFIGURATIONS.GROUPS["core"]))
         self.assertTrue(all("duckdb" in name for name in CONFIGURATIONS.GROUPS["duckdb"]))
+
+    def test_workflow_matrix_preserves_every_platform_and_group_selection(self):
+        linux, macos = "ubuntu-24.04", "macos-26-arm64"
+        ordinary = [{"os": linux, "group": "consumers"}, {"os": macos, "group": "core"},
+                    {"os": macos, "group": "duckdb"}]
+        native = [{"os": linux, "configuration": "minimal"}, {"os": linux, "configuration": "arrow-export"},
+                  {"os": macos, "configuration": "all"}]
+        for platform, group in itertools.product(("all", linux, macos), ("all", "core", "duckdb", "sanitizers")):
+            with self.subTest(platform=platform, group=group):
+                matrices = json.loads(subprocess.check_output([
+                    sys.executable, str(ROOT / "scripts/verify-c-configurations.py"), "--matrix", platform, group,
+                ]))
+                consumers = ordinary if group == "all" else []
+                if group in ("core", "duckdb"):
+                    consumers = [{"os": os_name, "group": group} for os_name in (linux, macos)]
+                sanitizers = native if group in ("all", "sanitizers") else []
+                for key, rows in (("consumers", consumers), ("sanitizers", sanitizers)):
+                    expected = [row for row in rows if platform in ("all", row["os"])]
+                    self.assertEqual(matrices[key], expected)
+
+    def test_native_job_executes_its_selected_feature_graph(self):
+        for selected in ("minimal", "arrow-export", "all"):
+            args = ["verify-c-configurations.py", "--group", "sanitizers", "--configuration", selected]
+            target = "aarch64-apple-darwin" if selected == "all" else "x86_64-unknown-linux-gnu"
+            with self.subTest(selected=selected), patch.object(sys, "argv", args), \
+                    patch.object(subprocess, "check_output", return_value=f"host: {target}\n"), \
+                    patch.object(subprocess, "run") as execute, patch.dict(os.environ, {}, clear=True), \
+                    redirect_stdout(io.StringIO()):
+                self.assertEqual(CONFIGURATIONS.main(), 0)
+                features = ("minimal", "arrow-export") if selected == "all" else (selected,)
+                expected = [command for name in features for command in CONFIGURATIONS.commands(name, target=target)]
+                self.assertEqual([call.args[0] for call in execute.call_args_list], expected)
 
     def test_each_build_selects_its_exact_features_before_running_consumers(self):
         for group in ("core", "duckdb"):
@@ -94,12 +129,12 @@ class ConfigurationTests(unittest.TestCase):
             with patch.object(CONFIGURATIONS.subprocess, "run", side_effect=execute), \
                     patch.dict(os.environ, {"GITHUB_STEP_SUMMARY": str(summary)}), \
                     redirect_stdout(io.StringIO()):
-                self.assertEqual(CONFIGURATIONS.run("core"), 1)
+                self.assertEqual(CONFIGURATIONS.run("consumers"), 1)
             self.assertEqual(calls[0], CONFIGURATIONS.commands("minimal")[0])
-            self.assertEqual(calls[1:], [command for name in CONFIGURATIONS.GROUPS["core"][1:]
+            self.assertEqual(calls[1:], [command for name in CONFIGURATIONS.GROUPS["consumers"][1:]
                                         for command in CONFIGURATIONS.commands(name)])
             self.assertIn("| minimal | FAIL |", summary.read_text())
-            self.assertEqual(summary.read_text().count("| PASS |"), 4)
+            self.assertEqual(summary.read_text().count("| PASS |"), 8)
 
     def test_failed_consumer_is_not_hidden_by_later_success(self):
         calls = []

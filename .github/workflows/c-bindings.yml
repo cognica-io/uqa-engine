@@ -47,6 +47,7 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       required: ${{ steps.select.outputs.required }}
+      matrices: ${{ steps.plan.outputs.matrices }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -65,6 +66,14 @@ jobs:
         env:
           C_VALIDATION_FORCE_ALL: ${{ inputs.force_all }}
         run: python3 scripts/c_validation.py --kind bindings
+      - name: Plan C binding jobs
+        id: plan
+        env:
+          C_PLATFORM: ${{ inputs.platform || 'all' }}
+          C_GROUP: ${{ inputs.group || 'all' }}
+        run: |
+          matrices=$(python3 scripts/verify-c-configurations.py --matrix "$C_PLATFORM" "$C_GROUP")
+          printf 'matrices=%s\n' "$matrices" >> "$GITHUB_OUTPUT"
 
   consumers:
     needs: scope
@@ -75,8 +84,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: ${{ fromJSON(inputs.platform == 'ubuntu-24.04' && '["ubuntu-24.04"]' || inputs.platform == 'macos-26-arm64' && '["macos-26-arm64"]' || '["ubuntu-24.04","macos-26-arm64"]') }}
-        group: ${{ fromJSON(inputs.group == 'core' && '["core"]' || inputs.group == 'duckdb' && '["duckdb"]' || '["core","duckdb"]') }}
+        include: ${{ fromJSON(needs.scope.outputs.matrices).consumers }}
     steps:
       - name: Limit shared macOS worker parallelism
         if: runner.os == 'macOS' && runner.environment == 'self-hosted'
@@ -107,13 +115,13 @@ jobs:
   native-sanitizers:
     needs: scope
     if: needs.scope.outputs.required == 'true' && inputs.group != 'core' && inputs.group != 'duckdb'
-    name: Native ASan (${{ matrix.os }})
+    name: Native ASan (${{ matrix.os }}, ${{ matrix.configuration }})
     runs-on: ${{ matrix.os == 'macos-26-arm64' && fromJSON('["self-hosted","macOS","ARM64","macos-arm64","macos-26-arm64"]') || matrix.os }}
     timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:
-        os: ${{ fromJSON(inputs.platform == 'ubuntu-24.04' && '["ubuntu-24.04"]' || inputs.platform == 'macos-26-arm64' && '["macos-26-arm64"]' || '["ubuntu-24.04","macos-26-arm64"]') }}
+        include: ${{ fromJSON(needs.scope.outputs.matrices).sanitizers }}
     env:
       CC: ${{ github.workspace }}/.github/scripts/c-sanitizer-cc.sh
       CXX: clang++
@@ -167,4 +175,4 @@ jobs:
       - name: Verify shared Rust and native sanitizer linkage and diagnostics
         run: python3 scripts/verify-c-sanitizer-link.py
       - name: Instrument Rust, its standard library and native dependencies
-        run: python3 scripts/verify-c-configurations.py --group sanitizers
+        run: python3 scripts/verify-c-configurations.py --group sanitizers --configuration '${{ matrix.configuration }}'
