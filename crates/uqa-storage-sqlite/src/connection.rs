@@ -782,8 +782,10 @@ impl ManagedConnection {
                 return Err(SQLiteError::TransactionAborted(error));
             }
         }
+        // The restoration of a catalog converts it and upgrades nothing. A file that another opener converted meanwhile is reopened here, and its upgrade is reported like any other.
+        let report = self.upgrade_report();
         let native = if statement == "COMMIT" && self.session.native_restore.lock().is_some() {
-            match self.prepare_initial_native_binding(connection.connection()?) {
+            match self.prepare_initial_native_binding(connection.connection()?, &report) {
                 Ok(native) => Some(native),
                 Err(error) => {
                     *self.session.transaction_failure.lock() = Some(error.to_string());
@@ -793,12 +795,14 @@ impl ManagedConnection {
         } else {
             None
         };
+        report.committing();
         if let Err(error) = connection.connection()?.execute_batch(statement) {
             self.session.native_restore.lock().take();
             transaction.take();
             self.session.transaction_failure.lock().take();
             return Err(SQLiteError::SQLite(error));
         }
+        report.finished();
         self.session.native_restore.lock().take();
         transaction.take();
         self.session.transaction_failure.lock().take();

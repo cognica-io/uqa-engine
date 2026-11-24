@@ -174,6 +174,9 @@ pub use uqa_sql::{
     AsyncSQLEngine, NoticeLevel, SQLBatchError, SQLNotice, SQLParam, SQLResult,
 };
 pub use uqa_storage_sqlite::{DatabaseFileFormat, SQLiteCompressionOptions, SQLiteError};
+pub use uqa_storage_sqlite::{
+    StorageUpgradeEvent, StorageUpgradeInspection, StorageUpgradeObserver, StorageUpgradeStep,
+};
 
 use functions::RegisteredSQLFunction;
 pub use functions::{

@@ -122,16 +122,28 @@ impl SQLiteRecordStore {
         native::present(connection).map_err(Error::into_version)
     }
 
+    /// The native mapping a database is stored in and the rewriting steps an open would run to bring it to the current one, each with its rows. Reads only.
+    pub(crate) fn inspect_native_mapping(
+        connection: &Connection,
+    ) -> VersionResult<crate::StorageUpgradeInspection> {
+        native::inspect(connection).map_err(Error::into_version)
+    }
+
+    /// The native mapping this Engine reads and writes.
+    pub(crate) const CURRENT_NATIVE_MAPPING: u32 = native::CURRENT_MAPPING;
+
     /// Prepare a native baseline on the initial restore's physical transaction. Its owner publishes both the restored catalog and this baseline with one COMMIT.
     pub(crate) fn initialize_native_in(
         connection: &ManagedConnection,
         transaction: &Connection,
         control: &StorageReadControl,
+        report: &crate::upgrade::UpgradeReport,
     ) -> VersionResult<Self> {
         let native::NativeMapping {
             identity,
             namespace,
-        } = native::initialize_in(transaction, control).map_err(Error::into_version)?;
+        } = native::initialize_in_reporting(transaction, control, report)
+            .map_err(Error::into_version)?;
         Ok(Self {
             managed_allocations: receipts::ManagedAllocations::default(),
             data_commit: Arc::default(),
@@ -190,12 +202,13 @@ impl SQLiteRecordStore {
         let _admission = connection
             .admit_record_initialization(control)
             .map_err(|error| VersionError::Storage(error.into()))?;
+        let report = connection.upgrade_report();
         let connection = connection.record_connection();
         let native::NativeMapping {
             identity,
             namespace,
         } = connection
-            .with(|connection| Ok(native::initialize(connection, control)))
+            .with(|connection| Ok(native::initialize_reporting(connection, control, &report)))
             .map_err(|error| VersionError::Storage(error.into()))?
             .map_err(Error::into_version)?;
         Ok(Self {

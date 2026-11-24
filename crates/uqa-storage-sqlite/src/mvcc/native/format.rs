@@ -17,6 +17,7 @@ use super::{
     NativeRecordFamily as Family, NativeRecordNamespace,
 };
 use crate::mvcc::{codec, schema, write, PhysicalResult};
+use crate::upgrade::{StorageUpgradeInspection, StorageUpgradeStep, UpgradeReport};
 
 mod graph_lookup_upgrade;
 #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
@@ -189,28 +190,42 @@ fn prepare_catalog_sources(
     Ok(())
 }
 
-pub(in crate::mvcc) fn initialize(
+/// Initialize or reopen the mapping in a transaction of its own, and tell `report` what an upgrade of it does and when it is committed.
+pub(in crate::mvcc) fn initialize_reporting(
     connection: &Connection,
     control: &StorageReadControl,
+    report: &UpgradeReport,
 ) -> PhysicalResult<NativeMapping> {
     control.cancellation().check().map_err(VersionError::from)?;
     let _permit = crate::mvcc::admission::permit(connection, control)?;
     let transaction = crate::mvcc::admission::begin(connection, control)?;
-    let mapping = initialize_in(&transaction, control)?;
+    let mapping = initialize_in_reporting(&transaction, control, report)?;
+    report.committing();
     crate::mvcc::admission::commit(transaction, control)?;
+    report.finished();
     Ok(mapping)
 }
 
+/// As [`initialize_in_reporting`], for an initialization that nobody observes.
 pub(in crate::mvcc) fn initialize_in(
     transaction: &Connection,
     control: &StorageReadControl,
+) -> PhysicalResult<NativeMapping> {
+    initialize_in_reporting(transaction, control, &UpgradeReport::silent())
+}
+
+/// Initialize or reopen the mapping in the caller's transaction, and tell `report` what an upgrade of it does. The caller commits, and tells `report` so.
+pub(in crate::mvcc) fn initialize_in_reporting(
+    transaction: &Connection,
+    control: &StorageReadControl,
+    report: &UpgradeReport,
 ) -> PhysicalResult<NativeMapping> {
     control.cancellation().check().map_err(VersionError::from)?;
     if transaction.is_autocommit() {
         return Err(invalid("native baseline import requires an owning transaction").into());
     }
     if present(transaction)? {
-        let mapping = reopen(transaction, control, false)?;
+        let mapping = reopen(transaction, control, false, report)?;
         control.cancellation().check().map_err(VersionError::from)?;
         return Ok(mapping);
     }
@@ -322,7 +337,7 @@ pub(in crate::mvcc) fn initialize_restoration(
         )
         .into());
     }
-    let mapping = reopen(connection, control, true)?;
+    let mapping = reopen(connection, control, true, &UpgradeReport::silent())?;
     control.cancellation().check().map_err(VersionError::from)?;
     Ok(mapping)
 }
@@ -373,10 +388,76 @@ fn record_history(connection: &Connection, restoring: bool) -> PhysicalResult<Da
     Ok(initialized.identity)
 }
 
+/// The steps of an upgrade from `version` that write rows of the database again, in the order [`reopen`] runs them.
+fn rewriting_steps(version: u32) -> Vec<StorageUpgradeStep> {
+    let mut steps = Vec::new();
+    if version < 3 {
+        steps.push(StorageUpgradeStep::GraphLookups);
+    }
+    if version < SEQUENCE_VALUES_VERSION {
+        steps.push(StorageUpgradeStep::SequenceValues);
+    }
+    if version < ORDERED_KEYS_VERSION {
+        steps.push(StorageUpgradeStep::LookupKeys);
+    }
+    steps
+}
+
+/// How many B-tree index entries the database holds. The populations are kept by triggers from mapping 16 on, so this reads one row for an index and no entry.
+fn index_entries(connection: &Connection) -> PhysicalResult<u64> {
+    let entries: i64 = connection.query_row(
+        "SELECT coalesce(sum(population), 0) FROM _btree_index_population",
+        [],
+        |row| row.get(0),
+    )?;
+    u64::try_from(entries).map_err(|_| invalid("negative B-tree index population").into())
+}
+
+/// How many rows a step of an upgrade from `version` writes again, where the database records that number.
+fn rows_of(
+    connection: &Connection,
+    version: u32,
+    step: StorageUpgradeStep,
+) -> PhysicalResult<Option<u64>> {
+    match step {
+        StorageUpgradeStep::LookupKeys if version >= EQUALITY_INDEX_VERSION => {
+            index_entries(connection).map(Some)
+        }
+        // A mapping before 16 keeps no population of its indexes, and the two older steps write one record for a graph or a sequence and not for a row.
+        _ => Ok(None),
+    }
+}
+
+/// The mapping a database is stored in and the rewriting steps an open would run to bring it to the current one, each with its rows. Reads only. A database that holds no native mapping is stored in none.
+pub(in crate::mvcc) fn inspect(
+    connection: &Connection,
+) -> PhysicalResult<StorageUpgradeInspection> {
+    if !present(connection)? {
+        return Ok(StorageUpgradeInspection::new(
+            None,
+            CURRENT_VERSION,
+            Vec::new(),
+        ));
+    }
+    let version = stored_version(connection)?;
+    // A file whose format this Engine does not know is not reported as current.
+    validate_format(connection, version)?;
+    let mut steps = Vec::new();
+    for step in rewriting_steps(version) {
+        steps.push((step, rows_of(connection, version, step)?));
+    }
+    Ok(StorageUpgradeInspection::new(
+        Some(version),
+        CURRENT_VERSION,
+        steps,
+    ))
+}
+
 fn reopen(
     connection: &Connection,
     control: &StorageReadControl,
     restoring: bool,
+    report: &UpgradeReport,
 ) -> PhysicalResult<NativeMapping> {
     crate::Catalog::upgrade_metadata_cache_triggers(connection)?;
     let version = stored_version(connection)?;
@@ -391,8 +472,13 @@ fn reopen(
         return Err(invalid("predecessor native mapping contains current record runs").into());
     }
     super::sequences::validate_source(connection)?;
+    if version < CURRENT_VERSION {
+        report.started(version, CURRENT_VERSION);
+    }
     if version < 3 {
-        graph_lookup_upgrade::upgrade(connection, identity, version, control)?;
+        report.step(connection, StorageUpgradeStep::GraphLookups, None, || {
+            graph_lookup_upgrade::upgrade(connection, identity, version, control)
+        })?;
     }
     if version < 4 {
         occurrence_accelerators::create(connection)?;
@@ -427,7 +513,9 @@ fn reopen(
     if version < SEQUENCE_VALUES_VERSION {
         // The backfill writes the history and the materialization itself, before the family's capture triggers exist.
         connection.execute_batch(super::sequence_values::SQL)?;
-        super::sequence_values::backfill(connection, identity, control)?;
+        report.step(connection, StorageUpgradeStep::SequenceValues, None, || {
+            super::sequence_values::backfill(connection, identity, control)
+        })?;
         install_family_guards(connection, Family::SequenceValues)?;
     }
     if version < FOREIGN_SERVER_METADATA_VERSION {
@@ -442,11 +530,16 @@ fn reopen(
         }
         install_family_guards(connection, Family::ForeignServerMetadata)?;
     }
-    if version < EQUALITY_INDEX_VERSION {
-        install_equality_projection(connection)?;
-    } else if version < ORDERED_KEYS_VERSION {
-        // The keys of an earlier format are equal for equal values and in no order: every key is written again.
-        install_equality_keys(connection)?;
+    if version < ORDERED_KEYS_VERSION {
+        let rows = rows_of(connection, version, StorageUpgradeStep::LookupKeys)?;
+        report.step(connection, StorageUpgradeStep::LookupKeys, rows, || {
+            if version < EQUALITY_INDEX_VERSION {
+                install_equality_projection(connection)
+            } else {
+                // The keys of an earlier format are equal for equal values and in no order: every key is written again.
+                install_equality_keys(connection)
+            }
+        })?;
     }
     if version < CURRENT_VERSION {
         upgrade_format(connection, version, identity)?;

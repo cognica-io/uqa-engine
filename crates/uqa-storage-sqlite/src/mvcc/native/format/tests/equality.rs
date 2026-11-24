@@ -178,7 +178,10 @@ fn expression_index_upgrade_preserves_history_and_rolls_back_atomically() {
 }
 
 /// Put a database back into the format before the ordered keys: the same projection, with keys that are equal for equal values and in no order.
-fn write_the_keys_of_the_format_before(connection: &ManagedConnection, namespace: DatabaseId) {
+pub(super) fn write_the_keys_of_the_format_before(
+    connection: &ManagedConnection,
+    namespace: DatabaseId,
+) {
     with(connection, |sqlite| {
         let _permit = schema::WritePermit::acquire(sqlite)?;
         let transaction = schema::begin(sqlite)?;

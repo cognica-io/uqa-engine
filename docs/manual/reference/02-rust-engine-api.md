@@ -10,6 +10,8 @@ The `uqa` facade is the primary application dependency and re-exports the `uqa-e
 | `Engine::open(path)` | Default persistent SQLite engine |
 | `Engine::detect_database_file(path)` | File format detection without opening the engine |
 | `Engine::open_auto(path, key)` | Detect plain, encrypted, compressed, or compressed-encrypted SQLite formats |
+| `Engine::open_auto_with_upgrade_observer(path, key, observer)` | `open_auto`, telling the observer what the open does to [upgrade the storage mapping](04-storage-and-security.md#schema-and-index-migrations) |
+| `Engine::inspect_storage_upgrade(path, key)` | The mapping a SQLite database is stored in and the steps an open would run to upgrade it, read without changing the file |
 | `Engine::open_encrypted(path, key)` | SQLCipher-backed persistent engine |
 | `Engine::open_compressed(path, options)` | Compressed SQLite container |
 | `Engine::open_compressed_encrypted(path, key, options)` | Compressed and encrypted container |

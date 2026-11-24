@@ -396,6 +396,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- `Engine::inspect_storage_upgrade(path, key)` reads, without changing the file, which native SQLite mapping a database is stored in, whether an open upgrades it and which steps of the upgrade write rows again, each with its rows. `Engine::open_auto_with_upgrade_observer(path, key, observer)` tells an observer those steps and the commit as the open runs them. An open that upgrades a mapping did its work without telling its caller that an upgrade was due, how much it would write or how far it was, so a supervisor could not tell a long upgrade from a hang. [Schema and index migrations](docs/manual/reference/04-storage-and-security.md#schema-and-index-migrations)
 - Add full and incremental backup, verification, retention and restore to the standalone `usql backup` command and the interactive `\backup` command. [CLI reference](docs/manual/reference/03-cli.md)
 - Expose online full and incremental backups in the native C, Python and Node.js bindings. Applications can open protected repositories, restore a child after retiring its parent, and resume a persistent restore by ID. [Native backup and restore](docs/manual/reference/08-bindings-and-extensions.md#native-backup-and-restore)
 

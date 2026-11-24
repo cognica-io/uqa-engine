@@ -11,6 +11,7 @@ mod changes;
 mod diskann;
 mod equality;
 mod foreign_servers;
+mod observed;
 mod populations;
 mod sequence_values;
 
@@ -185,7 +186,7 @@ fn native_vector_mapping_rejects_prior_writers_and_rollback_restores_the_old_mar
             transaction.commit().unwrap();
             validate_format(sqlite, 6).unwrap();
             let transaction = schema::begin(sqlite).unwrap();
-            reopen(&transaction, &control, false).unwrap();
+            reopen(&transaction, &control, false, &UpgradeReport::silent()).unwrap();
             check_mapping_version(&transaction, CURRENT_VERSION).unwrap();
             assert!(check_mapping_version(&transaction, 6).is_err());
             // An error after migration must roll back its DDL and recreated guards together.

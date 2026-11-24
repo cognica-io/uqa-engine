@@ -52,6 +52,8 @@ pub(super) struct ConnectionPool {
     pub(super) owner: Option<Arc<DatabaseOwner>>,
     /// Decoded document columns shared by every session of this database.
     pub(super) decoded_columns: crate::document_store::decoded_columns::DecodedColumns,
+    /// Whom the open of this database tells what an upgrade of its native mapping does.
+    pub(super) upgrade_observer: Mutex<Option<Arc<dyn crate::StorageUpgradeObserver>>>,
     // Declared last: callback context outlives every physical connection.
     #[cfg(not(target_os = "emscripten"))]
     pub(super) checkpoint: Option<super::checkpoint::Checkpoint>,
@@ -98,6 +100,7 @@ impl ConnectionPool {
             decoded_columns: crate::document_store::decoded_columns::DecodedColumns::new(
                 crate::document_store::decoded_columns::DEFAULT_LIMIT,
             ),
+            upgrade_observer: Mutex::new(None),
         }))
     }
 

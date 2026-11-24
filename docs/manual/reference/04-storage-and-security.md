@@ -114,9 +114,16 @@ Opening an older supported database can run provider migrations. Clustered full-
 Before upgrading an application:
 
 1. Make a recoverable backup.
-2. Test opening a copy with the exact new binary.
-3. Run representative SQL, text, vector, and graph checks.
-4. Verify that the older binary is not expected to open a newly migrated file.
+2. Read what the open will do with `Engine::inspect_storage_upgrade(path, key)`.
+3. Test opening a copy with the exact new binary, on storage like that of the database.
+4. Run representative SQL, text, vector, and graph checks.
+5. Verify that the older binary is not expected to open a newly migrated file.
+
+An open that upgrades the native SQLite mapping does all of its work before it returns an engine, and some upgrades write rows of the database again, so their time grows with the database. `Engine::inspect_storage_upgrade` opens the file for reading alone and returns the mapping it is stored in, the mapping of this Engine and the steps of the upgrade that write rows again (`StorageUpgradeStep`), each with the number of rows where the database records it. It reads those numbers from the populations the database keeps of its indexes, so the inspection of a large database takes no longer than that of a small one. A database in write-ahead mode is read as every reader of it is, which can leave its shared-memory file beside it.
+
+`Engine::open_auto_with_upgrade_observer` tells a `StorageUpgradeObserver` what the open does: `Started` with the stored and the current mapping before anything is written, `StepStarted` with the rows of a step, `StepAdvanced` at most once a second with the instructions SQLite has run for it, `StepFinished`, `Committing` and `Finished`. An open of a database that is current tells nothing. The observer is called on the thread that opens the database while the open holds the database's write transaction: it returns quickly and neither opens nor queries that database.
+
+A database in write-ahead mode commits an upgrade by copying what the upgrade wrote from the log into the database file. SQLite runs no instruction during that copy, so nothing follows `Committing` until the commit has ended, however long the disk takes. A supervisor that has to tell an open at work from one that hangs during a commit watches what the process reads and writes, as the operating system accounts it. The [upgrade guide](10-upgrading.md) records how long the upgrade of each mapping took and on what storage.
 
 Storage formats may evolve before a stable release, so application and database rollouts should be coordinated. The [0.6.3 upgrade guide](10-upgrading.md) covers vector-index storage formats, shared MVCC writers, backup restoration and the provider, analyzer and index migration requirements for earlier releases.
 

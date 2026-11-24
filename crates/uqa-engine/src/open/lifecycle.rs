@@ -153,6 +153,41 @@ impl Engine {
         Self::open_with_connection(&connection)
     }
 
+    /// Open `path` as [`Engine::open_auto`] does, and tell `observer` what
+    /// the open does to bring the database to the current storage mapping.
+    ///
+    /// An open of a database that is stored in an earlier mapping upgrades
+    /// it before it returns, and some upgrades write rows of the database
+    /// again: their time grows with the database. The observer is told the
+    /// mapping the database is stored in before anything is written, each
+    /// rewriting step as it begins, while it is at work and when it is
+    /// complete, and the commit. An open of a database that is current
+    /// tells nothing. See [`StorageUpgradeEvent`](crate::StorageUpgradeEvent).
+    pub fn open_auto_with_upgrade_observer(
+        path: &Path,
+        key: Option<&str>,
+        observer: Arc<dyn crate::StorageUpgradeObserver>,
+    ) -> Result<Self, SQLiteError> {
+        let connection = ManagedConnection::open_auto(path, key)?;
+        connection.observe_storage_upgrade(observer);
+        Self::open_with_connection(&connection)
+    }
+
+    /// Read which storage mapping the database at `path` is stored in and
+    /// what an open with this Engine would do to bring it to the current
+    /// one, without changing the file.
+    ///
+    /// The inspection names the steps of the upgrade that write rows again
+    /// and how many rows each writes, so that an upgrade can be sized
+    /// before a release performs it. `key` follows the rules of
+    /// [`Engine::open_auto`].
+    pub fn inspect_storage_upgrade(
+        path: &Path,
+        key: Option<&str>,
+    ) -> Result<crate::StorageUpgradeInspection, SQLiteError> {
+        uqa_storage_sqlite::inspect_storage_upgrade(path, key)
+    }
+
     /// SQLCipher-backed engine. Applies `key` before any catalog
     /// access, runs migrations, and rebuilds the in-memory table
     /// registry from the encrypted catalog.

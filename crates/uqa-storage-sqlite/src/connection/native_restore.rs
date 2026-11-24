@@ -88,8 +88,11 @@ impl ManagedConnection {
             .map_err(VersionError::into_storage_error)?
         {
             // Inspect under the physical reservation: another opener may have converted the file after this session was created.
-            let logical = self.prepare_initial_native_binding(sqlite)?;
+            let report = self.upgrade_report();
+            let logical = self.prepare_initial_native_binding(sqlite, &report)?;
+            report.committing();
             sqlite.execute_batch("COMMIT")?;
+            report.finished();
             self.install_initial_native_binding(Arc::clone(&logical));
             drop(permit);
             drop(connection);
@@ -104,9 +107,11 @@ impl ManagedConnection {
         Ok(())
     }
 
+    /// The caller commits `transaction`, and tells `report` before and after it does.
     pub(super) fn prepare_initial_native_binding(
         &self,
         transaction: &Connection,
+        report: &crate::upgrade::UpgradeReport,
     ) -> Result<Arc<BoundRecordSession>> {
         let identity = self.storage_identity()?;
         let options = VersionedSessionOptions::default();
@@ -114,6 +119,7 @@ impl ManagedConnection {
             self,
             transaction,
             &StorageReadControl::with_limit(options.retained_bytes),
+            report,
         )
         .map_err(VersionError::into_storage_error)?;
         let namespace = records
@@ -128,6 +134,18 @@ impl ManagedConnection {
             )),
             native: Some(namespace),
         }))
+    }
+
+    /// Tell `observer` what the open of this database does to bring it to the current native mapping.
+    ///
+    /// Set it before the first session is opened: the upgrade runs when the mapping is first bound, which the open of an engine does. An open of a database that is current tells nothing.
+    pub fn observe_storage_upgrade(&self, observer: Arc<dyn crate::StorageUpgradeObserver>) {
+        *self.pool.upgrade_observer.lock() = Some(observer);
+    }
+
+    /// The report of an initialization of this database's mapping.
+    pub(crate) fn upgrade_report(&self) -> crate::upgrade::UpgradeReport {
+        crate::upgrade::UpgradeReport::to(self.pool.upgrade_observer.lock().clone())
     }
 
     pub(super) fn install_initial_native_binding(&self, logical: Arc<BoundRecordSession>) {

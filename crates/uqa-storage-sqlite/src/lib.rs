@@ -17,6 +17,7 @@ pub mod detect;
 mod diskann;
 pub mod document_store;
 pub mod inverted_index;
+pub mod upgrade;
 pub mod vector_index;
 
 pub use btree_index::SQLiteBTreeIndexStore;
@@ -32,6 +33,10 @@ pub use document_store::SQLiteDocumentStore;
 pub use inverted_index::SQLiteInvertedIndex;
 /// The exact `SQLite` driver used by managed physical-connection callbacks.
 pub use rusqlite;
+pub use upgrade::{
+    inspect_storage_upgrade, StorageUpgradeEvent, StorageUpgradeInspection, StorageUpgradeObserver,
+    StorageUpgradeStep,
+};
 pub use uqa_storage::catalog::{
     CatalogFacade, CatalogIndexRow, ColumnStatsInput, ColumnStatsRow, EdgeRow, ForeignServerRow,
     ForeignTableRow, TableSchema, VectorFieldSchema,

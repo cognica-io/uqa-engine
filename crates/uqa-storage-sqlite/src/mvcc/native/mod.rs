@@ -43,7 +43,10 @@ mod vector_guards;
 pub(crate) use session::{NativeSnapshot, PrivateRows};
 
 pub(super) use capture::{capture_key, CapturedKey};
-pub(super) use format::{check_mapping, initialize, initialize_in, present, reject_mapped};
+pub(super) use format::{check_mapping, initialize_in, present, reject_mapped};
+pub(super) use format::{initialize_in_reporting, initialize_reporting, inspect};
+/// The native mapping this Engine reads and writes.
+pub(super) const CURRENT_MAPPING: u32 = format::CURRENT_VERSION;
 pub(super) use format::{initialize_restoration, validate_restoration};
 pub(super) use projection::materialize;
 
