@@ -31,6 +31,83 @@ fn filter(field: impl Into<String>, value: Value) -> OperatorTree {
 }
 
 #[test]
+fn a_selected_index_costs_the_observed_postings_without_column_statistics() {
+    for count in [0, 1, 7] {
+        let probe = |_: &str, _: &Predicate| Ok(Some(count));
+        let catalog = IndexCatalog {
+            events: RefCell::default(),
+            rows: vec![index()].into(),
+            probe: Some(&probe),
+        };
+        let estimate = crate::retrieval_planning::estimate_operator_tree_access(
+            &catalog,
+            "docs",
+            filter("id", Value::Int(1)),
+            true,
+        )
+        .unwrap();
+        assert_eq!(estimate.output_rows.to_bits(), (count as f64).to_bits());
+        let cost = crate::CostEstimator::default()
+            .estimate_unary(crate::OperatorKind::IndexScan, count as f64)
+            .total();
+        assert_eq!(estimate.cost.to_bits(), cost.to_bits());
+        assert_eq!(
+            *catalog.events.borrow(),
+            [
+                "has table",
+                "resolve table",
+                "list indexes",
+                "cardinality",
+                "row count",
+                "table",
+                "column statistics"
+            ]
+        );
+    }
+}
+
+#[test]
+fn a_union_costs_each_physical_index_scan_from_its_own_posting_count() {
+    let probe = |_: &str, predicate: &Predicate| match predicate {
+        Predicate::Equals(Value::Int(1)) => Ok(Some(1)),
+        Predicate::Equals(Value::Int(2)) => Ok(Some(7)),
+        _ => panic!("unexpected indexed predicate"),
+    };
+    let catalog = IndexCatalog {
+        events: RefCell::default(),
+        rows: vec![index()].into(),
+        probe: Some(&probe),
+    };
+    let tree = OperatorTree::Union(vec![
+        filter("id", Value::Int(1)),
+        filter("id", Value::Int(2)),
+    ]);
+    let estimate =
+        crate::retrieval_planning::estimate_operator_tree_access(&catalog, "docs", tree, true)
+            .unwrap();
+    assert_eq!(estimate.output_rows.to_bits(), 8.0_f64.to_bits());
+    let costs = crate::CostEstimator::default();
+    let expected = [1.0, 7.0]
+        .map(|n| {
+            costs
+                .estimate_unary(crate::OperatorKind::IndexScan, n)
+                .total()
+        })
+        .iter()
+        .sum::<f64>();
+    assert_eq!(estimate.cost.to_bits(), expected.to_bits());
+    assert_eq!(
+        catalog
+            .events
+            .borrow()
+            .iter()
+            .filter(|event| **event == "cardinality")
+            .count(),
+        2
+    );
+}
+
+#[test]
 fn unindexed_filter_discovery_does_not_copy_payloads_or_collect_nodes() {
     let catalog = IndexCatalog {
         events: RefCell::new(Vec::with_capacity(3)),
@@ -46,7 +123,7 @@ fn unindexed_filter_discovery_does_not_copy_payloads_or_collect_nodes() {
     ));
     let tree = OperatorTree::Union(children);
     let allocation = allocation_counter::measure(|| {
-        assert!(index_candidates(&catalog, "docs", &tree)
+        assert!(index_candidates(&catalog, "docs", &tree, None)
             .unwrap()
             .is_empty());
     });
@@ -77,7 +154,7 @@ fn index_cardinality_borrows_the_original_filter_until_selection() {
         probe: Some(&probe),
     };
     let allocation = allocation_counter::measure(|| {
-        assert!(index_candidates(&catalog, "docs", &tree)
+        assert!(index_candidates(&catalog, "docs", &tree, None)
             .unwrap()
             .is_empty());
     });
@@ -102,7 +179,7 @@ fn selected_candidate_retains_one_independent_payload_after_borrowed_costing() {
     };
     let mut output = None;
     let allocation = allocation_counter::measure(|| {
-        output = Some(index_candidates(&catalog, "docs", &tree).unwrap());
+        output = Some(index_candidates(&catalog, "docs", &tree, None).unwrap());
     });
     assert!(
         allocation.bytes_total < 4 * 1024 * 1024 + 4096,
@@ -150,7 +227,7 @@ fn index_candidate_failure_preserves_order_and_drops_partial_output_without_late
             probe: Some(&probe),
         };
         let allocation = allocation_counter::measure(|| {
-            let error = index_candidates(&catalog, "docs", &tree).unwrap_err();
+            let error = index_candidates(&catalog, "docs", &tree, None).unwrap_err();
             assert_eq!(error.sqlstate(), Some(code));
             assert_eq!(error.to_string(), "candidate read failed");
         });
@@ -182,7 +259,7 @@ fn index_candidate_unwind_drops_partial_output_without_later_copies() {
     };
     let allocation = allocation_counter::measure(|| {
         let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            index_candidates(&catalog, "docs", &tree)
+            index_candidates(&catalog, "docs", &tree, None)
         }));
         assert!(outcome.is_err());
     });

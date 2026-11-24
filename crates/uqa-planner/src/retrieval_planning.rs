@@ -15,7 +15,7 @@ mod indexes;
 mod joins;
 mod paradigm;
 mod statistics;
-use crate::query_optimizer::QueryOptimizer;
+use crate::query_optimizer::{IndexScanCandidate, QueryOptimizer};
 pub use catalog::{
     GraphStatisticsSnapshot, RetrievalPlanningCatalog, RetrievalStatisticsTable,
     TextStatisticsRead, VectorStatisticsRead,
@@ -24,6 +24,7 @@ use indexes::index_candidates;
 pub use joins::estimate_cross_relation_operator_join;
 pub use paradigm::operator_tree_paradigm;
 use statistics::{graph_context, index_stats};
+use uqa_core::memory::{ProductionControl, ProductionSmallVec};
 use uqa_operators::OperatorTree;
 use uqa_sql::SQLError;
 type PlanningResult<T> = Result<T, SQLError>;
@@ -41,12 +42,31 @@ pub fn query_optimizer(
     table: &str,
     tree: &OperatorTree,
 ) -> PlanningResult<QueryOptimizer> {
-    let candidates = index_candidates(catalog, table, tree)?;
+    let candidates = index_candidates(catalog, table, tree, None)?;
     let resources = catalog.production_resources()?;
-    let control = resources.as_ref().map_or_else(
-        uqa_core::memory::ProductionControl::uncontrolled,
+    build_optimizer(
+        catalog,
+        table,
+        tree,
+        candidates,
+        planning_control(resources.as_ref()),
+    )
+}
+
+fn planning_control(resources: Option<&crate::PlanningResources>) -> ProductionControl<'_> {
+    resources.map_or_else(
+        ProductionControl::uncontrolled,
         crate::PlanningResources::control,
-    );
+    )
+}
+
+fn build_optimizer(
+    catalog: &dyn RetrievalPlanningCatalog,
+    table: &str,
+    tree: &OperatorTree,
+    candidates: Vec<IndexScanCandidate>,
+    control: ProductionControl<'_>,
+) -> PlanningResult<QueryOptimizer> {
     let stats = index_stats(catalog, table, tree, &control)?;
     let column_stats = if table.is_empty() {
         crate::ColumnStatistics::default()
@@ -69,31 +89,61 @@ pub fn query_optimizer(
     Ok(optimizer)
 }
 
+struct CostedTree {
+    optimizer: QueryOptimizer,
+    tree: OperatorTree,
+    output_rows: f64,
+    cost: f64,
+}
+
+fn costed_tree(
+    catalog: &dyn RetrievalPlanningCatalog,
+    table: &str,
+    tree: OperatorTree,
+) -> PlanningResult<CostedTree> {
+    let resources = catalog.production_resources()?;
+    let control = planning_control(resources.as_ref());
+    let mut observed_rows = ProductionSmallVec::<[usize; 4]>::new(control);
+    let candidates = index_candidates(catalog, table, &tree, Some(&mut observed_rows))?;
+    let optimizer = build_optimizer(catalog, table, &tree, candidates, control)?;
+    let tree = optimizer.optimize(tree);
+    let observed = crate::operator_statistics::OperatorStatistics::new(
+        &optimizer.index_stats,
+        &optimizer.index_candidates,
+        &observed_rows,
+    );
+    let output_rows = optimizer.estimator.estimate_tree(&tree, &observed);
+    let cost = optimizer.cost_model.estimate_tree(&tree, &observed);
+    Ok(CostedTree {
+        optimizer,
+        tree,
+        output_rows,
+        cost,
+    })
+}
+
 pub fn estimate_operator_tree_access(
     catalog: &dyn RetrievalPlanningCatalog,
     table: &str,
     tree: OperatorTree,
     clamp_to_table: bool,
 ) -> PlanningResult<crate::LocalAccessEstimate> {
-    let optimizer = query_optimizer(catalog, table, &tree)?;
-    let planned_tree = optimizer.optimize(tree);
-    let total_docs = optimizer.index_stats.total_docs as f64;
-    let output_rows = optimizer
-        .estimator
-        .estimate(&planned_tree, &optimizer.index_stats);
+    let CostedTree {
+        optimizer,
+        tree,
+        output_rows,
+        cost,
+    } = costed_tree(catalog, table, tree)?;
     if !output_rows.is_finite() || output_rows < 0.0 {
         return Err(SQLError::Internal(format!(
             "operator access produced invalid cardinality {output_rows}"
         )));
     }
     let output_rows = if clamp_to_table {
-        output_rows.min(total_docs)
+        output_rows.min(optimizer.index_stats.total_docs as f64)
     } else {
         output_rows
     };
-    let cost = optimizer
-        .cost_model
-        .estimate(&planned_tree, &optimizer.index_stats);
     if !cost.is_finite() || cost < 0.0 {
         return Err(SQLError::Internal(format!(
             "operator access produced invalid cost {cost}"
@@ -102,6 +152,6 @@ pub fn estimate_operator_tree_access(
     Ok(crate::LocalAccessEstimate {
         output_rows,
         cost,
-        paradigm: operator_tree_paradigm(&planned_tree),
+        paradigm: operator_tree_paradigm(&tree),
     })
 }

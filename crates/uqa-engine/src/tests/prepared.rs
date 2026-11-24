@@ -21,6 +21,14 @@ mod explain_options;
 mod explain_serialization;
 mod runtime_index_lookups;
 
+fn pause_automatic_statistics(engine: &Engine) {
+    engine.release_automatic_statistics_client();
+    engine
+        .session
+        .statistics_worker
+        .store(true, std::sync::atomic::Ordering::Release);
+}
+
 #[test]
 fn prepared_temporal_constants_keep_the_preparation_clock() {
     use std::sync::atomic::Ordering;

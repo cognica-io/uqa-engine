@@ -11,10 +11,16 @@ use super::{
     CardinalityEstimator, GraphStoreSampler, IndexStats, OperatorTree,
 };
 
+use crate::operator_statistics::OperatorStatistics;
+
 impl CardinalityEstimator {
     /// Estimate the cardinality of `op` against an inverted index described
     /// by `stats`.
     pub fn estimate(&self, op: &OperatorTree, stats: &IndexStats) -> f64 {
+        self.estimate_tree(op, &OperatorStatistics::from(stats))
+    }
+
+    pub(crate) fn estimate_tree(&self, op: &OperatorTree, stats: &OperatorStatistics<'_>) -> f64 {
         let n = if stats.total_docs > 0 {
             stats.total_docs as f64
         } else {
@@ -38,18 +44,18 @@ impl CardinalityEstimator {
             } => {
                 let input = source
                     .as_deref()
-                    .map_or(n, |source| self.estimate(source, stats));
+                    .map_or(n, |source| self.estimate_tree(source, stats));
                 input * self.filter_selectivity(field, predicate, n)
             }
-            OperatorTree::Score { source, .. } => self.estimate(source, stats),
-            OperatorTree::BayesianScore { source, .. } => self.estimate(source, stats),
+            OperatorTree::Score { source, .. } => self.estimate_tree(source, stats),
+            OperatorTree::BayesianScore { source, .. } => self.estimate_tree(source, stats),
             OperatorTree::Intersect(ops) => self.estimate_intersect(ops, stats, n),
             OperatorTree::Union(ops) => {
-                let child_cards: f64 = ops.iter().map(|o| self.estimate(o, stats)).sum();
+                let child_cards: f64 = ops.iter().map(|o| self.estimate_tree(o, stats)).sum();
                 n.min(child_cards)
             }
             OperatorTree::Complement(inner) => {
-                let inner_card = self.estimate(inner, stats);
+                let inner_card = self.estimate_tree(inner, stats);
                 (n - inner_card).max(0.0)
             }
             _ => self.estimate_cross_paradigm(op, stats, n),
@@ -64,8 +70,13 @@ impl CardinalityEstimator {
         self.estimate(op, &stats)
     }
 
-    fn estimate_intersect(&self, ops: &[OperatorTree], stats: &IndexStats, n: f64) -> f64 {
-        let mut child_cards: Vec<f64> = ops.iter().map(|o| self.estimate(o, stats)).collect();
+    fn estimate_intersect(
+        &self,
+        ops: &[OperatorTree],
+        stats: &OperatorStatistics<'_>,
+        n: f64,
+    ) -> f64 {
+        let mut child_cards: Vec<f64> = ops.iter().map(|o| self.estimate_tree(o, stats)).collect();
         if child_cards.is_empty() {
             return 0.0;
         }

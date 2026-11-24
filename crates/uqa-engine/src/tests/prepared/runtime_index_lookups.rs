@@ -53,6 +53,82 @@ fn check_lookup_before_analyze(engine: &Engine) {
     }
 }
 
+fn check_selective_plans(engine: &Engine) {
+    for (query, relation_count, indexed_joins) in [
+        (SCALAR, 2, 0),
+        (MEMBERSHIP, 2, 0),
+        (JOIN, 2, 1),
+        (CHAIN, 3, 2),
+        ("EXECUTE lookup_chain('s77')", 3, 2),
+        (
+            "SELECT v FROM b WHERE id=(SELECT b_id FROM a WHERE id='a77')",
+            2,
+            0,
+        ),
+        (
+            "SELECT v FROM b WHERE id=(SELECT b_id FROM a WHERE id='a77') AND v <> 'absent'",
+            2,
+            0,
+        ),
+        (
+            "SELECT v FROM b WHERE v=(SELECT 'v77'::text) AND id=(SELECT b_id FROM a WHERE id='a77')",
+            2,
+            0,
+        ),
+        (
+            "SELECT v FROM b WHERE id IN (SELECT b_id FROM a WHERE id='a77') AND v=(SELECT 'v77'::text)",
+            2,
+            0,
+        ),
+    ] {
+        let result = engine.sql(query, &[]).unwrap();
+        assert_eq!(result.rows.len(), 1, "{query}");
+        assert_eq!(
+            result.value_at(0, 0),
+            Some(&Value::Str("v77".into())),
+            "{query}"
+        );
+        let document = explain(engine, query);
+        let relations = document["Node Estimates"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|node| node["Node Type"] == "Relation")
+            .collect::<Vec<_>>();
+        assert_eq!(relations.len(), relation_count, "{query}: {relations:?}");
+        for node in relations {
+            let rows = node["Plan Rows"].as_f64().unwrap();
+            let cost = node["Total Cost"].as_f64().unwrap();
+            assert!(rows <= 1.0 && cost < 64.0, "{query}: {node}");
+        }
+        let operators = &document["Plan"]["UQA Plan"];
+        assert_eq!(
+            operators.to_string().matches("IndexNestedLoop").count(),
+            indexed_joins,
+            "{query}: {operators}"
+        );
+        let executed = document["Node Executions"].as_array().unwrap();
+        if indexed_joins == 0 {
+            assert!(
+                executed
+                    .iter()
+                    .any(|op| op["Node Type"] == "Index Scan"
+                        && op["Actual Rows"].as_f64() == Some(1.0)),
+                "{query}: {executed:?}"
+            );
+        }
+        let scans: Vec<_> = executed
+            .iter()
+            .filter(|op| op["Node Type"] == "Relation Scan")
+            .collect();
+        assert_eq!(scans.len(), relation_count, "{query}: {scans:?}");
+        for scan in scans {
+            assert_eq!(scan["Actual Rows"].as_f64(), Some(1.0), "{query}: {scan}");
+            assert_eq!(scan["Actual Loops"].as_f64(), Some(1.0), "{query}: {scan}");
+        }
+    }
+}
+
 #[test]
 fn analyzed_subquery_keys_share_the_indexed_columns_equality_domain() {
     use uqa_planner::statement_planning::PlannerStatisticsCatalog;
@@ -104,6 +180,7 @@ fn analyzed_subquery_keys_share_the_indexed_columns_equality_domain() {
 fn selective_runtime_keys_bound_relation_access(#[case] provider: Provider) {
     let directory = tempfile::tempdir().unwrap();
     let engine = provider.open(&directory.path().join("runtime-keys.db"));
+    super::pause_automatic_statistics(&engine);
     engine
         .sql(
             "CREATE TABLE a (id text PRIMARY KEY, b_id text NOT NULL);
@@ -116,80 +193,15 @@ fn selective_runtime_keys_bound_relation_access(#[case] provider: Provider) {
         )
         .unwrap();
 
+    engine.sql(
+        "SET plan_cache_mode=force_generic_plan;
+         PREPARE lookup_chain(text) AS SELECT b.v FROM s JOIN a ON a.id=s.a_id JOIN b ON b.id=a.b_id WHERE s.id=$1",
+        &[],
+    ).unwrap();
     check_lookup_before_analyze(&engine);
+    check_selective_plans(&engine);
     engine.sql("ANALYZE a; ANALYZE b; ANALYZE s", &[]).unwrap();
-    for (query, relation_count, indexed_joins) in [
-        (SCALAR, 2, 0),
-        (MEMBERSHIP, 2, 0),
-        (JOIN, 2, 1),
-        (CHAIN, 3, 2),
-        (
-            "SELECT v FROM b WHERE id=(SELECT b_id FROM a WHERE id='a77')",
-            2,
-            0,
-        ),
-        (
-            "SELECT v FROM b WHERE id=(SELECT b_id FROM a WHERE id='a77') AND v <> 'absent'",
-            2,
-            0,
-        ),
-        (
-            "SELECT v FROM b WHERE v=(SELECT 'v77'::text) AND id=(SELECT b_id FROM a WHERE id='a77')",
-            2,
-            0,
-        ),
-        (
-            "SELECT v FROM b WHERE id IN (SELECT b_id FROM a WHERE id='a77') AND v=(SELECT 'v77'::text)",
-            2,
-            0,
-        ),
-    ] {
-        let result = engine.sql(query, &[]).unwrap();
-        assert_eq!(result.rows.len(), 1, "{query}");
-        assert_eq!(
-            result.value_at(0, 0),
-            Some(&Value::Str("v77".into())),
-            "{query}"
-        );
-        let document = explain(&engine, query);
-        let relations = document["Node Estimates"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .filter(|node| node["Node Type"] == "Relation")
-            .collect::<Vec<_>>();
-        assert_eq!(relations.len(), relation_count, "{query}: {relations:?}");
-        for node in relations {
-            let rows = node["Plan Rows"].as_f64().unwrap();
-            let cost = node["Total Cost"].as_f64().unwrap();
-            assert!(rows <= 1.0 && cost < 64.0, "{query}: {node}");
-        }
-        let operators = &document["Plan"]["UQA Plan"];
-        assert_eq!(
-            operators.to_string().matches("IndexNestedLoop").count(),
-            indexed_joins,
-            "{query}: {operators}"
-        );
-        let executed = document["Node Executions"].as_array().unwrap();
-        if indexed_joins == 0 {
-            assert!(
-                executed
-                    .iter()
-                    .any(|op| op["Node Type"] == "Index Scan"
-                        && op["Actual Rows"].as_f64() == Some(1.0)),
-                "{query}: {executed:?}"
-            );
-        }
-        let scans: Vec<_> = executed
-            .iter()
-            .filter(|op| op["Node Type"] == "Relation Scan")
-            .collect();
-        assert_eq!(scans.len(), relation_count, "{query}: {scans:?}");
-        for scan in scans {
-            assert_eq!(scan["Actual Rows"].as_f64(), Some(1.0), "{query}: {scan}");
-            assert_eq!(scan["Actual Loops"].as_f64(), Some(1.0), "{query}: {scan}");
-        }
-    }
+    check_selective_plans(&engine);
     engine
         .sql(
             "CREATE TABLE int_target(k bigint PRIMARY KEY);
