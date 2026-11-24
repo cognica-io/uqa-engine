@@ -531,7 +531,12 @@ fn reopen(
         install_family_guards(connection, Family::ForeignServerMetadata)?;
     }
     if version < ORDERED_KEYS_VERSION {
-        let rows = rows_of(connection, version, StorageUpgradeStep::LookupKeys)?;
+        // An initialization that nobody observes reads nothing for a report.
+        let rows = if report.is_observed() {
+            rows_of(connection, version, StorageUpgradeStep::LookupKeys)?
+        } else {
+            None
+        };
         report.step(connection, StorageUpgradeStep::LookupKeys, rows, || {
             if version < EQUALITY_INDEX_VERSION {
                 install_equality_projection(connection)

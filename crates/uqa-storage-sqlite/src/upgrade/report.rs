@@ -65,6 +65,12 @@ impl UpgradeReport {
         }
     }
 
+    /// Whether anybody is told. An initialization that nobody observes reads
+    /// nothing for its report.
+    pub(crate) const fn is_observed(&self) -> bool {
+        self.observer.is_some()
+    }
+
     /// The database is stored in the mapping `from`, and its upgrade to `to`
     /// begins.
     pub(crate) fn started(&self, from: u32, to: u32) {
@@ -286,5 +292,7 @@ mod tests {
         assert_eq!(counted, 20_000);
         report.committing();
         report.finished();
+        assert!(!report.is_observed());
+        assert!(UpgradeReport::to(Some(Arc::new(Told::default()))).is_observed());
     }
 }
