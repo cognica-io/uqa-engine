@@ -37,6 +37,7 @@ pub struct IndexCatalogIdentity {
 }
 
 pub mod identity;
+pub mod lookup;
 pub mod native;
 
 mod relationships;

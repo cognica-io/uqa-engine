@@ -189,7 +189,7 @@ fn local_filter_costs_keep_relation_order_and_stop_on_original_error() {
         } else {
             assert_eq!(*estimates.calls.borrow(), [0, 1, 2]);
             let output = outcome.unwrap();
-            for (index, estimate) in output[..3].iter().enumerate() {
+            for (index, estimate) in output.estimates[..3].iter().enumerate() {
                 assert_eq!(
                     *estimate,
                     Some(crate::LocalAccessEstimate {
@@ -199,7 +199,7 @@ fn local_filter_costs_keep_relation_order_and_stop_on_original_error() {
                     })
                 );
             }
-            assert!(output[3..].iter().all(Option::is_none));
+            assert!(output.estimates[3..].iter().all(Option::is_none));
         }
         assert!(relations
             .iter()

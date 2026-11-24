@@ -66,6 +66,15 @@ impl PhysicalSubqueryRunner for ScopedEngineHook<'_> {
         self.subquery_context()
             .execute_subquery(subquery, plan, outer_row, params)
     }
+    fn index_membership_input(
+        &self,
+        slot: usize,
+        plan: &QueryPlan,
+        params: &[SQLParam],
+    ) -> Result<Option<uqa_execution::SubqueryResult>, SQLError> {
+        self.subquery_context()
+            .index_membership_input(slot, plan, params)
+    }
     fn row_subquery_value(
         &self,
         subquery: usize,

@@ -40,6 +40,7 @@ macro_rules! syntax_leaf {
 syntax_leaf!(
     bool,
     usize,
+    u16,
     u32,
     i16,
     [u8; 16],

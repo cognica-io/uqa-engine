@@ -35,6 +35,7 @@ pub(super) fn join_predicate<'p>(
         right_alias,
         left_field,
         right_field,
+        lookup_columns: [None; 2],
     })
 }
 

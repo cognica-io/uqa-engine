@@ -80,4 +80,4 @@ projected_enum!(inline, RelationalPlan {
 projected_enum!(inline, CtePlanBody { 0 => Query(value), 1 => Command(value) });
 projected_enum!(inline, AccessPathPlan { 0 => Row, 1 => OperatorTree { score_limit_pushdown }, 2 => Hybrid });
 projected_enum!(inline, ComputePlan { 0 => Project, 1 => Aggregate, 2 => Window });
-projected_enum!(inline, JoinExecutionStrategy { 0 => Auto, 1 => Hash });
+projected_enum!(inline, JoinExecutionStrategy { 0 => Auto, 1 => Hash, 2 => IndexNestedLoop { inner_column } });

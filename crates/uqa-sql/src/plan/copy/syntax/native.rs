@@ -168,6 +168,7 @@ inline_fields!(
     ast::OverridingKind,
     bool,
     usize,
+    u16,
     u32,
     i16,
     [u8; 16]

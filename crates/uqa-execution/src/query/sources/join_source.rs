@@ -173,13 +173,17 @@ pub(super) fn build_join_source_operator<'a, S: Clone + Send + Sync + 'static>(
                     )?,
                     None => false,
                 };
-                if dependent {
-                    if !matches!(strategy, JoinExecutionStrategy::Auto) {
+                if dependent
+                    || matches!(strategy, JoinExecutionStrategy::IndexNestedLoop { .. })
+                        && !right_empty
+                {
+                    if dependent && !matches!(strategy, JoinExecutionStrategy::Auto) {
                         return Err(SQLError::Internal(
                             "optimizer selected a hash strategy for a lateral join".into(),
                         ));
                     }
-                    let input_schema = lateral_input.expect("dependent source has a calling scope");
+                    let input_schema =
+                        lateral_input.unwrap_or_else(|| left_operator.row_schema().clone());
                     return left_operator.attach(|left| {
                         super::lateral_binding::build_lateral_join(
                             context,
@@ -297,7 +301,7 @@ pub(super) fn build_join_source_operator<'a, S: Clone + Send + Sync + 'static>(
                 })?;
                 left_operator.attach(|left_operator| {
                     let joined: Box<dyn PhysicalOperator + 'a> = match (strategy, hash_plan) {
-                        (JoinExecutionStrategy::Auto | JoinExecutionStrategy::Hash, Some(keys)) => {
+                        (_, Some(keys)) => {
                             drop(effective_on);
                             HashJoin::with_owned_expressions(
                                 left_operator,
@@ -315,20 +319,18 @@ pub(super) fn build_join_source_operator<'a, S: Clone + Send + Sync + 'static>(
                             )?
                             .into_boxed(&control)?
                         }
-                        (JoinExecutionStrategy::Auto | JoinExecutionStrategy::Hash, None) => {
-                            NestedLoopJoin::with_owned_predicate(
-                                left_operator,
-                                right_operator,
-                                *kind,
-                                effective_on,
-                                evaluator,
-                                left_nulls,
-                                right_nulls,
-                                work_mem,
-                                &control,
-                            )?
-                            .into_boxed(&control)?
-                        }
+                        (_, None) => NestedLoopJoin::with_owned_predicate(
+                            left_operator,
+                            right_operator,
+                            *kind,
+                            effective_on,
+                            evaluator,
+                            left_nulls,
+                            right_nulls,
+                            work_mem,
+                            &control,
+                        )?
+                        .into_boxed(&control)?,
                     };
                     Ok(joined)
                 })?;

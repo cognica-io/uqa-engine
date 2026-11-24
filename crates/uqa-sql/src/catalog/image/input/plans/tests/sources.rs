@@ -66,6 +66,53 @@ fn native_query_input_keeps_source_bindings_and_internal_value_descriptors() {
     assert_eq!(memory.used(), 0);
 }
 
+#[test]
+fn query_images_preserve_the_physical_join_strategy_and_attribute() {
+    use crate::plan::JoinExecutionStrategy;
+    let memory = MemoryBudget::new(2 << 20);
+    let token = CancellationToken::new();
+    for selected in [
+        JoinExecutionStrategy::Auto,
+        JoinExecutionStrategy::Hash,
+        JoinExecutionStrategy::IndexNestedLoop { inner_column: 3 },
+        JoinExecutionStrategy::IndexNestedLoop {
+            inner_column: u16::try_from(crate::catalog::relation_attributes::MAX_ATTRIBUTES - 1)
+                .unwrap(),
+        },
+    ] {
+        let mut plan = query("SELECT * FROM a JOIN b ON a.id=b.key");
+        let RelationalPlan::QueryBlock(block) = &mut plan.root else {
+            panic!("query block")
+        };
+        let Some(SourcePlan::Join { strategy, .. }) = &mut block.from else {
+            panic!("join")
+        };
+        *strategy = selected;
+        let bytes = encode(&plan);
+        for inline in [true, false] {
+            let restored = if inline {
+                QueryPlan::read_image(&mut bytes.as_slice(), &memory, &token).unwrap()
+            } else {
+                crate::catalog::image::input::window_tests::read_windowed(
+                    QueryPlan::image_input(&memory, &token).unwrap(),
+                    &bytes,
+                    7,
+                    3,
+                )
+            };
+            let RelationalPlan::QueryBlock(block) = &restored.root else {
+                panic!("stored query block")
+            };
+            assert!(
+                matches!(&block.from, Some(SourcePlan::Join { strategy, .. }) if *strategy == selected)
+            );
+            assert_eq!(encode(&restored), bytes);
+            drop(restored);
+            assert_eq!(memory.used(), 0);
+        }
+    }
+}
+
 fn table_wire() -> Vec<u8> {
     let mut bytes = vec![0]; // Table constructor.
     for _ in 0..2 {

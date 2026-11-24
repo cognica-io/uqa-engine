@@ -16,10 +16,9 @@
 //! [`MAX_DP_RELATIONS`] relations.
 //!
 //! Internally relation subsets are encoded as `u64` bitmasks for
-//! O(1) hash-table lookup and set operations. Equijoins are costed as
-//! hash joins because that is the physical strategy available to the SQL
-//! execution pipeline. An index-join cost must never influence ordering unless
-//! the planner can prove that a compatible physical index join is executable.
+//! O(1) hash-table lookup and set operations. Equality edges carry any physical
+//! key that can accept the opposite operand. Search compares its probe cost
+//! with scanning and hashing the two inputs.
 //!
 //! Returns a [`JoinPlan`] tree where each `Join` node records the
 //! `(left, right, edge, cost, cardinality)` tuple. Disconnected join

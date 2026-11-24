@@ -7,13 +7,7 @@
 use crate::tests::providers::Provider;
 use uqa_core::Value;
 
-fn pause_automatic_statistics(engine: &crate::Engine) {
-    engine.release_automatic_statistics_client();
-    engine
-        .session
-        .statistics_worker
-        .store(true, std::sync::atomic::Ordering::Release);
-}
+use super::pause_automatic_statistics;
 
 #[rstest::rstest]
 #[case::memory(Provider::Memory)]

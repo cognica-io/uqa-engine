@@ -100,12 +100,10 @@ impl JoinOrderOptimizer {
                     predicate.left_field,
                     predicate.right_field,
                 );
-                edges.push_copy(JoinGraph::validated_edge(
-                    relations.len(),
-                    left,
-                    right,
-                    selectivity,
-                )?)?;
+                let mut edge =
+                    JoinGraph::validated_edge(relations.len(), left, right, selectivity)?;
+                edge.lookup_columns = predicate.lookup_columns;
+                edges.push_copy(edge)?;
             }
         }
 

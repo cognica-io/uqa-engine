@@ -6,8 +6,8 @@
 
 //! Exact star search with admitted states and a fixed-size predecessor walk.
 
+use super::Decision;
 use super::{ProductionVec, Search, ValueRetentionError};
-use crate::cost_model::OperatorKind;
 
 #[derive(Clone, Copy)]
 struct StarState {
@@ -15,6 +15,21 @@ struct StarState {
     cost: f64,
     previous: usize,
     leaf: usize,
+}
+
+impl StarState {
+    fn decision(self, mask: usize, centre_mask: u64) -> Decision {
+        // The compact subset omits the centre's bit. Insert it to recover the graph's relation mask.
+        let subset = mask as u64;
+        let lower = centre_mask - 1;
+        let relations = (subset & lower) | centre_mask | ((subset & !lower) << 1);
+        Decision {
+            relations,
+            cardinality: self.cardinality,
+            cost: self.cost,
+            ..Decision::EMPTY
+        }
+    }
 }
 
 impl Search<'_, '_> {
@@ -71,24 +86,22 @@ impl Search<'_, '_> {
             let Some(base) = dp[mask] else {
                 continue;
             };
+            let left = base.decision(mask, centre_mask);
             for (position, &leaf) in leaves[..count].iter().enumerate() {
                 let bit = 1_usize << position;
                 if mask & bit != 0 {
                     continue;
                 }
-                let leaf_rows = self.graph.cardinalities[leaf];
-                let mut cardinality = base.cardinality * leaf_rows;
-                for edge in self.edges(centre_mask, 1_u64 << leaf) {
-                    self.control.check()?;
-                    cardinality *= edge.selectivity;
-                }
-                let join_cost = self
-                    .cost
-                    .estimate_join(OperatorKind::HashJoinInner, base.cardinality, leaf_rows)
-                    .total();
+                let right = self
+                    .decisions
+                    .get(1u64 << leaf)
+                    .expect("admitted star leaf");
+                let joined = self
+                    .join(left, right)?
+                    .expect("star leaf connects to centre");
                 let candidate = StarState {
-                    cardinality,
-                    cost: base.cost + self.graph.access_costs[leaf] + join_cost,
+                    cardinality: joined.cardinality,
+                    cost: joined.cost,
                     previous: mask,
                     leaf,
                 };

@@ -40,7 +40,7 @@ pub(super) fn select_graph<'a>(
     };
     let relations = &mut relation_storage[..atoms.len()];
     let column_owners = ColumnOwners::new(relations);
-    let local_estimates = estimate_local_filters(
+    let local = estimate_local_filters(
         relations,
         external_predicates,
         &column_owners,
@@ -76,13 +76,20 @@ pub(super) fn select_graph<'a>(
         control.check().map_err(uqa_sql::SQLError::from)?;
         let graph_predicate = join_predicate(expression, &column_owners);
         let mut relations = 0;
-        if let Some(predicate) = graph_predicate {
+        if let Some(mut predicate) = graph_predicate {
             for alias in [predicate.left_alias, predicate.right_alias] {
                 relations |= 1_u64
                     << column_owners
                         .alias_index(alias)
                         .expect("resolved join alias");
             }
+            predicate.lookup_columns = lookup_columns(
+                &predicate,
+                &atoms,
+                &column_owners,
+                statistics,
+                local.retrieval_sources,
+            );
             graph_predicates
                 .push_copy(predicate)
                 .map_err(uqa_sql::SQLError::from)?;
@@ -95,7 +102,7 @@ pub(super) fn select_graph<'a>(
     let selected = JoinOrderOptimizer::new().select_relations_with_control(
         relations.iter().enumerate().map(|(index, relation)| {
             let mut input = relation.as_join_relation();
-            if let Some(estimate) = local_estimates[index] {
+            if let Some(estimate) = local.estimates[index] {
                 input.cardinality = estimate.output_rows;
                 input.access_cost = estimate.cost;
             }
@@ -110,6 +117,43 @@ pub(super) fn select_graph<'a>(
         inferred: inferred.finish().map_err(uqa_sql::SQLError::from)?,
         original_count,
     }))
+}
+
+fn lookup_columns(
+    predicate: &crate::join_order::JoinPredicateRef<'_>,
+    atoms: &[&SourcePlan],
+    column_owners: &ColumnOwners<'_>,
+    statistics: &dyn SourceStatistics,
+    retrieval_sources: u64,
+) -> [Option<u16>; 2] {
+    let column = |alias: &str, field: &str| {
+        let index = column_owners.alias_index(alias)?;
+        let SourcePlan::Table {
+            name,
+            executable_query: None,
+            bound_columns: None,
+            column_aliases,
+            ..
+        } = atoms[index]
+        else {
+            return None;
+        };
+        if !column_aliases.is_empty() {
+            return None;
+        }
+        let column = statistics.lookup_column(name, field)?;
+        let can_probe = column.unique && retrieval_sources & (1_u64 << index) == 0;
+        Some((column.domain, can_probe.then_some(column.position)))
+    };
+    match (
+        column(predicate.left_alias, predicate.left_field),
+        column(predicate.right_alias, predicate.right_field),
+    ) {
+        (Some((left_domain, left)), Some((right_domain, right))) if left_domain == right_domain => {
+            [left, right]
+        }
+        _ => [None; 2],
+    }
 }
 
 fn relation_metadata<'a>(

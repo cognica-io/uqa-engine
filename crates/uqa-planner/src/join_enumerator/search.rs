@@ -121,7 +121,7 @@ impl<'g, 'a> Search<'g, 'a> {
             .cost
             .estimate_join(kind, left.cardinality, right.cardinality)
             .total();
-        Ok(Some(Decision {
+        let mut best = Decision {
             relations: left.relations | right.relations,
             cardinality,
             cost: join_cost + left.cost + right.cost,
@@ -129,7 +129,36 @@ impl<'g, 'a> Search<'g, 'a> {
             right: right.relations,
             edge: Some(edge),
             kind: Some(kind),
-        }))
+        };
+        for edge in self.edges(left.relations, right.relations) {
+            self.control.check()?;
+            for (outer, inner) in [(left, right), (right, left)] {
+                if edge.lookup_column(inner.relations).is_none() {
+                    continue;
+                }
+                let probe_cost = self
+                    .cost
+                    .estimate_join(
+                        OperatorKind::IndexJoin,
+                        outer.cardinality,
+                        inner.cardinality,
+                    )
+                    .total();
+                let cost = outer.cost + probe_cost;
+                if cost < best.cost {
+                    best = Decision {
+                        relations: best.relations,
+                        cardinality: cardinality.min(outer.cardinality),
+                        cost,
+                        left: outer.relations,
+                        right: inner.relations,
+                        edge: Some(*edge),
+                        kind: Some(OperatorKind::IndexJoin),
+                    };
+                }
+            }
+        }
+        Ok(Some(best))
     }
 
     fn enumerate(&mut self, n: usize) -> Result<(), ValueRetentionError> {

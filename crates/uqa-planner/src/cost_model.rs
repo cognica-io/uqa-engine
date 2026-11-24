@@ -218,8 +218,9 @@ impl CostEstimator {
                 memory: 0.0,
             },
             OperatorKind::IndexJoin => OperatorCost {
-                cpu: l * c.hashjoin_probe_per_row + l * c.index_per_row,
-                io: l * c.io_per_disk_row * 0.5,
+                cpu: l * (c.hashjoin_probe_per_row + c.index_per_row * r.max(2.0).log2()),
+                // Each lookup visits the index posting and its base row.
+                io: l * (2.0 * c.io_per_disk_row),
                 memory: 0.0,
             },
             OperatorKind::SemiJoin | OperatorKind::AntiJoin => OperatorCost {
@@ -257,6 +258,7 @@ impl CostEstimator {
 // Algebraic-tree cost model constants and estimator.
 // ---------------------------------------------------------------
 
+use crate::operator_statistics::OperatorStatistics;
 use uqa_core::IndexStats;
 use uqa_operators::{DeepFusionLayer, OperatorTree};
 
@@ -305,11 +307,15 @@ impl CostModel {
     }
 
     /// Estimate the cost of a subplan against `stats`.
+    pub fn estimate(&self, op: &OperatorTree, stats: &IndexStats) -> f64 {
+        self.estimate_tree(op, &OperatorStatistics::from(stats))
+    }
+
     #[expect(
         clippy::too_many_lines,
         reason = "cost boundary keeps paradigm terms and clamping in one formula"
     )]
-    pub fn estimate(&self, op: &OperatorTree, stats: &IndexStats) -> f64 {
+    pub(crate) fn estimate_tree(&self, op: &OperatorTree, stats: &OperatorStatistics<'_>) -> f64 {
         let n = stats.total_docs as f64;
         match op {
             OperatorTree::Empty => 0.0,
@@ -356,18 +362,26 @@ impl CostModel {
                 let dims = f64::from(stats.dimensions.max(1));
                 dims * ((stats.total_docs as f64) + 1.0).log2() * SCORE_OVERHEAD_FACTOR
             }
-            OperatorTree::IndexScan { .. } => self
-                .physical_cost
-                .estimate_unary(
-                    OperatorKind::IndexScan,
-                    self.estimated_cardinality(op, stats),
-                )
-                .total(),
+            OperatorTree::IndexScan {
+                index_name,
+                field,
+                predicate,
+            } => stats.scan(index_name, field, predicate).map_or_else(
+                || {
+                    self.physical_cost
+                        .estimate_unary(
+                            OperatorKind::IndexScan,
+                            self.estimated_cardinality(op, stats),
+                        )
+                        .total()
+                },
+                |(_, cost)| cost,
+            ),
             OperatorTree::Score { source, .. } => {
-                self.estimate(source, stats) * SCORE_OVERHEAD_FACTOR
+                self.estimate_tree(source, stats) * SCORE_OVERHEAD_FACTOR
             }
             OperatorTree::BayesianScore { source, .. } => {
-                self.estimate(source, stats) * SCORE_OVERHEAD_FACTOR
+                self.estimate_tree(source, stats) * SCORE_OVERHEAD_FACTOR
             }
             OperatorTree::BayesianMatchWithPrior { query, field, .. } => {
                 let postings = if stats.total_docs == 0 {
@@ -387,7 +401,7 @@ impl CostModel {
                             .estimate_unary(OperatorKind::TableScan, n)
                             .total()
                     },
-                    |source| self.estimate(source, stats),
+                    |source| self.estimate_tree(source, stats),
                 );
                 input_cost
                     + self
@@ -396,10 +410,10 @@ impl CostModel {
                         .total()
             }
             OperatorTree::Intersect(ops) => {
-                let total: f64 = ops.iter().map(|o| self.estimate(o, stats)).sum();
+                let total: f64 = ops.iter().map(|o| self.estimate_tree(o, stats)).sum();
                 total
             }
-            OperatorTree::Union(ops) => ops.iter().map(|o| self.estimate(o, stats)).sum(),
+            OperatorTree::Union(ops) => ops.iter().map(|o| self.estimate_tree(o, stats)).sum(),
             OperatorTree::Aggregate { .. } => n,
             OperatorTree::GroupBy { .. } => n * GROUP_BY_OVERHEAD_FACTOR,
             OperatorTree::BayesianEvidenceFusion { signals, .. }
@@ -407,19 +421,19 @@ impl CostModel {
             | OperatorTree::ProbBoolFusion { signals, .. }
             | OperatorTree::AttentionFusion { signals, .. }
             | OperatorTree::LearnedFusion { signals, .. } => {
-                signals.iter().map(|s| self.estimate(s, stats)).sum()
+                signals.iter().map(|s| self.estimate_tree(s, stats)).sum()
             }
-            OperatorTree::ProbNot { signal, .. } => self.estimate(signal, stats) + n,
+            OperatorTree::ProbNot { signal, .. } => self.estimate_tree(signal, stats) + n,
             OperatorTree::HybridTextVector {
                 term_op, vector_op, ..
-            } => self.estimate(term_op, stats) + self.estimate(vector_op, stats),
+            } => self.estimate_tree(term_op, stats) + self.estimate_tree(vector_op, stats),
             OperatorTree::SemanticFilter { source, vector_op } => {
-                self.estimate(source, stats) + self.estimate(vector_op, stats)
+                self.estimate_tree(source, stats) + self.estimate_tree(vector_op, stats)
             }
             OperatorTree::VectorExclusion { positive, negative } => {
-                self.estimate(positive, stats) + self.estimate(negative, stats)
+                self.estimate_tree(positive, stats) + self.estimate_tree(negative, stats)
             }
-            OperatorTree::FacetVector { vector_op, .. } => self.estimate(vector_op, stats),
+            OperatorTree::FacetVector { vector_op, .. } => self.estimate_tree(vector_op, stats),
             OperatorTree::VertexAggregation { .. } => n * VERTEX_AGG_FRACTION,
             OperatorTree::Traverse {
                 label, max_hops, ..
@@ -487,14 +501,14 @@ impl CostModel {
                 }
                 n * n
             }
-            OperatorTree::SparseThreshold { source, .. } => self.estimate(source, stats) * 0.5,
+            OperatorTree::SparseThreshold { source, .. } => self.estimate_tree(source, stats) * 0.5,
             OperatorTree::MultiFieldSearch { fields, .. } => n * fields.len() as f64,
             OperatorTree::MessagePassing { source } | OperatorTree::GraphEmbedding { source } => {
-                self.estimate(source, stats)
+                self.estimate_tree(source, stats)
             }
             OperatorTree::MultiStage { stages } => stages
                 .iter()
-                .map(|s| self.estimate(&s.child, stats))
+                .map(|s| self.estimate_tree(&s.child, stats))
                 .sum::<f64>()
                 .max(n * 0.1),
             // The plan IR does not yet carry maximum iterations, so PageRank
@@ -506,8 +520,8 @@ impl CostModel {
             OperatorTree::TextSimilarityJoin { left, right, .. } => {
                 let left_rows = self.estimated_cardinality(left, stats);
                 let right_rows = self.estimated_cardinality(right, stats);
-                self.estimate(left, stats)
-                    + self.estimate(right, stats)
+                self.estimate_tree(left, stats)
+                    + self.estimate_tree(right, stats)
                     + self
                         .physical_cost
                         .estimate_join(OperatorKind::NestedLoopJoin, left_rows, right_rows)
@@ -516,8 +530,8 @@ impl CostModel {
             OperatorTree::VectorSimilarityJoin { left, right, .. } => {
                 let left_rows = self.estimated_cardinality(left, stats);
                 let right_rows = self.estimated_cardinality(right, stats);
-                self.estimate(left, stats)
-                    + self.estimate(right, stats)
+                self.estimate_tree(left, stats)
+                    + self.estimate_tree(right, stats)
                     + self
                         .physical_cost
                         .estimate_join(OperatorKind::NestedLoopJoin, left_rows, right_rows)
@@ -532,8 +546,8 @@ impl CostModel {
                 let candidate_edges = self.graph_stats.as_ref().map_or(left_rows, |graph| {
                     left_rows * graph.avg_out_degree * graph.label_selectivity(label.as_deref())
                 });
-                self.estimate(left, stats)
-                    + self.estimate(right, stats)
+                self.estimate_tree(left, stats)
+                    + self.estimate_tree(right, stats)
                     + candidate_edges
                     + self
                         .physical_cost
@@ -543,8 +557,8 @@ impl CostModel {
             OperatorTree::CrossParadigmJoin { left, right } => {
                 let left_rows = self.estimated_cardinality(left, stats);
                 let right_rows = self.estimated_cardinality(right, stats);
-                self.estimate(left, stats)
-                    + self.estimate(right, stats)
+                self.estimate_tree(left, stats)
+                    + self.estimate_tree(right, stats)
                     + self
                         .physical_cost
                         .estimate_join(OperatorKind::HashJoinInner, left_rows, right_rows)
@@ -554,8 +568,8 @@ impl CostModel {
                 let left_rows = self.estimated_cardinality(left, stats);
                 let right_rows = self.estimated_cardinality(right, stats);
                 let equality_candidates = (left_rows * right_rows) / n.max(1.0);
-                self.estimate(left, stats)
-                    + self.estimate(right, stats)
+                self.estimate_tree(left, stats)
+                    + self.estimate_tree(right, stats)
                     + self
                         .physical_cost
                         .estimate_join(OperatorKind::HashJoinInner, left_rows, right_rows)
@@ -572,24 +586,32 @@ impl CostModel {
             OperatorTree::DeepFusion { layers, .. } => self.estimate_deep_fusion(layers, stats, n),
             OperatorTree::DeepPredict { .. } => n,
             OperatorTree::Composed(ops) | OperatorTree::Opaque { children: ops, .. } => {
-                ops.iter().map(|o| self.estimate(o, stats)).sum()
+                ops.iter().map(|o| self.estimate_tree(o, stats)).sum()
             }
-            OperatorTree::Complement(inner) => self.estimate(inner, stats) + n,
-            OperatorTree::EncodeGraphPosting { source } => self.estimate(source, stats),
-            OperatorTree::CosineProbability(inner) => self.estimate(inner, stats),
+            OperatorTree::Complement(inner) => self.estimate_tree(inner, stats) + n,
+            OperatorTree::EncodeGraphPosting { source } => self.estimate_tree(source, stats),
+            OperatorTree::CosineProbability(inner) => self.estimate_tree(inner, stats),
             OperatorTree::Facet { source, .. } => match source.as_deref() {
-                Some(s) => self.estimate(s, stats),
+                Some(s) => self.estimate_tree(s, stats),
                 None => n,
             },
         }
     }
 
-    fn estimate_deep_fusion(&self, layers: &[DeepFusionLayer], stats: &IndexStats, n: f64) -> f64 {
+    fn estimate_deep_fusion(
+        &self,
+        layers: &[DeepFusionLayer],
+        stats: &OperatorStatistics<'_>,
+        n: f64,
+    ) -> f64 {
         let mut cost = 0.0_f64;
         for layer in layers {
             match layer {
                 DeepFusionLayer::Signal { signals } => {
-                    cost += signals.iter().map(|s| self.estimate(s, stats)).sum::<f64>();
+                    cost += signals
+                        .iter()
+                        .map(|s| self.estimate_tree(s, stats))
+                        .sum::<f64>();
                 }
                 DeepFusionLayer::Propagate { .. } | DeepFusionLayer::Conv { .. } => {
                     cost += n;
@@ -605,13 +627,13 @@ impl CostModel {
         cost.max(n * 0.1)
     }
 
-    fn estimated_cardinality(&self, op: &OperatorTree, stats: &IndexStats) -> f64 {
+    fn estimated_cardinality(&self, op: &OperatorTree, stats: &OperatorStatistics<'_>) -> f64 {
         let mut estimator =
             crate::CardinalityEstimator::new().with_column_stats(self.column_stats.clone());
         if let Some(graph_stats) = self.graph_stats.clone() {
             estimator = estimator.with_graph_stats(graph_stats);
         }
-        estimator.estimate(op, stats)
+        estimator.estimate_tree(op, stats)
     }
 }
 

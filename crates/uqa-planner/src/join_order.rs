@@ -15,9 +15,8 @@
 //! interprets to drive the actual row-tuple join algorithms.
 //!
 //! `JoinOrderTree` retains the executable physical strategy selected by the
-//! enumerator. Today relational equijoins are hash joins; the planner does not
-//! pretend that a pre-existing index join is available when the engine cannot
-//! execute one.
+//! enumerator. Catalog-backed SQL plans can supply unique index keys in
+//! addition to the ordinary hash-join candidate.
 
 use std::collections::BTreeMap;
 use uqa_core::{
@@ -91,6 +90,7 @@ pub(crate) struct JoinPredicateRef<'a> {
     pub right_alias: &'a str,
     pub left_field: &'a str,
     pub right_field: &'a str,
+    pub lookup_columns: [Option<u16>; 2],
 }
 
 impl JoinPredicate {
@@ -100,6 +100,7 @@ impl JoinPredicate {
             right_alias: &self.right_alias,
             left_field: &self.left_field,
             right_field: &self.right_field,
+            lookup_columns: [None; 2],
         }
     }
 }

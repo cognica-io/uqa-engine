@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Selective equality joins can probe a primary key or unique index with each outer row. A scalar subquery or a small positive `IN` subquery can also supply the keys for an indexed scan. Primary-key lookups stay selective before column statistics are collected, including in generic prepared plans.
+
 - Creating a graph with many new catalog identities now reuses the native lock registry's SQLite rollback journal. Each identity is still visible to other processes as soon as its reservation succeeds.
 
 - Independent analyzer catalogs now charge their own memory budgets for encoded analyzer and dictionary images. Closing a catalog or abandoning a failed installation releases its reservations even while another catalog uses the same analyzer.

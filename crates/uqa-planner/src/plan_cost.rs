@@ -10,6 +10,7 @@ use uqa_core::memory::ProductionControl;
 use uqa_sql::SQLError;
 
 pub mod nodes;
+mod runtime_keys;
 mod scope;
 use nodes::{Capture, PlanCostInput};
 use scope::{Definition, Definitions, Namespace, ProducerState};
@@ -248,8 +249,16 @@ impl PlanCostEstimator<'_, '_> {
         capture: Option<&Capture<'p, '_>>,
     ) -> Result<PlanCost, SQLError> {
         self.control.check()?;
+        let mut prepaid = None;
         let mut cost = match &block.from {
-            Some(source) => self.source(source, block.r#where.as_ref(), scope, capture)?,
+            Some(source) => {
+                if let Some((cost, slot)) = self.runtime_source(block, source, scope, capture)? {
+                    prepaid = slot;
+                    cost
+                } else {
+                    self.source(source, block.r#where.as_ref(), scope, capture, None)?
+                }
+            }
             None => {
                 let mut cost = PlanCost {
                     rows: 1.0,
@@ -259,7 +268,12 @@ impl PlanCostEstimator<'_, '_> {
                 cost
             }
         };
-        self.subqueries(&mut cost, &block.subqueries, scope, capture)?;
+        if let Some(slot) = prepaid {
+            self.subqueries(&mut cost, &block.subqueries[..slot], scope, capture)?;
+            self.subqueries(&mut cost, &block.subqueries[slot + 1..], scope, capture)?;
+        } else {
+            self.subqueries(&mut cost, &block.subqueries, scope, capture)?;
+        }
         match block.compute {
             ComputePlan::Aggregate => {
                 cost.execution += self.unary(OperatorKind::HashAggregate, cost.rows);
@@ -329,9 +343,10 @@ impl PlanCostEstimator<'_, '_> {
         predicate: Option<&ScalarExpr>,
         scope: Scope<'p, '_>,
         capture: Option<&Capture<'p, '_>>,
+        filters: Option<&uqa_sql::plan::source_projection::QualifierFilters>,
     ) -> Result<PlanCost, SQLError> {
         Capture::node(capture, PlanCostInput::Source(source), || {
-            self.source_cost(source, predicate, scope, capture)
+            self.source_cost(source, predicate, scope, capture, filters)
         })
     }
 
@@ -341,6 +356,7 @@ impl PlanCostEstimator<'_, '_> {
         predicate: Option<&ScalarExpr>,
         scope: Scope<'p, '_>,
         capture: Option<&Capture<'p, '_>>,
+        filters: Option<&uqa_sql::plan::source_projection::QualifierFilters>,
     ) -> Result<PlanCost, SQLError> {
         self.control.check()?;
         let mut cost = match source {
@@ -361,7 +377,12 @@ impl PlanCostEstimator<'_, '_> {
                         ..PlanCost::default()
                     }
                 } else {
-                    return self.table(name, predicate);
+                    let local = uqa_sql::semantics::source_filters::qualifier_filter_with_control(
+                        filters,
+                        source.visible_qualifier().expect("table qualifier"),
+                        &self.control,
+                    )?;
+                    return self.table(name, local.as_deref().or(predicate));
                 }
             }
             SourcePlan::Values { rows, .. } => self.values(rows),
@@ -383,8 +404,13 @@ impl PlanCostEstimator<'_, '_> {
                 lateral,
                 ..
             } => {
-                let left = self.source(left, None, scope, capture)?;
-                let right = self.source(right, None, scope, capture)?;
+                let left = self.source(left, None, scope, capture, filters)?;
+                if matches!(strategy, JoinExecutionStrategy::IndexNestedLoop { .. }) {
+                    let mut indexed = self.index_join(left, right, capture)?;
+                    self.filter(&mut indexed, predicate, &RelationStats::default())?;
+                    return Ok(indexed);
+                }
+                let right = self.source(right, None, scope, capture, filters)?;
                 let equality = on.as_ref().is_some_and(has_equality) || using.is_some() || *natural;
                 let operator = if matches!(kind, JoinKind::Cross) {
                     OperatorKind::CrossJoin
@@ -412,22 +438,7 @@ impl PlanCostEstimator<'_, '_> {
                 };
                 self.join_cost(*kind, operator, *lateral, left, right, selectivity)
             }
-            SourcePlan::Function { .. } => {
-                self.statistics.source_access_estimate(source).map_or_else(
-                    || PlanCost {
-                        rows: DEFAULT_ROWS,
-                        execution: self.unary(OperatorKind::Project, DEFAULT_ROWS),
-                        relations: 1,
-                        startup: 0.0,
-                    },
-                    |access| PlanCost {
-                        rows: access.output_rows,
-                        execution: access.cost,
-                        startup: access.cost,
-                        relations: 1,
-                    },
-                )
-            }
+            SourcePlan::Function { .. } => self.function_source(source),
             SourcePlan::FunctionGroup { functions, .. } => PlanCost {
                 rows: DEFAULT_ROWS,
                 execution: functions.len() as f64 * self.unary(OperatorKind::Project, DEFAULT_ROWS),
@@ -438,6 +449,23 @@ impl PlanCostEstimator<'_, '_> {
         self.filter(&mut cost, predicate, &RelationStats::default())?;
         self.control.check()?;
         Ok(cost)
+    }
+
+    fn function_source(&self, source: &SourcePlan) -> PlanCost {
+        self.statistics.source_access_estimate(source).map_or_else(
+            || PlanCost {
+                rows: DEFAULT_ROWS,
+                execution: self.unary(OperatorKind::Project, DEFAULT_ROWS),
+                relations: 1,
+                startup: 0.0,
+            },
+            |access| PlanCost {
+                rows: access.output_rows,
+                execution: access.cost,
+                startup: access.cost,
+                relations: 1,
+            },
+        )
     }
 
     fn join_cost(
@@ -600,7 +628,7 @@ impl PlanCostEstimator<'_, '_> {
             _ => PlanCost::default(),
         };
         if let Some(source) = command.source_input() {
-            let source = self.source(source, None, scope, capture)?;
+            let source = self.source(source, None, scope, capture, None)?;
             cost.startup += source.startup;
             cost.execution += self
                 .costs

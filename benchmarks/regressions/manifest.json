@@ -2,6 +2,22 @@
   "schema_version": 1,
   "checks": [
     {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "selective_runtime_keys_bound_relation_access",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/tests/prepared/runtime_index_lookups.rs",
+      "capability": "Indexed selection with keys from other relations",
+      "workload": "Before and after explicit ANALYZE, read one payload from 256-row tables using qualified and unqualified scalar equality, positive membership, a two-table join and a three-table join. Join all rows as a hash-join control.",
+      "invariant": "Each selective relation scan emits one row in one loop, uses a bounded cost estimate, and returns the expected payload. Positive membership and scalar equality execute an index scan. Selective joins use one or two index nested loops and the unrestricted join chooses a hash join.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
       "package": "uqa-storage-sqlite",
       "kind": "lib",
       "test": "an_appended_commit_replaces_only_the_chunks_it_published",

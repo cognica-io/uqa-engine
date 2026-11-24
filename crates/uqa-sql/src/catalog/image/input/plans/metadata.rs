@@ -50,7 +50,6 @@ enum_field!(plan_lock_strength, LockStrength, 0 => ForKeyShare, 1 => ForShare, 2
 enum_field!(plan_lock_wait, LockWait, 0 => Block, 1 => SkipLocked, 2 => NoWait);
 enum_field!(plan_overriding_kind, OverridingKind, 0 => SystemValue, 1 => UserValue);
 enum_field!(plan_compute, ComputePlan, 0 => Project, 1 => Aggregate, 2 => Window);
-enum_field!(plan_strategy, JoinExecutionStrategy, 0 => Auto, 1 => Hash);
 
 macro_rules! input_fields {
     ($input:ident, $read:ident $(, $async:ident)?) => {
@@ -172,6 +171,18 @@ macro_rules! input_fields {
                     }),
                     2 => Ok(AccessPathPlan::Hybrid),
                     _ => Err(invalid("query access path")),
+                }
+            }
+
+            pub(super) $($async)? fn plan_strategy(&mut self) -> Result<JoinExecutionStrategy, SQLError> {
+                match $read!(self.binary.array::<1>())?[0] {
+                    0 => Ok(JoinExecutionStrategy::Auto),
+                    1 => Ok(JoinExecutionStrategy::Hash),
+                    2 => Ok(JoinExecutionStrategy::IndexNestedLoop {
+                        inner_column: u16::try_from($read!(self.binary.count())?)
+                            .map_err(|_| invalid("index join column position"))?,
+                    }),
+                    _ => Err(invalid("join execution strategy")),
                 }
             }
 

@@ -193,6 +193,86 @@ impl Engine {
 impl StatisticsTableState for crate::TableState {}
 
 impl PlannerStatisticsCatalog for Engine {
+    fn placed_filters(
+        &self,
+        block: &uqa_sql::plan::QueryBlockPlan,
+        source: &uqa_sql::plan::SourcePlan,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<uqa_planner::filter_pushdown::FilterPlacement>, SQLError> {
+        let scope = super::query_scope::new_for_statement_with_control(self, None, control)?;
+        let Some(local) =
+            super::query_planning::qualifier_filters_for_stmt(self, block, source, &scope)?
+        else {
+            return Ok(None);
+        };
+        let residual = super::query_planning::final_filter_after_qualifier_pushdown(
+            self,
+            block,
+            source,
+            Some(&local),
+            &scope,
+        )?;
+        Ok(Some(uqa_planner::filter_pushdown::FilterPlacement {
+            local,
+            residual,
+        }))
+    }
+    fn subquery_key_domain(
+        &self,
+        query: &uqa_sql::plan::QueryPlan,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<uqa_sql::catalog::index::lookup::EqualityDomain>, SQLError> {
+        let scope = super::query_scope::new_for_statement_with_control(self, None, control)?;
+        match uqa_execution::query::binding::subquery_key_domain(self, query, &[], &scope, control)
+        {
+            Ok(domain) => Ok(domain),
+            Err(error) if matches!(error.sqlstate(), Some("53200" | "57014")) => Err(error),
+            Err(_) => Ok(None),
+        }
+    }
+    fn lookup_column(
+        &self,
+        table: &str,
+        field: &str,
+    ) -> Result<Option<uqa_sql::catalog::index::lookup::LookupColumn>, SQLError> {
+        use uqa_sql::catalog::index::lookup::{is_unique_column, EqualityDomain, LookupColumn};
+        let Some(name) = self.resolved_table_name(table)? else {
+            return Ok(None);
+        };
+        let Some(state) = self
+            .try_table(&name)
+            .map_err(|err| storage_error("read index key metadata", &err))?
+        else {
+            return Ok(None);
+        };
+        let columns = state.columns.snapshot();
+        let Some((position, column)) = columns
+            .iter()
+            .enumerate()
+            .find(|(_, column)| column.name == field)
+        else {
+            return Ok(None);
+        };
+        let Some(domain) = EqualityDomain::of(&column.ty, column.collation_oid) else {
+            return Ok(None);
+        };
+        let position = u16::try_from(position).map_err(|_| {
+            SQLError::Internal("index column exceeds the table attribute range".into())
+        })?;
+        let unique = self.query_hierarchy_scan_tables(&name, true)?.len() == 1
+            && is_unique_column(
+                &name,
+                column,
+                &columns,
+                &state.key_constraints.snapshot(),
+                PlannerStatisticsCatalog::catalog_indexes(self)?.iter(),
+            )?;
+        Ok(Some(LookupColumn {
+            position,
+            domain,
+            unique,
+        }))
+    }
     fn storage_table(
         &self,
         table: &str,

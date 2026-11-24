@@ -7,9 +7,11 @@
 //! Fusion, retrieval, graph, and cross-paradigm cardinality estimators.
 
 use super::{
-    CardinalityEstimator, DeepFusionLayer, IndexStats, MultiStageCutoff, OperatorTree,
-    ProbBoolMode, GRAPH_AVG_DEGREE_DEFAULT, JACCARD_JOIN_SELECTIVITY,
+    CardinalityEstimator, DeepFusionLayer, MultiStageCutoff, OperatorTree, ProbBoolMode,
+    GRAPH_AVG_DEGREE_DEFAULT, JACCARD_JOIN_SELECTIVITY,
 };
+
+use crate::operator_statistics::OperatorStatistics;
 
 impl CardinalityEstimator {
     /// Estimate cardinality for cross-paradigm operators.
@@ -20,7 +22,7 @@ impl CardinalityEstimator {
     pub(super) fn estimate_cross_paradigm(
         &self,
         op: &OperatorTree,
-        stats: &IndexStats,
+        stats: &OperatorStatistics<'_>,
         n: f64,
     ) -> f64 {
         match op {
@@ -39,27 +41,30 @@ impl CardinalityEstimator {
             | OperatorTree::LearnedFusion { signals, .. }
             | OperatorTree::BayesianEvidenceFusion { signals, .. }
             | OperatorTree::RobustPositiveEvidencePool { signals, .. } => {
-                let sum: f64 = signals.iter().map(|s| self.estimate(s, stats)).sum();
+                let sum: f64 = signals.iter().map(|s| self.estimate_tree(s, stats)).sum();
                 n.min(sum)
             }
 
             OperatorTree::MultiFieldSearch { fields, .. } => n.min(n * 0.3 * fields.len() as f64),
 
-            OperatorTree::SparseThreshold { source, .. } => self.estimate(source, stats) * 0.5,
+            OperatorTree::SparseThreshold { source, .. } => self.estimate_tree(source, stats) * 0.5,
 
             OperatorTree::VectorExclusion { positive, negative } => {
-                let pos = self.estimate(positive, stats);
-                let neg = self.estimate(negative, stats);
+                let pos = self.estimate_tree(positive, stats);
+                let neg = self.estimate_tree(negative, stats);
                 let overlap = if n > 0.0 { (pos * neg) / n } else { 0.0 };
                 (pos - overlap).max(1.0)
             }
 
-            OperatorTree::FacetVector { vector_op, .. } => self.estimate(vector_op, stats),
+            OperatorTree::FacetVector { vector_op, .. } => self.estimate_tree(vector_op, stats),
 
             OperatorTree::VertexAggregation { .. } => 1.0,
 
             OperatorTree::ProbBoolFusion { signals, mode } => {
-                let cards: Vec<f64> = signals.iter().map(|s| self.estimate(s, stats)).collect();
+                let cards: Vec<f64> = signals
+                    .iter()
+                    .map(|s| self.estimate_tree(s, stats))
+                    .collect();
                 match mode {
                     ProbBoolMode::And => {
                         if cards.is_empty() {
@@ -79,15 +84,15 @@ impl CardinalityEstimator {
             }
 
             OperatorTree::ProbNot { signal, .. } => {
-                let inner = self.estimate(signal, stats);
+                let inner = self.estimate_tree(signal, stats);
                 (n - inner).max(0.0)
             }
 
             OperatorTree::HybridTextVector {
                 term_op, vector_op, ..
             } => {
-                let text = self.estimate(term_op, stats);
-                let vec_card = self.estimate(vector_op, stats);
+                let text = self.estimate_tree(term_op, stats);
+                let vec_card = self.estimate_tree(vector_op, stats);
                 if n > 0.0 {
                     ((text * vec_card) / n).max(1.0)
                 } else {
@@ -96,8 +101,8 @@ impl CardinalityEstimator {
             }
 
             OperatorTree::SemanticFilter { source, vector_op } => {
-                let src = self.estimate(source, stats);
-                let vec_card = self.estimate(vector_op, stats);
+                let src = self.estimate_tree(source, stats);
+                let vec_card = self.estimate_tree(vector_op, stats);
                 if n > 0.0 {
                     ((src * vec_card) / n).max(1.0)
                 } else {
@@ -158,8 +163,8 @@ impl CardinalityEstimator {
                 .unwrap_or(n),
 
             OperatorTree::TextSimilarityJoin { left, right, .. } => {
-                let l = self.estimate_join_side(left, stats, n);
-                let r = self.estimate_join_side(right, stats, n);
+                let l = self.estimate_tree(left, stats);
+                let r = self.estimate_tree(right, stats);
                 l * r * JACCARD_JOIN_SELECTIVITY
             }
 
@@ -168,16 +173,16 @@ impl CardinalityEstimator {
                 right,
                 threshold,
             } => {
-                let l = self.estimate_join_side(left, stats, n);
-                let r = self.estimate_join_side(right, stats, n);
+                let l = self.estimate_tree(left, stats);
+                let r = self.estimate_tree(right, stats);
                 l * r * Self::vector_selectivity(*threshold, stats.dimensions)
             }
 
             OperatorTree::GraphJoin {
                 left, right, label, ..
             } => {
-                let l = self.estimate_join_side(left, stats, n);
-                let r = self.estimate_join_side(right, stats, n);
+                let l = self.estimate_tree(left, stats);
+                let r = self.estimate_tree(right, stats);
                 let edge_probability = self.graph_stats.as_ref().map_or_else(
                     || (GRAPH_AVG_DEGREE_DEFAULT / n.max(1.0)).min(1.0),
                     |gs| {
@@ -190,8 +195,8 @@ impl CardinalityEstimator {
             }
 
             OperatorTree::HybridJoin { left, right } => {
-                let l = self.estimate_join_side(left, stats, n);
-                let r = self.estimate_join_side(right, stats, n);
+                let l = self.estimate_tree(left, stats);
+                let r = self.estimate_tree(right, stats);
                 if n > 0.0 {
                     (l * r) / n * Self::vector_selectivity(0.5, stats.dimensions)
                 } else {
@@ -200,8 +205,8 @@ impl CardinalityEstimator {
             }
 
             OperatorTree::CrossParadigmJoin { left, right } => {
-                let l = self.estimate_join_side(left, stats, n);
-                let r = self.estimate_join_side(right, stats, n);
+                let l = self.estimate_tree(left, stats);
+                let r = self.estimate_tree(right, stats);
                 (l * r) / n.max(1.0)
             }
 
@@ -211,9 +216,9 @@ impl CardinalityEstimator {
 
             OperatorTree::DeepFusion { layers, .. } => self.estimate_deep_fusion(layers, stats, n),
 
-            OperatorTree::CosineProbability(inner) => self.estimate(inner, stats),
-            OperatorTree::BayesianScore { source, .. } => self.estimate(source, stats),
-            OperatorTree::EncodeGraphPosting { source } => self.estimate(source, stats),
+            OperatorTree::CosineProbability(inner) => self.estimate_tree(inner, stats),
+            OperatorTree::BayesianScore { source, .. } => self.estimate_tree(source, stats),
+            OperatorTree::EncodeGraphPosting { source } => self.estimate_tree(source, stats),
             OperatorTree::BayesianMatchWithPrior { field, query, .. } => {
                 if stats.total_docs == 0 {
                     0.0
@@ -224,20 +229,26 @@ impl CardinalityEstimator {
             OperatorTree::CalibratedVectorMatch { k, .. } => n.min(*k as f64),
             OperatorTree::DeepPredict { .. } => n,
 
-            OperatorTree::Composed(ops) => {
-                ops.last().map(|o| self.estimate(o, stats)).unwrap_or(0.0)
-            }
+            OperatorTree::Composed(ops) => ops
+                .last()
+                .map(|o| self.estimate_tree(o, stats))
+                .unwrap_or(0.0),
 
             OperatorTree::Facet { .. } => n,
             OperatorTree::IndexScan {
-                field, predicate, ..
-            } => n * self.filter_selectivity(field, predicate, n),
+                index_name,
+                field,
+                predicate,
+            } => stats.scan(index_name, field, predicate).map_or_else(
+                || n * self.filter_selectivity(field, predicate, n),
+                |(rows, _)| rows,
+            ),
             OperatorTree::Aggregate { .. } => 1.0,
             OperatorTree::GroupBy { .. } => n * 0.1,
 
             OperatorTree::Opaque { children, .. } => children
                 .iter()
-                .map(|c| self.estimate(c, stats))
+                .map(|c| self.estimate_tree(c, stats))
                 .fold(0.0, f64::max),
 
             // Variants already handled in `estimate`.
@@ -254,12 +265,17 @@ impl CardinalityEstimator {
         }
     }
 
-    fn estimate_deep_fusion(&self, layers: &[DeepFusionLayer], stats: &IndexStats, n: f64) -> f64 {
+    fn estimate_deep_fusion(
+        &self,
+        layers: &[DeepFusionLayer],
+        stats: &OperatorStatistics<'_>,
+        n: f64,
+    ) -> f64 {
         let mut card: f64 = 0.0;
         for layer in layers {
             match layer {
                 DeepFusionLayer::Signal { signals } => {
-                    let sum: f64 = signals.iter().map(|s| self.estimate(s, stats)).sum();
+                    let sum: f64 = signals.iter().map(|s| self.estimate_tree(s, stats)).sum();
                     card = card.max(n.min(sum));
                 }
                 DeepFusionLayer::Propagate { edge_label, .. } => {

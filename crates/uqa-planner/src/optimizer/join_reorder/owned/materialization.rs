@@ -129,6 +129,16 @@ impl Sources {
         let strategy = match (tree.join_edge, tree.kind) {
             (None, _) => JoinExecutionStrategy::Auto,
             (Some(_), Some(OperatorKind::HashJoinInner)) => JoinExecutionStrategy::Hash,
+            (Some(edge), Some(OperatorKind::IndexJoin)) => JoinExecutionStrategy::IndexNestedLoop {
+                inner_column: edge
+                    .lookup_column(
+                        tree.right
+                            .as_ref()
+                            .expect("index join has an inner relation")
+                            .relations,
+                    )
+                    .expect("selected inner key"),
+            },
             _ => {
                 return Err(SQLError::Internal(
                     "DPccp selected an invalid executable equijoin strategy".into(),

@@ -58,6 +58,8 @@ macro_rules! primitive {
 
 primitive!(bool, value => Part::Tag(u8::from(*value)));
 primitive!(usize, value => Part::Count(*value));
+// A plan column position uses the image's count encoding regardless of its in-memory width.
+primitive!(u16, value => Part::Count(usize::from(*value)));
 primitive!(u32, value => Part::U32(*value));
 primitive!(u64, value => Part::U64(*value));
 primitive!(crate::ScalarExpr, value => Part::Scalar(value));

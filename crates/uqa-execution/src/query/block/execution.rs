@@ -18,6 +18,7 @@ use super::{
 use crate::query::binding::sources::{
     bind_query_block_with_sources, ensure_select_with_sources, BoundQueryBlock, SourceBindings,
 };
+use uqa_sql::catalog::index::lookup::SubqueryKeys;
 
 #[expect(
     clippy::too_many_arguments,
@@ -211,7 +212,23 @@ fn run_from_query_block<'a, S: Clone + Send + Sync + 'static>(
                     .hierarchy_scan_tables(&resolution, name, *include_descendants)?
                     .len()
                     > 1;
-            if alias.is_none() && !is_virtual && !command_overlay && !has_hierarchy_descendants {
+            let subquery_lookup = if schemaless || stmt.subqueries.is_empty() {
+                false
+            } else if let Some(filter) = &stmt.r#where {
+                let key = SubqueryKeys::first_in_filter(
+                    filter,
+                    &context.ctes.production_resources()?.control(),
+                )?;
+                key.is_some() && !uqa_sql::semantics::contains_retrieval(filter)
+            } else {
+                false
+            };
+            if alias.is_none()
+                && !is_virtual
+                && !command_overlay
+                && !has_hierarchy_descendants
+                && !subquery_lookup
+            {
                 let local_table = local_table
                     .as_deref()
                     .expect("single-table fast path requires a resolved table");

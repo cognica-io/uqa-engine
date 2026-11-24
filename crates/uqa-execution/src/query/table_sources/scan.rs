@@ -18,6 +18,7 @@ use uqa_core::{
     Value,
 };
 mod schema;
+pub(in crate::query) mod subquery;
 use schema::{append_scan_metadata, projected_scan_schema_with_control};
 use uqa_sql::{
     plan::{
@@ -51,10 +52,6 @@ pub fn try_streaming_local_table_scan<'a, S: Clone>(
     )
 }
 
-#[expect(
-    clippy::too_many_lines,
-    reason = "preserves source schema and row identity"
-)]
 pub fn try_streaming_local_table_scan_with_control<'a, S: Clone>(
     context: TableScanContext<'_>,
     source: &SourcePlan,
@@ -62,6 +59,27 @@ pub fn try_streaming_local_table_scan_with_control<'a, S: Clone>(
     prune: Option<&ColumnPrune>,
     filters: Option<&QualifierFilters>,
     params: &[SQLParam],
+    control: &ProductionControl<'_>,
+) -> Result<Option<StreamingLocalTableScan<'a>>, SQLError> {
+    local_scan(context, source, ctes, prune, filters, params, None, control)
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the query scan borrows the statement's subquery arena when available"
+)]
+#[expect(
+    clippy::too_many_lines,
+    reason = "preserves source schema and row identity"
+)]
+pub(in crate::query) fn local_scan<'a, S: Clone>(
+    context: TableScanContext<'_>,
+    source: &SourcePlan,
+    ctes: &CteScope<S>,
+    prune: Option<&ColumnPrune>,
+    filters: Option<&QualifierFilters>,
+    params: &[SQLParam],
+    runtime: Option<&subquery::Runtime<'a, '_, S>>,
     control: &ProductionControl<'_>,
 ) -> Result<Option<StreamingLocalTableScan<'a>>, SQLError> {
     control.check()?;
@@ -300,6 +318,26 @@ pub fn try_streaming_local_table_scan_with_control<'a, S: Clone>(
         };
         let table_oid =
             include_table_oid.then(|| Value::Int(i64::from(table_snapshot.catalog_oids.relation)));
+        let runtime_key = if table_names.len() == 1
+            && candidates.is_none()
+            && recheck_pins.is_none()
+        {
+            match (runtime, predicate_expression.as_deref()) {
+                (Some(runtime), Some(_)) => runtime
+                    .bind(
+                        table_snapshot,
+                        table.maps_integer_keys(),
+                        table_name,
+                        &catalog,
+                        &|name, field| visible_names.get(name).copied().unwrap_or(name) == field,
+                        control,
+                    )?
+                    .map(|probe| (probe, runtime.diagnostics)),
+                _ => None,
+            }
+        } else {
+            None
+        };
         let name = control.copy_text(table_name)?;
         let copied_columns = copy_names(&columns, control)?;
         let copied_schema = copy_names(&schema, control)?;
@@ -327,8 +365,38 @@ pub fn try_streaming_local_table_scan_with_control<'a, S: Clone>(
             },
             control.combine(control.combine(name_memory, column_memory), schema_memory),
         )?;
-        let source = LocalTableRowSource::from_produced(config)
-            .with_scan_batch_bytes(context.runtime.work_mem_bytes()?);
+        let batch_bytes = context.runtime.work_mem_bytes()?;
+        if let Some((probe, diagnostics)) = runtime_key {
+            let resources = control.capture();
+            let operator =
+                crate::query::deferred::DeferredOperator::from_bound_schema_with_control(
+                    Some(physical_schema.clone()),
+                    move || {
+                        let (mut config, memory) = config.into_parts();
+                        let access = if let Some(ids) = probe()? {
+                            config.estimated_cardinality = ids.len() as u64;
+                            config.candidates = Some(ids);
+                            "Index Scan"
+                        } else {
+                            "Table Scan"
+                        };
+                        let control = resources.control();
+                        let input =
+                            LocalTableRowSource::from_produced(control.finish(config, memory)?)
+                                .with_scan_batch_bytes(batch_bytes);
+                        diagnostics.observe(
+                            crate::TableScan::boxed_with_control(
+                                input.into_boxed(&control)?,
+                                &control,
+                            )?,
+                            access,
+                        )
+                    },
+                    control,
+                )?;
+            return Ok(Some((operator, filter_pushed)));
+        }
+        let source = LocalTableRowSource::from_produced(config).with_scan_batch_bytes(batch_bytes);
         sources.push_produced(control.finish(source, control.empty_reservation())?)?;
     }
     let sources = sources.finish()?;

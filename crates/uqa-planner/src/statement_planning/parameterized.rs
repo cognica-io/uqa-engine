@@ -51,7 +51,12 @@ pub(super) fn parameterized_access(
     let rows = stats.row_count as f64;
     let mut cost = costs.estimate_unary(OperatorKind::TableScan, rows).total()
         + costs.estimate_unary(OperatorKind::Filter, rows).total();
-    if let Some(candidate_rows) = index_rows(predicate, &stats, &fields, &statistics.production)? {
+    let mut output_rows = rows
+        * CardinalityEstimator::new()
+            .scalar_selectivity_with_control(predicate, &stats, &statistics.production)?
+            .raw();
+    if let Some(candidate_rows) = index_rows(predicate, &stats, &fields, statistics, table)? {
+        output_rows = output_rows.min(candidate_rows);
         let index_cost = costs
             .estimate_unary(OperatorKind::IndexScan, candidate_rows)
             .total()
@@ -61,10 +66,7 @@ pub(super) fn parameterized_access(
         cost = cost.min(index_cost);
     }
     Ok(Some(LocalAccessEstimate {
-        output_rows: rows
-            * CardinalityEstimator::new()
-                .scalar_selectivity_with_control(predicate, &stats, &statistics.production)?
-                .raw(),
+        output_rows,
         cost,
         paradigm: AccessParadigm::Relational,
     }))
@@ -74,13 +76,15 @@ fn index_rows(
     expression: &ScalarExpr,
     stats: &RelationStats,
     fields: &std::collections::BTreeSet<String>,
-    control: &uqa_core::memory::ProductionControl<'_>,
+    statistics: &CatalogSourceStatistics<'_, '_>,
+    table: &str,
 ) -> Result<Option<f64>, SQLError> {
+    let control = &statistics.production;
     control.check()?;
     if let ScalarExpr::And(items) = expression {
         let mut minimum: Option<f64> = None;
         for item in items {
-            if let Some(rows) = index_rows(item, stats, fields, control)? {
+            if let Some(rows) = index_rows(item, stats, fields, statistics, table)? {
                 minimum = Some(minimum.map_or(rows, |previous| previous.min(rows)));
             }
         }
@@ -115,6 +119,16 @@ fn index_rows(
         )
     {
         return Ok(None);
+    }
+    if *op == BinaryOp::Equal
+        && statistics
+            .context
+            .catalog
+            .lookup_column(table, column)?
+            .is_some_and(|column| column.unique)
+    {
+        // The declared key bounds a probe even when its parameter has no value during planning.
+        return Ok(Some((stats.row_count as f64).min(1.0)));
     }
     Ok(Some(
         stats.row_count as f64

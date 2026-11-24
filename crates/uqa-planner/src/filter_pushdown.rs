@@ -41,6 +41,12 @@ pub use placement::{
 };
 pub use uqa_sql::semantics::outer_join_nullable_qualifiers;
 
+/// Local predicates and the block-level predicate still evaluated after pushdown.
+pub struct FilterPlacement {
+    pub local: QualifierFilters,
+    pub residual: Option<uqa_sql::plan::OwnedScalarExpr>,
+}
+
 pub fn qualifier_filters_for_stmt(
     context: FilterPushdownContext<'_>,
     stmt: &QueryBlockPlan,

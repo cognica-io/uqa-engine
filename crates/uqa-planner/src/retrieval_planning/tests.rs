@@ -181,16 +181,19 @@ impl RetrievalPlanningCatalog for IndexCatalog<'_> {
         panic!("these trees do not plan physical text limits")
     }
     fn table_doc_count(&self, _: &str) -> Result<u64, SQLError> {
-        panic!("invalid catalog metadata must precede statistics reads")
+        self.events.borrow_mut().push("row count");
+        Ok(256)
     }
     fn try_query_table(
         &self,
         _: &str,
     ) -> Result<Option<Box<dyn RetrievalStatisticsTable>>, String> {
-        panic!("invalid catalog metadata must precede table retention")
+        self.events.borrow_mut().push("table");
+        Ok(None)
     }
     fn try_query_column_stats(&self, _: &str) -> Result<ColumnStatistics, String> {
-        panic!("invalid catalog metadata must precede column statistics")
+        self.events.borrow_mut().push("column statistics");
+        Ok(ColumnStatistics::default())
     }
     fn graph_snapshot(&self, _: &str) -> Result<Option<GraphStatisticsSnapshot>, String> {
         panic!("invalid catalog metadata must precede graph snapshots")
@@ -253,7 +256,7 @@ fn shared_index_rows_preserve_candidate_order_without_copying_unrelated_payloads
     };
     let mut output = None;
     let allocation = allocation_counter::measure(|| {
-        output = Some(index_candidates(&catalog, "docs", &tree).unwrap());
+        output = Some(index_candidates(&catalog, "docs", &tree, None).unwrap());
     });
     assert!(allocation.bytes_total < 4096, "{allocation:?}");
     let output = output.unwrap();

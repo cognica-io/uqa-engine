@@ -9,6 +9,7 @@
 use super::{operator_execution_error, PlanningResult, RetrievalPlanningCatalog};
 use crate::{query_optimizer::IndexScanCandidate, CostEstimator, OperatorKind};
 use std::collections::BTreeMap;
+use uqa_core::memory::ProductionSmallVec;
 use uqa_operators::OperatorTree;
 use uqa_sql::SQLError;
 
@@ -16,6 +17,7 @@ pub(super) fn index_candidates(
     catalog: &dyn RetrievalPlanningCatalog,
     table: &str,
     tree: &OperatorTree,
+    mut observed_rows: Option<&mut ProductionSmallVec<'_, [usize; 4]>>,
 ) -> PlanningResult<Vec<IndexScanCandidate>> {
     if table.is_empty()
         || !catalog
@@ -67,9 +69,8 @@ pub(super) fn index_candidates(
         let Some(cardinality) = catalog.value_index_cardinality(table, field, predicate)? else {
             return Ok(());
         };
-        let cardinality = cardinality as f64;
         let scan_cost = CostEstimator::default()
-            .estimate_unary(OperatorKind::IndexScan, cardinality)
+            .estimate_unary(OperatorKind::IndexScan, cardinality as f64)
             .total();
         candidates.push(IndexScanCandidate {
             index_name: index_name.clone(),
@@ -78,6 +79,9 @@ pub(super) fn index_candidates(
             predicate: predicate.clone(),
             scan_cost,
         });
+        if let Some(rows) = &mut observed_rows {
+            rows.push(cardinality)?;
+        }
         Ok::<(), SQLError>(())
     })?;
     Ok(candidates)

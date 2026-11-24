@@ -48,7 +48,15 @@ impl Context<'_, '_> {
             }
         })
     }
-    fn query(&self, mut query: MutableQueryPlan) -> Result<MutableQueryPlan, SQLError> {
+    fn query(&self, query: MutableQueryPlan) -> Result<MutableQueryPlan, SQLError> {
+        let local = super::scope::JoinStatistics::new(self.statistics, &query.ctes, self.control)?;
+        Context {
+            statistics: local.selected(),
+            control: self.control,
+        }
+        .query_in_scope(query)
+    }
+    fn query_in_scope(&self, mut query: MutableQueryPlan) -> Result<MutableQueryPlan, SQLError> {
         self.control.check()?;
         for index in 0..query.ctes.len() {
             query = query.map_cte(index, self.control, |body| self.plan(body))?;
@@ -92,7 +100,19 @@ impl Context<'_, '_> {
         }
         Ok(query)
     }
-    fn command(&self, mut command: MutableCommandPlan) -> Result<MutableCommandPlan, SQLError> {
+    fn command(&self, command: MutableCommandPlan) -> Result<MutableCommandPlan, SQLError> {
+        let local =
+            super::scope::JoinStatistics::new(self.statistics, command.ctes(), self.control)?;
+        Context {
+            statistics: local.selected(),
+            control: self.control,
+        }
+        .command_in_scope(command)
+    }
+    fn command_in_scope(
+        &self,
+        mut command: MutableCommandPlan,
+    ) -> Result<MutableCommandPlan, SQLError> {
         self.control.check()?;
         match &*command {
             CommandPlan::DeclareCursor { .. } => {

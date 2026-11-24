@@ -6,7 +6,9 @@
 
 //! Independent relation costs and cross-relation operator-join estimates.
 
-use super::{operator_tree_paradigm, query_optimizer, PlanningResult, RetrievalPlanningCatalog};
+use super::{
+    costed_tree, operator_tree_paradigm, CostedTree, PlanningResult, RetrievalPlanningCatalog,
+};
 use crate::{
     CardinalityEstimator, CostEstimator, OperatorKind, GRAPH_AVG_DEGREE_DEFAULT,
     JACCARD_JOIN_SELECTIVITY,
@@ -85,15 +87,13 @@ fn estimate_operator_join_side(
     relation: &str,
     tree: OperatorTree,
 ) -> PlanningResult<OperatorJoinSideEstimate> {
-    let optimizer = query_optimizer(catalog, relation, &tree)?;
-    let planned = optimizer.optimize(tree);
-    let output_rows = optimizer
-        .estimator
-        .estimate(&planned, &optimizer.index_stats);
+    let CostedTree {
+        optimizer,
+        output_rows,
+        cost,
+        ..
+    } = costed_tree(catalog, relation, tree)?;
     let total_docs = optimizer.index_stats.total_docs as f64;
-    let cost = optimizer
-        .cost_model
-        .estimate(&planned, &optimizer.index_stats);
     if !output_rows.is_finite() || output_rows < 0.0 {
         return Err(SQLError::Internal(format!(
             "operator join relation `{relation}` produced invalid cardinality {output_rows}"
@@ -109,7 +109,7 @@ fn estimate_operator_join_side(
         cost,
         total_docs,
         dimensions: optimizer.index_stats.dimensions,
-        graph_stats: optimizer.graph_stats.clone(),
+        graph_stats: optimizer.graph_stats,
     })
 }
 

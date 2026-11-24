@@ -69,6 +69,21 @@ impl<S: Clone + Send + Sync + 'static> PhysicalSubqueryRunner for SubqueryContex
         result.result()
     }
 
+    fn index_membership_input(
+        &self,
+        slot: usize,
+        plan: &QueryPlan,
+        params: &[SQLParam],
+    ) -> Result<Option<crate::SubqueryResult>, SQLError> {
+        match self.ctes.cached_subquery(slot) {
+            Some(ScalarSubqueryCacheEntry::Membership(_)) => Ok(None),
+            Some(ScalarSubqueryCacheEntry::ComparedMembership(rows)) => rows.result().map(Some),
+            _ => self
+                .execute_subquery(slot, plan, PhysicalOuterRow::Absent, params)
+                .map(Some),
+        }
+    }
+
     fn row_subquery_value(
         &self,
         subquery: usize,

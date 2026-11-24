@@ -167,7 +167,8 @@ fn local_join_costing_borrows_predicates_and_column_statistics() {
                     &estimates,
                     &ProductionControl::uncontrolled(),
                 )
-                .unwrap()[0]
+                .unwrap()
+                .estimates[0]
                     .unwrap(),
             );
         });

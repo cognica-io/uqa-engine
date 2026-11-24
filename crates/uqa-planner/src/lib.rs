@@ -57,6 +57,7 @@ pub mod plan_cost;
 mod planning_resources;
 mod scratch;
 pub use planning_resources::PlanningResources;
+mod operator_statistics;
 pub mod query_optimizer;
 pub mod statement_planning;
 pub mod text_top_k;

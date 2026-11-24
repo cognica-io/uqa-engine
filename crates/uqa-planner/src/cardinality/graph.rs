@@ -8,7 +8,7 @@
 
 use super::{
     rpq_label_count, Arc, BTreeMap, CardinalityEstimator, GraphPatternIR, GraphStats,
-    GraphStoreSampler, IndexStats, OperatorTree, TemporalFilterIR, VertexConstraint, XorShiftRng,
+    GraphStoreSampler, TemporalFilterIR, VertexConstraint, XorShiftRng,
 };
 
 impl CardinalityEstimator {
@@ -158,15 +158,6 @@ impl CardinalityEstimator {
         let cosine = threshold.clamp(-1.0, 1.0);
         let z = cosine * f64::from(dimensions.max(1)).sqrt();
         normal_survival(z).clamp(0.0, 1.0)
-    }
-
-    pub(super) fn estimate_join_side(
-        &self,
-        side: &OperatorTree,
-        stats: &IndexStats,
-        _n: f64,
-    ) -> f64 {
-        self.estimate(side, stats)
     }
 
     /// Fixed-size random-walk estimate. `None` means no graph store is available
