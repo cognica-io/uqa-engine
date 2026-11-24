@@ -586,19 +586,12 @@ pub(super) fn build_table_source_operator<'a, S: Clone + Send + Sync + 'static>(
             }
 
             let resources = context.ctes.production_resources()?;
-            let runtime = filters
+            let terms = filters
                 .and_then(|filters| filters.get(qualifier))
-                .and_then(|parts| {
-                    parts
-                        .iter()
-                        .find_map(uqa_sql::catalog::index::lookup::SubqueryKeys::predicate)
-                })
-                .map(|(field, key)| {
-                    crate::query::table_sources::scan::subquery::Runtime::new(
-                        context, ctes, params, field, key,
-                    )
-                })
-                .transpose()?;
+                .unwrap_or_default();
+            let runtime = crate::query::table_sources::scan::subquery::Runtime::new(
+                context, ctes, params, terms,
+            )?;
             let Some((operator, filter_pushed)) = crate::query::table_sources::scan::local_scan(
                 context.scans,
                 from,

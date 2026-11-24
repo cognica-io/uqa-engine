@@ -66,22 +66,23 @@ impl PlanCostEstimator<'_, '_> {
         else {
             return Ok(None);
         };
-        let Some((field, keys)) = terms.iter().find_map(SubqueryKeys::predicate) else {
+        let bound = SubqueryKeys::find_usable(terms, &self.control, |field, keys| {
+            let Some(column) = self
+                .statistics
+                .lookup_column(name, field)
+                .filter(|column| column.unique)
+            else {
+                return Ok(None);
+            };
+            let Some(inner) = block.subqueries.get(keys.slot()) else {
+                return Ok(None);
+            };
+            let domain = self.statistics.subquery_key_domain(inner, &self.control)?;
+            Ok((domain == Some(column.domain)).then_some((field, keys, inner)))
+        })?;
+        let Some((field, keys, inner)) = bound else {
             return Ok(None);
         };
-        let Some(column) = self
-            .statistics
-            .lookup_column(name, field)
-            .filter(|column| column.unique)
-        else {
-            return Ok(None);
-        };
-        let Some(inner) = block.subqueries.get(keys.slot()) else {
-            return Ok(None);
-        };
-        if self.statistics.subquery_key_domain(inner, &self.control)? != Some(column.domain) {
-            return Ok(None);
-        }
         let child = self.query(inner, scope, capture)?;
         let keys_estimate = match keys {
             SubqueryKeys::Scalar(_) => 1.0,

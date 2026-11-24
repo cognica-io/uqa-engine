@@ -79,7 +79,7 @@ pub(in crate::query) fn local_scan<'a, S: Clone>(
     prune: Option<&ColumnPrune>,
     filters: Option<&QualifierFilters>,
     params: &[SQLParam],
-    runtime: Option<&subquery::Runtime<'a, '_>>,
+    runtime: Option<&subquery::Runtime<'a, '_, S>>,
     control: &ProductionControl<'_>,
 ) -> Result<Option<StreamingLocalTableScan<'a>>, SQLError> {
     control.check()?;
@@ -318,24 +318,26 @@ pub(in crate::query) fn local_scan<'a, S: Clone>(
         };
         let table_oid =
             include_table_oid.then(|| Value::Int(i64::from(table_snapshot.catalog_oids.relation)));
-        let runtime_key =
-            if table_names.len() == 1 && candidates.is_none() && recheck_pins.is_none() {
-                match (runtime, predicate_expression.as_deref()) {
-                    (Some(runtime), Some(_)) => runtime
-                        .bind(
-                            table_snapshot,
-                            table.maps_integer_keys(),
-                            table_name,
-                            &catalog,
-                            &|name| visible_names.get(name).copied().unwrap_or(name).to_owned(),
-                            control,
-                        )?
-                        .map(|probe| (probe, runtime.diagnostics)),
-                    _ => None,
-                }
-            } else {
-                None
-            };
+        let runtime_key = if table_names.len() == 1
+            && candidates.is_none()
+            && recheck_pins.is_none()
+        {
+            match (runtime, predicate_expression.as_deref()) {
+                (Some(runtime), Some(_)) => runtime
+                    .bind(
+                        table_snapshot,
+                        table.maps_integer_keys(),
+                        table_name,
+                        &catalog,
+                        &|name, field| visible_names.get(name).copied().unwrap_or(name) == field,
+                        control,
+                    )?
+                    .map(|probe| (probe, runtime.diagnostics)),
+                _ => None,
+            }
+        } else {
+            None
+        };
         let name = control.copy_text(table_name)?;
         let copied_columns = copy_names(&columns, control)?;
         let copied_schema = copy_names(&schema, control)?;

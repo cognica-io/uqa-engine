@@ -29,6 +29,30 @@ fn explain(engine: &Engine, query: &str) -> Json {
     document[0].clone()
 }
 
+fn check_lookup_before_analyze(engine: &Engine) {
+    let doc = explain(
+        engine,
+        "SELECT b.v FROM b WHERE b.id = (SELECT 'b77'::text)",
+    );
+    let relations = doc["Node Estimates"].as_array().unwrap();
+    let target = relations
+        .iter()
+        .find(|node| node["Relation Name"] == "b")
+        .unwrap();
+    assert_eq!(target["Plan Rows"].as_f64(), Some(1.0), "{doc}");
+    assert!(target["Total Cost"].as_f64().unwrap() < 64.0, "{doc}");
+    let nodes = doc["Node Executions"].as_array().unwrap();
+    for kind in ["Relation Scan", "Index Scan"] {
+        let scans: Vec<_> = nodes
+            .iter()
+            .filter(|node| node["Node Type"] == kind)
+            .collect();
+        assert_eq!(scans.len(), 1, "{doc}");
+        assert_eq!(scans[0]["Actual Rows"].as_f64(), Some(1.0), "{doc}");
+        assert_eq!(scans[0]["Actual Loops"].as_f64(), Some(1.0), "{doc}");
+    }
+}
+
 #[test]
 fn analyzed_subquery_keys_share_the_indexed_columns_equality_domain() {
     use uqa_planner::statement_planning::PlannerStatisticsCatalog;
@@ -87,12 +111,13 @@ fn selective_runtime_keys_bound_relation_access(#[case] provider: Provider) {
         CREATE TABLE s (id text PRIMARY KEY, a_id text NOT NULL);
         INSERT INTO a SELECT 'a' || i, 'b' || i FROM generate_series(1,256) AS g(i);
         INSERT INTO b SELECT 'b' || i, 'v' || i FROM generate_series(1,256) AS g(i);
-        INSERT INTO s SELECT 's' || i, 'a' || i FROM generate_series(1,256) AS g(i);
-        ANALYZE a; ANALYZE b; ANALYZE s",
+        INSERT INTO s SELECT 's' || i, 'a' || i FROM generate_series(1,256) AS g(i)",
             &[],
         )
         .unwrap();
 
+    check_lookup_before_analyze(&engine);
+    engine.sql("ANALYZE a; ANALYZE b; ANALYZE s", &[]).unwrap();
     for (query, relation_count, indexed_joins) in [
         (SCALAR, 2, 0),
         (MEMBERSHIP, 2, 0),
@@ -105,6 +130,16 @@ fn selective_runtime_keys_bound_relation_access(#[case] provider: Provider) {
         ),
         (
             "SELECT v FROM b WHERE id=(SELECT b_id FROM a WHERE id='a77') AND v <> 'absent'",
+            2,
+            0,
+        ),
+        (
+            "SELECT v FROM b WHERE v=(SELECT 'v77'::text) AND id=(SELECT b_id FROM a WHERE id='a77')",
+            2,
+            0,
+        ),
+        (
+            "SELECT v FROM b WHERE id IN (SELECT b_id FROM a WHERE id='a77') AND v=(SELECT 'v77'::text)",
             2,
             0,
         ),
@@ -225,6 +260,10 @@ fn runtime_lookups_preserve_sql_comparisons_and_statement_visibility(#[case] pro
         &[1, 1, 2],
     );
     check("SELECT v FROM target t WHERE t.k=(SELECT q.k FROM keys q WHERE q.k=t.k LIMIT 1) ORDER BY v", &[1, 2]);
+    check(
+        "SELECT v FROM target t WHERE t.k IN (SELECT q.k FROM keys q WHERE q.k=t.k) ORDER BY v",
+        &[1, 2],
+    );
     check(
         "SELECT v FROM target t WHERE t.k=(SELECT k FROM keys WHERE false)",
         &[],

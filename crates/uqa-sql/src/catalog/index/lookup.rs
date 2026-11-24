@@ -88,6 +88,23 @@ pub enum SubqueryKeys {
 }
 
 impl SubqueryKeys {
+    /// Select a usable key from the stable conjuncts placed on one relation.
+    pub fn find_usable<'a, T>(
+        terms: &'a [ScalarExpr],
+        control: &uqa_core::memory::ProductionControl<'_>,
+        mut bind: impl FnMut(&'a str, Self) -> Result<Option<T>, SQLError>,
+    ) -> Result<Option<T>, SQLError> {
+        for term in terms {
+            control.check()?;
+            if let Some((field, keys)) = Self::predicate(term) {
+                if let Some(bound) = bind(field, keys)? {
+                    return Ok(Some(bound));
+                }
+            }
+        }
+        Ok(None)
+    }
+
     pub fn slot(self) -> SubqueryId {
         match self {
             Self::Scalar(id) | Self::Membership(id) => id,
