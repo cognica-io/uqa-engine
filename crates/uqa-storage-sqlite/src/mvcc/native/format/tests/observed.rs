@@ -289,6 +289,75 @@ fn an_inspection_reads_what_an_open_will_do_and_changes_no_file_in_any_file_mode
     }
 }
 
+#[test]
+fn an_inspection_reads_a_database_whose_metadata_triggers_an_open_brings_up_to_date() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("predecessor-triggers.db");
+    {
+        let connection = connection(&path, 0);
+        in_the_mapping_before(&connection);
+        // An Engine before the current encoding of the metadata cache triggers wrote this database last.
+        crate::mvcc::native::tests::materialization::with(&connection, |sqlite| {
+            for event in ["INSERT", "DELETE", "UPDATE"] {
+                let (name, predecessor) = Catalog::predecessor_metadata_cache_trigger(event);
+                sqlite.execute_batch(&format!("DROP TRIGGER {name}; {predecessor}"))?;
+            }
+            // The whole format is valid only once an open has replaced them, which an open does before it validates.
+            assert!(validate_format(sqlite, 17).is_err());
+            Ok(())
+        });
+    }
+    let stored = std::fs::read(&path).unwrap();
+    let inspection = inspect_storage_upgrade(&path, None).unwrap();
+    assert_eq!(inspection.stored_mapping(), Some(17));
+    assert_eq!(
+        inspection.steps(),
+        [(StorageUpgradeStep::LookupKeys, Some(ENTRIES))]
+    );
+    assert_eq!(std::fs::read(&path).unwrap(), stored);
+
+    let connection = connection(&path, 0);
+    let told = Arc::new(Told::default());
+    connection.observe_storage_upgrade(told.clone());
+    connection.begin_native_initial_restore().unwrap();
+    assert_the_upgrade_of_the_keys_was_told(&told.events());
+    connection.rollback_transaction().unwrap();
+}
+
+#[test]
+fn an_inspection_does_not_report_a_mapping_this_engine_does_not_know_as_current() {
+    let connection = ManagedConnection::open_in_memory().unwrap();
+    let control = in_the_mapping_before(&connection);
+    let namespace = SQLiteRecordStore::for_native(&connection, &control)
+        .unwrap()
+        .native_namespace()
+        .unwrap();
+    crate::mvcc::native::tests::materialization::with(&connection, |sqlite| {
+        let current = inspect(sqlite)?;
+        assert_eq!(current.stored_mapping(), Some(CURRENT_VERSION));
+        assert!(!current.upgrade_due());
+
+        // A later Engine has written the marker of a mapping after the current one.
+        let later = TABLES[0].1.replace(
+            &format!("CHECK(format = {CURRENT_VERSION})"),
+            &format!("CHECK(format = {})", CURRENT_VERSION + 1),
+        );
+        assert_ne!(later, TABLES[0].1);
+        let _permit = schema::WritePermit::acquire(sqlite)?;
+        let transaction = schema::begin(sqlite)?;
+        transaction.execute_batch("DROP TABLE _uqa_mvcc_native_format")?;
+        transaction.execute_batch(&later)?;
+        transaction.execute(
+            "INSERT INTO _uqa_mvcc_native_format VALUES(1,?1,49,?2)",
+            rusqlite::params![CURRENT_VERSION + 1, namespace.as_bytes().as_slice()],
+        )?;
+        assert!(inspect(&transaction).is_err());
+        drop(transaction);
+        assert_eq!(inspect(sqlite)?.stored_mapping(), Some(CURRENT_VERSION));
+        Ok(())
+    });
+}
+
 fn connection_again(path: &Path, mode: usize) -> ManagedConnection {
     ManagedConnection::open_auto(path, key_of(mode)).unwrap()
 }

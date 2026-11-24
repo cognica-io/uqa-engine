@@ -86,6 +86,17 @@ impl Catalog {
         )
     }
 
+    /// A metadata cache trigger in the encoding before the current one, as a database has it that an earlier Engine wrote last.
+    #[cfg(test)]
+    pub(crate) fn predecessor_metadata_cache_trigger(event: &str) -> (String, String) {
+        cache_trigger(
+            "_metadata",
+            false,
+            event,
+            MetadataTriggerFormat::RelationAclTuples,
+        )
+    }
+
     /// Upgrade known metadata trigger encodings and exclude internal allocation state without altering data or revision history. The caller owns the schema transaction.
     pub(crate) fn upgrade_metadata_cache_triggers(conn: &rusqlite::Connection) -> Result<()> {
         for event in ["INSERT", "DELETE", "UPDATE"] {

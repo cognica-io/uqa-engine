@@ -440,8 +440,14 @@ pub(in crate::mvcc) fn inspect(
         ));
     }
     let version = stored_version(connection)?;
-    // A file whose format this Engine does not know is not reported as current.
-    validate_format(connection, version)?;
+    // A file whose mapping this Engine does not know is not reported as current.
+    if version == CURRENT_VERSION
+        && schema::definition_matches(connection, TABLES[0].0, TABLES[0].1)? != Some(true)
+    {
+        return Err(invalid("native record format of an unknown mapping").into());
+    }
+    // The marker of the mapping is complete, as an open requires it. The rest of the format is validated by the open alone: it first brings the metadata cache triggers of an earlier encoding to the current one, and an inspection writes nothing.
+    check_mapping_version(connection, version)?;
     let mut steps = Vec::new();
     for step in rewriting_steps(version) {
         steps.push((step, rows_of(connection, version, step)?));

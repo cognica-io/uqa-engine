@@ -80,8 +80,14 @@ impl StorageUpgradeInspection {
 /// [`ManagedConnection::open_auto`](crate::ManagedConnection::open_auto).
 ///
 /// The rows of a step are read from the populations the database keeps of
-/// its indexes, so the inspection of a large database takes no longer than
-/// that of a small one.
+/// its indexes: one row for an index and no index entry. A compressed
+/// container is loaded as an open loads it, by the records of the chunks it
+/// has committed, so its inspection grows with the container and not with
+/// its rows.
+///
+/// The inspection reads the marker of the mapping and does not validate the
+/// rest of the format, which an open validates after it has brought the
+/// triggers of an earlier Engine up to date.
 ///
 /// # Errors
 ///
@@ -89,8 +95,13 @@ impl StorageUpgradeInspection {
 /// cannot read and for a mapping it does not know, as an open would.
 pub fn inspect_storage_upgrade(path: &Path, key: Option<&str>) -> Result<StorageUpgradeInspection> {
     match open_for_reading(path, key)? {
-        Some(connection) => Ok(SQLiteRecordStore::inspect_native_mapping(&connection)
-            .map_err(VersionError::into_storage_error)?),
+        Some(connection) => {
+            // One read transaction: every statement of the inspection reads the same
+            // committed state, also while another process upgrades the file.
+            let reading = connection.unchecked_transaction()?;
+            Ok(SQLiteRecordStore::inspect_native_mapping(&reading)
+                .map_err(VersionError::into_storage_error)?)
+        }
         None => Ok(StorageUpgradeInspection::new(
             None,
             SQLiteRecordStore::CURRENT_NATIVE_MAPPING,
