@@ -20,6 +20,28 @@ pub trait StatisticsTableState: Send + Sync {}
 
 /// Loaded metadata needed to estimate relational access without depending on a storage provider.
 pub trait PlannerStatisticsCatalog {
+    fn placed_filters(
+        &self,
+        _block: &uqa_sql::plan::QueryBlockPlan,
+        _source: &uqa_sql::plan::SourcePlan,
+        _control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<crate::filter_pushdown::FilterPlacement>, SQLError> {
+        Ok(None)
+    }
+    fn subquery_key_domain(
+        &self,
+        _query: &uqa_sql::plan::QueryPlan,
+        _control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<uqa_sql::catalog::index::lookup::EqualityDomain>, SQLError> {
+        Ok(None)
+    }
+    fn lookup_column(
+        &self,
+        _table: &str,
+        _field: &str,
+    ) -> Result<Option<uqa_sql::catalog::index::lookup::LookupColumn>, SQLError> {
+        Ok(None)
+    }
     fn storage_table(&self, table: &str)
         -> Result<Option<Arc<dyn StatisticsTableState>>, SQLError>;
     fn hierarchy_scan_tables(&self, table: &str) -> Result<Vec<String>, SQLError>;
@@ -63,6 +85,34 @@ impl CatalogSourceStatistics<'_, '_> {
 }
 
 impl crate::SourceStatistics for CatalogSourceStatistics<'_, '_> {
+    fn placed_filters(
+        &self,
+        block: &uqa_sql::plan::QueryBlockPlan,
+        source: &uqa_sql::plan::SourcePlan,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<crate::filter_pushdown::FilterPlacement>, SQLError> {
+        self.context.catalog.placed_filters(block, source, control)
+    }
+    fn subquery_key_domain(
+        &self,
+        query: &uqa_sql::plan::QueryPlan,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<uqa_sql::catalog::index::lookup::EqualityDomain>, SQLError> {
+        self.context.catalog.subquery_key_domain(query, control)
+    }
+    fn lookup_column(
+        &self,
+        table: &str,
+        field: &str,
+    ) -> Option<uqa_sql::catalog::index::lookup::LookupColumn> {
+        self.context
+            .catalog
+            .lookup_column(table, field)
+            .unwrap_or_else(|error| {
+                self.record_error(error);
+                None
+            })
+    }
     fn relation_statistics(&self, table: &str) -> Option<crate::RelationStats> {
         match self.context.catalog.storage_table(table) {
             Ok(None) => None,

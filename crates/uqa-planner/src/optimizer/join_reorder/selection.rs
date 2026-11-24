@@ -76,12 +76,40 @@ pub(super) fn select_graph<'a>(
         control.check().map_err(uqa_sql::SQLError::from)?;
         let graph_predicate = join_predicate(expression, &column_owners);
         let mut relations = 0;
-        if let Some(predicate) = graph_predicate {
+        if let Some(mut predicate) = graph_predicate {
             for alias in [predicate.left_alias, predicate.right_alias] {
                 relations |= 1_u64
                     << column_owners
                         .alias_index(alias)
                         .expect("resolved join alias");
+            }
+            let column = |alias: &str, field: &str| {
+                let index = column_owners.alias_index(alias)?;
+                let SourcePlan::Table {
+                    name,
+                    executable_query: None,
+                    bound_columns: None,
+                    column_aliases,
+                    ..
+                } = atoms[index]
+                else {
+                    return None;
+                };
+                if !column_aliases.is_empty() {
+                    return None;
+                }
+                statistics.lookup_column(name, field)
+            };
+            if let (Some(left), Some(right)) = (
+                column(predicate.left_alias, predicate.left_field),
+                column(predicate.right_alias, predicate.right_field),
+            ) {
+                if left.domain == right.domain {
+                    predicate.lookup_columns = [
+                        left.unique.then_some(left.position),
+                        right.unique.then_some(right.position),
+                    ];
+                }
             }
             graph_predicates
                 .push_copy(predicate)

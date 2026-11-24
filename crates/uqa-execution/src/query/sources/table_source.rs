@@ -586,16 +586,29 @@ pub(super) fn build_table_source_operator<'a, S: Clone + Send + Sync + 'static>(
             }
 
             let resources = context.ctes.production_resources()?;
-            let Some((operator, filter_pushed)) =
-                crate::query::table_sources::scan::try_streaming_local_table_scan_with_control(
-                    context.scans,
-                    from,
-                    ctes,
-                    prune,
-                    filters,
-                    params,
-                    &resources.control(),
-                )?
+            let runtime = filters
+                .and_then(|filters| filters.get(qualifier))
+                .and_then(|parts| {
+                    parts
+                        .iter()
+                        .find_map(uqa_sql::catalog::index::lookup::SubqueryKeys::predicate)
+                })
+                .map(|(_, key)| {
+                    crate::query::table_sources::scan::subquery::Runtime::new(
+                        context, ctes, params, key,
+                    )
+                })
+                .transpose()?;
+            let Some((operator, filter_pushed)) = crate::query::table_sources::scan::local_scan(
+                context.scans,
+                from,
+                ctes,
+                prune,
+                filters,
+                params,
+                runtime.as_ref(),
+                &resources.control(),
+            )?
             else {
                 return Err(SQLError::UnknownTable(name.clone()));
             };

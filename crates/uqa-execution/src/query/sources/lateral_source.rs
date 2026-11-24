@@ -11,6 +11,7 @@ use super::{
     validate_table_function_column_definition, CteScope, SQLError, SQLParam, ScalarExpr,
     SourceContext, SourcePlan, TableFunctionCall,
 };
+use uqa_sql::expr::RowLookup;
 
 /// Enforce EXECUTE on each function of a lateral FROM item, which the join calls once per outer row, as `PostgreSQL` checks it when it initializes the scan, before any outer row is read.
 pub(super) fn require_lateral_function_execute<S: Clone + Send + Sync + 'static>(
@@ -68,7 +69,104 @@ pub(super) fn require_lateral_function_execute<S: Clone + Send + Sync + 'static>
     Ok(())
 }
 
+pub(super) struct IndexKey {
+    outer_position: usize,
+    qualifier: uqa_core::memory::Produced<String>,
+    column: uqa_core::memory::Produced<String>,
+}
+
+impl IndexKey {
+    pub(super) fn bind(
+        join: &SourcePlan,
+        inner_column: usize,
+        left: &crate::RowSchema,
+        right: &crate::RowSchema,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Self, SQLError> {
+        let SourcePlan::Join {
+            right: inner,
+            on: Some(on),
+            ..
+        } = join
+        else {
+            return Err(SQLError::Internal("index join requires an equality".into()));
+        };
+        let qualifier = inner
+            .visible_qualifier()
+            .ok_or_else(|| SQLError::Internal("index join requires a base relation".into()))?;
+        let field = right.public_name(inner_column).ok_or_else(|| {
+            SQLError::Internal("index join key is outside its table descriptor".into())
+        })?;
+        let position = |expr: &ScalarExpr, schema: &crate::RowSchema| match expr {
+            ScalarExpr::QualifiedColumn { qualifier, column } => {
+                schema.qualified_position(qualifier, column.as_str())
+            }
+            ScalarExpr::Column(column) => schema.unqualified_position(column.as_str()),
+            _ => None,
+        };
+        let mut outer_position = None;
+        uqa_sql::semantics::visit_filter_parts_with_control(on, control, &mut |term| {
+            if let ScalarExpr::Binary {
+                op: uqa_sql::ast::BinaryOp::Equal,
+                lhs,
+                rhs,
+            } = term
+            {
+                for (outer, inner) in [(lhs, rhs), (rhs, lhs)] {
+                    if position(inner, right) == Some(inner_column) {
+                        if let Some(slot) = position(outer, left) {
+                            let domain = |schema: &crate::RowSchema, position| {
+                                schema.column_type(position).and_then(|ty| {
+                                    uqa_sql::catalog::index::lookup::EqualityDomain::of(
+                                        ty,
+                                        schema.column_collation(position),
+                                    )
+                                })
+                            };
+                            if domain(left, slot)
+                                .is_some_and(|outer| Some(outer) == domain(right, inner_column))
+                            {
+                                outer_position = Some(slot);
+                            }
+                        }
+                    }
+                }
+            }
+            Ok(())
+        })?;
+        let outer_position = outer_position.ok_or_else(|| {
+            SQLError::Internal(
+                "selected index join equality is absent from the bound inputs".into(),
+            )
+        })?;
+        Ok(Self {
+            outer_position,
+            qualifier: control.copy_text(qualifier)?,
+            column: control.copy_text(field)?,
+        })
+    }
+
+    fn filter(
+        &self,
+        value: &uqa_core::Value,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<uqa_sql::plan::source_projection::QualifierFilters, SQLError> {
+        use uqa_sql::plan::OwnedScalarExpr;
+        let field = OwnedScalarExpr::column(
+            control.copy_text(&self.column)?,
+            Some(control.copy_text(&self.qualifier)?),
+            control,
+        )?;
+        let key = OwnedScalarExpr::literal(control.copy_value(value)?, control)?;
+        let equality = OwnedScalarExpr::binary(uqa_sql::ast::BinaryOp::Equal, field, key, control)?;
+        let mut filters = uqa_sql::plan::source_projection::QualifierFilters::new();
+        filters.push_owned(&self.qualifier, equality, control)?;
+        Ok(filters)
+    }
+}
+
 pub(super) struct QueryLateralSource<'a, S: Clone + 'static> {
+    pub(super) index_key: Option<IndexKey>,
     pub(super) context: SourceContext<'a, S>,
     pub(super) right: SourcePlan,
     pub(super) on: Option<(
@@ -325,17 +423,27 @@ impl<'a, S: Clone + Send + Sync + 'static> crate::LateralSource<'a> for QueryLat
                 .diagnostics
                 .observe(input, "Lateral Function Group Scan")?
         } else {
-            let mut scoped_ctes = self
-                .ctes
-                .copy_with_control(&self.context.ctes.production_resources()?.control())?;
-            scoped_ctes.set_row_lock_outer_row(left_row.clone());
+            let resources = self.context.ctes.production_resources()?;
+            let mut scoped_ctes = self.ctes.copy_with_control(&resources.control())?;
+            let filters = if let Some(key) = &self.index_key {
+                let Some(value) = left_row
+                    .positional_column(key.outer_position)
+                    .filter(|value| **value != uqa_core::Value::Null)
+                else {
+                    return Ok(crate::SQLRowStream::new(std::iter::empty()));
+                };
+                Some(key.filter(value, &resources.control())?)
+            } else {
+                scoped_ctes.set_row_lock_outer_row(left_row.clone());
+                None
+            };
             build_join_operator_with_ctes(
                 &self.context,
                 &self.right,
                 self.params,
                 &mut scoped_ctes,
                 None,
-                None,
+                filters.as_ref(),
             )?
         };
         let schema = self.right_schema.clone();

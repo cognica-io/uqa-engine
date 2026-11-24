@@ -23,6 +23,7 @@ mod tests;
 
 mod bindings;
 mod owned;
+mod scope;
 mod selection;
 pub(super) use owned::reorder_owned_plan;
 mod inference;
@@ -87,6 +88,8 @@ fn reorder_query_joins(
     control: &ProductionControl<'_>,
     output: &mut Output,
 ) -> OptimizerResult<()> {
+    let local = scope::JoinStatistics::new(statistics, &query.ctes, control)?;
+    let statistics = local.selected();
     for cte in &mut query.ctes {
         match &mut cte.body {
             crate::CtePlanBody::Query(query) => {
@@ -149,6 +152,8 @@ fn reorder_command_joins(
     control: &ProductionControl<'_>,
     output: &mut Output,
 ) -> OptimizerResult<()> {
+    let local = scope::JoinStatistics::new(statistics, command.ctes(), control)?;
+    let statistics = local.selected();
     match command {
         CommandPlan::Insert(plan) => reorder_insert_joins(plan, statistics, control, output)?,
         CommandPlan::Update(plan) => {

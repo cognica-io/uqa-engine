@@ -38,6 +38,17 @@ pub trait PhysicalSubqueryRunner {
         params: &[SQLParam],
     ) -> Result<SubqueryResult, SQLError>;
 
+    /// Read the uncorrelated input for a positive membership probe. A runner may already hold only the comparison set, in which case the original filter remains available.
+    fn index_membership_input(
+        &self,
+        slot: SubqueryId,
+        plan: &QueryPlan,
+        params: &[SQLParam],
+    ) -> Result<Option<SubqueryResult>, SQLError> {
+        self.execute_subquery(slot, plan, PhysicalOuterRow::Absent, params)
+            .map(Some)
+    }
+
     fn row_subquery_value(
         &self,
         subquery: SubqueryId,

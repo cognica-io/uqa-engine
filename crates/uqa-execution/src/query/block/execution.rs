@@ -211,7 +211,15 @@ fn run_from_query_block<'a, S: Clone + Send + Sync + 'static>(
                     .hierarchy_scan_tables(&resolution, name, *include_descendants)?
                     .len()
                     > 1;
-            if alias.is_none() && !is_virtual && !command_overlay && !has_hierarchy_descendants {
+            let subquery_lookup = stmt.r#where.as_ref().is_some_and(|predicate| {
+                uqa_sql::catalog::index::lookup::SubqueryKeys::predicate(predicate).is_some()
+            });
+            if alias.is_none()
+                && !is_virtual
+                && !command_overlay
+                && !has_hierarchy_descendants
+                && !subquery_lookup
+            {
                 let local_table = local_table
                     .as_deref()
                     .expect("single-table fast path requires a resolved table");

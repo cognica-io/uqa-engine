@@ -47,6 +47,7 @@ pub(super) fn build_lateral_join<'a, S: Clone + Send + Sync + 'static>(
         natural,
         alias,
         column_aliases,
+        strategy,
         ..
     } = binding.join
     else {
@@ -157,6 +158,18 @@ pub(super) fn build_lateral_join<'a, S: Clone + Send + Sync + 'static>(
             })
             .transpose()?;
             let source = QueryLateralSource {
+                index_key: match strategy {
+                    uqa_sql::plan::JoinExecutionStrategy::IndexNestedLoop { inner_column } => {
+                        Some(super::lateral_source::IndexKey::bind(
+                            binding.join,
+                            *inner_column,
+                            &left_schema,
+                            &right_schema,
+                            &control,
+                        )?)
+                    }
+                    _ => None,
+                },
                 context: *context,
                 right: right.clone(),
                 right_filter,

@@ -116,6 +116,13 @@ impl Sources {
                     (Some(_), Some(crate::OperatorKind::HashJoinInner)) => {
                         JoinExecutionStrategy::Hash
                     }
+                    (Some(edge), Some(crate::OperatorKind::IndexJoin)) => {
+                        JoinExecutionStrategy::IndexNestedLoop {
+                            inner_column: edge
+                                .lookup_column(right.relations)
+                                .expect("selected inner key"),
+                        }
+                    }
                     (Some(_), Some(kind)) => {
                         return Err(JoinGraphError::InvalidPlan {
                             detail: format!(

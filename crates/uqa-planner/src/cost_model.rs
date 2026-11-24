@@ -218,8 +218,9 @@ impl CostEstimator {
                 memory: 0.0,
             },
             OperatorKind::IndexJoin => OperatorCost {
-                cpu: l * c.hashjoin_probe_per_row + l * c.index_per_row,
-                io: l * c.io_per_disk_row * 0.5,
+                cpu: l * (c.hashjoin_probe_per_row + c.index_per_row * r.max(2.0).log2()),
+                // Each lookup visits the index posting and its base row.
+                io: l * (2.0 * c.io_per_disk_row),
                 memory: 0.0,
             },
             OperatorKind::SemiJoin | OperatorKind::AntiJoin => OperatorCost {

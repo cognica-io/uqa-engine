@@ -51,6 +51,8 @@ pub struct JoinEdge {
     /// Selectivity of the join predicate (1 / max(distinct_left,
     /// distinct_right) for an equijoin).
     pub selectivity: f64,
+    /// Declaration position of a unique lookup column at each endpoint.
+    pub lookup_columns: [Option<usize>; 2],
 }
 
 #[derive(Debug, Clone, Default)]
@@ -65,6 +67,18 @@ pub struct JoinGraph {
     /// Connecting edges in predicate order. Costing preserves that order
     /// when multiplying selectivities and selecting the first crossing edge.
     pub(crate) edges: Vec<JoinEdge>,
+}
+
+impl JoinEdge {
+    pub(crate) fn lookup_column(&self, inner: u64) -> Option<usize> {
+        if inner == self.left {
+            self.lookup_columns[0]
+        } else if inner == self.right {
+            self.lookup_columns[1]
+        } else {
+            None
+        }
+    }
 }
 
 impl JoinGraph {
@@ -143,6 +157,7 @@ impl JoinGraph {
             left: 1u64 << left_idx,
             right: 1u64 << right_idx,
             selectivity,
+            lookup_columns: [None; 2],
         })
     }
 

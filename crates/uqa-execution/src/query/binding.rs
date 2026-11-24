@@ -207,6 +207,27 @@ pub fn bind_expression_plan_routines_for_storage<S: Clone>(
     )
 }
 
+/// Resolve a subquery output in the same scope and equality domain used by a parameterized index scan.
+pub fn subquery_key_domain<S: Clone>(
+    routines: &dyn RoutineResolution,
+    plan: &QueryPlan,
+    params: &[SQLParam],
+    ctes: &CteScope<S>,
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<Option<uqa_sql::catalog::index::lookup::EqualityDomain>, SQLError> {
+    let schema = uqa_sql::binding::bind_query_plan_schema_with_control(
+        routines,
+        plan,
+        params,
+        binding_context_with_control(ctes, control)?,
+        None,
+        control,
+    )?;
+    Ok(schema.column_type(0).and_then(|ty| {
+        uqa_sql::catalog::index::lookup::EqualityDomain::of(ty, schema.column_collation(0))
+    }))
+}
+
 pub fn bind_query_plan_schema<S: Clone>(
     routines: &dyn RoutineResolution,
     plan: &QueryPlan,

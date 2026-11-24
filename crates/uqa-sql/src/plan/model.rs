@@ -263,6 +263,9 @@ pub enum JoinExecutionStrategy {
     #[default]
     Auto,
     Hash,
+    IndexNestedLoop {
+        inner_column: usize,
+    },
 }
 
 /// One independently resolved and bound function inside a range-function group.

@@ -157,6 +157,30 @@ impl OptimizerConfig<'_> {
 pub trait SourceStatistics {
     fn relation_statistics(&self, table: &str) -> Option<RelationStats>;
 
+    /// Equality semantics and full unique-key access for a physical table attribute.
+    fn lookup_column(
+        &self,
+        _table: &str,
+        _field: &str,
+    ) -> Option<uqa_sql::catalog::index::lookup::LookupColumn> {
+        None
+    }
+    fn placed_filters(
+        &self,
+        _block: &uqa_sql::plan::QueryBlockPlan,
+        _source: &SourcePlan,
+        _control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<crate::filter_pushdown::FilterPlacement>, uqa_sql::SQLError> {
+        Ok(None)
+    }
+    fn subquery_key_domain(
+        &self,
+        _query: &uqa_sql::plan::QueryPlan,
+        _control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<uqa_sql::catalog::index::lookup::EqualityDomain>, uqa_sql::SQLError> {
+        Ok(None)
+    }
+
     /// Estimate a non-table source that can participate as one atom in an
     /// inner-join region. Returning `None` keeps that region in SQL order.
     fn source_access_estimate(&self, _source: &SourcePlan) -> Option<LocalAccessEstimate> {
