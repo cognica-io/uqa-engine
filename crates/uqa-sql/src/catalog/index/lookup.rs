@@ -94,6 +94,21 @@ impl SubqueryKeys {
         }
     }
 
+    /// A positive conjunct is necessary for a row to pass the filter. Disjunctions and negations retain their original evaluation.
+    pub fn first_in_filter<'a>(
+        filter: &'a ScalarExpr,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<(&'a str, Self)>, SQLError> {
+        let mut first = None;
+        crate::semantics::visit_filter_parts_with_control(filter, control, &mut |part| {
+            if first.is_none() {
+                first = Self::predicate(part);
+            }
+            Ok(())
+        })?;
+        Ok(first)
+    }
+
     pub fn predicate(expression: &ScalarExpr) -> Option<(&str, Self)> {
         let (column, keys) = match expression {
             ScalarExpr::Binary {

@@ -105,13 +105,13 @@ fn engine_uses_dpccp_source_order_and_preserves_join_results() {
     let c_pos = plan.find("name: \"dp_c\"").expect("c scan in plan");
     let a_pos = plan.find("name: \"dp_a\"").expect("a scan in plan");
     assert!(
-        b_pos < c_pos && c_pos < a_pos,
-        "DPccp should join the selective b-c edge before a: {plan}"
+        c_pos < b_pos && b_pos < a_pos,
+        "the three-row c relation drives lookups into b and then a: {plan}"
     );
     assert_eq!(
-        plan.matches("strategy: Hash").count(),
+        plan.matches("strategy: IndexNestedLoop").count(),
         2,
-        "every DPccp equijoin must retain its executable hash strategy: {plan}"
+        "both inner primary-key lookups must retain their executable strategy: {plan}"
     );
 
     let result = engine.sql(query, &[]).unwrap();

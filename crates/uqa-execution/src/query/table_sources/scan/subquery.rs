@@ -20,12 +20,13 @@ use uqa_core::{
 use uqa_sql::{
     catalog::index::lookup::{self, EqualityDomain, SubqueryKeys},
     expr::RowLookup,
-    SQLError, SQLParam, ScalarExpr,
+    SQLError, SQLParam,
 };
 
 type Probe<'a> = Box<dyn FnOnce() -> Result<Option<SelectedIds>, SQLError> + Send + 'a>;
 
-pub(in crate::query) struct Runtime<'a> {
+pub(in crate::query) struct Runtime<'a, 'f> {
+    field: &'f str,
     scope: Arc<dyn SetFunctionRuntime + 'a>,
     pub(super) diagnostics: &'a crate::query::diagnostics::QueryDiagnostics,
     reads: &'a dyn crate::query::table_read::QueryTableAccess,
@@ -37,11 +38,12 @@ pub(in crate::query) struct Runtime<'a> {
     cancellation: CancellationToken,
 }
 
-impl<'a> Runtime<'a> {
+impl<'a, 'f> Runtime<'a, 'f> {
     pub(in crate::query) fn new<S: Clone + 'static>(
         context: &SourceContext<'a, S>,
         ctes: &CteScope<S>,
         params: &'a [SQLParam],
+        field: &'f str,
         keys: SubqueryKeys,
     ) -> Result<Self, SQLError> {
         let scope = context.relational.expression_scope(ctes)?;
@@ -57,6 +59,7 @@ impl<'a> Runtime<'a> {
             &resources.control(),
         )?;
         Ok(Self {
+            field,
             scope,
             diagnostics: context.scans.runtime.diagnostics,
             reads: context.scans.tables,
@@ -71,29 +74,17 @@ impl<'a> Runtime<'a> {
 
     pub(super) fn bind(
         &self,
-        predicate: &ScalarExpr,
         table: &CatalogTableSnapshot,
+        maps_integer_keys: bool,
         name: &str,
         catalog: &CatalogReadView,
         visible: &dyn Fn(&str) -> String,
         control: &ProductionControl<'_>,
     ) -> Result<Option<Probe<'a>>, SQLError> {
-        let mut key_field = None;
-        uqa_sql::semantics::visit_filter_parts_with_control(predicate, control, &mut |part| {
-            if let Some((field, key)) = SubqueryKeys::predicate(part) {
-                if key == self.keys {
-                    key_field = Some(field);
-                }
-            }
-            Ok(())
-        })?;
-        let Some(field) = key_field else {
-            return Ok(None);
-        };
         let Some(column) = table
             .columns
             .iter()
-            .find(|column| visible(&column.name) == field)
+            .find(|column| visible(&column.name) == self.field)
         else {
             return Ok(None);
         };
@@ -110,6 +101,7 @@ impl<'a> Runtime<'a> {
             return Ok(None);
         }
         let name = control.copy_text(name)?;
+        let integer_identity = maps_integer_keys && column.primary_key && column.ty.is_integer();
         let field = control.copy_text(&column.name)?;
         let scope = self.scope.clone();
         let (keys, params, reads, command_visible, bytes) = (
@@ -125,6 +117,11 @@ impl<'a> Runtime<'a> {
             let slot = keys.slot();
             let plan = &scope.subquery_plans()[slot];
             let probe = |key: Value| {
+                if integer_identity {
+                    if let Some(id) = uqa_sql::semantics::key_identity::key_document_id(&key) {
+                        return SelectedIds::from_sorted(vec![id], bytes, &cancellation).map(Some);
+                    }
+                }
                 capture_predicate(
                     reads,
                     &name,

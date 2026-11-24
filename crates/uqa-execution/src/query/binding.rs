@@ -215,14 +215,21 @@ pub fn subquery_key_domain<S: Clone>(
     ctes: &CteScope<S>,
     control: &uqa_core::memory::ProductionControl<'_>,
 ) -> Result<Option<uqa_sql::catalog::index::lookup::EqualityDomain>, SQLError> {
-    let schema = uqa_sql::binding::bind_query_plan_schema_with_control(
-        routines,
-        plan,
-        params,
-        binding_context_with_control(ctes, control)?,
-        None,
-        control,
-    )?;
+    control.check()?;
+    let bound;
+    let schema = if let Some(analyzed) = &plan.analyzed_output {
+        analyzed
+    } else {
+        bound = uqa_sql::binding::bind_query_plan_schema_with_control(
+            routines,
+            plan,
+            params,
+            binding_context_with_control(ctes, control)?,
+            None,
+            control,
+        )?;
+        &bound
+    };
     Ok(schema.column_type(0).and_then(|ty| {
         uqa_sql::catalog::index::lookup::EqualityDomain::of(ty, schema.column_collation(0))
     }))

@@ -45,12 +45,30 @@ impl PlanCostEstimator<'_, '_> {
         else {
             return Ok(None);
         };
-        let Some((field, keys)) = block.r#where.as_ref().and_then(SubqueryKeys::predicate) else {
+        let Some(predicate) = &block.r#where else {
             return Ok(None);
         };
-        if !column_aliases.is_empty() || scope.and_then(|scope| scope.resolve(name)).is_some() {
+        if !column_aliases.is_empty()
+            || scope.and_then(|scope| scope.resolve(name)).is_some()
+            || SubqueryKeys::first_in_filter(predicate, &self.control)?.is_none()
+        {
             return Ok(None);
         }
+        let Some(placed) = self
+            .statistics
+            .placed_filters(block, source, &self.control)?
+        else {
+            return Ok(None);
+        };
+        let Some(terms) = source
+            .visible_qualifier()
+            .and_then(|name| placed.local.get(name))
+        else {
+            return Ok(None);
+        };
+        let Some((field, keys)) = terms.iter().find_map(SubqueryKeys::predicate) else {
+            return Ok(None);
+        };
         let Some(column) = self
             .statistics
             .lookup_column(name, field)
@@ -61,15 +79,7 @@ impl PlanCostEstimator<'_, '_> {
         let Some(inner) = block.subqueries.get(keys.slot()) else {
             return Ok(None);
         };
-        let placed = self
-            .statistics
-            .placed_filters(block, source, &self.control)?;
-        if placed
-            .as_ref()
-            .and_then(|filters| filters.local.get(source.visible_qualifier()?))
-            .is_none()
-            || self.statistics.subquery_key_domain(inner, &self.control)? != Some(column.domain)
-        {
+        if self.statistics.subquery_key_domain(inner, &self.control)? != Some(column.domain) {
             return Ok(None);
         }
         let child = self.query(inner, scope, capture)?;
@@ -83,12 +93,23 @@ impl PlanCostEstimator<'_, '_> {
             }
             let execution = self.unary(OperatorKind::IndexScan, keys_estimate)
                 + self.unary(OperatorKind::Filter, keys_estimate);
-            Ok(PlanCost {
+            let mut estimate = PlanCost {
                 rows: keys_estimate,
                 execution,
                 startup: execution,
                 relations: 1,
-            })
+            };
+            for term in terms {
+                if SubqueryKeys::predicate(term) != Some((field, keys)) {
+                    self.filter(&mut estimate, Some(term), &super::RelationStats::default())?;
+                }
+            }
+            self.filter(
+                &mut estimate,
+                placed.residual.as_deref(),
+                &super::RelationStats::default(),
+            )?;
+            Ok(estimate)
         })?;
         outer.startup += child.execution;
         outer.add_child(child);

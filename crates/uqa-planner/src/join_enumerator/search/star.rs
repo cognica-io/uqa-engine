@@ -17,6 +17,21 @@ struct StarState {
     leaf: usize,
 }
 
+impl StarState {
+    fn decision(self, mask: usize, centre_mask: u64) -> Decision {
+        // The compact subset omits the centre's bit. Insert it to recover the graph's relation mask.
+        let subset = mask as u64;
+        let lower = centre_mask - 1;
+        let relations = (subset & lower) | centre_mask | ((subset & !lower) << 1);
+        Decision {
+            relations,
+            cardinality: self.cardinality,
+            cost: self.cost,
+            ..Decision::EMPTY
+        }
+    }
+}
+
 impl Search<'_, '_> {
     pub(super) fn star(&mut self, n: usize) -> Result<bool, ValueRetentionError> {
         if n < 3
@@ -71,16 +86,7 @@ impl Search<'_, '_> {
             let Some(base) = dp[mask] else {
                 continue;
             };
-            // The compact subset omits the centre's bit. Insert it to recover the graph's relation mask.
-            let subset = mask as u64;
-            let lower = centre_mask - 1;
-            let relations = (subset & lower) | centre_mask | ((subset & !lower) << 1);
-            let left = Decision {
-                relations,
-                cardinality: base.cardinality,
-                cost: base.cost,
-                ..Decision::EMPTY
-            };
+            let left = base.decision(mask, centre_mask);
             for (position, &leaf) in leaves[..count].iter().enumerate() {
                 let bit = 1_usize << position;
                 if mask & bit != 0 {

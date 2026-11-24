@@ -83,34 +83,8 @@ pub(super) fn select_graph<'a>(
                         .alias_index(alias)
                         .expect("resolved join alias");
             }
-            let column = |alias: &str, field: &str| {
-                let index = column_owners.alias_index(alias)?;
-                let SourcePlan::Table {
-                    name,
-                    executable_query: None,
-                    bound_columns: None,
-                    column_aliases,
-                    ..
-                } = atoms[index]
-                else {
-                    return None;
-                };
-                if !column_aliases.is_empty() {
-                    return None;
-                }
-                statistics.lookup_column(name, field)
-            };
-            if let (Some(left), Some(right)) = (
-                column(predicate.left_alias, predicate.left_field),
-                column(predicate.right_alias, predicate.right_field),
-            ) {
-                if left.domain == right.domain {
-                    predicate.lookup_columns = [
-                        left.unique.then_some(left.position),
-                        right.unique.then_some(right.position),
-                    ];
-                }
-            }
+            predicate.lookup_columns =
+                lookup_columns(&predicate, &atoms, &column_owners, statistics);
             graph_predicates
                 .push_copy(predicate)
                 .map_err(uqa_sql::SQLError::from)?;
@@ -138,6 +112,41 @@ pub(super) fn select_graph<'a>(
         inferred: inferred.finish().map_err(uqa_sql::SQLError::from)?,
         original_count,
     }))
+}
+
+fn lookup_columns(
+    predicate: &crate::join_order::JoinPredicateRef<'_>,
+    atoms: &[&SourcePlan],
+    column_owners: &ColumnOwners<'_>,
+    statistics: &dyn SourceStatistics,
+) -> [Option<usize>; 2] {
+    let column = |alias: &str, field: &str| {
+        let index = column_owners.alias_index(alias)?;
+        let SourcePlan::Table {
+            name,
+            executable_query: None,
+            bound_columns: None,
+            column_aliases,
+            ..
+        } = atoms[index]
+        else {
+            return None;
+        };
+        if !column_aliases.is_empty() {
+            return None;
+        }
+        statistics.lookup_column(name, field)
+    };
+    match (
+        column(predicate.left_alias, predicate.left_field),
+        column(predicate.right_alias, predicate.right_field),
+    ) {
+        (Some(left), Some(right)) if left.domain == right.domain => [
+            left.unique.then_some(left.position),
+            right.unique.then_some(right.position),
+        ],
+        _ => [None; 2],
+    }
 }
 
 fn relation_metadata<'a>(

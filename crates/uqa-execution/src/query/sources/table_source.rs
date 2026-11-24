@@ -593,9 +593,9 @@ pub(super) fn build_table_source_operator<'a, S: Clone + Send + Sync + 'static>(
                         .iter()
                         .find_map(uqa_sql::catalog::index::lookup::SubqueryKeys::predicate)
                 })
-                .map(|(_, key)| {
+                .map(|(field, key)| {
                     crate::query::table_sources::scan::subquery::Runtime::new(
-                        context, ctes, params, key,
+                        context, ctes, params, field, key,
                     )
                 })
                 .transpose()?;

@@ -79,7 +79,7 @@ pub(in crate::query) fn local_scan<'a, S: Clone>(
     prune: Option<&ColumnPrune>,
     filters: Option<&QualifierFilters>,
     params: &[SQLParam],
-    runtime: Option<&subquery::Runtime<'a>>,
+    runtime: Option<&subquery::Runtime<'a, '_>>,
     control: &ProductionControl<'_>,
 ) -> Result<Option<StreamingLocalTableScan<'a>>, SQLError> {
     control.check()?;
@@ -321,10 +321,10 @@ pub(in crate::query) fn local_scan<'a, S: Clone>(
         let runtime_key =
             if table_names.len() == 1 && candidates.is_none() && recheck_pins.is_none() {
                 match (runtime, predicate_expression.as_deref()) {
-                    (Some(runtime), Some(predicate)) => runtime
+                    (Some(runtime), Some(_)) => runtime
                         .bind(
-                            predicate,
-                            &table_snapshot,
+                            table_snapshot,
+                            table.maps_integer_keys(),
                             table_name,
                             &catalog,
                             &|name| visible_names.get(name).copied().unwrap_or(name).to_owned(),

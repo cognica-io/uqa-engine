@@ -51,6 +51,41 @@ fn single_relation_returns_leaf() {
 }
 
 #[test]
+fn selective_outer_uses_the_unique_inner_key_while_broad_inputs_hash() {
+    let cost = CostEstimator::default();
+    for outer_rows in [1.0, 10_000.0] {
+        let mut graph = JoinGraph::new();
+        let inner = graph
+            .add_relation_with_cost(
+                "target",
+                10_000.0,
+                cost.estimate_unary(OperatorKind::TableScan, 10_000.0)
+                    .total(),
+            )
+            .unwrap();
+        let outer = graph
+            .add_relation_with_cost(
+                "keys",
+                outer_rows,
+                cost.estimate_unary(OperatorKind::TableScan, outer_rows)
+                    .total(),
+            )
+            .unwrap();
+        graph.add_edge(inner, outer, 0.0001).unwrap();
+        graph.edges[0].lookup_columns = [Some(3), None];
+        let plan = enumerate_dpccp(&graph).unwrap();
+        if outer_rows == 1.0 {
+            assert_eq!(plan.kind, Some(OperatorKind::IndexJoin));
+            assert_eq!(plan.right.as_ref().unwrap().relations, 1 << inner);
+            assert_eq!(plan.join_edge.unwrap().lookup_column(1 << inner), Some(3));
+            assert_eq!(plan.cardinality, 1.0);
+        } else {
+            assert_eq!(plan.kind, Some(OperatorKind::HashJoinInner));
+        }
+    }
+}
+
+#[test]
 fn explicit_cost_estimator_drives_join_cost() {
     let mut graph = JoinGraph::new();
     let left = graph.add_relation_with_cost("left", 10.0, 7.0).unwrap();

@@ -255,9 +255,8 @@ pub enum AccessPathPlan {
 ///
 /// `Auto` is used for an unreordered SQL join and lets physical lowering pick
 /// hash execution for a splittable equality predicate or nested-loop execution
-/// otherwise. `Hash` is an optimizer commitment produced by `DPccp` and must be
-/// executable; physical lowering reports an internal planning error if that
-/// invariant is violated.
+/// otherwise. `DPccp` can select a hash join or an index nested loop. The latter
+/// binds the right table's unique attribute to an equality key from the left input.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum JoinExecutionStrategy {
     #[default]

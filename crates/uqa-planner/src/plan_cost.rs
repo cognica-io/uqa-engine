@@ -438,22 +438,7 @@ impl PlanCostEstimator<'_, '_> {
                 };
                 self.join_cost(*kind, operator, *lateral, left, right, selectivity)
             }
-            SourcePlan::Function { .. } => {
-                self.statistics.source_access_estimate(source).map_or_else(
-                    || PlanCost {
-                        rows: DEFAULT_ROWS,
-                        execution: self.unary(OperatorKind::Project, DEFAULT_ROWS),
-                        relations: 1,
-                        startup: 0.0,
-                    },
-                    |access| PlanCost {
-                        rows: access.output_rows,
-                        execution: access.cost,
-                        startup: access.cost,
-                        relations: 1,
-                    },
-                )
-            }
+            SourcePlan::Function { .. } => self.function_source(source),
             SourcePlan::FunctionGroup { functions, .. } => PlanCost {
                 rows: DEFAULT_ROWS,
                 execution: functions.len() as f64 * self.unary(OperatorKind::Project, DEFAULT_ROWS),
@@ -464,6 +449,23 @@ impl PlanCostEstimator<'_, '_> {
         self.filter(&mut cost, predicate, &RelationStats::default())?;
         self.control.check()?;
         Ok(cost)
+    }
+
+    fn function_source(&self, source: &SourcePlan) -> PlanCost {
+        self.statistics.source_access_estimate(source).map_or_else(
+            || PlanCost {
+                rows: DEFAULT_ROWS,
+                execution: self.unary(OperatorKind::Project, DEFAULT_ROWS),
+                relations: 1,
+                startup: 0.0,
+            },
+            |access| PlanCost {
+                rows: access.output_rows,
+                execution: access.cost,
+                startup: access.cost,
+                relations: 1,
+            },
+        )
     }
 
     fn join_cost(
