@@ -414,6 +414,12 @@ fn copy_local_conjunction(
     Ok(control.finish(ScalarExpr::And(expressions), memory)?)
 }
 
+#[derive(Debug)]
+struct LocalFilters {
+    estimates: [Option<crate::LocalAccessEstimate>; 64],
+    retrieval_sources: u64,
+}
+
 fn estimate_local_filters(
     relations: &[RelationMetadata<'_>],
     predicates: &[&ScalarExpr],
@@ -421,16 +427,18 @@ fn estimate_local_filters(
     relation_tables: &[Option<&str>],
     source_statistics: &dyn SourceStatistics,
     control: &ProductionControl<'_>,
-) -> OptimizerResult<[Option<crate::LocalAccessEstimate>; 64]> {
+) -> OptimizerResult<LocalFilters> {
     let estimator = crate::CardinalityEstimator::new();
     let mut estimates = [None; 64];
+    let mut retrieval_sources = 0;
     let predicates_by_alias =
         local_predicate_groups(relations, predicates, column_owners, control)?;
-    for (((relation, predicates), table), output) in relations
+    for (index, (((relation, predicates), table), output)) in relations
         .iter()
         .zip(predicates_by_alias)
         .zip(relation_tables)
         .zip(&mut estimates)
+        .enumerate()
     {
         let predicates = predicates.expect("one predicate bucket per relation");
         if predicates.is_empty() {
@@ -443,6 +451,10 @@ fn estimate_local_filters(
             conjunction = copy_local_conjunction(&predicates, control)?;
             &conjunction
         };
+        // Relation-wide retrieval selects its own candidates before any outer-row key can restrict this input.
+        if uqa_sql::semantics::contains_retrieval(predicate) {
+            retrieval_sources |= 1_u64 << index;
+        }
         let statistics = crate::cardinality::RelationStatsRef {
             row_count: relation.cardinality.round() as u64,
             columns: &relation.column_stats,
@@ -482,5 +494,8 @@ fn estimate_local_filters(
             paradigm: relation.paradigm,
         });
     }
-    Ok(estimates)
+    Ok(LocalFilters {
+        estimates,
+        retrieval_sources,
+    })
 }

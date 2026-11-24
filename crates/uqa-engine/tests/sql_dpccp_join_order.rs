@@ -133,10 +133,7 @@ fn dpccp_uses_operator_tree_knn_cardinality_for_join_order() {
         )
         .unwrap();
     engine
-        .sql(
-            "CREATE TABLE dp_knn_b (id INTEGER PRIMARY KEY, a_id INTEGER)",
-            &[],
-        )
+        .sql("CREATE TABLE dp_knn_b (id INTEGER, a_id INTEGER)", &[])
         .unwrap();
     engine
         .sql(
@@ -207,6 +204,9 @@ fn dpccp_uses_operator_tree_knn_cardinality_for_join_order() {
     let result = engine.sql(query, &[]).unwrap();
     assert_eq!(result.rows.len(), 1);
     assert_eq!(result.rows[0].get("id"), Some(&Value::Int(1)));
+    // The nearest row is a.id=1. A selective join key for a different row must be applied to that completed KNN result.
+    let selective = query.replace("ORDER BY a.id", "AND c.id = 2 ORDER BY a.id");
+    assert!(engine.sql(&selective, &[]).unwrap().rows.is_empty());
 }
 
 #[test]

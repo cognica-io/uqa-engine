@@ -212,14 +212,16 @@ fn run_from_query_block<'a, S: Clone + Send + Sync + 'static>(
                     .hierarchy_scan_tables(&resolution, name, *include_descendants)?
                     .len()
                     > 1;
-            let subquery_lookup = match &stmt.r#where {
-                Some(filter @ ScalarExpr::And(_)) => SubqueryKeys::first_in_filter(
+            let subquery_lookup = if schemaless || stmt.subqueries.is_empty() {
+                false
+            } else if let Some(filter) = &stmt.r#where {
+                let key = SubqueryKeys::first_in_filter(
                     filter,
                     &context.ctes.production_resources()?.control(),
-                )?
-                .is_some(),
-                Some(filter) => SubqueryKeys::predicate(filter).is_some(),
-                None => false,
+                )?;
+                key.is_some() && !uqa_sql::semantics::contains_retrieval(filter)
+            } else {
+                false
             };
             if alias.is_none()
                 && !is_virtual

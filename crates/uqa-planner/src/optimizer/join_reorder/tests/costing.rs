@@ -210,7 +210,7 @@ fn compound_join_costing_keeps_leases_through_estimates_errors_and_unwind() {
         assert_eq!(budget.used(), 0, "mode={mode}");
         match mode {
             0 => {
-                let result = outcome.unwrap().unwrap()[0].unwrap();
+                let result = outcome.unwrap().unwrap().estimates[0].unwrap();
                 assert_eq!(result.output_rows, 100.0 * (0.4 * 0.1));
                 assert_eq!(
                     result.cost,
@@ -221,7 +221,7 @@ fn compound_join_costing_keeps_leases_through_estimates_errors_and_unwind() {
                 );
             }
             1 => {
-                let result = outcome.unwrap().unwrap()[0].unwrap();
+                let result = outcome.unwrap().unwrap().estimates[0].unwrap();
                 assert_eq!(result.output_rows, 7.0);
                 assert_eq!(result.cost, 3.0);
                 assert_eq!(result.paradigm, crate::AccessParadigm::Text);
