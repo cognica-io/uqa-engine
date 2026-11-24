@@ -125,7 +125,7 @@ fn lookup_columns(
     column_owners: &ColumnOwners<'_>,
     statistics: &dyn SourceStatistics,
     retrieval_sources: u64,
-) -> [Option<usize>; 2] {
+) -> [Option<u16>; 2] {
     let column = |alias: &str, field: &str| {
         let index = column_owners.alias_index(alias)?;
         let SourcePlan::Table {

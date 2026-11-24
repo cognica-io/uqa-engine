@@ -90,7 +90,7 @@ pub(crate) struct JoinPredicateRef<'a> {
     pub right_alias: &'a str,
     pub left_field: &'a str,
     pub right_field: &'a str,
-    pub lookup_columns: [Option<usize>; 2],
+    pub lookup_columns: [Option<u16>; 2],
 }
 
 impl JoinPredicate {

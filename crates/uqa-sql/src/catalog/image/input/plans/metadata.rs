@@ -178,7 +178,10 @@ macro_rules! input_fields {
                 match $read!(self.binary.array::<1>())?[0] {
                     0 => Ok(JoinExecutionStrategy::Auto),
                     1 => Ok(JoinExecutionStrategy::Hash),
-                    2 => Ok(JoinExecutionStrategy::IndexNestedLoop { inner_column: $read!(self.binary.count())? }),
+                    2 => Ok(JoinExecutionStrategy::IndexNestedLoop {
+                        inner_column: u16::try_from($read!(self.binary.count())?)
+                            .map_err(|_| invalid("index join column position"))?,
+                    }),
                     _ => Err(invalid("join execution strategy")),
                 }
             }

@@ -162,7 +162,7 @@ pub(super) fn build_lateral_join<'a, S: Clone + Send + Sync + 'static>(
                     uqa_sql::plan::JoinExecutionStrategy::IndexNestedLoop { inner_column } => {
                         Some(super::lateral_source::IndexKey::bind(
                             binding.join,
-                            *inner_column,
+                            usize::from(*inner_column),
                             &left_schema,
                             &right_schema,
                             &control,

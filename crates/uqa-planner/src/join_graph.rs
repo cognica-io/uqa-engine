@@ -52,7 +52,7 @@ pub struct JoinEdge {
     /// distinct_right) for an equijoin).
     pub selectivity: f64,
     /// Declaration position of a unique lookup column at each endpoint.
-    pub lookup_columns: [Option<usize>; 2],
+    pub lookup_columns: [Option<u16>; 2],
 }
 
 #[derive(Debug, Clone, Default)]
@@ -70,7 +70,7 @@ pub struct JoinGraph {
 }
 
 impl JoinEdge {
-    pub(crate) fn lookup_column(&self, inner: u64) -> Option<usize> {
+    pub(crate) fn lookup_column(&self, inner: u64) -> Option<u16> {
         if inner == self.left {
             self.lookup_columns[0]
         } else if inner == self.right {

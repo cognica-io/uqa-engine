@@ -263,7 +263,8 @@ pub enum JoinExecutionStrategy {
     Auto,
     Hash,
     IndexNestedLoop {
-        inner_column: usize,
+        /// Zero-based declaration position in the inner table, which has at most 1,600 attributes.
+        inner_column: u16,
     },
 }
 

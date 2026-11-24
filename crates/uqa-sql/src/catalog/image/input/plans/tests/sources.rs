@@ -75,6 +75,10 @@ fn query_images_preserve_the_physical_join_strategy_and_attribute() {
         JoinExecutionStrategy::Auto,
         JoinExecutionStrategy::Hash,
         JoinExecutionStrategy::IndexNestedLoop { inner_column: 3 },
+        JoinExecutionStrategy::IndexNestedLoop {
+            inner_column: u16::try_from(crate::catalog::relation_attributes::MAX_ATTRIBUTES - 1)
+                .unwrap(),
+        },
     ] {
         let mut plan = query("SELECT * FROM a JOIN b ON a.id=b.key");
         let RelationalPlan::QueryBlock(block) = &mut plan.root else {

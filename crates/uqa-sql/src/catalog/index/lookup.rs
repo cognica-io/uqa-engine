@@ -23,7 +23,7 @@ pub enum EqualityDomain {
 
 #[derive(Debug, Clone, Copy)]
 pub struct LookupColumn {
-    pub position: usize,
+    pub position: u16,
     pub domain: EqualityDomain,
     pub unique: bool,
 }

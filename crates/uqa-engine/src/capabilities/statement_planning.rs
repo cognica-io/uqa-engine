@@ -256,6 +256,9 @@ impl PlannerStatisticsCatalog for Engine {
         let Some(domain) = EqualityDomain::of(&column.ty, column.collation_oid) else {
             return Ok(None);
         };
+        let position = u16::try_from(position).map_err(|_| {
+            SQLError::Internal("index column exceeds the table attribute range".into())
+        })?;
         let unique = self.query_hierarchy_scan_tables(&name, true)?.len() == 1
             && is_unique_column(
                 &name,
