@@ -361,6 +361,7 @@ fn cast_with_resolved_types(
     let source_type = resolved_source_type.as_deref();
     let target_column_type = resolved_target.as_deref().or(parsed_target.as_deref());
     let _date_order = datestyle::input_scope(value, target_column_type, engine, control)?;
+    let _time_zone = timezone::input_scope(value, target_column_type, engine, control)?;
     let _interval_style = intervalstyle::cast_scope(value, target_column_type, engine, control)?;
     if let (Some(engine), Some(target)) = (engine, resolved_target.as_deref()) {
         if let Some(value) = record_identity_cast(value, source_type, target, engine, control)? {
@@ -445,6 +446,7 @@ pub(crate) fn evaluate_selected_cast(
 ) -> Result<Produced<Value>> {
     let target = cast.target_type();
     let _date_order = datestyle::input_scope(value, Some(&target), engine, control)?;
+    let _time_zone = timezone::input_scope(value, Some(&target), engine, control)?;
     let _interval_style = intervalstyle::cast_scope(value, Some(&target), engine, control)?;
     if let Some(engine) = engine {
         if let Some(output) =

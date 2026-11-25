@@ -44,6 +44,7 @@ pub struct PreparedRegistrationContext<'a> {
     pub transaction_timestamp_micros: Option<i64>,
     pub date_order: Option<uqa_core::TemporalDateOrder>,
     pub interval_style: Option<uqa_core::TemporalIntervalStyle>,
+    pub time_zone: Option<uqa_core::TemporalTimeZone>,
     /// The session's cancellation, which the definition's analysis observes.
     pub cancellation: &'a uqa_core::CancellationToken,
     pub clock: fn() -> i64,
@@ -136,6 +137,9 @@ fn register_definition(
         io: uqa_core::io_usage::IOContext::current(),
         regex_cache: uqa_sql::expr::current_regex_cache(),
         temporal_input: uqa_sql::expr::TemporalInputContext {
+            time_zone: context
+                .time_zone
+                .unwrap_or_else(uqa_sql::expr::temporal_time_zone),
             transaction_clock_micros: context
                 .transaction_timestamp_micros
                 .or_else(uqa_sql::expr::transaction_clock_micros),

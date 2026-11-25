@@ -112,6 +112,7 @@ fn register(registry: &Registry) -> Result<(), SQLError> {
             transaction_timestamp_micros: None,
             date_order: None,
             interval_style: None,
+            time_zone: None,
             cancellation: &registry.cancellation,
             clock,
         },

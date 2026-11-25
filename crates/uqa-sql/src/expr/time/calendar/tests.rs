@@ -56,7 +56,7 @@ fn overlaps_uses_the_session_calendar_only_for_zoned_periods() {
     let day = Value::Temporal(TemporalValue::parse_interval("1 day").unwrap());
     let zoned = |text| Value::Temporal(TemporalValue::parse_timestamp_tz(text).unwrap());
     let civil = |text| Value::Temporal(TemporalValue::parse_timestamp(text).unwrap());
-    for (args, expected) in [
+    for (args, expected, zone_reads) in [
         (
             [
                 zoned("2024-03-09 12:00-05"),
@@ -65,6 +65,7 @@ fn overlaps_uses_the_session_calendar_only_for_zoned_periods() {
                 zoned("2024-03-10 12:45-04"),
             ],
             false,
+            2,
         ),
         (
             [
@@ -74,8 +75,20 @@ fn overlaps_uses_the_session_calendar_only_for_zoned_periods() {
                 civil("2024-03-10 11:45"),
             ],
             true,
+            0,
+        ),
+        (
+            [
+                zoned("2000-01-01 05:05Z"),
+                zoned("2000-01-01 05:10Z"),
+                Value::Str("2000-01-01 00:00".into()),
+                Value::Str("2000-01-01 00:15".into()),
+            ],
+            true,
+            4,
         ),
     ] {
+        let previous_reads = session.reads.get();
         assert_eq!(
             scalar_dispatch::eval_scalar_function_with_context("overlaps", &args, &ctx, 0).unwrap(),
             Value::Bool(expected)
@@ -91,8 +104,8 @@ fn overlaps_uses_the_session_calendar_only_for_zoned_periods() {
             .unwrap(),
             Value::Bool(expected)
         );
+        assert_eq!(session.reads.get() - previous_reads, zone_reads);
     }
-    assert_eq!(session.reads.get(), 2);
 }
 
 fn bytes<const N: usize>(text: &str) -> [u8; N] {

@@ -260,6 +260,12 @@ fn builtin_overload_is_stable(
 ) -> bool {
     (matches!(name, "age" | "timezone") && argument_count == 1)
         || (name == "to_timestamp" && argument_count == 2)
+        || (name == "overlaps"
+            && binding.is_none_or(|binding| {
+                binding.argument_types.first().is_some_and(|ty| {
+                    matches!(ty.as_str(), "timestamptz" | "timestamp with time zone")
+                }) && binding.argument_types.iter().any(|ty| ty == "interval")
+            }))
         || (matches!(name, "quote_literal" | "quote_nullable")
             && binding.is_none_or(|binding| binding.argument_types.as_slice() != ["text"]))
         || (matches!(name, "date_part" | "extract" | "date_trunc")

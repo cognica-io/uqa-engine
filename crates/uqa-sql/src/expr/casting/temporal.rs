@@ -73,8 +73,12 @@ impl TemporalCastTarget {
             Self::Timestamp => TemporalValue::timestamp_input_in_order_with_control(
                 text, now_micros, order, control,
             )?,
-            Self::TimestampTz => TemporalValue::timestamp_tz_input_in_order_with_control(
-                text, now_micros, order, control,
+            Self::TimestampTz => TemporalValue::timestamp_tz_input_in_zone_with_control(
+                text,
+                now_micros,
+                order,
+                crate::expr::temporal_time_zone(),
+                control,
             )?,
             Self::Interval => TemporalValue::interval_input_in_style_with_control(
                 text,
@@ -85,7 +89,7 @@ impl TemporalCastTarget {
     }
 }
 
-/// Whether reading `text` as `input_type` is a function of the text alone. `read` consults three settings of the executing thread: the date order, the interval style and the transaction clock the special values resolve against. Reading the text again under every other date order and interval style and under a clock on another day at another time of day must reproduce `value`; a different value, or an error under one of them, means the constant depends on the session and an ordinary message must read its text again.
+/// Test whether a temporal constant still reads as `value` when the date order, interval style, time zone and transaction clock change. An ordinary message must reread session-dependent input.
 pub(crate) fn text_input_is_session_independent(
     text: &str,
     input_type: &ColumnType,
@@ -95,6 +99,19 @@ pub(crate) fn text_input_is_session_independent(
     let source = Value::Str(text.into());
     let reproduces =
         || super::cast_value_from(&source, &target, None).is_ok_and(|other| other == *value);
+    if matches!(
+        input_type,
+        ColumnType::TimestampTz | ColumnType::TimestampTzPrecision(_)
+    ) {
+        // Explicit offsets and absolute instants reproduce in both zones.
+        for offset in [0, 3_600] {
+            let zone = uqa_core::TemporalTimeZone::fixed(offset).expect("valid UTC offset");
+            let _zone = crate::expr::temporal_input::TimeZoneScope::enter(zone);
+            if !reproduces() {
+                return false;
+            }
+        }
+    }
     let current_order = temporal_date_order();
     for order in [
         TemporalDateOrder::MonthDayYear,

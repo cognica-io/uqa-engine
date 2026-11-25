@@ -15,6 +15,37 @@ fn date(days: i32) -> TemporalValue {
 }
 
 #[test]
+fn timestamptz_input_applies_the_session_zone_to_civil_fields_and_relative_midnight() {
+    let zone = TemporalTimeZone::named("America/New_York").unwrap();
+    // At this transaction start the local calendar is still March 9.
+    let now = 1_710_045_000_000_000;
+    for (text, expected) in [
+        ("2000-01-01 00:00", "2000-01-01 05:00Z"),
+        ("2000-01-01 00:00+00", "2000-01-01 00:00Z"),
+        ("2000-01-01 00:00-05", "2000-01-01 05:00Z"),
+        ("2024-03-10 02:30", "2024-03-10 07:30Z"),
+        ("2024-11-03 01:30", "2024-11-03 06:30Z"),
+        ("today", "2024-03-09 05:00Z"),
+        ("tomorrow", "2024-03-10 05:00Z"),
+        ("yesterday", "2024-03-08 05:00Z"),
+        ("now", "2024-03-10 04:30Z"),
+        ("epoch", "1970-01-01 00:00Z"),
+        ("infinity", "infinity"),
+    ] {
+        assert_eq!(
+            TemporalValue::timestamp_tz_input_in_zone(
+                text,
+                now,
+                TemporalDateOrder::default(),
+                zone
+            ),
+            TemporalValue::timestamp_tz_input(expected, now),
+            "{text}",
+        );
+    }
+}
+
+#[test]
 fn iso_dates_read_in_every_accepted_spelling() {
     let expected = date(19_724);
     for text in [

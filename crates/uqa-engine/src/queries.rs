@@ -86,7 +86,7 @@ impl Engine {
         cache
     }
 
-    /// The thread context this session's statements evaluate under: its transaction clock, live date order and interval style, cancellation token and retained regex cache. Direct APIs that evaluate SQL expressions outside a statement enter the same context.
+    /// Capture the session's clock, temporal input settings, cancellation token and retained regex cache. Direct APIs that evaluate SQL expressions outside a statement enter the same context.
     pub(crate) fn statement_thread_context(
         &self,
     ) -> uqa_execution::statement::thread_context::StatementThreadContext {
@@ -96,6 +96,7 @@ impl Engine {
             io: self.runtime.diagnostics.io_context(),
             regex_cache: Some(self.session_regex_cache()),
             temporal_input: uqa_sql::expr::TemporalInputContext {
+                time_zone: self.session.time_zone(),
                 transaction_clock_micros: self.session_transaction_clock_micros(),
                 interval_style: self.session.interval_style(),
                 date_order: uqa_sql::semantics::parameters::datestyle::date_order(

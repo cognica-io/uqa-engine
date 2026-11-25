@@ -6,7 +6,7 @@
 
 //! Date and time input as `PostgreSQL`'s input functions read it: ISO 8601 dates, times and timestamps with a UTC offset and an `AD` or `BC` era, the special values `now`, `today`, `tomorrow`, `yesterday`, `epoch` and `allballs`, and the diagnostics `DecodeDateTime`, `DecodeTimeOnly`, `DecodeTimezone` and `ValidateDate` report, each kept apart so the SQL layer names the type and the text.
 
-use super::{TemporalInfinity, TemporalValue, MICROS_PER_DAY, MICROS_PER_SECOND};
+use super::{TemporalInfinity, TemporalTimeZone, TemporalValue, MICROS_PER_DAY, MICROS_PER_SECOND};
 
 /// Field order for ambiguous numeric calendar dates. ISO and compact dates retain year-first interpretation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -216,14 +216,49 @@ impl TemporalValue {
         now_micros: i64,
         order: TemporalDateOrder,
     ) -> Input<Self> {
+        Self::timestamp_tz_input_in_zone(text, now_micros, order, TemporalTimeZone::UTC)
+    }
+
+    /// Read a timestamp with the session's calendar and its default zone for unqualified civil time.
+    pub(super) fn timestamp_tz_input_in_zone(
+        text: &str,
+        now_micros: i64,
+        order: TemporalDateOrder,
+        zone: TemporalTimeZone,
+    ) -> Input<Self> {
         let fields = decode(text, order)?;
         if let Some(infinity) = fields.infinity() {
             return Ok(infinity.timestamp_tz());
         }
-        let local = instant(&fields, now_micros)?;
-        let offset = fields.zone.unwrap_or(0) * MICROS_PER_SECOND;
+        let clock = if matches!(
+            fields.date,
+            Some(DatePart::Special(
+                Special::Today | Special::Tomorrow | Special::Yesterday
+            ))
+        ) {
+            let offset = zone
+                .offset_at(now_micros.div_euclid(MICROS_PER_SECOND))
+                .ok_or(TemporalInputError::OutOfRange)?;
+            now_micros
+                .checked_add(i64::from(offset) * MICROS_PER_SECOND)
+                .ok_or(TemporalInputError::OutOfRange)?
+        } else {
+            now_micros
+        };
+        let local = instant(&fields, clock)?;
+        let offset = match (fields.zone, fields.date) {
+            (Some(offset), _) => offset,
+            (None, Some(DatePart::Special(Special::Epoch | Special::Now))) => 0,
+            (None, _) => i64::from(
+                zone.offset_for_local(
+                    local.div_euclid(MICROS_PER_SECOND)
+                        + super::POSTGRES_EPOCH_MICROS / MICROS_PER_SECOND,
+                )
+                .ok_or(TemporalInputError::OutOfRange)?,
+            ),
+        };
         let micros = local
-            .checked_sub(offset)
+            .checked_sub(offset * MICROS_PER_SECOND)
             .ok_or(TemporalInputError::OutOfRange)?;
         if !Self::timestamp_micros_in_range(micros) {
             return Err(TemporalInputError::OutOfRange);

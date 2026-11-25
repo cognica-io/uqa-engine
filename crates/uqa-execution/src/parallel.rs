@@ -247,10 +247,15 @@ mod temporal_tests {
             transaction_clock_micros: Some(123),
             date_order: uqa_core::TemporalDateOrder::DayMonthYear,
             interval_style: uqa_core::TemporalIntervalStyle::SqlStandard,
+            time_zone: uqa_core::TemporalTimeZone::named("Asia/Seoul").unwrap(),
         }
         .enter();
         let check = || {
             assert_eq!(uqa_sql::expr::transaction_clock_micros(), Some(123));
+            assert_eq!(
+                uqa_sql::expr::temporal_time_zone().offset_at(0),
+                Some(9 * 3600)
+            );
             assert_eq!(
                 uqa_sql::expr::temporal_interval_style(),
                 uqa_core::TemporalIntervalStyle::SqlStandard
