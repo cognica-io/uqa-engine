@@ -35,13 +35,13 @@ impl DatabaseKeys {
         root: Zeroizing<[u8; 32]>,
         database: &Path,
         original: &StorageEncryptionKey,
-        owner: Option<Arc<DatabaseOwner>>,
+        owner: Option<&Arc<DatabaseOwner>>,
     ) -> StorageEncryptionKey {
         original.with_file_keys(Arc::new(Self {
             root,
             database: database.to_owned(),
             original: original.clone(),
-            owner: owner.as_ref().map(Arc::downgrade),
+            owner: owner.map(Arc::downgrade),
         }))
     }
 

@@ -71,7 +71,7 @@ impl ConnectionPool {
             ConnectionSpec::File {
                 path,
                 key: Some(key),
-            } if source.is_some() => Some(key.auxiliary_key(&initial, path, owner.clone())?),
+            } if source.is_some() => Some(key.auxiliary_key(&initial, path, owner.as_ref())?),
             ConnectionSpec::File { key: Some(key), .. } => Some(key.supplied.clone()),
             #[cfg(not(target_os = "emscripten"))]
             ConnectionSpec::Compressed {
@@ -88,7 +88,7 @@ impl ConnectionPool {
                     crate::compressed_vfs::auxiliary_root(&initial)?,
                     &path,
                     key,
-                    owner.clone(),
+                    owner.as_ref(),
                 ))
             }
             #[cfg(target_os = "emscripten")]

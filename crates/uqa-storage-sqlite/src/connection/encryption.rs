@@ -46,7 +46,7 @@ impl FileKey {
         &self,
         connection: &Connection,
         path: &std::path::Path,
-        owner: Option<Arc<super::ownership::DatabaseOwner>>,
+        owner: Option<&Arc<super::ownership::DatabaseOwner>>,
     ) -> Result<StorageEncryptionKey> {
         use hmac::{Hmac, Mac};
         use sha2::Sha256;
