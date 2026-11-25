@@ -314,32 +314,33 @@ fn validation_pages_past_deleted_entries_without_loading_large_values() {
     assert_eq!(snapshot.control.memory().used(), 0);
 }
 
+fn validation_steps(connection: &ManagedConnection, catalog: &Catalog, limit: usize) -> usize {
+    let steps = Arc::new(AtomicUsize::new(0));
+    let counter = Arc::clone(&steps);
+    connection
+        .with_physical(|sqlite| {
+            sqlite.progress_handler(
+                1,
+                Some(move || counter.fetch_add(1, Ordering::Relaxed) >= limit),
+            )?;
+            Ok(())
+        })
+        .unwrap();
+    catalog.migrate_relation_namespace().unwrap();
+    connection
+        .with_physical(|sqlite| {
+            sqlite.progress_handler(0, None::<fn() -> bool>)?;
+            Ok(())
+        })
+        .unwrap();
+    steps.load(Ordering::Relaxed)
+}
+
 #[test]
 fn validation_reads_one_entry_of_an_index_that_exists() {
     let work = |entries| {
         let (connection, catalog) = fixture_with_entries(entries);
-        let steps = Arc::new(AtomicUsize::new(0));
-        let counter = Arc::clone(&steps);
-        connection
-            .with_physical(|sqlite| {
-                sqlite.progress_handler(
-                    1,
-                    Some(move || {
-                        counter.fetch_add(1, Ordering::Relaxed);
-                        false
-                    }),
-                )?;
-                Ok(())
-            })
-            .unwrap();
-        catalog.migrate_relation_namespace().unwrap();
-        connection
-            .with_physical(|sqlite| {
-                sqlite.progress_handler(0, None::<fn() -> bool>)?;
-                Ok(())
-            })
-            .unwrap();
-        steps.load(Ordering::Relaxed)
+        validation_steps(&connection, &catalog, usize::MAX)
     };
     let few = work(70);
     assert_ne!(few, 0, "the validation ran on the observed connection");
@@ -370,7 +371,7 @@ fn validation_reads_every_entry_of_an_index_that_does_not_exist() {
     // The column index is dropped, and more of its first entries than one page holds with it.
     change(&|snapshot, batch, table| {
         snapshot.delete_prefix(batch, Family::BtreeIndexes, table, &[text("id")])?;
-        for id in 1..=65 {
+        for id in (1..=65).chain([70]) {
             snapshot.delete_prefix(
                 batch,
                 Family::BtreeIndexEntries,
@@ -404,4 +405,48 @@ fn validation_reads_every_entry_of_an_index_that_does_not_exist() {
     );
     connection.rollback_transaction().unwrap();
     catalog.migrate_relation_namespace().unwrap();
+}
+
+#[test]
+fn a_million_compacted_deletions_do_not_add_work_to_namespace_validation() {
+    let (connection, catalog) = fixture();
+    let snapshot = connection.native_snapshot().unwrap().unwrap();
+    let owner = snapshot.table_owner("app.docs").unwrap().unwrap();
+    let identity = NativeRecordIdentity::new(Family::BtreeIndexEntries, owner).unwrap();
+    let key = |id| {
+        identity
+            .encode_key(&[text("dropped"), ValueRef::Integer(id)], &snapshot.control)
+            .unwrap()
+    };
+    let sequence = snapshot.view.sequence().as_u64().to_be_bytes();
+    // Install deleted runs in the same on-disk representation produced by VACUUM.
+    // The last run is short. The live named and column indexes from the fixture remain.
+    let add_runs = |start, end| {
+        connection.with_physical(|sqlite| {
+        let _permit = crate::mvcc::WritePermit::for_native_restore(sqlite)?;
+        let transaction = sqlite.unchecked_transaction()?;
+        {
+            let mut insert = transaction.prepare("INSERT INTO _uqa_mvcc_runs(key_length, first_key, last_key, sequence, kind, value) VALUES(length(?1), ?1, ?2, ?3, 0, NULL)")?;
+            for first in (start..=end).step_by(128) {
+                insert.execute(rusqlite::params![&*key(first), &*key((first + 127).min(end)), sequence.as_slice()])?;
+            }
+        }
+        transaction.commit()?;
+        Ok(())
+    }).unwrap()
+    };
+    add_runs(1_i64, 128_i64);
+    let before = validation_steps(&connection, &catalog, usize::MAX);
+    add_runs(129_i64, 1_000_000_i64);
+    for id in [1, 500_000, 1_000_000] {
+        assert!(
+            !snapshot
+                .view
+                .metadata(&key(id), &snapshot.control)
+                .unwrap()
+                .unwrap()
+                .live
+        );
+    }
+    assert!(validation_steps(&connection, &catalog, before) <= before);
 }
