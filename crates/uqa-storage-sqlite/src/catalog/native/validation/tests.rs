@@ -61,7 +61,10 @@ fn fixture() -> (ManagedConnection, Catalog) {
 
 /// Two indexes of `app.docs`, a column index and a named one, of `entries` entries each. The last entry of each has a large value.
 fn fixture_with_entries(entries: i64) -> (ManagedConnection, Catalog) {
-    let connection = ManagedConnection::open_in_memory().unwrap();
+    indexed_fixture(ManagedConnection::open_in_memory().unwrap(), entries)
+}
+
+fn indexed_fixture(connection: ManagedConnection, entries: i64) -> (ManagedConnection, Catalog) {
     let catalog = Catalog::open(connection.clone()).unwrap();
     catalog.save_schema("app").unwrap();
     catalog
@@ -409,44 +412,56 @@ fn validation_reads_every_entry_of_an_index_that_does_not_exist() {
 
 #[test]
 fn a_million_compacted_deletions_do_not_add_work_to_namespace_validation() {
-    let (connection, catalog) = fixture();
-    let snapshot = connection.native_snapshot().unwrap().unwrap();
-    let owner = snapshot.table_owner("app.docs").unwrap().unwrap();
-    let identity = NativeRecordIdentity::new(Family::BtreeIndexEntries, owner).unwrap();
-    let key = |id| {
-        identity
-            .encode_key(&[text("dropped"), ValueRef::Integer(id)], &snapshot.control)
-            .unwrap()
-    };
-    let sequence = snapshot.view.sequence().as_u64().to_be_bytes();
-    // Install deleted runs in the same on-disk representation produced by VACUUM.
-    // The last run is short. The live named and column indexes from the fixture remain.
-    let add_runs = |start, end| {
-        connection.with_physical(|sqlite| {
-        let _permit = crate::mvcc::WritePermit::for_native_restore(sqlite)?;
-        let transaction = sqlite.unchecked_transaction()?;
+    let reopened_work = |deleted: i64, limit| {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("catalog.db");
         {
-            let mut insert = transaction.prepare("INSERT INTO _uqa_mvcc_runs(key_length, first_key, last_key, sequence, kind, value) VALUES(length(?1), ?1, ?2, ?3, 0, NULL)")?;
-            for first in (start..=end).step_by(128) {
-                insert.execute(rusqlite::params![&*key(first), &*key((first + 127).min(end)), sequence.as_slice()])?;
+            let (connection, _catalog) =
+                indexed_fixture(ManagedConnection::open(&path).unwrap(), 70);
+            let snapshot = connection.native_snapshot().unwrap().unwrap();
+            let owner = snapshot.table_owner("app.docs").unwrap().unwrap();
+            let identity = NativeRecordIdentity::new(Family::BtreeIndexEntries, owner).unwrap();
+            let key = |id| {
+                identity
+                    .encode_key(&[text("dropped"), ValueRef::Integer(id)], &snapshot.control)
+                    .unwrap()
+            };
+            let sequence = snapshot.view.sequence().as_u64().to_be_bytes();
+            // VACUUM stores contiguous deleted records in runs, including a short final run.
+            connection.with_physical(|sqlite| {
+                let _permit = crate::mvcc::WritePermit::for_native_restore(sqlite)?;
+                let transaction = sqlite.unchecked_transaction()?;
+                {
+                    let mut insert = transaction.prepare(
+                        "INSERT INTO _uqa_mvcc_runs(key_length, first_key, last_key, sequence, kind, value)
+                         VALUES(length(?1), ?1, ?2, ?3, 0, NULL)",
+                    )?;
+                    for first in (1..=deleted).step_by(128) {
+                        insert.execute(rusqlite::params![&*key(first), &*key((first + 127).min(deleted)), sequence.as_slice()])?;
+                    }
+                }
+                transaction.commit()?;
+                Ok(())
+            }).unwrap();
+            for id in [1, deleted / 2, deleted] {
+                assert!(
+                    !snapshot
+                        .view
+                        .metadata(&key(id), &snapshot.control)
+                        .unwrap()
+                        .unwrap()
+                        .live
+                );
             }
         }
-        transaction.commit()?;
-        Ok(())
-    }).unwrap()
+        let connection = ManagedConnection::open(&path).unwrap();
+        connection
+            .bind_native_records(VersionedSessionOptions::default())
+            .unwrap();
+        let catalog = Catalog::open(connection.clone()).unwrap();
+        validation_steps(&connection, &catalog, limit)
     };
-    add_runs(1_i64, 128_i64);
-    let before = validation_steps(&connection, &catalog, usize::MAX);
-    add_runs(129_i64, 1_000_000_i64);
-    for id in [1, 500_000, 1_000_000] {
-        assert!(
-            !snapshot
-                .view
-                .metadata(&key(id), &snapshot.control)
-                .unwrap()
-                .unwrap()
-                .live
-        );
-    }
-    assert!(validation_steps(&connection, &catalog, before) <= before);
+    let small = reopened_work(128, usize::MAX);
+    assert_ne!(small, 0);
+    assert!(reopened_work(1_000_000, small) <= small);
 }
