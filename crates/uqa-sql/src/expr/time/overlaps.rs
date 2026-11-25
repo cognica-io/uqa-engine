@@ -7,9 +7,11 @@
 use crate::ast::BinaryOp;
 use crate::error::{Result, SQLError};
 use crate::expr::{cast_value_from_with_control, EvalContext};
+use crate::type_resolution::runtime_value_type_with_control;
+use crate::ColumnType;
 use uqa_core::{
     memory::{Produced, ProductionControl},
-    TemporalValue, Value,
+    Value,
 };
 
 pub(in crate::expr) fn overlaps(
@@ -24,36 +26,42 @@ pub(in crate::expr) fn overlaps(
             "overlaps takes 4 args (start1, end1, start2, end2)".into(),
         ));
     };
-    let target = endpoint_type(args);
-    let endpoint = |value: &Value| {
-        if target == "timestamptz"
-            && matches!(
-                value,
-                Value::Temporal(TemporalValue::Date { .. } | TemporalValue::Timestamp { .. })
-            )
-        {
+    // A retained field's OID determines the overload without reading its payload.
+    let kind = |value: &Value| {
+        if matches!(value, Value::Temporal(_) | Value::Datum(_)) {
+            runtime_value_type_with_control(value, None, control)
+        } else {
+            Ok(None)
+        }
+    };
+    let types = [kind(a)?, kind(b)?, kind(c)?, kind(d)?];
+    let kinds = types.each_ref().map(Option::as_deref);
+    let target = endpoint_type(&kinds);
+    let endpoint = |value: &Value, ty: Option<&ColumnType>| {
+        if target == "timestamptz" && matches!(ty, Some(ColumnType::Date | ColumnType::Timestamp)) {
             let local = cast_value_from_with_control(value, "timestamp", None, control)?;
             super::eval_timezone(std::slice::from_ref(&*local), context, control)
         } else {
             cast_value_from_with_control(value, target, None, control)
         }
     };
-    let period = |start: &Value, end: &Value| -> Result<_> {
-        let start = endpoint(start)?;
-        let end = if matches!(end, Value::Temporal(TemporalValue::Interval { .. })) {
+    let period = |start: &Value, start_ty, end: &Value, end_ty| -> Result<_> {
+        let start = endpoint(start, start_ty)?;
+        let end = if end_ty == Some(&ColumnType::Interval) {
             if matches!(*start, Value::Null) {
                 Value::Null
             } else {
+                let interval = cast_value_from_with_control(end, "interval", None, control)?;
                 super::temporal_arith_with_control(
                     &start,
-                    end,
+                    &interval,
                     BinaryOp::Add,
                     context.and_then(|ctx| ctx.engine),
                     control,
                 )?
             }
         } else {
-            endpoint(end)?.into_parts().0
+            endpoint(end, end_ty)?.into_parts().0
         };
         Ok(match (&*start, end) {
             (Value::Temporal(a), Value::Temporal(b)) if *a > b => Some((b, Some(a.clone()))),
@@ -63,8 +71,8 @@ pub(in crate::expr) fn overlaps(
             _ => None,
         })
     };
-    let left = period(a, b)?;
-    let right = period(c, d)?;
+    let left = period(a, kinds[0], b, kinds[1])?;
+    let right = period(c, kinds[2], d, kinds[3])?;
     let (Some((a, b)), Some((c, d))) = (left, right) else {
         return finish(Value::Null);
     };
@@ -87,29 +95,16 @@ pub(in crate::expr) fn overlaps(
     })
 }
 
-fn endpoint_type(args: &[Value]) -> &'static str {
-    let mut temporals = args.iter().filter_map(|value| match value {
-        Value::Temporal(value) => Some(value),
-        _ => None,
-    });
-    if temporals
-        .clone()
-        .any(|v| matches!(v, TemporalValue::TimestampTz { .. }))
-    {
+fn endpoint_type(kinds: &[Option<&ColumnType>; 4]) -> &'static str {
+    if kinds.contains(&Some(&ColumnType::TimestampTz)) {
         "timestamptz"
-    } else if temporals.clone().any(|v| {
-        matches!(
-            v,
-            TemporalValue::Date { .. } | TemporalValue::Timestamp { .. }
-        )
-    }) {
-        "timestamp"
-    } else if temporals
-        .clone()
-        .any(|v| matches!(v, TemporalValue::TimeTz { .. }))
+    } else if kinds.contains(&Some(&ColumnType::Date))
+        || kinds.contains(&Some(&ColumnType::Timestamp))
     {
+        "timestamp"
+    } else if kinds.contains(&Some(&ColumnType::TimeTz)) {
         "timetz"
-    } else if temporals.any(|v| matches!(v, TemporalValue::Time { .. })) {
+    } else if kinds.contains(&Some(&ColumnType::Time)) {
         "time"
     } else {
         "timestamptz"
