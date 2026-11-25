@@ -33,16 +33,32 @@ pub(crate) struct DatabaseOwner {
 
 pub(super) struct RestoreAdmission(Admission);
 
-/// Excludes predecessor attachment until complete record initialization finishes.
-pub(crate) struct RecordAdmission {
+/// Holds physical admission through initialization or conversion of an owned file.
+pub(crate) struct DatabaseAdmission {
     _admission: Admission,
+}
+
+impl DatabaseOwner {
+    /// Keep new parent pools out while an existing auxiliary file changes its key.
+    #[cfg(not(target_os = "emscripten"))]
+    pub(super) fn sole_owner_admission(
+        &self,
+        control: &StorageReadControl,
+    ) -> Result<Option<DatabaseAdmission>> {
+        Ok(self
+            .lease
+            .sole_owner_admission(control)?
+            .map(|admission| DatabaseAdmission {
+                _admission: admission,
+            }))
+    }
 }
 
 impl super::ManagedConnection {
     pub(crate) fn admit_record_initialization(
         &self,
         control: &StorageReadControl,
-    ) -> Result<Option<RecordAdmission>> {
+    ) -> Result<Option<DatabaseAdmission>> {
         control.check()?;
         self.pool
             .owner
@@ -51,7 +67,7 @@ impl super::ManagedConnection {
                 owner
                     .lease
                     .admit_records(control)
-                    .map(|admission| RecordAdmission {
+                    .map(|admission| DatabaseAdmission {
                         _admission: admission,
                     })
             })
@@ -81,6 +97,22 @@ fn retain(admission: &Admission, control: &StorageReadControl) -> Result<Arc<Dat
 
 pub(super) fn open(path: &Path, control: &StorageReadControl) -> Result<Arc<DatabaseOwner>> {
     retain(&admission(path, false, control)?, control)
+}
+
+/// Serialize selection and publication of a new encrypted file's salt across processes.
+pub(super) fn admit_file_header(
+    path: &Path,
+    control: &StorageReadControl,
+) -> Result<Option<DatabaseAdmission>> {
+    let held = admission(path, false, control)?;
+    match path.metadata() {
+        Ok(metadata) if metadata.len() > 0 => Ok(None),
+        Ok(_) => Ok(Some(DatabaseAdmission { _admission: held })),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            Ok(Some(DatabaseAdmission { _admission: held }))
+        }
+        Err(error) => Err(error.into()),
+    }
 }
 
 impl RestoreAdmission {

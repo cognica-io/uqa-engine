@@ -94,7 +94,10 @@ impl ImageConnection {
                 key,
             }
         } else {
-            ConnectionSpec::File { path, key }
+            ConnectionSpec::File {
+                path,
+                key: key.map(Into::into),
+            }
         };
         let mode = if fresh {
             super::ConnectionOpen::Initial

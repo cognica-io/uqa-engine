@@ -44,6 +44,8 @@ pub use backup_import::{
 #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 pub use backup_target::{SQLiteBackupMapping, SQLiteBackupTarget};
 pub(crate) use schema::WritePermit;
+#[cfg(not(target_os = "emscripten"))]
+pub(crate) use serializable::recognizes_encrypted_state;
 pub use serializable::SQLiteSerializableAdmission;
 
 use std::sync::Arc;

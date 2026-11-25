@@ -24,6 +24,7 @@ use crate::compressed_vfs::{self, SQLiteCompressedContainerAnchor, SQLiteCompres
 
 #[cfg(not(target_os = "emscripten"))]
 mod checkpoint;
+mod encryption;
 mod identity;
 #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 pub(crate) mod image_import;
@@ -206,12 +207,7 @@ impl ManagedConnection {
     /// compressed containers whose main-file encryption lives in the VFS.
     #[must_use]
     pub fn auxiliary_encryption_key(&self) -> Option<StorageEncryptionKey> {
-        match &self.pool.spec {
-            ConnectionSpec::File { key, .. }
-            | ConnectionSpec::Auxiliary { key, .. }
-            | ConnectionSpec::Compressed { key, .. } => key.clone(),
-            ConnectionSpec::Memory => None,
-        }
+        self.pool.auxiliary_key.clone()
     }
 
     /// Lease an independent physical connection without joining this logical
@@ -232,7 +228,7 @@ impl ManagedConnection {
         Self::from_spec(
             ConnectionSpec::Auxiliary {
                 path: path.to_path_buf(),
-                key,
+                key: key.map(Into::into),
             },
             default_pool_connections(),
         )
@@ -274,7 +270,7 @@ impl ManagedConnection {
     fn open_with_optional_key(path: &Path, key: Option<&str>) -> Result<Self> {
         let spec = ConnectionSpec::File {
             path: path.to_path_buf(),
-            key: key.map(StorageEncryptionKey::new),
+            key: key.map(StorageEncryptionKey::new).map(Into::into),
         };
         Self::from_spec(spec, default_pool_connections())
     }
@@ -344,7 +340,7 @@ impl ManagedConnection {
         max_connections: usize,
         owner: Option<Arc<ownership::DatabaseOwner>>,
     ) -> Result<Self> {
-        let initial = spec.open(ConnectionOpen::Initial)?;
+        let initial = spec.open_initial()?;
         crate::mvcc::restore::reject_pending(&initial)?;
         Ok(Self {
             pool: ConnectionPool::new(spec, initial, max_connections, owner)?,
@@ -355,14 +351,6 @@ impl ManagedConnection {
 
     pub(crate) fn database_owner(&self) -> Option<Arc<ownership::DatabaseOwner>> {
         self.pool.owner.clone()
-    }
-
-    fn apply_encryption_key(conn: &Connection, key: &str) -> Result<()> {
-        if key.is_empty() {
-            return Err(SQLiteError::EmptyEncryptionKey);
-        }
-        conn.pragma_update(None, "key", key)?;
-        Ok(())
     }
 
     fn enable_wal(conn: &Connection) -> Result<()> {

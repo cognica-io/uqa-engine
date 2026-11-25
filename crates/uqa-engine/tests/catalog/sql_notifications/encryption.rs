@@ -12,6 +12,7 @@ use std::sync::Arc;
 use rusqlite::Connection;
 use tempfile::TempDir;
 use uqa_engine::Engine;
+use uqa_storage::encryption_key::AuxiliaryFile;
 use uqa_storage_sqlite::{
     Catalog, ManagedConnection, SQLiteCompressionOptions, SQLiteStorageBackend,
 };
@@ -23,9 +24,7 @@ pub(super) const PAYLOAD: &str = "retained-secret-notification-payload-marker";
 const CHANNEL: &str = "confidential_notification_channel";
 
 pub(super) fn registry_path(database: &Path) -> std::path::PathBuf {
-    let mut path = database.as_os_str().to_owned();
-    path.push(".uqa-notification-state");
-    path.into()
+    AuxiliaryFile::Notifications.path(database)
 }
 
 pub(super) fn assert_no_plaintext(database: &Path, markers: &[&str]) {
@@ -81,6 +80,22 @@ fn encrypted_notification_queue_and_listener_metadata_remain_encrypted() {
         drop(registry);
         let registry = Connection::open(registry_path(&database)).unwrap();
         registry.pragma_update(None, "key", KEY).unwrap();
+        assert!(registry
+            .query_row("SELECT count(*) FROM queue_entries", [], |r| r
+                .get::<_, i64>(0))
+            .is_err());
+        drop(registry);
+        let main = ManagedConnection::open_auto(&database, Some(KEY)).unwrap();
+        let path = registry_path(&database.canonicalize().unwrap());
+        let key = main
+            .auxiliary_encryption_key()
+            .unwrap()
+            .for_file(AuxiliaryFile::Notifications, &path)
+            .unwrap();
+        let registry = Connection::open(&path).unwrap();
+        registry
+            .pragma_update(None, "key", key.expose_secret())
+            .unwrap();
         let retained: (String, String) = registry
             .query_row("SELECT channel, payload FROM queue_entries", [], |row| {
                 Ok((row.get(0)?, row.get(1)?))

@@ -30,18 +30,8 @@ pub(super) fn load(
     control: &StorageReadControl,
 ) -> PhysicalResult<SerializableGraph> {
     control.check().map_err(VersionError::from)?;
-    let application: i64 =
-        connection.pragma_query_value(None, "application_id", |row| row.get(0))?;
-    let format: i64 = connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
-    let count: i64 = connection.query_row(
-        "SELECT count(*) FROM sqlite_schema WHERE name NOT GLOB 'sqlite_*'",
-        [],
-        |row| row.get(0),
-    )?;
-    if count == 0 {
-        if application != 0 || format != 0 {
-            return Err(invalid().into());
-        }
+    let format = retained_format(connection)?;
+    if format == 0 {
         let mut coordinator = [0; 16];
         getrandom::fill(&mut coordinator).map_err(|error| {
             VersionError::Storage(StorageBackendError::backend(
@@ -56,16 +46,6 @@ pub(super) fn load(
             control.memory(),
         )?);
     }
-    let definition = match format {
-        1 if count == 1 => LEGACY_DEFINITION,
-        FORMAT if count == 2 => DEFINITION,
-        _ => return Err(invalid().into()),
-    };
-    if application != APPLICATION_ID
-        || !matches_definition(connection, "_uqa_serializable_state", definition)?
-    {
-        return Err(invalid().into());
-    }
     let coordinator = identity(connection, database)?;
     if format == 1 {
         let mut blob =
@@ -77,10 +57,48 @@ pub(super) fn load(
         initialize(connection, database, coordinator)?;
         return Ok(graph);
     }
-    if !matches_definition(connection, "_uqa_serializable_records", RECORDS)? {
+    records::load(connection, database, coordinator, control)
+}
+
+/// Read and validate the existing layout without initializing or migrating any rows.
+fn retained_format(connection: &Connection) -> PhysicalResult<i64> {
+    let application: i64 =
+        connection.pragma_query_value(None, "application_id", |row| row.get(0))?;
+    let format: i64 = connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
+    let count: i64 = connection.query_row(
+        "SELECT count(*) FROM sqlite_schema WHERE name NOT GLOB 'sqlite_*'",
+        [],
+        |row| row.get(0),
+    )?;
+    if count == 0 && application == 0 && format == 0 {
+        return Ok(0);
+    }
+    let definition = match format {
+        1 if count == 1 => LEGACY_DEFINITION,
+        FORMAT if count == 2 => DEFINITION,
+        _ => return Err(invalid().into()),
+    };
+    if application != APPLICATION_ID
+        || !matches_definition(connection, "_uqa_serializable_state", definition)?
+    {
         return Err(invalid().into());
     }
-    records::load(connection, database, coordinator, control)
+    if format == FORMAT && !matches_definition(connection, "_uqa_serializable_records", RECORDS)? {
+        return Err(invalid().into());
+    }
+    Ok(format)
+}
+
+#[cfg(not(target_os = "emscripten"))]
+pub(crate) fn recognizes_encrypted_state(connection: &Connection) -> crate::Result<bool> {
+    let application: i64 =
+        connection.pragma_query_value(None, "application_id", |row| row.get(0))?;
+    if application != APPLICATION_ID {
+        return Ok(false);
+    }
+    retained_format(connection)
+        .map(|format| format != 0)
+        .map_err(|error| crate::SQLiteError::StorageBackend(error.to_string()))
 }
 
 fn initialize(

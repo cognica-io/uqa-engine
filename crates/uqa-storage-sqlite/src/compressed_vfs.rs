@@ -63,6 +63,8 @@ mod directory_sync;
 mod file;
 mod format;
 mod io_callbacks;
+#[cfg(not(target_os = "emscripten"))]
+pub(crate) use io_callbacks::auxiliary_root;
 mod locking;
 mod options;
 mod record_scan;

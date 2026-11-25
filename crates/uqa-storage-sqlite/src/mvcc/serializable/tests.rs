@@ -218,6 +218,73 @@ fn encrypted_and_compressed_predicates_never_enter_plaintext_auxiliary_files() {
     }
 }
 
+#[cfg(not(target_os = "emscripten"))]
+#[rstest::rstest]
+#[case::ordinary(false)]
+#[case::restore(true)]
+fn legacy_encrypted_serializable_state_preserves_its_transaction_history(#[case] restore: bool) {
+    use uqa_storage::{encryption_key::AuxiliaryFile, mvcc::DatabaseRestore};
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("legacy-ssi.db");
+    let main = open(&path, 1);
+    let store = SQLiteRecordStore::new(&main).unwrap();
+    let actor = admit_read(&store, b"legacy predicate");
+    let database = store.database_id();
+    let file = AuxiliaryFile::Serializable.path(&path);
+    let key = main
+        .auxiliary_encryption_key()
+        .unwrap()
+        .for_file(AuxiliaryFile::Serializable, &file)
+        .unwrap();
+    drop((store, main));
+    // Model an existing state file using SQLCipher's ordinary passphrase format.
+    let legacy = Connection::open(&file).unwrap();
+    legacy
+        .pragma_update(None, "key", key.expose_secret())
+        .unwrap();
+    legacy
+        .pragma_update(None, "rekey", "serializable-transport-test")
+        .unwrap();
+    drop(legacy);
+    if restore {
+        let request = DatabaseRestore::new(database).unwrap();
+        let restored = ManagedConnection::open_encrypted_restored(
+            &path,
+            "serializable-transport-test",
+            request,
+            &control(),
+        )
+        .unwrap();
+        let store = SQLiteRecordStore::new(&restored).unwrap();
+        assert_eq!(store.database_id(), request.target());
+        assert!(store
+            .serializable_admission(&control())
+            .unwrap()
+            .graph()
+            .check_active(actor)
+            .is_err());
+    } else {
+        for _ in 0..2 {
+            let main = open(&path, 1);
+            let store = SQLiteRecordStore::new(&main).unwrap();
+            store
+                .serializable_admission(&control())
+                .unwrap()
+                .graph()
+                .check_active(actor)
+                .unwrap();
+        }
+        let external = Connection::open(&file).unwrap();
+        external
+            .pragma_update(None, "key", "serializable-transport-test")
+            .unwrap();
+        assert!(external
+            .query_row("SELECT count(*) FROM sqlite_schema", [], |row| row
+                .get::<_, i64>(0))
+            .is_err());
+    }
+}
+
 #[test]
 fn malformed_auxiliary_state_is_rejected_without_recreation() {
     for sql in [

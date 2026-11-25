@@ -31,7 +31,7 @@ impl ManagedConnection {
         })
     }
 
-    /// `SQLCipher` counterpart of [`Self::open_restored`], using the same credential for its SSI database.
+    /// `SQLCipher` counterpart of [`Self::open_restored`], preserving the encryption of its SSI database.
     pub fn open_encrypted_restored(
         path: &Path,
         key: &str,
@@ -44,7 +44,7 @@ impl ManagedConnection {
         Self::restore_with_spec(path, request, control, || {
             Ok(ConnectionSpec::File {
                 path: path.to_path_buf(),
-                key: Some(StorageEncryptionKey::new(key)),
+                key: Some(StorageEncryptionKey::new(key).into()),
             })
         })
     }

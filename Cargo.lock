@@ -4355,6 +4355,7 @@ dependencies = [
  "uqa-analysis",
  "uqa-core",
  "windows-sys 0.61.2",
+ "zeroize",
 ]
 
 [[package]]
@@ -4388,6 +4389,7 @@ dependencies = [
  "hmac",
  "lz4_flex",
  "parking_lot",
+ "ring",
  "rstest",
  "serde",
  "serde_json",

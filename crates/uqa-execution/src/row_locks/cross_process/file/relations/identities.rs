@@ -312,8 +312,19 @@ impl FileLockCoordinator {
                 }
             }
         }
+        let key = self
+            .relation_key
+            .as_ref()
+            .map(|key| {
+                key.for_file(
+                    uqa_storage::encryption_key::AuxiliaryFile::RelationIdentities,
+                    &self.relation_path,
+                )
+            })
+            .transpose()
+            .map_err(|error| format!("open relation identity registry: {error}"))?;
         let connection = rusqlite::Connection::open(&self.relation_path).map_err(sql)?;
-        if let Some(key) = &self.relation_key {
+        if let Some(key) = key {
             connection
                 .pragma_update(None, "key", key.expose_secret())
                 .map_err(sql)?;

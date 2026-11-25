@@ -8,7 +8,6 @@
 
 use super::{ManagedConnection, Path, StorageEncryptionKey, REGISTRY_BUSY_TIMEOUT};
 use rusqlite::TransactionBehavior;
-use std::path::PathBuf;
 
 const REGISTRY_SCHEMA_VERSION: i64 = 2;
 const REGISTRY_APPLICATION_ID: i64 = 0x5551_4e31;
@@ -17,11 +16,38 @@ pub(super) fn open_registry(
     database_path: &Path,
     key: Option<&StorageEncryptionKey>,
 ) -> Result<ManagedConnection, String> {
-    let path = suffixed_path(database_path, ".uqa-notification-state");
-    let registry = ManagedConnection::open_auxiliary(&path, key.cloned())
+    let path = uqa_storage::encryption_key::AuxiliaryFile::Notifications.path(database_path);
+    let key = key
+        .map(|key| {
+            key.for_file(
+                uqa_storage::encryption_key::AuxiliaryFile::Notifications,
+                &path,
+            )
+        })
+        .transpose()
+        .map_err(|error| format!("open asynchronous notification registry: {error}"))?;
+    let registry = ManagedConnection::open_auxiliary(&path, key)
         .map_err(|error| format!("open asynchronous notification registry: {error}"))?;
     initialize_registry(&registry)?;
     Ok(registry)
+}
+
+/// Only recognized durable notification formats may be rekeyed in place.
+#[cfg(not(target_os = "emscripten"))]
+pub(crate) fn recognizes_encrypted_registry(
+    connection: &rusqlite::Connection,
+) -> crate::Result<bool> {
+    let application: i64 =
+        connection.pragma_query_value(None, "application_id", |row| row.get(0))?;
+    let version: i64 = connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
+    if application != REGISTRY_APPLICATION_ID || !(1..=REGISTRY_SCHEMA_VERSION).contains(&version) {
+        return Ok(false);
+    }
+    validate_registry_schema(connection).map_err(crate::SQLiteError::StorageBackend)?;
+    if version == REGISTRY_SCHEMA_VERSION {
+        validate_publication_schema(connection).map_err(crate::SQLiteError::StorageBackend)?;
+    }
+    Ok(true)
 }
 
 pub(super) fn initialize_registry(registry: &ManagedConnection) -> Result<(), String> {
@@ -201,7 +227,7 @@ fn create_publication_schema(transaction: &rusqlite::Transaction<'_>) -> Result<
     Ok(())
 }
 
-fn validate_publication_schema(transaction: &rusqlite::Transaction<'_>) -> Result<(), String> {
+fn validate_publication_schema(transaction: &rusqlite::Connection) -> Result<(), String> {
     let valid_rows = transaction.query_row(
         "SELECT count(*) FROM publication_state WHERE singleton = 1 AND typeof(registry_id) = 'blob' AND length(registry_id) = 16 AND registry_id != zeroblob(16) AND typeof(next_publication) = 'integer' AND next_publication >= 0 AND (acknowledged_fingerprint IS NULL OR (typeof(acknowledged_fingerprint) = 'blob' AND length(acknowledged_fingerprint) = 32)) AND ((reserved_fingerprint IS NULL AND reservation_owner IS NULL) OR (typeof(reserved_fingerprint) = 'blob' AND length(reserved_fingerprint) = 32 AND typeof(reservation_owner) = 'blob' AND length(reservation_owner) = 16))", [], |row| row.get::<_, i64>(0),
     ).map_err(|error| format!("validate asynchronous notification publication state: {error}"))?;
@@ -234,7 +260,7 @@ fn validate_publication_schema(transaction: &rusqlite::Transaction<'_>) -> Resul
     Ok(())
 }
 
-fn validate_registry_schema(transaction: &rusqlite::Transaction<'_>) -> Result<(), String> {
+fn validate_registry_schema(transaction: &rusqlite::Connection) -> Result<(), String> {
     let queue_state_rows = transaction
         .query_row("SELECT count(*) FROM queue_state", [], |row| {
             row.get::<_, i64>(0)
@@ -280,10 +306,4 @@ fn validate_registry_schema(transaction: &rusqlite::Transaction<'_>) -> Result<(
         })?;
     }
     Ok(())
-}
-
-fn suffixed_path(database_path: &Path, suffix: &str) -> PathBuf {
-    let mut path = database_path.as_os_str().to_owned();
-    path.push(suffix);
-    PathBuf::from(path)
 }

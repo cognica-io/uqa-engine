@@ -37,6 +37,7 @@ uqa-storage = { workspace = true }
 # replaced by a single-process shim there.
 [target.'cfg(not(target_os = "emscripten"))'.dependencies]
 rusqlite = { workspace = true, features = ["functions", "hooks"] }
+ring = "0.17.14"
 fs2 = { workspace = true }
 
 [target.'cfg(windows)'.dependencies]

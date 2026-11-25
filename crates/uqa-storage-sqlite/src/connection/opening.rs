@@ -20,11 +20,11 @@ use super::{
 pub(super) enum ConnectionSpec {
     File {
         path: PathBuf,
-        key: Option<StorageEncryptionKey>,
+        key: Option<super::encryption::FileKey>,
     },
     Auxiliary {
         path: PathBuf,
-        key: Option<StorageEncryptionKey>,
+        key: Option<super::encryption::FileKey>,
     },
     Compressed {
         path: PathBuf,
@@ -42,6 +42,29 @@ pub(super) enum ConnectionOpen {
 }
 
 impl ConnectionSpec {
+    pub(super) fn open_initial(&self) -> Result<Connection> {
+        let header = match self {
+            Self::File { path, key: Some(_) } | Self::Auxiliary { path, key: Some(_) }
+                if !path.as_os_str().is_empty() && path != std::path::Path::new(":memory:") =>
+            {
+                super::ownership::admit_file_header(
+                    path,
+                    &uqa_storage::read_control::StorageReadControl::with_limit(
+                        uqa_storage::mvcc::VersionedSessionOptions::default().retained_bytes,
+                    ),
+                )?
+            }
+            _ => None,
+        };
+        let connection = self.open(ConnectionOpen::Initial)?;
+        if header.is_some() && matches!(self, Self::Auxiliary { .. }) {
+            // WAL initialization writes the main header. A new DELETE-mode file
+            // needs an explicit header write before other connections select its salt.
+            connection.pragma_update(None, "user_version", 0)?;
+        }
+        Ok(connection)
+    }
+
     pub(super) fn open(&self, mode: ConnectionOpen) -> Result<Connection> {
         let conn = self.open_configured(mode)?;
         conn.set_prepared_statement_cache_capacity(PREPARED_STATEMENT_CACHE_CAPACITY);
@@ -58,7 +81,7 @@ impl ConnectionSpec {
             Self::File { path, key } | Self::Auxiliary { path, key } => {
                 let conn = Connection::open_with_flags(path, flags)?;
                 if let Some(key) = key {
-                    ManagedConnection::apply_encryption_key(&conn, key.expose_secret())?;
+                    key.apply(&conn)?;
                 }
                 crate::btree_index::equality::register(&conn)?;
                 if matches!(self, Self::Auxiliary { .. }) {
