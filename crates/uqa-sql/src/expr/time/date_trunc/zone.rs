@@ -40,13 +40,8 @@ pub(in crate::expr) fn truncate_session_zone(
             return Ok(Value::Null);
         }
         let units = value_to_string(unit)?;
-        let name = context
-            .engine
-            .map(|engine| engine.runtime_parameter("TimeZone"))
-            .transpose()?
-            .flatten();
-        let name = name.as_deref().unwrap_or("UTC");
-        let zone = TemporalTimeZone::named(name).ok_or_else(|| unknown_zone(name))?;
+        let zone =
+            crate::expr::time::session_zone(context.engine, &ProductionControl::uncontrolled())?;
         truncate(&units, value, &zone, &ProductionControl::uncontrolled())
     })())
 }

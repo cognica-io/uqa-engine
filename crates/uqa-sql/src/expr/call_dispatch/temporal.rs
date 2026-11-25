@@ -6,9 +6,9 @@
 
 //! Selected timestamptz extraction observes the invoking session's current zone.
 
-use super::{EvalContext, Result, SQLError};
+use super::{EvalContext, Result};
 use crate::expr::{conversion::value_to_string, time::extract_from_value_with_offset};
-use uqa_core::{memory::ProductionControl, TemporalTimeZone, TemporalValue, Value};
+use uqa_core::{memory::ProductionControl, TemporalValue, Value};
 
 pub(super) fn extract_session_zone(
     name: &str,
@@ -31,16 +31,8 @@ pub(super) fn extract_session_zone(
             return Ok(Value::Null);
         }
         let field = value_to_string(field)?;
-        let zone = context
-            .engine
-            .map(|engine| engine.runtime_parameter("TimeZone"))
-            .transpose()?
-            .flatten();
-        let zone = zone.as_deref().unwrap_or("UTC");
-        let zone = TemporalTimeZone::named(zone).ok_or_else(|| SQLError::Routine {
-            sqlstate: "22023".into(),
-            message: format!("time zone \"{zone}\" not recognized"),
-        })?;
+        let zone =
+            crate::expr::time::session_zone(context.engine, &ProductionControl::uncontrolled())?;
         let offset = if temporal.is_finite() {
             zone.offset_at_postgres_micros(*micros)
                 .ok_or_else(|| crate::expr::datetime_out_of_range("timestamp"))?

@@ -114,6 +114,36 @@ fn session_independent_temporal_inputs_reuse_optimized_plans() {
 }
 
 #[test]
+fn cached_timestamptz_array_inputs_follow_the_zone_of_each_sql_message() {
+    let engine = Engine::new();
+    let local = r#"SELECT ('{"2000-01-01 00:00"}'::timestamptz[])[1] AS v"#;
+    let nested = r#"SELECT ('{{"2000-01-01 00:00"}}'::timestamptz(3)[][])[1][1] AS v"#;
+    let absolute = r#"SELECT ('{{"2000-01-01 00:00Z"}}'::timestamptz[][])[1][1] AS v"#;
+    for (zone, expected) in [
+        ("UTC", 0),
+        ("America/New_York", 18_000_000_000),
+        ("Asia/Seoul", -32_400_000_000),
+    ] {
+        engine.sql(&format!("SET TIME ZONE '{zone}'"), &[]).unwrap();
+        for sql in [local, nested] {
+            assert_eq!(
+                engine.sql(sql, &[]).unwrap().rows[0]["v"],
+                Value::Temporal(uqa_core::TemporalValue::TimestampTz {
+                    postgres_micros: expected
+                }),
+                "{zone}: {sql}"
+            );
+            assert!(engine.cached_optimized_sql_plan(sql).is_none());
+        }
+        assert_eq!(
+            engine.sql(absolute, &[]).unwrap().rows[0]["v"],
+            Value::Temporal(uqa_core::TemporalValue::TimestampTz { postgres_micros: 0 })
+        );
+        assert!(engine.cached_optimized_sql_plan(absolute).is_some());
+    }
+}
+
+#[test]
 fn simple_query_transaction_boundaries_refresh_temporal_input_clocks() {
     fn verify(engine: &Engine) {
         let _caller_clock = uqa_sql::expr::TransactionClockScope::enter(11);

@@ -6,7 +6,7 @@
 
 //! Timestamp zone conversion shares Core's bundled offset selection.
 
-use crate::expr::{datetime_out_of_range, EvalContext, Result, SQLError};
+use crate::expr::{datetime_out_of_range, EngineHook, EvalContext, Result, SQLError};
 use uqa_core::{
     memory::{Produced, ProductionControl},
     TemporalTimeZone, TemporalValue, Value,
@@ -47,13 +47,7 @@ pub(in crate::expr) fn eval_timezone(
         }));
     }
     let seconds_to_subtract = if args.len() == 1 {
-        let name = context
-            .and_then(|context| context.engine)
-            .map(|engine| engine.runtime_parameter("TimeZone"))
-            .transpose()?
-            .flatten();
-        let name = name.as_deref().unwrap_or("UTC");
-        let zone = TemporalTimeZone::named(name).ok_or_else(|| unknown_zone(name))?;
+        let zone = session_zone(context.and_then(|context| context.engine), control)?;
         directional_offset(zone, micros, to_utc)?
     } else {
         match &args[0] {
@@ -83,6 +77,28 @@ pub(in crate::expr) fn eval_timezone(
             postgres_micros: micros,
         }
     }))
+}
+
+/// Resolve a live `TimeZone` setting or inherit the calling statement's captured zone.
+pub(in crate::expr) fn session_zone(
+    engine: Option<&dyn EngineHook>,
+    control: &ProductionControl<'_>,
+) -> Result<TemporalTimeZone> {
+    control.check()?;
+    let Some(engine) = engine else {
+        return Ok(crate::expr::temporal_time_zone());
+    };
+    if let Some(zone) = engine.temporal_time_zone()? {
+        control.check()?;
+        return Ok(zone);
+    }
+    let name = engine.runtime_parameter("TimeZone")?;
+    control.check()?;
+    let Some(name) = name else {
+        return Ok(crate::expr::temporal_time_zone());
+    };
+    let _memory = control.reserve(name.capacity())?;
+    TemporalTimeZone::named(&name).ok_or_else(|| unknown_zone(&name))
 }
 
 fn interval_offset(

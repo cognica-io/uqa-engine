@@ -911,10 +911,11 @@ pub(super) fn error(sqlstate: &str, message: String) -> SQLError {
     }
 }
 
-/// Whether an ordinary message must read `text` again. Domain arrays and composites read the catalog; a type whose input function is stable reads a session setting or the transaction clock, unless the text reproduces `value` under every setting.
+/// An ordinary message must reread catalog-dependent input and temporal input whose value changes with the session settings or transaction clock.
 fn input_reads_session(
-    text: &str,
+    input: &Value,
     input_type: &ColumnType,
+    name: &str,
     value: &Value,
     control: &ProductionControl<'_>,
 ) -> Result<bool, SQLError> {
@@ -928,27 +929,9 @@ fn input_reads_session(
     {
         return Ok(false);
     }
-    Ok(!(temporal_input_type(input_type)
-        && crate::expr::text_input_is_session_independent(text, input_type, value)))
-}
-
-/// Types whose text input reads only the thread's date order, interval style and transaction clock, and arrays of them.
-fn temporal_input_type(ty: &ColumnType) -> bool {
-    match ty {
-        ColumnType::Array(element) => temporal_input_type(element),
-        ColumnType::Date
-        | ColumnType::Time
-        | ColumnType::TimePrecision(_)
-        | ColumnType::TimeTz
-        | ColumnType::TimeTzPrecision(_)
-        | ColumnType::Timestamp
-        | ColumnType::TimestampPrecision(_)
-        | ColumnType::TimestampTz
-        | ColumnType::TimestampTzPrecision(_)
-        | ColumnType::Interval
-        | ColumnType::IntervalWithFields { .. } => true,
-        _ => false,
-    }
+    Ok(!crate::expr::text_input_is_session_independent(
+        input, input_type, name, value, control,
+    )?)
 }
 
 #[cfg(test)]

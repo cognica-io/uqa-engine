@@ -293,6 +293,35 @@ fn temporal_assignment_domain_and_array_paths_reuse_session_conversion_once() {
 }
 
 #[test]
+fn detached_timestamp_casts_share_the_captured_zone_with_text_input() {
+    let text = Value::Str("2000-01-01 00:00".into());
+    let civil = timestamp("2000-01-01 00:00");
+    let seoul = zoned(946_652_400_000_000);
+    let utc = zoned(946_684_800_000_000);
+    let cast = |value, source, target| {
+        cast_value_with_type_resolution(value, Some(source), target, None).unwrap()
+    };
+    let _zone = crate::expr::TemporalInputContext {
+        time_zone: uqa_core::TemporalTimeZone::named("Asia/Seoul").unwrap(),
+        ..crate::expr::TemporalInputContext::current()
+    }
+    .enter();
+    assert_eq!(cast(&text, "text", "timestamptz"), seoul);
+    assert_eq!(cast(&civil, "timestamp", "timestamptz"), seoul);
+    assert_eq!(cast(&seoul, "timestamptz", "timestamp"), civil);
+    assert_eq!(
+        cast_value_with_type_resolution(
+            &civil,
+            Some("timestamp"),
+            "timestamptz",
+            Some(&Session::new("UTC"))
+        )
+        .unwrap(),
+        utc
+    );
+}
+
+#[test]
 fn zone_casts_preserve_precision_nulls_and_already_zoned_values() {
     let session = Session::new("Asia/Seoul");
     let output = cast_value_with_type_resolution(

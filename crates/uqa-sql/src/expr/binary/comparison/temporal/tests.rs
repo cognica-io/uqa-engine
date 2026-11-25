@@ -7,7 +7,7 @@
 use super::super::{eval_comparison_truth_with_engine, BinaryOp};
 use super::*;
 use std::cell::Cell;
-use uqa_core::{memory::MemoryBudget, CancellationToken, DatumValue, Value};
+use uqa_core::{memory::MemoryBudget, CancellationToken, DatumValue, TemporalTimeZone, Value};
 
 struct Session<'a> {
     zone: &'a str,

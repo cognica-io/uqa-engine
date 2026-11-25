@@ -35,7 +35,7 @@ pub(in crate::expr) fn timestamp_tz_plus_interval(
         .map(EngineHook::temporal_time_zone)
         .transpose()?
         .flatten()
-        .unwrap_or_else(|| TemporalTimeZone::fixed(0).expect("UTC offset"));
+        .unwrap_or_else(crate::expr::temporal_time_zone);
     control.check()?;
     advance(ts, span, Some(zone))
 }
