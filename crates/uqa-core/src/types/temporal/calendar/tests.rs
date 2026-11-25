@@ -37,6 +37,16 @@ fn civil_fields_match_postgresql_across_the_full_date_domain() {
             TemporalDate::from_calendar(date.year(), date.month(), date.day()),
             Some(date)
         );
+        let (iso_year, week) = date.iso_week();
+        let monday = TemporalDate::iso_week_start(iso_year, week as i32).unwrap();
+        assert_eq!(
+            monday.checked_add_days(date.weekday_monday() as i32),
+            Some(date)
+        );
+        assert_eq!(
+            TemporalDate::from_julian_day(date.julian_day().try_into().unwrap()),
+            Some(date)
+        );
     }
     for days in [i32::MIN, i32::MIN + 1, i32::MAX - 1, i32::MAX] {
         assert!((1..=53).contains(&TemporalDate::from_unix_days(days).iso_week().1));

@@ -12,11 +12,14 @@ use uqa_core::{memory::ProductionControl, TemporalDate, TemporalValue};
 
 #[derive(Default)]
 struct Fields {
+    convention: Option<Convention>,
     year: i32,
     month: i32,
     day: i32,
     ordinal: i32,
     weekday: i32,
+    iso_week: i32,
+    julian: i32,
     era: i32,
     hour: i32,
     minute: i32,
@@ -25,6 +28,12 @@ struct Fields {
     microsecond: i32,
     meridiem: i32,
     twelve_hour: bool,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Convention {
+    Gregorian,
+    IsoWeek,
 }
 
 fn diagnostic(
@@ -191,6 +200,28 @@ fn word(
 }
 
 impl Fields {
+    fn select_convention(&mut self, name: &str) -> Result<()> {
+        let next = match name {
+            "IYYY" | "IYY" | "IY" | "I" | "IW" | "ID" | "IDDD" => Convention::IsoWeek,
+            "YYYY" | "YYY" | "YY" | "Y" | "MONTH" | "MON" | "MM" | "DDD" | "DD" | "D" => {
+                Convention::Gregorian
+            }
+            _ => return Ok(()),
+        };
+        if self.convention.is_some_and(|prior| prior != next) {
+            return Err(diagnostic(
+                "22007",
+                "invalid combination of date conventions".into(),
+                None,
+                Some(
+                    "Do not mix Gregorian and ISO week date conventions in a formatting template.",
+                ),
+            ));
+        }
+        self.convention = Some(next);
+        Ok(())
+    }
+
     fn read(
         &mut self,
         name: &str,
@@ -199,6 +230,7 @@ impl Fields {
         fixed: bool,
         control: &ProductionControl<'_>,
     ) -> Result<()> {
+        self.select_convention(name)?;
         match name {
             "MONTH" | "MON" => {
                 return set(
@@ -232,15 +264,16 @@ impl Fields {
             _ => {}
         }
         let width = match name {
-            "YYYY" => 4,
-            "DDD" | "MS" => 3,
+            "YYYY" | "IYYY" => 4,
+            "YYY" | "IYY" | "IDDD" | "DDD" | "MS" => 3,
+            "I" | "Y" | "D" | "ID" | "J" => 1,
             "US" => 6,
             _ => 2,
         };
         let (mut value, used) = number(input, width, fixed, spelling, control)?;
         let field = match name {
-            "YYYY" | "YY" => {
-                if name == "YY" && used < 4 {
+            "YYYY" | "YYY" | "YY" | "Y" | "IYYY" | "IYY" | "IY" | "I" => {
+                if width < 4 && used < 4 {
                     value += match value {
                         ..70 => 2000,
                         70..100 => 1900,
@@ -253,7 +286,19 @@ impl Fields {
             }
             "MM" => &mut self.month,
             "DD" => &mut self.day,
-            "DDD" => &mut self.ordinal,
+            "DDD" | "IDDD" => &mut self.ordinal,
+            "IW" => &mut self.iso_week,
+            "D" => &mut self.weekday,
+            "ID" => {
+                set(&mut self.weekday, value, spelling)?;
+                self.weekday = if self.weekday >= 7 {
+                    1
+                } else {
+                    self.weekday + 1
+                };
+                return Ok(());
+            }
+            "J" => &mut self.julian,
             "HH12" | "HH" | "HH24" => {
                 if name != "HH24" {
                     self.twelve_hour = true;
@@ -275,15 +320,7 @@ impl Fields {
         set(field, value, spelling)
     }
 
-    fn date(self, text: &str, control: &ProductionControl<'_>) -> Result<TemporalValue> {
-        let field_overflow = || {
-            input_error(
-                "22008",
-                format_args!("date/time field value out of range: \"{text}\""),
-                None,
-                control,
-            )
-        };
+    fn validate_time(&self, field_overflow: impl FnOnce() -> SQLError) -> Result<()> {
         if self.twelve_hour && !(1..=12).contains(&self.hour) {
             return Err(diagnostic(
                 "22007",
@@ -300,14 +337,58 @@ impl Fields {
         {
             return Err(field_overflow());
         }
+        Ok(())
+    }
+
+    fn date(self, text: &str, control: &ProductionControl<'_>) -> Result<TemporalValue> {
+        let field_overflow = || {
+            input_error(
+                "22008",
+                format_args!("date/time field value out of range: \"{text}\""),
+                None,
+                control,
+            )
+        };
+        let date_overflow = || {
+            input_error(
+                "22008",
+                format_args!("date out of range: \"{text}\""),
+                None,
+                control,
+            )
+        };
+        self.validate_time(field_overflow)?;
         let year = if self.era == 1 {
             self.year.checked_neg().ok_or_else(field_overflow)?
         } else {
             self.year
         };
-        let year = year + i32::from(year < 0);
-        let mut month = if self.month == 0 { 1 } else { self.month };
-        let mut day = if self.day == 0 { 1 } else { self.day };
+        let mut year = year + i32::from(year < 0);
+        let mut month = 1;
+        let mut day = 1;
+        if self.julian != 0 {
+            let date = TemporalDate::from_julian_day(self.julian)
+                .filter(|d| TemporalValue::date_days_in_range(d.unix_days()))
+                .ok_or_else(date_overflow)?;
+            (year, month, day) = (date.year(), date.month() as i32, date.day() as i32);
+        }
+        if self.iso_week != 0 {
+            let weekday = match self.weekday {
+                0 => 0,
+                2.. => self.weekday - 2,
+                _ => 6,
+            };
+            let date = TemporalDate::iso_week_start(year, self.iso_week)
+                .and_then(|monday| monday.checked_add_days(weekday))
+                .ok_or_else(date_overflow)?;
+            (year, month, day) = (date.year(), date.month() as i32, date.day() as i32);
+        }
+        if self.month != 0 {
+            month = self.month;
+        }
+        if self.day != 0 {
+            day = self.day;
+        }
         if self.ordinal != 0 && (month <= 1 || day <= 1) {
             if year == 0 && self.era == 0 {
                 return Err(diagnostic(
@@ -317,17 +398,26 @@ impl Fields {
                     None,
                 ));
             }
-            let jan1 = TemporalDate::from_calendar(year, 1, 1).ok_or_else(field_overflow)?;
+            let iso = self.convention == Some(Convention::IsoWeek);
+            let first = if iso {
+                TemporalDate::iso_week_start(year, 1)
+            } else {
+                TemporalDate::from_calendar(year, 1, 1)
+            }
+            .ok_or_else(field_overflow)?;
             let ordinal = self
                 .ordinal
                 .checked_sub(1)
-                .and_then(|d| jan1.checked_add_days(d))
-                .filter(|d| d.year() == year)
+                .and_then(|d| first.checked_add_days(d))
+                .filter(|d| iso || d.year() == year)
                 .ok_or_else(field_overflow)?;
-            if month <= 1 {
+            if iso {
+                year = ordinal.year();
+            }
+            if iso || month <= 1 {
                 month = ordinal.month() as i32;
             }
-            if day <= 1 {
+            if iso || day <= 1 {
                 day = ordinal.day() as i32;
             }
         }
@@ -338,14 +428,7 @@ impl Fields {
         }
         let date = TemporalDate::from_calendar(year, month as u32, day as u32)
             .filter(|d| TemporalValue::date_days_in_range(d.unix_days()))
-            .ok_or_else(|| {
-                input_error(
-                    "22008",
-                    format_args!("date out of range: \"{text}\""),
-                    None,
-                    control,
-                )
-            })?;
+            .ok_or_else(date_overflow)?;
         Ok(TemporalValue::Date {
             days: date.unix_days(),
         })
@@ -393,6 +476,9 @@ pub(in crate::expr) fn parse_date(
                     None => false,
                 };
                 fields.read(name, spelling, &mut input, !fill && next_digit, control)?;
+                if !exact {
+                    skipped = skip_spaces(&mut input, control)? as i64;
+                }
             }
             Item::Literal { ch, quoted } => {
                 if let Some(next) = input.chars().next() {
