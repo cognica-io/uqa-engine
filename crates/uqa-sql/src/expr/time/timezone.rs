@@ -84,21 +84,41 @@ pub(in crate::expr) fn session_zone(
     engine: Option<&dyn EngineHook>,
     control: &ProductionControl<'_>,
 ) -> Result<TemporalTimeZone> {
+    read_session_zone(engine, control, |name| named_session_zone(&name))
+}
+
+/// A catalog-aware cast admits storage returned by a name-only host callback.
+pub(in crate::expr) fn cast_session_zone(
+    engine: Option<&dyn EngineHook>,
+    control: &ProductionControl<'_>,
+) -> Result<TemporalTimeZone> {
+    read_session_zone(engine, control, |name| {
+        let _memory = control.reserve(name.capacity())?;
+        named_session_zone(&name)
+    })
+}
+
+fn named_session_zone(name: &str) -> Result<TemporalTimeZone> {
+    TemporalTimeZone::named(name).ok_or_else(|| unknown_zone(name))
+}
+
+fn read_session_zone(
+    engine: Option<&dyn EngineHook>,
+    control: &ProductionControl<'_>,
+    decode_name: impl FnOnce(String) -> Result<TemporalTimeZone>,
+) -> Result<TemporalTimeZone> {
     control.check()?;
     let Some(engine) = engine else {
         return Ok(crate::expr::temporal_time_zone());
     };
-    if let Some(zone) = engine.temporal_time_zone()? {
-        control.check()?;
+    let zone = engine.temporal_time_zone()?;
+    control.check()?;
+    if let Some(zone) = zone {
         return Ok(zone);
     }
     let name = engine.runtime_parameter("TimeZone")?;
     control.check()?;
-    let Some(name) = name else {
-        return Ok(crate::expr::temporal_time_zone());
-    };
-    let _memory = control.reserve(name.capacity())?;
-    TemporalTimeZone::named(&name).ok_or_else(|| unknown_zone(&name))
+    name.map_or_else(|| Ok(crate::expr::temporal_time_zone()), decode_name)
 }
 
 fn interval_offset(

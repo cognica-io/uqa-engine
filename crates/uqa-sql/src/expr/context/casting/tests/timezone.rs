@@ -363,6 +363,18 @@ fn zone_callback_storage_and_cancellation_remain_in_the_production_scope() {
     .unwrap();
     assert_eq!(*output, zoned(1_704_132_245_000_000));
     assert_eq!(budget.used(), 0);
+    let inline_budget = MemoryBudget::new(0);
+    let inline_control = ProductionControl::new(&inline_budget, &original, &invoking);
+    let error = super::super::timezone::cast_timestamp(
+        &input,
+        Some(&ColumnType::TimestampTz),
+        Some(&session),
+        &inline_control,
+    )
+    .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("53200"));
+    assert_eq!(session.calls.get(), 2);
+    assert_eq!(inline_budget.used(), 0);
     for cancel_original in [true, false] {
         let original = CancellationToken::new();
         let invoking = CancellationToken::new();
