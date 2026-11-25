@@ -91,24 +91,38 @@ impl TemporalCastTarget {
 
 /// Test whether a temporal constant still reads as `value` when the date order, interval style, time zone and transaction clock change. An ordinary message must reread session-dependent input.
 pub(crate) fn text_input_is_session_independent(
-    text: &str,
+    source: &Value,
     input_type: &ColumnType,
+    target: &str,
     value: &Value,
-) -> bool {
-    let target = input_type.catalog_name();
-    let source = Value::Str(text.into());
-    let reproduces =
-        || super::cast_value_from(&source, &target, None).is_ok_and(|other| other == *value);
-    if matches!(
-        input_type,
-        ColumnType::TimestampTz | ColumnType::TimestampTzPrecision(_)
+    control: &ProductionControl<'_>,
+) -> Result<bool> {
+    let (element, _) =
+        crate::catalog::work::inline(input_type.array_shape_with_work(control, &mut ()))?;
+    let element = element.without_temporal_modifiers();
+    if !matches!(
+        element,
+        ColumnType::Date
+            | ColumnType::Time
+            | ColumnType::TimeTz
+            | ColumnType::Timestamp
+            | ColumnType::TimestampTz
+            | ColumnType::Interval
     ) {
+        return Ok(false);
+    }
+    let reproduces = || match super::cast_value_from_with_control(source, target, None, control) {
+        Ok(other) => Ok(*other == *value),
+        Err(error) if error.native_resource_error().is_some() => Err(error),
+        Err(_) => Ok(false),
+    };
+    if matches!(element, ColumnType::TimestampTz) {
         // Explicit offsets and absolute instants reproduce in both zones.
         for offset in [0, 3_600] {
             let zone = uqa_core::TemporalTimeZone::fixed(offset).expect("valid UTC offset");
             let _zone = crate::expr::temporal_input::TimeZoneScope::enter(zone);
-            if !reproduces() {
-                return false;
+            if !reproduces()? {
+                return Ok(false);
             }
         }
     }
@@ -120,8 +134,8 @@ pub(crate) fn text_input_is_session_independent(
     ] {
         if order != current_order {
             let _order = DateOrderScope::enter(order);
-            if !reproduces() {
-                return false;
+            if !reproduces()? {
+                return Ok(false);
             }
         }
     }
@@ -134,8 +148,8 @@ pub(crate) fn text_input_is_session_independent(
     ] {
         if style != current_style {
             let _style = IntervalStyleScope::enter(style);
-            if !reproduces() {
-                return false;
+            if !reproduces()? {
+                return Ok(false);
             }
         }
     }

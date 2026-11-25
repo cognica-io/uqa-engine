@@ -6,10 +6,11 @@
 
 //! Typed timestamp casts use the invoking session's zone before applying the target type modifier.
 
-use uqa_core::{memory::ProductionControl, TemporalTimeZone, TemporalValue, Value};
+use uqa_core::{memory::ProductionControl, TemporalValue, Value};
 
-use super::{ColumnType, EngineHook, Result, SQLError};
+use super::{ColumnType, EngineHook, Result};
 use crate::expr::temporal_input::TimeZoneScope;
+use crate::expr::time::session_zone;
 
 pub(super) fn input_scope(
     value: &Value,
@@ -17,9 +18,17 @@ pub(super) fn input_scope(
     engine: Option<&dyn EngineHook>,
     control: &ProductionControl<'_>,
 ) -> Result<Option<TimeZoneScope>> {
+    let mut base = target;
+    while let Some(ColumnType::Array(inner) | ColumnType::Domain { base: inner, .. }) = base {
+        base = Some(inner);
+    }
     if matches!(
-        target,
-        Some(ColumnType::TimestampTz | ColumnType::TimestampTzPrecision(_))
+        base.map(ColumnType::without_temporal_modifiers),
+        Some(
+            ColumnType::TimestampTz
+                | ColumnType::Range(crate::ast::RangeSubtype::TimestampTz)
+                | ColumnType::Multirange(crate::ast::RangeSubtype::TimestampTz)
+        )
     ) {
         TimeZoneScope::for_timestamp_input(value, engine, control)
     } else {
@@ -120,26 +129,4 @@ pub(super) fn cast_timestamp(
     Ok(Some(Value::Temporal(TemporalValue::TimestampTz {
         postgres_micros: micros,
     })))
-}
-
-fn session_zone(
-    engine: Option<&dyn EngineHook>,
-    control: &ProductionControl<'_>,
-) -> Result<TemporalTimeZone> {
-    control.check()?;
-    let name = engine
-        .map(|engine| engine.runtime_parameter("TimeZone"))
-        .transpose()?
-        .flatten()
-        .map(|name| {
-            let memory = control.reserve(name.capacity())?;
-            Ok::<_, SQLError>(control.finish(name, memory)?)
-        })
-        .transpose()?;
-    control.check()?;
-    let name = name.as_ref().map_or("UTC", |name| name.as_str());
-    TemporalTimeZone::named(name).ok_or_else(|| SQLError::Routine {
-        sqlstate: "22023".into(),
-        message: format!("time zone \"{name}\" not recognized"),
-    })
 }

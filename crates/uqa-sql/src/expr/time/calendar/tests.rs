@@ -51,6 +51,12 @@ fn overlaps_uses_the_session_calendar_only_for_zoned_periods() {
         cancel: None,
     };
     let ctx = EvalContext::new(None, &[]).with_engine(&session);
+    let _installed = crate::expr::TemporalInputContext {
+        time_zone: TemporalTimeZone::named(session.zone).unwrap(),
+        ..crate::expr::TemporalInputContext::current()
+    }
+    .enter();
+    let detached = EvalContext::new(None, &[]);
     let control = ProductionControl::uncontrolled();
     // PostgreSQL 18.4: the New York civil day crossing this transition lasts 23 hours.
     let day = Value::Temporal(TemporalValue::parse_interval("1 day").unwrap());
@@ -89,21 +95,24 @@ fn overlaps_uses_the_session_calendar_only_for_zoned_periods() {
         ),
     ] {
         let previous_reads = session.reads.get();
-        assert_eq!(
-            scalar_dispatch::eval_scalar_function_with_context("overlaps", &args, &ctx, 0).unwrap(),
-            Value::Bool(expected)
-        );
-        assert_eq!(
-            *scalar_dispatch::eval_generated_scalar_function_with_context(
-                "pg_catalog.overlaps",
-                &args,
-                &control,
-                &ctx,
-                0
-            )
-            .unwrap(),
-            Value::Bool(expected)
-        );
+        for context in [&ctx, &detached] {
+            assert_eq!(
+                scalar_dispatch::eval_scalar_function_with_context("overlaps", &args, context, 0)
+                    .unwrap(),
+                Value::Bool(expected)
+            );
+            assert_eq!(
+                *scalar_dispatch::eval_generated_scalar_function_with_context(
+                    "pg_catalog.overlaps",
+                    &args,
+                    &control,
+                    context,
+                    0
+                )
+                .unwrap(),
+                Value::Bool(expected)
+            );
+        }
         assert_eq!(session.reads.get() - previous_reads, zone_reads);
     }
 }

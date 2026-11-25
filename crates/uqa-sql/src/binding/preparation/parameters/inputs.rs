@@ -105,7 +105,8 @@ impl<I: super::LiteralInput> ParameterTypes<'_, I> {
         }
         let name = input_type.catalog_name_with_control(&control)?;
         let value = crate::expr::cast_value_from_with_control(&input, &name, None, &control)?;
-        let session_dependent = super::input_reads_session(text, input_type, &value, &control)?;
+        let session_dependent =
+            super::input_reads_session(&input, input_type, &name, &value, &control)?;
         Ok(Some(ReadInput {
             value,
             session_dependent,

@@ -352,7 +352,7 @@ pub trait EngineHook {
         Ok(None)
     }
 
-    /// The validated zone of a live session. Detached value evaluation uses UTC.
+    /// The validated zone of a live session. Detached timestamp input inherits the calling thread's temporal context, initially UTC.
     fn temporal_time_zone(&self) -> Result<Option<uqa_core::TemporalTimeZone>> {
         Ok(None)
     }

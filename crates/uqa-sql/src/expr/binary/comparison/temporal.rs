@@ -10,7 +10,7 @@ use std::cmp::Ordering;
 
 use crate::error::Result;
 use crate::expr::EngineHook;
-use uqa_core::{memory::ProductionControl, TemporalInfinity, TemporalTimeZone, TemporalValue};
+use uqa_core::{memory::ProductionControl, TemporalInfinity, TemporalValue};
 
 pub(super) fn compare(
     left: &TemporalValue,
@@ -59,7 +59,7 @@ pub(super) fn compare(
                     .map(EngineHook::temporal_time_zone)
                     .transpose()?
                     .flatten()
-                    .unwrap_or_else(|| TemporalTimeZone::fixed(0).expect("UTC offset"));
+                    .unwrap_or_else(crate::expr::temporal_time_zone);
                 control.check()?;
                 zone.offset_for_local(seconds)
                     .ok_or_else(|| crate::expr::datetime_out_of_range("timestamp"))?
