@@ -21,6 +21,7 @@ struct CommitDuringRestore {
     reader: ManagedConnection,
     writer: ManagedConnection,
     armed: AtomicBool,
+    publish_after_commit: bool,
     opened_tables: AtomicUsize,
 }
 
@@ -35,7 +36,7 @@ impl PersistentStorageBackend for CommitDuringRestore {
 
     fn document_store(&self, table: &str) -> Box<dyn DocumentStore> {
         self.opened_tables.fetch_add(1, Ordering::Relaxed);
-        if self.armed.swap(false, Ordering::AcqRel) {
+        if !self.publish_after_commit && self.armed.swap(false, Ordering::AcqRel) {
             assert!(
                 self.inner.in_transaction(),
                 "external catalog restoration must own a pinned read transaction"
@@ -106,7 +107,12 @@ impl PersistentStorageBackend for CommitDuringRestore {
     }
 
     fn commit_transaction(&self) -> StorageBackendResult<()> {
-        self.inner.commit_transaction()
+        self.inner.commit_transaction()?;
+        if self.publish_after_commit && self.armed.swap(false, Ordering::AcqRel) {
+            let catalog = Catalog::open(self.writer.clone())?;
+            catalog.drop_schema("peer_schema")?;
+        }
+        Ok(())
     }
 
     fn rollback_transaction(&self) -> StorageBackendResult<()> {
@@ -163,6 +169,7 @@ fn external_refresh_keeps_one_snapshot_when_a_writer_commits_during_restore() {
         reader,
         writer,
         armed: AtomicBool::new(true),
+        publish_after_commit: false,
         opened_tables: AtomicUsize::new(0),
     });
     engine.storage.backend = Some(backend.clone());
@@ -221,6 +228,7 @@ fn initialized_session_restores_once_on_a_pinned_view_and_keeps_racing_commits_v
         reader,
         writer: ManagedConnection::open(&path).unwrap(),
         armed: AtomicBool::new(true),
+        publish_after_commit: false,
         opened_tables: AtomicUsize::new(0),
     });
     let restored = Engine::from_initialized_persistent_session(
@@ -261,5 +269,47 @@ fn initialized_session_restores_once_on_a_pinned_view_and_keeps_racing_commits_v
             .unwrap()
             .rows[0]["body"],
         uqa_core::Value::Str("alpha beta".into())
+    );
+}
+
+#[rstest::rstest]
+#[case::clean(false)]
+#[case::peer_commit(true)]
+fn opening_observes_the_catalog_version_restored_before_repairs(#[case] peer_commit: bool) {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("initial-restore.db");
+    let reader = ManagedConnection::open(&path).unwrap();
+    let catalog = Arc::new(Catalog::open(reader.clone()).unwrap());
+    let inner = Arc::new(uqa_storage_sqlite::SQLiteStorageBackend::new(
+        reader.clone(),
+    ));
+    let engine = Engine::from_persistent_backends(catalog.clone(), inner.clone()).unwrap();
+    engine
+        .sql("CREATE SCHEMA peer_schema; CREATE TABLE items(id INT)", &[])
+        .unwrap();
+    drop(engine);
+    let backend = Arc::new(CommitDuringRestore {
+        inner,
+        reader,
+        writer: ManagedConnection::open(&path).unwrap(),
+        armed: AtomicBool::new(peer_commit),
+        publish_after_commit: true,
+        opened_tables: AtomicUsize::new(0),
+    });
+    let engine = Engine::from_persistent_backends(catalog, backend.clone()).unwrap();
+    engine.release_automatic_statistics_client();
+    if !peer_commit {
+        assert_eq!(backend.opened_tables.load(Ordering::Relaxed), 1);
+    }
+    assert_eq!(
+        engine
+            .sql(
+                "SELECT nspname FROM pg_namespace WHERE nspname = 'peer_schema'",
+                &[]
+            )
+            .unwrap()
+            .rows
+            .len(),
+        usize::from(!peer_commit),
     );
 }

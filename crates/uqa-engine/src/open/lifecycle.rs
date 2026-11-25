@@ -546,27 +546,17 @@ impl Engine {
         let restore_backend = Arc::clone(&storage_session.backend);
         let mut engine = Self::empty_persistent_session(storage_session, provider);
         configure(&mut engine);
-        let own_read = !initialize_catalog && !restore_backend.in_transaction();
-        let version_before_read = if own_read {
-            let version = restore_backend.change_version()?;
-            restore_backend.begin_read_transaction()?;
-            restore_backend.pin_transaction_snapshot()?;
-            Some(version)
-        } else {
-            None
-        };
-        // A load-only restore owns one read boundary. Registry validators may
-        // resolve tables without recursively restoring a newer catalog. The
-        // unpublished Engine releases this transaction on errors and unwinds.
-        let read_view_before = restore_backend.read_view_revision()?;
-        let cache_revisions_before;
         if initialize_catalog {
             restore_backend.migrate_document_storage()?;
+            // A physical change monitor can advance independently of the pinned session.
+            // Its value before BEGIN is a safe lower bound for the restored snapshot.
+            let version = restore_backend.change_version()?;
             // A clean restore remains read-only on backends that can promote a transaction, while backends without promotion reserve their writer before the atomic migration scan.
             restore_backend.begin_upgradeable_transaction()?;
             let restore_result = (|| {
                 restore_catalog.initialize_storage()?;
                 let cache_revisions = restore_catalog.cache_revisions()?;
+                let read_view = restore_backend.read_view_revision()?;
                 restore_backend.migrate_inverted_index_storage()?;
                 Self::prepare_catalog_for_initial_restore(restore_catalog.as_ref())?;
                 engine
@@ -578,9 +568,9 @@ impl Engine {
                 )?;
                 engine.repair_reset_fts_storage(restore_catalog.as_ref())?;
                 engine.initialize_catalog_constraint_tuples(&restore_catalog, &restore_backend)?;
-                Ok(cache_revisions)
+                Ok((cache_revisions, read_view))
             })();
-            cache_revisions_before = match restore_result {
+            let (cache_revisions, read_view) = match restore_result {
                 Ok(revisions) => revisions,
                 Err(error) => {
                     return match restore_backend.rollback_transaction() {
@@ -599,23 +589,42 @@ impl Engine {
                     ))),
                 };
             }
-        } else {
-            cache_revisions_before = restore_catalog.cache_revisions()?;
-            engine.restore_from_catalog(
-                restore_catalog.as_ref(),
-                restore_backend.as_ref(),
-                super::CatalogRestoreMode::LoadOnly,
-            )?;
-        }
-        if initialize_catalog {
+
+            *engine.epochs.storage_cache_revisions.lock() = cache_revisions;
+            *engine.epochs.seen_storage_read_view.lock() = read_view;
+            if let Some(version) = version {
+                engine
+                    .epochs
+                    .seen_storage_change_version
+                    .store(version, std::sync::atomic::Ordering::Release);
+            }
             engine.repair_catalog_on_open()?;
+            engine.restore_model_caches(restore_catalog.as_ref())?;
+            return Ok(engine);
         }
+        let own_read = !restore_backend.in_transaction();
+        let version_before_read = if own_read {
+            let version = restore_backend.change_version()?;
+            restore_backend.begin_read_transaction()?;
+            restore_backend.pin_transaction_snapshot()?;
+            Some(version)
+        } else {
+            None
+        };
+        // A load-only restore owns one read boundary. Registry validators may
+        // resolve tables without recursively restoring a newer catalog. The
+        // unpublished Engine releases this transaction on errors and unwinds.
+        let read_view_before = restore_backend.read_view_revision()?;
+        let cache_revisions_before = restore_catalog.cache_revisions()?;
+        engine.restore_from_catalog(
+            restore_catalog.as_ref(),
+            restore_backend.as_ref(),
+            super::CatalogRestoreMode::LoadOnly,
+        )?;
         // Eagerly and fallibly populate read caches. Once open succeeds,
         // cache misses mean absence rather than a swallowed catalog error.
         engine.restore_model_caches(restore_catalog.as_ref())?;
-        // Initial catalog migrations and physical-index repairs above may
-        // commit. Establish the backend monitor baseline only after every
-        // one-time write has completed.
+        // Certify the generations visible to this load-only transaction.
         let cache_revisions_after = restore_catalog.cache_revisions()?;
         let stable_restore = cache_revisions_before == cache_revisions_after;
         if stable_restore {
