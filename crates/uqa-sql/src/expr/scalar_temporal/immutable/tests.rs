@@ -80,7 +80,13 @@ fn temporal_quota_and_both_cancellations_preserve_resource_errors() {
         }
         let budget = MemoryBudget::new(4096);
         let control = ProductionControl::new(&budget, &original, &invoking);
-        for name in ["extract", "make_date", "age", "uuid_extract_version"] {
+        for name in [
+            "extract",
+            "make_date",
+            "to_date",
+            "age",
+            "uuid_extract_version",
+        ] {
             let error = eval_temporal_functions_with_control(name, &[], &control)
                 .unwrap()
                 .unwrap_err();
@@ -88,13 +94,7 @@ fn temporal_quota_and_both_cancellations_preserve_resource_errors() {
             assert_eq!(budget.used(), 0);
         }
     }
-    for name in [
-        "clock_timestamp",
-        "to_char",
-        "to_date",
-        "to_number",
-        "uuidv7",
-    ] {
+    for name in ["clock_timestamp", "to_char", "to_number", "uuidv7"] {
         assert!(eval_temporal_functions_with_control(name, &[], &control).is_none());
     }
 }

@@ -8,6 +8,81 @@ use super::*;
 use uqa_core::{memory::MemoryBudget, CancellationToken, TemporalValue};
 
 #[test]
+fn date_templates_match_postgres_values_and_diagnostics() {
+    // Captured with PostgreSQL 18.4 to_date and ISO DateStyle.
+    let control = ProductionControl::uncontrolled();
+    for (input, template, expected) in [
+        ("29/Feb/2024", "DD/Mon/YYYY", "2024-02-29"),
+        ("2024060", "YYYYDDD", "2024-02-29"),
+        ("69", "YY", "2069-01-01"),
+        ("70", "YY", "1970-01-01"),
+        ("4714-11-24 BC", "YYYY-MM-DD BC", "4714-11-24 BC"),
+        ("5874897-12-31", "YYYY-MM-DD", "5874897-12-31"),
+        ("2024*3*7", "FXYYYY/MM/DD", "2024-03-07"),
+        ("xxx2024", r#""cat"YYYY"#, "2024-01-01"),
+        ("", "YYYY-MM-DD", "0001-01-01 BC"),
+        ("0000", "YYYY", "0001-01-01 BC"),
+        (
+            "2024 2 28 11:15:29.35 PM",
+            "YYYY MM DD HH12:MI:SS.MS PM",
+            "2024-02-28",
+        ),
+        ("2024 31 Monday", "YYYY DD Day", "2024-01-31"),
+        ("20000229", "YYYYMMDD", "2000-02-29"),
+    ] {
+        assert_eq!(
+            parse_date(input, template, &control)
+                .unwrap()
+                .to_sql_string(),
+            expected,
+            "{input} / {template}"
+        );
+    }
+    for (input, template, state, message) in [
+        (
+            "2024-02-30",
+            "YYYY-MM-DD",
+            "22008",
+            r#"date/time field value out of range: "2024-02-30""#,
+        ),
+        (
+            "2023 366",
+            "YYYY DDD",
+            "22008",
+            r#"date/time field value out of range: "2023 366""#,
+        ),
+        (
+            "5880000-01-23",
+            "YYYY-MM-DD",
+            "22008",
+            r#"date out of range: "5880000-01-23""#,
+        ),
+        (
+            "2024-Mxyz-01",
+            "YYYY-Month-DD",
+            "22007",
+            r#"invalid value "Mxyz-01" for "Month""#,
+        ),
+        (
+            "2024 00 AM",
+            "YYYY HH12 AM",
+            "22007",
+            r#"hour "0" is invalid for the 12-hour clock"#,
+        ),
+        (
+            "15x06x2024",
+            "DD-MM-YYYY",
+            "22007",
+            r#"invalid value "x0" for "MM""#,
+        ),
+    ] {
+        let err = parse_date(input, template, &control).unwrap_err();
+        assert_eq!(err.sqlstate(), Some(state));
+        assert_eq!(err.to_string(), message);
+    }
+}
+
+#[test]
 fn calendar_templates_preserve_full_range_fields_and_controlled_output() {
     // PostgreSQL 18.4 to_char, captured from uqa-pg18-projection-reference.
     for (input, template, expected) in [

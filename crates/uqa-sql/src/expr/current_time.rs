@@ -17,11 +17,7 @@ thread_local! {
     static TRANSACTION_CLOCK: Cell<Option<i64>> = const { Cell::new(None) };
 }
 
-/// Read the platform wall clock as Unix microseconds.
-#[must_use]
-pub fn clock_timestamp_micros() -> i64 {
-    chrono::Utc::now().timestamp_micros()
-}
+pub use uqa_core::clock_timestamp_micros;
 
 /// The transaction start entered for the current thread, or `None` outside any statement.
 #[must_use]
@@ -66,6 +62,8 @@ pub(super) fn eval_current_time(
     if !(matches!(
         name,
         "now"
+            | "clock_timestamp"
+            | "timeofday"
             | "transaction_timestamp"
             | "statement_timestamp"
             | "current_timestamp"
@@ -87,6 +85,20 @@ pub(super) fn eval_current_time(
                 expected: "0".into(),
                 actual: args.len(),
             });
+        }
+        if matches!(name, "clock_timestamp" | "timeofday") {
+            let now = clock_timestamp_micros();
+            if name == "clock_timestamp" {
+                return Ok(Value::Temporal(TemporalValue::TimestampTz {
+                    postgres_micros: now - uqa_core::POSTGRES_EPOCH_MICROS,
+                }));
+            }
+            let zone = context
+                .and_then(|ctx| ctx.engine)
+                .map(|engine| engine.runtime_parameter("TimeZone"))
+                .transpose()?
+                .flatten();
+            return timeofday(now, zone.as_deref().unwrap_or("UTC")).map(Value::Str);
         }
         let statement = name == "statement_timestamp";
         let micros = context
@@ -134,9 +146,61 @@ pub(super) fn eval_current_time(
     })())
 }
 
+fn timeofday(unix_micros: i64, zone: &str) -> Result<String> {
+    let (offset, abbreviation) =
+        uqa_core::TemporalTimeZone::local_time_type_at(zone, unix_micros.div_euclid(1_000_000))
+            .ok_or_else(|| SQLError::Routine {
+                sqlstate: "22023".into(),
+                message: format!("time zone \"{zone}\" not recognized"),
+            })?;
+    let local = TemporalValue::Timestamp {
+        postgres_micros: unix_micros - uqa_core::POSTGRES_EPOCH_MICROS
+            + i64::from(offset) * 1_000_000,
+    };
+    let mut text = super::format_temporal(&local, "Dy Mon DD HH24:MI:SS.US YYYY ")?;
+    text.push_str(abbreviation);
+    Ok(text)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn timeofday_uses_the_session_zone_at_the_wall_clock_instant() {
+        let winter = 1_704_153_600_123_456;
+        let summer = 1_719_878_400_123_456;
+        for (instant, zone, expected) in [
+            (winter, "UTC", "Tue Jan 02 00:00:00.123456 2024 UTC"),
+            (
+                winter,
+                "Asia/Kathmandu",
+                "Tue Jan 02 05:45:00.123456 2024 +0545",
+            ),
+            (
+                winter,
+                "America/New_York",
+                "Mon Jan 01 19:00:00.123456 2024 EST",
+            ),
+            (
+                winter,
+                "ABC5XYZ4,M3.2.0,M11.1.0",
+                "Mon Jan 01 19:00:00.123456 2024 ABC",
+            ),
+            (
+                summer,
+                "ABC5XYZ4,M3.2.0,M11.1.0",
+                "Mon Jul 01 20:00:00.123456 2024 XYZ",
+            ),
+            (
+                winter,
+                "<+05:30>-05:30",
+                "Tue Jan 02 05:30:00.123456 2024 +05:30",
+            ),
+        ] {
+            assert_eq!(timeofday(instant, zone).unwrap(), expected);
+        }
+    }
 
     #[test]
     fn temporal_coercion_uses_the_transaction_clock() {

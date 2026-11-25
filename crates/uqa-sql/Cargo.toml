@@ -21,7 +21,6 @@ uqa-pg-regex = { workspace = true }
 ahash = { workspace = true }
 serde = { workspace = true, features = ["rc"] }
 serde_json = { workspace = true }
-chrono = { workspace = true }
 crc32fast = { workspace = true }
 getrandom = { workspace = true }
 icu_casemap = { workspace = true }

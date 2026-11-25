@@ -46,20 +46,21 @@ pub use relation_identity::{
 pub use types::value_image;
 pub use types::work::Work as ValueInputWork;
 pub use types::{
-    compare_bytes_with_control, fixed_char_comparison_text_with_control, jsonb_equality_key,
-    jsonb_equality_key_with_control, write_jsonb_comparison_key, write_jsonb_equality_key,
-    ArrayAssignmentError, ArrayTraversalError, ArrayValue, BitStringValue, BudgetedArrayElements,
-    ControlledArrayElements, DatumValue, DecimalValue, DiskANNIndexStats, DiskANNQueryStats, DocId,
-    Edge, EdgeId, EnumLabelKey, EnumLabelKeyError, EnumLabelKeyParseError, EnumValue, FieldName,
-    GeneralizedPayload, GeneralizedPostingEntry, IndexStats, IndexStatsBuilder, JsonValueDecoder,
-    JsonbKeyError, LegacyVectorKind, LegacyVectorValue, OwnedIndexStats, OwnedValue, PathExpr,
-    PathSegment, Payload, PostingEntry, RecordDatumField, RecordDescriptor, RecordFieldType,
-    RecordIter, RecordIterMut, RecordValue, RowDescriptor, RowValue, TemporalDate,
-    TemporalDateOrder, TemporalDateStyle, TemporalDateTime, TemporalInfinity, TemporalInputError,
-    TemporalIntervalStyle, TemporalTimeZone, TemporalValue, TokenOccurrence, TokenOccurrenceError,
-    TokenOffsets, Value, ValueCopyWork, ValueRetentionError, ValueRetirement, ValueSerialization,
-    VectorGeneration, VectorPopulationStats, VectorQueryRoute, VectorReadStats, Vertex, VertexId,
-    MAX_ENUM_LABEL_KEY_BYTES, POSTGRES_EPOCH_DAYS, POSTGRES_EPOCH_MICROS,
+    clock_timestamp_micros, compare_bytes_with_control, fixed_char_comparison_text_with_control,
+    jsonb_equality_key, jsonb_equality_key_with_control, write_jsonb_comparison_key,
+    write_jsonb_equality_key, ArrayAssignmentError, ArrayTraversalError, ArrayValue,
+    BitStringValue, BudgetedArrayElements, ControlledArrayElements, DatumValue, DecimalValue,
+    DiskANNIndexStats, DiskANNQueryStats, DocId, Edge, EdgeId, EnumLabelKey, EnumLabelKeyError,
+    EnumLabelKeyParseError, EnumValue, FieldName, GeneralizedPayload, GeneralizedPostingEntry,
+    IndexStats, IndexStatsBuilder, JsonValueDecoder, JsonbKeyError, LegacyVectorKind,
+    LegacyVectorValue, OwnedIndexStats, OwnedValue, PathExpr, PathSegment, Payload, PostingEntry,
+    RecordDatumField, RecordDescriptor, RecordFieldType, RecordIter, RecordIterMut, RecordValue,
+    RowDescriptor, RowValue, TemporalDate, TemporalDateOrder, TemporalDateStyle, TemporalDateTime,
+    TemporalInfinity, TemporalInputError, TemporalIntervalStyle, TemporalTimeZone, TemporalValue,
+    TokenOccurrence, TokenOccurrenceError, TokenOffsets, Value, ValueCopyWork, ValueRetentionError,
+    ValueRetirement, ValueSerialization, VectorGeneration, VectorPopulationStats, VectorQueryRoute,
+    VectorReadStats, Vertex, VertexId, MAX_ENUM_LABEL_KEY_BYTES, POSTGRES_EPOCH_DAYS,
+    POSTGRES_EPOCH_MICROS,
 };
 
 mod scored_entry;

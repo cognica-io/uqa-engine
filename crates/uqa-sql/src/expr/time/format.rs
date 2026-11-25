@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Calendar template output uses SQL's full date domain rather than a host date library.
+//! PostgreSQL date templates share field recognition across parsing and formatting.
 
 use std::fmt::Write;
 use uqa_core::{
@@ -35,14 +35,96 @@ const DAYS: [&str; 7] = [
     "Friday",
     "Saturday",
 ];
-const TOKENS: [&str; 20] = [
-    "HH24", "HH12", "YYYY", "Month", "MONTH", "month", "DDD", "Mon", "MON", "mon", "Day", "DAY",
-    "day", "Dy", "DY", "dy", "YY", "MM", "DD", "HH",
+mod input;
+pub(in crate::expr) use input::parse_date;
+
+const TOKENS: &[&str] = &[
+    "HH24", "HH12", "YYYY", "MONTH", "DDD", "MON", "DAY", "DY", "YY", "MM", "DD", "HH", "MI", "SS",
+    "US", "MS", "AM", "PM", "BC", "AD", "FX",
 ];
+
+#[derive(Clone, Copy)]
+enum Item<'a> {
+    Field {
+        name: &'static str,
+        spelling: &'a str,
+        fill: bool,
+    },
+    Literal {
+        ch: char,
+        quoted: bool,
+    },
+}
+
+struct Template<'a> {
+    rest: &'a str,
+    quoted: bool,
+}
+
+impl<'a> Template<'a> {
+    fn new(rest: &'a str) -> Self {
+        Self {
+            rest,
+            quoted: false,
+        }
+    }
+
+    fn field(s: &str) -> Option<(&'static str, &str, bool)> {
+        let fill = s.get(..2).is_some_and(|p| p.eq_ignore_ascii_case("FM"));
+        let s = if fill { &s[2..] } else { s };
+        TOKENS.iter().find_map(|name| {
+            let spelling = s.get(..name.len())?;
+            spelling
+                .eq_ignore_ascii_case(name)
+                .then_some((*name, spelling, fill))
+        })
+    }
+    fn next(
+        &mut self,
+        control: &ProductionControl<'_>,
+    ) -> Result<Option<Item<'a>>, ValueRetentionError> {
+        loop {
+            control.check()?;
+            let Some(ch) = self.rest.chars().next() else {
+                return Ok(None);
+            };
+            if ch == '"' {
+                self.quoted = !self.quoted;
+                self.rest = &self.rest[1..];
+                continue;
+            }
+            if !self.quoted {
+                if let Some((name, spelling, fill)) = Self::field(self.rest) {
+                    self.rest = &self.rest[spelling.len() + if fill { 2 } else { 0 }..];
+                    return Ok(Some(Item::Field {
+                        name,
+                        spelling,
+                        fill,
+                    }));
+                }
+            }
+            self.rest = &self.rest[ch.len_utf8()..];
+            if ch == '\\' && (self.quoted || self.rest.starts_with('"')) {
+                let Some(escaped) = self.rest.chars().next() else {
+                    return Ok(None);
+                };
+                self.rest = &self.rest[escaped.len_utf8()..];
+                return Ok(Some(Item::Literal {
+                    ch: escaped,
+                    quoted: true,
+                }));
+            }
+            return Ok(Some(Item::Literal {
+                ch,
+                quoted: self.quoted,
+            }));
+        }
+    }
+}
 
 pub(super) fn format(
     value: TemporalDateTime,
-    mut template: &str,
+    template: &str,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<String>, ValueRetentionError> {
     let mut output = ProductionString::new(*control);
@@ -51,39 +133,20 @@ pub(super) fn format(
     } else {
         1 - value.year()
     };
-    while !template.is_empty() {
-        control.check()?;
-        if let Some(quoted) = template.strip_prefix('"') {
-            template = quoted;
-            while let Some(character) = template.chars().next() {
-                control.check()?;
-                template = &template[character.len_utf8()..];
-                if character == '"' {
-                    break;
-                }
-                output.push(character)?;
+    let mut template = Template::new(template);
+    while let Some(item) = template.next(control)? {
+        let (token, spelling, fill) = match item {
+            Item::Literal { ch, .. } => {
+                output.push(ch)?;
+                continue;
             }
-            continue;
-        }
-        let fill = template.starts_with("FM");
-        if fill {
-            template = &template[2..];
-        }
-        let token = TOKENS
-            .iter()
-            .copied()
-            .chain([
-                "MI", "SS", "US", "MS", "AM", "PM", "am", "pm", "BC", "AD", "bc", "ad",
-            ])
-            .find(|token| template.starts_with(token));
-        let Some(token) = token else {
-            if let Some(character) = template.chars().next() {
-                output.push(character)?;
-                template = &template[character.len_utf8()..];
-            }
-            continue;
+            Item::Field { name: "FX", .. } => continue,
+            Item::Field {
+                name,
+                spelling,
+                fill,
+            } => (name, spelling, fill),
         };
-        template = &template[token.len()..];
         let numeric = match token {
             "YYYY" => Some((i64::from(year), 4)),
             "YY" => Some((i64::from(year % 100), 2)),
@@ -106,18 +169,18 @@ pub(super) fn format(
             continue;
         }
         let text = match token {
-            "Month" | "MONTH" | "month" => MONTHS[(value.month() - 1) as usize],
-            "Mon" | "MON" | "mon" => &MONTHS[(value.month() - 1) as usize][..3],
-            "Day" | "DAY" | "day" => DAYS[value.date().weekday_sunday() as usize],
-            "Dy" | "DY" | "dy" => &DAYS[value.date().weekday_sunday() as usize][..3],
-            "AM" | "PM" | "am" | "pm" => {
+            "MONTH" => MONTHS[(value.month() - 1) as usize],
+            "MON" => &MONTHS[(value.month() - 1) as usize][..3],
+            "DAY" => DAYS[value.date().weekday_sunday() as usize],
+            "DY" => &DAYS[value.date().weekday_sunday() as usize][..3],
+            "AM" | "PM" => {
                 if value.hour() < 12 {
                     "AM"
                 } else {
                     "PM"
                 }
             }
-            "BC" | "AD" | "bc" | "ad" => {
+            "BC" | "AD" => {
                 if value.year() <= 0 {
                     "BC"
                 } else {
@@ -127,16 +190,16 @@ pub(super) fn format(
             _ => unreachable!("template token was selected"),
         };
         for character in text.chars() {
-            let character = if token.bytes().all(|byte| byte.is_ascii_uppercase()) {
+            let character = if spelling.bytes().all(|byte| byte.is_ascii_uppercase()) {
                 character.to_ascii_uppercase()
-            } else if token.bytes().all(|byte| byte.is_ascii_lowercase()) {
+            } else if spelling.bytes().all(|byte| byte.is_ascii_lowercase()) {
                 character.to_ascii_lowercase()
             } else {
                 character
             };
             output.push(character)?;
         }
-        if !fill && matches!(token, "Month" | "MONTH" | "month" | "Day" | "DAY" | "day") {
+        if !fill && matches!(token, "MONTH" | "DAY") {
             for _ in text.len()..9 {
                 output.push(' ')?;
             }

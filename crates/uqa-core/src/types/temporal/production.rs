@@ -7,11 +7,10 @@
 //! Temporal producers use admitted text and borrowed parser tokens.
 
 use super::{
-    wall_clock_micros, ProductionControl, ProductionString, TemporalDateOrder, TemporalInputError,
-    TemporalValue, ValueRetentionError, MICROS_PER_DAY, MICROS_PER_SECOND,
+    clock_timestamp_micros, ProductionControl, ProductionString, TemporalDateOrder,
+    TemporalInputError, TemporalValue, ValueRetentionError, MICROS_PER_DAY, MICROS_PER_SECOND,
 };
 use crate::memory::Produced;
-use chrono::NaiveTime;
 
 impl TemporalValue {
     pub fn parse_same_kind_with_control(
@@ -19,7 +18,7 @@ impl TemporalValue {
         input: &str,
         control: &ProductionControl<'_>,
     ) -> Result<Option<Self>, ValueRetentionError> {
-        self.parse_same_kind_at_with_control(input, wall_clock_micros(), control)
+        self.parse_same_kind_at_with_control(input, clock_timestamp_micros(), control)
     }
 
     /// Parse this temporal family using the caller's Unix-microsecond clock for special input values.
@@ -70,35 +69,35 @@ impl TemporalValue {
         input: &str,
         control: &ProductionControl<'_>,
     ) -> Result<Option<Self>, ValueRetentionError> {
-        Ok(Self::date_input_with_control(input, wall_clock_micros(), control)?.ok())
+        Ok(Self::date_input_with_control(input, clock_timestamp_micros(), control)?.ok())
     }
 
     pub fn parse_time_with_control(
         input: &str,
         control: &ProductionControl<'_>,
     ) -> Result<Option<Self>, ValueRetentionError> {
-        Ok(Self::time_input_with_control(input, wall_clock_micros(), control)?.ok())
+        Ok(Self::time_input_with_control(input, clock_timestamp_micros(), control)?.ok())
     }
 
     pub fn parse_time_tz_with_control(
         input: &str,
         control: &ProductionControl<'_>,
     ) -> Result<Option<Self>, ValueRetentionError> {
-        Ok(Self::time_tz_input_with_control(input, wall_clock_micros(), control)?.ok())
+        Ok(Self::time_tz_input_with_control(input, clock_timestamp_micros(), control)?.ok())
     }
 
     pub fn parse_timestamp_with_control(
         input: &str,
         control: &ProductionControl<'_>,
     ) -> Result<Option<Self>, ValueRetentionError> {
-        Ok(Self::timestamp_input_with_control(input, wall_clock_micros(), control)?.ok())
+        Ok(Self::timestamp_input_with_control(input, clock_timestamp_micros(), control)?.ok())
     }
 
     pub fn parse_timestamp_tz_with_control(
         input: &str,
         control: &ProductionControl<'_>,
     ) -> Result<Option<Self>, ValueRetentionError> {
-        Ok(Self::timestamp_tz_input_with_control(input, wall_clock_micros(), control)?.ok())
+        Ok(Self::timestamp_tz_input_with_control(input, clock_timestamp_micros(), control)?.ok())
     }
 
     pub fn parse_interval_with_control(
@@ -357,24 +356,24 @@ fn format_time(
     if micros == MICROS_PER_DAY {
         return control.copy_text("24:00:00");
     }
-    let normalized = micros.rem_euclid(MICROS_PER_DAY);
-    let seconds = normalized / MICROS_PER_SECOND;
-    let fraction = normalized % MICROS_PER_SECOND;
-    let (Ok(seconds), Some(nanos)) = (
-        u32::try_from(seconds),
-        fraction
-            .checked_mul(1_000)
-            .and_then(|nanos| u32::try_from(nanos).ok()),
-    ) else {
-        return control.format(format_args!("{normalized}"));
-    };
-    let Some(time) = NaiveTime::from_num_seconds_from_midnight_opt(seconds, nanos) else {
-        return control.format(format_args!("{normalized}"));
-    };
     let mut out = ProductionString::new(*control);
-    out.push_str(&control.format(format_args!("{}", time.format("%H:%M:%S")))?)?;
-    append_fraction(&mut out, fraction as u64, control)?;
+    push_time(&mut out, micros, control)?;
     out.finish()
+}
+
+fn push_time(
+    out: &mut ProductionString<'_>,
+    micros: i64,
+    control: &ProductionControl<'_>,
+) -> Result<(), ValueRetentionError> {
+    let seconds = micros.rem_euclid(MICROS_PER_DAY) / MICROS_PER_SECOND;
+    out.push_str(&control.format(format_args!(
+        "{:02}:{:02}:{:02}",
+        seconds / 3600,
+        seconds / 60 % 60,
+        seconds % 60
+    ))?)?;
+    append_fraction(out, micros.rem_euclid(MICROS_PER_SECOND) as u64, control)
 }
 
 fn format_timestamp(
@@ -385,21 +384,10 @@ fn format_timestamp(
     // Every day in the signed microsecond carrier fits in the integer day carrier.
     let days = micros.div_euclid(MICROS_PER_DAY) as i32 + super::POSTGRES_EPOCH_DAYS;
     let (year, month, day) = super::calendar::to_output_calendar(days);
-    let seconds = micros.rem_euclid(MICROS_PER_DAY) / MICROS_PER_SECOND;
     let mut out = ProductionString::new(*control);
     push_date(&mut out, year, month, day, control)?;
     out.push(' ')?;
-    out.push_str(&control.format(format_args!(
-        "{:02}:{:02}:{:02}",
-        seconds / 3600,
-        seconds / 60 % 60,
-        seconds % 60
-    ))?)?;
-    append_fraction(
-        &mut out,
-        micros.rem_euclid(MICROS_PER_SECOND) as u64,
-        control,
-    )?;
+    push_time(&mut out, micros, control)?;
     if utc {
         out.push_str("+00")?;
     }

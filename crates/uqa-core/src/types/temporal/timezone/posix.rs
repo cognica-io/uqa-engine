@@ -28,14 +28,15 @@ struct Transition {
     seconds: i32,
 }
 
-pub(super) fn parse(name: &str) -> Option<Zone> {
+pub(super) fn parse(name: &str) -> Option<(Zone, (&str, &str))> {
     let mut input = Parser(name.as_bytes());
-    input.designation()?;
+    let standard_name = input.designation()?;
     let standard = -input.offset()?;
     if input.0.is_empty() {
-        return Some(Zone::Fixed(standard));
+        return Some((Zone::Fixed(standard), (standard_name, standard_name)));
     }
-    if input.designation()? == 0 {
+    let daylight_name = input.designation()?;
+    if daylight_name.is_empty() {
         return None;
     }
     let daylight = if input.0.is_empty() || matches!(input.0.first(), Some(b',' | b';')) {
@@ -59,12 +60,15 @@ pub(super) fn parse(name: &str) -> Option<Zone> {
         let end = input.transition()?;
         (start, end)
     };
-    input.0.is_empty().then_some(Zone::Posix(PosixTimeZone {
-        standard,
-        daylight,
-        start,
-        end,
-    }))
+    input.0.is_empty().then_some((
+        Zone::Posix(PosixTimeZone {
+            standard,
+            daylight,
+            start,
+            end,
+        }),
+        (standard_name, daylight_name),
+    ))
 }
 
 enum YearTransitions {
@@ -74,6 +78,11 @@ enum YearTransitions {
 
 impl PosixTimeZone {
     pub(super) fn offset_at(self, unix_seconds: i64) -> Option<i32> {
+        self.offset_and_dst_at(unix_seconds)
+            .map(|(offset, _)| offset)
+    }
+
+    pub(super) fn offset_and_dst_at(self, unix_seconds: i64) -> Option<(i32, bool)> {
         let current_year = UtcDateTime::from_timespec(unix_seconds, 0).ok()?.year();
         let mut latest = None;
         // Times up to a week outside their nominal day can cross the year boundary.
@@ -82,9 +91,9 @@ impl PosixTimeZone {
         for distance in 0..=401 {
             let year = current_year.checked_add(1)?.checked_sub(distance)?;
             if let YearTransitions::Changes(start, end) = self.transitions(year)? {
-                for (at, offset) in [(start, self.daylight), (end, self.standard)] {
+                for (at, is_dst) in [(start, true), (end, false)] {
                     if at <= unix_seconds && latest.is_none_or(|(last, _)| at > last) {
-                        latest = Some((at, offset));
+                        latest = Some((at, is_dst));
                     }
                 }
             }
@@ -93,7 +102,8 @@ impl PosixTimeZone {
             }
         }
         // No transitions in a complete cycle denotes perpetual daylight time.
-        Some(latest.map_or(self.daylight, |(_, offset)| offset))
+        let is_dst = latest.is_none_or(|(_, is_dst)| is_dst);
+        Some((if is_dst { self.daylight } else { self.standard }, is_dst))
     }
 
     pub(super) fn offset_for_local(self, local_seconds: i64) -> Option<i32> {
@@ -176,7 +186,7 @@ fn leap_year(year: i32) -> bool {
 
 struct Parser<'a>(&'a [u8]);
 
-impl Parser<'_> {
+impl<'a> Parser<'a> {
     fn eat(&mut self, byte: u8) -> bool {
         if self.0.first() == Some(&byte) {
             self.0 = &self.0[1..];
@@ -186,19 +196,21 @@ impl Parser<'_> {
         }
     }
 
-    fn designation(&mut self) -> Option<usize> {
+    fn designation(&mut self) -> Option<&'a str> {
         if self.eat(b'<') {
             let end = self.0.iter().position(|byte| *byte == b'>')?;
+            let name = std::str::from_utf8(&self.0[..end]).ok()?;
             self.0 = &self.0[end + 1..];
-            Some(end)
+            Some(name)
         } else {
             let end = self
                 .0
                 .iter()
                 .position(|byte| byte.is_ascii_digit() || matches!(byte, b',' | b'-' | b'+'))
                 .unwrap_or(self.0.len());
-            self.0 = &self.0[end..];
-            Some(end)
+            let (name, rest) = self.0.split_at(end);
+            self.0 = rest;
+            std::str::from_utf8(name).ok()
         }
     }
 

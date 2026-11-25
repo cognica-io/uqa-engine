@@ -9,7 +9,7 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use chrono::{Duration, Utc};
+use time::{format_description::well_known::Rfc3339, Duration, OffsetDateTime};
 use uqa_core::{IndexStats, Value};
 use uqa_scoring::{
     authority_prior, recency_prior, BayesianBM25Params, ExternalPriorScorer, PriorFn,
@@ -82,7 +82,10 @@ fn recency_missing_field_returns_neutral() {
 fn recency_recent_date_gives_high_prior() {
     let prior = recency_prior("timestamp", 30.0);
     let mut fields = BTreeMap::new();
-    fields.insert("timestamp".into(), Value::Str(Utc::now().to_rfc3339()));
+    fields.insert(
+        "timestamp".into(),
+        Value::Str(OffsetDateTime::now_utc().format(&Rfc3339).unwrap()),
+    );
     assert!(prior(&fields) > 0.7);
 }
 
@@ -92,7 +95,11 @@ fn recency_old_date_gives_lower_prior() {
     let mut fields = BTreeMap::new();
     fields.insert(
         "timestamp".into(),
-        Value::Str((Utc::now() - Duration::days(365)).to_rfc3339()),
+        Value::Str(
+            (OffsetDateTime::now_utc() - Duration::days(365))
+                .format(&Rfc3339)
+                .unwrap(),
+        ),
     );
     assert!(prior(&fields) < 0.6);
 }

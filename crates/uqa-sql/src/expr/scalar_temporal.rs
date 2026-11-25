@@ -7,9 +7,8 @@
 //! Temporal, formatting, identity, and UUID built-ins.
 
 use super::{
-    coerce_temporal, datetime_out_of_range, format_pg_number, format_temporal,
-    generate_random_uuid, pg_to_chrono_fmt, typeof_value, value_to_string, DecimalValue, Result,
-    SQLError, TemporalValue, Value,
+    coerce_temporal, format_pg_number, format_temporal, generate_random_uuid, typeof_value,
+    value_to_string, DecimalValue, Result, SQLError, Value,
 };
 use uqa_core::memory::ProductionControl;
 
@@ -33,10 +32,7 @@ pub(super) fn eval_temporal_functions(name: &str, args: &[Value]) -> Option<Resu
     }
     const NAMES: &[&str] = &[
         "to_char",
-        "to_date",
         "to_number",
-        "clock_timestamp",
-        "timeofday",
         "typeof",
         "pg_typeof",
         "gen_random_uuid",
@@ -71,20 +67,6 @@ pub(super) fn eval_temporal_functions(name: &str, args: &[Value]) -> Option<Resu
                     ))),
                 }
             }
-            "to_date" => {
-                if args.len() != 2 {
-                    return Err(SQLError::TypeMismatch("to_date takes 2 args".into()));
-                }
-                let s = value_to_string(&args[0])?;
-                let fmt = pg_to_chrono_fmt(&value_to_string(&args[1])?);
-                let date = chrono::NaiveDate::parse_from_str(&s, &fmt)
-                    .map_err(|e| SQLError::TypeMismatch(format!("to_date: {e}")))?;
-                let epoch = chrono::DateTime::<chrono::Utc>::UNIX_EPOCH.date_naive();
-                Ok(Value::Temporal(TemporalValue::Date {
-                    days: i32::try_from(date.signed_duration_since(epoch).num_days())
-                        .map_err(|_| datetime_out_of_range("date"))?,
-                }))
-            }
             "to_number" => {
                 if args.len() != 2 {
                     return Err(SQLError::TypeMismatch("to_number takes 2 args".into()));
@@ -107,15 +89,6 @@ pub(super) fn eval_temporal_functions(name: &str, args: &[Value]) -> Option<Resu
                     .map(Value::Decimal)
                     .ok_or_else(|| SQLError::TypeMismatch(format!("to_number: {s:?}")))
             }
-            "clock_timestamp" => Ok(Value::Temporal(TemporalValue::TimestampTz {
-                postgres_micros: chrono::Utc::now().timestamp_micros()
-                    - uqa_core::POSTGRES_EPOCH_MICROS,
-            })),
-            "timeofday" => Ok(Value::Str(
-                chrono::Utc::now()
-                    .format("%a %b %d %H:%M:%S%.6f %Y UTC")
-                    .to_string(),
-            )),
             "typeof" | "pg_typeof" => Ok(Value::Str(typeof_value(&args[0]))),
             "gen_random_uuid" | "uuidv4" => {
                 if !args.is_empty() {

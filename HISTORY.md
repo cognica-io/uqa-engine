@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- `to_date` reads calendar templates across the PostgreSQL date range, including BC dates, using the same calendar as date casts and `to_char`. `OVERLAPS` compares typed endpoints at their stored precision and handles reversed, instantaneous and partially unknown periods.
+
 - Opening a native SQLite database skips historical deletions when checking B-tree indexes and restores an unchanged catalog once. An encrypted SQLite open derives the passphrase key once and reuses it across physical connections. Notification, relation-lock and serializable transaction state use separate keys derived from the database key.
 
 - Selective equality joins can probe a primary key or unique index with each outer row. A scalar subquery or a small positive `IN` subquery can also supply the keys for an indexed scan. Primary-key lookups stay selective before column statistics are collected, including in generic prepared plans.

@@ -21,8 +21,8 @@ ignore = [
     # unmaintained and offers no safe upgrade; keep this explicit so real
     # vulnerability advisories still fail the gate.
     "RUSTSEC-2024-0436",
-    # Remove this maintenance exception when #1425 replaces chrono across the
-    # workspace and its transitive dependencies. The notice covers every version.
+    # Arrow and Parquet still require chrono, including through DuckDB.
+    # Remove the exception in #1425 when the full feature graph is clear.
     "RUSTSEC-2026-0543",
 ]
 

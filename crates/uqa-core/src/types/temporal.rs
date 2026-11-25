@@ -7,12 +7,11 @@
 //! SQL temporal values, parsing, formatting, and total ordering.
 
 use super::Ordering;
-#[cfg(test)]
-use super::{DateTime, NaiveDate};
 use crate::{
     memory::{ProductionControl, ProductionString},
     ValueRetentionError,
 };
+use std::time::{SystemTime, UNIX_EPOCH};
 
 mod carriers;
 mod date_style;
@@ -90,23 +89,23 @@ impl TemporalValue {
 
     /// The `parse_*` readers are the input functions with the wall clock standing in for the transaction start that `now` and `today` name; a text the type rejects reads as `None`.
     pub fn parse_date(input: &str) -> Option<Self> {
-        Self::date_input(input, wall_clock_micros()).ok()
+        Self::date_input(input, clock_timestamp_micros()).ok()
     }
 
     pub fn parse_time(input: &str) -> Option<Self> {
-        Self::time_input(input, wall_clock_micros()).ok()
+        Self::time_input(input, clock_timestamp_micros()).ok()
     }
 
     pub fn parse_time_tz(input: &str) -> Option<Self> {
-        Self::time_tz_input(input, wall_clock_micros()).ok()
+        Self::time_tz_input(input, clock_timestamp_micros()).ok()
     }
 
     pub fn parse_timestamp(input: &str) -> Option<Self> {
-        Self::timestamp_input(input, wall_clock_micros()).ok()
+        Self::timestamp_input(input, clock_timestamp_micros()).ok()
     }
 
     pub fn parse_timestamp_tz(input: &str) -> Option<Self> {
-        Self::timestamp_tz_input(input, wall_clock_micros()).ok()
+        Self::timestamp_tz_input(input, clock_timestamp_micros()).ok()
     }
 
     pub fn parse_same_kind(&self, input: &str) -> Option<Self> {
@@ -186,12 +185,17 @@ impl Ord for TemporalValue {
     }
 }
 
-#[cfg(test)]
-fn epoch_date() -> NaiveDate {
-    DateTime::<chrono::Utc>::UNIX_EPOCH.date_naive()
+/// The platform clock in Unix microseconds, which stands in for the transaction start when no statement supplies one.
+#[must_use]
+pub fn clock_timestamp_micros() -> i64 {
+    unix_micros(SystemTime::now())
 }
 
-/// The platform clock in Unix microseconds, which stands in for the transaction start when no statement supplies one.
-fn wall_clock_micros() -> i64 {
-    chrono::Utc::now().timestamp_micros()
+fn unix_micros(instant: SystemTime) -> i64 {
+    match instant.duration_since(UNIX_EPOCH) {
+        Ok(elapsed) => i64::try_from(elapsed.as_micros()).unwrap_or(i64::MAX),
+        // One nanosecond before the epoch is in Unix microsecond -1.
+        Err(error) => i64::try_from(error.duration().as_nanos().div_ceil(1_000))
+            .map_or(i64::MIN, |micros| -micros),
+    }
 }

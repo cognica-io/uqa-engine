@@ -10,8 +10,6 @@
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
 
-#[cfg(test)]
-use chrono::{DateTime, NaiveDate};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// Document identifier.
@@ -82,8 +80,8 @@ pub use posting::{GeneralizedPayload, GeneralizedPostingEntry, Payload, PostingE
 pub use record::{RecordDescriptor, RecordIter, RecordIterMut, RecordValue};
 pub use row::{RecordFieldType, RowDescriptor, RowValue};
 pub use temporal::{
-    TemporalDate, TemporalDateOrder, TemporalDateStyle, TemporalDateTime, TemporalInfinity,
-    TemporalInputError, TemporalIntervalStyle, TemporalTimeZone, TemporalValue,
+    clock_timestamp_micros, TemporalDate, TemporalDateOrder, TemporalDateStyle, TemporalDateTime,
+    TemporalInfinity, TemporalInputError, TemporalIntervalStyle, TemporalTimeZone, TemporalValue,
     POSTGRES_EPOCH_DAYS, POSTGRES_EPOCH_MICROS,
 };
 pub use value::OwnedValue;
