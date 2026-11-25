@@ -6,9 +6,10 @@
 #
 # Build the browser (emscripten) WASM package into crates/uqa-wasm/js/.
 #
-# Requires emscripten (emcc) and the wasm32-unknown-emscripten Rust
-# target:
-#   brew install emscripten          # or emsdk
+# The browser package uses Emscripten SDK 7.0.0 and the matching Rust target.
+# From the SDK directory:
+#   ./emsdk install 7.0.0 && ./emsdk activate 7.0.0
+#   source ./emsdk_env.sh
 #   rustup target add wasm32-unknown-emscripten
 #
 # Usage: scripts/build-wasm.sh [--debug] [--no-default-features] [--features NAMES] [--output-dir DIR]

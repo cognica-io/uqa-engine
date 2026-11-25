@@ -335,7 +335,7 @@ Add `UQA.xcframework` to the application's linked libraries with **Do Not Embed*
 
 ### Browser WebAssembly
 
-Install the [Emscripten SDK](https://emscripten.org/docs/getting_started/downloads.html), activate its environment, then build the browser package:
+Install and activate Emscripten 7.0.0 before building the browser package. The Ubuntu 24.04 build uses LLVM 18's libclang for the PostgreSQL parser bindings. [Emscripten SDK installation](https://emscripten.org/docs/getting_started/downloads.html)
 
 ```sh
 rustup target add wasm32-unknown-emscripten
