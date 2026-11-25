@@ -177,8 +177,8 @@ fn overlaps_compares_typed_endpoints_at_postgresql_precision() {
             [
                 Value::Str("1999-12-31 19:00:00-05".into()),
                 Value::Str("2000-01-01T00:00:00.0000004Z".into()),
-                anchor.clone(),
-                anchor,
+                Value::Temporal(TemporalValue::TimestampTz { postgres_micros: 0 }),
+                Value::Temporal(TemporalValue::TimestampTz { postgres_micros: 0 }),
             ],
             Value::Bool(true),
         ),

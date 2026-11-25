@@ -42,6 +42,59 @@ impl EngineHook for Session<'_> {
     }
 }
 
+#[test]
+fn overlaps_uses_the_session_calendar_only_for_zoned_periods() {
+    use crate::expr::{scalar_dispatch, EvalContext};
+    let session = Session {
+        zone: "America/New_York",
+        reads: Cell::new(0),
+        cancel: None,
+    };
+    let ctx = EvalContext::new(None, &[]).with_engine(&session);
+    let control = ProductionControl::uncontrolled();
+    // PostgreSQL 18.4: the New York civil day crossing this transition lasts 23 hours.
+    let day = Value::Temporal(TemporalValue::parse_interval("1 day").unwrap());
+    let zoned = |text| Value::Temporal(TemporalValue::parse_timestamp_tz(text).unwrap());
+    let civil = |text| Value::Temporal(TemporalValue::parse_timestamp(text).unwrap());
+    for (args, expected) in [
+        (
+            [
+                zoned("2024-03-09 12:00-05"),
+                day.clone(),
+                zoned("2024-03-10 12:30-04"),
+                zoned("2024-03-10 12:45-04"),
+            ],
+            false,
+        ),
+        (
+            [
+                civil("2024-03-09 12:00"),
+                day,
+                civil("2024-03-10 11:30"),
+                civil("2024-03-10 11:45"),
+            ],
+            true,
+        ),
+    ] {
+        assert_eq!(
+            scalar_dispatch::eval_scalar_function_with_context("overlaps", &args, &ctx, 0).unwrap(),
+            Value::Bool(expected)
+        );
+        assert_eq!(
+            *scalar_dispatch::eval_generated_scalar_function_with_context(
+                "pg_catalog.overlaps",
+                &args,
+                &control,
+                &ctx,
+                0
+            )
+            .unwrap(),
+            Value::Bool(expected)
+        );
+    }
+    assert_eq!(session.reads.get(), 2);
+}
+
 fn bytes<const N: usize>(text: &str) -> [u8; N] {
     assert_eq!(text.len(), N * 2);
     std::array::from_fn(|i| u8::from_str_radix(&text[2 * i..2 * i + 2], 16).unwrap())
