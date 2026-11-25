@@ -338,6 +338,7 @@ impl SQLError {
     /// `PostgreSQL` DETAIL field, reported separately from the primary message.
     pub fn detail(&self) -> Option<&str> {
         match self {
+            SQLError::RetainedRoutine(source) => source.error.detail(),
             SQLError::Context { source, .. }
             | SQLError::Position { source, .. }
             | SQLError::InternalPosition { source, .. } => source.detail(),

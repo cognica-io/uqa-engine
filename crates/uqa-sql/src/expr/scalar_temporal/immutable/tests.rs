@@ -14,6 +14,42 @@ fn evaluate(name: &str, args: &[Value], control: &ProductionControl<'_>) -> Prod
 }
 
 #[test]
+fn to_date_borrows_text_and_accounts_for_retained_diagnostics() {
+    let token = CancellationToken::new();
+    let zero = MemoryBudget::new(0);
+    let control = ProductionControl::new(&zero, &token, &token);
+    let template = Value::Str("YYYYMMDD".into());
+    let args = [Value::Str("20000229".into()), template.clone()];
+    assert_eq!(
+        *evaluate("to_date", &args, &control),
+        Value::Temporal(TemporalValue::Date { days: 11_016 })
+    );
+    assert_eq!(
+        *evaluate("to_date", &[Value::Null, template], &control),
+        Value::Null
+    );
+    let invalid = [Value::Str("x".repeat(8192)), Value::Str("Month".into())];
+    let error = eval_temporal_functions_with_control("to_date", &invalid, &control)
+        .unwrap()
+        .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("53200"));
+    assert_eq!(zero.used(), 0);
+    let budget = MemoryBudget::new(32768);
+    let control = ProductionControl::new(&budget, &token, &token);
+    let error = eval_temporal_functions_with_control("to_date", &invalid, &control)
+        .unwrap()
+        .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("22007"));
+    assert_eq!(
+        error.detail(),
+        Some("The given value did not match any of the allowed values for this field.")
+    );
+    assert!(budget.used() >= 8192);
+    drop(error);
+    assert_eq!(budget.used(), 0);
+}
+
+#[test]
 fn temporal_results_preserve_decimal_scale_and_release_only_their_workspace() {
     let budget = MemoryBudget::new(4096);
     let token = CancellationToken::new();

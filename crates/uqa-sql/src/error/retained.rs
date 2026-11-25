@@ -33,7 +33,7 @@ impl SQLError {
         message: Produced<String>,
         control: &ProductionControl<'_>,
     ) -> Result<Self, Self> {
-        Ok(Self::produced_routine_message(sqlstate, message, control)?)
+        Ok(Self::produced_diagnostic(sqlstate, message, None, control)?)
     }
 
     pub(crate) fn admit_internal_message(
@@ -75,31 +75,45 @@ impl SQLError {
         let Some(sqlstate) = self.sqlstate() else {
             return Ok(self);
         };
-        Self::produced_routine_message(sqlstate, control.format(format_args!("{self}"))?, control)
+        Self::produced_diagnostic(
+            sqlstate,
+            control.format(format_args!("{self}"))?,
+            None,
+            control,
+        )
     }
 
-    fn produced_routine_message(
+    pub(crate) fn produced_diagnostic(
         sqlstate: &str,
         message: Produced<String>,
+        detail: Option<&str>,
         control: &ProductionControl<'_>,
     ) -> Result<Self, uqa_core::ValueRetentionError> {
-        if control.budget().is_none() {
-            let (message, memory) = message.into_parts();
-            debug_assert!(memory.is_none());
-            return Ok(Self::Routine {
-                sqlstate: sqlstate.into(),
-                message,
-            });
-        }
         let header = control.reserve(size_of::<RetainedRoutineDiagnostic>())?;
         let state = control.copy_text(sqlstate)?;
+        let detail = detail.map(|s| control.copy_text(s)).transpose()?;
         control.check()?;
         let (sqlstate, state_memory) = state.into_parts();
         let (message, message_memory) = message.into_parts();
-        let memory = control
-            .combine(control.combine(header, state_memory), message_memory)
-            .expect("admitted routine diagnostic");
-        Ok(Self::Routine { sqlstate, message }.with_diagnostic_memory(memory))
+        let memory = control.combine(control.combine(header, state_memory), message_memory);
+        let (error, memory) = if let Some(detail) = detail {
+            let (detail, detail_memory) = detail.into_parts();
+            (
+                Self::Diagnostic {
+                    sqlstate,
+                    message,
+                    detail: Some(detail),
+                    hint: None,
+                },
+                control.combine(memory, detail_memory),
+            )
+        } else {
+            (Self::Routine { sqlstate, message }, memory)
+        };
+        Ok(match memory {
+            Some(memory) => error.with_diagnostic_memory(memory),
+            None => error,
+        })
     }
 }
 

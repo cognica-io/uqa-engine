@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Read PostgreSQL date templates against the same calendar used by date input and output.
+//! Read `PostgreSQL` date templates against the same calendar used by date input and output.
 
 use super::{Item, Template, DAYS, MONTHS};
 use crate::error::{Result, SQLError};
@@ -41,13 +41,16 @@ fn diagnostic(
     }
 }
 
-fn field_overflow(text: &str) -> SQLError {
-    diagnostic(
-        "22008",
-        format!("date/time field value out of range: \"{text}\""),
-        None,
-        None,
-    )
+fn input_error(
+    state: &str,
+    message: std::fmt::Arguments<'_>,
+    detail: Option<&str>,
+    control: &ProductionControl<'_>,
+) -> SQLError {
+    control
+        .format(message)
+        .and_then(|message| SQLError::produced_diagnostic(state, message, detail, control))
+        .unwrap_or_else(SQLError::from)
 }
 
 fn set(field: &mut i32, value: i32, spelling: &str) -> Result<()> {
@@ -63,6 +66,18 @@ fn set(field: &mut i32, value: i32, spelling: &str) -> Result<()> {
     Ok(())
 }
 
+fn skip_spaces(input: &mut &str, control: &ProductionControl<'_>) -> Result<usize> {
+    let mut length = 0_usize;
+    for _ in input.bytes().take_while(u8::is_ascii_whitespace) {
+        if length.is_multiple_of(1024) {
+            control.check()?;
+        }
+        length += 1;
+    }
+    *input = &input[length..];
+    Ok(length)
+}
+
 fn number(
     input: &mut &str,
     width: usize,
@@ -70,6 +85,7 @@ fn number(
     spelling: &str,
     control: &ProductionControl<'_>,
 ) -> Result<(i32, usize)> {
+    let leading = skip_spaces(input, control)?;
     let text = *input;
     let mut end = width.min(text.len());
     while !text.is_char_boundary(end) {
@@ -92,6 +108,8 @@ fn number(
     let source = if fixed { prefix } else { text };
     let digits = source.strip_prefix(['-', '+']).unwrap_or(source);
     let mut length = 0;
+    let sign = if source.starts_with('-') { -1 } else { 1 };
+    let mut value = Some(0_i32);
     for byte in digits.bytes() {
         if !byte.is_ascii_digit() {
             break;
@@ -100,6 +118,8 @@ fn number(
             control.check()?;
         }
         length += 1;
+        let digit = sign * i32::from(byte - b'0');
+        value = value.and_then(|v| v.checked_mul(10)?.checked_add(digit));
     }
     let used = source.len() - digits.len() + length;
     if length == 0 || (fixed && used != width) {
@@ -118,7 +138,7 @@ fn number(
             hint,
         ));
     }
-    let value = source[..used].parse().map_err(|_| {
+    let value = value.ok_or_else(|| {
         diagnostic(
             "22008",
             format!("value for \"{spelling}\" in source string is out of range"),
@@ -131,10 +151,16 @@ fn number(
         )
     })?;
     *input = &text[used..];
-    Ok((value, used))
+    Ok((value, leading + used))
 }
 
-fn word(input: &mut &str, words: &[&str], abbreviated: bool, spelling: &str) -> Result<i32> {
+fn word(
+    input: &mut &str,
+    words: &[&str],
+    abbreviated: bool,
+    spelling: &str,
+    control: &ProductionControl<'_>,
+) -> Result<i32> {
     for (index, name) in words.iter().enumerate() {
         let name = if abbreviated { &name[..3] } else { name };
         if input
@@ -145,12 +171,22 @@ fn word(input: &mut &str, words: &[&str], abbreviated: bool, spelling: &str) -> 
             return Ok(index as i32);
         }
     }
-    let invalid = input.split_ascii_whitespace().next().unwrap_or("");
-    Err(diagnostic(
+    let mut end = 0;
+    for byte in input.bytes() {
+        if byte.is_ascii_whitespace() {
+            break;
+        }
+        if end % 1024 == 0 {
+            control.check()?;
+        }
+        end += 1;
+    }
+    let invalid = &input[..end];
+    Err(input_error(
         "22007",
-        format!("invalid value \"{invalid}\" for \"{spelling}\""),
-        Some("The given value did not match any of the allowed values for this field.".into()),
-        None,
+        format_args!("invalid value \"{invalid}\" for \"{spelling}\""),
+        Some("The given value did not match any of the allowed values for this field."),
+        control,
     ))
 }
 
@@ -167,21 +203,21 @@ impl Fields {
             "MONTH" | "MON" => {
                 return set(
                     &mut self.month,
-                    word(input, &MONTHS, name == "MON", spelling)? + 1,
+                    word(input, &MONTHS, name == "MON", spelling, control)? + 1,
                     spelling,
                 )
             }
             "DAY" | "DY" => {
                 return set(
                     &mut self.weekday,
-                    word(input, &DAYS, name == "DY", spelling)? + 1,
+                    word(input, &DAYS, name == "DY", spelling, control)? + 1,
                     spelling,
                 )
             }
             "AD" | "BC" => {
                 return set(
                     &mut self.era,
-                    word(input, &["AD", "BC"], false, spelling)?,
+                    word(input, &["AD", "BC"], false, spelling, control)?,
                     spelling,
                 )
             }
@@ -189,7 +225,7 @@ impl Fields {
                 self.twelve_hour = true;
                 return set(
                     &mut self.meridiem,
-                    word(input, &["AM", "PM"], false, spelling)?,
+                    word(input, &["AM", "PM"], false, spelling, control)?,
                     spelling,
                 );
             }
@@ -239,7 +275,15 @@ impl Fields {
         set(field, value, spelling)
     }
 
-    fn date(self, text: &str) -> Result<TemporalValue> {
+    fn date(self, text: &str, control: &ProductionControl<'_>) -> Result<TemporalValue> {
+        let field_overflow = || {
+            input_error(
+                "22008",
+                format_args!("date/time field value out of range: \"{text}\""),
+                None,
+                control,
+            )
+        };
         if self.twelve_hour && !(1..=12).contains(&self.hour) {
             return Err(diagnostic(
                 "22007",
@@ -254,12 +298,10 @@ impl Fields {
             || !(0..60).contains(&self.second)
             || !(0..1_000_000).contains(&fraction)
         {
-            return Err(field_overflow(text));
+            return Err(field_overflow());
         }
         let year = if self.era == 1 {
-            self.year
-                .checked_neg()
-                .ok_or_else(|| field_overflow(text))?
+            self.year.checked_neg().ok_or_else(field_overflow)?
         } else {
             self.year
         };
@@ -275,14 +317,13 @@ impl Fields {
                     None,
                 ));
             }
-            let jan1 =
-                TemporalDate::from_calendar(year, 1, 1).ok_or_else(|| field_overflow(text))?;
+            let jan1 = TemporalDate::from_calendar(year, 1, 1).ok_or_else(field_overflow)?;
             let ordinal = self
                 .ordinal
                 .checked_sub(1)
                 .and_then(|d| jan1.checked_add_days(d))
                 .filter(|d| d.year() == year)
-                .ok_or_else(|| field_overflow(text))?;
+                .ok_or_else(field_overflow)?;
             if month <= 1 {
                 month = ordinal.month() as i32;
             }
@@ -293,16 +334,16 @@ impl Fields {
         if !(1..=12).contains(&month)
             || !(1..=TemporalDate::days_in_month(year, month as u32) as i32).contains(&day)
         {
-            return Err(field_overflow(text));
+            return Err(field_overflow());
         }
         let date = TemporalDate::from_calendar(year, month as u32, day as u32)
             .filter(|d| TemporalValue::date_days_in_range(d.unix_days()))
             .ok_or_else(|| {
-                diagnostic(
+                input_error(
                     "22008",
-                    format!("date out of range: \"{text}\""),
+                    format_args!("date out of range: \"{text}\""),
                     None,
-                    None,
+                    control,
                 )
             })?;
         Ok(TemporalValue::Date {
@@ -333,16 +374,7 @@ pub(in crate::expr) fn parse_date(
             && (first || matches!(token, Item::Field { .. }))
             && !matches!(token, Item::Field { name: "FX", .. })
         {
-            for byte in input.bytes() {
-                if !byte.is_ascii_whitespace() {
-                    break;
-                }
-                if skipped % 1024 == 0 {
-                    control.check()?;
-                }
-                input = &input[1..];
-                skipped += 1;
-            }
+            skipped += skip_spaces(&mut input, control)? as i64;
         }
         first = false;
         match token {
@@ -379,5 +411,5 @@ pub(in crate::expr) fn parse_date(
             }
         }
     }
-    fields.date(text)
+    fields.date(text, control)
 }
