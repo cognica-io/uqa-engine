@@ -37,6 +37,10 @@ impl TemporalTimeZone {
     /// This does not search the SQL timezone-abbreviation table.
     #[must_use]
     pub fn named(name: &str) -> Option<Self> {
+        Self::resolve_name(name).map(|(zone, _)| Self(zone))
+    }
+
+    fn resolve_name(name: &str) -> Option<(Zone, Option<(&str, &str)>)> {
         if name.len() > 255 || name.as_bytes().contains(&0) {
             return None;
         }
@@ -48,13 +52,30 @@ impl TemporalTimeZone {
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'/' | b'_' | b'-' | b'+'))
         {
             if let Some(zone) = tzdb_data::find_tz(key.as_bytes()) {
-                return Some(Self(Zone::Named(zone)));
+                return Some((Zone::Named(zone), None));
             }
         }
         if name.starts_with(':') {
             return None;
         }
-        posix::parse(name).map(Self)
+        posix::parse(name).map(|(zone, names)| (zone, Some(names)))
+    }
+
+    /// Return the offset and abbreviation in use at an instant in a named session zone.
+    #[must_use]
+    pub fn local_time_type_at(name: &str, unix_seconds: i64) -> Option<(i32, &str)> {
+        match Self::resolve_name(name)? {
+            (Zone::Named(zone), _) => {
+                let local = zone.find_local_time_type(unix_seconds).ok()?;
+                Some((local.ut_offset(), local.time_zone_designation()))
+            }
+            (Zone::Fixed(offset), Some((standard, _))) => Some((offset, standard)),
+            (Zone::Posix(zone), Some((standard, daylight))) => {
+                let (offset, is_dst) = zone.offset_and_dst_at(unix_seconds)?;
+                Some((offset, if is_dst { daylight } else { standard }))
+            }
+            _ => None,
+        }
     }
 
     /// Resolve a SQL timezone argument, searching `PostgreSQL`'s Default abbreviations first.

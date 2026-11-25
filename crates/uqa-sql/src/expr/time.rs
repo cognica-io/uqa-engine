@@ -10,7 +10,6 @@
 //! months/days/micros model, and `age()` produces the symbolic
 //! year/month decomposition.
 
-use chrono::{NaiveDate, NaiveDateTime};
 use uqa_core::{memory::ProductionControl, TemporalDate, TemporalDateTime, TemporalValue, Value};
 
 use crate::ast::BinaryOp;
@@ -25,9 +24,12 @@ pub(super) use construct::{make_date, make_timestamp};
 mod date_trunc;
 mod extract;
 mod format;
+pub(super) use format::parse_date;
 mod infinite;
 mod interval;
 mod number_format;
+mod overlaps;
+pub(super) use overlaps::overlaps;
 mod timezone;
 mod units;
 
@@ -473,29 +475,6 @@ pub(super) fn date_trunc_value(
     date_trunc::truncate(unit, value, control)
 }
 
-pub(super) fn pg_to_chrono_fmt(fmt: &str) -> String {
-    // Translate a small subset of PostgreSQL `to_date` template tokens
-    // into chrono format specifiers, covering the common `YYYY`, `MM`, `DD`,
-    // `HH24`, `MI`, and `SS` patterns.
-    fmt.replace("YYYY", "%Y")
-        .replace("YY", "%y")
-        .replace("Month", "%B")
-        .replace("Mon", "%b")
-        .replace("MM", "%m")
-        .replace("Day", "%A")
-        .replace("Dy", "%a")
-        .replace("DDD", "%j")
-        .replace("DD", "%d")
-        .replace("HH24", "%H")
-        .replace("HH12", "%I")
-        .replace("MI", "%M")
-        .replace("SS", "%S")
-        .replace("US", "%6f")
-        .replace("MS", "%3f")
-        .replace("AM", "%p")
-        .replace("PM", "%p")
-}
-
 pub(super) fn format_pg_number(value: &Value, fmt: &str) -> Result<String> {
     number_format::format_pg_number(value, fmt)
 }
@@ -537,39 +516,4 @@ pub(super) fn hex_encode(bytes: &[u8]) -> String {
     .expect("ordinary hex encoding")
     .into_uncontrolled()
     .expect("ordinary hex owner")
-}
-
-/// Parse a timestamp string into a UTC `DateTime`. Accepts:
-/// - RFC3339 (`2025-01-31T12:00:00Z`, `2025-01-31T12:00:00+09:00`)
-/// - `PostgreSQL`-ish `YYYY-MM-DD HH:MM:SS[.fff]` (assumed UTC)
-/// - Bare date `YYYY-MM-DD` (midnight UTC).
-pub(super) fn parse_timestamp(s: &str) -> Result<chrono::DateTime<chrono::Utc>> {
-    use chrono::{TimeZone, Utc};
-    if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(s) {
-        return Ok(dt.with_timezone(&Utc));
-    }
-    let formats: &[&str] = &[
-        "%Y-%m-%d %H:%M:%S%.f",
-        "%Y-%m-%d %H:%M:%S",
-        "%Y-%m-%dT%H:%M:%S%.f",
-        "%Y-%m-%dT%H:%M:%S",
-        "%Y-%m-%d %H:%M:%S%.f%#z",
-    ];
-    for fmt in formats {
-        if let Ok(naive) = NaiveDateTime::parse_from_str(s, fmt) {
-            return Ok(Utc.from_utc_datetime(&naive));
-        }
-    }
-    if let Ok(dt) = chrono::DateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S%.f%#z") {
-        return Ok(dt.with_timezone(&Utc));
-    }
-    if let Ok(date) = NaiveDate::parse_from_str(s, "%Y-%m-%d") {
-        let naive = date
-            .and_hms_opt(0, 0, 0)
-            .ok_or_else(|| SQLError::TypeMismatch(format!("bad date {s}")))?;
-        return Ok(Utc.from_utc_datetime(&naive));
-    }
-    Err(SQLError::TypeMismatch(format!(
-        "cannot parse timestamp {s:?}"
-    )))
 }

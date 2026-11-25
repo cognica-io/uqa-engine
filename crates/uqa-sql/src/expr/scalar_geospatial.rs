@@ -6,8 +6,8 @@
 
 //! Point, distance, containment, and temporal-overlap built-ins.
 
-use super::conversion::{to_f64_with_control, value_to_string_with_control};
-use super::{parse_timestamp, point_xy, Result, SQLError, Value};
+use super::conversion::to_f64_with_control;
+use super::{point_xy, Result, SQLError, Value};
 use uqa_core::memory::{Produced, ProductionControl, ProductionVec};
 
 pub(super) fn eval_geospatial_functions(name: &str, args: &[Value]) -> Option<Result<Value>> {
@@ -83,18 +83,7 @@ pub(super) fn eval_geospatial_functions_with_control(
                 };
                 Value::Bool(d <= radius)
             }
-            "overlaps" => {
-                if args.len() != 4 {
-                    return Err(SQLError::TypeMismatch(
-                        "overlaps takes 4 args (start1, end1, start2, end2)".into(),
-                    ));
-                }
-                let s1 = parse_timestamp(&value_to_string_with_control(&args[0], control)?)?;
-                let e1 = parse_timestamp(&value_to_string_with_control(&args[1], control)?)?;
-                let s2 = parse_timestamp(&value_to_string_with_control(&args[2], control)?)?;
-                let e2 = parse_timestamp(&value_to_string_with_control(&args[3], control)?)?;
-                Value::Bool(s1 < e2 && s2 < e1)
-            }
+            "overlaps" => super::time::overlaps(args, control)?,
             _ => unreachable!("function family membership was checked before dispatch"),
         };
         Ok(control.finish(value, control.empty_reservation())?)

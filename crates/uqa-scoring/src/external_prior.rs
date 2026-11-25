@@ -26,6 +26,7 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
+use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 use uqa_core::{IndexStats, Value};
 
 use crate::bayesian_bm25::{BayesianBM25Params, BayesianBM25Scorer};
@@ -95,21 +96,86 @@ impl ExternalPriorScorer {
 
 /// Recency-based prior. Documents with a more recent timestamp in
 /// `field` receive higher prior probability via exponential decay.
-/// Returns `0.5` (neutral) when the field is missing, malformed, or
-/// the timestamp lies in the future.
+/// Missing or malformed timestamps receive the neutral prior, `0.5`.
+/// Future timestamps have zero age.
 pub fn recency_prior(field: impl Into<String>, decay_days: f64) -> PriorFn {
     let field = field.into();
     Arc::new(move |fields: &BTreeMap<String, Value>| -> f64 {
-        let Some(val) = fields.get(&field) else {
+        let Some(Value::Str(timestamp)) = fields.get(&field) else {
             return 0.5;
         };
-        let Some(ts) = parse_timestamp(val) else {
-            return 0.5;
-        };
-        let now = chrono::Utc::now();
-        let age_days = ((now - ts).num_milliseconds() as f64 / 1000.0 / 86_400.0).max(0.0);
-        0.5 + 0.4 * (-age_days / decay_days).exp()
+        recency_at(timestamp, decay_days, OffsetDateTime::now_utc())
     })
+}
+
+fn recency_at(timestamp: &str, decay_days: f64, now: OffsetDateTime) -> f64 {
+    let Some(elapsed) = elapsed_milliseconds(timestamp, now) else {
+        return 0.5;
+    };
+    let age_days = (elapsed as f64 / 1_000.0 / 86_400.0).max(0.0);
+    0.5 + 0.4 * (-age_days / decay_days).exp()
+}
+
+fn elapsed_milliseconds(timestamp: &str, now: OffsetDateTime) -> Option<i128> {
+    if !matches!(timestamp.as_bytes().get(10), Some(b'T' | b't' | b' ')) {
+        return None;
+    }
+    let leap = timestamp.get(17..19) == Some("60");
+    let unicode_minus = timestamp
+        .get(timestamp.len().saturating_sub(8)..)
+        .is_some_and(|tail| tail.starts_with('−'));
+    // Stored timestamps may spell a negative offset with U+2212 or carry an explicit
+    // leap second and its fraction. Preserve those fields before parsing the instant.
+    let mut normalized = [0_u8; 35]; // YYYY-MM-DDTHH:MM:SS.123456789+HH:MM
+    let input = if leap || unicode_minus {
+        let (head, tail) = timestamp.split_at_checked(19)?;
+        normalized[..19].copy_from_slice(head.as_bytes());
+        if leap {
+            normalized[17..19].copy_from_slice(b"59");
+        }
+        let mut len = 19;
+        let offset = if let Some(digits) = tail.strip_prefix('.') {
+            let n = digits.bytes().take_while(u8::is_ascii_digit).count();
+            if n == 0 {
+                return None;
+            }
+            let keep = n.min(9);
+            normalized[len] = b'.';
+            len += 1;
+            normalized[len..len + keep].copy_from_slice(&digits.as_bytes()[..keep]);
+            len += keep;
+            &digits[n..]
+        } else {
+            tail
+        };
+        let offset = if let Some(magnitude) = offset.strip_prefix('−') {
+            normalized[len] = b'-';
+            len += 1;
+            magnitude
+        } else {
+            offset
+        };
+        let end = len + offset.len();
+        normalized
+            .get_mut(len..end)?
+            .copy_from_slice(offset.as_bytes());
+        std::str::from_utf8(&normalized[..end]).ok()?
+    } else {
+        timestamp
+    };
+    let published = OffsetDateTime::parse(input, &Rfc3339).ok()?;
+    if published.offset().whole_hours().unsigned_abs() >= 24 {
+        return None;
+    }
+    let mut elapsed = now - published;
+    // A UTC civil day ends after its leap second. The elapsed fraction still belongs
+    // to that second when the clock's time of day precedes its ordinary predecessor.
+    if leap
+        && now.unix_timestamp().rem_euclid(86_400) <= published.unix_timestamp().rem_euclid(86_400)
+    {
+        elapsed -= time::Duration::SECOND;
+    }
+    Some(elapsed.whole_milliseconds())
 }
 
 /// Authority-based prior. Maps categorical authority levels to prior
@@ -140,24 +206,61 @@ pub fn authority_prior(field: impl Into<String>, levels: Option<BTreeMap<String,
     })
 }
 
-fn parse_timestamp(v: &Value) -> Option<chrono::DateTime<chrono::Utc>> {
-    match v {
-        Value::Str(s) => chrono::DateTime::parse_from_rfc3339(s)
-            .ok()
-            .map(|dt| dt.with_timezone(&chrono::Utc)),
-        _ => None,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn retained_recency_timestamps_preserve_leap_seconds_and_offset_spellings() {
+        let now = OffsetDateTime::parse("2017-01-01T00:00:00.500Z", &Rfc3339).unwrap();
+        for (input, expected) in [
+            ("2016-12-31T23:59:60.125Z", Some(375)),
+            ("2017-01-01T08:59:60.125+09:00", Some(375)),
+            ("2016-12-30T12:15:60.125Z", Some(128_640_375)),
+            ("2024-04-30T20:00:00.0005−04:00", Some(-231_292_799_500)),
+            ("2024-04-30T00:00:00+24:00", None),
+            ("2016-12-31T23:59:60.125Zextra", None),
+        ] {
+            assert_eq!(elapsed_milliseconds(input, now), expected, "{input}");
+        }
+    }
 
     fn stats(n: u64, avgdl: f64) -> Arc<IndexStats> {
         let mut s = IndexStats::default();
         s.total_docs = n;
         s.avg_doc_length = avgdl;
         Arc::new(s)
+    }
+
+    #[test]
+    fn recency_uses_an_offset_instant_and_whole_elapsed_milliseconds() {
+        let now = OffsetDateTime::parse("2024-05-01T00:00:00.001500Z", &Rfc3339).unwrap();
+        let decay = 1.0 / 86_400_000.0;
+        for input in [
+            "2024-05-01T00:00:00.000499999Z",
+            "2024-04-30t20:00:00.000499999-04:00",
+            "2024-05-01 09:00:00.000499999+09:00",
+        ] {
+            let expected = 0.5 + 0.4 * (-1.0_f64).exp();
+            assert!(
+                (recency_at(input, decay, now) - expected).abs() < 1e-12,
+                "{input}"
+            );
+        }
+        assert_eq!(
+            recency_at("2024-05-01T00:00:00.000500001Z", decay, now),
+            0.9
+        );
+        assert_eq!(recency_at("2024-05-02T00:00:00Z", decay, now), 0.9);
+        for invalid in [
+            "now",
+            "2024-05-01",
+            "2024-05-01T00:00:00",
+            "2024-05-01X00:00:00Z",
+            "2024-02-30T12:00:00Z",
+        ] {
+            assert_eq!(recency_at(invalid, decay, now), 0.5, "{invalid}");
+        }
     }
 
     #[test]

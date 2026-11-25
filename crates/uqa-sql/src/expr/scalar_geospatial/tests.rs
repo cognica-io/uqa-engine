@@ -5,7 +5,7 @@
 //
 
 use super::*;
-use uqa_core::{memory::MemoryBudget, CancellationToken, DecimalValue};
+use uqa_core::{memory::MemoryBudget, CancellationToken, DecimalValue, TemporalValue};
 
 fn evaluate(name: &str, args: &[Value], control: &ProductionControl<'_>) -> Produced<Value> {
     eval_geospatial_functions_with_control(name, args, control)
@@ -137,5 +137,52 @@ fn geospatial_producers_observe_original_and_invoking_cancellation() {
             assert_eq!(budget.used(), 0);
         }
         assert!(eval_geospatial_functions_with_control("unrelated", &[], &control).is_none());
+    }
+}
+
+#[test]
+fn overlaps_compares_typed_endpoints_at_postgresql_precision() {
+    let control = ProductionControl::uncontrolled();
+    let ts = |s| Value::Temporal(TemporalValue::parse_timestamp(s).unwrap());
+    let anchor = ts("2000-01-01");
+    let next = ts("2000-01-02");
+    let end = ts("2000-01-03");
+    // PostgreSQL 18.4 OVERLAPS resolves reversed, instantaneous and unknown periods.
+    for (args, expected) in [
+        (
+            [next.clone(), anchor.clone(), anchor.clone(), end.clone()],
+            Value::Bool(true),
+        ),
+        (
+            [anchor.clone(), anchor.clone(), anchor.clone(), next.clone()],
+            Value::Bool(true),
+        ),
+        (
+            [anchor.clone(), next.clone(), next.clone(), next.clone()],
+            Value::Bool(false),
+        ),
+        (
+            [next.clone(), Value::Null, anchor.clone(), end.clone()],
+            Value::Bool(true),
+        ),
+        (
+            [end, Value::Null, anchor.clone(), next.clone()],
+            Value::Null,
+        ),
+        (
+            [Value::Null, Value::Null, anchor.clone(), next],
+            Value::Null,
+        ),
+        (
+            [
+                Value::Str("1999-12-31 19:00:00-05".into()),
+                Value::Str("2000-01-01T00:00:00.0000004Z".into()),
+                anchor.clone(),
+                anchor,
+            ],
+            Value::Bool(true),
+        ),
+    ] {
+        assert_eq!(*evaluate("overlaps", &args, &control), expected);
     }
 }

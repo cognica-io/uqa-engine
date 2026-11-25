@@ -5,11 +5,21 @@
 //
 
 use super::*;
-use crate::types::temporal::epoch_date;
 use crate::{memory::MemoryBudget, CancellationToken};
-use chrono::NaiveDate;
 
 mod interval_limits;
+
+#[test]
+fn unix_clock_floors_partial_microseconds_on_either_side_of_the_epoch() {
+    use crate::types::temporal::unix_micros;
+    use std::time::{Duration, UNIX_EPOCH};
+
+    for (nanos, before, after) in [(0, 0, 0), (100, -1, 0), (1_000, -1, 1), (1_100, -2, 1)] {
+        let delta = Duration::from_nanos(nanos);
+        assert_eq!(unix_micros(UNIX_EPOCH - delta), before);
+        assert_eq!(unix_micros(UNIX_EPOCH + delta), after);
+    }
+}
 
 #[test]
 fn second_precision_zones_retain_postgresql_timetz_binary_fields_and_output() {
@@ -308,56 +318,36 @@ fn same_kind_parser_preserves_each_temporal_variant_and_cancellation() {
 
 #[test]
 fn years_print_without_a_sign_and_with_the_bc_era() {
-    let days = |year, month, day| {
-        i32::try_from(
-            NaiveDate::from_ymd_opt(year, month, day)
-                .unwrap()
-                .signed_duration_since(epoch_date())
-                .num_days(),
-        )
-        .unwrap()
-    };
-    let micros = |year, month, day, seconds: i64| {
-        i64::from(days(year, month, day)) * MICROS_PER_DAY + seconds * MICROS_PER_SECOND
-    };
+    // PostgreSQL 18.4 dates relative to 1970 and timestamps relative to 2000.
     assert_eq!(
-        TemporalValue::Date {
-            days: days(99_999, 1, 1)
-        }
-        .to_sql_string(),
+        TemporalValue::Date { days: 35_804_357 }.to_sql_string(),
         "99999-01-01"
     );
     assert_eq!(
-        TemporalValue::Date {
-            days: days(0, 12, 31)
-        }
-        .to_sql_string(),
+        TemporalValue::Date { days: -719_163 }.to_sql_string(),
         "0001-12-31 BC"
     );
     assert_eq!(
-        TemporalValue::Date {
-            days: days(-1, 6, 15)
-        }
-        .to_sql_string(),
+        TemporalValue::Date { days: -719_728 }.to_sql_string(),
         "0002-06-15 BC"
     );
     assert_eq!(
         TemporalValue::Timestamp {
-            postgres_micros: (micros(99_999, 1, 1, 0)) - crate::POSTGRES_EPOCH_MICROS
+            postgres_micros: 3_092_549_760_000_000_000
         }
         .to_sql_string(),
         "99999-01-01 00:00:00"
     );
     assert_eq!(
         TemporalValue::Timestamp {
-            postgres_micros: (micros(0, 12, 31, 86_399)) - crate::POSTGRES_EPOCH_MICROS
+            postgres_micros: -63_082_281_601_000_000
         }
         .to_sql_string(),
         "0001-12-31 23:59:59 BC"
     );
     assert_eq!(
         TemporalValue::TimestampTz {
-            postgres_micros: (micros(-1, 6, 15, 36_000)) - crate::POSTGRES_EPOCH_MICROS
+            postgres_micros: -63_131_148_000_000_000
         }
         .to_sql_string(),
         "0002-06-15 10:00:00+00 BC"

@@ -65,7 +65,6 @@ pub use range::{
 pub use time::IntervalFields;
 use time::{
     age_between, coerce_temporal, format_pg_number, format_temporal, hex_encode, make_timestamp,
-    parse_timestamp, pg_to_chrono_fmt,
 };
 pub(crate) use uuid::format_uuid;
 use uuid::generate_random_uuid;

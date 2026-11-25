@@ -5,8 +5,6 @@
 //
 
 use super::*;
-use crate::types::temporal::epoch_date;
-use chrono::NaiveDate;
 
 /// 2024-03-15 13:45:30.5 UTC as Unix microseconds, the transaction start the special values resolve against.
 const NOW: i64 = 1_710_510_330_500_000;
@@ -483,22 +481,14 @@ fn intervals_keep_syntax_and_overflow_apart() {
 
 #[test]
 fn eras_count_years_before_the_common_era() {
-    let days = |year, month, day| {
-        i32::try_from(
-            NaiveDate::from_ymd_opt(year, month, day)
-                .unwrap()
-                .signed_duration_since(epoch_date())
-                .num_days(),
-        )
-        .unwrap()
-    };
+    // PostgreSQL 18.4 dates relative to 1970 and timestamps relative to 2000.
     assert_eq!(
         TemporalValue::date_input("0001-01-01 BC", NOW),
-        Ok(date(days(0, 1, 1)))
+        Ok(date(-719_528))
     );
     assert_eq!(
         TemporalValue::date_input("0002-06-15 bc", NOW),
-        Ok(date(days(-1, 6, 15)))
+        Ok(date(-719_728))
     );
     assert_eq!(
         TemporalValue::date_input("2024-01-01 AD", NOW),
@@ -507,8 +497,7 @@ fn eras_count_years_before_the_common_era() {
     assert_eq!(
         TemporalValue::timestamp_tz_input("0002-06-15 10:00 BC", NOW),
         Ok(TemporalValue::TimestampTz {
-            postgres_micros: (i64::from(days(-1, 6, 15)) * DAY + 10 * 3_600_000_000)
-                - crate::POSTGRES_EPOCH_MICROS
+            postgres_micros: -63_131_148_000_000_000
         })
     );
     for text in ["0000-01-01", "0000-01-01 BC"] {

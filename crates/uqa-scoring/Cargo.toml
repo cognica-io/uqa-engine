@@ -17,12 +17,13 @@ exclude.workspace = true
 [dependencies]
 uqa-core = { workspace = true }
 uqa-storage = { workspace = true }
-chrono = { workspace = true }
+time = { workspace = true, features = ["std"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
+time = { workspace = true, features = ["formatting"] }
 allocation-counter = "=0.8.1"
 uqa-analysis = { workspace = true }
 criterion = { workspace = true }

@@ -15,7 +15,6 @@ documentation = "https://docs.rs/uqa-core"
 exclude.workspace = true
 
 [dependencies]
-chrono = { workspace = true }
 tz-rs = { workspace = true }
 tzdb_data = { workspace = true }
 num-bigint = { workspace = true }

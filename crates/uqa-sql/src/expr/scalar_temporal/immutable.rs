@@ -49,7 +49,8 @@ pub(in crate::expr) fn eval_temporal_functions_with_control(
     }
     if !matches!(
         name,
-        "to_timestamp"
+        "to_date"
+            | "to_timestamp"
             | "extract"
             | "date_part"
             | "age"
@@ -74,6 +75,22 @@ pub(in crate::expr) fn eval_temporal_functions_with_control(
         let integer = |value| to_i64_with_control(value, control);
         let float = |value| to_f64_with_control(value, control);
         match name {
+            "to_date" => {
+                let [input, template] = args else {
+                    return Err(SQLError::TypeMismatch("to_date takes 2 args".into()));
+                };
+                if matches!(input, Value::Null) || matches!(template, Value::Null) {
+                    return inline(Value::Null);
+                }
+                let date = if let (Value::Str(input), Value::Str(template)) = (input, template) {
+                    super::super::time::parse_date(input, template, control)?
+                } else {
+                    let input = value_to_string_with_control(input, control)?;
+                    let template = value_to_string_with_control(template, control)?;
+                    super::super::time::parse_date(&input, &template, control)?
+                };
+                inline(Value::Temporal(date))
+            }
             "to_timestamp" => {
                 if args.len() != 1 {
                     return Err(SQLError::TypeMismatch("to_timestamp takes 1 arg".into()));
