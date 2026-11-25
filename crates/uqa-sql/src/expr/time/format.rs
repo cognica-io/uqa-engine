@@ -39,8 +39,9 @@ mod input;
 pub(in crate::expr) use input::parse_date;
 
 const TOKENS: &[&str] = &[
-    "HH24", "HH12", "YYYY", "MONTH", "DDD", "MON", "DAY", "DY", "YY", "MM", "DD", "HH", "MI", "SS",
-    "US", "MS", "AM", "PM", "BC", "AD", "FX",
+    "HH24", "HH12", "IYYY", "IDDD", "YYYY", "MONTH", "IYY", "YYY", "DDD", "MON", "DAY", "IW", "ID",
+    "IY", "DY", "YY", "MM", "DD", "HH", "MI", "SS", "US", "MS", "AM", "PM", "BC", "AD", "FX", "I",
+    "Y", "D", "J",
 ];
 
 #[derive(Clone, Copy)]
@@ -122,17 +123,28 @@ impl<'a> Template<'a> {
     }
 }
 
+fn year_field(date: TemporalDateTime, token: &str) -> (i64, usize) {
+    let year = if token.starts_with('I') {
+        date.date().iso_week().0
+    } else {
+        date.year()
+    };
+    let year = if year > 0 { year } else { 1 - year };
+    let width = token.len();
+    let digits = if width == 4 {
+        year
+    } else {
+        year % 10_i32.pow(width as u32)
+    };
+    (i64::from(digits), width)
+}
+
 pub(super) fn format(
     value: TemporalDateTime,
     template: &str,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<String>, ValueRetentionError> {
     let mut output = ProductionString::new(*control);
-    let year = if value.year() > 0 {
-        value.year()
-    } else {
-        1 - value.year()
-    };
     let mut template = Template::new(template);
     while let Some(item) = template.next(control)? {
         let (token, spelling, fill) = match item {
@@ -148,8 +160,20 @@ pub(super) fn format(
             } => (name, spelling, fill),
         };
         let numeric = match token {
-            "YYYY" => Some((i64::from(year), 4)),
-            "YY" => Some((i64::from(year % 100), 2)),
+            "YYYY" | "YYY" | "YY" | "Y" | "IYYY" | "IYY" | "IY" | "I" => {
+                Some(year_field(value, token))
+            }
+            "J" => Some((value.date().julian_day(), 1)),
+            "IW" => Some((i64::from(value.date().iso_week().1), 2)),
+            "ID" => Some((i64::from(value.date().weekday_monday() + 1), 1)),
+            "IDDD" => {
+                let date = value.date();
+                Some((
+                    i64::from((date.iso_week().1 - 1) * 7 + date.weekday_monday() + 1),
+                    3,
+                ))
+            }
+            "D" => Some((i64::from(value.date().weekday_sunday() + 1), 1)),
             "MM" => Some((i64::from(value.month()), 2)),
             "DD" => Some((i64::from(value.day()), 2)),
             "DDD" => Some((i64::from(value.date().ordinal()), 3)),

@@ -250,15 +250,11 @@ fn timestamp_part(unit: Unit, micros: i64, offset_seconds: Option<i32>) -> Resul
     let time = datetime.time_micros();
     if unit == Unit::Julian {
         return Ok(Some(Part::Julian {
-            day: julian_day(datetime.date()),
+            day: datetime.date().julian_day(),
             micros: time,
         }));
     }
     Ok(clock_part(unit, time).or_else(|| calendar_part(unit, datetime.date()).map(Part::Integer)))
-}
-
-fn julian_day(date: TemporalDate) -> i64 {
-    i64::from(date.unix_days()) + 2_440_588
 }
 
 fn calendar_part(unit: Unit, date: TemporalDate) -> Option<i64> {
@@ -301,7 +297,7 @@ fn calendar_part(unit: Unit, date: TemporalDate) -> Option<i64> {
                 year - 1
             }
         }
-        Unit::Julian => julian_day(date),
+        Unit::Julian => date.julian_day(),
         _ => return None,
     })
 }

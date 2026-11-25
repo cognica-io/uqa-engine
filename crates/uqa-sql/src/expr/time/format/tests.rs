@@ -31,6 +31,18 @@ fn date_templates_match_postgres_values_and_diagnostics() {
         ),
         ("2024 31 Monday", "YYYY DD Day", "2024-01-31"),
         ("20000229", "YYYYMMDD", "2000-02-29"),
+        ("2024-09-4", "IYYY-IW-ID", "2024-02-29"),
+        ("2020-53-7", "IYYY-IW-ID", "2021-01-03"),
+        ("2024-09-Sun", "IYYY-IW-Dy", "2024-03-03"),
+        ("4-09-4", "I-IW-ID", "2004-02-26"),
+        ("2024-366", "IYYY-IDDD", "2024-12-31"),
+        ("2451545", "J", "2000-01-01"),
+        ("2147483493", "J", "5874897-12-31"),
+        ("1", "J", "4714-11-25 BC"),
+        ("0", "J", "0001-01-01 BC"),
+        (" 2024x02x29", r#"YYYY"x"MM"x"DD"#, "2024-02-29"),
+        ("2024x02x29", r#"YYYY"x"MM"x"DD"#, "2024-02-29"),
+        ("2024  02 29", r#"YYYY"x"MM"x"DD"#, "2024-02-29"),
     ] {
         assert_eq!(
             parse_date(input, template, &control)
@@ -41,6 +53,19 @@ fn date_templates_match_postgres_values_and_diagnostics() {
         );
     }
     for (input, template, state, message) in [
+        (
+            "2147483494",
+            "J",
+            "22008",
+            r#"date out of range: "2147483494""#,
+        ),
+        ("-1", "J", "22008", r#"date out of range: "-1""#),
+        (
+            "2024-03",
+            "IYYY-MM",
+            "22007",
+            "invalid combination of date conventions",
+        ),
         (
             "2024-02-30",
             "YYYY-MM-DD",
@@ -99,6 +124,21 @@ fn calendar_templates_preserve_full_range_fields_and_controlled_output() {
             "4714-11-24 328 Mon Monday    00:00:00.000000 November BC",
         ),
         ("2000-01-01", "\"quoted 世界\" YYYY", "quoted 世界 2000"),
+        (
+            "2024-02-29",
+            "IYYY-IW-ID IDDD J IYY IY I",
+            "2024-09-4 060 2460370 024 24 4",
+        ),
+        (
+            "2021-01-03",
+            "IYYY-IW-ID IDDD J IYY IY I",
+            "2020-53-7 371 2459218 020 20 0",
+        ),
+        (
+            "0001-01-01 BC",
+            "IYYY-IW-ID IDDD J IYY IY I",
+            "0002-52-6 363 1721060 002 02 2",
+        ),
     ] {
         let TemporalValue::Timestamp { postgres_micros } =
             TemporalValue::parse_timestamp(input).unwrap()

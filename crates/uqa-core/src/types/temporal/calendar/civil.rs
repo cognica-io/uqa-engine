@@ -6,7 +6,7 @@
 
 //! Gregorian calendar fields span the complete SQL date and timestamp carriers.
 
-use super::{from_calendar, to_output_calendar};
+use super::{from_calendar, to_output_calendar, UNIX_EPOCH_JULIAN};
 use crate::types::temporal::{MICROS_PER_DAY, MICROS_PER_SECOND, POSTGRES_EPOCH_DAYS};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -20,6 +20,16 @@ impl TemporalDate {
     }
     pub const fn unix_days(self) -> i32 {
         self.days
+    }
+
+    pub fn julian_day(self) -> i64 {
+        i64::from(self.days) + UNIX_EPOCH_JULIAN
+    }
+
+    pub fn from_julian_day(day: i32) -> Option<Self> {
+        i32::try_from(i64::from(day) - UNIX_EPOCH_JULIAN)
+            .ok()
+            .map(Self::from_unix_days)
     }
 
     pub fn from_calendar(year: i32, month: u32, day: u32) -> Option<Self> {
@@ -57,6 +67,12 @@ impl TemporalDate {
     }
     pub fn weekday_monday(self) -> u32 {
         (self.weekday_sunday() + 6) % 7
+    }
+    /// The first ISO week contains January 4. Week offsets can cross a calendar year boundary.
+    pub fn iso_week_start(year: i32, week: i32) -> Option<Self> {
+        let fourth = Self::from_calendar(year, 1, 4)?;
+        let days = week.checked_sub(1)?.checked_mul(7)?;
+        fourth.checked_add_days(days.checked_sub(fourth.weekday_monday() as i32)?)
     }
     pub fn ordinal(self) -> u32 {
         let (_, month, day) = to_output_calendar(self.days);
