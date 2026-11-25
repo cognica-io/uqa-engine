@@ -7,9 +7,10 @@
 //! Engine restore and sibling publication consume the native logical provider contract.
 
 use super::{create_cross_store_table, scalar_int};
+use crate::notification_registry;
 use std::{path::Path, sync::Arc};
 use uqa_engine::{Engine, ScoringMode};
-use uqa_storage::mvcc::VersionedSessionOptions;
+use uqa_storage::{encryption_key::AuxiliaryFile, mvcc::VersionedSessionOptions};
 use uqa_storage_sqlite::{
     Catalog, ManagedConnection, SQLiteCompressionOptions, SQLiteStorageProvider,
 };
@@ -131,23 +132,20 @@ fn assert_notifications(engine: &Engine, observer: &Engine, path: &Path, mode: M
         .unwrap();
     assert_eq!(observer.take_sql_notifications().len(), 0);
     if matches!(mode, Mode::Encrypted | Mode::CompressedEncrypted) {
-        let mut registry = path.as_os_str().to_owned();
-        registry.push(".uqa-notification-state");
-        let registry = std::path::PathBuf::from(registry);
-        let raw = rusqlite::Connection::open(&registry).unwrap();
+        let raw = notification_registry::open(path, None);
         assert!(raw
             .query_row("SELECT payload FROM queue_entries", [], |row| row
                 .get::<_, String>(0))
             .is_err());
         drop(raw);
-        let keyed = rusqlite::Connection::open(&registry).unwrap();
-        keyed.pragma_update(None, "key", KEY).unwrap();
+        let main = mode.open(path);
+        let keyed = notification_registry::open(path, main.auxiliary_encryption_key());
         let retained: String = keyed
             .query_row("SELECT payload FROM queue_entries", [], |row| row.get(0))
             .unwrap();
         assert_eq!(retained, PAYLOAD);
         drop(keyed);
-        let bytes = std::fs::read(registry).unwrap();
+        let bytes = std::fs::read(AuxiliaryFile::Notifications.path(path)).unwrap();
         for marker in [CHANNEL, PAYLOAD, KEY] {
             assert!(!bytes
                 .windows(marker.len())

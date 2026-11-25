@@ -10,6 +10,10 @@ use uqa_storage::{DocumentMetadata, StoredDocument};
 #[path = "../tests/support/native_catalog.rs"]
 pub(crate) mod native_storage;
 
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
+#[path = "../tests/support/notification_registry.rs"]
+pub(crate) mod notification_registry;
+
 #[path = "../tests/support/pg18_oracle.rs"]
 mod pg18_oracle;
 
