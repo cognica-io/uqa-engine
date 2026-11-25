@@ -179,9 +179,9 @@ pub(super) fn eval_scalar_function_with_context(
     if name.strip_prefix("pg_catalog.").unwrap_or(name) == "uuidv7" {
         return super::uuid::eval_uuid_v7(args, Some(context));
     }
-    if name.strip_prefix("pg_catalog.").unwrap_or(name) == "timezone" {
-        return super::time::eval_timezone(args, Some(context), &ProductionControl::uncontrolled())
-            .map(|value| value.into_uncontrolled().expect("ordinary temporal result"));
+    if let Some(result) = session_temporal(name, args, context, &ProductionControl::uncontrolled())
+    {
+        return result.map(|value| value.into_uncontrolled().expect("ordinary temporal result"));
     }
     if let Some(result) = eval_array_comparison_with_context(
         name.strip_prefix("pg_catalog.").unwrap_or(name),
@@ -200,6 +200,19 @@ pub(super) fn eval_scalar_function_with_context(
             .as_ref()
             .map(|catalog| catalog as &dyn super::SQLValueCatalog),
     )
+}
+
+fn session_temporal(
+    name: &str,
+    args: &[Value],
+    context: &EvalContext<'_>,
+    control: &ProductionControl<'_>,
+) -> Option<Result<Produced<Value>>> {
+    match name.strip_prefix("pg_catalog.").unwrap_or(name) {
+        "timezone" => Some(super::time::eval_timezone(args, Some(context), control)),
+        "overlaps" => Some(super::time::overlaps(args, Some(context), control)),
+        _ => None,
+    }
 }
 
 fn eval_array_comparison_with_context(
@@ -232,8 +245,8 @@ pub(super) fn eval_generated_scalar_function_with_context(
     context: &EvalContext<'_>,
     collation: u32,
 ) -> Result<Produced<Value>> {
-    if name.strip_prefix("pg_catalog.").unwrap_or(name) == "timezone" {
-        return super::time::eval_timezone(args, Some(context), control);
+    if let Some(result) = session_temporal(name, args, context, control) {
+        return result;
     }
     if let Some(result) = eval_array_comparison_with_context(
         name.strip_prefix("pg_catalog.").unwrap_or(name),

@@ -83,7 +83,7 @@ pub(super) fn eval_geospatial_functions_with_control(
                 };
                 Value::Bool(d <= radius)
             }
-            "overlaps" => super::time::overlaps(args, control)?,
+            "overlaps" => return super::time::overlaps(args, None, control),
             _ => unreachable!("function family membership was checked before dispatch"),
         };
         Ok(control.finish(value, control.empty_reservation())?)
