@@ -34,10 +34,8 @@ jobs:
         if: matrix.target == 'wasm'
         with:
           node-version: "20"
-      - uses: mymindstorm/setup-emsdk@v14
+      - uses: ./.github/actions/setup-browser-emscripten
         if: matrix.target == 'wasm'
-        with:
-          version: latest
       - name: Install the Emscripten Rust target
         if: matrix.target == 'wasm'
         run: rustup target add wasm32-unknown-emscripten

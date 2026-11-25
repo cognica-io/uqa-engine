@@ -321,7 +321,7 @@ try {
 
 ## Browser WASM
 
-The browser binding uses an Emscripten build. Initialization is asynchronous, and persistent files are synchronized to IndexedDB. For source builds, `scripts/build-wasm.sh` matches the C setjmp/longjmp mode to the active Rust compiler's standard library: JavaScript exceptions before Rust 1.93, native WebAssembly exceptions from Rust 1.93 onward. This preserves PostgreSQL parser and regular expression error recovery; the build keeps Rust 1.90 compatibility.
+The browser package builds with Emscripten 7.0.0. On Ubuntu 24.04, LLVM 18's libclang generates the PostgreSQL parser bindings. Initialization is asynchronous, and persistent files are synchronized to IndexedDB. For source builds, `scripts/build-wasm.sh` selects the C setjmp/longjmp mode used by the Rust standard library. Versions before Rust 1.93 use JavaScript exceptions. Rust 1.93 and newer use native WebAssembly exceptions. This preserves PostgreSQL parser and regular expression error recovery across the supported Rust versions.
 
 ```sh
 npm install @cognica-io/uqa-wasm

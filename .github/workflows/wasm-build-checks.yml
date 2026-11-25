@@ -5,6 +5,7 @@ on:
     branches: [main]
     types: [ready_for_review]
     paths:
+      - .github/actions/setup-browser-emscripten/**
       - rust-toolchain.toml
       - crates/uqa-wasm/**
       - crates/uqa-core/src/types/**
@@ -33,9 +34,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
-      - uses: mymindstorm/setup-emsdk@v14
-        with:
-          version: latest
+      - uses: ./.github/actions/setup-browser-emscripten
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-emscripten

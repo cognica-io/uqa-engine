@@ -1,0 +1,18 @@
+name: Set up the browser Emscripten toolchain
+description: Install the browser SDK and select the host libclang used to read its headers
+runs:
+  using: composite
+  steps:
+    - uses: mymindstorm/setup-emsdk@v14
+      with:
+        version: "7.0.0"
+    - name: Select libclang 18 for parser bindings
+      shell: bash
+      run: |
+        set -euo pipefail
+        libclang_dir=/usr/lib/llvm-18/lib
+        if [[ ! -r "$libclang_dir/libclang.so.1" ]]; then
+          sudo apt-get update -q
+          sudo apt-get install -y --no-install-recommends libclang1-18
+        fi
+        echo "LIBCLANG_PATH=$libclang_dir" >> "$GITHUB_ENV"
