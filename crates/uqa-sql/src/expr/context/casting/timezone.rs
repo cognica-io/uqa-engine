@@ -10,7 +10,7 @@ use uqa_core::{memory::ProductionControl, TemporalValue, Value};
 
 use super::{ColumnType, EngineHook, Result};
 use crate::expr::temporal_input::TimeZoneScope;
-use crate::expr::time::session_zone;
+use crate::expr::time::cast_session_zone;
 
 pub(super) fn input_scope(
     value: &Value,
@@ -70,7 +70,7 @@ pub(super) fn cast_timestamp(
                     infinity.timestamp()
                 })));
             }
-            let zone = session_zone(engine, control)?;
+            let zone = cast_session_zone(engine, control)?;
             let offset = zone
                 .offset_at_postgres_micros(*micros)
                 .ok_or_else(|| crate::expr::datetime_out_of_range("timestamp"))?;
@@ -118,7 +118,7 @@ pub(super) fn cast_timestamp(
         .ok_or_else(out_of_range)?,
         _ => return Ok(None),
     };
-    let zone = session_zone(engine, control)?;
+    let zone = cast_session_zone(engine, control)?;
     let offset = zone
         .offset_for_local(local.div_euclid(1_000_000) + uqa_core::POSTGRES_EPOCH_MICROS / 1_000_000)
         .ok_or_else(out_of_range)?;
