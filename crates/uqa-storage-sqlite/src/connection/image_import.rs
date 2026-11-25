@@ -15,7 +15,6 @@ use uqa_storage::{
 };
 
 use super::{
-    compressed_vfs,
     ownership::{DatabaseOwner, RestoreAdmission},
     source::DatabaseSource,
     ConnectionPool, ConnectionSpec, ManagedConnection, Result, SQLiteCompressionOptions,
@@ -82,16 +81,11 @@ impl ImageConnection {
         let owner = admission.retain(control)?;
         let path = path.canonicalize()?;
         let mut spec = if let Some(compression) = compression {
-            compressed_vfs::register_database(
-                &path,
-                compression,
-                key.as_ref().map(StorageEncryptionKey::expose_secret),
-            )
-            .map_err(SQLiteError::CompressedContainer)?;
             ConnectionSpec::Compressed {
                 path,
                 compression,
                 key,
+                trusted_anchor: None,
             }
         } else {
             ConnectionSpec::File {

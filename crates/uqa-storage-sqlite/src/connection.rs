@@ -284,28 +284,13 @@ impl ManagedConnection {
         let compression = compression
             .validate()
             .map_err(SQLiteError::CompressedContainer)?;
-        let owner = ownership::open(
-            path,
-            &uqa_storage::read_control::StorageReadControl::with_limit(
-                uqa_storage::mvcc::VersionedSessionOptions::default().retained_bytes,
-            ),
-        )?;
-        match trusted_anchor {
-            Some(anchor) => compressed_vfs::register_database_with_anchor(
-                path,
-                compression,
-                key.ok_or(SQLiteError::EncryptionKeyRequired)?,
-                anchor,
-            ),
-            None => compressed_vfs::register_database(path, compression, key),
-        }
-        .map_err(SQLiteError::CompressedContainer)?;
         let spec = ConnectionSpec::Compressed {
             path: path.to_path_buf(),
             compression,
             key: key.map(StorageEncryptionKey::new),
+            trusted_anchor,
         };
-        Self::from_spec_owned(spec, default_pool_connections(), Some(owner))
+        Self::from_spec(spec, default_pool_connections())
     }
 
     pub fn open_in_memory() -> Result<Self> {

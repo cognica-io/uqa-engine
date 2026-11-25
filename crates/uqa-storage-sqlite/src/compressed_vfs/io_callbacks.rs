@@ -54,6 +54,11 @@ pub(crate) fn auxiliary_root(
             "expected a compressed main file".into(),
         ));
     };
+    if container.committed_file.is_none() {
+        return Err(crate::SQLiteError::CompressedContainer(
+            "auxiliary keys require a published container header".into(),
+        ));
+    }
     let keys = container
         .keys
         .as_ref()

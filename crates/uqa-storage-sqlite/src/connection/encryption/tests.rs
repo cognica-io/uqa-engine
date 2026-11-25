@@ -141,27 +141,88 @@ fn encrypted_legacy_notification_conversion_keeps_state_and_active_owners() {
     );
 }
 
-#[test]
-fn simultaneous_encrypted_first_opens_use_the_persisted_salt() {
+#[rstest::rstest]
+#[case::sqlcipher(false)]
+#[case::compressed(true)]
+fn simultaneous_encrypted_first_opens_use_the_persisted_salt(#[case] compressed: bool) {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("empty.db");
+    let open = || {
+        if compressed {
+            ManagedConnection::open_compressed_encrypted(
+                &path,
+                PASSWORD,
+                crate::SQLiteCompressionOptions::default(),
+            )
+        } else {
+            ManagedConnection::open_encrypted(&path, PASSWORD)
+        }
+        .unwrap()
+    };
     let start = std::sync::Barrier::new(4);
     std::thread::scope(|scope| {
         let handles: Vec<_> = (0..4).map(|_| scope.spawn(|| {
             start.wait();
-            let main = ManagedConnection::open_encrypted(&path, PASSWORD).unwrap();
+            let main = open();
             main.with(|connection| Ok(connection.execute_batch("CREATE TABLE IF NOT EXISTS shared(value); INSERT INTO shared VALUES (1)")?)).unwrap();
         })).collect();
         for handle in handles {
             handle.join().unwrap();
         }
     });
-    let main = ManagedConnection::open_encrypted(&path, PASSWORD).unwrap();
+    let main = open();
     assert_eq!(
         main.with(
             |db| Ok(db.query_row("SELECT count(*) FROM shared", [], |r| r.get::<_, i64>(0))?)
         )
         .unwrap(),
         4
+    );
+}
+
+#[test]
+fn compressed_first_openers_share_the_published_auxiliary_keys() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("empty-compressed.db");
+    let open = || {
+        ManagedConnection::open_compressed_encrypted(
+            &path,
+            PASSWORD,
+            crate::SQLiteCompressionOptions::default(),
+        )
+        .unwrap()
+    };
+    // Both pools open before either caller writes a SQLite page.
+    let first = open();
+    let second = open();
+    let role = AuxiliaryFile::Notifications;
+    let selected = |main: &ManagedConnection| {
+        main.auxiliary_encryption_key()
+            .unwrap()
+            .for_file(role, &role.path(&path))
+            .unwrap()
+    };
+    let first_key = selected(&first);
+    assert!(
+        first_key.expose_secret() == selected(&second).expose_secret(),
+        "independent empty openers selected different notification keys"
+    );
+    second
+        .with(|sqlite| Ok(sqlite.execute_batch("CREATE TABLE durable(value)")?))
+        .unwrap();
+    for main in [&first, &second] {
+        let registry =
+            NotificationRegistry::open(&path, main.auxiliary_encryption_key().as_ref()).unwrap();
+        assert!(next_process(&registry) > 0);
+    }
+    drop((first, second));
+    let reopened = open();
+    assert!(first_key.expose_secret() == selected(&reopened).expose_secret());
+    assert_eq!(
+        next_process(
+            &NotificationRegistry::open(&path, reopened.auxiliary_encryption_key().as_ref())
+                .unwrap()
+        ),
+        3
     );
 }
