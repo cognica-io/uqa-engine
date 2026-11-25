@@ -15,10 +15,6 @@ use uqa_core::memory::ProductionControl;
 mod immutable;
 pub(super) use immutable::eval_temporal_functions_with_control;
 
-#[expect(
-    clippy::too_many_lines,
-    reason = "builtin dispatch preserves arity, NULL, and error precedence"
-)]
 pub(super) fn eval_temporal_functions(name: &str, args: &[Value]) -> Option<Result<Value>> {
     if let Some(result) = super::current_time::eval_current_time(name, args, None) {
         return Some(result);

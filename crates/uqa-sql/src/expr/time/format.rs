@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! PostgreSQL date templates share field recognition across parsing and formatting.
+//! `PostgreSQL` date templates share field recognition across parsing and formatting.
 
 use std::fmt::Write;
 use uqa_core::{

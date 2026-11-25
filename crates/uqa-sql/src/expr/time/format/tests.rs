@@ -19,6 +19,8 @@ fn date_templates_match_postgres_values_and_diagnostics() {
         ("4714-11-24 BC", "YYYY-MM-DD BC", "4714-11-24 BC"),
         ("5874897-12-31", "YYYY-MM-DD", "5874897-12-31"),
         ("2024*3*7", "FXYYYY/MM/DD", "2024-03-07"),
+        ("2024- 02- 29", "FXYYYY-MM-DD", "2024-02-29"),
+        ("2024xx02xx29", r#"YYYY"ab"MM"ab"DD"#, "2024-02-29"),
         ("xxx2024", r#""cat"YYYY"#, "2024-01-01"),
         ("", "YYYY-MM-DD", "0001-01-01 BC"),
         ("0000", "YYYY", "0001-01-01 BC"),
