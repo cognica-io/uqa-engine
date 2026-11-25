@@ -2,6 +2,47 @@
   "schema_version": 1,
   "checks": [
     {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "a_million_compacted_deletions_do_not_add_work_to_namespace_validation",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/catalog/native/validation/tests.rs",
+      "capability": "Bounded SQLite namespace validation on open",
+      "workload": "Validate the same catalog with 128 and one million compacted deletions in a dropped B-tree index.",
+      "invariant": "The deleted keys remain visible as tombstones at their original revision. Validating the current namespace executes at most as many SQLite VM instructions with one million deletions as with 128.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "opening_observes_the_catalog_version_restored_before_repairs",
+      "cases": 2,
+      "source": "crates/uqa-engine/src/open/tests/external_refresh.rs",
+      "capability": "Single catalog restoration on open",
+      "workload": "Open a populated database with and without a peer commit immediately after the initial catalog transaction.",
+      "invariant": "A clean open initializes the table adapter once. A committed peer schema drop is visible to the first query.",
+      "case_names": [
+        "case_1_clean",
+        "case_2_peer_commit"
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "encrypted_open_bounds_password_derivations_across_connections_and_state",
+      "cases": 2,
+      "source": "crates/uqa-storage-sqlite/src/connection/encryption/tests.rs",
+      "capability": "Bounded encrypted SQLite connection setup",
+      "workload": "Create and reopen the main file, lease three physical connections together and access notification, serializable and relation state for passphrase and raw-key databases.",
+      "invariant": "Each open performs one passphrase derivation or zero for a raw key. The three roles have distinct credentials, and an independent SQLCipher client opens the main file.",
+      "case_names": [
+        "case_1_passphrase",
+        "case_2_raw_key"
+      ]
+    },
+    {
       "package": "uqa-engine",
       "kind": "lib",
       "test": "selective_runtime_keys_bound_relation_access",

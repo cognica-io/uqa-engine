@@ -11,6 +11,8 @@ mod restore;
 mod schema;
 #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 pub(in crate::mvcc) use liveness::lease_file;
+#[cfg(not(target_os = "emscripten"))]
+pub(crate) use schema::recognizes_encrypted_state;
 #[cfg(test)]
 mod tests;
 

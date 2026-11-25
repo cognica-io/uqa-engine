@@ -15,7 +15,7 @@ use super::{Arc, Connection, ManagedConnection, Result, SQLiteError, VersionedKe
 
 pub(super) struct NativeRestore {
     _permit: crate::mvcc::WritePermit,
-    _admission: Option<super::ownership::RecordAdmission>,
+    _admission: Option<super::ownership::DatabaseAdmission>,
 }
 
 impl ManagedConnection {

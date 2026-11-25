@@ -113,6 +113,17 @@ fn local_file_owners_exclude_restore_and_handoff_without_losing_admission() {
     let shared = local::Admission::acquire(&path, false, &control).unwrap();
     let lease = shared.retain(&control).unwrap();
     drop(shared);
+    let gate = lease.sole_owner_admission(&control).unwrap().unwrap();
+    assert!(matches!(
+        local::Admission::acquire(&path, false, &control),
+        Err(SQLiteError::DatabaseRestoreBusy)
+    ));
+    drop(gate);
+    let admission = local::Admission::acquire(&path, false, &control).unwrap();
+    let peer = admission.retain(&control).unwrap();
+    drop(admission);
+    assert!(lease.sole_owner_admission(&control).unwrap().is_none());
+    drop(peer);
     assert!(matches!(
         local::Admission::acquire(&path, true, &control),
         Err(SQLiteError::DatabaseRestoreBusy)

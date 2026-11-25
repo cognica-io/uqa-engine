@@ -12,6 +12,8 @@ mod publication;
 mod reservations;
 mod scan;
 mod schema;
+#[cfg(not(target_os = "emscripten"))]
+pub(crate) use schema::recognizes_encrypted_registry;
 #[cfg(test)]
 mod tests;
 

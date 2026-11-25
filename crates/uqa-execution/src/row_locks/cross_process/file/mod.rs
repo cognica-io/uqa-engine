@@ -179,8 +179,8 @@ impl FileLockCoordinator {
                 )
             })?;
         let pid = std::process::id();
-        let mut relation_path = database_path.as_os_str().to_owned();
-        relation_path.push(".uqa-relation-identities");
+        let relation_path =
+            uqa_storage::encryption_key::AuxiliaryFile::RelationIdentities.path(database_path);
         let coordinator = Self {
             #[cfg(test)]
             row_claim_table_locks: std::sync::atomic::AtomicUsize::new(0),
@@ -190,7 +190,7 @@ impl FileLockCoordinator {
             claim_file,
             claim_mapping: Mutex::new(row_claims::Mapping::default()),
             sequence_file,
-            relation_path: relation_path.into(),
+            relation_path,
             relation_key,
             change_journal: Mutex::new(journal::Readers::default()),
             transaction_xids: Mutex::new(xids::TransactionXids::new()),

@@ -12,20 +12,20 @@ use std::sync::Arc;
 use rusqlite::Connection;
 use tempfile::TempDir;
 use uqa_engine::Engine;
+use uqa_storage::encryption_key::AuxiliaryFile;
 use uqa_storage_sqlite::{
     Catalog, ManagedConnection, SQLiteCompressionOptions, SQLiteStorageBackend,
 };
 
 use super::{exec, values};
+use crate::notification_registry;
 
 pub(super) const KEY: &str = "notification-encryption-test-key";
 pub(super) const PAYLOAD: &str = "retained-secret-notification-payload-marker";
 const CHANNEL: &str = "confidential_notification_channel";
 
 pub(super) fn registry_path(database: &Path) -> std::path::PathBuf {
-    let mut path = database.as_os_str().to_owned();
-    path.push(".uqa-notification-state");
-    path.into()
+    AuxiliaryFile::Notifications.path(database)
 }
 
 pub(super) fn assert_no_plaintext(database: &Path, markers: &[&str]) {
@@ -72,15 +72,23 @@ fn encrypted_notification_queue_and_listener_metadata_remain_encrypted() {
         exec(&sender, &format!("NOTIFY {CHANNEL}, '{PAYLOAD}'"));
         assert_eq!(listener.take_sql_notifications().len(), 0);
 
-        let registry = Connection::open(registry_path(&database)).unwrap();
-        assert!(registry
-            .query_row("SELECT count(*) FROM queue_entries", [], |row| {
-                row.get::<_, i64>(0)
-            })
-            .is_err());
-        drop(registry);
-        let registry = Connection::open(registry_path(&database)).unwrap();
-        registry.pragma_update(None, "key", KEY).unwrap();
+        for supplied in [None, Some(KEY)] {
+            let registry = Connection::open(registry_path(&database)).unwrap();
+            if let Some(passphrase) = supplied {
+                registry.pragma_update(None, "key", passphrase).unwrap();
+            }
+            let error = registry
+                .query_row("SELECT count(*) FROM queue_entries", [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .unwrap_err();
+            assert_eq!(
+                error.sqlite_error_code(),
+                Some(rusqlite::ErrorCode::NotADatabase)
+            );
+        }
+        let main = ManagedConnection::open_auto(&database, Some(KEY)).unwrap();
+        let registry = notification_registry::open(&database, main.auxiliary_encryption_key());
         let retained: (String, String) = registry
             .query_row("SELECT channel, payload FROM queue_entries", [], |row| {
                 Ok((row.get(0)?, row.get(1)?))

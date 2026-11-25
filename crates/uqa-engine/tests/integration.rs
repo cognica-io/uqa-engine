@@ -15,6 +15,8 @@ use uqa_engine::{sql, Engine};
 mod legacy_vectors;
 #[path = "support/native_storage.rs"]
 mod native_storage;
+#[path = "support/notification_registry.rs"]
+mod notification_registry;
 #[path = "support/pg18_oracle.rs"]
 mod pg18_oracle;
 #[path = "support/waits.rs"]

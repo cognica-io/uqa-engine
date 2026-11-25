@@ -169,33 +169,41 @@ impl NativeLeaseFile {
 
     /// Split admission is used by the common snapshot transport's own scope guard.
     pub(super) fn acquire_admission(&self, control: &StorageReadControl) -> VersionResult<()> {
-        loop {
-            control.cancellation().check()?;
-            if self
-                .0
-                .admitted
-                .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
-                .is_ok()
-            {
-                break;
-            }
+        while !self.try_acquire_admission(control)? {
             std::thread::sleep(std::time::Duration::from_millis(1));
         }
-        let mut native_locked = false;
+        Ok(())
+    }
+
+    /// Optional maintenance must yield to another admission, including one already held by restoration.
+    pub(crate) fn try_admit(
+        &self,
+        control: &StorageReadControl,
+    ) -> VersionResult<Option<NativeLeaseAdmission>> {
+        Ok(self
+            .try_acquire_admission(control)?
+            .then(|| NativeLeaseAdmission(self.clone())))
+    }
+
+    fn try_acquire_admission(&self, control: &StorageReadControl) -> VersionResult<bool> {
+        control.cancellation().check()?;
+        if self
+            .0
+            .admitted
+            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+            .is_err()
+        {
+            return Ok(false);
+        }
+        if let Err(error) = try_lock_byte(&self.0.file, ADMISSION, true) {
+            self.0.admitted.store(false, Ordering::Release);
+            return if lock_would_block(&error) {
+                Ok(false)
+            } else {
+                Err(io_error(error))
+            };
+        }
         let result = (|| {
-            loop {
-                control.cancellation().check()?;
-                match try_lock_byte(&self.0.file, ADMISSION, true) {
-                    Ok(()) => {
-                        native_locked = true;
-                        break;
-                    }
-                    Err(error) if lock_would_block(&error) => {
-                        std::thread::sleep(std::time::Duration::from_millis(1));
-                    }
-                    Err(error) => return Err(io_error(error)),
-                }
-            }
             let (namespace, count) = self.0.header()?;
             if namespace != self.0.namespace {
                 let mut live = false;
@@ -210,13 +218,10 @@ impl NativeLeaseFile {
             } else if self.0.file.metadata().map_err(io_error)?.len() == 0 {
                 self.0.publish_header(0)?;
             }
-            Ok(())
+            Ok(true)
         })();
         if result.is_err() {
-            if native_locked {
-                let _ = unlock_byte(&self.0.file, ADMISSION);
-            }
-            self.0.admitted.store(false, Ordering::Release);
+            self.release_admission();
         }
         result
     }

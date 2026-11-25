@@ -21,6 +21,56 @@ unsafe fn file_from_sqlite<'a>(file: *mut ffi::sqlite3_file) -> Option<&'a mut F
     }
 }
 
+/// Select an auxiliary key root from the authenticated container already attached to
+/// this connection. The container's MAC key stays inside its VFS.
+#[cfg(not(target_os = "emscripten"))]
+pub(crate) fn auxiliary_root(
+    connection: &rusqlite::Connection,
+) -> crate::Result<cipher::zeroize::Zeroizing<[u8; 32]>> {
+    use super::{HmacSha256, Mac, VfsFile};
+    let mut file: *mut ffi::sqlite3_file = std::ptr::null_mut();
+    // SAFETY: this newly opened connection is still private to the pool constructor.
+    // FILE_POINTER returns its borrowed main file, and the method table identifies
+    // our concrete allocation before its handle is accessed.
+    let handle = unsafe {
+        let rc = ffi::sqlite3_file_control(
+            connection.handle(),
+            c"main".as_ptr(),
+            ffi::SQLITE_FCNTL_FILE_POINTER,
+            std::ptr::addr_of_mut!(file).cast(),
+        );
+        if rc != ffi::SQLITE_OK
+            || file.is_null()
+            || !std::ptr::eq((*file).pMethods, &raw const IO_METHODS)
+        {
+            return Err(crate::SQLiteError::CompressedContainer(
+                "compressed SQLite main file is unavailable".into(),
+            ));
+        }
+        file_from_sqlite(file)
+    };
+    let Some(VfsFile::Compressed(container)) = handle.map(|handle| &handle.file) else {
+        return Err(crate::SQLiteError::CompressedContainer(
+            "expected a compressed main file".into(),
+        ));
+    };
+    if container.committed_file.is_none() {
+        return Err(crate::SQLiteError::CompressedContainer(
+            "auxiliary keys require a published container header".into(),
+        ));
+    }
+    let keys = container
+        .keys
+        .as_ref()
+        .ok_or(crate::SQLiteError::EncryptionKeyRequired)?;
+    let mut mac =
+        <HmacSha256 as Mac>::new_from_slice(&keys.mac_key).expect("256-bit container MAC key");
+    mac.update(b"UQA compressed SQLite auxiliary keys v1");
+    Ok(cipher::zeroize::Zeroizing::new(
+        mac.finalize().into_bytes().into(),
+    ))
+}
+
 pub(super) static IO_METHODS: ffi::sqlite3_io_methods = ffi::sqlite3_io_methods {
     iVersion: 1,
     xClose: Some(file_close),

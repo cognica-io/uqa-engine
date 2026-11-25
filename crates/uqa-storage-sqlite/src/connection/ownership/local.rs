@@ -33,6 +33,20 @@ pub(super) struct Owner {
 }
 
 impl Owner {
+    #[cfg(any(test, not(target_os = "emscripten")))]
+    pub(super) fn sole_owner_admission(
+        &self,
+        control: &StorageReadControl,
+    ) -> Result<Option<Admission>> {
+        control.check()?;
+        let mut state = self.state.lock();
+        if state.admitted || state.owners != 1 {
+            return Ok(None);
+        }
+        state.admitted = true;
+        Ok(Some(Admission(Arc::clone(&self.state))))
+    }
+
     pub(super) fn admit_records(&self, control: &StorageReadControl) -> Result<Admission> {
         control.check()?;
         let mut state = self.state.lock();

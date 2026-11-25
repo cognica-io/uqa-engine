@@ -121,12 +121,20 @@ impl ManagedConnection {
             else {
                 unreachable!("database file identity")
             };
-            let mut auxiliary = path.into_os_string();
-            auxiliary.push(".uqa-serializable");
+            let path = uqa_storage::encryption_key::AuxiliaryFile::Serializable.path(&path);
+            let key = self
+                .auxiliary_encryption_key()
+                .map(|key| {
+                    key.for_file(
+                        uqa_storage::encryption_key::AuxiliaryFile::Serializable,
+                        &path,
+                    )
+                })
+                .transpose()?;
             Self::from_spec_owned(
                 super::ConnectionSpec::Auxiliary {
-                    path: std::path::PathBuf::from(auxiliary),
-                    key: self.auxiliary_encryption_key(),
+                    path,
+                    key: key.map(Into::into),
                 },
                 super::default_pool_connections(),
                 self.database_owner(),

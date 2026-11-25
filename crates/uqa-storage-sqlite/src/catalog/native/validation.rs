@@ -11,7 +11,7 @@ mod tests;
 
 use super::{Family, NativeRecordOwner, NativeSnapshot, Result, SQLiteError};
 use crate::mvcc::native::NativeRecordIdentity;
-use rusqlite::types::ValueRef;
+use rusqlite::{types::ValueRef, OptionalExtension};
 use uqa_core::memory::BudgetedVec;
 use uqa_storage::{catalog::RelationKind, mvcc::VersionError, read_control::StorageReadControl};
 
@@ -147,9 +147,42 @@ impl NativeSnapshot {
         Ok(())
     }
 
-    /// Every live entry belongs to an index that exists. The entries of one index are contiguous in key order and share its record, so the first of them answers for all the others and the scan continues after the last key they can have: the work follows the number of indexes, not of their entries. Only the entries of an index that does not exist are all visited, because any of them may be live; none of them is retained.
+    /// Each native commit projects its live rows and checks every cascade against the prepared records in the same transaction. At that exact view, the first physical entry of each (table, field) is enough to check its parent. Deleted entries have no row in that projection.
     fn validate_btree_parents(&self) -> Result<()> {
         let control = &self.control;
+        if self.read_latest_projection(control, &mut |connection| {
+            let mut entry: Option<i64> = connection.prepare_cached(
+                "SELECT rowid FROM _btree_index_entries ORDER BY table_name, field, doc_id LIMIT 1"
+            )?.query_row([], |row| row.get(0)).optional()?;
+            let mut group = connection.prepare_cached(
+                "SELECT EXISTS(SELECT 1 FROM _btree_indexes AS parent
+                           WHERE (parent.table_name, parent.field) = (entry.table_name, entry.field)),
+                        COALESCE(
+                            (SELECT next.rowid FROM _btree_index_entries AS next
+                              WHERE next.table_name = entry.table_name AND next.field > entry.field
+                              ORDER BY next.field, next.doc_id LIMIT 1),
+                            (SELECT next.rowid FROM _btree_index_entries AS next
+                              WHERE next.table_name > entry.table_name
+                              ORDER BY next.table_name, next.field, next.doc_id LIMIT 1))
+                   FROM _btree_index_entries AS entry WHERE entry.rowid = ?1"
+            )?;
+            while let Some(id) = entry {
+                control.check()?;
+                let (parent, next) = group.query_row([id], |row| {
+                    Ok((row.get::<_, bool>(0)?, row.get::<_, Option<i64>>(1)?))
+                })?;
+                if !parent {
+                    return Err(invalid("native B-tree entry references a missing index"));
+                }
+                entry = next;
+            }
+            Ok(Some(()))
+        })?.is_some() {
+            return Ok(());
+        }
+
+        // Private overlays and older snapshots can still see entries absent from the projection.
+        // Check their exact records, including any live key between deleted keys of a missing index.
         let prefix = NativeRecordIdentity::family_prefix(Family::BtreeIndexEntries, control)?;
         let mut after: Option<BudgetedVec<u8>> = None;
         loop {

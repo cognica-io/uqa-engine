@@ -39,6 +39,7 @@ pub(super) struct ConnectionPool {
         )>,
     >,
     pub(super) spec: ConnectionSpec,
+    pub(super) auxiliary_key: Option<uqa_storage::StorageEncryptionKey>,
     max_connections: usize,
     state: Mutex<PoolState>,
     available: Condvar,
@@ -65,6 +66,36 @@ impl ConnectionPool {
         owner: Option<Arc<DatabaseOwner>>,
     ) -> Result<Arc<Self>> {
         let source = DatabaseSource::capture(&mut spec, &initial)?.map(Arc::new);
+        let auxiliary_key = match &spec {
+            #[cfg(not(target_os = "emscripten"))]
+            ConnectionSpec::File {
+                path,
+                key: Some(key),
+            } if source.is_some() => Some(key.auxiliary_key(&initial, path, owner.as_ref())?),
+            ConnectionSpec::File { key: Some(key), .. } => Some(key.supplied.clone()),
+            #[cfg(not(target_os = "emscripten"))]
+            ConnectionSpec::Compressed {
+                path,
+                key: Some(key),
+                ..
+            } => {
+                let uqa_storage::PersistentStorageIdentity::File(path) =
+                    uqa_storage::PersistentStorageIdentity::for_database_path(path)?
+                else {
+                    unreachable!("compressed database file")
+                };
+                Some(super::encryption::DatabaseKeys::credential(
+                    crate::compressed_vfs::auxiliary_root(&initial)?,
+                    &path,
+                    key,
+                    owner.as_ref(),
+                ))
+            }
+            #[cfg(target_os = "emscripten")]
+            ConnectionSpec::Compressed { key, .. } => key.clone(),
+            ConnectionSpec::Auxiliary { key, .. } => key.as_ref().map(|key| key.supplied.clone()),
+            _ => None,
+        };
         #[cfg(not(target_os = "emscripten"))]
         let checkpoint =
             super::checkpoint::Checkpoint::start(&spec, source.clone(), owner.clone())?;
@@ -86,6 +117,7 @@ impl ConnectionPool {
             #[cfg(not(target_os = "emscripten"))]
             checkpoint,
             spec,
+            auxiliary_key,
             max_connections: max_connections.max(1),
             state: Mutex::new(PoolState {
                 open: idle.len(),

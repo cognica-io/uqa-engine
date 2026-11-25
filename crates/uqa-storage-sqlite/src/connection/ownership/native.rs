@@ -27,6 +27,24 @@ pub(super) struct Owner {
 }
 
 impl Owner {
+    pub(super) fn sole_owner_admission(
+        &self,
+        control: &StorageReadControl,
+    ) -> Result<Option<Admission>> {
+        let Some(held) = self.file.try_admit(control)? else {
+            return Ok(None);
+        };
+        let mut owners = 0usize;
+        self.file.visit(control, &mut |_| {
+            owners += 1;
+            Ok(())
+        })?;
+        Ok((owners == 1).then(|| Admission {
+            file: self.file.clone(),
+            _held: held,
+        }))
+    }
+
     pub(super) fn admit_records(&self, control: &StorageReadControl) -> Result<Admission> {
         let held = self.file.admit(control)?;
         let mut compatible = true;

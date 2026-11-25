@@ -11,9 +11,9 @@ use std::{path::Path, sync::Arc};
 use uqa_storage::{mvcc::DatabaseRestore, read_control::StorageReadControl, StorageEncryptionKey};
 
 use super::{
-    compressed_vfs, default_pool_connections, ownership::RestoreAdmission, ConnectionPool,
-    ConnectionSpec, ManagedConnection, Result, SQLiteCompressedContainerAnchor,
-    SQLiteCompressionOptions, SQLiteError, SessionState,
+    default_pool_connections, ownership::RestoreAdmission, ConnectionPool, ConnectionSpec,
+    ManagedConnection, Result, SQLiteCompressedContainerAnchor, SQLiteCompressionOptions,
+    SQLiteError, SessionState,
 };
 
 impl ManagedConnection {
@@ -23,15 +23,18 @@ impl ManagedConnection {
         request: DatabaseRestore,
         control: &StorageReadControl,
     ) -> Result<Self> {
-        Self::restore_with_spec(path, request, control, || {
-            Ok(ConnectionSpec::File {
+        Self::restore_with_spec(
+            path,
+            request,
+            control,
+            ConnectionSpec::File {
                 path: path.to_path_buf(),
                 key: None,
-            })
-        })
+            },
+        )
     }
 
-    /// `SQLCipher` counterpart of [`Self::open_restored`], using the same credential for its SSI database.
+    /// `SQLCipher` counterpart of [`Self::open_restored`], preserving the encryption of its SSI database.
     pub fn open_encrypted_restored(
         path: &Path,
         key: &str,
@@ -41,12 +44,15 @@ impl ManagedConnection {
         if key.is_empty() {
             return Err(SQLiteError::EmptyEncryptionKey);
         }
-        Self::restore_with_spec(path, request, control, || {
-            Ok(ConnectionSpec::File {
+        Self::restore_with_spec(
+            path,
+            request,
+            control,
+            ConnectionSpec::File {
                 path: path.to_path_buf(),
-                key: Some(StorageEncryptionKey::new(key)),
-            })
-        })
+                key: Some(StorageEncryptionKey::new(key).into()),
+            },
+        )
     }
 
     /// Compressed-container counterpart of [`Self::open_restored`].
@@ -103,30 +109,24 @@ impl ManagedConnection {
         let compression = compression
             .validate()
             .map_err(SQLiteError::CompressedContainer)?;
-        Self::restore_with_spec(path, request, control, || {
-            match anchor {
-                Some(anchor) => compressed_vfs::register_database_with_anchor(
-                    path,
-                    compression,
-                    key.ok_or(SQLiteError::EncryptionKeyRequired)?,
-                    anchor,
-                ),
-                None => compressed_vfs::register_database(path, compression, key),
-            }
-            .map_err(SQLiteError::CompressedContainer)?;
-            Ok(ConnectionSpec::Compressed {
+        Self::restore_with_spec(
+            path,
+            request,
+            control,
+            ConnectionSpec::Compressed {
                 path: path.to_path_buf(),
                 compression,
                 key: key.map(StorageEncryptionKey::new),
-            })
-        })
+                trusted_anchor: anchor,
+            },
+        )
     }
 
     fn restore_with_spec(
         path: &Path,
         request: DatabaseRestore,
         control: &StorageReadControl,
-        spec: impl FnOnce() -> Result<ConnectionSpec>,
+        spec: ConnectionSpec,
     ) -> Result<Self> {
         control.check()?;
         let admission = RestoreAdmission::acquire(path, control)?;
@@ -137,7 +137,6 @@ impl ManagedConnection {
         }
         // Allocate the returned owner before any durable transition, and install it under exclusive admission.
         let owner = admission.retain(control)?;
-        let spec = spec()?;
         let initial = spec.open(super::ConnectionOpen::Restored)?;
         let connection = Self {
             pool: ConnectionPool::new(spec, initial, default_pool_connections(), Some(owner))?,

@@ -20,16 +20,17 @@ use super::{
 pub(super) enum ConnectionSpec {
     File {
         path: PathBuf,
-        key: Option<StorageEncryptionKey>,
+        key: Option<super::encryption::FileKey>,
     },
     Auxiliary {
         path: PathBuf,
-        key: Option<StorageEncryptionKey>,
+        key: Option<super::encryption::FileKey>,
     },
     Compressed {
         path: PathBuf,
         compression: SQLiteCompressionOptions,
         key: Option<StorageEncryptionKey>,
+        trusted_anchor: Option<super::SQLiteCompressedContainerAnchor>,
     },
     Memory,
 }
@@ -42,6 +43,34 @@ pub(super) enum ConnectionOpen {
 }
 
 impl ConnectionSpec {
+    pub(super) fn open_initial(&self) -> Result<Connection> {
+        let header = match self {
+            Self::File { path, key: Some(_) }
+            | Self::Auxiliary { path, key: Some(_) }
+            | Self::Compressed {
+                path, key: Some(_), ..
+            } if !path.as_os_str().is_empty() && path != std::path::Path::new(":memory:") => {
+                super::ownership::admit_file_header(
+                    path,
+                    &uqa_storage::read_control::StorageReadControl::with_limit(
+                        uqa_storage::mvcc::VersionedSessionOptions::default().retained_bytes,
+                    ),
+                )?
+            }
+            _ => None,
+        };
+        let mut connection = self.open(ConnectionOpen::Initial)?;
+        if header.is_some() && matches!(self, Self::Auxiliary { .. } | Self::Compressed { .. }) {
+            // WAL initialization writes the main header. A new DELETE-mode file
+            // needs an explicit header write before another connection chooses its salt
+            // or a compressed pool derives credentials from its container identity.
+            connection
+                .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?
+                .commit()?;
+        }
+        Ok(connection)
+    }
+
     pub(super) fn open(&self, mode: ConnectionOpen) -> Result<Connection> {
         let conn = self.open_configured(mode)?;
         conn.set_prepared_statement_cache_capacity(PREPARED_STATEMENT_CACHE_CAPACITY);
@@ -58,7 +87,7 @@ impl ConnectionSpec {
             Self::File { path, key } | Self::Auxiliary { path, key } => {
                 let conn = Connection::open_with_flags(path, flags)?;
                 if let Some(key) = key {
-                    ManagedConnection::apply_encryption_key(&conn, key.expose_secret())?;
+                    key.apply(&conn)?;
                 }
                 crate::btree_index::equality::register(&conn)?;
                 if matches!(self, Self::Auxiliary { .. }) {
@@ -80,11 +109,25 @@ impl ConnectionSpec {
                 Ok(conn)
             }
             Self::Compressed {
-                path, compression, ..
+                path,
+                compression,
+                key,
+                trusted_anchor,
             } => {
                 let vfs = if matches!(mode, ConnectionOpen::Pooled) {
                     compressed_vfs::POOL_VFS_NAME
                 } else {
+                    let key = key.as_ref().map(StorageEncryptionKey::expose_secret);
+                    match trusted_anchor {
+                        Some(anchor) => compressed_vfs::register_database_with_anchor(
+                            path,
+                            *compression,
+                            key.ok_or(SQLiteError::EncryptionKeyRequired)?,
+                            *anchor,
+                        ),
+                        None => compressed_vfs::register_database(path, *compression, key),
+                    }
+                    .map_err(SQLiteError::CompressedContainer)?;
                     compressed_vfs::VFS_NAME
                 };
                 let conn = Connection::open_with_flags_and_vfs(path, flags, vfs)?;

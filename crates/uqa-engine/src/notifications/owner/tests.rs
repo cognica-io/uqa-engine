@@ -7,9 +7,10 @@
 //! Actual retained owners, blocked Engine gates and native registry transactions at shutdown.
 
 use super::super::CrossProcessCoordinator;
+use crate::tests::notification_registry;
 use crate::{Engine, NotificationSubscriptionOptions, NotificationWait};
 use std::{
-    path::{Path, PathBuf},
+    path::Path,
     sync::{mpsc, Arc},
     time::{Duration, Instant},
 };
@@ -32,12 +33,6 @@ fn coordinator(engine: &Engine) -> Arc<CrossProcessCoordinator> {
         .unwrap()
         .initialized_coordinator()
         .unwrap()
-}
-
-fn registry_path(path: &Path) -> PathBuf {
-    let mut registry = path.as_os_str().to_owned();
-    registry.push(".uqa-notification-state");
-    registry.into()
 }
 
 fn until(mut condition: impl FnMut() -> bool) -> bool {
@@ -156,12 +151,9 @@ fn retirement_provider(path: &Path, provider: usize) -> Engine {
     }
 }
 
-fn retirement_registry(path: &Path, provider: usize) -> rusqlite::Connection {
-    let registry = rusqlite::Connection::open(registry_path(path)).unwrap();
-    if matches!(provider, 3 | 4 | 6) {
-        registry.pragma_update(None, "key", RETIREMENT_KEY).unwrap();
-    }
-    registry
+fn registry_connection(engine: &Engine, path: &Path) -> rusqlite::Connection {
+    let provider = engine.storage.provider.as_ref().unwrap();
+    notification_registry::open(path, provider.auxiliary_encryption_key())
 }
 
 #[rstest::rstest]
@@ -186,7 +178,7 @@ fn individual_close_releases_its_lease_while_the_registry_writer_is_held(
         .as_ref()
         .unwrap()
         .owner_id();
-    let registry = retirement_registry(&path, provider);
+    let registry = registry_connection(&engine, &path);
     registry.execute_batch("BEGIN IMMEDIATE").unwrap();
     let (finished, completion) = mpsc::channel();
     let closing = Arc::clone(&subscription);
@@ -254,10 +246,10 @@ fn final_subscription_close_joins_recovery_and_drops_the_original_provider(
             .unwrap(),
     );
     let coordinator = coordinator(&engine);
+    let registry = registry_connection(&engine, &path);
     drop(engine);
     assert!(retained_provider.upgrade().is_some());
     assert!(retained_backend.upgrade().is_some());
-    let registry = retirement_registry(&path, provider);
     registry.execute_batch("BEGIN IMMEDIATE").unwrap();
     let closing = Arc::clone(&subscription);
     let (finished, completion) = mpsc::channel();
@@ -395,10 +387,7 @@ fn final_owner_cancels_retained_native_registry_admission(#[values(0, 1, 2, 3)] 
     engine.prepare_notification_recovery().unwrap();
     let coordinator = coordinator(&engine);
     let recovery = coordinator.recovery_control().unwrap();
-    let registry = rusqlite::Connection::open(registry_path(&path)).unwrap();
-    if provider == 3 {
-        registry.pragma_update(None, "key", KEY).unwrap();
-    }
+    let registry = registry_connection(&engine, &path);
     registry.execute_batch("BEGIN IMMEDIATE").unwrap();
     let (started, attempted) = mpsc::channel();
     let (finished, result) = mpsc::channel();
@@ -430,11 +419,11 @@ fn shutdown_cancels_native_cursor_commit_without_committing_its_prepared_state()
     let engine = Engine::open(&path).unwrap();
     engine.sql("LISTEN events", &[]).unwrap();
     let coordinator = coordinator(&engine);
-    let reader = rusqlite::Connection::open(registry_path(&path)).unwrap();
+    let reader = notification_registry::open(&path, None);
     reader
         .execute_batch("BEGIN; SELECT * FROM listeners")
         .unwrap();
-    let probe = rusqlite::Connection::open(registry_path(&path)).unwrap();
+    let probe = notification_registry::open(&path, None);
     probe.busy_timeout(Duration::ZERO).unwrap();
     let (finished, result) = mpsc::channel();
     let worker = {
