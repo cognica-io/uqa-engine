@@ -225,6 +225,7 @@ fn scope_thread_context() -> crate::statement::thread_context::StatementThreadCo
             transaction_clock_micros: Some(313),
             date_order: uqa_core::TemporalDateOrder::DayMonthYear,
             interval_style: uqa_core::TemporalIntervalStyle::SqlStandard,
+            time_zone: uqa_core::TemporalTimeZone::UTC,
         },
         cancellation: Some(uqa_core::CancellationToken::new()),
     }

@@ -33,6 +33,9 @@ enum Zone {
 }
 
 impl TemporalTimeZone {
+    /// UTC with a fixed zero offset.
+    pub const UTC: Self = Self(Zone::Fixed(0));
+
     /// Resolve a bundled IANA name or a `PostgreSQL` POSIX time zone specification.
     /// This does not search the SQL timezone-abbreviation table.
     #[must_use]

@@ -172,6 +172,10 @@ impl context::StatementExecutionInputs<StatementReadSnapshot> for Engine {
         Some(self.session.interval_style())
     }
 
+    fn temporal_time_zone(&self) -> Option<uqa_core::TemporalTimeZone> {
+        Some(self.session.time_zone())
+    }
+
     fn diagnostic_search_path(&self) -> Option<Vec<String>> {
         Some(self.session.state.read().search_path.to_vec())
     }

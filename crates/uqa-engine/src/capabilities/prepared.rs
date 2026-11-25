@@ -58,6 +58,7 @@ impl Engine {
             registry: self,
             transaction_timestamp_micros: self.session_transaction_clock_micros(),
             interval_style: Some(self.session.interval_style()),
+            time_zone: Some(self.session.time_zone()),
             date_order: Some(uqa_sql::semantics::parameters::datestyle::date_order(
                 &self.session.setting("DateStyle"),
             )),

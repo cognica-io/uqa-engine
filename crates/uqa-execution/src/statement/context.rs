@@ -103,6 +103,10 @@ pub trait StatementExecutionInputs<S: Clone + 'static> {
     fn temporal_interval_style(&self) -> Option<uqa_core::TemporalIntervalStyle> {
         None
     }
+    /// The session zone for civil timestamp input. Detached statements inherit the calling thread's zone.
+    fn temporal_time_zone(&self) -> Option<uqa_core::TemporalTimeZone> {
+        None
+    }
     /// The session's `statement_timeout`, which a statement starts with; `None` lets a statement run without a limit. Reading it captures none of the statement's execution inputs.
     fn statement_timeout(&self) -> Option<std::time::Duration>;
     /// Capture scanner settings at the SQL message boundary, before its first SET can execute.
@@ -130,6 +134,9 @@ pub(super) fn statement_thread_scope<S: Clone + 'static>(
         io: statements.io_context(),
         regex_cache: statements.regex_cache(),
         temporal_input: uqa_sql::expr::TemporalInputContext {
+            time_zone: statements
+                .temporal_time_zone()
+                .unwrap_or_else(uqa_sql::expr::temporal_time_zone),
             transaction_clock_micros: statements
                 .transaction_timestamp_micros()
                 .or_else(uqa_sql::expr::transaction_clock_micros),

@@ -68,6 +68,66 @@ fn temporal_comparisons_match_postgresql_values_and_prepared_parameters() {
     assert!(differences.is_empty(), "{}", differences.join("\n"));
 }
 
+#[test]
+fn overlaps_binds_timestamp_literals_parameters_and_declared_text_like_postgresql() {
+    let engine = engine();
+    engine.sql("SET TIME ZONE 'America/New_York'", &[]).unwrap();
+    let period = "(timestamptz '2000-01-01 05:05Z', timestamptz '2000-01-01 05:10Z')";
+    for (endpoints, expected) in [
+        ("('2000-01-01 00:00', '2000-01-01 00:15')", true),
+        (
+            "(timestamptz '2000-01-01 05:00Z', '2000-01-01 00:15')",
+            true,
+        ),
+        ("('2000-01-01 00:00+00', '2000-01-01 00:15+00')", false),
+        ("('2000-01-01 00:00-05', '2000-01-01 00:15-05')", true),
+    ] {
+        let result = engine
+            .sql(&format!("SELECT {period} OVERLAPS {endpoints} AS v"), &[])
+            .unwrap();
+        assert_eq!(result.rows[0]["v"], Value::Bool(expected), "{endpoints}");
+    }
+    let error = engine
+        .sql(
+            &format!("SELECT {period} OVERLAPS ('2000-01-01'::text, '2000-01-02'::text)"),
+            &[],
+        )
+        .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("42883"));
+    engine.sql(&format!("PREPARE zoned_period(timestamptz) AS SELECT {period} OVERLAPS ($1, interval '15 minutes') AS v"), &[]).unwrap();
+    let execute = "EXECUTE zoned_period('2000-01-01 00:00')";
+    assert_eq!(
+        engine.sql(execute, &[]).unwrap().rows[0]["v"],
+        Value::Bool(true)
+    );
+    engine.sql("SET TIME ZONE 'UTC'", &[]).unwrap();
+    assert_eq!(
+        engine.sql(execute, &[]).unwrap().rows[0]["v"],
+        Value::Bool(false)
+    );
+}
+
+#[test]
+fn generated_periods_require_immutable_overlaps_overloads() {
+    let engine = engine();
+    for (ty, end, allowed) in [
+        ("timestamptz", "duration", false),
+        ("timestamptz", "finish", true),
+        ("timestamp", "duration", true),
+    ] {
+        let sql = format!(
+            "CREATE TEMP TABLE period_{ty}_{end} (start_at {ty}, finish {ty}, duration interval,
+             observed boolean GENERATED ALWAYS AS ((start_at, finish) OVERLAPS (start_at, {end})) STORED)"
+        );
+        let result = engine.sql(&sql, &[]);
+        if allowed {
+            result.unwrap();
+        } else {
+            assert_eq!(result.unwrap_err().sqlstate(), Some("42P17"));
+        }
+    }
+}
+
 fn verify(engine: &Engine, oracle: &JSONValue) {
     let mut differences = Vec::new();
     for case in oracle["queries"].as_array().unwrap() {

@@ -9,6 +9,23 @@
 use uqa_core::{memory::ProductionControl, TemporalTimeZone, TemporalValue, Value};
 
 use super::{ColumnType, EngineHook, Result, SQLError};
+use crate::expr::temporal_input::TimeZoneScope;
+
+pub(super) fn input_scope(
+    value: &Value,
+    target: Option<&ColumnType>,
+    engine: Option<&dyn EngineHook>,
+    control: &ProductionControl<'_>,
+) -> Result<Option<TimeZoneScope>> {
+    if matches!(
+        target,
+        Some(ColumnType::TimestampTz | ColumnType::TimestampTzPrecision(_))
+    ) {
+        TimeZoneScope::for_timestamp_input(value, engine, control)
+    } else {
+        Ok(None)
+    }
+}
 
 pub(super) fn cast_timestamp(
     value: &Value,

@@ -8,7 +8,8 @@
 
 use super::{
     clock_timestamp_micros, ProductionControl, ProductionString, TemporalDateOrder,
-    TemporalInputError, TemporalValue, ValueRetentionError, MICROS_PER_DAY, MICROS_PER_SECOND,
+    TemporalInputError, TemporalTimeZone, TemporalValue, ValueRetentionError, MICROS_PER_DAY,
+    MICROS_PER_SECOND,
 };
 use crate::memory::Produced;
 
@@ -236,8 +237,25 @@ impl TemporalValue {
         order: TemporalDateOrder,
         control: &ProductionControl<'_>,
     ) -> Result<Result<Self, TemporalInputError>, ValueRetentionError> {
+        Self::timestamp_tz_input_in_zone_with_control(
+            text,
+            now_micros,
+            order,
+            TemporalTimeZone::UTC,
+            control,
+        )
+    }
+
+    /// Apply the session zone when the timestamp does not already specify an offset.
+    pub fn timestamp_tz_input_in_zone_with_control(
+        text: &str,
+        now_micros: i64,
+        order: TemporalDateOrder,
+        zone: TemporalTimeZone,
+        control: &ProductionControl<'_>,
+    ) -> Result<Result<Self, TemporalInputError>, ValueRetentionError> {
         check_input(text, control)?;
-        let value = Self::timestamp_tz_input_in_order(text, now_micros, order);
+        let value = Self::timestamp_tz_input_in_zone(text, now_micros, order, zone);
         control.check()?;
         Ok(value)
     }

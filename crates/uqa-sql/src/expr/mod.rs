@@ -169,8 +169,8 @@ pub use statement_cancellation::{
     check_statement_cancellation, statement_cancellation, StatementCancellationScope,
 };
 pub use temporal_input::{
-    temporal_date_order, temporal_interval_style, DateOrderScope, IntervalStyleScope,
-    TemporalInputContext, TemporalInputScope,
+    temporal_date_order, temporal_interval_style, temporal_time_zone, DateOrderScope,
+    IntervalStyleScope, TemporalInputContext, TemporalInputScope,
 };
 
 mod builtin;

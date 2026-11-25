@@ -38,6 +38,15 @@ pub(in crate::expr) fn overlaps(
     let kinds = types.each_ref().map(Option::as_deref);
     let target = endpoint_type(&kinds);
     let endpoint = |value: &Value, ty: Option<&ColumnType>| {
+        let _zone = if target == "timestamptz" {
+            crate::expr::temporal_input::TimeZoneScope::for_timestamp_input(
+                value,
+                context.and_then(|ctx| ctx.engine),
+                control,
+            )?
+        } else {
+            None
+        };
         if target == "timestamptz" && matches!(ty, Some(ColumnType::Date | ColumnType::Timestamp)) {
             let local = cast_value_from_with_control(value, "timestamp", None, control)?;
             super::eval_timezone(std::slice::from_ref(&*local), context, control)
