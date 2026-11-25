@@ -186,3 +186,43 @@ fn overlaps_compares_typed_endpoints_at_postgresql_precision() {
         assert_eq!(*evaluate("overlaps", &args, &control), expected);
     }
 }
+
+#[test]
+fn overlaps_observes_retained_temporal_fields_when_their_values_are_needed() {
+    use uqa_core::DatumValue;
+    let budget = MemoryBudget::new(0);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&budget, &token, &token);
+    let start = TemporalValue::parse_timestamp("2000-01-01").unwrap();
+    let day = TemporalValue::parse_interval("1 day").unwrap();
+    let last_hour = Value::Temporal(TemporalValue::parse_timestamp("2000-01-01 23:00").unwrap());
+    let midnight = Value::Temporal(TemporalValue::parse_timestamp("2000-01-02").unwrap());
+    let physical = |value: &TemporalValue, oid: u32| {
+        let (bytes, len) =
+            crate::catalog::node_tree::encode_temporal_datum_inline(value, i64::from(oid)).unwrap();
+        Value::Datum(DatumValue::new(oid, 0, bytes[..len].to_vec()))
+    };
+    for (start, duration) in [
+        (physical(&start, 1114), physical(&day, 1186)),
+        (Value::Temporal(start), Value::Temporal(day)),
+    ] {
+        assert_eq!(
+            *evaluate(
+                "overlaps",
+                &[start, duration, last_hour.clone(), midnight.clone()],
+                &control
+            ),
+            Value::Bool(true)
+        );
+    }
+    let unread = Value::Datum(DatumValue::new(1186, 0, Vec::new()));
+    assert_eq!(
+        *evaluate(
+            "overlaps",
+            &[Value::Null, unread, last_hour, midnight],
+            &control
+        ),
+        Value::Null
+    );
+    assert_eq!(budget.used(), 0);
+}
