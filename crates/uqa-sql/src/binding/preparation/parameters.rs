@@ -48,15 +48,7 @@ pub(super) struct ExpressionType {
     unknown: UnknownOrigin,
     /// The text of an `unknown` string literal, which the selected type's input function reads when a context coerces it.
     literal: Option<(AnalysisIdentity<ScalarExpr>, Produced<String>)>,
-    collation: Option<ExplicitInputCollation>,
-}
-
-/// A direct COLLATE clause can be peeled during coercion. Retain its operand's original collation along with the clause selected for the executable expression.
-#[derive(Clone, Copy)]
-struct ExplicitInputCollation {
-    origin: AnalysisIdentity<ScalarExpr>,
-    derivation: Derivation,
-    initial: u32,
+    collation: Option<AnalysisIdentity<ScalarExpr>>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -73,6 +65,7 @@ pub(super) struct ParameterTypes<'a, I = InputCatalogs<'a>> {
     fixed_values: Option<&'a [SQLParam]>,
     occurrences: AnalysisVec<(usize, Option<Produced<ColumnType>>)>,
     input_constants: Option<InputConstants>,
+    clause_inputs: collations::CollationInputs,
     inputs: I,
     stored_literal_syntax: bool,
     call_collations: Option<CallCollations>,
@@ -467,8 +460,7 @@ impl<I: LiteralInput> ParameterTypes<'_, I> {
         let Some(constants) = self.input_constants.as_mut() else {
             return Ok(None);
         };
-        constants
-            .3
+        self.clause_inputs
             .take_literal(expression, &mut constants.0, &control.control())
     }
 
@@ -479,17 +471,13 @@ impl<I: LiteralInput> ParameterTypes<'_, I> {
         oid: u32,
     ) -> Result<(), SQLError> {
         let origin = AnalysisIdentity::from(expression);
-        let inner = value.collation;
-        if let Some(constants) = &mut self.input_constants {
-            constants
-                .3
-                .select(origin, inner.map(|clause| clause.origin), oid)?;
-        }
-        value.collation = Some(ExplicitInputCollation {
+        self.clause_inputs.select(
             origin,
-            derivation: inner.map_or(value.derivation, |clause| clause.derivation),
-            initial: inner.map_or(value.initial_collation, |clause| clause.initial),
-        });
+            value.collation,
+            oid,
+            (value.derivation, value.initial_collation),
+        )?;
+        value.collation = Some(origin);
         value.derivation = value.derivation.explicit(i64::from(oid));
         value.initial_collation = oid;
         Ok(())
@@ -501,15 +489,12 @@ impl<I: LiteralInput> ParameterTypes<'_, I> {
         value: &mut ExpressionType,
         target: &ColumnType,
     ) -> Result<(), SQLError> {
-        if let Some(clause) = value
+        if let Some(origin) = value
             .collation
-            .filter(|clause| clause.origin == AnalysisIdentity::from(operand))
+            .filter(|origin| *origin == AnalysisIdentity::from(operand))
         {
-            if let Some(constants) = &mut self.input_constants {
-                constants.3.coerce(Some(clause.origin), target)?;
-            }
-            value.derivation = clause.derivation;
-            value.initial_collation = clause.initial;
+            (value.derivation, value.initial_collation) =
+                self.clause_inputs.coerce(origin, target)?;
             value.collation = None;
         }
         Ok(())
@@ -548,6 +533,7 @@ impl<I: LiteralInput> ParameterTypes<'_, I> {
             fixed_values: None,
             occurrences: AnalysisVec::new(control),
             input_constants: None,
+            clause_inputs: collations::CollationInputs::new(control),
             collations: super::collations::PendingCollations::new(control),
             inputs,
             stored_literal_syntax: false,
@@ -793,7 +779,14 @@ impl<I: LiteralInput> ParameterTypes<'_, I> {
     }
 
     pub(super) fn take_input_constants(&mut self) -> InputConstants {
-        let mut constants = self.input_constants.take().unwrap_or_default();
+        let mut constants = self
+            .input_constants
+            .take()
+            .map(|mut retained| {
+                std::mem::swap(&mut retained.3, &mut self.clause_inputs);
+                retained
+            })
+            .unwrap_or_default();
         constants.9 = std::mem::take(&mut self.row_expansions);
         constants.10 = std::mem::take(&mut self.rewritten_blocks);
         constants
@@ -874,10 +867,8 @@ impl<I: LiteralInput> ParameterTypes<'_, I> {
         let control_owner = self.control.clone();
         let control = control_owner.control();
         let target = target.without_type_modifiers_with_control(&control)?;
-        if let Some(constants) = &mut self.input_constants {
-            constants
-                .3
-                .coerce(expression.collation.map(|clause| clause.origin), &target)?;
+        if let Some(origin) = expression.collation {
+            self.clause_inputs.coerce(origin, &target)?;
         }
         if let Some(occurrence) = expression.occurrence {
             let (index, observed) = &mut self.occurrences[occurrence];

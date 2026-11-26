@@ -11,13 +11,15 @@ use super::{
     ScalarExpr,
 };
 use crate::ast::{FunctionBinding, FunctionDispatch};
-use crate::catalog::collations::expression::scalar_clause;
+use crate::catalog::collations::{derivation::Derivation, expression::scalar_clause};
 use uqa_core::memory::ProductionControl;
 
 struct ClauseInput {
     inner: Option<AnalysisIdentity<ScalarExpr>>,
     oid: u32,
     retain: bool,
+    /// The derivation and initial collation before this clause was applied.
+    operand: (Derivation, u32),
 }
 
 #[derive(Default)]
@@ -36,31 +38,35 @@ impl CollationInputs {
         origin: AnalysisIdentity<ScalarExpr>,
         inner: Option<AnalysisIdentity<ScalarExpr>>,
         oid: u32,
+        operand: (Derivation, u32),
     ) -> Result<(), SQLError> {
         self.0.insert_if_missing(origin, || {
             Ok(ClauseInput {
                 inner,
                 oid,
                 retain: true,
+                operand,
             })
         })
     }
 
     pub(super) fn coerce(
         &mut self,
-        mut origin: Option<AnalysisIdentity<ScalarExpr>>,
+        mut origin: AnalysisIdentity<ScalarExpr>,
         target: &ColumnType,
-    ) -> Result<(), SQLError> {
+    ) -> Result<(Derivation, u32), SQLError> {
         let mut retain = crate::schema::composites::type_is_collatable(target);
-        while let Some(identity) = origin {
-            let clause = self.0.get_mut(&identity).ok_or_else(|| {
+        loop {
+            let clause = self.0.get_mut(&origin).ok_or_else(|| {
                 SQLError::Internal("input collation did not belong to the analyzed plan".into())
             })?;
             clause.retain = retain;
+            let Some(inner) = clause.inner else {
+                return Ok(clause.operand);
+            };
             retain = false;
-            origin = clause.inner;
+            origin = inner;
         }
-        Ok(())
     }
 
     pub(super) async fn apply_owned_from<W: crate::plan::ScalarInputWork>(

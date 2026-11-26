@@ -99,7 +99,10 @@ fn fixture(kind: usize, control: &ProductionControl<'_>) -> Fixture {
             .unwrap();
     }
     if matches!(kind, 2 | 3) {
-        constants.3.select(identity, None, 950).unwrap();
+        constants
+            .3
+            .select(identity, None, 950, (Derivation::None, 0))
+            .unwrap();
         if kind == 3 {
             constants
                 .3
