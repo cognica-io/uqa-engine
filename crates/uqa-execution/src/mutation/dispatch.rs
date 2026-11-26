@@ -22,6 +22,7 @@ pub fn run_insert<S: Clone + Send + Sync + 'static>(
     params: &[SQLParam],
     inherited_ctes: Option<&CteScope<S>>,
 ) -> Result<MutationOutput, SQLError> {
+    let context = &context.with_domain_defaults(stmt.prepared_domain_defaults.as_deref());
     let rewrite = context.mutation.rules.views;
     let retained = context.mutation.scopes.read_control()?;
     let control = uqa_core::memory::ProductionControl::new(
@@ -136,6 +137,7 @@ pub fn run_update<S: Clone + Send + Sync + 'static>(
     params: &[SQLParam],
     inherited_ctes: Option<&CteScope<S>>,
 ) -> Result<MutationOutput, SQLError> {
+    let context = &context.with_domain_defaults(stmt.prepared_domain_defaults.as_deref());
     super::rules::schedule::run_update(context, stmt, params, inherited_ctes)
 }
 
@@ -154,6 +156,7 @@ pub fn run_merge<S: Clone + Send + Sync + 'static>(
     params: &[SQLParam],
     inherited_ctes: Option<&CteScope<S>>,
 ) -> Result<MutationOutput, SQLError> {
+    let context = &context.with_domain_defaults(stmt.prepared_domain_defaults.as_deref());
     let rewrite = context.mutation.rules.views;
     let retained = context.mutation.scopes.read_control()?;
     let control = uqa_core::memory::ProductionControl::new(

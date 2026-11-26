@@ -22,6 +22,7 @@ macro_rules! input_fields {
                     0 => {
                         memory.grow(size_of::<InsertPlan>())?;
                         CommandPlan::Insert(Box::new(InsertPlan {
+                            prepared_domain_defaults: None,
                             table: String::new(),
                             target_relation_bound: false,
                             relations_bound: false,
@@ -49,6 +50,7 @@ macro_rules! input_fields {
                     1 => {
                         memory.grow(size_of::<UpdatePlan>())?;
                         CommandPlan::Update(Box::new(UpdatePlan {
+                            prepared_domain_defaults: None,
                             table: String::new(),
                             target_relation_bound: false,
                             relations_bound: false,
@@ -94,6 +96,7 @@ macro_rules! input_fields {
                     3 => {
                         memory.grow(size_of::<MergePlan>() + size_of::<SourcePlan>())?;
                         CommandPlan::Merge(Box::new(MergePlan {
+                            prepared_domain_defaults: None,
                             ctes: Vec::new(),
                             target: String::new(),
                             statement_privilege_subject: None,

@@ -110,17 +110,21 @@ fn analyze_definition_with_finalizer(
                     control,
                 )?;
             let (mut dependencies, memory) = input.dependencies.into_parts();
-            let mut result = Ok(());
-            let mut include = |expression: &crate::ScalarExpr| {
-                if result.is_ok() {
-                    result = dependencies.include_expression_with_control(expression, control);
-                }
+            dependencies.include_plan_with_control(plan.as_plan_ref(), control)?;
+            let plan = if crate::prepared::defaults::needs_domain_defaults(plan.as_plan_ref()) {
+                plan.visit_scoped(
+                    control,
+                    &mut crate::prepared::defaults::BindMutationDefaults {
+                        catalog: catalog.as_ref(),
+                        resolution: &resolution,
+                        views: context.scopes.mutation_views(),
+                        dependencies: &mut dependencies,
+                        control: *control,
+                    },
+                )?
+            } else {
+                plan
             };
-            match plan.as_plan_ref() {
-                PlanRef::Query(query) => query.visit_scalar_expressions(&mut include),
-                PlanRef::Command(command) => command.visit_scalar_expressions(&mut include),
-            }
-            result?;
             let path = catalog.effective_search_path_with_control(&resolution, control)?;
             let snapshot =
                 catalog.prepared_dependency_snapshot_with_control(&dependencies, control)?;

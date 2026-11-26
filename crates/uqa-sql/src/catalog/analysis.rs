@@ -53,6 +53,16 @@ impl<'a> From<&'a ViewDefinition> for ViewDefinitionRef<'a> {
 
 /// Immutable namespace-aware lookup for SQL analysis. This contract exposes definitions only; it grants no row access, mutation, locking, or transaction services.
 pub trait AnalysisCatalog: Send + Sync {
+    /// Borrow the default expression from this analysis snapshot. A domain with no default supplies SQL NULL.
+    fn domain_default_with_control(
+        &self,
+        _oid: u32,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<&crate::ast::Expr>, SQLError> {
+        control.check()?;
+        Ok(None)
+    }
+
     /// The actual row type of a selected catalog relation. Anonymous query sources and catalog fixtures without identities leave this unavailable.
     fn relation_row_type(
         &self,

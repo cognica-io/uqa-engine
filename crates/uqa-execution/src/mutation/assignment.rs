@@ -21,6 +21,7 @@ use crate::{
     query::{locking::context::RowLockScopeSource, CteScope},
     OwnedPhysicalRow,
 };
+use std::borrow::Cow;
 use uqa_core::{DocId, Value};
 use uqa_sql::{
     assignment::{columns::AssignmentColumnCatalog, AssignmentContext},
@@ -31,12 +32,37 @@ use uqa_storage::document_store::Document;
 #[derive(Clone)]
 pub struct MutationAssignmentContext<'a, S: Clone + 'static> {
     pub columns: &'a dyn AssignmentColumnCatalog,
+    pub domain_defaults: Option<&'a uqa_sql::prepared::defaults::DomainDefaultExpressions>,
     pub assignment: &'a dyn AssignmentContext,
     pub rows: MutationRowContext<'a>,
     pub expressions: MutationExpressionContext<'a, S>,
     pub scopes: &'a dyn RowLockScopeSource<S>,
 }
 impl<S: Clone + 'static> Copy for MutationAssignmentContext<'_, S> {}
+
+impl<'a, S: Clone + 'static> MutationAssignmentContext<'a, S> {
+    fn column_default(
+        self,
+        table: &str,
+        column: &str,
+        action: &str,
+    ) -> Result<Option<Cow<'a, uqa_sql::ast::Expr>>, SQLError> {
+        if let Some(defaults) = self
+            .domain_defaults
+            .filter(|defaults| defaults.table == table)
+        {
+            if let Some((_, expression)) = defaults.columns.iter().find(|(name, _)| name == column)
+            {
+                return Ok(Some(Cow::Borrowed(expression)));
+            }
+        }
+        self.columns
+            .try_column_insert_default_expr(table, column)
+            .map(|expression| expression.map(Cow::Owned))
+            .map_err(|error| dml_storage_error(action, error))
+    }
+}
+
 #[derive(Clone, Copy)]
 pub struct MutationAssignmentTarget<'a> {
     pub table: &'a str,
@@ -92,11 +118,8 @@ pub fn eval_mutation_assignment<S: Clone + 'static>(
             )
             .map(Some);
         }
-        let default = services
-            .columns
-            .try_column_insert_default_expr(table, column)
-            .map_err(|error| dml_storage_error(action, error))?;
-        return evaluate_column_default(services, table, column, default.as_ref(), params)
+        let default = services.column_default(table, column, action)?;
+        return evaluate_column_default(services, table, column, default.as_deref(), params)
             .map(Some);
     }
     if generated.is_some() {
@@ -449,11 +472,7 @@ pub fn apply_missing_column_defaults<S: Clone + 'static>(
         {
             continue;
         }
-        if let Some(default_expr) = services
-            .columns
-            .try_column_insert_default_expr(table, &col)
-            .map_err(|err| dml_storage_error("INSERT defaults", err))?
-        {
+        if let Some(default_expr) = services.column_default(table, &col, "INSERT defaults")? {
             let value =
                 evaluate_column_default(services, table, &col, Some(&default_expr), params)?;
             document.insert(col, value);

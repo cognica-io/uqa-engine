@@ -36,6 +36,45 @@ fn domain_defaults_match_postgresql_and_persistent_reopen(#[case] provider: usiz
     }
 }
 
+#[test]
+fn host_prepared_write_keeps_only_the_defaults_it_uses() {
+    use uqa_core::Value;
+    use uqa_sql::SQLParam;
+
+    let engine = Engine::new();
+    for sql in [
+        "CREATE FUNCTION unused_default() RETURNS integer LANGUAGE sql AS 'SELECT 7'",
+        "CREATE DOMAIN written_value AS integer DEFAULT unused_default()",
+        "CREATE DOMAIN omitted_value AS integer DEFAULT 12",
+        "CREATE TABLE host_defaults(a written_value, b omitted_value)",
+    ] {
+        engine.sql(sql, &[]).unwrap();
+    }
+    let write = engine
+        .prepare_statement(
+            "INSERT INTO host_defaults(a) VALUES($1) RETURNING b::integer AS value",
+            &[],
+        )
+        .unwrap();
+    engine
+        .sql("ALTER DOMAIN omitted_value SET DEFAULT 13", &[])
+        .unwrap();
+    engine.sql("CREATE OR REPLACE FUNCTION unused_default() RETURNS integer LANGUAGE sql AS 'SELECT 8'", &[]).unwrap();
+    let execute = || {
+        engine
+            .execute_prepared_statement(&write, &[SQLParam::scalar(Value::Int(42))])
+            .unwrap()
+            .rows[0]["value"]
+            .clone()
+    };
+    assert_eq!(execute(), Value::Int(12));
+    engine
+        .sql("ALTER TABLE host_defaults ADD COLUMN extra text", &[])
+        .unwrap();
+    assert_eq!(execute(), Value::Int(13));
+    engine.finalize_prepared_statement(&write);
+}
+
 fn open(provider: usize, path: &Path) -> Engine {
     match provider {
         0 => Engine::new(),

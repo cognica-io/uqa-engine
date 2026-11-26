@@ -6,7 +6,7 @@
 
 //! DELETE execution with snapshot qualification, tuple rechecks, and deferred publication.
 use crate::mutation::output::MutationOutput;
-use crate::mutation::statement::context::{with_mutation_snapshot, MutationStatementContext};
+use crate::mutation::statement::context::MutationStatementContext;
 use crate::mutation::{
     candidate::{MutationCandidate, PhysicalDocumentIdentity, PhysicalMutationLockTarget},
     command_scope::MutationOverlayScope,
@@ -421,7 +421,7 @@ pub fn run_table_delete<S: Clone + Send + Sync + 'static>(
             Ok(MutationOutput::from_affected(affected))
         };
     let result = match statement_snapshot.as_deref() {
-        Some(snapshot) => with_mutation_snapshot(context.snapshots, snapshot, execute_read),
+        Some(snapshot) => context.with_snapshot(snapshot, execute_read),
         None => execute_read(context),
     };
     statement_end::finish_statement(

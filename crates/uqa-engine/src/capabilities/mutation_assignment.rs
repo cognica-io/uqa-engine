@@ -123,6 +123,7 @@ impl Engine {
     ) -> MutationAssignmentContext<'_, crate::session::StatementReadSnapshot> {
         MutationAssignmentContext {
             columns: self,
+            domain_defaults: None,
             assignment: self,
             rows: self.mutation_row_context(),
             expressions: self.mutation_expression_context(),

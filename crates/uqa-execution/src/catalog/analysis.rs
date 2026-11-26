@@ -10,6 +10,19 @@ use uqa_sql::catalog::analysis::{AnalysisCatalog, TableDefinition, ViewDefinitio
 use uqa_sql::{ColumnType, SQLError};
 
 impl AnalysisCatalog for CatalogReadView {
+    fn domain_default_with_control(
+        &self,
+        oid: u32,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<&uqa_sql::ast::Expr>, SQLError> {
+        Ok(uqa_sql::catalog::domain::find_domain_by_oid(
+            self.snapshot().definitions.domains.values(),
+            oid,
+            control,
+        )?
+        .and_then(|domain| domain.definition.default.as_ref()))
+    }
+
     fn relation_row_type_with_control(
         &self,
         resolution: &RelationNameResolution,

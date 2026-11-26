@@ -11,6 +11,26 @@ use crate::{ast::FunctionBinding, ColumnType, SQLError, ScalarExpr};
 use uqa_core::{memory::ProductionControl, Value};
 
 impl PreparedAnalysisDependencies {
+    pub(crate) fn include_plan_with_control(
+        &mut self,
+        plan: crate::plan::PlanRef<'_>,
+        control: &ProductionControl<'_>,
+    ) -> Result<(), SQLError> {
+        let mut status = Ok(());
+        let mut include = |expression: &crate::ScalarExpr| {
+            if status.is_ok() {
+                status = self.include_expression_with_control(expression, control);
+            }
+        };
+        match plan {
+            crate::plan::PlanRef::Query(query) => query.visit_scalar_expressions(&mut include),
+            crate::plan::PlanRef::Command(command) => {
+                command.visit_scalar_expressions(&mut include);
+            }
+        }
+        status
+    }
+
     pub(crate) fn include_relation_with_control(
         &mut self,
         oid: u32,

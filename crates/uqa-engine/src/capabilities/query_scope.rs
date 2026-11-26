@@ -88,6 +88,12 @@ impl
 }
 
 impl uqa_sql::binding::statements::StatementAnalysisScopes for Engine {
+    fn mutation_views(
+        &self,
+    ) -> Option<uqa_sql::semantics::view_rewrite::context::ViewRewriteContext<'_>> {
+        Some(self.view_rewrite_context())
+    }
+
     fn planning_control(&self) -> Result<uqa_core::memory::OwnedProductionControl, SQLError> {
         let resources = self.query_retention_control()?;
         Ok(ProductionControl::new(

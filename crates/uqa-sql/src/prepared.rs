@@ -14,6 +14,7 @@ pub use production::{
 };
 pub mod arguments;
 pub mod composites;
+pub mod defaults;
 pub mod definition;
 pub mod dependencies;
 pub mod entry;

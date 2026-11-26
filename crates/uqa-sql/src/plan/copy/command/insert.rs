@@ -21,6 +21,7 @@ impl Copying<'_> {
     ) -> Result<InsertPlan> {
         let selected = InsertFields::select(plan, selection);
         Ok(InsertPlan {
+            prepared_domain_defaults: plan.prepared_domain_defaults.clone(),
             table: self.field("table", |copying| copying.text(selected.table))?,
             target_relation_bound: plan.target_relation_bound,
             relations_bound: plan.relations_bound,

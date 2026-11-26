@@ -6,7 +6,7 @@
 
 //! Execute view mutation rows, rewrite rules, and INSTEAD OF triggers.
 use crate::mutation::output::MutationOutput;
-use crate::mutation::statement::context::{with_mutation_snapshot, MutationStatementContext};
+use crate::mutation::statement::context::MutationStatementContext;
 use crate::mutation::{
     expressions::eval_mutation_expr,
     returning::{

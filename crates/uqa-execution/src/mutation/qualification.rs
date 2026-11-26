@@ -12,7 +12,7 @@ use uqa_core::{memory::MemoryBudget, DocId};
 use uqa_sql::{SQLError, SQLParam, ScalarExpr};
 use uqa_storage::read_control::StorageReadControl;
 
-use super::statement::context::{with_mutation_snapshot, MutationStatementContext};
+use super::statement::context::MutationStatementContext;
 use crate::{query::CteScope, OwnedPhysicalRow};
 
 mod support;
@@ -83,7 +83,7 @@ impl<S: Clone + Send + Sync + 'static> RowQualification<S> {
                     .function(table, table, name, args, params, None)
             };
             let entries = match &self.snapshot {
-                Some(snapshot) => with_mutation_snapshot(context.snapshots, snapshot, execute)?,
+                Some(snapshot) => context.with_snapshot(snapshot, execute)?,
                 None => execute(context)?,
             };
             if volatile {

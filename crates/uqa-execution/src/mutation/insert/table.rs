@@ -19,7 +19,7 @@ use super::{
     triggers::insert_statement_events,
 };
 use crate::mutation::output::MutationOutput;
-use crate::mutation::statement::context::{with_mutation_snapshot, MutationStatementContext};
+use crate::mutation::statement::context::MutationStatementContext;
 use crate::{
     mutation::{
         assignment::{
@@ -622,7 +622,7 @@ pub fn run_table_insert<S: Clone + Send + Sync + 'static>(
             Ok(MutationOutput::from_affected(affected))
         };
     let result = match statement_snapshot.as_deref() {
-        Some(snapshot) => with_mutation_snapshot(context.snapshots, snapshot, execute_read),
+        Some(snapshot) => context.with_snapshot(snapshot, execute_read),
         None => execute_read(context),
     };
     statement_end::finish_statement(

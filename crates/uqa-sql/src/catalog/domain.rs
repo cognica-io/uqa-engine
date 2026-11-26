@@ -118,6 +118,22 @@ pub trait DomainCatalog {
     }
 }
 
+/// Borrow one retained domain by catalog identity under the caller's cancellation control.
+pub fn find_domain_by_oid<'a>(
+    domains: impl Iterator<Item = &'a StoredDomain>,
+    oid: u32,
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<Option<&'a StoredDomain>, crate::SQLError> {
+    for domain in domains {
+        control.check()?;
+        if domain.oid == oid {
+            return Ok(Some(domain));
+        }
+    }
+    control.check()?;
+    Ok(None)
+}
+
 pub fn domain_default_expression(
     catalog: &dyn DomainCatalog,
     ty: &crate::ColumnType,

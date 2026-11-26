@@ -8,9 +8,9 @@ use super::{
     build_join_spill_with_ctes, build_returning_value_row, dml_join_rows, eval_mutation_expr,
     finish_view_dml, materialize_view_rows, resolve_view_target, target_columns, target_row,
     validate_dml_expression_qualifiers, validate_returning_alias_relations, view_document,
-    with_mutation_snapshot, BTreeSet, CteScope, DeletePlan, DmlReturningShape,
-    MutationStatementContext, OwnedPhysicalRow, ReturningValueProjectionRow, SQLError, SQLParam,
-    ScalarExpr, TriggerViewChecks, UpdatePlan, Value, ViewDmlTarget,
+    BTreeSet, CteScope, DeletePlan, DmlReturningShape, MutationStatementContext, OwnedPhysicalRow,
+    ReturningValueProjectionRow, SQLError, SQLParam, ScalarExpr, TriggerViewChecks, UpdatePlan,
+    Value, ViewDmlTarget,
 };
 use crate::mutation::output::MutationOutput;
 use crate::mutation::{
@@ -407,7 +407,7 @@ pub fn run_view_update_inner<S: Clone + Send + Sync + 'static>(
             Ok(result)
         };
     let result = match statement_snapshot.as_deref() {
-        Some(snapshot) => with_mutation_snapshot(context.snapshots, snapshot, execute_read),
+        Some(snapshot) => context.with_snapshot(snapshot, execute_read),
         None => execute_read(context),
     };
     crate::mutation::statement_end::finish_statement(

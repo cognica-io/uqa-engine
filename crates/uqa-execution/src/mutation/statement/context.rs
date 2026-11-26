@@ -41,6 +41,34 @@ impl<'a, S: Clone + 'static> MutationStatementContext<'a, S> {
         context
     }
 
+    pub(crate) fn with_domain_defaults<'b>(
+        self,
+        defaults: Option<&'b uqa_sql::prepared::defaults::DomainDefaultExpressions>,
+    ) -> MutationStatementContext<'b, S>
+    where
+        'a: 'b,
+    {
+        let mut context = self;
+        context.mutation.preparation = context.mutation.preparation.with_domain_defaults(defaults);
+        context
+    }
+
+    pub(crate) fn with_snapshot<T>(
+        &self,
+        snapshot: &S,
+        action: impl for<'scope> FnOnce(&MutationStatementContext<'scope, S>) -> Result<T, SQLError>,
+    ) -> Result<T, SQLError> {
+        let defaults = self
+            .mutation
+            .preparation
+            .referential
+            .assignment
+            .domain_defaults;
+        with_mutation_snapshot(self.snapshots, snapshot, |read| {
+            action(&read.with_domain_defaults(defaults))
+        })
+    }
+
     pub fn insert_source(&self) -> InsertSourceContext<'a, S> {
         InsertSourceContext {
             rows: self.mutation.preparation,

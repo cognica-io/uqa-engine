@@ -40,7 +40,7 @@ projected_struct!(
         view_rule_relations,
         view_rule_insert_plans,
         view_rule_returning,
-    }
+    } skip { prepared_domain_defaults }
 );
 projected_struct!(
     recursive,
@@ -64,7 +64,7 @@ projected_struct!(
         view_rule_relations,
         view_rule_update_plans,
         view_rule_returning,
-    }
+    } skip { prepared_domain_defaults }
 );
 projected_struct!(
     recursive,
@@ -105,7 +105,7 @@ projected_struct!(
         returning_aliases,
         subqueries,
         view_checks,
-    }
+    } skip { prepared_domain_defaults }
 );
 projected_struct!(
     inline,

@@ -7,9 +7,8 @@
 //! INSERT execution for views with `INSTEAD OF` triggers.
 
 use super::{
-    resolve_view_target, target_columns, validate_returning_alias_relations,
-    with_mutation_snapshot, CteScope, InsertPlan, MutationStatementContext, SQLError, SQLParam,
-    SourceOutputPruning,
+    resolve_view_target, target_columns, validate_returning_alias_relations, CteScope, InsertPlan,
+    MutationStatementContext, SQLError, SQLParam, SourceOutputPruning,
 };
 use crate::mutation::output::MutationOutput;
 use crate::query::statement::consumer::QueryOutputMode;
@@ -224,7 +223,7 @@ pub fn run_view_insert_inner<S: Clone + Send + Sync + 'static>(
             row_output.finish()
         };
     let result = match statement_snapshot.as_deref() {
-        Some(snapshot) => with_mutation_snapshot(context.snapshots, snapshot, execute_read),
+        Some(snapshot) => context.with_snapshot(snapshot, execute_read),
         None => execute_read(context),
     };
     crate::mutation::statement_end::finish_statement(
