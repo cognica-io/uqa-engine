@@ -44,6 +44,7 @@ pub mod params;
 pub mod parser;
 pub mod plan;
 pub mod plpgsql;
+mod postgres_sort;
 mod production;
 pub mod registry;
 pub mod render;
