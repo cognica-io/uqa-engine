@@ -12,7 +12,7 @@ use super::{
     registered_table_function_row_stream,
     values::{
         generate_series_values, json_array_values, json_each_rows, json_object_key_values,
-        string_to_table_values, unnest_rows,
+        string_to_table_values,
     },
     TableFunctionCall, TableFunctionRows,
 };
@@ -129,26 +129,30 @@ fn builtin_value_columns(
 ) -> Result<Vec<String>, SQLError> {
     Ok(match lower {
         "unnest" => {
-            let aliases = if call.ordinality {
-                &call.column_aliases[..call.column_aliases.len().min(call.args.len())]
+            let width = if uqa_sql::semantics::is_tsvector_unnest(call.binding) {
+                uqa_sql::semantics::TSVECTOR_UNNEST_COLUMNS.len()
             } else {
-                call.column_aliases
+                call.args.len()
             };
-            if call.args.is_empty() || aliases.len() > call.args.len() {
-                return Err(SQLError::BadArity {
-                    name: "unnest".into(),
-                    expected: "one output alias per array argument".into(),
-                    actual: call.args.len(),
-                });
-            }
-            uqa_sql::semantics::table_function_empty_schema(
+            let control = uqa_core::memory::ProductionControl::uncontrolled();
+            uqa_sql::semantics::validate_table_function_alias_count_with_control(
+                call.alias.unwrap_or(call.output_name),
+                width + usize::from(call.ordinality),
+                call.column_aliases.len(),
+                &control,
+            )?;
+            uqa_sql::semantics::bound_table_function_empty_schema_with_control(
                 "unnest",
+                call.binding,
                 call.output_name,
                 call.alias,
-                aliases,
-                call.args.len(),
+                call.column_aliases,
+                width,
                 false,
-            )
+                &control,
+            )?
+            .into_parts()
+            .0
         }
         "json_each" | "jsonb_each" | "json_each_text" | "jsonb_each_text" => vec![
             call.column_aliases
@@ -213,11 +217,25 @@ fn build_table_function_value_row_stream_with_row(
         if let Some(binding) = selected.as_ref() {
             context.eval_hook.require_builtin_execute(binding)?;
         }
+        let call = TableFunctionCall { binding, ..call };
         let columns = builtin_value_columns(&lower, &call)?;
-        let evaluated = builtin_arguments(&lower, call_args)?;
+        let evaluated = if uqa_sql::semantics::is_tsvector_unnest(binding) {
+            call_args.into_iter().map(|(_, value)| value).collect()
+        } else {
+            builtin_arguments(&lower, call_args)?
+        };
         // The regular-expression functions read the call's input collation, `PostgreSQL`'s `inputcollid`.
         let collation = uqa_sql::ast::FunctionBinding::selected_input_collation(binding);
-        let rows = builtin_value_rows(context, &lower, evaluated, collation, &columns)?;
+        let rows = if lower == "unnest" {
+            super::unnest::rows(
+                context,
+                &call,
+                row.map_or(&empty, |row| &row.schema),
+                evaluated,
+            )?
+        } else {
+            builtin_value_rows(context, &lower, evaluated, collation, &columns)?
+        };
         return Ok(TableFunctionRows::new(columns, rows));
     }
     let TableFunctionCall {
@@ -335,7 +353,6 @@ fn builtin_value_rows(
     columns: &[String],
 ) -> Result<crate::PhysicalProjectRows, SQLError> {
     let values: Box<dyn Iterator<Item = Value> + Send> = match lower {
-        "unnest" => return unnest_rows(evaluated),
         "pg_listening_channels" => {
             uqa_sql::semantics::table_function_arguments::require_no_arguments(lower, &evaluated)?;
             Box::new(

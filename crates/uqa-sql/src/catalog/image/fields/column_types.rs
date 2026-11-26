@@ -36,6 +36,7 @@ impl<'a> Fields<'a> {
             ColumnType::DoublePrecision => self.scalar([TypeTag::DoublePrecision as u8]),
             ColumnType::Json => self.scalar([TypeTag::Json as u8]),
             ColumnType::Xml => self.scalar([TypeTag::Xml as u8]),
+            ColumnType::TsVector => self.scalar([TypeTag::TsVector as u8]),
             ColumnType::JsonB => self.scalar([TypeTag::JsonB as u8]),
             ColumnType::Bytea => self.scalar([TypeTag::Bytea as u8]),
             ColumnType::InternalChar => self.scalar([TypeTag::InternalChar as u8]),

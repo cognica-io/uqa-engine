@@ -15,7 +15,9 @@ use crate::{RowSchema, SQLError, SQLParam, ScalarExpr};
 use std::sync::Arc;
 
 mod columns;
-pub use columns::table_function_empty_schema_with_control;
+pub use columns::{
+    bound_table_function_empty_schema_with_control, table_function_empty_schema_with_control,
+};
 mod production;
 mod selection;
 mod types;
@@ -250,6 +252,17 @@ pub fn resolve_user_table_function_with_control(
 pub struct TableFunctionAnalysis<'a> {
     pub routines: &'a dyn RoutineResolution,
     pub types: &'a dyn FunctionTypeResolver,
+}
+
+/// OUT columns of the catalog declaration unnest(tsvector).
+pub const TSVECTOR_UNNEST_COLUMNS: [&str; 3] = ["lexeme", "positions", "weights"];
+
+pub fn is_tsvector_unnest(binding: Option<&FunctionBinding>) -> bool {
+    binding.is_some_and(|b| {
+        b.builtin
+            && b.name.rsplit('.').next() == Some("unnest")
+            && matches!(b.argument_types.as_slice(), [ty] if ty == "tsvector")
+    })
 }
 
 pub fn resolve_table_function_binding(

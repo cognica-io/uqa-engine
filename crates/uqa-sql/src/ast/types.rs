@@ -162,6 +162,8 @@ pub enum ColumnType {
     Enum(super::EnumTypeReference),
     /// A composite type bound by catalog identity: a standalone composite type or a relation's row type.
     Composite(super::CompositeTypeReference),
+    /// PostgreSQL full-text lexemes with optional positions and weights.
+    TsVector,
 }
 
 pub(crate) fn builtin_array_element_name(type_name: &str) -> Option<&'static str> {
@@ -200,6 +202,7 @@ pub(crate) fn builtin_array_element_name(type_name: &str) -> Option<&'static str
         "_uuid" => "uuid",
         "_json" => "json",
         "_xml" => "xml",
+        "_tsvector" => "tsvector",
         "_jsonb" => "jsonb",
         "_regtype" => "regtype",
         "_xid" => "xid",

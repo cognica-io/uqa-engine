@@ -140,6 +140,7 @@ impl fmt::Display for TypeName<'_> {
             ColumnType::Numeric { .. } => f.write_str("numeric"),
             ColumnType::Json => f.write_str("json"),
             ColumnType::Xml => f.write_str("xml"),
+            ColumnType::TsVector => f.write_str("tsvector"),
             ColumnType::JsonB => f.write_str("jsonb"),
             ColumnType::Bytea => f.write_str("bytea"),
             ColumnType::Bit(Some(length)) => write!(f, "bit({length})"),

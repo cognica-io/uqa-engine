@@ -12,6 +12,16 @@ use uqa_sql::ast::{ColumnType, FunctionBinding};
 use uqa_sql::{SQLError, SQLParam};
 
 impl FunctionTypeResolver for ScopedEngineHook<'_> {
+    fn multirange_member_type_with_control(
+        &self,
+        ty: &ColumnType,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<uqa_core::memory::Produced<ColumnType>>, SQLError> {
+        let catalog = uqa_sql::expr::EngineValueCatalog(self);
+        uqa_sql::expr::RangeValueDescriptor::from_type_with_control(ty, Some(&catalog), control)?
+            .map(|descriptor| descriptor.range_type_with_control(Some(&catalog), control))
+            .transpose()
+    }
     fn resolve_collation_name_with_control(
         &self,
         name: &str,

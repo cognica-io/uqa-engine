@@ -180,7 +180,13 @@ pub(in crate::type_resolution) fn match_signature_with_control<
         if let (Some(raw_actual), Some(actual), Some(declared)) = (
             builtin_canonical_type_name(actual_type),
             builtin_canonical_type_name(base_type(actual_type)),
-            parameters.builtin_canonical_type(index),
+            parameters.builtin_canonical_type(index).filter(|declared| {
+                !parameters.accepts_polymorphic_types()
+                    || crate::type_resolution::routine_signature::polymorphic_type_from_canonical(
+                        declared,
+                    )
+                    .is_none()
+            }),
         ) {
             if raw_actual == declared {
                 raw_exact_matches += 1;
@@ -211,6 +217,10 @@ pub(in crate::type_resolution) fn match_signature_with_control<
                         | ColumnType::AnyArray
                         | ColumnType::Int2Vector
                         | ColumnType::OidVector
+                )),
+                "anymultirange" => Some(matches!(
+                    base_type(actual_type),
+                    ColumnType::Multirange(_) | ColumnType::DeclaredMultirange(_)
                 )),
                 "anyenum" => Some(matches!(base_type(actual_type), ColumnType::Enum(_))),
                 _ => None,

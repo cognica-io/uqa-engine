@@ -73,6 +73,7 @@ impl Fields<'_> {
             TypeTag::DoublePrecision => ColumnType::DoublePrecision,
             TypeTag::Json => ColumnType::Json,
             TypeTag::Xml => ColumnType::Xml,
+            TypeTag::TsVector => ColumnType::TsVector,
             TypeTag::JsonB => ColumnType::JsonB,
             TypeTag::Bytea => ColumnType::Bytea,
             TypeTag::InternalChar => ColumnType::InternalChar,

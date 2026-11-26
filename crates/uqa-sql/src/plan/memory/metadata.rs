@@ -213,6 +213,7 @@ impl ObserveAllocations for ColumnType {
             } => {}
             Self::Json => {}
             Self::Xml => {}
+            Self::TsVector => {}
             Self::JsonB => {}
             Self::Bytea => {}
             Self::Bit(_) => {}
