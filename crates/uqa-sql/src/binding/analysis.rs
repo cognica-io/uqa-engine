@@ -334,7 +334,7 @@ impl SchemaScope {
         &mut self,
         engine: &dyn RoutineResolution,
         request: TableFunctionSourceValidation<'_>,
-    ) -> Result<Option<crate::semantics::ControlledUserTableFunction>, SQLError> {
+    ) -> Result<Option<crate::semantics::SelectedTableFunction>, SQLError> {
         let TableFunctionSourceValidation {
             name,
             binding,

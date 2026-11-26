@@ -201,6 +201,30 @@ pub fn resolve_user_table_function_with_control(
     params: &[SQLParam],
     control: &uqa_core::memory::ProductionControl<'_>,
 ) -> Result<Option<ControlledUserTableFunction>, SQLError> {
+    Ok(
+        match resolve_table_function_with_control(
+            context, name, binding, args, input, params, control,
+        )? {
+            Some(SelectedTableFunction::User(function)) => Some(function),
+            _ => None,
+        },
+    )
+}
+
+pub(crate) enum SelectedTableFunction {
+    Builtin(uqa_core::memory::Produced<FunctionBinding>),
+    User(ControlledUserTableFunction),
+}
+
+pub(crate) fn resolve_table_function_with_control(
+    context: TableFunctionAnalysis<'_>,
+    name: &str,
+    binding: Option<&FunctionBinding>,
+    args: &[ScalarExpr],
+    input: &RowSchema,
+    params: &[SQLParam],
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<Option<SelectedTableFunction>, SQLError> {
     let Some(binding) = resolve_table_function_binding_with_control(
         TableFunctionAnalysis { ..context },
         name,
@@ -214,7 +238,7 @@ pub fn resolve_user_table_function_with_control(
         return Ok(None);
     };
     if binding.builtin {
-        return Ok(None);
+        return Ok(Some(SelectedTableFunction::Builtin(binding)));
     }
     let signature = crate::function_call_argument_signature_with_control(
         args,
@@ -244,10 +268,12 @@ pub fn resolve_user_table_function_with_control(
         matched.invocation,
         control,
     )?;
-    Ok(Some(ControlledUserTableFunction {
-        function: matched.function,
-        binding,
-    }))
+    Ok(Some(SelectedTableFunction::User(
+        ControlledUserTableFunction {
+            function: matched.function,
+            binding,
+        },
+    )))
 }
 
 pub struct TableFunctionAnalysis<'a> {

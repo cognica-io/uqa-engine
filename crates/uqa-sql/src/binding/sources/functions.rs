@@ -11,7 +11,7 @@ use crate::{
     binding::SchemaScope,
     plan::{QueryPlan, SourcePlan},
     routines::RoutineResolution,
-    semantics::{ControlledUserTableFunction, TableFunctionTypeRequest},
+    semantics::{ControlledUserTableFunction, SelectedTableFunction, TableFunctionTypeRequest},
     type_resolution::FunctionTypeResolver,
     RowSchema, SQLError, SQLParam, ScalarExpr,
 };
@@ -26,7 +26,7 @@ mod tests;
 #[derive(Clone, Copy)]
 struct FunctionSource<'a> {
     name: &'a str,
-    binding: &'a Option<FunctionBinding>,
+    binding: Option<&'a FunctionBinding>,
     output_name: &'a str,
     relations: &'a Option<OperatorJoinRelations>,
     args: &'a [ScalarExpr],
@@ -53,7 +53,7 @@ impl<'a> FunctionSource<'a> {
         };
         Self {
             name,
-            binding,
+            binding: binding.as_ref(),
             output_name,
             relations,
             args,
@@ -114,16 +114,22 @@ impl SchemaScope {
             params,
             type_resolver: &type_resolver,
         };
-        let user_function =
+        let selected =
             self.bind_function_call(routines, source, &context, operator_inputs.as_ref())?;
-        self.validate_function_result(routines, source, &context, user_function.as_ref())?;
+        let (binding, user_function) = match &selected {
+            Some(SelectedTableFunction::Builtin(binding)) => (Some(&**binding), None),
+            Some(SelectedTableFunction::User(user)) => (Some(&*user.binding), Some(user)),
+            None => (source.binding, None),
+        };
+        let source = FunctionSource { binding, ..source };
+        self.validate_function_result(routines, source, &context, user_function)?;
         let (columns, declared_host_columns) =
-            self.function_result_columns(routines, source, user_function.as_ref())?;
+            self.function_result_columns(routines, source, user_function)?;
         self.function_result_schema(
             routines,
             source,
             &context,
-            user_function.as_ref(),
+            user_function,
             &columns,
             declared_host_columns,
         )
@@ -135,7 +141,7 @@ impl SchemaScope {
         source: FunctionSource<'_>,
         context: &FunctionInputs<'_>,
         operator_inputs: Option<&(RowSchema, RowSchema)>,
-    ) -> Result<Option<ControlledUserTableFunction>, SQLError> {
+    ) -> Result<Option<SelectedTableFunction>, SQLError> {
         let FunctionSource {
             name,
             binding,
@@ -150,7 +156,7 @@ impl SchemaScope {
         } = *context;
         let resources = self.production.clone();
         let control = resources.control();
-        let user_function = if let Some((left, right)) = operator_inputs {
+        let selected = if let Some((left, right)) = operator_inputs {
             if self.validate_references {
                 let constant = RowSchema::empty_with_control(&control)?;
                 for (position, argument) in args.iter().enumerate() {
@@ -170,7 +176,7 @@ impl SchemaScope {
                 routines,
                 crate::binding::analysis::TableFunctionSourceValidation {
                     name,
-                    binding: binding.as_ref(),
+                    binding,
                     args,
                     subqueries,
                     input,
@@ -178,20 +184,20 @@ impl SchemaScope {
                 },
             )?
         } else {
-            crate::semantics::resolve_user_table_function_with_control(
+            crate::semantics::resolve_table_function_with_control(
                 crate::semantics::TableFunctionAnalysis {
                     routines,
                     types: type_resolver,
                 },
                 name,
-                binding.as_ref(),
+                binding,
                 args,
                 input,
                 params,
                 &control,
             )?
         };
-        Ok(user_function)
+        Ok(selected)
     }
 
     fn validate_function_result(
@@ -221,7 +227,7 @@ impl SchemaScope {
             routines,
             crate::semantics::ColumnDefinitionRequest {
                 name,
-                binding: binding.as_ref(),
+                binding,
                 user_function: user_function.as_ref().map(|resolved| &**resolved.function),
                 user_invocation: user_function
                     .as_ref()
@@ -276,7 +282,7 @@ impl SchemaScope {
                     .0,
             ));
         }
-        let catalog_columns = if !self.validate_references && user_function.is_none() {
+        let catalog_columns = if !self.validate_references && binding.is_none() {
             super::super::catalog_sources::user_function_output_columns_with_control(
                 self.catalog.as_ref(),
                 &self.resolution,
@@ -307,7 +313,7 @@ impl SchemaScope {
                 )?,
                 None => crate::semantics::bound_table_function_empty_schema_with_control(
                     name,
-                    binding.as_ref(),
+                    binding,
                     output_name,
                     alias.as_deref(),
                     column_aliases,
@@ -350,7 +356,7 @@ impl SchemaScope {
             routines,
             TableFunctionTypeRequest {
                 name,
-                binding: binding.as_ref(),
+                binding,
                 args,
                 user_function: user_function.map(|resolved| &**resolved.function),
                 user_invocation: user_function

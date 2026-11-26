@@ -156,7 +156,7 @@ fn unnest_overloads_match_postgresql(#[case] provider: usize) {
                 .as_str()
                 .is_some_and(|sql| sql.starts_with("SELECT * FROM un_stored"))
         });
-        assert_eq!(rows["cases"].as_array().unwrap().len(), 1);
+        assert_eq!(rows["cases"].as_array().unwrap().len(), 2);
         crate::pg18_oracle::verify(&reopened, &rows.to_string());
     }
 }
