@@ -186,6 +186,8 @@ pub(super) fn base64_encode_with_control(
     input: &[u8],
     control: &ProductionControl<'_>,
 ) -> Result<Produced<String>> {
+    let bytes = input.len() as u64;
+    super::text_size::check_conversion_size(bytes.div_ceil(3) * 4 + bytes / 57, "encoding")?;
     let encoded = input
         .len()
         .div_ceil(3)
@@ -328,8 +330,20 @@ pub(super) fn escape_encode_with_control(
     input: &[u8],
     control: &ProductionControl<'_>,
 ) -> Result<Produced<String>> {
+    let mut capacity = 0u64;
+    for &byte in input {
+        control.check()?;
+        capacity += if byte == 0 || byte & 0x80 != 0 {
+            4
+        } else if byte == b'\\' {
+            2
+        } else {
+            1
+        };
+    }
+    super::text_size::check_conversion_size(capacity, "encoding")?;
     let mut encoded = ProductionString::new(*control);
-    encoded.reserve(input.len())?;
+    encoded.reserve(usize::try_from(capacity).expect("admitted encoding size"))?;
     for &byte in input {
         control.check()?;
         if byte == 0 || byte & 0x80 != 0 {

@@ -162,7 +162,12 @@ fn scalar_null_and_error_precedence_stays_shared_without_admitting_copies() {
             .unwrap_err();
         assert_eq!(error.to_string(), ordinary.to_string());
     }
-    assert!(eval_math_functions_with_control("format", &[text("%s")], &control).is_none());
+    let missing = eval_math_functions_with_control("format", &[text("%s")], &control)
+        .unwrap()
+        .unwrap_err();
+    assert_eq!(missing.sqlstate(), Some("22023"));
+    assert_eq!(missing.to_string(), "too few arguments for format()");
+    assert_eq!(budget.used(), 0);
     assert!(eval_math_functions_with_control("random", &[], &control).is_none());
     assert_eq!(
         eval_math_functions("format", &[text("%s:%L"), Value::Bool(true), Value::Int(7)])

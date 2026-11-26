@@ -18,20 +18,16 @@ use uqa_core::{
 
 mod numeric;
 mod text;
+pub(super) use text::concatenate_text;
 
 pub(super) fn eval_core_functions(name: &str, args: &[Value]) -> Option<Result<Value>> {
-    match name {
-        "concat" | "concat_ws" => Some(concat(name, args)),
-        _ => eval_core_functions_with_control(name, args, &ProductionControl::uncontrolled()).map(
-            |result| {
-                result.map(|value| {
-                    value
-                        .into_uncontrolled()
-                        .expect("ordinary core function has no retained owner")
-                })
-            },
-        ),
-    }
+    eval_core_functions_with_control(name, args, &ProductionControl::uncontrolled()).map(|result| {
+        result.map(|value| {
+            value
+                .into_uncontrolled()
+                .expect("ordinary core function has no retained owner")
+        })
+    })
 }
 
 /// Whether a built-in call by this name reads its input collation without a registered catalog signature that would bind it. Analysis keeps such a call bound by name, so its selection reaches execution; the case-mapping functions and pattern operators already keep their selected bindings.
@@ -78,6 +74,7 @@ pub(super) fn eval_core_functions_with_control(
     control: &ProductionControl<'_>,
 ) -> Option<Result<Produced<Value>>> {
     let evaluate = match name {
+        "concat" | "concat_ws" => concat,
         "coalesce" | "nullif" | "greatest" | "least" => selection,
         "abs" | "round" | "ceil" | "ceiling" | "floor" | "power" | "pow" | "sqrt" | "mod"
         | "div" | "gcd" | "lcm" => numeric::evaluate,
@@ -186,29 +183,33 @@ pub(super) fn selection_with_context(
     Ok(control.copy_value(selected)?)
 }
 
-fn concat(name: &str, args: &[Value]) -> Result<Value> {
-    if name == "concat" {
-        let mut output = String::new();
-        for value in args {
-            if !matches!(value, Value::Null) {
-                output.push_str(&super::value_to_string(value)?);
+fn concat(name: &str, args: &[Value], control: &ProductionControl<'_>) -> Result<Produced<Value>> {
+    let (separator, values) = if name == "concat_ws" {
+        let (separator, values) = args
+            .split_first()
+            .ok_or_else(|| SQLError::TypeMismatch("concat_ws needs separator".into()))?;
+        if matches!(separator, Value::Null) {
+            return plain(Value::Null, control);
+        }
+        (
+            Some(super::conversion::argument_text(separator, control)?),
+            values,
+        )
+    } else {
+        (None, args)
+    };
+    let mut output = super::text_size::TextBuffer::new(control);
+    let mut first = true;
+    for value in values.iter().filter(|value| !matches!(value, Value::Null)) {
+        if !first {
+            if let Some(separator) = &separator {
+                output.push_str(separator)?;
             }
         }
-        return Ok(Value::Str(output));
+        first = false;
+        output.push_str(&super::conversion::argument_text(value, control)?)?;
     }
-    let Some(separator) = args.first() else {
-        return Err(SQLError::TypeMismatch("concat_ws needs separator".into()));
-    };
-    if matches!(separator, Value::Null) {
-        return Ok(Value::Null);
-    }
-    let separator = super::value_to_string(separator)?;
-    let parts: Vec<String> = args[1..]
-        .iter()
-        .filter(|value| !matches!(value, Value::Null))
-        .map(super::value_to_string)
-        .collect::<Result<_>>()?;
-    Ok(Value::Str(parts.join(&separator)))
+    string(output.finish()?, control)
 }
 
 #[cfg(test)]

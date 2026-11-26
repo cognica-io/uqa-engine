@@ -11,7 +11,7 @@ use crate::{
     expr::{
         conversion::{to_i64_with_control, value_to_string_with_control},
         out_of_range,
-        scalar_helpers::{quote_ident_with_control, quote_literal_with_control},
+        scalar_helpers::{quote_literal_with_control, quote_sql_identifier},
         ArrayValue, DecimalValue, Result, SQLError, Value,
     },
 };
@@ -257,12 +257,14 @@ fn quote(name: &str, args: &[Value], control: &ProductionControl<'_>) -> Result<
         Some(value) => value,
         None => return Err(SQLError::TypeMismatch("missing arg #0".into())),
     };
-    let text = value_to_string_with_control(value, control)?;
+    let text = crate::expr::conversion::argument_text(value, control)?;
     let quoted = if name == "quote_ident" {
-        quote_ident_with_control(&text, control)?
+        quote_sql_identifier(&text, control)?
     } else {
+        crate::expr::text_size::check_varlena_size(text.len().saturating_mul(2).saturating_add(3))?;
         quote_literal_with_control(&text, control)?
     };
+    crate::expr::text_size::check_varlena_size(quoted.len())?;
     string(quoted, control)
 }
 

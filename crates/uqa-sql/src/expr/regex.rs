@@ -109,21 +109,7 @@ fn invalid_parameter(name: &str, value: i64) -> SQLError {
     }
 }
 
-/// The text of an argument: borrowed where the value holds text, and otherwise written as its cast to `text` writes it, so a call admits no second copy of a text argument.
-fn argument_text<'v>(
-    value: &'v Value,
-    control: &ProductionControl<'_>,
-) -> Result<Produced<Cow<'v, str>>> {
-    control.check()?;
-    if let Value::Str(text) = value {
-        return control
-            .finish(Cow::Borrowed(text.as_str()), control.empty_reservation())
-            .map_err(Into::into);
-    }
-    let (text, memory) =
-        super::conversion::value_to_string_with_control(value, control)?.into_parts();
-    control.finish(Cow::Owned(text), memory).map_err(Into::into)
-}
+use super::conversion::argument_text;
 
 /// The text of an optional flags argument; a call without one uses no flags.
 fn flag_text<'v>(

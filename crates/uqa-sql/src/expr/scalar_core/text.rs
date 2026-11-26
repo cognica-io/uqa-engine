@@ -286,22 +286,44 @@ fn concat(args: &[Value], control: &ProductionControl<'_>) -> Result<Produced<Va
         matches!(arg, Value::Bytes(_))
             || matches!(arg, Value::Datum(datum) if datum.type_oid() == 17)
     }) {
+        let [left, right] = args else {
+            return Err(SQLError::TypeMismatch(
+                "bytea concatenation takes two operands".into(),
+            ));
+        };
+        let left = binary_payload(left, control)?.expect("bytea left operand");
+        let right = binary_payload(right, control)?.expect("bytea right operand");
+        let length = left.bytes().len().saturating_add(right.bytes().len());
+        crate::expr::text_size::check_varlena_size(length)?;
         let mut output = ProductionVec::new(*control);
-        for value in args {
-            let payload = binary_payload(value, control)?.expect("every argument is bytea");
-            let bytes = payload.bytes();
-            output.reserve(bytes.len())?;
-            for byte in bytes {
-                output.push_copy(*byte)?;
-            }
+        output.reserve(length)?;
+        for &byte in left.bytes().iter().chain(right.bytes()) {
+            output.push_copy(byte)?;
         }
         let (output, memory) = output.finish()?.into_parts();
         return Ok(control.finish(Value::Bytes(output), memory)?);
     }
+    let [left, right] = args else {
+        return Err(SQLError::TypeMismatch(
+            "text concatenation takes two operands".into(),
+        ));
+    };
+    let left = crate::expr::conversion::argument_text(left, control)?;
+    let right = crate::expr::conversion::argument_text(right, control)?;
+    concatenate_text(&left, &right, control)
+}
+
+pub(in crate::expr) fn concatenate_text(
+    left: &str,
+    right: &str,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>> {
+    let length = left.len().saturating_add(right.len());
+    crate::expr::text_size::check_varlena_size(length)?;
     let mut output = ProductionString::new(*control);
-    for value in args {
-        output.push_str(&value_to_string_with_control(value, control)?)?;
-    }
+    output.reserve(length)?;
+    output.push_str(left)?;
+    output.push_str(right)?;
     string(output.finish()?, control)
 }
 
@@ -315,7 +337,7 @@ fn replace(args: &[Value], control: &ProductionControl<'_>) -> Result<Produced<V
     let source = value_to_string_with_control(&args[0], control)?;
     let from = value_to_string_with_control(&args[1], control)?;
     let to = value_to_string_with_control(&args[2], control)?;
-    let mut output = ProductionString::new(*control);
+    let mut output = crate::expr::text_size::TextBuffer::new(control);
     let mut previous = 0;
     for (index, matched) in source.match_indices(from.as_str()) {
         control.check()?;

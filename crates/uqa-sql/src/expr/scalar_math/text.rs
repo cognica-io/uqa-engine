@@ -23,19 +23,7 @@ use crate::expr::{
 #[cfg(test)]
 mod limits;
 
-/// `PostgreSQL` text producers include the four-byte varlena header in `MaxAllocSize`.
-fn check_text_size(bytes: Option<usize>) -> Result<()> {
-    if bytes
-        .and_then(|bytes| bytes.checked_add(4))
-        .is_none_or(|bytes| bytes > 0x3fff_ffff)
-    {
-        return Err(SQLError::Routine {
-            sqlstate: "54000".into(),
-            message: "requested length too large".into(),
-        });
-    }
-    Ok(())
-}
+use crate::expr::text_size::check_text_size;
 
 fn text_count(value: &Value, control: &ProductionControl<'_>) -> Result<usize> {
     let value =
@@ -150,6 +138,7 @@ pub(super) fn eval(
                 return Err(SQLError::TypeMismatch("translate takes 3 args".into()));
             }
             let s = value_to_string_with_control(&args[0], control)?;
+            check_text_size(s.len().checked_mul(4))?;
             let from = characters(&value_to_string_with_control(&args[1], control)?, control)?;
             let to = characters(&value_to_string_with_control(&args[2], control)?, control)?;
             let mut out = ProductionString::new(*control);
@@ -232,7 +221,10 @@ fn encode(name: &str, args: &[Value], control: &ProductionControl<'_>) -> Result
     }
     let encoding = value_to_string_with_control(&args[1], control)?;
     let output = match encoding.to_ascii_lowercase().as_str() {
-        "hex" => hex_encode_with_control(input, control)?,
+        "hex" => {
+            crate::expr::text_size::check_conversion_size(input.len() as u64 * 2, "encoding")?;
+            hex_encode_with_control(input, control)?
+        }
         "base64" => base64_encode_with_control(input, control)?,
         "escape" => escape_encode_with_control(input, control)?,
         _ => return Err(unrecognized_encoding(&encoding)),
@@ -252,7 +244,7 @@ fn decode(args: &[Value], control: &ProductionControl<'_>) -> Result<Produced<Va
     if args.len() != 2 {
         return Err(SQLError::TypeMismatch("decode takes 2 args".into()));
     }
-    let s = value_to_string_with_control(&args[0], control)?;
+    let s = crate::expr::conversion::argument_text(&args[0], control)?;
     let encoding = value_to_string_with_control(&args[1], control)?;
     let output = match encoding.to_ascii_lowercase().as_str() {
         "hex" => hex_decode_with_control(&s, control)?,

@@ -33,6 +33,7 @@ pub(crate) mod integer_input;
 mod json;
 mod json_strip;
 pub(crate) mod observations;
+pub mod text_size;
 pub use observations::sql_null_test_with_control;
 mod random;
 mod range;

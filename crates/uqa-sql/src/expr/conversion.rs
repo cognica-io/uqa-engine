@@ -482,3 +482,23 @@ pub(crate) fn tensor_items(v: &Value) -> Result<&[Value]> {
         ))),
     }
 }
+
+/// The text of an argument: borrowed where the value holds text, and otherwise written as its cast to `text` writes it, so a call admits no second copy of a text argument.
+pub(super) fn argument_text<'v>(
+    value: &'v Value,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<std::borrow::Cow<'v, str>>> {
+    control.check()?;
+    if let Value::Str(text) = value {
+        return control
+            .finish(
+                std::borrow::Cow::Borrowed(text.as_str()),
+                control.empty_reservation(),
+            )
+            .map_err(Into::into);
+    }
+    let (text, memory) = value_to_string_with_control(value, control)?.into_parts();
+    control
+        .finish(std::borrow::Cow::Owned(text), memory)
+        .map_err(Into::into)
+}
