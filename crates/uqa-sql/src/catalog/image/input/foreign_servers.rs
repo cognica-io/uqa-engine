@@ -142,9 +142,9 @@ impl Fields<'_> {
                 fdw_type,
                 options,
                 metadata: ForeignServerMetadata {
-                    revision,
                     oid,
                     object_id,
+                    revision,
                     owner,
                     server_type,
                     version,

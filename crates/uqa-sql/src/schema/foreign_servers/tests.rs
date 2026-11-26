@@ -177,3 +177,40 @@ fn missing_server_error_and_notice_have_distinct_postgresql_states() {
     assert!(notice.detail.is_none());
     assert!(notice.hint.is_none());
 }
+
+#[test]
+fn alter_options_uses_key_order_for_legacy_server_records() {
+    use crate::ast::ForeignOptionChange::{Add, Drop, Set};
+    let mut server = Catalog::new().server();
+    server.options = [("z".into(), "z0".into()), ("a".into(), "a0".into())]
+        .into_iter()
+        .collect();
+    assert!(server.metadata.option_order.is_none());
+    let pairs = altered_options(
+        &server,
+        &[Set {
+            name: "z".into(),
+            value: "z1".into(),
+        }],
+    )
+    .unwrap();
+    assert_eq!(
+        pairs,
+        [("a".into(), "a0".into()), ("z".into(), "z1".into())]
+    );
+    let pairs = altered_options(
+        &server,
+        &[
+            Drop { name: "a".into() },
+            Add {
+                name: "a".into(),
+                value: "a1".into(),
+            },
+        ],
+    )
+    .unwrap();
+    assert_eq!(
+        pairs,
+        [("z".into(), "z0".into()), ("a".into(), "a1".into())]
+    );
+}
