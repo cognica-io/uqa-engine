@@ -245,7 +245,8 @@ fn missing_parameterless_and_wrong_arity_definitions_do_not_capture_argument_sco
     );
     let error =
         bind_execute_parameters(&scopes, "p", Some(vec![None, None]), &invalid).unwrap_err();
-    assert!(matches!(error, SQLError::Routine { sqlstate, .. } if sqlstate == "42601"));
+    assert_eq!(error.sqlstate(), Some("42601"));
+    assert_eq!(error.detail(), Some("Expected 2 parameters but got 1."));
     assert!(scopes.events.borrow().is_empty());
 }
 
