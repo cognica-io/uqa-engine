@@ -18,8 +18,35 @@ pub fn table_function_empty_schema_with_control(
     ordinality: bool,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Vec<String>>, SQLError> {
+    bound_table_function_empty_schema_with_control(
+        name,
+        None,
+        output_name,
+        alias,
+        aliases,
+        output_width,
+        ordinality,
+        control,
+    )
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "describes a borrowed table-function call and its selected overload"
+)]
+pub fn bound_table_function_empty_schema_with_control(
+    name: &str,
+    binding: Option<&crate::ast::FunctionBinding>,
+    output_name: &str,
+    alias: Option<&str>,
+    aliases: &[String],
+    output_width: usize,
+    ordinality: bool,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Vec<String>>, SQLError> {
     let lower = crate::semantics::builtin_function_dispatch_name_with_control(name, control)?;
     let defaults: &[&str] = match lower.as_str() {
+        "unnest" if super::is_tsvector_unnest(binding) => &super::TSVECTOR_UNNEST_COLUMNS,
         "json_each" | "jsonb_each" | "json_each_text" | "jsonb_each_text" => &["key", "value"],
         "pg_get_sequence_data" => &["last_value", "is_called"],
         "aclexplode" => &["grantor", "grantee", "privilege_type", "is_grantable"],

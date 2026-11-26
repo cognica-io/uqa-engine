@@ -160,6 +160,14 @@ fn builtin_types<'a>(
         crate::semantics::builtin_function_dispatch_name_with_control(request.name, control)?;
     match name.as_str() {
         "generate_series" => series_types(routines, request, input, params, resolver, control),
+        "unnest" if super::is_tsvector_unnest(request.binding) => fixed(
+            &[
+                ColumnType::Text,
+                ColumnType::Array(Box::new(ColumnType::SmallInteger)),
+                ColumnType::Array(Box::new(ColumnType::Text)),
+            ],
+            control,
+        ),
         "unnest" => {
             let mut output = ProductionVec::new(*control);
             for argument in request.args {
@@ -262,10 +270,10 @@ pub(super) fn element_type(
         control,
     )?
     .flatten();
-    ty.as_deref()
-        .and_then(crate::type_resolution::array_element_type)
-        .map(|ty| ty.clone_with_control(control).map_err(Into::into))
-        .transpose()
+    match ty.as_deref() {
+        Some(ty) => crate::type_resolution::unnest_result_type(ty, Some(resolver), control),
+        None => Ok(None),
+    }
 }
 
 fn user_call_types<'a>(

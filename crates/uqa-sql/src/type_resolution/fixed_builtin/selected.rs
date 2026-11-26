@@ -218,7 +218,7 @@ pub(crate) fn requires_cast(
     declared: &ColumnType,
     control: &ProductionControl<'_>,
 ) -> Result<bool, SQLError> {
-    if *declared == ColumnType::AnyArray
+    if matches!(declared, ColumnType::AnyArray | ColumnType::Pseudo(_))
         || matches!(declared, ColumnType::Named(name) if name == "any")
     {
         return Ok(false);

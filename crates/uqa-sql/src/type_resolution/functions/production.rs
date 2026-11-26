@@ -923,7 +923,6 @@ pub(in crate::type_resolution) fn builtin_function_type_with_control(
         "array_positions" => array(Some(&ColumnType::Integer), control),
         "decode" => inline(ColumnType::Bytea, control),
         "array_fill" => array(first(), control),
-        "unnest" => array_element_type(first(), control),
         "now"
         | "current_timestamp"
         | "clock_timestamp"

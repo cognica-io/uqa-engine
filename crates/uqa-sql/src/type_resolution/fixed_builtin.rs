@@ -115,6 +115,28 @@ pub fn fixed_builtin_return_type_with_control(
         .transpose()
 }
 
+fn selected_return_type(
+    declaration: &ColumnType,
+    arguments: &[Option<ColumnType>],
+    resolver: Option<&dyn FunctionTypeResolver>,
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<uqa_core::memory::Produced<ColumnType>, SQLError> {
+    if matches!(
+        declaration,
+        ColumnType::Pseudo(
+            crate::ast::ExpressionPseudoType::AnyElement
+                | crate::ast::ExpressionPseudoType::AnyRange
+        )
+    ) {
+        if let [Some(input)] = arguments {
+            if let Some(output) = super::unnest_result_type(input, resolver, control)? {
+                return Ok(output);
+            }
+        }
+    }
+    Ok(declaration.clone_with_control(control)?)
+}
+
 /// Infer the selected result directly from the borrowed descriptor without constructing an unused execution binding.
 pub(super) fn resolve_return_type_with_control(
     name: &str,
@@ -132,11 +154,12 @@ pub(super) fn resolve_return_type_with_control(
         explicit_variadic,
         control,
     )?;
-    selected
-        .declaration
-        .return_type
-        .clone_with_control(control)
-        .map_err(Into::into)
+    selected_return_type(
+        &selected.declaration.return_type,
+        argument_types,
+        None,
+        control,
+    )
 }
 
 pub(super) fn resolve_overload(

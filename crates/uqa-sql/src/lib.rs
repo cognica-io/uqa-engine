@@ -52,6 +52,7 @@ pub mod routines;
 pub mod schema;
 pub mod semantics;
 mod sql_batch_error;
+pub mod tsvector;
 pub mod type_resolution;
 pub mod xml;
 

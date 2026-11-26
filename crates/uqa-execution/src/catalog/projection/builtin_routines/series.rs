@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Implemented integer series and their planner support identities.
+//! Set-returning series and unnest declarations with their planner support identities.
 
 use super::BuiltinRoutineCatalogEntry;
 
@@ -60,6 +60,19 @@ pub const ROUTINES: &[BuiltinRoutineCatalogEntry] = &[
         "generate_series_int8",
         &[20, 20],
         20,
+    ),
+    routine(1293, "unnest", "multirange_unnest", &[4537], 3831),
+    routine(2331, "unnest", "array_unnest", &[2277], 2283),
+    BuiltinRoutineCatalogEntry {
+        argument_names: &["tsvector", "lexeme", "positions", "weights"],
+        ..routine(3322, "unnest", "tsvector_unnest", &[3614], 2249)
+    },
+    routine(
+        3996,
+        "array_unnest_support",
+        "array_unnest_support",
+        &[2281],
+        2281,
     ),
     routine(
         3994,

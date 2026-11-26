@@ -410,6 +410,16 @@ impl RoutineResolution for Engine {
 }
 
 impl FunctionTypeResolver for Engine {
+    fn multirange_member_type_with_control(
+        &self,
+        ty: &ColumnType,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<uqa_core::memory::Produced<ColumnType>>, SQLError> {
+        let catalog = uqa_sql::expr::EngineValueCatalog(self);
+        uqa_sql::expr::RangeValueDescriptor::multirange_member_type_with_control(
+            ty, &catalog, control,
+        )
+    }
     fn format_type_name(&self, ty: &ColumnType) -> Result<String, SQLError> {
         self.routine_overload_context().format_type_name(ty)
     }

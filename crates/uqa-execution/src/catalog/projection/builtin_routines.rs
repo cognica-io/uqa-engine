@@ -108,6 +108,7 @@ impl BuiltinRoutineCatalogEntry {
             return Some(entry.argument_oids);
         }
         match self.oid {
+            3322 => Some(&[3614, 25, 1005, 1009]),
             3058 => Some(&[2276]),
             3059 => Some(&[25, 2276]),
             3078 => Some(&[26, 20, 20, 20, 20, 16, 20, 26]),
@@ -122,6 +123,7 @@ impl BuiltinRoutineCatalogEntry {
             return Some(&["i", "v"]);
         }
         match self.oid {
+            3322 => Some(&["i", "o", "o", "o"]),
             3058 => Some(&["v"]),
             3059 => Some(&["i", "v"]),
             3078 => Some(&["i", "o", "o", "o", "o", "o", "o", "o"]),
@@ -132,11 +134,12 @@ impl BuiltinRoutineCatalogEntry {
     }
 
     pub const fn returns_set(self) -> bool {
-        matches!(self.oid, 1066..=1069 | 3035 | 1689 | 2763..=2766)
+        matches!(self.oid, 1066..=1069 | 1293 | 2331 | 3322 | 3035 | 1689 | 2763..=2766)
     }
 
     pub const fn support_oid(self) -> i64 {
         match self.oid {
+            2331 => 3996,
             1066 | 1067 => 3994,
             1068 | 1069 => 3995,
             3100 => 6233,
@@ -153,6 +156,8 @@ impl BuiltinRoutineCatalogEntry {
     pub const fn estimated_rows(self) -> f64 {
         if matches!(self.oid, 1066..=1069 | 2765 | 2766) {
             1000.0
+        } else if matches!(self.oid, 1293 | 2331) {
+            100.0
         } else if self.oid == 2763 {
             1.0
         } else if self.returns_set() {

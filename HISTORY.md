@@ -9,6 +9,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 ### Changed
 
 - Recursive CTEs produce the rows their consumers request, share them across references, and support finite recursion beyond 1,024 generations.
+- `unnest` resolves SQL routines alongside its built-in array, multirange and `tsvector` signatures in SELECT lists and FROM clauses.
 
 - Browser package builds use Emscripten 7.0.0 and LLVM 18's libclang on Ubuntu. The PostgreSQL parser bindings build against this SDK's headers.
 

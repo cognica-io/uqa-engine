@@ -249,6 +249,7 @@ impl SchemaScope {
     ) -> Result<(Produced<Vec<String>>, bool), SQLError> {
         let FunctionSource {
             name,
+            binding,
             output_name,
             alias,
             column_aliases,
@@ -304,8 +305,9 @@ impl SchemaScope {
                     *ordinality,
                     &control,
                 )?,
-                None => crate::semantics::table_function_empty_schema_with_control(
+                None => crate::semantics::bound_table_function_empty_schema_with_control(
                     name,
+                    binding.as_ref(),
                     output_name,
                     alias.as_deref(),
                     column_aliases,

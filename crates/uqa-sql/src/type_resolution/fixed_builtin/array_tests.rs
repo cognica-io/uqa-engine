@@ -145,3 +145,27 @@ fn array_inspection_rejects_unknown_scalar_dimension_and_named_inputs() {
         assert!(error.to_string().contains(signature), "{sql}: {error}");
     }
 }
+
+#[test]
+fn unnest_selects_each_catalog_declaration_and_preserves_ambiguity() {
+    use crate::ast::RangeSubtype;
+    for (ty, declared, result) in [
+        (
+            ColumnType::Array(Box::new(ColumnType::Integer)),
+            "anyarray",
+            ColumnType::Integer,
+        ),
+        (
+            ColumnType::Multirange(RangeSubtype::Integer),
+            "anymultirange",
+            ColumnType::Range(RangeSubtype::Integer),
+        ),
+        (ColumnType::TsVector, "tsvector", ColumnType::Record),
+    ] {
+        let selected = resolve_overload("unnest", None, &[None], &[Some(ty)], false, None).unwrap();
+        assert_eq!(selected.binding.argument_types, [declared]);
+        assert_eq!(selected.return_type, result);
+    }
+    let error = resolve_overload("unnest", None, &[None], &[None], false, None).unwrap_err();
+    assert_eq!(error.sqlstate(), Some("42725"));
+}

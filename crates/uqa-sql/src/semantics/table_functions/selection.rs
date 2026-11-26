@@ -59,14 +59,14 @@ pub(crate) fn resolve_table_function_binding_for_types_with_control(
 
 pub(super) fn builtin_table_function_overloads_with_control(
     name: &str,
-    arguments: &[Option<ColumnType>],
+    _arguments: &[Option<ColumnType>],
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Vec<BuiltinFunctionOverload>>, SQLError> {
     control.check()?;
     let mut output = ProductionVec::new(*control);
     if matches!(
         name,
-        "generate_series" | "regexp_matches" | "regexp_split_to_table"
+        "generate_series" | "regexp_matches" | "regexp_split_to_table" | "unnest"
     ) {
         let declarations =
             crate::type_resolution::fixed_builtin_overloads_with_control(name, control)?
@@ -86,15 +86,6 @@ pub(super) fn builtin_table_function_overloads_with_control(
     let acl;
     let (types, result): (&[ColumnType], &ColumnType) = match name {
         "pg_listening_channels" => (&[], &ColumnType::Text),
-        "unnest" => {
-            let [Some(argument)] = arguments else {
-                return Ok(output.finish()?);
-            };
-            let Some(element) = crate::type_resolution::array_element_type(argument) else {
-                return Ok(output.finish()?);
-            };
-            (&[ColumnType::AnyArray], element)
-        }
         "string_to_table" => (&[ColumnType::Text, ColumnType::Text], &ColumnType::Text),
         "json_array_elements" => (&[ColumnType::Json], &ColumnType::Json),
         "jsonb_array_elements" => (&[ColumnType::JsonB], &ColumnType::JsonB),

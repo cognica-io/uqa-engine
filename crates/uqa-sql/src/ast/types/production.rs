@@ -127,6 +127,7 @@ impl ColumnType {
             Self::DoublePrecision => Self::DoublePrecision,
             Self::Json => Self::Json,
             Self::Xml => Self::Xml,
+            Self::TsVector => Self::TsVector,
             Self::JsonB => Self::JsonB,
             Self::Bytea => Self::Bytea,
             Self::InternalChar => Self::InternalChar,

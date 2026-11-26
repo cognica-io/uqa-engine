@@ -24,6 +24,7 @@ const TYPES: &[(ColumnType, &str)] = &[
     (ColumnType::OidVector, "oidvector"),
     (ColumnType::Json, "json"),
     (ColumnType::Xml, "xml"),
+    (ColumnType::TsVector, "tsvector"),
     (ColumnType::PgNodeTree, "pg_node_tree"),
     (ColumnType::Real, "float4"),
     (ColumnType::DoublePrecision, "float8"),

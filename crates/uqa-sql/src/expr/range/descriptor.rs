@@ -81,6 +81,17 @@ impl RangeValueDescriptor {
         )?))
     }
 
+    /// Resolve the associated range from a multirange type in the caller's catalog snapshot.
+    pub fn multirange_member_type_with_control(
+        ty: &ColumnType,
+        catalog: &dyn SQLValueCatalog,
+        control: &ProductionControl<'_>,
+    ) -> Result<Option<Produced<ColumnType>>, SQLError> {
+        Self::from_type_with_control(ty, Some(catalog), control)?
+            .map(|descriptor| descriptor.range_type_with_control(Some(catalog), control))
+            .transpose()
+    }
+
     /// Resolve the associated range's live identity for a multirange descriptor.
     pub fn range_type_with_control(
         &self,

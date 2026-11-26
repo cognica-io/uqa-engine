@@ -107,7 +107,7 @@ pub(crate) async fn routine_polymorphic_type_with_work<W: crate::catalog::work::
     Ok(polymorphic_type_from_canonical(&name))
 }
 
-fn polymorphic_type_from_canonical(name: &str) -> Option<RoutinePolymorphicType> {
+pub(super) fn polymorphic_type_from_canonical(name: &str) -> Option<RoutinePolymorphicType> {
     Some(match name {
         "anyelement" => RoutinePolymorphicType::AnyElement,
         "anyarray" => RoutinePolymorphicType::AnyArray,
