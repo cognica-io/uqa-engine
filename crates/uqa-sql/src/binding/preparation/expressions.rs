@@ -424,7 +424,7 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
                 self.scalar_subquery_expression(&schema)
             }
             CatalogOperands::Cast(expr, ty) => {
-                if W::MAY_SUSPEND {
+                let mut value = if W::MAY_SUSPEND {
                     let owner = self.scope.control().capture();
                     crate::construction::retain_with(owner.control(), || {
                         self.cast_expression(expr, ty, input, subqueries, work)
@@ -432,7 +432,9 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
                     .await
                 } else {
                     self.cast_expression_inline(expr, ty, input, subqueries, work)
-                }
+                }?;
+                value.bind_literal_site(expression);
+                Ok(value)
             }
             CatalogOperands::Boolean(items, context) => {
                 if W::MAY_SUSPEND {

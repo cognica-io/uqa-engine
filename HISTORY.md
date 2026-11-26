@@ -550,6 +550,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Resolve casts to `unknown` and polymorphic pseudo-types using the operand and catalog identity. Preserve domain and prepared result types and reject invalid stored column declarations.
+
 - Prepared writes retain the domain defaults selected at preparation. Volatile defaults run for each affected row, and changes to a referenced table or default routine refresh the prepared statement.
 
 - Support `ALTER SERVER` changes to a foreign server version and options. Existing foreign tables keep their server binding across option changes, rollback and reopen.

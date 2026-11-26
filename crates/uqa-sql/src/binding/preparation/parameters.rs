@@ -56,7 +56,7 @@ enum UnknownOrigin {
     Deferred,
     Literal,
     Parameter,
-    Field,
+    NonConstant,
 }
 
 pub(super) struct ParameterTypes<'a, I = InputCatalogs<'a>> {
@@ -830,7 +830,7 @@ impl<I: LiteralInput> ParameterTypes<'_, I> {
         if !expression.is_sql_unknown() {
             return Ok(());
         }
-        if expression.unknown == UnknownOrigin::Field {
+        if expression.unknown == UnknownOrigin::NonConstant {
             return Err(crate::type_resolution::field_selection::unknown_conversion_error(target));
         }
         if let Some((origin, text)) = &expression.literal {

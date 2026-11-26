@@ -96,9 +96,12 @@ impl ColumnType {
                 }
             }
         };
-        if let Some(name) =
-            invalid_array.filter(|_| matches!(*parsed, Self::Void | Self::PgNodeTree))
-        {
+        if let Some(name) = invalid_array.filter(|_| {
+            matches!(
+                *parsed,
+                Self::Void | Self::PgNodeTree | Self::AnyArray | Self::Pseudo(_)
+            )
+        }) {
             return Err(SQLError::Routine {
                 sqlstate: "42704".into(),
                 message: message("type \"", name, "\" does not exist", control, &mut work).await?,
@@ -125,6 +128,27 @@ impl ColumnType {
             .strip_prefix("pg_catalog.")
             .or_else(|| base.strip_prefix("\"pg_catalog\"."));
         let catalog_modifiers = catalog_name.is_some() || base.starts_with('"');
+        let local = catalog_name.unwrap_or(&base).trim_matches('"');
+        if let Some(ty @ (Self::Pseudo(_) | Self::AnyArray)) = (local == "unknown"
+            || local.starts_with("any"))
+        .then(|| crate::catalog::type_metadata::builtin_scalar_type_by_name(local))
+        .flatten()
+        {
+            if modifier.is_some() {
+                return Err(SQLError::Routine {
+                    sqlstate: "42601".into(),
+                    message: message(
+                        "type modifier is not allowed for type \"",
+                        local,
+                        "\"",
+                        control,
+                        work,
+                    )
+                    .await?,
+                });
+            }
+            return Ok(Parsed::Scalar(ty.clone_with_control(control)?));
+        }
         let catalog_type;
         let base = if let Some(name) =
             catalog_name.or_else(|| base.strip_prefix('"').map(|_| &**base))

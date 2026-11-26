@@ -229,7 +229,7 @@ impl ObserveAllocations for ColumnType {
             Self::AclItem => {}
             Self::Int2Vector => {}
             Self::OidVector => {}
-            Self::AnyArray => {}
+            Self::AnyArray | Self::Pseudo(_) => {}
             Self::Record => {}
             Self::Array(value0) => {
                 observer.child(value0)?;

@@ -45,8 +45,24 @@ pub(super) fn cast_type_with_control(
     let ScalarExpr::Cast { expr, ty, .. } = expression else {
         unreachable!("cast expression");
     };
-    let source = scalar_type_inner_with_control(expr, schema, params, resolver, control)?;
     let target = resolved_type_name(ty, resolver, control)?;
+    if let Some(target @ (ColumnType::Pseudo(_) | ColumnType::AnyArray)) = target.as_deref() {
+        let source = common::common_context_expression_type_with_control(
+            expr, schema, params, resolver, control,
+        )?;
+        return match super::super::pseudo_cast::select(
+            target,
+            source.as_deref(),
+            matches!(expr.as_ref(), ScalarExpr::Literal(uqa_core::Value::Str(_))),
+            control,
+        )? {
+            Some(super::super::pseudo_cast::Coercion::Preserve) => Ok(source),
+            Some(super::super::pseudo_cast::Coercion::Unknown) => Ok(None),
+            Some(super::super::pseudo_cast::Coercion::Relabel(ty)) => copy_type(Some(ty), control),
+            None => unreachable!("pseudo-type cast target"),
+        };
+    }
+    let source = scalar_type_inner_with_control(expr, schema, params, resolver, control)?;
     if let Some(target) = target.as_ref() {
         cast_compatibility::validate_explicit_cast_with_control(
             source.as_deref(),

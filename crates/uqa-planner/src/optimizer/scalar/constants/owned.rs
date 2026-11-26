@@ -46,17 +46,15 @@ pub(in crate::optimizer::scalar) fn fold(
             .as_deref()
             .is_some_and(|value| matches!(value, Value::Null))
         {
-            if let Some(target) = eligibility::cast_type(ty, types, control)? {
-                if !matches!(&*target, ColumnType::Domain { .. } | ColumnType::Named(_)) {
-                    return Ok(OwnedScalarExpr::typed_literal(
-                        control.finish(Value::Null, control.empty_reservation())?,
-                        control.copy_text(ty)?,
-                        Some(target),
-                        None,
-                        None,
-                        control,
-                    )?);
-                }
+            if let Some(target) = eligibility::direct_null_cast_type(ty, types, control)? {
+                return Ok(OwnedScalarExpr::typed_literal(
+                    control.finish(Value::Null, control.empty_reservation())?,
+                    control.copy_text(ty)?,
+                    Some(target),
+                    None,
+                    None,
+                    control,
+                )?);
             }
         }
     }

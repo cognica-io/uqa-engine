@@ -107,6 +107,29 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
             self.expression_with_work(expr, input, subqueries, work)
                 .await?
         };
+        use crate::type_resolution::pseudo_cast::{self, Coercion};
+        let control_owner = self.scope.control().capture();
+        let control = control_owner.control();
+        if let Some(coercion) = pseudo_cast::select(
+            target,
+            source.ty.as_deref(),
+            source.has_unknown_string(),
+            &control,
+        )? {
+            return match coercion {
+                Coercion::Preserve => Ok(source),
+                Coercion::Unknown => {
+                    let mut result = ExpressionType::unknown();
+                    result.mark_unknown_expression();
+                    Ok(result)
+                }
+                Coercion::Relabel(ty) => {
+                    let ty = ty.clone_with_control(&control)?;
+                    self.parameters.coerce_unknown(&mut source, &ty)?;
+                    ExpressionType::resolved_produced(Some(ty), &control)
+                }
+            };
+        }
         if let Some(fields) = &mut source.row_constructor {
             self.coerce_row_constructor(fields, target, work).await?;
         }

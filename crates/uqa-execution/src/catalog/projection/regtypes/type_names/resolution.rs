@@ -180,9 +180,12 @@ pub fn resolve_catalog_column_type_name_with_control(
     let parsed = uqa_sql::parse_regtype_name_with_control(type_name, control)?;
     if let Some(parsed) = parsed.as_ref().filter(|parsed| parsed.has_type_modifiers) {
         let name = quoted_name(parsed, control)?;
-        if resolve_catalog_column_type_with_control(context, &name, control)?
-            .is_some_and(|ty| matches!(*ty, ColumnType::Domain { .. }))
-        {
+        if resolve_catalog_column_type_with_control(context, &name, control)?.is_some_and(|ty| {
+            matches!(
+                *ty,
+                ColumnType::Domain { .. } | ColumnType::AnyArray | ColumnType::Pseudo(_)
+            )
+        }) {
             return Err(routine(
                 "42601",
                 format_args!(

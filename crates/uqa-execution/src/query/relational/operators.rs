@@ -281,9 +281,9 @@ pub fn build_relational_operator<'a, S: Clone + 'static>(
                         let labels = uqa_sql::semantics::projection_labels_with_control(&statement.projections, &[], &control)?;
                         operator.attach(|operator| {
                             let projections = labels.iter().zip(&statement.projections).map(|(label, projection)| {
-                                crate::query::projection::owned_physical_projection(crate::query::projection::owned_projection_column(label, &control)?, &projection.expr, true, &control)
+                                crate::query::projection::owned_physical_projection(crate::query::projection::owned_projection_column(label, &control)?, &projection.expr, &control)
                             }).chain(distinct_inputs.iter().map(|(_, column, expression)| {
-                                crate::query::projection::owned_physical_projection(control.finish(crate::ProjectionTarget::Internal(*column), control.empty_reservation())?, expression, false, &control)
+                                crate::query::projection::owned_physical_projection(control.finish(crate::ProjectionTarget::Internal(*column), control.empty_reservation())?, expression, &control)
                             }));
                             let project = Project::with_owned_target_evaluator(operator, projections, Arc::clone(&evaluator), &control)?;
                             Ok(Box::new(project.with_memory_budget(work_mem)))
