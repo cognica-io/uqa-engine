@@ -8,7 +8,10 @@ use super::{plain, string};
 use crate::{
     error::{Result, SQLError},
     expr::{
-        conversion::{to_i64_with_control, value_to_string_with_control},
+        conversion::{
+            argument_text, character_count, character_offsets, to_i64_with_control,
+            value_to_string_with_control,
+        },
         datums::binary_payload,
         out_of_range,
         scalar_helpers::{casing::CaseMapping, CompiledLikePattern},
@@ -128,7 +131,7 @@ fn case_mapping(
     if matches!(value, Value::Null) {
         return plain(Value::Null, control);
     }
-    let source = value_to_string_with_control(value, control)?;
+    let source = argument_text(value, control)?;
     let subject = match name {
         "upper" => "upper() function",
         "initcap" => "initcap() function",
@@ -143,15 +146,6 @@ fn case_mapping(
         _ => unreachable!("case-mapping family"),
     };
     string(output, control)
-}
-
-fn character_count(text: &str, control: &ProductionControl<'_>) -> Result<usize> {
-    let mut count = 0;
-    for _ in text.chars() {
-        control.check()?;
-        count += 1;
-    }
-    Ok(count)
 }
 
 fn length(
@@ -445,18 +439,7 @@ fn slice(
     last: usize,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Value>> {
-    let mut start = source.len();
-    let mut end = source.len();
-    for (ordinal, (index, _)) in source.char_indices().enumerate() {
-        control.check()?;
-        if ordinal == first {
-            start = index;
-        }
-        if ordinal == last {
-            end = index;
-            break;
-        }
-    }
+    let (start, end) = character_offsets(source, first, last, control)?;
     string(control.copy_text(&source[start..end])?, control)
 }
 

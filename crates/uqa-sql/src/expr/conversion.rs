@@ -483,6 +483,40 @@ pub(crate) fn tensor_items(v: &Value) -> Result<&[Value]> {
     }
 }
 
+pub(super) fn character_count(text: &str, control: &ProductionControl<'_>) -> Result<usize> {
+    let mut count = 0;
+    for _ in text.chars() {
+        control.check()?;
+        count += 1;
+    }
+    Ok(count)
+}
+
+/// Byte offsets of two zero-based character positions, clipped to the length of the text.
+pub(super) fn character_offsets(
+    text: &str,
+    first: usize,
+    last: usize,
+    control: &ProductionControl<'_>,
+) -> Result<(usize, usize)> {
+    let mut start = text.len();
+    let mut end = text.len();
+    let stop = first.max(last);
+    for (ordinal, (byte, _)) in text.char_indices().enumerate() {
+        control.check()?;
+        if ordinal == first {
+            start = byte;
+        }
+        if ordinal == last {
+            end = byte;
+        }
+        if ordinal == stop {
+            break;
+        }
+    }
+    Ok((start, end))
+}
+
 /// The text of an argument: borrowed where the value holds text, and otherwise written as its cast to `text` writes it, so a call admits no second copy of a text argument.
 pub(super) fn argument_text<'v>(
     value: &'v Value,

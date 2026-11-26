@@ -11,6 +11,7 @@ use uqa_core::memory::{Produced, ProductionControl, ProductionString};
 use uqa_pg_regex::MAX_ALLOC_SIZE;
 
 const VARHDRSZ: usize = 4;
+pub(super) const MAX_TEXT_BYTES: usize = MAX_ALLOC_SIZE - VARHDRSZ;
 
 /// Producers such as repeat, pad and translate validate their predicted allocation before building the text.
 pub(crate) fn check_text_size(payload: Option<usize>) -> Result<()> {
@@ -26,6 +27,12 @@ pub(crate) fn check_text_size(payload: Option<usize>) -> Result<()> {
 /// A direct varlena allocation includes its header, including the final result copied from a `StringInfo`.
 pub fn check_varlena_size(payload: usize) -> Result<()> {
     check_allocation_size(payload as u128 + VARHDRSZ as u128)
+}
+
+/// `PostgreSQL` first allocates the mapped C string, then converts it to text with a varlena header.
+pub(super) fn check_case_mapping_size(bytes: u64) -> Result<()> {
+    check_allocation_size(u128::from(bytes) + 1)?;
+    check_allocation_size(u128::from(bytes) + VARHDRSZ as u128)
 }
 
 pub(super) fn check_allocation_size(requested: u128) -> Result<()> {
@@ -104,6 +111,25 @@ impl<'a> TextBuffer<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn case_mapping_reports_the_exact_c_string_or_final_varlena_allocation() {
+        let limit = MAX_ALLOC_SIZE as u64;
+        assert!(check_case_mapping_size(limit - 4).is_ok());
+        for (payload, requested) in [
+            (limit - 3, limit + 1),
+            (limit - 1, limit + 3),
+            (limit, limit + 1),
+            (2 * limit, 2 * limit + 1),
+        ] {
+            let error = check_case_mapping_size(payload).unwrap_err();
+            assert_eq!(error.sqlstate(), Some("XX000"));
+            assert_eq!(
+                error.to_string(),
+                format!("invalid memory alloc request size {requested}")
+            );
+        }
+    }
 
     #[test]
     fn allocation_limits_distinguish_headers_terminators_and_requested_chunks() {

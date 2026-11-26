@@ -11,13 +11,16 @@ use uqa_core::memory::{Produced, ProductionControl, ProductionString, Production
 use super::{plain, Result, SQLError, Value};
 use crate::expr::{
     allocation_error,
-    conversion::{to_i64_with_control, value_to_string_with_control},
+    conversion::{
+        argument_text, character_count, character_offsets, to_i64_with_control,
+        value_to_string_with_control,
+    },
     encoding::{
         base64_decode_with_control, base64_encode_with_control, escape_decode_with_control,
         escape_encode_with_control, hex_decode_with_control, hex_encode_with_control,
         md5_hex_with_control,
     },
-    nonnegative_usize, out_of_range,
+    out_of_range,
 };
 
 #[cfg(test)]
@@ -160,40 +163,59 @@ pub(super) fn eval(
             }
             string(out.finish()?, control)
         }
-        "overlay" => {
-            if args.len() < 3 || args.len() > 4 {
-                return Err(SQLError::TypeMismatch("overlay takes 3 or 4 args".into()));
-            }
-            let s = characters(&value_to_string_with_control(&args[0], control)?, control)?;
-            let placing = characters(&value_to_string_with_control(&args[1], control)?, control)?;
-            let start = nonnegative_usize(
-                to_i64_with_control(&args[2], control)?.max(1) - 1,
-                "overlay start position",
-            )?;
-            let len = if args.len() == 4 {
-                nonnegative_usize(
-                    to_i64_with_control(&args[3], control)?.max(0),
-                    "overlay length",
-                )?
-            } else {
-                placing.len()
-            };
-            let end = start.saturating_add(len).min(s.len());
-            let mut out = ProductionString::new(*control);
-            for character in s[..start.min(s.len())]
-                .iter()
-                .chain(placing.iter())
-                .chain(s[end..].iter())
-            {
-                out.push(*character)?;
-            }
-            string(out.finish()?, control)
-        }
+        "overlay" => overlay(args, control),
         "md5" | "encode" => encode(name, args, control),
         "decode" => decode(args, control),
         "split_part" => split_part(args, control),
         _ => unreachable!("text family membership was checked before dispatch"),
     }
+}
+
+fn overlay(args: &[Value], control: &ProductionControl<'_>) -> Result<Produced<Value>> {
+    if !(3..=4).contains(&args.len()) {
+        return Err(SQLError::TypeMismatch("overlay takes 3 or 4 args".into()));
+    }
+    if args.iter().any(|value| matches!(value, Value::Null)) {
+        return plain(Value::Null, control);
+    }
+    let text = argument_text(&args[0], control)?;
+    let replacement = argument_text(&args[1], control)?;
+    let integer = |value| {
+        i32::try_from(to_i64_with_control(value, control)?).map_err(|_| out_of_range("integer"))
+    };
+    let start = integer(&args[2])?;
+    if start <= 0 {
+        return Err(SQLError::Routine {
+            sqlstate: "22011".into(),
+            message: "negative substring length not allowed".into(),
+        });
+    }
+    let length = match args.get(3) {
+        Some(value) => integer(value)?,
+        None => i32::try_from(character_count(&replacement, control)?)
+            .map_err(|_| out_of_range("integer"))?,
+    };
+    let end = start
+        .checked_add(length)
+        .ok_or_else(|| out_of_range("integer"))?;
+    let (first, last) = character_offsets(
+        &text,
+        (start - 1) as usize,
+        (end.max(1) - 1) as usize,
+        control,
+    )?;
+    let prefix = &text[..first];
+    let suffix = &text[last..];
+    let replaced = prefix.len() + replacement.len();
+    crate::expr::text_size::check_varlena_size(replaced)?;
+    let total = replaced + suffix.len();
+    crate::expr::text_size::check_varlena_size(total)?;
+    let mut output = ProductionString::new(*control);
+    output.reserve(total)?;
+    output.push_str(prefix)?;
+    output.push_str(&replacement)?;
+    output.push_str(suffix)?;
+    string(output.finish()?, control)
 }
 
 fn encode(name: &str, args: &[Value], control: &ProductionControl<'_>) -> Result<Produced<Value>> {

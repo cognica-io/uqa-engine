@@ -29,6 +29,14 @@
     {"sql":"SELECT encode('xy'::bytea,'hex'), encode(decode('5c80','hex'),'escape')","command_tags":["SELECT 1"],"error":null,"results":[{"columns":["encode","encode"],"type_oids":[25,25],"rows":[["7879","\\\\\\200"]]}],"notices":[]},
     {"sql":"SELECT length(encode(decode(repeat('61',57),'hex'),'base64')) AS chars","command_tags":["SELECT 1"],"error":null,"results":[{"columns":["chars"],"type_oids":[23],"rows":[["77"]]}],"notices":[]},
     {"sql":"SELECT string_agg(a, d ORDER BY k) AS joined FROM (VALUES (2,'b','/'),(1,'a','.'),(0,NULL,'ignored')) AS t(k,a,d)","command_tags":["SELECT 1"],"error":null,"results":[{"columns":["joined"],"type_oids":[25],"rows":[["a/b"]]}],"notices":[]},
-    {"sql":"SELECT format('%s') AS missing","command_tags":[],"error":{"sqlstate":"22023","message":"too few arguments for format()","detail":null,"hint":null},"results":[],"notices":[]}
+    {"sql":"SELECT format('%s') AS missing","command_tags":[],"error":{"sqlstate":"22023","message":"too few arguments for format()","detail":null,"hint":null},"results":[],"notices":[]},
+    {"sql":"SELECT overlay('é2345' PLACING '界' FROM 1) AS value","command_tags":["SELECT 1"],"error":null,"results":[{"columns":["value"],"type_oids":[25],"rows":[["界2345"]]}],"notices":[]},
+    {"sql":"SELECT overlay('é2345' PLACING '界' FROM 2 FOR 2) AS value","command_tags":["SELECT 1"],"error":null,"results":[{"columns":["value"],"type_oids":[25],"rows":[["é界45"]]}],"notices":[]},
+    {"sql":"SELECT overlay('é2345' PLACING '界' FROM 5 FOR -2) AS value","command_tags":["SELECT 1"],"error":null,"results":[{"columns":["value"],"type_oids":[25],"rows":[["é234界345"]]}],"notices":[]},
+    {"sql":"SELECT overlay('é2345' PLACING '界' FROM 1 FOR -5) AS value","command_tags":["SELECT 1"],"error":null,"results":[{"columns":["value"],"type_oids":[25],"rows":[["界é2345"]]}],"notices":[]},
+    {"sql":"SELECT overlay('é2345' PLACING '界' FROM 0 FOR 1) AS value","command_tags":[],"error":{"sqlstate":"22011","message":"negative substring length not allowed","detail":null,"hint":null},"results":[],"notices":[]},
+    {"sql":"SELECT overlay('é2345' PLACING '界' FROM -1) AS value","command_tags":[],"error":{"sqlstate":"22011","message":"negative substring length not allowed","detail":null,"hint":null},"results":[],"notices":[]},
+    {"sql":"SELECT overlay('é2345' PLACING '界' FROM 2147483647 FOR 1) AS value","command_tags":[],"error":{"sqlstate":"22003","message":"integer out of range","detail":null,"hint":null},"results":[],"notices":[]},
+    {"sql":"SELECT overlay('é2345' PLACING '界' FROM 2147483647 FOR 0) AS value","command_tags":["SELECT 1"],"error":null,"results":[{"columns":["value"],"type_oids":[25],"rows":[["é2345界"]]}],"notices":[]}
   ]
 }

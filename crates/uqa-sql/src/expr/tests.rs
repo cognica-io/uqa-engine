@@ -668,8 +668,9 @@ fn collection_and_string_sizes_fail_without_wrapping_or_panicking() {
                 Value::Int(i64::MAX),
             ],
         )
-        .unwrap(),
-        Value::Str("abcx".into())
+        .unwrap_err()
+        .sqlstate(),
+        Some("22003")
     );
 }
 
