@@ -92,14 +92,6 @@ pub fn largest_catalog_oid(
     catalog: &CatalogReadView,
     resolution: &RelationNameResolution,
 ) -> Result<Option<u32>, SQLError> {
-    let row_oids = |rows: Vec<uqa_sql::ResultRow>| {
-        rows.into_iter()
-            .filter_map(|row| match row.get("oid") {
-                Some(uqa_core::Value::Int(oid)) => Some(*oid),
-                _ => None,
-            })
-            .collect::<Vec<_>>()
-    };
     let snapshot = catalog.snapshot();
     let mut oids = relation_claims(catalog, resolution)?
         .into_iter()
@@ -197,6 +189,13 @@ pub fn largest_catalog_oid(
         .filter_map(|oid| u32::try_from(oid).ok())
         .filter(|oid| *oid >= uqa_sql::catalog::oids::FIRST_NORMAL_OBJECT_ID)
         .max())
+}
+
+fn row_oids(rows: Vec<uqa_sql::ResultRow>) -> impl Iterator<Item = i64> {
+    rows.into_iter().filter_map(|row| match row.get("oid") {
+        Some(uqa_core::Value::Int(oid)) => Some(*oid),
+        _ => None,
+    })
 }
 
 fn foreign_object_oids(

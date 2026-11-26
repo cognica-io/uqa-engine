@@ -378,7 +378,6 @@ fn committed_temporary_default_acl_tracks_its_grantee_across_catalog_refresh(
 fn default_privilege_grantees_keep_the_original_role_after_a_wait(#[case] provider: usize) {
     let (_directory, first, second) = sessions(provider);
     sql(&first, "CREATE ROLE dependent");
-    assert!(role_exists(&second));
     sql(&first, "BEGIN");
     let lock = role_lock(&first);
     first

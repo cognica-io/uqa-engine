@@ -22,6 +22,7 @@ use crate::catalog::security::roles::{
 };
 use std::{collections::BTreeSet, sync::Arc};
 use uqa_sql::catalog::roles::identity::RoleSubject;
+use uqa_sql::routines::compare_routine_overloads;
 use uqa_sql::{
     ast::{AlterRoutineStmt, CreateFunction, FunctionBody, RoleAttribute},
     catalog::roles::role_inherits,
@@ -242,8 +243,7 @@ pub fn register_sql_function(
     };
     let owner = locks.bind(&requested_owner)?;
     def.owner = Some(owner.identity());
-    let requested_name = def.name.clone();
-    def.name = context.namespace.object_name(&requested_name)?;
+    def.name = context.namespace.object_name(&def.name)?;
     validate_routine_creation(context, &mut def, &current_user)?;
     let checks_bodies = checks_function_bodies(context.configuration)?;
     let bound = compile_catalog_bound_routine(
@@ -296,30 +296,19 @@ pub fn register_sql_function(
                 overloads[pos] = Arc::clone(&published);
                 published
             } else {
-                let identity = uqa_core::RelationIdentity::from_legacy_name(&name)
-                    .map_err(|error| SQLError::Internal(error.to_string()))?;
-                def.execute_acl = context
-                    .namespace
-                    .defaults
-                    .initial_acl(
-                        owner.identity(),
-                        Some(&identity.schema),
-                        uqa_sql::ast::DefaultAclObject::Routine,
-                    )
-                    .map(uqa_sql::catalog::security::default_acl::single);
-                dependencies =
-                    uqa_sql::routines::security::binding::routine_role_dependencies(&def, &roles)?;
+                dependencies = bind_initial_privileges(
+                    context.namespace.defaults,
+                    &mut def,
+                    owner.identity(),
+                    &roles,
+                )?;
                 def.object_id = Some(allocate_routine_object_id(&registry, &name)?);
                 def.catalog_oid = Some(created_routine_oid(&name, new_oid)?);
                 let published = super::catalog::revision::replacement(def, bound.body.clone())?;
                 overloads.push(Arc::clone(&published));
                 published
             };
-            overloads.sort_by(|left, right| {
-                routine_signature_types(&left.def)
-                    .cmp(&routine_signature_types(&right.def))
-                    .then_with(|| left.def.is_procedure.cmp(&right.def.is_procedure))
-            });
+            overloads.sort_by(|left, right| compare_routine_overloads(&left.def, &right.def));
             next.insert(name.clone(), overloads)?;
             Ok(RoleDependencyCandidate {
                 value: (registry, next, published),
@@ -339,6 +328,24 @@ pub fn register_sql_function(
     drop(memberships);
     drop(roles);
     finish_registration(context, &def, &published, &bound, checks_bodies)
+}
+
+fn bind_initial_privileges(
+    defaults: &dyn uqa_sql::catalog::security::default_acl::InitialPrivileges,
+    def: &mut CreateFunction,
+    owner: uqa_core::catalog_role::RoleIdentity,
+    roles: &uqa_sql::catalog::roles::RoleDefinitions,
+) -> Result<BTreeSet<String>, SQLError> {
+    let identity =
+        uqa_core::RelationIdentity::from_legacy_name(&def.name).map_err(SQLError::Internal)?;
+    def.execute_acl = defaults
+        .initial_acl(
+            owner,
+            Some(&identity.schema),
+            uqa_sql::ast::DefaultAclObject::Routine,
+        )
+        .map(uqa_sql::catalog::security::default_acl::single);
+    uqa_sql::routines::security::binding::routine_role_dependencies(def, roles)
 }
 
 /// Complete a published definition: the compilation that validated a `PL/pgSQL` body stays with the defining session, and a SQL body is validated now that the routine is visible, so that the body can call it. A failure aborts the statement, whose rollback withdraws the routine.
