@@ -234,6 +234,7 @@ impl UQAValue {
         while let ColumnType::Domain { base, .. } = ty {
             ty = base;
         }
+        let ty = ty.without_temporal_modifiers();
         let accepted = match access {
             ScalarAccess::Bool => matches!(ty, ColumnType::Boolean),
             ScalarAccess::Int16 => matches!(ty, ColumnType::SmallInteger),
@@ -272,22 +273,11 @@ impl UQAValue {
                     | ColumnType::Regtype
             ),
             ScalarAccess::Date => matches!(ty, ColumnType::Date),
-            ScalarAccess::Time => matches!(ty, ColumnType::Time | ColumnType::TimePrecision(_)),
-            ScalarAccess::TimeTz => {
-                matches!(ty, ColumnType::TimeTz | ColumnType::TimeTzPrecision(_))
-            }
-            ScalarAccess::Timestamp => matches!(
-                ty,
-                ColumnType::Timestamp | ColumnType::TimestampPrecision(_)
-            ),
-            ScalarAccess::TimestampTz => matches!(
-                ty,
-                ColumnType::TimestampTz | ColumnType::TimestampTzPrecision(_)
-            ),
-            ScalarAccess::Interval => matches!(
-                ty,
-                ColumnType::Interval | ColumnType::IntervalWithFields { .. }
-            ),
+            ScalarAccess::Time => matches!(ty, ColumnType::Time),
+            ScalarAccess::TimeTz => matches!(ty, ColumnType::TimeTz),
+            ScalarAccess::Timestamp => matches!(ty, ColumnType::Timestamp),
+            ScalarAccess::TimestampTz => matches!(ty, ColumnType::TimestampTz),
+            ScalarAccess::Interval => matches!(ty, ColumnType::Interval),
             ScalarAccess::Json => matches!(ty, ColumnType::Json),
             ScalarAccess::JsonB => matches!(ty, ColumnType::JsonB),
             ScalarAccess::Text => matches!(
