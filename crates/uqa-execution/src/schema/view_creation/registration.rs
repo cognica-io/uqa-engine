@@ -186,7 +186,12 @@ fn register_view_plan_inner(
         .and_then(|view| view.row_type_array_name.clone());
     let mut view = StoredView {
         security: existing_view.as_ref().map_or_else(
-            || uqa_sql::catalog::security::BoundTableSecurity::owner(owner.identity()),
+            || {
+                context
+                    .namespace
+                    .defaults
+                    .table_security(owner.identity(), &relation.schema)
+            },
             |view| view.security.clone(),
         ),
         definition: uqa_sql::catalog::stored_view::StoredViewDefinition {

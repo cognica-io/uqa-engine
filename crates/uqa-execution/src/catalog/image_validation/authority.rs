@@ -48,6 +48,16 @@ pub(super) async fn validate(
             .table_with_work(&table.security, table.columns.iter().map(column_name), work)
             .await?;
     }
+    for (key, row) in definitions.default_acls.iter() {
+        authority.checkpoint(work).await?;
+        authority.role(key.owner)?;
+        for entry in &row.acl {
+            authority.checkpoint(work).await?;
+            if let Some(role) = entry.role {
+                authority.role(role)?;
+            }
+        }
+    }
     relations(definitions, &authority, work).await?;
     types(definitions, &authority, work).await?;
     routines(definitions, &authority, work).await?;

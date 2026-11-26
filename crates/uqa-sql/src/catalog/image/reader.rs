@@ -7,6 +7,7 @@
 //! One bounded cursor covers native catalog images.
 
 use super::fields::{Field, Fields};
+use crate::catalog::security::default_acl::{DefaultAclKey, DefaultAclRow, DefaultRights};
 use crate::{
     ast::{ColumnType, FunctionBinding, ObjectAclEntry},
     catalog::{
@@ -52,6 +53,7 @@ pub(super) enum Entries<'a> {
     Schemas(CapturedDefinitionIter<'a, String, BoundSchemaSecurity>),
     Database(Option<&'a BoundDatabaseSecurity>),
     BuiltinRoutines(CapturedDefinitionIter<'a, u32, BuiltinRoutineSecurity>),
+    DefaultAcls(CapturedDefinitionIter<'a, DefaultAclKey, DefaultAclRow>),
     SystemRelations(CapturedDefinitionIter<'a, RelationIdentity, SystemRelationSecurity>),
     Composites(CapturedDefinitionIter<'a, String, StoredComposite>),
     Ranges(CapturedDefinitionIter<'a, String, StoredRange>),
@@ -65,6 +67,7 @@ enum Acl<'a> {
     None,
     Schema(Iter<'a, BoundAclEntry<SchemaPrivileges>>),
     Database(Iter<'a, BoundAclEntry<DatabasePrivileges>>),
+    Default(Iter<'a, BoundAclEntry<DefaultRights>>),
     Object(Iter<'a, ObjectAclEntry>),
     Table(Iter<'a, BoundAclEntry<TablePrivileges>>),
     Sequence(Iter<'a, BoundAclEntry<SequencePrivileges>>),
@@ -138,6 +141,17 @@ impl<'a> CatalogImageReader<'a> {
             Acl::Database(acl) => {
                 if let Some(entry) = acl.next() {
                     self.fields.acl(entry);
+                    return true;
+                }
+            }
+            Acl::Default(acl) => {
+                if let Some(entry) = acl.next() {
+                    self.fields.flag(entry.role.is_some());
+                    if let Some(role) = entry.role {
+                        self.fields.identity(role);
+                    }
+                    self.fields.scalar(entry.privileges.0.to_le_bytes());
+                    self.fields.scalar(entry.grant_options.0.to_le_bytes());
                     return true;
                 }
             }
@@ -252,6 +266,26 @@ impl<'a> CatalogImageReader<'a> {
         }
         Ok(false)
     }
+    fn database_security(&mut self, database: &'a BoundDatabaseSecurity) {
+        let BoundDatabaseSecurity { role_owner, acl } = database;
+        self.fields.identity(*role_owner);
+        self.fields.flag(acl.is_some());
+        if let Some(acl) = acl {
+            self.fields.count(acl.len());
+            self.acl = Acl::Database(acl.iter());
+        }
+    }
+
+    fn default_acl(&mut self, key: &DefaultAclKey, row: &'a DefaultAclRow) {
+        self.fields.identity(key.owner);
+        self.fields.scalar(key.namespace.to_le_bytes());
+        self.fields
+            .scalar([u8::try_from(key.object.code()).expect("ASCII catalog class")]);
+        self.fields.scalar(row.oid.to_le_bytes());
+        self.fields.count(row.acl.len());
+        self.acl = Acl::Default(row.acl.iter());
+    }
+
     fn next_record(&mut self) -> Result<bool, SQLError> {
         self.fields = Fields::new();
         if self.next_child()? {
@@ -304,13 +338,13 @@ impl<'a> CatalogImageReader<'a> {
                 let Some(database) = entry.take() else {
                     return Ok(false);
                 };
-                let BoundDatabaseSecurity { role_owner, acl } = database;
-                self.fields.identity(*role_owner);
-                self.fields.flag(acl.is_some());
-                if let Some(acl) = acl {
-                    self.fields.count(acl.len());
-                    self.acl = Acl::Database(acl.iter());
-                }
+                self.database_security(database);
+            }
+            Entries::DefaultAcls(entries) => {
+                let Some((key, row)) = entries.next() else {
+                    return Ok(false);
+                };
+                self.default_acl(key, row);
             }
             Entries::BuiltinRoutines(entries) => {
                 let Some((oid, value)) = entries.next() else {

@@ -74,6 +74,7 @@ pub trait SchemaRegistrationPersistence {
     ) -> StorageBackendResult<()>;
 }
 pub struct SchemaRegistrationContext<'a> {
+    pub defaults: &'a uqa_sql::catalog::security::default_acl::DefaultAcls,
     pub state: &'a dyn SchemaRegistrationState,
     pub persistence: &'a dyn SchemaRegistrationPersistence,
     pub changes: &'a dyn NamespaceCatalogChanges,
@@ -104,7 +105,10 @@ pub fn register_schema(
     let security = BoundSchemaSecurity {
         tuple: Some(tuple),
         role_owner,
-        acl: None,
+        acl: context
+            .defaults
+            .initial(role_owner, 0, uqa_sql::ast::DefaultAclObject::Schema)
+            .map(uqa_sql::catalog::security::default_acl::schema),
     };
     context.persistence.persist_schema(name, &security)?;
     schemas

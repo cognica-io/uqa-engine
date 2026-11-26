@@ -12,12 +12,7 @@ use super::{
 };
 use crate::ColumnType;
 
-pub struct ForeignCatalogDescriptor {
-    pub relation: VirtualRelation,
-    pub row_type: u32,
-    pub array_type: u32,
-    pub required_columns: usize,
-}
+pub use super::SystemCatalogDescriptor as ForeignCatalogDescriptor;
 
 pub const FOREIGN_CATALOGS: &[ForeignCatalogDescriptor] = &[
     ForeignCatalogDescriptor {

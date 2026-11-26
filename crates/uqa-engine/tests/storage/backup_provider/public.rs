@@ -514,7 +514,7 @@ fn public_memory_backup_publishes_full_and_independent_incremental_roots(
         .open_backup(child_root.backup(), &control)
         .unwrap();
     let mut input = MemoryImageImportReader::new(lease, 16 << 20, &control).unwrap();
-    let mut catalogs = 0;
+    let mut catalogs = Vec::new();
     let mut documents = std::collections::BTreeMap::new();
     loop {
         match input.advance(113).unwrap() {
@@ -523,8 +523,8 @@ fn public_memory_backup_publishes_full_and_independent_incremental_roots(
             BackupSourceStep::Unit => (),
         }
         let document = match input.current_unit().unwrap().address {
-            DecodedMemoryImageAddress::Catalog(_) => {
-                catalogs += 1;
+            DecodedMemoryImageAddress::Catalog(slot) => {
+                catalogs.push(*slot);
                 false
             }
             DecodedMemoryImageAddress::Table {
@@ -560,7 +560,10 @@ fn public_memory_backup_publishes_full_and_independent_incremental_roots(
                 .is_none());
         }
     }
-    assert_eq!(catalogs, 24);
+    assert_eq!(
+        catalogs,
+        (1..=uqa_storage::backup::MEMORY_IMAGE_CATALOG_COUNT).collect::<Vec<_>>()
+    );
     assert_eq!(input.header().unwrap().source, child_root.cut().source);
     assert_eq!(documents.len(), 2);
     assert_eq!(

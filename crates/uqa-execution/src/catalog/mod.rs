@@ -155,6 +155,7 @@ pub struct CatalogDefinitionSnapshot {
     pub views: RetainedValue<uqa_sql::catalog::stored_view::ViewDefinitions>,
     pub catalog_indexes: RetainedValue<crate::catalog::index::registry::CatalogIndexes>,
     pub database_security: RetainedValue<uqa_sql::catalog::security::database::DatabaseAuthority>,
+    pub default_acls: RetainedValue<uqa_sql::catalog::security::default_acl::DefaultAcls>,
     pub schemas: RetainedValue<SchemaRegistry>,
     pub sequences: RetainedValue<sequence::registry::SequenceCatalog>,
     /// The OIDs graphs and their labels recorded when they were created, by graph name.

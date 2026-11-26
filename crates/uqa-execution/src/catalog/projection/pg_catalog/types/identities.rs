@@ -48,7 +48,7 @@ pub(in crate::catalog::projection) fn builtin_type_identity_by_name(
             return Ok(Some((array, 0)));
         }
     }
-    for entry in uqa_sql::catalog::foreign_relations::FOREIGN_CATALOGS {
+    for entry in uqa_sql::catalog::catalog_descriptors() {
         control.check()?;
         if name == entry.relation.name() {
             return Ok(Some((

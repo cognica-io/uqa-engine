@@ -140,6 +140,7 @@ pub(crate) fn build_requested_catalog_rows(
         VirtualRelation::PgDatabase => build_pg_database(catalog)?,
         VirtualRelation::PgAuthid => build_pg_authid(catalog),
         VirtualRelation::PgAuthMembers => build_pg_auth_members(catalog)?,
+        VirtualRelation::PgDefaultAcl => pg_catalog::default_acl::rows(catalog)?,
         VirtualRelation::PgRoles => build_pg_roles(catalog),
         VirtualRelation::PgUser => build_pg_user(catalog),
         VirtualRelation::PgShadow => pg_catalog::build_pg_shadow(catalog),

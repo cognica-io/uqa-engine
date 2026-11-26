@@ -67,6 +67,7 @@ impl Fixture {
     }
     fn context(&self) -> RelationCreationContext<'_> {
         RelationCreationContext {
+            defaults: self,
             names: self,
             roles: self,
             locks: self,
@@ -218,6 +219,16 @@ impl CreationRelationGuards for Fixture {
     }
     fn composite_types(&self) -> Box<dyn CreationRelationNames + '_> {
         Box::new(EmptyNames)
+    }
+}
+impl uqa_sql::catalog::security::default_acl::InitialPrivileges for Fixture {
+    fn initial_acl(
+        &self,
+        _: uqa_core::catalog_role::RoleIdentity,
+        _: Option<&str>,
+        _: uqa_sql::ast::DefaultAclObject,
+    ) -> Option<uqa_sql::catalog::security::default_acl::Entries> {
+        None
     }
 }
 impl RelationCreationRuntime for Fixture {

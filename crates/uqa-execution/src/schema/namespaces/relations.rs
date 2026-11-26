@@ -46,6 +46,7 @@ pub trait RelationCreationRuntime {
 
 #[derive(Clone, Copy)]
 pub struct RelationCreationContext<'a> {
+    pub defaults: &'a dyn uqa_sql::catalog::security::default_acl::InitialPrivileges,
     pub names: &'a dyn RoleReferenceNames,
     pub roles: &'a dyn RoleCatalogGuards,
     pub locks: &'a dyn SharedObjectLockSession,

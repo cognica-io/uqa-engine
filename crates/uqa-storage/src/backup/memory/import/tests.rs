@@ -261,6 +261,9 @@ fn memory_import_stream_rejects_incomplete_catalogs_and_invalid_headers() {
         valid[..24].to_vec(),
         valid[1..].to_vec(),
     ];
+    let mut missing_default_acl = valid.clone();
+    missing_default_acl[0].data[..8].copy_from_slice(b"UQAMEM02");
+    variants.push(missing_default_acl);
     let mut gap = valid.clone();
     gap.remove(7);
     variants.push(gap);

@@ -59,6 +59,26 @@ async fn validate_with_work(
         )+};
     }
     types!(domains, enums, composites, ranges, shells);
+    if !d.default_acls.is_empty() {
+        let mut namespaces = uqa_core::memory::ProductionMap::new(*control);
+        for name in uqa_sql::catalog::security::BoundSchemaSecurity::BUILTIN_NAMES
+            .into_iter()
+            .chain(d.schemas.keys().map(String::as_str))
+            .chain(catalog.graph_names_iter())
+        {
+            selection_work::checkpoint(control, work).await?;
+            let oid = crate::catalog::projection::schema_object_oid(catalog, name);
+            namespaces.insert_copy(oid, ())?;
+        }
+        for key in d.default_acls.keys() {
+            selection_work::checkpoint(control, work).await?;
+            if key.namespace != 0 && namespaces.get(&i64::from(key.namespace)).is_none() {
+                return Err(SQLError::Internal(
+                    "missing native default ACL namespace".into(),
+                ));
+            }
+        }
+    }
     for range in d.ranges.values() {
         schema(catalog, &range.multirange.identity.schema, control, work).await?;
     }

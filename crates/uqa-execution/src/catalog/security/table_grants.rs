@@ -7,6 +7,7 @@
 //! Apply table-shaped privilege commands while preserving authorization guards and persistence/publication order.
 mod authority;
 pub mod context;
+mod drop_owned;
 mod locking;
 mod targets;
 mod tuples;
@@ -45,23 +46,41 @@ impl TableGrantContext<'_> {
         let RoleDependencyCandidate {
             roles,
             memberships,
-            value:
-                prepared::PreparedTableGrant {
-                    updates,
-                    view_updates,
-                    views,
-                    foreign_updates,
-                    system_updates,
-                    system,
-                    acl_updates,
-                    notices,
-                },
+            value,
             ..
         } = prepare_role_dependencies(
             &role_locks,
             || self.writer.prepare_writer(),
             || prepared::prepare(self, statement, &targets, &mut command_roles),
         )?;
+        let (changed, notices) = self.publish_acl_updates(value)?;
+        drop(memberships);
+        drop(roles);
+        self.grant_table_syntax_sequence_privileges(statement, &targets, &mut command_roles)?;
+        for notice in notices {
+            self.notices.notice(notice);
+        }
+        if changed {
+            self.changes.table_catalog_changed();
+            self.changes.catalog_registry_changed();
+        }
+        Ok(())
+    }
+
+    fn publish_acl_updates(
+        &self,
+        value: prepared::PreparedTableGrant<'_>,
+    ) -> Result<(bool, Vec<uqa_sql::SQLNotice>), SQLError> {
+        let prepared::PreparedTableGrant {
+            updates,
+            view_updates,
+            views,
+            foreign_updates,
+            system_updates,
+            system,
+            acl_updates,
+            notices,
+        } = value;
         let mut foreign = self.foreign.foreign_catalog();
         for (relation, security) in &foreign_updates {
             foreign.replace_security(relation, security.clone())?;
@@ -107,18 +126,10 @@ impl TableGrantContext<'_> {
         if let Some(prepared::SystemPrivilegeCandidate { mut registry, next }) = system {
             **registry = next;
         }
-        drop(memberships);
-        drop(roles);
-
-        self.grant_table_syntax_sequence_privileges(statement, &targets, &mut command_roles)?;
-        for notice in notices {
-            self.notices.notice(notice);
-        }
-        if table_changed || view_changed || foreign_changed || system_changed {
-            self.changes.table_catalog_changed();
-            self.changes.catalog_registry_changed();
-        }
-        Ok(())
+        Ok((
+            table_changed || view_changed || foreign_changed || system_changed,
+            notices,
+        ))
     }
     fn grant_table_syntax_sequence_privileges(
         &self,
@@ -133,7 +144,7 @@ impl TableGrantContext<'_> {
             .collect::<Vec<_>>();
         if !sequence_names.is_empty() {
             let (sequence_privileges, has_inapplicable) =
-                table_sequence_privileges(&statement.privileges);
+                table_sequence_privileges(&statement.privileges)?;
             if has_inapplicable {
                 for target in targets.iter().filter(|target| target.kind == "sequence") {
                     self.notices.notice(

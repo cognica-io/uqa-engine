@@ -20,6 +20,7 @@ use uqa_sql::{
 pub mod context;
 mod deletion;
 mod identity;
+pub mod owned;
 pub use deletion::drop_roles;
 mod memberships;
 mod rename;

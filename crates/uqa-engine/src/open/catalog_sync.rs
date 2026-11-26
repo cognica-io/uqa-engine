@@ -270,6 +270,13 @@ impl Engine {
             &snapshot.roles,
             &self.temporary_schema_name(),
         )?;
+        snapshot.default_acls = crate::state::CatalogGeneration::new(
+            uqa_execution::catalog::security::default_acl::persistence::merge_private(
+                self.storage.catalog.as_deref(),
+                &current.default_acls,
+                &snapshot.default_acls,
+            )?,
+        );
         snapshot.builtin_routine_security = crate::state::CatalogGeneration::new(
             uqa_execution::catalog::security::builtin_routines::merge_private(
                 self.storage.catalog.as_deref(),

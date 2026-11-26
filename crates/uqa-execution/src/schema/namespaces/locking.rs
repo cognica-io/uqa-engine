@@ -88,7 +88,7 @@ impl SchemaLockContext<'_> {
 }
 
 /// Re-resolve names and authority after each wait before retaining the selected lifetime.
-pub(super) fn bind_namespace_lifetime<T>(
+pub(crate) fn bind_namespace_lifetime<T>(
     objects: &dyn SharedObjectLockSession,
     mode: RelationLockMode,
     mut resolve: impl FnMut() -> Result<Option<(SchemaTupleIdentity, T)>, SQLError>,
@@ -116,14 +116,14 @@ pub(super) fn bind_namespace_lifetime<T>(
     }
 }
 
-pub(super) fn tuple(security: &BoundSchemaSecurity) -> Result<SchemaTupleIdentity, SQLError> {
+pub(crate) fn tuple(security: &BoundSchemaSecurity) -> Result<SchemaTupleIdentity, SQLError> {
     security
         .tuple
         .filter(|tuple| tuple.is_valid())
         .ok_or_else(|| SQLError::Internal("schema has no valid catalog tuple identity".into()))
 }
 
-pub(super) fn missing(name: &str) -> SQLError {
+pub(crate) fn missing(name: &str) -> SQLError {
     SQLError::Routine {
         sqlstate: "3F000".into(),
         message: format!("schema \"{name}\" does not exist"),

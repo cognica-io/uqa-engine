@@ -38,7 +38,7 @@ pub enum RelationKind {
 }
 
 impl RelationKind {
-    pub(super) const fn description(self) -> &'static str {
+    pub(crate) const fn description(self) -> &'static str {
         match self {
             Self::Table => "table",
             Self::Index => "index",
@@ -122,6 +122,7 @@ pub(super) struct CatalogObjects {
     namespaces: BTreeMap<String, u32>,
     members: BTreeMap<(u32, u32), MemberObject>,
     roles: BTreeMap<u32, String>,
+    pub(super) default_acls: BTreeMap<u32, uqa_sql::catalog::security::default_acl::DefaultAclKey>,
     foreign_servers: BTreeMap<u32, (String, [u8; 16])>,
     foreign_wrappers: BTreeMap<u32, (String, [u8; 16])>,
     unpinned: BTreeSet<(u32, u32)>,
@@ -136,6 +137,13 @@ impl CatalogObjects {
     ) -> Result<Self, SQLError> {
         let mut objects = Self::default();
         objects.collect_namespaces(catalog);
+        for (&key, row) in catalog.snapshot().definitions.default_acls.iter() {
+            objects.default_acls.insert(row.oid, key);
+            objects.unpin(ObjectAddress::whole(
+                uqa_sql::catalog::dependencies::DEFAULT_ACL_CLASS,
+                row.oid,
+            ));
+        }
         objects.collect_relations(context, catalog, resolution)?;
         objects.collect_types(catalog);
         for wrapper in catalog.snapshot().definitions.foreign_wrappers.values() {
@@ -170,7 +178,7 @@ impl CatalogObjects {
         for role in catalog.roles() {
             let oid = catalog_oid(role.oid)?;
             objects.roles.insert(oid, role.name.clone());
-            if oid >= FIRST_UNPINNED_OBJECT_ID {
+            if !super::CatalogDependencies::role_is_pinned(oid) {
                 objects.unpin(ObjectAddress::whole(ROLE_CLASS, oid));
             }
         }
@@ -544,6 +552,12 @@ impl CatalogObjects {
     /// Whether a dependency on `object` would be recorded.
     pub(super) fn is_unpinned(&self, object: ObjectAddress) -> bool {
         self.unpinned.contains(&(object.class_id, object.object_id))
+    }
+}
+
+impl super::CatalogDependencies {
+    pub(crate) const fn role_is_pinned(oid: u32) -> bool {
+        oid < FIRST_UNPINNED_OBJECT_ID
     }
 }
 

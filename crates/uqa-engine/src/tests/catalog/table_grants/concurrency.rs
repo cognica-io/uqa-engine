@@ -305,3 +305,64 @@ fn attribute_wait_refresh_only_visits_columns_that_follow_the_waited_tuple() {
         }
     }
 }
+
+#[rstest::rstest]
+#[case::native_sqlite(0)]
+#[case::sqlite_key_value(1)]
+#[case::redb(2)]
+fn drop_owned_locks_newly_dependent_column_grants_after_wait(#[case] provider: usize) {
+    use crate::tests::relation_lock_support::after_tuple_wait_with_release;
+    use uqa_execution::row_locks::LockAcquire;
+    use uqa_sql::ast::{LockStrength, LockWait};
+    let (_directory, holder, worker) = sessions(provider);
+    sql(&holder, "CREATE ROLE source_role; CREATE ROLE relay; CREATE ROLE recipient; GRANT SELECT ON t TO source_role WITH GRANT OPTION; SET ROLE source_role; GRANT SELECT ON t TO relay WITH GRANT OPTION; RESET ROLE");
+    let Value::Int(oid) = sql(&holder, "SELECT 't'::regclass::oid AS oid").rows[0]["oid"] else {
+        panic!("missing relation OID");
+    };
+    let oid = u64::try_from(oid).unwrap();
+    let peer = holder.new_session().unwrap();
+    sql(&holder, "BEGIN");
+    holder
+        .lock_row(
+            "pg_catalog.pg_class",
+            oid,
+            LockStrength::ForNoKeyUpdate,
+            LockWait::Block,
+            "t",
+        )
+        .unwrap();
+    sql(&worker, "BEGIN");
+    let (worker, result) = after_tuple_wait_with_release(
+        &holder,
+        worker,
+        "DROP OWNED BY source_role",
+        "pg_catalog.pg_class",
+        oid,
+        || {
+            sql(&peer, "SET ROLE relay; GRANT SELECT(v) ON t TO recipient");
+            holder.sql("COMMIT", &[])
+        },
+    );
+    result.unwrap();
+    sql(&holder, "BEGIN");
+    let lock = holder
+        .lock_row(
+            "pg_catalog.pg_attribute",
+            (oid << 16) | 1,
+            LockStrength::ForNoKeyUpdate,
+            LockWait::SkipLocked,
+            "t.v",
+        )
+        .unwrap();
+    assert_eq!(lock, LockAcquire::Skipped);
+    sql(&holder, "ROLLBACK");
+    sql(&worker, "COMMIT");
+    assert_eq!(
+        sql(
+            &holder,
+            "SELECT has_column_privilege('recipient', 't', 'v', 'SELECT') AS allowed"
+        )
+        .rows[0]["allowed"],
+        Value::Bool(false)
+    );
+}

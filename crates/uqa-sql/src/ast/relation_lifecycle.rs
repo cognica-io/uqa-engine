@@ -382,6 +382,7 @@ pub enum TablePrivilege {
     Maintain,
     Usage,
     Unsupported(String),
+    Unrecognized(String),
 }
 
 /// Relation targets carried by `GRANT` or `REVOKE` with the `TABLE` object class.

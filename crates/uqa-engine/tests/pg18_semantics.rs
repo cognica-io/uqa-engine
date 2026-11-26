@@ -98,6 +98,8 @@ mod comparisons_and_arrays;
 mod concatenation;
 #[path = "pg18_semantics/constraint_information.rs"]
 mod constraint_information;
+#[path = "pg18_semantics/drop_owned.rs"]
+mod drop_owned;
 #[path = "pg18_semantics/floating_point_width.rs"]
 mod floating_point_width;
 #[path = "pg18_semantics/gamma_functions.rs"]

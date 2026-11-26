@@ -17,7 +17,7 @@ use uqa_core::{
 
 pub mod relations;
 
-fn acl_entries<P: Copy>(
+pub(super) fn acl_entries<P: Copy>(
     entries: &[BoundAclEntry<P>],
     output: &SyntaxProduction<'_>,
 ) -> Result<Vec<BoundAclEntry<P>>, SQLError> {

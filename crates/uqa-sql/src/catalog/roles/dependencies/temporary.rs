@@ -60,6 +60,16 @@ pub fn role_dependencies(
             }
         }
     }
+    for (key, row) in &catalog.temporary_default_acls() {
+        for role in std::iter::once(key.owner).chain(row.acl.iter().filter_map(|entry| entry.role))
+        {
+            let name = crate::catalog::roles::identity::RoleSubject::role_name(&role, roles)
+                .ok_or_else(|| {
+                    SQLError::Internal("default ACL references a missing role".into())
+                })?;
+            add_role(name, roles, limit, &mut referenced)?;
+        }
+    }
     Ok(referenced)
 }
 

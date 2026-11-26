@@ -47,7 +47,9 @@ mod views;
 #[cfg(test)]
 pub(super) mod window_tests;
 pub(super) use authorities::{builtin_routines, system_relations};
+mod default_acl;
 pub use continuation::CatalogImageInput;
+pub(super) use default_acl::default_acls;
 pub(super) use domains::domains;
 pub(super) use expressions::expression_image;
 pub(super) use foreign_servers::foreign_servers;

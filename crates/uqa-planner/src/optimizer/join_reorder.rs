@@ -260,6 +260,8 @@ fn reorder_command_joins(
         | CommandPlan::AlterRole(_)
         | CommandPlan::RenameRole(_)
         | CommandPlan::DropRole(_)
+        | CommandPlan::AlterDefaultPrivileges(_)
+        | CommandPlan::DropOwned(_)
         | CommandPlan::CreateTrigger(_)
         | CommandPlan::DropTrigger(_)
         | CommandPlan::CreateRule(_)

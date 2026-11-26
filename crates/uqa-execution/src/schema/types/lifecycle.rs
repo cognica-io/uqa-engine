@@ -98,20 +98,28 @@ fn lock_with_resolver(
 ) -> Result<ResolvedTypeObject, SQLError> {
     loop {
         let initial = resolve(&context.binding, name)?;
-        let guard = context.identities.locks.acquire_shared_catalog(
-            SharedCatalogLock::Object {
-                class_id: CatalogOidClass::Type.class_id(),
-                oid: initial.oid(),
-            },
-            RelationLockMode::AccessExclusive,
-        )?;
-        context.identities.locks.refresh_shared_catalog()?;
+        let guard = lock_type_oid(context, initial.oid())?;
         let current = resolve(&context.binding, name)?;
         if current.oid() == initial.oid() {
             guard.retain();
             return Ok(current);
         }
     }
+}
+
+pub(super) fn lock_type_oid<'a>(
+    context: &'a TypeLifecycleContext<'_>,
+    oid: u32,
+) -> Result<crate::row_locks::ScopedRelationLock<'a>, SQLError> {
+    let guard = context.identities.locks.acquire_shared_catalog(
+        SharedCatalogLock::Object {
+            class_id: CatalogOidClass::Type.class_id(),
+            oid,
+        },
+        RelationLockMode::AccessExclusive,
+    )?;
+    context.identities.locks.refresh_shared_catalog()?;
+    Ok(guard)
 }
 
 fn rename(

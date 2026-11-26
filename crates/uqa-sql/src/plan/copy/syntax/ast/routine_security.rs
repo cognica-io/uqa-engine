@@ -55,6 +55,24 @@ syntax_struct!(crate::ast::CreateRoleStmt {
 });
 
 syntax_struct!(crate::ast::DropRoleStmt { names, if_exists });
+syntax_struct!(crate::ast::DropOwnedStmt { roles, cascade });
+syntax_enum!(crate::ast::DefaultAclObject {
+    Table,
+    Sequence,
+    Routine,
+    Type,
+    Schema,
+    LargeObject
+});
+syntax_struct!(crate::ast::AlterDefaultPrivilegesStmt {
+    owners,
+    schemas,
+    object,
+    grantees,
+    privileges,
+    is_grant,
+    grant_option
+});
 
 syntax_enum!(crate::ast::FunctionParallel {
     Unsafe,

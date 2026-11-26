@@ -97,11 +97,14 @@ pub fn create_domain(
             object_id,
             oid,
             array_oid: Some(array_oid),
+            usage_acl: context
+                .creation
+                .defaults
+                .type_acl(owner.identity(), &identity.schema),
             identity,
             owner: owner.identity(),
             definition,
             array_name: Some(array_name),
-            usage_acl: None,
         },
     )?;
     domain::publish(context.publication, &before, registry)?;

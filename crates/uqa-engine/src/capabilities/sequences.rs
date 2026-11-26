@@ -85,7 +85,16 @@ impl SequenceCreationPublication for Engine {
         role_owner: uqa_core::catalog_role::RoleIdentity,
         catalog_oid: u32,
     ) -> Result<bool, SQLError> {
-        let security = BoundSequenceSecurity::owner(role_owner);
+        let mut security = BoundSequenceSecurity::owner(role_owner);
+        security.acl = self
+            .relation_creation_context()
+            .defaults
+            .initial_acl(
+                role_owner,
+                Some(&relation.schema),
+                uqa_sql::ast::DefaultAclObject::Sequence,
+            )
+            .map(uqa_sql::catalog::security::default_acl::sequence);
         let object_id = crate::new_sequence_object_id().map_err(|error| {
             SQLError::Internal(format!("allocate sequence `{name}` identity: {error}"))
         })?;

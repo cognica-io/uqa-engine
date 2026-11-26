@@ -19,6 +19,28 @@ use uqa_sql::{
 };
 
 impl DropStatementBindings for Engine {
+    fn with_drop_owned_write(
+        &self,
+        write: uqa_execution::schema::removal::entry::DropOwnedWrite<'_>,
+    ) -> Result<SQLResult, SQLError> {
+        use uqa_execution::{
+            catalog::security::{
+                role_lifecycle::owned::DropOwnedContext, table_grants::TableGrantInputs,
+            },
+            schema::deletion::CatalogRemovalInputs,
+        };
+        self.with_implicit_definition_transaction(|engine| {
+            write(&DropOwnedContext {
+                removal: engine.catalog_removal_context(),
+                roles: engine.role_execution_context(),
+                tables: engine.table_grant_context(),
+                schemas: engine.schema_privilege_context(),
+                database: engine.database_privilege_context(),
+                types: engine.type_lifecycle_context(),
+                routines: engine.routine_privilege_context(),
+            })
+        })
+    }
     fn with_foreign_server_removal_write(
         &self,
         write: ForeignServerRemovalWrite<'_>,

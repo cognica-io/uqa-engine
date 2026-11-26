@@ -200,7 +200,10 @@ pub fn register_materialized_view_plan(
         context.namespace.ensure_create(&name)?;
         let catalog_oids = super::registration::allocate_view_oids(context, &relation)?;
         let view = StoredView {
-            security: uqa_sql::catalog::security::BoundTableSecurity::owner(owner.identity()),
+            security: context
+                .namespace
+                .defaults
+                .table_security(owner.identity(), &relation.schema),
             definition: uqa_sql::catalog::stored_view::StoredViewDefinition {
                 object_id: context.catalog.allocate_identity().map_err(|error| {
                     SQLError::Internal(format!(

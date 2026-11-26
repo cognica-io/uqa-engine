@@ -121,6 +121,8 @@ pub(super) fn statement(value: &Statement, position: usize) -> Child<'_> {
         | Statement::AlterRole(_)
         | Statement::RenameRole(_)
         | Statement::DropRole(_)
+        | Statement::AlterDefaultPrivileges(_)
+        | Statement::DropOwned(_)
         | Statement::DropTrigger(_)
         | Statement::DropRule(_)
         | Statement::DoBlock { .. }

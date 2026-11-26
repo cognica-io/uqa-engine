@@ -99,6 +99,11 @@ impl DurableCatalogState {
         &mut self,
         registry: &MemoryCaptureRegistry,
     ) -> StorageBackendResult<()> {
+        self.default_acls = CatalogCell::capture_source(
+            self.default_acls.snapshot(),
+            Some(registry),
+            uqa_sql::catalog::security::default_acl::DefaultAcls::capture,
+        )?;
         self.database_security = CatalogCell::capture_source(
             self.database_security.snapshot(),
             Some(registry),

@@ -87,18 +87,42 @@ pub fn grant_database_privileges(
         || prepare_privileges(context, statement, &mut command_roles),
     )?;
     if next != current {
-        let json = persistence::encode(&next, &roles).map_err(|error| {
-            SQLError::Internal(format!("serialize database privileges: {error}"))
-        })?;
-        context.publication.persist_security(&json)?;
-        **context.registry.security_write() = next;
-        context.publication.catalog_changed();
+        publish(context, next, &roles)?;
     }
     drop(memberships);
     drop(roles);
     if let Some(notice) = notice {
         context.publication.notice(notice);
     }
+    Ok(())
+}
+
+pub(crate) fn remove_role_grants(
+    context: &DatabasePrivilegeContext<'_>,
+    targets: &BTreeSet<String>,
+) -> Result<(), SQLError> {
+    context.publication.prepare_writer()?;
+    let roles = context.roles.role_definitions();
+    let current = context.registry.security_read().clone();
+    let resolved = current.resolve(&roles).map_err(SQLError::Internal)?;
+    let next = uqa_sql::catalog::security::drop_owned::database(&resolved, targets)?;
+    if next == resolved {
+        return Ok(());
+    }
+    let next = BoundDatabaseSecurity::bind(&next, &roles).map_err(SQLError::Internal)?;
+    publish(context, current.successor(&next)?, &roles)
+}
+
+fn publish(
+    context: &DatabasePrivilegeContext<'_>,
+    next: DatabaseAuthority,
+    roles: &uqa_sql::catalog::roles::RoleDefinitions,
+) -> Result<(), SQLError> {
+    let json = persistence::encode(&next, roles)
+        .map_err(|error| SQLError::Internal(format!("serialize database privileges: {error}")))?;
+    context.publication.persist_security(&json)?;
+    **context.registry.security_write() = next;
+    context.publication.catalog_changed();
     Ok(())
 }
 

@@ -102,19 +102,60 @@ pub fn grant_schema_privileges(
         )?;
         drop(memberships);
         drop(roles);
-        context.tuples.replace(&name, value.before)?;
-        context
-            .persistence
-            .persist_security(&name, &value.security)?;
-        context
-            .registry
-            .schemas_write()
-            .insert(name, value.security)?;
-        context.changes.namespace_catalog_changed();
+        publish(context, name, value.before, value.security)?;
         if let Some(notice) = value.notice {
             context.notices.schema_privilege_notice(notice);
         }
     }
+    Ok(())
+}
+
+pub(crate) fn remove_role_grants(
+    context: &SchemaPrivilegeContext<'_>,
+    name: &str,
+    oid: u32,
+    targets: &BTreeSet<String>,
+) -> Result<(), SQLError> {
+    let Some(bound) = context
+        .tuples
+        .bind_lifetime(name, crate::row_locks::RelationLockMode::AccessShare)?
+    else {
+        return Ok(());
+    };
+    if super::locking::tuple(&bound)?.oid != i64::from(oid) {
+        return Ok(());
+    }
+    context.tuples.catalog_write()?;
+    context.writer.prepare_writer()?;
+    let roles = context.roles.role_definitions();
+    let current = context
+        .registry
+        .schemas_read()
+        .get(name)
+        .cloned()
+        .ok_or_else(|| super::locking::missing(name))?;
+    let before = super::locking::tuple(&current)?;
+    let resolved = current.resolve(&roles).map_err(SQLError::Internal)?;
+    let next = uqa_sql::catalog::security::drop_owned::schema(&resolved, targets)?;
+    if next == resolved {
+        return Ok(());
+    }
+    let mut security = BoundSchemaSecurity::bind(&next, &roles).map_err(SQLError::Internal)?;
+    super::identity::replace_tuple(&current, &mut security)?;
+    drop(roles);
+    publish(context, name.to_owned(), before, security)
+}
+
+fn publish(
+    context: &SchemaPrivilegeContext<'_>,
+    name: String,
+    before: uqa_core::catalog_schema::SchemaTupleIdentity,
+    security: BoundSchemaSecurity,
+) -> Result<(), SQLError> {
+    context.tuples.replace(&name, before)?;
+    context.persistence.persist_security(&name, &security)?;
+    context.registry.schemas_write().insert(name, security)?;
+    context.changes.namespace_catalog_changed();
     Ok(())
 }
 

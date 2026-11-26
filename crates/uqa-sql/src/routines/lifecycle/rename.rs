@@ -7,6 +7,7 @@
 //! Routine rename identities, collision checks, registry movement, and stored AST rewrites.
 
 use super::RoutineRegistry;
+use crate::routines::compare_routine_overloads;
 use crate::{
     ast::{CreateFunction, FunctionBinding, FunctionBody, RenameRoutineStmt},
     routines::{routine_signature_types, SQLUserFunction},
@@ -114,11 +115,7 @@ pub fn move_routine_registry_entry(
     renamed_definition.name.clone_from(&target.new_name);
     let mut new_overloads = registry.get(&target.new_name).cloned().unwrap_or_default();
     new_overloads.push(SQLUserFunction::new(renamed_definition, renamed.body.clone()).shared());
-    new_overloads.sort_by(|left, right| {
-        routine_signature_types(&left.def)
-            .cmp(&routine_signature_types(&right.def))
-            .then_with(|| left.def.is_procedure.cmp(&right.def.is_procedure))
-    });
+    new_overloads.sort_by(|left, right| compare_routine_overloads(&left.def, &right.def));
     registry.insert(target.new_name.clone(), new_overloads)?;
     Ok(registry)
 }
