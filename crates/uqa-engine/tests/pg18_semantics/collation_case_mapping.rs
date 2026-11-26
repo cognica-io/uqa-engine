@@ -111,3 +111,20 @@ fn verify_collations(
     assert_eq!(cases.len(), reopened_cases);
     crate::pg18_oracle::verify(&engine, &reference.to_string());
 }
+
+#[rstest::rstest]
+#[case::memory(0)]
+#[case::sqlite_native(1)]
+#[case::sqlite_kv(2)]
+#[case::redb(3)]
+fn partial_index_predicates_match_postgresql_and_reopen(#[case] provider: usize) {
+    verify_collations(
+        provider,
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../tests/parity/pg18/partial_index_arbiter.expected.json"
+        )),
+        7,
+        |case| case["reopen"] == true,
+    );
+}

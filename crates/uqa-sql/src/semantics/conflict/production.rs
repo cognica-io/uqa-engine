@@ -173,23 +173,19 @@ pub(super) fn inference_identity_owned(
     control: &ProductionControl<'_>,
 ) -> Result<OwnedScalarExpr, SQLError> {
     expression.transform_nodes(control, &mut |_, mut expression| {
-        while matches!(&*expression, ScalarExpr::Collated { .. }) {
+        // The selected operation retains its input collation. COLLATE wrappers only describe how analysis derived it.
+        while matches!(&*expression, ScalarExpr::Collated { .. })
+            || crate::catalog::collations::expression::scalar_clause(&expression)?.is_some()
+        {
             control.check()?;
             expression = expression.select_child(0);
         }
         if matches!(&*expression, ScalarExpr::Cast { .. }) {
             expression = expression.set_cast_implicit(false, control)?;
         }
-        if matches!(
-            &*expression,
-            ScalarExpr::Func {
-                binding: Some(_),
-                ..
-            }
-        ) {
-            expression = expression.set_call_input_collation(None, control)?;
-        }
-        Ok(expression)
+        expression
+            .literal_inference_identity(control)
+            .map_err(Into::into)
     })
 }
 
