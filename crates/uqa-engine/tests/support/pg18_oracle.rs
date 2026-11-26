@@ -40,18 +40,6 @@ pub fn run_case(engine: &Engine, sql: &str) -> serde_json::Value {
     let mut tags = Vec::new();
     let mut results = Vec::new();
     let outcome = engine.sql_simple_query(sql, &[], |result| {
-        let declared = result
-            .column_types
-            .iter()
-            .zip(&result.columns)
-            .map(|(ty, column)| {
-                ty.as_ref().ok_or_else(|| {
-                    uqa_sql::SQLError::Internal(format!(
-                        "missing declared result type for column {column}"
-                    ))
-                })
-            })
-            .collect::<Result<Vec<_>, _>>()?;
         let rows = (0..result.rows.len())
             .map(|position| {
                 result
@@ -69,15 +57,27 @@ pub fn run_case(engine: &Engine, sql: &str) -> serde_json::Value {
                         if matches!(value, Value::Null) {
                             return Ok(None);
                         }
-                        format_postgres_text(value, declared[index], Some(engine)).map(Some)
+                        format_postgres_text(
+                            value,
+                            result.column_types[index]
+                                .as_ref()
+                                .expect("declared result type"),
+                            Some(engine),
+                        )
+                        .map(Some)
                     })
                     .collect::<Result<Vec<_>, _>>()
             })
             .collect::<Result<Vec<_>, _>>()?;
         tags.push(result.command_tag.clone());
-        let types = declared
+        let types = result
+            .column_types
             .iter()
-            .map(|ty| type_class(postgres_result_type(ty).type_oid))
+            .map(|ty| {
+                type_class(
+                    postgres_result_type(ty.as_ref().expect("declared result type")).type_oid,
+                )
+            })
             .collect::<Vec<_>>();
         results
             .push(serde_json::json!({"columns": result.columns, "type_oids": types, "rows": rows}));

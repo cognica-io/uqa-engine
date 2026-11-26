@@ -4,13 +4,14 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! PostgreSQL expression pseudo-types project the same catalog attributes used in result descriptors.
+//! `PostgreSQL` expression pseudo-types project the same catalog attributes used in result descriptors.
 
 use super::{schema_oid, PgTypeCatalogMetadata};
 use uqa_sql::{ast::ExpressionPseudoType as P, catalog::type_metadata, ColumnType};
 
 pub(super) fn metadata() -> impl Iterator<Item = PgTypeCatalogMetadata<'static>> {
     [
+        P::Any,
         P::AnyElement,
         P::AnyNonArray,
         P::AnyEnum,

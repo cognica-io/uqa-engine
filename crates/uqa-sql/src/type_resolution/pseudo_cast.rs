@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! PostgreSQL accepts polymorphic cast targets before it tries ordinary binary or I/O coercion.
+//! `PostgreSQL` accepts polymorphic cast targets before it tries ordinary binary or I/O coercion.
 
 use crate::{ast::ExpressionPseudoType as P, ColumnType, SQLError};
 use uqa_core::memory::ProductionControl;

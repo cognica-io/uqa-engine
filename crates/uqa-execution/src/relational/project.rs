@@ -42,7 +42,7 @@ fn projected_null(
 ) -> Option<&'static uqa_sql::ColumnType> {
     (matches!(target, ProjectionTarget::Column(_))
         && matches!(expression, ScalarExpr::Literal(uqa_core::Value::Null)))
-    .then_some(&uqa_sql::ColumnType::Text)
+    .then_some(const { &uqa_sql::ColumnType::Text })
 }
 
 fn projection_layout(

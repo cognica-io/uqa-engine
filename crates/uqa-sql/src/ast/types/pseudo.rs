@@ -25,6 +25,28 @@ pub enum ExpressionPseudoType {
 }
 
 impl ExpressionPseudoType {
+    pub fn from_name(name: &str) -> Option<Self> {
+        if name != "unknown" && !name.starts_with("any") {
+            return None;
+        }
+        [
+            Self::Unknown,
+            Self::Any,
+            Self::AnyElement,
+            Self::AnyNonArray,
+            Self::AnyEnum,
+            Self::AnyRange,
+            Self::AnyMultiRange,
+            Self::AnyCompatibleMultiRange,
+            Self::AnyCompatible,
+            Self::AnyCompatibleArray,
+            Self::AnyCompatibleNonArray,
+            Self::AnyCompatibleRange,
+        ]
+        .into_iter()
+        .find(|ty| ty.name() == name)
+    }
+
     pub const fn name(self) -> &'static str {
         match self {
             Self::Unknown => "unknown",

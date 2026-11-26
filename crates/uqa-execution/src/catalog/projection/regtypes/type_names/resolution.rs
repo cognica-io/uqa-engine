@@ -73,7 +73,9 @@ pub fn resolve_catalog_column_type_with_control(
         );
     }
     if type_name.starts_with("pg_catalog.") || type_name.starts_with("\"pg_catalog\".") {
-        if let Some(ty) = optional(ColumnType::from_sql_name_with_control(type_name, control))? {
+        if let Some(ty) = optional(ColumnType::from_expression_type_name_with_control(
+            type_name, control,
+        ))? {
             return Ok(Some(ty));
         }
     }
@@ -101,16 +103,23 @@ fn resolve_parsed(
     for schema in names.iter() {
         control.check()?;
         if schema == "pg_catalog" {
-            let builtin =
-                if uqa_sql::catalog::type_metadata::builtin_scalar_type_by_name(local).is_some() {
-                    true
-                } else {
-                    let local = uqa_sql::expr::quote_ident_with_control(local, control)?;
-                    let qualified = control.format(format_args!("pg_catalog.{}", &**local))?;
-                    optional(ColumnType::from_sql_name_with_control(&qualified, control))?.is_some()
-                };
+            let builtin = if uqa_sql::catalog::type_metadata::builtin_scalar_type_by_name(local)
+                .is_some()
+                || uqa_sql::ast::ExpressionPseudoType::from_name(local).is_some()
+            {
+                true
+            } else {
+                let local = uqa_sql::expr::quote_ident_with_control(local, control)?;
+                let qualified = control.format(format_args!("pg_catalog.{}", &**local))?;
+                optional(ColumnType::from_expression_type_name_with_control(
+                    &qualified, control,
+                ))?
+                .is_some()
+            };
             if builtin {
-                return optional(ColumnType::from_sql_name_with_control(type_name, control));
+                return optional(ColumnType::from_expression_type_name_with_control(
+                    type_name, control,
+                ));
             }
         }
         for shell in catalog.shells() {

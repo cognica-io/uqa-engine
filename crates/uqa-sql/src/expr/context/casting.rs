@@ -206,7 +206,7 @@ fn optional_type_name(
     name: &str,
     control: &ProductionControl<'_>,
 ) -> Result<Option<Produced<ColumnType>>> {
-    match ColumnType::from_sql_name_with_control(name, control) {
+    match ColumnType::from_expression_type_name_with_control(name, control) {
         Ok(ty) => Ok(Some(ty)),
         Err(error) if matches!(error.sqlstate(), Some("53200" | "57014")) => Err(error),
         Err(_) => Ok(None),

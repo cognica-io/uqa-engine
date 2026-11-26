@@ -70,3 +70,19 @@ fn cancellation_precedes_polymorphic_selection() {
     let error = select(&ColumnType::Pseudo(P::AnyElement), None, false, &control).unwrap_err();
     assert_eq!(error.sqlstate(), Some("57014"));
 }
+
+#[test]
+fn expression_type_names_do_not_select_physical_scalar_operators() {
+    let control = ProductionControl::uncontrolled();
+    for pseudo in [P::Unknown, P::Any, P::AnyEnum, P::AnyRange] {
+        let name = pseudo.name();
+        let catalog = format!("pg_catalog.\"{name}\"");
+        assert_eq!(
+            *ColumnType::from_expression_type_name_with_control(&catalog, &control).unwrap(),
+            ColumnType::Pseudo(pseudo)
+        );
+        assert!(ColumnType::from_sql_name(&catalog).is_err());
+        assert!(crate::catalog::type_metadata::builtin_scalar_type(pseudo as u32).is_none());
+        assert!(crate::catalog::type_metadata::builtin_scalar_type_by_name(name).is_none());
+    }
+}

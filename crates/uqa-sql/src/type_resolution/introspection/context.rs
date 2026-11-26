@@ -43,7 +43,7 @@ impl BinderContext<'_> {
         }
     }
 
-    /// PostgreSQL elides polymorphic coercions that leave their input's type and datum intact.
+    /// `PostgreSQL` elides polymorphic coercions that leave their input's type and datum intact.
     pub(super) fn cast_preserves_operand(
         &self,
         name: &str,

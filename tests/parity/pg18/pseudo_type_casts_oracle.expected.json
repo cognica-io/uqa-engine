@@ -273,7 +273,7 @@
     {"sql":"SELECT pg_typeof(((ARRAY[4]::pc_list)::anyarray)[1]) AS t","command_tags":["SELECT 1"],"error":null,"results":[{"columns":["t"],"type_oids":[2206],"rows":[["integer"]]}],"notices":[]},
     {"sql":"SELECT (9::pc_int)::anycompatible AS v","command_tags":["SELECT 1"],"error":null,"results":[{"columns":["v"],"type_oids":[23],"rows":[["9"]]}],"notices":[]},
     {"sql":"SELECT pg_typeof((9::pc_int)::anycompatible) AS t","command_tags":["SELECT 1"],"error":null,"results":[{"columns":["t"],"type_oids":[2206],"rows":[["pc_int"]]}],"notices":[]},
-    {"sql":"SELECT ('red'::pc_color)::anyenum AS v","command_tags":["SELECT 1"],"error":null,"results":[{"columns":["v"],"type_oids":[16429],"rows":[["red"]]}],"notices":[]},
+    {"sql":"SELECT ('red'::pc_color)::anyenum AS v","command_tags":["SELECT 1"],"error":null,"results":[{"columns":["v"],"type_oids":[16492],"rows":[["red"]]}],"notices":[]},
     {"sql":"SELECT pg_typeof(('red'::pc_color)::anyenum) AS t","command_tags":["SELECT 1"],"error":null,"results":[{"columns":["t"],"type_oids":[2206],"rows":[["pc_color"]]}],"notices":[]},
     {"sql":"SELECT (int4range(1,4))::anyrange AS v","command_tags":["SELECT 1"],"error":null,"results":[{"columns":["v"],"type_oids":[3904],"rows":[["[1,4)"]]}],"notices":[]},
     {"sql":"SELECT pg_typeof((int4range(1,4))::anyrange) AS t","command_tags":["SELECT 1"],"error":null,"results":[{"columns":["t"],"type_oids":[2206],"rows":[["int4range"]]}],"notices":[]},
@@ -308,6 +308,15 @@
     {"sql":"SELECT pg_typeof(v) AS t FROM (SELECT 'abc'::unknown AS v) AS s","command_tags":["SELECT 1"],"error":null,"results":[{"columns":["t"],"type_oids":[2206],"rows":[["text"]]}],"notices":[]},
     {"sql":"CREATE TABLE pc_text_values(v text)","command_tags":["CREATE TABLE"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}],"notices":[]},
     {"sql":"INSERT INTO pc_text_values VALUES ('q')","command_tags":["INSERT 0 1"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}],"notices":[]},
-    {"sql":"SELECT v::unknown AS v, pg_typeof(v::unknown) AS t FROM pc_text_values","command_tags":[],"error":{"sqlstate":"XX000","message":"failed to find conversion function from unknown to text","detail":null,"hint":null},"results":[],"notices":[]}
+    {"sql":"SELECT v::unknown AS v, pg_typeof(v::unknown) AS t FROM pc_text_values","command_tags":[],"error":{"sqlstate":"XX000","message":"failed to find conversion function from unknown to text","detail":null,"hint":null},"results":[],"notices":[]},
+    {"sql":"SELECT NULL::anyelement AS v, generate_series(1,2) AS n","command_tags":["SELECT 2"],"error":null,"results":[{"columns":["v","n"],"type_oids":[25,23],"rows":[[null,"1"],[null,"2"]]}],"notices":[]},
+    {"sql":"SELECT 'abc'::unknown AS v, generate_series(1,2) AS n","command_tags":["SELECT 2"],"error":null,"results":[{"columns":["v","n"],"type_oids":[25,23],"rows":[["abc","1"],["abc","2"]]}],"notices":[]},
+    {"sql":"SELECT NULL::anyelement AS v, row_number() OVER () AS n FROM (VALUES (1),(2)) s(i)","command_tags":["SELECT 2"],"error":null,"results":[{"columns":["v","n"],"type_oids":[25,20],"rows":[[null,"1"],[null,"2"]]}],"notices":[]},
+    {"sql":"SELECT DISTINCT NULL::anyelement AS v FROM (VALUES (1),(2)) s(i)","command_tags":["SELECT 1"],"error":null,"results":[{"columns":["v"],"type_oids":[25],"rows":[[null]]}],"notices":[]},
+    {"sql":"SELECT NULL::anyelement AS v UNION ALL SELECT 'ok'","command_tags":["SELECT 2"],"error":null,"results":[{"columns":["v"],"type_oids":[25],"rows":[[null],["ok"]]}],"notices":[]},
+    {"sql":"SELECT pg_typeof(v) AS t, v FROM (SELECT NULL::anyelement AS v) s","command_tags":["SELECT 1"],"error":null,"results":[{"columns":["t","v"],"type_oids":[2206,25],"rows":[["text",null]]}],"notices":[]},
+    {"sql":"SELECT pg_typeof(v) AS t, v FROM (SELECT NULL::anyarray AS v) s","command_tags":["SELECT 1"],"error":null,"results":[{"columns":["t","v"],"type_oids":[2206,2277],"rows":[["anyarray",null]]}],"notices":[]},
+    {"sql":"SELECT pg_typeof((('abc'::unknown)::anyarray)) AS t","command_tags":[],"error":{"sqlstate":"0A000","message":"cannot accept a value of type anyarray","detail":null,"hint":null},"results":[],"notices":[]},
+    {"sql":"SELECT 'n'::text::unknown::integer","command_tags":[],"error":{"sqlstate":"XX000","message":"failed to find conversion function from unknown to integer","detail":null,"hint":null},"results":[],"notices":[]}
   ]
 }

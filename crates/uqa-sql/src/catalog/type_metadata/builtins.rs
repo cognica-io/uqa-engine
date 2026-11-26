@@ -8,8 +8,6 @@
 
 use super::{pg_type_array_oid, pg_type_oid, ColumnType, RangeSubtype};
 
-use crate::ast::ExpressionPseudoType as P;
-
 const TYPES: &[(ColumnType, &str)] = &[
     (ColumnType::Boolean, "bool"),
     (ColumnType::Bytea, "bytea"),
@@ -88,36 +86,6 @@ const TYPES: &[(ColumnType, &str)] = &[
     ),
     (ColumnType::Vector(0), "vector"),
     (ColumnType::Tensor(0), "tensor"),
-    (ColumnType::Pseudo(P::Unknown), P::Unknown.name()),
-    (ColumnType::Pseudo(P::Any), P::Any.name()),
-    (ColumnType::Pseudo(P::AnyElement), P::AnyElement.name()),
-    (ColumnType::Pseudo(P::AnyNonArray), P::AnyNonArray.name()),
-    (ColumnType::Pseudo(P::AnyEnum), P::AnyEnum.name()),
-    (ColumnType::Pseudo(P::AnyRange), P::AnyRange.name()),
-    (
-        ColumnType::Pseudo(P::AnyMultiRange),
-        P::AnyMultiRange.name(),
-    ),
-    (
-        ColumnType::Pseudo(P::AnyCompatibleMultiRange),
-        P::AnyCompatibleMultiRange.name(),
-    ),
-    (
-        ColumnType::Pseudo(P::AnyCompatible),
-        P::AnyCompatible.name(),
-    ),
-    (
-        ColumnType::Pseudo(P::AnyCompatibleArray),
-        P::AnyCompatibleArray.name(),
-    ),
-    (
-        ColumnType::Pseudo(P::AnyCompatibleNonArray),
-        P::AnyCompatibleNonArray.name(),
-    ),
-    (
-        ColumnType::Pseudo(P::AnyCompatibleRange),
-        P::AnyCompatibleRange.name(),
-    ),
 ];
 
 #[cfg(test)]
@@ -182,6 +150,9 @@ pub fn builtin_scalar_type_by_name(name: &str) -> Option<&'static ColumnType> {
 
 /// The catalog's local name for an implemented builtin type, independent of its modifiers.
 pub fn builtin_type_name(ty: &ColumnType) -> Option<&'static str> {
+    if let ColumnType::Pseudo(pseudo) = ty {
+        return Some(pseudo.name());
+    }
     if matches!(
         ty,
         ColumnType::Named(_)

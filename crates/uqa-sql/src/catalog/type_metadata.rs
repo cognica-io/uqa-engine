@@ -543,6 +543,23 @@ pub fn pg_type_collation_oid(ty: &ColumnType) -> i64 {
         .expect("a type has a collation OID")
 }
 
+fn pseudo_routine_oids(pseudo: P) -> PgTypeRoutineOids {
+    match pseudo {
+        P::Unknown => PgTypeRoutineOids::new(109, 110, 2416, 2417),
+        P::Any => PgTypeRoutineOids::new(2294, 2295, 0, 0),
+        P::AnyElement => PgTypeRoutineOids::new(2312, 2313, 0, 0),
+        P::AnyNonArray => PgTypeRoutineOids::new(2777, 2778, 0, 0),
+        P::AnyEnum => PgTypeRoutineOids::new(3504, 3505, 0, 0),
+        P::AnyRange => PgTypeRoutineOids::new(3832, 3833, 0, 0),
+        P::AnyMultiRange => PgTypeRoutineOids::new(4229, 4230, 0, 0),
+        P::AnyCompatibleMultiRange => PgTypeRoutineOids::new(4226, 4227, 0, 0),
+        P::AnyCompatible => PgTypeRoutineOids::new(5086, 5087, 0, 0),
+        P::AnyCompatibleArray => PgTypeRoutineOids::new(5088, 5089, 5090, 5091),
+        P::AnyCompatibleNonArray => PgTypeRoutineOids::new(5092, 5093, 0, 0),
+        P::AnyCompatibleRange => PgTypeRoutineOids::new(5094, 5095, 0, 0),
+    }
+}
+
 /// Each array element or legacy domain base is one inherited collation lookup.
 pub(super) fn type_collation_steps(ty: &ColumnType) -> impl Iterator<Item = Option<i64>> + '_ {
     let mut next = Some(ty);
@@ -723,20 +740,7 @@ pub fn pg_type_routine_oids(ty: &ColumnType) -> PgTypeRoutineOids {
         }
         ColumnType::Regtype => PgTypeRoutineOids::new(2220, 2221, 2454, 2455),
         ColumnType::AnyArray => PgTypeRoutineOids::new(2296, 2297, 2502, 2503),
-        ColumnType::Pseudo(pseudo) => match pseudo {
-            P::Unknown => PgTypeRoutineOids::new(109, 110, 2416, 2417),
-            P::Any => PgTypeRoutineOids::new(2294, 2295, 0, 0),
-            P::AnyElement => PgTypeRoutineOids::new(2312, 2313, 0, 0),
-            P::AnyNonArray => PgTypeRoutineOids::new(2777, 2778, 0, 0),
-            P::AnyEnum => PgTypeRoutineOids::new(3504, 3505, 0, 0),
-            P::AnyRange => PgTypeRoutineOids::new(3832, 3833, 0, 0),
-            P::AnyMultiRange => PgTypeRoutineOids::new(4229, 4230, 0, 0),
-            P::AnyCompatibleMultiRange => PgTypeRoutineOids::new(4226, 4227, 0, 0),
-            P::AnyCompatible => PgTypeRoutineOids::new(5086, 5087, 0, 0),
-            P::AnyCompatibleArray => PgTypeRoutineOids::new(5088, 5089, 5090, 5091),
-            P::AnyCompatibleNonArray => PgTypeRoutineOids::new(5092, 5093, 0, 0),
-            P::AnyCompatibleRange => PgTypeRoutineOids::new(5094, 5095, 0, 0),
-        },
+        ColumnType::Pseudo(pseudo) => pseudo_routine_oids(*pseudo),
         ColumnType::Record => PgTypeRoutineOids::new(2290, 2291, 2402, 2403),
         ColumnType::Uuid => PgTypeRoutineOids::new(2952, 2953, 2961, 2962),
         ColumnType::JsonB => PgTypeRoutineOids::new(3806, 3804, 3805, 3803),
