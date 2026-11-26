@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! PostgreSQL function range entries use the call's result collation for scalar output and the declaration's attribute collations for named tuples.
+//! `PostgreSQL` function range entries use the call's result collation for scalar output and the declaration's attribute collations for named tuples.
 
 use super::{
     FunctionInputs, RoutineResolution, RowSchema, SQLError, SQLParam, ScalarExpr, SchemaScope,

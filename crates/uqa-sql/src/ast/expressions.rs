@@ -761,7 +761,7 @@ impl ComparisonOperator {
 }
 
 impl BinaryOp {
-    /// PostgreSQL spelling of the selected operator.
+    /// `PostgreSQL` spelling of the selected operator.
     #[must_use]
     pub const fn sql(self) -> &'static str {
         match self {

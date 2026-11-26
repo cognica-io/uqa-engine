@@ -15,7 +15,7 @@ mod selection;
 pub use ctype::BuiltinCollationCtype;
 pub use selection::CollationSelection;
 
-/// PostgreSQL reports the operation that first needs a determinate collation.
+/// `PostgreSQL` reports the operation that first needs a determinate collation.
 pub fn indeterminate_error(operation: &str) -> crate::SQLError {
     crate::SQLError::Diagnostic {
         sqlstate: "42P22".into(),

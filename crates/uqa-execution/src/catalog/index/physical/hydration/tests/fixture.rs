@@ -152,6 +152,10 @@ impl DocumentStore for Store {
 }
 
 impl uqa_sql::semantics::conflict::ConflictCatalog for Documents {
+    fn inference_context(&self) -> uqa_sql::semantics::conflict::InferenceContext<'_> {
+        unreachable!("physical catalog fixtures never bind an INSERT conflict target")
+    }
+
     fn try_describe_table(&self, _: &str) -> Result<Option<Vec<ColumnDef>>, String> {
         Ok(Some(Vec::new()))
     }

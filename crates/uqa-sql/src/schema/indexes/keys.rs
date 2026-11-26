@@ -218,27 +218,41 @@ fn finish_index_keys(
                 if btree {
                     require_default_btree_operator_class(&ty)?;
                 }
-                let column = match expression.as_ref() {
-                    crate::ast::Expr::Column(name) => Some(name.clone()),
-                    crate::ast::Expr::Cast { expr, .. } => {
-                        if let crate::ast::Expr::Column(name) = expr.as_ref() {
-                            definitions
-                                .iter()
-                                .any(|column| column.name == *name && column.ty == ty)
-                                .then(|| name.clone())
-                        } else {
-                            None
-                        }
-                    }
-                    _ => None,
-                };
-                if let Some(column) = column {
-                    *key = IndexKey::Column(column.to_string());
+                if let Some(name) = index_expression_column(expression, &ty, &definitions) {
+                    *key = IndexKey::Column(name);
                 }
                 types.push(ty);
             }
         }
     }
+    validate_index_attributes(statement, &definitions)?;
+    Ok(types)
+}
+
+fn index_expression_column(
+    expression: &Expr,
+    ty: &ColumnType,
+    definitions: &[crate::ast::ColumnDef],
+) -> Option<String> {
+    match expression {
+        Expr::Column(name) => Some(name.to_string()),
+        Expr::Cast { expr, .. } => {
+            let Expr::Column(name) = expr.as_ref() else {
+                return None;
+            };
+            definitions
+                .iter()
+                .any(|column| column.name == *name && &column.ty == ty)
+                .then(|| name.to_string())
+        }
+        _ => None,
+    }
+}
+
+fn validate_index_attributes(
+    statement: &CreateIndex,
+    definitions: &[crate::ast::ColumnDef],
+) -> Result<(), SQLError> {
     // As in `PostgreSQL`, an included column may repeat and may also be a key column.
     for name in &statement.included_columns {
         match definitions.iter().find(|column| column.name == *name) {
@@ -256,7 +270,7 @@ fn finish_index_keys(
                 }
             }
             IndexKey::Expression(expression) => {
-                for column in &definitions {
+                for column in definitions {
                     if column
                         .generated
                         .as_ref()
@@ -280,7 +294,7 @@ fn finish_index_keys(
             reject_virtual_generated_column(column)?;
         }
     }
-    Ok(types)
+    Ok(())
 }
 
 fn reject_virtual_generated_column(column: &crate::ast::ColumnDef) -> Result<(), SQLError> {
