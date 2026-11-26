@@ -76,6 +76,7 @@ virtual_relations! {
     PgDatabase => ("pg_catalog", "pg_database", 1262),
     PgAuthid => ("pg_catalog", "pg_authid", 1260),
     PgAuthMembers => ("pg_catalog", "pg_auth_members", 1261),
+    PgDefaultAcl => ("pg_catalog", "pg_default_acl", 826),
     PgRoles => ("pg_catalog", "pg_roles", 12000),
     PgUser => ("pg_catalog", "pg_user", 12014),
     PgShadow => ("pg_catalog", "pg_shadow", 12005),
@@ -89,6 +90,26 @@ virtual_relations! {
     PgSequences => ("pg_catalog", "pg_sequences", 12048),
     AgGraph => ("ag_catalog", "ag_graph", super::oids::relation_oid("relation", "ag_catalog", "ag_graph")),
     AgLabel => ("ag_catalog", "ag_label", super::oids::relation_oid("relation", "ag_catalog", "ag_label")),
+}
+
+pub struct SystemCatalogDescriptor {
+    pub relation: VirtualRelation,
+    pub row_type: u32,
+    pub array_type: u32,
+    pub required_columns: usize,
+}
+
+/// Bootstrap relations with non-null leading attributes and a named composite row type.
+pub fn catalog_descriptors() -> impl Iterator<Item = &'static SystemCatalogDescriptor> {
+    const DEFAULT_ACL: SystemCatalogDescriptor = SystemCatalogDescriptor {
+        relation: VirtualRelation::PgDefaultAcl,
+        row_type: 10_088,
+        array_type: 10_087,
+        required_columns: 5,
+    };
+    super::foreign_relations::FOREIGN_CATALOGS
+        .iter()
+        .chain(std::iter::once(&DEFAULT_ACL))
 }
 
 impl VirtualRelation {

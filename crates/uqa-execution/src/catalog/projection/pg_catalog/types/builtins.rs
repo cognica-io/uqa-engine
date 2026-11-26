@@ -126,14 +126,12 @@ pub(in crate::catalog::projection) fn builtin_type_oid_in_use(oid: i64) -> bool 
         oids.extend(super::super::languages::type_oids());
         oids.extend(super::super::extensions::type_oids());
         oids.extend(
-            uqa_sql::catalog::foreign_relations::FOREIGN_CATALOGS
-                .iter()
-                .flat_map(|definition| {
-                    [
-                        i64::from(definition.row_type),
-                        i64::from(definition.array_type),
-                    ]
-                }),
+            uqa_sql::catalog::catalog_descriptors().flat_map(|definition| {
+                [
+                    i64::from(definition.row_type),
+                    i64::from(definition.array_type),
+                ]
+            }),
         );
         oids
     })

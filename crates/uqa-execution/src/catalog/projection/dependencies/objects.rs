@@ -122,6 +122,7 @@ pub(super) struct CatalogObjects {
     namespaces: BTreeMap<String, u32>,
     members: BTreeMap<(u32, u32), MemberObject>,
     roles: BTreeMap<u32, String>,
+    pub(super) default_acls: BTreeMap<u32, uqa_sql::catalog::security::default_acl::DefaultAclKey>,
     foreign_servers: BTreeMap<u32, (String, [u8; 16])>,
     foreign_wrappers: BTreeMap<u32, (String, [u8; 16])>,
     unpinned: BTreeSet<(u32, u32)>,
@@ -136,6 +137,13 @@ impl CatalogObjects {
     ) -> Result<Self, SQLError> {
         let mut objects = Self::default();
         objects.collect_namespaces(catalog);
+        for (&key, row) in catalog.snapshot().definitions.default_acls.iter() {
+            objects.default_acls.insert(row.oid, key);
+            objects.unpin(ObjectAddress::whole(
+                uqa_sql::catalog::dependencies::DEFAULT_ACL_CLASS,
+                row.oid,
+            ));
+        }
         objects.collect_relations(context, catalog, resolution)?;
         objects.collect_types(catalog);
         for wrapper in catalog.snapshot().definitions.foreign_wrappers.values() {

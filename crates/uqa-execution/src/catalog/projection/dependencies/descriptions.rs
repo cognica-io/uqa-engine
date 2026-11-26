@@ -18,9 +18,9 @@ use uqa_sql::catalog::languages::{language_name, PLPGSQL_EXTENSION, PLPGSQL_LANG
 use uqa_sql::SQLError;
 
 /// Catalogs whose objects `getObjectDescription` can name and that hold no objects in this catalog.
-const EMPTY_CLASSES: [u32; 26] = [
-    826, 1213, 1418, 2601, 2602, 2603, 2605, 2607, 2613, 2616, 2617, 2753, 3256, 3381, 3456, 3466,
-    3576, 3600, 3601, 3602, 3764, 6100, 6104, 6106, 6237, 6243,
+const EMPTY_CLASSES: [u32; 25] = [
+    1213, 1418, 2601, 2602, 2603, 2605, 2607, 2613, 2616, 2617, 2753, 3256, 3381, 3456, 3466, 3576,
+    3600, 3601, 3602, 3764, 6100, 6104, 6106, 6237, 6243,
 ];
 
 pub(super) fn describe(
@@ -69,6 +69,31 @@ pub(super) fn describe(
         | TRIGGER_CLASS
         | ROLE_MEMBERSHIP_CLASS => {
             member_description(context, objects, object.class_id, object.object_id)?
+        }
+        uqa_sql::catalog::dependencies::DEFAULT_ACL_CLASS => {
+            let Some(key) = objects.default_acls.get(&object.object_id) else {
+                return Ok(None);
+            };
+            let role =
+                objects
+                    .role_name(u32::try_from(key.owner.oid).map_err(|_| {
+                        SQLError::Internal("invalid default privilege owner".into())
+                    })?)
+                    .ok_or_else(|| SQLError::Internal("missing default privilege owner".into()))?;
+            let namespace = objects
+                .namespace_name(key.namespace)
+                .map_or_else(String::new, |name| format!(" in schema {name}"));
+            let kind = match key.object {
+                uqa_sql::ast::DefaultAclObject::Table => "relations",
+                uqa_sql::ast::DefaultAclObject::Routine => "functions",
+                uqa_sql::ast::DefaultAclObject::Sequence => "sequences",
+                uqa_sql::ast::DefaultAclObject::Type => "types",
+                uqa_sql::ast::DefaultAclObject::Schema => "schemas",
+                uqa_sql::ast::DefaultAclObject::LargeObject => "large objects",
+            };
+            Some(format!(
+                "default privileges on new {kind} belonging to role {role}{namespace}"
+            ))
         }
         class if EMPTY_CLASSES.contains(&class) => None,
         class => {

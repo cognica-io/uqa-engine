@@ -285,6 +285,11 @@ impl<K: Ord, T> DefinitionRegistry<K, T> {
         self.temporary.clear();
     }
 
+    /// Install a restored durable catalog while retaining this session's temporary definitions.
+    pub fn replace_durable(&mut self, restored: Self) {
+        self.durable = restored.durable;
+    }
+
     pub fn temporary_only(&self) -> Self {
         let mut temporary = self.clone();
         temporary.durable.clear();

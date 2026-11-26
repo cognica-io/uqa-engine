@@ -9,6 +9,8 @@ use super::{
     Statement,
 };
 use crate::compiler::{extract_string, range_var_name};
+mod default_privileges;
+pub(in crate::compiler) use default_privileges::compile_default_privileges;
 
 pub(in crate::compiler) fn compile_acl_role_specification(
     role: &pg_query::protobuf::RoleSpec,
@@ -136,13 +138,10 @@ pub(in crate::compiler) fn compile_grant(
     }
 }
 
-fn compile_grant_table(statement: &pg_query::protobuf::GrantStmt) -> Result<Statement> {
-    use crate::ast::{GrantTableStmt, TableRevokeBehavior};
-    use pg_query::protobuf::DropBehavior;
-
-    let target = compile_grant_table_target(statement)?;
-    let privileges = compile_grant_table_privileges(statement)?;
-    let grantees = statement
+fn compile_acl_grantees(
+    statement: &pg_query::protobuf::GrantStmt,
+) -> Result<Vec<crate::ast::AclRoleSpecification>> {
+    statement
         .grantees
         .iter()
         .map(|grantee| {
@@ -153,7 +152,16 @@ fn compile_grant_table(statement: &pg_query::protobuf::GrantStmt) -> Result<Stat
             };
             compile_acl_role_specification(role, "GRANT/REVOKE")
         })
-        .collect::<Result<Vec<_>>>()?;
+        .collect()
+}
+
+fn compile_grant_table(statement: &pg_query::protobuf::GrantStmt) -> Result<Statement> {
+    use crate::ast::{GrantTableStmt, TableRevokeBehavior};
+    use pg_query::protobuf::DropBehavior;
+
+    let target = compile_grant_table_target(statement)?;
+    let privileges = compile_grant_table_privileges(statement)?;
+    let grantees = compile_acl_grantees(statement)?;
     let grantor = statement
         .grantor
         .as_ref()
@@ -321,18 +329,7 @@ fn compile_grant_database(statement: &pg_query::protobuf::GrantStmt) -> Result<S
             Ok(database.sval.clone())
         })
         .collect::<Result<Vec<_>>>()?;
-    let grantees = statement
-        .grantees
-        .iter()
-        .map(|grantee| {
-            let Some(NodeEnum::RoleSpec(role)) = grantee.node.as_ref() else {
-                return Err(SQLError::Internal(
-                    "GRANT/REVOKE contains a malformed grantee".into(),
-                ));
-            };
-            compile_acl_role_specification(role, "GRANT/REVOKE")
-        })
-        .collect::<Result<Vec<_>>>()?;
+    let grantees = compile_acl_grantees(statement)?;
     let grantor = statement
         .grantor
         .as_ref()
@@ -396,18 +393,7 @@ fn compile_grant_schema(statement: &pg_query::protobuf::GrantStmt) -> Result<Sta
             Ok(schema.sval.clone())
         })
         .collect::<Result<Vec<_>>>()?;
-    let grantees = statement
-        .grantees
-        .iter()
-        .map(|grantee| {
-            let Some(NodeEnum::RoleSpec(role)) = grantee.node.as_ref() else {
-                return Err(SQLError::Internal(
-                    "GRANT/REVOKE contains a malformed grantee".into(),
-                ));
-            };
-            compile_acl_role_specification(role, "GRANT/REVOKE")
-        })
-        .collect::<Result<Vec<_>>>()?;
+    let grantees = compile_acl_grantees(statement)?;
     let grantor = statement
         .grantor
         .as_ref()
@@ -467,18 +453,7 @@ fn compile_grant_sequence(statement: &pg_query::protobuf::GrantStmt) -> Result<S
         }
         privileges
     };
-    let grantees = statement
-        .grantees
-        .iter()
-        .map(|grantee| {
-            let Some(NodeEnum::RoleSpec(role)) = grantee.node.as_ref() else {
-                return Err(SQLError::Internal(
-                    "GRANT/REVOKE contains a malformed grantee".into(),
-                ));
-            };
-            compile_acl_role_specification(role, "GRANT/REVOKE")
-        })
-        .collect::<Result<Vec<_>>>()?;
+    let grantees = compile_acl_grantees(statement)?;
     let grantor = statement
         .grantor
         .as_ref()

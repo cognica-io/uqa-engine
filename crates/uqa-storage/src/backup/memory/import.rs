@@ -32,6 +32,7 @@ pub struct MemoryImageImportReader<'a> {
     root: BackupRoot,
     control: StorageReadControl,
     header: Option<MemoryImageHeader>,
+    required_catalogs: u16,
     previous: Option<DecodedMemoryImageAddress>,
     current: Option<DecodedMemoryImageAddress>,
     verified_bytes: u64,
@@ -57,6 +58,7 @@ impl<'a> MemoryImageImportReader<'a> {
             root,
             control: control.clone(),
             header: None,
+            required_catalogs: 0,
             previous: None,
             current: None,
             verified_bytes: 0,
@@ -124,7 +126,7 @@ impl<'a> MemoryImageImportReader<'a> {
                 if self.header.is_none() || reader.verified().is_none() {
                     return Err(BackupError::Invalid("missing memory image header"));
                 }
-                membership::end(self.previous.as_ref())?;
+                membership::end(self.previous.as_ref(), self.required_catalogs)?;
                 self.release(true);
                 return Ok(BackupSourceStep::Complete);
             }
@@ -142,14 +144,21 @@ impl<'a> MemoryImageImportReader<'a> {
             let mut bytes = [0; 33];
             reader.read_exact_current(&mut bytes)?;
             reader.require_current_end()?;
-            let header = MemoryImageHeader::read_image(&mut &bytes[..], &self.control)?;
+            let (header, required_catalogs) =
+                MemoryImageHeader::read_layout(&mut &bytes[..], &self.control)?;
+            self.required_catalogs = required_catalogs;
             if header.source != self.root.cut().source {
                 return Err(BackupError::Invalid("memory image source identity"));
             }
             self.header = Some(header);
             return Ok(BackupSourceStep::Pending);
         }
-        membership::next(self.previous.as_ref(), &address, entry.kind())?;
+        membership::next(
+            self.previous.as_ref(),
+            &address,
+            entry.kind(),
+            self.required_catalogs,
+        )?;
         self.current = Some(address);
         Ok(BackupSourceStep::Unit)
     }

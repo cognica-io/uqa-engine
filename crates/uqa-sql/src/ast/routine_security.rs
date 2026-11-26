@@ -250,3 +250,25 @@ pub struct DropOwnedStmt {
     pub roles: Vec<RoleSpecification>,
     pub cascade: bool,
 }
+
+/// Object classes supported by the PostgreSQL default ACL catalog.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum DefaultAclObject {
+    Table,
+    Sequence,
+    Routine,
+    Type,
+    Schema,
+    LargeObject,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AlterDefaultPrivilegesStmt {
+    pub owners: Vec<RoleSpecification>,
+    pub schemas: Vec<String>,
+    pub object: DefaultAclObject,
+    pub grantees: Vec<crate::ast::AclRoleSpecification>,
+    pub privileges: Vec<crate::ast::TablePrivilegeSpec>,
+    pub is_grant: bool,
+    pub grant_option: bool,
+}

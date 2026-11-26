@@ -267,6 +267,9 @@ pub(super) fn compile_stmt(node: &Node) -> Result<Statement> {
         NodeEnum::AlterRoleStmt(stmt) => compile_alter_role(stmt),
         NodeEnum::DropRoleStmt(stmt) => compile_drop_role(stmt),
         NodeEnum::DropOwnedStmt(stmt) => compile_drop_owned(stmt),
+        NodeEnum::AlterDefaultPrivilegesStmt(stmt) => {
+            super::routines::compile_default_privileges(stmt)
+        }
         NodeEnum::VariableSetStmt(stmt) => compile_variable_set(stmt),
         NodeEnum::ConstraintsSetStmt(stmt) => compile_set_constraints(stmt),
         NodeEnum::VariableShowStmt(stmt) => Ok(Statement::ShowVariable {

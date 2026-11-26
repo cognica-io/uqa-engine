@@ -174,6 +174,13 @@ pub fn largest_catalog_oid(
     )?));
     oids.extend(super::pg_catalog::attribute_default_oids(catalog));
     oids.extend(row_oids(super::pg_catalog::build_pg_enum(catalog)));
+    oids.extend(
+        snapshot
+            .definitions
+            .default_acls
+            .values()
+            .map(|row| i64::from(row.oid)),
+    );
     oids.extend(row_oids(super::pg_catalog::build_pg_authid(catalog)));
     oids.extend(row_oids(super::pg_catalog::build_pg_auth_members(catalog)?));
     oids.extend(super::events::rewrite_catalog_oids(catalog));

@@ -114,10 +114,13 @@ pub fn create_composite_type(
             relation_oid: oids.relation,
             array_oid,
             array_name,
+            usage_acl: context
+                .creation
+                .defaults
+                .type_acl(owner.identity(), &identity.schema),
             identity,
             owner: owner.identity(),
             attributes,
-            usage_acl: None,
         },
     )?;
     composite_type::publish(context.publication, &before, registry)?;

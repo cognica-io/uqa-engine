@@ -71,6 +71,7 @@ catalog_sources! {
     roles: RoleDefinitions => uqa_sql::catalog::roles::CapturedRoleDefinitions, RoleDefinitions::capture;
     role_memberships: RoleMemberships => uqa_sql::catalog::roles::CapturedRoleMemberships, RoleMemberships::capture;
     database_security: DatabaseAuthority => CapturedDatabaseAuthority, DatabaseAuthority::capture;
+    default_acls: uqa_sql::catalog::security::default_acl::DefaultAcls => uqa_sql::catalog::security::default_acl::CapturedDefaultAcls, uqa_sql::catalog::security::default_acl::DefaultAcls::capture;
     builtin_routine_security: uqa_sql::catalog::security::builtin_routines::BuiltinRoutineSecurities => uqa_sql::catalog::security::builtin_routines::CapturedBuiltinRoutineSecurities, uqa_sql::catalog::security::builtin_routines::BuiltinRoutineSecurities::capture;
     system_relation_security: uqa_sql::catalog::security::system_relations::SystemRelationSecurities => uqa_sql::catalog::security::system_relations::CapturedSystemRelationSecurities, uqa_sql::catalog::security::system_relations::SystemRelationSecurities::capture;
     foreign_wrappers: ForeignWrappers => uqa_sql::catalog::foreign_wrapper::CapturedForeignWrappers, ForeignWrappers::capture;

@@ -39,7 +39,9 @@ pub use type_production::system_catalog_domain_with_control;
 pub const AG_CATALOG_SCHEMA: &str = "ag_catalog";
 
 mod virtual_relations;
-pub use virtual_relations::{resolve_virtual_relation, VirtualRelation};
+pub use virtual_relations::{
+    catalog_descriptors, resolve_virtual_relation, SystemCatalogDescriptor, VirtualRelation,
+};
 mod system_relations;
 pub use system_relations::SystemRelation;
 
@@ -69,6 +71,7 @@ impl VirtualRelation {
                 | Self::PgDatabase
                 | Self::PgAuthid
                 | Self::PgAuthMembers
+                | Self::PgDefaultAcl
                 | Self::PgDescription
                 | Self::PgDepend
                 | Self::PgShdepend
@@ -626,6 +629,13 @@ impl VirtualRelation {
                 "rolconnlimit" => Inline(ColumnType::Integer),
                 "rolpassword" => Inline(ColumnType::Text),
                 "rolvaliduntil" => Inline(ColumnType::TimestampTz),
+            ],
+            Self::PgDefaultAcl => columns![
+                "oid" => Inline(ColumnType::Oid),
+                "defaclrole" => Inline(ColumnType::Oid),
+                "defaclnamespace" => Inline(ColumnType::Oid),
+                "defaclobjtype" => Inline(ColumnType::InternalChar),
+                "defaclacl" => Array(ColumnType::AclItem),
             ],
             Self::PgAuthMembers => columns![
                 "oid" => Inline(ColumnType::Oid),

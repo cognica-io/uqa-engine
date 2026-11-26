@@ -490,6 +490,12 @@ impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'en
                 )?;
                 Ok(SQLResult::empty())
             }
+            CommandPlan::AlterDefaultPrivileges(statement) => {
+                self.context
+                    .default_privileges
+                    .with_default_acl_write(Box::new(|context| context.alter(statement)))?;
+                Ok(SQLResult::empty())
+            }
             CommandPlan::DropOwned(statement) => self
                 .context
                 .schemas

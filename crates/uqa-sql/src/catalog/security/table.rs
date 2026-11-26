@@ -151,7 +151,7 @@ pub fn requested_acl_privileges(
     Ok(RequestedTablePrivileges { table, columns })
 }
 
-fn table_privilege_name(privilege: &TablePrivilege) -> &str {
+pub(super) fn table_privilege_name(privilege: &TablePrivilege) -> &str {
     match privilege {
         TablePrivilege::Select => "SELECT",
         TablePrivilege::Insert => "INSERT",

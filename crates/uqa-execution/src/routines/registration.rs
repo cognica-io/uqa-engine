@@ -296,6 +296,17 @@ pub fn register_sql_function(
                 overloads[pos] = Arc::clone(&published);
                 published
             } else {
+                let identity = uqa_core::RelationIdentity::from_legacy_name(&name)
+                    .map_err(|error| SQLError::Internal(error.to_string()))?;
+                def.execute_acl = context
+                    .namespace
+                    .defaults
+                    .initial_acl(
+                        owner.identity(),
+                        Some(&identity.schema),
+                        uqa_sql::ast::DefaultAclObject::Routine,
+                    )
+                    .map(uqa_sql::catalog::security::default_acl::single);
                 dependencies =
                     uqa_sql::routines::security::binding::routine_role_dependencies(&def, &roles)?;
                 def.object_id = Some(allocate_routine_object_id(&registry, &name)?);

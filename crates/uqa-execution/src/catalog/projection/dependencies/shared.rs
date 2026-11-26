@@ -29,6 +29,22 @@ impl DependencyBuilder<'_> {
     fn record_shared_namespaces(&mut self, database: u32) {
         let snapshot = self.catalog.snapshot();
         let definitions = &snapshot.definitions;
+        for (&key, row) in definitions.default_acls.iter() {
+            let address =
+                ObjectAddress::whole(uqa_sql::catalog::dependencies::DEFAULT_ACL_CLASS, row.oid);
+            self.record_owned(
+                (database, address),
+                key.owner,
+                row.acl.iter().map(|entry| (entry.role, entry.grantor)),
+            );
+            if key.namespace != 0 {
+                self.recorder.record(
+                    address,
+                    ObjectAddress::whole(NAMESPACE_CLASS, key.namespace),
+                    uqa_sql::catalog::dependencies::DependencyKind::Auto,
+                );
+            }
+        }
         let security = definitions.database_security.as_ref();
         self.record_owned(
             (0, ObjectAddress::whole(DATABASE_CLASS, database)),

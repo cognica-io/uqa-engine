@@ -66,6 +66,7 @@ pub(crate) fn empty_catalog() -> CatalogReadView {
             graphs: uqa_core::memory::RetainedValue::default(),
             views: uqa_core::memory::RetainedValue::default(),
             catalog_indexes: uqa_core::memory::RetainedValue::default(),
+            default_acls: uqa_core::memory::RetainedValue::default(),
             database_security: uqa_core::memory::RetainedValue::new(
                 uqa_sql::catalog::security::database::DatabaseAuthority::bootstrap(),
             ),

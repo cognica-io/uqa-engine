@@ -344,6 +344,7 @@ impl Statement {
             | Self::AlterRole(_)
             | Self::RenameRole(_)
             | Self::DropRole(_)
+            | Self::AlterDefaultPrivileges(_)
             | Self::DropOwned(_)
             | Self::DropTrigger(_)
             | Self::DropRule(_)

@@ -305,6 +305,9 @@ impl Copying<'_> {
             Statement::RenameRole(value) => {
                 CommandPlan::RenameRole(self.field("value0", |copying| value.copy_syntax(copying))?)
             }
+            Statement::AlterDefaultPrivileges(value) => CommandPlan::AlterDefaultPrivileges(
+                self.field("value0", |copying| value.copy_syntax(copying))?,
+            ),
             Statement::DropOwned(value) => {
                 CommandPlan::DropOwned(self.field("value0", |copying| value.copy_syntax(copying))?)
             }

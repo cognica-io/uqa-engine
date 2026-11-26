@@ -25,6 +25,8 @@ pub const REWRITE_CLASS: u32 = 2618;
 pub const TRIGGER_CLASS: u32 = 2620;
 /// `pg_namespace`.
 pub const NAMESPACE_CLASS: u32 = 2615;
+/// `pg_default_acl`.
+pub const DEFAULT_ACL_CLASS: u32 = 826;
 /// `pg_collation`.
 pub const COLLATION_CLASS: u32 = 3456;
 /// `pg_language`.

@@ -296,6 +296,7 @@ fn table_array_metadata(table: &crate::TableState) -> RelationArrayMetadata<'_> 
 impl Engine {
     pub(crate) fn relation_creation_context(&self) -> RelationCreationContext<'_> {
         RelationCreationContext {
+            defaults: self,
             names: self,
             roles: self,
             locks: self,

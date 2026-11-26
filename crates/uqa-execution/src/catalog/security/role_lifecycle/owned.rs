@@ -189,6 +189,13 @@ impl DropOwnedContext<'_> {
             Some(CatalogObject::Type(oid)) => {
                 types::remove_role_grants(&self.types, oid, &targets.identities)
             }
+            Some(CatalogObject::DefaultAcl(key)) => {
+                crate::catalog::security::default_acl::remove_grantees(
+                    self.removal.default_acls,
+                    key,
+                    &targets.identities,
+                )
+            }
             Some(CatalogObject::Schema(name)) => privileges::remove_role_grants(
                 &self.schemas,
                 &name,

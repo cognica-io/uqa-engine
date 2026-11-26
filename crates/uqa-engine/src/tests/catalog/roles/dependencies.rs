@@ -321,3 +321,78 @@ fn drop_owned_waits_for_the_role_identity_and_spares_its_reused_name(#[case] pro
     assert!(!allowed_as(&holder, target, "renamed"));
     assert!(allowed(&holder, target));
 }
+
+#[rstest::rstest]
+#[case::native_sqlite(0)]
+#[case::sqlite_key_value(1)]
+#[case::redb(2)]
+fn committed_temporary_default_acl_tracks_its_grantee_across_catalog_refresh(
+    #[case] provider: usize,
+) {
+    let (_directory, first, second) = sessions(provider);
+    sql(
+        &first,
+        "CREATE ROLE dependent; CREATE TEMP TABLE seed(i integer)",
+    );
+    let schema = first.temporary_schema_name();
+    let grant =
+        format!("ALTER DEFAULT PRIVILEGES IN SCHEMA {schema} GRANT SELECT ON TABLES TO dependent");
+    let revoke = format!(
+        "ALTER DEFAULT PRIVILEGES IN SCHEMA {schema} REVOKE SELECT ON TABLES FROM dependent"
+    );
+    sql(&first, &grant);
+    assert_eq!(
+        second
+            .sql("DROP ROLE dependent", &[])
+            .unwrap_err()
+            .sqlstate(),
+        Some("2BP01")
+    );
+    sql(&second, "CREATE SCHEMA refresh_default_acl");
+    sql(&first, "CREATE TEMP TABLE after_refresh(i integer)");
+    assert_eq!(
+        sql(
+            &first,
+            "SELECT has_table_privilege('dependent','after_refresh','SELECT') AS permitted"
+        )
+        .rows[0]["permitted"],
+        Value::Bool(true)
+    );
+    sql(&first, "DROP TABLE after_refresh");
+    sql(&first, &format!("BEGIN; {revoke}; ROLLBACK"));
+    assert_eq!(
+        second
+            .sql("DROP ROLE dependent", &[])
+            .unwrap_err()
+            .sqlstate(),
+        Some("2BP01")
+    );
+    sql(&first, &revoke);
+    sql(&second, "DROP ROLE dependent");
+}
+
+#[rstest::rstest]
+#[case::native_sqlite(0)]
+#[case::sqlite_key_value(1)]
+#[case::redb(2)]
+fn default_privilege_grantees_keep_the_original_role_after_a_wait(#[case] provider: usize) {
+    let (_directory, first, second) = sessions(provider);
+    sql(&first, "CREATE ROLE dependent; BEGIN");
+    let lock = role_lock(&first);
+    first
+        .acquire_shared_catalog(lock, RelationLockMode::AccessExclusive)
+        .unwrap()
+        .retain();
+    let (_, outcome) = after_wait(
+        &first,
+        second,
+        "ALTER DEFAULT PRIVILEGES GRANT SELECT ON TABLES TO dependent",
+        lock,
+        "ALTER ROLE dependent RENAME TO renamed; CREATE ROLE dependent; COMMIT",
+    );
+    outcome.unwrap();
+    sql(&first, "CREATE TABLE after_wait(i integer)");
+    let privileges = sql(&first, "SELECT has_table_privilege('renamed','after_wait','SELECT') AS original, has_table_privilege('dependent','after_wait','SELECT') AS replacement");
+    assert_eq!(privileges.rows[0]["original"], Value::Bool(true));
+    assert_eq!(privileges.rows[0]["replacement"], Value::Bool(false));
+}

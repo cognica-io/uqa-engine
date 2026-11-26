@@ -61,7 +61,7 @@ impl CatalogInput {
             return Err(invalid());
         }
         match slot {
-            1..=18 | 21..=24 => {
+            1..=18 | 21..=25 => {
                 let mut definition = match self.definition.take() {
                     Some(definition) => definition,
                     None => DefinitionInput::new(slot, destination)?,
@@ -118,7 +118,8 @@ impl CatalogInput {
     }
 
     pub(super) fn finish(self) -> StorageBackendResult<()> {
-        if self.next != uqa_storage::backup::MEMORY_IMAGE_CATALOG_COUNT + 1
+        // The verified image header selects the final catalog. Older images end after scoring parameters.
+        if !(25..=uqa_storage::backup::MEMORY_IMAGE_CATALOG_COUNT + 1).contains(&self.next)
             || self.sequence.is_some()
             || self.definition.is_some()
         {

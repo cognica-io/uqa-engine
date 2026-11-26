@@ -25,6 +25,7 @@ pub mod role_lifecycle;
 pub mod roles;
 
 pub mod database_lifecycle;
+pub mod default_acl;
 
 pub mod builtin_routines;
 pub mod routine_inquiry;

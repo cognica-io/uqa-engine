@@ -227,7 +227,7 @@ impl ForeignCreationContext<'_> {
         };
         table.columns = statement.columns;
         table.checks = statement.checks;
-        self.publish_foreign_relation(&relation, &target.owner, table)?;
+        self.publish_foreign_relation(&relation, table)?;
         declaration.finish();
         Ok(())
     }

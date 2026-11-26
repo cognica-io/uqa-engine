@@ -69,6 +69,7 @@ pub enum CatalogObject {
         name: String,
     },
     Schema(String),
+    DefaultAcl(uqa_sql::catalog::security::default_acl::DefaultAclKey),
     ForeignServer {
         name: String,
         object_id: [u8; 16],
@@ -140,6 +141,11 @@ impl CatalogObjects {
             PROCEDURE_CLASS => self
                 .routine_object_id(address.object_id)
                 .map(|object_id| CatalogObject::Routine { object_id }),
+            uqa_sql::catalog::dependencies::DEFAULT_ACL_CLASS => self
+                .default_acls
+                .get(&address.object_id)
+                .copied()
+                .map(CatalogObject::DefaultAcl),
             NAMESPACE_CLASS => self
                 .namespace_name(address.object_id)
                 .map(|name| CatalogObject::Schema(name.to_string())),

@@ -66,7 +66,11 @@ fn memory_catalog_units_keep_the_committed_generation_after_transaction_and_engi
             assert_eq!(offset, expected.len());
             assert_eq!(output.memory().used(), 0);
         }
-        assert!(catalogs::image(&original, 25, &output).unwrap().is_none());
+        assert!(
+            catalogs::image(&original, catalogs::CATALOG_COUNT + 1, &output)
+                .unwrap()
+                .is_none()
+        );
     })
     .join()
     .unwrap();

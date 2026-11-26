@@ -72,7 +72,7 @@ impl Engine {
         table: &TableState,
         columns: &[uqa_sql::ast::ColumnDef],
         constraints: &uqa_sql::ast::TableConstraintSet,
-        security: &crate::state::BoundTableSecurity,
+        security: &BoundTableSecurity,
     ) -> StorageBackendResult<()> {
         self.try_save_table_schema_candidate(
             name,
@@ -90,7 +90,7 @@ impl Engine {
         table: &TableState,
         columns: &[uqa_sql::ast::ColumnDef],
         constraints: &uqa_sql::ast::TableConstraintSet,
-        security: &crate::state::BoundTableSecurity,
+        security: &BoundTableSecurity,
         kind: TablePublicationKind,
     ) -> StorageBackendResult<()> {
         if table.persistence == uqa_sql::ast::RelationPersistence::Temporary {
@@ -314,7 +314,11 @@ impl Engine {
             _image_memory: None,
             lifecycle_id: std::sync::atomic::AtomicU64::new(crate::next_table_lifecycle_id()),
             object_id: crate::new_table_object_id()?,
-            security: TableMetadataCell::new(BoundTableSecurity::owner(owner.identity())),
+            security: TableMetadataCell::new(
+                self.relation_creation_context()
+                    .defaults
+                    .table_security(owner.identity(), &relation.schema),
+            ),
             storage_generation: CatalogCell::new(crate::new_table_storage_generation()?),
             document_store: uqa_storage::memory_capture::MemoryCaptureCell::new(docs.into()),
             inverted_index: uqa_storage::memory_capture::MemoryCaptureCell::new(inv.into()),

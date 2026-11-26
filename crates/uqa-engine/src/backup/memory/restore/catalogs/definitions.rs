@@ -44,6 +44,7 @@ pub(super) enum DefinitionInput {
     Roles(CatalogImageInput<RoleDefinitions>),
     Memberships(CatalogImageInput<RoleMemberships>),
     Database(CatalogImageInput<DatabaseAuthority>),
+    DefaultAcls(CatalogImageInput<uqa_sql::catalog::security::default_acl::DefaultAcls>),
     BuiltinRoutines(CatalogImageInput<BuiltinRoutineSecurities>),
     SystemRelations(CatalogImageInput<SystemRelationSecurities>),
     ForeignWrappers(CatalogImageInput<ForeignWrappers>),
@@ -82,6 +83,10 @@ impl DefinitionInput {
             9 => input!(Roles, RoleDefinitions),
             10 => input!(Memberships, RoleMemberships),
             11 => input!(Database, DatabaseAuthority),
+            25 => input!(
+                DefaultAcls,
+                uqa_sql::catalog::security::default_acl::DefaultAcls
+            ),
             12 => input!(BuiltinRoutines, BuiltinRoutineSecurities),
             13 => input!(SystemRelations, SystemRelationSecurities),
             14 => input!(ForeignWrappers, ForeignWrappers),
@@ -146,6 +151,11 @@ impl DefinitionInput {
             Self::Roles(input) => publish!(input, roles, RoleDefinitions),
             Self::Memberships(input) => publish!(input, role_memberships, RoleMemberships),
             Self::Database(input) => publish!(input, database_security, DatabaseAuthority),
+            Self::DefaultAcls(input) => publish!(
+                input,
+                default_acls,
+                uqa_sql::catalog::security::default_acl::DefaultAcls
+            ),
             Self::BuiltinRoutines(input) => {
                 publish!(input, builtin_routine_security, BuiltinRoutineSecurities);
             }

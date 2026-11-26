@@ -10,6 +10,8 @@ mod attributes;
 mod composites;
 mod constraint_definitions;
 mod constraints;
+pub(super) mod default_acl;
+pub(super) mod descriptors;
 mod extensions;
 pub(crate) mod foreign;
 mod indexes;

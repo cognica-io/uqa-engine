@@ -12,6 +12,7 @@ pub mod acl_warning;
 pub mod authority;
 pub mod capture;
 pub mod columns;
+pub mod default_acl;
 pub mod dependencies;
 pub mod drop_owned;
 mod grant_paths;

@@ -27,6 +27,7 @@ use uqa_sql::{SQLError, SQLNotice};
 
 /// The catalog services that remove each kind of object.
 pub struct CatalogRemovalContext<'a> {
+    pub default_acls: &'a dyn crate::catalog::security::default_acl::DefaultAclPublication,
     pub comments: &'a dyn crate::catalog::comments::CommentPublication,
     pub catalog: CatalogContext<'a>,
     pub locks: &'a dyn RelationDefinitionSession,

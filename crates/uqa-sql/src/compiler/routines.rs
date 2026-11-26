@@ -18,8 +18,9 @@ mod roles;
 
 pub(super) use roles::{
     compile_acl_role_specification, compile_alter_role, compile_alter_routine_owner,
-    compile_create_role, compile_drop_owned, compile_drop_role, compile_grant, compile_grant_role,
-    compile_object_with_args, compile_role_specification, CompiledRoutineTarget,
+    compile_create_role, compile_default_privileges, compile_drop_owned, compile_drop_role,
+    compile_grant, compile_grant_role, compile_object_with_args, compile_role_specification,
+    CompiledRoutineTarget,
 };
 
 struct CompiledFunctionTypeName {

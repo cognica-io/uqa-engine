@@ -59,6 +59,7 @@ impl RoleTablesRead for Read<'_, BTreeMap<RelationIdentity, Table>> {
 }
 pub(super) struct Catalog {
     pub database: BoundDatabaseSecurity,
+    pub default_acls: crate::catalog::security::default_acl::DefaultAcls,
     pub schemas: SchemaRegistry,
     pub tables: BTreeMap<RelationIdentity, Table>,
     pub views: crate::catalog::stored_view::ViewDefinitions,
@@ -74,6 +75,7 @@ impl Catalog {
     pub fn new() -> Self {
         Self {
             database: BoundDatabaseSecurity::bootstrap(),
+            default_acls: crate::catalog::security::default_acl::DefaultAcls::new(),
             schemas: SchemaRegistry::new(),
             tables: BTreeMap::new(),
             views: crate::catalog::stored_view::ViewDefinitions::new(),
@@ -109,6 +111,9 @@ impl Catalog {
 }
 
 impl super::super::context::TemporaryRoleDependencyCatalog for Catalog {
+    fn temporary_default_acls(&self) -> crate::catalog::security::default_acl::DefaultAcls {
+        self.default_acls.temporary_only()
+    }
     fn temporary_namespace_allocated(&self) -> bool {
         true
     }
