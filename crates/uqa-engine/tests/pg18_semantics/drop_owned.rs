@@ -12,10 +12,29 @@ use super::range_input::open;
 #[case::sqlite_key_value(2)]
 #[case::redb(3)]
 fn drop_owned_matches_postgresql(#[case] provider: usize) {
+    compare(
+        provider,
+        include_str!("../../../../tests/parity/pg18/drop_owned_oracle.expected.json"),
+    );
+}
+
+#[rstest::rstest]
+#[case::memory(0)]
+#[case::sqlite_native(1)]
+#[case::sqlite_key_value(2)]
+#[case::redb(3)]
+fn default_privileges_match_postgresql(#[case] provider: usize) {
+    compare(
+        provider,
+        include_str!("../../../../tests/parity/pg18/default_privileges_oracle.expected.json"),
+    );
+}
+
+fn compare(provider: usize, transcript: &str) {
     let files = tempfile::tempdir().unwrap();
     let path = files.path().join("drop-owned.db");
     let engine = open(provider, &path);
-    let transcript = include_str!("../../../../tests/parity/pg18/drop_owned_oracle.expected.json");
+
     crate::pg18_oracle::verify(&engine, transcript);
     if provider != 0 {
         drop(engine);
