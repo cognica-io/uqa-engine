@@ -37,6 +37,14 @@ impl CteBodyExecutor<StatementReadSnapshot> for Engine {
     ) -> Result<Option<Box<dyn uqa_execution::PhysicalOperator>>, SQLError> {
         self.retained_query_operator(query, params, ctes)
     }
+    fn retain_recursive_term(
+        &self,
+        query: &QueryPlan,
+        params: &[SQLParam],
+        ctes: &CteScope,
+    ) -> Result<Box<dyn uqa_execution::query::cte::context::RecursiveTerm>, SQLError> {
+        self.retain_recursive_query(query, params, ctes)
+    }
     fn execute_query(
         &self,
         query: &QueryPlan,

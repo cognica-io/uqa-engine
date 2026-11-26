@@ -47,6 +47,9 @@ impl SourcePlanning<StatementReadSnapshot> for Engine {
     fn block_input_is_empty(&self, statement: &QueryBlockPlan) -> bool {
         uqa_planner::empty_sources::block_input_is_empty(statement)
     }
+    fn work_table_projection(&self, block: &QueryBlockPlan, name: &str) -> bool {
+        uqa_planner::empty_sources::work_table_projection(block, name)
+    }
     fn join_input_is_empty(&self, join: &SourcePlan, right: bool) -> bool {
         uqa_planner::empty_sources::join_input_is_empty(join, right)
     }

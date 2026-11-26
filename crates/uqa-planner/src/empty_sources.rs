@@ -33,6 +33,71 @@ pub fn block_input_is_empty(block: &QueryBlockPlan) -> bool {
         || block.from.as_ref().is_some_and(source_is_empty)
 }
 
+/// Whether a plain target list can be evaluated by the recursive work-table scan.
+/// A pulled-up constant, one-row FROM item does not introduce a second scan.
+pub fn work_table_projection(block: &QueryBlockPlan, name: &str) -> bool {
+    matches!(block.compute, ComputePlan::Project)
+        && !block_input_is_empty(block)
+        && block
+            .from
+            .as_ref()
+            .is_some_and(|source| work_table_scan(source, name))
+}
+
+fn work_table_scan(source: &SourcePlan, name: &str) -> bool {
+    match source {
+        SourcePlan::Table {
+            name: reference,
+            executable_query: None,
+            ..
+        } => uqa_core::RelationIdentity::borrowed_reference(reference).is_some_and(|reference| {
+            reference.schema.is_none() && reference.name == uqa_core::RelationName::decoded(name)
+        }),
+        SourcePlan::Join {
+            kind: JoinKind::Inner | JoinKind::Cross,
+            left,
+            right,
+            ..
+        } => {
+            (constant_result(right) && work_table_scan(left, name))
+                || (constant_result(left) && work_table_scan(right, name))
+        }
+        _ => false,
+    }
+}
+
+fn constant_result(source: &SourcePlan) -> bool {
+    let constant = |expression: &ScalarExpr| {
+        matches!(
+            expression,
+            ScalarExpr::Literal(_) | ScalarExpr::TypedLiteral { .. }
+        )
+    };
+    match source {
+        SourcePlan::Values { rows, .. } => {
+            matches!(rows.as_slice(), [row] if row.iter().all(constant))
+        }
+        SourcePlan::Subquery { body, .. } if body.ctes.is_empty() => match &body.root {
+            RelationalPlan::Values { rows, .. } => {
+                matches!(rows.as_slice(), [row] if row.iter().all(constant))
+            }
+            RelationalPlan::QueryBlock(query) => {
+                matches!(query.compute, ComputePlan::Project)
+                    && query.from.is_none()
+                    && query.r#where.is_none()
+                    && query.having.is_none()
+                    && query.limit.is_none()
+                    && query.offset.is_none()
+                    && !query.distinct
+                    && query.order_by.is_empty()
+                    && query.projections.iter().all(|p| constant(&p.expr))
+            }
+            _ => false,
+        },
+        _ => false,
+    }
+}
+
 fn passive_output(expression: &ScalarExpr) -> bool {
     matches!(
         expression,

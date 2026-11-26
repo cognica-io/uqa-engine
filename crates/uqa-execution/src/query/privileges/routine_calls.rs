@@ -39,6 +39,13 @@ pub fn query<S: Clone + Send + Sync + 'static>(
     )
 }
 
+#[derive(Clone, Copy)]
+enum Startup<'a> {
+    Query,
+    RecursiveUnion(&'a str),
+    WorkTable(&'a str),
+}
+
 pub(crate) fn initialize<S: Clone + Send + Sync + 'static>(
     context: &SourceContext<'_, S>,
     permissions: &BuiltinRoutinePermissions,
@@ -46,6 +53,26 @@ pub(crate) fn initialize<S: Clone + Send + Sync + 'static>(
     params: &[SQLParam],
     ctes: &CteScope<S>,
     outer: Option<&RowSchema>,
+) -> Result<(), SQLError> {
+    initialize_plan(
+        context,
+        permissions,
+        plan,
+        params,
+        ctes,
+        outer,
+        Startup::Query,
+    )
+}
+
+fn initialize_plan<S: Clone + Send + Sync + 'static>(
+    context: &SourceContext<'_, S>,
+    permissions: &BuiltinRoutinePermissions,
+    plan: &QueryPlan,
+    params: &[SQLParam],
+    ctes: &CteScope<S>,
+    outer: Option<&RowSchema>,
+    startup: Startup<'_>,
 ) -> Result<(), SQLError> {
     let retained = context.ctes.queries.read_control()?;
     let control = uqa_core::memory::ProductionControl::new(
@@ -73,11 +100,35 @@ pub(crate) fn initialize<S: Clone + Send + Sync + 'static>(
                 let definition = scope
                     .definition_scope_for_name_with_control(&scheduled.plan.name, &control)?
                     .expect("declared CTE scope");
-                initialize(context, permissions, query, params, &definition, outer)?;
+                let startup = if uqa_sql::semantics::cte_references_own_name_with_control(
+                    scheduled.plan,
+                    control,
+                )? {
+                    Startup::RecursiveUnion(&scheduled.plan.name)
+                } else {
+                    Startup::Query
+                };
+                initialize_plan(
+                    context,
+                    permissions,
+                    query,
+                    params,
+                    &definition,
+                    outer,
+                    startup,
+                )?;
             }
         }
     }
-    initialize_root(context, permissions, &plan.root, params, scope, outer)
+    initialize_root(
+        context,
+        permissions,
+        &plan.root,
+        params,
+        scope,
+        outer,
+        startup,
+    )
 }
 
 fn initialize_root<S: Clone + Send + Sync + 'static>(
@@ -87,6 +138,7 @@ fn initialize_root<S: Clone + Send + Sync + 'static>(
     params: &[SQLParam],
     scope: &mut CteScope<S>,
     outer: Option<&RowSchema>,
+    startup: Startup<'_>,
 ) -> Result<(), SQLError> {
     match root {
         RelationalPlan::QueryBlock(block) => {
@@ -113,6 +165,16 @@ fn initialize_root<S: Clone + Send + Sync + 'static>(
                 super::ensure_select_privileges_for_query_block(block, from, scope)?;
             }
             generated_calls(context, permissions, block, params, scope)?;
+            let scan_projection = if let Startup::WorkTable(name) = startup {
+                context.planning.work_table_projection(block, name) &&
+                    !uqa_sql::semantics::sets::validation::expressions_may_return_set_with_control(
+                        context.relational.catalog, context.relational.expression_scope(scope)?.as_ref(),
+                        block.projections.iter().map(|projection| &projection.expr),
+                        &schema, params, &arena_resources.control(),
+                    )?
+            } else {
+                false
+            };
             let mut initialize_expression = |expression: &ScalarExpr| {
                 expression_calls(
                     context,
@@ -129,8 +191,14 @@ fn initialize_root<S: Clone + Send + Sync + 'static>(
                     inputs::visit(context.planning, from, &mut initialize_expression)?;
                 }
             }
-            for expression in block.query_expressions() {
-                initialize_expression(expression)?;
+            if scan_projection {
+                for expression in block.scan_input_expressions() {
+                    initialize_expression(expression)?;
+                }
+            } else {
+                for expression in block.query_expressions() {
+                    initialize_expression(expression)?;
+                }
             }
             if let Some(from) = block
                 .from
@@ -150,7 +218,13 @@ fn initialize_root<S: Clone + Send + Sync + 'static>(
             ..
         } => {
             initialize(context, permissions, left, params, scope, outer)?;
-            initialize(context, permissions, right, params, scope, outer)?;
+            let step = match startup {
+                Startup::RecursiveUnion(name) | Startup::WorkTable(name) => {
+                    Startup::WorkTable(name)
+                }
+                Startup::Query => Startup::Query,
+            };
+            initialize_plan(context, permissions, right, params, scope, outer, step)?;
             for expression in order_by
                 .iter()
                 .map(|order| &order.expr)
