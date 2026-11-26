@@ -26,6 +26,7 @@ pub use production::{
 };
 pub(crate) use selection::resolve_table_function_binding_for_types_with_control;
 pub use types::table_function_column_types_with_control;
+pub(crate) use types::table_function_columns;
 
 mod column_definitions;
 pub use column_definitions::{
@@ -494,6 +495,7 @@ pub fn validate_table_function_alias_count(
     )
 }
 
+#[derive(Clone, Copy)]
 pub struct TableFunctionTypeRequest<'a> {
     pub name: &'a str,
     pub binding: Option<&'a FunctionBinding>,

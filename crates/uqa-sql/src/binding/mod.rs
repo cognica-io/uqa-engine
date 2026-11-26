@@ -43,7 +43,7 @@ mod scope;
 pub mod scoped_references;
 mod source_schemas;
 mod sources;
-pub use sources::bind_source_plan_schema_in_scope;
+pub use sources::{bind_source_plan_schema_in_scope, bind_table_function_result_schema};
 pub mod statements;
 mod type_resolution;
 mod variable_sites;

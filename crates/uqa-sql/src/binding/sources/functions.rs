@@ -17,6 +17,9 @@ use crate::{
 };
 use uqa_core::memory::{Produced, ProductionVec};
 
+mod result;
+pub use result::bind_table_function_result_schema;
+
 #[cfg(test)]
 mod tests;
 
@@ -322,7 +325,7 @@ impl SchemaScope {
     }
 
     fn function_result_schema(
-        &self,
+        &mut self,
         routines: &dyn RoutineResolution,
         source: FunctionSource<'_>,
         context: &FunctionInputs<'_>,
@@ -340,42 +343,25 @@ impl SchemaScope {
             output_name,
             ..
         } = source;
-        let FunctionInputs {
-            input,
-            params,
-            type_resolver,
-            ..
-        } = *context;
-        let resources = self.production.clone();
-        let control = resources.control();
-        let types = crate::semantics::table_function_column_types_with_control(
+        let qualifier = alias.as_deref().unwrap_or(output_name);
+        let schema = self.table_function_result(
             routines,
             TableFunctionTypeRequest {
                 name,
                 binding: binding.as_ref(),
                 args,
-                user_function: user_function.as_ref().map(|resolved| &**resolved.function),
+                user_function: user_function.map(|resolved| &**resolved.function),
                 user_invocation: user_function
-                    .as_ref()
                     .and_then(|resolved| resolved.binding.invocation.as_deref()),
                 declared_types: column_types,
                 columns,
                 ordinality: *ordinality,
             },
-            input,
-            params,
-            type_resolver,
-            &control,
-        )?;
-        let qualifier = alias.as_deref().unwrap_or(output_name);
-        let schema = RowSchema::with_column_metadata_with_control(
+            context,
             Some(qualifier),
-            columns
-                .iter()
-                .zip(types.iter())
-                .map(|(name, ty)| (name.as_str(), ty.as_ref(), None)),
-            &control,
         )?;
+        let resources = self.production.clone();
+        let control = resources.control();
         Ok(
             if user_function.is_none()
                 && !declared_host_columns
@@ -412,7 +398,7 @@ impl SchemaScope {
             .first()
             .ok_or_else(|| SQLError::Internal("ROWS FROM group has no functions".into()))?;
         let mut columns = ProductionVec::new(control);
-        let mut types = ProductionVec::new(control);
+        let mut fields = ProductionVec::new(control);
         let mut open = false;
         for function in functions {
             let member = function.copy_for_execution(&control)?;
@@ -423,18 +409,20 @@ impl SchemaScope {
                     control.copy_text(schema.public_name(position).unwrap_or(column))?,
                 )?;
             }
-            for ty in schema.column_types() {
-                types.push_produced(if open {
-                    control.finish(None, control.empty_reservation())?
+            for (position, ty) in schema.column_types().iter().enumerate() {
+                let (ty, memory) = if open {
+                    (None, control.empty_reservation())
                 } else {
-                    crate::plan::copy::copy_syntax_with_control(ty, &control)?
-                })?;
+                    crate::plan::copy::copy_syntax_with_control(ty, &control)?.into_parts()
+                };
+                let collation = ty.as_ref().and_then(|_| schema.column_collation(position));
+                fields.push_produced(control.finish((ty, collation), memory)?)?;
             }
         }
         if *ordinality {
             columns.push_produced(control.copy_text("ordinality")?)?;
-            types.push_produced(control.finish(
-                (!open).then_some(crate::ColumnType::BigInteger),
+            fields.push_produced(control.finish(
+                ((!open).then_some(crate::ColumnType::BigInteger), None),
                 control.empty_reservation(),
             )?)?;
         }
@@ -449,17 +437,15 @@ impl SchemaScope {
         }
         let schema = RowSchema::with_column_metadata_with_control(
             Some(qualifier),
-            columns
-                .iter()
-                .zip(types.iter())
-                .enumerate()
-                .map(|(position, (name, ty))| {
+            columns.iter().zip(fields.iter()).enumerate().map(
+                |(position, (name, (ty, collation)))| {
                     (
                         column_aliases.get(position).unwrap_or(name).as_str(),
                         ty.as_ref(),
-                        None,
+                        *collation,
                     )
-                }),
+                },
+            ),
             &control,
         )?;
         if open {

@@ -18,8 +18,13 @@ use uqa_core::memory::{Produced, ProductionControl, ProductionVec};
 
 mod metadata;
 
-pub(in crate::schema) type OutputColumn<'a> =
-    (&'a str, &'a ColumnIdentity, usize, Option<&'a ColumnType>);
+pub(in crate::schema) type OutputColumn<'a> = (
+    &'a str,
+    &'a ColumnIdentity,
+    usize,
+    Option<&'a ColumnType>,
+    Option<u32>,
+);
 pub(in crate::schema) type OutputAlias<'a> = (&'a ColumnIdentity, usize, Option<&'a ColumnType>);
 
 struct Layout<'a, 'c> {
@@ -112,13 +117,20 @@ impl<'a, 'c> Layout<'a, 'c> {
 pub(in crate::schema) fn physical<'a>(
     input: &'a RowSchema,
     columns: impl IntoIterator<Item = OutputColumn<'a>>,
-    aliases: impl IntoIterator<Item = OutputAlias<'a>>,
+    aliases: impl IntoIterator<
+        Item = (
+            &'a ColumnIdentity,
+            usize,
+            Option<&'a ColumnType>,
+            Option<u32>,
+        ),
+    >,
     physical_width: usize,
     control: &ProductionControl<'_>,
 ) -> Result<RowSchema, SQLError> {
     control.check()?;
     let mut layout = Layout::new(input, control)?;
-    for (label, identity, physical, ty) in columns {
+    for (label, identity, physical, ty, collation) in columns {
         control.check()?;
         let hidden = input
             .index
@@ -135,18 +147,16 @@ pub(in crate::schema) fn physical<'a>(
                 NULL_SLOT
             },
             ty,
-            input.inherited_physical_collation(physical),
+            collation,
             hidden,
         )?;
     }
     let mut selected = ProductionVec::new(*control);
-    for (identity, physical, ty) in aliases {
+    for (identity, physical, ty, collation) in aliases {
         control.check()?;
-        layout.collations.alias(
-            (identity.qualifier(), identity.column()),
-            input.inherited_physical_collation(physical),
-            ty,
-        )?;
+        layout
+            .collations
+            .alias((identity.qualifier(), identity.column()), collation, ty)?;
         selected.push_copy((
             identity,
             if physical < physical_width {

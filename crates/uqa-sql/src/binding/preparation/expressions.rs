@@ -706,7 +706,7 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
                 let schema = self.scalar_query_schema(*subquery, input, subqueries)?;
                 let mut result = ExpressionType::resolved(schema.column_type(0).cloned());
                 if let Some(oid) = schema.column_collation(0) {
-                    result.derivation = Derivation::implicit(i64::from(oid));
+                    result.derivation = Derivation::column(oid, result.ty.as_deref());
                 }
                 self.binary(BinaryOp::Equal, &mut value, &mut result)?;
                 self.reject_set_inputs(

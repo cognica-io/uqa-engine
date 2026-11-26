@@ -29,7 +29,7 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
         result.initial_collation =
             u32::try_from(result.derivation.oid()).expect("type collation OID");
         if let Some(oid) = schema.column_collation(0) {
-            result.derivation = Derivation::implicit(i64::from(oid));
+            result.derivation = Derivation::column(oid, result.ty.as_deref());
             result.initial_collation = oid;
         }
         result.record_fields = schema.record_fields(0).cloned();
@@ -290,7 +290,7 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
             )?;
         }
         if let Some(oid) = input.input_collation(expression) {
-            result.derivation = Derivation::implicit(i64::from(oid));
+            result.derivation = Derivation::column(oid, result.ty.as_deref());
             result.initial_collation = oid;
         }
         self.expression_record_fields(&mut result, expression, input, subqueries)?;
