@@ -175,6 +175,12 @@ fn source_with_catalog_entries() -> Engine {
     source.sql("CREATE VIEW saved_view AS SELECT id, row_number() OVER (ORDER BY id) AS position FROM saved_table; CREATE MATERIALIZED VIEW saved_materialized AS SELECT 'original 한글'::text AS body; GRANT SELECT(body) ON saved_materialized TO entry_0", &[]).unwrap();
     source.sql("CREATE FUNCTION saved_bound(a integer) RETURNS integer LANGUAGE SQL IMMUTABLE RETURN a + 7; CREATE TABLE saved_audit(id integer); CREATE RULE saved_rule AS ON UPDATE TO saved_table WHERE NEW.id > OLD.id DO ALSO INSERT INTO saved_audit VALUES(NEW.id)", &[]).unwrap();
     source
+        .sql(
+            "ALTER DEFAULT PRIVILEGES GRANT SELECT ON TABLES TO entry_0",
+            &[],
+        )
+        .unwrap();
+    source
         .save_scoring_params("signal", "{ \"x\": 1.00, \"x\": 2 }")
         .unwrap();
     source
@@ -289,6 +295,7 @@ fn repository_catalog_steps_retire_original_input_between_entries() {
 
 #[test]
 fn repository_catalog_decoder_obeys_the_current_call_byte_window() {
+    use uqa_storage::backup::{MEMORY_IMAGE_CATALOG_COUNT, MEMORY_IMAGE_TABLE_METADATA_COUNT};
     let directory = tempfile::tempdir().unwrap();
     let repository = repository(&directory.path().join("repository"));
     let source = source_with_catalog_entries();
@@ -297,15 +304,20 @@ fn repository_catalog_decoder_obeys_the_current_call_byte_window() {
     drop(source);
     let control = StorageReadControl::with_limit(32 << 20);
     let mut input = input(&repository, root, &control);
-    let mut calls = [0_u64; 34];
-    let mut lengths = [0_u64; 34];
+    let catalog_slots = usize::from(MEMORY_IMAGE_CATALOG_COUNT);
+    let mut calls = vec![0_u64; catalog_slots + usize::from(MEMORY_IMAGE_TABLE_METADATA_COUNT)];
+    let mut lengths = vec![0_u64; calls.len()];
     let component = |address: &DecodedMemoryImageAddress| match address {
-        DecodedMemoryImageAddress::Catalog(slot @ 1..=24) => Some(usize::from(*slot) - 1),
+        DecodedMemoryImageAddress::Catalog(slot @ 1..=MEMORY_IMAGE_CATALOG_COUNT) => {
+            Some(usize::from(*slot) - 1)
+        }
         DecodedMemoryImageAddress::Table {
             relation,
-            unit: DecodedMemoryTableUnit::Metadata(slot @ 0..=9),
+            unit: DecodedMemoryTableUnit::Metadata(slot),
             ..
-        } if &**relation == "saved_table" => Some(24 + usize::from(*slot)),
+        } if &**relation == "saved_table" && *slot < MEMORY_IMAGE_TABLE_METADATA_COUNT => {
+            Some(catalog_slots + usize::from(*slot))
+        }
         _ => None,
     };
     let state = loop {
@@ -365,6 +377,7 @@ fn check_restored_table_values(restored: &Engine) {
         Value::Int(0)
     );
     restored.sql("CREATE TABLE domain_after_restore(value saved_domain); INSERT INTO domain_after_restore DEFAULT VALUES", &[]).unwrap();
+    assert_eq!(restored.sql("SELECT has_table_privilege('entry_0', 'domain_after_restore', 'SELECT') AS allowed", &[]).unwrap().rows[0]["allowed"], Value::Bool(true));
     assert_eq!(
         restored
             .sql("SELECT value FROM domain_after_restore", &[])
