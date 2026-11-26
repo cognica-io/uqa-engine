@@ -522,7 +522,7 @@ fn stored_views_retain_recursive_controls_and_materialization_policy_after_reope
 #[case::redb(3)]
 fn recursive_consumer_demand_and_work_table_initialization(#[case] provider: usize) {
     let directory = tempfile::tempdir().unwrap();
-    let engine = crate::pg18_oracle::open(provider, &directory.path().join("recursive.db"));
+    let engine = crate::open_test_provider(provider, &directory.path().join("recursive.db"));
     crate::pg18_oracle::verify(
         &engine,
         include_str!(concat!(

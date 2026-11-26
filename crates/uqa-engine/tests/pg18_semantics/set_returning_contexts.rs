@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use crate::pg18_oracle::open;
+use crate::open_test_provider as open;
 
 #[rstest::rstest]
 #[case::memory(0)]
