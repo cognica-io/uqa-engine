@@ -233,6 +233,10 @@ pub fn convert_value_to_column_type_with_control(
                 cast_value_from_with_control(&value, name, None, control)
             }
         }
+        ColumnType::Pseudo(pseudo) => Err(SQLError::TypeMismatch(format!(
+            "cannot store a value of type {}",
+            pseudo.name()
+        ))),
         ColumnType::AnyArray => {
             if value.array_view().is_some() {
                 Ok(value)

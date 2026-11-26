@@ -99,7 +99,7 @@ pub(super) fn sql_type_name(ty: &ColumnType) -> String {
         ColumnType::Varchar(None) => "character varying".into(),
         ColumnType::Bpchar => "character".into(),
         ColumnType::Character(length) => format!("character({length})"),
-        ColumnType::Bit(_) | ColumnType::VarBit(_) => ty.sql_name(),
+        ColumnType::Bit(_) | ColumnType::VarBit(_) | ColumnType::Pseudo(_) => ty.sql_name(),
         ColumnType::Real => "real".into(),
         ColumnType::DoublePrecision => "double precision".into(),
         ColumnType::Numeric { precision, scale } => match (precision, scale) {
@@ -206,6 +206,18 @@ pub(super) fn foreign_table_options_display(
 mod tests {
     use super::sql_type_name;
     use uqa_sql::ColumnType;
+
+    #[test]
+    fn expression_pseudo_type_names_preserve_sql_identifier_quoting() {
+        use uqa_sql::ast::ExpressionPseudoType::{Any, AnyElement, Unknown};
+        for (ty, name) in [
+            (Unknown, "unknown"),
+            (Any, "\"any\""),
+            (AnyElement, "anyelement"),
+        ] {
+            assert_eq!(sql_type_name(&ColumnType::Pseudo(ty)), name);
+        }
+    }
 
     #[test]
     fn refcursor_type_names_match_postgresql() {

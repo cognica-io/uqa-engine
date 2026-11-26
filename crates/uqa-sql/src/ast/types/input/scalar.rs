@@ -7,6 +7,25 @@
 use super::{invalid, ColumnType, InputError};
 use crate::ast::{IntervalFields, RangeAlignment, RangeSubtype};
 
+pub(super) fn pseudo(name: &str) -> Result<crate::ast::ExpressionPseudoType, InputError> {
+    use crate::ast::ExpressionPseudoType as P;
+    Ok(match name {
+        "Unknown" => P::Unknown,
+        "Any" => P::Any,
+        "AnyElement" => P::AnyElement,
+        "AnyNonArray" => P::AnyNonArray,
+        "AnyEnum" => P::AnyEnum,
+        "AnyRange" => P::AnyRange,
+        "AnyMultiRange" => P::AnyMultiRange,
+        "AnyCompatibleMultiRange" => P::AnyCompatibleMultiRange,
+        "AnyCompatible" => P::AnyCompatible,
+        "AnyCompatibleArray" => P::AnyCompatibleArray,
+        "AnyCompatibleNonArray" => P::AnyCompatibleNonArray,
+        "AnyCompatibleRange" => P::AnyCompatibleRange,
+        _ => return Err(invalid()),
+    })
+}
+
 pub(super) fn column(tag: &str) -> Option<ColumnType> {
     Some(match tag {
         "SmallInteger" => ColumnType::SmallInteger,

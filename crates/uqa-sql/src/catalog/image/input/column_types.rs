@@ -88,6 +88,13 @@ impl Fields<'_> {
             TypeTag::Int2Vector => ColumnType::Int2Vector,
             TypeTag::OidVector => ColumnType::OidVector,
             TypeTag::AnyArray => ColumnType::AnyArray,
+            TypeTag::Pseudo => {
+                let oid = u32::from_le_bytes(self.binary.array().await?);
+                ColumnType::Pseudo(
+                    crate::ast::ExpressionPseudoType::from_oid(oid)
+                        .ok_or_else(|| invalid("expression pseudo-type OID"))?,
+                )
+            }
             TypeTag::Record => ColumnType::Record,
             TypeTag::Date => ColumnType::Date,
             TypeTag::Time => ColumnType::Time,

@@ -115,6 +115,7 @@ pub fn pg_type_oid(ty: &ColumnType) -> i64 {
         ColumnType::Int2Vector => 22,
         ColumnType::OidVector => 30,
         ColumnType::AnyArray => 2277,
+        ColumnType::Pseudo(pseudo) => i64::from(*pseudo as u32),
         ColumnType::Record => 2249,
         ColumnType::Range(subtype) => match subtype {
             RangeSubtype::Integer => 3904,
@@ -156,26 +157,34 @@ pub fn pg_type_oid(ty: &ColumnType) -> i64 {
     }
 }
 
+use crate::ast::ExpressionPseudoType as P;
+
 const ROUTINE_PSEUDO_TYPES: &[(&str, i64)] = &[
     ("record", 2249),
     ("cstring", 2275),
-    ("any", 2276),
+    (P::Any.name(), P::Any as i64),
     ("anyarray", 2277),
     ("void", 2278),
     ("trigger", 2279),
     ("internal", 2281),
     ("fdw_handler", 3115),
-    ("anyelement", 2283),
-    ("anynonarray", 2776),
-    ("anyenum", 3500),
-    ("anyrange", 3831),
+    (P::AnyElement.name(), P::AnyElement as i64),
+    (P::AnyNonArray.name(), P::AnyNonArray as i64),
+    (P::AnyEnum.name(), P::AnyEnum as i64),
+    (P::AnyRange.name(), P::AnyRange as i64),
     ("event_trigger", 3838),
-    ("anymultirange", 4537),
-    ("anycompatiblemultirange", 4538),
-    ("anycompatible", 5077),
-    ("anycompatiblearray", 5078),
-    ("anycompatiblenonarray", 5079),
-    ("anycompatiblerange", 5080),
+    (P::AnyMultiRange.name(), P::AnyMultiRange as i64),
+    (
+        P::AnyCompatibleMultiRange.name(),
+        P::AnyCompatibleMultiRange as i64,
+    ),
+    (P::AnyCompatible.name(), P::AnyCompatible as i64),
+    (P::AnyCompatibleArray.name(), P::AnyCompatibleArray as i64),
+    (
+        P::AnyCompatibleNonArray.name(),
+        P::AnyCompatibleNonArray as i64,
+    ),
+    (P::AnyCompatibleRange.name(), P::AnyCompatibleRange as i64),
 ];
 
 /// The declared pseudo-type spelling for a `PostgreSQL` catalog routine signature.
@@ -279,6 +288,15 @@ pub fn pg_type_len(ty: &ColumnType) -> i64 {
         ColumnType::Named(name) => {
             unreachable!("unresolved declaration type {name} reached catalog projection")
         }
+        ColumnType::Pseudo(P::Unknown) => -2,
+        ColumnType::Pseudo(
+            P::AnyRange
+            | P::AnyMultiRange
+            | P::AnyCompatibleArray
+            | P::AnyCompatibleRange
+            | P::AnyCompatibleMultiRange,
+        ) => -1,
+        ColumnType::Pseudo(_) => 4,
         ColumnType::SmallInteger => 2,
         ColumnType::Void
         | ColumnType::Integer
@@ -314,6 +332,9 @@ pub fn pg_type_len(ty: &ColumnType) -> i64 {
 }
 
 pub fn pg_type_by_value(ty: &ColumnType) -> bool {
+    if matches!(ty, ColumnType::Pseudo(_)) {
+        return pg_type_len(ty) == 4;
+    }
     matches!(
         ty,
         ColumnType::SmallInteger
@@ -345,6 +366,9 @@ pub fn pg_type_by_value(ty: &ColumnType) -> bool {
 
 pub fn pg_type_align(ty: &ColumnType) -> &'static str {
     match ty {
+        ColumnType::Pseudo(P::Unknown) => "c",
+        ColumnType::Pseudo(_) if pg_type_len(ty) == -1 => "d",
+
         ColumnType::DeclaredRange(reference) | ColumnType::DeclaredMultirange(reference) => {
             reference.alignment.catalog_name()
         }
@@ -383,6 +407,8 @@ pub fn pg_type_align(ty: &ColumnType) -> &'static str {
 
 pub fn pg_type_storage(ty: &ColumnType) -> &'static str {
     match ty {
+        ColumnType::Pseudo(_) if pg_type_len(ty) == -1 => "x",
+
         ColumnType::Named(name) => {
             unreachable!("unresolved declaration type {name} reached catalog projection")
         }
@@ -453,7 +479,7 @@ pub fn pg_type_array_oid(ty: &ColumnType) -> i64 {
         ColumnType::AclItem => 1034,
         ColumnType::Int2Vector => 1006,
         ColumnType::OidVector => 1013,
-        ColumnType::AnyArray => 0,
+        ColumnType::AnyArray | ColumnType::Pseudo(_) => 0,
         ColumnType::Record => 2287,
         ColumnType::Date => 1182,
         ColumnType::Time | ColumnType::TimePrecision(_) => 1183,
@@ -515,6 +541,23 @@ pub fn pg_type_collation_oid(ty: &ColumnType) -> i64 {
         .flatten()
         .next()
         .expect("a type has a collation OID")
+}
+
+fn pseudo_routine_oids(pseudo: P) -> PgTypeRoutineOids {
+    match pseudo {
+        P::Unknown => PgTypeRoutineOids::new(109, 110, 2416, 2417),
+        P::Any => PgTypeRoutineOids::new(2294, 2295, 0, 0),
+        P::AnyElement => PgTypeRoutineOids::new(2312, 2313, 0, 0),
+        P::AnyNonArray => PgTypeRoutineOids::new(2777, 2778, 0, 0),
+        P::AnyEnum => PgTypeRoutineOids::new(3504, 3505, 0, 0),
+        P::AnyRange => PgTypeRoutineOids::new(3832, 3833, 0, 0),
+        P::AnyMultiRange => PgTypeRoutineOids::new(4229, 4230, 0, 0),
+        P::AnyCompatibleMultiRange => PgTypeRoutineOids::new(4226, 4227, 0, 0),
+        P::AnyCompatible => PgTypeRoutineOids::new(5086, 5087, 0, 0),
+        P::AnyCompatibleArray => PgTypeRoutineOids::new(5088, 5089, 5090, 5091),
+        P::AnyCompatibleNonArray => PgTypeRoutineOids::new(5092, 5093, 0, 0),
+        P::AnyCompatibleRange => PgTypeRoutineOids::new(5094, 5095, 0, 0),
+    }
 }
 
 /// Each array element or legacy domain base is one inherited collation lookup.
@@ -697,6 +740,7 @@ pub fn pg_type_routine_oids(ty: &ColumnType) -> PgTypeRoutineOids {
         }
         ColumnType::Regtype => PgTypeRoutineOids::new(2220, 2221, 2454, 2455),
         ColumnType::AnyArray => PgTypeRoutineOids::new(2296, 2297, 2502, 2503),
+        ColumnType::Pseudo(pseudo) => pseudo_routine_oids(*pseudo),
         ColumnType::Record => PgTypeRoutineOids::new(2290, 2291, 2402, 2403),
         ColumnType::Uuid => PgTypeRoutineOids::new(2952, 2953, 2961, 2962),
         ColumnType::JsonB => PgTypeRoutineOids::new(3806, 3804, 3805, 3803),
@@ -761,6 +805,7 @@ pub fn column_type_name(ty: &ColumnType) -> &str {
         ColumnType::Int2Vector => "int2vector",
         ColumnType::OidVector => "oidvector",
         ColumnType::AnyArray => "anyarray",
+        ColumnType::Pseudo(pseudo) => pseudo.name(),
         ColumnType::Record => "record",
         ColumnType::Array(_) => "array",
         ColumnType::Date => "date",

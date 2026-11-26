@@ -395,6 +395,11 @@ impl OwnedBinder<'_> {
         mut expression: OwnedScalarExpr,
     ) -> Result<OwnedScalarExpr, SQLError> {
         let control = &self.context.control;
+        if let ScalarExpr::Cast { expr, ty, .. } = &*expression {
+            if self.context.cast_preserves_operand(ty, expr)? {
+                return self.bind(expression.select_child(0));
+            }
+        }
         expression = expression.map_child_with_parent(0, control, |parent, child| {
             let ScalarExpr::Cast { ty, .. } = parent else {
                 unreachable!()

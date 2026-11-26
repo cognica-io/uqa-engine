@@ -377,6 +377,8 @@ WHERE payload IS NOT NULL;
 
 ## Casts and type inspection
 
+An explicit cast to `"any"`, `anyelement` or `anycompatible` preserves the operand’s type, including a domain. The non-array variants also preserve the operand but reject array inputs. For example, `pg_typeof(NULL::anyelement)` returns `unknown`, while `pg_typeof(NULL::anyarray)` returns `anyarray`. An unknown string or NULL projected directly by `SELECT` resolves to `text`. Pseudo-type names follow the normal schema search path. A stored table column requires a concrete type.
+
 Use either cast syntax:
 
 ```sql

@@ -288,6 +288,10 @@ pub fn sql_column_type_to_fdw(column_type: &ColumnType) -> ForeignColumnType {
         ColumnType::Int2Vector => ForeignColumnType::Int2Vector,
         ColumnType::OidVector => ForeignColumnType::OidVector,
         ColumnType::AnyArray => ForeignColumnType::AnyArray,
+        ColumnType::Pseudo(pseudo) => unreachable!(
+            "expression pseudo-type {} reached foreign-table projection",
+            pseudo.name()
+        ),
         ColumnType::Record => ForeignColumnType::Record,
         ColumnType::Vector(dimension) => ForeignColumnType::Vector(*dimension),
         ColumnType::Tensor(dimension) => ForeignColumnType::Tensor(*dimension),

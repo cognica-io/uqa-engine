@@ -155,7 +155,7 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
             .combine(Derivation::implicit(i64::from(collation)));
         result.initial_collation = collation;
         if sql_unknown {
-            result.mark_unknown_field();
+            result.mark_unknown_expression();
         }
         Ok(Some(result))
     }

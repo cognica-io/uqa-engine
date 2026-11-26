@@ -34,7 +34,6 @@ fn physical_projection_keeps_only_live_expression_and_schema_owners() {
         owned_physical_projection(
             owned_projection_column("payload", &control)?,
             &expression,
-            true,
             &control,
         )
     };
@@ -78,7 +77,6 @@ fn physical_projection_rejects_before_copying_and_consumes_cancelled_inputs() {
         owned_physical_projection(
             owned_projection_column("payload", &control)?,
             &expression,
-            true,
             &control,
         )
     };
@@ -162,7 +160,6 @@ fn physical_projection_collects_then_binds_all_inputs_before_layout_type_observa
         owned_physical_projection(
             owned_projection_column("value", &control)?,
             &ScalarExpr::Literal(Value::Int(value)),
-            false,
             &control,
         )
     };

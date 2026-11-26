@@ -73,7 +73,9 @@ pub fn resolve_catalog_column_type_with_control(
         );
     }
     if type_name.starts_with("pg_catalog.") || type_name.starts_with("\"pg_catalog\".") {
-        if let Some(ty) = optional(ColumnType::from_sql_name_with_control(type_name, control))? {
+        if let Some(ty) = optional(ColumnType::from_expression_type_name_with_control(
+            type_name, control,
+        ))? {
             return Ok(Some(ty));
         }
     }
@@ -101,16 +103,23 @@ fn resolve_parsed(
     for schema in names.iter() {
         control.check()?;
         if schema == "pg_catalog" {
-            let builtin =
-                if uqa_sql::catalog::type_metadata::builtin_scalar_type_by_name(local).is_some() {
-                    true
-                } else {
-                    let local = uqa_sql::expr::quote_ident_with_control(local, control)?;
-                    let qualified = control.format(format_args!("pg_catalog.{}", &**local))?;
-                    optional(ColumnType::from_sql_name_with_control(&qualified, control))?.is_some()
-                };
+            let builtin = if uqa_sql::catalog::type_metadata::builtin_scalar_type_by_name(local)
+                .is_some()
+                || uqa_sql::ast::ExpressionPseudoType::from_name(local).is_some()
+            {
+                true
+            } else {
+                let local = uqa_sql::expr::quote_ident_with_control(local, control)?;
+                let qualified = control.format(format_args!("pg_catalog.{}", &**local))?;
+                optional(ColumnType::from_expression_type_name_with_control(
+                    &qualified, control,
+                ))?
+                .is_some()
+            };
             if builtin {
-                return optional(ColumnType::from_sql_name_with_control(type_name, control));
+                return optional(ColumnType::from_expression_type_name_with_control(
+                    type_name, control,
+                ));
             }
         }
         for shell in catalog.shells() {
@@ -180,9 +189,12 @@ pub fn resolve_catalog_column_type_name_with_control(
     let parsed = uqa_sql::parse_regtype_name_with_control(type_name, control)?;
     if let Some(parsed) = parsed.as_ref().filter(|parsed| parsed.has_type_modifiers) {
         let name = quoted_name(parsed, control)?;
-        if resolve_catalog_column_type_with_control(context, &name, control)?
-            .is_some_and(|ty| matches!(*ty, ColumnType::Domain { .. }))
-        {
+        if resolve_catalog_column_type_with_control(context, &name, control)?.is_some_and(|ty| {
+            matches!(
+                *ty,
+                ColumnType::Domain { .. } | ColumnType::AnyArray | ColumnType::Pseudo(_)
+            )
+        }) {
             return Err(routine(
                 "42601",
                 format_args!(

@@ -76,6 +76,8 @@ fn structured_type_images_reject_invalid_nested_tags_options_and_field_masks() {
     let prefix = &image[..image.len() - 1];
     for node in [
         &[44, 255][..],
+        &[59, 23, 0, 0, 0],
+        &[59, 255, 255, 255, 255],
         &[39, 2],
         &[41, 0, 2],
         &[49, 0, 0, 0],

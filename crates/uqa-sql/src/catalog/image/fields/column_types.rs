@@ -51,6 +51,10 @@ impl<'a> Fields<'a> {
             ColumnType::Int2Vector => self.scalar([TypeTag::Int2Vector as u8]),
             ColumnType::OidVector => self.scalar([TypeTag::OidVector as u8]),
             ColumnType::AnyArray => self.scalar([TypeTag::AnyArray as u8]),
+            ColumnType::Pseudo(pseudo) => {
+                self.scalar([TypeTag::Pseudo as u8]);
+                self.scalar((*pseudo as u32).to_le_bytes());
+            }
             ColumnType::Record => self.scalar([TypeTag::Record as u8]),
             ColumnType::Date => self.scalar([TypeTag::Date as u8]),
             ColumnType::Time => self.scalar([TypeTag::Time as u8]),
