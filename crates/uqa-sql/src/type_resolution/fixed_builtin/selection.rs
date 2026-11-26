@@ -21,6 +21,7 @@ pub(super) fn resolve_overload_with_control(
     argument_names: &[Option<String>],
     argument_types: &[Option<ColumnType>],
     explicit_variadic: bool,
+    resolver: Option<&dyn super::FunctionTypeResolver>,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<ResolvedFunctionOverload>, SQLError> {
     let selected = select_with_control(
@@ -35,7 +36,7 @@ pub(super) fn resolve_overload_with_control(
     let return_type = super::selected_return_type(
         &selected.declaration.return_type,
         argument_types,
-        None,
+        resolver,
         control,
     )?;
     let mut types = ProductionVec::new(*control);

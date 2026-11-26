@@ -39,6 +39,17 @@
     {"sql":"CREATE TABLE un_docs(v tsvector)","command_tags":["CREATE TABLE"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}],"notices":[]},
     {"sql":"INSERT INTO un_docs VALUES ('b:2A a')","command_tags":["INSERT 0 1"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}],"notices":[]},
     {"sql":"CREATE VIEW un_stored AS SELECT u.* FROM un_docs d, unnest(d.v) u","command_tags":["CREATE VIEW"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}],"notices":[]},
-    {"sql":"SELECT * FROM un_stored ORDER BY lexeme","command_tags":["SELECT 2"],"error":null,"results":[{"columns":["lexeme","positions","weights"],"type_oids":[25,1005,1009],"rows":[["a",null,null],["b","{2}","{A}"]]}],"notices":[]}
+    {"sql":"SELECT * FROM un_stored ORDER BY lexeme","command_tags":["SELECT 2"],"error":null,"results":[{"columns":["lexeme","positions","weights"],"type_oids":[25,1005,1009],"rows":[["a",null,null],["b","{2}","{A}"]]}],"notices":[]},
+    {"sql":"SELECT ('ab:4D,4A,2b ab:3,1C')::tsvector::text AS value","command_tags":["SELECT 1"],"error":null,"results":[{"columns":["value"],"type_oids":[25],"rows":[["'ab':1C,2B,3,4A"]]}],"notices":[]},
+    {"sql":"SELECT ('z:1D,16383D,16383A')::tsvector::text AS value","command_tags":["SELECT 1"],"error":null,"results":[{"columns":["value"],"type_oids":[25],"rows":[["'z':1,16383"]]}],"notices":[]},
+    {"sql":"SELECT ('z:1D,16383A,16383D')::tsvector::text AS value","command_tags":["SELECT 1"],"error":null,"results":[{"columns":["value"],"type_oids":[25],"rows":[["'z':1,16383A"]]}],"notices":[]},
+    {"sql":"SELECT ('z:16383D,16383A')::tsvector::text AS value","command_tags":["SELECT 1"],"error":null,"results":[{"columns":["value"],"type_oids":[25],"rows":[["'z':16383A"]]}],"notices":[]},
+    {"sql":"SELECT ('a:2147483648')::tsvector::text AS value","command_tags":[],"error":{"sqlstate":"42601","message":"wrong position info in tsvector: \"a:2147483648\"","detail":null,"hint":null},"results":[],"notices":[]},
+    {"sql":"SELECT ('a:4294967296')::tsvector::text AS value","command_tags":[],"error":{"sqlstate":"42601","message":"wrong position info in tsvector: \"a:4294967296\"","detail":null,"hint":null},"results":[],"notices":[]},
+    {"sql":"SELECT ('a:999999999999999999999999')::tsvector::text AS value","command_tags":["SELECT 1"],"error":null,"results":[{"columns":["value"],"type_oids":[25],"rows":[["'a':16383"]]}],"notices":[]},
+    {"sql":"SELECT ('a:2az')::tsvector::text AS value","command_tags":[],"error":{"sqlstate":"42601","message":"syntax error in tsvector: \"a:2az\"","detail":null,"hint":null},"results":[],"notices":[]},
+    {"sql":"SELECT ('x:1dD1')::tsvector::text AS value","command_tags":["SELECT 1"],"error":null,"results":[{"columns":["value"],"type_oids":[25],"rows":[["'x':1"]]}],"notices":[]},
+    {"sql":"SELECT ('ab '''' c')::tsvector::text AS value","command_tags":[],"error":{"sqlstate":"42601","message":"syntax error in tsvector: \"ab '' c\"","detail":null,"hint":null},"results":[],"notices":[]},
+    {"sql":"SELECT ('z:8 ''a b'':1b')::tsvector::text AS value","command_tags":["SELECT 1"],"error":null,"results":[{"columns":["value"],"type_oids":[25],"rows":[["'a b':1B 'z':8"]]}],"notices":[]}
   ]
 }

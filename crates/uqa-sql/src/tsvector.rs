@@ -78,13 +78,16 @@ impl Input<'_> {
         if !self.chars.peek().is_some_and(char::is_ascii_digit) {
             return Err(self.syntax());
         }
-        let mut position = 0_u32;
+        let mut position = 0_i64;
         while let Some(c) = self.chars.next_if(char::is_ascii_digit) {
             control.check()?;
             position = position
                 .saturating_mul(10)
-                .saturating_add(c as u32 - '0' as u32);
+                .saturating_add(i64::from(c as u32 - '0' as u32));
         }
+        // The backend reads a decimal C long, narrows it to int, clamps at 16383, then writes the low 14 position bits.
+        let [a, b, c, d, ..] = position.to_le_bytes();
+        let position = (i32::from_le_bytes([a, b, c, d]).min(16383) & 0x3fff) as u16;
         if position == 0 {
             return Err(error(
                 "42601",
@@ -108,7 +111,7 @@ impl Input<'_> {
                 _ => return Err(self.syntax()),
             };
         }
-        Ok((position.min(16383) as u16, weight))
+        Ok((position, weight))
     }
 }
 
@@ -141,6 +144,7 @@ pub fn parse(
     };
     let mut entries = ProductionVec::new(*control);
     let mut raw_bytes = 0;
+    control.check()?;
     while let Some(first) = input.chars.next() {
         control.check()?;
         if space(first) {
@@ -172,7 +176,11 @@ pub fn parse(
         )?)?;
     }
     let (mut entries, _entry_memory) = entries.finish()?.into_parts();
-    entries.sort_unstable_by(|a, b| a.text.cmp(&b.text));
+    uqa_core::ordering::sort_by_with_control(
+        &mut entries,
+        &mut || control.check(),
+        |left, right, _| Ok(left.text.cmp(&right.text)),
+    )?;
     let mut output = ProductionVec::new(*control);
     let mut bytes = 0usize;
     for words in entries.chunk_by(|a, b| a.text == b.text) {
@@ -180,15 +188,29 @@ pub fn parse(
         let mut ordered = ProductionVec::new(*control);
         for word in words {
             for &position in &word.positions {
-                ordered.push_copy(position)?;
+                ordered.push_copy((position.0, ordered.len(), position.1))?;
             }
         }
-        ordered
-            .as_mut_slice()
-            .sort_unstable_by_key(|&(position, weight)| (position, std::cmp::Reverse(weight)));
+        uqa_core::ordering::sort_by_with_control(
+            ordered.as_mut_slice(),
+            &mut || control.check(),
+            |&(left, left_order, _), &(right, right_order, _), _| {
+                Ok((left, left_order).cmp(&(right, right_order)))
+            },
+        )?;
         let mut positions = ProductionVec::new(*control);
-        for same in ordered.chunk_by(|a, b| a.0 == b.0).take(256) {
-            positions.push_copy(same[0])?;
+        for same in ordered.chunk_by(|a, b| a.0 == b.0) {
+            let (position, _, mut weight) = same[0];
+            // uniquePos stops immediately on reaching the last representable entry. Only preceding groups consume every duplicate weight.
+            if !positions.is_empty() && (position == 16383 || positions.len() == 255) {
+                positions.push_copy((position, weight))?;
+                break;
+            }
+            for &(_, _, other) in &same[1..] {
+                control.check()?;
+                weight = weight.max(other);
+            }
+            positions.push_copy((position, weight))?;
         }
         let (text, text_memory) = control.copy_text(&words[0].text)?.into_parts();
         let (positions, position_memory) = positions.finish()?.into_parts();
