@@ -142,71 +142,7 @@ fn initialize_root<S: Clone + Send + Sync + 'static>(
 ) -> Result<(), SQLError> {
     match root {
         RelationalPlan::QueryBlock(block) => {
-            let schema = block.from.as_ref().map_or_else(
-                || Ok(RowSchema::default()),
-                |source| {
-                    bind_source_plan_schema(
-                        context.ctes.routines,
-                        source,
-                        params,
-                        scope,
-                        outer,
-                        &context.ctes.production_resources()?.control(),
-                    )
-                },
-            )?;
-            let schema = uqa_sql::binding::overlay_outer_schema(&schema, outer);
-            let arena_resources = context.ctes.production_resources()?;
-            scope.scalar_subqueries = uqa_sql::plan::RetainedQueryArena::capture(
-                &block.subqueries,
-                &arena_resources.control(),
-            )?;
-            if let Some(from) = &block.from {
-                super::ensure_select_privileges_for_query_block(block, from, scope)?;
-            }
-            generated_calls(context, permissions, block, params, scope)?;
-            let scan_projection = if let Startup::WorkTable(name) = startup {
-                context.planning.work_table_projection(block, name) &&
-                    !uqa_sql::semantics::sets::validation::expressions_may_return_set_with_control(
-                        context.relational.catalog, context.relational.expression_scope(scope)?.as_ref(),
-                        block.projections.iter().map(|projection| &projection.expr),
-                        &schema, params, &arena_resources.control(),
-                    )?
-            } else {
-                false
-            };
-            let mut initialize_expression = |expression: &ScalarExpr| {
-                expression_calls(
-                    context,
-                    permissions,
-                    expression,
-                    &schema,
-                    &block.subqueries,
-                    params,
-                    scope,
-                )
-            };
-            if !context.planning.block_input_is_empty(block) {
-                if let Some(from) = &block.from {
-                    inputs::visit(context.planning, from, &mut initialize_expression)?;
-                }
-            }
-            if scan_projection {
-                for expression in block.scan_input_expressions() {
-                    initialize_expression(expression)?;
-                }
-            } else {
-                for expression in block.query_expressions() {
-                    initialize_expression(expression)?;
-                }
-            }
-            if let Some(from) = block
-                .from
-                .as_ref()
-                .filter(|_| !context.planning.block_input_is_empty(block))
-            {
-                source_calls(context, permissions, from, params, scope, Some(&schema))?;
-            }
+            initialize_block(context, permissions, block, params, scope, outer, startup)?;
         }
         RelationalPlan::SetOp {
             left,
@@ -255,6 +191,86 @@ fn initialize_root<S: Clone + Send + Sync + 'static>(
                 )?;
             }
         }
+    }
+    Ok(())
+}
+
+fn initialize_block<S: Clone + Send + Sync + 'static>(
+    context: &SourceContext<'_, S>,
+    permissions: &BuiltinRoutinePermissions,
+    block: &uqa_sql::plan::QueryBlockPlan,
+    params: &[SQLParam],
+    scope: &mut CteScope<S>,
+    outer: Option<&RowSchema>,
+    startup: Startup<'_>,
+) -> Result<(), SQLError> {
+    let schema = block.from.as_ref().map_or_else(
+        || Ok(RowSchema::default()),
+        |source| {
+            bind_source_plan_schema(
+                context.ctes.routines,
+                source,
+                params,
+                scope,
+                outer,
+                &context.ctes.production_resources()?.control(),
+            )
+        },
+    )?;
+    let schema = uqa_sql::binding::overlay_outer_schema(&schema, outer);
+    let arena_resources = context.ctes.production_resources()?;
+    scope.scalar_subqueries =
+        uqa_sql::plan::RetainedQueryArena::capture(&block.subqueries, &arena_resources.control())?;
+    if let Some(from) = &block.from {
+        super::ensure_select_privileges_for_query_block(block, from, scope)?;
+    }
+    generated_calls(context, permissions, block, params, scope)?;
+    let scan_projection = if let Startup::WorkTable(name) = startup {
+        context
+            .planning
+            .work_table_projection(block, name, &arena_resources.control())?
+            && !uqa_sql::semantics::sets::validation::expressions_may_return_set_with_control(
+                context.relational.catalog,
+                context.relational.expression_scope(scope)?.as_ref(),
+                block.projections.iter().map(|projection| &projection.expr),
+                &schema,
+                params,
+                &arena_resources.control(),
+            )?
+    } else {
+        false
+    };
+    let mut initialize_expression = |expression: &ScalarExpr| {
+        expression_calls(
+            context,
+            permissions,
+            expression,
+            &schema,
+            &block.subqueries,
+            params,
+            scope,
+        )
+    };
+    if !context.planning.block_input_is_empty(block) {
+        if let Some(from) = &block.from {
+            inputs::visit(context.planning, from, &mut initialize_expression)?;
+        }
+    }
+    if scan_projection {
+        for expression in block.scan_input_expressions() {
+            initialize_expression(expression)?;
+        }
+    } else {
+        for expression in block.query_expressions() {
+            initialize_expression(expression)?;
+        }
+    }
+    if let Some(from) = block
+        .from
+        .as_ref()
+        .filter(|_| !context.planning.block_input_is_empty(block))
+    {
+        source_calls(context, permissions, from, params, scope, Some(&schema))?;
     }
     Ok(())
 }
