@@ -46,6 +46,7 @@ pub struct ForeignCatalogRemovalContext<'a> {
 pub type ForeignServerRemovalContext<'a> = ForeignCatalogRemovalContext<'a>;
 
 pub struct ForeignServerRemovalPublication<'a> {
+    pub locks: &'a dyn SharedObjectLockSession,
     pub registry: &'a dyn ForeignCreationRegistry,
     pub catalog: Option<&'a dyn CatalogFacade>,
     pub changes: &'a dyn CatalogPublicationChanges,
@@ -144,15 +145,19 @@ impl ForeignCatalogRemovalContext<'_> {
 impl ForeignServerRemovalPublication<'_> {
     /// The dependency plan has removed every dependent and retains this server's object lock; do not reauthorize those dependents against the invoking role.
     pub fn remove(&self, name: &str, object_id: [u8; 16]) -> Result<(), SQLError> {
-        let mut next = self.registry.servers().clone();
-        if next
+        let tuple = self
+            .registry
+            .servers()
             .get(name)
-            .is_none_or(|server| server.metadata.object_id != object_id)
-        {
-            return Err(SQLError::Internal(format!(
-                "foreign server `{name}` changed before catalog removal"
-            )));
-        }
+            .filter(|server| server.metadata.object_id == object_id)
+            .map(crate::catalog::foreign::servers::ServerTuple::from)
+            .ok_or_else(|| {
+                SQLError::Internal(format!(
+                    "foreign server `{name}` changed before catalog removal"
+                ))
+            })?;
+        tuple.lock(name, self.locks, self.registry)?;
+        let mut next = self.registry.servers().clone();
         next.remove(name)?;
         if let Some(catalog) = self.catalog {
             catalog.drop_foreign_server(name).map_err(storage_error)?;

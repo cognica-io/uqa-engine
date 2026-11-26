@@ -84,6 +84,7 @@ impl<'a> Fields<'a> {
             oid,
             object_id,
             owner,
+            revision,
             server_type,
             version,
             option_order,
@@ -103,6 +104,11 @@ impl<'a> Fields<'a> {
             self.scalar(*object_id);
         }
         self.count(options.len());
+        if *revision != 0 {
+            // Initial tuples retain the original absent/present order tag.
+            self.scalar([2]);
+            self.scalar(revision.to_le_bytes());
+        }
         self.flag(option_order.is_some());
         if let Some(order) = option_order {
             self.count(order.len());

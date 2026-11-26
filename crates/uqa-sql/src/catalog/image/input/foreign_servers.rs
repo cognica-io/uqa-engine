@@ -114,7 +114,19 @@ impl Fields<'_> {
             None
         };
         let count = self.binary.count().await?;
-        let order_count = if self.flag().await? {
+        let (revision, has_order) = match self.binary.array::<1>().await?[0] {
+            0 => (0, false),
+            1 => (0, true),
+            2 => {
+                let revision = u64::from_le_bytes(self.binary.array().await?);
+                if revision == 0 {
+                    return Err(invalid("foreign server revision"));
+                }
+                (revision, self.flag().await?)
+            }
+            _ => return Err(invalid("foreign server option-order tag")),
+        };
+        let order_count = if has_order {
             Some(self.binary.count().await?)
         } else {
             None
@@ -130,6 +142,7 @@ impl Fields<'_> {
                 fdw_type,
                 options,
                 metadata: ForeignServerMetadata {
+                    revision,
                     oid,
                     object_id,
                     owner,

@@ -64,6 +64,7 @@ impl Catalog {
             fdw_type: "memory_fdw".into(),
             options: uqa_core::memory::OwnedMap::new(),
             metadata: ForeignServerMetadata {
+                revision: 0,
                 option_order: None,
                 wrapper_reference: None,
                 oid: 30_001,
@@ -109,7 +110,7 @@ impl RoleCatalogGuards for Catalog {
 fn server_drop_authority_uses_inheritance_and_releases_catalog_guards() {
     let mut catalog = Catalog::new();
     let server = catalog.server();
-    ensure_drop_authority(&server, &catalog, &catalog).unwrap();
+    require_owner(&server, &catalog, &catalog).unwrap();
     catalog.assert_released();
     let key = *catalog.memberships.borrow().keys().next().unwrap();
     catalog
@@ -121,7 +122,7 @@ fn server_drop_authority_uses_inheritance_and_releases_catalog_guards() {
         })
         .unwrap()
         .unwrap();
-    let error = ensure_drop_authority(&server, &catalog, &catalog).unwrap_err();
+    let error = require_owner(&server, &catalog, &catalog).unwrap_err();
     assert_eq!(error.sqlstate(), Some("42501"));
     assert_eq!(
         error.to_string(),
@@ -130,7 +131,7 @@ fn server_drop_authority_uses_inheritance_and_releases_catalog_guards() {
     catalog.assert_released();
     for current in ["owner", "uqa"] {
         catalog.current = current.into();
-        ensure_drop_authority(&server, &catalog, &catalog).unwrap();
+        require_owner(&server, &catalog, &catalog).unwrap();
         catalog.assert_released();
     }
 }
@@ -147,7 +148,7 @@ fn server_drop_authority_follows_owner_rename_but_not_replacement() {
         .borrow_mut()
         .insert(owner.name.clone(), owner)
         .unwrap();
-    ensure_drop_authority(&server, &catalog, &catalog).unwrap();
+    require_owner(&server, &catalog, &catalog).unwrap();
     catalog
         .roles
         .borrow_mut()
@@ -157,7 +158,7 @@ fn server_drop_authority_follows_owner_rename_but_not_replacement() {
         })
         .unwrap()
         .unwrap();
-    let error = ensure_drop_authority(&server, &catalog, &catalog).unwrap_err();
+    let error = require_owner(&server, &catalog, &catalog).unwrap_err();
     assert_eq!(error.sqlstate(), Some("42501"));
     catalog.assert_released();
 }

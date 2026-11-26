@@ -104,6 +104,7 @@ pub(super) fn statement(value: &Statement, position: usize) -> Child<'_> {
         | Statement::Deallocate { .. }
         | Statement::CreateForeignWrapper(_)
         | Statement::CreateForeignServer(_)
+        | Statement::AlterForeignServer(_)
         | Statement::CreateForeignTable(_)
         | Statement::CreateForeignTableDefinition(_)
         | Statement::DropFunction(_)

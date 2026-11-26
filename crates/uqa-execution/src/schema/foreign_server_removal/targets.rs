@@ -82,7 +82,7 @@ impl ForeignTarget {
         context: &ForeignCatalogRemovalContext<'_>,
     ) -> Result<(), SQLError> {
         match self {
-            Self::Server(server) => uqa_sql::schema::foreign_servers::ensure_drop_authority(
+            Self::Server(server) => uqa_sql::schema::foreign_servers::require_owner(
                 server,
                 context.session,
                 context.roles,

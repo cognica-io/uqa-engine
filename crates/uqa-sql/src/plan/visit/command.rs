@@ -100,6 +100,7 @@ impl CommandPlan {
             | Self::Deallocate { .. }
             | Self::CreateForeignWrapper(_)
             | Self::CreateForeignServer(_)
+            | Self::AlterForeignServer(_)
             | Self::CreateForeignTable(_)
             | Self::CreateForeignTableDefinition(_)
             | Self::CreateFunction(_)

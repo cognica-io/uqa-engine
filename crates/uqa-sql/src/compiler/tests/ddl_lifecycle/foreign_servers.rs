@@ -83,3 +83,44 @@ fn drop_server_preserves_written_targets_and_uses_its_own_command_tag() {
         assert_eq!(result.command_tag.as_deref(), Some("DROP SERVER"));
     }
 }
+
+#[test]
+fn alter_server_retains_version_presence_and_ordered_actions() {
+    use crate::ast::{ForeignOptionChange, ForeignServerVersion};
+    for (clause, version) in [
+        ("", ForeignServerVersion::Unchanged),
+        ("VERSION /* '' */ NULL", ForeignServerVersion::Clear),
+        (
+            "VERSION U&'' UESCAPE '^'",
+            ForeignServerVersion::Set(String::new()),
+        ),
+        ("VERSION 'NULL'", ForeignServerVersion::Set("NULL".into())),
+    ] {
+        let sql = format!(
+            r#"ALTER SERVER U&"remote^005fname" UESCAPE '^' {clause} OPTIONS (x '', SET x 'abc', DROP x, ADD x 'last')"#
+        );
+        let Statement::AlterForeignServer(server) = first(&sql) else {
+            panic!("{sql}");
+        };
+        assert_eq!(server.name, "remote_name");
+        assert_eq!(server.version, version);
+        assert_eq!(
+            server.options,
+            [
+                ForeignOptionChange::Add {
+                    name: "x".into(),
+                    value: String::new()
+                },
+                ForeignOptionChange::Set {
+                    name: "x".into(),
+                    value: "abc".into()
+                },
+                ForeignOptionChange::Drop { name: "x".into() },
+                ForeignOptionChange::Add {
+                    name: "x".into(),
+                    value: "last".into()
+                },
+            ]
+        );
+    }
+}

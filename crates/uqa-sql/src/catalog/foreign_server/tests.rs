@@ -39,6 +39,7 @@ fn definition() -> ForeignServerDefinition {
         fdw_type: "memory_fdw".into(),
         options: uqa_core::memory::OwnedMap::new(),
         metadata: ForeignServerMetadata {
+            revision: 0,
             option_order: None,
             wrapper_reference: None,
             oid: 20_000,

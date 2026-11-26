@@ -324,12 +324,25 @@ pub(super) fn defer_create_foreign_table(
 }
 
 pub(super) fn collect_def_elem_options(nodes: &[Node]) -> Result<Vec<(String, String)>> {
-    let mut out: Vec<(String, String)> = Vec::new();
-    for opt in nodes {
-        let Some(NodeEnum::DefElem(elem)) = opt.node.as_ref() else {
-            return Err(SQLError::Internal("malformed option node".into()));
-        };
-        let value = match elem
+    nodes
+        .iter()
+        .map(|node| {
+            let elem = option_element(node)?;
+            Ok((elem.defname.clone(), option_value(elem)?))
+        })
+        .collect()
+}
+
+pub(super) fn option_element(node: &Node) -> Result<&pg_query::protobuf::DefElem> {
+    match node.node.as_ref() {
+        Some(NodeEnum::DefElem(elem)) => Ok(elem),
+        _ => Err(SQLError::Internal("malformed option node".into())),
+    }
+}
+
+pub(super) fn option_value(elem: &pg_query::protobuf::DefElem) -> Result<String> {
+    Ok(
+        match elem
             .arg
             .as_ref()
             .and_then(|argument| argument.node.as_ref())
@@ -351,10 +364,8 @@ pub(super) fn collect_def_elem_options(nodes: &[Node]) -> Result<Vec<(String, St
                     elem.defname
                 )));
             }
-        };
-        out.push((elem.defname.clone(), value));
-    }
-    Ok(out)
+        },
+    )
 }
 
 fn invalid_reloption(message: impl Into<String>) -> SQLError {

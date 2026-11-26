@@ -799,6 +799,7 @@ pub enum CommandPlan {
     },
     CreateForeignWrapper(crate::ast::CreateForeignWrapper),
     CreateForeignServer(crate::ast::CreateForeignServer),
+    AlterForeignServer(crate::ast::AlterForeignServer),
     CreateForeignTable(crate::ast::CreateForeignTable),
     #[serde(alias = "CreateForeignTableIfNotExists")]
     CreateForeignTableDefinition(crate::ast::DeferredCreateForeignTable),

@@ -436,6 +436,9 @@ impl UnifiedPlan {
             Statement::CreateForeignServer(value) => {
                 Self::Command(Box::new(CommandPlan::CreateForeignServer(value)))
             }
+            Statement::AlterForeignServer(value) => {
+                Self::Command(Box::new(CommandPlan::AlterForeignServer(value)))
+            }
             Statement::CreateForeignTable(value) => {
                 Self::Command(Box::new(CommandPlan::CreateForeignTable(value)))
             }
@@ -608,6 +611,7 @@ impl CommandPlan {
             Self::Deallocate { .. } => "Deallocate",
             Self::CreateForeignWrapper(_) => "CreateForeignWrapper",
             Self::CreateForeignServer(_) => "CreateForeignServer",
+            Self::AlterForeignServer(_) => "AlterForeignServer",
             Self::CreateForeignTable(_) => "CreateForeignTable",
             Self::CreateForeignTableDefinition(_) => "CreateForeignTableDefinition",
             Self::AlterForeignTable(_) => "AlterForeignTable",

@@ -7,12 +7,25 @@
 use super::special::read_explain;
 use super::{invalid, Input, InputError, JsonToken, Native, Parts, Stored, Values};
 use crate::ast::{
-    CreateForeignServer, CreateForeignTable, CreateIndex, CursorDirection, DeclareCursorStmt,
-    DeferredCreateForeignTable, DiscardTarget, DropKind, DropStmt, FetchCursorStmt,
-    GeneratedColumn, GeneratedColumnKind, IndexColumnOrder, SetConstraintName, Statement,
+    AlterForeignServer, CreateForeignServer, CreateForeignTable, CreateIndex, CursorDirection,
+    DeclareCursorStmt, DeferredCreateForeignTable, DiscardTarget, DropKind, DropStmt,
+    FetchCursorStmt, ForeignOptionChange, ForeignServerVersion, GeneratedColumn,
+    GeneratedColumnKind, IndexColumnOrder, SetConstraintName, Statement,
     TransactionCharacteristics, TransactionIsolationLevel, TransactionStmt, TruncateTarget,
     VacuumOption, VacuumOptionValue, VacuumStmt, VacuumTarget,
 };
+
+stored_struct!(AlterForeignServer {
+    name: required,
+    version: required,
+    options: required,
+});
+stored_enum!(ForeignServerVersion { Unchanged, Set (value), Clear, });
+stored_enum!(ForeignOptionChange {
+    Add { name: required, value: required, },
+    Set { name: required, value: required, },
+    Drop { name: required, },
+});
 
 stored_struct!(CreateForeignServer {
     name: required,
@@ -259,6 +272,7 @@ stored_enum!(Statement {
     },
     CreateForeignWrapper (value),
     CreateForeignServer (value),
+    AlterForeignServer (value),
     CreateForeignTable (value),
     CreateForeignTableDefinition ["CreateForeignTableIfNotExists"] (value),
     Merge (value),

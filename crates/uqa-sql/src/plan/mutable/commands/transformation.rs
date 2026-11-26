@@ -744,6 +744,7 @@ pub(in crate::plan::mutable) async fn command_from<I: Input>(
         | CommandPlan::Deallocate { .. }
         | CommandPlan::CreateForeignWrapper(_)
         | CommandPlan::CreateForeignServer(_)
+        | CommandPlan::AlterForeignServer(_)
         | CommandPlan::CreateForeignTable(_)
         | CommandPlan::CreateForeignTableDefinition(_)
         | CommandPlan::CreateFunction(_)

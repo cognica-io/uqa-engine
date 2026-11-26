@@ -139,6 +139,7 @@ fn server_value() -> ForeignServerDefinition {
             .into_iter()
             .collect(),
         metadata: ForeignServerMetadata {
+            revision: 0,
             oid: 65541,
             object_id: [9; 16],
             owner: RoleIdentity::BOOTSTRAP,
@@ -255,11 +256,14 @@ fn native_metadata_images_preserve_options_acl_paths_and_legacy_graph_companions
             server.metadata.option_order = None;
             server.metadata.wrapper_reference = None;
         }
-        let servers = singleton("s", server);
-        let restored =
-            ForeignServerDefinition::decode(&mut encode(&servers).as_slice(), &memory, &token)
-                .unwrap();
-        assert!(restored == servers);
+        for revision in [0, 1, u64::MAX] {
+            server.metadata.revision = revision;
+            let servers = singleton("s", server.clone());
+            let restored =
+                ForeignServerDefinition::decode(&mut encode(&servers).as_slice(), &memory, &token)
+                    .unwrap();
+            assert!(restored == servers);
+        }
     }
     assert_eq!(memory.used(), 0);
 }

@@ -16,6 +16,7 @@ impl Engine {
         &self,
     ) -> uqa_execution::schema::foreign_server_removal::ForeignServerRemovalPublication<'_> {
         uqa_execution::schema::foreign_server_removal::ForeignServerRemovalPublication {
+            locks: self,
             registry: self,
             catalog: self.storage.catalog.as_deref(),
             changes: self,

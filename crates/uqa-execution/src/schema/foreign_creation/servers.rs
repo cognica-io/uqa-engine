@@ -9,7 +9,7 @@
 use super::ForeignCreationContext;
 use crate::row_locks::{shared_objects::SharedCatalogLock, RelationLockMode};
 use uqa_sql::{
-    ast::CreateForeignServer,
+    ast::{AlterForeignServer, CreateForeignServer, ForeignServerVersion},
     catalog::{
         dependencies::FOREIGN_SERVER_CLASS,
         foreign_server::{ForeignServerDefinition, ForeignServerMetadata},
@@ -119,6 +119,7 @@ impl ForeignCreationContext<'_> {
             fdw_type: statement.fdw_type.clone(),
             options: options.into_iter().collect(),
             metadata: ForeignServerMetadata {
+                revision: 0,
                 option_order: Some(
                     statement
                         .options
@@ -138,10 +139,60 @@ impl ForeignCreationContext<'_> {
                 version: statement.version.clone(),
             },
         };
+        self.publish_server(definition)
+    }
+
+    pub fn alter_server(&self, statement: &AlterForeignServer) -> Result<(), SQLError> {
+        use uqa_sql::schema::foreign_servers::{altered_options, missing_server, require_owner};
+        self.namespace
+            .synchronize_catalog_registries()
+            .map_err(storage_error)?;
+        let mut server = self
+            .registry
+            .servers()
+            .get(&statement.name)
+            .cloned()
+            .ok_or_else(|| missing_server(&statement.name))?;
+        require_owner(&server, self.creation.names, self.creation.roles)?;
+        match &statement.version {
+            ForeignServerVersion::Unchanged => {}
+            ForeignServerVersion::Set(value) => server.metadata.version = Some(value.clone()),
+            ForeignServerVersion::Clear => server.metadata.version = None,
+        }
+        if !statement.options.is_empty() {
+            let validator = server
+                .bound_wrapper(&self.registry.wrappers())?
+                .validator
+                .clone();
+            let options = altered_options(&server, &statement.options)?;
+            if let Some(validator) = validator {
+                self.invoke_foreign_validator(&validator, &options, FOREIGN_SERVER_CLASS)?;
+            }
+            server.metadata.option_order =
+                Some(options.iter().map(|(name, _)| name.clone()).collect());
+            server.options = options.into_iter().collect();
+        }
+        crate::catalog::foreign::servers::ServerTuple::from(&server).lock(
+            &server.name,
+            self.creation.locks,
+            self.registry,
+        )?;
+        self.creation
+            .runtime
+            .fence_catalog_writer_and_refresh_snapshot()?;
+        server.metadata.revision =
+            server.metadata.revision.checked_add(1).ok_or_else(|| {
+                SQLError::Internal("foreign server tuple revision exhausted".into())
+            })?;
+        self.publish_server(server)
+    }
+
+    fn publish_server(&self, server: ForeignServerDefinition) -> Result<(), SQLError> {
+        let name = server.name.clone();
         let mut next = self.registry.servers().clone();
-        next.insert(statement.name.clone(), definition)?;
+        next.insert(name.clone(), server)?;
         if let Some(catalog) = self.catalog {
-            crate::catalog::foreign::servers::persist(catalog, &next[&statement.name])
+            crate::catalog::foreign::servers::persist(catalog, &next[&name])
                 .map_err(storage_error)?;
         }
         **self.registry.servers_write() = next;
