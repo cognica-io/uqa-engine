@@ -35,6 +35,16 @@ pub struct Project<'a> {
     pending: Option<SpillDrain>,
 }
 
+/// The SELECT output boundary resolves a bare NULL to text after binding has removed transparent coercions.
+fn projected_null(
+    target: &ProjectionTarget,
+    expression: &ScalarExpr,
+) -> Option<&'static uqa_sql::ColumnType> {
+    (matches!(target, ProjectionTarget::Column(_))
+        && matches!(expression, ScalarExpr::Literal(uqa_core::Value::Null)))
+    .then_some(const { &uqa_sql::ColumnType::Text })
+}
+
 fn projection_layout(
     input: &RowSchema,
     projections: Vec<(ProjectionTarget, ScalarExpr)>,
@@ -102,7 +112,9 @@ fn projection_layout(
             continue;
         }
 
-        let ty = evaluator.expression_type(&expression, input).ok().flatten();
+        let ty = projected_null(&target, &expression)
+            .cloned()
+            .or_else(|| evaluator.expression_type(&expression, input).ok().flatten());
         let source = if let Some(source) = input.projection_input(&expression) {
             source
         } else {

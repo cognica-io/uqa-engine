@@ -169,15 +169,6 @@ pub(super) fn is_coalesce(name: &str, binding: Option<&FunctionBinding>) -> bool
     name.eq_ignore_ascii_case("coalesce") && binding.is_none_or(|binding| binding.builtin)
 }
 
-fn constant_cast_type(
-    name: &str,
-    types: Option<&dyn uqa_sql::routines::declaration::RoutineTypeCatalog>,
-) -> Option<ColumnType> {
-    eligibility::cast_type(name, types, &ProductionControl::uncontrolled())
-        .expect("ordinary constant type eligibility")
-        .map(|ty| ty.into_uncontrolled().expect("ordinary constant type"))
-}
-
 fn is_constant(
     expression: &ScalarExpr,
     types: Option<&dyn uqa_sql::routines::declaration::RoutineTypeCatalog>,
@@ -264,17 +255,16 @@ pub(super) fn fold_selected_literal(
             .as_deref()
             .is_some_and(|value| matches!(value, Value::Null))
         {
-            if let Some(target) = constant_cast_type(ty, types) {
-                if !matches!(target, ColumnType::Domain { .. } | ColumnType::Named(_)) {
-                    return Ok(ScalarExpr::TypedLiteral {
-                        collation_oid: None,
-                        composite_source: None,
-                        value: Value::Null,
-                        ty: ty.clone(),
-                        bound_type: Some(target),
-                        parameter_index: None,
-                    });
-                }
+            if let Some(target) = eligibility::direct_null_cast_type(ty, types, &config.production)?
+            {
+                return Ok(ScalarExpr::TypedLiteral {
+                    collation_oid: None,
+                    composite_source: None,
+                    value: Value::Null,
+                    ty: ty.clone(),
+                    bound_type: Some(target.into_parts().0),
+                    parameter_index: None,
+                });
             }
         }
     }

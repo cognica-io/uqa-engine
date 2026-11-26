@@ -67,7 +67,7 @@ impl UQAType {
 
 fn kind(ty: &ColumnType) -> u32 {
     match ty {
-        ColumnType::Named(_) => UQA_TYPE_UNKNOWN,
+        ColumnType::Named(_) | ColumnType::Pseudo(_) => UQA_TYPE_UNKNOWN,
         ColumnType::Boolean => UQA_TYPE_BOOL,
         ColumnType::SmallInteger => UQA_TYPE_INT16,
         ColumnType::Integer => UQA_TYPE_INT32,

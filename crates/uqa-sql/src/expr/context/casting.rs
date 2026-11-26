@@ -206,7 +206,7 @@ fn optional_type_name(
     name: &str,
     control: &ProductionControl<'_>,
 ) -> Result<Option<Produced<ColumnType>>> {
-    match ColumnType::from_sql_name_with_control(name, control) {
+    match ColumnType::from_expression_type_name_with_control(name, control) {
         Ok(ty) => Ok(Some(ty)),
         Err(error) if matches!(error.sqlstate(), Some("53200" | "57014")) => Err(error),
         Err(_) => Ok(None),
@@ -360,6 +360,15 @@ fn cast_with_resolved_types(
     let parsed_target = &types.parsed_target;
     let source_type = resolved_source_type.as_deref();
     let target_column_type = resolved_target.as_deref().or(parsed_target.as_deref());
+    if let Some(target @ (ColumnType::Pseudo(_) | ColumnType::AnyArray)) = target_column_type {
+        crate::type_resolution::pseudo_cast::select(
+            target,
+            source_type,
+            matches!(value, Value::Str(_)),
+            control,
+        )?;
+        return Ok(control.copy_value(value)?);
+    }
     let _date_order = datestyle::input_scope(value, target_column_type, engine, control)?;
     let _time_zone = timezone::input_scope(value, target_column_type, engine, control)?;
     let _interval_style = intervalstyle::cast_scope(value, target_column_type, engine, control)?;

@@ -186,7 +186,7 @@ pub(crate) fn match_routine_candidate_with_control(
             return Ok(None);
         };
         let polymorphic = polymorphic_type(&effective, control)?;
-        if polymorphic.is_none() {
+        if polymorphic.is_none() && *effective != "any" {
             if let Some(declared) = declared {
                 target.ty = Some(declared.clone_with_control(control)?);
             }

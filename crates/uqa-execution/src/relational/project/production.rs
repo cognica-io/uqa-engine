@@ -191,10 +191,16 @@ impl<'a, 'e> Layout<'a, 'e> {
             );
             return Ok(());
         }
-        let ty = match evaluator.expression_type_with_control(&expression, input, control) {
-            Ok(ty) => ty,
-            Err(error) if matches!(error.sqlstate(), Some("53200" | "57014")) => return Err(error),
-            Err(_) => None,
+        let ty = if let Some(ty) = super::projected_null(&target, &expression) {
+            Some(ty.clone_with_control(control)?)
+        } else {
+            match evaluator.expression_type_with_control(&expression, input, control) {
+                Ok(ty) => ty,
+                Err(error) if matches!(error.sqlstate(), Some("53200" | "57014")) => {
+                    return Err(error)
+                }
+                Err(_) => None,
+            }
         };
         let source = if let Some(source) = input.projection_input(&expression) {
             source

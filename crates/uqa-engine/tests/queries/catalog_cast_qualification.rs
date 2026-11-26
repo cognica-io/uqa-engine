@@ -26,6 +26,29 @@ fn open(provider: usize, path: &std::path::Path) -> Engine {
 
 #[rstest::rstest]
 #[case::memory(0)]
+#[case::sqlite_native(1)]
+#[case::sqlite_key_value(2)]
+#[case::redb(3)]
+fn pseudo_type_casts_match_postgresql(#[case] provider: usize) {
+    let files = tempfile::tempdir().unwrap();
+    let path = files.path().join("pseudo-casts.db");
+    let engine = open(provider, &path);
+    let oracle =
+        include_str!("../../../../tests/parity/pg18/pseudo_type_casts_oracle.expected.json");
+    crate::pg18_oracle::verify(&engine, oracle);
+    if provider != 0 {
+        drop(engine);
+        let reopened = open(provider, &path);
+        let query =
+            "SELECT pg_typeof(v)='pc_int'::regtype AS identity,v::integer AS value FROM pc_bound";
+        let result = reopened.sql(query, &[]).unwrap();
+        assert_eq!(result.rows[0]["identity"], uqa_core::Value::Bool(true));
+        assert_eq!(result.rows[0]["value"], uqa_core::Value::Int(8));
+    }
+}
+
+#[rstest::rstest]
+#[case::memory(0)]
 #[case::sqlite(1)]
 #[case::sqlite_key_value(2)]
 #[case::redb(3)]

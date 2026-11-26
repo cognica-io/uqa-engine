@@ -159,6 +159,8 @@ impl fmt::Display for TypeName<'_> {
             ColumnType::Int2Vector => f.write_str("int2vector"),
             ColumnType::OidVector => f.write_str("oidvector"),
             ColumnType::AnyArray => f.write_str("anyarray"),
+            ColumnType::Pseudo(super::ExpressionPseudoType::Any) => f.write_str("\"any\""),
+            ColumnType::Pseudo(pseudo) => f.write_str(pseudo.name()),
             ColumnType::Record => f.write_str("record"),
             ColumnType::Array(element) => write!(
                 f,

@@ -43,6 +43,52 @@ impl BinderContext<'_> {
         }
     }
 
+    /// `PostgreSQL` elides polymorphic coercions that leave their input's type and datum intact.
+    pub(super) fn cast_preserves_operand(
+        &self,
+        name: &str,
+        operand: &ScalarExpr,
+    ) -> Result<bool, SQLError> {
+        use crate::type_resolution::pseudo_cast::{self, Coercion};
+        let local = name
+            .strip_prefix("pg_catalog.")
+            .or_else(|| name.strip_prefix("\"pg_catalog\"."))
+            .unwrap_or(name)
+            .trim_matches('"');
+        if !(local.starts_with("any") || local == "unknown") {
+            return Ok(false);
+        }
+        let Some(target) = crate::type_resolution::inference::resolved_type_name(
+            name,
+            self.resolver,
+            &self.control,
+        )?
+        else {
+            return Ok(false);
+        };
+        if !matches!(*target, ColumnType::Pseudo(_) | ColumnType::AnyArray) {
+            return Ok(false);
+        }
+        let source = crate::type_resolution::common::common_context_expression_type_with_control(
+            operand,
+            self.schema,
+            self.params,
+            self.resolver,
+            &self.control,
+        )?;
+        let coercion = pseudo_cast::select(
+            &target,
+            source.as_deref(),
+            matches!(operand, ScalarExpr::Literal(uqa_core::Value::Str(_))),
+            &self.control,
+        )?;
+        Ok(match coercion {
+            Some(Coercion::Preserve) => true,
+            Some(Coercion::Relabel(ty)) => source.as_deref() == Some(ty),
+            _ => false,
+        })
+    }
+
     pub(super) fn infer(
         &self,
         expression: &ScalarExpr,

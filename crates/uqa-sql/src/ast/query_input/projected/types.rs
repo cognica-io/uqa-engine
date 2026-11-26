@@ -47,6 +47,7 @@ projected_enum!(ColumnType {
     Int2Vector,
     OidVector,
     AnyArray,
+    Pseudo(value),
     Record,
     Array(value),
     Date,
@@ -69,6 +70,22 @@ projected_enum!(ColumnType {
     Domain { schema: required, name: required, oid: required, array_oid: defaulted, collation_oid: defaulted, base: required },
     Enum(value),
     Composite(value)
+});
+
+use crate::ast::ExpressionPseudoType;
+projected_enum!(ExpressionPseudoType {
+    Unknown,
+    Any,
+    AnyElement,
+    AnyNonArray,
+    AnyEnum,
+    AnyRange,
+    AnyMultiRange,
+    AnyCompatibleMultiRange,
+    AnyCompatible,
+    AnyCompatibleArray,
+    AnyCompatibleNonArray,
+    AnyCompatibleRange
 });
 
 projected_enum!(RangeSubtype {
