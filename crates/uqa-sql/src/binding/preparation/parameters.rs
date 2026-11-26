@@ -56,7 +56,7 @@ enum UnknownOrigin {
     Deferred,
     Literal,
     Parameter,
-    Field,
+    NonConstant,
 }
 
 pub(super) struct ParameterTypes<'a, I = InputCatalogs<'a>> {
@@ -65,6 +65,7 @@ pub(super) struct ParameterTypes<'a, I = InputCatalogs<'a>> {
     fixed_values: Option<&'a [SQLParam]>,
     occurrences: AnalysisVec<(usize, Option<Produced<ColumnType>>)>,
     input_constants: Option<InputConstants>,
+    clause_inputs: collations::CollationInputs,
     inputs: I,
     stored_literal_syntax: bool,
     call_collations: Option<CallCollations>,
@@ -459,8 +460,7 @@ impl<I: LiteralInput> ParameterTypes<'_, I> {
         let Some(constants) = self.input_constants.as_mut() else {
             return Ok(None);
         };
-        constants
-            .3
+        self.clause_inputs
             .take_literal(expression, &mut constants.0, &control.control())
     }
 
@@ -471,12 +471,32 @@ impl<I: LiteralInput> ParameterTypes<'_, I> {
         oid: u32,
     ) -> Result<(), SQLError> {
         let origin = AnalysisIdentity::from(expression);
-        if let Some(constants) = &mut self.input_constants {
-            constants.3.select(origin, value.collation, oid)?;
-        }
+        self.clause_inputs.select(
+            origin,
+            value.collation,
+            oid,
+            (value.derivation, value.initial_collation),
+        )?;
         value.collation = Some(origin);
         value.derivation = value.derivation.explicit(i64::from(oid));
         value.initial_collation = oid;
+        Ok(())
+    }
+
+    pub(super) fn peel_pseudo_input_collation(
+        &mut self,
+        operand: &ScalarExpr,
+        value: &mut ExpressionType,
+        target: &ColumnType,
+    ) -> Result<(), SQLError> {
+        if let Some(origin) = value
+            .collation
+            .filter(|origin| *origin == AnalysisIdentity::from(operand))
+        {
+            (value.derivation, value.initial_collation) =
+                self.clause_inputs.coerce(origin, target)?;
+            value.collation = None;
+        }
         Ok(())
     }
 
@@ -513,6 +533,7 @@ impl<I: LiteralInput> ParameterTypes<'_, I> {
             fixed_values: None,
             occurrences: AnalysisVec::new(control),
             input_constants: None,
+            clause_inputs: collations::CollationInputs::new(control),
             collations: super::collations::PendingCollations::new(control),
             inputs,
             stored_literal_syntax: false,
@@ -758,7 +779,14 @@ impl<I: LiteralInput> ParameterTypes<'_, I> {
     }
 
     pub(super) fn take_input_constants(&mut self) -> InputConstants {
-        let mut constants = self.input_constants.take().unwrap_or_default();
+        let mut constants = self
+            .input_constants
+            .take()
+            .map(|mut retained| {
+                std::mem::swap(&mut retained.3, &mut self.clause_inputs);
+                retained
+            })
+            .unwrap_or_default();
         constants.9 = std::mem::take(&mut self.row_expansions);
         constants.10 = std::mem::take(&mut self.rewritten_blocks);
         constants
@@ -830,7 +858,7 @@ impl<I: LiteralInput> ParameterTypes<'_, I> {
         if !expression.is_sql_unknown() {
             return Ok(());
         }
-        if expression.unknown == UnknownOrigin::Field {
+        if expression.unknown == UnknownOrigin::NonConstant {
             return Err(crate::type_resolution::field_selection::unknown_conversion_error(target));
         }
         if let Some((origin, text)) = &expression.literal {
@@ -839,8 +867,8 @@ impl<I: LiteralInput> ParameterTypes<'_, I> {
         let control_owner = self.control.clone();
         let control = control_owner.control();
         let target = target.without_type_modifiers_with_control(&control)?;
-        if let Some(constants) = &mut self.input_constants {
-            constants.3.coerce(expression.collation, &target)?;
+        if let Some(origin) = expression.collation {
+            self.clause_inputs.coerce(origin, &target)?;
         }
         if let Some(occurrence) = expression.occurrence {
             let (index, observed) = &mut self.occurrences[occurrence];

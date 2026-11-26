@@ -462,6 +462,9 @@ impl Binder<'_, '_> {
                 ty,
                 implicit,
             } => {
+                if self.context.cast_preserves_operand(&ty, &expr)? {
+                    return self.bind(*expr);
+                }
                 self.fold_enum_array_constructor(&mut expr, &ty)?;
                 let source = if !implicit && self.cast_requires_source(&ty)? {
                     let source = self.semantic(self.infer(&expr))?.flatten();

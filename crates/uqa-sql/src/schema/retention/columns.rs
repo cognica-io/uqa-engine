@@ -174,6 +174,7 @@ impl<'a> Walker<'a> {
             | ColumnType::Int2Vector
             | ColumnType::OidVector
             | ColumnType::AnyArray
+            | ColumnType::Pseudo(_)
             | ColumnType::Record
             | ColumnType::Date
             | ColumnType::Time

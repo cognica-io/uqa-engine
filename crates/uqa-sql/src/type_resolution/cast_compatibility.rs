@@ -242,7 +242,7 @@ fn embedding_input_compatible(source: &ColumnType, target: &ColumnType) -> bool 
     )
 }
 
-fn is_string_io_type(ty: &ColumnType) -> bool {
+pub(super) fn is_string_io_type(ty: &ColumnType) -> bool {
     matches!(
         ty,
         ColumnType::Text

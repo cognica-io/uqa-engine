@@ -68,11 +68,16 @@ pub fn undefined_relation_column(table: &str, column: &str) -> SQLError {
 
 pub fn validate_postgres_relation_column_type(name: &str, ty: &ColumnType) -> Result<(), SQLError> {
     let pseudo_type = match ty {
-        ColumnType::Void | ColumnType::AnyArray | ColumnType::Record => Some(ty.sql_name()),
+        ColumnType::Void | ColumnType::AnyArray | ColumnType::Record | ColumnType::Pseudo(_) => {
+            Some(ty.sql_name())
+        }
         ColumnType::Array(element)
             if matches!(
                 element.as_ref(),
-                ColumnType::Void | ColumnType::AnyArray | ColumnType::Record
+                ColumnType::Void
+                    | ColumnType::AnyArray
+                    | ColumnType::Record
+                    | ColumnType::Pseudo(_)
             ) =>
         {
             Some(ty.sql_name())

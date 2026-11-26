@@ -68,6 +68,7 @@ pub(super) enum TypeTag {
     Domain = 56,
     Enum = 57,
     Composite = 58,
+    Pseudo = 59,
 }
 impl TypeTag {
     pub(super) fn decode(tag: u8) -> Result<Self, crate::SQLError> {
@@ -131,6 +132,7 @@ impl TypeTag {
             56 => Self::Domain,
             57 => Self::Enum,
             58 => Self::Composite,
+            59 => Self::Pseudo,
             _ => return Err(super::invalid("column type tag")),
         })
     }

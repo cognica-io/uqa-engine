@@ -211,8 +211,19 @@ impl ExpressionType {
         self.ty.is_none() && self.unknown == UnknownOrigin::Parameter
     }
 
-    pub(in crate::binding::preparation) fn mark_unknown_field(&mut self) {
-        self.unknown = UnknownOrigin::Field;
+    pub(in crate::binding::preparation) fn has_unknown_string(&self) -> bool {
+        self.is_sql_unknown() && self.literal.is_some()
+    }
+
+    /// A transparent cast of an unknown constant can itself be replaced when its surrounding context chooses an input type.
+    pub(in crate::binding::preparation) fn bind_literal_site(&mut self, expression: &ScalarExpr) {
+        if let Some((origin, _)) = &mut self.literal {
+            *origin = AnalysisIdentity::from(expression);
+        }
+    }
+
+    pub(in crate::binding::preparation) fn mark_unknown_expression(&mut self) {
+        self.unknown = UnknownOrigin::NonConstant;
     }
 
     pub(in crate::binding::preparation) fn leaf_owned(ty: Option<AnalysisType>) -> Self {
