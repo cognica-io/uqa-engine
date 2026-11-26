@@ -124,17 +124,17 @@ pub struct GeneratedColumn {
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IndexColumnOrder {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub collation_oid: Option<u32>,
     pub descending: bool,
     pub nulls_first: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub collation_oid: Option<u32>,
+    /// The index ordering differs from the collation of the column or stored expression.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub overrides_collation: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateIndex {
-    /// Explicit names attached to index keys, resolved against the definition namespace.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub key_collations: Vec<Option<String>>,
     #[serde(default)]
     pub included_columns: Vec<String>,
     #[serde(default)]
@@ -159,6 +159,9 @@ pub struct CreateIndex {
     /// Explicit option namespaces retained for declaration-time validation.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub option_namespaces: Vec<String>,
+    /// Explicit names attached to index keys, resolved against the definition namespace.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub key_collations: Vec<Option<String>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

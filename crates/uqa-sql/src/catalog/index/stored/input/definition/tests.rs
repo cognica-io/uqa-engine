@@ -31,11 +31,13 @@ fn fixture() -> IndexDefinition {
                 descending: false,
                 nulls_first: true,
                 collation_oid: Some(950),
+                overrides_collation: true,
             },
             IndexColumnOrder {
                 descending: true,
                 nulls_first: false,
                 collation_oid: None,
+                overrides_collation: false,
             },
         ],
         key_names: vec!["key".into(), "expression".into()],

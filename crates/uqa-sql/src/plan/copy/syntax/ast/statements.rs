@@ -38,7 +38,6 @@ syntax_struct!(crate::ast::CreateForeignTable {
 });
 
 syntax_struct!(crate::ast::CreateIndex {
-    key_collations,
     included_columns,
     column_order,
     predicate,
@@ -51,6 +50,7 @@ syntax_struct!(crate::ast::CreateIndex {
     if_not_exists,
     options,
     option_namespaces
+    key_collations,
 });
 
 syntax_enum!(crate::ast::CursorDirection {
@@ -132,9 +132,10 @@ syntax_struct!(crate::ast::GeneratedColumn {
 syntax_enum!(crate::ast::GeneratedColumnKind { Virtual, Stored });
 
 syntax_struct!(crate::ast::IndexColumnOrder {
-    collation_oid,
     descending,
     nulls_first
+    collation_oid,
+    overrides_collation,
 });
 
 native_struct!(crate::ast::InsertStmt {

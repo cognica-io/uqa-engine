@@ -174,13 +174,25 @@ fn finish_index_keys(
                     written,
                     order.collation_oid,
                 )?;
-                order.collation_oid = (selected != natural).then_some(selected);
+                order.overrides_collation = selected != natural;
+                order.collation_oid = order.overrides_collation.then_some(selected);
                 if btree {
                     require_default_btree_operator_class(&column.ty)?;
                 }
                 types.push(column.ty.clone());
             }
             IndexKey::Expression(expression) => {
+                let clause = crate::catalog::collations::expression::ast_clause(expression)?
+                    .map(|clause| {
+                        crate::catalog::collations::expression::select(
+                            clause.name,
+                            clause.oid,
+                            analyzed.as_ref(),
+                            Some(context.catalog),
+                        )
+                    })
+                    .transpose()?;
+                while crate::catalog::collations::expression::discard_ast_clause(expression)? {}
                 let natural = super::plan_index_expression(
                     context.catalog,
                     &statement.table,
@@ -191,14 +203,15 @@ fn finish_index_keys(
                     .as_ref()
                     .expect("analyzed index expression")
                     .clone();
-                order.collation_oid = Some(super::index_key_collation(
+                let selected = super::index_key_collation(
                     context.catalog,
                     Some(&ty),
                     natural,
                     written,
-                    order.collation_oid,
-                )?);
-                while crate::catalog::collations::expression::discard_ast_clause(expression)? {}
+                    clause.or(order.collation_oid),
+                )?;
+                order.overrides_collation = natural != selected;
+                order.collation_oid = Some(selected);
                 if btree {
                     require_default_btree_operator_class(&ty)?;
                 }

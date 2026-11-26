@@ -47,7 +47,6 @@ stored_struct!(CreateForeignTable {
 });
 
 stored_struct!(CreateIndex {
-    key_collations: defaulted,
     included_columns: defaulted,
     column_order: defaulted,
     predicate: defaulted,
@@ -60,6 +59,7 @@ stored_struct!(CreateIndex {
     if_not_exists: required,
     options: required,
     option_namespaces: defaulted,
+    key_collations: defaulted,
 });
 
 stored_enum!(CursorDirection {
@@ -128,9 +128,10 @@ stored_struct!(GeneratedColumn {
 stored_enum!(GeneratedColumnKind { Virtual, Stored });
 
 stored_struct!(IndexColumnOrder {
-    collation_oid: optional,
     descending: required,
     nulls_first: required,
+    collation_oid: optional,
+    overrides_collation: defaulted,
 });
 
 stored_struct!(SetConstraintName {

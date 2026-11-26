@@ -146,13 +146,19 @@ impl<'a> Input<'a, '_> {
         let mut value = IndexColumnOrder::default();
         self.fields(
             token,
-            &["descending", "nulls_first", "collation_oid"],
+            &[
+                "descending",
+                "nulls_first",
+                "collation_oid",
+                "overrides_collation",
+            ],
             3,
             |_, index, token| {
                 match index {
                     0 => value.descending = boolean(token)?,
                     1 => value.nulls_first = boolean(token)?,
-                    _ => value.collation_oid = optional(token)?,
+                    2 => value.collation_oid = optional(token)?,
+                    _ => value.overrides_collation = boolean(token)?,
                 }
                 Ok(())
             },

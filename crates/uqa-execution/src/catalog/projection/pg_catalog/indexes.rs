@@ -42,6 +42,18 @@ impl CatalogIndexRelation {
         )
     }
 
+    fn key_collation(
+        &self,
+        position: usize,
+        source: Option<&uqa_sql::ast::ColumnDef>,
+    ) -> Option<u32> {
+        self.definition
+            .column_order
+            .get(position)
+            .and_then(|order| order.collation_oid)
+            .or_else(|| source.and_then(|column| column.collation_oid))
+    }
+
     /// Stored key types and included-column types define both `pg_attribute` and storage dependencies.
     pub(crate) fn attributes(
         &self,
@@ -77,7 +89,9 @@ impl CatalogIndexRelation {
                 .ok_or_else(|| {
                     SQLError::Internal("missing expression index attribute type".into())
                 })?;
-            columns.push(uqa_sql::ast::ColumnDef::nullable(name, ty));
+            let mut attribute = uqa_sql::ast::ColumnDef::nullable(name, ty);
+            attribute.collation_oid = self.key_collation(position, source);
+            columns.push(attribute);
         }
         for (position, name) in self.definition.included_columns.iter().enumerate() {
             let ty = table_columns
@@ -94,10 +108,9 @@ impl CatalogIndexRelation {
                 .key_names
                 .get(self.columns.len() + position)
                 .unwrap_or(name);
-            columns.push(uqa_sql::ast::ColumnDef::nullable(
-                attribute_name,
-                ty.clone(),
-            ));
+            let mut attribute = uqa_sql::ast::ColumnDef::nullable(attribute_name, ty.clone());
+            attribute.collation_oid = Some(0);
+            columns.push(attribute);
         }
         Ok(columns)
     }
@@ -316,17 +329,12 @@ pub fn build_pg_index(
                         .iter()
                         .enumerate()
                         .map(|(position, key)| {
-                            let selected = index
-                                .definition
-                                .column_order
-                                .get(position)
-                                .and_then(|order| order.collation_oid)
-                                .map(i64::from);
                             let column = key
                                 .column()
                                 .and_then(|name| table_cols.iter().find(|col| col.name == name));
-                            let oid = selected
-                                .or_else(|| column.and_then(|col| col.collation_oid).map(i64::from))
+                            let oid = index
+                                .key_collation(position, column)
+                                .map(i64::from)
                                 .unwrap_or_else(|| {
                                     column
                                         .map(|col| &col.ty)

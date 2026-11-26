@@ -637,6 +637,7 @@ pub(in crate::compiler) fn compile_create_index(
             _ => descending,
         };
         column_order.push(crate::ast::IndexColumnOrder {
+            overrides_collation: false,
             collation_oid: None,
             descending,
             nulls_first,
