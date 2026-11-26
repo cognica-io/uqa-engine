@@ -19,7 +19,8 @@ uqa-core = { workspace = true }
 uqa-analysis = { workspace = true }
 uqa-operators = { workspace = true }
 uqa-storage = { workspace = true }
-icu_properties = { workspace = true }
+# AGE name validation only needs the stable Unicode identifier properties.
+icu_properties = "2.0.2"
 parking_lot = { workspace = true }
 regex = { workspace = true }
 serde = { workspace = true }

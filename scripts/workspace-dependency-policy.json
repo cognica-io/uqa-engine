@@ -299,6 +299,10 @@
     }
   },
   "forbidden_runtime_dependencies": {
+    "uqa-pg-regex": [
+      "icu_casemap",
+      "icu_properties"
+    ],
     "uqa-core": [
       "libsqlite3-sys",
       "redb",

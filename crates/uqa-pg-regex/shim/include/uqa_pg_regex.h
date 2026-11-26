@@ -86,22 +86,6 @@ extern Oid	uqa_pg_regex_current_locale(void);
 pg_noreturn extern void uqa_pg_regex_invalid_locale_state(void);
 
 /*
- * ICU4C character functions, implemented by the Rust wrapper over ICU4X data
- * of the same Unicode version.
- */
-extern int	uqa_pg_regex_icu_isdigit(pg_wchar c);
-extern int	uqa_pg_regex_icu_isalpha(pg_wchar c);
-extern int	uqa_pg_regex_icu_isalnum(pg_wchar c);
-extern int	uqa_pg_regex_icu_isupper(pg_wchar c);
-extern int	uqa_pg_regex_icu_islower(pg_wchar c);
-extern int	uqa_pg_regex_icu_isgraph(pg_wchar c);
-extern int	uqa_pg_regex_icu_isprint(pg_wchar c);
-extern int	uqa_pg_regex_icu_ispunct(pg_wchar c);
-extern int	uqa_pg_regex_icu_isspace(pg_wchar c);
-extern pg_wchar uqa_pg_regex_icu_toupper(pg_wchar c);
-extern pg_wchar uqa_pg_regex_icu_tolower(pg_wchar c);
-
-/*
  * Process-wide character-class cvecs, kept by the Rust wrapper.  Like
  * PostgreSQL's per-backend ctype cache, each is built on first use, never
  * freed and never modified, so the engine may share it between operations
