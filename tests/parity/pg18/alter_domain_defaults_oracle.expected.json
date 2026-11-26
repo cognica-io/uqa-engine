@@ -1,6 +1,6 @@
 {
   "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
-  "provenance": {"capture_script": "tests/parity/pg18/capture_command_completion_oracle.py", "capture_script_sha256": "03c5af634def87180984276a560f34f40c1a97be76af76547e00eb6f186d57e0", "capture_flags": ["--rows", "--details", "--notices"], "reference_container_image": "uqa-pg18-oracle-python:18.4", "scope": "Domain default replacement and removal, inherited defaults, explicit NULL, column overrides, transaction rollback, invalid expressions, sequence binding and ownership."},
+  "provenance": {"capture_script": "tests/parity/pg18/capture_command_completion_oracle.py", "capture_script_sha256": "03c5af634def87180984276a560f34f40c1a97be76af76547e00eb6f186d57e0", "capture_flags": ["--rows", "--details", "--notices"], "reference_container_image": "uqa-pg18-oracle-python:18.4", "scope": "Domain default replacement and removal, inherited defaults, explicit NULL, column overrides, transaction rollback, invalid expressions, sequence binding and ownership, failed statements and nested savepoint rollback."},
   "cases": [
     {"sql":"SELECT version()","command_tags":["SELECT 1"],"error":null,"results":[{"columns":["version"],"type_oids":[25],"rows":[["PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"]]}],"notices":[]},
     {"sql":"CREATE DOMAIN ad_base AS integer DEFAULT 5","command_tags":["CREATE DOMAIN"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}],"notices":[]},
@@ -34,6 +34,25 @@
     {"sql":"SET ROLE ad_reader","command_tags":["SET"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}],"notices":[]},
     {"sql":"ALTER DOMAIN ad_child SET DEFAULT 1","command_tags":[],"error":{"sqlstate":"42501","message":"must be owner of type ad_child","detail":null,"hint":null},"results":[],"notices":[]},
     {"sql":"RESET ROLE","command_tags":["RESET"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}],"notices":[]},
+    {"sql":"BEGIN","command_tags":["BEGIN"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}],"notices":[]},
+    {"sql":"SAVEPOINT original_default","command_tags":["SAVEPOINT"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}],"notices":[]},
+    {"sql":"ALTER DOMAIN ad_child SET DEFAULT 73","command_tags":["ALTER DOMAIN"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}],"notices":[]},
+    {"sql":"SAVEPOINT good_default","command_tags":["SAVEPOINT"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}],"notices":[]},
+    {"sql":"ALTER DOMAIN ad_child SET DEFAULT 'bad_value'","command_tags":[],"error":{"sqlstate":"22P02","message":"invalid input syntax for type integer: \"bad_value\"","detail":null,"hint":null},"results":[],"notices":[]},
+    {"sql":"ROLLBACK TO good_default","command_tags":["ROLLBACK"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}],"notices":[]},
+    {"sql":"SELECT typdefault FROM pg_type WHERE oid = 'ad_child'::regtype","command_tags":["SELECT 1"],"error":null,"results":[{"columns":["typdefault"],"type_oids":[25],"rows":[["73"]]}],"notices":[]},
+    {"sql":"ALTER DOMAIN ad_child DROP DEFAULT","command_tags":["ALTER DOMAIN"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}],"notices":[]},
+    {"sql":"ROLLBACK TO original_default","command_tags":["ROLLBACK"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}],"notices":[]},
+    {"sql":"SELECT typdefault FROM pg_type WHERE oid = 'ad_child'::regtype","command_tags":["SELECT 1"],"error":null,"results":[{"columns":["typdefault"],"type_oids":[25],"rows":[["nextval('ad_sequence'::regclass)"]]}],"notices":[]},
+    {"sql":"COMMIT","command_tags":["COMMIT"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}],"notices":[]},
+    {"sql":"CREATE FUNCTION ad_bound_fn() RETURNS integer LANGUAGE SQL IMMUTABLE RETURN 81","command_tags":["CREATE FUNCTION"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}],"notices":[]},
+    {"sql":"CREATE DOMAIN ad_cast AS integer","command_tags":["CREATE DOMAIN"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}],"notices":[]},
+    {"sql":"ALTER DOMAIN ad_child SET DEFAULT ad_bound_fn()::ad_cast","command_tags":["ALTER DOMAIN"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}],"notices":[]},
+    {"sql":"DROP FUNCTION ad_bound_fn()","command_tags":[],"error":{"sqlstate":"2BP01","message":"cannot drop function ad_bound_fn() because other objects depend on it","detail":"type ad_child depends on function ad_bound_fn()\ncolumn explicit_value of table ad_values depends on type ad_child\ncolumn value of table ad_values depends on type ad_child","hint":"Use DROP ... CASCADE to drop the dependent objects too."},"results":[],"notices":[]},
+    {"sql":"DROP DOMAIN ad_cast","command_tags":[],"error":{"sqlstate":"2BP01","message":"cannot drop type ad_cast because other objects depend on it","detail":"type ad_child depends on type ad_cast\ncolumn explicit_value of table ad_values depends on type ad_child\ncolumn value of table ad_values depends on type ad_child","hint":"Use DROP ... CASCADE to drop the dependent objects too."},"results":[],"notices":[]},
+    {"sql":"ALTER DOMAIN ad_child DROP DEFAULT","command_tags":["ALTER DOMAIN"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}],"notices":[]},
+    {"sql":"DROP FUNCTION ad_bound_fn()","command_tags":["DROP FUNCTION"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}],"notices":[]},
+    {"sql":"DROP DOMAIN ad_cast","command_tags":["DROP DOMAIN"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}],"notices":[]},
     {"sql":"SELECT id, value::integer AS value, explicit_value::integer AS explicit_value FROM ad_values ORDER BY id","command_tags":["SELECT 7"],"error":null,"results":[{"columns":["id","value","explicit_value"],"type_oids":[23,23,23],"rows":[["1","5","4"],["2","5","4"],["3","9","4"],["5","9","4"],["6",null,"4"],["7",null,"4"],["8","20","4"]]}],"notices":[]}
   ]
 }
