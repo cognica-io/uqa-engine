@@ -18,6 +18,7 @@ impl Engine {
     pub(crate) fn partition_context(&self) -> PartitionContext<'_> {
         PartitionContext {
             catalog: self,
+            bindings: self,
             expressions: self,
             types: self,
             assignment: self,
