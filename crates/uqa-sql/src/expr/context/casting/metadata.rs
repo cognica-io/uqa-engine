@@ -40,22 +40,32 @@ impl CastTypes {
         control.check()?;
         let target_type = resolve_catalog_type_with_control(target, engine, control)?;
         control.check()?;
-        let source = source
-            .map(|source| resolve_catalog_type_with_control(source, engine, control))
+        let source_type = source
+            .map(|name| resolve_catalog_type_with_control(name, engine, control))
             .transpose()?
-            .flatten()
-            // Literal input routines receive an unknown source without a physical type descriptor.
-            .filter(|ty| {
-                !matches!(
-                    **ty,
-                    ColumnType::Pseudo(crate::ast::ExpressionPseudoType::Unknown)
-                )
-            });
+            .flatten();
         let parsed_target = if target_type.is_some() {
             None
         } else {
             optional_type_name(target, control)?
         };
+        let source_type = match (
+            source_type,
+            source,
+            target_type.as_deref().or(parsed_target.as_deref()),
+        ) {
+            (None, Some(name), Some(ColumnType::AnyArray | ColumnType::Pseudo(_))) => {
+                optional_type_name(name, control)?
+            }
+            (resolved, _, _) => resolved,
+        };
+        // Literal input routines receive an unknown source without a physical type descriptor.
+        let source = source_type.filter(|ty| {
+            !matches!(
+                **ty,
+                ColumnType::Pseudo(crate::ast::ExpressionPseudoType::Unknown)
+            )
+        });
         Ok(Self {
             target: target_type,
             source,

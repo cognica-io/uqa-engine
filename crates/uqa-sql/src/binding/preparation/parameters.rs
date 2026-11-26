@@ -48,7 +48,15 @@ pub(super) struct ExpressionType {
     unknown: UnknownOrigin,
     /// The text of an `unknown` string literal, which the selected type's input function reads when a context coerces it.
     literal: Option<(AnalysisIdentity<ScalarExpr>, Produced<String>)>,
-    collation: Option<AnalysisIdentity<ScalarExpr>>,
+    collation: Option<ExplicitInputCollation>,
+}
+
+/// A direct COLLATE clause can be peeled during coercion. Retain its operand's original collation along with the clause selected for the executable expression.
+#[derive(Clone, Copy)]
+struct ExplicitInputCollation {
+    origin: AnalysisIdentity<ScalarExpr>,
+    derivation: Derivation,
+    initial: u32,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -471,12 +479,39 @@ impl<I: LiteralInput> ParameterTypes<'_, I> {
         oid: u32,
     ) -> Result<(), SQLError> {
         let origin = AnalysisIdentity::from(expression);
+        let inner = value.collation;
         if let Some(constants) = &mut self.input_constants {
-            constants.3.select(origin, value.collation, oid)?;
+            constants
+                .3
+                .select(origin, inner.map(|clause| clause.origin), oid)?;
         }
-        value.collation = Some(origin);
+        value.collation = Some(ExplicitInputCollation {
+            origin,
+            derivation: inner.map_or(value.derivation, |clause| clause.derivation),
+            initial: inner.map_or(value.initial_collation, |clause| clause.initial),
+        });
         value.derivation = value.derivation.explicit(i64::from(oid));
         value.initial_collation = oid;
+        Ok(())
+    }
+
+    pub(super) fn peel_pseudo_input_collation(
+        &mut self,
+        operand: &ScalarExpr,
+        value: &mut ExpressionType,
+        target: &ColumnType,
+    ) -> Result<(), SQLError> {
+        if let Some(clause) = value
+            .collation
+            .filter(|clause| clause.origin == AnalysisIdentity::from(operand))
+        {
+            if let Some(constants) = &mut self.input_constants {
+                constants.3.coerce(Some(clause.origin), target)?;
+            }
+            value.derivation = clause.derivation;
+            value.initial_collation = clause.initial;
+            value.collation = None;
+        }
         Ok(())
     }
 
@@ -840,7 +875,9 @@ impl<I: LiteralInput> ParameterTypes<'_, I> {
         let control = control_owner.control();
         let target = target.without_type_modifiers_with_control(&control)?;
         if let Some(constants) = &mut self.input_constants {
-            constants.3.coerce(expression.collation, &target)?;
+            constants
+                .3
+                .coerce(expression.collation.map(|clause| clause.origin), &target)?;
         }
         if let Some(occurrence) = expression.occurrence {
             let (index, observed) = &mut self.occurrences[occurrence];

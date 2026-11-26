@@ -138,6 +138,8 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
                 .await?
         };
         if matches!(target, ColumnType::Pseudo(_) | ColumnType::AnyArray) {
+            self.parameters
+                .peel_pseudo_input_collation(expr, &mut source, target)?;
             return self.cast_to_pseudo(source, target);
         }
         if let Some(fields) = &mut source.row_constructor {

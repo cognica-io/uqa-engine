@@ -25,26 +25,30 @@ pub enum ExpressionPseudoType {
 }
 
 impl ExpressionPseudoType {
+    pub const ALL: [Self; 12] = [
+        Self::Unknown,
+        Self::Any,
+        Self::AnyElement,
+        Self::AnyNonArray,
+        Self::AnyEnum,
+        Self::AnyRange,
+        Self::AnyMultiRange,
+        Self::AnyCompatibleMultiRange,
+        Self::AnyCompatible,
+        Self::AnyCompatibleArray,
+        Self::AnyCompatibleNonArray,
+        Self::AnyCompatibleRange,
+    ];
+
+    pub fn from_oid(oid: u32) -> Option<Self> {
+        Self::ALL.into_iter().find(|ty| *ty as u32 == oid)
+    }
+
     pub fn from_name(name: &str) -> Option<Self> {
         if name != "unknown" && !name.starts_with("any") {
             return None;
         }
-        [
-            Self::Unknown,
-            Self::Any,
-            Self::AnyElement,
-            Self::AnyNonArray,
-            Self::AnyEnum,
-            Self::AnyRange,
-            Self::AnyMultiRange,
-            Self::AnyCompatibleMultiRange,
-            Self::AnyCompatible,
-            Self::AnyCompatibleArray,
-            Self::AnyCompatibleNonArray,
-            Self::AnyCompatibleRange,
-        ]
-        .into_iter()
-        .find(|ty| ty.name() == name)
+        Self::ALL.into_iter().find(|ty| ty.name() == name)
     }
 
     pub const fn name(self) -> &'static str {

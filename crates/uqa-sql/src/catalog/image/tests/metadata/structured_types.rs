@@ -145,6 +145,7 @@ fn base_types() -> Vec<ColumnType> {
 fn types() -> Vec<ColumnType> {
     use ColumnType::*;
     let mut values = base_types();
+    values.extend(crate::ast::ExpressionPseudoType::ALL.map(Pseudo));
     for length in [None, Some(0), Some(13), Some(u32::MAX)] {
         values.extend([Varchar(length), Bit(length), VarBit(length)]);
     }

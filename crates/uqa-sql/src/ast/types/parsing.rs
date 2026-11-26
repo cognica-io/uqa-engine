@@ -160,7 +160,11 @@ impl ColumnType {
             .strip_prefix("pg_catalog.")
             .or_else(|| base.strip_prefix("\"pg_catalog\"."));
         let catalog_modifiers = catalog_name.is_some() || base.starts_with('"');
-        let local = catalog_name.unwrap_or(&base).trim_matches('"');
+        let local = catalog_name.unwrap_or(&base);
+        let local = local
+            .strip_prefix('"')
+            .and_then(|name| name.strip_suffix('"'))
+            .unwrap_or(local);
         let pseudo = if local == "anyarray" {
             Some(Self::AnyArray)
         } else if usage == TypeUse::Expression {
@@ -185,13 +189,8 @@ impl ColumnType {
             return Ok(Parsed::Scalar(ty.clone_with_control(control)?));
         }
         let catalog_type;
-        let base = if let Some(name) =
-            catalog_name.or_else(|| base.strip_prefix('"').map(|_| &**base))
-        {
-            let name = name
-                .strip_prefix('"')
-                .and_then(|name| name.strip_suffix('"'))
-                .unwrap_or(name);
+        let base = if catalog_modifiers {
+            let name = local;
             if let Some(element) = builtin_array_element_name(name) {
                 return Ok(Parsed::Array(element));
             }

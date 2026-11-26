@@ -15,6 +15,21 @@ mod ranges;
 mod timezone;
 
 #[test]
+fn standalone_polymorphic_casts_resolve_builtin_operand_types() {
+    let error = cast_value_with_type_resolution(&Value::Int(7), Some("integer"), "anyarray", None)
+        .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("42846"));
+    let range = Value::Str("[1,4)".into());
+    assert_eq!(
+        cast_value_with_type_resolution(&range, Some("int4range"), "anyrange", None).unwrap(),
+        range
+    );
+    let unknown =
+        cast_value_with_type_resolution(&range, Some("unknown"), "anyrange", None).unwrap_err();
+    assert_eq!(unknown.sqlstate(), Some("0A000"));
+}
+
+#[test]
 fn standalone_catalog_casts_keep_oid_output_and_array_lower_bounds() {
     let budget = MemoryBudget::new(128 * 1024);
     let token = CancellationToken::new();

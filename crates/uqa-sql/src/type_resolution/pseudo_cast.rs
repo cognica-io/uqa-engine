@@ -78,7 +78,11 @@ pub(crate) fn select<'a>(
                             ColumnType::Multirange(_) | ColumnType::DeclaredMultirange(_)
                         ),
                     };
-                matches.then_some(Coercion::Relabel(base))
+                matches.then_some(if matches!(source, Some(ColumnType::Domain { .. })) {
+                    Coercion::Relabel(base)
+                } else {
+                    Coercion::Preserve
+                })
             } else if unknown_string {
                 let name = target.regtype_name_with_control(control)?;
                 return Err(SQLError::Routine {

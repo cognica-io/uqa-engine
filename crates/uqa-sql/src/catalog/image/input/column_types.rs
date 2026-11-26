@@ -90,12 +90,10 @@ impl Fields<'_> {
             TypeTag::AnyArray => ColumnType::AnyArray,
             TypeTag::Pseudo => {
                 let oid = u32::from_le_bytes(self.binary.array().await?);
-                let Some(ColumnType::Pseudo(pseudo)) =
-                    crate::catalog::type_metadata::builtin_scalar_type(oid)
-                else {
-                    return Err(invalid("expression pseudo-type OID"));
-                };
-                ColumnType::Pseudo(*pseudo)
+                ColumnType::Pseudo(
+                    crate::ast::ExpressionPseudoType::from_oid(oid)
+                        .ok_or_else(|| invalid("expression pseudo-type OID"))?,
+                )
             }
             TypeTag::Record => ColumnType::Record,
             TypeTag::Date => ColumnType::Date,

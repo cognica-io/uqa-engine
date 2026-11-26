@@ -325,6 +325,20 @@
     {"sql":"SELECT ('(3,three)'::unknown)::pc_pair AS value","command_tags":["SELECT 1"],"error":null,"results":[{"columns":["value"],"type_oids":[16669],"rows":[["(3,three)"]]}],"notices":[]},
     {"sql":"SELECT ('red'::unknown)::pc_color AS value","command_tags":["SELECT 1"],"error":null,"results":[{"columns":["value"],"type_oids":[16638],"rows":[["red"]]}],"notices":[]},
     {"sql":"SELECT ('(4,four)'::text::unknown)::pc_pair AS value","command_tags":[],"error":{"sqlstate":"XX000","message":"failed to find conversion function from unknown to pc_pair","detail":null,"hint":null},"results":[],"notices":[]},
-    {"sql":"SELECT ('red'::text::unknown)::pc_color AS value","command_tags":[],"error":{"sqlstate":"XX000","message":"failed to find conversion function from unknown to pc_color","detail":null,"hint":null},"results":[],"notices":[]}
+    {"sql":"SELECT ('red'::text::unknown)::pc_color AS value","command_tags":[],"error":{"sqlstate":"XX000","message":"failed to find conversion function from unknown to pc_color","detail":null,"hint":null},"results":[],"notices":[]},
+    {"sql":"SELECT NULL::\"unknown\"\"\" AS value","command_tags":[],"error":{"sqlstate":"42704","message":"type \"unknown\"\" does not exist","detail":null,"hint":null},"results":[],"notices":[]},
+    {"sql":"SELECT NULL::pg_catalog.\"anyarray\"\"\" AS value","command_tags":[],"error":{"sqlstate":"42704","message":"type \"pg_catalog.anyarray\"\" does not exist","detail":null,"hint":null},"results":[],"notices":[]},
+    {"sql":"SELECT NULL::\"\"\"anyelement\" AS value","command_tags":[],"error":{"sqlstate":"42704","message":"type \"\"anyelement\" does not exist","detail":null,"hint":null},"results":[],"notices":[]},
+    {"sql":"SELECT NULL::\"UNKNOWN\" AS value","command_tags":[],"error":{"sqlstate":"42704","message":"type \"UNKNOWN\" does not exist","detail":null,"hint":null},"results":[],"notices":[]},
+    {"sql":"SELECT NULL::pg_catalog.\"unknown\" AS value","command_tags":["SELECT 1"],"error":null,"results":[{"columns":["value"],"type_oids":[25],"rows":[[null]]}],"notices":[]},
+    {"sql":"SELECT COLLATION FOR ((ARRAY['a'] COLLATE \"C\")::anyarray) AS chosen","command_tags":["SELECT 1"],"error":null,"results":[{"columns":["chosen"],"type_oids":[25],"rows":[["\"default\""]]}],"notices":[]},
+    {"sql":"SELECT COLLATION FOR ((ARRAY['a'] COLLATE \"C\")::anycompatiblearray) AS chosen","command_tags":["SELECT 1"],"error":null,"results":[{"columns":["chosen"],"type_oids":[25],"rows":[["\"default\""]]}],"notices":[]},
+    {"sql":"CREATE DOMAIN pc_collated_array AS text[]","command_tags":["CREATE DOMAIN"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}],"notices":[]},
+    {"sql":"SELECT COLLATION FOR (((ARRAY['a']::pc_collated_array) COLLATE \"C\")::anyarray) AS chosen","command_tags":["SELECT 1"],"error":null,"results":[{"columns":["chosen"],"type_oids":[25],"rows":[["\"default\""]]}],"notices":[]},
+    {"sql":"CREATE TABLE pc_collation_source(v text[] COLLATE \"C\")","command_tags":["CREATE TABLE"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}],"notices":[]},
+    {"sql":"INSERT INTO pc_collation_source VALUES (ARRAY['a'])","command_tags":["INSERT 0 1"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}],"notices":[]},
+    {"sql":"SELECT COLLATION FOR(v) AS source, COLLATION FOR(v::anyarray) AS poly, COLLATION FOR(v::anycompatiblearray) AS compatible, COLLATION FOR(v::anyelement) AS element FROM pc_collation_source","command_tags":["SELECT 1"],"error":null,"results":[{"columns":["source","poly","compatible","element"],"type_oids":[25,25,25,25],"rows":[["\"C\"","\"C\"","\"C\"","\"C\""]]}],"notices":[]},
+    {"sql":"SELECT COLLATION FOR((ARRAY['a'] COLLATE \"C\")) AS explicit_source, COLLATION FOR((ARRAY['a'] COLLATE \"C\")::anyelement) AS element","command_tags":["SELECT 1"],"error":null,"results":[{"columns":["explicit_source","element"],"type_oids":[25,25],"rows":[["\"C\"","\"default\""]]}],"notices":[]},
+    {"sql":"SELECT COLLATION FOR ((v COLLATE \"POSIX\")::anyarray) AS poly, COLLATION FOR (((v COLLATE \"POSIX\") COLLATE \"default\")::anyelement) AS element FROM pc_collation_source","command_tags":["SELECT 1"],"error":null,"results":[{"columns":["poly","element"],"type_oids":[25,25],"rows":[["\"C\"","\"C\""]]}],"notices":[]}
   ]
 }
