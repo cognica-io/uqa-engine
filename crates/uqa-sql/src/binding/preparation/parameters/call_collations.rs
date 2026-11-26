@@ -91,6 +91,12 @@ impl CallCollations {
 
     fn apply_node(&mut self, node: &mut ScalarExpr) {
         let identity = AnalysisIdentity::from(&*node);
+        if let ScalarExpr::Binary { op, .. } = node {
+            if let Some(selection) = self.selections.remove(&identity) {
+                *op = op.with_input_collation(selection);
+            }
+            return;
+        }
         let ScalarExpr::Func { binding, .. } = node else {
             return;
         };

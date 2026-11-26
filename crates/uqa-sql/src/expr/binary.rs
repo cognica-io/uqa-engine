@@ -52,15 +52,7 @@ pub(super) fn eval_binary(
     }
     let l = eval(lhs, ctx)?;
     let r = eval(rhs, ctx)?;
-    if matches!(
-        op,
-        BinaryOp::Equal
-            | BinaryOp::NotEqual
-            | BinaryOp::Less
-            | BinaryOp::LessEqual
-            | BinaryOp::Greater
-            | BinaryOp::GreaterEqual
-    ) {
+    if op.comparison().is_some() {
         if matches!((&l, &r), (Value::Row(_), Value::Row(_)))
             && !matches!((lhs, rhs), (Expr::Row(_), Expr::Row(_)))
         {
@@ -257,8 +249,9 @@ fn binary_values(
         | BinaryOp::Less
         | BinaryOp::LessEqual
         | BinaryOp::Greater
-        | BinaryOp::GreaterEqual => {
-            let value = eval_comparison_truth_with_control(op, l, r, control)?
+        | BinaryOp::GreaterEqual
+        | BinaryOp::Compare { .. } => {
+            let value = eval_comparison_truth_with_engine(op, l, r, control, engine, None)?
                 .map(Value::Bool)
                 .unwrap_or(Value::Null);
             control
@@ -357,15 +350,7 @@ pub(super) fn eval_binary_borrowed(
     rhs: &Expr,
     ctx: &EvalContext<'_>,
 ) -> Result<Option<Value>> {
-    if !matches!(
-        op,
-        BinaryOp::Equal
-            | BinaryOp::NotEqual
-            | BinaryOp::Less
-            | BinaryOp::LessEqual
-            | BinaryOp::Greater
-            | BinaryOp::GreaterEqual
-    ) {
+    if op.comparison().is_none() {
         return Ok(None);
     }
     let Some(l) = eval_operand_borrowed(lhs, ctx)? else {

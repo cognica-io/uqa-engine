@@ -34,6 +34,15 @@ pub trait SourcePlanning<S: Clone>: Sync {
         false
     }
     /// Whether an outer join removes one matching input while retaining its preserved side.
+    fn prefer_nested_loop(
+        &self,
+        _kind: uqa_sql::ast::JoinKind,
+        _left: &SourcePlan,
+        _right: &SourcePlan,
+        _control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<bool, SQLError> {
+        Ok(false)
+    }
     fn join_input_is_empty(&self, _join: &SourcePlan, _right: bool) -> bool {
         false
     }

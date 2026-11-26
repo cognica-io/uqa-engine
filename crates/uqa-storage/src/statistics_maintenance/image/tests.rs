@@ -16,6 +16,7 @@ fn fixture() -> StatisticsMaintenance {
         statistics_format: 12,
         analyzed_at: Some(13),
         analysis_generation: Some(14),
+        relation_rows: None,
     }
 }
 
@@ -84,7 +85,7 @@ fn native_statistics_maintenance_images_match_independent_inline_bytes() {
 fn native_statistics_maintenance_images_preserve_absence_and_all_counter_bits() {
     let memory = MemoryBudget::new(0);
     let token = CancellationToken::new();
-    for mask in 0u8..16 {
+    for mask in 0u8..32 {
         let source = StatisticsMaintenance {
             object_id: (mask & 1 != 0).then_some([0; 16]),
             generation: u64::MAX,
@@ -94,6 +95,7 @@ fn native_statistics_maintenance_images_preserve_absence_and_all_counter_bits() 
             statistics_format: u32::MAX,
             analyzed_at: (mask & 4 != 0).then_some(u64::MAX),
             analysis_generation: (mask & 8 != 0).then_some(0),
+            relation_rows: (mask & 16 != 0).then_some(u64::MAX),
         };
         let bytes = encode(&source, 7);
         assert_eq!(
@@ -164,3 +166,19 @@ fn native_statistics_maintenance_output_failure_and_cancellation_are_terminal() 
 }
 
 mod windows;
+
+#[test]
+fn index_population_survives_a_native_image_without_marking_columns_analyzed() {
+    let mut state = StatisticsMaintenance::default();
+    state.record_relation_rows([5; 16], 23);
+    let bytes = encode(&state, 3);
+    assert_eq!(bytes.len(), LENGTH);
+    let restored = StatisticsMaintenance::read_image(
+        &mut bytes.as_slice(),
+        &MemoryBudget::new(0),
+        &CancellationToken::new(),
+    )
+    .unwrap();
+    assert_eq!(restored.relation_rows(), Some(23));
+    assert!(restored.missing(true));
+}

@@ -7,9 +7,9 @@
 //! Operator volatility borrows static declarations and retains every concrete type candidate under its production scope.
 
 use super::{
-    base_type, binary_operator_name, binary_operator_types_with_control, catalog, resolution,
-    undefined_binary_operator, BinaryOp, BinaryOperatorCatalogEntry, ColumnType,
-    FunctionVolatility, ProductionControl, SQLError,
+    base_type, binary_operator_types_with_control, catalog, resolution, undefined_binary_operator,
+    BinaryOp, BinaryOperatorCatalogEntry, ColumnType, FunctionVolatility, ProductionControl,
+    SQLError,
 };
 
 pub fn binary_operator_volatility_with_control(
@@ -29,7 +29,7 @@ pub fn binary_operator_volatility_with_control(
         }
     }
     Ok(named_binary_operator_catalog_entry_with_control(
-        binary_operator_name(op),
+        op.sql(),
         [&targets[0], &targets[1]],
         control,
     )?

@@ -282,6 +282,16 @@ pub(super) fn build_join_source_operator<'a, S: Clone + Send + Sync + 'static>(
                         context.volatility,
                         &control,
                     )?;
+                    let hash_plan = if hash_plan.is_some()
+                        && matches!(strategy, uqa_sql::plan::JoinExecutionStrategy::Auto)
+                        && context
+                            .planning
+                            .prefer_nested_loop(*kind, left, right, &control)?
+                    {
+                        None
+                    } else {
+                        hash_plan
+                    };
                     // Both descriptors already contain every NULL-extended attribute; no duplicate named NULL rows are needed for physical construction.
                     let left_nulls = uqa_sql::ResultRow::new();
                     let right_nulls = uqa_sql::ResultRow::new();
@@ -317,6 +327,7 @@ pub(super) fn build_join_source_operator<'a, S: Clone + Send + Sync + 'static>(
                                 params,
                                 &control,
                             )?
+                            .with_hash_collations(keys.indeterminate)
                             .into_boxed(&control)?
                         }
                         (_, None) => NestedLoopJoin::with_owned_predicate(

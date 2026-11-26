@@ -13,7 +13,7 @@ use std::hash::BuildHasher;
 use smallvec::SmallVec;
 use uqa_core::Value;
 
-use crate::distinct::hash_typed_row_with_catalog;
+use crate::distinct::hash_typed_row_with_collations;
 use crate::{ExecResult, PhysicalRow, RowSchema};
 use uqa_sql::expr::enums::EnumLabelCatalog;
 
@@ -114,6 +114,7 @@ pub(super) fn positional_key_hash<S: BuildHasher>(
     schema: &RowSchema,
     row: &PhysicalRow,
     positions: &[usize],
+    indeterminate: &[usize],
     catalog: Option<&dyn EnumLabelCatalog>,
 ) -> ExecResult<Option<u64>> {
     let view = schema.view(row);
@@ -123,11 +124,12 @@ pub(super) fn positional_key_hash<S: BuildHasher>(
     }) {
         return Ok(None);
     }
-    hash_typed_row_with_catalog(
+    hash_typed_row_with_collations(
         build_hasher,
         positions
             .iter()
             .map(|position| (view.value_at(*position), schema.column_type(*position))),
+        indeterminate,
         catalog,
     )
     .map(Some)
@@ -176,6 +178,7 @@ pub(super) fn direct_unique_match(
     probe_schema: &RowSchema,
     probe_row: &PhysicalRow,
     probe_positions: &[usize],
+    indeterminate: &[usize],
     catalog: Option<&dyn EnumLabelCatalog>,
 ) -> ExecResult<Option<u64>> {
     let Some(hash) = positional_key_hash(
@@ -183,6 +186,7 @@ pub(super) fn direct_unique_match(
         probe_schema,
         probe_row,
         probe_positions,
+        indeterminate,
         catalog,
     )?
     else {

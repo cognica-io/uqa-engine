@@ -110,15 +110,7 @@ fn binary_values(
     context: &ScalarEvalContext<'_>,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Value>, SQLError> {
-    if matches!(
-        op,
-        BinaryOp::Equal
-            | BinaryOp::NotEqual
-            | BinaryOp::Less
-            | BinaryOp::LessEqual
-            | BinaryOp::Greater
-            | BinaryOp::GreaterEqual
-    ) {
+    if op.comparison().is_some() {
         if matches!((left, right), (Value::Row(_), Value::Row(_)))
             && !matches!((lhs, rhs), (ScalarExpr::Row(_), ScalarExpr::Row(_)))
         {

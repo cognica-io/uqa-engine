@@ -74,7 +74,8 @@ impl CardinalityEstimator {
         let constant = literal_of(rhs).or_else(|| literal_of(lhs));
         let col_stats = col.and_then(|name| stats.column(name));
         let value = constant;
-        match op {
+        match op.uncollated() {
+            BinaryOp::Compare { .. } => unreachable!("comparison was normalized"),
             BinaryOp::Equal => {
                 if let (Some(stats), Some(v)) = (col_stats, value) {
                     return Selectivity(stats.equality_selectivity_for(v)).clamp();
@@ -322,7 +323,8 @@ impl CardinalityEstimator {
         if matches!(value.as_deref(), Some(Value::Null)) {
             return Ok(Selectivity(0.0));
         }
-        Ok(match op {
+        Ok(match op.uncollated() {
+            BinaryOp::Compare { .. } => unreachable!("comparison was normalized"),
             BinaryOp::Equal | BinaryOp::NotEqual => {
                 let equal = column_stats.map_or(self.default_selectivity, |column| {
                     value.as_deref().map_or_else(

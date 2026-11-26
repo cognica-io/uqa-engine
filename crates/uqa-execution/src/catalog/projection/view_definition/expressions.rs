@@ -236,7 +236,7 @@ impl Deparser<'_> {
         let precedence = operator_precedence(op);
         let left = self.operand(lhs, precedence, false, scope, subqueries)?;
         let right = self.operand(rhs, precedence, true, scope, subqueries)?;
-        Ok(self.parenthesize(format!("{left} {} {right}", operator(op))))
+        Ok(self.parenthesize(format!("{left} {} {right}", op.sql())))
     }
 
     fn in_list(
@@ -913,21 +913,6 @@ fn operator_precedence(op: BinaryOp) -> u8 {
         BinaryOp::Add | BinaryOp::Subtract => 50,
         BinaryOp::Multiply | BinaryOp::Divide => 60,
         _ => 40,
-    }
-}
-
-fn operator(op: BinaryOp) -> &'static str {
-    match op {
-        BinaryOp::Equal => "=",
-        BinaryOp::NotEqual => "<>",
-        BinaryOp::Less => "<",
-        BinaryOp::LessEqual => "<=",
-        BinaryOp::Greater => ">",
-        BinaryOp::GreaterEqual => ">=",
-        BinaryOp::Add => "+",
-        BinaryOp::Subtract => "-",
-        BinaryOp::Multiply => "*",
-        BinaryOp::Divide => "/",
     }
 }
 

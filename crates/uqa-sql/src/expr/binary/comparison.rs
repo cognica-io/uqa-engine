@@ -44,21 +44,7 @@ pub fn eval_comparison_truth_with_control(
     r: &Value,
     control: &ProductionControl<'_>,
 ) -> Result<Option<bool>> {
-    control.check()?;
-    let out = match op {
-        BinaryOp::Equal => values_equal_nullable_with_control(l, r, control)?,
-        BinaryOp::NotEqual => values_equal_nullable_with_control(l, r, control)?.map(|v| !v),
-        BinaryOp::Less => compare_nullable_with_control(l, r, control)?.map(|v| v.is_lt()),
-        BinaryOp::LessEqual => compare_nullable_with_control(l, r, control)?.map(|v| v.is_le()),
-        BinaryOp::Greater => compare_nullable_with_control(l, r, control)?.map(|v| v.is_gt()),
-        BinaryOp::GreaterEqual => compare_nullable_with_control(l, r, control)?.map(|v| v.is_ge()),
-        _ => {
-            return Err(SQLError::Internal(format!(
-                "non-comparison operator {op:?} reached comparison evaluation"
-            )))
-        }
-    };
-    Ok(out)
+    eval_comparison_truth_with_context(op, l, r, control, None, None, None)
 }
 
 /// Borrow physical type metadata from scalar hooks even when the embedder provides no enum capability.
@@ -105,11 +91,29 @@ pub fn eval_record_comparison_truth_with_engine(
     let catalog = catalog
         .as_ref()
         .map(|catalog| catalog as &dyn crate::expr::SQLValueCatalog);
+    eval_selected_comparison(op, left, right, control, catalog)
+}
+
+fn eval_selected_comparison(
+    op: BinaryOp,
+    left: &Value,
+    right: &Value,
+    control: &ProductionControl<'_>,
+    catalog: Option<&dyn crate::expr::SQLValueCatalog>,
+) -> Result<Option<bool>> {
+    let collation = match op {
+        BinaryOp::Compare { collation, .. } => collation.oid(),
+        _ => collations::DEFAULT,
+    };
+    let op = op.uncollated();
     if matches!(op, BinaryOp::Equal | BinaryOp::NotEqual) {
-        let equal = equal_typed_values_with_enum_catalog(left, right, control, catalog)?;
+        let equal = equal_typed_values_with_catalog_and_collation(
+            left, right, collation, control, catalog,
+        )?;
         return Ok(Some(if op == BinaryOp::Equal { equal } else { !equal }));
     }
-    let order = compare_typed_values_with_enum_catalog(left, right, control, catalog, None)?;
+    let order =
+        compare_typed_values_with_catalog_and_collation(left, right, collation, control, catalog)?;
     Ok(Some(match op {
         BinaryOp::Less => order.is_lt(),
         BinaryOp::LessEqual => order.is_le(),
@@ -117,7 +121,7 @@ pub fn eval_record_comparison_truth_with_engine(
         BinaryOp::GreaterEqual => order.is_ge(),
         _ => {
             return Err(SQLError::Internal(format!(
-                "non-comparison operator {op:?} reached record comparison"
+                "non-comparison operator {op:?} reached typed comparison"
             )))
         }
     }))
@@ -142,7 +146,7 @@ pub fn eval_comparison_truth_with_deferred_state<'a>(
         _ => None,
     };
     if let Some(order) = primitive {
-        return match op {
+        return match op.uncollated() {
             BinaryOp::Equal => Ok(order.map(Ordering::is_eq)),
             BinaryOp::NotEqual => Ok(order.map(|order| !order.is_eq())),
             BinaryOp::Less => Ok(order.map(Ordering::is_lt)),
@@ -190,6 +194,12 @@ fn eval_comparison_truth_with_context(
     state: Option<&EnumComparisonState>,
 ) -> Result<Option<bool>> {
     control.check()?;
+    if let BinaryOp::Compare { .. } = op {
+        if matches!(left, Value::Null) || matches!(right, Value::Null) {
+            return Ok(None);
+        }
+        return eval_selected_comparison(op, left, right, control, enums);
+    }
     if matches!(op, BinaryOp::Equal | BinaryOp::NotEqual) {
         return values_equal_nullable_with_catalog(left, right, control, enums, engine)
             .map(|equal| equal.map(|equal| if op == BinaryOp::Equal { equal } else { !equal }));

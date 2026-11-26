@@ -115,7 +115,7 @@ pub fn binary_operator_catalog_entry(
     op: BinaryOp,
     operands: [&ColumnType; 2],
 ) -> Result<BinaryOperatorCatalogEntry, SQLError> {
-    let name = binary_operator_name(op);
+    let name = op.sql();
     named_binary_operator_catalog_entry(name, operands)
 }
 
@@ -263,11 +263,7 @@ pub fn binary_result_type_with_control(
                 ordering_operator_available
             };
         if left.is_some_and(|ty| !available(ty)) || right.is_some_and(|ty| !available(ty)) {
-            return Err(undefined_binary_operator(
-                binary_operator_name(op),
-                left,
-                right,
-            ));
+            return Err(undefined_binary_operator(op.sql(), left, right));
         }
         return control
             .finish(ColumnType::Boolean, control.empty_reservation())
@@ -314,7 +310,7 @@ pub fn binary_result_type_with_control(
     }
     Err(super::undefined_binary_operator(
         Some(left),
-        binary_operator_name(op),
+        op.sql(),
         Some(right),
     ))
 }
@@ -363,21 +359,6 @@ fn temporal_binary_result_type(
         }
         (ty, T::Interval, BinaryOp::Multiply) if numeric_rank(ty).is_some() => Some(T::Interval),
         _ => None,
-    }
-}
-
-fn binary_operator_name(op: BinaryOp) -> &'static str {
-    match op {
-        BinaryOp::Equal => "=",
-        BinaryOp::NotEqual => "<>",
-        BinaryOp::Less => "<",
-        BinaryOp::LessEqual => "<=",
-        BinaryOp::Greater => ">",
-        BinaryOp::GreaterEqual => ">=",
-        BinaryOp::Add => "+",
-        BinaryOp::Subtract => "-",
-        BinaryOp::Multiply => "*",
-        BinaryOp::Divide => "/",
     }
 }
 

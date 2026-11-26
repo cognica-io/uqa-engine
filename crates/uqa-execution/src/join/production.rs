@@ -186,6 +186,7 @@ impl<'a> HashJoin<'a> {
             right_keys,
             left_key_types: Vec::new(),
             right_key_types: Vec::new(),
+            indeterminate_keys: None,
             left_key_positions,
             right_key_positions,
             predicate,
@@ -208,6 +209,18 @@ impl<'a> HashJoin<'a> {
             hash_index_spilled: SpillState::InMemory,
             memory: None,
         })
+    }
+
+    /// Deterministic collations share the same equality bytes. Only an indeterminate key needs an observation when its hash function reaches text.
+    pub(crate) fn with_hash_collations(mut self, indeterminate: Produced<Vec<usize>>) -> Self {
+        self.indeterminate_keys = (!indeterminate.is_empty()).then_some(indeterminate);
+        self
+    }
+
+    pub(super) fn indeterminate_keys(&self) -> &[usize] {
+        self.indeterminate_keys
+            .as_deref()
+            .map_or(&[], Vec::as_slice)
     }
 
     pub fn into_boxed(mut self, control: &ProductionControl<'_>) -> Result<Box<Self>, SQLError> {

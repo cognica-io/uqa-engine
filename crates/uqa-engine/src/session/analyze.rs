@@ -308,12 +308,17 @@ impl Engine {
         *t.column_stats.write() = stats_out;
         *t.column_stats_loaded.write() = true;
         *t.column_stats_dirty.write() = false;
-        t.statistics_maintenance.write().analyzed(
+        let mut maintenance = t.statistics_maintenance.write();
+        maintenance.analyzed(
             t.object_id(),
             row_count,
             crate::statistics::value_size::FORMAT_VERSION,
             None,
         )?;
+        if persist {
+            maintenance.record_relation_rows(t.object_id(), row_count);
+        }
+        drop(maintenance);
         self.clear_pending_statistics_changes(canonical_table_name, t.object_id());
         self.retain_statistics_sample(canonical_table_name, t.object_id(), sampled_generations);
         Ok(())

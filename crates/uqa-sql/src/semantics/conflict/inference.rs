@@ -35,6 +35,15 @@ impl InferenceBindingScope for Catalog {
     }
 }
 impl ConflictCatalog for Catalog {
+    fn inference_context(&self) -> InferenceContext<'_> {
+        InferenceContext {
+            catalog: self,
+            aggregates: self,
+            routines: self,
+            binding: self,
+        }
+    }
+
     fn try_describe_table(&self, _: &str) -> Result<Option<Vec<ColumnDef>>, String> {
         Ok(Some(self.0.clone()))
     }

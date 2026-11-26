@@ -16,7 +16,7 @@ pub use ctype::BuiltinCollationCtype;
 pub use selection::CollationSelection;
 
 /// PostgreSQL reports the operation that first needs a determinate collation.
-pub(crate) fn indeterminate_error(operation: &str) -> crate::SQLError {
+pub fn indeterminate_error(operation: &str) -> crate::SQLError {
     crate::SQLError::Diagnostic {
         sqlstate: "42P22".into(),
         message: format!("could not determine which collation to use for {operation}"),

@@ -202,7 +202,11 @@ pub(super) fn eval(
         }
         "md5" | "encode" => encode(name, args, control),
         "decode" => decode(args, control),
-        "split_part" => split_part(args, control),
+        "split_part" => split_part(
+            args,
+            crate::catalog::collations::DEFAULT_COLLATION_OID as u32,
+            control,
+        ),
         _ => unreachable!("text family membership was checked before dispatch"),
     }
 }
@@ -263,7 +267,11 @@ fn decode(args: &[Value], control: &ProductionControl<'_>) -> Result<Produced<Va
     bytes(output, control)
 }
 
-fn split_part(args: &[Value], control: &ProductionControl<'_>) -> Result<Produced<Value>> {
+pub(in crate::expr) fn split_part(
+    args: &[Value],
+    collation: u32,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>> {
     if args.len() != 3 {
         return Err(SQLError::TypeMismatch("split_part takes 3 args".into()));
     }
@@ -278,6 +286,12 @@ fn split_part(args: &[Value], control: &ProductionControl<'_>) -> Result<Produce
             sqlstate: "22023".into(),
             message: "field position must not be zero".into(),
         });
+    }
+    if s.is_empty() {
+        return string(s, control);
+    }
+    if !separator.is_empty() {
+        crate::expr::collation::string_comparison_order(collation)?;
     }
     let mut parts = ProductionVec::new(*control);
     if separator.is_empty() {

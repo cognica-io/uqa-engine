@@ -63,6 +63,10 @@ impl AggregateClassifier for Catalog<'_> {
     }
 }
 impl ConflictCatalog for Catalog<'_> {
+    fn inference_context(&self) -> InferenceContext<'_> {
+        self.context()
+    }
+
     fn try_describe_table(&self, _: &str) -> Result<Option<Vec<ColumnDef>>, String> {
         panic!("inference borrows declarations")
     }

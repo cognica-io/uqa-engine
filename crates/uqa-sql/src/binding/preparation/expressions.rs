@@ -354,8 +354,8 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
                 collation,
             } => return self.collated_expression(expr, ty, *collation, input, subqueries),
             ScalarExpr::Cast { expr, ty, .. } => CatalogOperands::Cast(expr, ty),
-            ScalarExpr::Binary { op, lhs, rhs } => {
-                return self.binary_expression(*op, lhs, rhs, input, subqueries);
+            ScalarExpr::Binary { .. } => {
+                return self.binary_expression(expression, input, subqueries);
             }
             ScalarExpr::Not(inner) => return self.not_expression(inner, input, subqueries),
             ScalarExpr::And(items) | ScalarExpr::Or(items) => {

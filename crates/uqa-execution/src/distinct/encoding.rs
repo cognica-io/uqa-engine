@@ -60,14 +60,29 @@ pub(crate) fn hash_typed_row_with_catalog<'a, S: BuildHasher>(
     values: impl ExactSizeIterator<Item = (Option<&'a Value>, Option<&'a uqa_sql::ColumnType>)>,
     catalog: Option<&dyn uqa_sql::expr::SQLValueCatalog>,
 ) -> ExecResult<u64> {
+    hash_typed_row_with_collations(build_hasher, values, &[], catalog)
+}
+
+pub(crate) fn hash_typed_row_with_collations<'a, S: BuildHasher>(
+    build_hasher: &S,
+    values: impl ExactSizeIterator<Item = (Option<&'a Value>, Option<&'a uqa_sql::ColumnType>)>,
+    indeterminate: &[usize],
+    catalog: Option<&dyn uqa_sql::expr::SQLValueCatalog>,
+) -> ExecResult<u64> {
     let count = values.len();
     let mut hasher = build_hasher.build_hasher();
     {
         let mut output = HasherOutput(&mut hasher, catalog);
         encode_len(count, &mut output)?;
         let control = ProductionControl::uncontrolled();
-        for (value, ty) in values {
-            encode_selected_value(value.unwrap_or(&Value::Null), ty, &mut output, &control)?;
+        for (index, (value, ty)) in values.enumerate() {
+            encode_hash_operand(
+                value.unwrap_or(&Value::Null),
+                ty,
+                indeterminate.binary_search(&index).is_ok(),
+                &mut output,
+                &control,
+            )?;
         }
     }
     Ok(hasher.finish())
@@ -261,6 +276,7 @@ impl<O: KeyOutput> KeyOutput for CatalogKeyOutput<'_, O> {
 /// the SQL equality key without allocating or cloning a `Value`.
 pub(crate) fn encode_typed_non_null_key<'a>(
     values: impl ExactSizeIterator<Item = (Option<&'a Value>, Option<&'a uqa_sql::ColumnType>)>,
+    indeterminate: &[usize],
     enums: Option<&dyn uqa_sql::expr::SQLValueCatalog>,
 ) -> ExecResult<Option<EncodedKey>> {
     let count = values.len();
@@ -271,14 +287,20 @@ pub(crate) fn encode_typed_non_null_key<'a>(
     };
     encode_len(count, &mut output)?;
     let control = ProductionControl::uncontrolled();
-    for (value, ty) in values {
+    for (index, (value, ty)) in values.enumerate() {
         let Some(value) = value else {
             return Ok(None);
         };
         if matches!(value, Value::Null) {
             return Ok(None);
         }
-        encode_selected_value(value, ty, &mut output, &control)?;
+        encode_hash_operand(
+            value,
+            ty,
+            indeterminate.binary_search(&index).is_ok(),
+            &mut output,
+            &control,
+        )?;
     }
     Ok(Some(output.values))
 }
@@ -476,6 +498,20 @@ fn encode_frames_with_control<'a>(
     }
 }
 
+fn encode_hash_operand(
+    value: &Value,
+    ty: Option<&uqa_sql::ColumnType>,
+    indeterminate: bool,
+    output: &mut impl KeyOutput,
+    control: &ProductionControl<'_>,
+) -> ExecResult<()> {
+    if indeterminate {
+        encode_selected_value(value, ty, &mut output::IndeterminateHash(output), control)
+    } else {
+        encode_selected_value(value, ty, output, control)
+    }
+}
+
 fn encode_selected_value(
     value: &Value,
     ty: Option<&uqa_sql::ColumnType>,
@@ -547,10 +583,12 @@ fn encode_leaf(
         Value::Float(value) => encode_float_numeric(*value, output, control),
         Value::Decimal(value) => encode_decimal_numeric(value, output, control),
         Value::Str(value) => {
+            output.hash_text()?;
             output.push_byte(2)?;
             encode_bytes(value.as_bytes(), output)
         }
         Value::FixedChar(value) => {
+            output.hash_text()?;
             output.push_byte(7)?;
             let value = uqa_core::fixed_char_comparison_text_with_control(value, control)
                 .map_err(output::resource_error)?;

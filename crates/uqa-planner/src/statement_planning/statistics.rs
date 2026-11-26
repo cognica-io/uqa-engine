@@ -45,6 +45,10 @@ pub trait PlannerStatisticsCatalog {
     fn storage_table(&self, table: &str)
         -> Result<Option<Arc<dyn StatisticsTableState>>, SQLError>;
     fn hierarchy_scan_tables(&self, table: &str) -> Result<Vec<String>, SQLError>;
+    /// Population last measured by a catalog operation. A newly created relation may have no sample.
+    fn measured_relation_rows(&self, _table: &str) -> Result<Option<u64>, SQLError> {
+        Ok(None)
+    }
     fn table_row_count(&self, table: &str) -> Result<u64, SQLError>;
     fn column_statistics(&self, table: &str) -> Result<ColumnStatistics, SQLError>;
     fn resolved_table_name(&self, table: &str) -> Result<Option<String>, SQLError>;

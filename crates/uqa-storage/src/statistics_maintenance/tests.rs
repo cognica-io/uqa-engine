@@ -17,6 +17,7 @@ fn captured_statistics_maintenance_keeps_all_inline_state_without_payload_alloca
         statistics_format: 12,
         analyzed_at: Some(13),
         analysis_generation: Some(14),
+        relation_rows: Some(15),
     };
     let memory = uqa_core::memory::MemoryBudget::new(0);
     let cancellation = uqa_core::CancellationToken::new();

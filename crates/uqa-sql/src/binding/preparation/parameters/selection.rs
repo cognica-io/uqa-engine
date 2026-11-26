@@ -31,7 +31,7 @@ impl InputConstants {
                 ScalarExpr::Func {
                     binding: Some(_),
                     ..
-                }
+                } | ScalarExpr::Binary { .. }
             ) {
                 expression = expression.set_call_input_collation(collation, control)?;
             }

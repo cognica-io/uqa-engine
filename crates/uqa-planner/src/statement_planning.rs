@@ -77,6 +77,41 @@ fn with_statistics<T>(
     estimate
 }
 
+/// Choose an algorithm for an automatically planned equality join from the last measured table populations. Estimating a query never runs ANALYZE or inspects its values.
+pub fn prefer_nested_loop(
+    catalog: &dyn PlannerStatisticsCatalog,
+    kind: uqa_sql::ast::JoinKind,
+    left: &crate::SourcePlan,
+    right: &crate::SourcePlan,
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<bool, SQLError> {
+    struct Samples<'a> {
+        catalog: &'a dyn PlannerStatisticsCatalog,
+        error: std::cell::RefCell<Option<SQLError>>,
+    }
+    impl crate::SourceStatistics for Samples<'_> {
+        fn relation_statistics(&self, table: &str) -> Option<crate::RelationStats> {
+            match self.catalog.measured_relation_rows(table) {
+                Ok(rows) => rows.map(|row_count| crate::RelationStats {
+                    row_count,
+                    ..Default::default()
+                }),
+                Err(error) => {
+                    self.error.borrow_mut().get_or_insert(error);
+                    None
+                }
+            }
+        }
+    }
+    let samples = Samples {
+        catalog,
+        error: std::cell::RefCell::default(),
+    };
+    let selected = crate::plan_cost::PlanCostEstimator::new(&samples)
+        .prefer_nested_loop(kind, left, right, control)?;
+    samples.error.into_inner().map_or(Ok(selected), Err)
+}
+
 fn validate_cost(estimate: crate::plan_cost::PlanCost) -> Result<(), SQLError> {
     if !estimate.execution.is_finite()
         || estimate.execution < 0.0

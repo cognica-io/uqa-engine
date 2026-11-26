@@ -17,6 +17,7 @@ use binding::KeyBinding;
 pub(super) struct HashJoinKeys {
     pub left: Produced<Vec<ScalarExpr>>,
     pub right: Produced<Vec<ScalarExpr>>,
+    pub indeterminate: Produced<Vec<usize>>,
     pub residual: Option<Produced<ScalarExpr>>,
 }
 
@@ -49,23 +50,33 @@ pub(super) fn join_keys(
     };
     let mut left_keys = ProductionVec::new(*control);
     let mut right_keys = ProductionVec::new(*control);
+    let mut indeterminate = ProductionVec::new(*control);
     let mut residual = ProductionVec::new(*control);
     let mut merge_supported = true;
     visit_join_conjuncts_with_control(predicate, control, &mut |conjunct| {
         // ROW equality selects each field's SQL operator before assigning either operand to a physical input.
-        let mut pair = |lhs: &ScalarExpr, rhs: &ScalarExpr| -> Result<bool, SQLError> {
-            let selected = binding.select(lhs, rhs)?;
-            merge_supported &= selected.merge_supported;
-            if let Some([left, right]) = selected.keys {
-                left_keys.push_produced(left)?;
-                right_keys.push_produced(right)?;
-                Ok(true)
-            } else {
-                Ok(false)
-            }
-        };
+        let mut pair =
+            |op: BinaryOp, lhs: &ScalarExpr, rhs: &ScalarExpr| -> Result<bool, SQLError> {
+                let selected = binding.select(op, lhs, rhs)?;
+                merge_supported &= selected.merge_supported;
+                if let Some([left, right]) = selected.keys {
+                    if selected.indeterminate {
+                        indeterminate.push_copy(left_keys.len())?;
+                    }
+                    left_keys.push_produced(left)?;
+                    right_keys.push_produced(right)?;
+                    Ok(true)
+                } else {
+                    Ok(false)
+                }
+            };
         let all_hashed = if let ScalarExpr::Binary {
-            op: BinaryOp::Equal,
+            op:
+                op @ (BinaryOp::Equal
+                | BinaryOp::Compare {
+                    operator: uqa_sql::ast::ComparisonOperator::Equal,
+                    ..
+                }),
             lhs,
             rhs,
         } = conjunct
@@ -76,14 +87,14 @@ pub(super) fn join_keys(
                 if left_items.len() == right_items.len() {
                     let mut all = !left_items.is_empty();
                     for (lhs, rhs) in left_items.iter().zip(right_items) {
-                        all &= pair(lhs, rhs)?;
+                        all &= pair(BinaryOp::Equal, lhs, rhs)?;
                     }
                     all
                 } else {
-                    pair(lhs, rhs)?
+                    pair(*op, lhs, rhs)?
                 }
             } else {
-                pair(lhs, rhs)?
+                pair(*op, lhs, rhs)?
             }
         } else {
             merge_supported &= matches!(
@@ -122,6 +133,7 @@ pub(super) fn join_keys(
     Ok(Some(HashJoinKeys {
         left: left_keys.finish()?,
         right: right_keys.finish()?,
+        indeterminate: indeterminate.finish()?,
         residual,
     }))
 }

@@ -46,7 +46,11 @@ pub(in crate::expr) fn eval_postgres_immutable_with_control(
             "to_bin" | "to_hex" | "to_oct" => Err(SQLError::Internal(format!(
                 "{name} reached runtime before its integer overload was bound"
             ))),
-            "string_to_array" => string_to_array(args, control),
+            "string_to_array" => string_to_array(
+                args,
+                crate::catalog::collations::DEFAULT_COLLATION_OID as u32,
+                control,
+            ),
             "quote_ident" | "quote_literal" | "quote_nullable" => quote(name, args, control),
             "num_nulls" | "num_nonnulls" => {
                 let count_null = name == "num_nulls";
@@ -187,8 +191,9 @@ pub(in crate::expr) fn eval_postgres_integer_base_with_control(
     })())
 }
 
-pub(super) fn string_to_array(
+pub(in crate::expr) fn string_to_array(
     args: &[Value],
+    collation: u32,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Value>> {
     control.check()?;
@@ -208,6 +213,7 @@ pub(super) fn string_to_array(
         control.check()?;
         if marker.is_none() {
             if let Some(null_marker) = null_marker {
+                crate::expr::collation::string_comparison_order(collation)?;
                 marker = Some(value_to_string_with_control(null_marker, control)?);
             }
         }
@@ -235,6 +241,7 @@ pub(super) fn string_to_array(
                 if separator.is_empty() {
                     push(&text)?;
                 } else {
+                    crate::expr::collation::string_comparison_order(collation)?;
                     for part in text.split(separator.as_str()) {
                         push(part)?;
                     }

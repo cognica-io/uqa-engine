@@ -43,6 +43,9 @@ pub struct StatisticsMaintenance {
     /// Legacy records acquire it on their next completed analysis.
     #[serde(skip_serializing_if = "Option::is_none")]
     analysis_generation: Option<u64>,
+    /// Heap population observed by CREATE INDEX or a published ANALYZE. It is independent of the maintenance worker's dirty counters.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    relation_rows: Option<u64>,
 }
 
 impl StatisticsMaintenance {
@@ -61,6 +64,7 @@ impl StatisticsMaintenance {
                 statistics_format: self.statistics_format,
                 analyzed_at: self.analyzed_at,
                 analysis_generation: self.analysis_generation,
+                relation_rows: self.relation_rows,
             },
             control.empty_reservation(),
         )
@@ -99,6 +103,15 @@ impl StatisticsMaintenance {
 
     pub fn save(&self, catalog: &dyn CatalogFacade, table: &str) -> StorageBackendResult<()> {
         catalog.save_statistics_maintenance(table, self)
+    }
+
+    pub fn relation_rows(&self) -> Option<u64> {
+        self.relation_rows
+    }
+
+    pub fn record_relation_rows(&mut self, object_id: [u8; 16], rows: u64) {
+        self.object_id = Some(object_id);
+        self.relation_rows = Some(rows);
     }
 
     pub fn dirty(&self) -> bool {
@@ -167,6 +180,7 @@ impl StatisticsMaintenance {
     ) -> StorageBackendResult<()> {
         let mut state = Self::load_for(catalog, table, object_id)?;
         state.analyzed(object_id, rows, statistics_format, sampled_at)?;
+        state.record_relation_rows(object_id, rows);
         state.save(catalog, table)
     }
 
@@ -319,6 +333,11 @@ impl StatisticsMaintenance {
                 after.statistics_format
             } else {
                 current.statistics_format
+            },
+            relation_rows: if after.relation_rows == before.relation_rows {
+                current.relation_rows
+            } else {
+                after.relation_rows
             },
             // An analysis of the merged transaction is the one whose statistics it publishes.
             analyzed_at: if after.analyzed_at == before.analyzed_at {

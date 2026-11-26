@@ -31,12 +31,25 @@
     {"sql":"INSERT INTO arb_int VALUES (5),(5) ON CONFLICT(a) WHERE a>4 DO NOTHING","command_tags":["INSERT 0 1"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}],"notices":[]},
     {"sql":"INSERT INTO arb_int VALUES (3) ON CONFLICT(a) WHERE a>1 DO NOTHING","command_tags":[],"error":{"sqlstate":"42P10","message":"there is no unique or exclusion constraint matching the ON CONFLICT specification","detail":null,"hint":null},"results":[],"notices":[]},
     {"sql":"SELECT count(*) FROM arb_int","command_tags":["SELECT 1"],"error":null,"results":[{"columns":["count"],"type_oids":[20],"rows":[["1"]]}],"notices":[]},
+    {"sql":"CREATE TABLE inferred_c(a text COLLATE \"C\")","command_tags":["CREATE TABLE"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}],"notices":[]},
+    {"sql":"CREATE UNIQUE INDEX inferred_c_key ON inferred_c(lower(a))","command_tags":["CREATE INDEX"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}],"notices":[]},
+    {"sql":"INSERT INTO inferred_c VALUES ('q') ON CONFLICT (lower(a)) DO NOTHING","command_tags":["INSERT 0 1"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}],"notices":[]},
+    {"sql":"INSERT INTO inferred_c VALUES ('q') ON CONFLICT (lower(a COLLATE \"C\")) DO NOTHING","command_tags":["INSERT 0 0"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}],"notices":[]},
+    {"sql":"INSERT INTO inferred_c VALUES ('q') ON CONFLICT (lower(a COLLATE \"POSIX\")) DO NOTHING","command_tags":[],"error":{"sqlstate":"42P10","message":"there is no unique or exclusion constraint matching the ON CONFLICT specification","detail":null,"hint":null},"results":[],"notices":[]},
+    {"sql":"DROP INDEX inferred_c_key","command_tags":["DROP INDEX"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}],"notices":[]},
+    {"sql":"CREATE UNIQUE INDEX inferred_c_key ON inferred_c(a) WHERE a > 'a'","command_tags":["CREATE INDEX"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}],"notices":[]},
+    {"sql":"INSERT INTO inferred_c VALUES ('q') ON CONFLICT (a) WHERE a > 'b' DO NOTHING","command_tags":["INSERT 0 0"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}],"notices":[]},
+    {"sql":"INSERT INTO inferred_c VALUES ('q') ON CONFLICT (a) WHERE (a COLLATE \"POSIX\") > 'b' DO NOTHING","command_tags":[],"error":{"sqlstate":"42P10","message":"there is no unique or exclusion constraint matching the ON CONFLICT specification","detail":null,"hint":null},"results":[],"notices":[]},
+    {"sql":"INSERT INTO inferred_c VALUES ('q') ON CONFLICT (a) WHERE (a COLLATE \"C\") > 'b' DO NOTHING","command_tags":["INSERT 0 0"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}],"notices":[]},
     {"reopen":true,"sql":"INSERT INTO arb VALUES ('x',7) ON CONFLICT(a) WHERE a='x' DO UPDATE SET v=excluded.v","command_tags":["INSERT 0 1"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}],"notices":[]},
     {"reopen":true,"sql":"SELECT v FROM arb WHERE a='x'","command_tags":["SELECT 1"],"error":null,"results":[{"columns":["v"],"type_oids":[23],"rows":[["7"]]}],"notices":[]},
     {"reopen":true,"sql":"INSERT INTO arb_like VALUES ('xa') ON CONFLICT(a) WHERE a LIKE 'x%' DO NOTHING","command_tags":["INSERT 0 0"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}],"notices":[]},
     {"reopen":true,"sql":"INSERT INTO arb_lower VALUES ('X',7) ON CONFLICT(a) WHERE lower(a)='x' DO UPDATE SET v=excluded.v","command_tags":["INSERT 0 1"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}],"notices":[]},
     {"reopen":true,"sql":"INSERT INTO arb_ci VALUES ('Xa') ON CONFLICT(a) WHERE a ILIKE 'x%' DO NOTHING","command_tags":["INSERT 0 0"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}],"notices":[]},
     {"reopen":true,"sql":"SELECT count(*) FROM arb_ci","command_tags":["SELECT 1"],"error":null,"results":[{"columns":["count"],"type_oids":[20],"rows":[["1"]]}],"notices":[]},
-    {"reopen":true,"sql":"INSERT INTO arb_int VALUES (5) ON CONFLICT(a) WHERE a>4 DO NOTHING","command_tags":["INSERT 0 0"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}],"notices":[]}
+    {"reopen":true,"sql":"INSERT INTO arb_int VALUES (5) ON CONFLICT(a) WHERE a>4 DO NOTHING","command_tags":["INSERT 0 0"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}],"notices":[]},
+    {"reopen":true,"sql":"INSERT INTO inferred_c VALUES ('q') ON CONFLICT (a) WHERE a > 'b' DO NOTHING","command_tags":["INSERT 0 0"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}],"notices":[]},
+    {"reopen":true,"sql":"INSERT INTO inferred_c VALUES ('q') ON CONFLICT (a) WHERE (a COLLATE \"POSIX\") > 'b' DO NOTHING","command_tags":[],"error":{"sqlstate":"42P10","message":"there is no unique or exclusion constraint matching the ON CONFLICT specification","detail":null,"hint":null},"results":[],"notices":[]},
+    {"reopen":true,"sql":"INSERT INTO inferred_c VALUES ('q') ON CONFLICT (a) WHERE (a COLLATE \"C\") > 'b' DO NOTHING","command_tags":["INSERT 0 0"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}],"notices":[]}
   ]
 }

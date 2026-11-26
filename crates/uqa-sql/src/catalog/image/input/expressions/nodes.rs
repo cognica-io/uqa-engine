@@ -10,6 +10,33 @@ use super::{boxed, invalid, payload, Expr, Fields, MemoryReservation, SQLError};
 use crate::ast::{BinaryOp, FunctionCallSyntax, InternalColumnRef, OrderBy};
 
 impl Fields<'_> {
+    pub(in super::super) async fn binary_operator(&mut self) -> Result<BinaryOp, SQLError> {
+        let tag = self.binary.array::<1>().await?[0];
+        let op = match tag {
+            0 | 10 => BinaryOp::Equal,
+            1 | 11 => BinaryOp::NotEqual,
+            2 | 12 => BinaryOp::Less,
+            3 | 13 => BinaryOp::LessEqual,
+            4 | 14 => BinaryOp::Greater,
+            5 | 15 => BinaryOp::GreaterEqual,
+            6 => BinaryOp::Add,
+            7 => BinaryOp::Subtract,
+            8 => BinaryOp::Multiply,
+            9 => BinaryOp::Divide,
+            _ => return Err(invalid("scalar binary operator tag")),
+        };
+        if tag < 10 {
+            return Ok(op);
+        }
+        let oid = u32::from_le_bytes(self.binary.array::<4>().await?);
+        let collation = crate::catalog::collations::CollationSelection::from_oid(oid)
+            .ok_or_else(|| invalid("scalar comparison collation"))?;
+        Ok(BinaryOp::Compare {
+            operator: op.comparison().expect("comparison tag"),
+            collation,
+        })
+    }
+
     pub(super) async fn expression_node(
         &mut self,
         memory: &mut MemoryReservation,
@@ -130,19 +157,7 @@ impl Fields<'_> {
         }
         *value = match tag {
             13 => {
-                let op = match self.binary.array::<1>().await?[0] {
-                    0 => BinaryOp::Equal,
-                    1 => BinaryOp::NotEqual,
-                    2 => BinaryOp::Less,
-                    3 => BinaryOp::LessEqual,
-                    4 => BinaryOp::Greater,
-                    5 => BinaryOp::GreaterEqual,
-                    6 => BinaryOp::Add,
-                    7 => BinaryOp::Subtract,
-                    8 => BinaryOp::Multiply,
-                    9 => BinaryOp::Divide,
-                    _ => return Err(invalid("scalar binary operator tag")),
-                };
+                let op = self.binary_operator().await?;
                 Expr::Binary {
                     op,
                     lhs: boxed(Expr::Star, memory)?,

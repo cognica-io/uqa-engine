@@ -39,6 +39,11 @@ pub(crate) fn binds_input_collation_by_name(name: &str) -> bool {
     matches!(
         name.strip_prefix("pg_catalog.").unwrap_or(name),
         "starts_with"
+            | "replace"
+            | "position"
+            | "strpos"
+            | "split_part"
+            | "string_to_array"
             | "regexp_count"
             | "regexp_instr"
             | "regexp_like"
@@ -60,7 +65,18 @@ pub(super) fn eval_collated_functions_with_control(
 ) -> Option<Result<Produced<Value>>> {
     if matches!(
         name,
-        "upper" | "lower" | "casefold" | "initcap" | "like" | "ilike" | "starts_with"
+        "upper"
+            | "lower"
+            | "casefold"
+            | "initcap"
+            | "like"
+            | "ilike"
+            | "starts_with"
+            | "replace"
+            | "position"
+            | "strpos"
+            | "split_part"
+            | "string_to_array"
     ) {
         return Some(
             control

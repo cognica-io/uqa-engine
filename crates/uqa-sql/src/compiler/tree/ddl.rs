@@ -615,6 +615,7 @@ pub(in crate::compiler) fn compile_create_index(
     let mut columns = Vec::new();
     let mut column_order = Vec::new();
     let mut key_collations = Vec::new();
+    let mut labels = Vec::with_capacity(stmt.index_params.len());
     for elt in &stmt.index_params {
         let inner = elt
             .node
@@ -626,6 +627,17 @@ pub(in crate::compiler) fn compile_create_index(
             )));
         };
         let key = compile_index_key(idx)?;
+        let label = if !idx.indexcolname.is_empty() {
+            idx.indexcolname.clone()
+        } else if !idx.name.is_empty() {
+            idx.name.clone()
+        } else {
+            idx.expr
+                .as_deref()
+                .and_then(super::select::implicit_projection_name)
+                .unwrap_or_else(|| "expr".into())
+        };
+        labels.push(label);
         if !idx.collation.is_empty() {
             key_collations.resize(columns.len(), None);
             key_collations.push(Some(super::compile_collation_name(&idx.collation)?));
@@ -690,7 +702,11 @@ pub(in crate::compiler) fn compile_create_index(
             )),
         })
         .collect::<Result<Vec<_>>>()?;
+    let attribute_names = crate::schema::indexes::keys::unique_attribute_names(
+        labels.into_iter().chain(included_columns.iter().cloned()),
+    );
     Ok(CreateIndex {
+        attribute_names,
         key_collations,
         included_columns,
         column_order,

@@ -678,7 +678,7 @@ enum NameStrength {
 }
 
 /// `FigureColname`: the name of an unaliased target, or `None` when the expression gives itself none and the target is `?column?`.
-fn implicit_projection_name(node: &Node) -> Option<String> {
+pub(super) fn implicit_projection_name(node: &Node) -> Option<String> {
     figure_colname(node).map(|(name, _)| name)
 }
 

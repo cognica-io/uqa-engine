@@ -12,14 +12,17 @@ use crate::schema::SchemaBindingContext;
 use crate::{ast::CreateIndex, ColumnType, SQLError};
 
 pub fn key_names(keys: &[IndexKey]) -> Vec<String> {
-    let mut names = Vec::with_capacity(keys.len());
-    for key in keys {
-        let label = match key {
-            IndexKey::Column(column) => column.clone(),
-            IndexKey::Expression(expression) => {
-                expression_name(expression).map_or_else(|| "expr".into(), |(name, _)| name)
-            }
-        };
+    unique_attribute_names(keys.iter().map(|key| match key {
+        IndexKey::Column(column) => column.clone(),
+        IndexKey::Expression(expression) => {
+            expression_name(expression).map_or_else(|| "expr".into(), |(name, _)| name)
+        }
+    }))
+}
+
+pub(crate) fn unique_attribute_names(labels: impl Iterator<Item = String>) -> Vec<String> {
+    let mut names = Vec::with_capacity(labels.size_hint().0);
+    for label in labels {
         let mut name = label.clone();
         let mut suffix = 1_u64;
         while names.contains(&name) {
@@ -304,24 +307,33 @@ fn reject_unsupported_included_columns(statement: &CreateIndex) -> Result<(), SQ
     )))
 }
 
+/// Restored declarations without retained attribute names use their original key syntax.
+pub fn attribute_names(statement: &CreateIndex) -> std::borrow::Cow<'_, [String]> {
+    if !statement.attribute_names.is_empty() {
+        return std::borrow::Cow::Borrowed(&statement.attribute_names);
+    }
+    let keys: Vec<_> = statement
+        .columns
+        .iter()
+        .cloned()
+        .chain(
+            statement
+                .included_columns
+                .iter()
+                .cloned()
+                .map(IndexKey::Column),
+        )
+        .collect();
+    std::borrow::Cow::Owned(key_names(&keys))
+}
+
 /// Bind keys and predicates and retain the public attribute names assigned before expression simplification.
 pub fn prepare_index_definition(
     catalog: &dyn crate::schema::SchemaExpressionCatalog,
     bindings: &dyn crate::semantics::conflict::InferenceBindingScope,
     c: &mut CreateIndex,
 ) -> Result<crate::catalog::index::IndexDefinition, SQLError> {
-    let attribute_keys = c
-        .columns
-        .iter()
-        .cloned()
-        .chain(
-            c.included_columns
-                .iter()
-                .cloned()
-                .map(crate::ast::IndexKey::Column),
-        )
-        .collect::<Vec<_>>();
-    let key_names = key_names(&attribute_keys);
+    let key_names = attribute_names(c).into_owned();
     let binding = bindings.binding_scope()?;
     let scope = binding.context();
     let context = SchemaBindingContext {

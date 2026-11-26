@@ -76,6 +76,7 @@ pub struct HashJoin<'a> {
     right_keys: crate::scalar::PreparedExpressions<Produced<Vec<ScalarExpr>>>,
     left_key_types: Vec<Option<uqa_sql::ColumnType>>,
     right_key_types: Vec<Option<uqa_sql::ColumnType>>,
+    indeterminate_keys: Option<Produced<Vec<usize>>>,
     left_key_positions: Option<Produced<Vec<usize>>>,
     right_key_positions: Option<Produced<Vec<usize>>>,
     predicate: Option<crate::scalar::PreparedExpressions<Produced<ScalarExpr>>>,
@@ -363,6 +364,7 @@ impl<'a> HashJoin<'a> {
                         &batch.schema,
                         &row,
                         positions,
+                        self.indeterminate_keys(),
                         self.evaluator.enum_labels(),
                     )? {
                         direct.insert(hash, index)?;
@@ -463,6 +465,7 @@ impl<'a> HashJoin<'a> {
                         types.get(index).and_then(Option::as_ref),
                     )
                 }),
+                self.indeterminate_keys(),
                 self.evaluator.enum_labels(),
             );
         }
@@ -484,6 +487,7 @@ impl<'a> HashJoin<'a> {
                 .iter()
                 .enumerate()
                 .map(|(index, value)| (Some(value), types.get(index).and_then(Option::as_ref))),
+            self.indeterminate_keys(),
             self.evaluator.enum_labels(),
         )
     }
@@ -547,6 +551,7 @@ impl<'a> HashJoin<'a> {
                             &batch.schema,
                             &probe_row,
                             probe_positions,
+                            self.indeterminate_keys(),
                             self.evaluator.enum_labels(),
                         )?
                     }
@@ -656,6 +661,7 @@ impl HashJoin<'_> {
                         &batch.schema,
                         &row,
                         positions,
+                        self.indeterminate_keys(),
                         self.evaluator.enum_labels(),
                     )? {
                         direct.insert(hash, index)?;

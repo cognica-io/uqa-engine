@@ -85,7 +85,7 @@ fn expression_contexts_match_postgresql_and_reopen(#[case] provider: usize) {
             env!("CARGO_MANIFEST_DIR"),
             "/../../tests/parity/pg18/collation_contexts_oracle.expected.json"
         )),
-        8,
+        10,
         |case| case["reopen"] == true,
     );
 }
@@ -124,7 +124,7 @@ fn partial_index_predicates_match_postgresql_and_reopen(#[case] provider: usize)
             env!("CARGO_MANIFEST_DIR"),
             "/../../tests/parity/pg18/partial_index_arbiter.expected.json"
         )),
-        7,
+        10,
         |case| case["reopen"] == true,
     );
 }

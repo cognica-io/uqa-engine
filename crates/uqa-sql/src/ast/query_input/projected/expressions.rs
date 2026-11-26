@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use crate::ast::{BinaryOp, Expr, FunctionCallSyntax, InternalColumnRef};
+use crate::ast::{BinaryOp, ComparisonOperator, Expr, FunctionCallSyntax, InternalColumnRef};
 use crate::expr::composites::{
     CompositeAttribute, CompositeConstantSource, CompositeTypeDescriptor, DroppedCompositeAttribute,
 };
@@ -89,7 +89,17 @@ projected_enum!(BinaryOp {
     Add,
     Subtract,
     Multiply,
-    Divide
+    Divide,
+    Compare { operator: required, collation: required }
+});
+
+projected_enum!(ComparisonOperator {
+    Equal,
+    NotEqual,
+    Less,
+    LessEqual,
+    Greater,
+    GreaterEqual
 });
 
 projected_struct!(CompositeConstantSource {

@@ -162,6 +162,9 @@ pub struct CreateIndex {
     /// Explicit names attached to index keys, resolved against the definition namespace.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub key_collations: Vec<Option<String>>,
+    /// Names assigned to key and INCLUDE attributes from the original parser nodes.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attribute_names: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

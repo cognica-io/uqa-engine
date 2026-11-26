@@ -30,6 +30,12 @@ pub(super) fn evaluate_collated(
         "upper" | "lower" | "casefold" | "initcap" => case_mapping(name, args, collation, control),
         "like" | "ilike" => like(args, name == "ilike", collation, control),
         "starts_with" => starts_with(args, collation, control),
+        "replace" => replace(args, collation, control),
+        "position" | "strpos" => search(args, collation, control),
+        "split_part" => crate::expr::scalar_math::split_part(args, collation, control),
+        "string_to_array" => {
+            crate::expr::scalar_postgres::string_to_array(args, collation, control)
+        }
         _ => unreachable!("collated text family membership was checked"),
     }
 }
@@ -49,15 +55,15 @@ pub(super) fn evaluate(
             trim(args, name != "rtrim", name != "ltrim", control)
         }
         "concat_op" => concat(args, control),
-        "replace" => replace(args, control),
+
         "substring" | "substr" => substring(args, control),
         "left" | "right" => left_or_right(args, name == "right", control),
-        "starts_with" => starts_with(
+        "starts_with" | "replace" | "position" | "strpos" => evaluate_collated(
+            name,
             args,
             crate::catalog::collations::DEFAULT_COLLATION_OID as u32,
             control,
         ),
-        "position" | "strpos" => search(args, control),
         "ascii" => {
             let source = value_to_string_with_control(&args[0], control)?;
             plain(
@@ -305,7 +311,11 @@ fn concat(args: &[Value], control: &ProductionControl<'_>) -> Result<Produced<Va
     string(output.finish()?, control)
 }
 
-fn replace(args: &[Value], control: &ProductionControl<'_>) -> Result<Produced<Value>> {
+fn replace(
+    args: &[Value],
+    collation: u32,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>> {
     if args.len() != 3 {
         return Err(SQLError::TypeMismatch("replace takes 3 args".into()));
     }
@@ -314,6 +324,10 @@ fn replace(args: &[Value], control: &ProductionControl<'_>) -> Result<Produced<V
     }
     let source = value_to_string_with_control(&args[0], control)?;
     let from = value_to_string_with_control(&args[1], control)?;
+    if source.is_empty() || from.is_empty() {
+        return string(source, control);
+    }
+    crate::expr::collation::string_comparison_order(collation)?;
     let to = value_to_string_with_control(&args[2], control)?;
     let mut output = ProductionString::new(*control);
     let mut previous = 0;
@@ -472,7 +486,11 @@ fn starts_with(
     compare(source.as_bytes(), prefix.as_bytes())
 }
 
-fn search(args: &[Value], control: &ProductionControl<'_>) -> Result<Produced<Value>> {
+fn search(
+    args: &[Value],
+    collation: u32,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>> {
     if args.len() != 2 {
         return Err(SQLError::TypeMismatch("position takes 2 args".into()));
     }
@@ -499,6 +517,7 @@ fn search(args: &[Value], control: &ProductionControl<'_>) -> Result<Produced<Va
         }
         return plain(Value::Int(position), control);
     }
+    crate::expr::collation::string_comparison_order(collation)?;
     let source = value_to_string_with_control(&args[0], control)?;
     let needle = value_to_string_with_control(&args[1], control)?;
     control.check()?;

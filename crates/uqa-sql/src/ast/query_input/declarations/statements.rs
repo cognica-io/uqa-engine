@@ -60,6 +60,7 @@ stored_struct!(CreateIndex {
     options: required,
     option_namespaces: defaulted,
     key_collations: defaulted,
+    attribute_names: defaulted,
 });
 
 stored_enum!(CursorDirection {

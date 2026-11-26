@@ -13,6 +13,7 @@ use uqa_core::memory::{Produced, ProductionControl};
 mod binary;
 mod format;
 mod text;
+pub(super) use text::split_part;
 
 pub(super) fn eval_math_functions(name: &str, args: &[Value]) -> Option<Result<Value>> {
     if name == "format" {
