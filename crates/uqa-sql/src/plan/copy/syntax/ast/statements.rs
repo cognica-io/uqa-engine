@@ -6,6 +6,18 @@
 
 use super::{Copying, Result, SyntaxCopy};
 
+syntax_struct!(crate::ast::AlterForeignServer {
+    name,
+    version,
+    options
+});
+syntax_enum!(crate::ast::ForeignServerVersion { Unchanged, Set(value0), Clear });
+syntax_enum!(crate::ast::ForeignOptionChange {
+    Add { name, value },
+    Set { name, value },
+    Drop { name }
+});
+
 syntax_struct!(crate::ast::CreateForeignServer {
     name,
     fdw_type,
@@ -304,6 +316,7 @@ syntax_enum!(crate::ast::Statement {
     Values { rows },
     CreateForeignWrapper(value0),
     CreateForeignServer(value0),
+    AlterForeignServer(value0),
     CreateForeignTable(value0),
     CreateForeignTableDefinition(value0),
     Merge(value0),

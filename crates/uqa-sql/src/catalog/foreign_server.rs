@@ -21,6 +21,9 @@ pub use registry::{CapturedForeignServers, ForeignServers};
 pub struct ForeignServerMetadata {
     pub oid: u32,
     pub object_id: [u8; 16],
+    /// Catalog tuple revision. A definition created before ALTER support has its initial revision.
+    #[serde(default, skip_serializing_if = "initial_revision")]
+    pub revision: u64,
     pub owner: RoleIdentity,
     pub server_type: Option<String>,
     pub version: Option<String>,
@@ -30,6 +33,11 @@ pub struct ForeignServerMetadata {
     /// Missing only while restoring a catalog that predates wrapper identities.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wrapper_reference: Option<super::foreign_wrapper::ForeignWrapperReference>,
+}
+
+#[allow(clippy::trivially_copy_pass_by_ref)] // Serde passes the field by reference.
+const fn initial_revision(revision: &u64) -> bool {
+    *revision == 0
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

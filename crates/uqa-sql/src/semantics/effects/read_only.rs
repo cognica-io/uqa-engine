@@ -122,6 +122,7 @@ pub fn forbidden_command(
         | CommandPlan::GrantType(_)
         | CommandPlan::CreateForeignWrapper(_)
         | CommandPlan::CreateForeignServer(_)
+        | CommandPlan::AlterForeignServer(_)
         | CommandPlan::CreateForeignTable(_)
         | CommandPlan::CreateForeignTableDefinition(_)
         | CommandPlan::CreateFunction(_)

@@ -842,6 +842,14 @@ impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'en
             CommandPlan::CreateForeignServer(statement) => {
                 self.execute_create_foreign_server(statement)
             }
+            CommandPlan::AlterForeignServer(statement) => {
+                self.context
+                    .foreign
+                    .with_foreign_catalog_write(Box::new(|context| {
+                        context.alter_server(statement)
+                    }))?;
+                Ok(SQLResult::empty())
+            }
             CommandPlan::CreateForeignTable(statement) => {
                 self.execute_create_foreign_table(statement)
             }

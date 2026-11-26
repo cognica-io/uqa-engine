@@ -26,6 +26,57 @@ struct ServerEnvelope {
     metadata: ForeignServerMetadata,
 }
 
+/// The tuple written by ALTER and by dependency deletion. Reused names and equal option values can still identify different tuples.
+pub(crate) struct ServerTuple {
+    identity: super::ForeignServerReference,
+    revision: u64,
+}
+
+impl From<&ForeignServerDefinition> for ServerTuple {
+    fn from(server: &ForeignServerDefinition) -> Self {
+        Self {
+            identity: server.into(),
+            revision: server.metadata.revision,
+        }
+    }
+}
+
+impl ServerTuple {
+    pub(crate) fn lock(
+        &self,
+        name: &str,
+        locks: &dyn crate::row_locks::shared_objects::SharedObjectLockSession,
+        registry: &dyn super::reads::ForeignRegistryReads,
+    ) -> Result<(), uqa_sql::SQLError> {
+        use crate::row_locks::{shared_objects::SharedCatalogLock, RelationLockMode};
+        use uqa_sql::{catalog::dependencies::FOREIGN_SERVER_CLASS, SQLError};
+        let guard = locks.acquire_shared_catalog(
+            SharedCatalogLock::Tuple {
+                class_id: FOREIGN_SERVER_CLASS,
+                oid: self.identity.oid,
+            },
+            RelationLockMode::AccessExclusive,
+        )?;
+        locks.refresh_shared_catalog()?;
+        let servers = registry.servers();
+        let current = servers
+            .get(name)
+            .filter(|server| super::ForeignServerReference::from(*server) == self.identity)
+            .ok_or_else(|| SQLError::Routine {
+                sqlstate: "XX000".into(),
+                message: "tuple concurrently deleted".into(),
+            })?;
+        if current.metadata.revision != self.revision {
+            return Err(SQLError::Routine {
+                sqlstate: "XX000".into(),
+                message: "tuple concurrently updated".into(),
+            });
+        }
+        guard.retain();
+        Ok(())
+    }
+}
+
 pub fn fdw_definition(server: &ForeignServerDefinition) -> uqa_fdw::ForeignServer {
     uqa_fdw::ForeignServer {
         name: server.name.clone(),
@@ -163,6 +214,7 @@ pub(super) fn restore(
             &mut definitions,
             row,
             ForeignServerMetadata {
+                revision: 0,
                 option_order: None,
                 wrapper_reference: None,
                 oid,

@@ -59,6 +59,7 @@ syntax_enum!(crate::plan::CommandPlan {
     Deallocate { name },
     CreateForeignWrapper(value0),
     CreateForeignServer(value0),
+    AlterForeignServer(value0),
     CreateForeignTable(value0),
     CreateForeignTableDefinition(value0),
     AlterForeignTable(value0),

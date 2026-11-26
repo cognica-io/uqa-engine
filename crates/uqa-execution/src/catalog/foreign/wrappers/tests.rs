@@ -44,6 +44,7 @@ fn servers() -> ForeignServers {
             fdw_type: "memory_fdw".into(),
             options: uqa_core::memory::OwnedMap::new(),
             metadata: ForeignServerMetadata {
+                revision: 0,
                 option_order: None,
                 oid: 16_384,
                 object_id: [1; 16],

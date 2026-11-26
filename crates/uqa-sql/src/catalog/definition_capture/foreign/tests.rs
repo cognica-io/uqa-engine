@@ -40,6 +40,7 @@ fn server() -> ForeignServerDefinition {
             ("a".into(), "second 한글".into()),
         ]),
         metadata: ForeignServerMetadata {
+            revision: 0,
             oid: 24003,
             object_id: [3; 16],
             owner: RoleIdentity::BOOTSTRAP,

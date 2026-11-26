@@ -32,11 +32,18 @@ fn foreign_server_image_matches_literal_optional_fields_and_declaration_order() 
     let mut expected = b"UQAFSR01\x01\0\0\0\0\0\0\0\x01\0\0\0\0\0\0\0s\x01\0\0\0\0\0\0\0s\x0a\0\0\0\0\0\0\0memory_fdw\x05\0\x01\0".to_vec();
     expected.extend_from_slice(&[9; 16]);
     expected.extend_from_slice(b"\x0a\0\0\0\0\0\0\0UQA:role00000010\x01\0\0\0\0\0\0\0\0\0\x01\x01\0\0\0UQA native FDW\0\x01\x02\0\0\0\0\0\0\0\x01\x02\0\0\0\0\0\0\0");
+    let order_tag = expected.len() - 9;
     expected.extend_from_slice(
         b"\x01\0\0\0\0\0\0\0a\x02\0\0\0\0\0\0\0\xce\xb1\x01\0\0\0\0\0\0\0z\0\0\0\0\0\0\0\0",
     );
     expected.extend_from_slice(b"\x01\0\0\0\0\0\0\0z\x01\0\0\0\0\0\0\0a");
     assert_round_trip(&singleton("s", server_value()), &expected);
+    let mut updated = server_value();
+    updated.metadata.revision = 42;
+    let mut revision = vec![2];
+    revision.extend_from_slice(&42_u64.to_le_bytes());
+    expected.splice(order_tag..order_tag, revision);
+    assert_round_trip(&singleton("s", updated), &expected);
 }
 
 #[test]

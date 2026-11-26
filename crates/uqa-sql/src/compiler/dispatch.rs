@@ -75,8 +75,14 @@ impl<'sql> ParsedStatement<'sql> {
                         crate::ast::RoutineBodyOrigin::capture(body, self.message);
                 }
             }
-            if let Statement::CreateForeignServer(server) = &mut statement {
-                super::foreign_servers::retain_string_presence(self.sql, server)?;
+            match &mut statement {
+                Statement::CreateForeignServer(server) => {
+                    super::foreign_servers::retain_string_presence(self.sql, server)?;
+                }
+                Statement::AlterForeignServer(server) => {
+                    super::foreign_servers::retain_alter_version(self.sql, server)?;
+                }
+                _ => {}
             }
             Ok(statement)
         })
@@ -233,6 +239,9 @@ pub(super) fn compile_stmt(node: &Node) -> Result<Statement> {
         }
         NodeEnum::CreateForeignServerStmt(stmt) => {
             compile_create_foreign_server(stmt).map(Statement::CreateForeignServer)
+        }
+        NodeEnum::AlterForeignServerStmt(stmt) => {
+            super::foreign_servers::compile_alter(stmt).map(Statement::AlterForeignServer)
         }
         NodeEnum::CreateForeignTableStmt(stmt) => compile_create_foreign_table_statement(stmt),
         NodeEnum::MergeStmt(stmt) => compile_merge(stmt).map(Statement::Merge),

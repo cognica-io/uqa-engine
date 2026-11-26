@@ -86,7 +86,7 @@ pub fn wrappers(catalog: &CatalogReadView) -> Result<Vec<ResultRow>, SQLError> {
                         wrapper
                             .options
                             .iter()
-                            .map(|(name, value)| (name.as_str(), value.as_str())),
+                            .map(|(name, value)| Ok((name.as_str(), value.as_str()))),
                     )?,
                 ),
             ]))
@@ -127,11 +127,10 @@ pub fn servers(catalog: &CatalogReadView) -> Result<Vec<ResultRow>, SQLError> {
                 ("srvacl", Value::Null),
                 (
                     "srvoptions",
-                    ordered_options(
-                        server.options.iter(),
-                        |name| server.options.get(name),
+                    option_array(uqa_sql::schema::foreign_servers::ordered_option_pairs(
+                        &server.options,
                         metadata.option_order.as_deref(),
-                    )?,
+                    ))?,
                 ),
             ]))
         })
@@ -154,47 +153,26 @@ pub fn tables(catalog: &CatalogReadView) -> Result<Vec<ResultRow>, SQLError> {
                 ("ftserver", int_value(i64::from(table.server_oid()?))),
                 (
                     "ftoptions",
-                    ordered_options(
-                        table.options.iter(),
-                        |name| table.options.get(name),
+                    option_array(uqa_sql::schema::foreign_servers::ordered_option_pairs(
+                        &table.options,
                         Some(&table.option_order),
-                    )?,
+                    ))?,
                 ),
             ]))
         })
         .collect()
 }
 
-fn option_array<'a>(options: impl Iterator<Item = (&'a str, &'a str)>) -> Result<Value, SQLError> {
+fn option_array<'a>(
+    options: impl Iterator<Item = Result<(&'a str, &'a str), SQLError>>,
+) -> Result<Value, SQLError> {
     let values: Vec<_> = options
-        .map(|(name, value)| Value::Str(format!("{name}={value}")))
-        .collect();
+        .map(|pair| pair.map(|(name, value)| Value::Str(format!("{name}={value}"))))
+        .collect::<Result<_, _>>()?;
     if values.is_empty() {
         Ok(Value::Null)
     } else {
         catalog_array(values, "foreign catalog options")
-    }
-}
-
-fn ordered_options<'a>(
-    options: impl Iterator<Item = (&'a String, &'a String)>,
-    get: impl Fn(&str) -> Option<&'a String>,
-    order: Option<&[String]>,
-) -> Result<Value, SQLError> {
-    if let Some(order) = order {
-        let pairs = order
-            .iter()
-            .map(|name| {
-                get(name)
-                    .map(|value| (name.as_str(), value.as_str()))
-                    .ok_or_else(|| {
-                        SQLError::Internal("foreign option order references a missing key".into())
-                    })
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        option_array(pairs.into_iter())
-    } else {
-        option_array(options.map(|(name, value)| (name.as_str(), value.as_str())))
     }
 }
 

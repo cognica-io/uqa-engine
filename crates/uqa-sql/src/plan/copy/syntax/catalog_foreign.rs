@@ -30,6 +30,7 @@ syntax_struct!(crate::catalog::foreign_server::ForeignServerMetadata {
     oid,
     object_id,
     owner,
+    revision,
     server_type,
     version,
     option_order,

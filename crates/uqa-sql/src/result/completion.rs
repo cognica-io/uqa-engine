@@ -168,6 +168,7 @@ pub fn command_tag_name(command: &CommandPlan) -> &'static str {
         }
         CommandPlan::CreateForeignWrapper(_) => "CREATE FOREIGN DATA WRAPPER",
         CommandPlan::CreateForeignServer(_) => "CREATE SERVER",
+        CommandPlan::AlterForeignServer(_) => "ALTER SERVER",
         CommandPlan::CreateForeignTable(_) | CommandPlan::CreateForeignTableDefinition(_) => {
             "CREATE FOREIGN TABLE"
         }

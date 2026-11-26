@@ -45,3 +45,25 @@ fn foreign_server_identity_matches_postgresql(#[case] provider: usize) {
         crate::pg18_oracle::verify(&reopened, &transcript.to_string());
     }
 }
+
+#[rstest::rstest]
+#[case::memory(0)]
+#[case::sqlite(1)]
+#[case::sqlite_key_value(2)]
+#[case::redb(3)]
+fn alter_server_options_match_postgresql_and_reopen(#[case] provider: usize) {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("alter-server.db");
+    let engine = open(provider, &path);
+    let transcript =
+        include_str!("../../../../tests/parity/pg18/alter_foreign_server_oracle.expected.json");
+    crate::pg18_oracle::verify(&engine, transcript);
+    if provider != 0 {
+        drop(engine);
+        let reopened = open(provider, &path);
+        let mut oracle: serde_json::Value = serde_json::from_str(transcript).unwrap();
+        let cases = oracle["cases"].as_array_mut().unwrap();
+        cases.drain(..cases.len() - 2);
+        crate::pg18_oracle::verify(&reopened, &oracle.to_string());
+    }
+}

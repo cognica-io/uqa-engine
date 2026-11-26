@@ -652,6 +652,8 @@ pub enum Statement {
     CreateForeignWrapper(CreateForeignWrapper),
     /// `CREATE SERVER name FOREIGN DATA WRAPPER type OPTIONS (...)`.
     CreateForeignServer(CreateForeignServer),
+    /// Change a foreign server version or its ordered options.
+    AlterForeignServer(AlterForeignServer),
     /// `CREATE FOREIGN TABLE name (...) SERVER server OPTIONS (...)`.
     CreateForeignTable(CreateForeignTable),
     /// A SQL foreign-table definition retains its original declaration until execution checks its creation namespace.
@@ -782,6 +784,27 @@ pub struct CreateForeignServer {
     pub version: Option<String>,
     pub options: Vec<(String, String)>,
     pub if_not_exists: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AlterForeignServer {
+    pub name: String,
+    pub version: ForeignServerVersion,
+    pub options: Vec<ForeignOptionChange>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ForeignServerVersion {
+    Unchanged,
+    Set(String),
+    Clear,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ForeignOptionChange {
+    Add { name: String, value: String },
+    Set { name: String, value: String },
+    Drop { name: String },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

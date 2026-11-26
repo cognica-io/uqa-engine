@@ -363,6 +363,7 @@ pub(super) fn rewrite_command_scalars(
         | CommandPlan::Deallocate { .. }
         | CommandPlan::CreateForeignWrapper(_)
         | CommandPlan::CreateForeignServer(_)
+        | CommandPlan::AlterForeignServer(_)
         | CommandPlan::CreateForeignTable(_)
         | CommandPlan::CreateForeignTableDefinition(_)
         | CommandPlan::CreateFunction(_)

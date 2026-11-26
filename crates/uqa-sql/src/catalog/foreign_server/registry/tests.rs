@@ -23,6 +23,7 @@ fn server(index: u32) -> ForeignServerDefinition {
             ("a".into(), "second 한글".into()),
         ]),
         metadata: ForeignServerMetadata {
+            revision: 0,
             oid: 20000 + index,
             object_id: u128::from(index + 1).to_be_bytes(),
             owner: RoleIdentity::BOOTSTRAP,

@@ -249,6 +249,9 @@ impl Copying<'_> {
             Statement::CreateForeignServer(value) => CommandPlan::CreateForeignServer(
                 self.field("value0", |copying| value.copy_syntax(copying))?,
             ),
+            Statement::AlterForeignServer(value) => CommandPlan::AlterForeignServer(
+                self.field("value0", |copying| value.copy_syntax(copying))?,
+            ),
             Statement::CreateForeignTable(value) => CommandPlan::CreateForeignTable(
                 self.field("value0", |copying| value.copy_syntax(copying))?,
             ),

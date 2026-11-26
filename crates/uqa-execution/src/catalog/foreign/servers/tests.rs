@@ -25,6 +25,7 @@ fn definition() -> ForeignServerDefinition {
             "user option".into(),
         )]),
         metadata: ForeignServerMetadata {
+            revision: 0,
             option_order: None,
             wrapper_reference: None,
             oid: 16_384,

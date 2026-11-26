@@ -305,3 +305,98 @@ fn foreign_server_name_reservations_follow_competing_commit_or_rollback() {
         }
     }
 }
+
+#[rstest::rstest]
+#[case::sqlite(0)]
+#[case::sqlite_key_value(1)]
+#[case::redb(2)]
+fn alter_server_writers_match_postgresql_tuple_waits(#[case] provider: usize) {
+    use crate::tests::relation_lock_support::{after_shared_wait_with_release, sessions};
+    use uqa_execution::row_locks::shared_objects::SharedCatalogLock;
+    let oracle: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../../../tests/parity/pg18/alter_foreign_server_concurrency.expected.json"
+    ))
+    .unwrap();
+    let (_directory, first, mut peer) = sessions(provider);
+    sql(&first, "CREATE FOREIGN DATA WRAPPER concurrent_fdw");
+    for schedule in oracle["schedules"].as_array().unwrap() {
+        sql(
+            &first,
+            "CREATE SERVER changed FOREIGN DATA WRAPPER concurrent_fdw OPTIONS (k 'old')",
+        );
+        let oid = server(&first, "changed").metadata.oid;
+        sql(&first, "BEGIN");
+        sql(&first, schedule["first"].as_str().unwrap());
+        let waited = SharedCatalogLock::Tuple {
+            class_id: uqa_sql::catalog::dependencies::FOREIGN_SERVER_CLASS,
+            oid,
+        };
+        let (returned, result) = after_shared_wait_with_release(
+            &first,
+            peer,
+            schedule["second"].as_str().unwrap(),
+            waited,
+            || first.sql(schedule["finish"].as_str().unwrap(), &[]),
+        );
+        peer = returned;
+        if let Some(state) = schedule["result"]["state"].as_str() {
+            let error = result.unwrap_err();
+            assert_eq!(error.sqlstate(), Some(state), "{schedule}");
+            assert_eq!(
+                error.to_string(),
+                schedule["result"]["message"].as_str().unwrap(),
+                "{schedule}"
+            );
+        } else {
+            assert_eq!(
+                result.unwrap().command_tag.as_deref(),
+                schedule["result"]["tag"].as_str(),
+                "{schedule}"
+            );
+        }
+        let rows = peer.sql("SELECT srvoptions::text AS options FROM pg_foreign_server WHERE srvname = 'changed'", &[]).unwrap().rows;
+        let expected = schedule["final"].as_array().unwrap();
+        assert_eq!(rows.len(), expected.len(), "{schedule}");
+        for (row, expected) in rows.iter().zip(expected) {
+            let option = &expected[0];
+            let value = option.as_str().map_or(uqa_core::Value::Null, |text| {
+                uqa_core::Value::Str(text.into())
+            });
+            assert_eq!(row["options"], value, "{schedule}");
+        }
+        sql(&first, "DROP SERVER IF EXISTS changed");
+    }
+}
+
+#[rstest::rstest]
+#[case::memory(0)]
+#[case::sqlite(1)]
+#[case::sqlite_key_value(2)]
+#[case::redb(3)]
+fn altered_server_retains_bound_definitions(#[case] provider: usize) {
+    let directory = tempfile::tempdir().unwrap();
+    let engine = open(provider, &directory.path().join("retained.db"));
+    sql(&engine, "CREATE SERVER source FOREIGN DATA WRAPPER memory_fdw OPTIONS (z 'old'); CREATE FOREIGN TABLE foreign_rows(v integer) SERVER source");
+    let before = engine.durable.foreign_servers.snapshot();
+    let view = engine.catalog_read_view();
+    sql(&engine, "ALTER SERVER source OPTIONS (SET z 'new')");
+    let current = server(&engine, "source");
+    let original = &before["source"];
+    assert_eq!(current.metadata.oid, original.metadata.oid);
+    assert_eq!(current.metadata.object_id, original.metadata.object_id);
+    assert_eq!(
+        current.metadata.wrapper_reference,
+        original.metadata.wrapper_reference
+    );
+    assert_eq!(current.metadata.owner, original.metadata.owner);
+    assert_eq!(current.options["z"], "new");
+    assert_eq!(original.options["z"], "old");
+    assert_eq!(
+        view.snapshot()
+            .definitions
+            .foreign_servers
+            .get("source")
+            .unwrap(),
+        original
+    );
+}
