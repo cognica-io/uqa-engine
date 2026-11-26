@@ -23,6 +23,22 @@ Creating a table, view, materialized view, foreign table, sequence, schema, func
 
 `DROP OWNED BY role [, ...] [RESTRICT | CASCADE]` revokes the named roles’ grants and drops their objects in the current database. The roles themselves survive. The caller must have the privileges of each named role. With the default `RESTRICT`, a dependency from an object outside the drop set prevents the entire command. Listing both owners makes their objects part of the same drop set. `CASCADE` also removes dependent objects owned by other roles. Rolling back the command restores both objects and privileges.
 
+## Default privileges
+
+`ALTER DEFAULT PRIVILEGES` grants or revokes privileges for objects created later by a specified role. Omit `FOR ROLE` to use the current role. To change another role’s defaults, the current role must have that role’s privileges. An object uses its creator’s defaults at creation time. Changing role membership or a default leaves the ACLs of existing objects intact.
+
+```sql execute
+CREATE ROLE acl_reader_example;
+CREATE SCHEMA acl_reports_example;
+ALTER DEFAULT PRIVILEGES IN SCHEMA acl_reports_example GRANT SELECT ON TABLES TO acl_reader_example;
+CREATE TABLE acl_reports_example.monthly (total integer);
+SELECT has_table_privilege('acl_reader_example', 'acl_reports_example.monthly', 'SELECT');
+```
+
+Defaults can apply to tables (including views and foreign tables), sequences, functions or routines, types, schemas, and large objects. `IN SCHEMA` adds privileges for objects created in the listed schemas. A schema-specific revoke can undo a schema-specific grant. Changing a database-wide grant requires a database-wide revoke. Schema and large-object defaults are database-wide. Use `WITH GRANT OPTION` to let a named grantee delegate the privilege.
+
+`pg_catalog.pg_default_acl` exposes the creating role, namespace, object class and ACL for each customized default. A zero namespace OID identifies a database-wide default. Dropping a schema removes its defaults. `DROP OWNED BY` removes defaults owned by the named roles and their entries in other roles’ defaults. These changes participate in transactions and savepoints.
+
 ## Schemas
 
 ```sql execute
