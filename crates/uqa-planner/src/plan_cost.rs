@@ -126,6 +126,11 @@ impl PlanCostEstimator<'_, '_> {
         right: &SourcePlan,
         control: &ProductionControl<'_>,
     ) -> Result<bool, SQLError> {
+        control.check()?;
+        // PostgreSQL requires a hash or merge path for a FULL JOIN with join keys.
+        if kind == JoinKind::Full {
+            return Ok(false);
+        }
         let estimator = PlanCostEstimator {
             statistics: self.statistics,
             costs: self.costs.clone(),
