@@ -317,6 +317,14 @@
     {"sql":"SELECT pg_typeof(v) AS t, v FROM (SELECT NULL::anyelement AS v) s","command_tags":["SELECT 1"],"error":null,"results":[{"columns":["t","v"],"type_oids":[2206,25],"rows":[["text",null]]}],"notices":[]},
     {"sql":"SELECT pg_typeof(v) AS t, v FROM (SELECT NULL::anyarray AS v) s","command_tags":["SELECT 1"],"error":null,"results":[{"columns":["t","v"],"type_oids":[2206,2277],"rows":[["anyarray",null]]}],"notices":[]},
     {"sql":"SELECT pg_typeof((('abc'::unknown)::anyarray)) AS t","command_tags":[],"error":{"sqlstate":"0A000","message":"cannot accept a value of type anyarray","detail":null,"hint":null},"results":[],"notices":[]},
-    {"sql":"SELECT 'n'::text::unknown::integer","command_tags":[],"error":{"sqlstate":"XX000","message":"failed to find conversion function from unknown to integer","detail":null,"hint":null},"results":[],"notices":[]}
+    {"sql":"SELECT 'n'::text::unknown::integer","command_tags":[],"error":{"sqlstate":"XX000","message":"failed to find conversion function from unknown to integer","detail":null,"hint":null},"results":[],"notices":[]},
+    {"sql":"CREATE TYPE pc_pair AS (n integer, s text)","command_tags":["CREATE TYPE"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}],"notices":[]},
+    {"sql":"CREATE TABLE pc_pairs(v pc_pair, color pc_color)","command_tags":["CREATE TABLE"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}],"notices":[]},
+    {"sql":"INSERT INTO pc_pairs VALUES (ROW(1,'one'),'red'), ('(2,two)','green')","command_tags":["INSERT 0 2"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}],"notices":[]},
+    {"sql":"SELECT (v).n AS n, (v).s AS s, color::text AS color FROM pc_pairs ORDER BY (v).n","command_tags":["SELECT 2"],"error":null,"results":[{"columns":["n","s","color"],"type_oids":[23,25,25],"rows":[["1","one","red"],["2","two","green"]]}],"notices":[]},
+    {"sql":"SELECT ('(3,three)'::unknown)::pc_pair AS value","command_tags":["SELECT 1"],"error":null,"results":[{"columns":["value"],"type_oids":[16669],"rows":[["(3,three)"]]}],"notices":[]},
+    {"sql":"SELECT ('red'::unknown)::pc_color AS value","command_tags":["SELECT 1"],"error":null,"results":[{"columns":["value"],"type_oids":[16638],"rows":[["red"]]}],"notices":[]},
+    {"sql":"SELECT ('(4,four)'::text::unknown)::pc_pair AS value","command_tags":[],"error":{"sqlstate":"XX000","message":"failed to find conversion function from unknown to pc_pair","detail":null,"hint":null},"results":[],"notices":[]},
+    {"sql":"SELECT ('red'::text::unknown)::pc_color AS value","command_tags":[],"error":{"sqlstate":"XX000","message":"failed to find conversion function from unknown to pc_color","detail":null,"hint":null},"results":[],"notices":[]}
   ]
 }

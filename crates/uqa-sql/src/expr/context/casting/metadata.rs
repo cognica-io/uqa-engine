@@ -43,7 +43,14 @@ impl CastTypes {
         let source = source
             .map(|source| resolve_catalog_type_with_control(source, engine, control))
             .transpose()?
-            .flatten();
+            .flatten()
+            // Literal input routines receive an unknown source without a physical type descriptor.
+            .filter(|ty| {
+                !matches!(
+                    **ty,
+                    ColumnType::Pseudo(crate::ast::ExpressionPseudoType::Unknown)
+                )
+            });
         let parsed_target = if target_type.is_some() {
             None
         } else {
