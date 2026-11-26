@@ -12,6 +12,10 @@ impl Integer for u8 {
     const MAX_LITERAL_BYTES: usize = 3;
 }
 
+impl Integer for u16 {
+    const MAX_LITERAL_BYTES: usize = 5;
+}
+
 impl Integer for i16 {
     const MAX_LITERAL_BYTES: usize = 6;
 }

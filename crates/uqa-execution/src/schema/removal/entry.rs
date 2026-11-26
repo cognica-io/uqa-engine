@@ -24,7 +24,15 @@ pub type DomainRemovalWrite<'a> =
 pub type ForeignServerRemovalWrite<'a> =
     Box<dyn FnOnce(&ForeignServerRemovalContext<'_>) -> Result<SQLResult, SQLError> + 'a>;
 
+pub type DropOwnedWrite<'a> = Box<
+    dyn FnOnce(
+            &crate::catalog::security::role_lifecycle::owned::DropOwnedContext<'_>,
+        ) -> Result<SQLResult, SQLError>
+        + 'a,
+>;
+
 pub trait DropStatementBindings {
+    fn with_drop_owned_write(&self, write: DropOwnedWrite<'_>) -> Result<SQLResult, SQLError>;
     fn with_foreign_server_removal_write(
         &self,
         write: ForeignServerRemovalWrite<'_>,

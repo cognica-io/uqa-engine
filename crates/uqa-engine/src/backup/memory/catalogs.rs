@@ -86,6 +86,7 @@ pub(super) fn image(
         })?,
         23 => native!(&source.comments),
         24 => native!(&source.resources.scoring_params),
+        25 => sql_catalog!(&source.catalogs.default_acls),
         _ => return Ok(None),
     };
     source.cut.check()?;

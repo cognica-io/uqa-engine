@@ -23,8 +23,8 @@ use super::relations::{
 };
 use super::routines::{
     compile_alter_role, compile_alter_routine, compile_alter_routine_owner, compile_call,
-    compile_create_function, compile_create_role, compile_do, compile_drop_role, compile_grant,
-    compile_grant_role,
+    compile_create_function, compile_create_role, compile_do, compile_drop_owned,
+    compile_drop_role, compile_grant, compile_grant_role,
 };
 use super::schema_moves::compile_alter_object_schema;
 use super::sequences::{compile_alter_sequence, compile_create_sequence};
@@ -266,6 +266,10 @@ pub(super) fn compile_stmt(node: &Node) -> Result<Statement> {
         NodeEnum::CreateRoleStmt(stmt) => compile_create_role(stmt),
         NodeEnum::AlterRoleStmt(stmt) => compile_alter_role(stmt),
         NodeEnum::DropRoleStmt(stmt) => compile_drop_role(stmt),
+        NodeEnum::DropOwnedStmt(stmt) => compile_drop_owned(stmt),
+        NodeEnum::AlterDefaultPrivilegesStmt(stmt) => {
+            super::routines::compile_default_privileges(stmt)
+        }
         NodeEnum::VariableSetStmt(stmt) => compile_variable_set(stmt),
         NodeEnum::ConstraintsSetStmt(stmt) => compile_set_constraints(stmt),
         NodeEnum::VariableShowStmt(stmt) => Ok(Statement::ShowVariable {

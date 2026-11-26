@@ -157,10 +157,13 @@ pub fn create_enum(context: &EnumTypeContext<'_>, definition: CreateEnum) -> Res
             oid,
             array_oid,
             array_name,
+            usage_acl: context
+                .creation
+                .defaults
+                .type_acl(owner.identity(), &identity.schema),
             identity,
             owner: owner.identity(),
             labels,
-            usage_acl: None,
         },
     )?;
     enum_type::publish(context.publication, &before, registry)?;

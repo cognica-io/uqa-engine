@@ -24,8 +24,9 @@ pub use table::{
     MemoryTableMetadata, MemoryTableProperties, MemoryTableStatistics,
 };
 
-/// Required ordered catalog units in memory image version 1.
-pub const MEMORY_IMAGE_CATALOG_COUNT: u16 = 24;
+/// Required ordered catalog units in the current memory image header.
+pub const MEMORY_IMAGE_CATALOG_COUNT: u16 = 25;
+pub(super) const ORIGINAL_CATALOG_COUNT: u16 = 24;
 /// Required metadata units at the start of each table generation.
 pub const MEMORY_IMAGE_TABLE_METADATA_COUNT: u8 = 10;
 /// Named graph, model, path-index and analyzer resource families.

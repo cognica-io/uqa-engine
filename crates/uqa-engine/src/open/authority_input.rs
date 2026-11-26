@@ -37,6 +37,10 @@ pub(super) enum PersistentAuthorityInput {
         input: DatabaseCatalogInput,
         domains: DomainRestoreState,
     },
+    DefaultAcls {
+        input: uqa_execution::catalog::security::default_acl::persistence::DefaultAclInput,
+        domains: DomainRestoreState,
+    },
     Routines {
         input: RoutineCatalogPlaceholderInput,
         domains: DomainRestoreState,
@@ -96,12 +100,26 @@ impl PersistentAuthorityInput {
             Self::Database { mut input, domains } => match input.advance(1)? {
                 Some(value) => {
                     *engine.durable.database_security.write() = value;
+                    Self::DefaultAcls {
+                        input: uqa_execution::catalog::security::default_acl::persistence::DefaultAclInput::new(Arc::clone(catalog), engine.durable.roles.read().clone(), limits, engine.durable.default_acls.read().budget(), control)?,
+                        domains,
+                    }
+                }
+                None => Self::Database { input, domains },
+            },
+            Self::DefaultAcls { mut input, domains } => match input.advance(1)? {
+                None => Self::DefaultAcls { input, domains },
+                Some(defaults) => {
+                    engine
+                        .durable
+                        .default_acls
+                        .write()
+                        .replace_durable(defaults);
                     Self::Routines {
                         input: engine.routine_placeholder_input(limits, control)?,
                         domains,
                     }
                 }
-                None => Self::Database { input, domains },
             },
             Self::Routines { mut input, domains } => match input.advance(1)? {
                 None => Self::Routines { input, domains },

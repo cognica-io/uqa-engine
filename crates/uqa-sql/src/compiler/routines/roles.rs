@@ -9,6 +9,8 @@ use super::{
     Statement,
 };
 use crate::compiler::{extract_string, range_var_name};
+mod default_privileges;
+pub(in crate::compiler) use default_privileges::compile_default_privileges;
 
 pub(in crate::compiler) fn compile_acl_role_specification(
     role: &pg_query::protobuf::RoleSpec,
@@ -136,13 +138,10 @@ pub(in crate::compiler) fn compile_grant(
     }
 }
 
-fn compile_grant_table(statement: &pg_query::protobuf::GrantStmt) -> Result<Statement> {
-    use crate::ast::{GrantTableStmt, TableRevokeBehavior};
-    use pg_query::protobuf::DropBehavior;
-
-    let target = compile_grant_table_target(statement)?;
-    let privileges = compile_grant_table_privileges(statement)?;
-    let grantees = statement
+fn compile_acl_grantees(
+    statement: &pg_query::protobuf::GrantStmt,
+) -> Result<Vec<crate::ast::AclRoleSpecification>> {
+    statement
         .grantees
         .iter()
         .map(|grantee| {
@@ -153,7 +152,16 @@ fn compile_grant_table(statement: &pg_query::protobuf::GrantStmt) -> Result<Stat
             };
             compile_acl_role_specification(role, "GRANT/REVOKE")
         })
-        .collect::<Result<Vec<_>>>()?;
+        .collect()
+}
+
+fn compile_grant_table(statement: &pg_query::protobuf::GrantStmt) -> Result<Statement> {
+    use crate::ast::{GrantTableStmt, TableRevokeBehavior};
+    use pg_query::protobuf::DropBehavior;
+
+    let target = compile_grant_table_target(statement)?;
+    let privileges = compile_grant_table_privileges(statement)?;
+    let grantees = compile_acl_grantees(statement)?;
     let grantor = statement
         .grantor
         .as_ref()
@@ -227,7 +235,7 @@ fn compile_grant_table_privileges(
                 "GRANT/REVOKE contains a malformed privilege".into(),
             ));
         };
-        let privilege_name = match privilege.priv_name.to_ascii_lowercase().as_str() {
+        let privilege_name = match privilege.priv_name.as_str() {
             "select" => TablePrivilege::Select,
             "insert" => TablePrivilege::Insert,
             "update" => TablePrivilege::Update,
@@ -237,7 +245,11 @@ fn compile_grant_table_privileges(
             "trigger" => TablePrivilege::Trigger,
             "maintain" => TablePrivilege::Maintain,
             "usage" => TablePrivilege::Usage,
-            _ => TablePrivilege::Unsupported(privilege.priv_name.to_ascii_uppercase()),
+            "temp" | "temporary" => TablePrivilege::Unsupported("TEMP".into()),
+            name @ ("execute" | "create" | "connect" | "set" | "alter system") => {
+                TablePrivilege::Unsupported(name.to_ascii_uppercase())
+            }
+            name => TablePrivilege::Unrecognized(name.to_owned()),
         };
         let columns = privilege
             .cols
@@ -321,18 +333,7 @@ fn compile_grant_database(statement: &pg_query::protobuf::GrantStmt) -> Result<S
             Ok(database.sval.clone())
         })
         .collect::<Result<Vec<_>>>()?;
-    let grantees = statement
-        .grantees
-        .iter()
-        .map(|grantee| {
-            let Some(NodeEnum::RoleSpec(role)) = grantee.node.as_ref() else {
-                return Err(SQLError::Internal(
-                    "GRANT/REVOKE contains a malformed grantee".into(),
-                ));
-            };
-            compile_acl_role_specification(role, "GRANT/REVOKE")
-        })
-        .collect::<Result<Vec<_>>>()?;
+    let grantees = compile_acl_grantees(statement)?;
     let grantor = statement
         .grantor
         .as_ref()
@@ -396,18 +397,7 @@ fn compile_grant_schema(statement: &pg_query::protobuf::GrantStmt) -> Result<Sta
             Ok(schema.sval.clone())
         })
         .collect::<Result<Vec<_>>>()?;
-    let grantees = statement
-        .grantees
-        .iter()
-        .map(|grantee| {
-            let Some(NodeEnum::RoleSpec(role)) = grantee.node.as_ref() else {
-                return Err(SQLError::Internal(
-                    "GRANT/REVOKE contains a malformed grantee".into(),
-                ));
-            };
-            compile_acl_role_specification(role, "GRANT/REVOKE")
-        })
-        .collect::<Result<Vec<_>>>()?;
+    let grantees = compile_acl_grantees(statement)?;
     let grantor = statement
         .grantor
         .as_ref()
@@ -467,18 +457,7 @@ fn compile_grant_sequence(statement: &pg_query::protobuf::GrantStmt) -> Result<S
         }
         privileges
     };
-    let grantees = statement
-        .grantees
-        .iter()
-        .map(|grantee| {
-            let Some(NodeEnum::RoleSpec(role)) = grantee.node.as_ref() else {
-                return Err(SQLError::Internal(
-                    "GRANT/REVOKE contains a malformed grantee".into(),
-                ));
-            };
-            compile_acl_role_specification(role, "GRANT/REVOKE")
-        })
-        .collect::<Result<Vec<_>>>()?;
+    let grantees = compile_acl_grantees(statement)?;
     let grantor = statement
         .grantor
         .as_ref()
@@ -560,7 +539,7 @@ pub(in crate::compiler) fn compile_role_specification(
     }
 }
 
-fn compile_membership_role_list(
+fn compile_role_list(
     nodes: &[pg_query::protobuf::Node],
     context: &str,
 ) -> Result<Vec<crate::ast::RoleSpecification>> {
@@ -601,7 +580,7 @@ pub(in crate::compiler) fn compile_grant_role(
             Ok(role.priv_name.clone())
         })
         .collect::<Result<Vec<_>>>()?;
-    let members = compile_membership_role_list(&statement.grantee_roles, "GRANT/REVOKE ROLE")?;
+    let members = compile_role_list(&statement.grantee_roles, "GRANT/REVOKE ROLE")?;
     let mut options = RoleMembershipOptions::default();
     for option in &statement.opt {
         let Some(NodeEnum::DefElem(option)) = option.node.as_ref() else {
@@ -706,7 +685,7 @@ pub(in crate::compiler) fn compile_create_role(
                         element.defname
                     )));
                 };
-                let names = compile_membership_role_list(&roles.items, "CREATE ROLE membership")?;
+                let names = compile_role_list(&roles.items, "CREATE ROLE membership")?;
                 match element.defname.as_str() {
                     "addroleto" => role.in_roles.extend(names),
                     "rolemembers" => role.role_members.extend(names),
@@ -764,7 +743,7 @@ pub(in crate::compiler) fn compile_alter_role(
         } else {
             RoleMembershipAction::Drop
         });
-        alter.members = compile_membership_role_list(&roles.items, "ALTER GROUP")?;
+        alter.members = compile_role_list(&roles.items, "ALTER GROUP")?;
         return Ok(Statement::AlterRole(alter));
     }
     for option in &statement.options {
@@ -798,22 +777,20 @@ pub(in crate::compiler) fn compile_alter_role(
     Ok(Statement::AlterRole(alter))
 }
 
+pub(in crate::compiler) fn compile_drop_owned(
+    statement: &pg_query::protobuf::DropOwnedStmt,
+) -> Result<Statement> {
+    Ok(Statement::DropOwned(crate::ast::DropOwnedStmt {
+        roles: compile_role_list(&statement.roles, "DROP OWNED")?,
+        cascade: statement.behavior() == pg_query::protobuf::DropBehavior::DropCascade,
+    }))
+}
+
 pub(in crate::compiler) fn compile_drop_role(
     statement: &pg_query::protobuf::DropRoleStmt,
 ) -> Result<Statement> {
     use crate::ast::DropRoleStmt;
-    let names = statement
-        .roles
-        .iter()
-        .map(|role| {
-            let Some(NodeEnum::RoleSpec(role)) = role.node.as_ref() else {
-                return Err(SQLError::Internal(
-                    "DROP ROLE has a malformed target".into(),
-                ));
-            };
-            compile_role_specification(role, "DROP ROLE")
-        })
-        .collect::<Result<Vec<_>>>()?;
+    let names = compile_role_list(&statement.roles, "DROP ROLE")?;
     Ok(Statement::DropRole(DropRoleStmt {
         names,
         if_exists: statement.missing_ok,

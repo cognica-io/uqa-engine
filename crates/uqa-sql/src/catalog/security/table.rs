@@ -81,6 +81,43 @@ impl TableAclPrivilege {
     }
 }
 
+pub(super) fn unrecognized_privilege(name: &str) -> SQLError {
+    SQLError::Routine {
+        sqlstate: "42601".into(),
+        message: format!("unrecognized privilege type \"{name}\""),
+    }
+}
+
+/// USAGE applies to sequences reached through a relation grant.
+pub(super) fn relation_privilege(
+    spec: &TablePrivilegeSpec,
+) -> Result<Option<TableAclPrivilege>, SQLError> {
+    let privilege = match &spec.privilege {
+        TablePrivilege::Select => TableAclPrivilege::Select,
+        TablePrivilege::Insert => TableAclPrivilege::Insert,
+        TablePrivilege::Update => TableAclPrivilege::Update,
+        TablePrivilege::Delete => TableAclPrivilege::Delete,
+        TablePrivilege::Truncate => TableAclPrivilege::Truncate,
+        TablePrivilege::References => TableAclPrivilege::References,
+        TablePrivilege::Trigger => TableAclPrivilege::Trigger,
+        TablePrivilege::Maintain => TableAclPrivilege::Maintain,
+        TablePrivilege::Usage => return Ok(None),
+        TablePrivilege::Unrecognized(name) => return Err(unrecognized_privilege(name)),
+        TablePrivilege::Unsupported(name) => {
+            let object = if spec.columns.is_empty() {
+                "relation"
+            } else {
+                "column"
+            };
+            return Err(SQLError::Routine {
+                sqlstate: "0LP01".into(),
+                message: format!("invalid privilege type {name} for {object}"),
+            });
+        }
+    };
+    Ok(Some(privilege))
+}
+
 pub fn requested_acl_privileges(
     requested: &[TablePrivilegeSpec],
 ) -> Result<RequestedTablePrivileges, SQLError> {
@@ -93,39 +130,14 @@ pub fn requested_acl_privileges(
     let mut table = Vec::with_capacity(requested.len());
     let mut columns = Vec::new();
     for spec in requested {
-        let privilege = match &spec.privilege {
-            TablePrivilege::Select => TableAclPrivilege::Select,
-            TablePrivilege::Insert => TableAclPrivilege::Insert,
-            TablePrivilege::Update => TableAclPrivilege::Update,
-            TablePrivilege::Delete => TableAclPrivilege::Delete,
-            TablePrivilege::Truncate => TableAclPrivilege::Truncate,
-            TablePrivilege::References => TableAclPrivilege::References,
-            TablePrivilege::Trigger => TableAclPrivilege::Trigger,
-            TablePrivilege::Maintain => TableAclPrivilege::Maintain,
-            TablePrivilege::Usage => {
-                return Err(SQLError::Routine {
-                    sqlstate: "0LP01".into(),
-                    message: if spec.columns.is_empty() {
-                        "invalid privilege type USAGE for table".into()
-                    } else {
-                        "invalid privilege type USAGE for column".into()
-                    },
-                })
-            }
-            TablePrivilege::Unsupported(name) => {
-                return Err(SQLError::Routine {
-                    sqlstate: "0LP01".into(),
-                    message: format!(
-                        "invalid privilege type {name} for {}",
-                        if spec.columns.is_empty() {
-                            "table"
-                        } else {
-                            "column"
-                        }
-                    ),
-                })
-            }
-        };
+        let privilege = relation_privilege(spec)?.ok_or_else(|| SQLError::Routine {
+            sqlstate: "0LP01".into(),
+            message: if spec.columns.is_empty() {
+                "invalid privilege type USAGE for table".into()
+            } else {
+                "invalid privilege type USAGE for column".into()
+            },
+        })?;
         if spec.columns.is_empty() {
             if !table.contains(&privilege) {
                 table.push(privilege);
@@ -151,7 +163,7 @@ pub fn requested_acl_privileges(
     Ok(RequestedTablePrivileges { table, columns })
 }
 
-fn table_privilege_name(privilege: &TablePrivilege) -> &str {
+pub(super) fn table_privilege_name(privilege: &TablePrivilege) -> &str {
     match privilege {
         TablePrivilege::Select => "SELECT",
         TablePrivilege::Insert => "INSERT",
@@ -162,7 +174,7 @@ fn table_privilege_name(privilege: &TablePrivilege) -> &str {
         TablePrivilege::Trigger => "TRIGGER",
         TablePrivilege::Maintain => "MAINTAIN",
         TablePrivilege::Usage => "USAGE",
-        TablePrivilege::Unsupported(name) => name,
+        TablePrivilege::Unsupported(name) | TablePrivilege::Unrecognized(name) => name,
     }
 }
 

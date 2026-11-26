@@ -221,6 +221,9 @@ impl RoleDependencyCatalog for Engine {
 }
 
 impl uqa_sql::catalog::roles::dependencies::context::TemporaryRoleDependencyCatalog for Engine {
+    fn temporary_default_acls(&self) -> uqa_sql::catalog::security::default_acl::DefaultAcls {
+        self.durable.default_acls.read().temporary_only()
+    }
     fn temporary_namespace_allocated(&self) -> bool {
         self.session.state.read().temporary_namespace.is_some()
     }

@@ -44,5 +44,6 @@ pub trait RoleDependencyCatalog:
 }
 
 pub trait TemporaryRoleDependencyCatalog: RoleDependencyCatalog {
+    fn temporary_default_acls(&self) -> crate::catalog::security::default_acl::DefaultAcls;
     fn temporary_namespace_allocated(&self) -> bool;
 }

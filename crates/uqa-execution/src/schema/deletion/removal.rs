@@ -101,6 +101,9 @@ impl DeletionPlan {
                         cascade: false,
                     })?;
                 }
+                CatalogObject::DefaultAcl(key) => {
+                    crate::catalog::security::default_acl::remove(context.default_acls, *key)?;
+                }
                 CatalogObject::Schema(name) => remove_schema(context, name)?,
                 CatalogObject::ForeignServer { name, object_id } => {
                     context.foreign_servers.remove(name, *object_id)?;

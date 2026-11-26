@@ -199,6 +199,10 @@ pub(super) struct DurableCatalogState {
         uqa_execution::catalog::index::registry::CapturedCatalogIndexes,
     >,
     pub(super) database_security: CatalogCell<DatabaseAuthority, CapturedDatabaseAuthority>,
+    pub(super) default_acls: CatalogCell<
+        uqa_sql::catalog::security::default_acl::DefaultAcls,
+        uqa_sql::catalog::security::default_acl::CapturedDefaultAcls,
+    >,
     pub(super) schemas: CatalogCell<
         SchemaRegistry,
         uqa_sql::catalog::security::schema_registry::CapturedSchemaRegistry,
@@ -275,6 +279,8 @@ pub(super) struct DurableCatalogSnapshot {
     pub(super) catalog_indexes:
         CatalogGeneration<uqa_execution::catalog::index::registry::CatalogIndexes>,
     pub(super) database_security: CatalogGeneration<DatabaseAuthority>,
+    pub(super) default_acls:
+        CatalogGeneration<uqa_sql::catalog::security::default_acl::DefaultAcls>,
     pub(super) schemas: CatalogGeneration<SchemaRegistry>,
     pub(super) path_indexes: CatalogGeneration<uqa_graph::PathIndexCatalog>,
     pub(super) sequences:
@@ -317,6 +323,9 @@ impl DurableCatalogState {
                 uqa_execution::catalog::index::registry::CatalogIndexes::default(),
             ),
             database_security: CatalogCell::new(DatabaseAuthority::bootstrap()),
+            default_acls: CatalogCell::new(
+                uqa_sql::catalog::security::default_acl::DefaultAcls::new(),
+            ),
             schemas: CatalogCell::new(BoundSchemaSecurity::initial_catalog()),
             path_indexes: CatalogCell::new(uqa_graph::PathIndexCatalog::default()),
             sequences: CatalogCell::new(
@@ -367,6 +376,7 @@ impl DurableCatalogState {
             views: self.views.snapshot(),
             catalog_indexes: self.catalog_indexes.snapshot(),
             database_security: self.database_security.snapshot(),
+            default_acls: self.default_acls.snapshot(),
             schemas: self.schemas.snapshot(),
             path_indexes: self.path_indexes.snapshot(),
             sequences: self.sequences.snapshot(),
@@ -394,6 +404,7 @@ impl DurableCatalogState {
         self.views.restore(&snapshot.views);
         self.catalog_indexes.restore(&snapshot.catalog_indexes);
         self.database_security.restore(&snapshot.database_security);
+        self.default_acls.restore(&snapshot.default_acls);
         self.schemas.restore(&snapshot.schemas);
         self.path_indexes.restore(&snapshot.path_indexes);
         self.sequences.restore(&snapshot.sequences);

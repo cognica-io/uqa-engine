@@ -11,7 +11,7 @@ use super::{
 };
 use uqa_sql::{
     catalog::security::{
-        table_grants::{ResolvedTableGrantTarget, TableGrantApplication},
+        table_grants::{RelationAclChange, ResolvedTableGrantTarget},
         BoundTableSecurity,
     },
     SQLError,
@@ -22,7 +22,7 @@ pub(super) type TablePrivilegeUpdate<'a> =
 pub(super) fn system_privilege_updates(
     context: &TableGrantContext<'_>,
     targets: &[ResolvedTableGrantTarget],
-    application: &TableGrantApplication<'_>,
+    application: &impl RelationAclChange,
     notices: &mut Vec<uqa_sql::SQLNotice>,
     dependencies: &mut std::collections::BTreeSet<String>,
 ) -> Result<Vec<SystemPrivilegeUpdate>, SQLError> {
@@ -34,12 +34,12 @@ pub(super) fn system_privilege_updates(
         uqa_sql::catalog::security::table_grants::validate_requested_columns(
             &target.relation,
             &relation.column_names(),
-            application.requested,
+            application.requested(),
         )?;
         let current = context
             .system
             .system_relation_security(relation)
-            .resolve(application.roles)
+            .resolve(application.roles())
             .map_err(SQLError::Internal)?;
         let (next, grantable) = application.apply_to(target, &current)?;
         uqa_sql::catalog::security::dependencies::added_table_acl_roles(
@@ -50,12 +50,12 @@ pub(super) fn system_privilege_updates(
         uqa_sql::catalog::security::system_relations::validate_security(
             relation,
             &next,
-            application.roles,
+            application.roles(),
         )
         .map_err(SQLError::Internal)?;
         application.record_warning(grantable, &target.relation, notices);
         let bound =
-            BoundTableSecurity::bind(&next, application.roles).map_err(SQLError::Internal)?;
+            BoundTableSecurity::bind(&next, application.roles()).map_err(SQLError::Internal)?;
         for column in application
             .replaced_tuples(&current, &next)
             .into_iter()
@@ -75,7 +75,7 @@ pub(super) fn system_privilege_updates(
 }
 pub(super) fn table_privilege_updates<'a>(
     targets: Vec<(&ResolvedTableGrantTarget, Box<dyn TableGrantState + 'a>)>,
-    application: &TableGrantApplication<'_>,
+    application: &impl RelationAclChange,
     notices: &mut Vec<uqa_sql::SQLNotice>,
     dependencies: &mut std::collections::BTreeSet<String>,
 ) -> Result<Vec<TablePrivilegeUpdate<'a>>, SQLError> {
@@ -83,7 +83,7 @@ pub(super) fn table_privilege_updates<'a>(
     for (target, table) in targets {
         let current = table
             .security()
-            .resolve(application.roles)
+            .resolve(application.roles())
             .map_err(SQLError::Internal)?;
         let (next, grantable) = application.apply_to(target, &current)?;
         uqa_sql::catalog::security::dependencies::added_table_acl_roles(
@@ -100,7 +100,7 @@ pub(super) fn table_privilege_updates<'a>(
             updates.push((
                 target.name.clone(),
                 table,
-                BoundTableSecurity::bind(&next, application.roles).map_err(SQLError::Internal)?,
+                BoundTableSecurity::bind(&next, application.roles()).map_err(SQLError::Internal)?,
             ));
         }
     }

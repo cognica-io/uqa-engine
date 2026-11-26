@@ -180,6 +180,7 @@ pub struct StatementExecutionContext<'a, S: Clone + 'static> {
     pub events: crate::schema::events::context::EventLifecycleContext<'a>,
     pub foreign: &'a dyn crate::schema::foreign_creation::entry::ForeignCreationTransactions,
     pub table_privileges: &'a dyn crate::catalog::security::table_grants::TableGrantInputs,
+    pub default_privileges: &'a dyn crate::catalog::security::default_acl::DefaultPrivilegeWrite,
     pub explain: PhysicalExplainRenderer,
     pub physical_explain: &'a dyn PhysicalExplainPlanning,
 }

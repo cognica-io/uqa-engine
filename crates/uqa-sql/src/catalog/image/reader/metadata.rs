@@ -195,6 +195,7 @@ impl<'a> CatalogImageReader<'a> {
             | Entries::Memberships(_)
             | Entries::Schemas(_)
             | Entries::Database(_)
+            | Entries::DefaultAcls(_)
             | Entries::BuiltinRoutines(_)
             | Entries::SystemRelations(_) => {
                 unreachable!("security entries are emitted by their native cursor")

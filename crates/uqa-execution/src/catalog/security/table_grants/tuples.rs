@@ -11,7 +11,7 @@ use uqa_core::RelationIdentity;
 use uqa_sql::{
     ast::RelationPersistence,
     catalog::security::{
-        table_grants::{ForeignTablePrivilegeUpdate, TableGrantApplication, ViewPrivilegeUpdate},
+        table_grants::{ForeignTablePrivilegeUpdate, RelationAclChange, ViewPrivilegeUpdate},
         BoundTableSecurity,
     },
     SQLError,
@@ -20,7 +20,8 @@ use uqa_storage::{catalog::relation_acl::RelationAclTuple, StorageBackendResult}
 
 pub(super) struct RelationPrivilegeUpdate {
     relation: RelationIdentity,
-    column: Option<String>,
+    pub(super) column: Option<String>,
+    persistence: RelationPersistence,
     entry: RelationAclTuple,
 }
 
@@ -29,6 +30,9 @@ impl RelationPrivilegeUpdate {
         &self,
         acls: &dyn super::context::TableGrantPersistence,
     ) -> StorageBackendResult<()> {
+        if self.persistence == RelationPersistence::Temporary {
+            return Ok(());
+        }
         acls.persist_relation_acl(&self.relation, self.column.as_deref(), &self.entry)
     }
 }
@@ -36,7 +40,7 @@ impl RelationPrivilegeUpdate {
 pub(super) fn prepare(
     context: &TableGrantContext<'_>,
     targets: &[uqa_sql::catalog::security::table_grants::ResolvedTableGrantTarget],
-    application: &TableGrantApplication<'_>,
+    application: &impl RelationAclChange,
     tables: &mut [TablePrivilegeUpdate<'_>],
     views: &mut [ViewPrivilegeUpdate],
     foreign: &mut [ForeignTablePrivilegeUpdate],
@@ -47,10 +51,10 @@ pub(super) fn prepare(
                      after: &mut BoundTableSecurity,
                      persistence| {
         let original = before
-            .resolve(application.roles)
+            .resolve(application.roles())
             .map_err(SQLError::Internal)?;
         let next = after
-            .resolve(application.roles)
+            .resolve(application.roles())
             .map_err(SQLError::Internal)?;
         let mut row = after.row();
         row.acl_revisions.clone_from(&before.acl_revisions);
@@ -71,13 +75,12 @@ pub(super) fn prepare(
             entry
                 .apply(column.as_deref(), &mut row)
                 .map_err(|error| SQLError::Internal(error.to_string()))?;
-            if persistence != RelationPersistence::Temporary {
-                updates.push(RelationPrivilegeUpdate {
-                    relation: relation.clone(),
-                    column,
-                    entry,
-                });
-            }
+            updates.push(RelationPrivilegeUpdate {
+                relation: relation.clone(),
+                column,
+                persistence,
+                entry,
+            });
         }
         *after = BoundTableSecurity::from_row(row);
         Ok::<_, SQLError>(())

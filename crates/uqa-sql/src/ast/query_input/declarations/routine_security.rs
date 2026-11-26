@@ -7,9 +7,10 @@
 use super::special::read_estimate;
 use super::{invalid, Input, InputError, JsonToken, Native, Parts, Stored, Values};
 use crate::ast::routine_security::{
-    AlterRoleStmt, AlterRoutineKind, AlterRoutineOwnerStmt, AlterRoutineStmt, CreateRoleStmt,
-    DropRoleStmt, FunctionParallel, GrantRoleStmt, GrantRoutineItem, GrantRoutineStmt,
-    RenameRoleStmt, RenameRoutineStmt, RoleAttribute, RoleMembershipAction, RoleMembershipOptions,
+    AlterDefaultPrivilegesStmt, AlterRoleStmt, AlterRoutineKind, AlterRoutineOwnerStmt,
+    AlterRoutineStmt, CreateRoleStmt, DefaultAclObject, DropOwnedStmt, DropRoleStmt,
+    FunctionParallel, GrantRoleStmt, GrantRoutineItem, GrantRoutineStmt, RenameRoleStmt,
+    RenameRoutineStmt, RoleAttribute, RoleMembershipAction, RoleMembershipOptions,
     RoutineConfigAction, RoutinePrivilege, RoutineRevokeBehavior, RoutineSecurityAttributes,
 };
 
@@ -59,6 +60,29 @@ stored_struct!(CreateRoleStmt {
     in_roles: defaulted,
     role_members: defaulted,
     admin_members: defaulted,
+});
+
+stored_enum!(DefaultAclObject {
+    Table,
+    Sequence,
+    Routine,
+    Type,
+    Schema,
+    LargeObject
+});
+stored_struct!(AlterDefaultPrivilegesStmt {
+    owners: required,
+    schemas: required,
+    object: required,
+    grantees: required,
+    privileges: required,
+    is_grant: required,
+    grant_option: required,
+});
+
+stored_struct!(DropOwnedStmt {
+    roles: required,
+    cascade: required
 });
 
 stored_struct!(DropRoleStmt {

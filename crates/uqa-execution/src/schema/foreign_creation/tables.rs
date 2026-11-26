@@ -7,7 +7,7 @@
 //! A foreign relation and its row type precede expression analysis and the server association.
 
 use super::ForeignCreationContext;
-use crate::catalog::{foreign::StoredForeignTable, security::BoundTableSecurity};
+use crate::catalog::foreign::StoredForeignTable;
 use crate::schema::sequences::ownership;
 use crate::statement::prepared::invalidation::PreparedCatalogChange;
 use uqa_core::RelationIdentity;
@@ -106,7 +106,9 @@ impl ForeignCreationContext<'_> {
         next.insert(
             relation.clone(),
             table.clone(),
-            BoundTableSecurity::owner(owner.identity()),
+            self.creation
+                .defaults
+                .table_security(owner.identity(), &relation.schema),
         )?;
         self.publication.publish_foreign_catalog(next);
         let declaration = ForeignDeclaration {
@@ -123,10 +125,8 @@ impl ForeignCreationContext<'_> {
     pub(super) fn publish_foreign_relation(
         &self,
         relation: &RelationIdentity,
-        owner: &crate::catalog::security::roles::locking::RoleBinding,
         table: StoredForeignTable,
     ) -> Result<(), SQLError> {
-        let security = BoundTableSecurity::owner(owner.identity());
         let columns = table.columns.clone();
         let object_id = table.object_id;
         let catalog_oid = table.relation_oids().relation;
@@ -141,6 +141,16 @@ impl ForeignCreationContext<'_> {
                 table.name
             )));
         }
+        let security = next
+            .security()
+            .get(relation)
+            .ok_or_else(|| {
+                SQLError::Internal(format!(
+                    "foreign table `{}` has no security declaration",
+                    table.name
+                ))
+            })?
+            .clone();
         next.insert(relation.clone(), table.clone(), security.clone())?;
         table
             .persist(self.catalog, relation, &security)

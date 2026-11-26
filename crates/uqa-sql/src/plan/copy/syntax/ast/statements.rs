@@ -339,6 +339,8 @@ syntax_enum!(crate::ast::Statement {
     AlterRole(value0),
     RenameRole(value0),
     DropRole(value0),
+    AlterDefaultPrivileges(value0),
+    DropOwned(value0),
     CreateTrigger(value0),
     DropTrigger(value0),
     CreateRule(value0),

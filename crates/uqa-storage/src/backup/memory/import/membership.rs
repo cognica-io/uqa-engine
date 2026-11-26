@@ -8,14 +8,14 @@
 
 use super::{BackupError, BackupResult, DecodedMemoryImageAddress as Address, UnitKind};
 use crate::backup::{
-    DecodedMemoryTableUnit as TableUnit, MEMORY_IMAGE_CATALOG_COUNT, MEMORY_IMAGE_RESOURCE_KINDS,
+    DecodedMemoryTableUnit as TableUnit, MEMORY_IMAGE_RESOURCE_KINDS,
     MEMORY_IMAGE_TABLE_METADATA_COUNT,
 };
 
-pub(super) fn end(previous: Option<&Address>) -> BackupResult<()> {
+pub(super) fn end(previous: Option<&Address>, required_catalogs: u16) -> BackupResult<()> {
     match previous {
         None => Err(invalid()),
-        Some(Address::Catalog(slot)) if *slot != MEMORY_IMAGE_CATALOG_COUNT => Err(invalid()),
+        Some(Address::Catalog(slot)) if *slot != required_catalogs => Err(invalid()),
         Some(Address::Table {
             unit: TableUnit::Metadata(slot),
             ..
@@ -28,10 +28,11 @@ pub(super) fn next(
     previous: Option<&Address>,
     current: &Address,
     kind: UnitKind,
+    required_catalogs: u16,
 ) -> BackupResult<()> {
     let expected_catalog = match previous {
         None => Some(1),
-        Some(Address::Catalog(slot)) if *slot < MEMORY_IMAGE_CATALOG_COUNT => Some(slot + 1),
+        Some(Address::Catalog(slot)) if *slot < required_catalogs => Some(slot + 1),
         _ => None,
     };
     if let Some(expected) = expected_catalog {
@@ -74,7 +75,7 @@ pub(super) fn next(
         unit,
     } = current
     else {
-        return end(previous);
+        return end(previous, required_catalogs);
     };
     let previous_unit = match previous {
         Some(Address::Table {
@@ -90,7 +91,7 @@ pub(super) fn next(
             Some(before_unit)
         }
         _ => {
-            end(previous)?;
+            end(previous, required_catalogs)?;
             None
         }
     };

@@ -63,6 +63,7 @@ const MEMBERSHIPS: [u8; 8] = *b"UQARMB01";
 const SCHEMAS: [u8; 8] = *b"UQASCH01";
 const DATABASE: [u8; 8] = *b"UQADBA01";
 const BUILTIN_ROUTINES: [u8; 8] = *b"UQABRA01";
+const DEFAULT_ACLS: [u8; 8] = *b"UQADAC01";
 const SYSTEM_RELATIONS: [u8; 8] = *b"UQASRA01";
 const COMPOSITES: [u8; 8] = *b"UQACMP01";
 const RANGES: [u8; 8] = *b"UQARNG01";
@@ -233,6 +234,13 @@ catalog_image!(
     Schemas,
     SCHEMAS,
     schemas
+);
+catalog_image!(
+    crate::catalog::security::default_acl::CapturedDefaultAcls,
+    crate::catalog::security::default_acl::DefaultAcls,
+    DefaultAcls,
+    DEFAULT_ACLS,
+    default_acls
 );
 catalog_image!(
     CapturedBuiltinRoutineSecurities,

@@ -61,6 +61,7 @@ impl Engine {
             events: self.event_lifecycle_context(),
             foreign: self,
             table_privileges: self,
+            default_privileges: self,
             explain: uqa_planner::explain::run_explain_with_control,
             physical_explain: self,
         }

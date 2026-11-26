@@ -241,6 +241,7 @@ stored_enum!(TablePrivilege {
     Maintain,
     Usage,
     Unsupported (value),
+    Unrecognized (value),
 });
 
 stored_struct!(TablePrivilegeSpec {

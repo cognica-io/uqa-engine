@@ -168,6 +168,7 @@ impl MutationCoordinator<'_> {
     ) -> StorageBackendResult<bool> {
         uqa_execution::schema::namespaces::register_schema(
             &uqa_execution::schema::namespaces::SchemaRegistrationContext {
+                defaults: &self.durable.default_acls.snapshot(),
                 state: self,
                 persistence: self,
                 changes: self,
@@ -264,6 +265,7 @@ impl Engine {
             views: durable.views.clone(),
             catalog_indexes: durable.catalog_indexes.clone(),
             database_security: durable.database_security.clone(),
+            default_acls: durable.default_acls.clone(),
             schemas: durable.schemas.clone(),
             sequences: durable.sequences.clone(),
             graph_catalog_oids: durable.graph_catalog_oids.clone(),

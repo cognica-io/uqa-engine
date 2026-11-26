@@ -25,7 +25,8 @@ use uqa_sql::catalog::{
     roles::{RoleDefinitions, RoleMemberships},
     security::{
         builtin_routines::BuiltinRoutineSecurities, database::DatabaseAuthority,
-        schema_registry::SchemaRegistry, system_relations::SystemRelationSecurities,
+        default_acl::DefaultAcls, schema_registry::SchemaRegistry,
+        system_relations::SystemRelationSecurities,
     },
     stored_view::ViewDefinitions,
 };
@@ -44,6 +45,7 @@ pub(super) enum DefinitionInput {
     Roles(CatalogImageInput<RoleDefinitions>),
     Memberships(CatalogImageInput<RoleMemberships>),
     Database(CatalogImageInput<DatabaseAuthority>),
+    DefaultAcls(CatalogImageInput<DefaultAcls>),
     BuiltinRoutines(CatalogImageInput<BuiltinRoutineSecurities>),
     SystemRelations(CatalogImageInput<SystemRelationSecurities>),
     ForeignWrappers(CatalogImageInput<ForeignWrappers>),
@@ -93,6 +95,7 @@ impl DefinitionInput {
             22 => input!(Indexes, CatalogIndexes),
             23 => input!(Comments, CommentRegistry),
             24 => Self::Scoring(ScoringParameters::image_input(control, mutations)?),
+            25 => input!(DefaultAcls, DefaultAcls),
             _ => return Err(invalid()),
         })
     }
@@ -106,22 +109,16 @@ impl DefinitionInput {
         let registry = destination.registry;
         let control = destination.control;
         macro_rules! publish {
-            ($input:ident, $field:ident, $ty:ty) => {{
-                let Some(value) = $input
-                    .advance_with_window(reader, 1, destination.window)
-                    .map_err(super::super::metadata::sql_error)?
-                else {
-                    return Ok(false);
-                };
-                state.$field = CatalogCell::capture_source_with_control(
-                    CatalogGeneration::with_budget(value, control.memory())?,
-                    registry,
-                    <$ty>::capture,
-                    Some(control),
-                )?;
-            }};
-        }
-        macro_rules! native {
+            ($input:ident, $field:ident, $ty:ty) => {
+                publish!(
+                    $input
+                        .advance_with_window(reader, 1, destination.window)
+                        .map_err(super::super::metadata::sql_error),
+                    $field,
+                    $ty,
+                    capture_source_with_control
+                )
+            };
             ($decoded:expr, $field:ident, $ty:ty, $capture:ident) => {{
                 let Some(value) = $decoded? else {
                     return Ok(false);
@@ -146,6 +143,7 @@ impl DefinitionInput {
             Self::Roles(input) => publish!(input, roles, RoleDefinitions),
             Self::Memberships(input) => publish!(input, role_memberships, RoleMemberships),
             Self::Database(input) => publish!(input, database_security, DatabaseAuthority),
+            Self::DefaultAcls(input) => publish!(input, default_acls, DefaultAcls),
             Self::BuiltinRoutines(input) => {
                 publish!(input, builtin_routine_security, BuiltinRoutineSecurities);
             }
@@ -155,7 +153,7 @@ impl DefinitionInput {
             Self::ForeignWrappers(input) => publish!(input, foreign_wrappers, ForeignWrappers),
             Self::ForeignServers(input) => publish!(input, foreign_servers, ForeignServers),
             Self::GraphOids(input) => publish!(input, graph_catalog_oids, GraphOidRegistry),
-            Self::Indexes(input) => native!(
+            Self::Indexes(input) => publish!(
                 input
                     .advance(reader, destination.window)
                     .map_err(super::super::metadata::sql_error),
@@ -163,7 +161,7 @@ impl DefinitionInput {
                 CatalogIndexes,
                 capture_resource_with_control
             ),
-            Self::Triggers(input) => native!(
+            Self::Triggers(input) => publish!(
                 input
                     .advance(reader, destination.window)
                     .map_err(super::super::metadata::sql_error),
@@ -171,7 +169,7 @@ impl DefinitionInput {
                 TriggerCatalog,
                 capture_source_with_control
             ),
-            Self::ForeignTables(input) => native!(
+            Self::ForeignTables(input) => publish!(
                 input
                     .advance(reader, destination.window)
                     .map_err(super::super::metadata::sql_error),
@@ -179,7 +177,7 @@ impl DefinitionInput {
                 ForeignCatalog,
                 capture_source_with_control
             ),
-            Self::Rules(input) => native!(
+            Self::Rules(input) => publish!(
                 input
                     .advance(reader, destination.window)
                     .map_err(super::super::metadata::sql_error),
@@ -187,7 +185,7 @@ impl DefinitionInput {
                 RuleCatalog,
                 capture_source_with_control
             ),
-            Self::Comments(input) => native!(
+            Self::Comments(input) => publish!(
                 input
                     .advance(reader, destination.window)
                     .map_err(super::super::metadata::sql_error),
@@ -195,7 +193,7 @@ impl DefinitionInput {
                 CommentRegistry,
                 capture_source_with_control
             ),
-            Self::Scoring(input) => native!(
+            Self::Scoring(input) => publish!(
                 input.advance(reader, destination.window),
                 scoring_params,
                 ScoringParameters,

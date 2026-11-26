@@ -530,6 +530,16 @@ pub fn routine_signature_types(def: &CreateFunction) -> Vec<String> {
         .collect()
 }
 
+/// Catalog order for overloads published by creation, rename and restore.
+pub fn compare_routine_overloads(
+    left: &CreateFunction,
+    right: &CreateFunction,
+) -> std::cmp::Ordering {
+    routine_signature_types(left)
+        .cmp(&routine_signature_types(right))
+        .then_with(|| left.is_procedure.cmp(&right.is_procedure))
+}
+
 pub fn routine_returns_anonymous_record(def: &CreateFunction) -> bool {
     routine_returns_anonymous_record_with_control(
         def,

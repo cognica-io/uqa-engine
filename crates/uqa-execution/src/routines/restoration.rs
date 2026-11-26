@@ -11,11 +11,12 @@ use super::{
     definition::{compile_catalog_bound_routine, RoutineBodyCompilation, RoutineDefinitionContext},
 };
 use std::collections::BTreeMap;
+use uqa_sql::routines::compare_routine_overloads;
 use uqa_sql::{
     ast::CreateFunction,
     routines::{
         lifecycle::{restoration as analysis, RoutineRegistry},
-        routine_signature_types, CompiledFunctionBody, RoutineBody, SQLUserFunction,
+        CompiledFunctionBody, RoutineBody, SQLUserFunction,
     },
 };
 use uqa_storage::{CatalogFacade, StorageBackendError, StorageBackendResult};
@@ -122,11 +123,7 @@ pub fn install_sql_function_restore_placeholders(
                     .shared()
                 })
                 .collect::<Vec<_>>();
-            overloads.sort_by(|left, right| {
-                routine_signature_types(&left.def)
-                    .cmp(&routine_signature_types(&right.def))
-                    .then_with(|| left.def.is_procedure.cmp(&right.def.is_procedure))
-            });
+            overloads.sort_by(|left, right| compare_routine_overloads(&left.def, &right.def));
             (name.clone(), overloads)
         })
         .collect::<Vec<_>>();
@@ -166,11 +163,7 @@ pub fn finalize_sql_function_restore(
                 migrated |= changed;
                 overloads.push(SQLUserFunction::new(def, body).shared());
             }
-            overloads.sort_by(|left, right| {
-                routine_signature_types(&left.def)
-                    .cmp(&routine_signature_types(&right.def))
-                    .then_with(|| left.def.is_procedure.cmp(&right.def.is_procedure))
-            });
+            overloads.sort_by(|left, right| compare_routine_overloads(&left.def, &right.def));
             restored.insert(name, overloads).map_err(|error| {
                 StorageBackendError::backend("admit restored routine definition", error)
             })?;

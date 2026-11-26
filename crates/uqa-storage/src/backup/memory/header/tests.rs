@@ -32,7 +32,13 @@ fn memory_header_preserves_absent_zero_and_exhausted_allocator_positions() {
             catalog_oid_position: position,
         };
         let encoded = bytes(header);
-        assert_eq!(&encoded[..8], b"UQAMEM01");
+        assert_eq!(&encoded[..8], b"UQAMEM02");
+        let mut previous = encoded.clone();
+        previous[..8].copy_from_slice(b"UQAMEM01");
+        assert_eq!(
+            MemoryImageHeader::read_layout(&mut previous.as_slice(), &control).unwrap(),
+            (header, 24)
+        );
         assert_eq!(encoded.len(), 33);
         assert_eq!(
             MemoryImageHeader::read_image(&mut encoded.as_slice(), &control).unwrap(),

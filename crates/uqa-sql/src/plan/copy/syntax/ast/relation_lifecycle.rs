@@ -218,7 +218,8 @@ syntax_enum!(crate::ast::TablePrivilege {
     Trigger,
     Maintain,
     Usage,
-    Unsupported(value0)
+    Unsupported(value0),
+    Unrecognized(value0)
 });
 
 syntax_struct!(crate::ast::TablePrivilegeSpec { privilege, columns });
