@@ -118,10 +118,10 @@ pub(super) fn prepare<'a>(
     };
     let (value, dependencies) = prepare_acl_updates(context, targets, &application)?;
     Ok(RoleDependencyCandidate {
-        roles,
-        memberships,
-        dependencies,
         value,
+        memberships,
+        roles,
+        dependencies,
     })
 }
 

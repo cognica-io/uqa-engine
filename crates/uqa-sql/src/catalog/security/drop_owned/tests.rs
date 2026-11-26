@@ -52,5 +52,8 @@ fn removing_a_grantor_preserves_independent_column_grants() {
     assert_eq!(column_acl.len(), 1);
     assert_eq!(column_acl[0].role, AclGrantee::from("b".to_owned()));
     assert_eq!(column_acl[0].grantor.as_deref(), Some("owner"));
-    assert_eq!(relation(&cleaned, &BTreeSet::from(["a".into()])).unwrap(), cleaned);
+    assert_eq!(
+        relation(&cleaned, &BTreeSet::from(["a".into()])).unwrap(),
+        cleaned
+    );
 }

@@ -117,11 +117,19 @@ impl SequencePrivilegeContext<'_> {
     pub(crate) fn remove_role_grants(
         &self,
         relation: &RelationIdentity,
+        oid: u32,
         targets: &BTreeSet<String>,
     ) -> Result<(), SQLError> {
         self.publication.prepare_writer()?;
         let roles = self.inquiry.roles.role_definitions();
         let mut registry = self.publication.security_write();
+        if registry
+            .object_id(relation)
+            .map(|id| registry.catalog_oid(id))
+            != Some(i64::from(oid))
+        {
+            return Ok(());
+        }
         let Some(current) = registry.security().get(relation) else {
             return Ok(());
         };

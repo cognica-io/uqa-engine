@@ -31,7 +31,7 @@ use uqa_sql::{
             ObjectAddress, SharedDependencyKind, DATABASE_CLASS, PROCEDURE_CLASS, RELATION_CLASS,
             ROLE_CLASS, ROLE_MEMBERSHIP_CLASS,
         },
-        roles::{resolve_role_specification, role_inherits},
+        roles::{identity::RoleBinding, resolve_role_specification, role_inherits},
         DATABASE_OID,
     },
     SQLError,
@@ -76,28 +76,29 @@ impl Targets {
         }
         let definitions = context.analysis.roles.role_definitions();
         let memberships = context.analysis.roles.role_memberships();
+        let mut names = BTreeSet::new();
         for role in &selected {
-            role.revalidate(&definitions)?;
+            let name = role.require_name(&definitions)?;
             if !role_inherits(&definitions, &memberships, &current, role) {
                 return Err(SQLError::Diagnostic {
                     sqlstate: "42501".into(),
                     message: "permission denied to drop objects".into(),
                     detail: Some(format!(
-                        "Only roles with privileges of role \"{}\" may drop objects owned by it.",
-                        role.name
+                        "Only roles with privileges of role \"{name}\" may drop objects owned by it."
                     )),
                     hint: None,
                 });
             }
+            names.insert(name.to_owned());
         }
         for role in &selected {
             if CatalogDependencies::role_is_pinned(role.oid) {
-                return Err(SQLError::Routine { sqlstate: "2BP01".into(), message: format!("cannot drop objects owned by role {} because they are required by the database system", uqa_sql::expr::quote_ident(&role.name)) });
+                return Err(SQLError::Routine { sqlstate: "2BP01".into(), message: format!("cannot drop objects owned by role {} because they are required by the database system", uqa_sql::expr::quote_ident(role.require_name(&definitions)?)) });
             }
         }
         Ok(Self {
-            names: selected.iter().map(|role| role.name.clone()).collect(),
-            identities: selected.iter().map(|role| role.identity()).collect(),
+            names,
+            identities: selected.iter().map(RoleBinding::identity).collect(),
             oids: ordered.into_keys().collect(),
         })
     }
@@ -174,10 +175,11 @@ impl DropOwnedContext<'_> {
                 identity,
                 kind: RelationKind::Sequence,
                 ..
-            }) => self
-                .tables
-                .sequences
-                .remove_role_grants(&identity, &targets.names),
+            }) => self.tables.sequences.remove_role_grants(
+                &identity,
+                address.object_id,
+                &targets.names,
+            ),
             Some(CatalogObject::Relation { identity, kind, .. }) => self.tables.remove_role_grants(
                 identity,
                 kind.description(),
@@ -187,9 +189,12 @@ impl DropOwnedContext<'_> {
             Some(CatalogObject::Type(oid)) => {
                 types::remove_role_grants(&self.types, oid, &targets.identities)
             }
-            Some(CatalogObject::Schema(name)) => {
-                privileges::remove_role_grants(&self.schemas, &name, &targets.names)
-            }
+            Some(CatalogObject::Schema(name)) => privileges::remove_role_grants(
+                &self.schemas,
+                &name,
+                address.object_id,
+                &targets.names,
+            ),
             None if address.class_id == RELATION_CLASS => {
                 if let Some(system) = uqa_sql::catalog::SystemRelation::all()
                     .find(|relation| relation.oid() == i64::from(address.object_id))

@@ -113,13 +113,16 @@ pub fn grant_schema_privileges(
 pub(crate) fn remove_role_grants(
     context: &SchemaPrivilegeContext<'_>,
     name: &str,
+    oid: u32,
     targets: &BTreeSet<String>,
 ) -> Result<(), SQLError> {
-    if context
+    let Some(bound) = context
         .tuples
         .bind_lifetime(name, crate::row_locks::RelationLockMode::AccessShare)?
-        .is_none()
-    {
+    else {
+        return Ok(());
+    };
+    if super::locking::tuple(&bound)?.oid != i64::from(oid) {
         return Ok(());
     }
     context.tuples.catalog_write()?;

@@ -293,3 +293,31 @@ fn unchanged_acl_roles_and_revoke_do_not_acquire_new_dependency_locks(
         sql(&first, "ROLLBACK");
     }
 }
+
+#[rstest::rstest]
+#[case::native_sqlite(0)]
+#[case::sqlite_key_value(1)]
+#[case::redb(2)]
+fn drop_owned_waits_for_the_role_identity_and_spares_its_reused_name(#[case] provider: usize) {
+    let (_directory, holder, worker) = sessions(provider);
+    let target = &TARGETS[0];
+    sql(&holder, "CREATE ROLE dependent");
+    if !target.setup.is_empty() {
+        sql(&holder, target.setup);
+    }
+    sql(&holder, target.grant);
+    let lock = role_lock(&holder);
+    sql(&holder, "BEGIN");
+    holder
+        .acquire_shared_catalog(lock, RelationLockMode::AccessExclusive)
+        .unwrap()
+        .retain();
+    let release = format!(
+        "ALTER ROLE dependent RENAME TO renamed; CREATE ROLE dependent; {}; COMMIT",
+        target.grant
+    );
+    let (_worker, outcome) = after_wait(&holder, worker, "DROP OWNED BY dependent", lock, &release);
+    outcome.unwrap();
+    assert!(!allowed_as(&holder, target, "renamed"));
+    assert!(allowed(&holder, target));
+}
