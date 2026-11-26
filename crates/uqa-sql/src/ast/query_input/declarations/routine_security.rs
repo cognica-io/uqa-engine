@@ -8,9 +8,10 @@ use super::special::read_estimate;
 use super::{invalid, Input, InputError, JsonToken, Native, Parts, Stored, Values};
 use crate::ast::routine_security::{
     AlterRoleStmt, AlterRoutineKind, AlterRoutineOwnerStmt, AlterRoutineStmt, CreateRoleStmt,
-    DropRoleStmt, FunctionParallel, GrantRoleStmt, GrantRoutineItem, GrantRoutineStmt,
-    RenameRoleStmt, RenameRoutineStmt, RoleAttribute, RoleMembershipAction, RoleMembershipOptions,
-    RoutineConfigAction, RoutinePrivilege, RoutineRevokeBehavior, RoutineSecurityAttributes,
+    DropOwnedStmt, DropRoleStmt, FunctionParallel, GrantRoleStmt, GrantRoutineItem,
+    GrantRoutineStmt, RenameRoleStmt, RenameRoutineStmt, RoleAttribute, RoleMembershipAction,
+    RoleMembershipOptions, RoutineConfigAction, RoutinePrivilege, RoutineRevokeBehavior,
+    RoutineSecurityAttributes,
 };
 
 stored_struct!(AlterRoleStmt {
@@ -59,6 +60,11 @@ stored_struct!(CreateRoleStmt {
     in_roles: defaulted,
     role_members: defaulted,
     admin_members: defaulted,
+});
+
+stored_struct!(DropOwnedStmt {
+    roles: required,
+    cascade: required
 });
 
 stored_struct!(DropRoleStmt {

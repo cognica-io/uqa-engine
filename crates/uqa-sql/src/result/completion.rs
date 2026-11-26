@@ -204,6 +204,7 @@ pub fn command_tag_name(command: &CommandPlan) -> &'static str {
         CommandPlan::CreateRole(_) => "CREATE ROLE",
         CommandPlan::AlterRole(_) | CommandPlan::RenameRole(_) => "ALTER ROLE",
         CommandPlan::DropRole(_) => "DROP ROLE",
+        CommandPlan::DropOwned(_) => "DROP OWNED",
         CommandPlan::CreateTrigger(_) => "CREATE TRIGGER",
         CommandPlan::DropTrigger(_) => "DROP TRIGGER",
         CommandPlan::CreateRule(_) => "CREATE RULE",

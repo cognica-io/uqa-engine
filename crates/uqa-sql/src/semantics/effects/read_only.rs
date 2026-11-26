@@ -140,6 +140,7 @@ pub fn forbidden_command(
         | CommandPlan::AlterRole(_)
         | CommandPlan::RenameRole(_)
         | CommandPlan::DropRole(_)
+        | CommandPlan::DropOwned(_)
         | CommandPlan::CreateTrigger(_)
         | CommandPlan::DropTrigger(_)
         | CommandPlan::CreateRule(_)

@@ -560,7 +560,7 @@ pub(in crate::compiler) fn compile_role_specification(
     }
 }
 
-fn compile_membership_role_list(
+fn compile_role_list(
     nodes: &[pg_query::protobuf::Node],
     context: &str,
 ) -> Result<Vec<crate::ast::RoleSpecification>> {
@@ -601,7 +601,7 @@ pub(in crate::compiler) fn compile_grant_role(
             Ok(role.priv_name.clone())
         })
         .collect::<Result<Vec<_>>>()?;
-    let members = compile_membership_role_list(&statement.grantee_roles, "GRANT/REVOKE ROLE")?;
+    let members = compile_role_list(&statement.grantee_roles, "GRANT/REVOKE ROLE")?;
     let mut options = RoleMembershipOptions::default();
     for option in &statement.opt {
         let Some(NodeEnum::DefElem(option)) = option.node.as_ref() else {
@@ -706,7 +706,7 @@ pub(in crate::compiler) fn compile_create_role(
                         element.defname
                     )));
                 };
-                let names = compile_membership_role_list(&roles.items, "CREATE ROLE membership")?;
+                let names = compile_role_list(&roles.items, "CREATE ROLE membership")?;
                 match element.defname.as_str() {
                     "addroleto" => role.in_roles.extend(names),
                     "rolemembers" => role.role_members.extend(names),
@@ -764,7 +764,7 @@ pub(in crate::compiler) fn compile_alter_role(
         } else {
             RoleMembershipAction::Drop
         });
-        alter.members = compile_membership_role_list(&roles.items, "ALTER GROUP")?;
+        alter.members = compile_role_list(&roles.items, "ALTER GROUP")?;
         return Ok(Statement::AlterRole(alter));
     }
     for option in &statement.options {
@@ -798,22 +798,20 @@ pub(in crate::compiler) fn compile_alter_role(
     Ok(Statement::AlterRole(alter))
 }
 
+pub(in crate::compiler) fn compile_drop_owned(
+    statement: &pg_query::protobuf::DropOwnedStmt,
+) -> Result<Statement> {
+    Ok(Statement::DropOwned(crate::ast::DropOwnedStmt {
+        roles: compile_role_list(&statement.roles, "DROP OWNED")?,
+        cascade: statement.behavior() == pg_query::protobuf::DropBehavior::DropCascade,
+    }))
+}
+
 pub(in crate::compiler) fn compile_drop_role(
     statement: &pg_query::protobuf::DropRoleStmt,
 ) -> Result<Statement> {
     use crate::ast::DropRoleStmt;
-    let names = statement
-        .roles
-        .iter()
-        .map(|role| {
-            let Some(NodeEnum::RoleSpec(role)) = role.node.as_ref() else {
-                return Err(SQLError::Internal(
-                    "DROP ROLE has a malformed target".into(),
-                ));
-            };
-            compile_role_specification(role, "DROP ROLE")
-        })
-        .collect::<Result<Vec<_>>>()?;
+    let names = compile_role_list(&statement.roles, "DROP ROLE")?;
     Ok(Statement::DropRole(DropRoleStmt {
         names,
         if_exists: statement.missing_ok,

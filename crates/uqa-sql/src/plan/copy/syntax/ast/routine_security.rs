@@ -55,6 +55,7 @@ syntax_struct!(crate::ast::CreateRoleStmt {
 });
 
 syntax_struct!(crate::ast::DropRoleStmt { names, if_exists });
+syntax_struct!(crate::ast::DropOwnedStmt { roles, cascade });
 
 syntax_enum!(crate::ast::FunctionParallel {
     Unsafe,

@@ -19,6 +19,10 @@ The embedded engine exposes one current database named `uqa`, owned by the boots
 
 Creating a table, view, materialized view, foreign table, sequence, schema, function or procedure retains its owner role through the transaction. A concurrent DROP ROLE waits for uncommitted creation, then reports `2BP01` if a committed object still depends on the role. Creation waiting for a deleted or replaced owner reports `42704` and does not adopt a new role with the same name. Temporary table, view and sequence ownership and ACL references also prevent role deletion from another session after commit; dropping the object, removing the reference or ending its owning session releases that dependency. Rollback and savepoint undo preserve the corresponding earlier state. `IF NOT EXISTS` targets already present during preflight and `OR REPLACE` that preserves ownership add no dependency on the invoking role.
 
+## Dropping objects owned by a role
+
+`DROP OWNED BY role [, ...] [RESTRICT | CASCADE]` revokes the named roles’ grants and drops their objects in the current database. The roles themselves survive. The caller must have the privileges of each named role. With the default `RESTRICT`, a dependency from an object outside the drop set prevents the entire command. Listing both owners makes their objects part of the same drop set. `CASCADE` also removes dependent objects owned by other roles. Rolling back the command restores both objects and privileges.
+
 ## Schemas
 
 ```sql execute

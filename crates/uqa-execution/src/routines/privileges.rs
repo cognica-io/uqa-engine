@@ -41,6 +41,8 @@ pub struct RoutinePrivilegeContext<'a> {
 }
 
 mod builtins;
+mod drop_owned;
+pub(crate) use drop_owned::remove_role_grants;
 mod candidates;
 mod ownership;
 mod targets;

@@ -38,7 +38,7 @@ pub enum RelationKind {
 }
 
 impl RelationKind {
-    pub(super) const fn description(self) -> &'static str {
+    pub(crate) const fn description(self) -> &'static str {
         match self {
             Self::Table => "table",
             Self::Index => "index",
@@ -170,7 +170,7 @@ impl CatalogObjects {
         for role in catalog.roles() {
             let oid = catalog_oid(role.oid)?;
             objects.roles.insert(oid, role.name.clone());
-            if oid >= FIRST_UNPINNED_OBJECT_ID {
+            if !super::CatalogDependencies::role_is_pinned(oid) {
                 objects.unpin(ObjectAddress::whole(ROLE_CLASS, oid));
             }
         }
@@ -544,6 +544,12 @@ impl CatalogObjects {
     /// Whether a dependency on `object` would be recorded.
     pub(super) fn is_unpinned(&self, object: ObjectAddress) -> bool {
         self.unpinned.contains(&(object.class_id, object.object_id))
+    }
+}
+
+impl super::CatalogDependencies {
+    pub(crate) const fn role_is_pinned(oid: u32) -> bool {
+        oid < FIRST_UNPINNED_OBJECT_ID
     }
 }
 

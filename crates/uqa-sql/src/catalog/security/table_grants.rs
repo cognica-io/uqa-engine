@@ -184,6 +184,57 @@ pub struct TableGrantApplication<'a> {
     pub memberships: &'a RoleMemberships,
 }
 
+/// A catalog operation on relation and column ACL tuples. Each relation provider uses the same change and persists exactly the selected tuples.
+pub trait RelationAclChange {
+    fn roles(&self) -> &RoleDefinitions;
+    fn requested(&self) -> &RequestedTablePrivileges;
+    fn apply_to(
+        &self,
+        target: &ResolvedTableGrantTarget,
+        current: &TableSecurity,
+    ) -> Result<(TableSecurity, usize), SQLError>;
+    fn replaced_tuples(&self, before: &TableSecurity, after: &TableSecurity)
+        -> Vec<Option<String>>;
+    fn record_warning(
+        &self,
+        _grantable: usize,
+        _relation: &RelationIdentity,
+        _notices: &mut Vec<crate::SQLNotice>,
+    ) {
+    }
+}
+
+impl RelationAclChange for TableGrantApplication<'_> {
+    fn roles(&self) -> &RoleDefinitions {
+        self.roles
+    }
+    fn requested(&self) -> &RequestedTablePrivileges {
+        self.requested
+    }
+    fn apply_to(
+        &self,
+        target: &ResolvedTableGrantTarget,
+        current: &TableSecurity,
+    ) -> Result<(TableSecurity, usize), SQLError> {
+        self.apply_to(target, current)
+    }
+    fn replaced_tuples(
+        &self,
+        before: &TableSecurity,
+        after: &TableSecurity,
+    ) -> Vec<Option<String>> {
+        self.replaced_tuples(before, after)
+    }
+    fn record_warning(
+        &self,
+        grantable: usize,
+        relation: &RelationIdentity,
+        notices: &mut Vec<crate::SQLNotice>,
+    ) {
+        self.record_warning(grantable, relation, notices);
+    }
+}
+
 impl TableGrantApplication<'_> {
     /// `PostgreSQL` replaces relation ACL tuples for table-level commands, and nonempty requested attribute ACLs even when their bits are unchanged.
     pub fn replaced_tuples(
@@ -474,7 +525,7 @@ pub fn table_sequence_privileges(
 
 pub fn view_privilege_updates(
     targets: Vec<(&ResolvedTableGrantTarget, StoredView)>,
-    application: &TableGrantApplication<'_>,
+    application: &impl RelationAclChange,
     notices: &mut Vec<crate::SQLNotice>,
     dependencies: &mut std::collections::BTreeSet<String>,
 ) -> Result<Vec<ViewPrivilegeUpdate>, SQLError> {
@@ -482,7 +533,7 @@ pub fn view_privilege_updates(
     for (target, mut view) in targets {
         let current = view
             .security
-            .resolve(application.roles)
+            .resolve(application.roles())
             .map_err(SQLError::Internal)?;
         let (next, grantable) = application.apply_to(target, &current)?;
         crate::catalog::security::dependencies::added_table_acl_roles(
@@ -496,7 +547,7 @@ pub fn view_privilege_updates(
                 target.relation.qualified_name()
             ))
         })?;
-        validate_table_security_invariants(&next, Some(columns), application.roles).map_err(
+        validate_table_security_invariants(&next, Some(columns), application.roles()).map_err(
             |error| {
                 SQLError::Internal(format!(
                     "view `{}` produced invalid privilege metadata: {error}",
@@ -511,7 +562,7 @@ pub fn view_privilege_updates(
             .any(|column| target.includes_acl_tuple(column.as_deref()))
         {
             view.set_security(
-                BoundTableSecurity::bind(&next, application.roles).map_err(SQLError::Internal)?,
+                BoundTableSecurity::bind(&next, application.roles()).map_err(SQLError::Internal)?,
             );
             updates.push((target.relation.clone(), view));
         }
@@ -520,14 +571,14 @@ pub fn view_privilege_updates(
 }
 pub fn foreign_table_privilege_updates(
     targets: Vec<ForeignTableGrantTarget<'_>>,
-    application: &TableGrantApplication<'_>,
+    application: &impl RelationAclChange,
     notices: &mut Vec<crate::SQLNotice>,
     dependencies: &mut std::collections::BTreeSet<String>,
 ) -> Result<Vec<ForeignTablePrivilegeUpdate>, SQLError> {
     let mut updates = Vec::new();
     for (target, current, columns) in targets {
         let current = current
-            .resolve(application.roles)
+            .resolve(application.roles())
             .map_err(SQLError::Internal)?;
         let (next, grantable) = application.apply_to(target, &current)?;
         crate::catalog::security::dependencies::added_table_acl_roles(
@@ -535,7 +586,7 @@ pub fn foreign_table_privilege_updates(
             &next,
             dependencies,
         );
-        validate_table_security_invariants(&next, Some(&columns), application.roles).map_err(
+        validate_table_security_invariants(&next, Some(&columns), application.roles()).map_err(
             |error| {
                 SQLError::Internal(format!(
                     "foreign table `{}` produced invalid privilege metadata: {error}",
@@ -551,7 +602,7 @@ pub fn foreign_table_privilege_updates(
         {
             updates.push((
                 target.relation.clone(),
-                BoundTableSecurity::bind(&next, application.roles).map_err(SQLError::Internal)?,
+                BoundTableSecurity::bind(&next, application.roles()).map_err(SQLError::Internal)?,
             ));
         }
     }

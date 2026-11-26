@@ -291,6 +291,7 @@ stored_enum!(Statement {
     AlterRole (value),
     RenameRole (value),
     DropRole (value),
+    DropOwned (value),
     CreateTrigger (value),
     DropTrigger (value),
     CreateRule (value),

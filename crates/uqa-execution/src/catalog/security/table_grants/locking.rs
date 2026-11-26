@@ -107,7 +107,7 @@ pub(super) fn lock_targets(
     Ok(bound)
 }
 
-fn lock_tuple(
+pub(super) fn lock_tuple(
     context: &TableGrantContext<'_>,
     target: &ResolvedTableGrantTarget,
     oid: i64,

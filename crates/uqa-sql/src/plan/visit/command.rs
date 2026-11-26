@@ -118,6 +118,7 @@ impl CommandPlan {
             | Self::AlterRole(_)
             | Self::RenameRole(_)
             | Self::DropRole(_)
+            | Self::DropOwned(_)
             | Self::CreateTrigger(_)
             | Self::DropTrigger(_)
             | Self::CreateRule(_)

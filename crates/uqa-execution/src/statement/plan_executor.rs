@@ -490,6 +490,14 @@ impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'en
                 )?;
                 Ok(SQLResult::empty())
             }
+            CommandPlan::DropOwned(statement) => self
+                .context
+                .schemas
+                .removal
+                .with_drop_owned_write(Box::new(|context| {
+                    context.execute(statement)?;
+                    Ok(SQLResult::empty())
+                })),
             CommandPlan::DropRole(statement) => {
                 crate::catalog::security::role_lifecycle::drop_roles(
                     &self.context.roles,

@@ -79,6 +79,7 @@ syntax_enum!(crate::plan::CommandPlan {
     AlterRole(value0),
     RenameRole(value0),
     DropRole(value0),
+    DropOwned(value0),
     CreateTrigger(value0),
     DropTrigger(value0),
     CreateRule(value0),

@@ -108,12 +108,6 @@ pub(super) fn prepare<'a>(
         }
     };
     let memberships = context.roles.role_memberships();
-    let table_targets = validated_table_grant_targets(context, targets, &requested_privileges)?;
-    let view_targets = validated_view_grant_targets(context, targets, &requested_privileges)?;
-    let foreign_targets =
-        validated_foreign_table_grant_targets(context, targets, &requested_privileges)?;
-    let mut notices = Vec::new();
-    let mut dependencies = std::collections::BTreeSet::new();
     let application = TableGrantApplication {
         statement,
         grantees: &grantees,
@@ -122,27 +116,47 @@ pub(super) fn prepare<'a>(
         roles: &roles,
         memberships: &memberships,
     };
+    let (value, dependencies) = prepare_acl_updates(context, targets, &application)?;
+    Ok(RoleDependencyCandidate {
+        roles,
+        memberships,
+        dependencies,
+        value,
+    })
+}
+
+pub(super) fn prepare_acl_updates<'a>(
+    context: &'a TableGrantContext<'_>,
+    targets: &[ResolvedTableGrantTarget],
+    application: &impl uqa_sql::catalog::security::table_grants::RelationAclChange,
+) -> Result<(PreparedTableGrant<'a>, std::collections::BTreeSet<String>), SQLError> {
+    let table_targets = validated_table_grant_targets(context, targets, application.requested())?;
+    let view_targets = validated_view_grant_targets(context, targets, application.requested())?;
+    let foreign_targets =
+        validated_foreign_table_grant_targets(context, targets, application.requested())?;
+    let mut notices = Vec::new();
+    let mut dependencies = std::collections::BTreeSet::new();
     let mut updates =
-        table_privilege_updates(table_targets, &application, &mut notices, &mut dependencies)?;
+        table_privilege_updates(table_targets, application, &mut notices, &mut dependencies)?;
     let mut view_updates =
-        view_privilege_updates(view_targets, &application, &mut notices, &mut dependencies)?;
+        view_privilege_updates(view_targets, application, &mut notices, &mut dependencies)?;
     let mut foreign_updates = foreign_table_privilege_updates(
         foreign_targets,
-        &application,
+        application,
         &mut notices,
         &mut dependencies,
     )?;
     let system_updates = system_privilege_updates(
         context,
         targets,
-        &application,
+        application,
         &mut notices,
         &mut dependencies,
     )?;
     let acl_updates = super::tuples::prepare(
         context,
         targets,
-        &application,
+        application,
         &mut updates,
         &mut view_updates,
         &mut foreign_updates,
@@ -166,8 +180,8 @@ pub(super) fn prepare<'a>(
         }
         Some(SystemPrivilegeCandidate { registry, next })
     };
-    Ok(RoleDependencyCandidate {
-        value: PreparedTableGrant {
+    Ok((
+        PreparedTableGrant {
             updates,
             view_updates,
             views,
@@ -177,8 +191,6 @@ pub(super) fn prepare<'a>(
             acl_updates,
             notices,
         },
-        memberships,
-        roles,
         dependencies,
-    })
+    ))
 }

@@ -11,7 +11,7 @@ use uqa_core::RelationIdentity;
 use uqa_sql::{
     ast::RelationPersistence,
     catalog::security::{
-        table_grants::{ForeignTablePrivilegeUpdate, TableGrantApplication, ViewPrivilegeUpdate},
+        table_grants::{ForeignTablePrivilegeUpdate, RelationAclChange, ViewPrivilegeUpdate},
         BoundTableSecurity,
     },
     SQLError,
@@ -36,7 +36,7 @@ impl RelationPrivilegeUpdate {
 pub(super) fn prepare(
     context: &TableGrantContext<'_>,
     targets: &[uqa_sql::catalog::security::table_grants::ResolvedTableGrantTarget],
-    application: &TableGrantApplication<'_>,
+    application: &impl RelationAclChange,
     tables: &mut [TablePrivilegeUpdate<'_>],
     views: &mut [ViewPrivilegeUpdate],
     foreign: &mut [ForeignTablePrivilegeUpdate],
@@ -47,10 +47,10 @@ pub(super) fn prepare(
                      after: &mut BoundTableSecurity,
                      persistence| {
         let original = before
-            .resolve(application.roles)
+            .resolve(application.roles())
             .map_err(SQLError::Internal)?;
         let next = after
-            .resolve(application.roles)
+            .resolve(application.roles())
             .map_err(SQLError::Internal)?;
         let mut row = after.row();
         row.acl_revisions.clone_from(&before.acl_revisions);

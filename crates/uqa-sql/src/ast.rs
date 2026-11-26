@@ -681,6 +681,7 @@ pub enum Statement {
     AlterRole(AlterRoleStmt),
     RenameRole(RenameRoleStmt),
     DropRole(DropRoleStmt),
+    DropOwned(DropOwnedStmt),
     /// `CREATE [OR REPLACE] TRIGGER ... ON relation`.
     CreateTrigger(CreateTrigger),
     /// `DROP TRIGGER [IF EXISTS] name ON relation`.

@@ -209,6 +209,26 @@ fn validate_grantees(resolved: &ResolvedAclRoles, roles: &RoleDefinitions) -> Re
     Ok(())
 }
 
+/// Remove the selected roles from a stored type's USAGE grants.
+pub(crate) fn remove_role_grants(
+    context: &TypeLifecycleContext<'_>,
+    oid: u32,
+    targets: &BTreeSet<RoleIdentity>,
+) -> Result<(), SQLError> {
+    context.writer.prepare_writer()?;
+    let object = current_definition(context, oid)?;
+    let name = object.identity().qualified_name();
+    let _bound = lock_and_resolve(context, &name)?;
+    let object = current_definition(context, oid)?;
+    let mut acl = object.usage_acl().map(<[_]>::to_vec);
+    uqa_sql::catalog::security::drop_owned::object(object.owner(), &mut acl, targets)?;
+    if acl.as_deref() != object.usage_acl() {
+        publish(context, with_acl(object, acl))?;
+        context.changes.catalog_registry_changed();
+    }
+    Ok(())
+}
+
 /// Grant or revoke the command's privileges from `grantor` in `acl`. Returns whether anything was granted or revoked: a revocation that finds no entry of the grantor removes nothing.
 fn apply_privileges(
     statement: &GrantTypeStmt,

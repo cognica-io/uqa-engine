@@ -25,6 +25,7 @@ pub mod relation_arrays;
 pub(crate) use lifecycle::lock_named_type;
 pub use lifecycle::{alter_type_object, relocate_type_object};
 pub use privileges::grant_type;
+pub(crate) use privileges::remove_role_grants;
 
 /// Stored definitions outside the type registries that embed a user-defined type's catalog name: table and foreign table columns and view output types. A rename or schema move rewrites them in the caller's transaction.
 pub trait TypeReferenceDependents {

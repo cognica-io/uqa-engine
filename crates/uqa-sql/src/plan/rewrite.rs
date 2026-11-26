@@ -381,6 +381,7 @@ pub(super) fn rewrite_command_scalars(
         | CommandPlan::AlterRole(_)
         | CommandPlan::RenameRole(_)
         | CommandPlan::DropRole(_)
+        | CommandPlan::DropOwned(_)
         | CommandPlan::CreateTrigger(_)
         | CommandPlan::DropTrigger(_)
         | CommandPlan::CreateRule(_)

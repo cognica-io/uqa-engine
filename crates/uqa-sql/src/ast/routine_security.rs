@@ -244,3 +244,9 @@ pub struct DropRoleStmt {
     pub names: Vec<RoleSpecification>,
     pub if_exists: bool,
 }
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DropOwnedStmt {
+    pub roles: Vec<RoleSpecification>,
+    pub cascade: bool,
+}

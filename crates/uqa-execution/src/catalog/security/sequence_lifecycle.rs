@@ -114,6 +114,38 @@ impl SequencePrivilegeContext<'_> {
         Ok(())
     }
 
+    pub(crate) fn remove_role_grants(
+        &self,
+        relation: &RelationIdentity,
+        targets: &BTreeSet<String>,
+    ) -> Result<(), SQLError> {
+        self.publication.prepare_writer()?;
+        let roles = self.inquiry.roles.role_definitions();
+        let mut registry = self.publication.security_write();
+        let Some(current) = registry.security().get(relation) else {
+            return Ok(());
+        };
+        let current = current.resolve(&roles).map_err(SQLError::Internal)?;
+        let next = uqa_sql::catalog::security::drop_owned::sequence(&current, targets)?;
+        if next == current {
+            return Ok(());
+        }
+        let next = BoundSequenceSecurity::bind(&next, &roles).map_err(SQLError::Internal)?;
+        let mut updated = registry.clone();
+        updated.replace_security(relation, next.clone())?;
+        self.persist_sequence_security_record(
+            &updated,
+            &relation.qualified_name(),
+            relation,
+            &next,
+        )?;
+        **registry = updated;
+        drop(registry);
+        self.publication.prepared_relation_changed(relation);
+        self.publication.catalog_changed();
+        Ok(())
+    }
+
     fn prepare_privileges<'a>(
         &'a self,
         statement: &GrantSequenceStmt,

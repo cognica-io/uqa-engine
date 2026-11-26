@@ -21,7 +21,10 @@ fn drop_owned_matches_postgresql(#[case] provider: usize) {
         drop(engine);
         let engine = open(provider, &path);
         let mut transcript: serde_json::Value = serde_json::from_str(transcript).unwrap();
-        transcript["cases"].as_array_mut().unwrap().retain(|case| case["reopen"] == true);
+        transcript["cases"]
+            .as_array_mut()
+            .unwrap()
+            .retain(|case| case["reopen"] == true);
         crate::pg18_oracle::verify(&engine, &transcript.to_string());
     }
 }
