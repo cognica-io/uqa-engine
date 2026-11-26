@@ -104,10 +104,7 @@ fn fixture(kind: usize, control: &ProductionControl<'_>) -> Fixture {
             .select(identity, None, 950, (Derivation::None, 0))
             .unwrap();
         if kind == 3 {
-            constants
-                .3
-                .coerce(Some(identity), &ColumnType::Integer)
-                .unwrap();
+            constants.3.coerce(identity, &ColumnType::Integer).unwrap();
         }
     }
     if matches!(kind, 4 | 5 | 7) {
