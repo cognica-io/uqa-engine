@@ -165,6 +165,8 @@ SELECT format_type(1043, 12) AS bounded_text,
 
 ## Text functions
 
+Text and bytea results use PostgreSQL’s 1 GB allocation limit (1,073,741,823 bytes including allocation overhead). Functions such as `repeat` reject oversized lengths before allocation. Functions that assemble their result incrementally, including `regexp_replace` and `string_agg`, report SQLSTATE `54000` on the append that would exceed the limit.
+
 | Group | Functions |
 | --- | --- |
 | Case and shape | `upper`, `lower`, `casefold`, `initcap`, `reverse` |

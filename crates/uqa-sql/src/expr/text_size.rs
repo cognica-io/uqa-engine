@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! PostgreSQL varlena allocation and StringInfo append sizes for SQL text and bytea results.
+//! `PostgreSQL` varlena allocation and `StringInfo` append sizes for SQL text and bytea results.
 
 use super::{Result, SQLError};
 use uqa_core::memory::{Produced, ProductionControl, ProductionString};
@@ -23,7 +23,7 @@ pub(crate) fn check_text_size(payload: Option<usize>) -> Result<()> {
     Ok(())
 }
 
-/// A direct varlena allocation includes its header, including the final result copied from a StringInfo.
+/// A direct varlena allocation includes its header, including the final result copied from a `StringInfo`.
 pub fn check_varlena_size(payload: usize) -> Result<()> {
     check_allocation_size(payload as u128 + VARHDRSZ as u128)
 }
@@ -49,7 +49,7 @@ pub(super) fn check_conversion_size(payload: u64, operation: &str) -> Result<()>
     Ok(())
 }
 
-/// StringInfo reserves its terminating byte and reports the size of the individual append that crossed the boundary.
+/// `StringInfo` reserves its terminating byte and reports the size of the individual append that crossed the boundary.
 pub fn check_buffer_append(current: usize, additional: usize) -> Result<()> {
     if additional >= MAX_ALLOC_SIZE.saturating_sub(current) {
         return Err(SQLError::Diagnostic {

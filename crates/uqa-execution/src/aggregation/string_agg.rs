@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! The string_agg transition retains the size of every delimiter, including the first. Final output starts after that first delimiter.
+//! The `string_agg` transition retains the size of every delimiter, including the first. Final output starts after that first delimiter.
 
 use uqa_core::Value;
 use uqa_sql::{
@@ -91,7 +91,7 @@ pub(super) fn finish(
     let mut output = Vec::new();
     values.for_each_ordered(catalog, |record| {
         state.accept(&record.value, catalog, |chunk| {
-            output.extend_from_slice(chunk)
+            output.extend_from_slice(chunk);
         })
     })?;
     state.finish(output)

@@ -112,7 +112,7 @@ pub enum AggregateStatePlan {
     Max,
     BoolAnd,
     BoolOr,
-    /// Counts StringInfo appends before retaining unordered inputs; ordered inputs reach the same transition after sorting.
+    /// Counts `StringInfo` appends before retaining unordered inputs. Ordered inputs reach the same transition after sorting.
     StringAgg,
     /// Retains non-NULL inputs: the ordered-set aggregates and the JSON object aggregates, whose pairs are never NULL.
     Buffered,
