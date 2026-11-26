@@ -127,12 +127,8 @@ async fn bind_expression_owned<W: crate::catalog::work::Work + Send>(
         bound_condition_queries: None,
         routines,
         scope: &mut scope,
-        parameters: ParameterTypes::fixed_with_inputs(
-            params,
-            stored_syntax.then_some(routines),
-            control,
-        )?
-        .with_stored_inputs(stored_syntax),
+        parameters: ParameterTypes::fixed_with_inputs(params, routines, control)?
+            .with_stored_inputs(stored_syntax),
         schema_expression: (),
     };
     let PlanRef::Query(query) = plan.as_plan_ref() else {

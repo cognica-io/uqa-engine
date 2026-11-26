@@ -224,6 +224,44 @@ fn domain(base: ColumnType) -> ColumnType {
 }
 
 #[test]
+fn folded_row_fields_keep_their_declared_domain_oid_without_a_catalog_lookup() {
+    use crate::ir::{RetainedConstantValue, RetainedScalarLiteral};
+
+    let control = ProductionControl::uncontrolled();
+    let ty = domain(ColumnType::Real);
+    let name = ty.catalog_name();
+    let value = control.copy_value(&Value::Null).unwrap();
+    let expressions = [
+        ScalarExpr::TypedLiteral {
+            value: Value::Null,
+            ty: name.clone(),
+            bound_type: Some(ty.clone()),
+            collation_oid: None,
+            composite_source: None,
+            parameter_index: None,
+        },
+        ScalarExpr::RetainedLiteral(RetainedScalarLiteral::new(
+            RetainedConstantValue::from_produced(value, &control).unwrap(),
+            Some(ty),
+            Some(name),
+            None,
+        )),
+    ];
+    for field in expressions {
+        let field = scalar_record_field_type_with_control(
+            &field,
+            &RowSchema::default(),
+            &[],
+            None,
+            &control,
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(field.oid, 91_001);
+    }
+}
+
+#[test]
 fn array_constructor_common_type_includes_unknown_inputs() {
     let schema = RowSchema::with_types(vec!["domain".into()], vec![Some(domain(ColumnType::Text))]);
     let known = ScalarExpr::Column("domain".into());
