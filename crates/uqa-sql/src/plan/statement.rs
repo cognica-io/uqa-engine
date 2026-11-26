@@ -125,6 +125,7 @@ impl UnifiedPlan {
                     })
                     .collect();
                 Self::Command(Box::new(CommandPlan::Insert(Box::new(InsertPlan {
+                    prepared_domain_defaults: None,
                     table: statement.table,
                     target_relation_bound: statement.target_relation_bound,
                     relations_bound: false,
@@ -168,6 +169,7 @@ impl UnifiedPlan {
                     })
                     .collect();
                 Self::Command(Box::new(CommandPlan::Update(Box::new(UpdatePlan {
+                    prepared_domain_defaults: None,
                     table: statement.table,
                     target_relation_bound: statement.target_relation_bound,
                     relations_bound: false,
@@ -463,6 +465,7 @@ impl UnifiedPlan {
                     })
                     .collect();
                 Self::Command(Box::new(CommandPlan::Merge(Box::new(MergePlan {
+                    prepared_domain_defaults: None,
                     ctes: lower_ctes(&statement.with, aggregates),
                     target: statement.target,
                     statement_privilege_subject: None,

@@ -33,6 +33,13 @@ pub type ControlledStatementAnalysisOperation<'a> =
 
 /// Retain a fresh catalog, namespace and transition scope for each statement analysis.
 pub trait StatementAnalysisScopes {
+    /// Borrow the native view rewrite services when binding defaults on a view target.
+    fn mutation_views(
+        &self,
+    ) -> Option<crate::semantics::view_rewrite::context::ViewRewriteContext<'_>> {
+        None
+    }
+
     /// Request ownership precedes analysis; optimizer catalog callbacks remain after successful analysis.
     fn planning_control(&self) -> Result<uqa_core::memory::OwnedProductionControl, SQLError> {
         Ok(uqa_core::memory::ProductionControl::uncontrolled().capture())
@@ -58,6 +65,12 @@ pub struct InheritedStatementAnalysisScopes<'a> {
 }
 
 impl StatementAnalysisScopes for InheritedStatementAnalysisScopes<'_> {
+    fn mutation_views(
+        &self,
+    ) -> Option<crate::semantics::view_rewrite::context::ViewRewriteContext<'_>> {
+        self.current.mutation_views()
+    }
+
     fn planning_control(&self) -> Result<uqa_core::memory::OwnedProductionControl, SQLError> {
         self.current.planning_control()
     }

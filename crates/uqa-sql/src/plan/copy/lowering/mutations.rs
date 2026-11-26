@@ -175,6 +175,7 @@ pub(in crate::plan::copy::lowering) async fn construct_insert<'s, 'c, I: Input<'
     let view_rule_insert_plans = copying.field("view_rule_insert_plans", |_| Ok(Vec::new()))?;
     let view_rule_returning = copying.field("view_rule_returning", |_| Ok(None))?;
     Ok(copying.retain_plan(InsertPlan {
+        prepared_domain_defaults: None,
         table,
         target_relation_bound: statement.target_relation_bound,
         relations_bound: false,
@@ -254,6 +255,7 @@ pub(in crate::plan::copy::lowering) async fn construct_update<'s, 'c, I: Input<'
     let view_rule_update_plans = copying.field("view_rule_update_plans", |_| Ok(Vec::new()))?;
     let view_rule_returning = copying.field("view_rule_returning", |_| Ok(None))?;
     Ok(copying.retain_plan(UpdatePlan {
+        prepared_domain_defaults: None,
         table,
         target_relation_bound: statement.target_relation_bound,
         relations_bound: false,
@@ -394,6 +396,7 @@ pub(in crate::plan::copy::lowering) async fn construct_merge<'s, 'c, I: Input<'s
     let view_checks = copying.field("view_checks", |_| Ok(Vec::new()))?;
     let view_checks = Pending::new(view_checks);
     Ok(copying.retain_plan(MergePlan {
+        prepared_domain_defaults: None,
         ctes: ctes.take(),
         target,
         statement_privilege_subject: None,

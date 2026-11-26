@@ -11,6 +11,17 @@ use crate::{catalog::roles::RoleReference, plan::copy::Copying};
 use uqa_core::memory::{Produced, ProductionControl};
 
 impl MutableCommandPlan {
+    pub(crate) fn set_prepared_domain_defaults(
+        &mut self,
+        defaults: crate::prepared::defaults::PreparedDomainDefaults,
+        control: &ProductionControl<'_>,
+    ) -> Result<(), SQLError> {
+        self.assert_owner(control);
+        control.check()?;
+        self.command.set_prepared_domain_defaults(defaults);
+        Ok(())
+    }
+
     pub(crate) fn mark_stored_cte_target_bound_in_place(
         &mut self,
         control: &ProductionControl<'_>,

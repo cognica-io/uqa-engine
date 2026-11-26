@@ -76,6 +76,7 @@ impl Copying<'_> {
 
     pub(super) fn update(&mut self, plan: &UpdatePlan) -> Result<UpdatePlan> {
         Ok(UpdatePlan {
+            prepared_domain_defaults: plan.prepared_domain_defaults.clone(),
             table: self.field("table", |copying| copying.text(&plan.table))?,
             target_relation_bound: plan.target_relation_bound,
             relations_bound: plan.relations_bound,
@@ -177,6 +178,7 @@ impl Copying<'_> {
 
     pub(super) fn merge(&mut self, plan: &MergePlan) -> Result<MergePlan> {
         Ok(MergePlan {
+            prepared_domain_defaults: plan.prepared_domain_defaults.clone(),
             ctes: self.field("ctes", |copying| copying.map(plan.ctes.iter(), Self::cte))?,
             target: self.field("target", |copying| copying.text(&plan.target))?,
             statement_privilege_subject: self.role(plan.statement_privilege_subject.as_ref())?,

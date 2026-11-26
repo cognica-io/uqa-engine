@@ -550,6 +550,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Prepared writes retain the domain defaults selected at preparation. Volatile defaults run for each affected row, and changes to a referenced table or default routine refresh the prepared statement.
+
 - Support `ALTER SERVER` changes to a foreign server version and options. Existing foreign tables keep their server binding across option changes, rollback and reopen.
 
 - Rust applications can combine `uqa-pg-regex` with versions of `url` and `idna_adapter` that use newer ICU4X 2.x releases. ICU regular expressions use PostgreSQL 18.4's bundled Unicode 16 tables for character classes and simple case mappings.

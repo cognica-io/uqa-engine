@@ -11,6 +11,13 @@ use crate::{catalog::resolution::RelationNameResolution, ColumnType, SQLError};
 use uqa_core::memory::Produced;
 
 impl<T: AnalysisCatalog> AnalysisCatalog for Produced<T> {
+    fn domain_default_with_control(
+        &self,
+        oid: u32,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<&crate::ast::Expr>, SQLError> {
+        (**self).domain_default_with_control(oid, control)
+    }
     fn relation_row_type_with_control(
         &self,
         resolution: &RelationNameResolution,

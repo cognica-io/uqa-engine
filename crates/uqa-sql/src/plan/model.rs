@@ -458,6 +458,9 @@ pub struct ViewRuleUpdatePlan {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct InsertPlan {
+    /// Domain defaults bound by prepared-statement rewrite. The session owns these expressions.
+    #[serde(skip)]
+    pub prepared_domain_defaults: crate::prepared::defaults::PreparedDomainDefaults,
     pub table: String,
     pub target_relation_bound: bool,
     /// Whether non-target relation references are stored catalog identities rather than names that must be resolved in the executing session.
@@ -541,6 +544,9 @@ pub enum ConflictActionPlan {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct UpdatePlan {
+    /// Domain defaults bound by prepared-statement rewrite. The session owns these expressions.
+    #[serde(skip)]
+    pub prepared_domain_defaults: crate::prepared::defaults::PreparedDomainDefaults,
     pub table: String,
     pub target_relation_bound: bool,
     /// Whether non-target relation references are stored catalog identities rather than names that must be resolved in the executing session.
@@ -592,6 +598,9 @@ pub struct DeletePlan {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct MergePlan {
+    /// Domain defaults bound by prepared-statement rewrite. The session owns these expressions.
+    #[serde(skip)]
+    pub prepared_domain_defaults: crate::prepared::defaults::PreparedDomainDefaults,
     #[serde(default)]
     pub ctes: Vec<CtePlan>,
     pub target: String,

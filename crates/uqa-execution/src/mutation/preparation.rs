@@ -16,3 +16,17 @@ pub struct MutationPreparationContext<'a, S: Clone + 'static> {
     pub returning: ReturningExecutionContext<'a, S>,
 }
 impl<S: Clone + 'static> Copy for MutationPreparationContext<'_, S> {}
+
+impl<'a, S: Clone + 'static> MutationPreparationContext<'a, S> {
+    pub(crate) fn with_domain_defaults<'b>(
+        self,
+        defaults: Option<&'b uqa_sql::prepared::defaults::DomainDefaultExpressions>,
+    ) -> MutationPreparationContext<'b, S>
+    where
+        'a: 'b,
+    {
+        let mut context = self;
+        context.referential.assignment.domain_defaults = defaults;
+        context
+    }
+}

@@ -19,6 +19,7 @@ impl ObserveAllocations for InsertPlan {
         observer: &mut AllocationObserver<'a, '_>,
     ) -> Result<(), ValueRetentionError> {
         let Self {
+            prepared_domain_defaults: _,
             table,
             target_relation_bound: _,
             relations_bound: _,
@@ -70,6 +71,7 @@ impl ObserveAllocations for UpdatePlan {
         observer: &mut AllocationObserver<'a, '_>,
     ) -> Result<(), ValueRetentionError> {
         let Self {
+            prepared_domain_defaults: _,
             table,
             target_relation_bound: _,
             relations_bound: _,
@@ -156,6 +158,7 @@ impl ObserveAllocations for MergePlan {
         observer: &mut AllocationObserver<'a, '_>,
     ) -> Result<(), ValueRetentionError> {
         let Self {
+            prepared_domain_defaults: _,
             ctes,
             target,
             statement_privilege_subject,

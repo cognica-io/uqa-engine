@@ -83,7 +83,7 @@ pub fn read_prepared_inputs_owned(
         control,
     )?;
     let mut dependencies = scope.prepared_dependencies.take().unwrap_or_default();
-    include_plan_dependencies(&mut dependencies, &plan, control)?;
+    dependencies.include_plan_with_control(plan.as_plan_ref(), control)?;
     Ok(PreparedOwnedInputs {
         plan,
         parameter_types: parameters,
@@ -188,24 +188,6 @@ fn declared_inputs(
     Ok(declared.finish()?)
 }
 
-fn include_plan_dependencies(
-    dependencies: &mut PreparedAnalysisDependencies,
-    plan: &MutableExecutablePlan,
-    control: &ProductionControl<'_>,
-) -> Result<(), SQLError> {
-    let mut status = Ok(());
-    let mut include = |expression: &crate::ScalarExpr| {
-        if status.is_ok() {
-            status = dependencies.include_expression_with_control(expression, control);
-        }
-    };
-    match plan.as_plan_ref() {
-        PlanRef::Query(query) => query.visit_scalar_expressions(&mut include),
-        PlanRef::Command(command) => command.visit_scalar_expressions(&mut include),
-    }
-    status
-}
-
 impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
     pub(super) fn observe_owned_plan(
         &mut self,
@@ -295,7 +277,7 @@ pub fn read_procedure_inputs_owned(
     if let Some(identity) = resolved.function.def.object_id {
         dependencies.include_routine_identity_with_control(identity, control)?;
     }
-    include_plan_dependencies(&mut dependencies, &plan, control)?;
+    dependencies.include_plan_with_control(plan.as_plan_ref(), control)?;
     Ok((
         schema,
         PreparedOwnedInputs {

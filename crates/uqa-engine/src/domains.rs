@@ -81,14 +81,13 @@ impl uqa_sql::catalog::domain::DomainCatalog for Engine {
         oid: u32,
         control: &uqa_core::memory::ProductionControl<'_>,
     ) -> Result<Option<uqa_core::memory::Produced<StoredDomain>>, SQLError> {
-        for domain in self.durable.domains.read().values() {
-            control.check()?;
-            if domain.oid == oid {
-                return domain.clone_with_control(control).map(Some);
-            }
-        }
-        control.check()?;
-        Ok(None)
+        uqa_sql::catalog::domain::find_domain_by_oid(
+            self.durable.domains.read().values(),
+            oid,
+            control,
+        )?
+        .map(|domain| domain.clone_with_control(control))
+        .transpose()
     }
 
     fn domain_by_oid(&self, oid: u32) -> Option<StoredDomain> {

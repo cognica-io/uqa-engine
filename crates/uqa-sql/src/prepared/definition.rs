@@ -120,6 +120,16 @@ pub fn analyze_definition(
             logical_plan.visit_scalar_expressions(&mut |expression| {
                 input.dependencies.include_expression(expression);
             });
+            if super::defaults::needs_domain_defaults((&logical_plan).into()) {
+                let control = uqa_core::memory::ProductionControl::uncontrolled();
+                logical_plan.visit_scoped_mut(&mut super::defaults::BindMutationDefaults {
+                    catalog: binding.catalog.as_ref(),
+                    resolution: &binding.resolution,
+                    views: context.scopes.mutation_views(),
+                    dependencies: &mut input.dependencies,
+                    control,
+                })?;
+            }
             let effective_search_path =
                 binding.catalog.effective_search_path(&binding.resolution)?;
             let dependency_snapshot = binding

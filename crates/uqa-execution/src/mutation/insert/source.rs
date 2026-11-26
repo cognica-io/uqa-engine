@@ -227,6 +227,12 @@ impl<S: Clone + 'static> InsertSelectConsumer<S> {
             has_prepared_auto_identity,
             supplied_identities,
         } = &mut *state;
+        let services = InsertSourceContext {
+            rows: services
+                .rows
+                .with_domain_defaults(stmt.prepared_domain_defaults.as_deref()),
+            ..services
+        };
         let columns = columns
             .as_ref()
             .ok_or_else(|| {

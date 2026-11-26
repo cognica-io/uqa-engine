@@ -102,6 +102,8 @@ SELECT id, amount FROM domain_orders ORDER BY id;
 
 `ALTER DOMAIN name SET DEFAULT expression` replaces the domain default; `ALTER DOMAIN name DROP DEFAULT` removes it. Both return `ALTER DOMAIN` with no result rows and require domain ownership. Existing columns without their own default use the current domain default; an explicit column default takes precedence. A derived domain keeps the default copied when it was created. Removing its default does not revive a later base-domain default, and `SET DEFAULT NULL` remains an explicit stored NULL default. These changes preserve domain and constraint identities, participate in transaction and savepoint rollback, and survive persistent reopen. Invalid expressions retain the ordinary default-expression diagnostics.
 
+A prepared write that uses a domain default keeps the expression selected at preparation. A later `ALTER DOMAIN ... SET DEFAULT` or `DROP DEFAULT` affects newly prepared writes. Each execution evaluates the retained expression for each row that needs it. If a change to the target table or a referenced routine forces reanalysis, the prepared statement picks up the current default.
+
 ```sql execute
 ALTER DOMAIN positive_amount SET DEFAULT 2;
 INSERT INTO domain_orders (id) VALUES (3);

@@ -9,9 +9,9 @@
 use crate::binding::preparation::{LiteralInput, SchemaContext};
 
 use super::{
-    include_plan_dependencies, retain_input_metadata_owned, AnalyzedResult, ColumnType,
-    ControlledBindingContext, MutableExecutablePlan, OidAliasInput, ParameterTypes, PlanRef,
-    Preparation, PreparedAnalysisDependencies, Produced, ProductionControl, ProductionVec,
+    retain_input_metadata_owned, AnalyzedResult, ColumnType, ControlledBindingContext,
+    MutableExecutablePlan, OidAliasInput, ParameterTypes, PlanRef, Preparation,
+    PreparedAnalysisDependencies, Produced, ProductionControl, ProductionVec,
     RoutineParameterScope, RoutineResolution, SQLError, SQLParam, SchemaScope,
 };
 use crate::plan::CommandPlan;
@@ -176,7 +176,7 @@ fn read_inputs_owned(
     let plan = retain_input_metadata_owned(routines, plan, params, metadata, control)?;
     let mut dependencies = scope.prepared_dependencies.take().unwrap_or_default();
     if track_dependencies {
-        include_plan_dependencies(&mut dependencies, &plan, control)?;
+        dependencies.include_plan_with_control(plan.as_plan_ref(), control)?;
     }
     Ok(ProceduralOwnedInputs {
         plan,
