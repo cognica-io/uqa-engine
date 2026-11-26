@@ -1841,6 +1841,343 @@
       "id": "volatile_row_calls"
     },
     {
+      "sql": "CREATE SEQUENCE cj_fields",
+      "command_tags": [
+        "CREATE SEQUENCE"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [],
+          "type_oids": [],
+          "rows": []
+        }
+      ],
+      "notices": [],
+      "id": "pair_sequence"
+    },
+    {
+      "sql": "SELECT ROW(0,nextval('cj_fields')) = ROW(1,0) AS eq, ROW(0,nextval('cj_fields')) <> ROW(1,0) AS ne, ROW(0,nextval('cj_fields')) < ROW(1,0) AS lt, ROW(0,nextval('cj_fields')) <= ROW(1,0) AS le, ROW(0,nextval('cj_fields')) > ROW(1,0) AS gt, ROW(0,nextval('cj_fields')) >= ROW(1,0) AS ge",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "eq",
+            "ne",
+            "lt",
+            "le",
+            "gt",
+            "ge"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16,
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "f",
+              "t",
+              "t",
+              "t",
+              "f",
+              "f"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "skipped_field_operators"
+    },
+    {
+      "sql": "SELECT last_value,is_called FROM cj_fields",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "last_value",
+            "is_called"
+          ],
+          "type_oids": [
+            20,
+            16
+          ],
+          "rows": [
+            [
+              "1",
+              "f"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "skipped_field_calls"
+    },
+    {
+      "sql": "SELECT ROW(NULL::int,0,nextval('cj_fields')) = ROW(1,1,0) AS eq, ROW(NULL::int,0,nextval('cj_fields')) <> ROW(1,1,0) AS ne, ROW(NULL::int,nextval('cj_fields')) < ROW(1,0) AS lt, ROW(NULL::int,nextval('cj_fields')) >= ROW(1,0) AS ge",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "eq",
+            "ne",
+            "lt",
+            "ge"
+          ],
+          "type_oids": [
+            16,
+            16,
+            16,
+            16
+          ],
+          "rows": [
+            [
+              "f",
+              "t",
+              null,
+              null
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "null_before_mismatch"
+    },
+    {
+      "sql": "SELECT last_value,is_called FROM cj_fields",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "last_value",
+            "is_called"
+          ],
+          "type_oids": [
+            20,
+            16
+          ],
+          "rows": [
+            [
+              "1",
+              "f"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "skipped_after_null_calls"
+    },
+    {
+      "sql": "SELECT ROW(nextval('cj_fields'),nextval('cj_fields')) = ROW(nextval('cj_fields')-1,nextval('cj_fields')-1) AS paired",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "paired"
+          ],
+          "type_oids": [
+            16
+          ],
+          "rows": [
+            [
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "pair_order"
+    },
+    {
+      "sql": "SELECT last_value,is_called FROM cj_fields",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "last_value",
+            "is_called"
+          ],
+          "type_oids": [
+            20,
+            16
+          ],
+          "rows": [
+            [
+              "4",
+              "t"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "pair_order_calls"
+    },
+    {
+      "sql": "SELECT count(*) FROM (VALUES(1),(2),(3)) a(i) INNER JOIN (VALUES(1),(2)) b(i) ON ROW(a.i,a.i+nextval('cj_fields')*0)=ROW(b.i,b.i)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "inner_volatile_pairs"
+    },
+    {
+      "sql": "SELECT last_value FROM cj_fields",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "last_value"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "6"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "inner_volatile_calls"
+    },
+    {
+      "sql": "SELECT count(*) FROM (VALUES(1),(2),(3)) a(i) LEFT JOIN (VALUES(1),(2)) b(i) ON ROW(a.i,a.i+nextval('cj_fields')*0)=ROW(b.i,b.i)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "3"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "left_volatile_pairs"
+    },
+    {
+      "sql": "SELECT last_value FROM cj_fields",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "last_value"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "8"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "left_volatile_calls"
+    },
+    {
+      "sql": "SELECT count(*) FROM (VALUES(1),(2),(3)) a(i) RIGHT JOIN (VALUES(1),(2)) b(i) ON ROW(a.i,a.i+nextval('cj_fields')*0)=ROW(b.i,b.i)",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "count"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "2"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "right_volatile_pairs"
+    },
+    {
+      "sql": "SELECT last_value FROM cj_fields",
+      "command_tags": [
+        "SELECT 1"
+      ],
+      "error": null,
+      "results": [
+        {
+          "columns": [
+            "last_value"
+          ],
+          "type_oids": [
+            20
+          ],
+          "rows": [
+            [
+              "10"
+            ]
+          ]
+        }
+      ],
+      "notices": [],
+      "id": "right_volatile_calls"
+    },
+    {
       "sql": "SET work_mem='64kB'",
       "command_tags": [
         "SET"
@@ -2072,8 +2409,8 @@
   ],
   "provenance": {
     "tool": "tests/parity/pg18/capture_command_completion_oracle.py",
-    "tool_sha256": "13a39469bb3d558afeee4871e01b992101c49980fc49e2d246bb327248f9e0ec",
-    "input_sha256": "664b70ea395a0a13c5b8a6883e80797aeb5cb8bf9e6d833e02a4bcb4d470df84",
+    "tool_sha256": "03c5af634def87180984276a560f34f40c1a97be76af76547e00eb6f186d57e0",
+    "input_sha256": "a004b361a3cdc4c21cb2e8a1bad6564213b9c3827259ddf10ad2d2db7809c7ea",
     "options": [
       "--rows",
       "--details",

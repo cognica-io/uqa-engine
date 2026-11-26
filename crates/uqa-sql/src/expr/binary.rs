@@ -34,9 +34,10 @@ pub use comparison::{
     equal_typed_values_with_enum_catalog, eval_comparison_truth,
     eval_comparison_truth_with_control, eval_comparison_truth_with_deferred_state,
     eval_comparison_truth_with_engine, eval_comparison_truth_with_enum_catalog,
-    eval_record_comparison_truth_with_engine, eval_value_comparison_truth_with_engine,
-    type_comparison_can_fail, validate_legacy_vector_comparison, value_comparison_can_fail,
-    value_comparison_can_fail_from, values_equal_nullable_with_control, values_equal_with_control,
+    eval_record_comparison_truth_with_engine, eval_row_comparison_with_control,
+    eval_value_comparison_truth_with_engine, type_comparison_can_fail,
+    validate_legacy_vector_comparison, value_comparison_can_fail, value_comparison_can_fail_from,
+    values_equal_nullable_with_control, values_equal_with_control,
     visit_record_image_fields_with_catalog,
 };
 pub(in crate::expr) use comparison::{require_array_element_support, ComparisonSupport};
@@ -47,15 +48,32 @@ pub(super) fn eval_binary(
     rhs: &Expr,
     ctx: &EvalContext<'_>,
 ) -> Result<Value> {
+    if let (Some(op), Expr::Row(left), Expr::Row(right)) = (op.comparison(), lhs, rhs) {
+        let control = ProductionControl::uncontrolled();
+        let truth = eval_row_comparison_with_control(
+            op,
+            left,
+            right,
+            &control,
+            ctx.engine,
+            None,
+            |item| {
+                let field = super::evaluator::row_field_type(item, ctx)?;
+                Ok((
+                    control.finish(eval(item, ctx)?, None)?,
+                    field.map(|field| field.oid),
+                ))
+            },
+        )?;
+        return Ok(truth.map_or(Value::Null, Value::Bool));
+    }
     if let Some(value) = eval_binary_borrowed(op, lhs, rhs, ctx)? {
         return Ok(value);
     }
     let l = eval(lhs, ctx)?;
     let r = eval(rhs, ctx)?;
     if op.comparison().is_some() {
-        if matches!((&l, &r), (Value::Row(_), Value::Row(_)))
-            && !matches!((lhs, rhs), (Expr::Row(_), Expr::Row(_)))
-        {
+        if matches!((&l, &r), (Value::Row(_), Value::Row(_))) {
             return eval_record_comparison_truth_with_engine(
                 op,
                 &l,

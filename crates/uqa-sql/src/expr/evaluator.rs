@@ -147,14 +147,7 @@ fn eval_inner(expr: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
             let mut out = Vec::with_capacity(elements.len());
             let mut fields = Vec::with_capacity(elements.len());
             for element in elements {
-                let scalar = crate::plan::ExpressionPlan::lower(element.clone()).scalar;
-                if let Some(field) = crate::type_resolution::scalar_record_field_type_with_control(
-                    &scalar,
-                    &crate::RowSchema::default(),
-                    ctx.params,
-                    ctx.engine,
-                    &uqa_core::memory::ProductionControl::uncontrolled(),
-                )? {
+                if let Some(field) = row_field_type(element, ctx)? {
                     fields.push(field);
                 }
                 out.push(eval(element, ctx)?);
@@ -422,6 +415,20 @@ fn eval_inner(expr: &Expr, ctx: &EvalContext<'_>) -> Result<Value> {
             Ok(Value::Bool(*negated))
         }
     }
+}
+
+pub(super) fn row_field_type(
+    element: &Expr,
+    ctx: &EvalContext<'_>,
+) -> Result<Option<uqa_core::RecordFieldType>> {
+    let scalar = crate::plan::ExpressionPlan::lower(element.clone()).scalar;
+    crate::type_resolution::scalar_record_field_type_with_control(
+        &scalar,
+        &crate::RowSchema::default(),
+        ctx.params,
+        ctx.engine,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
 }
 
 fn explicit_expr_type(expr: &Expr) -> Option<&str> {

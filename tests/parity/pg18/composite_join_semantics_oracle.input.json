@@ -281,6 +281,58 @@
       "sql": "SELECT last_value FROM cj_sequence"
     },
     {
+      "id": "pair_sequence",
+      "sql": "CREATE SEQUENCE cj_fields"
+    },
+    {
+      "id": "skipped_field_operators",
+      "sql": "SELECT ROW(0,nextval('cj_fields')) = ROW(1,0) AS eq, ROW(0,nextval('cj_fields')) <> ROW(1,0) AS ne, ROW(0,nextval('cj_fields')) < ROW(1,0) AS lt, ROW(0,nextval('cj_fields')) <= ROW(1,0) AS le, ROW(0,nextval('cj_fields')) > ROW(1,0) AS gt, ROW(0,nextval('cj_fields')) >= ROW(1,0) AS ge"
+    },
+    {
+      "id": "skipped_field_calls",
+      "sql": "SELECT last_value,is_called FROM cj_fields"
+    },
+    {
+      "id": "null_before_mismatch",
+      "sql": "SELECT ROW(NULL::int,0,nextval('cj_fields')) = ROW(1,1,0) AS eq, ROW(NULL::int,0,nextval('cj_fields')) <> ROW(1,1,0) AS ne, ROW(NULL::int,nextval('cj_fields')) < ROW(1,0) AS lt, ROW(NULL::int,nextval('cj_fields')) >= ROW(1,0) AS ge"
+    },
+    {
+      "id": "skipped_after_null_calls",
+      "sql": "SELECT last_value,is_called FROM cj_fields"
+    },
+    {
+      "id": "pair_order",
+      "sql": "SELECT ROW(nextval('cj_fields'),nextval('cj_fields')) = ROW(nextval('cj_fields')-1,nextval('cj_fields')-1) AS paired"
+    },
+    {
+      "id": "pair_order_calls",
+      "sql": "SELECT last_value,is_called FROM cj_fields"
+    },
+    {
+      "id": "inner_volatile_pairs",
+      "sql": "SELECT count(*) FROM (VALUES(1),(2),(3)) a(i) INNER JOIN (VALUES(1),(2)) b(i) ON ROW(a.i,a.i+nextval('cj_fields')*0)=ROW(b.i,b.i)"
+    },
+    {
+      "id": "inner_volatile_calls",
+      "sql": "SELECT last_value FROM cj_fields"
+    },
+    {
+      "id": "left_volatile_pairs",
+      "sql": "SELECT count(*) FROM (VALUES(1),(2),(3)) a(i) LEFT JOIN (VALUES(1),(2)) b(i) ON ROW(a.i,a.i+nextval('cj_fields')*0)=ROW(b.i,b.i)"
+    },
+    {
+      "id": "left_volatile_calls",
+      "sql": "SELECT last_value FROM cj_fields"
+    },
+    {
+      "id": "right_volatile_pairs",
+      "sql": "SELECT count(*) FROM (VALUES(1),(2),(3)) a(i) RIGHT JOIN (VALUES(1),(2)) b(i) ON ROW(a.i,a.i+nextval('cj_fields')*0)=ROW(b.i,b.i)"
+    },
+    {
+      "id": "right_volatile_calls",
+      "sql": "SELECT last_value FROM cj_fields"
+    },
+    {
       "id": "spill_allowance",
       "sql": "SET work_mem='64kB'"
     },

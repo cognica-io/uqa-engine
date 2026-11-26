@@ -19,6 +19,8 @@ pub use collations::{
 };
 mod image;
 mod records;
+mod rows;
+pub use rows::eval_row_comparison_with_control;
 mod support;
 mod temporal;
 pub use image::{compare_record_images_with_catalog, visit_record_image_fields_with_catalog};
@@ -114,17 +116,21 @@ fn eval_selected_comparison(
     }
     let order =
         compare_typed_values_with_catalog_and_collation(left, right, collation, control, catalog)?;
-    Ok(Some(match op {
-        BinaryOp::Less => order.is_lt(),
-        BinaryOp::LessEqual => order.is_le(),
-        BinaryOp::Greater => order.is_gt(),
-        BinaryOp::GreaterEqual => order.is_ge(),
-        _ => {
-            return Err(SQLError::Internal(format!(
-                "non-comparison operator {op:?} reached typed comparison"
-            )))
-        }
-    }))
+    apply_order(op, Some(order))
+}
+
+fn apply_order(op: BinaryOp, order: Option<Ordering>) -> Result<Option<bool>> {
+    match op.uncollated() {
+        BinaryOp::Equal => Ok(order.map(Ordering::is_eq)),
+        BinaryOp::NotEqual => Ok(order.map(|order| !order.is_eq())),
+        BinaryOp::Less => Ok(order.map(Ordering::is_lt)),
+        BinaryOp::LessEqual => Ok(order.map(Ordering::is_le)),
+        BinaryOp::Greater => Ok(order.map(Ordering::is_gt)),
+        BinaryOp::GreaterEqual => Ok(order.map(Ordering::is_ge)),
+        _ => Err(SQLError::Internal(format!(
+            "non-comparison operator {op:?} reached comparison evaluation"
+        ))),
+    }
 }
 
 /// Primitive scalar comparisons need no catalog or private enum call state. Resolve that state only when the evaluated carriers require the general comparison path; operand evaluation and its SQL ordering remain the caller's responsibility.
@@ -146,17 +152,7 @@ pub fn eval_comparison_truth_with_deferred_state<'a>(
         _ => None,
     };
     if let Some(order) = primitive {
-        return match op.uncollated() {
-            BinaryOp::Equal => Ok(order.map(Ordering::is_eq)),
-            BinaryOp::NotEqual => Ok(order.map(|order| !order.is_eq())),
-            BinaryOp::Less => Ok(order.map(Ordering::is_lt)),
-            BinaryOp::LessEqual => Ok(order.map(Ordering::is_le)),
-            BinaryOp::Greater => Ok(order.map(Ordering::is_gt)),
-            BinaryOp::GreaterEqual => Ok(order.map(Ordering::is_ge)),
-            _ => Err(SQLError::Internal(format!(
-                "non-comparison operator {op:?} reached comparison evaluation"
-            ))),
-        };
+        return apply_order(op, order);
     }
     let catalog = engine.map(crate::expr::value_catalog::EngineValueCatalog);
     eval_comparison_truth_with_context(
@@ -213,13 +209,7 @@ fn eval_comparison_truth_with_context(
         )));
     }
     let order = compare_nullable_with_catalog(left, right, control, enums, state, engine)?;
-    Ok(order.map(|order| match op {
-        BinaryOp::Less => order.is_lt(),
-        BinaryOp::LessEqual => order.is_le(),
-        BinaryOp::Greater => order.is_gt(),
-        BinaryOp::GreaterEqual => order.is_ge(),
-        _ => unreachable!("only comparison operators reach comparison evaluation"),
-    }))
+    apply_order(op, order)
 }
 
 /// Two-valued equality treats SQL UNKNOWN as no match for CASE, NULLIF and membership probes.
@@ -306,40 +296,9 @@ fn values_equal_nullable_with_catalog(
         (Value::FixedChar(x), Value::Str(y)) | (Value::Str(y), Value::FixedChar(x)) => {
             Some(compare_fixed_text(x, y, control)?.is_eq())
         }
-        // Anonymous rows use SQL three-valued equality: a definite mismatch wins over an earlier NULL field. Native arrays and stored records instead use total element equality through the value owner below.
+        (Value::Row(xs), Value::Row(ys)) if xs.len() != ys.len() => Some(false),
         (Value::Row(xs), Value::Row(ys)) => {
-            if xs.len() != ys.len() {
-                return Ok(Some(false));
-            }
-            let mut unknown = false;
-            for (index, (x, y)) in xs.iter().zip(ys).enumerate() {
-                let oid = row_field_oid(xs, index).or_else(|| row_field_oid(ys, index));
-                let equal = if let Some(order) = compare_declared_range(x, y, oid, control, enums)?
-                {
-                    Some(order.is_eq())
-                } else if matches!((x, y), (Value::Row(_), Value::Row(_))) {
-                    Some(equal_values(
-                        x,
-                        y,
-                        control,
-                        enums,
-                        false,
-                        collations::DEFAULT,
-                    )?)
-                } else {
-                    values_equal_nullable_with_catalog(x, y, control, enums, engine)?
-                };
-                match equal {
-                    Some(false) => return Ok(Some(false)),
-                    Some(true) => {}
-                    None => unknown = true,
-                }
-            }
-            if unknown {
-                None
-            } else {
-                Some(true)
-            }
+            rows::equal_fields(rows::value_pairs(xs, ys), control, enums, engine)?
         }
         _ => Some(equal_values(
             a,
@@ -451,51 +410,18 @@ fn compare_nullable_with_catalog(
             .map(|parsed| Some(parsed.cmp(y)))
             .ok_or_else(|| SQLError::TypeMismatch(format!("cannot compare {a:?} with {b:?}"))),
         // Ordering is lexicographic; reaching NULL before a definite comparison leaves it unknown.
-        (Value::Row(xs), Value::Row(ys)) => {
-            compare_anonymous_row(xs, ys, control, enums, state, engine)
-        }
+        (Value::Row(xs), Value::Row(ys)) => rows::compare_fields(
+            rows::value_pairs(xs, ys),
+            xs.len().cmp(&ys.len()),
+            control,
+            enums,
+            state,
+            engine,
+        ),
         (lhs, rhs) => Err(SQLError::TypeMismatch(format!(
             "cannot compare {lhs:?} with {rhs:?}"
         ))),
     }
-}
-
-fn compare_anonymous_row(
-    left: &uqa_core::RowValue,
-    right: &uqa_core::RowValue,
-    control: &ProductionControl<'_>,
-    enums: Option<&dyn EnumLabelCatalog>,
-    state: Option<&EnumComparisonState>,
-    engine: Option<&dyn crate::expr::EngineHook>,
-) -> Result<Option<Ordering>> {
-    for (index, (left_value, right_value)) in left.iter().zip(right).enumerate() {
-        let oid = row_field_oid(left, index).or_else(|| row_field_oid(right, index));
-        let (left, right) = (left_value, right_value);
-        let field =
-            if matches!(left, Value::Enum(_) | Value::Datum(_)) && !matches!(right, Value::Null) {
-                state.map(|state| state.field(index))
-            } else {
-                None
-            };
-        let order = if let Some(order) = compare_declared_range(left, right, oid, control, enums)? {
-            Some(order)
-        } else if matches!((left, right), (Value::Row(_), Value::Row(_))) {
-            Some(compare_typed_values_with_catalog(
-                left, right, control, enums,
-            )?)
-        } else {
-            compare_nullable_with_catalog(left, right, control, enums, field.as_deref(), engine)?
-        };
-        match order {
-            Some(Ordering::Equal) => {}
-            other => return Ok(other),
-        }
-    }
-    Ok(Some(left.len().cmp(&right.len())))
-}
-
-fn row_field_oid(row: &uqa_core::RowValue, index: usize) -> Option<u32> {
-    row.field_types()?.get(index).map(|field| field.oid)
 }
 
 fn compare_sql_values(
