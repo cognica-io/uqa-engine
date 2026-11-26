@@ -122,7 +122,7 @@ pub fn aggregate_value_with_args(
         }
         "min" => acc.min.clone().unwrap_or(Value::Null),
         "max" => acc.max.clone().unwrap_or(Value::Null),
-        "string_agg" => super::string_agg::finish(&acc.values.ordered_values(enums)?, enums)?,
+        "string_agg" => super::string_agg::finish(&acc.values, enums)?,
         "array_agg" => {
             let ordered_values = acc.values.ordered_values(enums)?;
             if ordered_values.is_empty() {

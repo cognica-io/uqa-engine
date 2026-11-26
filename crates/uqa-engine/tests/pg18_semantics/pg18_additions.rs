@@ -558,3 +558,14 @@ fn pg18_regex_functions_accept_named_arguments() {
         Value::Str("123-abc-abc123".into())
     );
 }
+
+#[test]
+fn text_result_sizes_match_postgresql() {
+    crate::pg18_oracle::verify(
+        &engine(),
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../tests/parity/pg18/text_result_sizes_oracle.expected.json"
+        )),
+    );
+}

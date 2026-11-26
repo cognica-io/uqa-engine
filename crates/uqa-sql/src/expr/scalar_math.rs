@@ -16,9 +16,6 @@ mod text;
 pub(super) use text::split_part;
 
 pub(super) fn eval_math_functions(name: &str, args: &[Value]) -> Option<Result<Value>> {
-    if name == "format" {
-        return Some(format::format(args));
-    }
     if name == "random" {
         // Lightweight pseudo-random value derived from system time.
         use std::time::{SystemTime, UNIX_EPOCH};
@@ -44,6 +41,9 @@ pub(super) fn eval_math_functions_with_control(
     args: &[Value],
     control: &ProductionControl<'_>,
 ) -> Option<Result<Produced<Value>>> {
+    if name == "format" {
+        return Some(format::format(args, control));
+    }
     const NAMES: &[&str] = &[
         "sin",
         "cos",

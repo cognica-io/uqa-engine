@@ -47,7 +47,7 @@ impl CaseMapping {
         self,
         text: &str,
         control: &ProductionControl<'_>,
-    ) -> Result<Produced<String>, ValueRetentionError> {
+    ) -> Result<Produced<String>, SQLError> {
         self.map(text, CaseKind::Lower, control)
     }
 
@@ -55,7 +55,7 @@ impl CaseMapping {
         self,
         text: &str,
         control: &ProductionControl<'_>,
-    ) -> Result<Produced<String>, ValueRetentionError> {
+    ) -> Result<Produced<String>, SQLError> {
         self.map(text, CaseKind::Upper, control)
     }
 
@@ -64,7 +64,7 @@ impl CaseMapping {
         self,
         text: &str,
         control: &ProductionControl<'_>,
-    ) -> Result<Produced<String>, ValueRetentionError> {
+    ) -> Result<Produced<String>, SQLError> {
         self.map(text, CaseKind::Fold, control)
     }
 
@@ -73,9 +73,10 @@ impl CaseMapping {
         self,
         text: &str,
         control: &ProductionControl<'_>,
-    ) -> Result<Produced<String>, ValueRetentionError> {
+    ) -> Result<Produced<String>, SQLError> {
         let mut output = ProductionString::new(*control);
         control.check()?;
+        crate::expr::text_size::check_allocation_size(text.len() as u128 + 1)?;
         output.reserve(text.len())?;
         let mut mapped = MappedOutput::new(&mut output);
         match self.ctype {
@@ -139,8 +140,8 @@ impl CaseMapping {
             }
             BuiltinCollationCtype::IcuRoot => icu_titlecase(text, &mut mapped, control)?,
         }
-        mapped.flush()?;
-        output.finish()
+        mapped.finish()?;
+        Ok(output.finish()?)
     }
 
     fn map(
@@ -148,9 +149,10 @@ impl CaseMapping {
         text: &str,
         kind: CaseKind,
         control: &ProductionControl<'_>,
-    ) -> Result<Produced<String>, ValueRetentionError> {
+    ) -> Result<Produced<String>, SQLError> {
         let mut output = ProductionString::new(*control);
         control.check()?;
+        crate::expr::text_size::check_allocation_size(text.len() as u128 + 1)?;
         output.reserve(text.len())?;
         let mut mapped = MappedOutput::new(&mut output);
         let characters = UnicodeCharacters::new(self.sigma_rule());
@@ -158,8 +160,8 @@ impl CaseMapping {
             control.check()?;
             self.map_range(text, start, end, kind, characters, &mut mapped, control)?;
         }
-        mapped.flush()?;
-        output.finish()
+        mapped.finish()?;
+        Ok(output.finish()?)
     }
 
     fn sigma_rule(self) -> FinalSigmaRule {

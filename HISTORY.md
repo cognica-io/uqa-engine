@@ -553,6 +553,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- SQL text functions and `string_agg` enforce PostgreSQL’s 1 GB allocation limit. Oversized requests report the diagnostic for the operation that crosses the limit, including the requested append size for string buffers.
+
 - Resolve casts to `unknown` and polymorphic pseudo-types using the operand and catalog identity. Preserve domain and prepared result types and reject invalid stored column declarations.
 
 - Prepared writes retain the domain defaults selected at preparation. Volatile defaults run for each affected row, and changes to a referenced table or default routine refresh the prepared statement.

@@ -8,10 +8,10 @@
 
 use super::super::{
     binary::values_equal_with_control,
-    conversion::{nonnegative_usize, to_i64_with_control, value_to_string_with_control},
+    conversion::{nonnegative_usize, to_i64_with_control},
     out_of_range, ArrayValue, Result, SQLError, Value,
 };
-use uqa_core::memory::{Produced, ProductionControl, ProductionString, ProductionVec};
+use uqa_core::memory::{Produced, ProductionControl, ProductionVec};
 
 pub(in crate::expr) fn eval_postgres_arrays_with_control(
     name: &str,
@@ -200,10 +200,10 @@ fn join(args: &[Value], control: &ProductionControl<'_>) -> Result<Produced<Valu
     if matches!(args[1], Value::Null) {
         return inline(Value::Null, control);
     }
-    let separator = value_to_string_with_control(&args[1], control)?;
+    let separator = crate::expr::conversion::argument_text(&args[1], control)?;
     let null_text = args.get(2).filter(|value| !matches!(value, Value::Null));
     let mut elements = array.elements_with_control(control)?;
-    let mut output = ProductionString::new(*control);
+    let mut output = crate::expr::text_size::TextBuffer::new(control);
     let mut first = true;
     while let Some(value) = elements.next_element()? {
         let value = if matches!(value, Value::Null) {
@@ -218,7 +218,7 @@ fn join(args: &[Value], control: &ProductionControl<'_>) -> Result<Produced<Valu
             output.push_str(&separator)?;
         }
         first = false;
-        output.push_str(&value_to_string_with_control(value, control)?)?;
+        output.push_str(&crate::expr::conversion::argument_text(value, control)?)?;
     }
     let (value, memory) = output.finish()?.into_parts();
     Ok(control.finish(Value::Str(value), memory)?)

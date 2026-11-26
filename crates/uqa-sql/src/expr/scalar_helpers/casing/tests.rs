@@ -176,12 +176,12 @@ fn mappings_admit_their_entire_output_and_observe_both_cancellations() {
             let limited = MemoryBudget::new(8);
             let control = ProductionControl::new(&limited, &original, &invoking);
             let error = mapping.lowercase(&input, &control).unwrap_err();
-            assert_eq!(crate::SQLError::from(error).sqlstate(), Some("53200"));
+            assert_eq!(error.sqlstate(), Some("53200"));
             assert_eq!(limited.used(), 0);
             invoking.cancel();
             let control = ProductionControl::new(&memory, &original, &invoking);
             let error = mapping.titlecase(&input, &control).unwrap_err();
-            assert_eq!(crate::SQLError::from(error).sqlstate(), Some("57014"));
+            assert_eq!(error.sqlstate(), Some("57014"));
             assert_eq!(memory.used(), 0);
         }
     }
