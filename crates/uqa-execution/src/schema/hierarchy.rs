@@ -188,6 +188,7 @@ fn attach_partition(
     // Parse analysis transforms the bound before the partition relation is opened.
     let bound = uqa_sql::semantics::partition::transform_partition_bound(
         &context.partitions,
+        context.publication.bindings.bindings,
         parent,
         &bound,
     )?;

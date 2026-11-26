@@ -321,35 +321,7 @@ pub fn build_pg_index(
                     "pg_index.indkey",
                 )?,
             ),
-            (
-                "indcollation",
-                catalog_oidvector(
-                    index
-                        .columns
-                        .iter()
-                        .enumerate()
-                        .map(|(position, key)| {
-                            let column = key
-                                .column()
-                                .and_then(|name| table_cols.iter().find(|col| col.name == name));
-                            let oid = index
-                                .key_collation(position, column)
-                                .map(i64::from)
-                                .unwrap_or_else(|| {
-                                    column
-                                        .map(|col| &col.ty)
-                                        .or_else(|| index.definition.key_types.get(position))
-                                        .map_or(
-                                            0,
-                                            uqa_sql::catalog::type_metadata::pg_type_collation_oid,
-                                        )
-                                });
-                            Value::Int(oid)
-                        })
-                        .collect(),
-                    "pg_index.indcollation",
-                )?,
-            ),
+            ("indcollation", index_collations(index, table_cols)?),
             ("indclass", Value::Null),
             ("indoption", index_options(index)?),
             (
@@ -384,6 +356,35 @@ pub fn build_pg_index(
         ]));
     }
     Ok(rows)
+}
+
+fn index_collations(
+    index: &CatalogIndexRelation,
+    table_cols: &[uqa_sql::ast::ColumnDef],
+) -> Result<Value, SQLError> {
+    catalog_oidvector(
+        index
+            .columns
+            .iter()
+            .enumerate()
+            .map(|(position, key)| {
+                let column = key
+                    .column()
+                    .and_then(|name| table_cols.iter().find(|col| col.name == name));
+                let oid = index
+                    .key_collation(position, column)
+                    .map(i64::from)
+                    .unwrap_or_else(|| {
+                        column
+                            .map(|col| &col.ty)
+                            .or_else(|| index.definition.key_types.get(position))
+                            .map_or(0, uqa_sql::catalog::type_metadata::pg_type_collation_oid)
+                    });
+                Value::Int(oid)
+            })
+            .collect(),
+        "pg_index.indcollation",
+    )
 }
 
 fn index_options(index: &CatalogIndexRelation) -> Result<Value, SQLError> {

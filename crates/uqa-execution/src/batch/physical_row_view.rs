@@ -20,6 +20,10 @@ impl<'a> PhysicalRowView<'a> {
             .and_then(|slot| self.row.value(slot))
     }
 
+    pub(crate) fn column_type(&self, logical: usize) -> Option<&'a uqa_sql::ColumnType> {
+        self.schema.column_type(logical)
+    }
+
     pub fn value_at(&self, logical: usize) -> Option<&'a Value> {
         self.schema
             .slot(logical)

@@ -233,7 +233,11 @@ pub fn bind_create_table_partitioning(
     context: &CreateTableAnalysisContext<'_>,
     c: &mut CreateTable,
 ) -> Result<(), SQLError> {
-    super::super::inheritance::bind_create_table_partitioning(&context.inheritance, c)
+    super::super::inheritance::bind_create_table_partitioning(
+        &context.inheritance,
+        context.bindings,
+        c,
+    )
 }
 
 /// The defaults and generation expressions of the new table's columns, which `DefineRelation` transforms in column order before it binds the table's partitioning, since a partition key may name a generated column; each stored expression takes its `pg_attrdef` OID as `AddRelationNewConstraints` stores it.

@@ -17,6 +17,7 @@ use uqa_core::Value;
 /// Transform a declared bound for a new partition of `parent` into its stored form.
 pub fn transform_partition_bound(
     context: &PartitionContext<'_>,
+    bindings: &dyn crate::semantics::conflict::InferenceBindingScope,
     parent: &str,
     bound: &PartitionBound,
 ) -> Result<PartitionBound, SQLError> {
@@ -53,7 +54,7 @@ pub fn transform_partition_bound(
                     "LIST partitioned table has more than one partition key".into(),
                 ));
             };
-            let snapshot = context.bindings.binding_scope()?;
+            let snapshot = bindings.binding_scope()?;
             let binding = snapshot.context();
             let mut transformed: Vec<Value> = Vec::with_capacity(values.len());
             for expression in values {
@@ -88,7 +89,7 @@ pub fn transform_partition_bound(
                     "TO must specify exactly one value per partitioning column",
                 ));
             }
-            let snapshot = context.bindings.binding_scope()?;
+            let snapshot = bindings.binding_scope()?;
             let binding = snapshot.context();
             Ok(PartitionBound::Range {
                 lower: transform_range_datums(context, &binding, lower, &keys)?,

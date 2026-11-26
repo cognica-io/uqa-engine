@@ -54,7 +54,6 @@ pub trait PartitionExpressions {
 #[derive(Clone, Copy)]
 pub struct PartitionContext<'a> {
     pub catalog: &'a dyn PartitionCatalog,
-    pub bindings: &'a dyn super::conflict::InferenceBindingScope,
     pub expressions: &'a dyn PartitionExpressions,
     pub types: &'a dyn FunctionTypeResolver,
     /// Catalog-aware assignment coercion of bound values and output of key values.

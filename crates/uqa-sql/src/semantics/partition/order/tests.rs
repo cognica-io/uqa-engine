@@ -182,16 +182,9 @@ impl crate::schema::SchemaExpressionCatalog for Unused {
     }
 }
 
-impl crate::semantics::conflict::InferenceBindingScope for Unused {
-    fn binding_scope(&self) -> Result<crate::binding::snapshot::BindingSnapshot, SQLError> {
-        unreachable!("partition ordering reads already transformed constants")
-    }
-}
-
 fn context(catalog: &Catalog) -> PartitionContext<'_> {
     PartitionContext {
         catalog,
-        bindings: &Unused,
         expressions: &Literals,
         types: &NoFunctions,
         assignment: &Unused,

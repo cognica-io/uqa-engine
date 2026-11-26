@@ -361,8 +361,7 @@ impl<'a> HashJoin<'a> {
                 {
                     if let Some(hash) = positional_key_hash(
                         direct.hasher(),
-                        &batch.schema,
-                        &row,
+                        batch.schema.view(&row),
                         positions,
                         self.indeterminate_keys(),
                         self.evaluator.enum_labels(),
@@ -548,8 +547,7 @@ impl<'a> HashJoin<'a> {
                             index,
                             &state.build_rows,
                             build_positions,
-                            &batch.schema,
-                            &probe_row,
+                            batch.schema.view(&probe_row),
                             probe_positions,
                             self.indeterminate_keys(),
                             self.evaluator.enum_labels(),
@@ -658,8 +656,7 @@ impl HashJoin<'_> {
                 {
                     if let Some(hash) = positional_key_hash(
                         direct.hasher(),
-                        &batch.schema,
-                        &row,
+                        batch.schema.view(&row),
                         positions,
                         self.indeterminate_keys(),
                         self.evaluator.enum_labels(),

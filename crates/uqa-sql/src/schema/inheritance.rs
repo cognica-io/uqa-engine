@@ -350,6 +350,7 @@ async fn check_parent_persistence_with_work(
 /// The bound of a new partition and the partition key of a new partitioned table, in `DefineRelation` order: `transformPartitionBound` and `check_new_partition_bound` before `ComputePartitionAttrs`.
 pub fn bind_create_table_partitioning(
     context: &InheritanceContext<'_>,
+    bindings: &dyn crate::semantics::conflict::InferenceBindingScope,
     table: &mut CreateTable,
 ) -> Result<(), SQLError> {
     if let (Some(parent), Some(bound)) = (
@@ -371,7 +372,7 @@ pub fn bind_create_table_partitioning(
             });
         }
         // The stored bound holds the values coerced to the parent's key types, as PostgreSQL stores Const nodes.
-        let bound = transform_partition_bound(&context.partitions, parent, bound)?;
+        let bound = transform_partition_bound(&context.partitions, bindings, parent, bound)?;
         validate_new_partition_bound(&context.partitions, parent, &table.name, &bound)?;
         table.hierarchy.partition_bound = Some(bound);
     }
