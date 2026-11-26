@@ -28,7 +28,8 @@ pub(crate) use production::bind_routine_parameter_references_from;
 pub(crate) use production::bind_rule_inputs_owned;
 pub(in crate::binding) use production::retain_input_metadata_owned;
 pub use production::{
-    bind_expression_plan_routines_for_storage_owned, resolve_variable_sites_owned,
+    bind_executable_expression, bind_expression_plan_routines_for_storage_owned,
+    resolve_variable_sites_owned, BoundExpression,
 };
 pub use production::{
     bind_routine_parameter_references_owned, parameter_input_types_with_control,
@@ -183,8 +184,6 @@ fn read_executable_inputs_inner(
     aliases: &dyn OidAliasInput,
     kind: InputAnalysisKind,
 ) -> Result<ExecutableInputAnalysis, SQLError> {
-    use super::statements::AnalyzedResult;
-
     let (declared, track_dependencies) = match kind {
         InputAnalysisKind::Host => (
             crate::params::bind_parameter_types(params, routines)?,
@@ -207,26 +206,8 @@ fn read_executable_inputs_inner(
         .retain_result_metadata(),
         schema_expression: None,
     };
-    let mut finish_parameters = false;
-    let result = match &*plan {
-        UnifiedPlan::Query(query) => AnalyzedResult::Schema(analysis.query(query, None)?),
-        UnifiedPlan::Command(command) => match command.as_ref() {
-            crate::plan::CommandPlan::CreateView { .. }
-            | crate::plan::CommandPlan::CreateTableAs { .. }
-            | crate::plan::CommandPlan::CreateMaterializedView { .. }
-            | crate::plan::CommandPlan::DeclareCursor { .. } => {
-                analysis.command(command)?;
-                AnalyzedResult::Command
-            }
-            _ if command.mutation_target().is_some() => {
-                finish_parameters = true;
-                analysis
-                    .command(command)?
-                    .map_or(AnalyzedResult::Command, AnalyzedResult::Schema)
-            }
-            _ => AnalyzedResult::Command,
-        },
-    };
+    let (result, finish_parameters) =
+        analysis.executable_result(crate::plan::PlanRef::from(&*plan))?;
     let constants = analysis.parameters.take_input_constants();
     if finish_parameters {
         analysis.parameters.finish()?;

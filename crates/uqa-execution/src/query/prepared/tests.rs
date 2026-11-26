@@ -133,13 +133,17 @@ impl PreparedArgumentScopes for Scopes {
         let aggregates = |_: &str| false;
         let cast_type = |_: &str| None;
         let routines = Types(self.domain.as_ref().map(StoredDomain::column_type));
-        let mut analyze_type = |argument: &ExpressionPlan| {
+        let mut bind_expression = |argument: &ExpressionPlan| {
             let label = match &argument.scalar {
                 uqa_sql::ScalarExpr::Func { name, .. } => name.as_str(),
                 _ => "expression",
             };
             self.record(&format!("analyze:{label}"));
-            Ok(Some(ColumnType::Integer))
+            let control = uqa_core::memory::ProductionControl::uncontrolled();
+            Ok(uqa_sql::binding::BoundExpression {
+                plan: argument.copy_for_rewrite(&control)?.finish(&control)?,
+                ty: Some(control.finish(ColumnType::Integer, control.empty_reservation())?),
+            })
         };
         operation(ArgumentBindingContext {
             validation: ArgumentValidationContext {
@@ -150,7 +154,7 @@ impl PreparedArgumentScopes for Scopes {
                 parameters,
             },
             assignment: self,
-            analyze_type: &mut analyze_type,
+            bind_expression: &mut bind_expression,
             evaluation: PhysicalEvalContext::new(None, parameters).with_function_hook(self),
         })
     }

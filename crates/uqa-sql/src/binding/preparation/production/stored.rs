@@ -20,6 +20,36 @@ enum ExpressionDestination<'a> {
     StoredSyntax(Option<&'a OriginalWorkspace>),
 }
 
+/// An executable expression and its analyzed SQL type retain their allocation owners through evaluation and assignment.
+pub struct BoundExpression {
+    pub plan: uqa_core::memory::Produced<crate::plan::ExpressionPlan>,
+    pub ty: Option<uqa_core::memory::Produced<crate::ColumnType>>,
+}
+
+/// Bind a standalone argument in its evaluation namespace. The returned plan carries the routines and input collations selected while deriving its type.
+pub fn bind_executable_expression(
+    routines: &dyn RoutineResolution,
+    expression: MutableExpressionPlan,
+    params: &[SQLParam],
+    binding: ControlledBindingContext<'_>,
+    input: &RowSchema,
+    control: &ProductionControl<'_>,
+) -> Result<BoundExpression, SQLError> {
+    let (plan, ty) = crate::catalog::work::inline(bind_expression_owned(
+        routines,
+        (expression, ExpressionDestination::Executable),
+        params,
+        binding,
+        input,
+        control,
+        &mut (),
+    ))?;
+    Ok(BoundExpression {
+        plan: plan.finish(control)?,
+        ty: ty.map(|ty| ty.into_produced(control)).transpose()?,
+    })
+}
+
 pub fn bind_expression_plan_routines_for_storage_owned(
     routines: &dyn RoutineResolution,
     expression: MutableExpressionPlan,
@@ -117,6 +147,10 @@ async fn bind_expression_owned<W: crate::catalog::work::Work + Send>(
     let observed = analysis
         .expression_with_work(&block.projections[0].expr, input, &block.subqueries, work)
         .await?;
+    analysis
+        .parameters
+        .collations
+        .validate_expression(&block.projections[0].expr)?;
     let constants = analysis.parameters.take_input_constants();
     match destination {
         ExpressionDestination::StoredSyntax(Some(workspace)) => {
