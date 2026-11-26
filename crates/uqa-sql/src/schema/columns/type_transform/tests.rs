@@ -175,6 +175,23 @@ fn columns() -> Vec<ColumnDef> {
     ]
 }
 
+#[test]
+fn original_columns_retain_declared_collations_for_every_qualifier() {
+    use crate::catalog::collations::C_COLLATION_OID;
+
+    let mut columns = columns();
+    columns[2].collation_oid = Some(C_COLLATION_OID);
+    let schema = original_row_schema("public.items", "items_alias", &columns).unwrap();
+    assert_eq!(schema.collation_of("t"), Some(C_COLLATION_OID));
+    for qualifier in ["items_alias", "items", "public.items"] {
+        assert_eq!(
+            schema.qualified_collation(qualifier, "t"),
+            Some(C_COLLATION_OID)
+        );
+        assert_eq!(schema.qualified_collation(qualifier, "a"), Some(0));
+    }
+}
+
 fn analyze(
     context: &SchemaBindingContext<'_, '_>,
     source: &str,

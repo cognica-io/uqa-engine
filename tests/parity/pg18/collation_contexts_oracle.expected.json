@@ -1,0 +1,16 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "provenance": {"source": "PostgreSQL 18.4, captured through libpq Simple Query", "scope": "SQL expression collations in their owning statement and relation contexts"},
+  "cases": [
+    {"sql":"SELECT version()","command_tags":["SELECT 1"],"error":null,"results":[{"columns":["version"],"type_oids":[25],"rows":[["PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"]]}],"notices":[]},
+    {"sql":"CREATE TABLE coll_alter (a text COLLATE \"C\", flag boolean)","command_tags":["CREATE TABLE"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}],"notices":[]},
+    {"sql":"INSERT INTO coll_alter VALUES (chr(192) || 'B', true)","command_tags":["INSERT 0 1"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}],"notices":[]},
+    {"sql":"ALTER TABLE coll_alter ALTER COLUMN flag TYPE text USING (a ILIKE chr(224) || 'b')::text, ALTER COLUMN a TYPE text USING lower(coll_alter.a)","command_tags":["ALTER TABLE"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}],"notices":[]},
+    {"sql":"SELECT ascii(a) AS byte,flag FROM coll_alter","command_tags":["SELECT 1"],"error":null,"results":[{"columns":["byte","flag"],"type_oids":[23,25],"rows":[["192","false"]]}],"notices":[]},
+    {"sql":"CREATE TABLE coll_alter_bad (a text COLLATE \"C\", b text COLLATE \"POSIX\")","command_tags":["CREATE TABLE"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}],"notices":[]},
+    {"sql":"INSERT INTO coll_alter_bad VALUES ('A','B')","command_tags":["INSERT 0 1"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}],"notices":[]},
+    {"sql":"ALTER TABLE coll_alter_bad ALTER COLUMN a TYPE text USING lower(a || b)","command_tags":[],"error":{"sqlstate":"42P22","message":"could not determine which collation to use for lower() function","detail":null,"hint":"Use the COLLATE clause to set the collation explicitly."},"results":[],"notices":[]},
+    {"sql":"SELECT a,b FROM coll_alter_bad","command_tags":["SELECT 1"],"error":null,"results":[{"columns":["a","b"],"type_oids":[25,25],"rows":[["A","B"]]}],"notices":[]},
+    {"sql":"SELECT ascii(a) AS persisted_point, flag FROM coll_alter","command_tags":["SELECT 1"],"error":null,"results":[{"columns":["persisted_point","flag"],"type_oids":[23,25],"rows":[["192","false"]]}],"notices":[],"reopen":true}
+  ]
+}
