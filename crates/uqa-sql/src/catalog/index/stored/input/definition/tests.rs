@@ -5,7 +5,7 @@
 //
 
 use super::*;
-use crate::ast::{ColumnType, Expr};
+use crate::ast::{ColumnType, Expr, IndexColumnOrder};
 use uqa_core::{catalog_identity::CatalogObjectIdentity, Value};
 
 mod compatibility;
@@ -87,10 +87,14 @@ fn stored_index_definition_preserves_positional_forms_and_column_order() {
     for text in [
         r"[null,[],[],[],[],[],null,false,true]",
         r#"{"column_order":[[true,false],[false,true]],"relationships":[null],"unique":false,"nulls_not_distinct":true}"#,
+        r#"{"column_order":[[true,false,950],[false,true,null],[true,true,951,true]],"unique":false,"nulls_not_distinct":false}"#,
         r#"{"catalog":[[[1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],40001],[2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"physical"],"unique":true,"nulls_not_distinct":false}"#,
     ] {
         assert!(compare(text));
     }
+    assert!(!compare(
+        r#"{"column_order":[[true]],"unique":false,"nulls_not_distinct":false}"#
+    ));
     let mut native = fixture();
     for sql in [
         "SELECT abs(-7)",

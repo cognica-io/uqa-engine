@@ -88,6 +88,32 @@ fn difference<T: Projected + DeserializeOwned + Serialize + std::fmt::Debug>(
 }
 
 #[test]
+fn stored_index_sort_flags_accept_legacy_and_collated_positional_fields() {
+    let mut statement =
+        serde_json::to_value(crate::compile("CREATE INDEX i ON t (a)").unwrap().remove(0)).unwrap();
+    let memory = MemoryBudget::new(1 << 20);
+    let token = CancellationToken::new();
+    for columns in [
+        json!([[true, false], [false, true, 950], [true, true, null, false]]),
+        json!([{"descending": false, "nulls_first": true, "collation_oid": 951, "overrides_collation": true}]),
+    ] {
+        statement["CreateIndex"]["column_order"] = columns;
+        let expected = serde_json::from_value::<Statement>(statement.clone()).unwrap();
+        let stored =
+            Statement::from_stored_json(&statement.to_string(), &memory, &token, &token).unwrap();
+        assert_eq!(
+            serde_json::to_value(&*stored).unwrap(),
+            serde_json::to_value(expected).unwrap()
+        );
+        compare::<Statement>(statement.clone());
+    }
+    statement["CreateIndex"]["column_order"] = json!([[true]]);
+    assert!(Statement::from_stored_json(&statement.to_string(), &memory, &token, &token).is_err());
+    compare::<Statement>(statement);
+    assert_eq!(memory.used(), 0);
+}
+
+#[test]
 fn projected_statement_input_preserves_every_statement_body_and_query_shape() {
     for sql in super::super::declarations::tests::STATEMENTS
         .iter()
