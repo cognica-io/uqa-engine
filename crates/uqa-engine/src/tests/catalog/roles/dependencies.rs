@@ -397,3 +397,65 @@ fn default_privilege_grantees_keep_the_original_role_after_a_wait(#[case] provid
     assert_eq!(privileges.rows[0]["original"], Value::Bool(true));
     assert_eq!(privileges.rows[0]["replacement"], Value::Bool(false));
 }
+
+#[rstest::rstest]
+#[case::native_sqlite(0)]
+#[case::sqlite_key_value(1)]
+#[case::redb(2)]
+fn drop_owned_holds_the_original_type_oid_through_rename_and_name_reuse(#[case] provider: usize) {
+    use uqa_execution::schema::namespaces::type_names::TYPE_CATALOG_CLASS_ID;
+    let (_directory, holder, worker) = sessions(provider);
+    sql(&holder, "CREATE ROLE dependent; CREATE DOMAIN original AS int; REVOKE ALL ON TYPE original FROM PUBLIC; GRANT USAGE ON TYPE original TO dependent");
+    let oid = holder.durable.domains.read()["public.original"].oid;
+    let lock = SharedCatalogLock::Object {
+        class_id: TYPE_CATALOG_CLASS_ID,
+        oid,
+    };
+    sql(&holder, "BEGIN");
+    holder
+        .acquire_shared_catalog(lock, RelationLockMode::AccessExclusive)
+        .unwrap()
+        .retain();
+    sql(&worker, "BEGIN");
+    let (worker, result) = after_wait(
+        &holder,
+        worker,
+        "DROP OWNED BY dependent",
+        lock,
+        "ALTER DOMAIN original RENAME TO moved; CREATE DOMAIN original AS int; COMMIT",
+    );
+    result.unwrap();
+    let replacement = holder.durable.domains.read()["public.original"].oid;
+    assert_ne!(oid, replacement);
+    for (target_oid, available) in [(oid, false), (replacement, true)] {
+        let key = holder
+            .row_locks
+            .shared_catalog_key(SharedCatalogLock::Object {
+                class_id: TYPE_CATALOG_CLASS_ID,
+                oid: target_oid,
+            });
+        assert_eq!(
+            holder
+                .row_locks
+                .try_acquire_relation(
+                    holder.session_id,
+                    key,
+                    RelationLockMode::AccessExclusive,
+                    0,
+                    &holder.runtime.cancellation
+                )
+                .unwrap(),
+            available
+        );
+    }
+    holder.row_locks.release_session(holder.session_id);
+    sql(&worker, "COMMIT");
+    assert_eq!(
+        sql(
+            &holder,
+            "SELECT has_type_privilege('dependent', 'moved', 'USAGE') AS allowed"
+        )
+        .rows[0]["allowed"],
+        Value::Bool(false)
+    );
+}

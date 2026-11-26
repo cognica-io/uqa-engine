@@ -7,7 +7,7 @@
 //! `GRANT | REVOKE USAGE ON TYPE | DOMAIN` through retained role state, in `ExecuteGrantStmt` order: the grantor, the target types, the grantees and the privilege names, then each type's checks and ACL change.
 
 use super::{
-    lifecycle::{current_definition, lock_and_resolve},
+    lifecycle::{current_definition, lock_and_resolve, lock_type_oid},
     TypeLifecycleContext,
 };
 use crate::catalog::security::roles::{
@@ -216,9 +216,7 @@ pub(crate) fn remove_role_grants(
     targets: &BTreeSet<RoleIdentity>,
 ) -> Result<(), SQLError> {
     context.writer.prepare_writer()?;
-    let object = current_definition(context, oid)?;
-    let name = object.identity().qualified_name();
-    let _bound = lock_and_resolve(context, &name)?;
+    lock_type_oid(context, oid)?.retain();
     let object = current_definition(context, oid)?;
     let mut acl = object.usage_acl().map(<[_]>::to_vec);
     uqa_sql::catalog::security::drop_owned::object(object.owner(), &mut acl, targets)?;

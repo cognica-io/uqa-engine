@@ -20,7 +20,8 @@ use uqa_storage::{catalog::relation_acl::RelationAclTuple, StorageBackendResult}
 
 pub(super) struct RelationPrivilegeUpdate {
     relation: RelationIdentity,
-    column: Option<String>,
+    pub(super) column: Option<String>,
+    persistence: RelationPersistence,
     entry: RelationAclTuple,
 }
 
@@ -29,6 +30,9 @@ impl RelationPrivilegeUpdate {
         &self,
         acls: &dyn super::context::TableGrantPersistence,
     ) -> StorageBackendResult<()> {
+        if self.persistence == RelationPersistence::Temporary {
+            return Ok(());
+        }
         acls.persist_relation_acl(&self.relation, self.column.as_deref(), &self.entry)
     }
 }
@@ -71,13 +75,12 @@ pub(super) fn prepare(
             entry
                 .apply(column.as_deref(), &mut row)
                 .map_err(|error| SQLError::Internal(error.to_string()))?;
-            if persistence != RelationPersistence::Temporary {
-                updates.push(RelationPrivilegeUpdate {
-                    relation: relation.clone(),
-                    column,
-                    entry,
-                });
-            }
+            updates.push(RelationPrivilegeUpdate {
+                relation: relation.clone(),
+                column,
+                persistence,
+                entry,
+            });
         }
         *after = BoundTableSecurity::from_row(row);
         Ok::<_, SQLError>(())
