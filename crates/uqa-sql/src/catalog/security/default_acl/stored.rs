@@ -143,7 +143,7 @@ impl<'a> Input<'a, '_> {
             |input, pos, token| {
                 match pos {
                     0 if token != JsonToken::Null => {
-                        role = Some(input.stored_role_identity(token)?)
+                        role = Some(input.stored_role_identity(token)?);
                     }
                     0 => (),
                     1 => grantor = input.stored_role_identity(token)?,

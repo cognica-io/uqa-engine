@@ -6,16 +6,17 @@
 
 //! Change default ACL tuples in the same definition transaction as their shared and namespace dependencies.
 use super::roles::locking::{RoleBinding, RoleLockContext};
-use crate::row_locks::{shared_objects::SharedCatalogLock, RelationLockMode};
+use crate::row_locks::RelationLockMode;
+use crate::schema::namespaces::locking as namespace_locking;
 use std::collections::{BTreeMap, BTreeSet};
-use uqa_core::catalog_role::RoleIdentity;
+use uqa_core::{catalog_role::RoleIdentity, catalog_schema::SchemaTupleIdentity};
 use uqa_sql::{
     ast::{AclRoleSpecification, AlterDefaultPrivilegesStmt},
     catalog::{
-        dependencies::{DEFAULT_ACL_CLASS, NAMESPACE_CLASS},
+        dependencies::DEFAULT_ACL_CLASS,
         roles::{resolve_role_specification, role_inherits, RoleReference},
         security::{
-            default_acl::{DefaultAclKey, DefaultAclRow, DefaultAcls},
+            default_acl::{DefaultAclKey, DefaultAclRow, DefaultAcls, DefaultRights},
             schema_inquiry::SchemaPrivilegeInquiry,
         },
     },
@@ -80,16 +81,17 @@ impl DefaultAclContext<'_> {
         }
     }
 
-    fn namespace(&self, name: &str) -> Result<u32, SQLError> {
-        let security = self
-            .schemas
+    fn namespace(&self, name: &str) -> Result<Option<(SchemaTupleIdentity, u32)>, SQLError> {
+        self.schemas
             .schema_security_for_privilege(name)
-            .ok_or_else(|| SQLError::Routine {
-                sqlstate: "3F000".into(),
-                message: format!("schema \"{name}\" does not exist"),
-            })?;
-        u32::try_from(security.namespace_oid(name))
-            .map_err(|_| SQLError::Internal("invalid namespace OID".into()))
+            .map(|security| {
+                let tuple = namespace_locking::tuple(&security)?;
+                Ok((
+                    tuple,
+                    u32::try_from(tuple.oid).expect("validated namespace OID"),
+                ))
+            })
+            .transpose()
     }
 
     pub fn alter(&self, statement: &AlterDefaultPrivilegesStmt) -> Result<(), SQLError> {
@@ -116,13 +118,15 @@ impl DefaultAclContext<'_> {
                 object: statement.object,
             };
             for name in &statement.schemas {
-                let oid = self.namespace(name)?;
+                let (_, oid) = self
+                    .namespace(name)?
+                    .ok_or_else(|| namespace_locking::missing(name))?;
                 let key = DefaultAclKey {
                     namespace: oid,
                     ..key
                 };
                 key.object.check_namespace(oid)?;
-                namespaces.insert(oid, name);
+                namespaces.insert(oid, (name, oid));
                 targets.push(key);
             }
             if statement.schemas.is_empty() {
@@ -140,22 +144,18 @@ impl DefaultAclContext<'_> {
         for (role, mode) in locks.into_values() {
             self.roles.lock(role, mode)?;
         }
-        for (&oid, &name) in &namespaces {
-            let guard = self.roles.session.acquire_shared_catalog(
-                SharedCatalogLock::Object {
-                    class_id: NAMESPACE_CLASS,
-                    oid,
-                },
+        for (name, oid) in namespaces.values_mut() {
+            *oid = namespace_locking::bind_namespace_lifetime(
+                self.roles.session,
                 RelationLockMode::AccessShare,
-            )?;
-            self.roles.session.refresh_shared_catalog()?;
-            if self.namespace(name)? != oid {
-                return Err(SQLError::Routine {
-                    sqlstate: "40001".into(),
-                    message: "schema was concurrently replaced".into(),
-                });
+                || self.namespace(name),
+            )?
+            .ok_or_else(|| namespace_locking::missing(name))?;
+        }
+        for key in &mut targets {
+            if let Some((_, oid)) = namespaces.get(&key.namespace) {
+                key.namespace = *oid;
             }
-            guard.retain();
         }
         self.publication.prepare_default_acl_writer()?;
         for owner in &owners {
@@ -165,11 +165,21 @@ impl DefaultAclContext<'_> {
             .iter()
             .map(|role| role.as_ref().map(RoleBinding::identity))
             .collect();
+        self.apply(targets, statement, rights, &grantees)
+    }
+
+    fn apply(
+        &self,
+        targets: Vec<DefaultAclKey>,
+        statement: &AlterDefaultPrivilegesStmt,
+        rights: DefaultRights,
+        grantees: &[Option<RoleIdentity>],
+    ) -> Result<(), SQLError> {
         let mut next = self.publication.default_acls();
         let mut changed = BTreeSet::new();
         for key in targets {
             let old = next.get(&key);
-            let acl = key.change(old, statement, rights, &grantees)?;
+            let acl = key.change(old, statement, rights, grantees)?;
             if old.map(|row| &row.acl) == acl.as_ref() {
                 continue;
             }

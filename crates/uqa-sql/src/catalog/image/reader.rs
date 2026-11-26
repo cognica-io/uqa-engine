@@ -266,6 +266,26 @@ impl<'a> CatalogImageReader<'a> {
         }
         Ok(false)
     }
+    fn database_security(&mut self, database: &'a BoundDatabaseSecurity) {
+        let BoundDatabaseSecurity { role_owner, acl } = database;
+        self.fields.identity(*role_owner);
+        self.fields.flag(acl.is_some());
+        if let Some(acl) = acl {
+            self.fields.count(acl.len());
+            self.acl = Acl::Database(acl.iter());
+        }
+    }
+
+    fn default_acl(&mut self, key: &DefaultAclKey, row: &'a DefaultAclRow) {
+        self.fields.identity(key.owner);
+        self.fields.scalar(key.namespace.to_le_bytes());
+        self.fields
+            .scalar([u8::try_from(key.object.code()).expect("ASCII catalog class")]);
+        self.fields.scalar(row.oid.to_le_bytes());
+        self.fields.count(row.acl.len());
+        self.acl = Acl::Default(row.acl.iter());
+    }
+
     fn next_record(&mut self) -> Result<bool, SQLError> {
         self.fields = Fields::new();
         if self.next_child()? {
@@ -318,25 +338,13 @@ impl<'a> CatalogImageReader<'a> {
                 let Some(database) = entry.take() else {
                     return Ok(false);
                 };
-                let BoundDatabaseSecurity { role_owner, acl } = database;
-                self.fields.identity(*role_owner);
-                self.fields.flag(acl.is_some());
-                if let Some(acl) = acl {
-                    self.fields.count(acl.len());
-                    self.acl = Acl::Database(acl.iter());
-                }
+                self.database_security(database);
             }
             Entries::DefaultAcls(entries) => {
                 let Some((key, row)) = entries.next() else {
                     return Ok(false);
                 };
-                self.fields.identity(key.owner);
-                self.fields.scalar(key.namespace.to_le_bytes());
-                self.fields
-                    .scalar([u8::try_from(key.object.code()).expect("ASCII catalog class")]);
-                self.fields.scalar(row.oid.to_le_bytes());
-                self.fields.count(row.acl.len());
-                self.acl = Acl::Default(row.acl.iter());
+                self.default_acl(key, row);
             }
             Entries::BuiltinRoutines(entries) => {
                 let Some((oid, value)) = entries.next() else {

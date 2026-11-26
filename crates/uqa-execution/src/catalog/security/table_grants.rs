@@ -144,7 +144,7 @@ impl TableGrantContext<'_> {
             .collect::<Vec<_>>();
         if !sequence_names.is_empty() {
             let (sequence_privileges, has_inapplicable) =
-                table_sequence_privileges(&statement.privileges);
+                table_sequence_privileges(&statement.privileges)?;
             if has_inapplicable {
                 for target in targets.iter().filter(|target| target.kind == "sequence") {
                     self.notices.notice(

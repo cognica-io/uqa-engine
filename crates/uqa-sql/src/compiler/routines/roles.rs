@@ -235,7 +235,7 @@ fn compile_grant_table_privileges(
                 "GRANT/REVOKE contains a malformed privilege".into(),
             ));
         };
-        let privilege_name = match privilege.priv_name.to_ascii_lowercase().as_str() {
+        let privilege_name = match privilege.priv_name.as_str() {
             "select" => TablePrivilege::Select,
             "insert" => TablePrivilege::Insert,
             "update" => TablePrivilege::Update,
@@ -245,7 +245,11 @@ fn compile_grant_table_privileges(
             "trigger" => TablePrivilege::Trigger,
             "maintain" => TablePrivilege::Maintain,
             "usage" => TablePrivilege::Usage,
-            _ => TablePrivilege::Unsupported(privilege.priv_name.to_ascii_uppercase()),
+            "temp" | "temporary" => TablePrivilege::Unsupported("TEMP".into()),
+            name @ ("execute" | "create" | "connect" | "set" | "alter system") => {
+                TablePrivilege::Unsupported(name.to_ascii_uppercase())
+            }
+            name => TablePrivilege::Unrecognized(name.to_owned()),
         };
         let columns = privilege
             .cols

@@ -19,7 +19,7 @@ use crate::catalog::roles::identity::RoleSubject;
 use crate::catalog::roles::{RoleDefinitions, RoleMemberships};
 use crate::catalog::stored_view::StoredView;
 use crate::{
-    ast::{GrantTableStmt, SequencePrivilege, TablePrivilege, TableRevokeBehavior},
+    ast::{GrantTableStmt, SequencePrivilege, TableRevokeBehavior},
     SQLError,
 };
 use std::collections::BTreeSet;
@@ -487,26 +487,26 @@ pub fn validate_table_acl_roles(
 
 pub fn table_sequence_privileges(
     privileges: &[crate::ast::TablePrivilegeSpec],
-) -> (Vec<SequencePrivilege>, bool) {
+) -> Result<(Vec<SequencePrivilege>, bool), SQLError> {
     if privileges.is_empty() {
-        return (
+        return Ok((
             vec![
                 SequencePrivilege::Select,
                 SequencePrivilege::Update,
                 SequencePrivilege::Usage,
             ],
             false,
-        );
+        ));
     }
     let mut mapped = Vec::new();
     let mut inapplicable = false;
     for spec in privileges {
         let privilege = if spec.columns.is_empty() {
-            match &spec.privilege {
-                TablePrivilege::Select => Some(SequencePrivilege::Select),
-                TablePrivilege::Update => Some(SequencePrivilege::Update),
-                TablePrivilege::Usage => Some(SequencePrivilege::Usage),
-                _ => {
+            match super::table::relation_privilege(spec)? {
+                Some(TableAclPrivilege::Select) => Some(SequencePrivilege::Select),
+                Some(TableAclPrivilege::Update) => Some(SequencePrivilege::Update),
+                None => Some(SequencePrivilege::Usage),
+                Some(_) => {
                     inapplicable = true;
                     None
                 }
@@ -520,7 +520,7 @@ pub fn table_sequence_privileges(
             }
         }
     }
-    (mapped, inapplicable)
+    Ok((mapped, inapplicable))
 }
 
 pub fn view_privilege_updates(

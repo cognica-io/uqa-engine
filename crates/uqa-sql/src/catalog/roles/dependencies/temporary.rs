@@ -60,7 +60,7 @@ pub fn role_dependencies(
             }
         }
     }
-    for (key, row) in catalog.temporary_default_acls().iter() {
+    for (key, row) in &catalog.temporary_default_acls() {
         for role in std::iter::once(key.owner).chain(row.acl.iter().filter_map(|entry| entry.role))
         {
             let name = crate::catalog::roles::identity::RoleSubject::role_name(&role, roles)

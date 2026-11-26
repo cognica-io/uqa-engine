@@ -251,7 +251,7 @@ pub struct DropOwnedStmt {
     pub cascade: bool,
 }
 
-/// Object classes supported by the PostgreSQL default ACL catalog.
+/// Object classes supported by the `PostgreSQL` default ACL catalog.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum DefaultAclObject {
     Table,

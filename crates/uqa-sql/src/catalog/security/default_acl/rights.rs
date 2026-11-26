@@ -5,14 +5,14 @@
 //
 
 use super::{invalid_grant, DefaultAclObject, SQLError};
-use crate::ast::TablePrivilegeSpec;
+use crate::ast::{TablePrivilege, TablePrivilegeSpec};
 use serde::{Deserialize, Serialize};
 use uqa_core::{
     catalog_acl::TablePrivileges, catalog_schema::SchemaPrivileges,
     catalog_sequence::SequencePrivileges,
 };
 
-/// Privilege and grant-option fields use PostgreSQL's acl.h bit positions.
+/// Privilege and grant-option fields use the bit positions in `PostgreSQL`'s `acl.h`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct DefaultRights(pub u16);
@@ -40,7 +40,7 @@ const RIGHTS: &[(u16, &str, char)] = &[
     (EXECUTE, "EXECUTE", 'X'),
     (USAGE, "USAGE", 'U'),
     (CREATE, "CREATE", 'C'),
-    (1 << 10, "TEMPORARY", 'T'),
+    (1 << 10, "TEMP", 'T'),
     (1 << 11, "CONNECT", 'c'),
     (1 << 12, "SET", 's'),
     (1 << 13, "ALTER SYSTEM", 'A'),
@@ -143,17 +143,15 @@ impl DefaultAclObject {
                     "default privileges cannot be set for columns",
                 ));
             }
+            if let TablePrivilege::Unrecognized(name) = &item.privilege {
+                return Err(super::super::table::unrecognized_privilege(name));
+            }
             let name = super::super::table::table_privilege_name(&item.privilege);
-            let name = if name == "TEMP" { "TEMPORARY" } else { name };
             let &(bit, _, _) = RIGHTS
                 .iter()
                 .find(|(_, privilege, _)| *privilege == name)
-                .ok_or_else(|| SQLError::Routine {
-                    sqlstate: "42601".into(),
-                    message: format!(
-                        "unrecognized privilege type \"{}\"",
-                        name.to_ascii_lowercase()
-                    ),
+                .ok_or_else(|| {
+                    super::super::table::unrecognized_privilege(&name.to_ascii_lowercase())
                 })?;
             if !self.rights().has(bit) {
                 return Err(invalid_grant(format!(

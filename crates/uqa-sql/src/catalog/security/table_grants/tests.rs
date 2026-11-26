@@ -5,7 +5,7 @@
 //
 
 use super::*;
-use crate::ast::{Statement, TablePrivilegeSpec};
+use crate::ast::{Statement, TablePrivilege, TablePrivilegeSpec};
 use crate::catalog::roles::RoleDefinition;
 use crate::catalog::roles::{RoleDefinitions, RoleMemberships};
 use crate::catalog::{
@@ -386,7 +386,7 @@ fn sequence_targets_reject_column_privileges_before_acl_application() {
 #[test]
 fn table_syntax_sequence_privileges_keep_input_order_and_mark_inapplicable_permissions() {
     assert_eq!(
-        table_sequence_privileges(&[]),
+        table_sequence_privileges(&[]).unwrap(),
         (
             vec![
                 SequencePrivilege::Select,
@@ -415,7 +415,7 @@ fn table_syntax_sequence_privileges_keep_input_order_and_mark_inapplicable_permi
         },
     ];
     assert_eq!(
-        table_sequence_privileges(&specs),
+        table_sequence_privileges(&specs).unwrap(),
         (
             vec![SequencePrivilege::Update, SequencePrivilege::Select],
             true
