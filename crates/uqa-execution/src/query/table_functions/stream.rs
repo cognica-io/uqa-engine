@@ -180,63 +180,8 @@ fn build_table_function_value_row_stream_with_row(
     call: TableFunctionCall<'_>,
     row: Option<&crate::OwnedPhysicalRow>,
 ) -> Result<TableFunctionRows, SQLError> {
-    if let Some(lower) = streaming_builtin(&call) {
-        let call_args = evaluate_arguments(context, &call, row)?;
-        let empty = crate::RowSchema::default();
-        let selected = if call.binding.is_none() {
-            uqa_sql::semantics::resolve_runtime_table_function_binding(
-                context.routines.lookup,
-                call.name,
-                call.args,
-                &call_args,
-                row.map_or(&empty, |row| &row.schema),
-                context.params,
-                context.resolver,
-            )?
-        } else {
-            None
-        };
-        let binding = selected.as_ref().or(call.binding);
-        if let Some(binding) = binding.filter(|binding| !binding.builtin) {
-            let record =
-                (!call.column_types.is_empty()).then_some((call.column_aliases, call.column_types));
-            let result = crate::routines::invocation::call_bound_user_table_function(
-                &context.routines,
-                binding,
-                &call_args,
-                record,
-            )
-            .ok_or_else(|| SQLError::Internal("selected table function disappeared".into()))??;
-            return super::registered_table_function_rows(
-                call.name,
-                result,
-                call.alias,
-                call.column_aliases,
-            );
-        }
-        if let Some(binding) = selected.as_ref() {
-            context.eval_hook.require_builtin_execute(binding)?;
-        }
-        let call = TableFunctionCall { binding, ..call };
-        let columns = builtin_value_columns(&lower, &call)?;
-        let evaluated = if uqa_sql::semantics::is_tsvector_unnest(binding) {
-            call_args.into_iter().map(|(_, value)| value).collect()
-        } else {
-            builtin_arguments(&lower, call_args)?
-        };
-        // The regular-expression functions read the call's input collation, `PostgreSQL`'s `inputcollid`.
-        let collation = uqa_sql::ast::FunctionBinding::selected_input_collation(binding);
-        let rows = if lower == "unnest" {
-            super::unnest::rows(
-                context,
-                &call,
-                row.map_or(&empty, |row| &row.schema),
-                evaluated,
-            )?
-        } else {
-            builtin_value_rows(context, &lower, evaluated, collation, &columns)?
-        };
-        return Ok(TableFunctionRows::new(columns, rows));
+    if let Some(name) = streaming_builtin(&call) {
+        return stream_catalog_overload(context, call, row, &name);
     }
     let TableFunctionCall {
         name,
@@ -287,6 +232,70 @@ fn build_table_function_value_row_stream_with_row(
     }
 
     build_table_function_rows_with_row(context, call, row)
+}
+
+fn stream_catalog_overload(
+    context: &TableFunctionContext<'_>,
+    call: TableFunctionCall<'_>,
+    row: Option<&crate::OwnedPhysicalRow>,
+    name: &str,
+) -> Result<TableFunctionRows, SQLError> {
+    let call_args = evaluate_arguments(context, &call, row)?;
+    let empty = crate::RowSchema::default();
+    let selected = if call.binding.is_none() {
+        uqa_sql::semantics::resolve_runtime_table_function_binding(
+            context.routines.lookup,
+            call.name,
+            call.args,
+            &call_args,
+            row.map_or(&empty, |row| &row.schema),
+            context.params,
+            context.resolver,
+        )?
+    } else {
+        None
+    };
+    let binding = selected.as_ref().or(call.binding);
+    if let Some(binding) = binding.filter(|binding| !binding.builtin) {
+        let record =
+            (!call.column_types.is_empty()).then_some((call.column_aliases, call.column_types));
+        let result = crate::routines::invocation::call_bound_user_table_function(
+            &context.routines,
+            binding,
+            &call_args,
+            record,
+        )
+        .ok_or_else(|| SQLError::Internal("selected table function disappeared".into()))??;
+        return super::registered_table_function_rows(
+            call.name,
+            result,
+            call.alias,
+            call.column_aliases,
+        );
+    }
+    if let Some(binding) = selected.as_ref() {
+        context.eval_hook.require_builtin_execute(binding)?;
+    }
+    let call = TableFunctionCall { binding, ..call };
+    let columns = builtin_value_columns(name, &call)?;
+    let evaluated = if uqa_sql::semantics::is_tsvector_unnest(binding) {
+        call_args.into_iter().map(|(_, value)| value).collect()
+    } else {
+        builtin_arguments(name, call_args)?
+    };
+    // The regular-expression functions read the call's input collation, `PostgreSQL`'s `inputcollid`.
+    let collation = uqa_sql::ast::FunctionBinding::selected_input_collation(binding);
+    let rows = if name == "unnest" {
+        super::unnest::rows(
+            context,
+            &call,
+            row.map_or(&empty, |row| &row.schema),
+            evaluated,
+        )?
+    } else {
+        builtin_value_rows(context, name, evaluated, collation, &columns)?
+    };
+    Ok(TableFunctionRows::new(columns, rows))
 }
 
 /// Evaluate arguments once in their calling scope before choosing a dynamically typed overload.
