@@ -41,6 +41,9 @@ pub(in crate::optimizer::scalar) fn fold(
     {
         return Ok(expression);
     }
+    if let Some(domain) = super::domains::fold(&expression, config)? {
+        return retained_result(domain.value, Some(domain.ty), true, config);
+    }
     if let ScalarExpr::Cast { expr, ty, .. } = &*expression {
         if literal_value_with_control(expr, control)?
             .as_deref()

@@ -142,7 +142,16 @@ fn finish_index_keys(
         super::options::index_access_method(statement)?.as_str(),
         "" | "btree"
     );
-    for (key, analyzed) in statement.columns.iter_mut().zip(expressions) {
+    statement.column_order.resize(
+        statement.columns.len(),
+        crate::ast::IndexColumnOrder::default(),
+    );
+    for (position, (key, analyzed)) in statement.columns.iter_mut().zip(expressions).enumerate() {
+        let order = &mut statement.column_order[position];
+        let written = statement
+            .key_collations
+            .get(position)
+            .and_then(Option::as_deref);
         match key {
             IndexKey::Column(name) => {
                 let Some(column) = definitions.iter().find(|column| column.name == *name) else {
@@ -152,13 +161,27 @@ fn finish_index_keys(
                     }
                     return Err(SQLError::UnknownColumn(name.clone()));
                 };
+                let natural = column.collation_oid.unwrap_or_else(|| {
+                    u32::try_from(crate::catalog::type_metadata::pg_type_collation_oid(
+                        &column.ty,
+                    ))
+                    .expect("type collation OID")
+                });
+                let selected = super::index_key_collation(
+                    context.catalog,
+                    Some(&column.ty),
+                    natural,
+                    written,
+                    order.collation_oid,
+                )?;
+                order.collation_oid = (selected != natural).then_some(selected);
                 if btree {
                     require_default_btree_operator_class(&column.ty)?;
                 }
                 types.push(column.ty.clone());
             }
             IndexKey::Expression(expression) => {
-                super::validate_index_expression_immutability(
+                let natural = super::plan_index_expression(
                     context.catalog,
                     &statement.table,
                     expression,
@@ -168,6 +191,14 @@ fn finish_index_keys(
                     .as_ref()
                     .expect("analyzed index expression")
                     .clone();
+                order.collation_oid = Some(super::index_key_collation(
+                    context.catalog,
+                    Some(&ty),
+                    natural,
+                    written,
+                    order.collation_oid,
+                )?);
+                while crate::catalog::collations::expression::discard_ast_clause(expression)? {}
                 if btree {
                     require_default_btree_operator_class(&ty)?;
                 }
@@ -294,7 +325,7 @@ pub fn prepare_index_definition(
     }
     reject_unsupported_included_columns(c)?;
     if let Some(predicate) = c.predicate.as_deref_mut() {
-        super::validate_index_expression_immutability(catalog, &c.table, predicate, true)?;
+        super::plan_index_expression(catalog, &c.table, predicate, true)?;
     }
     super::options::validate_index_options(c)?;
     let key_types = finish_index_keys(&context, c, &expressions)?;

@@ -35,12 +35,7 @@ impl CaseMapping {
     /// Select the provider of `collation`, which is `PostgreSQL`'s `inputcollid`. An indeterminate collation (zero) reports the function-specific `42P22` diagnostic that `subject` names, such as `lower() function` or `ILIKE`.
     pub(in crate::expr) fn select(collation: u32, subject: &str) -> Result<Self, SQLError> {
         if collation == 0 {
-            return Err(SQLError::Diagnostic {
-                sqlstate: "42P22".into(),
-                message: format!("could not determine which collation to use for {subject}"),
-                detail: None,
-                hint: Some("Use the COLLATE clause to set the collation explicitly.".into()),
-            });
+            return Err(crate::catalog::collations::indeterminate_error(subject));
         }
         let ctype = builtin_collation_ctype(collation).ok_or_else(|| {
             SQLError::Internal(format!("cache lookup failed for collation {collation}"))

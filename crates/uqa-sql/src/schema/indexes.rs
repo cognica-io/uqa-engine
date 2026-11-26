@@ -18,7 +18,8 @@ pub fn prepare_index_expression(
     expression: &mut Expr,
 ) -> Result<ColumnType, SQLError> {
     let ty = bind_index_expression(engine, binding, table, expression, false)?;
-    validate_index_expression_immutability(engine, table, expression, false)?;
+    let natural = plan_index_expression(engine, table, expression, false)?;
+    index_key_collation(engine, ty.as_ref(), natural, None, None)?;
     if let Some(ty) = ty {
         return Ok(ty);
     }
@@ -37,7 +38,7 @@ pub fn prepare_index_predicate(
     expression: &mut Expr,
 ) -> Result<(), SQLError> {
     bind_index_predicate(engine, binding, table, expression)?;
-    validate_index_expression_immutability(engine, table, expression, true)
+    plan_index_expression(engine, table, expression, true).map(|_| ())
 }
 
 pub(super) fn bind_index_predicate(
@@ -133,12 +134,12 @@ pub(super) fn bind_index_expression(
     Ok(ty)
 }
 
-pub(super) fn validate_index_expression_immutability(
+pub(super) fn plan_index_expression(
     engine: &dyn SchemaExpressionCatalog,
     table: &str,
     expression: &mut Expr,
     predicate: bool,
-) -> Result<(), SQLError> {
+) -> Result<u32, SQLError> {
     let columns = engine
         .schema_expression_columns(table)?
         .ok_or_else(|| SQLError::UnknownTable(table.into()))?;
@@ -153,7 +154,29 @@ pub(super) fn validate_index_expression_immutability(
         ));
     }
     *expression = planned.expression;
-    Ok(())
+    Ok(planned.collation)
+}
+
+/// A key's explicit COLLATE names the index ordering. It does not change the input collation of a call inside the key expression.
+fn index_key_collation(
+    catalog: &dyn SchemaExpressionCatalog,
+    ty: Option<&ColumnType>,
+    natural: u32,
+    written: Option<&str>,
+    retained: Option<u32>,
+) -> Result<u32, SQLError> {
+    if let Some(name) = written {
+        let select = crate::catalog::collations::expression::select;
+        let oid = select(name, None, None, Some(catalog))?;
+        return select(name, Some(oid), ty, Some(catalog));
+    }
+    let oid = retained.unwrap_or(natural);
+    if oid == 0 && ty.is_some_and(crate::schema::composites::type_is_collatable) {
+        return Err(crate::catalog::collations::indeterminate_error(
+            "index expression",
+        ));
+    }
+    Ok(oid)
 }
 
 fn index_error(sqlstate: &str, message: String) -> SQLError {

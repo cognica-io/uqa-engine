@@ -38,6 +38,7 @@ syntax_struct!(crate::ast::CreateForeignTable {
 });
 
 syntax_struct!(crate::ast::CreateIndex {
+    key_collations,
     included_columns,
     column_order,
     predicate,
@@ -131,6 +132,7 @@ syntax_struct!(crate::ast::GeneratedColumn {
 syntax_enum!(crate::ast::GeneratedColumnKind { Virtual, Stored });
 
 syntax_struct!(crate::ast::IndexColumnOrder {
+    collation_oid,
     descending,
     nulls_first
 });

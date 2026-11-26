@@ -614,6 +614,7 @@ pub(in crate::compiler) fn compile_create_index(
     let access_method = stmt.access_method.clone();
     let mut columns = Vec::new();
     let mut column_order = Vec::new();
+    let mut key_collations = Vec::new();
     for elt in &stmt.index_params {
         let inner = elt
             .node
@@ -625,6 +626,10 @@ pub(in crate::compiler) fn compile_create_index(
             )));
         };
         let key = compile_index_key(idx)?;
+        if !idx.collation.is_empty() {
+            key_collations.resize(columns.len(), None);
+            key_collations.push(Some(super::compile_collation_name(&idx.collation)?));
+        }
         let descending = idx.ordering() == pg_query::protobuf::SortByDir::SortbyDesc;
         let nulls_first = match idx.nulls_ordering() {
             pg_query::protobuf::SortByNulls::SortbyNullsFirst => true,
@@ -632,6 +637,7 @@ pub(in crate::compiler) fn compile_create_index(
             _ => descending,
         };
         column_order.push(crate::ast::IndexColumnOrder {
+            collation_oid: None,
             descending,
             nulls_first,
         });
@@ -684,6 +690,7 @@ pub(in crate::compiler) fn compile_create_index(
         })
         .collect::<Result<Vec<_>>>()?;
     Ok(CreateIndex {
+        key_collations,
         included_columns,
         column_order,
         predicate: stmt

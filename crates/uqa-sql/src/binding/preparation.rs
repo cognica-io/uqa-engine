@@ -317,6 +317,7 @@ fn analyze_schema_expression(
             kind,
         }),
     )
+    .map(|(ty, _)| ty)
 }
 
 /// Retain input literals in typed stored syntax before routine binding and publication.
@@ -325,7 +326,7 @@ pub(crate) fn analyze_stored_expression_inputs(
     expression: &mut crate::plan::ExpressionPlan,
     binding: &BindingContext<'_>,
     input: &RowSchema,
-) -> Result<Option<ColumnType>, SQLError> {
+) -> Result<(Option<ColumnType>, u32), SQLError> {
     analyze_expression_inputs(catalog, catalog, expression, input, binding, None)
 }
 
@@ -348,6 +349,7 @@ pub(crate) fn analyze_default_inputs(
             kind: SchemaExpressionKind::Default,
         }),
     )
+    .map(|(ty, _)| ty)
 }
 
 fn analyze_expression_inputs<'a>(
@@ -357,7 +359,7 @@ fn analyze_expression_inputs<'a>(
     input: &RowSchema,
     binding: &BindingContext<'_>,
     schema_expression: Option<SchemaExpressionContext<'a>>,
-) -> Result<Option<ColumnType>, SQLError> {
+) -> Result<(Option<ColumnType>, u32), SQLError> {
     let mut analysis = Preparation {
         bound_condition_queries: None,
         routines,
@@ -370,9 +372,8 @@ fn analyze_expression_inputs<'a>(
         ),
         schema_expression,
     };
-    let ty = analysis
-        .expression(&expression.scalar, input, &expression.subqueries)?
-        .ty;
+    let result = analysis.expression(&expression.scalar, input, &expression.subqueries)?;
+    let collation = u32::try_from(result.derivation.oid()).expect("type collation OID");
     analysis
         .parameters
         .collations
@@ -386,7 +387,10 @@ fn analyze_expression_inputs<'a>(
             routines,
             &[],
         )?;
-    Ok(ty.map(ownership::AnalysisType::into_ordinary))
+    Ok((
+        result.ty.map(ownership::AnalysisType::into_ordinary),
+        collation,
+    ))
 }
 
 fn retain_compute_kinds(routines: &dyn RoutineResolution, plan: &mut UnifiedPlan) {

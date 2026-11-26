@@ -30,10 +30,12 @@ fn fixture() -> IndexDefinition {
             IndexColumnOrder {
                 descending: false,
                 nulls_first: true,
+                collation_oid: Some(950),
             },
             IndexColumnOrder {
                 descending: true,
                 nulls_first: false,
+                collation_oid: None,
             },
         ],
         key_names: vec!["key".into(), "expression".into()],

@@ -124,12 +124,17 @@ pub struct GeneratedColumn {
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IndexColumnOrder {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub collation_oid: Option<u32>,
     pub descending: bool,
     pub nulls_first: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateIndex {
+    /// Explicit names attached to index keys, resolved against the definition namespace.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub key_collations: Vec<Option<String>>,
     #[serde(default)]
     pub included_columns: Vec<String>,
     #[serde(default)]

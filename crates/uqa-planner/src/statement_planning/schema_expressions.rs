@@ -132,6 +132,7 @@ pub fn plan_schema_expression(
     Ok(PlannedSchemaExpression {
         expression: analyzed.expression,
         ty: analyzed.ty,
+        collation: analyzed.collation,
         immutable,
         constant,
     })

@@ -38,6 +38,11 @@ pub struct StoredDomain<Owner = RoleIdentity> {
 }
 
 impl<Owner> StoredDomain<Owner> {
+    /// Even a NOT VALID check applies to each new coercion to this domain.
+    pub fn has_constraints(&self) -> bool {
+        self.definition.not_null.is_some() || !self.definition.checks.is_empty()
+    }
+
     pub fn column_type(&self) -> ColumnType {
         ColumnType::Domain {
             schema: self.identity.schema.clone(),

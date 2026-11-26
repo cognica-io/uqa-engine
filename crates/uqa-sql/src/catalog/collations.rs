@@ -15,6 +15,16 @@ mod selection;
 pub use ctype::BuiltinCollationCtype;
 pub use selection::CollationSelection;
 
+/// PostgreSQL reports the operation that first needs a determinate collation.
+pub(crate) fn indeterminate_error(operation: &str) -> crate::SQLError {
+    crate::SQLError::Diagnostic {
+        sqlstate: "42P22".into(),
+        message: format!("could not determine which collation to use for {operation}"),
+        detail: None,
+        hint: Some("Use the COLLATE clause to set the collation explicitly.".into()),
+    }
+}
+
 /// The database-default collation's predefined `PostgreSQL` catalog identity.
 pub const DEFAULT_COLLATION_OID: i64 = 100;
 pub const C_COLLATION_OID: u32 = 950;

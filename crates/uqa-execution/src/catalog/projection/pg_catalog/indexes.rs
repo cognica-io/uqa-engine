@@ -16,7 +16,7 @@ use uqa_core::RelationIdentity;
 use super::super::helpers::index_definitions::{index_columns, indexdef};
 use super::super::helpers::oids::{relation_oid, split_schema_name};
 use super::super::helpers::rows::{
-    bool_value, catalog_int2vector, catalog_usize, int_value, row, str_value,
+    bool_value, catalog_int2vector, catalog_oidvector, catalog_usize, int_value, row, str_value,
 };
 use super::table_relation_oid_from;
 
@@ -308,7 +308,40 @@ pub fn build_pg_index(
                     "pg_index.indkey",
                 )?,
             ),
-            ("indcollation", Value::Null),
+            (
+                "indcollation",
+                catalog_oidvector(
+                    index
+                        .columns
+                        .iter()
+                        .enumerate()
+                        .map(|(position, key)| {
+                            let selected = index
+                                .definition
+                                .column_order
+                                .get(position)
+                                .and_then(|order| order.collation_oid)
+                                .map(i64::from);
+                            let column = key
+                                .column()
+                                .and_then(|name| table_cols.iter().find(|col| col.name == name));
+                            let oid = selected
+                                .or_else(|| column.and_then(|col| col.collation_oid).map(i64::from))
+                                .unwrap_or_else(|| {
+                                    column
+                                        .map(|col| &col.ty)
+                                        .or_else(|| index.definition.key_types.get(position))
+                                        .map_or(
+                                            0,
+                                            uqa_sql::catalog::type_metadata::pg_type_collation_oid,
+                                        )
+                                });
+                            Value::Int(oid)
+                        })
+                        .collect(),
+                    "pg_index.indcollation",
+                )?,
+            ),
             ("indclass", Value::Null),
             ("indoption", index_options(index)?),
             (

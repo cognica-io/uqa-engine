@@ -8,7 +8,7 @@
 
 use crate::{
     ast::{
-        stored_input::{boolean, Input, InputError, Parts, Values},
+        stored_input::{boolean, optional, Input, InputError, Parts, Values},
         IndexColumnOrder,
     },
     catalog::index::{IndexCatalogIdentity, IndexDefinition, IndexRelationships},
@@ -146,13 +146,13 @@ impl<'a> Input<'a, '_> {
         let mut value = IndexColumnOrder::default();
         self.fields(
             token,
-            &["descending", "nulls_first"],
+            &["descending", "nulls_first", "collation_oid"],
             3,
             |_, index, token| {
-                if index == 0 {
-                    value.descending = boolean(token)?;
-                } else {
-                    value.nulls_first = boolean(token)?;
+                match index {
+                    0 => value.descending = boolean(token)?,
+                    1 => value.nulls_first = boolean(token)?,
+                    _ => value.collation_oid = optional(token)?,
                 }
                 Ok(())
             },
