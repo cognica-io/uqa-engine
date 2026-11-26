@@ -130,6 +130,8 @@ mod range_datums;
 mod range_elements;
 #[path = "pg18_semantics/range_input.rs"]
 mod range_input;
+#[path = "pg18_semantics/drop_owned.rs"]
+mod drop_owned;
 #[path = "pg18_semantics/range_peers.rs"]
 mod range_peers;
 #[path = "pg18_semantics/range_rowsets.rs"]
