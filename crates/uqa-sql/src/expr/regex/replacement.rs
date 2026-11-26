@@ -170,7 +170,7 @@ fn replace(
             continue;
         }
         output.push_str(take_chars(&mut remaining, whole.start - copied, control)?)?;
-        let matched = take_chars(&mut remaining, whole.len(), control)?;
+        let whole_text = take_chars(&mut remaining, whole.len(), control)?;
         if escapes == Escapes::None {
             output.push_str(replacement)?;
         } else {
@@ -178,7 +178,7 @@ fn replace(
                 &mut output,
                 replacement,
                 spans,
-                matched,
+                whole_text,
                 whole.start,
                 control,
             )?;
@@ -221,13 +221,13 @@ fn expand(
     output: &mut TextBuffer<'_>,
     mut replacement: &str,
     spans: &[MatchSpan],
-    matched: &str,
+    whole_text: &str,
     match_start: usize,
     control: &ProductionControl<'_>,
 ) -> Result<()> {
-    // A match has at most nine named subexpressions. Decode each requested range once.
+    // Replacement escapes can reference the first nine subexpressions. Decode each requested range once.
     let mut captures = [None; REPLACEMENT_SLOTS];
-    captures[0] = Some(matched);
+    captures[0] = Some(whole_text);
     while let Some((prefix, rest)) = replacement.split_once('\\') {
         output.push_str(prefix)?;
         replacement = rest;
@@ -254,7 +254,7 @@ fn expand(
         } else {
             let text = match spans.get(slot).and_then(|span| span.range()) {
                 Some(range) => {
-                    let mut input = matched;
+                    let mut input = whole_text;
                     let offset = range.start.checked_sub(match_start).ok_or_else(|| {
                         SQLError::Internal("regular expression capture before match".into())
                     })?;
