@@ -13,7 +13,7 @@
 
 The engine is compiled with `-O2` in every build profile, as PostgreSQL compiles it, because the stack each recursion level uses depends on the optimization level. It also depends on the compiler and architecture, as it does for PostgreSQL itself: a level of nested capturing groups takes about 240 bytes with GCC on x86-64, 320 with GCC on AArch64 and 400 with Clang on AArch64, so the deepest pattern accepted under the 2 MB budget differs between platforms.
 
-Character classes, case-insensitive matching and word boundaries follow PostgreSQL's strategy for the collation: the ASCII table for `C`, PostgreSQL's own Unicode 16 tables for the builtin provider, and ICU's character functions, evaluated over ICU4X Unicode 16 data, for ICU collations. Engine state is kept per operation and per thread, so operations on different threads are independent.
+Character classes, case-insensitive matching and word boundaries follow PostgreSQL's strategy for the collation: the ASCII table for `C`, PostgreSQL's own Unicode 16 tables for the builtin provider, and ICU4C's character class definitions and simple case mappings over those same tables for ICU collations. Engine state is kept per operation and per thread, so operations on different threads are independent.
 
 ## Verification
 

@@ -31,9 +31,9 @@
  *	 collation other than C and POSIX, which use the C strategy, so the
  *	 PG_REGEX_STRATEGY_LIBC_WIDE and PG_REGEX_STRATEGY_LIBC_1BYTE strategies
  *	 have no counterpart.  The builtin strategy calls PostgreSQL's
- *	 unicode_category.c and unicode_case.c unchanged.  The ICU strategy calls
- *	 ICU4C-compatible u_is*() and u_to*() functions implemented by the Rust
- *	 wrapper over ICU4X data.
+ *	 unicode_category.c and unicode_case.c unchanged.  The ICU strategy uses
+ *	 ICU4C's character class definitions and the same Unicode 16 category
+ *	 and simple case tables.
  *
  * - PostgreSQL caches the cvec of each ctype class per backend in malloc'd
  *	 memory.  Here the Rust wrapper keeps each complete cvec once per process
@@ -227,6 +227,33 @@ pg_set_regex_collation(Oid collation)
  */
 #define BUILTIN_POSIX(locale) ((locale) == UQA_PG_REGEX_LOCALE_BUILTIN_C_UTF8)
 
+/* ICU4C classifies by General_Category. Pattern escapes can exceed Unicode. */
+static pg_unicode_category
+icu_category(pg_wchar c)
+{
+	return c <= 0x10ffff ? unicode_category(c) : PG_U_UNASSIGNED;
+}
+
+static bool
+icu_is_letter(pg_unicode_category category)
+{
+	return category >= PG_U_UPPERCASE_LETTER && category <= PG_U_OTHER_LETTER;
+}
+
+static bool
+icu_is_separator(pg_unicode_category category)
+{
+	return category >= PG_U_SPACE_SEPARATOR && category <= PG_U_PARAGRAPH_SEPARATOR;
+}
+
+static bool
+icu_is_printable(pg_unicode_category category)
+{
+	return category != PG_U_UNASSIGNED && category != PG_U_CONTROL &&
+		category != PG_U_FORMAT && category != PG_U_SURROGATE &&
+		category != PG_U_PRIVATE_USE;
+}
+
 static int
 pg_wc_isdigit(pg_wchar c)
 {
@@ -241,7 +268,7 @@ pg_wc_isdigit(pg_wchar c)
 		case UQA_PG_REGEX_LOCALE_BUILTIN_UNICODE:
 			return pg_u_isdigit(c, BUILTIN_POSIX(locale));
 		case UQA_PG_REGEX_LOCALE_ICU:
-			return uqa_pg_regex_icu_isdigit(c);
+			return icu_category(c) == PG_U_DECIMAL_NUMBER;
 	}
 	uqa_pg_regex_invalid_locale_state();
 }
@@ -258,7 +285,7 @@ pg_wc_isalpha(pg_wchar c)
 		case UQA_PG_REGEX_LOCALE_BUILTIN_UNICODE:
 			return pg_u_isalpha(c);
 		case UQA_PG_REGEX_LOCALE_ICU:
-			return uqa_pg_regex_icu_isalpha(c);
+			return icu_is_letter(icu_category(c));
 	}
 	uqa_pg_regex_invalid_locale_state();
 }
@@ -277,7 +304,11 @@ pg_wc_isalnum(pg_wchar c)
 		case UQA_PG_REGEX_LOCALE_BUILTIN_UNICODE:
 			return pg_u_isalnum(c, BUILTIN_POSIX(locale));
 		case UQA_PG_REGEX_LOCALE_ICU:
-			return uqa_pg_regex_icu_isalnum(c);
+		{
+			pg_unicode_category category = icu_category(c);
+
+			return icu_is_letter(category) || category == PG_U_DECIMAL_NUMBER;
+		}
 	}
 	uqa_pg_regex_invalid_locale_state();
 }
@@ -303,7 +334,7 @@ pg_wc_isupper(pg_wchar c)
 		case UQA_PG_REGEX_LOCALE_BUILTIN_UNICODE:
 			return pg_u_isupper(c);
 		case UQA_PG_REGEX_LOCALE_ICU:
-			return uqa_pg_regex_icu_isupper(c);
+			return icu_category(c) == PG_U_UPPERCASE_LETTER;
 	}
 	uqa_pg_regex_invalid_locale_state();
 }
@@ -320,7 +351,7 @@ pg_wc_islower(pg_wchar c)
 		case UQA_PG_REGEX_LOCALE_BUILTIN_UNICODE:
 			return pg_u_islower(c);
 		case UQA_PG_REGEX_LOCALE_ICU:
-			return uqa_pg_regex_icu_islower(c);
+			return icu_category(c) == PG_U_LOWERCASE_LETTER;
 	}
 	uqa_pg_regex_invalid_locale_state();
 }
@@ -337,7 +368,12 @@ pg_wc_isgraph(pg_wchar c)
 		case UQA_PG_REGEX_LOCALE_BUILTIN_UNICODE:
 			return pg_u_isgraph(c);
 		case UQA_PG_REGEX_LOCALE_ICU:
-			return uqa_pg_regex_icu_isgraph(c);
+		{
+			pg_unicode_category category = icu_category(c);
+
+			return category == PG_U_PRIVATE_USE ||
+					(icu_is_printable(category) && !icu_is_separator(category));
+		}
 	}
 	uqa_pg_regex_invalid_locale_state();
 }
@@ -354,7 +390,7 @@ pg_wc_isprint(pg_wchar c)
 		case UQA_PG_REGEX_LOCALE_BUILTIN_UNICODE:
 			return pg_u_isprint(c);
 		case UQA_PG_REGEX_LOCALE_ICU:
-			return uqa_pg_regex_icu_isprint(c);
+			return icu_is_printable(icu_category(c));
 	}
 	uqa_pg_regex_invalid_locale_state();
 }
@@ -373,7 +409,7 @@ pg_wc_ispunct(pg_wchar c)
 		case UQA_PG_REGEX_LOCALE_BUILTIN_UNICODE:
 			return pg_u_ispunct(c, BUILTIN_POSIX(locale));
 		case UQA_PG_REGEX_LOCALE_ICU:
-			return uqa_pg_regex_icu_ispunct(c);
+			return c <= 0x10ffff && pg_u_ispunct(c, false);
 	}
 	uqa_pg_regex_invalid_locale_state();
 }
@@ -390,7 +426,8 @@ pg_wc_isspace(pg_wchar c)
 		case UQA_PG_REGEX_LOCALE_BUILTIN_UNICODE:
 			return pg_u_isspace(c);
 		case UQA_PG_REGEX_LOCALE_ICU:
-			return uqa_pg_regex_icu_isspace(c);
+			return (c >= 0x09 && c <= 0x0d) || (c >= 0x1c && c <= 0x1f) ||
+				c == 0x85 || icu_is_separator(icu_category(c));
 	}
 	uqa_pg_regex_invalid_locale_state();
 }
@@ -406,9 +443,8 @@ pg_wc_toupper(pg_wchar c)
 			return c;
 		case UQA_PG_REGEX_LOCALE_BUILTIN_C_UTF8:
 		case UQA_PG_REGEX_LOCALE_BUILTIN_UNICODE:
-			return unicode_uppercase_simple(c);
 		case UQA_PG_REGEX_LOCALE_ICU:
-			return uqa_pg_regex_icu_toupper(c);
+			return unicode_uppercase_simple(c);
 	}
 	uqa_pg_regex_invalid_locale_state();
 }
@@ -424,9 +460,8 @@ pg_wc_tolower(pg_wchar c)
 			return c;
 		case UQA_PG_REGEX_LOCALE_BUILTIN_C_UTF8:
 		case UQA_PG_REGEX_LOCALE_BUILTIN_UNICODE:
-			return unicode_lowercase_simple(c);
 		case UQA_PG_REGEX_LOCALE_ICU:
-			return uqa_pg_regex_icu_tolower(c);
+			return unicode_lowercase_simple(c);
 	}
 	uqa_pg_regex_invalid_locale_state();
 }

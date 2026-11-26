@@ -90,3 +90,33 @@ fn collation_properties_select_strategies() {
         assert_eq!(RegexCollation::from_locale(16384, locale), Ok(expected));
     }
 }
+
+#[test]
+fn icu_classes_reject_nul_surrogates_and_out_of_range_codes() {
+    use uqa_pg_regex::{MatchSpan, Regex, REG_ADVANCED};
+
+    // PostgreSQL text cannot carry these inputs. Regex::exec accepts code points directly.
+    let points: Vec<_> = [0]
+        .into_iter()
+        .chain(0xD800..=0xDFFF)
+        .chain([0x11_0000, 0x7FFF_FFFE])
+        .collect();
+    for class in [
+        "digit", "alpha", "alnum", "upper", "lower", "graph", "print", "punct", "space",
+    ] {
+        let mut budget = crate::support::Budget::unlimited();
+        let mut regex = Regex::compile(
+            &format!("[[:{class}:]]"),
+            REG_ADVANCED,
+            RegexCollation::Icu,
+            &mut budget,
+        )
+        .unwrap();
+        let mut span = [MatchSpan::UNSET];
+        assert!(
+            !regex.exec(&points, 0, &mut span).unwrap(),
+            "{class} unexpectedly matched {:?}",
+            span[0].range()
+        );
+    }
+}

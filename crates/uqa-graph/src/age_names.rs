@@ -12,7 +12,7 @@
 //! - graph names: `^[ID_Start_][ID_Continue.-]*[ID_Continue]$`, 3 to 63 bytes
 //! - label names: `^[ID_Start_][ID_Continue]*$`, 1 to 63 bytes
 //!
-//! Lengths are byte lengths because AGE measures them with `strlen`.
+//! Lengths are byte lengths because AGE measures them with `strlen`. The resolved ICU4X data supplies both identifier classes. Unicode guarantees that characters already in `ID_Start` or `ID_Continue` stay in that class in later versions.
 
 use icu_properties::props::{IdContinue, IdStart};
 use icu_properties::CodePointSetData;

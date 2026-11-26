@@ -26,10 +26,6 @@ include = [
     "tests/**/*",
 ]
 
-[dependencies]
-icu_casemap = { workspace = true }
-icu_properties = { workspace = true }
-
 # Engine operations move to a separately allocated stack when the thread lacks headroom. WebAssembly runs the engine on its own call stack, which cannot be switched.
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 stacker = { workspace = true }
@@ -38,6 +34,9 @@ stacker = { workspace = true }
 cc = "1.2"
 
 [dev-dependencies]
+# Unicode 16 reference data for the ICU collation tests.
+icu_casemap = { workspace = true }
+icu_properties = { workspace = true }
 serde_json = { workspace = true }
 
 [[test]]

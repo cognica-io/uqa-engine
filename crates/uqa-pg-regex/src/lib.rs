@@ -15,7 +15,7 @@
 //! - Every engine allocation is charged to the caller's [`RegexResources`] before it happens and released after it is freed. The same hooks answer the engine's interrupt and stack-depth checks. Dropping a [`Regex`] releases every reserved byte.
 //! - The engine recurses on the stack. Every operation may use [`MAX_STACK_DEPTH`], `PostgreSQL`'s default `max_stack_depth` of 2 MB, with [`STACK_DEPTH_SLOP`] to spare, on a separately allocated stack when the thread's own lacks that headroom, and fails with `REG_ETOOBIG` beyond it. Under Emscripten, whose call stack cannot be switched, the engine bounds its live frames conservatively and fails with `REG_ETOOBIG` before they take half of V8's default stack.
 //!
-//! Character classes, case-insensitive matching and word boundaries follow the collation's strategy: `PostgreSQL`'s ASCII table for `C`, `PostgreSQL`'s own Unicode 16 tables for the builtin provider, and ICU's definitions over ICU4X Unicode 16 data for ICU collations. The C shims keep all engine state per operation and per thread, so operations on different threads are independent. `UPSTREAM.md` lists the imported files and every local adaptation.
+//! Character classes, case-insensitive matching and word boundaries follow the collation's strategy: `PostgreSQL`'s ASCII table for `C`, `PostgreSQL`'s own Unicode 16 tables for the builtin provider, and ICU4C's character class definitions and simple case mappings over the same Unicode 16 tables for ICU collations. The C shims keep all engine state per operation and per thread, so operations on different threads are independent. `UPSTREAM.md` lists the imported files and every local adaptation.
 //!
 //! ```
 //! use uqa_pg_regex::{MatchSpan, Regex, RegexCollation, RegexResources, REG_ADVANCED};
@@ -50,6 +50,7 @@ mod collation;
 mod error;
 mod ffi;
 mod flags;
+#[cfg(test)]
 mod icu;
 mod memory;
 mod operation;
