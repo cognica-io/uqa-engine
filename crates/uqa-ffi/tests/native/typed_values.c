@@ -81,6 +81,32 @@ static void builtins(uqa_engine engine, uqa_result result, uqa_buffer buffer) {
         CHECK(uqa_value_destroy(&value));
         CHECK(uqa_transaction_rollback(engine));
     }
+    {
+        uqa_value_view returned = NULL;
+        uqa_string_view text = {NULL, 0};
+        uint32_t oid = 0;
+        CHECK(uqa_value_create_from_text(engine, "tsvector", "z:3 a:2B", &value));
+        CHECK(uqa_value_get_type(value, &type));
+        CHECK(uqa_type_get_kind(type, &kind));
+        CHECK(uqa_type_get_oid(type, &oid));
+        assert(kind == UQA_TYPE_TSVECTOR && oid == 3614);
+        CHECK(uqa_value_get_text(value, &text));
+        assert(equal(text, "'a':2B 'z':3"));
+        uqa_value_view params[] = {value};
+        CHECK(uqa_engine_execute_params(engine, "SELECT ARRAY[$1]", params, 1, result));
+        CHECK(uqa_result_get_column_type(result, 0, &type));
+        CHECK(uqa_type_get_oid(type, &oid));
+        assert(oid == 3643);
+        CHECK(uqa_result_get_value(result, 0, 0, &returned));
+        uqa_value_view element = NULL;
+        CHECK(uqa_value_get_element(returned, 0, &element));
+        CHECK(uqa_value_get_type(element, &type));
+        CHECK(uqa_type_get_kind(type, &kind));
+        assert(kind == UQA_TYPE_TSVECTOR);
+        CHECK(uqa_value_get_text(element, &text));
+        assert(equal(text, "'a':2B 'z':3"));
+        CHECK(uqa_value_destroy(&value));
+    }
     CHECK(uqa_value_create_typed_null(engine, "smallint", &value));
     CHECK(uqa_value_get_is_null(value, &is_null));
     assert(is_null == 1);

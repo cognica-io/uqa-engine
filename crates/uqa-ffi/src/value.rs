@@ -299,6 +299,7 @@ impl UQAValue {
                     | ColumnType::Name
                     | ColumnType::RefCursor
                     | ColumnType::Xml
+                    | ColumnType::TsVector
                     | ColumnType::PgNodeTree
                     | ColumnType::AclItem
             ),
