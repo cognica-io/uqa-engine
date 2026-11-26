@@ -11,9 +11,6 @@ use super::{schema_oid, PgTypeCatalogMetadata, PgTypeRoutineOids};
 pub(super) fn metadata() -> impl Iterator<Item = PgTypeCatalogMetadata<'static>> {
     [
         (
-            2276, "any", 4, true, "p", "P", 0, 0, 2294, 2295, 0, 0, "i", "p",
-        ),
-        (
             2279, "trigger", 4, true, "p", "P", 0, 0, 2300, 2301, 0, 0, "i", "p",
         ),
         (

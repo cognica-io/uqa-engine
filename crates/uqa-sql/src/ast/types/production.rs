@@ -142,6 +142,7 @@ impl ColumnType {
             Self::Int2Vector => Self::Int2Vector,
             Self::OidVector => Self::OidVector,
             Self::AnyArray => Self::AnyArray,
+            Self::Pseudo(pseudo) => Self::Pseudo(*pseudo),
             Self::Record => Self::Record,
             Self::Date => Self::Date,
             Self::Time => Self::Time,

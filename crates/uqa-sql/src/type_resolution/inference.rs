@@ -318,7 +318,7 @@ pub(super) fn resolved_type_name(
         }
         control.check()?;
     }
-    ColumnType::from_sql_name_with_control(name, control).map(Some)
+    ColumnType::from_expression_type_name_with_control(name, control).map(Some)
 }
 
 pub(super) fn copy_type(

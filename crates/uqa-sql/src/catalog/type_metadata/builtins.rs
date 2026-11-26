@@ -150,6 +150,9 @@ pub fn builtin_scalar_type_by_name(name: &str) -> Option<&'static ColumnType> {
 
 /// The catalog's local name for an implemented builtin type, independent of its modifiers.
 pub fn builtin_type_name(ty: &ColumnType) -> Option<&'static str> {
+    if let ColumnType::Pseudo(pseudo) = ty {
+        return Some(pseudo.name());
+    }
     if matches!(
         ty,
         ColumnType::Named(_)

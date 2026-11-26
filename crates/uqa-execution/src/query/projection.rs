@@ -63,14 +63,7 @@ pub fn physical_projections(projections: &[ProjectionPlan]) -> Vec<PhysicalProje
         .map(|(index, projection)| {
             (
                 ProjectionTarget::Column(labels[index].clone()),
-                match &projection.expr {
-                    ScalarExpr::Literal(uqa_core::Value::Null) => ScalarExpr::Cast {
-                        implicit: true,
-                        expr: Box::new(projection.expr.clone()),
-                        ty: "text".into(),
-                    },
-                    expression => expression.clone(),
-                },
+                projection.expr.clone(),
             )
         })
         .collect()
@@ -79,7 +72,6 @@ pub fn physical_projections(projections: &[ProjectionPlan]) -> Vec<PhysicalProje
 pub(crate) fn owned_physical_projection(
     target: uqa_core::memory::Produced<ProjectionTarget>,
     expression: &ScalarExpr,
-    text_null: bool,
     control: &uqa_core::memory::ProductionControl<'_>,
 ) -> Result<
     (
@@ -89,13 +81,6 @@ pub(crate) fn owned_physical_projection(
     SQLError,
 > {
     let expression = expression.copy_for_rewrite(control)?;
-    let expression = if text_null
-        && matches!(&*expression, ScalarExpr::Literal(uqa_core::Value::Null))
-    {
-        uqa_sql::plan::OwnedScalarExpr::cast(expression, control.copy_text("text")?, true, control)?
-    } else {
-        expression
-    };
     Ok((target, expression))
 }
 

@@ -31,7 +31,7 @@ pub fn prepare_domain_definition(
     }
     if matches!(
         definition.base,
-        ColumnType::Void | ColumnType::Record | ColumnType::AnyArray
+        ColumnType::Void | ColumnType::Record | ColumnType::AnyArray | ColumnType::Pseudo(_)
     ) {
         return Err(domain_error(
             "42804",

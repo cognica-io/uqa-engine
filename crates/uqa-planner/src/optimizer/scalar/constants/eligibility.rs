@@ -32,6 +32,23 @@ pub(super) fn cast_type(
     uqa_sql::type_resolution::pg_catalog_builtin_type_with_control(name, control)
 }
 
+/// Domains execute constraints and polymorphic casts select their result type from the operand.
+pub(super) fn direct_null_cast_type(
+    name: &str,
+    types: Option<&dyn RoutineTypeCatalog>,
+    control: &ProductionControl<'_>,
+) -> Result<Option<Produced<ColumnType>>, SQLError> {
+    Ok(cast_type(name, types, control)?.filter(|ty| {
+        !matches!(
+            &**ty,
+            ColumnType::Domain { .. }
+                | ColumnType::Named(_)
+                | ColumnType::Pseudo(_)
+                | ColumnType::AnyArray
+        )
+    }))
+}
+
 pub(super) fn scalar_type(
     expression: &ScalarExpr,
     resolver: Option<&dyn FunctionTypeResolver>,

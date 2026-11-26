@@ -19,7 +19,9 @@ mod ownership;
 mod parsing;
 mod production;
 pub(crate) use production::ColumnTypeInputWork;
+mod pseudo;
 mod references;
+pub use pseudo::ExpressionPseudoType;
 
 pub use display::TypeDisplayScope;
 pub use identity::{TypeIdentityInputError, UserTypeIdentity, UserTypeKind};
@@ -93,6 +95,8 @@ pub enum ColumnType {
     Int2Vector,
     OidVector,
     AnyArray,
+    /// Catalog identity of an expression pseudo-type. Relation columns cannot store this declaration.
+    Pseudo(ExpressionPseudoType),
     /// `PostgreSQL`'s anonymous composite pseudo-type (OID 2249).
     Record,
     /// A `PostgreSQL` array whose elements retain their declared SQL type.

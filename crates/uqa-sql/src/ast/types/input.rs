@@ -85,6 +85,7 @@ impl<'a> Input<'a, '_> {
             "TimestampTzPrecision" => ColumnType::TimestampTzPrecision(number(token)?),
             "Vector" => ColumnType::Vector(number(token)?),
             "Tensor" => ColumnType::Tensor(number(token)?),
+            "Pseudo" => ColumnType::Pseudo(scalar::pseudo(&self.unit_tag(token)?)?),
             "Range" => ColumnType::Range(scalar::range(&self.unit_tag(token)?)?),
             "Multirange" => ColumnType::Multirange(scalar::range(&self.unit_tag(token)?)?),
             _ => return Err(invalid()),

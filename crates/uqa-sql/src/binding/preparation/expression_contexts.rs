@@ -43,6 +43,36 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
             .await
     }
 
+    fn cast_to_pseudo(
+        &mut self,
+        mut source: ExpressionType,
+        target: &ColumnType,
+    ) -> Result<ExpressionType, SQLError> {
+        use crate::type_resolution::pseudo_cast::{self, Coercion};
+        let owner = self.scope.control().capture();
+        let control = owner.control();
+        let coercion = pseudo_cast::select(
+            target,
+            source.ty.as_deref(),
+            source.has_unknown_string(),
+            &control,
+        )?
+        .expect("catalog pseudo-type target");
+        match coercion {
+            Coercion::Preserve => Ok(source),
+            Coercion::Unknown => {
+                let mut result = ExpressionType::unknown();
+                result.mark_unknown_expression();
+                Ok(result)
+            }
+            Coercion::Relabel(ty) => {
+                let ty = ty.clone_with_control(&control)?;
+                self.parameters.coerce_unknown(&mut source, &ty)?;
+                ExpressionType::resolved_produced(Some(ty), &control)
+            }
+        }
+    }
+
     async fn cast_to_type<W: crate::catalog::work::Work + Send>(
         &mut self,
         expr: &ScalarExpr,
@@ -107,6 +137,11 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
             self.expression_with_work(expr, input, subqueries, work)
                 .await?
         };
+        if matches!(target, ColumnType::Pseudo(_) | ColumnType::AnyArray) {
+            self.parameters
+                .peel_pseudo_input_collation(expr, &mut source, target)?;
+            return self.cast_to_pseudo(source, target);
+        }
         if let Some(fields) = &mut source.row_constructor {
             self.coerce_row_constructor(fields, target, work).await?;
         }

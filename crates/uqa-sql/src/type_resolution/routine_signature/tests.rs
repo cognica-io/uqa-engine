@@ -61,6 +61,18 @@ fn unconstrained_any_retains_values_without_claiming_an_exact_signature_match() 
         assert_eq!(matched.raw_exact_matches, 0);
         assert_eq!(matched.exact_matches, 0);
     }
+    let mut catalog_parameter = parameter("any");
+    catalog_parameter.column_type = Some(ColumnType::Pseudo(crate::ast::ExpressionPseudoType::Any));
+    for actual in [None, Some(ColumnType::Integer)] {
+        let matched = match_types(
+            std::slice::from_ref(&catalog_parameter),
+            std::slice::from_ref(&actual),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(matched.coercion_targets[0].column_type, actual);
+        assert_eq!(matched.raw_exact_matches, 0);
+    }
     let concrete = match_types(&[parameter("integer")], &[Some(ColumnType::Integer)])
         .unwrap()
         .unwrap();

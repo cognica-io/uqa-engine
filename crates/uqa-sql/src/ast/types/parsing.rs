@@ -21,6 +21,12 @@ mod numbers;
 #[cfg(test)]
 mod tests;
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum TypeUse {
+    Declaration,
+    Expression,
+}
+
 enum Parsed {
     Scalar(Produced<ColumnType>),
     Array(&'static str),
@@ -55,6 +61,19 @@ impl ColumnType {
         crate::catalog::work::inline(Self::from_sql_name_with_input_work(name, control, &mut ()))
     }
 
+    /// Parse a cast target, including built-in expression types without a physical scalar representation.
+    pub fn from_expression_type_name_with_control(
+        name: &str,
+        control: &ProductionControl<'_>,
+    ) -> Result<Produced<Self>, SQLError> {
+        crate::catalog::work::inline(Self::parse_type_name(
+            name,
+            control,
+            &mut (),
+            TypeUse::Expression,
+        ))
+    }
+
     /// Parse a native catalog type spelling with the invoking continuation.
     pub async fn from_sql_name_from_input(
         name: &str,
@@ -68,6 +87,18 @@ impl ColumnType {
         name: &str,
         control: &ProductionControl<'_>,
         work: &mut W,
+    ) -> Result<Produced<Self>, SQLError>
+    where
+        W::Error: Into<SQLError>,
+    {
+        Self::parse_type_name(name, control, work, TypeUse::Declaration).await
+    }
+
+    async fn parse_type_name<W: ColumnTypeInputWork>(
+        name: &str,
+        control: &ProductionControl<'_>,
+        work: &mut W,
+        usage: TypeUse,
     ) -> Result<Produced<Self>, SQLError>
     where
         W::Error: Into<SQLError>,
@@ -87,7 +118,7 @@ impl ColumnType {
                 invalid_array = Some(selected);
                 selected = lexical::trim_end(element, control, &mut work).await?;
             } else {
-                match Self::parse_scalar(selected, control, &mut work).await? {
+                match Self::parse_scalar(selected, control, &mut work, usage).await? {
                     Parsed::Scalar(value) => break value,
                     Parsed::Array(element) => {
                         dimensions += 1;
@@ -96,9 +127,12 @@ impl ColumnType {
                 }
             }
         };
-        if let Some(name) =
-            invalid_array.filter(|_| matches!(*parsed, Self::Void | Self::PgNodeTree))
-        {
+        if let Some(name) = invalid_array.filter(|_| {
+            matches!(
+                *parsed,
+                Self::Void | Self::PgNodeTree | Self::AnyArray | Self::Pseudo(_)
+            )
+        }) {
             return Err(SQLError::Routine {
                 sqlstate: "42704".into(),
                 message: message("type \"", name, "\" does not exist", control, &mut work).await?,
@@ -119,20 +153,44 @@ impl ColumnType {
         normalized: &str,
         control: &ProductionControl<'_>,
         work: &mut W,
+        usage: TypeUse,
     ) -> Result<Parsed, SQLError> {
         let (base, modifier) = split_type_modifier_from(normalized, control, work).await?;
         let catalog_name = base
             .strip_prefix("pg_catalog.")
             .or_else(|| base.strip_prefix("\"pg_catalog\"."));
         let catalog_modifiers = catalog_name.is_some() || base.starts_with('"');
+        let local = catalog_name.unwrap_or(&base);
+        let local = local
+            .strip_prefix('"')
+            .and_then(|name| name.strip_suffix('"'))
+            .unwrap_or(local);
+        let pseudo = if local == "anyarray" {
+            Some(Self::AnyArray)
+        } else if usage == TypeUse::Expression {
+            super::ExpressionPseudoType::from_name(local).map(Self::Pseudo)
+        } else {
+            None
+        };
+        if let Some(ty) = pseudo {
+            if modifier.is_some() {
+                return Err(SQLError::Routine {
+                    sqlstate: "42601".into(),
+                    message: message(
+                        "type modifier is not allowed for type \"",
+                        local,
+                        "\"",
+                        control,
+                        work,
+                    )
+                    .await?,
+                });
+            }
+            return Ok(Parsed::Scalar(ty.clone_with_control(control)?));
+        }
         let catalog_type;
-        let base = if let Some(name) =
-            catalog_name.or_else(|| base.strip_prefix('"').map(|_| &**base))
-        {
-            let name = name
-                .strip_prefix('"')
-                .and_then(|name| name.strip_suffix('"'))
-                .unwrap_or(name);
+        let base = if catalog_modifiers {
+            let name = local;
             if let Some(element) = builtin_array_element_name(name) {
                 return Ok(Parsed::Array(element));
             }

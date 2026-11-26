@@ -75,14 +75,6 @@ pub fn named_type_exists<'a>(
 }
 
 /// The current definition of the user-defined type an identity names, wrapped in its array dimensions.
-pub fn resolve_user_type_identity(
-    context: &CatalogContext<'_>,
-    identity: uqa_sql::ast::UserTypeIdentity,
-) -> Option<ColumnType> {
-    catalog_user_type_identity(&context.catalog_read_view(), identity)
-}
-
-/// [`resolve_user_type_identity`] over one catalog snapshot.
 pub fn catalog_user_type_identity(
     catalog: &crate::catalog::CatalogReadView,
     identity: uqa_sql::ast::UserTypeIdentity,
@@ -144,74 +136,15 @@ pub fn resolve_catalog_column_type(
     context: &CatalogContext<'_>,
     type_name: &str,
 ) -> Option<ColumnType> {
-    if let Some(identity) = uqa_sql::ast::UserTypeIdentity::parse(type_name) {
-        return resolve_user_type_identity(context, identity);
-    }
-    // An explicit builtin namespace is independent of search_path; the SQL owner checks actual catalog identifiers and modifiers.
-    if type_name.starts_with("pg_catalog.") || type_name.starts_with("\"pg_catalog\".") {
-        if let Ok(ty) = ColumnType::from_sql_name(type_name) {
-            return Some(ty);
-        }
-    }
-    let parsed = uqa_sql::parse_regtype_name(type_name).ok()??;
-    let (qualified, local) = match parsed.names.as_slice() {
-        [local] => (None, local),
-        [schema, local] => (Some(schema.as_str()), local),
-        _ => return None,
-    };
-    let catalog = context.catalog_read_view();
-    let schemas = qualified.map_or_else(
-        || {
-            crate::catalog::namespaces::current_schema_names(
-                &catalog,
-                &context.session.relation_name_resolution(),
-                &context.current_role(),
-                true,
-            )
-        },
-        |schema| {
-            vec![if schema == "pg_temp" {
-                context.session.temporary_schema_name()
-            } else {
-                schema.to_owned()
-            }]
-        },
-    );
-    for schema in schemas {
-        if schema == "pg_catalog" {
-            let builtin = uqa_sql::catalog::type_metadata::builtin_scalar_type_by_name(local)
-                .is_some()
-                || uqa_sql::ast::ColumnType::from_sql_name(&format!(
-                    "pg_catalog.{}",
-                    uqa_sql::expr::quote_ident(local)
-                ))
-                .is_ok();
-            if builtin {
-                return ColumnType::from_sql_name(type_name).ok();
-            }
-        }
-        if catalog
-            .shells()
-            .any(|shell| shell.identity.schema == schema && shell.identity.name == *local)
-        {
-            return None;
-        }
-        let name = format!(
-            "\"{}\".\"{}\"",
-            schema.replace('"', "\"\""),
-            local.replace('"', "\"\"")
-        );
-        let resolved = context.resolve_user_type(&name).or_else(|| {
-            CATALOG_NAMED_TYPES.iter().find(|ty| matches!(ty, ColumnType::Domain { schema: owner, name, .. } if owner == &schema && name == local)).cloned()
-        });
-        if let Some(mut ty) = resolved {
-            for _ in 0..parsed.array_dimensions {
-                ty = ColumnType::Array(Box::new(ty));
-            }
-            return Some(ty);
-        }
-    }
-    None
+    resolve_catalog_column_type_with_control(
+        context,
+        type_name,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )
+    .ok()
+    .flatten()?
+    .into_uncontrolled()
+    .ok()
 }
 
 /// `format_type_be` of a type in one catalog snapshot: a user-defined type is spelled by its current name, qualified when the search path does not include its schema; built-in types use their SQL spelling.

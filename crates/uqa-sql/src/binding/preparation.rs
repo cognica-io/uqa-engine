@@ -860,7 +860,7 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
             .routines
             .resolve_type_name_with_control(name, &control)?
             .map_or_else(
-                || ColumnType::from_sql_name_with_control(name, &control),
+                || ColumnType::from_expression_type_name_with_control(name, &control),
                 Ok,
             )?;
         ownership::AnalysisType::from_produced(ty, &control)
