@@ -170,6 +170,7 @@ fn replace(
             continue;
         }
         output.push_str(take_chars(&mut remaining, whole.start - copied, control)?)?;
+        let matched = take_chars(&mut remaining, whole.len(), control)?;
         if escapes == Escapes::None {
             output.push_str(replacement)?;
         } else {
@@ -177,12 +178,11 @@ fn replace(
                 &mut output,
                 replacement,
                 spans,
-                remaining,
+                matched,
                 whole.start,
                 control,
             )?;
         }
-        take_chars(&mut remaining, whole.len(), control)?;
         copied = whole.end;
         if occurrence > 0 {
             break;
@@ -221,10 +221,13 @@ fn expand(
     output: &mut TextBuffer<'_>,
     mut replacement: &str,
     spans: &[MatchSpan],
-    match_input: &str,
+    matched: &str,
     match_start: usize,
     control: &ProductionControl<'_>,
 ) -> Result<()> {
+    // A match has at most nine named subexpressions. Decode each requested range once.
+    let mut captures = [None; REPLACEMENT_SLOTS];
+    captures[0] = Some(matched);
     while let Some((prefix, rest)) = replacement.split_once('\\') {
         output.push_str(prefix)?;
         replacement = rest;
@@ -232,12 +235,9 @@ fn expand(
             output.push('\\')?;
             return Ok(());
         };
-        let span = match escape {
-            b'1'..=b'9' => spans
-                .get(usize::from(escape - b'0'))
-                .copied()
-                .unwrap_or(MatchSpan::UNSET),
-            b'&' => spans[0],
+        let slot = match escape {
+            b'1'..=b'9' => usize::from(escape - b'0'),
+            b'&' => 0,
             b'\\' => {
                 output.push('\\')?;
                 replacement = &rest[1..];
@@ -249,14 +249,24 @@ fn expand(
             }
         };
         replacement = &rest[1..];
-        if let Some(range) = span.range() {
-            let mut input = match_input;
-            let offset = range.start.checked_sub(match_start).ok_or_else(|| {
-                SQLError::Internal("regular expression capture before match".into())
-            })?;
-            take_chars(&mut input, offset, control)?;
-            output.push_str(take_chars(&mut input, range.len(), control)?)?;
-        }
+        let capture = if let Some(cached) = captures[slot] {
+            cached
+        } else {
+            let text = match spans.get(slot).and_then(|span| span.range()) {
+                Some(range) => {
+                    let mut input = matched;
+                    let offset = range.start.checked_sub(match_start).ok_or_else(|| {
+                        SQLError::Internal("regular expression capture before match".into())
+                    })?;
+                    take_chars(&mut input, offset, control)?;
+                    take_chars(&mut input, range.len(), control)?
+                }
+                None => "",
+            };
+            captures[slot] = Some(text);
+            text
+        };
+        output.push_str(capture)?;
     }
     output.push_str(replacement)
 }

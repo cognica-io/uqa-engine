@@ -23,6 +23,23 @@ fn run(name: &str, args: &[Value], control: &ProductionControl<'_>) -> Result<Pr
 }
 
 #[test]
+fn repeated_references_share_utf8_capture_ranges_for_each_match() {
+    let prefix = "界".repeat(4096);
+    let replacement = r"\2\1\3".repeat(2048);
+    let args = [
+        text(&format!("-{prefix}Ωé/{prefix}β中!")),
+        text("界+(.)(.)(q)?"),
+        text(&replacement),
+        text("g"),
+    ];
+    let result = run("regexp_replace", &args, &ProductionControl::uncontrolled()).unwrap();
+    assert_eq!(
+        *result,
+        text(&format!("-{}/{}!", "éΩ".repeat(2048), "中β".repeat(2048)))
+    );
+}
+
+#[test]
 fn regex_outputs_keep_capture_nulls_unicode_offsets_and_replacement_selection() {
     let budget = MemoryBudget::new(128 * 1024);
     let token = CancellationToken::new();

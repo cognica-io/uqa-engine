@@ -797,7 +797,7 @@ pub(super) fn cast_integer(
             .ok_or_else(|| out_of_range(target))?
             .to_i64_trunc_with_control(control)?
             .ok_or_else(|| out_of_range(target))?,
-        Value::Str(s) | Value::FixedChar(s) => return integer_from_text(s, target),
+        Value::Str(s) | Value::FixedChar(s) => return integer_from_text(s, target).map(Value::Int),
         Value::Bytes(bytes) => bytea_to_integer(bytes, target)?,
         other => {
             return Err(SQLError::TypeMismatch(format!(
@@ -849,7 +849,7 @@ pub fn invalid_boolean_input(text: &str) -> SQLError {
 }
 
 /// Text read as `PostgreSQL`'s `int2in`, `int4in` and `int8in` read it, whose out-of-range error names the text and the type.
-fn integer_from_text(text: &str, target: &str) -> Result<Value> {
+pub(super) fn integer_from_text(text: &str, target: &str) -> Result<i64> {
     use crate::expr::integer_input::{parse_int8, IntegerInputError};
     let out_of_range = || SQLError::Routine {
         sqlstate: "22003".into(),
@@ -868,7 +868,7 @@ fn integer_from_text(text: &str, target: &str) -> Result<Value> {
         _ => true,
     };
     if in_range {
-        Ok(Value::Int(value))
+        Ok(value)
     } else {
         Err(out_of_range())
     }

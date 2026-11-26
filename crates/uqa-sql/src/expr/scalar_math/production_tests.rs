@@ -179,6 +179,24 @@ fn scalar_null_and_error_precedence_stays_shared_without_admitting_copies() {
 }
 
 #[test]
+fn format_reads_width_from_borrowed_text_with_a_small_output_allowance() {
+    let width = Value::Str(format!("{}0x3", " ".repeat(16 * 1024)));
+    let budget = MemoryBudget::new(128);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&budget, &token, &token);
+    let args = [text("%*s"), width, text("x")];
+    let expected = text("  x");
+    let allocations = allocation_counter::measure(|| {
+        let result = eval_math_functions_with_control("format", &args, &control)
+            .unwrap()
+            .unwrap();
+        assert_eq!(*result, expected);
+    });
+    assert!(allocations.bytes_max < 1024, "{allocations:?}");
+    assert_eq!(budget.used(), 0);
+}
+
+#[test]
 fn quota_failures_never_become_numeric_fallbacks_or_base64_syntax_errors() {
     for limit in [0, 1, 8, 24, 64, 128] {
         let budget = MemoryBudget::new(limit);

@@ -167,15 +167,11 @@ fn width_value(value: &Value, control: &ProductionControl<'_>) -> Result<i32> {
             sqlstate: "22003".into(),
             message: format!("value \"{width}\" is out of range for type integer"),
         }),
-        other => match crate::expr::cast_value(
-            &Value::Str(output_text(other, control)?.into_parts().0.into_owned()),
-            "integer",
-        )? {
-            Value::Int(width) => i32::try_from(width).map_err(|_| out_of_range()),
-            other => Err(SQLError::Internal(format!(
-                "integer input produced {other:?}"
-            ))),
-        },
+        other => {
+            let text = output_text(other, control)?;
+            let width = crate::expr::casting::integer_from_text(&text, "integer")?;
+            i32::try_from(width).map_err(|_| out_of_range())
+        }
     }
 }
 
