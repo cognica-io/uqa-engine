@@ -106,7 +106,7 @@ fn reference_key(sql: &str, catalog: &Catalog) -> EnforcedKey {
 fn analyzed_inference_and_stored_index_syntax_match_postgresql() {
     let cases: Vec<serde_json::Value> =
         serde_json::from_str(include_str!("inference.json")).unwrap();
-    assert_eq!(cases.len(), 8);
+    assert_eq!(cases.len(), 11);
     for case in cases {
         let crate::Statement::CreateTable(table) = crate::compile(case["table"].as_str().unwrap())
             .unwrap()
