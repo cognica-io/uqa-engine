@@ -29,6 +29,34 @@ impl<S: Clone> CteScope<S> {
         width: Option<usize>,
         control: &ProductionControl<'_>,
     ) -> Result<RecursiveCteScope<'a, 'n, S>, SQLError> {
+        let (saved, previous_width) = self.replace_recursive_cte(name, rows, width, control)?;
+        Ok(RecursiveCteScope {
+            scope: self,
+            name,
+            saved: Some(saved),
+            width: previous_width,
+        })
+    }
+
+    /// Permanently bind the current generation in a private copy retained by a recursive reader.
+    pub fn with_recursive_cte_with_control(
+        mut self,
+        name: &str,
+        rows: crate::SharedSpill,
+        width: Option<usize>,
+        control: &ProductionControl<'_>,
+    ) -> Result<Self, SQLError> {
+        self.replace_recursive_cte(name, rows, width, control)?;
+        Ok(self)
+    }
+
+    fn replace_recursive_cte(
+        &mut self,
+        name: &str,
+        rows: crate::SharedSpill,
+        width: Option<usize>,
+        control: &ProductionControl<'_>,
+    ) -> Result<(SavedCteBindings, Option<BindingMap<usize>>), SQLError> {
         let mut pending_rows = CteRowsMap::new();
         pending_rows.insert_with_control(
             name,
@@ -43,12 +71,7 @@ impl<S: Clone> CteScope<S> {
         let previous_width = width.map(|_| self.recursive_control_widths.extract(name));
         self.rows.append(pending_rows);
         self.recursive_control_widths.append(pending_width);
-        Ok(RecursiveCteScope {
-            scope: self,
-            name,
-            saved: Some(saved),
-            width: previous_width,
-        })
+        Ok((saved, previous_width))
     }
 }
 

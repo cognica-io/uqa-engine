@@ -397,6 +397,11 @@ impl QueryBlockPlan {
         Ok(true)
     }
 
+    /// Expressions initialized when opening a scan whose target list is bound on its first read.
+    pub fn scan_input_expressions(&self) -> impl Iterator<Item = &ScalarExpr> {
+        self.expression_steps(ExpressionOrder::ScanInputs).flatten()
+    }
+
     /// Expressions at this query level, excluding FROM-item inputs and join conditions, which have their own namespaces.
     pub fn query_expressions(&self) -> impl Iterator<Item = &ScalarExpr> {
         self.expression_steps(ExpressionOrder::Initialization)

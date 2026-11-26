@@ -33,6 +33,16 @@ pub trait SourcePlanning<S: Clone>: Sync {
     fn block_input_is_empty(&self, _statement: &QueryBlockPlan) -> bool {
         false
     }
+    /// Whether this SELECT computes its scalar output in the recursive work-table scan.
+    fn work_table_projection(
+        &self,
+        _block: &QueryBlockPlan,
+        _name: &str,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<bool, SQLError> {
+        control.check()?;
+        Ok(false)
+    }
     /// Whether an outer join removes one matching input while retaining its preserved side.
     fn prefer_nested_loop(
         &self,

@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Recursive CTEs produce the rows their consumers request, share them across references, and support finite recursion beyond 1,024 generations.
+
 - Browser package builds use Emscripten 7.0.0 and LLVM 18's libclang on Ubuntu. The PostgreSQL parser bindings build against this SDK's headers.
 
 - `to_date` reads calendar templates across the PostgreSQL date range, including BC dates. Both `to_date` and `to_char` recognize ISO week dates and Julian days. `OVERLAPS` compares typed endpoints at their stored precision, handles reversed, instantaneous and partially unknown periods, and applies calendar intervals in the session time zone for `timestamptz` endpoints. Timestamp input without an explicit offset uses the session zone when converted to `timestamptz`, including in array literals, prepared statements and period endpoints. `timeofday()` displays the local time and abbreviation for the session zone.
