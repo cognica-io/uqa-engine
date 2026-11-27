@@ -7,7 +7,7 @@
 //! Catalog operator selection shares `PostgreSQL` function matching/ranking and owns only the requested operator's candidate types.
 
 use super::super::{common::base_type, BuiltinFunctionOverload};
-use super::{catalog::SIGNATURES, undefined_binary_operator};
+use super::{catalog, undefined_binary_operator};
 use crate::{
     ast::{BinaryOp, ColumnType},
     SQLError,
@@ -109,12 +109,9 @@ fn select_binary_operator_types(
     let exact_left = arguments[0].as_ref().or(arguments[1].as_ref());
     let exact_right = arguments[1].as_ref().or(arguments[0].as_ref());
     if let (Some(lhs), Some(rhs)) = (exact_left, exact_right) {
-        for &(operator, left, right, output, _, _) in SIGNATURES {
+        for &(_, left, right, output, _, _) in catalog::named(name) {
             control.check()?;
-            if operator == name
-                && scalar_catalog_type(left) == Some(lhs)
-                && scalar_catalog_type(right) == Some(rhs)
-            {
+            if scalar_catalog_type(left) == Some(lhs) && scalar_catalog_type(right) == Some(rhs) {
                 if let Some(output) = scalar_catalog_type(output) {
                     return result(lhs, rhs, output, control);
                 }
@@ -186,12 +183,10 @@ fn candidates(
     right: Option<&ColumnType>,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Vec<BuiltinFunctionOverload>>, SQLError> {
+    control.check()?;
     let mut candidates = ProductionVec::new(*control);
-    for &(operator, lhs, rhs, result, _, _) in SIGNATURES {
+    for &(_, lhs, rhs, result, _, _) in catalog::named(name) {
         control.check()?;
-        if operator != name {
-            continue;
-        }
         if let Some([left, right]) = range_operands(lhs, rhs, [left, right]) {
             let result = catalog_type_with_control(result, control)?
                 .expect("range containment has a concrete result");
@@ -240,9 +235,9 @@ fn candidates(
                 }
                 None => true,
             };
-        for &(operator, lhs, rhs, result, _, _) in SIGNATURES {
+        for &(_, lhs, rhs, result, _, _) in catalog::named(name) {
             control.check()?;
-            if operator != name || lhs != polymorphic || rhs != polymorphic || !consistent {
+            if lhs != polymorphic || rhs != polymorphic || !consistent {
                 continue;
             }
             let result = if result == polymorphic {

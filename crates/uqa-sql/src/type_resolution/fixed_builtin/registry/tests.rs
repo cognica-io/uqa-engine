@@ -110,3 +110,27 @@ fn selected_binding_resource_failures_never_become_missing_signatures() {
     }
     assert_eq!(budget.used(), 0);
 }
+
+#[test]
+fn stored_overload_normalizes_each_argument_once() {
+    let binding = binding("PG_CATALOG.ABS", "numeric");
+    let control = ProductionControl::uncontrolled();
+    let expected = bound_signature(&binding, &control).unwrap().unwrap();
+    let one_argument = allocation_counter::measure(|| {
+        let normalized =
+            crate::type_resolution::canonical_routine_type_name_with_control("numeric", &control)
+                .unwrap();
+        assert_eq!(normalized.as_str(), "numeric");
+    });
+    let lookup = allocation_counter::measure(|| {
+        assert!(std::ptr::eq(
+            bound_signature(&binding, &control).unwrap().unwrap(),
+            expected
+        ));
+    });
+    assert_eq!(
+        lookup.count_total, one_argument.count_total,
+        "{lookup:?} vs {one_argument:?}"
+    );
+    assert_eq!(lookup.bytes_total, one_argument.bytes_total);
+}
