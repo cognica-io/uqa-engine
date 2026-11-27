@@ -6895,7 +6895,7 @@
       "workload": "Reorder four large, caller-owned conjunction operands with zero or one kibibyte of scratch.",
       "invariant": "The input buffer survives, four index slots bound scratch, and an exhausted allowance rejects the permutation.",
       "case_names": [
-        "optimizer::access_path::owned::tests::caller_owned_access_order_reuses_children_and_charges_only_the_permutation"
+        ""
       ]
     },
     {
@@ -6908,7 +6908,7 @@
       "workload": "Rename a bound text retrieval predicate with a large argument and 32 bytes of free workspace.",
       "invariant": "The new name replaces only the original name's capacity. The argument vector and selected binding keep their addresses and all reservations release on drop.",
       "case_names": [
-        "optimizer::implicit_fusion::owned::tests::calibration_renames_the_call_in_its_existing_argument_storage"
+        ""
       ]
     },
     {
@@ -6921,7 +6921,7 @@
       "workload": "Fuse two caller-owned predicates with a one-mebibyte argument under exhausted, cancelled and 32 KiB operation allowances.",
       "invariant": "The operation admits new containers, preserves the original argument addresses, reports 53200 or 57014 at rejection, and releases every workspace reservation.",
       "case_names": [
-        "optimizer::implicit_fusion::owned::tests::caller_owned_fusion_charges_construction_and_preserves_existing_arguments"
+        ""
       ]
     },
     {
@@ -6934,7 +6934,20 @@
       "workload": "Propagate a VALUES column beside a 1 MiB projection with exhausted, available and cancelled operation allowances.",
       "invariant": "The selected literal and projection label preserve their SQL identity, unselected storage keeps its address, and allocation failure or cancellation releases all work.",
       "case_names": [
-        "optimizer::source_constants::tests::caller_owned_source_substitution_charges_new_constants_and_preserves_unrelated_payloads"
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "cte_initialization_charges_reachability_and_checks_unread_recursive_cycles",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/tests.rs",
+      "capability": "Common table expression initialization",
+      "workload": "Plan a query and a mutation with an unread erroneous CTE, a zero-byte allowance and mutually recursive unread definitions.",
+      "invariant": "Declaration selection charges the request, preserves lazy scalar initialization and reports SQLSTATE 0A000 for mutual recursion. All workspace releases on return.",
+      "case_names": [
+        ""
       ]
     },
     {
@@ -6947,7 +6960,7 @@
       "workload": "Plan a query against a registered aggregate under zero and 256 KiB operation allowances.",
       "invariant": "The catalog uses the active allowance for every observation. Exhaustion returns 53200 and successful classification selects aggregate execution.",
       "case_names": [
-        "optimizer::tests::aggregate_identity::caller_owned_compute_classification_charges_registered_aggregate_observation"
+        ""
       ]
     },
     {
@@ -6960,7 +6973,7 @@
       "workload": "Plan a projection with a 1 MiB column name under 32 KiB and 2 MiB allowances, with and without an explicit alias.",
       "invariant": "The generated label is admitted before publication. Existing syntax keeps its address, explicit aliases survive and the workspace releases after handoff.",
       "case_names": [
-        "optimizer::scalar::storage_tests::caller_owned_projection_alias_charges_only_the_new_label"
+        ""
       ]
     },
     {
@@ -6973,7 +6986,7 @@
       "workload": "Install a generated grouping key in a caller-owned query under zero-byte and eight-kibibyte operation allowances.",
       "invariant": "Admission precedes the grouping allocation, projection storage survives a successful edit, and a rejected edit releases its partial output.",
       "case_names": [
-        "plan::mutable::tests::vectors::caller_owned_grouping_admits_its_new_vector_before_handoff"
+        ""
       ]
     },
     {
@@ -6986,7 +6999,7 @@
       "workload": "Cancel each request token while rewriting the only scalar in a caller-owned VALUES query.",
       "invariant": "The final scalar edit returns SQLSTATE 57014 and releases its workspace.",
       "case_names": [
-        "plan::mutable::tests::children::caller_owned_local_scalar_edit_observes_cancellation_in_the_last_slot"
+        ""
       ]
     },
     {
@@ -6999,7 +7012,7 @@
       "workload": "Compact two caller-owned scalar subqueries with available, exhausted and cancelled remapping allocations.",
       "invariant": "The remaining slot retains its arena allocation. Exhaustion and cancellation return their own SQLSTATE and release all workspace.",
       "case_names": [
-        "plan::mutable::tests::children::caller_owned_subqueries_use_the_operation_allowance_for_remapping"
+        ""
       ]
     },
     {
@@ -7012,7 +7025,7 @@
       "workload": "Publish a private query rewrite over either caller-owned or admitted syntax, with a live or cancelled request.",
       "invariant": "Successful output reuses its original projection buffer and keeps the input storage domain. Cancellation releases every constructor reservation.",
       "case_names": [
-        "plan::mutable::tests::construction::speculative_query_replacement_preserves_the_input_owner_and_moves_the_destination"
+        ""
       ]
     },
     {
@@ -7025,7 +7038,7 @@
       "workload": "Simplify a CASE with an existing four-megabyte column name under a one-kibibyte work allowance.",
       "invariant": "The selected column retains its original allocation, the unreachable cast is never evaluated, and the operation releases all scratch.",
       "case_names": [
-        "optimizer::scalar::storage_tests::caller_owned_case_moves_its_existing_column_under_a_tight_work_budget"
+        ""
       ]
     },
     {

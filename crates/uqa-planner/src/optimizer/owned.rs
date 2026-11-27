@@ -125,12 +125,13 @@ impl Context<'_, '_> {
                 )?;
             }
         }
-        let reachable =
-            uqa_sql::semantics::reachable_query_cte_order_with_control(&query, *control)?;
-        // Scalar initialization follows declaration order, even where CTE dependency analysis uses a different traversal order.
-        for index in 0..query.ctes.len() {
+        let reachable = uqa_sql::semantics::reachable_cte_declarations_with_control(
+            uqa_sql::plan::PlanRef::Query(&query),
+            *control,
+        )?;
+        for (index, &selected) in reachable.iter().enumerate() {
             control.check()?;
-            if reachable.contains(&index) {
+            if selected {
                 query = query.map_cte(index, control, |body| self.plan(body))?;
             }
         }

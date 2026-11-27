@@ -215,7 +215,7 @@ impl SourceStatistics for NoSourceStatistics {
     }
 }
 
-struct NoRegisteredAggregates;
+pub(super) struct NoRegisteredAggregates;
 
 impl AggregateClassifier for NoRegisteredAggregates {
     fn is_registered_aggregate(&self, _name: &str) -> bool {

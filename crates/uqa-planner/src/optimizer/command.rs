@@ -24,12 +24,19 @@ pub(super) fn optimize_command(
     aggregates: &dyn AggregateClassifier,
 ) -> Result<(), SQLError> {
     super::subqueries::prune_command(command, config.production)?;
-    let reachable = uqa_sql::semantics::reachable_command_cte_names(command);
+    let reachable = uqa_sql::semantics::reachable_cte_declarations_with_control(
+        uqa_sql::plan::PlanRef::Command(command),
+        config.production,
+    )?;
     if let Some(ctes) = command.ctes_mut() {
-        for cte in ctes.iter_mut().filter(|cte| reachable.contains(&cte.name)) {
-            super::traversal::optimize_cte(&mut cte.body, config, aggregates)?;
+        for (cte, &selected) in ctes.iter_mut().zip(reachable.iter()) {
+            config.production.check()?;
+            if selected {
+                super::traversal::optimize_cte(&mut cte.body, config, aggregates)?;
+            }
         }
     }
+    drop(reachable);
     match command {
         CommandPlan::Insert(plan) => {
             if let Some(source) = &mut plan.source {

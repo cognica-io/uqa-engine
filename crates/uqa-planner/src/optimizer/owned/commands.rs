@@ -17,11 +17,13 @@ impl Context<'_, '_> {
     ) -> Result<MutableCommandPlan, SQLError> {
         let control = &self.config.production;
         command = command.prune_subqueries(control)?;
-        let reachable =
-            uqa_sql::semantics::reachable_command_cte_order_with_control(&command, *control)?;
-        for index in 0..command.ctes().len() {
+        let reachable = uqa_sql::semantics::reachable_cte_declarations_with_control(
+            uqa_sql::plan::PlanRef::Command(&command),
+            *control,
+        )?;
+        for (index, &selected) in reachable.iter().enumerate() {
             control.check()?;
-            if reachable.contains(&index) {
+            if selected {
                 command = command.map_cte(index, control, |body| self.plan(body))?;
             }
         }

@@ -92,14 +92,17 @@ pub(super) fn optimize_query(
             )?;
         }
     }
-    let reachable = uqa_sql::semantics::reachable_plan_cte_names(query);
-    for cte in query
-        .ctes
-        .iter_mut()
-        .filter(|cte| reachable.contains(&cte.name))
-    {
-        optimize_cte(&mut cte.body, config, aggregates)?;
+    let reachable = uqa_sql::semantics::reachable_cte_declarations_with_control(
+        uqa_sql::plan::PlanRef::Query(query),
+        config.production,
+    )?;
+    for (cte, &selected) in query.ctes.iter_mut().zip(reachable.iter()) {
+        config.production.check()?;
+        if selected {
+            optimize_cte(&mut cte.body, config, aggregates)?;
+        }
     }
+    drop(reachable);
     match &mut query.root {
         RelationalPlan::QueryBlock(_) => {
             optimize_query_block(query, config, aggregates)?;
