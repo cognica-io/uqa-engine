@@ -6,11 +6,11 @@
 
 //! `PostgreSQL` 18's regular-expression function signatures. Every `pg_proc` overload of `regexp_count`, `regexp_instr`, `regexp_like`, `regexp_match`, `regexp_matches`, `regexp_replace`, `regexp_split_to_array`, `regexp_split_to_table` and `regexp_substr` is a separate declaration with its argument names and no defaults, so overload resolution, named arguments and untyped parameters select exactly the catalog routine `PostgreSQL` selects.
 
-use super::registry::{declarations, Signature};
+use super::registry::{declarations, overloads, Declaration, Signature};
 use crate::ast::ColumnType as T;
 use std::sync::LazyLock;
 
-declarations! { fn register_fixed;
+declarations! { pub(super) static DECLARATIONS;
         "regexp_count" => &[
             Signature::named(const { &[T::Text, T::Text] }, &["string", "pattern"], T::Integer),
             Signature::named(const { &[T::Text, T::Text, T::Integer] }, &["string", "pattern", "start"], T::Integer),
@@ -119,9 +119,7 @@ static TEXT_ARRAY_SIGNATURES: LazyLock<[Signature; 2]> = LazyLock::new(|| {
     ]
 });
 
-pub(super) fn register(register: &mut impl FnMut(&'static str, &'static [Signature])) {
-    register_fixed(register);
-    for name in TEXT_ARRAY_FUNCTIONS {
-        register(name, &*TEXT_ARRAY_SIGNATURES);
-    }
-}
+pub(super) static TEXT_ARRAY_DECLARATIONS: &[Declaration] = &[Declaration {
+    names: &TEXT_ARRAY_FUNCTIONS,
+    overloads: || overloads!(&*TEXT_ARRAY_SIGNATURES, 2),
+}];

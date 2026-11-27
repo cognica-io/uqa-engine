@@ -58,7 +58,7 @@ pub(in crate::type_resolution) fn bind_call_in_place_with_control(
     ) {
         return Ok(());
     }
-    let Some((registered, _)) = registry::lookup(&call.name) else {
+    let Some(registered) = registry::registered_name(&call.name) else {
         return Ok(());
     };
     let signature = match signature(&call.arguments, params, infer, control) {
@@ -66,9 +66,11 @@ pub(in crate::type_resolution) fn bind_call_in_place_with_control(
         Err(error) => return optional_error(error, control),
     };
     if !(signature.explicit_variadic && signature.names.iter().any(Option::is_some)) {
-        if let Some(binding) = call.binding.as_mut().filter(|binding| {
-            registry::lookup(&binding.name).is_some_and(|(name, _)| name == registered)
-        }) {
+        if let Some(binding) = call
+            .binding
+            .as_mut()
+            .filter(|binding| registry::registered_name(&binding.name) == Some(registered))
+        {
             let mut selected = selected::SelectedCall::take(binding, &mut call.arguments);
             let matched = selected::bind_call_in_place_with_control(
                 &mut selected,
