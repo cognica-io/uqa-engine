@@ -60,7 +60,7 @@ For one field-bound score-ordered text leaf, the planner creates `TextTopKPlan`.
 
 WAND and Block-Max WAND skip only when an upper bound proves that a candidate cannot enter the current top-K. Therefore they are exact top-K algorithms under valid bounds. A write atomically invalidates persisted block bounds, and a validity change causes safe fallback.
 
-[`uqa-scoring/src/wand`](../../../crates/uqa-scoring/src/wand) separates shared result and bound validation, materialized posting-list cursors, persistent score cursors, the WAND and Block-Max WAND loops for each cursor model, and diagnostics. The root preserves the public scorer and result paths while each execution model owns its own cursor transitions.
+Materialized posting lists and storage cursors use the same WAND and Block-Max WAND pivot loop. Each term computes its inverse document frequency once. Both input forms report the sum of term document frequencies as the candidate upper bound. Call `WANDQuery::exact_candidate_count` to count distinct documents across materialized lists. [Scoring implementation](../../../crates/uqa-scoring/src/wand)
 
 Boolean and fusion parents do not receive child text top-K pushdown because truncating one child can change the parent support and ranking.
 
@@ -106,7 +106,7 @@ $$
 L = \mathrm{logit}(\pi) + \sum_i \ell_i, \qquad P = \sigma(L).
 $$
 
-Robust positive-evidence pooling has a separate type and name. It applies gating, confidence scaling, and optional adaptive weights as a ranking heuristic. The code does not claim that its output is an exact posterior.
+Robust positive-evidence pooling applies gating, confidence scaling and optional adaptive weights as a ranking heuristic. Adaptive weighting validates all probabilities while accumulating each signal’s mean gated logit, then measures variance around that mean. The final pass applies the weights in signal order. This preserves the original floating-point score bits and needs at most three passes per input.
 
 The exact SQL names are `fuse_bayesian_evidence` and its alias `fuse_log_odds`; the exact typed API is `hybrid_search`. The heuristic names are `pool_positive_evidence` and `robust_hybrid_search`.
 

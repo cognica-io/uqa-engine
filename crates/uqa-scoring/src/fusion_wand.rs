@@ -18,16 +18,71 @@
 //! the scorer focuses purely on the heuristic pool's pivot loop. Exact Bayesian
 //! evidence fusion uses a separate operator and does not use this scorer.
 
-use std::cmp::Ordering;
-use std::collections::{BTreeMap, BTreeSet, BinaryHeap};
+use std::collections::{BTreeMap, BinaryHeap};
 
 use crate::error::{invalid_input, require_probability};
-use crate::prob::confidence_scaled_log_odds_pool;
-use crate::wand::BoundTightnessAnalyzer;
+use crate::prob::{coverage_based_default, pool_with_confidence_scale};
+use crate::wand::{
+    count_distinct_docs, update_top_k, BoundTightnessAnalyzer, HeapEntry, WANDStats,
+};
 use crate::ScoringResult;
 
 /// Per-signal score map keyed by document identifier.
 pub type SignalScoreMap = BTreeMap<u64, f64>;
+
+const SIGNAL_WINDOW: usize = 16;
+
+/// A bounded sorted slice of one signal. Sequential candidates consume the
+/// slice directly. A pivot beyond it opens a range at the target key.
+struct SignalCursor<'a> {
+    map: &'a SignalScoreMap,
+    input: std::collections::btree_map::Range<'a, u64, f64>,
+    buffer: [(u64, f64); SIGNAL_WINDOW],
+    start: usize,
+    end: usize,
+}
+
+impl<'a> SignalCursor<'a> {
+    fn new(map: &'a SignalScoreMap) -> Self {
+        let mut cursor = Self {
+            map,
+            input: map.range(..),
+            buffer: [(0, 0.0); SIGNAL_WINDOW],
+            start: 0,
+            end: 0,
+        };
+        cursor.refill();
+        cursor
+    }
+
+    fn refill(&mut self) {
+        self.start = 0;
+        self.end = 0;
+        for (slot, (&id, &score)) in self.buffer.iter_mut().zip(&mut self.input) {
+            *slot = (id, score);
+            self.end += 1;
+        }
+    }
+
+    fn scores(&self) -> &[(u64, f64)] {
+        &self.buffer[self.start..self.end]
+    }
+
+    fn advance(&mut self) {
+        self.start += 1;
+        if self.start == self.end {
+            self.refill();
+        }
+    }
+
+    fn seek(&mut self, target: u64) {
+        self.start += self.scores().partition_point(|entry| entry.0 < target);
+        if self.start == self.end {
+            self.input = self.map.range(target..);
+            self.refill();
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct ConfidenceScaledPoolWANDScorer {
@@ -56,101 +111,85 @@ impl ConfidenceScaledPoolWANDScorer {
     /// Run the WAND pivot loop and return the top-k `(doc_id, score)` pairs
     /// sorted by descending score.
     pub fn score_top_k(&self) -> ScoringResult<Vec<(u64, f64)>> {
-        validate_fusion_inputs(&self.signals, &self.upper_bounds, self.alpha)?;
-        if self.signals.is_empty() {
-            return Ok(Vec::new());
-        }
-        let mut all_doc_ids: BTreeSet<u64> = BTreeSet::new();
-        for sig in &self.signals {
-            all_doc_ids.extend(sig.keys().copied());
-        }
-        if all_doc_ids.is_empty() {
-            return Ok(Vec::new());
-        }
-        let num_docs = all_doc_ids.len();
-        let defaults: Vec<f64> = self
-            .signals
-            .iter()
-            .map(|sig| coverage_based_default(sig.len(), num_docs, 0.01))
-            .collect();
-
-        // Min-heap keyed by score: BinaryHeap is max-heap by default,
-        // so we negate via Reverse-style ordering with a wrapper.
-        let mut heap: BinaryHeap<HeapEntry> = BinaryHeap::with_capacity(self.k + 1);
-
-        for doc_id in all_doc_ids {
-            // Pivot check: bail out when even the most-optimistic fused
-            // upper bound for this doc cannot beat the threshold.
-            if heap.len() >= self.k {
-                let threshold = heap.peek().map_or(f64::NEG_INFINITY, |e| e.score);
-                let doc_ubs: Vec<f64> = self
-                    .signals
-                    .iter()
-                    .enumerate()
-                    .map(|(j, sig)| {
-                        if sig.contains_key(&doc_id) {
-                            self.upper_bounds[j]
-                        } else {
-                            defaults[j]
-                        }
-                    })
-                    .collect();
-                let fused_ub = self.compute_fused_upper_bound(&doc_ubs)?;
-                if fused_ub < threshold {
-                    continue;
-                }
-            }
-
-            // Score the document.
-            let probs: Vec<f64> = self
-                .signals
-                .iter()
-                .enumerate()
-                .map(|(j, sig)| sig.get(&doc_id).copied().unwrap_or(defaults[j]))
-                .collect();
-            let fused = if probs.len() == 1 {
-                probs[0]
-            } else {
-                confidence_scaled_log_odds_pool(&probs, self.alpha)
-            };
-            require_probability(fused, "confidence-scaled pool WAND score")?;
-
-            if heap.len() < self.k {
-                heap.push(HeapEntry {
-                    score: fused,
-                    doc_id,
-                });
-            } else if let Some(top) = heap.peek() {
-                if fused > top.score {
-                    heap.pop();
-                    heap.push(HeapEntry {
-                        score: fused,
-                        doc_id,
-                    });
-                }
-            }
-        }
-
-        // The Ord impl reverses score order so BinaryHeap acts as a
-        // min-heap by score; into_sorted_vec then yields entries
-        // sorted ascending in Ord order, which is descending in raw
-        // score order -- exactly what callers expect from a Top-K
-        // loop.
+        let (heap, _) = self.select()?;
         Ok(heap
             .into_sorted_vec()
             .into_iter()
-            .map(|e| (e.doc_id, e.score))
+            .map(|entry| (entry.doc_id, entry.score))
             .collect())
     }
 
-    fn compute_fused_upper_bound(&self, active_ubs: &[f64]) -> ScoringResult<f64> {
-        let bound = if active_ubs.is_empty() {
-            0.0
-        } else {
-            confidence_scaled_log_odds_pool(active_ubs, self.alpha)
+    fn select(&self) -> ScoringResult<(BinaryHeap<HeapEntry>, WANDStats)> {
+        validate_fusion_inputs(&self.signals, &self.upper_bounds, self.alpha)?;
+        let mut stats = WANDStats::default();
+        if self.k == 0 || self.signals.is_empty() {
+            return Ok((BinaryHeap::new(), stats));
+        }
+        let total = count_distinct_docs(self.signals.iter().map(|signal| signal.keys().copied()))
+            .ok_or_else(|| {
+            invalid_input("confidence-scaled pool candidate count overflowed")
+        })?;
+        stats.total_candidates = u64::try_from(total)
+            .map_err(|_| invalid_input("confidence-scaled pool candidate count exceeds u64"))?;
+        let mut heap = BinaryHeap::with_capacity(self.k.min(total));
+        let defaults: Vec<_> = self
+            .signals
+            .iter()
+            .map(|signal| coverage_based_default(signal.len(), total, 0.01))
+            .collect();
+        let mut remaining: Vec<_> = self.signals.iter().map(SignalCursor::new).collect();
+        let scale = (defaults.len() as f64).powf(self.alpha);
+        let score_row = |row: &[f64]| match row {
+            [single] => *single,
+            _ => pool_with_confidence_scale(row, scale),
         };
-        require_probability(bound, "confidence-scaled pool WAND upper bound")?;
-        Ok(bound)
+        let mut row = defaults.clone();
+        let mut threshold = 0.0;
+        while let Some(doc) = remaining
+            .iter()
+            .filter_map(|column| column.scores().first().map(|entry| entry.0))
+            .min()
+        {
+            if heap.len() == self.k {
+                let mut pivot = None;
+                for (i, column) in remaining.iter().enumerate() {
+                    row[i] = defaults[i];
+                    if let Some(&(id, _)) = column.scores().first() {
+                        if id == doc {
+                            row[i] = row[i].max(self.upper_bounds[i]);
+                        } else {
+                            pivot = Some(pivot.map_or(id, |previous: u64| previous.min(id)));
+                        }
+                    }
+                }
+                // Until the next distinct head, only columns at doc can supply
+                // a hit. A missing score can exceed a signal's explicit bound.
+                if score_row(&row) < threshold {
+                    let Some(pivot) = pivot else { break };
+                    for column in &mut remaining {
+                        if column.scores().first().is_some_and(|entry| entry.0 == doc) {
+                            column.seek(pivot);
+                            stats.cursor_advances += 1;
+                        }
+                    }
+                    continue;
+                }
+            }
+            for (i, column) in remaining.iter_mut().enumerate() {
+                row[i] = defaults[i];
+                if let Some(&(id, score)) = column.scores().first() {
+                    if id == doc {
+                        row[i] = score;
+                        column.advance();
+                    }
+                }
+            }
+            let score = score_row(&row);
+            require_probability(score, "confidence-scaled pool WAND score")?;
+            stats.scored += 1;
+            update_top_k(&mut heap, self.k, score, doc, &mut threshold);
+        }
+        Ok((heap, stats))
     }
 }
 
@@ -212,41 +251,6 @@ impl TightenedConfidenceScaledPoolWANDScorer {
     }
 }
 
-/// Score-keyed heap entry. The heap is a max-heap so the smallest
-/// element after `score_top_k`'s loop is the cutoff threshold. Ties
-/// resolve by doc id for determinism.
-#[derive(Debug)]
-struct HeapEntry {
-    score: f64,
-    doc_id: u64,
-}
-
-impl PartialEq for HeapEntry {
-    fn eq(&self, other: &Self) -> bool {
-        self.cmp(other) == Ordering::Equal
-    }
-}
-
-impl Eq for HeapEntry {}
-
-impl PartialOrd for HeapEntry {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl Ord for HeapEntry {
-    fn cmp(&self, other: &Self) -> Ordering {
-        // Reverse ordering on score so BinaryHeap acts as a min-heap
-        // over scores -- we evict the smallest-scoring entry when the
-        // heap fills up.
-        other
-            .score
-            .total_cmp(&self.score)
-            .then(self.doc_id.cmp(&other.doc_id))
-    }
-}
-
 fn validate_fusion_inputs(
     signals: &[SignalScoreMap],
     upper_bounds: &[f64],
@@ -276,14 +280,6 @@ fn validate_fusion_inputs(
         }
     }
     Ok(())
-}
-
-fn coverage_based_default(n_hits: usize, n_total: usize, floor: f64) -> f64 {
-    if n_total == 0 {
-        return 0.5;
-    }
-    let r = n_hits as f64 / n_total as f64;
-    f64::midpoint(1.0 - r, 0.0) + floor * r
 }
 
 #[cfg(test)]
@@ -360,5 +356,115 @@ mod tests {
             1
         )
         .is_err());
+    }
+
+    #[test]
+    fn sparse_pivot_skips_weak_scores_without_changing_the_top_document() {
+        let common: SignalScoreMap = (1..=8192).map(|doc| (doc, 0.6)).collect();
+        let rare = map(&[(1, 0.99), (8192, 0.99)]);
+        let scorer =
+            ConfidenceScaledPoolWANDScorer::new(vec![common, rare], vec![0.6, 0.99], 0.5, 1)
+                .unwrap();
+        let (heap, stats) = scorer.select().unwrap();
+        let winner = heap.peek().unwrap();
+        assert_eq!(winner.doc_id, 1);
+        assert_eq!(
+            winner.score.to_bits(),
+            crate::prob::confidence_scaled_log_odds_pool(&[0.6, 0.99], 0.5).to_bits()
+        );
+        assert_eq!(
+            stats,
+            WANDStats {
+                total_candidates: 8192,
+                scored: 2,
+                cursor_advances: 1
+            }
+        );
+    }
+
+    #[test]
+    fn sparse_pool_matches_exhaustive_scores_and_ties_for_every_cutoff() {
+        let columns = vec![
+            map(&[(2, 0.0), (3, 0.1), (7, 0.04)]),
+            map(&[(0, 1.0), (2, 0.2), (4, 0.99), (7, 0.0), (u64::MAX, 1.0)]),
+            map(&[(1, 0.5), (3, 0.8), (4, 0.9), (7, 0.6)]),
+        ];
+        let ids: std::collections::BTreeSet<_> = columns
+            .iter()
+            .flat_map(|column| column.keys().copied())
+            .collect();
+        let defaults: Vec<_> = columns
+            .iter()
+            .map(|column| coverage_based_default(column.len(), ids.len(), 0.01))
+            .collect();
+        for alpha in [0.0, 0.5, 1.0] {
+            let mut expected: Vec<_> = ids
+                .iter()
+                .map(|doc| {
+                    let probabilities: Vec<_> = columns
+                        .iter()
+                        .zip(&defaults)
+                        .map(|(column, default)| *column.get(doc).unwrap_or(default))
+                        .collect();
+                    (
+                        *doc,
+                        crate::prob::confidence_scaled_log_odds_pool(&probabilities, alpha),
+                    )
+                })
+                .collect();
+            expected.sort_by(|a, b| b.1.total_cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+            for k in (0..=ids.len() + 1).chain([usize::MAX]) {
+                let scorer = ConfidenceScaledPoolWANDScorer::new(
+                    columns.clone(),
+                    vec![0.1, 1.0, 0.9],
+                    alpha,
+                    k,
+                )
+                .unwrap();
+                let actual: Vec<_> = scorer
+                    .score_top_k()
+                    .unwrap()
+                    .into_iter()
+                    .map(|(id, score)| (id, score.to_bits()))
+                    .collect();
+                assert_eq!(
+                    actual,
+                    expected
+                        .iter()
+                        .take(k)
+                        .map(|(id, score)| (*id, score.to_bits()))
+                        .collect::<Vec<_>>()
+                );
+            }
+        }
+        let just_below_one = f64::from_bits(1.0_f64.to_bits() - 1);
+        let scorer = ConfidenceScaledPoolWANDScorer::new(
+            vec![map(&[(1, just_below_one), (2, 1.0)])],
+            vec![1.0],
+            0.5,
+            1,
+        )
+        .unwrap();
+        assert_eq!(scorer.score_top_k().unwrap(), [(2, 1.0)]);
+    }
+
+    #[test]
+    fn overlapping_pool_inputs_use_bounded_scratch_independent_of_population() {
+        let measure = |count| {
+            let signals = (0..32)
+                .map(|_| (1..=count).map(|doc| (doc, 0.5)).collect())
+                .collect();
+            let scorer =
+                ConfidenceScaledPoolWANDScorer::new(signals, vec![0.99; 32], 0.5, 10).unwrap();
+            allocation_counter::measure(|| {
+                let result = scorer.score_top_k().unwrap();
+                assert!(result.iter().map(|(id, _)| *id).eq(1..=10));
+            })
+        };
+        let small = measure(32);
+        let large = measure(8192);
+        assert_eq!(large.bytes_max, small.bytes_max);
+        assert_eq!(large.count_total, small.count_total);
+        assert!(large.count_total < 32, "{large:?}");
     }
 }

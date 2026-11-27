@@ -57,7 +57,7 @@ fn assert_same_scores(left: &PostingList, right: &PostingList) {
     assert_eq!(left.len(), right.len());
     for (left, right) in left.iter().zip(right) {
         assert_eq!(left.doc_id, right.doc_id);
-        assert!((left.payload.score - right.payload.score).abs() < 1e-12);
+        assert_eq!(left.payload.score.to_bits(), right.payload.score.to_bits());
     }
 }
 
@@ -205,7 +205,7 @@ fn wand_top_k_matches_exhaustive_scoring() {
     assert_eq!(got.len(), expected.len());
     for ((d1, s1), (d2, s2)) in got.iter().zip(&expected) {
         assert_eq!(d1, d2);
-        assert!((s1 - s2).abs() < 1e-9, "{s1} vs {s2}");
+        assert_eq!(s1.to_bits(), s2.to_bits());
     }
 }
 
@@ -344,7 +344,7 @@ fn bayesian_wand_finalizes_the_complete_query_once() {
     for ((actual_doc, actual_score), (expected_doc, expected_score)) in actual.iter().zip(&expected)
     {
         assert_eq!(actual_doc, expected_doc);
-        assert!((actual_score - expected_score).abs() < 1e-12);
+        assert_eq!(actual_score.to_bits(), expected_score.to_bits());
     }
 }
 
@@ -362,4 +362,102 @@ fn bound_tightness_records_ratio() {
     a.record(2.0, 1.0).unwrap();
     // ratios: 0.8, 0.5; mean 0.65
     assert!((a.tightness_ratio() - 0.65).abs() < 1e-9);
+}
+
+#[test]
+fn materialized_and_stored_cursors_seek_past_a_long_weak_range() {
+    use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
+
+    struct CountingScorer {
+        idfs: AtomicUsize,
+        scores: AtomicUsize,
+        maximum: f64,
+    }
+
+    impl Scorer for CountingScorer {
+        fn idf(&self, _df: u64) -> f64 {
+            self.idfs.fetch_add(1, Relaxed);
+            1.0
+        }
+        fn term_upper_bound(&self, _df: u64) -> f64 {
+            self.maximum
+        }
+        fn term_score(&self, tf: u64, dl: u64, df: u64) -> f64 {
+            self.term_score_with_idf(tf, dl, self.idf(df))
+        }
+        fn term_score_with_idf(&self, tf: u64, _dl: u64, idf: f64) -> f64 {
+            self.scores.fetch_add(1, Relaxed);
+            tf as f64 * idf
+        }
+        fn finalize_score(&self, scores: &[f64]) -> f64 {
+            scores.iter().sum()
+        }
+    }
+    let dense = (1..=8192).map(|id| (id, 1)).collect::<Vec<_>>();
+    let rare = [(1, 8), (8192, 8)];
+    let counts = [1.0, 8.0].map(|maximum| {
+        Arc::new(CountingScorer {
+            maximum,
+            idfs: AtomicUsize::new(0),
+            scores: AtomicUsize::new(0),
+        })
+    });
+    let scorers = counts
+        .iter()
+        .map(|s| s.clone() as Arc<dyn Scorer>)
+        .collect::<Vec<_>>();
+    let fields = vec!["body".into(); 2];
+    let terms = vec!["common".into(), "rare".into()];
+    let query = WANDQuery::new(
+        vec![pl_from_tfs(&dense), pl_from_tfs(&rare)],
+        scorers.clone(),
+        fields.clone(),
+        terms.clone(),
+        1,
+    )
+    .unwrap();
+    let borrowed = CursorWANDQuery::new(
+        vec![score_cursor(&dense), score_cursor(&rare)],
+        scorers,
+        fields,
+        terms,
+        1,
+    )
+    .unwrap();
+    let mut blocks = BlockMaxIndex::new(8192).unwrap();
+    for (term, maximum) in [("common", 1.0), ("rare", 8.0)] {
+        blocks
+            .set_block_maxes("docs", "body", term, vec![maximum])
+            .unwrap();
+    }
+
+    for result in [
+        WANDScorer::new(&query, None).score_top_k().unwrap(),
+        BlockMaxWANDScorer::new(&query, None, &blocks, "docs")
+            .score_top_k()
+            .unwrap(),
+        CursorWANDScorer::new(&borrowed).score_top_k().unwrap(),
+        CursorBlockMaxWANDScorer::new(&borrowed, &blocks, "docs")
+            .score_top_k()
+            .unwrap(),
+    ] {
+        let first = &result.top_k.entries()[0];
+        assert_eq!(
+            (first.doc_id, first.payload.score.to_bits()),
+            (1, 9.0f64.to_bits())
+        );
+        assert_eq!(
+            result.stats,
+            WANDStats {
+                total_candidates: 8194,
+                scored: 2,
+                cursor_advances: 1
+            }
+        );
+    }
+    assert_eq!(query.exact_candidate_count().unwrap(), 8192);
+    for scorer in &counts {
+        assert_eq!(scorer.idfs.load(Relaxed), 4);
+        assert_eq!(scorer.scores.load(Relaxed), 8);
+    }
 }

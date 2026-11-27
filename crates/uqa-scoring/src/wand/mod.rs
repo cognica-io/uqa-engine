@@ -16,6 +16,7 @@ mod cursor;
 mod diagnostics;
 mod materialized;
 
+pub(crate) use common::{count_distinct_docs, update_top_k, HeapEntry};
 pub use common::{WANDResult, WANDStats};
 pub use cursor::{CursorBlockMaxWANDScorer, CursorWANDQuery, CursorWANDScorer};
 pub use diagnostics::{AdaptiveWANDScorer, BoundTightnessAnalyzer};
