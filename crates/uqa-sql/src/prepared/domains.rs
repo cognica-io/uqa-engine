@@ -40,7 +40,12 @@ impl GenericDomainInputs {
                 let ScalarExpr::Cast { ty: name, .. } = node else {
                     return Ok(true);
                 };
-                if bindings.iter().any(|binding| binding.name == *name) {
+                // Grammar-bound builtins have a fixed catalog identity. A free
+                // type name can still select a domain through the search path.
+                if bindings.iter().any(|binding| binding.name == *name)
+                    || crate::type_resolution::pg_catalog_builtin_type_with_control(name, control)?
+                        .is_some()
+                {
                     return Ok(true);
                 }
                 let Some(resolved) =
