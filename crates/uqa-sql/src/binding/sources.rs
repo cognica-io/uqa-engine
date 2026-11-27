@@ -169,7 +169,9 @@ pub fn bind_source_input_schema(
 }
 
 mod pseudo_columns;
-pub use pseudo_columns::with_query_table_pseudo_columns_with_control;
+pub use pseudo_columns::{
+    query_expression_schema_with_control, with_query_table_pseudo_columns_with_control,
+};
 
 /// Add query-block pseudo columns after the complete source scope is known, so `_meta` is exposed only for one unambiguous local-table source and never shadows a real relation alias.
 pub fn with_query_table_pseudo_columns(schema: &RowSchema) -> RowSchema {

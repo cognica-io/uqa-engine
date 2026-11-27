@@ -85,6 +85,85 @@ impl SourceBindings<'_> {
     }
 }
 
+/// Rebind a correlated outer row only when the block introduces structural identities.
+pub(crate) fn prepare_query_block<'a, S: Clone>(
+    routines: &'a dyn RoutineResolution,
+    block: &'a QueryBlockPlan,
+    params: &'a [SQLParam],
+    ctes: &mut CteScope<S>,
+    inherited: Option<&SourceBindings<'a>>,
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<BoundQueryBlock<'a>, SQLError> {
+    if let Some(outer) = ctes.row_lock_outer_row() {
+        if let std::borrow::Cow::Owned(rebound) = super::bind_outer_rewrite_row(block, outer) {
+            ctes.set_row_lock_outer_row(rebound);
+        }
+    }
+    let options = uqa_sql::binding::ExecutionBindingOptions {
+        outer: ctes.row_lock_outer_row().map(|row| &row.schema),
+        defer_distinct_limit: uqa_sql::semantics::should_defer_distinct_limit(block),
+    };
+    bind_query_block_with_sources(routines, block, params, ctes, options, inherited, control)
+}
+
+pub(crate) fn validate_block_set_contexts<S: Clone + Send + Sync + 'static>(
+    context: &crate::query::relational::RelationalContext<'_, S>,
+    block: &QueryBlockPlan,
+    schema: &RowSchema,
+    params: &[SQLParam],
+    ctes: &CteScope<S>,
+    outer: Option<&RowSchema>,
+) -> Result<(), SQLError> {
+    let resolver = context.expression_scope(ctes)?;
+    uqa_sql::semantics::sets::validation::validate_query_set_contexts(
+        context.catalog,
+        resolver.as_ref(),
+        block,
+        schema,
+        params,
+    )?;
+    if let Some(from) = &block.from {
+        uqa_sql::semantics::sets::validation::validate_source_set_contexts_before_build(
+            context.catalog,
+            resolver.as_ref(),
+            from,
+            params,
+            &super::binding_context(ctes)?,
+            outer,
+        )?;
+    }
+    Ok(())
+}
+
+/// Distinct bound and original query trees can each need view rewrites against the physical row type.
+pub(crate) struct QueryBlockRewrites<'a, 'b> {
+    bound: ExecutionQueryBlock<'a>,
+    original: Option<ExecutionQueryBlock<'b>>,
+}
+
+impl<'a, 'b> QueryBlockRewrites<'a, 'b> {
+    pub(crate) fn resolve(
+        bound: ExecutionQueryBlock<'a>,
+        original: &'b QueryBlockPlan,
+        schema: &RowSchema,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Self, SQLError> {
+        let shared = std::ptr::eq(bound.as_ref(), original);
+        let bound = bound.resolve_outer_rewrites(schema, control)?;
+        let original = if shared {
+            None
+        } else {
+            Some(ExecutionQueryBlock::borrowed(original).resolve_outer_rewrites(schema, control)?)
+        };
+        Ok(Self { bound, original })
+    }
+
+    pub(crate) fn blocks(&self) -> (&QueryBlockPlan, &QueryBlockPlan) {
+        let bound = self.bound.as_ref();
+        (bound, self.original.as_ref().map_or(bound, AsRef::as_ref))
+    }
+}
+
 pub(crate) fn bind_query_block_with_sources<'a, S: Clone>(
     routines: &'a dyn RoutineResolution,
     block: &'a QueryBlockPlan,

@@ -8,7 +8,9 @@
 
 use crate::binding::preparation::{LiteralInput, SchemaContext};
 
-use super::super::{overlay_outer_schema_with_control, JoinSchemaBinding, SourcePlan, SourceScope};
+use super::super::{
+    query_expression_schema_with_control, JoinSchemaBinding, SourcePlan, SourceScope,
+};
 use super::{Preparation, QueryPlan, RowSchema, SQLError, ScalarExpr};
 use crate::ast::{FunctionBinding, OperatorJoinRelations};
 use crate::catalog::work::{inline, Work};
@@ -244,11 +246,8 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
                 std::iter::empty::<String>(),
                 &self.scope.control(),
             )?;
-            let joined = crate::binding::with_query_table_pseudo_columns_with_control(
-                &joined,
-                &self.scope.control(),
-            )?;
-            let input = overlay_outer_schema_with_control(&joined, outer, &self.scope.control())?;
+            let input =
+                query_expression_schema_with_control(&joined, outer, &self.scope.control())?;
             self.in_placement(SetPlacement::JoinCondition, |analysis| {
                 analysis.require_boolean(on, &input, subqueries, "JOIN/ON")
             })?;

@@ -123,3 +123,55 @@ fn source_transfer_rebinds_changed_parameters_and_cte_definitions() {
     .unwrap();
     assert_eq!(rebound.schema.column_type(0), Some(&ColumnType::Text));
 }
+
+#[test]
+fn query_block_binding_retains_the_outer_row_and_distinct_output_syntax() {
+    let mut scope = empty_scope();
+    scope.set_row_lock_outer_row(crate::OwnedPhysicalRow::new(
+        RowSchema::with_qualified_types(
+            "parent",
+            vec!["v".into()],
+            vec![Some(ColumnType::Integer)],
+        ),
+        crate::PhysicalRow::from_values(vec![uqa_core::Value::Int(7)]),
+    ));
+    let outer = scope.outer_row_binding().unwrap();
+    let query = query("SELECT DISTINCT parent.v FROM (VALUES (1)) AS input(n) LIMIT 1");
+    let original = block(&query);
+    let control = ProductionControl::uncontrolled();
+    let prepared =
+        prepare_query_block(&NoRoutines, original, &[], &mut scope, None, &control).unwrap();
+    assert!(Arc::ptr_eq(&outer, &scope.outer_row_binding().unwrap()));
+    let physical = prepared.schema;
+    let same = QueryBlockRewrites::resolve(
+        ExecutionQueryBlock::borrowed(original),
+        original,
+        &physical,
+        &control,
+    )
+    .unwrap();
+    let (query, output) = same.blocks();
+    assert!(std::ptr::eq(query, output));
+    assert!(output.limit.is_some());
+
+    let bound = bind_query_block_with_sources(
+        &NoRoutines,
+        original,
+        &[],
+        &scope,
+        ExecutionBindingOptions {
+            outer: Some(&outer.schema),
+            defer_distinct_limit: true,
+        },
+        None,
+        &control,
+    )
+    .unwrap();
+    let different =
+        QueryBlockRewrites::resolve(bound.block, original, &physical, &control).unwrap();
+    let (input, output) = different.blocks();
+    assert!(!std::ptr::eq(input, output));
+    assert!(input.limit.is_none());
+    assert!(output.limit.is_some());
+    assert_eq!(outer.physical_value_at(0), Some(&uqa_core::Value::Int(7)));
+}

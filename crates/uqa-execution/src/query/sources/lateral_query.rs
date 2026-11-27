@@ -213,18 +213,11 @@ fn execute_lateral_query_block_output<S: Clone + Send + Sync + 'static>(
     let captured_outer = crate::query::binding::bind_outer_rewrite_row(stmt, outer_row);
     let outer_row = captured_outer.as_ref();
     let rewrite_subqueries = !stmt.deferred_outer_rewrites.is_empty();
-    let inherited_lock_identities = scoped_ctes.lock_identities.emit;
     let arena_resources = context.ctes.production_resources()?;
     let control = arena_resources.control();
     let mut scoped_ctes = scoped_ctes.enter_query_block_with_control(stmt, &control)?;
     scoped_ctes.set_row_lock_outer_row(outer_row.clone());
-    let row_identity_barrier = stmt.distinct
-        || !stmt.distinct_on.is_empty()
-        || matches!(stmt.compute, ComputePlan::Aggregate | ComputePlan::Window);
-    scoped_ctes.lock_identities.emit =
-        !stmt.locking.is_empty() || (inherited_lock_identities && !row_identity_barrier);
-    scoped_ctes.lock_identities.retain_after_lock =
-        inherited_lock_identities && !row_identity_barrier;
+    scoped_ctes.lock_identities = scoped_ctes.lock_identities.for_block(stmt);
     let (statement_owner, own_schema) = bind_lateral_query_block(
         context,
         stmt,

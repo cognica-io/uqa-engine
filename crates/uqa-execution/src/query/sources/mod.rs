@@ -40,6 +40,7 @@ use uqa_sql::{
     SQLError, SQLParam, ScalarExpr,
 };
 
+pub(in crate::query) mod block_source;
 mod function_source;
 mod join_keys;
 mod join_source;

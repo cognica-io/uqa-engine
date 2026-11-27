@@ -7997,6 +7997,19 @@
     {
       "package": "uqa-execution",
       "kind": "lib",
+      "test": "query_block_binding_retains_the_outer_row_and_distinct_output_syntax",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/binding/sources/tests.rs",
+      "capability": "Query block binding",
+      "workload": "Bind an outer column in a derived SELECT DISTINCT with LIMIT using both the original and a separately bound input block.",
+      "invariant": "Binding retains the outer row allocation. Identical block inputs share their rewritten owner and deferring DISTINCT and LIMIT keeps the original output syntax.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
       "test": "spilled_distinct_and_join_bound_physical_reads_for_colliding_partitions",
       "cases": 1,
       "source": "crates/uqa-execution/src/join/tests/spill_work.rs",

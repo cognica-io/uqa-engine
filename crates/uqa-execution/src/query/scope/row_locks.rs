@@ -23,6 +23,20 @@ pub struct LockIdentityOptions {
     pub retain_after_lock: bool,
 }
 
+impl LockIdentityOptions {
+    pub(crate) fn for_block(self, block: &uqa_sql::plan::QueryBlockPlan) -> Self {
+        use uqa_sql::plan::ComputePlan;
+        let retain_after_lock = self.emit
+            && !block.distinct
+            && block.distinct_on.is_empty()
+            && !matches!(block.compute, ComputePlan::Aggregate | ComputePlan::Window);
+        Self {
+            emit: retain_after_lock || !block.locking.is_empty(),
+            retain_after_lock,
+        }
+    }
+}
+
 #[derive(Clone, Default)]
 pub struct RowLockScopeState {
     source_row_locks: Option<SourceRowLocks>,

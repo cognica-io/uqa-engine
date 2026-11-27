@@ -107,8 +107,8 @@ pub use scope::{
 pub use sources::{
     analyze_source_plan_schema, bind_source_input_schema, bind_source_plan_for_execution_owned,
     bind_source_plan_schema, bind_source_plan_schema_for_execution,
-    with_query_table_pseudo_columns, with_query_table_pseudo_columns_with_control,
-    SourceBindingInput,
+    query_expression_schema_with_control, with_query_table_pseudo_columns,
+    with_query_table_pseudo_columns_with_control, SourceBindingInput,
 };
 pub use variable_sites::{resolve_variable_sites, VariableSiteResolution};
 

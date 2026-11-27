@@ -6,7 +6,7 @@
 
 //! The output columns of a `VALUES` list and of a join, as their query level sees them.
 
-use super::scope::overlay_outer_schema_with_control;
+use super::query_expression_schema_with_control;
 use super::sources::JoinSchemaBinding;
 use super::SchemaScope;
 use crate::ast::ColumnType;
@@ -97,9 +97,7 @@ impl SchemaScope {
                 std::iter::empty::<String>(),
                 &self.control(),
             )?;
-            let input =
-                super::with_query_table_pseudo_columns_with_control(&input, &self.control())?;
-            let input = overlay_outer_schema_with_control(&input, outer, &self.control())?;
+            let input = query_expression_schema_with_control(&input, outer, &self.control())?;
             if self.validate_references {
                 self.bind_expression_type_with_control(routines, on, &input, subqueries, params)?;
                 self.validate_condition(routines, on, "JOIN/ON", &input, subqueries, params)?;
