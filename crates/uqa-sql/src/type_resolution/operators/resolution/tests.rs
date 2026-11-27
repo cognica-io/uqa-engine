@@ -457,6 +457,12 @@ fn modifier_variants_share_one_retained_selection_and_the_retention_stays_bounde
 
 #[test]
 fn operator_name_index_keeps_catalog_order_and_lookup_visits_only_its_overloads() {
+    let allocation = allocation_counter::measure(|| {
+        assert_eq!(catalog::named("#").len(), 3);
+        assert!(catalog::named("unregistered").next().is_none());
+        assert!(catalog::by_oid(-1).is_none());
+    });
+    assert_eq!(allocation.count_total, 0);
     let names: std::collections::BTreeSet<_> = SIGNATURES.iter().map(|entry| entry.0).collect();
     for name in names {
         assert!(catalog::named(name).eq(SIGNATURES.iter().filter(|entry| entry.0 == name)));
@@ -473,10 +479,4 @@ fn operator_name_index_keeps_catalog_order_and_lookup_visits_only_its_overloads(
             (name, [left, right], result, function)
         );
     }
-    let allocation = allocation_counter::measure(|| {
-        assert_eq!(catalog::named("#").len(), 3);
-        assert!(catalog::named("unregistered").next().is_none());
-        assert!(catalog::by_oid(-1).is_none());
-    });
-    assert_eq!(allocation.count_total, 0);
 }
