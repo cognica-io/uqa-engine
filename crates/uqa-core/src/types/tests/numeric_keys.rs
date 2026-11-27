@@ -122,6 +122,12 @@ fn exact_numeric_hashes_cover_all_representations_without_heap_allocation() {
         ),
         (decimal("1e-1000"), decimal("10.000e-1001")),
     ];
+    for scale in [26, 27, 28, 54, 1080, 16_382] {
+        pairs.push((
+            decimal(&format!("7e-{scale}")),
+            decimal(&format!("70e-{}", scale + 1)),
+        ));
+    }
     for value in [
         0.0,
         -0.0,
@@ -153,6 +159,7 @@ fn exact_numeric_hashes_cover_all_representations_without_heap_allocation() {
         }
     });
     assert_eq!(allocations.count_total, 0, "{allocations:?}");
+    assert_ne!(hash(&Value::Int(1)), hash(&decimal("36893488147419103115")));
     assert!(Value::Null.numeric_hash_key().is_none());
     assert_ne!(hash(&Value::Float(0.1)), hash(&decimal("0.1")));
     assert_ne!(
