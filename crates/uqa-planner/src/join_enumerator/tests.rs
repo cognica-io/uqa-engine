@@ -205,3 +205,37 @@ fn threshold_sized_star_uses_exact_plan() {
     assert_eq!(plan.relations, g.full_set());
     assert!(plan.cost > 0.0);
 }
+
+#[test]
+fn parallel_join_predicates_cost_both_orientations_in_one_edge_scan() {
+    for select_index in [false, true] {
+        let mut graph = JoinGraph::new();
+        graph.add_relation("outer", 1.0).unwrap();
+        graph.add_relation("inner", 100000.0).unwrap();
+        let factors = [0.5, 0.25, 0.003, 0.9, 0.75];
+        let mut cardinality = 100000.0;
+        for (position, factor) in factors.into_iter().enumerate() {
+            graph.add_edge(0, 1, factor).unwrap();
+            cardinality *= factor;
+            if select_index && position > 0 {
+                graph.edges[position].lookup_columns[1] = Some(position as u16);
+            }
+        }
+        let before = crate::join_graph::EDGE_PROBES.get();
+        let plan = enumerate_dpccp(&graph).unwrap();
+        assert_eq!(crate::join_graph::EDGE_PROBES.get() - before, factors.len());
+        let edge = plan.join_edge.unwrap();
+        if select_index {
+            assert_eq!(plan.kind, Some(OperatorKind::IndexJoin));
+            assert_eq!(edge.lookup_column(2), Some(1));
+            assert_eq!(
+                plan.cardinality.to_bits(),
+                cardinality.min(1.0_f64).to_bits()
+            );
+        } else {
+            assert_eq!(plan.kind, Some(OperatorKind::HashJoinInner));
+            assert_eq!(edge.selectivity.to_bits(), factors[0].to_bits());
+            assert_eq!(plan.cardinality.to_bits(), cardinality.to_bits());
+        }
+    }
+}

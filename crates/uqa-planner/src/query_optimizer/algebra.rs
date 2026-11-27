@@ -6,107 +6,25 @@
 
 //! Payload-safe algebraic rewrites for operator trees.
 
+use std::collections::{BTreeMap, BTreeSet, HashSet};
+
+use uqa_core::Predicate;
 use uqa_operators::OperatorTree;
 
 use super::{tree_map::map_operator_children, QueryOptimizer};
 
 impl QueryOptimizer {
-    // ---------------------------------------------------------------
-    // 1. Algebraic simplification
-    // ---------------------------------------------------------------
-
     pub(super) fn simplify_algebra(&self, op: OperatorTree) -> OperatorTree {
-        // Recurse first (bottom-up).
-        let op = self.recurse_simplify(op);
-        match op {
+        match self.recurse_simplify(op) {
             OperatorTree::Intersect(operands) => {
-                // Empty elimination: any empty child collapses the
-                // intersection.
-                for child in &operands {
-                    if child.is_empty() {
-                        return OperatorTree::Intersect(Vec::new());
-                    }
+                if operands.iter().any(OperatorTree::is_empty) {
+                    return OperatorTree::Intersect(Vec::new());
                 }
-                // Idempotence is valid only for membership-only operands.
-                // Posting-list merges add scores, so structurally equal scored
-                // terms must remain distinct.
-                let mut seen: Vec<OperatorTree> = Vec::new();
-                'outer: for child in operands {
-                    for s in &seen {
-                        if same_membership_term(s, &child) {
-                            continue 'outer;
-                        }
-                    }
-                    seen.push(child);
-                }
-                let operands = seen;
-                // Absorption: drop Union(A, ...) when A also appears
-                // in the intersection.
-                let mut absorbed: Vec<OperatorTree> = Vec::new();
-                for (child_index, child) in operands.iter().enumerate() {
-                    if let OperatorTree::Union(union_operands) = child {
-                        let drop = is_membership_only(child)
-                            && operands.iter().enumerate().any(|(other_index, other)| {
-                                other_index != child_index
-                                    && union_operands
-                                        .iter()
-                                        .any(|union_term| same_membership_term(union_term, other))
-                            });
-                        if drop {
-                            continue;
-                        }
-                    }
-                    absorbed.push(child.clone());
-                }
-                if absorbed.len() == 1 {
-                    if let Some(only) = absorbed.pop() {
-                        return only;
-                    }
-                }
-                OperatorTree::Intersect(absorbed)
+                reduce(operands, Boolean::Intersect)
             }
-            OperatorTree::Union(operands) => {
-                // Drop empty children.
-                let mut kept: Vec<OperatorTree> =
-                    operands.into_iter().filter(|c| !c.is_empty()).collect();
-                // Idempotence is valid only for membership-only operands.
-                let mut seen: Vec<OperatorTree> = Vec::new();
-                'outer: for child in kept.drain(..) {
-                    for s in &seen {
-                        if same_membership_term(s, &child) {
-                            continue 'outer;
-                        }
-                    }
-                    seen.push(child);
-                }
-                let operands = seen;
-                // Absorption: drop Intersect(A, ...) when A also appears
-                // in the union.
-                let mut absorbed: Vec<OperatorTree> = Vec::new();
-                for (child_index, child) in operands.iter().enumerate() {
-                    if let OperatorTree::Intersect(int_operands) = child {
-                        let drop = is_membership_only(child)
-                            && operands.iter().enumerate().any(|(other_index, other)| {
-                                other_index != child_index
-                                    && int_operands.iter().any(|intersect_term| {
-                                        same_membership_term(intersect_term, other)
-                                    })
-                            });
-                        if drop {
-                            continue;
-                        }
-                    }
-                    absorbed.push(child.clone());
-                }
-                if absorbed.len() == 1 {
-                    if let Some(only) = absorbed.pop() {
-                        return only;
-                    }
-                }
-                if absorbed.is_empty() {
-                    return OperatorTree::Union(Vec::new());
-                }
-                OperatorTree::Union(absorbed)
+            OperatorTree::Union(mut operands) => {
+                operands.retain(|child| !child.is_empty());
+                reduce(operands, Boolean::Union)
             }
             other => other,
         }
@@ -117,122 +35,189 @@ impl QueryOptimizer {
     }
 }
 
-/// Whether Boolean composition observes only membership for this subtree.
-///
-/// `PostingList::merge_union` and `PostingList::merge_intersection` add scores when the same
-/// document appears on both sides. They may also carry operator-specific
-/// fields. The algebraic identities are therefore safe only for the explicit
-/// subset classified exhaustively by `OperatorTree`, whose execution produces
-/// default payloads. A new variant opts out until its payload effect has been
-/// reviewed.
-fn is_membership_only(op: &OperatorTree) -> bool {
-    op.is_membership_only()
+#[derive(Clone, Copy)]
+enum Boolean {
+    Intersect,
+    Union,
 }
 
-/// Address-independent structural equivalence for operands on which Boolean
-/// idempotence and absorption preserve the complete posting-list payload.
-fn same_membership_term(left: &OperatorTree, right: &OperatorTree) -> bool {
-    if !is_membership_only(left) || !is_membership_only(right) {
-        return false;
-    }
-
-    // All three zero-child composition forms execute as the same empty set.
-    if left.is_empty() || right.is_empty() {
-        return left.is_empty() && right.is_empty();
-    }
-
-    match (left, right) {
-        (
-            OperatorTree::Filter {
-                field: left_field,
-                predicate: left_predicate,
-                source: left_source,
-            },
-            OperatorTree::Filter {
-                field: right_field,
-                predicate: right_predicate,
-                source: right_source,
-            },
-        ) => {
-            left_field == right_field
-                && left_predicate == right_predicate
-                && same_optional_membership_source(left_source.as_deref(), right_source.as_deref())
+impl Boolean {
+    fn opposite_terms<'a>(self, key: &'a MembershipKey<'_>) -> &'a [usize] {
+        match (self, key) {
+            (Self::Intersect, MembershipKey::Union(ids))
+            | (Self::Union, MembershipKey::Intersect(ids)) => ids,
+            _ => &[],
         }
-        (
-            OperatorTree::IndexScan {
-                index_name: left_index,
-                field: left_field,
-                predicate: left_predicate,
-            },
-            OperatorTree::IndexScan {
-                index_name: right_index,
-                field: right_field,
-                predicate: right_predicate,
-            },
-        ) => {
-            left_index == right_index
-                && left_field == right_field
-                && left_predicate == right_predicate
-        }
-        (OperatorTree::Intersect(left), OperatorTree::Intersect(right))
-        | (OperatorTree::Union(left), OperatorTree::Union(right)) => {
-            same_membership_multiset(left, right)
-        }
-        (OperatorTree::Complement(left), OperatorTree::Complement(right)) => {
-            same_membership_term(left, right)
-        }
-        (OperatorTree::Composed(left), OperatorTree::Composed(right)) => {
-            same_membership_sequence(left, right)
-        }
-        (
-            OperatorTree::VectorExclusion {
-                positive: left_positive,
-                negative: left_negative,
-            },
-            OperatorTree::VectorExclusion {
-                positive: right_positive,
-                negative: right_negative,
-            },
-        ) => {
-            same_membership_term(left_positive, right_positive)
-                && same_membership_term(left_negative, right_negative)
-        }
-        _ => false,
     }
 }
 
-fn same_optional_membership_source(
-    left: Option<&OperatorTree>,
-    right: Option<&OperatorTree>,
-) -> bool {
-    match (left, right) {
-        (None, None) => true,
-        (Some(left), Some(right)) => same_membership_term(left, right),
-        (None, Some(_)) | (Some(_), None) => false,
-    }
-}
-
-fn same_membership_sequence(left: &[OperatorTree], right: &[OperatorTree]) -> bool {
-    left.len() == right.len()
-        && left
-            .iter()
-            .zip(right)
-            .all(|(left, right)| same_membership_term(left, right))
-}
-
-fn same_membership_multiset(left: &[OperatorTree], right: &[OperatorTree]) -> bool {
-    if left.len() != right.len() {
-        return false;
-    }
-
-    let mut matched = vec![false; right.len()];
-    for left_term in left {
-        let Some(index) = right.iter().enumerate().position(|(index, right_term)| {
-            !matched[index] && same_membership_term(left_term, right_term)
-        }) else {
-            return false;
+fn reduce(mut operands: Vec<OperatorTree>, boolean: Boolean) -> OperatorTree {
+    if operands.len() > 1 {
+        let mut keep = {
+            let mut index = MembershipIndex::default();
+            let roots: Vec<_> = operands
+                .iter()
+                .map(|op| {
+                    if op.is_membership_only() {
+                        index.key(op)
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            // A root absorbs an opposite Boolean operand only if it also occurs as a child. Such terms already have an interned identity.
+            let absorbing: HashSet<_> = roots
+                .iter()
+                .flatten()
+                .filter_map(|key| index.terms.get(key).copied())
+                .collect();
+            let mut seen = BTreeSet::new();
+            roots
+                .iter()
+                .map(|root| {
+                    root.as_ref().is_none_or(|key| {
+                        seen.insert(key)
+                            && !boolean
+                                .opposite_terms(key)
+                                .iter()
+                                .any(|id| absorbing.contains(id))
+                    })
+                })
+                .collect::<Vec<_>>()
+                .into_iter()
         };
-        matched[index] = true;
+        operands.retain(|_| keep.next().expect("one decision per operand"));
     }
-    true
+    if operands.len() == 1 {
+        return operands.pop().expect("single operand");
+    }
+    match boolean {
+        Boolean::Intersect => OperatorTree::Intersect(operands),
+        Boolean::Union => OperatorTree::Union(operands),
+    }
+}
+
+/// Predicates retain Value's exact SQL ordering, including equal cross-numeric variants and NaNs. Commutative children are sorted by their canonical identity with multiplicity intact.
+#[derive(PartialEq, Eq, PartialOrd, Ord)]
+enum MembershipKey<'a> {
+    Empty,
+    Filter(&'a str, &'a Predicate, Option<usize>),
+    IndexScan(&'a str, &'a str, &'a Predicate),
+    Intersect(Vec<usize>),
+    Union(Vec<usize>),
+    Complement(usize),
+    Composed(Vec<usize>),
+    VectorExclusion(usize, usize),
+}
+
+#[derive(Default)]
+struct MembershipIndex<'a> {
+    terms: BTreeMap<MembershipKey<'a>, usize>,
+}
+
+impl<'a> MembershipIndex<'a> {
+    fn id(&mut self, op: &'a OperatorTree) -> Option<usize> {
+        let key = self.key(op)?;
+        let next = self.terms.len();
+        Some(*self.terms.entry(key).or_insert(next))
+    }
+
+    fn key(&mut self, op: &'a OperatorTree) -> Option<MembershipKey<'a>> {
+        #[cfg(test)]
+        KEY_VISITS.with(|visits| visits.set(visits.get() + 1));
+        if op.is_empty() {
+            return Some(MembershipKey::Empty);
+        }
+        Some(match op {
+            OperatorTree::Filter {
+                field,
+                predicate,
+                source,
+            } => MembershipKey::Filter(
+                field,
+                predicate,
+                match source {
+                    Some(source) => Some(self.id(source)?),
+                    None => None,
+                },
+            ),
+            OperatorTree::IndexScan {
+                index_name,
+                field,
+                predicate,
+            } => MembershipKey::IndexScan(index_name, field, predicate),
+            OperatorTree::Intersect(children) | OperatorTree::Union(children) => {
+                let mut ids: Vec<_> = children
+                    .iter()
+                    .map(|child| self.id(child))
+                    .collect::<Option<_>>()?;
+                ids.sort_unstable();
+                if matches!(op, OperatorTree::Intersect(_)) {
+                    MembershipKey::Intersect(ids)
+                } else {
+                    MembershipKey::Union(ids)
+                }
+            }
+            OperatorTree::Composed(children) => MembershipKey::Composed(
+                children
+                    .iter()
+                    .map(|child| self.id(child))
+                    .collect::<Option<_>>()?,
+            ),
+            OperatorTree::Complement(inner) => MembershipKey::Complement(self.id(inner)?),
+            OperatorTree::VectorExclusion { positive, negative } => {
+                MembershipKey::VectorExclusion(self.id(positive)?, self.id(negative)?)
+            }
+            _ => return None,
+        })
+    }
+}
+
+#[cfg(test)]
+thread_local! { static KEY_VISITS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) }; }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use uqa_core::Value;
+
+    fn filter(value: i64) -> OperatorTree {
+        OperatorTree::Filter {
+            field: "value".into(),
+            predicate: Predicate::Equals(Value::Int(value)),
+            source: None,
+        }
+    }
+
+    #[test]
+    fn wide_absorption_indexes_each_member_once_and_moves_the_surviving_payload() {
+        let term = OperatorTree::Term {
+            field: Some("body".into()),
+            query: "x".repeat(1 << 20),
+            scoring: None,
+            top_k: None,
+        };
+        let OperatorTree::Term {
+            query: original, ..
+        } = &term
+        else {
+            unreachable!()
+        };
+        let pointer = original.as_ptr();
+        let mut parts = Vec::new();
+        for n in 0..128 {
+            parts.push(filter(n));
+            parts.push(OperatorTree::Union(vec![filter(n + 512), filter(n)]));
+        }
+        parts.push(term);
+        KEY_VISITS.with(|visits| visits.set(0));
+        let OperatorTree::Intersect(kept) = reduce(parts, Boolean::Intersect) else {
+            panic!("intersection")
+        };
+        assert_eq!(kept.len(), 129);
+        assert_eq!(KEY_VISITS.with(std::cell::Cell::get), 512);
+        assert!(
+            matches!(kept.last(), Some(OperatorTree::Term { query, .. }) if query.as_ptr() == pointer)
+        );
+    }
 }
