@@ -85,7 +85,7 @@ impl RowSchema {
             };
             selected.insert_copy(
                 *column,
-                (slot, ty, input.qualified_identity_collation(identity)),
+                (slot, ty, input.qualified_identity_collation(*identity)),
             )?;
         }
         publish(input, &selected, control, |metadata| {
@@ -93,7 +93,7 @@ impl RowSchema {
                 if !input.has_internal_column(*column) && identity.qualifier().is_some() {
                     metadata.collations.internal_with_control(
                         *column,
-                        input.qualified_identity_collation(identity),
+                        input.qualified_identity_collation(*identity),
                         input.qualified_identity_type(identity),
                         control,
                     )?;

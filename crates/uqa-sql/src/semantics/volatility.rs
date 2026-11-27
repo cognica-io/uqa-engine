@@ -20,8 +20,8 @@ use crate::ScalarExpr;
 mod production;
 pub use production::{
     builtin_function_volatility_with_control, expr_contains_volatile_function_with_control,
-    function_volatility_with_binding_and_control, query_contains_volatile_function_with_control,
-    scalar_calls_are_volatile_with_control,
+    function_volatility_with_binding_and_control, plan_ref_contains_volatile_function_with_control,
+    query_contains_volatile_function_with_control, scalar_calls_are_volatile_with_control,
     scalar_in_scope_contains_volatile_function_with_control,
     select_contains_volatile_function_with_control,
     unified_plan_contains_volatile_function_with_control,
@@ -77,8 +77,6 @@ pub trait VolatilityCatalog {
         Ok(result)
     }
 }
-
-use super::builtin_function_dispatch_name;
 
 /// Resolve the volatility of the implementation that can run for `name`.
 ///
@@ -146,6 +144,15 @@ pub fn builtin_function_volatility(
     binding: Option<&FunctionBinding>,
     argument_count: usize,
 ) -> FunctionVolatility {
+    let identity = super::functions::lowercase_function_name(name);
+    normalized_builtin_volatility(&identity, binding, argument_count)
+}
+
+fn normalized_builtin_volatility(
+    identity: &str,
+    binding: Option<&FunctionBinding>,
+    argument_count: usize,
+) -> FunctionVolatility {
     if let Some(crate::ast::FunctionDispatch::Concat { oid }) =
         binding.and_then(|binding| binding.dispatch)
     {
@@ -157,17 +164,17 @@ pub fn builtin_function_volatility(
     if is_intrinsic_scalar_syntax(binding) {
         return FunctionVolatility::Immutable;
     }
-    let lower = builtin_function_dispatch_name(name);
-    if builtin_is_volatile(&lower) {
+    let lower = super::functions::normalized_builtin_dispatch_name(identity);
+    if builtin_is_volatile(lower) {
         return FunctionVolatility::Volatile;
     }
 
     // UQA retrieval/graph functions not listed above read the statement's
     // catalog snapshot.  Session/catalog introspection functions have the same
     // statement-stable contract.  All remaining built-ins are value-pure.
-    if crate::registry::is_registered(&lower)
+    if crate::registry::is_registered(lower)
         || matches!(
-            lower.as_ref(),
+            lower,
             "current_schema"
                 | "concat"
                 | "concat_ws"
@@ -245,7 +252,7 @@ pub fn builtin_function_volatility(
                 | "enum_last"
                 | "enum_range"
         )
-        || builtin_overload_is_stable(&lower, binding, argument_count)
+        || builtin_overload_is_stable(lower, binding, argument_count)
     {
         FunctionVolatility::Stable
     } else {

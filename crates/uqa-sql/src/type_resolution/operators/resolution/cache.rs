@@ -9,22 +9,11 @@
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::RwLock;
 
-use super::{scalar_catalog_type, ColumnType, SIGNATURES};
+use super::{scalar_catalog_type, ColumnType};
+use crate::type_resolution::operators::catalog::OPERATOR_NAME_BYTES;
 use crate::type_resolution::overload_resolution::builtin_canonical_type_name;
 
 const RETAINED_SELECTIONS: usize = 1 << 14;
-const OPERATOR_NAME_BYTES: usize = {
-    let mut maximum = 0;
-    let mut index = 0;
-    while index < SIGNATURES.len() {
-        let length = SIGNATURES[index].0.len();
-        if length > maximum {
-            maximum = length;
-        }
-        index += 1;
-    }
-    maximum
-};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 struct OperandType(Option<&'static ColumnType>);

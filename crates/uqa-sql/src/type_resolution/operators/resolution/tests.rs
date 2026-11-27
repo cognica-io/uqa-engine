@@ -4,6 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
+use super::catalog::SIGNATURES;
 use super::*;
 use uqa_core::{memory::MemoryBudget, CancellationToken};
 
@@ -452,4 +453,30 @@ fn modifier_variants_share_one_retained_selection_and_the_retention_stays_bounde
         Some(ColumnType::Varchar(Some(12))),
         Some(ColumnType::Varchar(Some(3))),
     ));
+}
+
+#[test]
+fn operator_name_index_keeps_catalog_order_and_lookup_visits_only_its_overloads() {
+    let names: std::collections::BTreeSet<_> = SIGNATURES.iter().map(|entry| entry.0).collect();
+    for name in names {
+        assert!(catalog::named(name).eq(SIGNATURES.iter().filter(|entry| entry.0 == name)));
+    }
+    for &(name, left, right, result, oid, function) in SIGNATURES {
+        let entry = crate::type_resolution::binary_operator_by_oid(oid).unwrap();
+        assert_eq!(
+            (
+                entry.name,
+                entry.operand_types,
+                entry.result_type,
+                entry.function_oid
+            ),
+            (name, [left, right], result, function)
+        );
+    }
+    let allocation = allocation_counter::measure(|| {
+        assert_eq!(catalog::named("#").len(), 3);
+        assert!(catalog::named("unregistered").next().is_none());
+        assert!(catalog::by_oid(-1).is_none());
+    });
+    assert_eq!(allocation.count_total, 0);
 }

@@ -6,6 +6,66 @@
 
 //! `PostgreSQL` 18.4 built-in binary operator signatures from `pg_catalog.pg_operator`.
 
+use std::{collections::HashMap, sync::LazyLock};
+
+type Signature = (
+    &'static str,
+    &'static str,
+    &'static str,
+    &'static str,
+    i64,
+    i64,
+);
+
+#[derive(Default)]
+struct OperatorIndex {
+    by_name: HashMap<&'static str, Vec<&'static Signature>>,
+    by_oid: HashMap<i64, &'static Signature>,
+}
+
+static INDEX: LazyLock<OperatorIndex> = LazyLock::new(|| {
+    let mut index = OperatorIndex::default();
+    for signature in SIGNATURES {
+        index
+            .by_name
+            .entry(signature.0)
+            .or_default()
+            .push(signature);
+        index.by_oid.entry(signature.4).or_insert(signature);
+    }
+    index
+});
+
+pub(super) fn named(name: &str) -> impl ExactSizeIterator<Item = &'static Signature> {
+    let rows = if name.len() <= OPERATOR_NAME_BYTES {
+        INDEX
+            .by_name
+            .get(name)
+            .map(Vec::as_slice)
+            .unwrap_or_default()
+    } else {
+        &[]
+    };
+    rows.iter().copied()
+}
+
+pub(super) fn by_oid(oid: i64) -> Option<&'static Signature> {
+    INDEX.by_oid.get(&oid).copied()
+}
+
+pub(super) const OPERATOR_NAME_BYTES: usize = {
+    let mut maximum = 0;
+    let mut index = 0;
+    while index < SIGNATURES.len() {
+        let length = SIGNATURES[index].0.len();
+        if length > maximum {
+            maximum = length;
+        }
+        index += 1;
+    }
+    maximum
+};
+
 pub(super) const UNARY_MINUS: &[(&str, i64, i64)] = &[
     ("float4", 584, 206),
     ("float8", 585, 220),
@@ -16,7 +76,7 @@ pub(super) const UNARY_MINUS: &[(&str, i64, i64)] = &[
     ("numeric", 1751, 1771),
 ];
 
-pub(super) const SIGNATURES: &[(&str, &str, &str, &str, i64, i64)] = &[
+pub(super) const SIGNATURES: &[Signature] = &[
     ("#", "int8", "int8", "int8", 1888, 1906),
     ("#", "int2", "int2", "int2", 1876, 1894),
     ("#", "int4", "int4", "int4", 1882, 1900),

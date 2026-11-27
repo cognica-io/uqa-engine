@@ -8,6 +8,8 @@
 
 use crate::ast::ColumnType;
 
+mod index;
+
 pub(super) struct Signature {
     pub(super) argument_types: &'static [ColumnType],
     pub(super) argument_names: &'static [&'static str],
@@ -47,49 +49,34 @@ impl Signature {
 }
 
 macro_rules! declarations {
-    ($visibility:vis fn $function:ident($local:ident); $($($name:literal)|+ => $signatures:expr),* $(,)?) => {
-        $visibility fn $function($local: &str) -> Option<(&'static str, &'static [Signature])> {
-            $(
-                if let Some(name) = [$($name),+].into_iter().find(|name| $local.eq_ignore_ascii_case(name)) {
-                    const SIGNATURES: &[Signature] = $signatures;
-                    return Some((name, SIGNATURES));
-                }
-            )*
-            None
+    ($visibility:vis fn $function:ident; $($($name:literal)|+ => $signatures:expr),* $(,)?) => {
+        $visibility fn $function(register: &mut impl FnMut(&'static str, &'static [Signature])) {
+            $({
+                const SIGNATURES: &[Signature] = $signatures;
+                $(register($name, SIGNATURES);)+
+            })*
         }
     };
 }
 pub(super) use declarations;
 
 pub(super) fn lookup(name: &str) -> Option<(&'static str, &'static [Signature])> {
-    let local = match name.split_once('.') {
-        Some((namespace, local)) if namespace.eq_ignore_ascii_case("pg_catalog") => local,
-        Some(_) => return None,
-        None => name,
-    };
-    if let Some(signatures) = super::standard::lookup(local) {
-        return Some(signatures);
-    }
-    if let Some(signatures) = super::regular_expressions::lookup(local) {
-        return Some(signatures);
-    }
-    if local.eq_ignore_ascii_case("pg_collation_for") || local.eq_ignore_ascii_case("pg_typeof") {
-        static ARGUMENTS: std::sync::LazyLock<[ColumnType; 1]> =
-            std::sync::LazyLock::new(|| [ColumnType::Named("any".into())]);
-        static COLLATION_SIGNATURES: std::sync::LazyLock<[Signature; 1]> =
-            std::sync::LazyLock::new(|| [Signature::new(&*ARGUMENTS, ColumnType::Text)]);
-        static TYPE_SIGNATURES: std::sync::LazyLock<[Signature; 1]> =
-            std::sync::LazyLock::new(|| [Signature::new(&*ARGUMENTS, ColumnType::Regtype)]);
-        return Some(if local.eq_ignore_ascii_case("pg_typeof") {
-            ("pg_typeof", &*TYPE_SIGNATURES)
-        } else {
-            ("pg_collation_for", &*COLLATION_SIGNATURES)
-        });
-    }
-    lookup_local(local)
+    index::lookup(name).map(|entry| (entry.name, entry.signatures))
 }
 
-declarations! { fn lookup_local(local);
+fn register_polymorphic(register: &mut impl FnMut(&'static str, &'static [Signature])) {
+    use std::sync::LazyLock;
+    static ARGUMENTS: LazyLock<[ColumnType; 1]> =
+        LazyLock::new(|| [ColumnType::Named("any".into())]);
+    static COLLATION: LazyLock<[Signature; 1]> =
+        LazyLock::new(|| [Signature::new(&*ARGUMENTS, ColumnType::Text)]);
+    static TYPE: LazyLock<[Signature; 1]> =
+        LazyLock::new(|| [Signature::new(&*ARGUMENTS, ColumnType::Regtype)]);
+    register("pg_collation_for", &*COLLATION);
+    register("pg_typeof", &*TYPE);
+}
+
+declarations! { fn register_local;
 
         "abs" => &[
             Signature::new(const { &[ColumnType::SmallInteger] }, ColumnType::SmallInteger),
@@ -449,6 +436,9 @@ impl super::super::overload_resolution::SignatureParameters for Signature {
                 .len()
                 .saturating_sub(self.default_arguments)
     }
+    fn builtin_canonical_type(&self, index: usize) -> Option<&'static str> {
+        super::super::overload_resolution::builtin_canonical_type_name(&self.argument_types[index])
+    }
     fn canonical_type(
         &self,
         index: usize,
@@ -466,9 +456,6 @@ pub(super) fn bound_signature(
     binding: &crate::ast::FunctionBinding,
     control: &uqa_core::memory::ProductionControl<'_>,
 ) -> Result<Option<&'static Signature>, crate::SQLError> {
-    use super::super::overload_resolution::{
-        canonical_column_type_name_with_control, canonical_routine_type_name_with_control,
-    };
     control.check()?;
     if !binding.builtin {
         return Ok(None);
@@ -479,28 +466,10 @@ pub(super) fn bound_signature(
     if !namespace.eq_ignore_ascii_case("pg_catalog") {
         return Ok(None);
     }
-    let Some((_, signatures)) = lookup(&binding.name) else {
+    let Some(entry) = index::lookup(&binding.name) else {
         return Ok(None);
     };
-    for signature in signatures {
-        control.check()?;
-        if signature.argument_types.len() != binding.argument_types.len() {
-            continue;
-        }
-        let mut matched = true;
-        for (declared, actual) in signature.argument_types.iter().zip(&binding.argument_types) {
-            let declared = canonical_column_type_name_with_control(declared, control)?;
-            let actual = canonical_routine_type_name_with_control(actual, control)?;
-            if *declared != *actual {
-                matched = false;
-                break;
-            }
-        }
-        if matched {
-            return Ok(Some(signature));
-        }
-    }
-    Ok(None)
+    entry.bound_signature(binding, control)
 }
 
 #[cfg(test)]
