@@ -34,9 +34,11 @@ use crate::{
 };
 
 use crate::spill::MatchFlags;
-use canonical_index::{HybridHashIndex, MemoryMatchSummary};
+pub(crate) use canonical_index::HybridHashIndex;
+use canonical_index::MemoryMatchSummary;
 use direct_index::{positional_key_hash, DirectHashIndex, DirectMatches};
-use row_store::HybridRowStore;
+pub(crate) use production::simple_key_positions;
+pub(crate) use row_store::HybridRowStore;
 
 pub use nested_loop::NestedLoopJoin;
 

@@ -21,6 +21,25 @@ mod legacy_vectors;
 mod presence;
 mod schemas;
 
+pub(crate) fn temporary_reads(operation: impl FnOnce()) -> u64 {
+    use std::sync::atomic::AtomicBool;
+    use uqa_core::io_usage::{IOContext, IOObservation, IOOptions};
+    use uqa_core::memory::MemoryBudget;
+    let observation = IOObservation::new(
+        &MemoryBudget::new(16 * 1024),
+        IOOptions {
+            buffers: true,
+            wal: false,
+        },
+        Arc::new(AtomicBool::new(false)),
+        None,
+    )
+    .unwrap();
+    let _scope = IOContext::new(Some(observation.clone())).enter();
+    operation();
+    observation.snapshot().unwrap().temporary.reads
+}
+
 fn dummy_batch(start: usize, n: usize) -> Batch {
     let schema = RowSchema::new(vec!["x".into()]);
     let rows = (start..start + n)

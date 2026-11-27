@@ -12,6 +12,7 @@ pub mod statement_events;
 mod actions;
 pub mod analysis;
 mod model;
+mod pairing;
 pub mod table;
 mod targets;
 

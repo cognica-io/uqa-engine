@@ -5,25 +5,7 @@
 //
 
 use super::*;
-use std::sync::atomic::AtomicBool;
-use uqa_core::io_usage::{IOContext, IOObservation, IOOptions};
-use uqa_core::memory::MemoryBudget;
-
-fn temporary_reads(operation: impl FnOnce()) -> u64 {
-    let observation = IOObservation::new(
-        &MemoryBudget::new(16 * 1024),
-        IOOptions {
-            buffers: true,
-            wal: false,
-        },
-        Arc::new(AtomicBool::new(false)),
-        None,
-    )
-    .unwrap();
-    let _scope = IOContext::new(Some(observation.clone())).enter();
-    operation();
-    observation.snapshot().unwrap().temporary.reads
-}
+use crate::spill::temporary_reads;
 
 fn probe_work(count: usize) -> (u64, u64) {
     let mut set = crate::distinct::SeenKeySet::new(0, None);

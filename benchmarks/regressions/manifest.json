@@ -8023,6 +8023,19 @@
     {
       "package": "uqa-execution",
       "kind": "lib",
+      "test": "merge_equality_bounds_spilled_source_reads_and_preserves_duplicate_order",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/mutation/merge/pairing/candidates/tests.rs",
+      "capability": "MERGE source pairing",
+      "workload": "Probe 12, 48 and 192 targets against duplicates and NULLs with 512-byte source payloads and a one-byte budget. Repeat the 48-target workload in memory.",
+      "invariant": "Repeated equality probes preserve duplicate order and evaluate only matching candidates. Each fourfold increase costs at most seven times the encrypted block reads. The 48-key index uses fewer than twice the block reads of repeated scans. The 192-key index uses fewer block reads than repeated scans.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
       "test": "growing_hash_partitions_bound_disk_work_for_distinct_keys_and_join_probes",
       "cases": 1,
       "source": "crates/uqa-execution/src/spill/partitioned/tests.rs",

@@ -18,6 +18,8 @@ use tempfile::{Builder, TempDir};
 use uqa_storage::temporary_file::{BlockTemporaryFile, TemporaryFile};
 
 const ROW_BYTES: u64 = 16;
+// A one-based position in the link file cannot reach this value because each record occupies 16 bytes.
+const INLINE_ROW: u64 = u64::MAX;
 type PositionFile = BlockTemporaryFile<256>;
 
 #[derive(Debug, thiserror::Error)]
@@ -90,9 +92,6 @@ impl PartitionedKeys {
             self.directory.grow(self.location.path())?;
             index = self.directory.find(hash, |_| Ok(false))?.0;
         }
-        if row.is_some() && self.rows.is_none() {
-            self.rows = Some(PositionFile::new_in(self.path())?);
-        }
         let key_end = self.keys.metadata()?.len();
         let row_end = self
             .rows
@@ -117,20 +116,8 @@ impl PartitionedKeys {
                     IoSlice::new(key),
                 ])?;
             }
-            if let (Some(row), Some(file)) = (row, &mut self.rows) {
-                let number = row_end / ROW_BYTES + 1;
-                file.seek(SeekFrom::Start(row_end))?;
-                file.write_all_vectored(&mut [
-                    IoSlice::new(&row.to_le_bytes()),
-                    IoSlice::new(&[0; 8]),
-                ])?;
-                if slot.last == 0 {
-                    slot.first = number;
-                } else {
-                    file.seek(SeekFrom::Start(row_offset(slot.last)? + 8))?;
-                    file.write_all(&number.to_le_bytes())?;
-                }
-                slot.last = number;
+            if let Some(row) = row {
+                self.append_position(&mut slot, row, row_end)?;
             }
             self.directory.publish(index, slot, inserted)
         })();
@@ -152,6 +139,40 @@ impl PartitionedKeys {
         Ok(inserted)
     }
 
+    fn append_position(&mut self, slot: &mut Slot, row: u64, end: u64) -> io::Result<()> {
+        if slot.last == 0 {
+            slot.first = row;
+            slot.last = INLINE_ROW;
+            return Ok(());
+        }
+        let file = match &mut self.rows {
+            Some(file) => file,
+            missing @ None => missing.insert(PositionFile::new_in(self.location.path())?),
+        };
+        let number = end / ROW_BYTES + 1;
+        file.seek(SeekFrom::Start(end))?;
+        if slot.last == INLINE_ROW {
+            let second = number + 1;
+            file.write_all_vectored(&mut [
+                IoSlice::new(&slot.first.to_le_bytes()),
+                IoSlice::new(&second.to_le_bytes()),
+                IoSlice::new(&row.to_le_bytes()),
+                IoSlice::new(&[0; 8]),
+            ])?;
+            slot.first = number;
+            slot.last = second;
+        } else {
+            file.write_all_vectored(&mut [
+                IoSlice::new(&row.to_le_bytes()),
+                IoSlice::new(&[0; 8]),
+            ])?;
+            file.seek(SeekFrom::Start(row_offset(slot.last)? + 8))?;
+            file.write_all(&number.to_le_bytes())?;
+            slot.last = number;
+        }
+        Ok(())
+    }
+
     pub(crate) fn positions(&mut self, key: &[u8]) -> ExecResult<Option<DiskPositions>> {
         self.positions_hashed(key, stable_hash(key))
             .map_err(|error| spill_error(self.owner, error))
@@ -159,8 +180,10 @@ impl PartitionedKeys {
 
     fn positions_hashed(&mut self, key: &[u8], hash: u64) -> IndexResult<Option<DiskPositions>> {
         let (_, slot) = self.locate(key, hash)?;
-        if slot.first == 0 {
-            return Ok(None);
+        match slot.last {
+            0 => return Ok(None),
+            INLINE_ROW => return Ok(Some(DiskPositions::Single(Some(slot.first)))),
+            _ => {}
         }
         let file = self
             .rows
@@ -168,19 +191,20 @@ impl PartitionedKeys {
             .ok_or_else(|| invalid("missing spill row positions"))?
             .reopen()?;
         let end = file.metadata()?.len();
-        if slot.first > slot.last
+        if slot.first == 0
+            || slot.first > slot.last
             || row_offset(slot.last)?
                 .checked_add(ROW_BYTES)
                 .is_none_or(|offset| offset > end)
         {
             return Err(invalid("invalid spill row bounds").into());
         }
-        Ok(Some(DiskPositions {
+        Ok(Some(DiskPositions::Linked(Box::new(LinkedPositions {
             input: BufReader::with_capacity(8192, file),
             position: 0,
             next: slot.first,
             last: slot.last,
-        }))
+        }))))
     }
 }
 
@@ -191,18 +215,28 @@ fn row_offset(number: u64) -> io::Result<u64> {
         .ok_or_else(|| invalid("invalid spill row position"))
 }
 
-pub(crate) struct DiskPositions<R: Read + Seek = PositionFile> {
+pub(crate) enum DiskPositions {
+    Single(Option<u64>),
+    Linked(Box<LinkedPositions<PositionFile>>),
+}
+
+impl DiskPositions {
+    pub(crate) fn next(&mut self) -> ExecResult<Option<u64>> {
+        match self {
+            Self::Single(row) => Ok(row.take()),
+            Self::Linked(rows) => rows.read().map_err(|error| spill_error("join", error)),
+        }
+    }
+}
+
+pub(crate) struct LinkedPositions<R: Read + Seek> {
     input: BufReader<R>,
     position: u64,
     next: u64,
     last: u64,
 }
 
-impl<R: Read + Seek> DiskPositions<R> {
-    pub(crate) fn next(&mut self) -> ExecResult<Option<u64>> {
-        self.read().map_err(|error| spill_error("join", error))
-    }
-
+impl<R: Read + Seek> LinkedPositions<R> {
     fn read(&mut self) -> io::Result<Option<u64>> {
         let number = self.next;
         if number == 0 {

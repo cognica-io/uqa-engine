@@ -109,6 +109,7 @@ fn growing_hash_partitions_bound_disk_work_for_distinct_keys_and_join_probes() {
             assert_eq!(matches.next().unwrap(), None);
         }
         assert!(set.rows.is_none());
+        assert!(join.rows.is_none());
         (set.directory.probes, join.directory.probes)
     }
     let small = exercise(256);
@@ -148,16 +149,16 @@ fn adjacent_positions_are_read_in_one_buffer_without_scanning_other_keys() {
         inner: Cursor::new(input),
         calls: 0,
     };
-    let mut rows = DiskPositions {
+    let mut rows = LinkedPositions {
         input: BufReader::new(read),
         position: 0,
         next: 1,
         last: 128,
     };
     for n in 0..128 {
-        assert_eq!(rows.next().unwrap(), Some(n));
+        assert_eq!(rows.read().unwrap(), Some(n));
     }
-    assert_eq!(rows.next().unwrap(), None);
+    assert_eq!(rows.read().unwrap(), None);
     assert_eq!(rows.input.get_ref().calls, 1);
 }
 
@@ -190,4 +191,21 @@ fn cancelled_spill_operations_keep_the_previous_partition_and_sqlstate() {
             Some(n)
         );
     }
+}
+
+#[test]
+fn singleton_spill_probes_retain_the_row_in_the_directory_until_a_duplicate_arrives() {
+    let mut index = PartitionedKeys::new(None, "join").unwrap();
+    let key = b"shared";
+    assert!(index.insert(key, None).unwrap());
+    assert!(!index.insert(key, Some(u64::MAX)).unwrap());
+    assert!(index.rows.is_none());
+    let mut old = index.positions(key).unwrap().unwrap();
+    assert!(!index.insert(key, Some(0)).unwrap());
+    assert_eq!(old.next().unwrap(), Some(u64::MAX));
+    assert_eq!(old.next().unwrap(), None);
+    let mut both = index.positions(key).unwrap().unwrap();
+    assert_eq!(both.next().unwrap(), Some(u64::MAX));
+    assert_eq!(both.next().unwrap(), Some(0));
+    assert_eq!(both.next().unwrap(), None);
 }

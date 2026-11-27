@@ -5,20 +5,20 @@
 //
 
 //! MERGE pairing and INSTEAD OF trigger execution for view targets.
-use super::codec::{merge_source_index_value, MergePairKind};
+use super::codec::MergePairKind;
 use crate::mutation::output::MutationOutput;
 use crate::mutation::statement::context::MutationStatementContext;
 use crate::mutation::{
     assignment::MutationAssignmentContext,
     expressions::eval_mutation_expr,
     returning::ReturningExecutionContext,
-    rows::{context::MutationExpressionContext, join_rows as dml_join_rows},
+    rows::join_rows as dml_join_rows,
     statement_end,
     triggers::context::TriggerContext,
     views::commands::{materialize_view_rows, resolve_view_target, target_row, TriggerViewChecks},
 };
 use crate::query::{scope::StatementCommands, sources::build_join_spill_with_ctes, CteScope};
-use crate::{OwnedPhysicalRow, PhysicalRow, RowSchema};
+use crate::{OwnedPhysicalRow, RowSchema};
 use uqa_core::Value;
 use uqa_sql::{
     plan::{MergePlan, MergeWhenPlan},
@@ -26,11 +26,12 @@ use uqa_sql::{
     SQLError, SQLParam, ScalarExpr,
 };
 mod codec;
-use codec::{decode_view_merge_pair, push_view_merge_pair, view_merge_pair_schema, ViewMergePair};
+use codec::{
+    decode_view_merge_pair, encode_view_merge_pair, view_merge_pair_schema, ViewMergePair,
+};
 
 struct PairingInput<'a, S: Clone + 'static> {
-    expressions: MutationExpressionContext<'a, S>,
-    runtime: crate::query::runtime::QueryRuntimeView<'a>,
+    context: &'a MutationStatementContext<'a, S>,
     target: &'a ViewDmlTarget,
     plan: &'a MergePlan,
     candidates: &'a crate::SharedSpill,
@@ -43,8 +44,7 @@ fn build_view_merge_pairings<S: Clone + 'static>(
     input: PairingInput<'_, S>,
 ) -> Result<crate::SharedSpill, SQLError> {
     let PairingInput {
-        expressions,
-        runtime,
+        context,
         target,
         plan,
         candidates,
@@ -52,22 +52,17 @@ fn build_view_merge_pairings<S: Clone + 'static>(
         params,
         ctes,
     } = input;
-    let schema = view_merge_pair_schema(source_rows.row_schema());
+    let runtime = context.query.source.relational.runtime;
     let work_mem = crate::query::projection::physical_work_mem_bytes(runtime)?.max(1);
-    let mut pairings = crate::SpillBuffer::new(work_mem);
-    let mut matched_source = crate::ExactRowSet::new(work_mem);
-    let has_source_missing = plan.when_clauses.iter().any(|clause| {
-        matches!(
-            clause,
-            MergeWhenPlan::UpdateNotMatchedBySource { .. }
-                | MergeWhenPlan::DeleteNotMatchedBySource { .. }
-                | MergeWhenPlan::NothingNotMatchedBySource { .. }
-        )
-    });
-    let null_source = OwnedPhysicalRow::new(
-        source_rows.row_schema().clone(),
-        PhysicalRow::nulls(source_rows.row_schema().physical_width()),
-    );
+    let mut pairings = super::pairing::MergeInputPairs::new(
+        context,
+        plan,
+        params,
+        ctes,
+        source_rows,
+        view_merge_pair_schema(source_rows.row_schema()),
+        work_mem,
+    )?;
     for candidate in candidates
         .read_rows()
         .map_err(crate::physical::physical_exec_error)?
@@ -78,87 +73,12 @@ fn build_view_merge_pairings<S: Clone + 'static>(
             .row
             .into_physical_values();
         let target_row = target_row(target, &plan.target_qualifier, &values)?;
-        if let Some(predicate) = &plan.target_predicate {
-            let visible =
-                eval_mutation_expr(expressions, ctes, predicate, Some(&target_row), params)?;
-            if !uqa_sql::expr::truthy(&visible)? {
-                continue;
-            }
-        }
-        let mut matched = false;
-        for (index, source) in source_rows
-            .read_rows()
-            .map_err(crate::physical::physical_exec_error)?
-            .enumerate()
-        {
-            let source = source.map_err(crate::physical::physical_exec_error)?;
-            let joined = dml_join_rows(&target_row, &source);
-            let value = eval_mutation_expr(
-                expressions,
-                ctes,
-                &plan.join_condition,
-                Some(&joined),
-                params,
-            )?;
-            if !uqa_sql::expr::truthy(&value)? {
-                continue;
-            }
-            matched = true;
-            let index = merge_source_index_value(index);
-            let _ = matched_source
-                .insert_values(std::slice::from_ref(&index))
-                .map_err(crate::physical::physical_exec_error)?;
-            push_view_merge_pair(
-                &mut pairings,
-                &schema,
-                MergePairKind::Matched,
-                Some(&values),
-                &source,
-            )?;
-        }
-        if !matched && has_source_missing {
-            push_view_merge_pair(
-                &mut pairings,
-                &schema,
-                MergePairKind::NotMatchedBySource,
-                Some(&values),
-                &null_source,
-            )?;
-        }
+        pairings.pair_target(&target_row, |kind, source| {
+            Ok(encode_view_merge_pair(kind, Some(&values), source))
+        })?;
     }
-    append_unmatched_view_sources(&mut pairings, &schema, &mut matched_source, source_rows)?;
     pairings
-        .into_shared(schema)
-        .map_err(crate::physical::physical_exec_error)
-}
-
-fn append_unmatched_view_sources(
-    pairings: &mut crate::SpillBuffer,
-    schema: &RowSchema,
-    matched_source: &mut crate::ExactRowSet,
-    source_rows: &crate::SharedSpill,
-) -> Result<(), SQLError> {
-    for (index, source) in source_rows
-        .read_rows()
-        .map_err(crate::physical::physical_exec_error)?
-        .enumerate()
-    {
-        let source = source.map_err(crate::physical::physical_exec_error)?;
-        let index = merge_source_index_value(index);
-        if !matched_source
-            .contains_values(std::slice::from_ref(&index))
-            .map_err(crate::physical::physical_exec_error)?
-        {
-            push_view_merge_pair(
-                pairings,
-                schema,
-                MergePairKind::NotMatchedByTarget,
-                None,
-                &source,
-            )?;
-        }
-    }
-    Ok(())
+        .finish(|source| encode_view_merge_pair(MergePairKind::NotMatchedByTarget, None, source))
 }
 
 enum SelectedViewMergeAction {
@@ -730,13 +650,7 @@ fn pair_view_merge_rows<S: Clone + Send + Sync + 'static>(
     let candidates = materialize_view_rows(&read_context.query, target, params, &mut target_scope)?;
     let snapshot = ctes.returning_statement_snapshot_scope_with_control(&control)?;
     let pairings = build_view_merge_pairings(PairingInput {
-        expressions: read_context
-            .mutation
-            .preparation
-            .referential
-            .assignment
-            .expressions,
-        runtime: read_context.query.source.relational.runtime,
+        context: read_context,
         target,
         plan,
         candidates: &candidates,

@@ -42,7 +42,7 @@ use uqa_sql::{
 
 pub(in crate::query) mod block_source;
 mod function_source;
-mod join_keys;
+pub(crate) mod join_keys;
 mod join_source;
 mod join_validation;
 mod lateral_binding;

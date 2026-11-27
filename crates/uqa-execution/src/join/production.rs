@@ -16,7 +16,7 @@ use crate::{
 use uqa_core::memory::{Produced, ProductionControl, ProductionVec};
 use uqa_sql::{ast::JoinKind, ResultRow, SQLError, SQLParam};
 
-fn simple_key_positions(
+pub(crate) fn simple_key_positions(
     schema: &RowSchema,
     expressions: &[ScalarExpr],
     control: &ProductionControl<'_>,

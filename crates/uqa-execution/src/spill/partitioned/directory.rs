@@ -19,7 +19,7 @@ pub(super) struct Slot {
     pub(super) hash: u64,
     /// One-based byte position in the key file. Zero denotes an unused slot.
     pub(super) key: u64,
-    /// One-based record numbers in the row-position file. Sets leave both zero.
+    /// A single row lives in `first` with the inline-row sentinel in `last`. Duplicates use one-based link records. Sets leave both zero.
     pub(super) first: u64,
     pub(super) last: u64,
 }

@@ -10,13 +10,13 @@ use crate::spill::DiskPositions;
 use crate::ExecResult;
 use std::sync::Arc;
 
-pub(in crate::join) enum HashMatches {
+pub(crate) enum HashMatches {
     Empty,
     Memory {
         indices: Arc<Vec<u64>>,
         position: usize,
     },
-    Disk(Box<DiskPositions>),
+    Disk(DiskPositions),
 }
 
 impl HashMatches {
@@ -32,10 +32,10 @@ impl HashMatches {
     }
 
     pub(in crate::join) fn disk(positions: DiskPositions) -> Self {
-        Self::Disk(Box::new(positions))
+        Self::Disk(positions)
     }
 
-    pub(in crate::join) fn next(&mut self) -> ExecResult<Option<u64>> {
+    pub(crate) fn next(&mut self) -> ExecResult<Option<u64>> {
         match self {
             Self::Empty => Ok(None),
             Self::Memory { indices, position } => {

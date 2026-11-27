@@ -18,7 +18,7 @@ pub(super) use cursor::HashMatches;
 /// migrates atomically to a partitioned temporary index before the encoded key and
 /// row-index records would exceed its byte budget. Disk probes always compare
 /// the full key, so bucket hash collisions cannot create false join matches.
-pub(super) struct HybridHashIndex {
+pub(crate) struct HybridHashIndex {
     memory: HashMap<EncodedKey, Arc<Vec<u64>>, ahash::RandomState>,
     memory_bytes: usize,
     budget_bytes: usize,
@@ -33,7 +33,7 @@ pub(super) enum MemoryMatchSummary {
 }
 
 impl HybridHashIndex {
-    pub(super) fn new(budget_bytes: usize) -> Self {
+    pub(crate) fn new(budget_bytes: usize) -> Self {
         Self {
             // AHash keeps a per-index random seed while avoiding SipHash's
             // cryptographic-round overhead after the canonical SQL key has
@@ -45,7 +45,7 @@ impl HybridHashIndex {
         }
     }
 
-    pub(super) fn insert(&mut self, key: EncodedKey, row_index: u64) -> ExecResult<()> {
+    pub(crate) fn insert(&mut self, key: EncodedKey, row_index: u64) -> ExecResult<()> {
         if let Some(disk) = self.disk.as_mut() {
             return disk.insert(&key, Some(row_index)).map(|_| ());
         }
@@ -91,7 +91,7 @@ impl HybridHashIndex {
         Ok(())
     }
 
-    pub(super) fn match_cursor(&mut self, key: EncodedKey) -> ExecResult<HashMatches> {
+    pub(crate) fn match_cursor(&mut self, key: EncodedKey) -> ExecResult<HashMatches> {
         let Some(disk) = self.disk.as_mut() else {
             return Ok(self
                 .memory

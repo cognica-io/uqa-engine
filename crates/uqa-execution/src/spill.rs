@@ -943,3 +943,5 @@ where
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+pub(crate) use tests::temporary_reads;

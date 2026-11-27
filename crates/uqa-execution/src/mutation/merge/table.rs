@@ -9,10 +9,7 @@ use super::{
     actions::{
         ensure_merge_target_is_modified_once, ensure_merge_target_is_unwritten, select_merge_action,
     },
-    codec::{
-        decode_merge_pair, encode_merge_pair, merge_pair_schema, merge_source_index_value,
-        MergePairKind,
-    },
+    codec::{decode_merge_pair, encode_merge_pair, merge_pair_schema, MergePairKind},
     model::SelectedMergeAction,
     returning::{build_merge_returning_row, MergeReturningRow},
     targets::lock_merge_targets,
@@ -222,13 +219,19 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
                 context.query.source.relational.runtime,
             )?;
 
-            let pair_schema = merge_pair_schema(source_rows.row_schema());
             let work_mem = crate::query::projection::physical_work_mem_bytes(
                 context.query.source.relational.runtime,
             )?
             .max(1);
-            let mut pairings = crate::SpillBuffer::new(work_mem);
-            let mut matched_source = crate::ExactRowSet::new(work_mem);
+            let mut pairings = super::pairing::MergeInputPairs::new(
+                read_context,
+                stmt,
+                params,
+                &ctes,
+                &source_rows,
+                merge_pair_schema(source_rows.row_schema()),
+                work_mem,
+            )?;
             let mut lock_target_ids = PhysicalRowBuffer::new(
                 work_mem,
                 constraints.cancellation.clone(),
@@ -247,19 +250,6 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
                         | MergeWhenPlan::DeleteNotMatchedBySource { .. }
                 )
             });
-            let has_source_missing_clause = stmt.when_clauses.iter().any(|clause| {
-                matches!(
-                    clause,
-                    MergeWhenPlan::UpdateNotMatchedBySource { .. }
-                        | MergeWhenPlan::DeleteNotMatchedBySource { .. }
-                        | MergeWhenPlan::NothingNotMatchedBySource { .. }
-                )
-            });
-            let null_source_row = crate::OwnedPhysicalRow::new(
-                source_rows.row_schema().clone(),
-                crate::PhysicalRow::nulls(source_rows.row_schema().physical_width()),
-            );
-
             for storage_table in target_tables.iter() {
                 let ids = CandidateIds::from_pages(
                     work_mem,
@@ -290,100 +280,26 @@ pub fn run_table_merge<S: Clone + Send + Sync + 'static>(
                         doc_id,
                         &doc,
                     )?;
-                    if let Some(predicate) = &stmt.target_predicate {
-                        if !truthy(&eval_mutation_expr(
-                            read_assignment.expressions,
-                            &ctes,
-                            predicate,
-                            Some(&target_row),
-                            params,
-                        )?)? {
-                            continue;
-                        }
-                    }
-                    let mut target_matched = false;
-                    let source_reader = source_rows
-                        .read_rows()
-                        .map_err(crate::physical::physical_exec_error)?;
-                    for (idx, src) in source_reader.enumerate() {
-                        let src = src.map_err(crate::physical::physical_exec_error)?;
-                        let joined = dml_join_rows(&target_row, &src);
-                        if truthy(&eval_mutation_expr(
-                            read_assignment.expressions,
-                            &ctes,
-                            &stmt.join_condition,
-                            Some(&joined),
-                            params,
-                        )?)? {
-                            target_matched = true;
-                            let index_value = merge_source_index_value(idx);
-                            let _ = matched_source
-                                .insert_values(std::slice::from_ref(&index_value))
-                                .map_err(crate::physical::physical_exec_error)?;
-                            pairings
-                                .push(crate::Batch::from_physical_rows(
-                                    pair_schema.clone(),
-                                    vec![encode_merge_pair(
-                                        MergePairKind::Matched,
-                                        Some(storage_table),
-                                        Some(doc_id),
-                                        Some(&doc),
-                                        &src,
-                                    )],
-                                ))
-                                .map_err(crate::physical::physical_exec_error)?;
-                        }
-                    }
-                    if target_matched && matched_can_mutate {
-                        lock_target_ids.insert(storage_table, doc_id)?;
-                    } else if !target_matched && has_source_missing_clause {
-                        if source_missing_can_mutate {
+                    let matched = pairings.pair_target(&target_row, |kind, source| {
+                        if kind == MergePairKind::NotMatchedBySource && source_missing_can_mutate {
                             lock_target_ids.insert(storage_table, doc_id)?;
                         }
-                        pairings
-                            .push(crate::Batch::from_physical_rows(
-                                pair_schema.clone(),
-                                vec![encode_merge_pair(
-                                    MergePairKind::NotMatchedBySource,
-                                    Some(storage_table),
-                                    Some(doc_id),
-                                    Some(&doc),
-                                    &null_source_row,
-                                )],
-                            ))
-                            .map_err(crate::physical::physical_exec_error)?;
+                        Ok(encode_merge_pair(
+                            kind,
+                            Some(storage_table),
+                            Some(doc_id),
+                            Some(&doc),
+                            source,
+                        ))
+                    })?;
+                    if matched && matched_can_mutate {
+                        lock_target_ids.insert(storage_table, doc_id)?;
                     }
                 }
             }
-            let source_reader = source_rows
-                .read_rows()
-                .map_err(crate::physical::physical_exec_error)?;
-            for (idx, src) in source_reader.enumerate() {
-                let src = src.map_err(crate::physical::physical_exec_error)?;
-                let index_value = merge_source_index_value(idx);
-                if matched_source
-                    .contains_values(std::slice::from_ref(&index_value))
-                    .map_err(crate::physical::physical_exec_error)?
-                {
-                    continue;
-                }
-                pairings
-                    .push(crate::Batch::from_physical_rows(
-                        pair_schema.clone(),
-                        vec![encode_merge_pair(
-                            MergePairKind::NotMatchedByTarget,
-                            None,
-                            None,
-                            None,
-                            &src,
-                        )],
-                    ))
-                    .map_err(crate::physical::physical_exec_error)?;
-            }
-
-            let pairings = pairings
-                .into_shared(pair_schema)
-                .map_err(crate::physical::physical_exec_error)?;
+            let pairings = pairings.finish(|source| {
+                encode_merge_pair(MergePairKind::NotMatchedByTarget, None, None, None, source)
+            })?;
             let mut locked_targets =
                 lock_merge_targets(referential, stmt, &target_qual, lock_target_ids.finish()?)?;
             let recheck_matches = locked_targets.recheck_matches;
