@@ -6914,6 +6914,32 @@
     {
       "package": "uqa-planner",
       "kind": "lib",
+      "test": "source_free_and_open_producers_keep_the_parent_without_scratch",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/derived_pullup/tests.rs",
+      "capability": "Derived source eligibility",
+      "workload": "Plan a source-free projection and a source with an open input schema while a sibling holds all remaining memory.",
+      "invariant": "Both derived tables keep their original query without speculative allocations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "producer_cardinality_boundaries_keep_subquery_predicates_without_scratch",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/derived_pullup/tests.rs",
+      "capability": "Derived predicate pushdown",
+      "workload": "Filter a derived table with a scalar subquery across LIMIT, OFFSET 0 and grouping sets while a sibling holds all remaining memory.",
+      "invariant": "The outer qualification stays above each producer without allocating transfer workspace.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
       "test": "caller_owned_fusion_charges_construction_and_preserves_existing_arguments",
       "cases": 1,
       "source": "crates/uqa-planner/src/optimizer/implicit_fusion/owned/tests.rs",

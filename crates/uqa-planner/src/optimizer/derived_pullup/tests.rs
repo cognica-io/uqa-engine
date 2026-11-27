@@ -609,12 +609,49 @@ fn scalar_output_without_a_query_qualification_allocates_no_transfer_workspace()
 
 #[test]
 fn ineligible_derived_source_keeps_its_existing_query_without_scratch() {
+    assert_no_derived_workspace(analyzed(
+        "SELECT DISTINCT x AS k FROM (VALUES(1)) v(x)",
+        "k = 1",
+    ));
+}
+
+#[test]
+fn source_free_and_open_producers_keep_the_parent_without_scratch() {
+    assert_no_derived_workspace(analyzed("SELECT 1 AS k", "k = 1"));
+    let mut input = analyzed("SELECT x AS k FROM (VALUES(1)) v(x)", "k = 1");
+    let RelationalPlan::QueryBlock(parent) = &mut input.root else {
+        panic!("parent query block");
+    };
+    let Some(SourcePlan::Subquery { body, .. }) = &mut parent.from else {
+        panic!("derived source");
+    };
+    let analyzed = body.analyzed_source.as_deref().unwrap();
+    body.analyzed_source = Some(
+        std::sync::Arc::new(AnalyzedSource {
+            schema: RowSchema::with_open_columns(&analyzed.schema, Some("v")),
+            children: None,
+        })
+        .into(),
+    );
+    assert_no_derived_workspace(input);
+}
+
+#[test]
+fn producer_cardinality_boundaries_keep_subquery_predicates_without_scratch() {
+    for clause in ["LIMIT 1", "OFFSET 0", "GROUP BY GROUPING SETS ((x), ())"] {
+        assert_no_derived_workspace(analyzed(
+            &format!("SELECT x AS k FROM (VALUES(1)) v(x) {clause}"),
+            "k = (SELECT 2)",
+        ));
+    }
+}
+
+fn assert_no_derived_workspace(mut input: QueryPlan) {
     use uqa_core::{
         memory::{MemoryBudget, ProductionControl},
         CancellationToken,
     };
 
-    let mut input = analyzed("SELECT DISTINCT x AS k FROM (VALUES(1)) v(x)", "k = 1");
     let RelationalPlan::QueryBlock(parent) = &mut input.root else {
         panic!("parent query block");
     };
@@ -633,18 +670,8 @@ fn ineligible_derived_source_keeps_its_existing_query_without_scratch() {
     let sibling = budget.reserve(budget.available()).unwrap();
     let mut output = None;
     let allocation = allocation_counter::measure(|| {
-        output = Some(
-            query_block(
-                input,
-                &Context {
-                    routines: &Catalog,
-                    volatility: &Catalog,
-                    relations_bound: false,
-                },
-                &control,
-            )
-            .unwrap(),
-        );
+        let input = query_block(input, &context(), &control).unwrap();
+        output = Some(predicates::push(input, &context(), &control).unwrap());
     });
     assert_eq!(allocation.count_total, 0);
     assert_eq!(budget.used(), retained + sibling.bytes());

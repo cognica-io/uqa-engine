@@ -57,7 +57,10 @@ pub(super) fn push(
     let RelationalPlan::QueryBlock(producer) = &body.root else {
         return Ok(query);
     };
-    if !producer.locking.is_empty() || !producer.privilege_columns.is_empty() {
+    if !crate::filter_pushdown::owned::accepts_output_predicates(producer)
+        || !producer.locking.is_empty()
+        || !producer.privilege_columns.is_empty()
+    {
         return Ok(query);
     }
     let producer = body.copy_for_rewrite(control)?;

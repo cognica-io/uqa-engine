@@ -61,9 +61,6 @@ fn candidate(
     if !eligible_body(body, block, context, control)? {
         return Ok(None);
     }
-    if block.from.is_none() || input.schema.columns_are_open(None) {
-        return Ok(None);
-    }
     let mut unique = ProductionMap::new(*control);
     for identity in analyzed.schema.identities() {
         unique.insert_copy(identity, ())?;
@@ -189,6 +186,8 @@ fn projectable_source<'a>(
     if body.relations_bound != context.relations_bound
         || body.relation_privilege_subject.is_some()
         || !body.ctes.is_empty()
+        || block.from.is_none()
+        || input.schema.columns_are_open(None)
         || !block.subqueries.is_empty()
         || !matches!(block.compute, ComputePlan::Project)
         || block.distinct
