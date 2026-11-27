@@ -16,3 +16,11 @@ syntax_enum!(crate::ast::RangeSubtype {
     Timestamp,
     TimestampTz
 });
+
+syntax_struct!(crate::ast::CreateRange { name, options });
+syntax_struct!(crate::ast::RangeOption {
+    name,
+    value,
+    position
+});
+syntax_enum!(crate::ast::RangeOptionValue { Type(value0), Name(value0), Invalid });

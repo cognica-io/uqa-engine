@@ -66,6 +66,9 @@ pub fn rename_sql_routine(
     let registry = context.mutation.registry.routine_snapshot();
     let previous = registry.clone();
     let target = resolve_routine_rename_target(context, stmt, &registry)?;
+    if stmt.set_schema && target.old_name == target.new_name {
+        return Ok(());
+    }
     let mut renamed_registry = analysis::move_routine_registry_entry(registry, &target)?;
     super::catalog::revision::renamed(&mut renamed_registry, &target.new_name, &target.binding)?;
     **context.mutation.registry.routines_write() = renamed_registry;
@@ -205,6 +208,20 @@ fn resolve_routine_rename_target(
                 "resolved ALTER routine target `{old_name}` disappeared before rename"
             ))
         })?;
+    let old_identity = analysis::routine_rename_identity(&old_name)?;
+    let destination = analysis::routine_destination(stmt, &old_identity)?;
+    if stmt.set_schema
+        && context
+            .mutation
+            .names
+            .schema_security(&destination.schema)
+            .is_none()
+    {
+        return Err(SQLError::Routine {
+            sqlstate: "3F000".into(),
+            message: format!("schema \"{}\" does not exist", destination.schema),
+        });
+    }
     let current_user = context.mutation.names.current_role();
     let roles = context.mutation.roles.role_definitions();
     let memberships = context.mutation.roles.role_memberships();
@@ -221,17 +238,17 @@ fn resolve_routine_rename_target(
     )?;
     drop(memberships);
     drop(roles);
-    let old_identity = analysis::routine_rename_identity(&old_name)?;
     context
         .schemas
-        .require_schema_create(&old_identity.schema, &current_user)?;
+        .require_schema_create(&destination.schema, &current_user)?;
     analysis::finish_routine_rename_target(
         stmt,
         old_name,
         position,
         &function.def,
-        &old_identity,
+        destination,
         registry,
+        context.mutation.names,
     )
 }
 

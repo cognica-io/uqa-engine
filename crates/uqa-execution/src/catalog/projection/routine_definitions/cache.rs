@@ -13,9 +13,26 @@ use std::{collections::BTreeMap, sync::OnceLock};
 #[derive(Default)]
 pub(in crate::catalog) struct RoutineDefinitions {
     by_oid: OnceLock<OrderedOidLookup<(String, usize)>>,
+    has_execute_acl: OnceLock<bool>,
 }
 
 impl CatalogReadView {
+    /// A catalog generation with default routine ACLs allows PUBLIC to execute every SQL function.
+    pub fn sql_routines_require_execute_checks(
+        &self,
+        role: &uqa_sql::catalog::roles::RoleReference,
+    ) -> bool {
+        let definitions = &self.snapshot().definitions;
+        !uqa_sql::catalog::roles::memberships::role_is_superuser(&definitions.roles, role)
+            && *self.routine_definitions.has_execute_acl.get_or_init(|| {
+                definitions
+                    .sql_user_functions
+                    .values()
+                    .flatten()
+                    .any(|routine| routine.def.execute_acl.is_some())
+            })
+    }
+
     /// Borrow a retained user routine by its catalog identity, sharing the generation's existing OID lookup.
     pub fn sql_function_by_oid(
         &self,
@@ -54,7 +71,7 @@ pub(super) fn user_routine_by_oid(
     }))
 }
 
-pub(super) fn builtin_routine_by_oid(oid: i64) -> Option<BuiltinRoutineCatalogEntry> {
+pub(crate) fn builtin_routine_by_oid(oid: i64) -> Option<BuiltinRoutineCatalogEntry> {
     static BUILTINS: OnceLock<BTreeMap<i64, BuiltinRoutineCatalogEntry>> = OnceLock::new();
     BUILTINS
         .get_or_init(|| {

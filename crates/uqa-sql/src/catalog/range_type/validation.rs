@@ -56,6 +56,7 @@ async fn validate<'a>(
     control.check()?;
     let mut identities = ProductionMap::new(*control);
     let mut oids = ProductionMap::new(*control);
+    let mut casts = ProductionMap::new(*control);
     let mut names = ProductionMap::new(*control);
     for (name, definition) in entries {
         work.checkpoint().await?;
@@ -115,8 +116,23 @@ async fn validate<'a>(
                 definition.owner.oid
             )));
         }
+        if let Some(oid) = definition.cast_oid {
+            if definition.constructor_oids.is_none()
+                || oid < crate::catalog::oids::FIRST_NORMAL_OBJECT_ID
+                || casts.insert_copy(oid, ())?.is_some()
+            {
+                return Err(SQLError::Internal(format!(
+                    "invalid or duplicate range cast identity for `{name}`"
+                )));
+            }
+        }
         if !subtype(&definition.subtype, control, work).await?
             || definition.subtype_operator_class == 0
+            || definition.constructor_oids.is_some_and(|oids| {
+                oids.iter().enumerate().any(|(i, oid)| {
+                    *oid < crate::catalog::oids::FIRST_NORMAL_OBJECT_ID || oids[..i].contains(oid)
+                })
+            })
             || definition.canonical_oid == Some(0)
             || definition.subtype_difference_oid == Some(0)
         {

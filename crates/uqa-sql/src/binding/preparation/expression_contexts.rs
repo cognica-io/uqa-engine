@@ -8,9 +8,7 @@
 
 use crate::binding::preparation::{LiteralInput, SchemaContext};
 
-use super::{
-    error, ColumnType, ExpressionType, Preparation, QueryPlan, RowSchema, SQLError, ScalarExpr,
-};
+use super::{ColumnType, ExpressionType, Preparation, QueryPlan, RowSchema, SQLError, ScalarExpr};
 use crate::ast::BinaryOp;
 use crate::catalog::collations::derivation::Derivation;
 use crate::semantics::sets::placement::SetPlacement;
@@ -19,28 +17,36 @@ use uqa_core::Value;
 impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
     pub(super) fn cast_expression_inline<W: crate::catalog::work::Work + Send>(
         &mut self,
-        expr: &ScalarExpr,
-        ty: &str,
+        expression: &ScalarExpr,
         input: &RowSchema,
         subqueries: &[QueryPlan],
         work: &mut W,
     ) -> Result<ExpressionType, SQLError> {
         crate::catalog::work::inline_with(|| {
-            self.cast_expression(expr, ty, input, subqueries, work)
+            self.cast_expression(expression, input, subqueries, work)
         })
     }
 
     pub(super) async fn cast_expression<W: crate::catalog::work::Work + Send>(
         &mut self,
-        expr: &ScalarExpr,
-        ty: &str,
+        expression: &ScalarExpr,
         input: &RowSchema,
         subqueries: &[QueryPlan],
         work: &mut W,
     ) -> Result<ExpressionType, SQLError> {
+        let ScalarExpr::Cast { expr, ty, implicit } = expression else {
+            unreachable!()
+        };
         let target = self.type_name(ty)?;
-        self.cast_to_type(expr, &target, input, subqueries, work)
-            .await
+        self.cast_to_type(
+            expr,
+            &target,
+            (!implicit).then_some(expression),
+            input,
+            subqueries,
+            work,
+        )
+        .await
     }
 
     fn cast_to_pseudo(
@@ -77,6 +83,7 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
         &mut self,
         expr: &ScalarExpr,
         target: &ColumnType,
+        site: Option<&ScalarExpr>,
         input: &RowSchema,
         subqueries: &[QueryPlan],
         work: &mut W,
@@ -97,7 +104,7 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
                     crate::catalog::work::nested!(
                         W::MAY_SUSPEND,
                         control,
-                        self.cast_to_type(item, array_type, input, subqueries, work)
+                        self.cast_to_type(item, array_type, None, input, subqueries, work)
                     )?
                 } else {
                     self.expression_with_work(item, input, subqueries, work)
@@ -118,18 +125,12 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
                     element.as_ref()
                 };
                 self.parameters.coerce_unknown(item, element)?;
-                if let Some(source) = &item.ty {
-                    if !crate::type_resolution::explicit_type_compatible(source, element) {
-                        return Err(error(
-                            "42846",
-                            format!(
-                                "cannot cast type {} to {}",
-                                source.display_name(),
-                                element.display_name()
-                            ),
-                        ));
-                    }
-                }
+                crate::type_resolution::validate_explicit_cast_with_control(
+                    item.ty.as_deref(),
+                    element,
+                    self.routines.enum_labels(),
+                    &control,
+                )?;
                 item.derivation = cast_collation(expression, item, element)?;
             }
             ExpressionType::combined(Some(array_type.clone()), &items)
@@ -147,19 +148,21 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
         }
         let initial_collation = cast_initial_collation(expr, &source, target)?;
         self.parameters.coerce_unknown(&mut source, target)?;
-        if source
-            .ty
-            .as_ref()
-            .is_some_and(|source| !crate::type_resolution::explicit_type_compatible(source, target))
-        {
-            return Err(error(
-                "42846",
-                format!(
-                    "cannot cast type {} to {}",
-                    source.ty.as_deref().expect("known source").display_name(),
-                    target.display_name()
-                ),
-            ));
+        crate::type_resolution::validate_explicit_cast_with_control(
+            source.ty.as_deref(),
+            target,
+            self.routines.enum_labels(),
+            &self.scope.control(),
+        )?;
+        if let Some(site) = site {
+            if let Some(binding) = crate::type_resolution::declared_cast_function(
+                source.ty.as_deref(),
+                target,
+                self.routines,
+                &self.scope.control(),
+            )? {
+                self.parameters.retain_call(site, &binding)?;
+            }
         }
         if source
             .ty

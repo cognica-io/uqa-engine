@@ -173,6 +173,7 @@ impl SQLValueCatalog for Catalog {
             .find(|row| oid == integer(&row[1]) || oid == integer(&row[6]))
             .map(|row| {
                 Arc::new(RangeValueDescriptor {
+                    cast_oid: None,
                     range_oid: integer(&row[1]),
                     multirange_oid: integer(&row[6]),
                     endpoint: Self::endpoint(row),

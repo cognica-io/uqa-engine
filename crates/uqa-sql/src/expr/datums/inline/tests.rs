@@ -256,6 +256,7 @@ impl SQLValueCatalog for Reference {
                 let name = row[0].as_str().unwrap();
                 (oid == integer(&row[1]) || oid == integer(&row[6])).then(|| {
                     Arc::new(crate::expr::range::RangeValueDescriptor {
+                        cast_oid: None,
                         range_oid: integer(&row[1]),
                         multirange_oid: integer(&row[6]),
                         endpoint: self.endpoint(name),

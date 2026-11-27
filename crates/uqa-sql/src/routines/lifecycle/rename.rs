@@ -32,11 +32,37 @@ pub fn finish_routine_rename_target(
     old_name: String,
     position: usize,
     definition: &CreateFunction,
-    old_identity: &RelationIdentity,
+    destination: RelationIdentity,
     registry: &RoutineRegistry,
+    catalog: &dyn super::names::RoutineNameCatalog,
 ) -> Result<RoutineRenameTarget, SQLError> {
     let signature = routine_signature_types(definition);
-    let new_name = routine_rename_destination(stmt, old_identity, &signature, registry)?;
+    let new_name = destination.qualified_name();
+    if (!stmt.set_schema || new_name != old_name)
+        && registry.get(&new_name).is_some_and(|overloads| {
+            overloads
+                .iter()
+                .any(|function| routine_signature_types(&function.def) == signature)
+        })
+    {
+        let message = if stmt.set_schema {
+            let signature =
+                super::routine_signature_display(catalog, &destination.name, &signature);
+            format!(
+                "function {signature} already exists in schema \"{}\"",
+                destination.schema
+            )
+        } else {
+            format!(
+                "function \"{}\" already exists with same argument types",
+                destination.name
+            )
+        };
+        return Err(SQLError::Routine {
+            sqlstate: "42723".into(),
+            message,
+        });
+    }
     let object_id = definition.object_id.ok_or_else(|| {
         SQLError::Internal(format!(
             "routine `{old_name}` has no catalog object identity"
@@ -60,39 +86,27 @@ pub fn finish_routine_rename_target(
     })
 }
 
-fn routine_rename_destination(
+/// Decode the changed identifier component before checking creation privilege on its destination namespace.
+pub fn routine_destination(
     stmt: &RenameRoutineStmt,
     old_identity: &RelationIdentity,
-    signature: &[String],
-    registry: &crate::routines::registry::RoutineRegistry,
-) -> Result<String, SQLError> {
-    let (new_schema, new_local_name) =
+) -> Result<RelationIdentity, SQLError> {
+    let (qualifier, component) =
         RelationIdentity::parse_reference(&stmt.new_name).map_err(|error| SQLError::Routine {
-            sqlstate: "42602".into(),
-            message: format!("invalid routine name `{}`: {error}", stmt.new_name),
+            sqlstate: "42601".into(),
+            message: format!("invalid routine name \"{}\": {error}", stmt.new_name),
         })?;
-    if new_schema.is_some() {
+    if qualifier.is_some() {
         return Err(SQLError::Routine {
             sqlstate: "42601".into(),
             message: "ALTER ROUTINE RENAME TO requires an unqualified new name".into(),
         });
     }
-    let new_name = RelationIdentity::new(&old_identity.schema, new_local_name).qualified_name();
-    if registry.get(&new_name).is_some_and(|overloads| {
-        overloads
-            .iter()
-            .any(|function| routine_signature_types(&function.def) == signature)
-    }) {
-        return Err(SQLError::Routine {
-            sqlstate: "42723".into(),
-            message: format!(
-                "function \"{}\" already exists with same argument types",
-                RelationIdentity::from_legacy_name(&new_name)
-                    .map_or_else(|_| new_name.clone(), |identity| identity.name)
-            ),
-        });
-    }
-    Ok(new_name)
+    Ok(if stmt.set_schema {
+        RelationIdentity::new(component, &old_identity.name)
+    } else {
+        RelationIdentity::new(&old_identity.schema, component)
+    })
 }
 
 pub fn move_routine_registry_entry(

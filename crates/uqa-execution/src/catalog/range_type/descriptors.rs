@@ -7,7 +7,7 @@
 //! Read-only range layouts are shared by both type OIDs for one immutable catalog generation.
 
 use std::{collections::BTreeMap, sync::Arc};
-use uqa_sql::{expr::RangeValueDescriptor, SQLError};
+use uqa_sql::{catalog::range_type::StoredRange, expr::RangeValueDescriptor, SQLError};
 
 use super::super::{cache::CatalogDerivation, CatalogReadView};
 
@@ -43,6 +43,30 @@ impl CatalogReadView {
         Ok(definitions
             .get(&oid)
             .and_then(|name| self.snapshot().definitions.ranges.get(name.as_ref())))
+    }
+
+    /// Bind the published function cast to its one-member constructor, including any later routine rename or schema move.
+    pub fn range_cast_binding(
+        &self,
+        source: u32,
+        target: u32,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<uqa_core::memory::Produced<uqa_sql::ast::FunctionBinding>>, SQLError> {
+        control.check()?;
+        let Some(cast) = self
+            .range_definition_by_oid(source)?
+            .and_then(StoredRange::cast)
+            .filter(|cast| cast.source == source && cast.target == target)
+        else {
+            return Ok(None);
+        };
+        let function = self.sql_function_by_oid(cast.function)?.ok_or_else(|| {
+            SQLError::Internal(format!(
+                "cache lookup failed for function {}",
+                cast.function
+            ))
+        })?;
+        function.catalog_binding(None, control).map(Some)
     }
 
     /// Borrow pinned layout support without resolving mutable names or invoking endpoint input. An empty range registry adds no descriptor-cache allocation.

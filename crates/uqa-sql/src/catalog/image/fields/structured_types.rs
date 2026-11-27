@@ -63,6 +63,8 @@ impl<'a> Fields<'a> {
             collation_oid,
             canonical_oid,
             subtype_difference_oid,
+            constructor_oids,
+            cast_oid,
             multirange: _,
             usage_acl: _,
         } = value;
@@ -75,6 +77,18 @@ impl<'a> Fields<'a> {
         self.identity(*owner);
         self.scalar(subtype_operator_class.to_le_bytes());
         self.scalar(collation_oid.to_le_bytes());
+        if let Some(constructors) = constructor_oids {
+            // Tags 0 and 1 encode only the canonical function. Tags 2 and 3 also carry constructor OIDs, with the generated cast added in tag 3.
+            self.scalar([if cast_oid.is_some() { 3 } else { 2 }]);
+            let mut bytes = [0; 5 * size_of::<u32>()];
+            for (field, oid) in bytes.chunks_exact_mut(size_of::<u32>()).zip(constructors) {
+                field.copy_from_slice(&oid.to_le_bytes());
+            }
+            self.scalar(bytes);
+        }
+        if let Some(oid) = cast_oid {
+            self.scalar(oid.to_le_bytes());
+        }
         self.optional_u32(*canonical_oid);
         self.optional_u32(*subtype_difference_oid);
     }

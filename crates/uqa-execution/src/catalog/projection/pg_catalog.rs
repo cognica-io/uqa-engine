@@ -7,6 +7,7 @@
 //! Virtual `pg_catalog` relation builders.
 
 mod attributes;
+pub(super) mod casts;
 mod composites;
 mod constraint_definitions;
 mod constraints;
@@ -20,6 +21,7 @@ pub(crate) use indexes::{
     catalog_index_by_name, catalog_index_by_oid, catalog_index_for_constraint,
 };
 mod languages;
+pub(super) mod operator_classes;
 mod relations;
 mod roles;
 mod row_types;

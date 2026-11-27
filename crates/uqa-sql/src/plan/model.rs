@@ -777,6 +777,7 @@ pub enum CommandPlan {
     CreateShellType(String),
     CommentType(crate::ast::CommentType),
     CreateEnum(crate::ast::CreateEnum),
+    CreateRange(crate::ast::CreateRange),
     CreateCompositeType(crate::ast::CreateCompositeType),
     AlterEnum(crate::ast::AlterEnum),
     AlterTypeObject(crate::ast::AlterTypeObject),

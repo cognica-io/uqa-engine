@@ -65,6 +65,8 @@ virtual_relations! {
     PgViews => ("pg_catalog", "pg_views", 12028),
     PgIndexes => ("pg_catalog", "pg_indexes", 12043),
     PgType => ("pg_catalog", "pg_type", 1247),
+    PgCast => ("pg_catalog", "pg_cast", 2605),
+    PgOpclass => ("pg_catalog", "pg_opclass", 2616),
     PgRange => ("pg_catalog", "pg_range", 3541),
     PgEnum => ("pg_catalog", "pg_enum", 3501),
     PgProc => ("pg_catalog", "pg_proc", 1255),
@@ -124,6 +126,42 @@ impl VirtualRelation {
             schema == uqa_core::RelationName::decoded(relation.namespace())
                 && reference.name == uqa_core::RelationName::decoded(relation.name())
         })
+    }
+
+    pub const fn accepts_row_lock(self) -> bool {
+        matches!(
+            self,
+            Self::PgNamespace
+                | Self::PgClass
+                | Self::PgInherits
+                | Self::PgPartitionedTable
+                | Self::PgAttribute
+                | Self::PgAttrdef
+                | Self::PgConstraint
+                | Self::PgIndex
+                | Self::PgTrigger
+                | Self::PgRewrite
+                | Self::PgType
+                | Self::PgCast
+                | Self::PgOpclass
+                | Self::PgRange
+                | Self::PgEnum
+                | Self::PgProc
+                | Self::PgLanguage
+                | Self::PgExtension
+                | Self::PgForeignDataWrapper
+                | Self::PgForeignServer
+                | Self::PgForeignTable
+                | Self::PgDatabase
+                | Self::PgAuthid
+                | Self::PgAuthMembers
+                | Self::PgDefaultAcl
+                | Self::PgDescription
+                | Self::PgDepend
+                | Self::PgShdepend
+                | Self::AgGraph
+                | Self::AgLabel
+        )
     }
 
     pub const fn kind(self) -> &'static str {

@@ -186,6 +186,7 @@ impl SQLValueCatalog for PartitionValues<'_> {
                 .into_parts();
             let descriptor = self.shared(self.control.finish(
                 RangeValueDescriptor {
+                    cast_oid: definition.cast_oid,
                     range_oid: definition.oid,
                     multirange_oid: definition.multirange.oid,
                     endpoint,

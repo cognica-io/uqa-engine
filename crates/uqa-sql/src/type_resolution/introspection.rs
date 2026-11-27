@@ -466,20 +466,30 @@ impl Binder<'_, '_> {
                     return self.bind(*expr);
                 }
                 self.fold_enum_array_constructor(&mut expr, &ty)?;
-                let source = if !implicit && self.cast_requires_source(&ty)? {
-                    let source = self.semantic(self.infer(&expr))?.flatten();
-                    source
-                        .map(|source| self.declared_source(&ty, source))
-                        .transpose()?
-                        .flatten()
-                } else {
-                    None
-                };
+                let inputs = self.context.cast_inputs(&ty, implicit, &expr)?;
                 self.in_place(&mut expr)?;
                 if let Some(folded) = self.fold_explicit_enum_cast(&expr, &ty)? {
                     return Ok(folded);
                 }
-                if let Some(source) = source {
+                if let Some(binding) = inputs.function {
+                    let name = self.control.copy_text(&binding.name)?;
+                    let mut args = uqa_core::memory::ProductionVec::new(self.control);
+                    // The parent already owns the argument payload. Only the new argument vector needs a reservation.
+                    args.push_produced(
+                        self.control
+                            .finish(*expr, self.control.empty_reservation())?,
+                    )?;
+                    return Ok(ScalarExpr::Func {
+                        name: self.retain(name),
+                        binding: Some(self.retain(binding)),
+                        args: self.retain(args.finish()?),
+                        distinct: false,
+                        order_syntax: crate::ast::FunctionOrderSyntax::Ordinary,
+                        order_by: Vec::new(),
+                        filter: None,
+                    });
+                }
+                if let Some(source) = inputs.source {
                     self.wrap_declared(&mut expr, &source)?;
                 }
                 if self.literal_binding == LiteralBinding::Stored {

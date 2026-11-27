@@ -122,7 +122,7 @@ pub struct AlterRoutineOwnerStmt {
     pub new_owner: RoleSpecification,
 }
 
-/// `ALTER FUNCTION | PROCEDURE | ROUTINE name[(input_types)] RENAME TO new_name`.
+/// Change a routine’s local name or move its existing name to another schema.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RenameRoutineStmt {
     pub kind: AlterRoutineKind,
@@ -132,6 +132,9 @@ pub struct RenameRoutineStmt {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub arg_type_references: Vec<Option<RoutineColumnTypeReference>>,
     pub new_name: String,
+    /// When true, the changed name component is the destination schema.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub set_schema: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

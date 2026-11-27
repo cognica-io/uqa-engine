@@ -144,13 +144,20 @@ impl<'a> Input<'a, '_> {
     }
 
     pub fn identity(&mut self, first: JsonToken<'a>) -> Result<[u8; 16], InputError> {
+        self.integer_array(first)
+    }
+
+    pub fn integer_array<T: Integer + Copy + Default, const N: usize>(
+        &mut self,
+        first: JsonToken<'a>,
+    ) -> Result<[T; N], InputError> {
         if first != JsonToken::StartArray {
             return Err(invalid());
         }
         self.enter()?;
-        let mut value = [0; 16];
-        for byte in &mut value {
-            *byte = number(self.next()?)?;
+        let mut value = [T::default(); N];
+        for element in &mut value {
+            *element = number(self.next()?)?;
         }
         if self.next()? != JsonToken::EndArray {
             return Err(invalid());

@@ -23,6 +23,10 @@ pub trait TypeObjectCatalog: DomainCatalog {
     fn format_drop_type(&self, oid: i64) -> Result<Option<String>, String>;
     /// An enum by its own type OID or by its generated array's OID.
     fn enum_by_type_oid(&self, oid: u32) -> Option<crate::catalog::enum_type::StoredEnum>;
+    /// The range record claiming either value type or either generated array.
+    fn range_by_type_oid(&self, _oid: u32) -> Option<crate::catalog::range_type::StoredRange> {
+        None
+    }
     /// A standalone composite type by its own type OID or by its generated array's OID.
     fn composite_by_type_oid(
         &self,
@@ -224,6 +228,24 @@ fn drop_target(
             schema: Some(definition.identity.schema),
             owner: definition.owner,
             required_by: None,
+        });
+    }
+    if let Some(range) = context.catalog.range_by_type_oid(oid) {
+        let multi = oid == range.multirange.oid || oid == range.multirange.array_oid;
+        let (element, identity) = if multi {
+            (range.multirange.oid, &range.multirange.identity)
+        } else {
+            (range.oid, &range.identity)
+        };
+        return Ok(DropTarget {
+            schema: Some(identity.schema.clone()),
+            owner: range.owner,
+            required_by: (oid != element)
+                .then(|| {
+                    format_type(context, i64::from(element))
+                        .map(|element| Requirement::Object(format!("type {element}")))
+                })
+                .transpose()?,
         });
     }
     if let Some(definition) = context.catalog.enum_by_type_oid(oid) {

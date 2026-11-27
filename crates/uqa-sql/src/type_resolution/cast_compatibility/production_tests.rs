@@ -36,6 +36,7 @@ fn controlled_cast_compatibility_preserves_catalog_array_and_text_rules() {
     let error = validate_explicit_cast_with_control(
         Some(&ColumnType::Date),
         &ColumnType::Integer,
+        None,
         &control,
     )
     .unwrap_err();
@@ -57,6 +58,7 @@ fn identical_inline_types_and_unknown_sources_need_no_scratch() {
     validate_explicit_cast_with_control(
         None,
         &ColumnType::Array(Box::new(ColumnType::Text)),
+        None,
         &control,
     )
     .unwrap();
@@ -70,7 +72,7 @@ fn cast_compatibility_propagates_quota_and_cancellation_without_false_rejection(
     let cancellation = CancellationToken::new();
     let control = ProductionControl::new(&budget, &cancellation, &cancellation);
     assert_eq!(
-        validate_explicit_cast_with_control(Some(&array), &array, &control)
+        validate_explicit_cast_with_control(Some(&array), &array, None, &control)
             .unwrap_err()
             .sqlstate(),
         Some("53200")
@@ -86,7 +88,7 @@ fn cast_compatibility_propagates_quota_and_cancellation_without_false_rejection(
         }
         let control = ProductionControl::new(&budget, &original, &invoking);
         assert_eq!(
-            validate_explicit_cast_with_control(None, &ColumnType::Integer, &control)
+            validate_explicit_cast_with_control(None, &ColumnType::Integer, None, &control)
                 .unwrap_err()
                 .sqlstate(),
             Some("57014")

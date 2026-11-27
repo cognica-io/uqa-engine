@@ -111,11 +111,15 @@ pub(crate) mod pattern;
 mod string_binary;
 
 pub use cast_compatibility::{
-    assignment_type_compatible, assignment_type_compatible_with_control, cast_catalog_entry,
-    cast_volatility, cast_volatility_with_control, explicit_type_compatible, immutable_cast_type,
-    pg_catalog_builtin_type, pg_catalog_builtin_type_with_control, CastCatalogEntry, CastMethod,
+    assignment_type_compatible, assignment_type_compatible_with_control, builtin_casts,
+    cast_catalog_entry, cast_volatility, cast_volatility_with_control, explicit_type_compatible,
+    immutable_cast_type, pg_catalog_builtin_type, pg_catalog_builtin_type_with_control,
+    CastCatalogEntry, CastCatalogRow, CastMethod,
 };
-pub(crate) use cast_compatibility::{cast_catalog_entry_with_control, preserves_record_identity};
+pub(crate) use cast_compatibility::{
+    cast_catalog_entry_with_control, declared_cast_function, preserves_record_identity,
+    validate_explicit_cast_with_control,
+};
 #[doc(hidden)]
 pub use checksum::{resolve_checksum_overload, ResolvedChecksumOverload};
 pub(crate) use common::effective_overload_argument_type_ref_with_params;

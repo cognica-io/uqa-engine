@@ -137,6 +137,12 @@ fn range_constructor(
             subtype.range_name()
         )));
     }
+    let flags = constructor_flags(args, control)?;
+    let range = range_from_values_with_control(&args[0], &args[1], flags, subtype, control)?;
+    text_value(range.to_text_with_control(control)?, control)
+}
+
+fn constructor_flags(args: &[Value], control: &ProductionControl<'_>) -> Result<(bool, bool)> {
     let decoded = match args.get(2) {
         Some(Value::Datum(datum)) => Some(super::datums::read_with_control(datum, control)?),
         _ => None,
@@ -151,9 +157,17 @@ fn range_constructor(
             )))
         }
     };
-    let flags = range_bound_flags(bounds)?;
-    let range = range_from_values_with_control(&args[0], &args[1], flags, subtype, control)?;
-    text_value(range.to_text_with_control(control)?, control)
+    range_bound_flags(bounds)
+}
+
+fn multirange_array_members(array: &uqa_core::ArrayValue) -> Result<&[Value]> {
+    if array.dimensions().len() > 1 {
+        return Err(SQLError::Routine {
+            sqlstate: "21000".into(),
+            message: "multiranges cannot be constructed from multidimensional arrays".into(),
+        });
+    }
+    Ok(array.elements())
 }
 
 fn multirange_constructor(
@@ -190,14 +204,7 @@ fn multirange_constructor(
                 ranges.push_produced(RangeSet::single(argument, subtype, control)?)?;
             }
             Value::Array(array) => {
-                if array.dimensions().len() > 1 {
-                    return Err(SQLError::Routine {
-                        sqlstate: "21000".into(),
-                        message: "multiranges cannot be constructed from multidimensional arrays"
-                            .into(),
-                    });
-                }
-                for value in array.elements() {
+                for value in multirange_array_members(array)? {
                     control.check()?;
                     if matches!(value, Value::Null) {
                         return Err(null_multirange_member());
@@ -387,6 +394,65 @@ fn text_value(text: Produced<String>, control: &ProductionControl<'_>) -> Result
 fn inline_value(value: Value, control: &ProductionControl<'_>) -> Result<Produced<Value>> {
     debug_assert!(matches!(value, Value::Null | Value::Bool(_)));
     Ok(control.finish(value, control.empty_reservation())?)
+}
+
+/// Dispatch a catalog-generated internal routine using its bound result type and already coerced arguments. Routine names and namespaces can change independently of the type.
+pub fn evaluate_declared_range_constructor(
+    result: crate::ast::UserTypeIdentity,
+    source: &str,
+    arguments: &[Value],
+    catalog: &dyn super::EngineHook,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>> {
+    use crate::ast::UserTypeKind;
+    control.check()?;
+    match (result.kind, source, arguments) {
+        (UserTypeKind::Range, "range_constructor2", [lower, upper])
+        | (UserTypeKind::Range, "range_constructor3", [lower, upper, _]) => {
+            let (lower_inclusive, upper_inclusive) = constructor_flags(arguments, control)?;
+            let endpoint = |value: &Value| {
+                if matches!(value, Value::Null) {
+                    return Ok(control.finish(None, control.empty_reservation())?);
+                }
+                let (value, memory) = control.copy_value(value)?.into_parts();
+                Ok::<_, SQLError>(control.finish(Some(value), memory)?)
+            };
+            catalog.construct_range(
+                result.oid,
+                super::RangeBoundsInput::Bounds {
+                    lower: endpoint(lower)?,
+                    upper: endpoint(upper)?,
+                    lower_inclusive,
+                    upper_inclusive,
+                },
+                control,
+            )
+        }
+        (UserTypeKind::Multirange, "multirange_constructor0", [])
+        | (UserTypeKind::Multirange, "multirange_constructor1", [_]) => {
+            catalog.construct_multirange(result.oid, arguments, control)
+        }
+        (UserTypeKind::Multirange, "multirange_constructor2", [argument]) => {
+            let decoded = if let Value::Datum(datum) = argument {
+                Some(super::datums::read_array_input_with_catalog_and_control(
+                    datum,
+                    Some(&super::EngineValueCatalog(catalog)),
+                    control,
+                )?)
+            } else {
+                None
+            };
+            let Some(Value::Array(array)) = decoded.as_deref().or(Some(argument)) else {
+                return Err(SQLError::Internal(
+                    "variadic range constructor requires an array".into(),
+                ));
+            };
+            catalog.construct_multirange(result.oid, multirange_array_members(array)?, control)
+        }
+        _ => Err(SQLError::Internal(format!(
+            "invalid catalog range constructor {source}"
+        ))),
+    }
 }
 
 #[cfg(test)]

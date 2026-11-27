@@ -30,6 +30,7 @@ impl Engine {
             identities: self.catalog_identity_reservation_context(),
             writer: self,
             types: self,
+            ranges: self,
             allocate_identity: || {
                 crate::new_nonzero_catalog_identity("composite", "object identity")
                     .map_err(|error| SQLError::Internal(error.to_string()))

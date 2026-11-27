@@ -13,6 +13,8 @@ use uqa_core::memory::{Produced, ProductionControl};
 pub struct RangeValueDescriptor {
     pub range_oid: u32,
     pub multirange_oid: u32,
+    /// OID of the explicit cast registered with a SQL-declared range.
+    pub cast_oid: Option<u32>,
     pub endpoint: ColumnType,
 }
 
@@ -31,6 +33,7 @@ impl RangeValueDescriptor {
                     range_oid: type_metadata::pg_type_oid(&ColumnType::Range(*subtype)) as u32,
                     multirange_oid: type_metadata::pg_type_oid(&ColumnType::Multirange(*subtype))
                         as u32,
+                    cast_oid: None,
                     endpoint: subtype.scalar_type(),
                 };
                 (
@@ -63,6 +66,7 @@ impl RangeValueDescriptor {
                     Self {
                         range_oid: descriptor.range_oid,
                         multirange_oid: descriptor.multirange_oid,
+                        cast_oid: descriptor.cast_oid,
                         endpoint,
                     },
                     memory,
@@ -75,6 +79,7 @@ impl RangeValueDescriptor {
             Self {
                 range_oid,
                 multirange_oid,
+                cast_oid: selected.cast_oid,
                 endpoint,
             },
             memory,

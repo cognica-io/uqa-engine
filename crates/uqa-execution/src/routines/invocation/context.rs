@@ -44,6 +44,21 @@ pub struct RoutineInvocationContext<'a> {
     pub authority: &'a dyn RoutineExecutionAuthority,
 }
 
+impl RoutineInvocationContext<'_> {
+    pub(super) fn with_production_control<'a>(
+        &'a self,
+        control: uqa_core::memory::ProductionControl<'a>,
+    ) -> RoutineInvocationContext<'a> {
+        RoutineInvocationContext {
+            runtime: RoutineContext {
+                planning: Some(control),
+                ..self.runtime
+            },
+            ..*self
+        }
+    }
+}
+
 #[derive(Clone, Copy)]
 pub struct RoutineCallRetention<'a> {
     pub descriptions: &'a uqa_sql::routines::invocation::descriptions::RoutineCallDescriptions,

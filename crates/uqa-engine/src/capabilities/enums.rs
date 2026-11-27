@@ -27,6 +27,7 @@ impl Engine {
                 authority: self,
                 session: self,
             },
+            ranges: self,
             allocate_identity: || {
                 crate::new_nonzero_catalog_identity("enum", "object identity")
                     .map_err(|error| SQLError::Internal(error.to_string()))
@@ -106,6 +107,17 @@ impl EnumLabelCatalog for Engine {
             value,
             control,
         )
+    }
+
+    fn value_range_cast_binding(
+        &self,
+        source: u32,
+        target: u32,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<uqa_core::memory::Produced<uqa_sql::ast::FunctionBinding>>, uqa_sql::SQLError>
+    {
+        self.catalog_read_view()
+            .range_cast_binding(source, target, control)
     }
 
     fn value_range_type(

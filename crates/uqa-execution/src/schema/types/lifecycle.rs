@@ -290,6 +290,24 @@ fn set_owner(
     resolved.reject_row_type(&context.binding)?;
     resolved.reject_array(&context.binding)?;
     let object = resolved.into_type_object(&context.binding)?;
+    if let TypeObject::Range {
+        definition,
+        multirange: true,
+    } = &object
+    {
+        return Err(SQLError::Diagnostic {
+            sqlstate: "42809".into(),
+            message: format!(
+                "cannot alter multirange type {}",
+                format_type(context, definition.multirange.oid)?
+            ),
+            detail: None,
+            hint: Some(format!(
+                "You can alter type {}, which will alter the multirange type as well.",
+                format_type(context, definition.oid)?
+            )),
+        });
+    }
     let current_user = context.creation.names.current_role();
     let candidate = prepare_role_owner(
         locks,
@@ -328,7 +346,19 @@ fn set_owner(
     let Some((object, previous)) = candidate.value else {
         return Ok(());
     };
-    let new_owner = owner.identity();
+    publish_type_owner(context, object, previous, owner.identity())?;
+    drop(candidate.memberships);
+    drop(candidate.roles);
+    context.changes.catalog_registry_changed();
+    Ok(())
+}
+
+fn publish_type_owner(
+    context: &TypeLifecycleContext<'_>,
+    object: TypeObject,
+    previous: uqa_sql::catalog::roles::RoleIdentity,
+    new_owner: uqa_sql::catalog::roles::RoleIdentity,
+) -> Result<(), SQLError> {
     match object {
         TypeObject::Shell(mut definition) => {
             definition.owner = new_owner;
@@ -337,6 +367,11 @@ fn set_owner(
             let mut registry = before.clone();
             registry.insert(definition.identity.qualified_name(), definition)?;
             crate::catalog::shell_type::publish(context.shells, &before, registry)?;
+        }
+        TypeObject::Range { mut definition, .. } => {
+            definition.owner = new_owner;
+            object_acl::rewrite_owner(&mut definition.usage_acl, previous, new_owner);
+            publish_range(context, &definition.identity.clone(), *definition)?;
         }
         TypeObject::Enum(mut definition) => {
             definition.owner = new_owner;
@@ -368,9 +403,6 @@ fn set_owner(
             )?;
         }
     }
-    drop(candidate.memberships);
-    drop(candidate.roles);
-    context.changes.catalog_registry_changed();
     Ok(())
 }
 
@@ -386,6 +418,18 @@ pub(super) fn current_definition(
         .find(|definition| definition.oid == oid)
     {
         return Ok(TypeObject::Shell(definition.clone()));
+    }
+    if let Some(range) = context
+        .registries
+        .ranges
+        .range_registry()
+        .values()
+        .find(|range| range.oid == oid || range.multirange.oid == oid)
+    {
+        return Ok(TypeObject::Range {
+            definition: Box::new(range.clone()),
+            multirange: oid == range.multirange.oid,
+        });
     }
     if let Some(definition) = context
         .registries
@@ -435,6 +479,25 @@ fn publish_identity(
             registry.insert(identity.qualified_name(), definition)?;
             crate::catalog::shell_type::publish(context.shells, &before, registry)?;
         }
+        TypeObject::Range {
+            mut definition,
+            multirange,
+        } => {
+            let previous = definition.identity.clone();
+            let (target, array) = if multirange {
+                (
+                    &mut definition.multirange.identity,
+                    &mut definition.multirange.array_name,
+                )
+            } else {
+                (&mut definition.identity, &mut definition.array_name)
+            };
+            *target = identity.clone();
+            if let Some(name) = array_name {
+                *array = name;
+            }
+            publish_range(context, &previous, *definition)?;
+        }
         TypeObject::Enum(mut definition) => {
             let before = context.registries.enums.enum_registry().clone();
             let mut registry = before.clone();
@@ -472,6 +535,22 @@ fn publish_identity(
                 registry,
             )?;
         }
+    }
+    let before = context.registries.ranges.range_registry().clone();
+    let mut ranges = before.clone();
+    let mut changed = false;
+    for (name, range) in before.iter() {
+        let mut subtype = range.subtype.clone();
+        if subtype.rename_user_type(oid, &identity) {
+            ranges.edit(name, |range| {
+                range.subtype = subtype;
+                Ok(())
+            })?;
+            changed = true;
+        }
+    }
+    if changed {
+        crate::catalog::range_type::publish(context.registries.ranges, &before, ranges)?;
     }
     rewrite_domain_bases(context, oid, &identity)?;
     rewrite_composite_attributes(context, oid, &identity)?;
@@ -537,4 +616,19 @@ fn format_type(context: &TypeLifecycleContext<'_>, oid: u32) -> Result<String, S
         .format_drop_type(i64::from(oid))
         .map_err(SQLError::Internal)?
         .ok_or_else(|| SQLError::Internal(format!("type {oid} disappeared")))
+}
+
+pub(super) fn publish_range(
+    context: &TypeLifecycleContext<'_>,
+    previous: &RelationIdentity,
+    range: uqa_sql::catalog::range_type::StoredRange,
+) -> Result<(), SQLError> {
+    let publication = context.registries.ranges;
+    let before = publication.range_registry().clone();
+    let mut registry = before.clone();
+    if previous != &range.identity {
+        registry.remove(&previous.qualified_name())?;
+    }
+    registry.insert(range.identity.qualified_name(), range)?;
+    crate::catalog::range_type::publish(publication, &before, registry)
 }

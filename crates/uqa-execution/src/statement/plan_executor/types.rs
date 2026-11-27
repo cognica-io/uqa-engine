@@ -29,6 +29,13 @@ impl<S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'_, '_, S> {
                 )?;
                 Ok(SQLResult::empty())
             }
+            CommandPlan::CreateRange(statement) => {
+                crate::schema::ranges::create_range(
+                    &self.context.schemas.inputs.range_creation_context(),
+                    statement,
+                )?;
+                Ok(SQLResult::empty())
+            }
             CommandPlan::CreateEnum(statement) => {
                 crate::schema::enums::create_enum(
                     &self.context.schemas.inputs.enum_type_context(),

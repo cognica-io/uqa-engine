@@ -16,9 +16,16 @@ impl RelationCreationContext<'_> {
     /// Check visible types before a wait, then reject a newly committed competitor with catalog uniqueness diagnostics.
     pub fn reserve_type_name(&self, name: &str) -> Result<RelationIdentity, SQLError> {
         let identity = RelationIdentity::from_legacy_name(name).map_err(SQLError::Internal)?;
-        creation::ensure_type_name_available(self.relations, &identity)?;
-        self.reserve_type_destination(&identity)?;
+        self.reserve_type_identity(&identity)?;
         Ok(identity)
+    }
+
+    pub(crate) fn reserve_type_identity(
+        &self,
+        identity: &RelationIdentity,
+    ) -> Result<(), SQLError> {
+        creation::ensure_type_name_available(self.relations, identity)?;
+        self.reserve_type_destination(identity)
     }
 
     /// Row-bearing relations reserve both namespaces. Type preflight precedes either wait so concurrent collisions remain uniqueness violations.

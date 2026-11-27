@@ -322,24 +322,35 @@ pub(crate) fn selected_binding(
     invocation: Produced<RoutineInvocationBinding>,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<FunctionBinding>, SQLError> {
-    let mut arguments = uqa_core::memory::ProductionVec::new(*control);
-    for parameter in function.def.identity_params() {
-        control.check()?;
-        arguments.push_produced(canonical_routine_type_name_with_control(
-            &parameter.type_name,
-            control,
-        )?)?;
+    function.catalog_binding(Some(invocation), control)
+}
+
+impl crate::routines::SQLUserFunction {
+    /// Bind this catalog identity and its declared signature under the invoking allowance.
+    pub fn catalog_binding(
+        &self,
+        invocation: Option<Produced<RoutineInvocationBinding>>,
+        control: &ProductionControl<'_>,
+    ) -> Result<Produced<FunctionBinding>, SQLError> {
+        let mut arguments = uqa_core::memory::ProductionVec::new(*control);
+        for parameter in self.def.identity_params() {
+            control.check()?;
+            arguments.push_produced(canonical_routine_type_name_with_control(
+                &parameter.type_name,
+                control,
+            )?)?;
+        }
+        FunctionBindingParts {
+            object_id: self.def.object_id,
+            name: control.copy_text(&self.def.name)?,
+            argument_types: arguments.finish()?,
+            builtin: false,
+            dispatch: None,
+            invocation,
+            value_binding: None,
+            resolution_error: None,
+            input_collation: None,
+        }
+        .finish(control)
     }
-    FunctionBindingParts {
-        object_id: function.def.object_id,
-        name: control.copy_text(&function.def.name)?,
-        argument_types: arguments.finish()?,
-        builtin: false,
-        dispatch: None,
-        invocation: Some(invocation),
-        value_binding: None,
-        resolution_error: None,
-        input_collation: None,
-    }
-    .finish(control)
 }

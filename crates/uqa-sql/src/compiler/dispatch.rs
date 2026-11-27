@@ -250,6 +250,7 @@ pub(super) fn compile_stmt(node: &Node) -> Result<Statement> {
         | NodeEnum::DefineStmt(_)
         | NodeEnum::CommentStmt(_)
         | NodeEnum::CreateEnumStmt(_)
+        | NodeEnum::CreateRangeStmt(_)
         | NodeEnum::CompositeTypeStmt(_)
         | NodeEnum::AlterEnumStmt(_) => type_lifecycle::compile_type_statement(inner),
         NodeEnum::CreateFunctionStmt(stmt) => {

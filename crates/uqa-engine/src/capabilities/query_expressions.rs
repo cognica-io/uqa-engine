@@ -138,6 +138,23 @@ impl uqa_sql::expr::EngineHook for ScopedEngineHook<'_> {
         )
     }
 
+    fn cast_range_to_multirange(
+        &self,
+        source: u32,
+        target: u32,
+        value: &uqa_core::Value,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<uqa_core::memory::Produced<uqa_core::Value>>, SQLError> {
+        uqa_execution::routines::invocation::call_range_cast(
+            &self.engine.routine_invocation_context(),
+            &self.ctes.catalog_read_view()?,
+            source,
+            target,
+            value,
+            control,
+        )
+    }
+
     fn construct_multirange(
         &self,
         oid: u32,

@@ -59,6 +59,21 @@ where
             )
             .await
             .map_err(Into::into)?;
+        } else if matches!(&*expression, ScalarExpr::Cast { .. }) {
+            let name = control.copy_text(&selected.name)?;
+            let argument = expression
+                .select_child_from(0, control, work)
+                .await
+                .map_err(Into::into)?;
+            expression = OwnedScalarExpr::call_from(
+                name,
+                Some(selected),
+                std::iter::once(argument),
+                control,
+                work,
+            )
+            .await
+            .map_err(Into::into)?;
         } else {
             retire_produced_from(selected, control, work)
                 .await

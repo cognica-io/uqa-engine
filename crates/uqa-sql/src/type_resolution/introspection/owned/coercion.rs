@@ -409,16 +409,7 @@ impl OwnedBinder<'_> {
         let ScalarExpr::Cast { expr, ty, implicit } = &*expression else {
             unreachable!()
         };
-        let source = if !implicit && self.context.cast_requires_source(ty)? {
-            self.context
-                .semantic(self.context.infer(expr))?
-                .flatten()
-                .map(|source| self.context.declared_source(ty, source))
-                .transpose()?
-                .flatten()
-        } else {
-            None
-        };
+        let inputs = self.context.cast_inputs(ty, *implicit, expr)?;
         expression = expression.map_child(0, control, |child| self.bind(child))?;
         let ScalarExpr::Cast { expr, ty, .. } = &*expression else {
             unreachable!()
@@ -434,7 +425,16 @@ impl OwnedBinder<'_> {
                 }
             }
         }
-        if let Some(source) = source {
+        if let Some(binding) = inputs.function {
+            let name = control.copy_text(&binding.name)?;
+            return Ok(OwnedScalarExpr::call(
+                name,
+                Some(binding),
+                std::iter::once(expression.select_child(0)),
+                control,
+            )?);
+        }
+        if let Some(source) = inputs.source {
             expression =
                 expression.map_child(0, control, |child| self.wrap_declared(child, &source))?;
         }

@@ -24,6 +24,7 @@ pub struct DomainCreationContext<'a> {
     pub identities: crate::catalog::identity::CatalogIdentityReservationContext<'a>,
     pub writer: &'a dyn SchemaStatementWriter,
     pub bindings: &'a dyn DomainDeclarationBinding,
+    pub ranges: &'a dyn crate::catalog::range_type::RangeRegistryPublication,
     pub allocate_identity: fn() -> Result<[u8; 16], SQLError>,
     pub publication: &'a dyn DomainRegistryPublication,
     /// Enum and composite arrays share the type namespace with domain arrays.
@@ -44,6 +45,7 @@ pub fn create_domain(
     super::types::arrays::displace_array_type(
         &context.creation,
         super::types::arrays::UserTypeRegistries {
+            ranges: context.ranges,
             enums: context.enums,
             domains: context.publication,
             composites: context.composites,

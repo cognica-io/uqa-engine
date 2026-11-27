@@ -48,6 +48,7 @@ syntax_enum!(crate::plan::CommandPlan {
     CreateShellType(value0),
     CommentType(value0),
     CreateEnum(value0),
+    CreateRange(value0),
     CreateCompositeType(value0),
     AlterEnum(value0),
     AlterTypeObject(value0),

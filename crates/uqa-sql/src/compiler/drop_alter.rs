@@ -13,7 +13,7 @@ mod identity;
 use super::relations::{
     collect_def_elem_options, validate_materialized_view_options, validate_view_options,
 };
-use super::routines::{compile_drop_function, compile_object_with_args, CompiledRoutineTarget};
+use super::routines::{compile_drop_function, compile_routine_name_change};
 use super::types::{
     compile_foreign_key_action, compile_foreign_key_match, preserve_alter_type_declaration,
     validate_foreign_key_set_columns,
@@ -24,8 +24,7 @@ use super::{
     NodeEnum, Result, SQLError, Statement, TableKeyConstraint, TableKeyConstraintKind,
 };
 use crate::ast::{
-    AlterRoutineKind, AlterSequence, EventEnableMode, ForeignKey, RelationPersistence,
-    RenameRoutineStmt, SequenceLifecycle, TableCheck,
+    AlterSequence, EventEnableMode, ForeignKey, RelationPersistence, SequenceLifecycle, TableCheck,
 };
 
 fn extract_strings(nodes: &[pg_query::protobuf::Node]) -> Result<Vec<String>> {
@@ -849,34 +848,13 @@ pub(super) fn compile_rename(stmt: &pg_query::protobuf::RenameStmt) -> Result<St
             new_name: stmt.newname.clone(),
         });
     }
-    let (routine_kind, context) = match stmt.rename_type() {
-        ObjectType::ObjectFunction => (Some(AlterRoutineKind::Function), "ALTER FUNCTION"),
-        ObjectType::ObjectProcedure => (Some(AlterRoutineKind::Procedure), "ALTER PROCEDURE"),
-        ObjectType::ObjectRoutine => (Some(AlterRoutineKind::Routine), "ALTER ROUTINE"),
-        _ => (None, "RENAME"),
-    };
-    if let Some(kind) = routine_kind {
-        let Some(NodeEnum::ObjectWithArgs(object)) = stmt
-            .object
-            .as_deref()
-            .and_then(|object| object.node.as_ref())
-        else {
-            return Err(SQLError::Internal(format!(
-                "{context}: malformed routine target"
-            )));
-        };
-        let CompiledRoutineTarget {
-            name,
-            arg_types,
-            arg_type_references,
-        } = compile_object_with_args(object, context)?;
-        return Ok(Statement::RenameRoutine(RenameRoutineStmt {
-            kind,
-            name,
-            arg_types,
-            arg_type_references,
-            new_name: render_relation_component(&stmt.newname),
-        }));
+    if let Some(routine) = compile_routine_name_change(
+        stmt.rename_type(),
+        stmt.object.as_deref(),
+        &stmt.newname,
+        false,
+    )? {
+        return Ok(routine);
     }
     compile_relation_rename(stmt)
 }

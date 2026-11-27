@@ -736,6 +736,7 @@ pub(in crate::plan::mutable) async fn command_from<I: Input>(
         | CommandPlan::CommentType(_)
         | CommandPlan::CreateShellType(_)
         | CommandPlan::CreateEnum(_)
+        | CommandPlan::CreateRange(_)
         | CommandPlan::CreateCompositeType(_)
         | CommandPlan::AlterEnum(_)
         | CommandPlan::AlterTypeObject(_)

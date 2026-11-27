@@ -111,7 +111,8 @@ syntax_struct!(crate::ast::RenameRoutineStmt {
     name,
     arg_types,
     arg_type_references,
-    new_name
+    new_name,
+    set_schema
 });
 
 syntax_enum!(crate::ast::RoleAttribute {

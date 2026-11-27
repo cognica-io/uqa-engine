@@ -190,6 +190,7 @@ stored_enum!(Statement {
     CreateShellType (value),
     CommentType (value),
     CreateEnum (value),
+    CreateRange (value),
     CreateCompositeType (value),
     AlterEnum (value),
     AlterTypeObject (value),

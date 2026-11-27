@@ -8,7 +8,7 @@ use super::*;
 
 #[test]
 fn stored_query_input_preserves_flattened_body_order_and_assignment_alternatives() {
-    let mut expression = query(QUERIES[9]);
+    let mut expression = query(UPDATE_CTE);
     let mut target = expression["ScalarSubquery"]["with"][0]["update"]["assignments"][0][0].clone();
     target["column"] = json!("first_target");
     for indirection in [json!(false), json!([{"Index":{"Unknown":null}}]), json!([])] {
@@ -38,7 +38,7 @@ fn stored_query_input_preserves_flattened_body_order_and_assignment_alternatives
 
 #[test]
 fn stored_query_input_preserves_optional_mutations_and_generic_numeric_content() {
-    let mut expression = query(QUERIES[11]);
+    let mut expression = query(MERGE_CTE);
     for tag in [
         "DeleteNotMatchedBySource",
         "NothingMatched",

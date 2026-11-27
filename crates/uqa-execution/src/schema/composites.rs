@@ -38,6 +38,7 @@ pub struct CompositeTypeContext<'a> {
     pub writer: &'a dyn SchemaStatementWriter,
     /// Resolves attribute types through the catalog and checks `USAGE` on them.
     pub types: &'a dyn FunctionTypeResolver,
+    pub ranges: &'a dyn crate::catalog::range_type::RangeRegistryPublication,
     pub allocate_identity: fn() -> Result<[u8; 16], SQLError>,
     pub publication: &'a dyn CompositeRegistryPublication,
     /// Enum and domain arrays share the type namespace with composite arrays.
@@ -59,6 +60,7 @@ pub fn create_composite_type(
     super::types::arrays::displace_array_type(
         &context.creation,
         super::types::arrays::UserTypeRegistries {
+            ranges: context.ranges,
             enums: context.enums,
             domains: context.domains,
             composites: context.publication,

@@ -6,7 +6,7 @@
 
 //! EXPLAIN initializes mutation expressions without dispatching statement or row effects.
 
-use super::{BuiltinRoutinePermissions, MutationStatementContext};
+use super::{routine_calls, MutationStatementContext};
 use uqa_sql::{
     plan::CommandPlan,
     semantics::{mutation_privileges, view_privileges},
@@ -19,7 +19,7 @@ pub fn explain<S: Clone + Send + Sync + 'static>(
     command: &CommandPlan,
     params: &[SQLParam],
 ) -> Result<(), SQLError> {
-    if BuiltinRoutinePermissions::capture(&context.query.source.catalog).unrestricted() {
+    if routine_calls::required_checks(&context.query.source.catalog).is_none() {
         return Ok(());
     }
     let (target, bound, include_descendants) = match command {

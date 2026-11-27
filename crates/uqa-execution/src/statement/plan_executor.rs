@@ -803,6 +803,7 @@ impl<'engine, 'params, S: Clone + Send + Sync + 'static> UnifiedPlanExecutor<'en
             CommandPlan::CreateDomain(_)
             | CommandPlan::AlterDomain(_)
             | CommandPlan::CreateEnum(_)
+            | CommandPlan::CreateRange(_)
             | CommandPlan::CommentType(_)
             | CommandPlan::CreateShellType(_)
             | CommandPlan::CreateCompositeType(_)

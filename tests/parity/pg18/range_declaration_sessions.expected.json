@@ -1,0 +1,21 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "provenance": "Two retained libpq connections to PostgreSQL 18.4 with PG_UNICODE_FAST",
+  "schedules": [{"name": "peer changes", "steps": [
+    {"session":"A","sql":"BEGIN","result":{"rows":[]}},
+    {"session":"A","sql":"CREATE TYPE peer_range AS RANGE(subtype=text)","result":{"rows":[]}},
+    {"session":"A","sql":"SELECT peer_range('a','z')::text","result":{"rows":[["[a,z)"]]}},
+    {"session":"B","sql":"SELECT to_regtype('peer_range') IS NULL AS invisible","result":{"rows":[["t"]]}},
+    {"session":"A","sql":"COMMIT","result":{"rows":[]}},
+    {"session":"B","sql":"SELECT peer_range('a','z')::text AS r,pg_typeof(peer_multirange())::text AS m","result":{"rows":[["[a,z)","peer_multirange"]]}},
+    {"session":"B","sql":"BEGIN","result":{"rows":[]}},
+    {"session":"B","sql":"SAVEPOINT before_drop","result":{"rows":[]}},
+    {"session":"B","sql":"DROP TYPE peer_range","result":{"rows":[]}},
+    {"session":"A","sql":"SELECT peer_range('x','z')::text AS retained","result":{"rows":[["[x,z)"]]}},
+    {"session":"B","sql":"ROLLBACK TO before_drop","result":{"rows":[]}},
+    {"session":"B","sql":"COMMIT","result":{"rows":[]}},
+    {"session":"A","sql":"SELECT count(*) AS constructors FROM pg_proc WHERE proname IN ('peer_range','peer_multirange')","result":{"rows":[["5"]]}},
+    {"session":"B","sql":"DROP TYPE peer_range","result":{"rows":[]}},
+    {"session":"A","sql":"SELECT to_regtype('peer_range') IS NULL AS type_gone,to_regprocedure('peer_multirange()') IS NULL AS constructor_gone","result":{"rows":[["t","t"]]}}
+  ]}]
+}

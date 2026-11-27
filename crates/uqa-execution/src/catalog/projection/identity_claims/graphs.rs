@@ -68,8 +68,9 @@ fn class_oids(
             Box::new([label.id_default, label.properties_default].into_iter())
         }
         CatalogOidClass::Trigger => Box::new(std::iter::once(label.trigger)),
-        CatalogOidClass::EnumLabel | CatalogOidClass::Rewrite | CatalogOidClass::Procedure => {
-            Box::new(std::iter::empty())
-        }
+        CatalogOidClass::Cast
+        | CatalogOidClass::EnumLabel
+        | CatalogOidClass::Rewrite
+        | CatalogOidClass::Procedure => Box::new(std::iter::empty()),
     }
 }

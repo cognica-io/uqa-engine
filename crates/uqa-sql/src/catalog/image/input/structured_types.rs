@@ -175,7 +175,23 @@ impl Fields<'_> {
         let owner = self.identity().await?;
         let subtype_operator_class = self.catalog_oid().await?;
         let collation_oid = u32::from_le_bytes(self.binary.array().await?);
-        let canonical_oid = self.optional_oid().await?;
+        let (constructor_oids, cast_oid, canonical_oid) = match self.binary.array::<1>().await?[0] {
+            0 => (None, None, None),
+            1 => (None, None, Some(self.catalog_oid().await?)),
+            tag @ (2 | 3) => {
+                let mut constructors = [0; 5];
+                for oid in &mut constructors {
+                    *oid = self.user_oid().await?;
+                }
+                let cast = if tag == 3 {
+                    Some(self.user_oid().await?)
+                } else {
+                    None
+                };
+                (Some(constructors), cast, self.optional_oid().await?)
+            }
+            _ => return Err(invalid("range support record tag")),
+        };
         let subtype_difference_oid = self.optional_oid().await?;
         let (usage_acl, reservation) = self.optional_object_acl().await?.into_parts();
         memory.absorb(reservation);
@@ -201,6 +217,8 @@ impl Fields<'_> {
                 subtype_difference_oid,
                 multirange,
                 usage_acl,
+                constructor_oids,
+                cast_oid,
             },
             memory,
         ))

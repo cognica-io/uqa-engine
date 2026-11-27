@@ -97,6 +97,7 @@ impl DeletionPlan {
                 | CatalogObject::Rule { relation, .. }
                 | CatalogObject::Trigger { relation, .. } => Some(relation.clone()),
                 CatalogObject::Type(_)
+                | CatalogObject::RangeCast
                 | CatalogObject::ArrayType { .. }
                 | CatalogObject::RowType { .. }
                 | CatalogObject::DomainConstraint { .. }
@@ -250,7 +251,9 @@ fn removed_with_another_target(
     let internal = target.flags.contains(DeletionFlags::INTERNAL);
     let partition = target.flags.contains(DeletionFlags::PARTITION);
     match object {
-        CatalogObject::ArrayType { .. } | CatalogObject::RowType { .. } => true,
+        CatalogObject::ArrayType { .. }
+        | CatalogObject::RowType { .. }
+        | CatalogObject::RangeCast => true,
         CatalogObject::Rule { name, .. } => name == "_RETURN",
         CatalogObject::Relation {
             kind: RelationKind::Index,

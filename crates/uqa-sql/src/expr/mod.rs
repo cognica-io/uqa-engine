@@ -100,6 +100,7 @@ mod scalar_math;
 mod scalar_postgres;
 pub use scalar_postgres::eval_distinct_boolean;
 mod scalar_range;
+pub use scalar_range::evaluate_declared_range_constructor;
 mod scalar_temporal;
 mod session_settings;
 mod session_sleep;

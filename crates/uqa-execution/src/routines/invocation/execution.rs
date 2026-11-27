@@ -129,6 +129,37 @@ fn execute_entry(
         SetPlacementScope::compiled_source()
     };
     super::scopes::with_routine_context(context.session, definition, || {
+        if definition.language == "internal" {
+            let result = uqa_sql::ast::UserTypeIdentity::parse(
+                uqa_sql::routines::declaration::result_type_name(definition),
+            )
+            .ok_or_else(|| {
+                SQLError::Internal("internal constructor has no catalog result identity".into())
+            })?;
+            let uqa_sql::ast::FunctionBody::Source(source) = &definition.body else {
+                return Err(SQLError::Internal(
+                    "internal function has no source symbol".into(),
+                ));
+            };
+            let control = context
+                .runtime
+                .planning
+                .unwrap_or_else(uqa_core::memory::ProductionControl::uncontrolled);
+            let produced = uqa_sql::expr::evaluate_declared_range_constructor(
+                result,
+                source,
+                &bound,
+                context.runtime.expressions,
+                &control,
+            )?;
+            return Ok(RoutineOutcome {
+                value: produced.into_parts().0,
+                out_values: Vec::new(),
+                set_rows: Vec::new(),
+                anonymous_record_column_types: None,
+                sql_result_kind: None,
+            });
+        }
         let body = if definition.language == "plpgsql" {
             context.session.plpgsql_body(function, definition, None)?
         } else {

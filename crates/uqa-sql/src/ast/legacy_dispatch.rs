@@ -180,6 +180,7 @@ impl Statement {
         match self {
             Self::Select(select) => select.upgrade_legacy_serialized_dispatches(),
             Self::CreateEnum(_)
+            | Self::CreateRange(_)
             | Self::CreateCompositeType(_)
             | Self::AlterEnum(_)
             | Self::AlterTypeObject(_)

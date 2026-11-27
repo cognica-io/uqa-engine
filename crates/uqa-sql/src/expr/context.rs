@@ -151,6 +151,17 @@ pub trait EngineHook {
         )))
     }
 
+    /// Apply the explicit cast selected by the source and destination type OIDs. A missing cast lets SQL report its ordinary coercion diagnostic.
+    fn cast_range_to_multirange(
+        &self,
+        _source: u32,
+        _target: u32,
+        _value: &Value,
+        _control: &ProductionControl<'_>,
+    ) -> Result<Option<Produced<Value>>> {
+        Ok(None)
+    }
+
     /// Normalize admitted members with the selected declaration's comparison and canonical support.
     fn construct_multirange(
         &self,

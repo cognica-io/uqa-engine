@@ -8,8 +8,14 @@ use super::*;
 
 #[test]
 fn stored_query_input_retires_nested_native_allocations_on_denial_and_cancellation() {
-    for index in [0, 1, 7, 11, 12] {
-        let encoded = query(QUERIES[index]).to_string();
+    for sql in [
+        JOIN_WITH_ROW_LOCK,
+        WINDOW_FRAME,
+        RECURSIVE_SEARCH_CYCLE,
+        MERGE_CTE,
+        NESTED_SUBQUERIES,
+    ] {
+        let encoded = query(sql).to_string();
         let memory = MemoryBudget::new(64 << 20);
         let token = CancellationToken::new();
         let mut output = None;
@@ -31,14 +37,14 @@ fn stored_query_input_retires_nested_native_allocations_on_denial_and_cancellati
             assert_eq!(
                 error.sqlstate(),
                 Some("53200"),
-                "fixture {index}, limit {limit}/{peak}"
+                "fixture {sql}, limit {limit}/{peak}"
             );
             drop(error);
             assert_eq!(memory.used(), 0);
             assert!(memory.peak() <= limit);
         }
     }
-    let mut expression = query(QUERIES[11]);
+    let mut expression = query(MERGE_CTE);
     let projection = expression["ScalarSubquery"]["projections"][0].clone();
     expression["ScalarSubquery"]["projections"] = vec![projection; 2048].into();
     let encoded = expression.to_string();
@@ -74,7 +80,7 @@ fn stored_query_input_retires_nested_native_allocations_on_denial_and_cancellati
 
 #[test]
 fn stored_query_input_retains_only_surviving_merge_binding_payloads() {
-    let mut expression = query(QUERIES[11]);
+    let mut expression = query(MERGE_CTE);
     let small = json!({"object_id":[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16],"attribute_number":3,"domain_dependencies":[40000]});
     expression["ScalarSubquery"]["with"][0]["merge"]["target_column_bindings"] =
         json!({"kept":small.clone()});

@@ -23,6 +23,8 @@ fn definition() -> StoredRange {
         collation_oid: 0,
         canonical_oid: None,
         subtype_difference_oid: None,
+        constructor_oids: None,
+        cast_oid: None,
         multirange: StoredMultirange {
             object_id: [2; 16],
             oid: 36_743,
@@ -77,7 +79,7 @@ fn range_registry_rejects_aliasing_names_oids_and_retired_role_incarnations() {
         &roles,
     )
     .unwrap();
-    for corruption in 0..14 {
+    for corruption in 0..17 {
         let mut changed = range.clone();
         match corruption {
             0 => changed.object_id = [0; 16],
@@ -95,7 +97,13 @@ fn range_registry_rejects_aliasing_names_oids_and_retired_role_incarnations() {
                 changed.subtype = ColumnType::Array(Box::new(ColumnType::Named("missing".into())));
             }
             12 => changed.subtype_operator_class = 0,
-            _ => changed.canonical_oid = Some(0),
+            13 => changed.canonical_oid = Some(0),
+            14 => changed.cast_oid = Some(40_010),
+            15 => {
+                changed.constructor_oids = Some([40_001, 40_002, 40_003, 40_004, 40_005]);
+                changed.cast_oid = Some(0);
+            }
+            _ => changed.constructor_oids = Some([40_001; 5]),
         }
         assert!(
             validate_range_registry(&BTreeMap::from([("public.r".into(), changed)]), &roles)

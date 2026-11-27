@@ -19,6 +19,10 @@ use uqa_core::{catalog_role::RoleIdentity, RelationIdentity};
 pub enum TypeObject {
     Shell(crate::catalog::shell_type::StoredShellType),
     Enum(StoredEnum),
+    Range {
+        definition: Box<crate::catalog::range_type::StoredRange>,
+        multirange: bool,
+    },
     Domain(Box<StoredDomain>),
     /// A standalone composite type, whose relation follows it.
     Composite(Box<StoredComposite>),
@@ -30,6 +34,16 @@ impl TypeObject {
         match self {
             Self::Shell(definition) => definition.oid,
             Self::Enum(definition) => definition.oid,
+            Self::Range {
+                definition,
+                multirange,
+            } => {
+                if *multirange {
+                    definition.multirange.oid
+                } else {
+                    definition.oid
+                }
+            }
             Self::Domain(domain) => domain.oid,
             Self::Composite(definition) => definition.oid,
         }
@@ -40,6 +54,16 @@ impl TypeObject {
         match self {
             Self::Shell(definition) => &definition.identity,
             Self::Enum(definition) => &definition.identity,
+            Self::Range {
+                definition,
+                multirange,
+            } => {
+                if *multirange {
+                    &definition.multirange.identity
+                } else {
+                    &definition.identity
+                }
+            }
             Self::Domain(domain) => &domain.identity,
             Self::Composite(definition) => &definition.identity,
         }
@@ -50,6 +74,7 @@ impl TypeObject {
         match self {
             Self::Shell(definition) => definition.owner,
             Self::Enum(definition) => definition.owner,
+            Self::Range { definition, .. } => definition.owner,
             Self::Domain(domain) => domain.owner,
             Self::Composite(definition) => definition.owner,
         }
@@ -60,6 +85,17 @@ impl TypeObject {
         match self {
             Self::Shell(_) => None,
             Self::Enum(definition) => Some(definition.array_name.clone()),
+            Self::Range {
+                definition,
+                multirange,
+            } => Some(
+                if *multirange {
+                    &definition.multirange.array_name
+                } else {
+                    &definition.array_name
+                }
+                .clone(),
+            ),
             Self::Domain(domain) => Some(domain.array_type_name()),
             Self::Composite(definition) => Some(definition.array_name.clone()),
         }
@@ -70,6 +106,7 @@ impl TypeObject {
         match self {
             Self::Shell(definition) => definition.usage_acl.as_deref(),
             Self::Enum(definition) => definition.usage_acl.as_deref(),
+            Self::Range { definition, .. } => definition.usage_acl.as_deref(),
             Self::Domain(domain) => domain.usage_acl.as_deref(),
             Self::Composite(definition) => definition.usage_acl.as_deref(),
         }
@@ -162,6 +199,23 @@ fn classify(context: &TypeObjectBinding<'_>, oid: u32) -> ResolvedKind {
     if let Some(domain) = context.catalog.domain_by_oid(oid) {
         return ResolvedKind::User(TypeObject::Domain(Box::new(domain)));
     }
+    if let Some(definition) = context.catalog.range_by_type_oid(oid) {
+        if oid == definition.array_oid {
+            return ResolvedKind::Array {
+                element: definition.oid,
+            };
+        }
+        if oid == definition.multirange.array_oid {
+            return ResolvedKind::Array {
+                element: definition.multirange.oid,
+            };
+        }
+        let multirange = oid == definition.multirange.oid;
+        return ResolvedKind::User(TypeObject::Range {
+            definition: Box::new(definition),
+            multirange,
+        });
+    }
     if let Some(definition) = context.catalog.enum_by_type_oid(oid) {
         if definition.array_oid == oid {
             return ResolvedKind::Array {
@@ -244,6 +298,12 @@ impl ResolvedTypeObject {
                 .catalog
                 .domain_by_oid(*element)
                 .map(|domain| domain.owner)
+                .or_else(|| {
+                    context
+                        .catalog
+                        .range_by_type_oid(*element)
+                        .map(|range| range.owner)
+                })
                 .or_else(|| {
                     context
                         .catalog
@@ -385,6 +445,20 @@ impl ResolvedTypeObject {
                 message: "cannot set privileges of array types".into(),
                 detail: None,
                 hint: Some("Set the privileges of the element type instead.".into()),
+            });
+        }
+        if matches!(
+            self.kind,
+            ResolvedKind::User(TypeObject::Range {
+                multirange: true,
+                ..
+            })
+        ) {
+            return Err(SQLError::Diagnostic {
+                sqlstate: "0LP01".into(),
+                message: "cannot set privileges of multirange types".into(),
+                detail: None,
+                hint: Some("Set the privileges of the range type instead.".into()),
             });
         }
         if kind == TypeObjectKind::Domain

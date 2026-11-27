@@ -109,6 +109,8 @@ fn range() -> StoredRange {
         collation_oid: 0,
         canonical_oid: Some(20_011),
         subtype_difference_oid: Some(20_012),
+        constructor_oids: None,
+        cast_oid: None,
         multirange: StoredMultirange {
             object_id: [5; 16],
             oid: 20_013,
