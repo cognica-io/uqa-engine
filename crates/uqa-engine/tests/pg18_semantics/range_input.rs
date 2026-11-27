@@ -126,8 +126,7 @@ fn range_cast_charges_multirange_construction_to_its_caller() {
     let control = ProductionControl::new(&limited, &token, &token);
     let error = engine
         .cast_range_to_multirange(range, multi, &value, &control)
-        .err()
-        .expect("the cast must admit the same constructor temporaries as a direct call");
+        .expect_err("the cast must admit the same constructor temporaries as a direct call");
     assert_eq!(error.sqlstate(), Some("53200"));
     assert_eq!(limited.used(), 0);
 }

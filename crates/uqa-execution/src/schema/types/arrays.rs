@@ -31,7 +31,7 @@ pub fn reserve_array_name(
     name: &str,
 ) -> Result<String, SQLError> {
     let array_name = available_array_name(creation, schema, name);
-    creation.reserve_type_name(&RelationIdentity::new(schema, &array_name).qualified_name())?;
+    creation.reserve_type_identity(&RelationIdentity::new(schema, &array_name))?;
     Ok(array_name)
 }
 

@@ -209,9 +209,8 @@ impl RangeCreationContext<'_> {
                 hint: None,
             });
         }
-        self.types
-            .creation
-            .reserve_type_name(&name.qualified_name())
+        self.types.creation.reserve_type_identity(&name)?;
+        Ok(name)
     }
 }
 
