@@ -13,13 +13,13 @@ use uqa_sql::ast::BinaryOp;
 use uqa_sql::{ScalarExpr, ScalarFrameBound};
 
 use crate::unified_plan::{
-    AccessPathPlan, AggregateClassifier, CommandPlan, ComputePlan, ExpressionPlan,
-    JoinExecutionStrategy, ProjectionPlan, QueryBlockPlan, QueryPlan, RelationalPlan, SourcePlan,
-    UnifiedPlan,
+    AccessPathPlan, AggregateClassifier, CommandPlan, ComputePlan, ExpressionPlan, ProjectionPlan,
+    QueryBlockPlan, QueryPlan, RelationalPlan, SourcePlan, UnifiedPlan,
 };
-use crate::{
-    JoinGraphError, JoinGraphResult, JoinOrderOptimizer, JoinPredicate, JoinRelation, RelationStats,
-};
+use crate::{JoinGraphError, JoinOrderOptimizer, JoinPredicate, JoinRelation, RelationStats};
+
+#[cfg(test)]
+use crate::JoinExecutionStrategy;
 
 mod access_path;
 mod api;

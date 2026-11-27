@@ -4,189 +4,243 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Reassemble an eligible source tree using its existing leaves and boxed nodes.
+//! Move sources, predicates and their original join shells into the selected topology.
 
 use super::{
-    output::Output, JoinExecutionStrategy, JoinGraphError, JoinGraphResult, JoinPredicateBinding,
-    ScalarExpr, SourcePlan,
+    bindings::{PredicateBindings, PredicateGroups},
+    selection::SelectedGraph,
+};
+use crate::{JoinExecutionStrategy, JoinPlan, OperatorKind};
+use std::ops::Range;
+use uqa_core::memory::{MemoryReservation, Produced, ProductionControl};
+use uqa_sql::{
+    plan::{MutableJoinShell, MutableSourcePlan, OwnedScalarExpr, SourcePlan},
+    SQLError, ScalarExpr,
 };
 
-pub(super) fn reorder(
-    source: &mut SourcePlan,
-    tree: &crate::JoinPlan,
-    predicates: &mut [JoinPredicateBinding],
-    output: &mut Output,
-) -> JoinGraphResult<SourcePlan> {
-    let mut sources = Sources {
-        atoms: std::array::from_fn(|_| None),
-        boxes: std::array::from_fn(|_| None),
-        atom_count: 0,
-        box_count: 0,
-    };
-    let mut original = predicates
-        .iter_mut()
-        .filter(|predicate| predicate.expression.is_none());
-    sources.collect(take_source(source), &mut original, output);
-    assert!(
-        original.next().is_none(),
-        "all original join predicates were moved"
-    );
-    sources.materialize(tree)
+/// Embedded plans carry their constructor reservations. Caller-owned plans retain newly constructed predicates in their output owner.
+pub(super) trait PredicateOutput {
+    fn copy_inferred(
+        &mut self,
+        expression: &ScalarExpr,
+        control: &ProductionControl<'_>,
+    ) -> Result<OwnedScalarExpr, SQLError>;
+
+    fn prepare(
+        &mut self,
+        _groups: &PredicateGroups,
+        _control: &ProductionControl<'_>,
+    ) -> Result<(), SQLError> {
+        Ok(())
+    }
+
+    fn take_conjunction_memory(&mut self, _items: &[ScalarExpr]) -> Option<MemoryReservation> {
+        None
+    }
+
+    fn conjunction(
+        &mut self,
+        node: usize,
+        children: impl ExactSizeIterator<Item = OwnedScalarExpr>,
+        storage: &ProductionControl<'_>,
+    ) -> Result<OwnedScalarExpr, SQLError>;
+}
+
+pub(super) struct EmbeddedPredicates;
+
+impl PredicateOutput for EmbeddedPredicates {
+    fn copy_inferred(
+        &mut self,
+        expression: &ScalarExpr,
+        control: &ProductionControl<'_>,
+    ) -> Result<OwnedScalarExpr, SQLError> {
+        Ok(expression.copy_for_rewrite(control)?)
+    }
+
+    fn conjunction(
+        &mut self,
+        _node: usize,
+        children: impl ExactSizeIterator<Item = OwnedScalarExpr>,
+        storage: &ProductionControl<'_>,
+    ) -> Result<OwnedScalarExpr, SQLError> {
+        Ok(OwnedScalarExpr::boolean(children, true, storage)?)
+    }
+}
+
+pub(super) struct PreparedJoin {
+    tree: Produced<JoinPlan>,
+    positions: Produced<Vec<u64>>,
+    original_count: usize,
+    groups: PredicateGroups,
+    predicates: PredicateBindings,
+}
+
+impl PreparedJoin {
+    pub(super) fn new(
+        mut selected: SelectedGraph<'_>,
+        output: &mut impl PredicateOutput,
+        work: &ProductionControl<'_>,
+    ) -> Result<Self, SQLError> {
+        let groups = PredicateGroups::assign(&selected.tree, selected.masks.as_mut_slice(), work)?;
+        let mut predicates = PredicateBindings::new(selected.masks.len(), work)?;
+        for (&slot, &expression) in selected.masks[selected.original_count..]
+            .iter()
+            .zip(selected.inferred.iter())
+        {
+            work.check()?;
+            predicates.set(slot, output.copy_inferred(expression, work)?);
+        }
+        output.prepare(&groups, work)?;
+        Ok(Self {
+            tree: selected.tree,
+            positions: selected.masks,
+            original_count: selected.original_count,
+            groups,
+            predicates,
+        })
+    }
+
+    pub(super) fn assemble(
+        mut self,
+        source: MutableSourcePlan,
+        output: &mut impl PredicateOutput,
+        storage: &ProductionControl<'_>,
+    ) -> Result<MutableSourcePlan, SQLError> {
+        let mut sources = Sources {
+            atoms: std::array::from_fn(|_| None),
+            shells: std::array::from_fn(|_| None),
+            atom_count: 0,
+            shell_count: 0,
+        };
+        let mut originals = self.positions[..self.original_count].iter().copied();
+        sources.collect(
+            source,
+            &mut self.predicates,
+            &mut originals,
+            output,
+            storage,
+        )?;
+        assert!(
+            originals.next().is_none(),
+            "all original join predicates moved"
+        );
+        drop(self.positions);
+        let mut nodes = self.groups.ranges().enumerate();
+        let plan = sources.materialize(
+            &self.tree,
+            &mut nodes,
+            &mut self.predicates,
+            output,
+            storage,
+        )?;
+        assert!(
+            nodes.next().is_none(),
+            "all join nodes received their predicates"
+        );
+        Ok(plan)
+    }
 }
 
 struct Sources {
-    atoms: [Option<Box<SourcePlan>>; 64],
-    boxes: [Option<Box<SourcePlan>>; 62],
+    atoms: [Option<MutableSourcePlan>; 64],
+    shells: [Option<MutableJoinShell>; 63],
     atom_count: usize,
-    box_count: usize,
+    shell_count: usize,
 }
 
 impl Sources {
-    fn collect<'a>(
+    fn collect(
         &mut self,
-        source: SourcePlan,
-        predicates: &mut impl Iterator<Item = &'a mut JoinPredicateBinding>,
-        output: &mut Output,
-    ) {
-        let SourcePlan::Join {
-            left, right, on, ..
-        } = source
-        else {
-            unreachable!("selected source root has at least two atoms");
-        };
-        self.collect_box(left, predicates, output);
-        self.collect_box(right, predicates, output);
-        if let Some(on) = on {
-            move_conjuncts(on, predicates, output);
-        }
-    }
-
-    fn collect_box<'a>(
-        &mut self,
-        mut source: Box<SourcePlan>,
-        predicates: &mut impl Iterator<Item = &'a mut JoinPredicateBinding>,
-        output: &mut Output,
-    ) {
-        if matches!(source.as_ref(), SourcePlan::Join { .. }) {
-            self.collect(take_source(&mut source), predicates, output);
-            self.boxes[self.box_count] = Some(source);
-            self.box_count += 1;
-        } else {
+        source: MutableSourcePlan,
+        predicates: &mut PredicateBindings,
+        originals: &mut impl Iterator<Item = u64>,
+        output: &mut impl PredicateOutput,
+        storage: &ProductionControl<'_>,
+    ) -> Result<(), SQLError> {
+        storage.check()?;
+        if !matches!(&*source, SourcePlan::Join { .. }) {
             self.atoms[self.atom_count] = Some(source);
             self.atom_count += 1;
+            return Ok(());
         }
+        let parts = source.split_join(storage)?;
+        self.collect(parts.left, predicates, originals, output, storage)?;
+        self.collect(parts.right, predicates, originals, output, storage)?;
+        if let Some(on) = parts.on {
+            move_conjuncts(on, predicates, originals, output, storage)?;
+        }
+        self.shells[self.shell_count] = Some(parts.shell);
+        self.shell_count += 1;
+        Ok(())
     }
 
-    fn boxed(&mut self, tree: &crate::JoinPlan) -> JoinGraphResult<Box<SourcePlan>> {
-        if tree.left.is_none() && tree.right.is_none() {
-            return self.atom(tree);
-        }
-        let source = self.materialize(tree)?;
-        self.box_count -= 1;
-        let mut node = self.boxes[self.box_count]
+    fn materialize(
+        &mut self,
+        tree: &JoinPlan,
+        nodes: &mut impl Iterator<Item = (usize, Range<usize>)>,
+        predicates: &mut PredicateBindings,
+        output: &mut impl PredicateOutput,
+        storage: &ProductionControl<'_>,
+    ) -> Result<MutableSourcePlan, SQLError> {
+        storage.check()?;
+        let (Some(left), Some(right)) = (&tree.left, &tree.right) else {
+            assert!(
+                tree.left.is_none() && tree.right.is_none(),
+                "selected join children are paired"
+            );
+            let index = tree.relations.trailing_zeros() as usize;
+            return Ok(self.atoms[index].take().expect("selected source atom"));
+        };
+        let strategy = match (tree.join_edge, tree.kind) {
+            (None, _) => JoinExecutionStrategy::Auto,
+            (Some(_), Some(OperatorKind::HashJoinInner)) => JoinExecutionStrategy::Hash,
+            (Some(edge), Some(OperatorKind::IndexJoin)) => JoinExecutionStrategy::IndexNestedLoop {
+                inner_column: edge
+                    .lookup_column(right.relations)
+                    .expect("selected inner key"),
+            },
+            _ => {
+                return Err(SQLError::Internal(
+                    "DPccp selected an invalid executable equijoin strategy".into(),
+                ))
+            }
+        };
+        let left = self.materialize(left, nodes, predicates, output, storage)?;
+        let right = self.materialize(right, nodes, predicates, output, storage)?;
+        let (node, range) = nodes.next().expect("selected join predicates");
+        let mut children = predicates.take(range);
+        let on = match children.len() {
+            0 => None,
+            1 => children.next(),
+            _ => Some(output.conjunction(node, children, storage)?),
+        };
+        self.shell_count -= 1;
+        self.shells[self.shell_count]
             .take()
-            .expect("collected source node");
-        *node = source;
-        Ok(node)
-    }
-
-    fn atom(&mut self, tree: &crate::JoinPlan) -> JoinGraphResult<Box<SourcePlan>> {
-        let source_id = usize::try_from(tree.relations.trailing_zeros()).map_err(|_| {
-            JoinGraphError::InvalidPlan {
-                detail: "join leaf index exceeds the addressable source range".into(),
-            }
-        })?;
-        self.atoms
-            .get_mut(source_id)
-            .and_then(Option::take)
-            .ok_or_else(|| JoinGraphError::InvalidPlan {
-                detail: format!(
-                    "join source id {source_id} is unavailable in {} source atom(s)",
-                    self.atom_count
-                ),
-            })
-    }
-
-    fn materialize(&mut self, tree: &crate::JoinPlan) -> JoinGraphResult<SourcePlan> {
-        match (&tree.left, &tree.right) {
-            (None, None) => self.atom(tree).map(|source| *source),
-            (Some(left), Some(right)) => {
-                let strategy = match (tree.join_edge, tree.kind) {
-                    (None, _) => JoinExecutionStrategy::Auto,
-                    (Some(_), Some(crate::OperatorKind::HashJoinInner)) => {
-                        JoinExecutionStrategy::Hash
-                    }
-                    (Some(edge), Some(crate::OperatorKind::IndexJoin)) => {
-                        JoinExecutionStrategy::IndexNestedLoop {
-                            inner_column: edge
-                                .lookup_column(right.relations)
-                                .expect("selected inner key"),
-                        }
-                    }
-                    (Some(_), Some(kind)) => {
-                        return Err(JoinGraphError::InvalidPlan {
-                            detail: format!(
-                                "DPccp selected non-executable equijoin strategy {kind:?}"
-                            ),
-                        })
-                    }
-                    (Some(_), None) => {
-                        return Err(JoinGraphError::InvalidPlan {
-                            detail: "DPccp equijoin node has no physical strategy".into(),
-                        })
-                    }
-                };
-                Ok(SourcePlan::Join {
-                    comma: false,
-                    left: self.boxed(left)?,
-                    right: self.boxed(right)?,
-                    kind: uqa_sql::ast::JoinKind::Inner,
-                    on: None,
-                    using: None,
-                    natural: false,
-                    alias: None,
-                    column_aliases: Vec::new(),
-                    lateral: false,
-                    strategy,
-                })
-            }
-            _ => Err(JoinGraphError::InvalidPlan {
-                detail: "join node contains exactly one child".into(),
-            }),
-        }
+            .expect("selected join shell")
+            .assemble(left, right, on, strategy, storage)
     }
 }
 
-fn move_conjuncts<'a>(
-    expression: ScalarExpr,
-    predicates: &mut impl Iterator<Item = &'a mut JoinPredicateBinding>,
-    output: &mut Output,
-) {
-    if let ScalarExpr::And(items) = expression {
-        let memory = output.take_conjunction_memory(&items);
-        for item in items {
-            move_conjuncts(item, predicates, output);
+fn move_conjuncts(
+    expression: OwnedScalarExpr,
+    predicates: &mut PredicateBindings,
+    originals: &mut impl Iterator<Item = u64>,
+    output: &mut impl PredicateOutput,
+    storage: &ProductionControl<'_>,
+) -> Result<(), SQLError> {
+    storage.check()?;
+    if let ScalarExpr::And(items) = &*expression {
+        let memory = output.take_conjunction_memory(items);
+        for child in expression.into_children() {
+            move_conjuncts(child, predicates, originals, output, storage)?;
         }
         drop(memory);
     } else {
-        predicates
-            .next()
-            .expect("original join predicate binding")
-            .expression = Some(expression);
+        predicates.set(
+            originals.next().expect("original join predicate"),
+            expression,
+        );
     }
-}
-
-fn take_source(source: &mut SourcePlan) -> SourcePlan {
-    std::mem::replace(
-        source,
-        SourcePlan::Table {
-            name: String::new(),
-            executable_query: None,
-            qualifier: String::new(),
-            alias: None,
-            column_aliases: Vec::new(),
-            bound_columns: None,
-            include_descendants: true,
-        },
-    )
+    Ok(())
 }

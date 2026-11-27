@@ -34826,6 +34826,19 @@
     {
       "package": "uqa-planner",
       "kind": "lib",
+      "test": "join_predicate_groups_reuse_masks_and_preserve_order_within_each_join",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/join_reorder/tests/bindings.rs",
+      "capability": "Stable join predicate attachment",
+      "workload": "Assign 8192 predicates to balanced and right-deep 64-relation trees, including residuals and all pairs of relations.",
+      "invariant": "The original mask buffer is sufficient under a zero-byte allowance. Every predicate reaches its lowest covering join in input order and unbound residuals reach the root.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
       "test": "predicate_slots_retain_the_buffer_lease_when_expressions_move",
       "cases": 1,
       "source": "crates/uqa-planner/src/optimizer/join_reorder/tests/bindings.rs",

@@ -7,9 +7,9 @@
 //! Statistics-driven DPccp join reordering and predicate attachment.
 
 use super::{
-    BTreeMap, BTreeSet, BinaryOp, CommandPlan, ExpressionPlan, JoinExecutionStrategy,
-    JoinGraphError, JoinGraphResult, JoinOrderOptimizer, JoinPredicate, QueryPlan, RelationalPlan,
-    ScalarExpr, ScalarFrameBound, SourcePlan, SourceStatistics, UnifiedPlan,
+    BTreeMap, BTreeSet, BinaryOp, CommandPlan, ExpressionPlan, JoinGraphError, JoinOrderOptimizer,
+    JoinPredicate, QueryPlan, RelationalPlan, ScalarExpr, ScalarFrameBound, SourcePlan,
+    SourceStatistics, UnifiedPlan,
 };
 
 use uqa_core::memory::{Produced, ProductionControl, ProductionSmallVec, ProductionVec};
@@ -28,7 +28,6 @@ mod selection;
 pub(super) use owned::reorder_owned_plan;
 mod inference;
 mod inputs;
-use bindings::{PredicateAttachments, PredicateBindings};
 mod output;
 use inference::{implied_join_predicates, join_predicate};
 use output::Output;
@@ -334,75 +333,16 @@ fn reorder_source_joins(
         | SourcePlan::FunctionGroup { .. } => {}
     }
 
-    if let Some(reordered) =
-        rewrite_inner_join_source(source, external_predicates, statistics, control, output)?
+    if let Some(selected) =
+        selection::select_graph(source, external_predicates, statistics, control)?
     {
-        *source = reordered;
+        let mut predicates = output::CallerPredicates::new(output);
+        let prepared = materialization::PreparedJoin::new(selected, &mut predicates, control)?;
+        source.edit_uncontrolled(|source| {
+            prepared.assemble(source, &mut predicates, &ProductionControl::uncontrolled())
+        })?;
     }
     Ok(())
-}
-
-#[derive(Debug)]
-struct JoinPredicateBinding {
-    expression: Option<ScalarExpr>,
-    relations: u64,
-}
-
-fn rewrite_inner_join_source(
-    source: &mut SourcePlan,
-    external_predicates: &[&ScalarExpr],
-    statistics: &dyn SourceStatistics,
-    control: &ProductionControl<'_>,
-    output: &mut Output,
-) -> OptimizerResult<Option<SourcePlan>> {
-    let Some(selection::SelectedGraph {
-        tree: selected,
-        masks,
-        inferred,
-        original_count,
-    }) = selection::select_graph(source, external_predicates, statistics, control)?
-    else {
-        return Ok(None);
-    };
-    let mut predicates = PredicateBindings::new(masks.len(), control)?;
-    for relations in &*masks {
-        predicates.push(JoinPredicateBinding {
-            expression: None,
-            relations: *relations,
-        });
-    }
-    drop(masks);
-    for (slot, expression) in predicates.as_mut_slice()[original_count..]
-        .iter_mut()
-        .zip(inferred.iter())
-    {
-        control.check().map_err(uqa_sql::SQLError::from)?;
-        slot.expression = Some(
-            output.retain_predicate(
-                expression
-                    .clone_with_control(control)
-                    .map_err(uqa_sql::SQLError::from)?,
-            ),
-        );
-    }
-    let attachments =
-        PredicateAttachments::prepare(&selected, predicates.as_mut_slice(), output, control)?;
-    drop(inferred);
-    let mut reordered =
-        materialization::reorder(source, &selected, predicates.as_mut_slice(), output)?;
-    attachments.attach(&mut reordered, &selected, predicates.as_mut_slice(), output);
-    let remaining = predicates
-        .as_slice()
-        .iter()
-        .filter(|predicate| predicate.expression.is_some())
-        .count();
-    if remaining != 0 {
-        return Err(JoinGraphError::InvalidPlan {
-            detail: format!("join reordering failed to retain {remaining} predicate(s)"),
-        }
-        .into());
-    }
-    Ok(Some(reordered))
 }
 
 fn copy_local_conjunction(

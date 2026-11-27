@@ -7,19 +7,19 @@
 //! Native join rewrites keep independently owned scalar leaves and reuse the original source boxes throughout topology changes.
 
 use super::{
-    collect_conjuncts, selection::select_graph, CommandPlan, OptimizerResult, RelationalPlan,
-    SourcePlan, SourceStatistics,
+    collect_conjuncts,
+    materialization::{EmbeddedPredicates, PreparedJoin},
+    selection::select_graph,
+    CommandPlan, OptimizerResult, RelationalPlan, SourcePlan, SourceStatistics,
 };
 use uqa_core::memory::{ProductionControl, ProductionVec};
 use uqa_sql::{
     plan::{
         CommandQuerySlot, MutableCommandPlan, MutableExecutablePlan, MutableQueryPlan,
-        MutableSourcePlan, OwnedScalarExpr, QueryChildSlot, SourceChildSlot,
+        MutableSourcePlan, QueryChildSlot, SourceChildSlot,
     },
     SQLError, ScalarExpr,
 };
-
-mod materialization;
 
 pub(in crate::optimizer) fn reorder_owned_plan(
     plan: MutableExecutablePlan,
@@ -203,7 +203,7 @@ impl Context<'_, '_> {
         source: MutableSourcePlan,
         external: &[&ScalarExpr],
     ) -> Result<MutableSourcePlan, SQLError> {
-        let Some(mut selected) = select_graph(&source, external, self.statistics, self.control)
+        let Some(selected) = select_graph(&source, external, self.statistics, self.control)
             .map_err(|error| match error {
                 super::super::OptimizerError::Expression(error) => error,
                 super::super::OptimizerError::JoinGraph(error) => {
@@ -213,27 +213,11 @@ impl Context<'_, '_> {
         else {
             return Ok(source);
         };
-        let mut predicates = materialization::Predicates::new(selected.masks.len(), self.control)?;
-        for (index, expression) in selected.inferred.iter().enumerate() {
-            predicates.set(
-                selected.original_count + index,
-                expression.copy_for_rewrite(self.control)?,
-            );
-        }
-        for mask in selected.masks.as_mut_slice() {
-            *mask = super::bindings::destination(&selected.tree, *mask);
-        }
-        let source = materialization::reorder(
+        let mut output = EmbeddedPredicates;
+        PreparedJoin::new(selected, &mut output, self.control)?.assemble(
             source,
-            &selected.tree,
-            &selected.masks,
-            &mut predicates,
+            &mut output,
             self.control,
-        )?;
-        assert!(
-            predicates.all_consumed(),
-            "selected join retains every original and inferred predicate"
-        );
-        Ok(source)
+        )
     }
 }

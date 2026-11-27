@@ -208,9 +208,34 @@ fn reordered_inner_join_source(
     control: &ProductionControl<'_>,
 ) -> OptimizerResult<Option<SelectedSource>> {
     let mut output = Output::new(control);
-    let source = rewrite_inner_join_source(source, external, statistics, control, &mut output)?;
-    Ok(source.map(|source| SelectedSource {
+    let Some(selected) = selection::select_graph(source, external, statistics, control)? else {
+        return Ok(None);
+    };
+    let mut predicates = super::output::CallerPredicates::new(&mut output);
+    let prepared = super::materialization::PreparedJoin::new(selected, &mut predicates, control)?;
+    let original = std::mem::replace(
         source,
+        SourcePlan::Table {
+            name: String::new(),
+            executable_query: None,
+            qualifier: String::new(),
+            alias: None,
+            column_aliases: Vec::new(),
+            bound_columns: None,
+            include_descendants: true,
+        },
+    );
+    let storage = ProductionControl::uncontrolled();
+    let plan = prepared.assemble(
+        uqa_sql::plan::MutableSourcePlan::uncontrolled(original),
+        &mut predicates,
+        &storage,
+    )?;
+    Ok(Some(SelectedSource {
+        source: plan
+            .finish(&storage)?
+            .into_uncontrolled()
+            .expect("caller-owned source"),
         _memory: output.finish(),
     }))
 }
