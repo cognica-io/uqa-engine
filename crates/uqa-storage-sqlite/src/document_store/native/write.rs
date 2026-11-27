@@ -22,20 +22,14 @@ impl NativeDocumentRead<'_> {
         &self,
         batch: &mut dyn KeyValueBatch,
         doc_id: DocId,
-        fields: &Document,
+        fields: impl IntoIterator<Item = (String, Value)>,
         metadata: DocumentMetadata,
         unused: Option<DocumentIdNamespace>,
     ) -> SQLiteResult<()> {
         let id = sqlite_doc_id(doc_id)?;
         let owner = self.snapshot.ensure_table_owner(self.table, batch)?;
         let unused = unused.is_some_and(|namespace| owner.stores(namespace));
-        let (fields, blobs) = encode_document_blobs(
-            fields
-                .iter()
-                .filter(|(_, value)| !matches!(value, Value::Null))
-                .map(|(field, value)| (field.clone(), value.clone()))
-                .collect(),
-        )?;
+        let (fields, blobs) = encode_document_blobs(fields)?;
         if !unused {
             self.snapshot.delete_prefix(
                 batch,
@@ -70,8 +64,7 @@ impl NativeDocumentRead<'_> {
             updates
                 .iter()
                 .filter(|(_, value)| !matches!(value, Value::Null))
-                .map(|(field, value)| (field.clone(), value.clone()))
-                .collect(),
+                .map(|(field, value)| (field.clone(), value.clone())),
         )?;
         for field in updates.keys() {
             fields.remove(field);
