@@ -28,6 +28,22 @@ use crate::read_control::{copy_bytes, payload_length, prefix_upper_bound, reserv
 
 use super::{codec, runs, PhysicalResult, SQLiteRecordStore};
 
+#[cfg(test)]
+fn history_test_connection() -> Connection {
+    let connection = Connection::open_in_memory().unwrap();
+    super::connection_functions::ConnectionFunctions::of(&connection).unwrap();
+    connection.execute_batch(
+        "CREATE TABLE _uqa_mvcc_heads (key BLOB PRIMARY KEY, sequence BLOB, compacted INTEGER) WITHOUT ROWID;
+         CREATE TABLE _uqa_mvcc_versions (key BLOB, sequence BLOB, value BLOB, version_id INTEGER PRIMARY KEY);
+         CREATE TABLE _uqa_mvcc_runs (unused INTEGER);"
+    ).unwrap();
+    connection
+        .execute_batch(super::version_metadata::TABLE.1)
+        .unwrap();
+    super::version_metadata::create_triggers(&connection).unwrap();
+    connection
+}
+
 pub(super) struct Snapshot {
     pub(super) store: SQLiteRecordStore,
     pub(super) sequence: CommitSequence,
