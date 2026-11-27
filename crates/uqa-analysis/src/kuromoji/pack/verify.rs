@@ -6,13 +6,12 @@
 
 //! Reconstruct every neutral-model value from the decoded runtime representation.
 
-use crate::kuromoji::error::{check_limit, invalid};
 use crate::kuromoji::tables::CLASSES;
 use crate::kuromoji::{DictionaryLimits, DictionaryResult, DictionaryWord, KuromojiDictionary};
 
-use crate::morphology::neutral::hash::NeutralHash;
+use crate::morphology::neutral::{self, hash::NeutralHash, verify::NeutralFiles};
 
-fn write_word(output: &mut NeutralHash, word: DictionaryWord<'_>) -> DictionaryResult<()> {
+fn write_word(output: &mut NeutralHash, word: DictionaryWord<'_>) -> neutral::Result<()> {
     output.u32(word.original_id())?;
     output.u32(u32::from(word.left_context()))?;
     output.u32(u32::from(word.right_context()))?;
@@ -26,87 +25,41 @@ fn write_word(output: &mut NeutralHash, word: DictionaryWord<'_>) -> DictionaryR
     Ok(())
 }
 
-fn verify(
-    dictionary: &KuromojiDictionary,
-    name: &str,
-    write: impl FnOnce(&mut NeutralHash) -> DictionaryResult<()>,
-) -> DictionaryResult<()> {
-    let mut output = NeutralHash::new(dictionary.provenance(), name)?;
-    write(&mut output)?;
-    output.finish().map_err(Into::into)
-}
-
 /// Reconstruct all six neutral streams and compare their complete hashes, including every lexicon lookup.
 pub fn verify_dictionary(
     dictionary: &KuromojiDictionary,
     limits: DictionaryLimits,
 ) -> DictionaryResult<()> {
-    let files = dictionary.provenance()["files"]
-        .as_array()
-        .ok_or_else(|| invalid("neutral verification", "missing file inventory"))?;
-    let mut total = 0_usize;
-    for file in files {
-        let count = file["bytes"]
-            .as_u64()
-            .and_then(|count| usize::try_from(count).ok())
-            .ok_or_else(|| invalid("neutral verification", "invalid expected byte count"))?;
-        total = total
-            .checked_add(count)
-            .ok_or_else(|| invalid("neutral verification", "size overflow"))?;
-    }
-    check_limit(
-        "reconstructed neutral bytes",
-        total,
-        limits.max_decoded_bytes,
+    let files = NeutralFiles::new(dictionary.provenance(), *b"UQAJ", limits)?;
+    let word = |id| dictionary.word(id);
+    files.lexicon(
+        &dictionary.lexicon,
+        &dictionary.surfaces,
+        dictionary.known_words,
+        word,
+        write_word,
     )?;
-    verify_lexicon(dictionary)?;
-    verify_unknown(dictionary)?;
-    verify(dictionary, "connection_costs.bin", |output| {
-        output.bytes(b"UQAJCCS1")?;
-        output.count(dictionary.matrix.forward)?;
-        output.count(dictionary.matrix.backward)?;
-        for backward in 0..dictionary.matrix.backward {
-            for forward in 0..dictionary.matrix.forward {
-                let cost = dictionary
-                    .matrix
-                    .get(forward, backward)
-                    .ok_or_else(|| invalid("neutral verification", "missing connection cost"))?;
-                output.u16(cost as u16)?;
-            }
-        }
-        Ok(())
-    })?;
-    verify(dictionary, "characters.bin", |output| {
-        output.bytes(b"UQAJCHR1")?;
-        output.count(CLASSES.len())?;
-        output.bytes(&dictionary.characters.flags)?;
-        output.count(dictionary.characters.values.len())?;
-        for unit in 0..0x1_0000 {
-            output.bytes(&[
-                dictionary.character_class(unit as u16),
-                u8::from(dictionary.is_kanji(unit as u16)),
-            ])?;
-        }
-        Ok(())
-    })?;
-    verify(dictionary, "unicode.bin", |output| {
-        output.bytes(b"UQAJUNI1")?;
-        output.u32(crate::morphology::unicode::CODE_POINTS)?;
-        for code_point in 0..crate::morphology::unicode::CODE_POINTS {
-            let value = dictionary
-                .unicode(code_point)
-                .ok_or_else(|| invalid("neutral verification", "missing code point"))?;
-            output.bytes(&[value.category])?;
-            output.u16(value.script)?;
-            output.bytes(&[u8::from(value.is_digit)
-                | (u8::from(value.is_whitespace) << 1)
-                | (u8::from(value.is_space_char) << 2)])?;
-            output.u32(value.lowercase)?;
-        }
-        Ok(())
-    })?;
-    verify(dictionary, "analysis.bin", |output| {
-        output.bytes(b"UQAJANA1")?;
+    files.unknown(
+        CLASSES,
+        &dictionary.characters.words,
+        dictionary.words.len() - dictionary.known_words as usize,
+        word,
+        write_word,
+    )?;
+    files.matrix(&dictionary.matrix)?;
+    files.characters(
+        CLASSES.len(),
+        &dictionary.characters.flags,
+        dictionary.characters.values.len(),
+        |unit| {
+            [
+                dictionary.character_class(unit),
+                u8::from(dictionary.is_kanji(unit)),
+            ]
+        },
+    )?;
+    files.unicode(&dictionary.unicode)?;
+    files.stream("analysis.bin", *b"ANA1", |output| {
         output.count(dictionary.analysis.stop_words.len())?;
         for word in &dictionary.analysis.stop_words {
             output.text(Some(word))?;
@@ -126,58 +79,4 @@ pub fn verify_dictionary(
         Ok(())
     })?;
     Ok(())
-}
-
-fn verify_lexicon(dictionary: &KuromojiDictionary) -> DictionaryResult<()> {
-    verify(dictionary, "lexicon.bin", |output| {
-        output.bytes(b"UQAJLEX1")?;
-        output.count(dictionary.surfaces.len())?;
-        output.u32(dictionary.known_words)?;
-        for (index, units) in dictionary.lexicon.entries().enumerate() {
-            let units = units?;
-            if dictionary.lexicon.lookup(units.iter().copied()) != Some(index as u32) {
-                return Err(invalid(
-                    "neutral verification",
-                    "enumerated and looked-up ranks differ",
-                ));
-            }
-            let text = String::from_utf16(&units)?;
-            let surface = &dictionary.surfaces[index];
-            output.u32(surface.source_id)?;
-            output.text(Some(&text))?;
-            output.u32(surface.word_ids.end - surface.word_ids.start)?;
-            for id in surface.word_ids.clone() {
-                write_word(
-                    output,
-                    dictionary
-                        .word(id)
-                        .ok_or_else(|| invalid("neutral verification", "missing system word"))?,
-                )?;
-            }
-        }
-        Ok(())
-    })
-}
-
-fn verify_unknown(dictionary: &KuromojiDictionary) -> DictionaryResult<()> {
-    verify(dictionary, "unknown.bin", |output| {
-        output.bytes(b"UQAJUNK1")?;
-        output.count(CLASSES.len())?;
-        output.count(dictionary.words.len() - dictionary.known_words as usize)?;
-        for (index, name) in CLASSES.iter().enumerate() {
-            output.count(index)?;
-            output.text(Some(name))?;
-            let words = &dictionary.characters.words[index];
-            output.u32(words.end - words.start)?;
-            for id in words.clone() {
-                write_word(
-                    output,
-                    dictionary
-                        .word(id)
-                        .ok_or_else(|| invalid("neutral verification", "missing unknown word"))?,
-                )?;
-            }
-        }
-        Ok(())
-    })
 }
