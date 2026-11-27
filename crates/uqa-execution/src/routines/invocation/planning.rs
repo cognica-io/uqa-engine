@@ -23,17 +23,7 @@ pub fn evaluate_bound_scalar_for_planning(
     if let Err(error) = control.check() {
         return Some(Err(error.into()));
     }
-    let nested = RoutineInvocationContext {
-        runtime: crate::routines::RoutineContext {
-            planning: Some(*control),
-            ..context.runtime
-        },
-        session: context.session,
-        lookup: context.lookup,
-        overloads: context.overloads,
-        types: context.types,
-        authority: context.authority,
-    };
+    let nested = context.with_production_control(*control);
     call_bound_user_scalar_function(&nested, binding, arguments)
         .map(|result| transfer_result(result, control))
 }

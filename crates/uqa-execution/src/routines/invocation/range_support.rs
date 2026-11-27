@@ -123,15 +123,16 @@ fn invoke(
     let mut arguments = ProductionVec::new(*control);
     arguments.push_produced(control.copy_value(value)?)?;
     let (arguments, _argument_memory) = arguments.finish()?.into_parts();
+    let nested = context.with_production_control(*control);
     let outcome = match selected {
         RangeFunction::Canonical(_) => super::execution::execute_catalog_routine(
-            context,
+            &nested,
             &matched.function,
             arguments,
             &matched.invocation,
         ),
         RangeFunction::Cast(_) => super::execution::execute_routine(
-            context,
+            &nested,
             &matched.function,
             arguments,
             &matched.invocation,

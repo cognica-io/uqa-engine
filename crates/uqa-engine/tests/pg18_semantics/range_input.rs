@@ -67,6 +67,71 @@ fn declared_ranges_and_constructors_match_postgresql_after_reopen(#[case] provid
     );
 }
 
+#[test]
+fn range_cast_charges_multirange_construction_to_its_caller() {
+    use uqa_core::{
+        memory::{MemoryBudget, ProductionControl},
+        CancellationToken, Value,
+    };
+    use uqa_sql::expr::EngineHook;
+
+    let engine = Engine::new();
+    engine
+        .sql("CREATE TYPE textspan AS RANGE (subtype=text)", &[])
+        .unwrap();
+    let types = engine
+        .sql(
+            "SELECT 'textspan'::regtype::int AS r, 'textspan_multirange'::regtype::int AS m",
+            &[],
+        )
+        .unwrap();
+    let (Value::Int(range), Value::Int(multi)) = (&types.rows[0]["r"], &types.rows[0]["m"]) else {
+        panic!("expected catalog type OIDs");
+    };
+    let range = u32::try_from(*range).unwrap();
+    let multi = u32::try_from(*multi).unwrap();
+    let input = format!("[{},{})", "a".repeat(32_768), "z".repeat(32_768));
+    let value = engine
+        .read_range_input(range, &input, &ProductionControl::uncontrolled())
+        .unwrap();
+
+    let token = CancellationToken::new();
+    let budget = MemoryBudget::new(8 * 1024 * 1024);
+    let control = ProductionControl::new(&budget, &token, &token);
+    let direct = engine
+        .construct_multirange(multi, std::slice::from_ref(&*value), &control)
+        .unwrap();
+    let constructor_peak = budget.peak();
+    let expected = direct.into_parts().0;
+    assert_eq!(budget.used(), 0);
+
+    let argument_bytes = control.copy_value(&value).unwrap().reserved_bytes();
+    let cast_budget = MemoryBudget::new(8 * 1024 * 1024);
+    let control = ProductionControl::new(&cast_budget, &token, &token);
+    let result = engine
+        .cast_range_to_multirange(range, multi, &value, &control)
+        .unwrap()
+        .unwrap();
+    assert_eq!(*result, expected);
+    drop(result);
+    assert_eq!(cast_budget.used(), 0);
+    let required = argument_bytes + constructor_peak;
+    assert!(
+        cast_budget.peak() >= required,
+        "cast peak {} must cover its argument ({argument_bytes}) and constructor ({constructor_peak})",
+        cast_budget.peak()
+    );
+
+    let limited = MemoryBudget::new(required - 1);
+    let control = ProductionControl::new(&limited, &token, &token);
+    let error = engine
+        .cast_range_to_multirange(range, multi, &value, &control)
+        .err()
+        .expect("the cast must admit the same constructor temporaries as a direct call");
+    assert_eq!(error.sqlstate(), Some("53200"));
+    assert_eq!(limited.used(), 0);
+}
+
 fn verify_declared_values(provider: usize, transcript: &str, reopen_cases: usize) {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("range-input.db");
