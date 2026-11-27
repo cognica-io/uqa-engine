@@ -16,7 +16,8 @@ impl Context<'_, '_> {
         row_syntax: bool,
         result_type: Option<&ColumnType>,
     ) -> Result<OwnedScalarExpr, SQLError> {
-        let config = self.config;
+        let config = self.production.config;
+        let storage = &self.production.storage;
         let control = &config.production;
         if let (
             Some(context),
@@ -43,7 +44,7 @@ impl Context<'_, '_> {
                     let active = active.finish()?;
                     drop(expression);
                     let nested = Context {
-                        config,
+                        production: super::ScalarProduction::admitted(config),
                         active_routines: &active,
                     };
                     let expression = nested.scalar(inlined.expression).map_err(|error| {
@@ -59,7 +60,9 @@ impl Context<'_, '_> {
                     })?;
                     let expression =
                         constants::metadata::retain_record_result(expression, false, control)?;
-                    return constants::metadata::retain_computed_integer(expression, None, control);
+                    let expression =
+                        constants::metadata::retain_computed_integer(expression, None, control)?;
+                    return self.production.adopt(expression);
                 }
             }
         }
@@ -79,20 +82,20 @@ impl Context<'_, '_> {
             control,
         )?;
         let expression =
-            constants::metadata::retain_record_result(expression, row_syntax, control)?;
+            constants::metadata::retain_record_result(expression, row_syntax, storage)?;
         let expression =
             match constants::fold_owned_composite_constructor(&expression, types, control)? {
-                Some(replacement) => replacement,
+                Some(replacement) => self.production.adopt(replacement)?,
                 None => expression,
             };
-        let expression = constants::owned::fold(expression, result_type, config)?;
+        let expression = constants::owned::fold(expression, result_type, self.production)?;
         let expression = if integer_syntax {
             expression
         } else {
-            constants::metadata::retain_computed_integer(expression, None, control)?
+            constants::metadata::retain_computed_integer(expression, None, storage)?
         };
         if config.retain_values_constants {
-            constants::owned::retain_large_literal(expression, config)
+            constants::owned::retain_large_literal(expression, self.production)
         } else {
             Ok(expression)
         }

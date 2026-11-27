@@ -120,8 +120,15 @@ fn retained_values_preserve_raw_arrays_declared_names_and_parameter_origin() {
             collation_oid: Some(950),
             composite_source: None,
         };
-        let retained =
-            retain_large_literal(ordinary.clone(), settings.constant_storage.as_deref()).unwrap();
+        let retained = owned::retain_large_literal(
+            uqa_sql::plan::OwnedScalarExpr::uncontrolled(ordinary.clone()),
+            crate::optimizer::scalar::ScalarProduction::admitted(&settings),
+        )
+        .unwrap()
+        .finish(&settings.production)
+        .unwrap()
+        .into_uncontrolled()
+        .unwrap();
         assert_eq!(
             serde_json::to_vec(&retained).unwrap(),
             serde_json::to_vec(&ordinary).unwrap()

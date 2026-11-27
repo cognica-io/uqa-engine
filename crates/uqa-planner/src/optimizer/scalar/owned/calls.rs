@@ -14,10 +14,10 @@ impl Context<'_, '_> {
         &self,
         mut expression: OwnedScalarExpr,
     ) -> Result<OwnedScalarExpr, SQLError> {
-        let control = &self.config.production;
+        let control = &self.production.storage;
         if matches!(&*expression, ScalarExpr::Func { distinct: false, order_by, filter: None, .. } if order_by.is_empty())
         {
-            if let Some(context) = &self.config.routine_inlining {
+            if let Some(context) = &self.production.config.routine_inlining {
                 expression = context.materialize_owned_call(expression, control)?;
             }
         }
@@ -34,7 +34,7 @@ impl Context<'_, '_> {
             let arguments = conditional::optimize_owned_boolean(
                 arguments,
                 false,
-                self.config,
+                self.production.config,
                 control,
                 |child| self.scalar(child),
             )?;
@@ -49,7 +49,7 @@ impl Context<'_, '_> {
         let expression = if coalesce {
             conditional::optimize_owned_coalesce(
                 call.into_expression(),
-                self.config,
+                self.production.config,
                 control,
                 |child| self.scalar(child),
             )?
@@ -65,7 +65,7 @@ impl Context<'_, '_> {
         &self,
         expression: OwnedScalarExpr,
     ) -> Result<OwnedScalarExpr, SQLError> {
-        let control = &self.config.production;
+        let control = &self.production.storage;
         let selected_arm = matches!(&*expression, ScalarExpr::Collated { expr, .. } if matches!(expr.as_ref(), ScalarExpr::Case { .. }));
         let expression = expression.map_child_with_parent(0, control, |parent, child| {
             let ScalarExpr::Collated { ty, .. } = parent else {

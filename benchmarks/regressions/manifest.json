@@ -6888,6 +6888,19 @@
     {
       "package": "uqa-planner",
       "kind": "lib",
+      "test": "caller_owned_case_moves_its_existing_column_under_a_tight_work_budget",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/scalar/storage_tests.rs",
+      "capability": "Scalar optimizer input ownership",
+      "workload": "Simplify a CASE with an existing four-megabyte column name under a one-kibibyte work allowance.",
+      "invariant": "The selected column retains its original allocation, the unreachable cast is never evaluated, and the operation releases all scratch.",
+      "case_names": [
+        "optimizer::scalar::storage_tests::caller_owned_case_moves_its_existing_column_under_a_tight_work_budget"
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
       "test": "strict_arithmetic_does_not_guess_a_result_for_an_unanalyzed_row",
       "cases": 1,
       "source": "crates/uqa-planner/src/optimizer/scalar/constants/tests/strict_arithmetic.rs",

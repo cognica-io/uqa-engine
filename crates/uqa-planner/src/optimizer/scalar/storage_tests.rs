@@ -15,6 +15,14 @@ fn config() -> OptimizerConfig<'static> {
     OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar_with_control)
 }
 
+fn optimize_input(
+    mut input: ScalarExpr,
+    config: &OptimizerConfig<'_>,
+) -> Result<ScalarExpr, SQLError> {
+    optimize_scalar_slot(&mut input, config)?;
+    Ok(input)
+}
+
 #[test]
 fn scalar_rewrite_reuses_surviving_boxes_and_array_capacity() {
     let input = ScalarExpr::Array(vec![
@@ -48,10 +56,39 @@ fn scalar_rewrite_reuses_surviving_boxes_and_array_capacity() {
     let expected = input.clone();
     let mut output = None;
     let allocation = allocation_counter::measure(|| {
-        output = Some(optimize_scalar(input, &config()).unwrap());
+        output = Some(optimize_input(input, &config()).unwrap());
     });
     assert_eq!(allocation.bytes_total, 0, "{allocation:?}");
     assert_eq!(output.unwrap(), expected);
+}
+
+#[test]
+fn caller_owned_case_moves_its_existing_column_under_a_tight_work_budget() {
+    use uqa_core::{memory::MemoryBudget, CancellationToken};
+
+    let budget = MemoryBudget::new(1024);
+    let token = CancellationToken::new();
+    let mut settings = config();
+    settings.production = ProductionControl::new(&budget, &token, &token);
+    settings.coerced_conditionals = true;
+    let column = "x".repeat(4 * 1024 * 1024);
+    let buffer = column.as_ptr();
+    let mut input = ScalarExpr::Case {
+        base: None,
+        when: vec![(
+            ScalarExpr::Literal(Value::Bool(true)),
+            ScalarExpr::Column(column.into()),
+        )],
+        else_branch: Some(Box::new(invalid_cast())),
+    };
+    let allocated =
+        allocation_counter::measure(|| optimize_scalar_slot(&mut input, &settings).unwrap());
+    let ScalarExpr::Column(column) = input else {
+        panic!("selected column")
+    };
+    assert_eq!(column.as_ptr(), buffer);
+    assert!(allocated.bytes_total < 1024, "{allocated:?}");
+    assert_eq!(budget.used(), 0);
 }
 
 #[test]
@@ -73,7 +110,7 @@ fn case_reuses_storage_without_evaluating_unreachable_values() {
             when,
             else_branch: Some(branch),
         };
-        let output = optimize_scalar(input, &config).unwrap();
+        let output = optimize_input(input, &config).unwrap();
         let ScalarExpr::Case {
             when, else_branch, ..
         } = output
@@ -118,8 +155,7 @@ fn coalesce_reuses_arguments_and_keeps_unbound_type_arms() {
             order_by: Vec::new(),
             filter: None,
         };
-        let ScalarExpr::Func { args: output, .. } = optimize_coalesce(input, &config).unwrap()
-        else {
+        let ScalarExpr::Func { args: output, .. } = optimize_input(input, &config).unwrap() else {
             panic!("coalesce call");
         };
         assert_eq!(output.as_ptr(), buffer);
@@ -139,7 +175,7 @@ fn simple_case_moves_base_and_else_boxes_without_changing_arm_order() {
     let branch_buffer = std::ptr::from_ref(branch.as_ref());
     let when = vec![(column(), column()), (column(), column())];
     let when_buffer = when.as_ptr();
-    let output = optimize_case(
+    let output = optimize_input(
         ScalarExpr::Case {
             base: Some(base),
             when,
