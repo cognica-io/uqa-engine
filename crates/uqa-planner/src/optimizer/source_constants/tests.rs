@@ -72,7 +72,10 @@ fn retained_source_constants_preserve_propagation_and_grouping() {
     ] {
         let values = [expression.clone()];
         let constants = constants_from_values(&values, |_| "x".into(), None);
-        assert_eq!(constants["x"].as_ref(), Some(&retained));
+        assert_eq!(
+            constants.get("x").map(std::ops::Deref::deref),
+            Some(&retained)
+        );
         let mut plan = query("SELECT count(*) FROM (SELECT 1 WHERE false) s GROUP BY true");
         let RelationalPlan::QueryBlock(block) = &mut plan.root else {
             panic!("block")

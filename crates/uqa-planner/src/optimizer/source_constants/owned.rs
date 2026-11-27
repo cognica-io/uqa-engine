@@ -25,12 +25,9 @@ pub(in crate::optimizer) fn propagate(
     let Some(source) = &block.from else {
         return Ok(query);
     };
-    let mut constants = Constants::new(control);
-    if !production::observe_source(source, types, views, control, &mut |name, value| {
-        constants.insert(name, value, control)
-    })? {
+    let Some(constants) = Constants::from_source(source, types, views, control)? else {
         return Ok(query);
-    }
+    };
     let qualifier = source
         .visible_qualifier()
         .map(|name| control.copy_text(name))
