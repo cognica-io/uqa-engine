@@ -184,6 +184,20 @@ impl<T: Copy> BudgetedVec<T> {
     }
 }
 
+impl<T> BudgetedVec<&T> {
+    /// Release all references and reuse their storage and allowance for the next borrow scope.
+    pub fn clear_references<'next>(mut self) -> BudgetedVec<&'next T> {
+        self.clear();
+        let (values, memory) = self.into_parts();
+        let mut values = std::mem::ManuallyDrop::new(values);
+        // SAFETY: clearing removed every reference. Changing the reference lifetime preserves element size and alignment. The new empty Vec takes the original allocation and capacity, and is its only owner.
+        #[allow(unsafe_code)]
+        let values =
+            unsafe { Vec::from_raw_parts(values.as_mut_ptr().cast(), 0, values.capacity()) };
+        BudgetedVec { values, memory }
+    }
+}
+
 impl<T> std::ops::DerefMut for BudgetedVec<T> {
     fn deref_mut(&mut self) -> &mut [T] {
         &mut self.values
