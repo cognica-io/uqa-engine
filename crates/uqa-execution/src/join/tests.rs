@@ -4,7 +4,6 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use std::io::{Seek, SeekFrom, Write};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
@@ -15,6 +14,7 @@ use crate::scan::TableScan;
 mod enum_keys;
 mod input_demand;
 mod range_keys;
+mod spill_work;
 
 fn row(values: &[(&str, Value)]) -> ResultRow {
     values
@@ -25,23 +25,6 @@ fn row(values: &[(&str, Value)]) -> ResultRow {
 
 fn evaluator() -> SharedExpressionEvaluator<'static> {
     Arc::new(TestEvaluator)
-}
-
-#[test]
-fn disk_hash_index_rejects_corrupt_key_length_without_allocating_it() {
-    let key = b"join-key";
-    let mut index = DiskHashIndex::new(None).unwrap();
-    index.insert(key, 7).unwrap();
-    let bucket = u8::try_from(stable_hash(key) % HASH_BUCKETS).unwrap();
-    let file = index.buckets.get_mut(&bucket).unwrap();
-    file.seek(SeekFrom::Start(0)).unwrap();
-    file.write_all(&(1_u64 << 40).to_le_bytes()).unwrap();
-    file.flush().unwrap();
-
-    let error = index.for_each_match(key, &mut |_| Ok(())).unwrap_err();
-    assert!(error
-        .to_string()
-        .contains("exceeds remaining bucket record bytes"));
 }
 
 struct TestEvaluator;

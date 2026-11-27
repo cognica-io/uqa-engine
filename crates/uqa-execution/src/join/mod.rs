@@ -40,9 +40,6 @@ use row_store::HybridRowStore;
 
 pub use nested_loop::NestedLoopJoin;
 
-#[cfg(test)]
-use canonical_index::{stable_hash, DiskHashIndex, HASH_BUCKETS};
-
 const DEFAULT_JOIN_WORK_MEM_BYTES: usize = 64 * 1024 * 1024;
 
 /// One probe batch establishes whether a join needs its other input, without draining the probe or retaining more than its ordinary batch allowance.
@@ -60,10 +57,6 @@ fn next_nonempty_batch(
         }
     }
     Ok(None)
-}
-
-fn join_io_error(operation: &str, error: impl std::fmt::Display) -> ExecError {
-    ExecError::Other(format!("join spill {operation}: {error}"))
 }
 
 /// Equality join backed by a canonical SQL-key hash table. SQL NULL keys never

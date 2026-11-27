@@ -421,25 +421,6 @@ fn spill_creation_failure_is_returned() {
         .contains("failed to create DISTINCT spill directory"));
 }
 
-#[test]
-fn truncated_disk_record_is_reported() {
-    let first = encode_key(&[Value::Int(1)]).unwrap();
-    let bucket = stable_hash(&first) % DISK_BUCKETS;
-    let second = (2..10_000)
-        .map(|value| encode_key(&[Value::Int(value)]).unwrap())
-        .find(|key| stable_hash(key) % DISK_BUCKETS == bucket)
-        .unwrap();
-    let mut set = SeenKeySet::new(0, None);
-    assert!(set.insert(first).unwrap());
-    let disk = set.disk.as_mut().unwrap();
-    let file = disk.buckets.get_mut(&(bucket as u8)).unwrap();
-    file.set_len(4).unwrap();
-    let error = set.insert(second).unwrap_err();
-    assert!(error
-        .to_string()
-        .contains("truncated DISTINCT spill key length"));
-}
-
 struct FailingEvaluator;
 
 struct MismatchedSchemaScan {

@@ -7997,6 +7997,58 @@
     {
       "package": "uqa-execution",
       "kind": "lib",
+      "test": "spilled_distinct_and_join_bound_physical_reads_for_colliding_partitions",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/join/tests/spill_work.rs",
+      "capability": "Partitioned execution spill",
+      "workload": "Build disk-only DISTINCT and join indexes for 32 and 128 two-kilobyte keys with identical low six hash bits, then probe every key.",
+      "invariant": "A fourfold increase in input requires at most seven times the observed encrypted temporary block reads in each operator. Every probe returns its exact set membership or build position.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "growing_hash_partitions_bound_disk_work_for_distinct_keys_and_join_probes",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/spill/partitioned/tests.rs",
+      "capability": "Partitioned execution spill",
+      "workload": "Insert and probe 256 and 1,024 unique keys in separate disk-only set and row-position indexes, including directory growth.",
+      "invariant": "The larger workload requires fewer than seven times the directory probes and fewer than 24 probes per input, including migration.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "disk_key_probes_check_the_complete_key_and_keep_insertion_order_across_growth",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/spill/partitioned/tests.rs",
+      "capability": "Partitioned execution spill",
+      "workload": "Force a full-hash collision between two 8,193-byte keys, resize the directory, and append duplicate positions while a cursor retains the old tail.",
+      "invariant": "Keys that differ only at the final byte retain separate insertion-ordered sequences. The old cursor stops at its original tail.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "cancelled_spill_operations_keep_the_previous_partition_and_sqlstate",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/spill/partitioned/tests.rs",
+      "capability": "Partitioned execution spill",
+      "workload": "Cancel an insertion at the growth boundary, release the request and add the same key.",
+      "invariant": "The cancelled request returns 57014, publishes no new key, and retains every earlier key and position after growth.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
       "test": "direct_probe_resumes_duplicate_positions_and_rejects_hash_collisions",
       "cases": 1,
       "source": "crates/uqa-execution/src/join/direct_index.rs",

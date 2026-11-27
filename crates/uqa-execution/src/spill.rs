@@ -45,6 +45,10 @@ use format::{
     encoded_borrowed_row_record_size, encoded_physical_row_record_size, open_spill_reader,
     spill_error,
 };
+mod partitioned;
+#[cfg(test)]
+pub(crate) use partitioned::stable_hash;
+pub(crate) use partitioned::{DiskPositions, PartitionedKeys};
 mod batch_writer;
 pub(crate) use batch_writer::SpillBatchWriter;
 mod batch_layout;

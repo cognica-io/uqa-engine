@@ -38,8 +38,6 @@ pub(crate) use encoding::{
 };
 pub use memory::{CanonicalRowHashSet, ExactRowSet};
 pub(crate) use spill::SeenKeySet;
-#[cfg(test)]
-use spill::{stable_hash, DISK_BUCKETS};
 
 /// Default used by compatibility constructors. Engine callers should pass the
 /// current session's `work_mem` through [`Distinct::all_with_work_mem`] or
