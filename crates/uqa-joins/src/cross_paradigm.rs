@@ -14,7 +14,7 @@
 //! similarity score into a payload field; downstream consumers can
 //! pull it back out for ranking.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use uqa_analysis::analyzer::standard_analyzer;
 use uqa_core::{
@@ -66,32 +66,43 @@ impl<'a> TextSimilarityJoin<'a> {
 
     pub fn execute(&self) -> CrossParadigmResult<GeneralizedPostingList> {
         validate_threshold(self.threshold, 0.0, 1.0, "text similarity")?;
-        let analyzer = standard_analyzer(self.language);
-        let mut out: Vec<GeneralizedPostingEntry> = Vec::new();
-        for left in self.left {
-            let Some(Value::Str(left_text)) = left.payload.fields.get(self.left_field) else {
-                continue;
-            };
-            let left_tokens: std::collections::BTreeSet<String> =
-                analyzer.analyze(left_text)?.into_iter().collect();
+        let mut left_texts = self
+            .left
+            .iter()
+            .filter_map(|entry| text_field(entry, self.left_field))
+            .peekable();
+        if left_texts.peek().is_none() {
+            return Ok(GeneralizedPostingList::from_unsorted(Vec::new()));
+        }
+        let analyzer = standard_analyzer(self.language).compile()?;
+        let mut right_tokens = None;
+        let mut out = Vec::new();
+        for (left, text) in left_texts {
+            let left_tokens: BTreeSet<String> = analyzer.analyze(text)?.into_iter().collect();
             if left_tokens.is_empty() {
                 continue;
             }
-            for right in self.right {
-                let Some(Value::Str(right_text)) = right.payload.fields.get(self.right_field)
-                else {
-                    continue;
-                };
-                let right_tokens: std::collections::BTreeSet<String> =
-                    analyzer.analyze(right_text)?.into_iter().collect();
-                if right_tokens.is_empty() {
-                    continue;
+            let rights = match &right_tokens {
+                Some(rights) => rights,
+                None => {
+                    let mut prepared = Vec::new();
+                    for (entry, text) in self
+                        .right
+                        .iter()
+                        .filter_map(|entry| text_field(entry, self.right_field))
+                    {
+                        let tokens: BTreeSet<String> =
+                            analyzer.analyze(text)?.into_iter().collect();
+                        if !tokens.is_empty() {
+                            prepared.push((entry, tokens));
+                        }
+                    }
+                    right_tokens.insert(prepared)
                 }
-                let inter = left_tokens.intersection(&right_tokens).count();
-                let union = left_tokens.union(&right_tokens).count();
-                if union == 0 {
-                    continue;
-                }
+            };
+            for (right, tokens) in rights {
+                let inter = left_tokens.intersection(tokens).count();
+                let union = (left_tokens.len() - inter) + tokens.len();
                 let jaccard = inter as f64 / union as f64;
                 if jaccard < self.threshold {
                     continue;
@@ -106,6 +117,13 @@ impl<'a> TextSimilarityJoin<'a> {
             }
         }
         Ok(GeneralizedPostingList::from_unsorted(out))
+    }
+}
+
+fn text_field<'a>(entry: &'a PostingEntry, field: &str) -> Option<(&'a PostingEntry, &'a str)> {
+    match entry.payload.fields.get(field)? {
+        Value::Str(text) => Some((entry, text.as_str())),
+        _ => None,
     }
 }
 
@@ -142,15 +160,21 @@ impl<'a> VectorSimilarityJoin<'a> {
     pub fn execute(&self) -> CrossParadigmResult<GeneralizedPostingList> {
         validate_threshold(self.threshold, -1.0, 1.0, "vector similarity")?;
         let mut out = Vec::new();
+        let mut rights = None;
         for left in self.left {
-            let Some(left_vec) = read_vector(&left.payload.fields, self.left_field)? else {
+            let Some(value) = left.payload.fields.get(self.left_field) else {
                 continue;
             };
-            for right in self.right {
-                let Some(right_vec) = read_vector(&right.payload.fields, self.right_field)? else {
-                    continue;
-                };
-                let cosine = cosine_similarity(&left_vec, &right_vec)?;
+            let left_vec = PreparedVector::read(value, self.left_field)?;
+            let rights = rights.get_or_insert_with(|| {
+                self.right
+                    .iter()
+                    .filter_map(|entry| RightVector::new(entry, self.right_field))
+                    .collect::<Vec<_>>()
+            });
+            for right in rights {
+                let cosine = right.cosine(&left_vec, self.right_field)?;
+                let right = right.entry;
                 if cosine < self.threshold {
                     continue;
                 }
@@ -201,10 +225,12 @@ impl<'a> HybridJoin<'a> {
 
     pub fn execute(&self) -> CrossParadigmResult<GeneralizedPostingList> {
         validate_threshold(self.threshold, -1.0, 1.0, "hybrid")?;
-        let mut right_index: BTreeMap<Value, Vec<&PostingEntry>> = BTreeMap::new();
+        let mut right_index: BTreeMap<&Value, Vec<RightVector<'_>>> = BTreeMap::new();
         for entry in self.right {
             if let Some(key) = entry.payload.fields.get(self.structured_field) {
-                right_index.entry(key.clone()).or_default().push(entry);
+                if let Some(vector) = RightVector::new(entry, self.vector_field) {
+                    right_index.entry(key).or_default().push(vector);
+                }
             }
         }
         let mut out = Vec::new();
@@ -212,17 +238,16 @@ impl<'a> HybridJoin<'a> {
             let Some(left_key) = left.payload.fields.get(self.structured_field) else {
                 continue;
             };
-            let Some(left_vec) = read_vector(&left.payload.fields, self.vector_field)? else {
+            let Some(value) = left.payload.fields.get(self.vector_field) else {
                 continue;
             };
-            let Some(rights) = right_index.get(left_key) else {
+            let left_vec = PreparedVector::read(value, self.vector_field)?;
+            let Some(rights) = right_index.get_mut(left_key) else {
                 continue;
             };
             for right in rights {
-                let Some(right_vec) = read_vector(&right.payload.fields, self.vector_field)? else {
-                    continue;
-                };
-                let cosine = cosine_similarity(&left_vec, &right_vec)?;
+                let cosine = right.cosine(&left_vec, self.vector_field)?;
+                let right = right.entry;
                 if cosine < self.threshold {
                     continue;
                 }
@@ -353,10 +378,10 @@ impl<'a, G: GraphStore> CrossParadigmJoin<'a, G> {
         for entry in self.right {
             validate_payload_score(entry, "right")?;
         }
-        let mut right_index: BTreeMap<Value, Vec<&PostingEntry>> = BTreeMap::new();
+        let mut right_index: BTreeMap<&Value, Vec<&PostingEntry>> = BTreeMap::new();
         for entry in self.right {
             if let Some(key) = entry.payload.fields.get(self.doc_field) {
-                right_index.entry(key.clone()).or_default().push(entry);
+                right_index.entry(key).or_default().push(entry);
             }
         }
         let mut out = Vec::new();
@@ -367,11 +392,10 @@ impl<'a, G: GraphStore> CrossParadigmJoin<'a, G> {
                     left.doc_id
                 )))
             })?;
-            let vertex_key = vertex.properties.get(self.vertex_field).cloned();
-            let Some(vertex_key) = vertex_key else {
+            let Some(vertex_key) = vertex.properties.get(self.vertex_field) else {
                 continue;
             };
-            let Some(rights) = right_index.get(&vertex_key) else {
+            let Some(rights) = right_index.get(vertex_key) else {
                 continue;
             };
             for right in rights {
@@ -448,81 +472,116 @@ fn validate_payload_score(entry: &PostingEntry, side: &str) -> CrossParadigmResu
     Ok(())
 }
 
-fn read_vector(
-    fields: &BTreeMap<String, Value>,
-    name: &str,
-) -> CrossParadigmResult<Option<Vec<f64>>> {
-    let Some(value) = fields.get(name) else {
-        return Ok(None);
-    };
-    let Value::List(items) = value else {
-        return Err(CrossParadigmError::InvalidInput(format!(
-            "vector field {name:?} must be a list"
-        )));
-    };
-    if items.is_empty() {
-        return Err(CrossParadigmError::InvalidInput(format!(
-            "vector field {name:?} must not be empty"
-        )));
-    }
-    let mut out = Vec::new();
-    out.try_reserve_exact(items.len()).map_err(|error| {
-        CrossParadigmError::InvalidInput(format!(
-            "cannot allocate vector field {name:?} with {} components: {error}",
-            items.len()
-        ))
-    })?;
-    for v in items {
-        match v {
-            Value::Float(f) if f.is_finite() => out.push(*f),
-            Value::Int(n) if n.unsigned_abs() <= (1_u64 << 53) => out.push(*n as f64),
-            Value::Int(n) => {
-                return Err(CrossParadigmError::InvalidInput(format!(
-                    "integer vector component {n} in field {name:?} cannot be represented exactly as f64"
-                )));
-            }
-            _ => {
-                return Err(CrossParadigmError::InvalidInput(format!(
-                    "vector field {name:?} contains a non-numeric or non-finite component"
-                )));
-            }
-        }
-    }
-    Ok(Some(out))
+struct RightVector<'a> {
+    entry: &'a PostingEntry,
+    value: &'a Value,
+    prepared: Option<PreparedVector>,
 }
 
-fn cosine_similarity(a: &[f64], b: &[f64]) -> CrossParadigmResult<f64> {
-    if a.len() != b.len() || a.is_empty() {
-        return Err(CrossParadigmError::InvalidInput(format!(
-            "cosine vectors must have the same non-zero dimension ({} != {})",
-            a.len(),
-            b.len()
-        )));
+impl<'a> RightVector<'a> {
+    fn new(entry: &'a PostingEntry, name: &str) -> Option<Self> {
+        Some(Self {
+            entry,
+            value: entry.payload.fields.get(name)?,
+            prepared: None,
+        })
     }
-    let scale_a = a
-        .iter()
-        .fold(0.0_f64, |scale, value| scale.max(value.abs()));
-    let scale_b = b
-        .iter()
-        .fold(0.0_f64, |scale, value| scale.max(value.abs()));
-    if scale_a == 0.0 || scale_b == 0.0 {
-        return Err(CrossParadigmError::InvalidInput(
-            "cosine vectors must have non-zero norms".to_string(),
-        ));
+
+    fn cosine(&mut self, left: &PreparedVector, name: &str) -> CrossParadigmResult<f64> {
+        // Validate on first use, in the original left-major pair order.
+        let right = match &self.prepared {
+            Some(vector) => vector,
+            None => self
+                .prepared
+                .insert(PreparedVector::read(self.value, name)?),
+        };
+        left.cosine(right)
     }
-    let sum_sq_a = a.iter().map(|value| (value / scale_a).powi(2)).sum::<f64>();
-    let sum_sq_b = b.iter().map(|value| (value / scale_b).powi(2)).sum::<f64>();
-    let norm_a = sum_sq_a.sqrt();
-    let norm_b = sum_sq_b.sqrt();
-    let cosine = a
-        .iter()
-        .zip(b)
-        .map(|(left, right)| (left / scale_a / norm_a) * (right / scale_b / norm_b))
-        .sum::<f64>();
-    if !cosine.is_finite() {
-        return Err(CrossParadigmError::ArithmeticOverflow(
-            "cosine similarity is not finite".to_string(),
-        ));
+}
+
+struct PreparedVector {
+    components: Vec<f64>,
+    zero_norm: bool,
+}
+
+impl PreparedVector {
+    fn read(value: &Value, name: &str) -> CrossParadigmResult<Self> {
+        let Value::List(items) = value else {
+            return Err(CrossParadigmError::InvalidInput(format!(
+                "vector field {name:?} must be a list"
+            )));
+        };
+        if items.is_empty() {
+            return Err(CrossParadigmError::InvalidInput(format!(
+                "vector field {name:?} must not be empty"
+            )));
+        }
+        let mut out = Vec::new();
+        out.try_reserve_exact(items.len()).map_err(|error| {
+            CrossParadigmError::InvalidInput(format!(
+                "cannot allocate vector field {name:?} with {} components: {error}",
+                items.len()
+            ))
+        })?;
+        for v in items {
+            match v {
+                Value::Float(f) if f.is_finite() => out.push(*f),
+                Value::Int(n) if n.unsigned_abs() <= (1_u64 << 53) => out.push(*n as f64),
+                Value::Int(n) => {
+                    return Err(CrossParadigmError::InvalidInput(format!(
+                        "integer vector component {n} in field {name:?} cannot be represented exactly as f64"
+                    )));
+                }
+                _ => {
+                    return Err(CrossParadigmError::InvalidInput(format!(
+                        "vector field {name:?} contains a non-numeric or non-finite component"
+                    )));
+                }
+            }
+        }
+        let scale = out
+            .iter()
+            .fold(0.0_f64, |scale, value| scale.max(value.abs()));
+        if scale != 0.0 {
+            let norm = out
+                .iter()
+                .map(|value| (value / scale).powi(2))
+                .sum::<f64>()
+                .sqrt();
+            for component in &mut out {
+                *component = *component / scale / norm;
+            }
+        }
+        Ok(Self {
+            components: out,
+            zero_norm: scale == 0.0,
+        })
     }
-    Ok(cosine.clamp(-1.0, 1.0))
+
+    fn cosine(&self, other: &Self) -> CrossParadigmResult<f64> {
+        if self.components.len() != other.components.len() {
+            return Err(CrossParadigmError::InvalidInput(format!(
+                "cosine vectors must have the same non-zero dimension ({} != {})",
+                self.components.len(),
+                other.components.len()
+            )));
+        }
+        if self.zero_norm || other.zero_norm {
+            return Err(CrossParadigmError::InvalidInput(
+                "cosine vectors must have non-zero norms".into(),
+            ));
+        }
+        let cosine: f64 = self
+            .components
+            .iter()
+            .zip(&other.components)
+            .map(|(left, right)| left * right)
+            .sum();
+        if !cosine.is_finite() {
+            return Err(CrossParadigmError::ArithmeticOverflow(
+                "cosine similarity is not finite".into(),
+            ));
+        }
+        Ok(cosine.clamp(-1.0, 1.0))
+    }
 }
