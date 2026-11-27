@@ -8,11 +8,13 @@
 //! operator runs against a [`GraphStore`] and returns a
 //! [`GraphPostingList`] keyed on vertex id with a calibrated score.
 
+use std::sync::Arc;
+
 use std::collections::{BTreeMap, VecDeque};
 
-use uqa_core::{DocId, Payload, PostingEntry, PostingList, Value, VertexId};
+use uqa_core::{Payload, PostingEntry, PostingList, Value, VertexId};
 
-use crate::posting_list::{GraphPayload, GraphPostingList};
+use crate::posting_list::GraphPostingList;
 use crate::store::{GraphStore, GraphStoreError, GraphStoreResult};
 
 const MAX_EXACT_F64_INTEGER: u64 = 9_007_199_254_740_992;
@@ -90,7 +92,12 @@ impl<'a> PageRank<'a> {
             return Ok(GraphPostingList::new());
         }
         if n == 1 {
-            return single_vertex_result(vertices[0], 1.0, &vertices, self.graph);
+            return Ok(single_vertex_result(
+                vertices[0],
+                1.0,
+                &vertices,
+                self.graph,
+            ));
         }
 
         let n_f64 = usize_as_f64(n, "PageRank vertex count")?;
@@ -282,7 +289,12 @@ impl<'a> BetweennessCentrality<'a> {
             return Ok(GraphPostingList::new());
         }
         if n == 1 {
-            return single_vertex_result(vertices[0], 0.0, &vertices, self.graph);
+            return Ok(single_vertex_result(
+                vertices[0],
+                0.0,
+                &vertices,
+                self.graph,
+            ));
         }
 
         let vertex_index: BTreeMap<VertexId, usize> = vertices
@@ -398,23 +410,14 @@ fn single_vertex_result(
     score: f64,
     vertices: &[VertexId],
     graph: &str,
-) -> GraphStoreResult<GraphPostingList> {
+) -> GraphPostingList {
     let entry = PostingEntry::new(vid, Payload::with_score(score));
-    let mut graph_payloads: BTreeMap<DocId, GraphPayload> = BTreeMap::new();
-    graph_payloads.insert(
-        vid,
-        GraphPayload {
-            subgraph_vertices: vertices.to_vec(),
-            subgraph_edges: Vec::new(),
-            graph_name: graph.to_string(),
-            score_override: Some(score),
-        },
-    );
-    GraphPostingList::try_from_parts(
+    GraphPostingList::with_shared_subgraph(
         PostingList::from_sorted_unchecked(vec![entry]),
-        graph_payloads,
+        vertices.into(),
+        Arc::default(),
+        graph.into(),
     )
-    .map_err(Into::into)
 }
 
 fn build_score_result(
@@ -424,7 +427,6 @@ fn build_score_result(
     extra_fields: &BTreeMap<VertexId, BTreeMap<String, Value>>,
 ) -> GraphStoreResult<GraphPostingList> {
     let mut entries: Vec<PostingEntry> = Vec::with_capacity(vertices.len());
-    let mut graph_payloads: BTreeMap<DocId, GraphPayload> = BTreeMap::new();
     let mut sorted = vertices.to_vec();
     sorted.sort_unstable();
     for vid in &sorted {
@@ -436,16 +438,11 @@ fn build_score_result(
             payload.fields = fields.clone();
         }
         entries.push(PostingEntry::new(*vid, payload));
-        graph_payloads.insert(
-            *vid,
-            GraphPayload {
-                subgraph_vertices: sorted.clone(),
-                subgraph_edges: Vec::new(),
-                graph_name: graph.to_string(),
-                score_override: Some(score),
-            },
-        );
     }
-    GraphPostingList::try_from_parts(PostingList::from_sorted_unchecked(entries), graph_payloads)
-        .map_err(Into::into)
+    Ok(GraphPostingList::with_shared_subgraph(
+        PostingList::from_sorted_unchecked(entries),
+        sorted.into(),
+        Arc::default(),
+        graph.into(),
+    ))
 }

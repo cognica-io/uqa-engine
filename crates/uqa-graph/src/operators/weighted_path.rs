@@ -6,6 +6,8 @@
 
 //! Bounded weighted regular-path execution.
 
+use std::sync::Arc;
+
 use super::{
     build_nfa, simplify, subset_construction, value_as_f64, BTreeMap, Dfa, DfaState, EdgeId,
     GraphPayload, GraphPostingList, GraphStore, GraphStoreError, GraphStoreResult,
@@ -89,6 +91,7 @@ impl<'a> WeightedPathQuery<'a> {
         }
 
         let mut entries = Vec::with_capacity(accepted.len());
+        let graph_name: Arc<str> = self.graph.into();
         let mut graph_payloads = BTreeMap::new();
         for (end, path_match) in accepted {
             let mut fields = BTreeMap::new();
@@ -104,9 +107,9 @@ impl<'a> WeightedPathQuery<'a> {
             graph_payloads.insert(
                 end,
                 GraphPayload {
-                    subgraph_vertices: path_match.vertices,
-                    subgraph_edges: path_match.edges,
-                    graph_name: self.graph.to_string(),
+                    subgraph_vertices: path_match.vertices.into(),
+                    subgraph_edges: path_match.edges.into(),
+                    graph_name: Arc::clone(&graph_name),
                     score_override: Some(self.score),
                 },
             );

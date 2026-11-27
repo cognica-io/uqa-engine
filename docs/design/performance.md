@@ -2,6 +2,10 @@
 
 This document records dated UQA Engine measurements, including controlled CI qualification and historical developer-machine comparisons. Each section identifies its source and measurement boundary; absolute times remain specific to the measured host. Controlled qualification uses independently authenticated host control and reference-only noise calibration. Unless a section explicitly compares another engine, its ratios compare UQA revisions. Measurements use the `bench` profile (release + debug symbols, thin LTO, `codegen-units = 1`) unless a section explicitly records a package-scoped `release` runner or a published package.
 
+## Graph posting results (2026-11-27 UTC)
+
+Ordinary traversal of a 512-vertex star with 511 edges retained 4,316,128 bytes on `a492473eb` and 80,272 bytes with shared vertex IDs, edge IDs and graph names on macOS ARM64. The same build retained 80,272 bytes for temporal traversal and 76,168 bytes for two PageRank rounds. These counts measure live heap allocations immediately after the operation returns, with the input graph constructed before measurement. Every posting retained its own score and referred to the complete sorted subgraph.
+
 ## Posting and fusion allocations (2026-11-27 UTC)
 
 The same Rust caller on macOS ARM64 measured allocations during each public operation with prebuilt inputs. The path and union comparisons use main at `557463e22`. The confidence-scaled pool comparisons use `e98499b30` before the WAND changes. The path returned the same scalar, the union preserved the decorated postings, and the two pool workloads returned identical document order and score bits for all ten results. [Implementation and regression tests](https://github.com/cognica-io/uqa-engine/pull/1485)

@@ -11,6 +11,8 @@
 //! prior feature via a residual sum. Final per-vertex feature is
 //! squashed through the sigmoid to land in `[0, 1]`.
 
+use std::sync::Arc;
+
 use std::collections::BTreeMap;
 
 use uqa_core::{DocId, Payload, PostingEntry, PostingList, Value, VertexId};
@@ -186,6 +188,7 @@ impl<'a> MessagePassing<'a> {
                 vertices.len()
             ))
         })?;
+        let graph_name: Arc<str> = self.graph.into();
         let mut graph_payloads: BTreeMap<DocId, GraphPayload> = BTreeMap::new();
         for vid in &vertices {
             let feature = features.get(vid).copied().ok_or_else(|| {
@@ -198,9 +201,9 @@ impl<'a> MessagePassing<'a> {
             graph_payloads.insert(
                 *vid,
                 GraphPayload {
-                    subgraph_vertices: vec![*vid],
-                    subgraph_edges: Vec::new(),
-                    graph_name: self.graph.to_string(),
+                    subgraph_vertices: [*vid].into(),
+                    subgraph_edges: Arc::default(),
+                    graph_name: Arc::clone(&graph_name),
                     score_override: Some(calibrated),
                 },
             );

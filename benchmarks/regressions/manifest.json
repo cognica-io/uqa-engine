@@ -77568,6 +77568,19 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "test",
+      "test": "traversal_and_centrality_share_one_subgraph_across_the_result",
+      "cases": 1,
+      "source": "crates/uqa-graph/tests/centrality.rs",
+      "capability": "Linear retained graph result memory",
+      "workload": "Traverse a 512-vertex star with ordinary and temporal traversal and run two PageRank rounds.",
+      "invariant": "Each result retains less than 512 KiB. All 512 entries share the same vertex slice, edge slice and graph name and preserve their scores and sorted identities.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

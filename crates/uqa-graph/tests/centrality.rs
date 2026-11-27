@@ -9,7 +9,7 @@
 use uqa_core::{Edge, Value, Vertex};
 use uqa_graph::{
     AggregationKind, BetweennessCentrality, GraphStore, MemoryGraphStore, MessagePassing, PageRank,
-    HITS,
+    TemporalTraverse, Traverse, HITS,
 };
 
 fn linear_corpus() -> MemoryGraphStore {
@@ -165,6 +165,56 @@ fn message_passing_rejects_non_finite_accumulation_and_layer_exhaustion() {
         .k_layers(u32::MAX)
         .execute(&g)
         .is_err());
+}
+
+#[test]
+fn traversal_and_centrality_share_one_subgraph_across_the_result() {
+    const COUNT: u64 = 512;
+    let mut store = MemoryGraphStore::new();
+    store.create_graph("star").unwrap();
+    for id in 1..=COUNT {
+        store.add_vertex(Vertex::new(id, "v"), "star").unwrap();
+        if id > 1 {
+            store.add_edge(Edge::new(id, 1, id, "e"), "star").unwrap();
+        }
+    }
+    for operator in ["traverse", "temporal", "pagerank"] {
+        let mut result = None;
+        let allocated = allocation_counter::measure(|| {
+            let postings = match operator {
+                "traverse" => Traverse::new(1, "star").execute(&store),
+                "temporal" => TemporalTraverse::new(1, "star").execute(&store),
+                _ => PageRank::new("star").max_iterations(2).execute(&store),
+            };
+            result = Some(postings.unwrap());
+        });
+        let result = result.unwrap();
+        assert_eq!(result.len(), COUNT as usize);
+        assert!(
+            allocated.bytes_current < 512 * 1024,
+            "{operator}: {allocated:?}"
+        );
+        let first = result.get_graph_payload(1).unwrap();
+        assert!(first.subgraph_vertices.iter().copied().eq(1..=COUNT));
+        if operator == "pagerank" {
+            assert!(first.subgraph_edges.is_empty());
+        } else {
+            assert!(first.subgraph_edges.iter().copied().eq(2..=COUNT));
+        }
+        for entry in result.inner() {
+            let payload = result.get_graph_payload(entry.doc_id).unwrap();
+            assert_eq!(
+                payload.subgraph_vertices.as_ptr(),
+                first.subgraph_vertices.as_ptr()
+            );
+            assert_eq!(
+                payload.subgraph_edges.as_ptr(),
+                first.subgraph_edges.as_ptr()
+            );
+            assert_eq!(payload.graph_name.as_ptr(), first.graph_name.as_ptr());
+            assert_eq!(payload.score_override, Some(entry.payload.score));
+        }
+    }
 }
 
 fn score_map(gpl: &uqa_graph::GraphPostingList) -> std::collections::BTreeMap<u64, f64> {

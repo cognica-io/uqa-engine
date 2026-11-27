@@ -6,6 +6,8 @@
 
 //! DFA-backed regular path reachability.
 
+use std::sync::Arc;
+
 use super::{
     build_nfa, simplify, subset_construction, BTreeMap, BTreeSet, Dfa, DfaState, DocId,
     GraphPayload, GraphPostingList, GraphStore, GraphStoreError, GraphStoreResult, Payload,
@@ -66,6 +68,7 @@ impl<'a> RegularPathQuery<'a> {
         }
 
         let mut entries: Vec<PostingEntry> = Vec::new();
+        let graph_name: Arc<str> = self.graph.into();
         let mut graph_payloads: BTreeMap<DocId, GraphPayload> = BTreeMap::new();
         let mut seen: BTreeSet<DocId> = BTreeSet::new();
         for (start_v, end_v) in &pairs {
@@ -78,9 +81,9 @@ impl<'a> RegularPathQuery<'a> {
                 graph_payloads.insert(
                     doc_id,
                     GraphPayload {
-                        subgraph_vertices,
-                        subgraph_edges: Vec::new(),
-                        graph_name: self.graph.to_string(),
+                        subgraph_vertices: subgraph_vertices.into(),
+                        subgraph_edges: Arc::default(),
+                        graph_name: Arc::clone(&graph_name),
                         score_override: Some(self.score),
                     },
                 );

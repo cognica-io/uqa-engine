@@ -61,6 +61,8 @@ Parser depth is bounded at 256 and NFA or DFA states at 16,384. Weighted RPQ eva
 
 `GraphPostingList` pairs document support with graph payload while enforcing that graph payload keys belong to the support set. Union, intersection, difference, graph-name conflict, and overlapping subgraph operations use explicit policies.
 
+In Rust, `GraphPayload` shares its vertex and edge lists as `Arc<[VertexId]>` and `Arc<[EdgeId]>`, and its graph name as `Arc<str>`. A struct literal can convert owned vectors and strings with `.into()`. Traversal and centrality entries share one subgraph. The Phi codec materializes the lists when encoding an ordinary posting payload.
+
 Generic posting collision rules do not define graph overlap automatically. Every graph algebra operation must state whether it merges, selects, rejects, or removes graph context.
 
 ## Phi codec boundary
