@@ -141,9 +141,19 @@ async fn compact<W: Work, K: Fn(usize) -> bool + ?Sized>(
 
 impl MutableCommandPlan {
     /// Compact a mutation's scalar-query arena using its existing source-then-expression namespace remapping. Command CTEs and retained source queries keep their independent owners.
-    pub fn prune_subqueries(mut self, control: &ProductionControl<'_>) -> Result<Self, SQLError> {
-        self.assert_owner(control);
-        control.check()?;
+    pub fn prune_subqueries(self, control: &ProductionControl<'_>) -> Result<Self, SQLError> {
+        self.prune_subqueries_with_workspace(control, control)
+    }
+
+    /// Compact the original command arena while charging remapping to the current operation.
+    pub fn prune_subqueries_with_workspace(
+        mut self,
+        storage: &ProductionControl<'_>,
+        workspace: &ProductionControl<'_>,
+    ) -> Result<Self, SQLError> {
+        self.assert_owner(storage);
+        storage.check()?;
+        workspace.check()?;
         if self.command.scalar_subqueries().is_empty() {
             return Ok(self);
         }
@@ -164,7 +174,7 @@ impl MutableCommandPlan {
         });
         super::super::subqueries::prune_command_with_retention(
             &mut self.command,
-            *control,
+            *workspace,
             |arena, keep| {
                 work::inline(compact(arena, fields, keep, None, None, &mut ()))
                     .expect("immediate compaction has no fallible commit operation");

@@ -146,7 +146,13 @@ fn caller_owned_fusion_charges_construction_and_preserves_existing_arguments() {
         if cancel_invoking {
             invoking.cancel();
         }
-        let result = super::super::rewrite_implicit_hybrid_fusion(&mut predicate, true, &config);
+        let result = crate::optimizer::scalar::rewrite_ordinary_slot(
+            &mut predicate,
+            &config,
+            |input, production| {
+                super::rewrite(input, true, &production.storage, &config.production)
+            },
+        );
         if limit == 0 || cancel_original || cancel_invoking {
             assert_eq!(
                 result.unwrap_err().sqlstate(),

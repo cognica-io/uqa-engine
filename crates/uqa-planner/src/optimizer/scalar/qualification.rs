@@ -24,7 +24,7 @@ pub(crate) fn optimize_qualification(
     super::rewrite_ordinary_slot(expression, config, qualification)
 }
 
-fn qualification(
+pub(in crate::optimizer) fn qualification(
     expression: OwnedScalarExpr,
     production: super::ScalarProduction<'_, '_>,
 ) -> Result<OwnedScalarExpr, SQLError> {

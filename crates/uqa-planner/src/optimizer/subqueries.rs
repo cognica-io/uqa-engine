@@ -12,10 +12,6 @@ use uqa_sql::{
     SQLError, ScalarExpr,
 };
 
-pub(super) use uqa_sql::plan::subqueries::{
-    prune_command_with_control as prune_command, prune_query_with_control as prune_query,
-};
-
 /// Retain dead branches for static result typing without evaluating their child plans.
 pub(super) fn live_slots<'a, 'control>(
     expressions: impl IntoIterator<Item = &'a ScalarExpr>,
@@ -101,23 +97,6 @@ fn referenced_slots(
         },
         &control,
     )
-}
-
-/// Plan only subquery slots reached by a surviving expression, in original slot order. Unreached slots retain their analyzed result types.
-pub(super) fn optimize_live(
-    queries: &mut [super::QueryPlan],
-    slots: &ProductionMap<'_, usize, ()>,
-    config: &super::OptimizerConfig,
-    aggregates: &dyn super::AggregateClassifier,
-) -> Result<(), SQLError> {
-    config.production.check()?;
-    for (index, ()) in slots {
-        config.production.check()?;
-        if let Some(query) = queries.get_mut(*index) {
-            super::optimize_query(query, config, aggregates)?;
-        }
-    }
-    Ok(())
 }
 
 #[cfg(test)]

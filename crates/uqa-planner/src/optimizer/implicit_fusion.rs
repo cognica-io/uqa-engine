@@ -17,25 +17,6 @@ enum RetrievalSignalKind {
     Vector,
 }
 
-/// Rewrite a conjunction containing both text and vector retrieval leaves into
-/// canonical exact Bayesian evidence fusion. Explicit fusion functions are
-/// never rewritten, and relational conjuncts remain strict filters over the
-/// fused candidate support.
-pub(super) fn rewrite_implicit_hybrid_fusion(
-    expression: &mut ScalarExpr,
-    allow_unqualified_signals: bool,
-    config: &super::OptimizerConfig<'_>,
-) -> Result<(), uqa_sql::SQLError> {
-    super::scalar::rewrite_ordinary_slot(expression, config, |input, production| {
-        owned::rewrite(
-            input,
-            allow_unqualified_signals,
-            &production.storage,
-            &config.production,
-        )
-    })
-}
-
 /// Return whether optimizing this query will introduce a fusion node that can
 /// persist Bayesian text calibration. This mirrors the rewrite's source-aware
 /// qualifier policy before optimization changes the predicate.

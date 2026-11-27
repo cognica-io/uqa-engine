@@ -5,6 +5,7 @@
 //
 
 use super::*;
+use crate::optimizer::OptimizerConfig;
 use uqa_core::memory::ProductionControl;
 use uqa_sql::{
     ast::{FunctionBinding, FunctionVolatility},
@@ -59,6 +60,16 @@ fn propagate_view<'a>(query: &'a mut QueryPlan, views: &Views) -> &'a QueryBlock
     let config = OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar_with_control);
     propagate_caller(query, None, Some(views), &config).unwrap();
     block_of(query)
+}
+
+fn propagate_caller(
+    query: &mut QueryPlan,
+    types: Option<&dyn RoutineTypeCatalog>,
+    views: Option<&dyn VolatilityCatalog>,
+    config: &crate::optimizer::OptimizerConfig<'_>,
+) -> Result<(), SQLError> {
+    query
+        .edit_uncontrolled(|query| propagate(query, types, views, ScalarProduction::caller(config)))
 }
 
 #[test]

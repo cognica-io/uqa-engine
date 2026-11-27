@@ -34,27 +34,39 @@ fn caller_owned_projection_alias_charges_only_the_new_label() {
     ] {
         let name = uqa_sql::ast::ReferenceName::from("x".repeat(1 << 20));
         let name_pointer = name.as_ptr();
-        let mut projection = [ProjectionPlan {
+        let crate::UnifiedPlan::Query(mut query) =
+            crate::UnifiedPlan::lower(uqa_sql::compile("SELECT 1").unwrap().remove(0))
+        else {
+            panic!("query")
+        };
+        let crate::RelationalPlan::QueryBlock(block) = &mut query.root else {
+            panic!("query block")
+        };
+        block.projections[0] = ProjectionPlan {
             expr: ScalarExpr::Column(name),
             alias: alias.map(str::to_owned),
-        }];
+        };
         let budget = MemoryBudget::new(limit);
         let original = CancellationToken::new();
         let invoking = CancellationToken::new();
         let mut settings = config();
         settings.production = ProductionControl::new(&budget, &original, &invoking);
-        let result = optimize_projections(&mut projection, &settings);
+        let result = crate::optimizer::owned::Context::caller(&settings, &|_: &str| false)
+            .projections(uqa_sql::plan::MutableQueryPlan::uncontrolled(*query));
         if limit < (1 << 20) && alias.is_none() {
             assert_eq!(result.unwrap_err().sqlstate(), Some("53200"));
-            assert!(projection[0].alias.is_none());
+            assert_eq!(budget.used(), 0);
         } else {
-            result.unwrap();
-            let ScalarExpr::Column(column) = &projection[0].expr else {
+            let query = result.unwrap();
+            let crate::RelationalPlan::QueryBlock(block) = &query.root else {
+                panic!("query block")
+            };
+            let ScalarExpr::Column(column) = &block.projections[0].expr else {
                 panic!("column")
             };
             assert_eq!(column.as_ptr(), name_pointer);
             assert_eq!(
-                projection[0].alias.as_deref(),
+                block.projections[0].alias.as_deref(),
                 Some(alias.unwrap_or(column.as_str()))
             );
             if alias.is_none() {

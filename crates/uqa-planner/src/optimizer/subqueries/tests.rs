@@ -93,7 +93,15 @@ fn live_subquery_planning_keeps_dead_case_and_coalesce_children_for_typing() {
             slots.iter().map(|(id, ())| *id).collect::<Vec<_>>(),
             expected
         );
-        optimize_live(&mut block.subqueries, &slots, &config, &|_: &str| false).unwrap();
+        query
+            .edit_uncontrolled(|query| {
+                super::super::owned::Context::caller(&config, &|_: &str| false)
+                    .query_arena(query, &slots)
+            })
+            .unwrap();
+        let RelationalPlan::QueryBlock(block) = &query.root else {
+            panic!("block")
+        };
         assert_eq!(serde_json::to_value(&block.subqueries[0]).unwrap(), dead);
         drop(slots);
         drop(query);

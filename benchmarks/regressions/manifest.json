@@ -6992,6 +6992,19 @@
     {
       "package": "uqa-planner",
       "kind": "lib",
+      "test": "caller_and_admitted_traversal_preserve_statement_shape_and_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/tests/plan_ownership.rs",
+      "capability": "Statement planning ownership",
+      "workload": "Optimize queries, mutations, a cursor and a routine call through both public entry points with separate cancellation tokens.",
+      "invariant": "Both paths produce identical serialized plans and SQLSTATEs. Completed, rejected and cancelled operations release their entire workspace.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
       "test": "unselected_function_group_keeps_its_wide_argument_without_a_member_copy",
       "cases": 1,
       "source": "crates/uqa-planner/src/optimizer/owned/sources.rs",

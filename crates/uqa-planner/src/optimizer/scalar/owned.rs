@@ -22,7 +22,7 @@ pub(in crate::optimizer) fn optimize(
     optimize_in(expression, ScalarProduction::admitted(config))
 }
 
-pub(super) fn optimize_in(
+pub(in crate::optimizer) fn optimize_in(
     expression: OwnedScalarExpr,
     production: ScalarProduction<'_, '_>,
 ) -> Result<OwnedScalarExpr, SQLError> {

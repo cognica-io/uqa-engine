@@ -6,7 +6,7 @@
 
 //! Scalar simplification with SQL errors preserved at the planning boundary.
 
-use super::{AssignmentPlan, OptimizerConfig, ProjectionPlan, ScalarExpr, Value};
+use super::{OptimizerConfig, ProjectionPlan, ScalarExpr, Value};
 use uqa_sql::SQLError;
 
 mod conditional;
@@ -22,34 +22,6 @@ use uqa_sql::plan::OwnedScalarExpr;
 
 #[cfg(test)]
 mod storage_tests;
-
-pub(super) fn optimize_assignments(
-    assignments: &mut [AssignmentPlan],
-    config: &OptimizerConfig,
-) -> Result<(), SQLError> {
-    for assignment in assignments {
-        optimize_scalar_slot(&mut assignment.value, config)?;
-    }
-    Ok(())
-}
-
-pub(super) fn optimize_projections(
-    projections: &mut [ProjectionPlan],
-    config: &OptimizerConfig,
-) -> Result<(), SQLError> {
-    let production = ScalarProduction::caller(config);
-    for projection in projections {
-        if let Some(label) = production.projection_alias(projection)? {
-            projection.alias = Some(
-                label
-                    .into_uncontrolled()
-                    .expect("caller-owned projection alias"),
-            );
-        }
-        optimize_scalar_slot(&mut projection.expr, config)?;
-    }
-    Ok(())
-}
 
 pub(super) fn optimize_scalar_slot(
     expression: &mut ScalarExpr,

@@ -14,7 +14,9 @@ impl Context<'_, '_> {
         &self,
         mut source: MutableSourcePlan,
     ) -> Result<MutableSourcePlan, SQLError> {
-        let control = &self.config.production;
+        let production = self.scalars();
+        let control = &production.storage;
+        self.config.production.check()?;
         match &*source {
             SourcePlan::RetainedRows(_) | SourcePlan::Table { .. } => Ok(source),
             SourcePlan::Join { right, lateral, .. } => {
@@ -41,9 +43,17 @@ impl Context<'_, '_> {
             SourcePlan::Values { .. }
             | SourcePlan::Function { .. }
             | SourcePlan::FunctionGroup { .. } => {
-                source = super::super::scalar::ScalarProduction::admitted(self.config)
-                    .source_inputs(source)?;
-                Ok(super::super::function_source::expand(&source, self)?.unwrap_or(source))
+                source = production.source_inputs(source)?;
+                let Some(replacement) = super::super::function_source::expand(&source, self)?
+                else {
+                    return Ok(source);
+                };
+                match self.input {
+                    super::PlanInput::Caller => Ok(MutableSourcePlan::uncontrolled(
+                        replacement.finish(&self.config.production)?.into_parts().0,
+                    )),
+                    super::PlanInput::Admitted => Ok(replacement),
+                }
             }
             SourcePlan::Subquery { .. } => source.map_query(control, |query| self.query(query)),
         }
@@ -53,9 +63,7 @@ impl Context<'_, '_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::optimizer::{
-        api::NoRegisteredAggregates, traversal::optimize_source, OptimizerConfig,
-    };
+    use crate::optimizer::{api::NoRegisteredAggregates, OptimizerConfig};
     use uqa_core::{
         memory::{MemoryBudget, ProductionControl},
         CancellationToken, Value,
@@ -111,17 +119,13 @@ mod tests {
         let ordinary_ptr = argument(&source).as_ptr();
         let native_ptr = argument(&native).as_ptr();
         let ordinary = allocation_counter::measure(|| {
-            optimize_source(&mut source, &config, &aggregates).unwrap();
+            source
+                .edit_uncontrolled(|source| Context::caller(&config, &aggregates).source(source))
+                .unwrap();
         });
         let mut output = None;
         let admitted = allocation_counter::measure(|| {
-            output = Some(
-                Context {
-                    config: &config,
-                    aggregates: &aggregates,
-                }
-                .source(native),
-            );
+            output = Some(Context::admitted(&config, &aggregates).source(native));
         });
         let output = output.unwrap();
         assert!(

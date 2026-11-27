@@ -12,7 +12,7 @@ mod production;
 #[cfg(test)]
 mod tests;
 
-use super::{scalar::ScalarProduction, OptimizerConfig};
+use super::scalar::ScalarProduction;
 use crate::{QueryBlockPlan, QueryPlan, RelationalPlan, SourcePlan};
 use map::Constants;
 use uqa_core::Value;
@@ -22,16 +22,6 @@ use uqa_sql::{
     semantics::volatility::VolatilityCatalog,
     ColumnType, SQLError, ScalarExpr,
 };
-
-pub(super) fn propagate_caller(
-    query: &mut QueryPlan,
-    types: Option<&dyn RoutineTypeCatalog>,
-    views: Option<&dyn VolatilityCatalog>,
-    config: &OptimizerConfig<'_>,
-) -> Result<(), SQLError> {
-    query
-        .edit_uncontrolled(|query| propagate(query, types, views, ScalarProduction::caller(config)))
-}
 
 pub(super) fn propagate(
     mut query: MutableQueryPlan,

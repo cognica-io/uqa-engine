@@ -12,15 +12,6 @@ pub(super) mod owned;
 
 /// Put posting-list-compatible conjuncts before row residuals. The executor
 /// can then build the smallest candidate set before touching documents.
-pub(super) fn prioritize_access_predicates(
-    expression: &mut ScalarExpr,
-    config: &super::OptimizerConfig<'_>,
-) -> Result<(), uqa_sql::SQLError> {
-    super::scalar::rewrite_ordinary_slot(expression, config, |input, production| {
-        owned::prioritize(input, &production.storage, &config.production)
-    })
-}
-
 pub(super) fn choose_access_path(block: &QueryBlockPlan) -> AccessPathPlan {
     if !matches!(block.from, Some(SourcePlan::Table { .. })) {
         return AccessPathPlan::Row;

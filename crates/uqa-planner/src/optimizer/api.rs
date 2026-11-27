@@ -7,8 +7,8 @@
 //! Optimizer configuration, statistics seam, and public entry points.
 
 use super::{
-    optimize_unified_plan, reorder_unified_plan_joins, AggregateClassifier, JoinGraphError,
-    RelationStats, ScalarExpr, SourcePlan, UnifiedPlan,
+    reorder_unified_plan_joins, AggregateClassifier, JoinGraphError, RelationStats, ScalarExpr,
+    SourcePlan, UnifiedPlan,
 };
 use crate::LocalAccessEstimate;
 
@@ -265,7 +265,7 @@ pub fn optimize_with_aggregates_and_statistics(
     aggregates: &dyn AggregateClassifier,
     statistics: &dyn SourceStatistics,
 ) -> OptimizerResult<uqa_sql::plan::OwnedExecutablePlan> {
-    let plan = optimize_unified_plan(plan, config, aggregates)?;
+    let plan = super::owned::optimize_caller(plan, config, aggregates)?;
     if config.enable_join_reordering {
         reorder_unified_plan_joins(plan, statistics, &config.production)
     } else {

@@ -93,6 +93,15 @@ impl SourcePlan {
 }
 
 impl MutableSourcePlan {
+    /// Move a caller-owned range item into the source editor.
+    #[must_use]
+    pub fn uncontrolled(source: SourcePlan) -> Self {
+        Self {
+            source,
+            memory: None.into(),
+        }
+    }
+
     pub fn reserved_bytes(&self) -> usize {
         self.memory.reserved_bytes()
     }

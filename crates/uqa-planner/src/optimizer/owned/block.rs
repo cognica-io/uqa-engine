@@ -10,26 +10,17 @@ use super::{ComputePlan, Context, MutableQueryPlan, QueryScalarSlot, RelationalP
 
 impl Context<'_, '_> {
     pub(super) fn block(&self, mut query: MutableQueryPlan) -> Result<MutableQueryPlan, SQLError> {
-        let control = &self.config.production;
+        let work = &self.config.production;
+        let production = self.scalars();
+        let control = &production.storage;
         let routines = self.config.routine_inlining.as_ref();
-        if query.analyzed_output.is_none() {
-            query = super::super::derived_projection::owned::prune(
-                query,
-                super::super::OutputPruningContext {
-                    production: *control,
-                    aggregates: self.aggregates,
-                    routines: routines.map(|context| context.routines),
-                    volatility: routines.map(|context| context.volatility),
-                    visible_ctes: &|_| false,
-                },
-            )?;
-        }
+        query = self.prune_derived_outputs(query)?;
         query = query.map_source(control, |source| self.source(source))?;
         query = super::super::source_constants::propagate(
             query,
             routines.map(|context| context.types),
             routines.map(|context| context.volatility),
-            super::super::scalar::ScalarProduction::admitted(self.config),
+            production,
         )?;
         query = self.projections(query)?;
         let RelationalPlan::QueryBlock(block) = &query.root else {
@@ -43,7 +34,7 @@ impl Context<'_, '_> {
                 expression,
                 allow_unqualified,
                 control,
-                control,
+                work,
             )?;
             self.access_predicate(expression)
         })?;
@@ -78,19 +69,19 @@ impl Context<'_, '_> {
         query = super::super::source_constants::simplify_group(
             query,
             routines.map(|context| context.types),
-            super::super::scalar::ScalarProduction::admitted(self.config),
+            production,
         )?;
         let RelationalPlan::QueryBlock(block) = &query.root else {
             unreachable!()
         };
-        let live = super::super::subqueries::live_slots_for_block(block, *control)?;
+        let live = super::super::subqueries::live_slots_for_block(block, *work)?;
         query = self.query_arena(query, &live)?;
         let RelationalPlan::QueryBlock(block) = &query.root else {
             unreachable!()
         };
         // A removed aggregate value still determines whether empty input produces one implicit group.
         if !matches!(block.compute, ComputePlan::Aggregate) {
-            let compute = block.compute_kind_with_control(self.aggregates, control)?;
+            let compute = block.compute_kind_with_control(self.aggregates, work)?;
             query = query.set_compute(compute, control)?;
         }
         let RelationalPlan::QueryBlock(block) = &query.root else {
@@ -100,9 +91,12 @@ impl Context<'_, '_> {
         query.set_access(access, control)
     }
 
-    fn projections(&self, mut query: MutableQueryPlan) -> Result<MutableQueryPlan, SQLError> {
-        let control = &self.config.production;
-        let production = super::super::scalar::ScalarProduction::admitted(self.config);
+    pub(in crate::optimizer) fn projections(
+        &self,
+        mut query: MutableQueryPlan,
+    ) -> Result<MutableQueryPlan, SQLError> {
+        let production = self.scalars();
+        let control = &production.storage;
         let RelationalPlan::QueryBlock(block) = &query.root else {
             unreachable!()
         };
@@ -123,7 +117,7 @@ impl Context<'_, '_> {
     }
 
     fn grouping(&self, mut query: MutableQueryPlan) -> Result<MutableQueryPlan, SQLError> {
-        let control = &self.config.production;
+        let control = &self.scalars().storage;
         let RelationalPlan::QueryBlock(block) = &query.root else {
             unreachable!()
         };
@@ -151,7 +145,7 @@ impl Context<'_, '_> {
     }
 
     fn windows(&self, mut query: MutableQueryPlan) -> Result<MutableQueryPlan, SQLError> {
-        let control = &self.config.production;
+        let control = &self.scalars().storage;
         let RelationalPlan::QueryBlock(block) = &query.root else {
             unreachable!()
         };

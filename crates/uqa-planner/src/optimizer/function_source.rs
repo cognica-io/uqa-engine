@@ -177,7 +177,7 @@ pub(super) fn expand(
         arguments.into_iter(),
         control,
     )?;
-    let expression = context.scalar(expression)?;
+    let expression = super::scalar::owned::optimize(expression, context.config)?;
     if same_call(&expression, call.name, call.binding, call.args, control)? {
         return Ok(None);
     }
@@ -193,11 +193,7 @@ fn optimize_inlined(
     let control = &context.config.production;
     let query = unit_source(query, control)?;
     context.config.with_inline_routine(identity, |nested| {
-        Context {
-            config: nested,
-            aggregates: context.aggregates,
-        }
-        .query(query)
+        Context::admitted(nested, context.aggregates).query(query)
     })
 }
 

@@ -11,6 +11,7 @@ use uqa_sql::compile;
 use super::*;
 
 mod aggregate_identity;
+mod plan_ownership;
 mod retained_rows;
 
 #[test]
@@ -32,26 +33,20 @@ fn cte_initialization_charges_reachability_and_checks_unread_recursive_cycles() 
             ),
         ] {
             let sql = format!("WITH {definitions} {root}");
-            let mut plan = UnifiedPlan::lower(compile(&sql).unwrap().remove(0));
+            let plan = UnifiedPlan::lower(compile(&sql).unwrap().remove(0));
             let token = CancellationToken::new();
             let memory = MemoryBudget::new(limit);
             let mut config =
                 OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar_with_control);
             config.production = ProductionControl::new(&memory, &token, &token);
-            let result = match &mut plan {
-                UnifiedPlan::Query(query) => {
-                    optimize_query(query, &config, &api::NoRegisteredAggregates)
-                }
-                UnifiedPlan::Command(command) => {
-                    optimize_command(command, &config, &api::NoRegisteredAggregates)
-                }
-            };
+            let result = owned::Context::caller(&config, &api::NoRegisteredAggregates)
+                .plan(uqa_sql::plan::MutableExecutablePlan::uncontrolled(plan));
             if result.as_ref().err().and_then(uqa_sql::SQLError::sqlstate) != expected {
                 differences.push(format!(
                     "{sql} with {limit} bytes: {result:?}, expected {expected:?}"
                 ));
             }
-            drop(plan);
+            drop(result);
             assert_eq!(memory.used(), 0);
         }
     }
