@@ -402,6 +402,14 @@ pub fn cast_value_from_with_control(
                 |_| {},
             )
         }
+        "tsvector" => {
+            let Value::Str(input) = v else {
+                return Err(SQLError::TypeMismatch(
+                    "tsvector input requires text".into(),
+                ));
+            };
+            return crate::tsvector::canonical_text(input, control);
+        }
         "jsonb" => return super::json::cast_json_value_with_control(v, true, control),
         "bytea" => return cast_bytea(v, source_ty, control),
         "boolean" | "bool" => cast_boolean(v),

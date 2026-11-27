@@ -44,8 +44,9 @@ pub(super) fn columns(
             &crate::semantics::builtin_function_dispatch_name_with_control(name, control)?,
         );
     let names = if builtin {
-        crate::semantics::table_function_empty_schema_with_control(
+        crate::semantics::bound_table_function_empty_schema_with_control(
             name,
+            binding,
             output_name,
             alias,
             aliases,

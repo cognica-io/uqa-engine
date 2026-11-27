@@ -239,6 +239,7 @@ impl ColumnType {
             }
             "json" => Ok(Self::Json),
             "xml" => Ok(Self::Xml),
+            "tsvector" => Ok(Self::TsVector),
             "jsonb" => Ok(Self::JsonB),
             "bytea" => Ok(Self::Bytea),
             "bit" | "bit varying" | "varbit" => {

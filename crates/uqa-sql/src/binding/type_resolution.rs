@@ -95,6 +95,15 @@ impl QueryFunctionTypeResolver<'_> {
 }
 
 impl FunctionTypeResolver for QueryFunctionTypeResolver<'_> {
+    fn multirange_member_type_with_control(
+        &self,
+        ty: &crate::ColumnType,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<uqa_core::memory::Produced<crate::ColumnType>>, SQLError> {
+        self.routines
+            .multirange_member_type_with_control(ty, control)
+    }
+
     fn resolve_collation_name_with_control(
         &self,
         name: &str,

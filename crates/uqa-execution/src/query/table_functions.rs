@@ -170,4 +170,5 @@ mod graphs;
 mod records;
 mod regular_expressions;
 mod stream;
+mod unnest;
 pub use stream::{build_table_function_row_stream_with_row, deferred_table_function_columns};

@@ -142,6 +142,28 @@ pub(crate) fn literal_input_type_with_control(
     input_type(ty, control)
 }
 
+/// The element emitted by each catalog unnest declaration. Domain wrappers on the input container leave its member identity intact.
+pub(crate) fn unnest_result_type(
+    ty: &ColumnType,
+    resolver: Option<&dyn super::FunctionTypeResolver>,
+    control: &ProductionControl<'_>,
+) -> Result<Option<Produced<ColumnType>>, SQLError> {
+    let base = base_type(ty);
+    match base {
+        ColumnType::Multirange(subtype) => Ok(Some(
+            ColumnType::Range(*subtype).clone_with_control(control)?,
+        )),
+        ColumnType::DeclaredMultirange(_) => match resolver {
+            Some(resolver) => resolver.multirange_member_type_with_control(base, control),
+            None => Ok(None),
+        },
+        ColumnType::TsVector => Ok(Some(ColumnType::Record.clone_with_control(control)?)),
+        _ => array_element_type(base)
+            .map(|element| element.clone_with_control(control).map_err(Into::into))
+            .transpose(),
+    }
+}
+
 pub(crate) fn array_element_type(ty: &ColumnType) -> Option<&ColumnType> {
     match base_type(ty) {
         ColumnType::Array(element) => {

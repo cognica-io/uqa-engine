@@ -616,7 +616,9 @@ The window functions are `row_number`, `rank`, `dense_rank`, `percent_rank`, `cu
 | Function | Implemented shape |
 | --- | --- |
 | `generate_series(start, stop [, step])` | Integer series with two or three arguments |
-| `unnest(array)` | One row per array value |
+| `unnest(array)` | One row per array element, in storage order |
+| `unnest(multirange)` | One row per range, in ascending order |
+| `unnest(tsvector)` | One row per lexeme, with its positions and weights |
 | `regexp_matches(string, pattern [, flags])` | One `text[]` row per match |
 | `regexp_split_to_table(string, pattern [, flags])` | One row per split value |
 | `string_to_table(text, delimiter)` | One row per split value |
@@ -641,6 +643,8 @@ Table functions accept a relation alias, positional output-column aliases, and a
 Each `ROWS FROM` member resolves as an ordinary table-function call against its own arguments and the active `search_path`. The group concatenates member columns in declaration order, emits as many rows as its longest member, and fills columns from exhausted members with SQL NULL. `WITH ORDINALITY` appends one group-wide, one-based `bigint` column after all member columns and resets for each correlated LATERAL invocation.
 
 The group construct does not itself mutate database or session state; each member retains the state and volatility behavior of that function. Range-function groups are implicitly lateral where PostgreSQL permits an earlier `FROM` item to supply an argument, and a `LEFT JOIN LATERAL` null-extends an empty group.
+
+Unary `unnest` participates in ordinary overload resolution. For example, a SQL function named `unnest(text)` accepts a text argument, while `unnest(ARRAY[1,2])` still expands the array. Use an explicit cast for an untyped string when more than one declaration matches.
 
 PostgreSQL gives unqualified multi-argument `unnest(array1, array2, ...)` special syntax only in a `FROM` range-function position, including as a member of `ROWS FROM`: it expands to independent unary `pg_catalog.unnest` members, zips them to the longest array, and NULL-pads shorter arrays, so a visible user-defined two-argument `unnest` cannot intercept that syntax. A single unqualified `unnest(array)` remains an ordinary overload-resolved call, a schema-qualified `schema.unnest(array1, array2)` remains one ordinary function call, and `pg_catalog.unnest(array1, array2)` reports undefined function (`42883`) because the catalog has no such ordinary signature. Outside a `FROM` range-function position, a multi-argument `unnest` is also an ordinary function call rather than this syntax transform.
 

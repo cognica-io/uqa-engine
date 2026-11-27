@@ -93,7 +93,10 @@ pub(in crate::type_resolution) fn selected_argument_targets_with_control(
     for (name, actual) in selected.binding.argument_types.iter().zip(types) {
         let parsed =
             semantic_optional(ColumnType::from_sql_name_with_control(name, control).map(Some))?;
-        let parsed = if parsed.as_deref() == Some(&ColumnType::AnyArray) {
+        let parsed = if matches!(
+            parsed.as_deref(),
+            Some(ColumnType::AnyArray | ColumnType::Pseudo(_))
+        ) {
             copy_optional(actual.as_ref(), control)?
         } else {
             let (ty, memory) = parsed.map_or((None, control.empty_reservation()), |ty| {

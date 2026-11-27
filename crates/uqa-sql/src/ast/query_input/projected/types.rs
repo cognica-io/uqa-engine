@@ -43,6 +43,7 @@ projected_enum!(ColumnType {
     Regrole,
     Regtype,
     PgNodeTree,
+    TsVector,
     AclItem,
     Int2Vector,
     OidVector,
