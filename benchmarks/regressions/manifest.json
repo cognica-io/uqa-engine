@@ -36207,8 +36207,8 @@
       "cases": 1,
       "source": "crates/uqa-sql/src/type_resolution/fixed_builtin/registry/tests.rs",
       "capability": "Fixed builtin overload lookup",
-      "workload": "Resolve a stored one-argument binding against all six declared signatures of ABS.",
-      "invariant": "Warm lookup selects the same descriptor using exactly the allocations and bytes required to normalize its single supplied argument.",
+      "workload": "Resolve a stored one-argument binding against all six signatures of ABS on the first lookup and again after selection.",
+      "invariant": "Both lookups select the same descriptor and allocate only the bytes and allocations needed to normalize the supplied argument.",
       "case_names": [
         ""
       ]
@@ -36220,8 +36220,8 @@
       "cases": 1,
       "source": "crates/uqa-sql/src/type_resolution/operators/resolution/tests.rs",
       "capability": "Indexed binary operator declarations",
-      "workload": "Look up each catalog name and OID, then probe three overloads of the integer XOR operator and missing identities.",
-      "invariant": "Name groups retain declaration order. Each OID returns the original operand and result identities. Warm indexed probes allocate zero times.",
+      "workload": "Probe three XOR overloads and missing identities before traversing all catalog names and OIDs.",
+      "invariant": "The initial index lookup allocates zero times. Name groups preserve declaration order and OIDs preserve the original operand and result identities.",
       "case_names": [
         ""
       ]

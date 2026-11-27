@@ -9,6 +9,7 @@
 use crate::ast::ColumnType;
 
 mod index;
+pub(super) use index::Overloads;
 
 pub(super) struct Signature {
     pub(super) argument_types: &'static [ColumnType],
@@ -48,36 +49,66 @@ impl Signature {
     }
 }
 
+pub(super) struct Declaration {
+    pub(super) names: &'static [&'static str],
+    pub(super) overloads: fn() -> Overloads,
+}
+
+macro_rules! overloads {
+    ($signatures:expr, $count:expr) => {{
+        static ORDER: std::sync::OnceLock<[usize; $count]> = std::sync::OnceLock::new();
+        $crate::type_resolution::fixed_builtin::registry::Overloads::new($signatures, &ORDER)
+    }};
+}
+pub(super) use overloads;
+
 macro_rules! declarations {
-    ($visibility:vis fn $function:ident; $($($name:literal)|+ => $signatures:expr),* $(,)?) => {
-        $visibility fn $function(register: &mut impl FnMut(&'static str, &'static [Signature])) {
-            $({
-                const SIGNATURES: &[Signature] = $signatures;
-                $(register($name, SIGNATURES);)+
-            })*
-        }
+    ($visibility:vis static $table:ident; $($($name:literal)|+ => $signatures:expr),* $(,)?) => {
+        $visibility static $table: &[$crate::type_resolution::fixed_builtin::registry::Declaration] = &[
+            $($crate::type_resolution::fixed_builtin::registry::Declaration {
+                names: &[$($name),+],
+                overloads: || {
+                    const SIGNATURES: &[Signature] = $signatures;
+                    $crate::type_resolution::fixed_builtin::registry::overloads!(SIGNATURES, SIGNATURES.len())
+                },
+            },)*
+        ];
     };
 }
 pub(super) use declarations;
 
+pub(super) fn registered_name(name: &str) -> Option<&'static str> {
+    index::lookup(name).map(|(name, _)| name)
+}
+
 pub(super) fn lookup(name: &str) -> Option<(&'static str, &'static [Signature])> {
-    index::lookup(name).map(|entry| (entry.name, entry.signatures))
+    let (name, entry) = index::lookup(name)?;
+    Some((name, (entry.overloads)().signatures))
 }
 
-fn register_polymorphic(register: &mut impl FnMut(&'static str, &'static [Signature])) {
-    use std::sync::LazyLock;
-    static ARGUMENTS: LazyLock<[ColumnType; 1]> =
-        LazyLock::new(|| [ColumnType::Named("any".into())]);
-    static COLLATION: LazyLock<[Signature; 1]> =
-        LazyLock::new(|| [Signature::new(&*ARGUMENTS, ColumnType::Text)]);
-    static TYPE: LazyLock<[Signature; 1]> =
-        LazyLock::new(|| [Signature::new(&*ARGUMENTS, ColumnType::Regtype)]);
-    register("pg_collation_for", &*COLLATION);
-    register("pg_typeof", &*TYPE);
-}
+static ANY_ARGUMENT: std::sync::LazyLock<[ColumnType; 1]> =
+    std::sync::LazyLock::new(|| [ColumnType::Named("any".into())]);
 
-declarations! { fn register_local;
+static POLYMORPHIC: &[Declaration] = &[
+    Declaration {
+        names: &["pg_collation_for"],
+        overloads: || {
+            static SIGNATURES: std::sync::LazyLock<[Signature; 1]> =
+                std::sync::LazyLock::new(|| [Signature::new(&*ANY_ARGUMENT, ColumnType::Text)]);
+            overloads!(&*SIGNATURES, 1)
+        },
+    },
+    Declaration {
+        names: &["pg_typeof"],
+        overloads: || {
+            static SIGNATURES: std::sync::LazyLock<[Signature; 1]> =
+                std::sync::LazyLock::new(|| [Signature::new(&*ANY_ARGUMENT, ColumnType::Regtype)]);
+            overloads!(&*SIGNATURES, 1)
+        },
+    },
+];
 
+declarations! { static LOCAL;
         "abs" => &[
             Signature::new(const { &[ColumnType::SmallInteger] }, ColumnType::SmallInteger),
             Signature::new(const { &[ColumnType::Integer] }, ColumnType::Integer),
@@ -466,10 +497,10 @@ pub(super) fn bound_signature(
     if !namespace.eq_ignore_ascii_case("pg_catalog") {
         return Ok(None);
     }
-    let Some(entry) = index::lookup(&binding.name) else {
+    let Some((_, entry)) = index::lookup(&binding.name) else {
         return Ok(None);
     };
-    entry.bound_signature(binding, control)
+    (entry.overloads)().bound_signature(binding, control)
 }
 
 #[cfg(test)]

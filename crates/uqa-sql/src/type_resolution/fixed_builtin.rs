@@ -40,7 +40,7 @@ use super::{
 #[doc(hidden)]
 #[must_use]
 pub fn is_function(name: &str) -> bool {
-    registry::lookup(name).is_some()
+    registry::registered_name(name).is_some()
 }
 
 /// Fixed-signature call metadata needed by generated-column binding without exposing the built-in registry itself.
@@ -255,9 +255,9 @@ pub(super) fn bind_call(
     if binding.is_none() && resolver.is_some_and(|resolver| resolver.has_untyped_function(&name)) {
         return name;
     }
-    let Some(_) = registry::lookup(&name) else {
+    if registry::registered_name(&name).is_none() {
         return name;
-    };
+    }
     let Ok(call_arguments) = scalar_call_arguments(args) else {
         return name;
     };
