@@ -220,3 +220,162 @@ fn retained_engine_catalog_capture_keeps_completed_generations_after_ddl_and_eng
     drop((actual, expected));
     assert_eq!(native.used(), 0);
 }
+
+#[rstest::rstest]
+#[case::memory(crate::tests::providers::Provider::Memory)]
+#[case::sqlite_native(crate::tests::providers::Provider::SQLiteNative)]
+#[case::sqlite_kv(crate::tests::providers::Provider::SQLiteKeyValue)]
+#[case::redb(crate::tests::providers::Provider::Redb)]
+fn catalog_generations_reuse_selected_tables_within_their_own_allowance(
+    #[case] provider: crate::tests::providers::Provider,
+) {
+    use uqa_core::{
+        memory::{MemoryBudget, ProductionControl},
+        CancellationToken, RelationIdentity,
+    };
+    let directory = tempfile::tempdir().unwrap();
+    let engine = provider.open(&directory.path().join("catalog-generations"));
+    pause_automatic_statistics(&engine);
+    engine
+        .sql(
+            "CREATE TABLE shared_catalog(id integer); CREATE TYPE selected_range AS RANGE (subtype=text)",
+            &[],
+        )
+        .unwrap();
+    let relation = RelationIdentity::new("public", "shared_catalog");
+    engine.clear_regtype_output_cache();
+    CATALOG_CAPTURES.set(0);
+    let first = engine.catalog_read_view();
+    let range = first
+        .ranges()
+        .find(|range| range.identity.name == "selected_range")
+        .unwrap()
+        .oid;
+    let descriptor = first.range_value_descriptor(range).unwrap().unwrap();
+    for _ in 0..8 {
+        let hit = uqa_sql::expr::SQLValueCatalog::value_range_type(&engine, range)
+            .unwrap()
+            .unwrap();
+        assert!(Arc::ptr_eq(&descriptor, &hit));
+        let current = engine.catalog_read_view();
+        assert!(std::ptr::eq(first.snapshot(), current.snapshot()));
+    }
+    assert_eq!(CATALOG_CAPTURES.get(), 1);
+
+    let memory = MemoryBudget::new(1 << 20);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&memory, &token, &token);
+    let charged = engine.catalog_read_view_with_control(&control).unwrap();
+    let additional = engine.catalog_read_view_with_control(&control).unwrap();
+    assert!(std::ptr::eq(charged.snapshot(), additional.snapshot()));
+    assert_eq!(CATALOG_CAPTURES.get(), 2);
+    let tiny = MemoryBudget::new(1);
+    let error = engine
+        .catalog_read_view_with_control(&ProductionControl::new(&tiny, &token, &token))
+        .err()
+        .unwrap();
+    assert_eq!(error.sqlstate(), Some("53200"));
+    assert_eq!(tiny.used(), 0);
+    token.cancel();
+    let error = engine
+        .catalog_read_view_with_control(&control)
+        .err()
+        .unwrap();
+    assert_eq!(error.sqlstate(), Some("57014"));
+    assert!(memory.used() > 0);
+    drop((charged, additional));
+    assert_eq!(memory.used(), 0);
+
+    engine.sql("BEGIN; ALTER TABLE shared_catalog ADD COLUMN private_value text; SAVEPOINT before_second; ALTER TABLE shared_catalog ADD COLUMN second integer", &[]).unwrap();
+    assert_eq!(
+        engine.catalog_read_view().snapshot().tables[&relation]
+            .columns
+            .len(),
+        3
+    );
+    engine.sql("ROLLBACK TO before_second", &[]).unwrap();
+    assert_eq!(
+        engine.catalog_read_view().snapshot().tables[&relation]
+            .columns
+            .len(),
+        2
+    );
+    engine.sql("ROLLBACK", &[]).unwrap();
+    assert_eq!(
+        engine.catalog_read_view().snapshot().tables[&relation]
+            .columns
+            .len(),
+        1
+    );
+    assert_eq!(first.snapshot().tables[&relation].columns.len(), 1);
+}
+
+#[rstest::rstest]
+#[case::sqlite_native(crate::tests::providers::Provider::SQLiteNative)]
+#[case::sqlite_kv(crate::tests::providers::Provider::SQLiteKeyValue)]
+#[case::redb(crate::tests::providers::Provider::Redb)]
+fn cached_catalog_observes_peer_commits_and_keeps_session_overlays_private(
+    #[case] provider: crate::tests::providers::Provider,
+) {
+    use uqa_core::RelationIdentity;
+    let directory = tempfile::tempdir().unwrap();
+    let root = provider.open(&directory.path().join("shared"));
+    pause_automatic_statistics(&root);
+    root.sql("CREATE TABLE shared_rows(id integer)", &[])
+        .unwrap();
+    root.create_graph("committed_graph").unwrap();
+    let peer = root.new_session().unwrap();
+    pause_automatic_statistics(&peer);
+    let relation = RelationIdentity::new("public", "shared_rows");
+    let previous = peer.catalog_read_view();
+    assert_eq!(previous.snapshot().tables[&relation].columns.len(), 1);
+    root.sql("ALTER TABLE shared_rows ADD COLUMN added integer", &[])
+        .unwrap();
+    peer.sql("SELECT added FROM shared_rows", &[]).unwrap();
+    assert_eq!(
+        peer.catalog_read_view().snapshot().tables[&relation]
+            .columns
+            .len(),
+        2
+    );
+    assert_eq!(previous.snapshot().tables[&relation].columns.len(), 1);
+
+    peer.sql("CREATE TEMP TABLE local_only(id integer)", &[])
+        .unwrap();
+    assert!(peer
+        .catalog_read_view()
+        .snapshot()
+        .temporary_namespace
+        .is_some());
+    assert!(root
+        .catalog_read_view()
+        .snapshot()
+        .temporary_namespace
+        .is_none());
+    peer.sql(
+        "BEGIN ISOLATION LEVEL REPEATABLE READ; SELECT id FROM shared_rows",
+        &[],
+    )
+    .unwrap();
+    peer.create_graph("private_graph").unwrap();
+    let graph = peer.catalog_read_view();
+    assert!(graph
+        .graph_names()
+        .iter()
+        .any(|name| name == "private_graph"));
+    assert!(!root
+        .catalog_read_view()
+        .graph_names()
+        .iter()
+        .any(|name| name == "private_graph"));
+    peer.sql("ROLLBACK", &[]).unwrap();
+    let current = peer.catalog_read_view();
+    assert!(!current
+        .graph_names()
+        .iter()
+        .any(|name| name == "private_graph"));
+    assert!(graph
+        .graph_names()
+        .iter()
+        .any(|name| name == "private_graph"));
+}

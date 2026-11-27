@@ -242,10 +242,12 @@ fn relation_descriptor_errors_and_new_generations_rebuild() {
     let retained = original.clone();
     let replacement = CatalogReadView::new(original.snapshot().clone());
     assert!(original
+        .snapshot
         .relation_descriptors
         .get_or_try_init(7, || Err(SQLError::Internal("invalid attribute".into())))
         .is_err());
     let descriptor = original
+        .snapshot
         .relation_descriptors
         .get_or_try_init(7, || {
             Ok(Some(Arc::new(CompositeTypeDescriptor {
@@ -260,12 +262,14 @@ fn relation_descriptor_errors_and_new_generations_rebuild() {
     assert!(Arc::ptr_eq(
         &descriptor,
         &retained
+            .snapshot
             .relation_descriptors
             .get_or_try_init(7, || panic!("retained descriptor rebuilt"))
             .unwrap()
             .unwrap()
     ));
     assert!(replacement
+        .snapshot
         .relation_descriptors
         .get_or_try_init(7, || Ok(None))
         .unwrap()

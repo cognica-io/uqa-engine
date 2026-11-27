@@ -198,7 +198,7 @@ impl MutationCoordinator<'_> {
         if change == uqa_execution::statement::prepared::invalidation::CatalogRegistryChange::BuiltinRoutinePrivileges {
             self.session.state.write().sql_statement_cache.clear();
         }
-        self.runtime.regtype_output_cache.clear();
+        self.runtime.invalidate_catalog_views();
         self.runtime.bayesian_params_cache.write().clear();
         if !self.session.transactions.lock().is_empty() {
             self.epochs
@@ -354,6 +354,9 @@ pub(crate) fn validate_stored_schema_name(name: &str) -> StorageBackendResult<()
 mod tests;
 
 mod catalog_execution;
+mod catalog_reads;
+pub(crate) use catalog_reads::CatalogViewCache;
+use catalog_reads::{DefinitionRevision, SessionDefinitions};
 #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 mod restore_catalog;
 #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
@@ -544,6 +547,58 @@ mod sequence_values;
 mod table_removal;
 
 impl Engine {
+    fn session_catalog_read_view(
+        &self,
+        include_overlay: bool,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<CatalogReadView, SQLError> {
+        let current_revision = || {
+            DefinitionRevision::new(
+                self.catalog_epochs(),
+                self.runtime.regtype_output_cache.revision(),
+            )
+        };
+        loop {
+            control.check()?;
+            let revision = current_revision();
+            let sources =
+                SessionDefinitions::current(&self.session, &self.durable, include_overlay);
+            let cached = self
+                .runtime
+                .catalog_views
+                .lock()
+                .get(revision, control.budget());
+            if let Some(mut view) = cached.filter(|view| sources.matches(view)) {
+                if current_revision() != revision {
+                    continue;
+                }
+                if let Some(catalog) = &self.storage.catalog {
+                    view = view.with_prepared_catalog(catalog.clone());
+                }
+                return self.with_sequence_positions_with_control(view, control);
+            }
+            let durable = self.durable.snapshot();
+            let view = self.catalog_read_view_from_with_control(
+                &durable,
+                &self.storage.tables.read(),
+                sources.overlay.clone(),
+                control,
+            )?;
+            if !sources.matches(&view) {
+                continue;
+            }
+            let retired = {
+                let mut cache = self.runtime.catalog_views.lock();
+                if current_revision() != revision {
+                    continue;
+                }
+                cache.store(revision, &view, control.budget())
+            };
+            drop(retired);
+            return self.with_sequence_positions_with_control(view, control);
+        }
+    }
+
     pub(crate) fn catalog_read_view_with_control(
         &self,
         control: &uqa_core::memory::ProductionControl<'_>,
@@ -552,33 +607,14 @@ impl Engine {
         if let Some(snapshot) = &self.query_catalog_snapshot {
             return self.with_sequence_positions_with_control(snapshot.read_view.clone(), control);
         }
-        let durable = self.durable.snapshot();
-        let overlay = self
-            .session
-            .state
-            .read()
-            .graph_overlay
-            .as_ref()
-            .map(|overlay| uqa_execution::catalog::GraphCatalogOverlay {
-                names: overlay.names.clone(),
-                store: overlay.store.clone(),
-            });
-        let tables = self.storage.tables.read();
-        let view = self.catalog_read_view_from_with_control(&durable, &tables, overlay, control)?;
-        drop(tables);
-        self.with_sequence_positions_with_control(view, control)
+        self.session_catalog_read_view(true, control)
     }
 
     pub(crate) fn restored_catalog_read_view_with_control(
         &self,
         control: &uqa_core::memory::ProductionControl<'_>,
     ) -> Result<CatalogReadView, SQLError> {
-        control.check()?;
-        let durable = self.durable.snapshot();
-        let tables = self.storage.tables.read();
-        let view = self.catalog_read_view_from_with_control(&durable, &tables, None, control)?;
-        drop(tables);
-        self.with_sequence_positions_with_control(view, control)
+        self.session_catalog_read_view(false, control)
     }
 
     pub(crate) fn with_sequence_positions_with_control(

@@ -721,6 +721,7 @@ pub(super) struct QueryRuntime {
     pub(super) notification_wake: Arc<parking_lot::Condvar>,
     pub(super) function_depth_limit: AtomicUsize,
     pub(super) bayesian_params_cache: RwLock<BTreeMap<String, BayesianBM25Params>>,
+    pub(super) catalog_views: Mutex<crate::capabilities::CatalogViewCache>,
     pub(super) regtype_output_cache: uqa_execution::catalog::cache::RegtypeOutputCache,
     pub(super) enum_label_cache: uqa_execution::catalog::enum_type::EnumLabelCache,
     pub(super) composite_descriptor_cache:
@@ -763,6 +764,7 @@ impl QueryRuntime {
             notification_wake: Arc::new(parking_lot::Condvar::new()),
             function_depth_limit: AtomicUsize::new(function_depth_limit),
             bayesian_params_cache: RwLock::new(BTreeMap::new()),
+            catalog_views: Mutex::default(),
             regtype_output_cache: uqa_execution::catalog::cache::RegtypeOutputCache::default(),
             enum_label_cache: uqa_execution::catalog::enum_type::EnumLabelCache::default(),
             composite_descriptor_cache:

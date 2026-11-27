@@ -24,13 +24,17 @@ impl CatalogReadView {
     ) -> bool {
         let definitions = &self.snapshot().definitions;
         !uqa_sql::catalog::roles::memberships::role_is_superuser(&definitions.roles, role)
-            && *self.routine_definitions.has_execute_acl.get_or_init(|| {
-                definitions
-                    .sql_user_functions
-                    .values()
-                    .flatten()
-                    .any(|routine| routine.def.execute_acl.is_some())
-            })
+            && *self
+                .snapshot
+                .routine_definitions
+                .has_execute_acl
+                .get_or_init(|| {
+                    definitions
+                        .sql_user_functions
+                        .values()
+                        .flatten()
+                        .any(|routine| routine.def.execute_acl.is_some())
+                })
     }
 
     /// Borrow a retained user routine by its catalog identity, sharing the generation's existing OID lookup.
@@ -46,7 +50,7 @@ pub(super) fn user_routine_by_oid(
     catalog: &CatalogReadView,
     oid: i64,
 ) -> Result<Option<&uqa_sql::routines::SQLRoutine>, SQLError> {
-    let lookup = catalog.routine_definitions.by_oid.get_or_init(|| {
+    let lookup = catalog.snapshot.routine_definitions.by_oid.get_or_init(|| {
         OrderedOidLookup::build(
             catalog
                 .snapshot()

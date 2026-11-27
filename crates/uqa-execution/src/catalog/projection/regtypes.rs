@@ -545,6 +545,7 @@ impl RegtypeOutputCatalog {
         resolution: &RelationNameResolution,
     ) -> Result<Arc<Self>, SQLError> {
         catalog
+            .snapshot
             .alias_output
             .get_or_try_init(|| {
                 let catalog = catalog.metadata_view();

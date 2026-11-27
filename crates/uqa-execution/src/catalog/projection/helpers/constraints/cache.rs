@@ -34,7 +34,7 @@ fn retained<'a>(
     catalog: &'a CatalogReadView,
     resolution: &RelationNameResolution,
 ) -> Result<&'a ConstraintDefinitions, SQLError> {
-    catalog.constraint_definitions.get_or_try_init(|| {
+    catalog.snapshot.constraint_definitions.get_or_try_init(|| {
         let rows = super::build_constraint_catalog_rows(catalog, resolution)?;
         let mut by_oid = BTreeMap::new();
         for (position, row) in rows.iter().enumerate() {

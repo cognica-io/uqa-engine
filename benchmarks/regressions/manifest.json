@@ -41526,6 +41526,37 @@
     {
       "package": "uqa-engine",
       "kind": "lib",
+      "test": "catalog_generations_reuse_selected_tables_within_their_own_allowance",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/capabilities/tests/catalog_capture.rs",
+      "capability": "Session catalog and retained query snapshots",
+      "workload": "Read the table catalog and a SQL range repeatedly on four storage providers, retain a controlled view, and change the table inside a transaction and a savepoint.",
+      "invariant": "Repeated reads share the original table definitions and range descriptor. Each budget accounts for its own generation, releases it at the last drop, and exposes the correct table shape after DDL and rollback.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "cached_catalog_observes_peer_commits_and_keeps_session_overlays_private",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/capabilities/tests/catalog_capture.rs",
+      "capability": "Session catalog and retained query snapshots",
+      "workload": "Read a committed table through two sessions on each persistent provider, then create session-local temporary and graph definitions and roll back.",
+      "invariant": "New statements observe the peer's committed table shape. Retained views preserve their original table and graph definitions, while other sessions see only their own temporary namespace and committed graph names.",
+      "case_names": [
+        "case_1_sqlite_native",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
       "test": "implicit_reads_select_undo_only_before_the_first_write",
       "cases": 4,
       "source": "crates/uqa-engine/src/transactions/snapshots/tests.rs",

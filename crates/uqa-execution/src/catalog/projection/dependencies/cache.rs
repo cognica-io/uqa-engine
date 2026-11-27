@@ -37,7 +37,7 @@ pub(in crate::catalog::projection) fn retained_dependencies(
     catalog: &CatalogReadView,
     resolution: &RelationNameResolution,
 ) -> Result<Arc<CatalogDependencies>, SQLError> {
-    catalog.dependencies.get_or_try_init(|| {
+    catalog.snapshot.dependencies.get_or_try_init(|| {
         let metadata = catalog.metadata_view();
         let context = CatalogContext {
             catalog: metadata.as_ref(),

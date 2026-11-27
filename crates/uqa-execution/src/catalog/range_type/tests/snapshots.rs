@@ -41,7 +41,7 @@ fn range_descriptors_share_both_oids_and_retain_their_generation_without_repeat_
     });
     assert_eq!(allocation.count_total, 0);
     let empty = crate::catalog::test_support::empty_catalog();
-    assert!(empty.range_descriptors.is_none());
+    assert!(empty.snapshot.range_descriptors.is_none());
     assert!(empty
         .range_value_descriptor(original.oid)
         .unwrap()

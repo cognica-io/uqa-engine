@@ -58,7 +58,7 @@ fn select<T>(
     control.check()?;
     let catalog = context.catalog_read_view();
     {
-        let cached = catalog.relation_descriptors.entries.lock();
+        let cached = catalog.snapshot.relation_descriptors.entries.lock();
         if let Some(descriptor) = cached.known.get(&oid) {
             return Ok(ready(Some(OwnedCompositeTypeDescriptor::retained(
                 descriptor.clone(),
