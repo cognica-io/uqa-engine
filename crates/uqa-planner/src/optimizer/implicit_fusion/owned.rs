@@ -94,17 +94,13 @@ fn calibrate(
     expression: OwnedScalarExpr,
     control: &ProductionControl<'_>,
 ) -> Result<OwnedScalarExpr, SQLError> {
-    let ScalarExpr::Func { name, binding, .. } = &*expression else {
+    let ScalarExpr::Func { name, .. } = &*expression else {
         unreachable!("selected retrieval call")
     };
     if !name.eq_ignore_ascii_case("text_match") {
         return Ok(expression);
     }
-    let binding = binding
-        .as_ref()
-        .map(|binding| binding.clone_with_control(control))
-        .transpose()?;
-    Ok(expression.replace_call_metadata(control.copy_text("bayesian_match")?, binding, control)?)
+    Ok(expression.replace_call_name(control.copy_text("bayesian_match")?, control)?)
 }
 
 #[cfg(test)]

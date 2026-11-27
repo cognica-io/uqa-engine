@@ -67,6 +67,56 @@ fn fusion_transfers_payloads_and_retains_only_exact_surviving_constructors() {
 }
 
 #[test]
+fn calibration_renames_the_call_in_its_existing_argument_storage() {
+    let budget = MemoryBudget::new(1 << 20);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&budget, &token, &token);
+    let mut source = call("text_match", Some("items"));
+    let ScalarExpr::Func { binding, .. } = &mut source else {
+        panic!("call")
+    };
+    *binding = Some(uqa_sql::ast::FunctionBinding::builtin_by_name(
+        "text_match",
+        None,
+    ));
+    let input = source.copy_for_rewrite(&control).unwrap();
+    let ScalarExpr::Func {
+        args,
+        name,
+        binding: Some(binding),
+        ..
+    } = &*input
+    else {
+        panic!("call")
+    };
+    let arguments = args.as_ptr();
+    let selected_name = binding.name.as_ptr();
+    let original_capacity = name.capacity();
+    let before = input.reserved_bytes();
+    let sibling = budget.reserve(budget.available() - 32).unwrap();
+    let output = calibrate(input, &control).unwrap();
+    let ScalarExpr::Func {
+        args,
+        name,
+        binding: Some(binding),
+        ..
+    } = &*output
+    else {
+        panic!("call")
+    };
+    assert_eq!(name, "bayesian_match");
+    assert_eq!(args.as_ptr(), arguments);
+    assert_eq!(binding.name, "text_match");
+    assert_eq!(binding.name.as_ptr(), selected_name);
+    assert_eq!(
+        output.reserved_bytes(),
+        before - original_capacity + name.capacity()
+    );
+    drop((output, sibling));
+    assert_eq!(budget.used(), 0);
+}
+
+#[test]
 fn rejected_and_cancelled_fusion_releases_private_children_and_scratch() {
     let source = ScalarExpr::And(vec![call("text_match", None), call("knn_match", None)]);
     for mode in 0..4 {

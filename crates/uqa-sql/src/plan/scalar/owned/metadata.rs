@@ -14,6 +14,26 @@ use uqa_core::{
 };
 
 impl OwnedScalarExpr {
+    pub(super) fn replace_text_field(
+        mut self,
+        text: Produced<String>,
+        control: &ProductionControl<'_>,
+        field: impl FnOnce(&mut ScalarExpr) -> &mut String,
+    ) -> Result<Self> {
+        self.assert_owner(control);
+        control.check()?;
+        let old = field(&mut self.expression);
+        let bytes = old.capacity();
+        let (text, lease) = text.into_parts();
+        *old = text;
+        if let Some(owner) = &mut self.memory {
+            drop(owner.direct.split(bytes));
+            owner.direct.absorb(lease.expect("admitted scalar text"));
+        }
+        control.check()?;
+        Ok(self)
+    }
+
     /// Wrap the surviving expression in the exact type and collation selected during ordered analysis.
     pub fn collated(
         child: Self,

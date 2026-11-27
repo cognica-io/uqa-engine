@@ -6899,6 +6899,19 @@
       ]
     },
     {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "calibration_renames_the_call_in_its_existing_argument_storage",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/implicit_fusion/owned/tests.rs",
+      "capability": "Implicit fusion calibration",
+      "workload": "Rename a bound text retrieval predicate with a large argument and 32 bytes of free workspace.",
+      "invariant": "The new name replaces only the original name's capacity. The argument vector and selected binding keep their addresses and all reservations release on drop.",
+      "case_names": [
+        "optimizer::implicit_fusion::owned::tests::calibration_renames_the_call_in_its_existing_argument_storage"
+      ]
+    },
+    {
       "package": "uqa-sql",
       "kind": "lib",
       "test": "caller_owned_subqueries_use_the_operation_allowance_for_remapping",
