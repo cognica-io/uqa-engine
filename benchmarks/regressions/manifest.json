@@ -77672,6 +77672,19 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "repeated_cypher_patterns_match_without_allocating_or_recompiling",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/cypher/executor/regex.rs",
+      "capability": "Statement-owned Cypher pattern reuse",
+      "workload": "Evaluate the same unanchored Cypher pattern 2,048 times after the initial match.",
+      "invariant": "The warmed matches allocate no heap memory and the statement retains one compiled pattern.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

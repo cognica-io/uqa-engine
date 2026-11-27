@@ -7,16 +7,15 @@
 //! MATCH expansion, vertex and relationship binding, and predicates.
 
 use super::{
-    agtype, pattern_variables, strict_bool, BTreeSet, Binding, BindingRow, CypherError,
-    CypherExecutor, CypherExpr, Direction, Edge, EdgeId, GraphStore, MatchClause, MatchState,
-    NodePattern, PathElement, PathPattern, RelDirection, RelPattern, ResultRow, Value, Vertex,
-    VertexId,
+    agtype, pattern_variables, strict_bool, BTreeSet, Binding, BindingRow, CypherError, CypherExpr,
+    Direction, Edge, EdgeId, GraphStore, MatchClause, MatchState, NodePattern, PathElement,
+    PathPattern, RelDirection, RelPattern, ResultRow, StatementReader, Value, Vertex, VertexId,
 };
 
 mod batch;
 mod borrowed;
 
-impl<G: GraphStore> CypherExecutor<'_, G> {
+impl<G: GraphStore> StatementReader<'_, G> {
     pub(crate) fn exec_match(
         &self,
         clause: &MatchClause,

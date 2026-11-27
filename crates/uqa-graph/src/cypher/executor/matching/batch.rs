@@ -7,11 +7,11 @@
 //! Share node scans across independent input bindings without retaining a graph payload cache.
 
 use super::{
-    agtype, pattern_variables, BTreeSet, Binding, BindingRow, CypherError, CypherExecutor,
-    CypherExpr, GraphStore, MatchClause, PathElement, Value,
+    agtype, pattern_variables, BTreeSet, Binding, BindingRow, CypherError, CypherExpr, GraphStore,
+    MatchClause, PathElement, StatementReader, Value,
 };
 
-impl<G: GraphStore> CypherExecutor<'_, G> {
+impl<G: GraphStore> StatementReader<'_, G> {
     pub(super) fn try_node_match_batch(
         &self,
         clause: &MatchClause,

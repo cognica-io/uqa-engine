@@ -31,6 +31,8 @@ Vertex and edge identities are non-negative internal identifiers. Application pr
 
 ## Cypher pipeline
 
+Read and write statements reuse up to eight compiled `=~` patterns across rows and clauses. A pattern longer than 4,096 source bytes can still match and is released after the match. Non-string operands yield null, and an invalid pattern is reported when its string operands are evaluated.
+
 The Cypher parser produces an owned query representation for supported clauses. Execution carries a binding environment across `MATCH`, `OPTIONAL MATCH`, `UNWIND`, `WITH`, filtering, projection, grouping, ordering, skip, and limit. Mutation paths implement create, merge, set, delete, and detach delete semantics against the named store.
 
 `MERGE` separates its matched and created paths so `ON MATCH SET` and `ON CREATE SET` apply only to the correct branch. A mutation returning no values still enters SQL through a defined table-function schema.
