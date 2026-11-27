@@ -12,7 +12,6 @@
 //! top-`k` highest-scoring candidates. Stages run in order; the
 //! operator returns the result of the final stage.
 
-use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use uqa_core::{IndexStats, Payload, PostingEntry, PostingList};
@@ -20,8 +19,8 @@ use uqa_fusion::LogitGating;
 use uqa_scoring::{logit, sigmoid};
 use uqa_storage::StorageBackendError;
 
-use crate::base::{require_probability, ExecutionContext, Operator, OperatorResult};
-use crate::hybrid::coverage_based_default;
+use crate::base::{ExecutionContext, Operator, OperatorResult};
+use crate::hybrid::{evidence::visit_covered_scores, validate_probability_postings};
 
 pub struct ProgressiveFusionOperator {
     pub stages: Vec<(Vec<Arc<dyn Operator>>, usize)>,
@@ -69,10 +68,9 @@ impl Operator for ProgressiveFusionOperator {
             None => LogitGating::Pass,
         };
         let mut signal_lists: Vec<PostingList> = Vec::new();
-        let mut candidate_ids: Option<BTreeSet<u64>> = None;
         let mut last_result: PostingList = PostingList::new();
 
-        for (signals, k) in &self.stages {
+        for (stage, (signals, k)) in self.stages.iter().enumerate() {
             if signals.is_empty() {
                 return Err(StorageBackendError::Other(
                     "ProgressiveFusionOperator stages require at least one signal".to_string(),
@@ -80,60 +78,34 @@ impl Operator for ProgressiveFusionOperator {
             }
             for signal in signals {
                 let mut pl = signal.execute(ctx)?;
-                for entry in pl.entries() {
-                    require_probability(entry.payload.score, "progressive fusion")?;
-                }
-                if let Some(cands) = &candidate_ids {
-                    let kept: Vec<PostingEntry> = pl
-                        .entries()
-                        .iter()
-                        .filter(|e| cands.contains(&e.doc_id))
-                        .cloned()
-                        .collect();
-                    pl = PostingList::from_sorted_unchecked(kept);
+                validate_probability_postings(&pl, "progressive fusion")?;
+                if stage > 0 {
+                    let mut previous = last_result.lookup_ascending();
+                    pl = PostingList::from_sorted_unchecked(
+                        pl.into_iter()
+                            .filter(|entry| previous(entry.doc_id).is_some())
+                            .collect(),
+                    );
                 }
                 signal_lists.push(pl);
             }
-            let mut score_maps = Vec::with_capacity(signal_lists.len());
-            let mut all_doc_ids = BTreeSet::new();
-            for posting in &signal_lists {
-                let map: BTreeMap<u64, f64> = posting
-                    .entries()
+            let n = signal_lists.len() as f64;
+            let confidence = n.powf(self.alpha);
+            let mut scored = Vec::new();
+            visit_covered_scores(&signal_lists, |doc_id, scores| {
+                let mean_gated_logit = scores
                     .iter()
-                    .map(|entry| {
-                        all_doc_ids.insert(entry.doc_id);
-                        (entry.doc_id, entry.payload.score)
-                    })
-                    .collect();
-                score_maps.push(map);
-            }
-            let total = all_doc_ids.len();
-            let defaults: Vec<f64> = score_maps
-                .iter()
-                .map(|scores| coverage_based_default(scores.len(), total, 0.01))
-                .collect();
-            let n = signal_lists.len();
-            let confidence = (n as f64).powf(self.alpha);
-            let mut scored: Vec<PostingEntry> = all_doc_ids
-                .into_iter()
-                .map(|doc_id| {
-                    let mean_gated_logit = score_maps
-                        .iter()
-                        .zip(&defaults)
-                        .map(|(scores, default)| {
-                            gating.apply(logit(scores.get(&doc_id).copied().unwrap_or(*default)))
-                        })
-                        .sum::<f64>()
-                        / n as f64;
-                    let fused = sigmoid(confidence * mean_gated_logit);
-                    PostingEntry::new(doc_id, Payload::with_score(fused))
-                })
-                .collect();
-            scored.sort_by_key(|e| e.doc_id);
+                    .map(|score| gating.apply(logit(*score)))
+                    .sum::<f64>()
+                    / n;
+                scored.push(PostingEntry::new(
+                    doc_id,
+                    Payload::with_score(sigmoid(confidence * mean_gated_logit)),
+                ));
+                Ok::<_, StorageBackendError>(())
+            })?;
             let scored_pl = PostingList::from_sorted_unchecked(scored);
-            let topk = scored_pl.ranked().select_top_k(*k);
-            candidate_ids = Some(topk.doc_ids().collect());
-            last_result = topk;
+            last_result = scored_pl.ranked().select_top_k(*k);
         }
         Ok(last_result)
     }
@@ -199,13 +171,13 @@ mod tests {
         ])) as Arc<dyn Operator>;
         let op = ProgressiveFusionOperator::new(vec![(vec![stage_0], 3), (vec![stage_1], 2)], 0.0);
         let result = op.execute(&ExecutionContext::new()).unwrap();
-        let ids: Vec<u64> = result.doc_ids().collect();
-        // Stage 0 keeps {1,2,3}. Stage 1 contributes only doc 1 (4, 5
-        // are filtered to the candidate set from stage 0). Remaining
-        // docs accumulate stage 0 score plus 0.5 prior for stage 1
-        // signal. Top-2 should be doc 1 (combo of high signal + signal)
-        // and one of {2, 3}.
-        assert_eq!(ids.len(), 2);
-        assert!(ids.contains(&1));
+        // Only document 1 matched the second signal inside the first cutoff.
+        let miss = crate::hybrid::coverage_based_default(1, 4, 0.01);
+        let expected = [(1, 0.9, 0.95), (2, 0.8, miss)]
+            .map(|(id, a, b)| (id, sigmoid(f64::midpoint(logit(a), logit(b))).to_bits()));
+        assert!(result
+            .iter()
+            .map(|entry| (entry.doc_id, entry.payload.score.to_bits()))
+            .eq(expected));
     }
 }

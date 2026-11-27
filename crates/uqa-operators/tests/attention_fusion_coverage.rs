@@ -51,17 +51,25 @@ fn test_attention_empty_signals_return_empty() {
 
 #[test]
 fn test_attention_fuses_two_signals() {
+    let attention = AttentionFusion::new(2, 6, 0.0);
+    let miss = uqa_operators::hybrid::coverage_based_default(2, 3, 0.01);
+    let expected = attention
+        .fuse_batch(
+            &[vec![0.8, 0.7], vec![0.6, miss], vec![miss, 0.5]],
+            &[0.0; 6],
+        )
+        .unwrap();
     let op = AttentionFusionOperator::new(
         vec![signal(&[(1, 0.8), (2, 0.6)]), signal(&[(1, 0.7), (3, 0.5)])],
-        AttentionFuser::Single(AttentionFusion::new(2, 6, 0.0)),
+        AttentionFuser::Single(attention),
         vec![0.0; 6],
     );
     let result = op.execute(&ExecutionContext::new()).unwrap();
-    let ids: Vec<u64> = result.iter().map(|entry| entry.doc_id).collect();
-    assert_eq!(ids, vec![1, 2, 3]);
-    for entry in &result {
-        assert!(entry.payload.score > 0.0 && entry.payload.score < 1.0);
-    }
+    assert!(result.doc_ids().eq([1, 2, 3]));
+    assert!(result
+        .iter()
+        .map(|entry| entry.payload.score.to_bits())
+        .eq(expected.into_iter().map(f64::to_bits)));
 }
 
 #[test]
@@ -105,16 +113,20 @@ fn test_learned_empty_signals_return_empty() {
 
 #[test]
 fn test_learned_fuses_two_signals() {
+    let model = LearnedFusion::new(2, 0.0);
+    let miss = uqa_operators::hybrid::coverage_based_default(2, 3, 0.01);
+    let expected =
+        [[0.8, 0.7], [0.6, miss], [miss, 0.5]].map(|row| model.fuse(&row).unwrap().to_bits());
     let op = LearnedFusionOperator::new(
         vec![signal(&[(1, 0.8), (2, 0.6)]), signal(&[(1, 0.7), (3, 0.5)])],
-        LearnedFusion::new(2, 0.0),
+        model,
     );
     let result = op.execute(&ExecutionContext::new()).unwrap();
-    let ids: Vec<u64> = result.iter().map(|entry| entry.doc_id).collect();
-    assert_eq!(ids, vec![1, 2, 3]);
-    for entry in &result {
-        assert!(entry.payload.score > 0.0 && entry.payload.score < 1.0);
-    }
+    assert!(result.doc_ids().eq([1, 2, 3]));
+    assert!(result
+        .iter()
+        .map(|entry| entry.payload.score.to_bits())
+        .eq(expected));
 }
 
 #[test]

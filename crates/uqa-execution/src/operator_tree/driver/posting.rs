@@ -6,10 +6,7 @@
 
 //! Posting-list adapters and document-wise fusion utilities.
 
-use super::{
-    BTreeMap, BTreeSet, DocId, DriverResult, Payload, PostingEntry, PostingList, SQLError,
-    ScoredEntry, Value,
-};
+use super::{DriverResult, Payload, PostingEntry, PostingList, SQLError, ScoredEntry, Value};
 
 /// Replay a computed child posting list for operators that consume already-evaluated signals.
 pub(super) struct StaticPostingList {
@@ -37,19 +34,6 @@ impl uqa_operators::base::Operator for StaticPostingList {
     }
 }
 
-/// Combine a vector of per-signal posting lists into a single fused posting list. `fuse` receives one document's per-signal probability vector and returns its fused score.
-pub(super) fn fuse_signals_with<F>(
-    posting_lists: &[PostingList],
-    fuse: F,
-) -> DriverResult<PostingList>
-where
-    F: Fn(&[f64]) -> DriverResult<f64>,
-{
-    fuse_signal_batches_with(posting_lists, |probabilities| {
-        probabilities.iter().map(|sample| fuse(sample)).collect()
-    })
-}
-
 pub(super) fn fuse_signal_batches_with<F>(
     posting_lists: &[PostingList],
     fuse: F,
@@ -57,7 +41,8 @@ pub(super) fn fuse_signal_batches_with<F>(
 where
     F: Fn(&[Vec<f64>]) -> DriverResult<Vec<f64>>,
 {
-    let (candidate_ids, probabilities) = fusion_probability_matrix(posting_lists);
+    let (candidate_ids, probabilities) =
+        uqa_operators::hybrid::evidence::fusion_probability_matrix(posting_lists);
     if candidate_ids.is_empty() {
         return Ok(PostingList::new());
     }
@@ -83,41 +68,6 @@ where
         })
         .collect();
     Ok(PostingList::from_sorted_unchecked(entries))
-}
-
-pub(super) fn fusion_probability_matrix(
-    posting_lists: &[PostingList],
-) -> (Vec<DocId>, Vec<Vec<f64>>) {
-    let mut maps: Vec<BTreeMap<DocId, f64>> = Vec::with_capacity(posting_lists.len());
-    let mut all_ids: BTreeSet<DocId> = BTreeSet::new();
-    for pl in posting_lists {
-        let mut m: BTreeMap<DocId, f64> = BTreeMap::new();
-        for entry in pl {
-            m.insert(entry.doc_id, entry.payload.score);
-            all_ids.insert(entry.doc_id);
-        }
-        maps.push(m);
-    }
-    let total = all_ids.len();
-    if total == 0 {
-        return (Vec::new(), Vec::new());
-    }
-    let defaults: Vec<f64> = maps
-        .iter()
-        .map(|m| uqa_operators::hybrid::coverage_based_default(m.len(), total, 0.01))
-        .collect();
-    let mut candidate_ids = Vec::with_capacity(total);
-    let mut probabilities = Vec::with_capacity(total);
-    for doc_id in all_ids {
-        let probs: Vec<f64> = maps
-            .iter()
-            .enumerate()
-            .map(|(j, m)| *m.get(&doc_id).unwrap_or(&defaults[j]))
-            .collect();
-        candidate_ids.push(doc_id);
-        probabilities.push(probs);
-    }
-    (candidate_ids, probabilities)
 }
 
 pub fn scored_to_posting_list(scored: &[ScoredEntry]) -> PostingList {

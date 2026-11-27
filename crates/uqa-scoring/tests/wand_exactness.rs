@@ -105,12 +105,7 @@ fn assert_top_k_matches(got: &[(DocId, f64)], expected: &[(DocId, f64)]) {
     assert_eq!(got.len(), expected.len(), "top-k length mismatch");
     for (a, b) in got.iter().zip(expected) {
         assert_eq!(a.0, b.0, "doc_id order mismatch");
-        assert!(
-            (a.1 - b.1).abs() < 1e-9,
-            "score delta {} too large at doc {}",
-            (a.1 - b.1).abs(),
-            a.0,
-        );
+        assert_eq!(a.1.to_bits(), b.1.to_bits(), "score at document {}", a.0);
     }
 }
 
@@ -158,13 +153,17 @@ fn wand_top_k_matches_exhaustive_and_skips_at_least_60pct() {
     let expected = exhaustive_top_k(&idx, &scorers, &fields, &terms, 10);
     assert_top_k_matches(&got, &expected);
 
-    let skip_rate = result.stats.skip_rate();
+    let exact = uqa_scoring::WANDStats {
+        total_candidates: q.exact_candidate_count().unwrap(),
+        ..result.stats
+    };
+    let skip_rate = exact.skip_rate();
     assert!(
         skip_rate >= 0.60,
         "WAND skip rate {} below 60% (scored={} of {})",
         skip_rate,
         result.stats.scored,
-        result.stats.total_candidates,
+        exact.total_candidates,
     );
 }
 
@@ -221,13 +220,17 @@ fn bmw_top_k_matches_exhaustive_and_skips_at_least_75pct() {
     let expected = exhaustive_top_k(&idx, &scorers, &fields, &terms, 10);
     assert_top_k_matches(&got, &expected);
 
-    let skip_rate = result.stats.skip_rate();
+    let exact = uqa_scoring::WANDStats {
+        total_candidates: q.exact_candidate_count().unwrap(),
+        ..result.stats
+    };
+    let skip_rate = exact.skip_rate();
     assert!(
         skip_rate >= 0.75,
         "BMW skip rate {} below 75% (scored={} of {})",
         skip_rate,
         result.stats.scored,
-        result.stats.total_candidates,
+        exact.total_candidates,
     );
 }
 

@@ -129,14 +129,14 @@ impl AttentionFusion {
         Ok(())
     }
 
-    fn validate_values(probs: &[f64], query_features: &[f64]) -> Result<(), &'static str> {
+    fn validate_values(probs: &[f64], finite_query_features: bool) -> Result<(), &'static str> {
         if probs
             .iter()
             .any(|probability| !probability.is_finite() || !(0.0..=1.0).contains(probability))
         {
             return Err("attention probabilities must be finite and in [0, 1]");
         }
-        if query_features.iter().any(|feature| !feature.is_finite()) {
+        if !finite_query_features {
             return Err("attention query features must be finite");
         }
         Ok(())
@@ -144,12 +144,19 @@ impl AttentionFusion {
 
     pub fn fuse(&self, probs: &[f64], query_features: &[f64]) -> Result<f64, &'static str> {
         self.validate_inputs(probs.len(), query_features.len())?;
-        Self::validate_values(probs, query_features)?;
+        Self::validate_values(
+            probs,
+            query_features.iter().all(|feature| feature.is_finite()),
+        )?;
         if probs.len() == 1 {
             return Ok(self.apply_base_rate(probs[0]));
         }
         let weights = self.attention_weights(query_features)?;
-        let probability = confidence_scaled_log_odds_pool_weighted(probs, &weights, self.alpha)?;
+        self.fuse_weighted(probs, &weights)
+    }
+
+    fn fuse_weighted(&self, probs: &[f64], weights: &[f64]) -> Result<f64, &'static str> {
+        let probability = confidence_scaled_log_odds_pool_weighted(probs, weights, self.alpha)?;
         Ok(self.apply_base_rate(probability))
     }
 
@@ -163,21 +170,31 @@ impl AttentionFusion {
         query_features: &[f64],
     ) -> Result<Vec<f64>, &'static str> {
         self.validate_inputs(self.n_signals, query_features.len())?;
+        let finite_query_features = query_features.iter().all(|feature| feature.is_finite());
         for sample in probabilities {
-            self.validate_inputs(sample.len(), query_features.len())?;
-            Self::validate_values(sample, query_features)?;
+            if sample.len() != self.n_signals {
+                self.validate_inputs(sample.len(), query_features.len())?;
+            }
+            Self::validate_values(sample, finite_query_features)?;
         }
         if probabilities.is_empty() {
             return Ok(Vec::new());
         }
-        if !self.normalize || probabilities.len() == 1 {
+        let normalize = self.normalize && probabilities.len() > 1;
+        if !normalize && self.n_signals == 1 {
+            return Ok(probabilities
+                .iter()
+                .map(|sample| self.apply_base_rate(sample[0]))
+                .collect());
+        }
+        let weights = self.attention_weights(query_features)?;
+        if !normalize {
             return probabilities
                 .iter()
-                .map(|sample| self.fuse(sample, query_features))
+                .map(|sample| self.fuse_weighted(sample, &weights))
                 .collect();
         }
 
-        let weights = self.attention_weights(query_features)?;
         let mut normalized_logits = probabilities
             .iter()
             .map(|sample| sample.iter().copied().map(logit).collect::<Vec<_>>())
@@ -308,7 +325,7 @@ impl AttentionFusion {
                 return Err("attention training labels must be finite and in [0, 1]");
             }
             self.validate_inputs(sample.len(), features.len())?;
-            Self::validate_values(sample, features)?;
+            Self::validate_values(sample, features.iter().all(|feature| feature.is_finite()))?;
         }
         let mut candidate = self.clone();
         for _ in 0..epochs {
@@ -485,6 +502,41 @@ mod tests {
         for w in &weights {
             assert!((w - 1.0 / 3.0).abs() < 1e-9);
         }
+    }
+
+    #[test]
+    fn unnormalized_batch_matches_individual_scores_and_skips_unused_logits() {
+        let mut fusion = AttentionFusion::new(2, 2, 0.7)
+            .with_options(false, Some(0.3))
+            .unwrap();
+        fusion.weights = vec![-1.0, 2.0, 0.3, 0.8];
+        let samples = vec![vec![0.0, 0.9], vec![0.5, 1.0], vec![0.2, 0.3]];
+        let features = [0.2, -0.7];
+        let expected: Vec<_> = samples
+            .iter()
+            .map(|row| fusion.fuse(row, &features).unwrap().to_bits())
+            .collect();
+        assert_eq!(
+            fusion
+                .fuse_batch(&samples, &features)
+                .unwrap()
+                .into_iter()
+                .map(f64::to_bits)
+                .collect::<Vec<_>>(),
+            expected
+        );
+        assert!(fusion.fuse_batch(&[], &[f64::NAN, 0.0]).unwrap().is_empty());
+        assert!(fusion
+            .fuse_batch(&[vec![0.25, f64::NAN]], &features)
+            .is_err());
+        let mut identity = AttentionFusion::new(1, 1, 1.0);
+        identity.weights[0] = f64::MAX;
+        assert_eq!(
+            identity
+                .fuse_batch(&[vec![0.25], vec![0.75]], &[2.0])
+                .unwrap(),
+            [0.25, 0.75]
+        );
     }
 
     #[test]

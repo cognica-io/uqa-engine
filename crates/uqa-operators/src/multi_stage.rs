@@ -14,7 +14,7 @@
 
 use std::sync::Arc;
 
-use uqa_core::{IndexStats, Payload, PostingEntry, PostingList};
+use uqa_core::{IndexStats, PostingList};
 use uqa_storage::{StorageBackendError, StorageBackendResult};
 
 use crate::base::{require_finite_score, ExecutionContext, Operator, OperatorResult};
@@ -50,19 +50,14 @@ impl MultiStageOperator {
         Ok(Self { stages })
     }
 
-    fn apply_cutoff(pl: &PostingList, cutoff: Cutoff) -> StorageBackendResult<PostingList> {
+    fn apply_cutoff(pl: PostingList, cutoff: Cutoff) -> StorageBackendResult<PostingList> {
         for entry in pl.entries() {
             require_finite_score(entry.payload.score, "multi-stage retrieval")?;
         }
         Ok(match cutoff {
             Cutoff::TopK(k) => pl.ranked().select_top_k(k),
             Cutoff::Threshold(t) => {
-                let kept: Vec<PostingEntry> = pl
-                    .entries()
-                    .iter()
-                    .filter(|e| e.payload.score >= t)
-                    .cloned()
-                    .collect();
+                let kept = pl.into_iter().filter(|e| e.payload.score >= t).collect();
                 PostingList::from_sorted_unchecked(kept)
             }
         })
@@ -74,38 +69,24 @@ impl Operator for MultiStageOperator {
         let (first_op, first_cutoff) = self.stages.first().ok_or_else(|| {
             StorageBackendError::Other("MultiStageOperator requires at least one stage".to_string())
         })?;
-        let mut candidates = Self::apply_cutoff(&first_op.execute(ctx)?, *first_cutoff)?;
+        let mut candidates = Self::apply_cutoff(first_op.execute(ctx)?, *first_cutoff)?;
 
         for (stage_op, cutoff) in self.stages.iter().skip(1) {
             let stage_result = stage_op.execute(ctx)?;
             for entry in stage_result.entries() {
                 require_finite_score(entry.payload.score, "multi-stage retrieval")?;
             }
-            // Build a doc_id -> score map from the stage's output.
-            let mut scores: std::collections::BTreeMap<u64, f64> =
-                std::collections::BTreeMap::new();
-            for entry in stage_result.entries() {
-                scores.insert(entry.doc_id, entry.payload.score);
-            }
-            // Re-score surviving candidates: replace score when the
-            // stage scored the doc; otherwise carry the prior score.
-            let rescored: Vec<PostingEntry> = candidates
-                .entries()
-                .iter()
-                .map(|e| {
-                    let new_score = scores.get(&e.doc_id).copied().unwrap_or(e.payload.score);
-                    PostingEntry::new(
-                        e.doc_id,
-                        Payload {
-                            positions: e.payload.positions.clone(),
-                            score: new_score,
-                            fields: e.payload.fields.clone(),
-                        },
-                    )
+            let mut lookup = stage_result.lookup_ascending();
+            let rescored = candidates
+                .into_iter()
+                .map(|mut entry| {
+                    if let Some(stage) = lookup(entry.doc_id) {
+                        entry.payload.score = stage.payload.score;
+                    }
+                    entry
                 })
                 .collect();
-            candidates =
-                Self::apply_cutoff(&PostingList::from_sorted_unchecked(rescored), *cutoff)?;
+            candidates = Self::apply_cutoff(PostingList::from_sorted_unchecked(rescored), *cutoff)?;
         }
         Ok(candidates)
     }
@@ -175,10 +156,12 @@ mod tests {
 
     #[test]
     fn second_stage_rescores_survivors_only() {
+        let mut candidate = entry(3, 0.6);
+        candidate.payload.positions = vec![7, 9];
         let stage_0 = Arc::new(ConstOperator(vec![
             entry(1, 0.4),
             entry(2, 0.9),
-            entry(3, 0.6),
+            candidate,
             entry(4, 0.1),
         ])) as Arc<dyn Operator>;
         let stage_1 = Arc::new(ConstOperator(vec![
@@ -198,9 +181,7 @@ mod tests {
         // Survivors: {1, 2, 3}. Stage 1 rescores 2 -> 0.2, 3 -> 0.95;
         // 1 has no stage-1 score so it carries 0.4. Top-2 by score
         // gives {3, 1}. Result returns to doc_id order: {1, 3}.
-        assert_eq!(pairs.len(), 2);
-        let ids: Vec<u64> = pairs.iter().map(|p| p.0).collect();
-        assert!(ids.contains(&1));
-        assert!(ids.contains(&3));
+        assert_eq!(pairs, [(1, 0.4), (3, 0.95)]);
+        assert_eq!(out.get_entry(3).unwrap().payload.positions, [7, 9]);
     }
 }

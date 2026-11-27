@@ -8,13 +8,13 @@
 
 use super::{
     collect_graph_names, combine_signal_priors, deep_runtime_gating, fuse_signal_batches_with,
-    fuse_signals_with, lower_deep_batch_norm, lower_deep_conv, lower_deep_dense,
-    lower_deep_dropout, lower_deep_pool, operator_execution_error, scored_to_posting_list,
-    static_operator, BTreeSet, BayesianEvidenceFusionOperator, DocId, DriverResult,
-    ExternalPriorMode, GatingSpec, GraphNeighborAccess, MultiStageCutoff, MultiStageEntry,
-    OperatorTree, Payload, PhysicalRetrievalDriver, PositiveEvidencePoolExecution, PostingEntry,
-    PostingList, RobustPositiveEvidencePoolOperator, SQLError, ScalarExpr, ScoredEntry,
-    StaticPostingList, StorageBackendError, TextScoringMode, Value,
+    lower_deep_batch_norm, lower_deep_conv, lower_deep_dense, lower_deep_dropout, lower_deep_pool,
+    operator_execution_error, scored_to_posting_list, static_operator, BTreeSet,
+    BayesianEvidenceFusionOperator, DocId, DriverResult, ExternalPriorMode, GatingSpec,
+    GraphNeighborAccess, MultiStageCutoff, MultiStageEntry, OperatorTree, Payload,
+    PhysicalRetrievalDriver, PositiveEvidencePoolExecution, PostingEntry, PostingList,
+    RobustPositiveEvidencePoolOperator, SQLError, ScalarExpr, ScoredEntry, StaticPostingList,
+    StorageBackendError, TextScoringMode, Value,
 };
 
 pub(super) fn lower_positive_gating(gating: &GatingSpec) -> uqa_fusion::LogitGating {
@@ -600,11 +600,9 @@ impl PhysicalRetrievalDriver<'_> {
             .validate_inputs(signals.len())
             .map_err(|error| SQLError::TypeMismatch(format!("LearnedFusion: {error}")))?;
         let posting_lists = self.execute_posting_branches(signals)?;
-        fuse_signals_with(&posting_lists, |probs| {
-            learned
-                .fuse(probs)
-                .map_err(|error| SQLError::TypeMismatch(format!("LearnedFusion: {error}")))
-        })
+        learned
+            .fuse_postings(&posting_lists)
+            .map_err(|error| SQLError::TypeMismatch(format!("LearnedFusion: {error}")))
     }
 
     pub(super) fn execute_multi_stage(
@@ -620,15 +618,13 @@ impl PhysicalRetrievalDriver<'_> {
         for stage in stages {
             let stage_result = self.execute_posting_node(&stage.child)?;
             let mut entries: Vec<PostingEntry> = if let Some(prior) = &current {
-                let prior_ids: BTreeSet<DocId> = prior.entries().iter().map(|e| e.doc_id).collect();
+                let mut lookup = prior.lookup_ascending();
                 stage_result
-                    .entries()
-                    .iter()
-                    .filter(|entry| prior_ids.contains(&entry.doc_id))
-                    .cloned()
+                    .into_iter()
+                    .filter(|entry| lookup(entry.doc_id).is_some())
                     .collect()
             } else {
-                stage_result.entries().to_vec()
+                stage_result.into_iter().collect()
             };
             entries.sort_by(|a, b| {
                 b.payload

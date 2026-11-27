@@ -28,6 +28,33 @@ pub struct LearnedFusionState {
     pub weights: Vec<f64>,
 }
 
+/// Normalized model weights for scoring candidates from the same batch.
+pub struct PreparedLearnedFusion {
+    weights: std::borrow::Cow<'static, [f64]>,
+    alpha: f64,
+}
+
+impl PreparedLearnedFusion {
+    pub fn fuse(&self, probs: &[f64]) -> Result<f64, &'static str> {
+        if probs.is_empty() {
+            return Err("learned fusion requires at least one signal");
+        }
+        if probs.len() != self.weights.len() {
+            return Err("learned fusion signal count does not match the model");
+        }
+        if probs
+            .iter()
+            .any(|probability| !probability.is_finite() || !(0.0..=1.0).contains(probability))
+        {
+            return Err("learned fusion probabilities must be finite and in [0, 1]");
+        }
+        if probs.len() == 1 {
+            return Ok(probs[0]);
+        }
+        confidence_scaled_log_odds_pool_weighted(probs, &self.weights, self.alpha)
+    }
+}
+
 impl LearnedFusion {
     pub fn new(n_signals: usize, alpha: f64) -> Self {
         Self {
@@ -59,18 +86,19 @@ impl LearnedFusion {
     /// Forward pass: softmax(weights), then weighted log-odds
     /// conjunction.
     pub fn fuse(&self, probs: &[f64]) -> Result<f64, &'static str> {
-        self.validate_inputs(probs.len())?;
-        if probs
-            .iter()
-            .any(|probability| !probability.is_finite() || !(0.0..=1.0).contains(probability))
-        {
-            return Err("learned fusion probabilities must be finite and in [0, 1]");
-        }
-        if probs.len() == 1 {
-            return Ok(probs[0]);
-        }
-        let weights = softmax(&self.weights);
-        confidence_scaled_log_odds_pool_weighted(probs, &weights, self.alpha)
+        self.prepare(probs.len())?.fuse(probs)
+    }
+
+    pub fn prepare(&self, signal_count: usize) -> Result<PreparedLearnedFusion, &'static str> {
+        self.validate_inputs(signal_count)?;
+        Ok(PreparedLearnedFusion {
+            weights: if signal_count == 1 {
+                std::borrow::Cow::Borrowed(&[1.0])
+            } else {
+                std::borrow::Cow::Owned(softmax(&self.weights))
+            },
+            alpha: self.alpha,
+        })
     }
 
     pub fn state_dict(&self) -> LearnedFusionState {
@@ -110,9 +138,10 @@ impl LearnedFusion {
         if !learning_rate.is_finite() || learning_rate < 0.0 {
             return Err("learned fusion learning rate must be finite and non-negative");
         }
-        let predicted = self.fuse(probs)?;
+        let prepared = self.prepare(probs.len())?;
+        let predicted = prepared.fuse(probs)?;
         let error = predicted - label;
-        let weights = softmax(&self.weights);
+        let weights = prepared.weights;
         let mut next_weights = self.weights.clone();
         // Gradient w.r.t. raw weights via chain rule on softmax + log-odds.
         // Approximation: dL/dw_i ~ error * weight_i * logit(p_i).
@@ -176,6 +205,34 @@ fn softmax(values: &[f64]) -> Vec<f64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn prepared_weights_preserve_single_candidate_results_and_model_identity() {
+        let mut model = LearnedFusion {
+            weights: vec![-2.0, 3.0, 0.2],
+            alpha: 0.7,
+        };
+        let normalized = softmax(&model.weights);
+        let batch = model.prepare(3).unwrap();
+        model.weights.reverse();
+        for sample in [[0.0, 0.5, 1.0], [0.9, 0.3, 0.01]] {
+            let expected =
+                confidence_scaled_log_odds_pool_weighted(&sample, &normalized, 0.7).unwrap();
+            assert_eq!(batch.fuse(&sample).unwrap().to_bits(), expected.to_bits());
+        }
+        assert!(batch.fuse(&[]).is_err());
+        assert!(batch.fuse(&[0.3; 2]).is_err());
+        assert!(batch.fuse(&[f64::NAN; 3]).is_err());
+        assert_eq!(
+            LearnedFusion::new(1, 0.5)
+                .prepare(1)
+                .unwrap()
+                .fuse(&[-0.0])
+                .unwrap()
+                .to_bits(),
+            (-0.0f64).to_bits()
+        );
+    }
 
     #[test]
     fn fuse_with_zero_weights_collapses_to_uniform_log_odds() {

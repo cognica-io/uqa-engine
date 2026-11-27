@@ -647,6 +647,73 @@ fn eval_path_walks_nested_map() {
 }
 
 #[test]
+fn projected_path_indexes_the_entries_that_contain_each_key() {
+    use crate::document_store::eval_path_in_document;
+    use uqa_core::PathSegment::{Index, Key};
+
+    let row = |child| Value::Map(doc([("child", child)]));
+    let leaf = |value| Value::Map(doc([("value", value)]));
+    let document = doc([(
+        "rows",
+        Value::List(vec![
+            Value::Null,
+            row(Value::Null),
+            row(leaf(Value::Null)),
+            row(Value::List(vec![leaf(Value::Int(99))])),
+            row(leaf(Value::List(vec![leaf(Value::Int(42))]))),
+        ]),
+    )]);
+    let rows = Key("rows".into());
+    let child = Key("child".into());
+    let value = Key("value".into());
+    let path = [rows, child, value.clone(), Index(1), value, Index(0)];
+    assert_eq!(
+        eval_path_in_document(&document, &path),
+        Some(Value::Int(42))
+    );
+    assert_eq!(
+        eval_path_in_document(&document, &path[..3]),
+        Some(Value::List(vec![
+            Value::Null,
+            Value::List(vec![leaf(Value::Int(42))])
+        ]))
+    );
+    assert_eq!(
+        eval_path_in_document(&document, &[Key("rows".into()), Key("absent".into())]),
+        Some(Value::List(vec![]))
+    );
+    for missing in [
+        vec![],
+        vec![Index(0)],
+        vec![Key("absent".into())],
+        vec![Key("rows".into()), Key("absent".into()), Index(0)],
+    ] {
+        assert_eq!(eval_path_in_document(&document, &missing), None);
+    }
+}
+
+#[test]
+fn scalar_path_lookup_borrows_the_document_at_every_depth() {
+    use crate::document_store::eval_path_in_document;
+    use uqa_core::PathSegment::{Index, Key};
+
+    let mut value = Value::Int(7);
+    let mut path = vec![Key("root".into())];
+    for _ in 0..32 {
+        value = Value::Map(doc([
+            ("child", Value::List(vec![value])),
+            ("unselected", Value::Str("x".repeat(4096))),
+        ]));
+        path.extend([Key("child".into()), Index(0)]);
+    }
+    let document = doc([("root", value)]);
+    let allocation = allocation_counter::measure(|| {
+        assert_eq!(eval_path_in_document(&document, &path), Some(Value::Int(7)));
+    });
+    assert_eq!(allocation.count_total, 0);
+}
+
+#[test]
 fn iter_all_yields_in_id_order() {
     let mut s = MemoryDocumentStore::new();
     s.put(3, doc([("k", Value::Int(3))])).unwrap();
