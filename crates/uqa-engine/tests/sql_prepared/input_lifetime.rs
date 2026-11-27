@@ -16,7 +16,7 @@ use uqa_engine::Engine;
 #[case::redb(3)]
 fn prepared_input_invalidation_matches_postgresql(
     #[case] provider: usize,
-    #[values(0, 1, 2)] fixture: usize,
+    #[values(0, 1, 2, 3)] fixture: usize,
 ) {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("prepared-invalidation.db");
@@ -33,6 +33,9 @@ fn prepared_input_invalidation_matches_postgresql(
             2 => {
                 include_str!("../../../../tests/parity/pg18/prepared_catalog_inputs.expected.json")
             }
+            3 => include_str!(
+                "../../../../tests/parity/pg18/prepared_cast_domain_shadowing.expected.json"
+            ),
             _ => unreachable!(),
         },
     );
