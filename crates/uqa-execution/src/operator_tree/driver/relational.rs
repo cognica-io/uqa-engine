@@ -34,10 +34,23 @@ impl PhysicalRetrievalDriver<'_> {
         let Some(first) = iter.next() else {
             return Ok(PostingList::new().into());
         };
-        iter.try_fold(first, |acc, next| match (acc, next) {
-            (OperatorOutput::Posting(left), OperatorOutput::Posting(right)) => {
-                Ok(OperatorOutput::Posting(left.merge_union(&right)))
+        let mixed_carriers = || {
+            SQLError::TypeMismatch(
+                "Union operands must use the same posting-list carrier".to_string(),
+            )
+        };
+        if let OperatorOutput::Posting(first) = first {
+            let mut lists = Vec::with_capacity(1 + iter.len());
+            lists.push(first);
+            for output in iter {
+                let OperatorOutput::Posting(list) = output else {
+                    return Err(mixed_carriers());
+                };
+                lists.push(list);
             }
+            return Ok(PostingList::merge_union_all(lists).into());
+        }
+        iter.try_fold(first, |acc, next| match (acc, next) {
             (OperatorOutput::Graph(left), OperatorOutput::Graph(right)) => left
                 .merge_union(&right)
                 .map(OperatorOutput::Graph)
@@ -45,9 +58,7 @@ impl PhysicalRetrievalDriver<'_> {
             (OperatorOutput::Generalized(left), OperatorOutput::Generalized(right)) => {
                 Ok(OperatorOutput::Generalized(left.merge_union(&right)))
             }
-            _ => Err(SQLError::TypeMismatch(
-                "Union operands must use the same posting-list carrier".to_string(),
-            )),
+            _ => Err(mixed_carriers()),
         })
     }
 
