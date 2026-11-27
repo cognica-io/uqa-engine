@@ -65,7 +65,7 @@ fn match_signatures(g: &uqa_graph::GraphPostingList) -> BTreeSet<Vec<VertexId>> 
             .get_graph_payload(entry.doc_id)
             .cloned()
             .unwrap_or_default();
-        let mut vs = payload.subgraph_vertices.clone();
+        let mut vs = payload.subgraph_vertices.to_vec();
         vs.sort_unstable();
         vs.dedup();
         sigs.insert(vs);

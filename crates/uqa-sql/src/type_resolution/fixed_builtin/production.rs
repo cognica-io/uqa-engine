@@ -19,7 +19,7 @@ pub(crate) fn resolve_syntax_binding_with_control(
     control: &ProductionControl<'_>,
 ) -> Result<Option<Produced<FunctionBinding>>, SQLError> {
     control.check()?;
-    if registry::lookup(name).is_none() {
+    if registry::registered_name(name).is_none() {
         return Ok(None);
     }
     let selected = resolve_overload_with_control(name, None, &[], &[], false, None, control)?;

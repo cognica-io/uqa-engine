@@ -32,10 +32,18 @@ pub enum AgtypeConversionError {
     GraphIdOutOfRange { id: u64 },
 }
 
-fn graph_id_value(id: u64) -> Result<Value, AgtypeConversionError> {
-    i64::try_from(id)
-        .map(Value::Int)
-        .map_err(|_| AgtypeConversionError::GraphIdOutOfRange { id })
+/// Convert a stored vertex or edge ID to an agtype integer.
+pub fn graph_id(id: u64) -> Result<i64, AgtypeConversionError> {
+    i64::try_from(id).map_err(|_| AgtypeConversionError::GraphIdOutOfRange { id })
+}
+
+/// Convert an edge's ID and endpoints in agtype field order.
+pub fn edge_ids(edge: &Edge) -> Result<[i64; 3], AgtypeConversionError> {
+    Ok([
+        graph_id(edge.edge_id)?,
+        graph_id(edge.source_id)?,
+        graph_id(edge.target_id)?,
+    ])
 }
 
 /// Reserved map key that tags a [`Value::Map`] as a graph-entity
@@ -59,7 +67,7 @@ pub enum EntityKind {
 pub fn vertex_to_value(vertex: &Vertex) -> Result<Value, AgtypeConversionError> {
     let mut map = BTreeMap::new();
     map.insert(AGTYPE_KIND_KEY.into(), Value::Str(KIND_VERTEX.into()));
-    map.insert("id".into(), graph_id_value(vertex.vertex_id)?);
+    map.insert("id".into(), Value::Int(graph_id(vertex.vertex_id)?));
     map.insert("label".into(), Value::Str(vertex.label.clone()));
     map.insert("properties".into(), Value::Map(vertex.properties.clone()));
     Ok(Value::Map(map))
@@ -67,12 +75,13 @@ pub fn vertex_to_value(vertex: &Vertex) -> Result<Value, AgtypeConversionError> 
 
 /// Wrap an [`Edge`] into its agtype envelope value.
 pub fn edge_to_value(edge: &Edge) -> Result<Value, AgtypeConversionError> {
+    let [id, start, end] = edge_ids(edge)?;
     let mut map = BTreeMap::new();
     map.insert(AGTYPE_KIND_KEY.into(), Value::Str(KIND_EDGE.into()));
-    map.insert("id".into(), graph_id_value(edge.edge_id)?);
+    map.insert("id".into(), Value::Int(id));
     map.insert("label".into(), Value::Str(edge.label.clone()));
-    map.insert("start_id".into(), graph_id_value(edge.source_id)?);
-    map.insert("end_id".into(), graph_id_value(edge.target_id)?);
+    map.insert("start_id".into(), Value::Int(start));
+    map.insert("end_id".into(), Value::Int(end));
     map.insert("properties".into(), Value::Map(edge.properties.clone()));
     Ok(Value::Map(map))
 }

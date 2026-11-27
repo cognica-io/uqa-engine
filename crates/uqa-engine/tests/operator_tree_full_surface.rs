@@ -392,8 +392,8 @@ fn graph_filter_pushdown_prunes_bfs_expansion() {
         .expect("pushed traversal must preserve the graph carrier");
     assert_eq!(graph.inner().doc_ids().collect::<Vec<_>>(), vec![1, 2]);
     let payload = graph.get_graph_payload(1).unwrap();
-    assert_eq!(payload.subgraph_vertices, vec![1, 2]);
-    assert_eq!(payload.subgraph_edges, vec![1]);
+    assert_eq!(payload.subgraph_vertices.as_ref(), &[1, 2]);
+    assert_eq!(payload.subgraph_edges.as_ref(), &[1]);
 }
 
 #[test]
@@ -426,8 +426,8 @@ fn graph_set_nodes_preserve_the_graph_carrier_and_merge_subgraphs() {
         .expect("a union of graph results must retain the graph carrier");
     assert_eq!(union.inner().doc_ids().collect::<Vec<_>>(), vec![1, 2, 3]);
     let payload = union.get_graph_payload(1).unwrap();
-    assert_eq!(payload.subgraph_vertices, vec![1, 2, 3]);
-    assert_eq!(payload.subgraph_edges, vec![1, 2]);
+    assert_eq!(payload.subgraph_vertices.as_ref(), &[1, 2, 3]);
+    assert_eq!(payload.subgraph_edges.as_ref(), &[1, 2]);
 
     let intersection = driver
         .execute_node(&OperatorTree::Intersect(vec![one_hop, two_hops]))
@@ -440,8 +440,8 @@ fn graph_set_nodes_preserve_the_graph_carrier_and_merge_subgraphs() {
         vec![1, 2]
     );
     let payload = intersection.get_graph_payload(1).unwrap();
-    assert_eq!(payload.subgraph_vertices, vec![1, 2]);
-    assert_eq!(payload.subgraph_edges, vec![1]);
+    assert_eq!(payload.subgraph_vertices.as_ref(), &[1, 2]);
+    assert_eq!(payload.subgraph_edges.as_ref(), &[1]);
 }
 
 #[test]

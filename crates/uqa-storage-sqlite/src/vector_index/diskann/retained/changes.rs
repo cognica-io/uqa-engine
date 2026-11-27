@@ -11,7 +11,10 @@ use crate::mvcc::native::{decode_record, variable_fields_limit};
 use rusqlite::types::ValueRef;
 use uqa_core::DocId;
 use uqa_storage::{
-    diskann_index::format::{DiskANNChangeIdentity, CANONICAL_ORIGIN_BYTES, CHANGE_IDENTITY_BYTES},
+    diskann_index::{
+        format::{DiskANNChangeIdentity, CANONICAL_ORIGIN_BYTES, CHANGE_IDENTITY_BYTES},
+        DiskANNBoundRead,
+    },
     mvcc::VersionError,
     read_control::StorageReadControl,
     StorageBackendResult,
@@ -21,28 +24,16 @@ impl RetainedSQLiteDiskANNCanonical {
     /// Return each currently journaled document once on this canonical view, including an empty replacement. This does not establish the coverage of a published generation.
     pub fn next_change_after(
         &self,
-        mut after: Option<DocId>,
+        after: Option<DocId>,
         control: &StorageReadControl,
     ) -> StorageBackendResult<Option<DiskANNChangeIdentity>> {
-        loop {
-            self.check(control)?;
-            if after.is_some_and(|document| document >= i64::MAX as DocId) {
-                return Ok(None);
-            }
-            let Some(document) = self.next_changed_document(after, control)? else {
-                self.check(control)?;
-                return Ok(None);
-            };
-            after = Some(document);
-            let Some(canonical) = self.record(document, control)? else {
-                continue;
-            };
-            let identity = DiskANNChangeIdentity::new(document, canonical.version());
-            if self.matches_change(identity, canonical, control)? {
-                self.check(control)?;
-                return Ok(Some(identity));
-            }
-        }
+        self.next_canonical_change(
+            after,
+            i64::MAX as DocId,
+            control,
+            |after| self.next_changed_document(after, control),
+            |change, origin| self.matches_change(change, origin, control),
+        )
     }
 
     fn next_changed_document(

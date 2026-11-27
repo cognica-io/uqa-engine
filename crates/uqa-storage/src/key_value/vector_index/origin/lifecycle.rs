@@ -6,17 +6,17 @@
 
 //! Structural mutations join the caller's catalog transaction and preserve its outer undo scope.
 
-use super::{invalid, journal, key, KeyValueDiskANNCanonical, Record, RetainedDiskANNCanonical};
+use super::{journal, key, KeyValueDiskANNCanonical, Record, RetainedDiskANNCanonical};
 use crate::{
     diskann_index::{
-        build::DiskANNTemporaryBudget,
+        build::{DiskANNCanonicalCoverage, DiskANNTemporaryBudget},
         catalog::DiskANNIndexResolver,
         format::{DiskANNChangeIdentity, DiskANNVectorVersion},
-        DiskANNIndexOptions,
+        DiskANNAdoptedOrigins, DiskANNIndexOptions, DiskANNLifecycle,
     },
-    key_value::{catalog::diskann::Binding, codec, KeyValueDiskANNStore},
+    key_value::{catalog::diskann::Binding, codec, KeyValueDiskANNSource, KeyValueDiskANNStore},
     read_control::StorageReadControl,
-    RelationIdentity, StorageBackendError, StorageBackendResult, StorageSavepointId,
+    RelationIdentity, StorageBackendResult,
 };
 
 impl KeyValueDiskANNCanonical {
@@ -27,16 +27,8 @@ impl KeyValueDiskANNCanonical {
         resolver: &dyn DiskANNIndexResolver,
         control: &StorageReadControl,
     ) -> StorageBackendResult<()> {
-        self.structural_change(|| {
-            let source = self.retain_for_index(index, control)?;
-            self.index.store.with_mutation(&mut |read, batch| {
-                source.retire_generation(resolver, read, batch, control)?;
-                self.index.coordinate_field(batch, true)?;
-                control.check()
-            })
-        })
+        DiskANNLifecycle::retire_index(self, index, resolver, control)
     }
-
     /// Adopt the complete existing raw field and publish its first generation. The actual private catalog definition must already exist, and the caller must retain the enclosing definition transaction.
     pub fn create_index(
         &self,
@@ -46,16 +38,8 @@ impl KeyValueDiskANNCanonical {
         temporary: &DiskANNTemporaryBudget,
         control: &StorageReadControl,
     ) -> StorageBackendResult<()> {
-        self.structural_change(|| {
-            let source = self.retain_for_index(index, control)?;
-            if source.selected_source(resolver, control)?.is_some() {
-                return Err(invalid("index already has a published generation"));
-            }
-            self.adopt(index, control)?;
-            self.rebuild_index(index, resolver, options, temporary, control)
-        })
+        DiskANNLifecycle::create_index(self, index, resolver, options, temporary, control)
     }
-
     /// Rebuild from one actual retained source. Publication keeps the original head expectation and never completes the caller's transaction.
     pub fn rebuild_index(
         &self,
@@ -65,61 +49,74 @@ impl KeyValueDiskANNCanonical {
         temporary: &DiskANNTemporaryBudget,
         control: &StorageReadControl,
     ) -> StorageBackendResult<()> {
-        let source = self.retain_for_index(index, control)?;
-        self.rebuild_source(source, resolver, options, temporary, control)
+        DiskANNLifecycle::rebuild_index(self, index, resolver, options, temporary, control)
     }
+}
 
-    pub(super) fn rebuild_source(
+impl DiskANNLifecycle for KeyValueDiskANNCanonical {
+    type Read = RetainedDiskANNCanonical;
+    type SavepointError = crate::StorageBackendError;
+    fn in_transaction(&self) -> bool {
+        self.index.store.in_transaction()
+    }
+    fn savepoint(&self, name: &str) -> Result<(), Self::SavepointError> {
+        self.index.store.savepoint(name)
+    }
+    fn release_savepoint(&self, name: &str) -> Result<(), Self::SavepointError> {
+        self.index.store.release_savepoint(name)
+    }
+    fn rollback_to_savepoint(&self, name: &str) -> Result<(), Self::SavepointError> {
+        self.index.store.rollback_to_savepoint(name)
+    }
+    fn retain_for_index(
         &self,
-        source: RetainedDiskANNCanonical,
+        index: &RelationIdentity,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<Self::Read> {
+        Self::retain_for_index(self, index, control)
+    }
+    fn generation_store(
+        &self,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<KeyValueDiskANNStore> {
+        KeyValueDiskANNStore::connect(&self.index.store, control)
+    }
+    fn publish(
+        &self,
+        coverage: &DiskANNCanonicalCoverage<Self::Read>,
         resolver: &dyn DiskANNIndexResolver,
-        options: DiskANNIndexOptions,
-        temporary: &DiskANNTemporaryBudget,
+        sealed: &KeyValueDiskANNSource,
         control: &StorageReadControl,
     ) -> StorageBackendResult<()> {
-        self.require_transaction()?;
-        if source.index_parameters() != Some(options.parameters) {
-            return Err(invalid("construction parameters differ from the catalog"));
-        }
-        let scope = source.index_scope(resolver, control)?;
-        let repository = KeyValueDiskANNStore::connect(&self.index.store, control)?;
-        repository.initialize(control)?;
-        let mut stage = repository.allocate_bound_stage(&scope, control)?;
-        let coverage = stage.build(source, options, temporary, control)?;
-        let sealed = repository.open_source(stage.generation(), control)?;
-        let _prepared = crate::diskann_index::DiskANNQuery::open(
-            coverage.source(),
-            sealed.clone(),
-            options.parameters,
-            options.read,
-            control,
-        )?;
         self.index.store.with_mutation(&mut |read, batch| {
             RetainedDiskANNCanonical::publish_generation(
-                &coverage, resolver, &sealed, read, batch, control,
+                coverage, resolver, sealed, read, batch, control,
             )
         })
     }
-
-    pub(super) fn clear_index(
+    fn retire_generation(
         &self,
-        source: &RetainedDiskANNCanonical,
-        index: &RelationIdentity,
+        source: &Self::Read,
         resolver: &dyn DiskANNIndexResolver,
-        options: DiskANNIndexOptions,
-        temporary: &DiskANNTemporaryBudget,
         control: &StorageReadControl,
     ) -> StorageBackendResult<()> {
-        self.structural_change(|| {
-            self.index.store.with_mutation(&mut |read, batch| {
-                source.require_current_index(read, batch, control)?;
-                self.index.stage_clear(batch)?;
-                control.check()
-            })?;
-            self.rebuild_index(index, resolver, options, temporary, control)
+        self.index.store.with_mutation(&mut |read, batch| {
+            source.retire_generation(resolver, read, batch, control)?;
+            self.index.coordinate_field(batch, true)?;
+            control.check()
         })
     }
-
+    fn clear_vectors(
+        &self,
+        source: &Self::Read,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<()> {
+        self.index.store.with_mutation(&mut |read, batch| {
+            source.require_current_index(read, batch, control)?;
+            self.index.stage_clear(batch)?;
+            control.check()
+        })
+    }
     fn adopt(
         &self,
         index: &RelationIdentity,
@@ -148,79 +145,41 @@ impl KeyValueDiskANNCanonical {
                     &self.index.field,
                 )?)?;
                 let mut decoder = super::super::read::CanonicalDecoder::new(&self.index);
-                let mut current = None;
-                let mut count = 0_u64;
-                let stamp = |document, count, batch: &mut dyn crate::KeyValueBatch| {
-                    let record = Record::new(version, self.index.dimensions, count)?;
-                    batch.put(
-                        &key(&self.index.table, &self.index.field, document)?,
-                        &record.encode(),
-                    )?;
-                    batch.put(
-                        &journal::key(
-                            &self.index.table,
-                            &self.index.field,
-                            DiskANNChangeIdentity::new(document, version),
-                        )?,
-                        &record.encode(),
-                    )
-                };
+                let mut origins = DiskANNAdoptedOrigins::new(
+                    version,
+                    self.index.dimensions,
+                    |document, record: Record| {
+                        batch.put(
+                            &key(&self.index.table, &self.index.field, document)?,
+                            &record.encode(),
+                        )?;
+                        batch.put(
+                            &journal::key(
+                                &self.index.table,
+                                &self.index.field,
+                                DiskANNChangeIdentity::new(document, version),
+                            )?,
+                            &record.encode(),
+                        )
+                    },
+                );
                 read.visit_prefix(
                     &codec::vector_field_prefix(&self.index.table, &self.index.field)?,
                     &mut |key, value| {
                         control.check()?;
                         control
                             .check_value_size(value.len(), self.index.dimensions as usize * 4)?;
-                        let (document, _, vector) = decoder.decode(key, value)?;
+                        let (document, ordinal, vector) = decoder.decode(key, value)?;
                         crate::vector_index::validate_vector_values_controlled(
                             self.index.dimensions,
                             &vector,
                             Some(control),
                         )?;
-                        if current != Some(document) {
-                            if let Some(previous) = current {
-                                stamp(previous, count, batch)?;
-                            }
-                            current = Some(document);
-                            count = 0;
-                        }
-                        count = count
-                            .checked_add(1)
-                            .ok_or_else(|| invalid("canonical count overflow"))?;
-                        Ok(())
+                        origins.push(document, ordinal)
                     },
                 )?;
-                if let Some(document) = current {
-                    stamp(document, count, batch)?;
-                }
+                origins.finish()?;
                 control.check()
             })
-    }
-
-    fn structural_change(
-        &self,
-        operation: impl FnOnce() -> StorageBackendResult<()>,
-    ) -> StorageBackendResult<()> {
-        self.require_transaction()?;
-        let store = &self.index.store;
-        let savepoint = StorageSavepointId::allocate().backend_name();
-        store.savepoint(&savepoint)?;
-        match operation() {
-            Ok(()) => store.release_savepoint(&savepoint),
-            Err(error) => {
-                store.rollback_to_savepoint(&savepoint).and_then(|()| store.release_savepoint(&savepoint))
-                    .map_err(|rollback| StorageBackendError::Other(format!("DiskANN structural rollback failed: {rollback}; original error: {error}")))?;
-                Err(error)
-            }
-        }
-    }
-
-    fn require_transaction(&self) -> StorageBackendResult<()> {
-        if !self.index.store.in_transaction() {
-            return Err(invalid(
-                "structural changes require the caller's active catalog transaction",
-            ));
-        }
-        Ok(())
     }
 }

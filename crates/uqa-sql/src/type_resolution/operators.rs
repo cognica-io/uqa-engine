@@ -97,17 +97,14 @@ pub fn binary_operator_volatility(
 }
 
 pub fn binary_operator_by_oid(oid: i64) -> Option<BinaryOperatorCatalogEntry> {
-    catalog::SIGNATURES.iter().find_map(
-        |&(name, left, right, result_type, candidate, function_oid)| {
-            (candidate == oid).then_some(BinaryOperatorCatalogEntry {
-                name,
-                operand_types: [left, right],
-                result_type,
-                oid,
-                function_oid,
-            })
-        },
-    )
+    let &(name, left, right, result_type, _, function_oid) = catalog::by_oid(oid)?;
+    Some(BinaryOperatorCatalogEntry {
+        name,
+        operand_types: [left, right],
+        result_type,
+        oid,
+        function_oid,
+    })
 }
 
 /// Read the identity of the exact overload chosen by the shared operand resolver.
@@ -221,6 +218,39 @@ pub fn binary_result_type(
     })
 }
 
+/// UQA's embedding comparisons are intrinsic and have no `PostgreSQL` operator OID.
+pub(super) fn embedding_operand<'a>(
+    left: Option<&'a ColumnType>,
+    right: Option<&'a ColumnType>,
+) -> Option<&'a ColumnType> {
+    left.into_iter()
+        .chain(right)
+        .map(base_type)
+        .find(|ty| matches!(ty, ColumnType::Vector(_) | ColumnType::Tensor(_)))
+}
+
+fn embedding_comparison_operands<'a>(
+    op: BinaryOp,
+    left: Option<&'a ColumnType>,
+    right: Option<&'a ColumnType>,
+    embedding: &'a ColumnType,
+) -> Result<Option<[&'a ColumnType; 2]>, SQLError> {
+    let available: fn(&ColumnType) -> bool = match op {
+        BinaryOp::Equal | BinaryOp::NotEqual => equality_operator_available,
+        BinaryOp::Less | BinaryOp::LessEqual | BinaryOp::Greater | BinaryOp::GreaterEqual => {
+            ordering_operator_available
+        }
+        _ => return Ok(None),
+    };
+    if left.is_some_and(|ty| !available(ty)) || right.is_some_and(|ty| !available(ty)) {
+        return Err(undefined_binary_operator(op.sql(), left, right));
+    }
+    Ok(Some([
+        left.map_or(embedding, base_type),
+        right.map_or(embedding, base_type),
+    ]))
+}
+
 /// Apply the shared result-type rules with owned output and controlled temporary operator selection.
 #[doc(hidden)]
 pub fn binary_result_type_with_control(
@@ -230,12 +260,8 @@ pub fn binary_result_type_with_control(
     control: &ProductionControl<'_>,
 ) -> Result<Option<Produced<ColumnType>>, SQLError> {
     control.check()?;
-    if left
-        .into_iter()
-        .chain(right)
-        .all(|ty| !matches!(base_type(ty), ColumnType::Vector(_) | ColumnType::Tensor(_)))
-    {
-        let selected = binary_operator_types_with_control(op, left, right, control)?;
+    let Some(embedding) = embedding_operand(left, right) else {
+        let selected = named_binary_operator_types_with_control(op.sql(), left, right, control)?;
         if control.budget().is_none() {
             let [_, _, result] = selected
                 .into_uncontrolled()
@@ -246,25 +272,8 @@ pub fn binary_result_type_with_control(
             .clone_with_control(control)
             .map(Some)
             .map_err(Into::into);
-    }
-    if matches!(
-        op,
-        BinaryOp::Equal
-            | BinaryOp::NotEqual
-            | BinaryOp::Less
-            | BinaryOp::LessEqual
-            | BinaryOp::Greater
-            | BinaryOp::GreaterEqual
-    ) {
-        let available: fn(&ColumnType) -> bool =
-            if matches!(op, BinaryOp::Equal | BinaryOp::NotEqual) {
-                equality_operator_available
-            } else {
-                ordering_operator_available
-            };
-        if left.is_some_and(|ty| !available(ty)) || right.is_some_and(|ty| !available(ty)) {
-            return Err(undefined_binary_operator(op.sql(), left, right));
-        }
+    };
+    if embedding_comparison_operands(op, left, right, embedding)?.is_some() {
         return control
             .finish(ColumnType::Boolean, control.empty_reservation())
             .map(Some)

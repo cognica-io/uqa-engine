@@ -6,7 +6,7 @@
 
 //! Bounded rolling positions, retaining candidate insertion order for exact cost ties.
 
-use uqa_core::memory::{BudgetedDeque, BudgetedVec, MemoryBudget};
+use uqa_core::memory::{BudgetedDeque, BudgetedVec, MemoryBudget, MemoryReservation};
 
 use crate::{AnalysisError, AnalysisResult};
 
@@ -34,53 +34,15 @@ pub(crate) struct Node {
     pub word: WordId,
 }
 
-// A released singleton returns its storage to the deque's ring. Empty slots
-// have no heap owner and ambiguous positions alone allocate a candidate list.
-enum Position {
-    Empty,
-    One(Node),
-    Many(BudgetedVec<Node>),
-}
-
-impl Position {
-    fn candidates(&self) -> &[Node] {
-        match self {
-            Self::Empty => &[],
-            Self::One(node) => std::slice::from_ref(node),
-            Self::Many(nodes) => nodes,
-        }
-    }
-
-    fn push(&mut self, node: Node, budget: &MemoryBudget) -> AnalysisResult<()> {
-        match self {
-            Self::Empty => *self = Self::One(node),
-            Self::One(first) => {
-                let mut nodes = BudgetedVec::new(budget);
-                nodes.reserve(2)?;
-                nodes.push(*first)?;
-                nodes.push(node)?;
-                *self = Self::Many(nodes);
-            }
-            Self::Many(nodes) => nodes.push(node)?,
-        }
-        Ok(())
-    }
-
-    fn rebase(&mut self) {
-        match self {
-            Self::One(node) => node.cost = 0,
-            Self::Many(nodes) => nodes[0].cost = 0,
-            Self::Empty => unreachable!("backtrace starts at a live candidate"),
-        }
-    }
-}
-
 pub(crate) struct Lattice<C> {
     base: usize,
-    positions: BudgetedDeque<Position>,
+    positions: BudgetedDeque<Vec<Node>>,
+    // Reuse a released single-candidate buffer at the next occupied position.
+    spare: Vec<Node>,
+    // All candidate buffers are dropped before their shared allowance.
+    buffers: MemoryReservation,
     candidates: usize,
     limits: C,
-    budget: MemoryBudget,
 }
 
 impl<C: LatticeConfig> Lattice<C> {
@@ -98,7 +60,8 @@ impl<C: LatticeConfig> Lattice<C> {
             positions: BudgetedDeque::new(budget),
             candidates: 0,
             limits,
-            budget: budget.clone(),
+            spare: Vec::new(),
+            buffers: budget.empty_reservation(),
         };
         lattice.push(
             0,
@@ -138,14 +101,14 @@ impl<C: LatticeConfig> Lattice<C> {
                 if self.positions.len().is_multiple_of(1024) {
                     poll()?;
                 }
-                self.positions.push_back(Position::Empty)?;
+                self.positions.push_back(Vec::new())?;
             }
         }
         Ok(())
     }
 
     pub fn get(&self, position: usize) -> &[Node] {
-        self.positions[position - self.base].candidates()
+        &self.positions[position - self.base]
     }
 
     pub fn push(
@@ -161,20 +124,44 @@ impl<C: LatticeConfig> Lattice<C> {
                 .ok_or_else(|| self.limits.invalid("candidate count overflow"))?,
         )?;
         let nodes = &mut self.positions[position - self.base];
-        nodes.push(node, &self.budget)?;
+        if nodes.capacity() == 0 {
+            std::mem::swap(nodes, &mut self.spare);
+        }
+        if nodes.len() < nodes.capacity() {
+            nodes.push(node);
+        } else {
+            let memory = self.buffers.split(nodes.capacity() * size_of::<Node>());
+            let mut owned = BudgetedVec::from_parts(std::mem::take(nodes), memory);
+            let result = owned.push(node);
+            // Failed growth returns the original buffer and its full allowance.
+            let (values, memory) = owned.into_parts();
+            *nodes = values;
+            self.buffers.absorb(memory);
+            result?;
+        }
         self.candidates += 1;
         Ok(())
     }
 
     pub fn rebase(&mut self, position: usize) {
-        self.positions[position - self.base].rebase();
+        self.positions[position - self.base][0].cost = 0;
     }
 
-    #[cfg(feature = "kuromoji")]
+    fn retire(&mut self, mut nodes: Vec<Node>) {
+        self.candidates -= nodes.len();
+        if nodes.capacity() == 1 && self.spare.capacity() == 0 {
+            nodes.clear();
+            self.spare = nodes;
+        } else if nodes.capacity() != 0 {
+            let bytes = nodes.capacity() * size_of::<Node>();
+            drop(nodes);
+            drop(self.buffers.split(bytes));
+        }
+    }
+
     pub fn clear_position(&mut self, position: usize) {
-        let nodes = &mut self.positions[position - self.base];
-        self.candidates -= nodes.candidates().len();
-        *nodes = Position::Empty;
+        let nodes = std::mem::take(&mut self.positions[position - self.base]);
+        self.retire(nodes);
     }
 
     pub fn prune(
@@ -189,14 +176,14 @@ impl<C: LatticeConfig> Lattice<C> {
             if work % 1024 == 0 {
                 poll()?;
             }
-            let nodes = &mut self.positions[position - self.base];
-            self.candidates -= nodes.candidates().len();
-            *nodes = if position == keep {
-                self.candidates += 1;
-                Position::One(node)
+            if position == keep {
+                let nodes = &mut self.positions[position - self.base];
+                self.candidates -= nodes.len() - 1;
+                nodes[0] = node;
+                nodes.truncate(1);
             } else {
-                Position::Empty
-            };
+                self.clear_position(position);
+            }
         }
         Ok(())
     }
@@ -211,12 +198,8 @@ impl<C: LatticeConfig> Lattice<C> {
             if work % 1024 == 0 {
                 poll()?;
             }
-            self.candidates -= self
-                .positions
-                .pop_front()
-                .expect("live prefix")
-                .candidates()
-                .len();
+            let slot = self.positions.pop_front().expect("live prefix");
+            self.retire(slot);
             self.base += 1;
             work += 1;
         }

@@ -6,11 +6,11 @@
 
 //! `PostgreSQL` 18's regular-expression function signatures. Every `pg_proc` overload of `regexp_count`, `regexp_instr`, `regexp_like`, `regexp_match`, `regexp_matches`, `regexp_replace`, `regexp_split_to_array`, `regexp_split_to_table` and `regexp_substr` is a separate declaration with its argument names and no defaults, so overload resolution, named arguments and untyped parameters select exactly the catalog routine `PostgreSQL` selects.
 
-use super::registry::{declarations, Signature};
+use super::registry::{declarations, overloads, Declaration, Signature};
 use crate::ast::ColumnType as T;
 use std::sync::LazyLock;
 
-declarations! { fn lookup_fixed(local);
+declarations! { pub(super) static DECLARATIONS;
         "regexp_count" => &[
             Signature::named(const { &[T::Text, T::Text] }, &["string", "pattern"], T::Integer),
             Signature::named(const { &[T::Text, T::Text, T::Integer] }, &["string", "pattern", "start"], T::Integer),
@@ -119,12 +119,7 @@ static TEXT_ARRAY_SIGNATURES: LazyLock<[Signature; 2]> = LazyLock::new(|| {
     ]
 });
 
-pub(super) fn lookup(local: &str) -> Option<(&'static str, &'static [Signature])> {
-    if let Some(declarations) = lookup_fixed(local) {
-        return Some(declarations);
-    }
-    TEXT_ARRAY_FUNCTIONS
-        .into_iter()
-        .find(|name| local.eq_ignore_ascii_case(name))
-        .map(|name| (name, &TEXT_ARRAY_SIGNATURES[..]))
-}
+pub(super) static TEXT_ARRAY_DECLARATIONS: &[Declaration] = &[Declaration {
+    names: &TEXT_ARRAY_FUNCTIONS,
+    overloads: || overloads!(&*TEXT_ARRAY_SIGNATURES, 2),
+}];

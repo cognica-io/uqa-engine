@@ -15,21 +15,26 @@ use crate::ScalarExpr;
 use std::collections::BTreeSet;
 
 pub fn expr_contains_function(expression: &ScalarExpr) -> bool {
-    let mut contains_function = false;
-    expression.visit(&mut |part| {
-        contains_function |= matches!(
+    expression.any_node(|part| {
+        matches!(
             part,
             ScalarExpr::Func { .. } | ScalarExpr::WindowCall { .. }
-        );
-    });
-    contains_function
+        )
+    })
 }
 
 pub fn flatten_and_filter_parts(expr: &ScalarExpr) -> Vec<&ScalarExpr> {
-    match expr {
-        ScalarExpr::And(items) => items.iter().flat_map(flatten_and_filter_parts).collect(),
-        other => vec![other],
-    }
+    let mut parts = Vec::new();
+    visit_filter_parts_with_control(
+        expr,
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+        &mut |part| {
+            parts.push(part);
+            Ok(())
+        },
+    )
+    .expect("ordinary conjunction traversal");
+    parts
 }
 
 pub fn from_qualifier_set(from: &SourcePlan) -> BTreeSet<String> {
@@ -53,184 +58,17 @@ pub fn collect_expr_qualifiers(expr: &ScalarExpr, qualifiers: &mut BTreeSet<Stri
 }
 
 pub fn expr_has_unqualified_column(expr: &ScalarExpr) -> bool {
-    let mut found = false;
-    expr.visit(&mut |part| {
-        found |= matches!(part, ScalarExpr::Column(_));
-    });
-    found
+    expr.any_node(|part| matches!(part, ScalarExpr::Column(_)))
 }
 
-#[expect(
-    clippy::too_many_lines,
-    reason = "preserves SELECT schema and row identity"
-)]
 pub fn qualify_unqualified_columns(expr: &ScalarExpr, qualifier: &str) -> ScalarExpr {
-    match expr {
-        ScalarExpr::Column(column) => ScalarExpr::qualified_column(qualifier, column),
-        ScalarExpr::Default
-        | ScalarExpr::Position(_)
-        | ScalarExpr::InternalColumn(_)
-        | ScalarExpr::QualifiedColumn { .. }
-        | ScalarExpr::QualifiedStar(_)
-        | ScalarExpr::Literal(_)
-        | ScalarExpr::TypedLiteral { .. }
-        | ScalarExpr::RetainedLiteral(_)
-        | ScalarExpr::Param(_)
-        | ScalarExpr::Star => expr.clone(),
-        ScalarExpr::Array(items) => ScalarExpr::Array(
-            items
-                .iter()
-                .map(|item| qualify_unqualified_columns(item, qualifier))
-                .collect(),
-        ),
-        ScalarExpr::Row(items) => ScalarExpr::Row(
-            items
-                .iter()
-                .map(|item| qualify_unqualified_columns(item, qualifier))
-                .collect(),
-        ),
-        ScalarExpr::CompositeRow {
-            items,
-            binding,
-            bound_type,
-        } => ScalarExpr::CompositeRow {
-            items: items
-                .iter()
-                .map(|item| qualify_unqualified_columns(item, qualifier))
-                .collect(),
-            binding: binding.clone(),
-            bound_type: bound_type.clone(),
-        },
-        ScalarExpr::And(items) => ScalarExpr::And(
-            items
-                .iter()
-                .map(|item| qualify_unqualified_columns(item, qualifier))
-                .collect(),
-        ),
-        ScalarExpr::Or(items) => ScalarExpr::Or(
-            items
-                .iter()
-                .map(|item| qualify_unqualified_columns(item, qualifier))
-                .collect(),
-        ),
-        ScalarExpr::Binary { op, lhs, rhs } => ScalarExpr::Binary {
-            op: *op,
-            lhs: Box::new(qualify_unqualified_columns(lhs, qualifier)),
-            rhs: Box::new(qualify_unqualified_columns(rhs, qualifier)),
-        },
-        ScalarExpr::Not(inner) => {
-            ScalarExpr::Not(Box::new(qualify_unqualified_columns(inner, qualifier)))
-        }
-        ScalarExpr::UnaryMinus(inner) => {
-            ScalarExpr::UnaryMinus(Box::new(qualify_unqualified_columns(inner, qualifier)))
-        }
-        ScalarExpr::IsNull { expr, negated } => ScalarExpr::IsNull {
-            expr: Box::new(qualify_unqualified_columns(expr, qualifier)),
-            negated: *negated,
-        },
-        ScalarExpr::Between { expr, low, high } => ScalarExpr::Between {
-            expr: Box::new(qualify_unqualified_columns(expr, qualifier)),
-            low: Box::new(qualify_unqualified_columns(low, qualifier)),
-            high: Box::new(qualify_unqualified_columns(high, qualifier)),
-        },
-        ScalarExpr::InList {
-            expr,
-            list,
-            negated,
-        } => ScalarExpr::InList {
-            expr: Box::new(qualify_unqualified_columns(expr, qualifier)),
-            list: list
-                .iter()
-                .map(|item| qualify_unqualified_columns(item, qualifier))
-                .collect(),
-            negated: *negated,
-        },
-        ScalarExpr::Func {
-            order_syntax,
-            name,
-            binding,
-            args,
-            distinct,
-            order_by,
-            filter,
-        } => ScalarExpr::Func {
-            order_syntax: *order_syntax,
-            name: name.clone(),
-            binding: binding.clone(),
-            args: args
-                .iter()
-                .map(|arg| qualify_unqualified_columns(arg, qualifier))
-                .collect(),
-            distinct: *distinct,
-            order_by: order_by.clone(),
-            filter: filter
-                .as_ref()
-                .map(|filter| Box::new(qualify_unqualified_columns(filter, qualifier))),
-        },
-        ScalarExpr::WindowCall {
-            name,
-            args,
-            spec,
-            filter,
-            modifiers,
-        } => ScalarExpr::WindowCall {
-            modifiers: *modifiers,
-            name: name.clone(),
-            args: args
-                .iter()
-                .map(|arg| qualify_unqualified_columns(arg, qualifier))
-                .collect(),
-            spec: spec.clone(),
-            filter: filter
-                .as_ref()
-                .map(|filter| Box::new(qualify_unqualified_columns(filter, qualifier))),
-        },
-        ScalarExpr::Case {
-            base,
-            when,
-            else_branch,
-        } => ScalarExpr::Case {
-            base: base
-                .as_ref()
-                .map(|expr| Box::new(qualify_unqualified_columns(expr, qualifier))),
-            when: when
-                .iter()
-                .map(|(cond, result)| {
-                    (
-                        qualify_unqualified_columns(cond, qualifier),
-                        qualify_unqualified_columns(result, qualifier),
-                    )
-                })
-                .collect(),
-            else_branch: else_branch
-                .as_ref()
-                .map(|expr| Box::new(qualify_unqualified_columns(expr, qualifier))),
-        },
-        ScalarExpr::Collated {
-            expr,
-            ty,
-            collation,
-        } => ScalarExpr::Collated {
-            expr: Box::new(qualify_unqualified_columns(expr, qualifier)),
-            ty: ty.clone(),
-            collation: *collation,
-        },
-        ScalarExpr::Cast { expr, ty, implicit } => ScalarExpr::Cast {
-            implicit: *implicit,
-            expr: Box::new(qualify_unqualified_columns(expr, qualifier)),
-            ty: ty.clone(),
-        },
-        ScalarExpr::InSubquery {
-            expr,
-            subquery,
-            negated,
-        } => ScalarExpr::InSubquery {
-            expr: Box::new(qualify_unqualified_columns(expr, qualifier)),
-            subquery: *subquery,
-            negated: *negated,
-        },
-        ScalarExpr::ScalarSubquery(_) | ScalarExpr::Exists { .. } => expr.clone(),
-    }
+    let control = uqa_core::memory::ProductionControl::uncontrolled();
+    qualify_unqualified_columns_with_control(expr, qualifier, &control)
+        .expect("ordinary column qualification")
+        .finish(&control)
+        .expect("ordinary qualified scalar")
+        .into_uncontrolled()
+        .expect("ordinary qualified scalar has no reservation")
 }
 
 /// True when the expression can never evaluate to SQL NULL for any

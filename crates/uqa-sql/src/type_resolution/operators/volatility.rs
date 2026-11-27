@@ -43,11 +43,8 @@ pub(super) fn named_binary_operator_catalog_entry_with_control(
 ) -> Result<BinaryOperatorCatalogEntry, SQLError> {
     control.check()?;
     for polymorphic in [false, true] {
-        for &(candidate, left, right, result_type, oid, function_oid) in catalog::SIGNATURES {
+        for &(candidate, left, right, result_type, oid, function_oid) in catalog::named(name) {
             control.check()?;
-            if candidate != name {
-                continue;
-            }
             let range_match = resolution::range_operands(left, right, operands.map(Some)).is_some();
             let mut matches = range_match;
             if !matches {

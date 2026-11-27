@@ -58,6 +58,25 @@ impl OwnedScalarExpr {
         output.rewrite(control, Ok)
     }
 
+    /// Add a qualifier while retaining the existing column name, source position and allocation.
+    pub(crate) fn add_reference_qualifier(
+        mut self,
+        qualifier: &str,
+        control: &ProductionControl<'_>,
+    ) -> Result<Self> {
+        self.assert_owner(control);
+        let (qualifier, lease) = control.copy_text(qualifier)?.into_parts();
+        let ScalarExpr::Column(column) = std::mem::replace(&mut self.expression, ScalarExpr::Star)
+        else {
+            panic!("adding a qualifier requires an unqualified column")
+        };
+        self.expression = ScalarExpr::QualifiedColumn { qualifier, column };
+        if let Some(memory) = &mut self.memory {
+            memory.direct.absorb(lease.expect("controlled qualifier"));
+        }
+        Ok(self)
+    }
+
     /// Replace only a reference's qualifier. Existing capacity is reused; growth admits a replacement buffer while the original is still live.
     pub fn replace_qualifier(
         mut self,

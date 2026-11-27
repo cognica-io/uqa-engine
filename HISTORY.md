@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Graph traversal and centrality results share subgraph vertices, edges and names across postings. Rust callers can use `.into()` for these three `GraphPayload` fields.
+
 - Preserve prepared domain checks across unrelated catalog changes in other sessions. Generic plans track casts that resolve to a domain through the search path, including domains named like a built-in type. Adding a constraint to a previously unconstrained domain rebuilds plans that folded its cast.
 - Match an explicit collation in an `ON CONFLICT` target to the corresponding key of a single unique index. Omitted collations leave the key unrestricted.
 
@@ -24,11 +26,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - Opening a native SQLite database skips historical deletions when checking B-tree indexes and restores an unchanged catalog once. An encrypted SQLite open derives the passphrase key once and reuses it across physical connections. Notification, relation-lock and serializable transaction state use separate keys derived from the database key.
 
+- IVF tensor searches retain the best requested documents in bounded memory. HNSW releases upper-layer distances before the base search, and DiskANN tracks its frontier by node ID. Native SQLite exact vector searches reuse canonical vector norms across queries on the same snapshot.
+- Native SQLite DiskANN maintenance now requires the original temporary-file allowance for both a change census and a rebuild, as do the Key/Value storage providers.
+
 - Selective equality joins can probe a primary key or unique index with each outer row. A scalar subquery or a small positive `IN` subquery can also supply the keys for an indexed scan. Primary-key lookups stay selective before column statistics are collected, including in generic prepared plans.
 
 - Creating a graph with many new catalog identities now reuses the native lock registry's SQLite rollback journal. Each identity is still visible to other processes as soon as its reservation succeeds.
 
-- Lowercase and ASCII folding reuse owned ASCII token buffers. Character mappings share a scan for independent rules, and Korean and Japanese tokenizers reuse rolling slots for single-candidate positions. Token text, positions and original source offsets retain their existing semantics.
+- Lowercase and ASCII folding reuse owned ASCII token buffers. Character mappings share a scan for independent rules, and Korean and Japanese tokenizers reuse released candidate buffers and keep sparse lattice positions compact. Token text, positions and original source offsets retain their existing semantics.
 
 - Independent analyzer catalogs now charge their own memory budgets for encoded analyzer and dictionary images. Closing a catalog or abandoning a failed installation releases its reservations even while another catalog uses the same analyzer.
 
@@ -565,6 +570,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Add joint redb record and autonomous identifier snapshots for backup image adapters. Retained metadata generations preserve allocation watermarks while later writes and bounded reads continue; redb record format 64 upgrades existing allocations atomically and requires updated database owners.
 
 ### Fixed
+
+- A named zero-hop Cypher path now contains one vertex and zero relationships. Both the length and endpoints agree with Apache AGE.
+
+- Store binary operator and fixed-function indexes in fixed process storage so the first SQL request observes the same heap allocation limits as later requests.
+- Infer untyped parameters in `IS DISTINCT FROM` and `IS NOT DISTINCT FROM` from the equality operator’s operand types, including in `UPDATE` and `DELETE` predicates and their subqueries.
 
 - Preserve expression collations in table rewrites, partition bounds, routine and prepared-statement arguments, table-function results, joined columns and scalar subqueries. Text comparisons and hashing report indeterminate collations when evaluated, and partial-index inference respects the predicate’s collation.
 

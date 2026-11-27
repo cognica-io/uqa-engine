@@ -40,6 +40,13 @@ impl GraphRead {
 }
 
 impl PersistentGraphStore {
+    pub(super) fn check_bound_read(&self) -> GraphStoreResult<()> {
+        if let Some(read) = &self.read {
+            read.control.check()?;
+        }
+        Ok(())
+    }
+
     pub(crate) fn observe_labels(&self, graph: &str, label: Option<&str>) -> GraphStoreResult<()> {
         let Some(read) = &self.read else {
             return Ok(());

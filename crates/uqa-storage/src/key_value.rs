@@ -496,6 +496,16 @@ pub trait KeyValueStore: Send + Sync {
         ))
     }
 
+    /// Invoke the callback exactly once inside the caller's active transaction, or return false when the session is idle. Admission and staging share the transaction owner's lock. Returning false preserves the last commit receipt and all records.
+    fn try_with_transaction_mutation(
+        &self,
+        _mutate: &mut KeyValueMutation<'_>,
+    ) -> StorageBackendResult<bool> {
+        Err(StorageBackendError::Other(
+            "transaction-scoped KeyValue evaluation is not supported by this store".into(),
+        ))
+    }
+
     /// Stage once and optionally certify the resulting prefix identity before another mutation can intervene. The identity may name private state before a later commit. A provider without this capability performs the ordinary mutation and returns no certificate; opening a later read view cannot certify this mutation's result.
     fn with_mutation_revision(
         &self,

@@ -5,7 +5,7 @@
 //
 
 use super::*;
-use uqa_core::Value;
+use uqa_core::{DecimalValue, Value};
 
 fn row<const N: usize>(pairs: [(&str, Value); N]) -> ResultRow {
     pairs.into_iter().map(|(k, v)| (k.to_string(), v)).collect()
@@ -333,4 +333,38 @@ fn jsonb_join_hashes_match_postgresql_semantic_equality() {
         .collect();
     assert_eq!(joined.len(), expected.len());
     assert_eq!(actual, expected);
+}
+
+#[test]
+fn full_outer_join_extracts_each_key_once_and_retains_unmatched_row_order() {
+    use std::cell::Cell;
+    let left = [row([("l", Value::Int(1))]), row([("l", Value::Int(4))])];
+    let right = [2, 1, 3, 1].map(|n| row([("r", Value::Int(n))]));
+    let (left_calls, right_calls) = (Cell::new(0), Cell::new(0));
+    let rows = full_outer_join(
+        &left,
+        &right,
+        |row| {
+            left_calls.set(left_calls.get() + 1);
+            row.get("l").map(JoinKey::new)
+        },
+        |row| {
+            right_calls.set(right_calls.get() + 1);
+            row.get("r").map(JoinKey::new)
+        },
+    );
+    assert_eq!(
+        (left_calls.get(), right_calls.get()),
+        (left.len(), right.len())
+    );
+    assert_eq!(
+        rows,
+        [
+            row([("l", Value::Int(1)), ("r", Value::Int(1))]),
+            row([("l", Value::Int(1)), ("r", Value::Int(1))]),
+            row([("l", Value::Int(4)), ("r", Value::Null)]),
+            row([("l", Value::Null), ("r", Value::Int(2))]),
+            row([("l", Value::Null), ("r", Value::Int(3))]),
+        ]
+    );
 }

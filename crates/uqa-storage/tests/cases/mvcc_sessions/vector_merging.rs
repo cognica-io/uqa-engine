@@ -342,13 +342,24 @@ fn a_vector_rebase_cannot_overwrite_unjournaled_derived_changes() {
     }
 }
 
-#[test]
-fn spilled_vector_journals_preserve_ordered_replay_at_refresh_and_commit() {
-    for hnsw in [false, true] {
+mod spilled_vector_journals_preserve_ordered_replay_at_refresh_and_commit {
+    use super::*;
+
+    fn verify(hnsw: bool) {
         let persistence = Persistence::new();
         let store: Arc<dyn KeyValueStore> = Arc::new(persistence.session(1 << 20));
         let backend = uqa_storage::KeyValueStorageBackend::new(store);
         uqa_storage::key_value::conformance::verify_vector_transaction_spill(&backend, hnsw)
             .unwrap();
+    }
+
+    #[test]
+    fn ivf() {
+        verify(false);
+    }
+
+    #[test]
+    fn hnsw() {
+        verify(true);
     }
 }

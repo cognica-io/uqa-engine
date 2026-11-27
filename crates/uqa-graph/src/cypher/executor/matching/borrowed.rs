@@ -6,9 +6,9 @@
 
 //! Pure node predicates consume one borrowed vertex without provider reentry.
 
-use super::{CypherError, CypherExecutor, CypherExpr, GraphStore, NodePattern, Vertex, VertexId};
+use super::{CypherError, CypherExpr, GraphStore, NodePattern, StatementReader, Vertex, VertexId};
 
-impl<G: GraphStore> CypherExecutor<'_, G> {
+impl<G: GraphStore> StatementReader<'_, G> {
     pub(super) fn for_each_node_vertex(
         &self,
         pattern: &NodePattern,

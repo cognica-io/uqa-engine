@@ -81,6 +81,11 @@ fn scalar_child_borrows_preserve_window_and_call_ownership_order() {
         Scope::Construction,
         &[0, 1, 3, 4, 5, 6, 2],
     );
+    check(
+        expression.clone(),
+        Scope::AggregateDependencies,
+        &[3, 4, 5, 6, 0, 1, 2],
+    );
     check(expression, Scope::Observation { call_order: true }, &[]);
     let expression = ScalarExpr::Func {
         name: "sum".into(),

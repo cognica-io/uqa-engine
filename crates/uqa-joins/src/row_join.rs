@@ -13,10 +13,10 @@
 //! extra adapter; the returned `Vec<ResultRow>` carries qualifier-
 //! prefixed columns that the projection layer consumes verbatim.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 
-use uqa_core::{DecimalValue, TemporalValue, Value};
+use uqa_core::{TemporalValue, Value};
 use uqa_sql::ResultRow;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -88,10 +88,13 @@ fn hash_value<H: Hasher>(value: &Value, state: &mut H) {
         }
         Value::Null => 0_u8.hash(state),
         Value::Void => 13_u8.hash(state),
-        Value::Bool(value) => hash_decimal_numeric(&DecimalValue::from_bool(*value), state),
-        Value::Int(value) => hash_decimal_numeric(&DecimalValue::from_i64(*value), state),
-        Value::Float(value) => hash_float_numeric(*value, state),
-        Value::Decimal(value) => hash_decimal_numeric(value, state),
+        Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Decimal(_) => {
+            1_u8.hash(state);
+            value
+                .numeric_hash_key()
+                .expect("numeric join key")
+                .hash(state);
+        }
         Value::Str(value) => {
             2_u8.hash(state);
             value.hash(state);
@@ -175,23 +178,6 @@ fn hash_value<H: Hasher>(value: &Value, state: &mut H) {
     }
 }
 
-fn hash_decimal_numeric<H: Hasher>(value: &DecimalValue, state: &mut H) {
-    if value.is_nan() {
-        7_u8.hash(state);
-    } else if value.is_positive_infinity() {
-        8_u8.hash(state);
-    } else if value.is_negative_infinity() {
-        9_u8.hash(state);
-    } else {
-        1_u8.hash(state);
-        value.to_canonical_string().hash(state);
-    }
-}
-
-fn hash_float_numeric<H: Hasher>(value: f64, state: &mut H) {
-    hash_decimal_numeric(&DecimalValue::from_f64_exact(value), state);
-}
-
 fn hash_temporal<H: Hasher>(value: &TemporalValue, state: &mut H) {
     const MICROS_PER_DAY: i128 = 86_400_000_000;
     4_u8.hash(state);
@@ -247,24 +233,18 @@ fn merge(left: &ResultRow, right: &ResultRow) -> ResultRow {
 
 /// Construct a row containing every column from `row` and each
 /// `column` from the right side filled with `Value::Null`.
-fn pad_with_nulls(row: &ResultRow, columns: &[String]) -> ResultRow {
+fn pad_with_nulls(row: &ResultRow, columns: &HashSet<&str>) -> ResultRow {
     let mut out = row.clone();
     for c in columns {
-        out.entry(c.clone()).or_insert(Value::Null);
+        out.entry((*c).to_owned()).or_insert(Value::Null);
     }
     out
 }
 
-fn collect_columns(rows: &[ResultRow]) -> Vec<String> {
-    let mut seen: Vec<String> = Vec::new();
-    for r in rows {
-        for k in r.keys() {
-            if !seen.iter().any(|c| c == k) {
-                seen.push(k.clone());
-            }
-        }
-    }
-    seen
+fn collect_columns(rows: &[ResultRow]) -> HashSet<&str> {
+    rows.iter()
+        .flat_map(|row| row.keys().map(String::as_str))
+        .collect()
 }
 
 fn build_index<'a, F>(rows: &'a [ResultRow], key_of: F) -> HashMap<JoinKey, Vec<&'a ResultRow>>
@@ -297,33 +277,13 @@ where
     L: Fn(&ResultRow) -> Option<JoinKey>,
     R: Fn(&ResultRow) -> Option<JoinKey>,
 {
-    let (build_rows, probe_rows, build_is_left) = if left.len() <= right.len() {
-        (left, right, true)
-    } else {
-        (right, left, false)
-    };
-    let build_key_fn: &dyn Fn(&ResultRow) -> Option<JoinKey> =
-        if build_is_left { &left_key } else { &right_key };
-    let probe_key_fn: &dyn Fn(&ResultRow) -> Option<JoinKey> =
-        if build_is_left { &right_key } else { &left_key };
-    let index = build_index(build_rows, build_key_fn);
-    let mut out: Vec<ResultRow> = Vec::with_capacity(probe_rows.len());
-    for probe in probe_rows {
-        let Some(key) = probe_key_fn(probe) else {
-            continue;
-        };
-        if let Some(matches) = index.get(&key) {
-            for build_row in matches {
-                let merged = if build_is_left {
-                    merge(build_row, probe)
-                } else {
-                    merge(probe, build_row)
-                };
-                out.push(merged);
-            }
-        }
-    }
-    out
+    try_hash_inner_join(
+        left,
+        right,
+        |row| Ok::<_, std::convert::Infallible>(left_key(row)),
+        |row| Ok(right_key(row)),
+    )
+    .unwrap_or_else(|never| match never {})
 }
 
 /// Error-preserving hash inner join. This is the physical form used when join
@@ -440,36 +400,28 @@ where
 {
     let left_columns = collect_columns(left);
     let right_columns = collect_columns(right);
-    let left_index = build_index(left, &left_key);
-    let right_index = build_index(right, &right_key);
-    let mut matched_right: HashMap<JoinKey, bool> = HashMap::with_capacity(right_index.len());
-    let mut out: Vec<ResultRow> = Vec::new();
-    for l in left {
-        let key = left_key(l);
-        let matches = key.as_ref().and_then(|k| right_index.get(k));
-        match matches {
-            Some(rows) if !rows.is_empty() => {
-                if let Some(k) = key.clone() {
-                    matched_right.insert(k, true);
-                }
-                for r in rows {
-                    out.push(merge(l, r));
-                }
-            }
-            _ => out.push(pad_with_nulls(l, &right_columns)),
+    let mut right_index: HashMap<JoinKey, Vec<usize>> = HashMap::with_capacity(right.len());
+    for (position, row) in right.iter().enumerate() {
+        if let Some(key) = right_key(row) {
+            right_index.entry(key).or_default().push(position);
         }
     }
-    for r in right {
-        let key = right_key(r);
-        if let Some(k) = key.as_ref() {
-            if matched_right.contains_key(k) {
-                continue;
+    let mut matched = vec![false; right.len()];
+    let mut out = Vec::new();
+    for row in left {
+        if let Some(positions) = left_key(row).and_then(|key| right_index.get(&key)) {
+            for &position in positions {
+                matched[position] = true;
+                out.push(merge(row, &right[position]));
             }
-            if left_index.contains_key(k) {
-                continue;
-            }
+        } else {
+            out.push(pad_with_nulls(row, &right_columns));
         }
-        out.push(pad_with_nulls(r, &left_columns));
+    }
+    for (row, matched) in right.iter().zip(matched) {
+        if !matched {
+            out.push(pad_with_nulls(row, &left_columns));
+        }
     }
     out
 }

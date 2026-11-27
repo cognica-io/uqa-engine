@@ -132,11 +132,15 @@ fn retained_definition_reads_keep_the_original_participant_and_cancellation() {
         let other = begin(&b);
         let cancellation = CancellationToken::new();
         let retained = a.backend.open_retained_read_session(&cancellation).unwrap();
-        let read = store(&retained).with_serializable_read(context, &cancellation);
+        let read = uqa_graph::GraphStoreHandle::Persistent(
+            store(&retained).with_serializable_read(context, &cancellation),
+        );
         if cancelled {
             cancellation.cancel();
+            assert!(read.check_read().is_err());
             assert!(read.graph_names().is_err());
         } else {
+            read.check_read().unwrap();
             assert!(!read.has_graph("future").unwrap());
         }
         pivot(&a, &other);

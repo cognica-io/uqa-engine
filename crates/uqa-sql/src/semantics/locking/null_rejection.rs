@@ -210,10 +210,10 @@ fn reduce_null_rejected_outer_joins(
     Ok(changed)
 }
 
-const TRUTH_FALSE: u8 = 1;
-const TRUTH_TRUE: u8 = 2;
-const TRUTH_NULL: u8 = 4;
-const TRUTH_ANY: u8 = TRUTH_FALSE | TRUTH_TRUE | TRUTH_NULL;
+pub(crate) const TRUTH_FALSE: u8 = 1;
+pub(crate) const TRUTH_TRUE: u8 = 2;
+pub(crate) const TRUTH_NULL: u8 = 4;
+pub(crate) const TRUTH_ANY: u8 = TRUTH_FALSE | TRUTH_TRUE | TRUTH_NULL;
 
 fn predicate_rejects_null_extended_side(
     routines: &dyn RoutineResolution,
@@ -416,13 +416,13 @@ fn scalar_function_is_strict(
         .unwrap_or(false))
 }
 
-fn negate_truth_values(values: u8) -> u8 {
+pub(crate) fn negate_truth_values(values: u8) -> u8 {
     (u8::from(values & TRUTH_FALSE != 0) * TRUTH_TRUE)
         | (u8::from(values & TRUTH_TRUE != 0) * TRUTH_FALSE)
         | (values & TRUTH_NULL)
 }
 
-fn combine_truth_values(left: u8, right: u8, and: bool) -> u8 {
+pub(crate) fn combine_truth_values(left: u8, right: u8, and: bool) -> u8 {
     let mut output = 0;
     for lhs in [TRUTH_FALSE, TRUTH_TRUE, TRUTH_NULL] {
         if left & lhs == 0 {

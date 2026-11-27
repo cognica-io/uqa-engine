@@ -6,24 +6,19 @@
 
 //! Bind canonical build input to actual catalog records on the same fixed view.
 
-use crate::diskann_index::catalog;
+use crate::diskann_index::catalog::{self, DiskANNCatalogRecord};
 use uqa_core::memory::{Budgeted, BudgetedVec};
 
 use super::{decode_value, relation_key, StoredCatalogIndex, TAG_CATALOG_INDEX, TAG_TABLE};
-use crate::key_value::{KeyValueRead, KeyValueReadRevision};
+use crate::key_value::KeyValueRead;
 use crate::read_control::StorageReadControl;
 use crate::vector_index::DiskANNIndexParams;
 use crate::{KeyValueBatch, RelationIdentity, StorageBackendResult, TableSchema};
 
 pub(in crate::key_value) struct Binding {
-    table: Record,
-    index: Record,
+    table: DiskANNCatalogRecord,
+    index: DiskANNCatalogRecord,
     pub(in crate::key_value) parameters: DiskANNIndexParams,
-}
-
-struct Record {
-    key: BudgetedVec<u8>,
-    revision: KeyValueReadRevision,
 }
 
 impl Binding {
@@ -34,13 +29,13 @@ impl Binding {
         capture: &StorageReadControl,
         control: &StorageReadControl,
     ) -> StorageBackendResult<catalog::DiskANNIndexScope> {
-        let table: Budgeted<TableSchema> = decode(read, &self.table.key, control)?;
-        let index: Budgeted<StoredCatalogIndex> = decode(read, &self.index.key, control)?;
+        let table: Budgeted<TableSchema> = decode(read, self.table.key(), control)?;
+        let index: Budgeted<StoredCatalogIndex> = decode(read, self.index.key(), control)?;
         catalog::resolve_scope(
             resolver,
             (table.object_id, table.storage_generation),
             index.definition_json.as_deref(),
-            &self.index.revision,
+            self.index.revision(),
             read.control(),
             capture,
             control,
@@ -56,13 +51,11 @@ impl Binding {
         control: &StorageReadControl,
     ) -> StorageBackendResult<Self> {
         control.check()?;
-        let relation =
-            RelationIdentity::from_legacy_name(table).map_err(crate::StorageBackendError::Other)?;
-        if relation.qualified_name() != table || relation.schema != index.schema {
-            return Err(invalid("index and canonical table names do not match"));
-        }
-        let table = Record::capture(read, TAG_TABLE, &relation, control)?;
-        let schema: Budgeted<TableSchema> = decode(read, &table.key, control)?;
+        let relation = catalog::bound_relation(table, index, || {
+            invalid("index and canonical table names do not match")
+        })?;
+        let table = capture_record(read, TAG_TABLE, &relation, control)?;
+        let schema: Budgeted<TableSchema> = decode(read, table.key(), control)?;
         if schema.relation != relation
             || schema.object_id == [0; 16]
             || schema.storage_generation == [0; 16]
@@ -73,8 +66,8 @@ impl Binding {
         }
         catalog::validate_field(&schema.vector_fields, field, dimensions)?;
         super::super::table_owners::validate_table(read, &schema)?;
-        let index = Record::capture(read, TAG_CATALOG_INDEX, index, control)?;
-        let definition: Budgeted<StoredCatalogIndex> = decode(read, &index.key, control)?;
+        let index = capture_record(read, TAG_CATALOG_INDEX, index, control)?;
+        let definition: Budgeted<StoredCatalogIndex> = decode(read, index.key(), control)?;
         if definition.table_name != relation.qualified_name() {
             return Err(invalid("catalog index does not own this canonical field"));
         }
@@ -95,7 +88,7 @@ impl Binding {
     }
 
     pub(in crate::key_value) fn prefixes(&self) -> [&[u8]; 2] {
-        [&self.table.key, &self.index.key]
+        [self.table.key(), self.index.key()]
     }
 
     /// Recheck against the publication command's view and retain its committed preconditions in that same command's batch. This does not publish a generation or complete the caller's transaction.
@@ -105,41 +98,29 @@ impl Binding {
         batch: &mut dyn KeyValueBatch,
         control: &StorageReadControl,
     ) -> StorageBackendResult<()> {
-        for record in [&self.table, &self.index] {
-            control.check()?;
-            if read.record_revision(&record.key)?.as_ref() != Some(&record.revision) {
-                return Err(invalid(
-                    "table or index definition changed since build capture",
-                ));
-            }
-            batch.require_unchanged(&record.key)?;
-        }
-        control.check()
+        catalog::require_current_records([&self.table, &self.index], read, batch, control, || {
+            invalid("table or index definition changed since build capture")
+        })
     }
 }
 
-impl Record {
-    fn capture(
-        read: &dyn KeyValueRead,
-        tag: u8,
-        relation: &RelationIdentity,
-        control: &StorageReadControl,
-    ) -> StorageBackendResult<Self> {
-        let size = relation
-            .schema
-            .len()
-            .checked_add(relation.name.len())
-            .and_then(|size| size.checked_add(17))
-            .ok_or(uqa_core::memory::MemoryError::SizeOverflow)?;
-        let _encoding = control.memory().reserve(size)?;
-        let encoded = relation_key(tag, relation)?;
-        let mut key = BudgetedVec::new(control.memory());
-        key.extend_from_slice(&encoded)?;
-        let revision = read
-            .record_revision(&key)?
-            .ok_or_else(|| invalid("catalog record is missing"))?;
-        Ok(Self { key, revision })
-    }
+fn capture_record(
+    read: &dyn KeyValueRead,
+    tag: u8,
+    relation: &RelationIdentity,
+    control: &StorageReadControl,
+) -> StorageBackendResult<DiskANNCatalogRecord> {
+    let size = relation
+        .schema
+        .len()
+        .checked_add(relation.name.len())
+        .and_then(|size| size.checked_add(17))
+        .ok_or(uqa_core::memory::MemoryError::SizeOverflow)?;
+    let _encoding = control.memory().reserve(size)?;
+    let encoded = relation_key(tag, relation)?;
+    let mut key = BudgetedVec::new(control.memory());
+    key.extend_from_slice(&encoded)?;
+    DiskANNCatalogRecord::capture(read, key, || invalid("catalog record is missing"))
 }
 
 fn decode<T: serde::de::DeserializeOwned>(

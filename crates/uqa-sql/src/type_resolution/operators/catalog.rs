@@ -6,6 +6,63 @@
 
 //! `PostgreSQL` 18.4 built-in binary operator signatures from `pg_catalog.pg_operator`.
 
+use std::sync::LazyLock;
+
+type Signature = (
+    &'static str,
+    &'static str,
+    &'static str,
+    &'static str,
+    i64,
+    i64,
+);
+
+// Row positions keep both indexes in process-owned fixed storage. The second key preserves declaration order among overloads and selects the first occurrence of an OID.
+static BY_NAME: LazyLock<[usize; SIGNATURES.len()]> = LazyLock::new(|| {
+    let mut rows = std::array::from_fn(|row| row);
+    rows.sort_unstable_by_key(|&row| (SIGNATURES[row].0, row));
+    rows
+});
+
+static BY_OID: LazyLock<[usize; SIGNATURES.len()]> = LazyLock::new(|| {
+    let mut rows = std::array::from_fn(|row| row);
+    rows.sort_unstable_by_key(|&row| (SIGNATURES[row].4, row));
+    rows
+});
+
+pub(super) fn named(name: &str) -> impl ExactSizeIterator<Item = &'static Signature> {
+    let rows = if name.len() > OPERATOR_NAME_BYTES {
+        &[][..]
+    } else {
+        let index = &*BY_NAME;
+        let start = index.partition_point(|&row| SIGNATURES[row].0 < name);
+        let tail = &index[start..];
+        &tail[..tail.partition_point(|&row| SIGNATURES[row].0 == name)]
+    };
+    rows.iter().map(|&row| &SIGNATURES[row])
+}
+
+pub(super) fn by_oid(oid: i64) -> Option<&'static Signature> {
+    let position = BY_OID.partition_point(|&row| SIGNATURES[row].4 < oid);
+    BY_OID
+        .get(position)
+        .map(|&row| &SIGNATURES[row])
+        .filter(|signature| signature.4 == oid)
+}
+
+pub(super) const OPERATOR_NAME_BYTES: usize = {
+    let mut maximum = 0;
+    let mut index = 0;
+    while index < SIGNATURES.len() {
+        let length = SIGNATURES[index].0.len();
+        if length > maximum {
+            maximum = length;
+        }
+        index += 1;
+    }
+    maximum
+};
+
 pub(super) const UNARY_MINUS: &[(&str, i64, i64)] = &[
     ("float4", 584, 206),
     ("float8", 585, 220),
@@ -16,7 +73,7 @@ pub(super) const UNARY_MINUS: &[(&str, i64, i64)] = &[
     ("numeric", 1751, 1771),
 ];
 
-pub(super) const SIGNATURES: &[(&str, &str, &str, &str, i64, i64)] = &[
+pub(super) const SIGNATURES: &[Signature] = &[
     ("#", "int8", "int8", "int8", 1888, 1906),
     ("#", "int2", "int2", "int2", 1876, 1894),
     ("#", "int4", "int4", "int4", 1882, 1900),

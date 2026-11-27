@@ -17,7 +17,7 @@ pub fn builtin_function_volatility_with_control(
     control: &ProductionControl<'_>,
 ) -> Result<FunctionVolatility, SQLError> {
     let name = lowercase_function_name_with_control(name, control)?;
-    Ok(super::builtin_function_volatility(
+    Ok(super::normalized_builtin_volatility(
         &name,
         binding,
         argument_count,
@@ -31,11 +31,11 @@ pub fn function_volatility_with_binding_and_control(
     argument_count: usize,
     control: &ProductionControl<'_>,
 ) -> Result<FunctionVolatility, SQLError> {
-    let builtin = builtin_function_volatility_with_control(name, binding, argument_count, control)?;
+    let identity = lowercase_function_name_with_control(name, control)?;
+    let builtin = super::normalized_builtin_volatility(&identity, binding, argument_count);
     if super::is_intrinsic_scalar_syntax(binding) || builtin == FunctionVolatility::Volatile {
         return Ok(builtin);
     }
-    let identity = lowercase_function_name_with_control(name, control)?;
     if let Some(volatility) = catalog.host_function_volatility(&identity) {
         return Ok(volatility);
     }
@@ -81,51 +81,45 @@ pub(super) fn expression_contains_volatile_with_control(
     control: &ProductionControl<'_>,
 ) -> Result<bool, SQLError> {
     control.check()?;
-    let mut result = Ok(false);
-    expression.visit(&mut |part| {
-        if !matches!(result, Ok(false)) {
-            return;
-        }
-        result = (|| {
-            control.check()?;
-            Ok(match part {
-                ScalarExpr::Func {
+    expression.try_any_node(|part| {
+        control.check()?;
+        Ok(match part {
+            ScalarExpr::Func {
+                name,
+                binding,
+                args,
+                ..
+            } => {
+                function_volatility_with_binding_and_control(
+                    catalog,
                     name,
-                    binding,
-                    args,
-                    ..
-                } => {
-                    function_volatility_with_binding_and_control(
-                        catalog,
-                        name,
-                        binding.as_ref(),
-                        args.len(),
-                        control,
-                    )? == FunctionVolatility::Volatile
-                }
-                ScalarExpr::WindowCall { name, args, .. } => {
-                    function_volatility_with_binding_and_control(
-                        catalog,
-                        name,
-                        None,
-                        args.len(),
-                        control,
-                    )? == FunctionVolatility::Volatile
-                }
-                ScalarExpr::ScalarSubquery(_)
-                | ScalarExpr::Exists { .. }
-                | ScalarExpr::InSubquery { .. } => conservative_subqueries,
-                _ => false,
-            })
-        })();
-    });
-    result
+                    binding.as_ref(),
+                    args.len(),
+                    control,
+                )? == FunctionVolatility::Volatile
+            }
+            ScalarExpr::WindowCall { name, args, .. } => {
+                function_volatility_with_binding_and_control(
+                    catalog,
+                    name,
+                    None,
+                    args.len(),
+                    control,
+                )? == FunctionVolatility::Volatile
+            }
+            ScalarExpr::ScalarSubquery(_)
+            | ScalarExpr::Exists { .. }
+            | ScalarExpr::InSubquery { .. } => conservative_subqueries,
+            _ => false,
+        })
+    })
 }
 
 mod queries;
 #[cfg(test)]
 mod tests;
 pub use queries::{
+    plan_ref_contains_volatile_function_with_control,
     query_contains_volatile_function_with_control,
     scalar_in_scope_contains_volatile_function_with_control,
     select_contains_volatile_function_with_control,

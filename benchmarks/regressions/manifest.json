@@ -23167,7 +23167,33 @@
       "source": "crates/uqa-analysis/src/morphology/lattice/tests.rs",
       "capability": "Rolling morphology lattice storage",
       "workload": "Advance a two-position Viterbi frontier through 4,096 further positions, inserting one ordered candidate per position.",
-      "invariant": "Each backtrace candidate is retained in the ring, the steady-state loop allocates zero times and dropping the lattice releases every reserved byte.",
+      "invariant": "Every retained word position is correct. Reusing a released candidate buffer allocates zero times after warmup and dropping the lattice returns every reserved byte.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "sparse_positions_fit_within_one_candidate_list_header_per_slot",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/morphology/lattice/tests.rs",
+      "capability": "Rolling morphology lattice storage",
+      "workload": "Open 512 lattice positions with only the start candidate occupied.",
+      "invariant": "The entire window fits the previous position-header allowance plus the start candidate, including the old buffer while the ring grows.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "ambiguous_positions_return_their_buffers_after_failed_growth_and_release",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/morphology/lattice/tests.rs",
+      "capability": "Rolling morphology lattice storage",
+      "workload": "Fill three ambiguous positions, deny one growth, release a prefix and prune to one candidate.",
+      "invariant": "Candidate ordering and counts survive the rejected growth. Releasing, pruning and clearing return each retired buffer's full capacity and dropping the lattice releases the remaining bytes.",
       "case_names": [
         ""
       ]
@@ -35949,6 +35975,97 @@
       "capability": "Positional source demand ownership",
       "workload": "Projection roots followed by SQL92 ORDER BY aliases and a decoded quoted function label.",
       "invariant": "Preserve original expression addresses and ordering precedence; reject label decoding with 53200 before observing later roots and release scratch.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "qualification_moves_the_admitted_name_and_parser_position",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/semantics/expression_shape/qualification/tests.rs",
+      "capability": "Column qualification with an existing name",
+      "workload": "Qualify an existing 4 KiB reference with one byte of additional allowance and repeat through the ordinary owner.",
+      "invariant": "Both paths retain the column buffer and its parser position. The retained result charges exactly 4,097 bytes and releases them on drop.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "name_type_and_collation_probes_borrow_each_visible_and_hidden_identity",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/identity_lookup/tests.rs",
+      "capability": "Borrowed column identity probes",
+      "workload": "Resolve visible, hidden and missing names, their collations and their projection slots sixteen times, including 4 KiB names.",
+      "invariant": "All resolutions retain their original types, slots, ambiguity and collation with zero heap allocations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "metadata_overlays_preserve_name_scope_without_rebuilding_lookup_indexes",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/identity_lookup/tests.rs",
+      "capability": "Row schema metadata changes",
+      "workload": "Attach internal, score, wildcard and open-column metadata to a row with an outer scope.",
+      "invariant": "All six metadata operations preserve the outer boundary, leave the input schema intact and rebuild zero lookup indexes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "nested_set_rewrite_keeps_owned_subtrees_and_assigns_levels_by_parentage",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/semantics/sets/tests.rs",
+      "capability": "Set-returning scalar rewrites",
+      "workload": "Rewrite a wide name under eight or 64 unary operators and compile nested and sibling generate_series calls.",
+      "invariant": "The ordinary expressions retain their owned column buffer at both depths and allocate zero times. Nested and sibling calls receive the original levels and placeholders.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "first_volatile_call_stops_before_remaining_scalar_children",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/semantics/volatility/production/tests.rs",
+      "capability": "Short-circuit scalar volatility",
+      "workload": "Classify a row whose leading random() call is followed by 4,096 scalar fields.",
+      "invariant": "Exactly two scalar nodes are visited. The row is volatile.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_overload_normalizes_each_argument_once",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/type_resolution/fixed_builtin/registry/tests.rs",
+      "capability": "Fixed builtin overload lookup",
+      "workload": "Resolve a stored one-argument binding against all six signatures of ABS on the first lookup and again after selection.",
+      "invariant": "Both lookups select the same descriptor and allocate only the bytes and allocations needed to normalize the supplied argument.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "operator_name_index_keeps_catalog_order_and_lookup_visits_only_its_overloads",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/type_resolution/operators/resolution/tests.rs",
+      "capability": "Indexed binary operator declarations",
+      "workload": "Probe three XOR overloads and missing identities before traversing all catalog names and OIDs.",
+      "invariant": "The initial index lookup allocates zero times. Name groups preserve declaration order and OIDs preserve the original operand and result identities.",
       "case_names": [
         ""
       ]
@@ -77734,6 +77851,253 @@
       "capability": "Stored routine restoration",
       "workload": "Replace a small SELECT literal with over 128 KiB of UTF-8 text, cancel and retry the edit, then replace it with the original small literal.",
       "invariant": "Each copy uses the current expression's total bytes. The long text yields across byte windows, cancellation preserves the declaration, and shrinking the value releases its reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "test",
+      "test": "traversal_and_centrality_share_one_subgraph_across_the_result",
+      "cases": 1,
+      "source": "crates/uqa-graph/tests/centrality.rs",
+      "capability": "Linear retained graph result memory",
+      "workload": "Traverse a 512-vertex star with ordinary and temporal traversal and run two PageRank rounds.",
+      "invariant": "Each result retains less than 512 KiB. All 512 entries share the same vertex slice, edge slice and graph name and preserve their scores and sorted identities.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "test",
+      "test": "propagation_rounds_reuse_adjacency_and_score_buffers",
+      "cases": 1,
+      "source": "crates/uqa-graph/tests/centrality.rs",
+      "capability": "Bounded allocation for graph propagation rounds",
+      "workload": "Run PageRank, HITS and message passing for one, two and eight rounds on the same four-vertex chain.",
+      "invariant": "Every vertex has a posting. A single message-passing layer omits the adjacency cache, and subsequent rounds reuse their allocations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "looping_over_dense_path_states_requires_no_heap_allocation",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/rpq/dfa/tests.rs",
+      "capability": "Allocation-free regular path state transitions",
+      "workload": "Advance a compiled DFA through 8,192 alternating edge labels.",
+      "invariant": "Every step uses a numeric state ID. The final state accepts the path and execution allocates zero bytes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "repeated_cypher_patterns_match_without_allocating_or_recompiling",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/cypher/executor/regex.rs",
+      "capability": "Statement-owned Cypher pattern reuse",
+      "workload": "Evaluate the same unanchored Cypher pattern 2,048 times after the initial match.",
+      "invariant": "The warmed matches allocate no heap memory and the statement retains one compiled pattern.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "bound_start_vertex_does_not_enumerate_unrelated_vertices",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/cypher/executor/matching/tests.rs",
+      "capability": "Bound Cypher start vertices",
+      "workload": "Match the same bound vertex in graphs with one and 4,096 vertices.",
+      "invariant": "Both matches return the same binding and allocate the same number of bytes and buffers.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "unnamed_trails_validate_identifiers_in_entity_order_without_copying_properties",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/cypher/executor/matching/tests.rs",
+      "capability": "Cypher path materialization",
+      "workload": "Validate an unnamed vertex and edge with 64 KiB properties and four ordered identifier errors.",
+      "invariant": "Unnamed trail validation allocates zero times. Both path forms report the same first invalid identifier.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "exact_numeric_hashes_cover_all_representations_without_heap_allocation",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/tests/numeric_keys.rs",
+      "capability": "Hashing exact numeric keys",
+      "workload": "Hash equal bool, integer, binary float and decimal values through 64 passes. Include subnormals, large coefficients, extra display zeros, infinities and NaNs.",
+      "invariant": "Equivalent values have identical hashes across representation and scale boundaries. Distinct wide integer coefficients reach the map hasher, and the 64 passes allocate zero buffers.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "cached_neighbors_observe_read_cancellation_within_a_vertex",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/message_passing.rs",
+      "capability": "Cancellable graph propagation",
+      "workload": "Cancel a graph read while summing, averaging or taking the maximum over 1,024 cached neighbors.",
+      "invariant": "All aggregations return the original storage cancellation error within the row.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "hash_input_matches_independent_arbitrary_precision_quotients_and_fractional_digits",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/decimal/hashing/tests.rs",
+      "capability": "Exact numeric join keys",
+      "workload": "Hash single-word and multiword coefficients at eleven fractional scales, including the maximum SQL scale.",
+      "invariant": "Every emitted integer limb, fractional digit and partition length matches independent arbitrary-precision division.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "two_edge_match_allocates_only_surviving_payload_buffers",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/operators/gmatch.rs",
+      "capability": "Graph match payload allocation",
+      "workload": "Build a two-edge path payload whose first and last vertices coincide.",
+      "invariant": "Every allocation survives in the result. The ID slices are sorted and unique, and the graph name shares its original allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-joins",
+      "kind": "lib",
+      "test": "full_outer_join_extracts_each_key_once_and_retains_unmatched_row_order",
+      "cases": 1,
+      "source": "crates/uqa-joins/src/row_join/tests.rs",
+      "capability": "Full outer join key extraction",
+      "workload": "Join two left rows to four right rows with duplicates and unmatched endpoints.",
+      "invariant": "Each input key is evaluated once. Duplicate pairs and padded rows retain their order and values.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-joins",
+      "kind": "test",
+      "test": "right_input_preparation_scales_with_rows_for_text_vector_and_hybrid_joins",
+      "cases": 1,
+      "source": "crates/uqa-joins/tests/cross_paradigm.rs",
+      "capability": "Right-input preparation in similarity joins",
+      "workload": "Compare four-by-four and 32-by-32 inputs for text, vector and hybrid joins with no output pairs.",
+      "invariant": "Multiplying each side by eight increases total allocations at most eightfold for every join.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "base_layer_search_releases_upper_distances_and_decodes_each_candidate_once",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/hnsw_index/tests/reads.rs",
+      "capability": "HNSW base-layer distance workspace",
+      "workload": "Warm an upper-level distance, then search all 128 nodes of a 256-coordinate ring.",
+      "invariant": "The base search emits 128 neighbors, releases the upper cache and decodes at most 128 candidate vectors.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "frontier_reuses_membership_and_orders_each_new_priority_with_logarithmic_comparisons",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/diskann_index/search/tests.rs",
+      "capability": "DiskANN bounded frontier work",
+      "workload": "Offer 512 equal-priority candidates in reverse order, repeat each admission and revisit expanded and evicted nodes.",
+      "invariant": "The ordered frontier retains the first 256 node IDs. Duplicates consume no extra distance estimates and comparisons stay within a logarithmic bound per admission.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "tensor_top_k_uses_bounded_workspace_in_trained_and_untrained_search",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/ivf_index/tests.rs",
+      "capability": "Bounded tensor IVF selection",
+      "workload": "Query five of 1,024 documents with two vectors each before and after training under a 4 KiB allowance.",
+      "invariant": "Both routes return the canonical five scores and document IDs and release the complete workspace.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "probed_tensor_scores_preserve_bits_at_float_extremes_and_ties",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/ivf_index/tests.rs",
+      "capability": "IVF tensor score and ordering equivalence",
+      "workload": "Probe one, two and four centroids across seven query vectors, three top-k limits, ties, subnormals and overflowing dot products.",
+      "invariant": "Each result matches the document IDs and exact score bits of materializing every selected component and then reducing.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "cached_norms_preserve_every_canonical_score_bit",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/vector_index/cosine/tests.rs",
+      "capability": "Canonical cosine from retained norms",
+      "workload": "Score vector pairs with empty, mismatched, subnormal and overflowing components.",
+      "invariant": "Computing the query norm or both norms ahead of time preserves the canonical f32 score bits.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "retained_coordinates_keep_one_flat_tensor_and_reuse_norms_across_queries",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/vector_index/brute_force/cache/tests.rs",
+      "capability": "Retained SQLite vector storage",
+      "workload": "Warm the exact index with multiple tensor components and issue a second query on the same read snapshot.",
+      "invariant": "Coordinates use one contiguous array, every retained norm matches the canonical reduction and the second query reuses the snapshot.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "restricting_live_workspace_charges_only_its_receiving_child",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/tests.rs",
+      "capability": "Memory ownership transfer into a bounded child",
+      "workload": "Move a live parent allocation into a capped child budget and attempt the same transfer while the child is full.",
+      "invariant": "Ownership transfer charges the child once, preserves the parent peak and leaves the source fully charged when the child rejects admission.",
       "case_names": [
         ""
       ]

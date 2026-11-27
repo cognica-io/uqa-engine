@@ -28,8 +28,13 @@ struct Candidate {
     distance: PQDistance,
 }
 
+#[cfg(test)]
+thread_local! { static PRIORITY_COMPARISONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) }; }
+
 impl Candidate {
     fn compare(&self, other: &Self) -> Ordering {
+        #[cfg(test)]
+        PRIORITY_COMPARISONS.set(PRIORITY_COMPARISONS.get() + 1);
         self.distance
             .get()
             .total_cmp(&other.distance.get())
@@ -48,7 +53,8 @@ struct Workspace {
     lookup: Option<PQLookupTable>,
     refinement: Option<Refinement>,
     frontier: BudgetedVec<Candidate>,
-    expanded: BudgetedHashSet<u64>,
+    // The frontier and all expanded nodes are disjoint. Evicted, unexpanded nodes leave this set.
+    discovered: BudgetedHashSet<u64>,
     phase: Phase,
     cursor: u64,
 }
@@ -89,6 +95,8 @@ impl DiskANNTraversal {
                 node: entry,
                 distance: lookup.estimate(code, control)?,
             })?;
+            let mut discovered = BudgetedHashSet::new(control.memory());
+            discovered.insert(entry)?;
             stats.pq_estimates = 1;
             Some(Workspace {
                 lookup: Some(lookup),
@@ -98,7 +106,7 @@ impl DiskANNTraversal {
                     control,
                 )?),
                 frontier,
-                expanded: BudgetedHashSet::new(control.memory()),
+                discovered,
                 phase: Phase::Approximate,
                 cursor: 0,
             })
@@ -191,7 +199,7 @@ impl Workspace {
                 control.check()?;
                 let node = self.cursor;
                 self.cursor += 1;
-                if !self.expanded.contains(&node) {
+                if !self.discovered.contains(&node) {
                     selected.push(node)?;
                 }
             }
@@ -201,19 +209,13 @@ impl Workspace {
                     "approximate traversal cannot resume after completion starts",
                 ));
             }
-            for candidate in self.frontier.iter() {
+            for candidate in self.frontier.iter().take(width) {
                 control.check()?;
-                if !self.expanded.contains(&candidate.node) {
-                    selected.push(candidate.node)?;
-                    if selected.len() == width {
-                        break;
-                    }
-                }
+                selected.push(candidate.node)?;
             }
             if selected.is_empty() {
                 self.phase = Phase::Exhausted;
             }
-            self.expanded.reserve(selected.len())?;
         }
         if selected.is_empty() {
             return Ok(BudgetedVec::new(control.memory()));
@@ -221,20 +223,13 @@ impl Workspace {
         let (nodes, read) = reader.read_nodes_with_stats(&selected, control)?;
         pages.merge(read)?;
         if !completion {
-            for node in nodes.iter() {
-                control.check()?;
-                self.expanded.insert(node.node_id())?;
+            let count = selected.len();
+            let remaining = self.frontier.len() - count;
+            for target in 0..remaining {
+                super::metric::checkpoint(target, control)?;
+                self.frontier[target] = self.frontier[target + count];
             }
-            let mut retained = 0;
-            for offset in 0..self.frontier.len() {
-                super::metric::checkpoint(offset, control)?;
-                let candidate = self.frontier[offset];
-                if !self.expanded.contains(&candidate.node) {
-                    self.frontier[retained] = candidate;
-                    retained += 1;
-                }
-            }
-            self.frontier.truncate(retained);
+            self.frontier.truncate(remaining);
         }
         for node in nodes.iter() {
             control.check()?;
@@ -267,14 +262,8 @@ impl Workspace {
         control: &StorageReadControl,
         stats: &mut DiskANNTraversalStats,
     ) -> StorageBackendResult<()> {
-        if self.expanded.contains(&node) {
+        if self.discovered.contains(&node) {
             return Ok(());
-        }
-        for (offset, item) in self.frontier.iter().enumerate() {
-            super::metric::checkpoint(offset, control)?;
-            if item.node == node {
-                return Ok(());
-            }
         }
         let code = reader
             .code(node)
@@ -289,18 +278,20 @@ impl Workspace {
         };
         increment(&mut stats.pq_estimates)?;
         let limit = reader.manifest().input().parameters.search_list_size;
-        if self.frontier.len() < limit {
-            self.frontier.push(candidate)?;
-        } else if candidate
-            .compare(self.frontier.last().expect("positive list limit"))
-            .is_lt()
-        {
-            self.frontier[limit - 1] = candidate;
-        } else {
-            return Ok(());
+        if self.frontier.len() == limit {
+            let worst = self.frontier.last().expect("positive list limit");
+            if !candidate.compare(worst).is_lt() {
+                return Ok(());
+            }
+            self.discovered.remove(&worst.node);
+            self.frontier.pop();
         }
-        // Only unexpanded work occupies the bounded PQ frontier. A previously evicted candidate may be admitted again if a later edge rediscovers it.
-        self.frontier.sort_unstable_by(Candidate::compare);
+        let position = self
+            .frontier
+            .partition_point(|entry| entry.compare(&candidate).is_lt());
+        self.discovered.insert(node)?;
+        self.frontier.push(candidate)?;
+        self.frontier[position..].rotate_right(1);
         Ok(())
     }
 }
