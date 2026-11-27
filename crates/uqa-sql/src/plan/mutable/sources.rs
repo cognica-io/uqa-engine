@@ -82,6 +82,16 @@ impl MutableQueryPlan {
     }
 }
 
+impl SourcePlan {
+    /// Move a caller-owned range item through a consuming edit. An error leaves an empty source in the caller's slot.
+    pub fn edit_uncontrolled(
+        &mut self,
+        edit: impl FnOnce(MutableSourcePlan) -> Result<MutableSourcePlan, SQLError>,
+    ) -> Result<(), SQLError> {
+        super::edits::edit_uncontrolled(self, edit)
+    }
+}
+
 impl MutableSourcePlan {
     pub fn reserved_bytes(&self) -> usize {
         self.memory.reserved_bytes()

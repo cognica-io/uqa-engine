@@ -19,31 +19,46 @@ fn query(sql: &str) -> QueryPlan {
 
 #[test]
 fn caller_owned_local_scalar_edit_observes_cancellation_in_the_last_slot() {
-    for cancel_original in [false, true] {
-        let mut values = query("VALUES (1)");
-        let storage = ProductionControl::uncontrolled();
-        let budget = MemoryBudget::new(8192);
-        let original = CancellationToken::new();
-        let invoking = CancellationToken::new();
-        let workspace = ProductionControl::new(&budget, &original, &invoking);
-        let mut visited = 0;
-        let error = values
-            .edit_uncontrolled(|plan| {
-                plan.map_local_scalars(&storage, &workspace, |value| {
-                    visited += 1;
-                    let token = if cancel_original {
-                        &original
+    let storage = ProductionControl::uncontrolled();
+    for sql in ["VALUES (1)", "SELECT * FROM generate_series(1,2)"] {
+        for cancel_original in [false, true] {
+            let mut input = query(sql);
+            let budget = MemoryBudget::new(8192);
+            let original = CancellationToken::new();
+            let invoking = CancellationToken::new();
+            let workspace = ProductionControl::new(&budget, &original, &invoking);
+            let count = if matches!(input.root, RelationalPlan::Values { .. }) {
+                1
+            } else {
+                2
+            };
+            let mut visited = 0;
+            let final_slot = |value| {
+                visited += 1;
+                if visited == count {
+                    if cancel_original {
+                        original.cancel();
                     } else {
-                        &invoking
-                    };
-                    token.cancel();
-                    Ok(value)
-                })
-            })
+                        invoking.cancel();
+                    }
+                }
+                Ok(value)
+            };
+            let error = match &mut input.root {
+                RelationalPlan::QueryBlock(block) => {
+                    block.from.as_mut().unwrap().edit_uncontrolled(|source| {
+                        source.map_local_scalars(&storage, &workspace, final_slot)
+                    })
+                }
+                _ => input.edit_uncontrolled(|query| {
+                    query.map_local_scalars(&storage, &workspace, final_slot)
+                }),
+            }
             .unwrap_err();
-        assert_eq!(visited, 1);
-        assert_eq!(error.sqlstate(), Some("57014"));
-        assert_eq!(budget.used(), 0);
+            assert_eq!(visited, count);
+            assert_eq!(error.sqlstate(), Some("57014"));
+            assert_eq!(budget.used(), 0);
+        }
     }
 }
 

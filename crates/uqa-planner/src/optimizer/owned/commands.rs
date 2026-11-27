@@ -81,8 +81,7 @@ impl Context<'_, '_> {
         let CommandPlan::Insert(plan) = &*command else {
             unreachable!()
         };
-        if plan.rows.iter().any(|row| !row.is_empty()) {
-            let config = self.config.for_values()?;
+        if let Some(config) = self.config.for_values(&plan.rows)? {
             let values = Context {
                 config: &config,
                 aggregates: self.aggregates,

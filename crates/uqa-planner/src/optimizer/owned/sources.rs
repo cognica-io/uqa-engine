@@ -38,52 +38,20 @@ impl Context<'_, '_> {
                     self.access_predicate(self.qualification(expression)?)
                 })
             }
-            SourcePlan::Values { rows, .. } => {
-                if rows.iter().any(|row| !row.is_empty()) {
-                    let config = self.config.for_values()?;
-                    let nested = Context {
-                        config: &config,
-                        aggregates: self.aggregates,
-                    };
-                    for row in 0..rows.len() {
-                        let SourcePlan::Values { rows, .. } = &*source else {
-                            unreachable!()
-                        };
-                        for column in 0..rows[row].len() {
-                            source = source.map_scalar(
-                                SourceScalarSlot::Value { row, column },
-                                control,
-                                |expression| nested.scalar(expression),
-                            )?;
-                        }
+            SourcePlan::Values { .. }
+            | SourcePlan::Function { .. }
+            | SourcePlan::FunctionGroup { .. } => {
+                source = super::super::scalar::ScalarProduction::admitted(self.config)
+                    .source_inputs(source)?;
+                match &*source {
+                    SourcePlan::Function { .. } => {
+                        super::super::function_source::owned::optimize(source, self)
                     }
-                }
-                Ok(source)
-            }
-            SourcePlan::Function { args, .. } => {
-                for argument in 0..args.len() {
-                    source = source.map_scalar(
-                        SourceScalarSlot::Argument(argument),
-                        control,
-                        |expression| self.scalar(expression),
-                    )?;
-                }
-                super::super::function_source::owned::optimize(source, self)
-            }
-            SourcePlan::FunctionGroup { functions, .. } => {
-                for function in 0..functions.len() {
-                    let SourcePlan::FunctionGroup { functions, .. } = &*source else {
-                        unreachable!()
-                    };
-                    for argument in 0..functions[function].args.len() {
-                        source = source.map_scalar(
-                            SourceScalarSlot::GroupArgument { function, argument },
-                            control,
-                            |expression| self.scalar(expression),
-                        )?;
+                    SourcePlan::FunctionGroup { .. } => {
+                        super::super::function_source::owned::optimize_group(source, self)
                     }
+                    _ => Ok(source),
                 }
-                super::super::function_source::owned::optimize_group(source, self)
             }
             SourcePlan::Subquery { .. } => source.map_query(control, |query| self.query(query)),
         }

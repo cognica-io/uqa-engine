@@ -80,6 +80,48 @@ impl<'a, 'scope> ScalarProduction<'a, 'scope> {
         }
     }
 
+    pub(super) fn query_inputs(
+        self,
+        query: uqa_sql::plan::MutableQueryPlan,
+    ) -> Result<uqa_sql::plan::MutableQueryPlan, SQLError> {
+        let values = match &query.root {
+            super::RelationalPlan::Values { rows, .. } => self.config.for_values(rows)?,
+            super::RelationalPlan::SetOp { .. } => None,
+            super::RelationalPlan::QueryBlock(_) => unreachable!("query input scalar scope"),
+        };
+        let config = values.as_ref().unwrap_or(self.config);
+        query.map_local_scalars(&self.storage, &config.production, |expression| {
+            owned::optimize_in(
+                expression,
+                ScalarProduction {
+                    config,
+                    storage: self.storage,
+                },
+            )
+        })
+    }
+
+    pub(super) fn source_inputs(
+        self,
+        source: uqa_sql::plan::MutableSourcePlan,
+    ) -> Result<uqa_sql::plan::MutableSourcePlan, SQLError> {
+        let values = match &*source {
+            super::SourcePlan::Values { rows, .. } => self.config.for_values(rows)?,
+            super::SourcePlan::Function { .. } | super::SourcePlan::FunctionGroup { .. } => None,
+            _ => unreachable!("range item argument scope"),
+        };
+        let config = values.as_ref().unwrap_or(self.config);
+        source.map_local_scalars(&self.storage, &config.production, |expression| {
+            owned::optimize_in(
+                expression,
+                ScalarProduction {
+                    config,
+                    storage: self.storage,
+                },
+            )
+        })
+    }
+
     /// Hand a newly produced constructor to the caller's syntax owner. Shared literal values retain their independent leases.
     pub(super) fn adopt(self, produced: OwnedScalarExpr) -> Result<OwnedScalarExpr, SQLError> {
         if self.storage.budget().is_none() && self.config.production.budget().is_some() {

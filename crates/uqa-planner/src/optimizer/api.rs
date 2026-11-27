@@ -116,7 +116,13 @@ impl OptimizerConfig<'_> {
         optimize(&nested)
     }
 
-    pub(super) fn for_values(&self) -> Result<Self, uqa_sql::SQLError> {
+    pub(super) fn for_values(
+        &self,
+        rows: &[Vec<ScalarExpr>],
+    ) -> Result<Option<Self>, uqa_sql::SQLError> {
+        if rows.iter().all(Vec::is_empty) {
+            return Ok(None);
+        }
         let mut config = self.clone();
         config.retain_values_constants = true;
         if config.constant_storage.is_none() {
@@ -124,7 +130,7 @@ impl OptimizerConfig<'_> {
                 config.constant_storage = factory.0(&config.production)?;
             }
         }
-        Ok(config)
+        Ok(Some(config))
     }
 
     #[must_use]

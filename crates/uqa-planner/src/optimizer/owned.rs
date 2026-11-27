@@ -78,16 +78,7 @@ impl Context<'_, '_> {
     }
 
     fn qualification(&self, expression: OwnedScalarExpr) -> Result<OwnedScalarExpr, SQLError> {
-        let expression = self.scalar(expression)?;
-        if self.config.enable_boolean_simplify {
-            super::scalar::qualification::simplify_owned(
-                expression,
-                &self.config.production,
-                &self.config.production,
-            )
-        } else {
-            Ok(expression)
-        }
+        super::scalar::optimize_qualification_owned(expression, self.config)
     }
 
     fn access_predicate(&self, expression: OwnedScalarExpr) -> Result<OwnedScalarExpr, SQLError> {
@@ -131,75 +122,18 @@ impl Context<'_, '_> {
         }
         drop(reachable);
         match &query.root {
-            RelationalPlan::QueryBlock(_) => self.block(query),
+            RelationalPlan::QueryBlock(_) => return self.block(query),
             RelationalPlan::SetOp { .. } => {
                 query = query
                     .map_query_child(QueryChildSlot::Left, control, |query| self.query(query))?;
                 query = query
                     .map_query_child(QueryChildSlot::Right, control, |query| self.query(query))?;
-                let RelationalPlan::SetOp { order_by, .. } = &query.root else {
-                    unreachable!()
-                };
-                for index in 0..order_by.len() {
-                    query = query.map_scalar(
-                        QueryScalarSlot::OrderBy(index),
-                        control,
-                        |expression| self.scalar(expression),
-                    )?;
-                }
-                query = query.map_scalar(QueryScalarSlot::Limit, control, |expression| {
-                    self.scalar(expression)
-                })?;
-                query = query.map_scalar(QueryScalarSlot::Offset, control, |expression| {
-                    self.scalar(expression)
-                })?;
-                let RelationalPlan::SetOp {
-                    order_by,
-                    limit,
-                    offset,
-                    ..
-                } = &query.root
-                else {
-                    unreachable!()
-                };
-                let live = super::subqueries::live_slots(
-                    order_by
-                        .iter()
-                        .map(|order| &order.expr)
-                        .chain(limit.as_deref())
-                        .chain(offset.as_deref()),
-                    *control,
-                )?;
-                self.query_arena(query, &live)
             }
-            RelationalPlan::Values { rows, .. } => {
-                if rows.iter().any(|row| !row.is_empty()) {
-                    let values = self.config.for_values()?;
-                    let nested = Context {
-                        config: &values,
-                        aggregates: self.aggregates,
-                    };
-                    let count = rows.len();
-                    for row in 0..count {
-                        let RelationalPlan::Values { rows, .. } = &query.root else {
-                            unreachable!()
-                        };
-                        for column in 0..rows[row].len() {
-                            query = query.map_scalar(
-                                QueryScalarSlot::Value { row, column },
-                                control,
-                                |expression| nested.scalar(expression),
-                            )?;
-                        }
-                    }
-                }
-                let RelationalPlan::Values { rows, .. } = &query.root else {
-                    unreachable!()
-                };
-                let live = super::subqueries::live_slots(rows.iter().flatten(), *control)?;
-                self.query_arena(query, &live)
-            }
+            RelationalPlan::Values { .. } => {}
         }
+        query = super::scalar::ScalarProduction::admitted(self.config).query_inputs(query)?;
+        let live = super::subqueries::live_slots_for_query(&query, *control)?;
+        self.query_arena(query, &live)
     }
 
     fn query_arena(

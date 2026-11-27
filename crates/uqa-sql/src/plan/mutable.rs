@@ -69,11 +69,7 @@ impl QueryPlan {
         &mut self,
         edit: impl FnOnce(MutableQueryPlan) -> Result<MutableQueryPlan, SQLError>,
     ) -> Result<(), SQLError> {
-        let mut slot = edits::Slot::<MutableQueryPlan>::new(self, None);
-        let output = edit(slot.take())?;
-        output.assert_owner(&ProductionControl::uncontrolled());
-        slot.restore(output);
-        Ok(())
+        edits::edit_uncontrolled(self, edit)
     }
 
     /// Copy a complete query while keeping mutable constructor ownership separate. Every destination and ownership-record buffer is admitted before allocation; published immutable schemas retain their original shared owners.

@@ -46,8 +46,7 @@ pub(super) fn optimize_values(
     rows: &mut [Vec<uqa_sql::ScalarExpr>],
     config: &OptimizerConfig,
 ) -> Result<(), SQLError> {
-    if rows.iter().any(|row| !row.is_empty()) {
-        let values_config = config.for_values()?;
+    if let Some(values_config) = config.for_values(rows)? {
         for expression in rows.iter_mut().flatten() {
             optimize_scalar_slot(expression, &values_config)?;
         }
@@ -107,39 +106,20 @@ pub(super) fn optimize_query(
         RelationalPlan::QueryBlock(_) => {
             optimize_query_block(query, config, aggregates)?;
         }
-        RelationalPlan::SetOp {
-            left,
-            right,
-            order_by,
-            limit,
-            offset,
-            subqueries,
-            ..
-        } => {
-            optimize_query(left, config, aggregates)?;
-            optimize_query(right, config, aggregates)?;
-            for order in &mut *order_by {
-                optimize_scalar_slot(&mut order.expr, config)?;
+        RelationalPlan::SetOp { .. } | RelationalPlan::Values { .. } => {
+            if let RelationalPlan::SetOp { left, right, .. } = &mut query.root {
+                optimize_query(left, config, aggregates)?;
+                optimize_query(right, config, aggregates)?;
             }
-            if let Some(limit) = limit {
-                optimize_scalar_slot(limit, config)?;
-            }
-            if let Some(offset) = offset {
-                optimize_scalar_slot(offset, config)?;
-            }
-            let live = super::subqueries::live_slots(
-                order_by
-                    .iter()
-                    .map(|order| &order.expr)
-                    .chain(limit.as_deref())
-                    .chain(offset.as_deref()),
-                config.production,
-            )?;
-            super::subqueries::optimize_live(subqueries, &live, config, aggregates)?;
-        }
-        RelationalPlan::Values { rows, subqueries } => {
-            optimize_values(rows, config)?;
-            let live = super::subqueries::live_slots(rows.iter().flatten(), config.production)?;
+            query.edit_uncontrolled(|query| {
+                super::scalar::ScalarProduction::caller(config).query_inputs(query)
+            })?;
+            let live = super::subqueries::live_slots_for_query(query, config.production)?;
+            let (RelationalPlan::SetOp { subqueries, .. }
+            | RelationalPlan::Values { subqueries, .. }) = &mut query.root
+            else {
+                unreachable!("set operation or VALUES subquery arena")
+            };
             super::subqueries::optimize_live(subqueries, &live, config, aggregates)?;
         }
     }
@@ -269,22 +249,21 @@ pub(super) fn optimize_source(
                 }
             }
         }
-        SourcePlan::Values { rows, .. } => {
-            optimize_values(rows, config)?;
-        }
-        SourcePlan::Function { args, .. } => {
-            for expression in args {
-                optimize_scalar_slot(expression, config)?;
-            }
-            super::function_source::optimize(source, config, aggregates)?;
-        }
-        SourcePlan::FunctionGroup { functions, .. } => {
-            for function in functions {
-                for expression in &mut function.args {
-                    optimize_scalar_slot(expression, config)?;
+        SourcePlan::Values { .. }
+        | SourcePlan::Function { .. }
+        | SourcePlan::FunctionGroup { .. } => {
+            source.edit_uncontrolled(|source| {
+                super::scalar::ScalarProduction::caller(config).source_inputs(source)
+            })?;
+            match source {
+                SourcePlan::Function { .. } => {
+                    super::function_source::optimize(source, config, aggregates)?;
                 }
+                SourcePlan::FunctionGroup { .. } => {
+                    super::function_source::optimize_group(source, config, aggregates)?;
+                }
+                _ => {}
             }
-            super::function_source::optimize_group(source, config, aggregates)?;
         }
         SourcePlan::Subquery { body, .. } => optimize_query(body, config, aggregates)?,
         SourcePlan::Table { .. } => {}

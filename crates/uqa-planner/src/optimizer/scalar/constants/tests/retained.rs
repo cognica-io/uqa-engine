@@ -262,6 +262,7 @@ fn values_inputs_reuse_the_enclosing_routine_stack() {
     }
     assert!(differences.is_empty(), "{differences:?}");
 
+    let rows = [vec![ScalarExpr::Literal(Value::Int(1))]];
     for (allowance, cancel, expected) in [
         (0, 0, Some("53200")),
         (0, 1, Some("57014")),
@@ -287,7 +288,8 @@ fn values_inputs_reuse_the_enclosing_routine_stack() {
             assert_eq!(last, &[9; 16]);
             assert_eq!(parents, stack);
             assert!(memory.used() >= std::mem::size_of_val(child.active_inline_routines));
-            let values = child.for_values()?;
+            assert!(child.for_values(&[Vec::new()])?.is_none());
+            let values = child.for_values(&rows)?.unwrap();
             assert!(std::ptr::eq(
                 values.active_inline_routines,
                 child.active_inline_routines

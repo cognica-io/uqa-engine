@@ -6996,7 +6996,7 @@
       "cases": 1,
       "source": "crates/uqa-sql/src/plan/mutable/tests/children.rs",
       "capability": "Query scalar editing",
-      "workload": "Cancel each request token while rewriting the only scalar in a caller-owned VALUES query.",
+      "workload": "Cancel each request token in the last scalar of a caller-owned VALUES query and in the last argument of a range function.",
       "invariant": "The final scalar edit returns SQLSTATE 57014 and releases its workspace.",
       "case_names": [
         ""

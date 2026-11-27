@@ -8,7 +8,7 @@
 
 use uqa_core::memory::{ProductionControl, ProductionMap};
 use uqa_sql::{
-    plan::{QueryBlockPlan, SourcePlan},
+    plan::{QueryBlockPlan, QueryPlan, RelationalPlan, SourcePlan},
     SQLError, ScalarExpr,
 };
 
@@ -40,6 +40,29 @@ pub(super) fn live_slots_with_source<'a, 'control>(
         source.try_visit_expressions(&mut visit)?;
     }
     Ok(slots)
+}
+
+pub(super) fn live_slots_for_query<'control>(
+    query: &QueryPlan,
+    control: ProductionControl<'control>,
+) -> Result<ProductionMap<'control, usize, ()>, SQLError> {
+    match &query.root {
+        RelationalPlan::SetOp {
+            order_by,
+            limit,
+            offset,
+            ..
+        } => live_slots(
+            order_by
+                .iter()
+                .map(|order| &order.expr)
+                .chain(limit.as_deref())
+                .chain(offset.as_deref()),
+            control,
+        ),
+        RelationalPlan::Values { rows, .. } => live_slots(rows.iter().flatten(), control),
+        RelationalPlan::QueryBlock(block) => live_slots_for_block(block, control),
+    }
 }
 
 pub(super) fn live_slots_for_block<'control>(

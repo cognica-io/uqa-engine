@@ -30,6 +30,20 @@ pub(super) trait Editable: Sized {
     fn into_parts(self) -> (Self::Value, Option<Self::Memory>);
 }
 
+pub(super) fn edit_uncontrolled<T: Editable>(
+    target: &mut T::Value,
+    edit: impl FnOnce(T) -> Result<T, crate::SQLError>,
+) -> Result<(), crate::SQLError> {
+    let input = Slot::<T>::new(target, None).take();
+    let (value, memory) = edit(input)?.into_parts();
+    assert!(
+        memory.is_none(),
+        "caller-owned syntax cannot receive an admitted constructor"
+    );
+    *target = value;
+    Ok(())
+}
+
 pub(super) struct Slot<'a, T: Editable> {
     value: Location<'a, T::Value>,
     memory: Option<&'a mut Option<T::Memory>>,

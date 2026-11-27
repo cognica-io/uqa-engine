@@ -7,8 +7,8 @@
 //! Scalar-root traversal keeps each syntax node beside its constructor owner during edits.
 
 use super::{
-    memory::RewriteMemory, sources::query_source_memory, MutableQueryPlan, OwnedScalarExpr,
-    QueryScalarSlot, RelationalPlan, SourceChildSlot, SourceScalarSlot,
+    memory::RewriteMemory, sources::query_source_memory, MutableQueryPlan, MutableSourcePlan,
+    OwnedScalarExpr, QueryScalarSlot, RelationalPlan, SourceChildSlot, SourceScalarSlot,
 };
 use crate::{
     plan::{QueryPlan, SourcePlan},
@@ -83,6 +83,32 @@ impl MutableQueryPlan {
             control,
             &mut action,
         )?;
+        Ok(self)
+    }
+}
+
+impl MutableSourcePlan {
+    /// Rewrite the scalar roots of this range item in declaration order. Join children and subqueries retain their own scopes.
+    pub fn map_local_scalars(
+        mut self,
+        storage: &ProductionControl<'_>,
+        workspace: &ProductionControl<'_>,
+        map: impl FnMut(OwnedScalarExpr) -> Result<OwnedScalarExpr, SQLError>,
+    ) -> Result<Self, SQLError> {
+        self.assert_owner(storage);
+        storage.check()?;
+        let mut input = roots::MapRoots {
+            map,
+            storage: *storage,
+            work: (),
+        };
+        crate::catalog::work::inline(roots::source(
+            &mut self.source,
+            self.memory.as_mut(),
+            workspace,
+            &mut input,
+        ))?;
+        workspace.check()?;
         Ok(self)
     }
 }
