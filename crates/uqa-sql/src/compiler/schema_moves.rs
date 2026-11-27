@@ -16,6 +16,14 @@ pub(super) fn compile_alter_object_schema(
     stmt: &pg_query::protobuf::AlterObjectSchemaStmt,
 ) -> Result<Statement> {
     use pg_query::protobuf::ObjectType;
+    if let Some(routine) = super::drop_alter::compile_routine_name_change(
+        stmt.object_type(),
+        stmt.object.as_deref(),
+        &stmt.newschema,
+        true,
+    )? {
+        return Ok(routine);
+    }
     let relation = stmt
         .relation
         .as_ref()

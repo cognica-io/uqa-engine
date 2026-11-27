@@ -127,6 +127,7 @@ pub(crate) fn build_requested_catalog_rows(
         VirtualRelation::PgType => {
             pg_catalog::build_requested_pg_type(context, catalog, resolution, request)?
         }
+        VirtualRelation::PgOpclass => pg_catalog::operator_classes::rows(),
         VirtualRelation::PgRange => pg_catalog::build_pg_range_with_catalog(catalog),
         VirtualRelation::PgEnum => build_pg_enum(catalog),
         VirtualRelation::PgProc => {

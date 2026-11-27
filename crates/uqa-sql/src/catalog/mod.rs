@@ -60,6 +60,7 @@ impl VirtualRelation {
                 | Self::PgTrigger
                 | Self::PgRewrite
                 | Self::PgType
+                | Self::PgOpclass
                 | Self::PgRange
                 | Self::PgEnum
                 | Self::PgProc
@@ -533,6 +534,17 @@ impl VirtualRelation {
                 "enumtypid" => Inline(ColumnType::Oid),
                 "enumsortorder" => Inline(ColumnType::Real),
                 "enumlabel" => Inline(ColumnType::Name),
+            ],
+            Self::PgOpclass => columns![
+                "oid" => Inline(ColumnType::Oid),
+                "opcmethod" => Inline(ColumnType::Oid),
+                "opcname" => Inline(ColumnType::Name),
+                "opcnamespace" => Inline(ColumnType::Oid),
+                "opcowner" => Inline(ColumnType::Oid),
+                "opcfamily" => Inline(ColumnType::Oid),
+                "opcintype" => Inline(ColumnType::Oid),
+                "opcdefault" => Inline(ColumnType::Boolean),
+                "opckeytype" => Inline(ColumnType::Oid),
             ],
             Self::PgRange => columns![
                 "rngtypid" => Inline(ColumnType::Oid),

@@ -134,6 +134,7 @@ stored_struct!(RenameRoutineStmt {
     arg_types: defaulted,
     arg_type_references: defaulted,
     new_name: required,
+    set_schema: defaulted,
 });
 
 stored_enum!(RoleAttribute {

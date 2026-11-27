@@ -849,36 +849,48 @@ pub(super) fn compile_rename(stmt: &pg_query::protobuf::RenameStmt) -> Result<St
             new_name: stmt.newname.clone(),
         });
     }
-    let (routine_kind, context) = match stmt.rename_type() {
-        ObjectType::ObjectFunction => (Some(AlterRoutineKind::Function), "ALTER FUNCTION"),
-        ObjectType::ObjectProcedure => (Some(AlterRoutineKind::Procedure), "ALTER PROCEDURE"),
-        ObjectType::ObjectRoutine => (Some(AlterRoutineKind::Routine), "ALTER ROUTINE"),
-        _ => (None, "RENAME"),
-    };
-    if let Some(kind) = routine_kind {
-        let Some(NodeEnum::ObjectWithArgs(object)) = stmt
-            .object
-            .as_deref()
-            .and_then(|object| object.node.as_ref())
-        else {
-            return Err(SQLError::Internal(format!(
-                "{context}: malformed routine target"
-            )));
-        };
-        let CompiledRoutineTarget {
-            name,
-            arg_types,
-            arg_type_references,
-        } = compile_object_with_args(object, context)?;
-        return Ok(Statement::RenameRoutine(RenameRoutineStmt {
-            kind,
-            name,
-            arg_types,
-            arg_type_references,
-            new_name: render_relation_component(&stmt.newname),
-        }));
+    if let Some(routine) = compile_routine_name_change(
+        stmt.rename_type(),
+        stmt.object.as_deref(),
+        &stmt.newname,
+        false,
+    )? {
+        return Ok(routine);
     }
     compile_relation_rename(stmt)
+}
+
+pub(super) fn compile_routine_name_change(
+    object_type: pg_query::protobuf::ObjectType,
+    target: Option<&Node>,
+    destination: &str,
+    set_schema: bool,
+) -> Result<Option<Statement>> {
+    use pg_query::protobuf::ObjectType;
+    let (kind, context) = match object_type {
+        ObjectType::ObjectFunction => (AlterRoutineKind::Function, "ALTER FUNCTION"),
+        ObjectType::ObjectProcedure => (AlterRoutineKind::Procedure, "ALTER PROCEDURE"),
+        ObjectType::ObjectRoutine => (AlterRoutineKind::Routine, "ALTER ROUTINE"),
+        _ => return Ok(None),
+    };
+    let Some(NodeEnum::ObjectWithArgs(object)) = target.and_then(|node| node.node.as_ref()) else {
+        return Err(SQLError::Internal(format!(
+            "{context}: malformed routine target"
+        )));
+    };
+    let CompiledRoutineTarget {
+        name,
+        arg_types,
+        arg_type_references,
+    } = compile_object_with_args(object, context)?;
+    Ok(Some(Statement::RenameRoutine(RenameRoutineStmt {
+        kind,
+        name,
+        arg_types,
+        arg_type_references,
+        new_name: render_relation_component(destination),
+        set_schema,
+    })))
 }
 
 fn compile_relation_rename(stmt: &pg_query::protobuf::RenameStmt) -> Result<Statement> {

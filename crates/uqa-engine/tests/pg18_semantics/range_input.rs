@@ -92,3 +92,16 @@ fn verify_declared_values(provider: usize, transcript: &str, reopen_cases: usize
     assert_eq!(reopened["cases"].as_array().unwrap().len(), reopen_cases);
     crate::pg18_oracle::verify(&engine, &reopened.to_string());
 }
+
+#[rstest::rstest]
+#[case::sqlite_native(1)]
+#[case::sqlite_key_value(2)]
+#[case::redb(3)]
+fn declared_range_publication_follows_transaction_visibility(#[case] provider: usize) {
+    let directory = tempfile::tempdir().unwrap();
+    let engine = open(provider, &directory.path().join("range-peers.db"));
+    crate::pg18_oracle::verify_peer(
+        &engine,
+        include_str!("../../../../tests/parity/pg18/range_declaration_sessions.expected.json"),
+    );
+}
