@@ -35888,6 +35888,19 @@
     {
       "package": "uqa-planner",
       "kind": "lib",
+      "test": "caller_wildcard_expansion_moves_existing_outputs_within_the_planning_allowance",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/derived_projection/owned/tests.rs",
+      "capability": "Caller-owned wildcard projection expansion",
+      "workload": "Expand a qualified wildcard beside a four MiB literal, repeat with an incompatible output width and with insufficient planning memory.",
+      "invariant": "Accepted and rejected layouts retain the original literal and alias addresses. Planning uses less than 32 KiB and releases all reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
       "test": "known_output_demand_borrows_wide_column_names",
       "cases": 1,
       "source": "crates/uqa-planner/src/optimizer/derived_projection/tests/demand.rs",

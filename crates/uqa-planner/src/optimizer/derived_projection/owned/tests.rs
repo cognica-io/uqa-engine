@@ -192,3 +192,70 @@ fn failed_wildcard_destination_and_both_cancellations_release_private_query() {
         assert_eq!(budget.used(), sibling.bytes());
     }
 }
+
+#[test]
+fn caller_wildcard_expansion_moves_existing_outputs_within_the_planning_allowance() {
+    for (width, allowance, expected) in
+        [(3, 32_768, Ok(3)), (2, 32_768, Ok(2)), (3, 8, Err("53200"))]
+    {
+        let mut query = star_query();
+        query.analyzed_output = Some(RowSchema::with_types(
+            ["a", "b", "kept"][..width]
+                .iter()
+                .map(|s| (*s).to_owned())
+                .collect(),
+            vec![Some(ColumnType::Integer); width],
+        ));
+        let RelationalPlan::QueryBlock(block) = &mut query.root else {
+            unreachable!()
+        };
+        let large = "v".repeat(4 * 1024 * 1024);
+        let original_text = large.as_ptr();
+        let original_alias = block.projections[1].alias.as_ref().unwrap().as_ptr();
+        block.projections[1].expr = ScalarExpr::Literal(Value::Str(large));
+        let budget = MemoryBudget::new(allowance);
+        let token = CancellationToken::new();
+        let control = ProductionControl::new(&budget, &token, &token);
+        let mut result = None;
+        let allocation = allocation_counter::measure(|| {
+            result = Some(super::super::prune_outputs(
+                &mut query,
+                &[],
+                &|_| true,
+                None,
+                OutputPruningContext {
+                    production: control,
+                    ..OutputPruningContext::new(&|_: &str| false)
+                },
+            ));
+        });
+        assert!(
+            allocation.bytes_total < 32_768,
+            "width={width}, allowance={allowance}: {allocation:?}"
+        );
+        let RelationalPlan::QueryBlock(block) = &query.root else {
+            unreachable!()
+        };
+        match expected {
+            Ok(count) => {
+                result.unwrap().unwrap();
+                assert_eq!(block.projections.len(), count);
+            }
+            Err(state) => {
+                assert_eq!(result.unwrap().unwrap_err().sqlstate(), Some(state));
+                assert_eq!(block.projections.len(), 2);
+            }
+        }
+        assert_eq!(
+            matches!(block.projections[0].expr, ScalarExpr::QualifiedStar(_)),
+            block.projections.len() == 2
+        );
+        let kept = block.projections.last().unwrap();
+        let ScalarExpr::Literal(Value::Str(text)) = &kept.expr else {
+            panic!("surviving output")
+        };
+        assert_eq!(text.as_ptr(), original_text);
+        assert_eq!(kept.alias.as_ref().unwrap().as_ptr(), original_alias);
+        assert_eq!(budget.used(), 0);
+    }
+}

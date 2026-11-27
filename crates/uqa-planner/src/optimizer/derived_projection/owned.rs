@@ -12,7 +12,7 @@ use uqa_core::memory::{Produced, ProductionControl};
 use uqa_sql::plan::{MutableQueryPlan, OwnedScalarExpr, QueryScalarSlot};
 
 mod stars;
-pub(crate) use stars::expand as expand_stars;
+pub(crate) use stars::{expand as expand_stars, expand_caller as expand_local_stars};
 #[cfg(test)]
 mod tests;
 

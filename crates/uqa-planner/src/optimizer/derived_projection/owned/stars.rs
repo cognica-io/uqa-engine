@@ -4,13 +4,45 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Wildcard expansion moves surviving projection owners and admits only generated references and containers.
+//! Resolve wildcards against the original namespace and move every other projection directly to its output slot.
 
 use super::{
     Buffer, MutableQueryPlan, OwnedScalarExpr, ProductionControl, RelationalPlan, RowSchema,
     SQLError, ScalarExpr,
 };
-use uqa_sql::plan::OwnedProjection;
+use crate::{ProjectionPlan, QueryBlockPlan};
+use uqa_core::memory::ProductionVec;
+use uqa_sql::plan::{AnalyzedSource, OwnedProjection};
+
+enum Expansion<T> {
+    Unchanged,
+    Unresolved,
+    Fields(Buffer<Field<T>>),
+}
+
+enum Field<T> {
+    Original(usize),
+    Generated(T),
+}
+
+/// Generated fields precede publication. An original slot is consumed only when the result reaches it.
+fn resolve<P, T>(
+    fields: Buffer<Field<T>>,
+    mut originals: impl Iterator<Item = P>,
+    mut publish: impl FnMut(T) -> P,
+) -> impl ExactSizeIterator<Item = P> {
+    let mut next = 0;
+    fields.into_iter().map(move |field| match field {
+        Field::Original(index) => {
+            let original = originals
+                .nth(index - next)
+                .expect("selected original projection");
+            next = index + 1;
+            original
+        }
+        Field::Generated(field) => publish(field),
+    })
+}
 
 pub(crate) fn expand(
     query: MutableQueryPlan,
@@ -20,83 +52,120 @@ pub(crate) fn expand(
     let RelationalPlan::QueryBlock(block) = &query.root else {
         unreachable!()
     };
-    if !block.projections.iter().any(|projection| {
-        matches!(
-            projection.expr,
-            ScalarExpr::Star | ScalarExpr::QualifiedStar(_)
-        )
-    }) {
-        return Ok((query, true));
-    }
-    let Some(source) = query.analyzed_source.clone() else {
-        return Ok((query, false));
-    };
-    if schema.is_some_and(|schema| schema.columns_are_open(None))
-        || block
-            .projections
-            .iter()
-            .any(|projection| match &projection.expr {
-                ScalarExpr::Star => source.schema.columns_are_open(None),
-                ScalarExpr::QualifiedStar(qualifier) => {
-                    source.schema.columns_are_open(Some(qualifier))
-                }
-                _ => false,
-            })
-    {
-        return Ok((query, false));
-    }
-    let mut count = 0;
-    for projection in &block.projections {
-        let counted = observe_star(&projection.expr, &source.schema, control, &mut |_, _, _| {
-            count += 1;
-            Ok(())
-        });
-        match counted {
-            Ok(false) => count += 1,
-            Ok(true) => {}
-            Err(error) if matches!(error.sqlstate(), Some("53200" | "57014")) => return Err(error),
-            Err(_) => return Ok((query, false)),
+    match prepare(
+        &block.projections,
+        query.analyzed_source.as_deref(),
+        schema,
+        control,
+        Ok,
+    )? {
+        Expansion::Unchanged => Ok((query, true)),
+        Expansion::Unresolved => Ok((query, false)),
+        Expansion::Fields(fields) => {
+            let (query, originals) = query.take_projections(control)?;
+            let expanded = resolve(fields, originals, |projection| projection);
+            Ok((query.replace_projections(expanded, control)?, true))
         }
     }
-    if schema.is_none_or(|schema| schema.len() != count) {
-        return Ok((query, false));
+}
+
+pub(crate) fn expand_caller(
+    block: &mut QueryBlockPlan,
+    source: Option<&AnalyzedSource>,
+    schema: Option<&RowSchema>,
+    control: &ProductionControl<'_>,
+) -> Result<bool, SQLError> {
+    match prepare(&block.projections, source, schema, control, |field| {
+        field.finish(control)
+    })? {
+        Expansion::Unchanged => Ok(true),
+        Expansion::Unresolved => Ok(false),
+        Expansion::Fields(fields) => {
+            // Admit the complete destination while the input is still intact. Publication moves the caller's existing fields and transfers the new allocations to the caller.
+            let mut destination = ProductionVec::new(*control);
+            destination.reserve(fields.len())?;
+            let (mut expanded, memory) = destination.finish()?.into_parts();
+            let originals = std::mem::take(&mut block.projections);
+            expanded.extend(resolve(fields, originals.into_iter(), |field| {
+                field.into_parts().0
+            }));
+            block.projections = expanded;
+            drop(memory);
+            Ok(true)
+        }
     }
-    let (query, projections) = query.take_projections(control)?;
-    let mut expanded = Buffer::new(*control);
+}
+
+fn prepare<T>(
+    projections: &[ProjectionPlan],
+    source: Option<&AnalyzedSource>,
+    output: Option<&RowSchema>,
+    control: &ProductionControl<'_>,
+    mut finish: impl FnMut(OwnedProjection) -> Result<T, SQLError>,
+) -> Result<Expansion<T>, SQLError> {
+    if !projections
+        .iter()
+        .any(|p| matches!(p.expr, ScalarExpr::Star | ScalarExpr::QualifiedStar(_)))
+    {
+        return Ok(Expansion::Unchanged);
+    }
+    let Some(source) = source else {
+        return Ok(Expansion::Unresolved);
+    };
+    let schema = &source.schema;
+    if output.is_some_and(|schema| schema.columns_are_open(None))
+        || projections.iter().any(|p| match &p.expr {
+            ScalarExpr::Star => schema.columns_are_open(None),
+            ScalarExpr::QualifiedStar(qualifier) => schema.columns_are_open(Some(qualifier)),
+            _ => false,
+        })
+    {
+        return Ok(Expansion::Unresolved);
+    }
+    let mut width = 0;
     for projection in projections {
+        match observe_star(&projection.expr, schema, control, &mut |_, _, _| {
+            width += 1;
+            Ok(())
+        }) {
+            Ok(false) => width += 1,
+            Ok(true) => {}
+            Err(error) if matches!(error.sqlstate(), Some("53200" | "57014")) => return Err(error),
+            Err(_) => return Ok(Expansion::Unresolved),
+        }
+    }
+    if output.is_none_or(|schema| schema.len() != width) {
+        return Ok(Expansion::Unresolved);
+    }
+    let mut fields = Buffer::new(*control);
+    for (index, projection) in projections.iter().enumerate() {
         let star = observe_star(
-            &projection.expression,
-            &source.schema,
+            &projection.expr,
+            schema,
             control,
             &mut |column, position, qualifier| {
                 let expression = match position {
                     Some(position) => uqa_sql::semantics::bound_projection_expression_with_control(
-                        &source.schema,
-                        position,
-                        control,
+                        schema, position, control,
                     )?,
                     None => OwnedScalarExpr::column(
                         control.copy_text(column)?,
-                        qualifier
-                            .map(|qualifier| control.copy_text(qualifier))
-                            .transpose()?,
+                        qualifier.map(|name| control.copy_text(name)).transpose()?,
                         control,
                     )?,
                 };
-                expanded.push(OwnedProjection {
+                let field = OwnedProjection {
                     expression,
                     alias: Some(control.copy_text(column)?),
-                })
+                };
+                fields.push(Field::Generated(finish(field)?))
             },
         )?;
         if !star {
-            expanded.push(projection)?;
+            fields.push(Field::Original(index))?;
         }
     }
-    Ok((
-        query.replace_projections(expanded.into_iter(), control)?,
-        true,
-    ))
+    Ok(Expansion::Fields(fields))
 }
 
 type ProjectionFieldObserver<'a> =

@@ -14,6 +14,7 @@ mod demand;
 mod observations;
 pub(super) mod owned;
 mod replacements;
+pub(crate) use owned::expand_local_stars;
 pub use owned::prune_outputs as prune_owned_outputs;
 
 /// Catalog and lexical inputs for removing an unobserved output without losing its effects.
@@ -166,7 +167,12 @@ pub(super) fn prune_positions(
     if inner.distinct || !inner.distinct_on.is_empty() || !inner.windows.is_empty() {
         return Ok(());
     }
-    if !expand_local_stars(inner, query.analyzed_source.as_deref(), schema) {
+    if !expand_local_stars(
+        inner,
+        query.analyzed_source.as_deref(),
+        schema,
+        &context.production,
+    )? {
         return Ok(());
     }
     let replacements = replacements::collect(query, schema, required, context, |expression| {
@@ -199,47 +205,6 @@ pub(super) fn prune_positions(
         projection.expr = expression.into_parts().0;
     }
     Ok(())
-}
-
-pub(crate) fn expand_local_stars(
-    inner: &mut QueryBlockPlan,
-    source: Option<&uqa_sql::plan::AnalyzedSource>,
-    schema: Option<&RowSchema>,
-) -> bool {
-    if inner
-        .projections
-        .iter()
-        .any(|p| matches!(p.expr, ScalarExpr::Star | ScalarExpr::QualifiedStar(_)))
-    {
-        let Some(source) = source else {
-            return false;
-        };
-        if schema.is_some_and(|schema| schema.columns_are_open(None))
-            || inner
-                .projections
-                .iter()
-                .any(|projection| match &projection.expr {
-                    ScalarExpr::Star => source.schema.columns_are_open(None),
-                    ScalarExpr::QualifiedStar(qualifier) => {
-                        source.schema.columns_are_open(Some(qualifier))
-                    }
-                    _ => false,
-                })
-        {
-            return false;
-        }
-        let Ok(expanded) =
-            uqa_sql::semantics::expand_bound_projection_stars(&inner.projections, &source.schema)
-        else {
-            // A qualified enclosing star needs its enclosing layout; a local descriptor alone cannot authorize that expansion.
-            return false;
-        };
-        if schema.is_none_or(|schema| schema.len() != expanded.len()) {
-            return false;
-        }
-        inner.projections = expanded;
-    }
-    true
 }
 
 #[cfg(test)]
