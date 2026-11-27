@@ -47,6 +47,7 @@ impl RoutinePlanVariants {
                 from_sql: false,
                 generic_plans: 0,
                 custom_plans: 0,
+                generic_domains: Default::default(),
                 generic_cost: None,
                 total_custom_cost: 0.0,
             },
@@ -74,7 +75,7 @@ impl RoutinePlanVariants {
     pub(super) fn invalidate(&self) {
         let mut current = self.0.lock();
         if !current.entry.has_tracked_executable_dependencies() {
-            current.entry.plan = None;
+            current.entry.invalidate_executable();
             // Reentrant catalog publication retires only this selection generation. The analyzed input remains immutable and does not need a new allocation identity.
             current.generation = Arc::new(());
         }

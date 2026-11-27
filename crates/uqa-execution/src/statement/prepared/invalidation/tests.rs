@@ -99,6 +99,7 @@ fn cached_entry(executable: &str) -> PreparedStatementPlan {
         from_sql: true,
         generic_plans: 1,
         custom_plans: 0,
+        generic_domains: Default::default(),
         generic_cost: Some(1.0),
         total_custom_cost: 0.0,
     }

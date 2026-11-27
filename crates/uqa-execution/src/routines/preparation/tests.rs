@@ -273,6 +273,7 @@ fn executable_invalidation_reaches_procedural_owners_and_fences_recursive_public
                 composite_inputs: uqa_sql::prepared::composites::CompositeInputs::default(),
                 reanalyzed: None,
                 generic_plan: Some(plan),
+                generic_domains: Default::default(),
                 generic_cost: Some(1.0),
                 custom_cost: None,
             },

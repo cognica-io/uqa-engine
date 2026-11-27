@@ -33,6 +33,7 @@ pub struct PreparedStatementPlan {
     pub from_sql: bool,
     pub generic_plans: i64,
     pub custom_plans: i64,
+    pub generic_domains: super::domains::GenericDomainInputs,
     pub generic_cost: Option<f64>,
     pub total_custom_cost: f64,
 }
@@ -72,7 +73,12 @@ impl PreparedStatementPlan {
         self.dependencies = definition.dependencies;
         self.dependency_snapshot = definition.dependency_snapshot;
         self.needs_analysis = false;
+        self.invalidate_executable();
+    }
+
+    pub fn invalidate_executable(&mut self) {
         self.plan = None;
+        self.generic_domains = Default::default();
         self.generic_cost = None;
     }
 
@@ -80,7 +86,7 @@ impl PreparedStatementPlan {
         if !super::utility::requires_analysis(&self.source_plan) {
             return;
         }
-        self.plan = None;
+        self.invalidate_executable();
         self.needs_analysis = true;
     }
 
@@ -94,6 +100,7 @@ impl PreparedStatementPlan {
             self.needs_analysis = false;
         }
         self.plan = update.generic_plan;
+        self.generic_domains = update.generic_domains;
         self.generic_cost = update.generic_cost;
         if let Some(cost) = update.custom_cost {
             self.total_custom_cost += cost;

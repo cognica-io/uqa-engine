@@ -213,6 +213,11 @@ fn select(
         entry.plan.clone()
     };
     let mut generic_cost = entry.generic_cost;
+    let mut generic_domains = if needs_analysis {
+        Default::default()
+    } else {
+        entry.generic_domains.clone()
+    };
     let reanalyzed = needs_analysis
         .then(|| reanalyze(&context.analysis, entry, control))
         .transpose()?;
@@ -227,7 +232,8 @@ fn select(
             &definition.composite_inputs
         });
     if generic_plan.is_some()
-        && inputs.generic_requires_rebuild_with_control(context.analysis.types, control)?
+        && (inputs.generic_requires_rebuild_with_control(context.analysis.types, control)?
+            || generic_domains.requires_rebuild(context.analysis.procedures, control)?)
     {
         generic_plan = None;
         generic_cost = None;
@@ -267,6 +273,11 @@ fn select(
         let plan = projected
             .take()
             .map_or_else(|| source.copy_for_rewrite(control), Ok)?;
+        generic_domains = uqa_sql::prepared::domains::GenericDomainInputs::capture(
+            source,
+            context.analysis.procedures,
+            control,
+        )?;
         let generic = prepare_generic(context, inputs, plan, control)?;
         composite_inputs = generic.inputs;
         generic_cost = Some(generic.cost);
@@ -297,6 +308,7 @@ fn select(
             composite_inputs,
             reanalyzed,
             generic_plan,
+            generic_domains,
             generic_cost,
             custom_cost,
         },

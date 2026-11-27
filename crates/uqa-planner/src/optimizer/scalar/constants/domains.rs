@@ -37,20 +37,11 @@ pub(super) fn fold(
     let Some(literal) = literal_value_with_control(expr, control)? else {
         return Ok(None);
     };
-    let mut base = &*target;
-    while let ColumnType::Domain {
-        oid, base: parent, ..
-    } = base
-    {
-        if catalog
-            .types
-            .domain_has_constraints_with_control(*oid, control)?
-            != Some(false)
-        {
-            return Ok(None);
-        }
-        base = parent;
-    }
+    let uqa_sql::catalog::domain::CoercionConstraints::Unconstrained(base) =
+        uqa_sql::catalog::domain::coercion_constraints(&target, catalog.types, control)?
+    else {
+        return Ok(None);
+    };
     if !matches!(&*literal, Value::Null) {
         let Some(source) = eligibility::scalar_type(expr, Some(catalog.routines), control)? else {
             return Ok(None);

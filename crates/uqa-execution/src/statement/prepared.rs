@@ -189,6 +189,7 @@ fn register_definition(
             from_sql,
             generic_plans: 0,
             custom_plans: 0,
+            generic_domains: Default::default(),
             generic_cost: None,
             total_custom_cost: 0.0,
         },

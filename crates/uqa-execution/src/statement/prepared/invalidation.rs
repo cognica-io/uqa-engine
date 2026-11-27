@@ -15,7 +15,7 @@ pub fn invalidate_execution_plans<'a>(
 ) {
     for entry in entries {
         if !entry.has_tracked_executable_dependencies() {
-            entry.plan = None;
+            entry.invalidate_executable();
         }
     }
 }

@@ -17,6 +17,7 @@ pub mod composites;
 pub mod defaults;
 pub mod definition;
 pub mod dependencies;
+pub mod domains;
 pub mod entry;
 pub mod ownership;
 pub mod planning;
