@@ -88,3 +88,61 @@ fn owned_qualification_preserves_separate_ordering_scopes_and_exact_lifetimes() 
     );
     assert_eq!(budget.used(), 0);
 }
+
+#[test]
+fn qualification_accepts_childless_windows_in_both_entry_points() {
+    let crate::plan::UnifiedPlan::Query(query) = crate::plan::UnifiedPlan::lower(
+        crate::compile("SELECT row_number() OVER ()")
+            .unwrap()
+            .remove(0),
+    ) else {
+        panic!("query")
+    };
+    let crate::plan::RelationalPlan::QueryBlock(block) = &query.root else {
+        panic!("block")
+    };
+    let expression = &block.projections[0].expr;
+    assert_eq!(
+        &crate::semantics::qualify_unqualified_columns(expression, "r"),
+        expression
+    );
+    let budget = MemoryBudget::new(8192);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&budget, &token, &token);
+    assert_eq!(
+        &*qualify_unqualified_columns_with_control(expression, "r", &control).unwrap(),
+        expression
+    );
+    assert_eq!(budget.used(), 0);
+}
+
+#[test]
+fn qualification_moves_the_admitted_name_and_parser_position() {
+    let name = "x".repeat(4096);
+    let source = ScalarExpr::Column(crate::ast::ReferenceName::from(name).with_position(Some(27)));
+    let budget = MemoryBudget::new(4097);
+    let token = CancellationToken::new();
+    for control in [
+        ProductionControl::uncontrolled(),
+        ProductionControl::new(&budget, &token, &token),
+    ] {
+        let original = source.copy_for_rewrite(&control).unwrap();
+        let ScalarExpr::Column(name) = &*original else {
+            panic!("column");
+        };
+        let allocated = name.as_ptr();
+        let qualified = qualify(original, "r", &control).unwrap();
+        let ScalarExpr::QualifiedColumn { qualifier, column } = &*qualified else {
+            panic!("qualified column");
+        };
+        assert_eq!(column.as_ptr(), allocated);
+        assert_eq!(column.position(), Some(27));
+        assert_eq!(qualifier, "r");
+        if control.budget().is_some() {
+            assert_eq!(qualified.reserved_bytes(), 4097);
+            assert_eq!(budget.peak(), 4097);
+        }
+        drop(qualified);
+        assert_eq!(budget.used(), 0);
+    }
+}
