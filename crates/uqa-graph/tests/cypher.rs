@@ -122,6 +122,32 @@ fn match_relationship_fixed_one_hop() {
 }
 
 #[test]
+fn zero_length_named_path_retains_its_start_vertex_once() {
+    let mut store = MemoryGraphStore::new();
+    store.create_graph("walk").unwrap();
+    for id in 1..=2 {
+        let mut v = Vertex::new(id, "n");
+        v.properties.insert("i".into(), Value::Int(id as i64));
+        store.add_vertex(v, "walk").unwrap();
+    }
+    store.add_edge(Edge::new(9, 1, 2, "e"), "walk").unwrap();
+    let executor = CypherExecutor::new(&store, "walk");
+    // PostgreSQL 18.4 / Apache AGE 1.8.0, including the matched endpoints.
+    let expected = [[0, 1, 0, 1, 1], [1, 2, 1, 1, 2]];
+    for max_hops in [0, 1] {
+        let query = format!("MATCH p=(a:n {{i:1}})-[:e*0..{max_hops}]->(b) RETURN length(p) AS steps, size(nodes(p)) AS vertices, size(relationships(p)) AS edges, a.i AS origin, b.i AS reached ORDER BY reached");
+        let (cols, rows) = executor.execute(&parse_cypher(&query).unwrap()).unwrap();
+        assert_eq!(cols, ["steps", "vertices", "edges", "origin", "reached"]);
+        assert_eq!(rows.len(), max_hops + 1);
+        for (row, values) in rows.iter().zip(expected) {
+            for (name, expected) in cols.iter().zip(values) {
+                assert_eq!(row[name], Value::Int(expected));
+            }
+        }
+    }
+}
+
+#[test]
 fn variable_length_path() {
     let (_, rows) =
         run("MATCH (a:Person {name: 'alice'})-[:KNOWS*1..2]->(b:Person) RETURN b.name AS name");

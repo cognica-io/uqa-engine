@@ -57,10 +57,7 @@ impl<G: GraphStore> StatementReader<'_, G> {
             self.for_each_node_vertex(node, &candidates, |vertex| {
                 for (index, seed) in seeds.iter().enumerate() {
                     if self.node_matches(node, vertex, seed)? {
-                        // The ordinary matcher validates the agtype graph ID even without a path variable.
-                        if i64::try_from(vertex.vertex_id).is_err() {
-                            agtype::vertex_to_value(vertex)?;
-                        }
+                        agtype::graph_id(vertex.vertex_id)?;
                         let mut row = (*seed).clone();
                         if let Some(variable) = &node.variable {
                             row.insert(variable.clone(), Binding::Vertex(vertex.clone()));
