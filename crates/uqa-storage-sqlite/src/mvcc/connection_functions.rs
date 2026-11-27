@@ -20,6 +20,9 @@ use super::PhysicalResult;
 
 const TOKEN_FUNCTION: &str = "__uqa_mvcc_connection_token";
 
+mod fingerprints;
+pub(super) use fingerprints::FingerprintScope;
+
 /// The state of each registered connection, keyed by the token its own token function returns.
 static CONNECTIONS: LazyLock<Mutex<HashMap<u64, Weak<ConnectionFunctions>>>> =
     LazyLock::new(Mutex::default);
@@ -29,6 +32,7 @@ static NEXT_TOKEN: AtomicU64 = AtomicU64::new(1);
 pub(in crate::mvcc) struct ConnectionFunctions {
     write_permit: AtomicBool,
     capture: Mutex<Option<CaptureScope>>,
+    fingerprints: Mutex<Option<CaptureScope>>,
     /// Set while an identifier observation may have left the connection below full synchronization.
     relaxed_synchronization: AtomicBool,
 }
@@ -84,6 +88,7 @@ impl ConnectionFunctions {
         let functions = Arc::new(Self {
             write_permit: AtomicBool::new(false),
             capture: Mutex::new(None),
+            fingerprints: Mutex::new(None),
             relaxed_synchronization: AtomicBool::new(false),
         });
         let permit = Arc::clone(&functions);
@@ -101,6 +106,13 @@ impl ConnectionFunctions {
                 | FunctionFlags::SQLITE_INNOCUOUS
                 | FunctionFlags::SQLITE_DETERMINISTIC,
             move |context| capture.capture_key(context),
+        )?;
+        let fingerprints = Arc::clone(&functions);
+        connection.create_scalar_function(
+            "__uqa_mvcc_image_digest",
+            2,
+            FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_INNOCUOUS,
+            move |context| fingerprints.image_digest(context),
         )?;
         let token = NEXT_TOKEN.fetch_add(1, Ordering::Relaxed);
         CONNECTIONS.lock().insert(token, Arc::downgrade(&functions));

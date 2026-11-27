@@ -185,7 +185,9 @@ pub(super) fn downgrade_record_format(store: &SQLiteRecordStore, format: i64) {
         let definition: String = connection.query_row("SELECT sql FROM sqlite_schema WHERE name = '_uqa_mvcc_metadata'", [], |row| row.get(0))?;
         let current_format = format!("CHECK(format = {})", schema::RECORD_FORMAT);
         assert!(definition.contains(&current_format));
-        if (59..69).contains(&format) {
+        if format == 69 {
+            super::version_metadata::install_fingerprint_predecessor(connection)?;
+        } else if (59..69).contains(&format) {
             super::version_metadata::install_addressed_predecessor(connection)?;
         }
         if format < 68 {

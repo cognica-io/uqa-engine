@@ -243,9 +243,7 @@ fn stage(
         .prepare_cached("SELECT EXISTS(SELECT 1 FROM _uqa_mvcc_runs)")?
         .query_row([], |row| row.get(0))?;
     {
-        let mut versions = connection.prepare_cached(
-            "INSERT INTO _uqa_mvcc_versions (key, sequence, value) VALUES (?1, ?2, ?3)",
-        )?;
+        let mut versions = super::version_metadata::VersionInsert::new(connection, control)?;
         let mut previous = connection.prepare_cached("INSERT INTO _uqa_mvcc_versions (key, sequence, value) SELECT key, sequence, NULL FROM _uqa_mvcc_heads WHERE key = ?1 AND compacted = 1")?;
         let mut heads = connection.prepare_cached("INSERT INTO _uqa_mvcc_heads (key, sequence, compacted) VALUES (?1, ?2, 0) ON CONFLICT(key) DO UPDATE SET sequence = excluded.sequence, compacted = 0")?;
         let mut writes = prepared.writes();
@@ -264,15 +262,7 @@ fn stage(
                     "a write that expects no revision was staged over a head"
                 );
             }
-            versions.execute(params![write.key(), sequence.as_slice(), write.value()])?;
-            versions.clear_bindings();
-            super::version_metadata::retain_image_digest(
-                connection,
-                write.key(),
-                receipt.sequence,
-                write.value(),
-                control,
-            )?;
+            versions.insert(write.key(), receipt.sequence, write.value())?;
             heads.execute(params![write.key(), sequence.as_slice()])?;
             heads.clear_bindings();
         }
@@ -299,10 +289,8 @@ pub(super) fn stage_record(
     let sequence = sequence.as_u64().to_be_bytes();
     super::runs::extract(connection, key, control)?;
     connection.prepare_cached("INSERT INTO _uqa_mvcc_versions (key, sequence, value) SELECT key, sequence, NULL FROM _uqa_mvcc_heads WHERE key = ?1 AND compacted = 1")?.execute([key])?;
-    connection
-        .prepare_cached("INSERT INTO _uqa_mvcc_versions(key, sequence, value) VALUES (?1, ?2, ?3)")?
-        .execute(params![key, sequence.as_slice(), value])?;
-    super::version_metadata::retain_image_digest(connection, key, revision, value, control)?;
+    super::version_metadata::VersionInsert::new(connection, control)?
+        .insert(key, revision, value)?;
     connection.prepare_cached("INSERT INTO _uqa_mvcc_heads(key, sequence, compacted) VALUES (?1, ?2, 0) ON CONFLICT(key) DO UPDATE SET sequence = excluded.sequence, compacted = 0")?.execute(params![key, sequence.as_slice()])?;
     Ok(())
 }
