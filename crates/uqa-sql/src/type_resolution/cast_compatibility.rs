@@ -62,6 +62,40 @@ pub(crate) fn cast_catalog_entry_with_control(
     Ok(Some(CastCatalogEntry { context, method }))
 }
 
+/// Resolve the declared cast routine with the source's actual type, including domains over a range.
+pub(crate) fn declared_cast_function(
+    source: Option<&ColumnType>,
+    target: &ColumnType,
+    resolver: &dyn super::FunctionTypeResolver,
+    control: &ProductionControl<'_>,
+) -> Result<Option<Produced<crate::ast::FunctionBinding>>, SQLError> {
+    let (Some(source), ColumnType::DeclaredMultirange(multi)) = (source, target) else {
+        return Ok(None);
+    };
+    let (ColumnType::DeclaredRange(range), Some(catalog)) =
+        (base_type(source), resolver.enum_labels())
+    else {
+        return Ok(None);
+    };
+    let Some(identity) = catalog.value_range_cast_binding(range.oid, multi.oid, control)? else {
+        return Ok(None);
+    };
+    let (argument, _memory) = source.clone_with_control(control)?.into_parts();
+    let selected = resolver
+        .resolve_function_overload_with_control(
+            &identity.name,
+            Some(&identity),
+            &[None],
+            &[Some(argument)],
+            false,
+            control,
+        )?
+        .ok_or_else(|| {
+            SQLError::Internal(format!("missing range cast function {}", identity.name))
+        })?;
+    Ok(Some(selected.binding.clone_with_control(control)?))
+}
+
 /// Whether an explicit SQL cast has a `PostgreSQL` coercion path, independently of its value. NULL input does not make an otherwise missing cast valid.
 #[must_use]
 pub fn explicit_type_compatible(source: &ColumnType, target: &ColumnType) -> bool {

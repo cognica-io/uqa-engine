@@ -121,6 +121,10 @@ pub trait CatalogSnapshotSource: Sync {
             current_role,
         )
     }
+    fn sql_routines_require_execute_checks(&self, role: &RoleReference) -> bool {
+        self.catalog_snapshot()
+            .sql_routines_require_execute_checks(role)
+    }
     fn refreshed_catalog_snapshot(&self) -> Result<super::CatalogReadView, SQLError>;
     /// Refresh definitions without capturing a query view that definition coordination will discard.
     fn refresh_catalog(&self) -> Result<(), SQLError> {

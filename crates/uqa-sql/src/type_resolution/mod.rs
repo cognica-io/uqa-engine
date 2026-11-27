@@ -117,7 +117,8 @@ pub use cast_compatibility::{
     CastCatalogEntry, CastCatalogRow, CastMethod,
 };
 pub(crate) use cast_compatibility::{
-    cast_catalog_entry_with_control, preserves_record_identity, validate_explicit_cast_with_control,
+    cast_catalog_entry_with_control, declared_cast_function, preserves_record_identity,
+    validate_explicit_cast_with_control,
 };
 #[doc(hidden)]
 pub use checksum::{resolve_checksum_overload, ResolvedChecksumOverload};

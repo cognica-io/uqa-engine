@@ -4,11 +4,10 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Initialize live builtin calls before mutation triggers, CTE effects or row production.
+//! Initialize live routine calls before mutation triggers, CTE effects or row production.
 
 use super::statement::context::MutationStatementContext;
 use crate::{
-    catalog::security::builtin_routines::execution::BuiltinRoutinePermissions,
     query::{binding::bind_source_plan_schema, privileges::routine_calls, CteScope},
     RowSchema,
 };
@@ -193,10 +192,9 @@ fn initialize<'a, S: Clone + Send + Sync + 'static>(
     params: &[SQLParam],
     inherited: Option<&CteScope<S>>,
 ) -> Result<(), SQLError> {
-    let permissions = BuiltinRoutinePermissions::capture(&context.query.source.catalog);
-    if permissions.unrestricted() {
+    let Some(permissions) = routine_calls::required_checks(&context.query.source.catalog) else {
         return Ok(());
-    }
+    };
     let retained = context.query.source.ctes.queries.read_control()?;
     let control = ProductionControl::new(
         retained.memory(),

@@ -22,7 +22,7 @@ mod nodes;
 /// A selected scalar field whose owning analyzer can suspend between operands.
 enum CatalogOperands<'a> {
     Subquery(usize),
-    Cast(&'a ScalarExpr, &'a str),
+    Cast,
     Boolean(&'a [ScalarExpr], &'static str),
     Null(&'a ScalarExpr),
     Array(&'a [ScalarExpr]),
@@ -353,7 +353,7 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
                 ty,
                 collation,
             } => return self.collated_expression(expr, ty, *collation, input, subqueries),
-            ScalarExpr::Cast { expr, ty, .. } => CatalogOperands::Cast(expr, ty),
+            ScalarExpr::Cast { .. } => CatalogOperands::Cast,
             ScalarExpr::Binary { op, lhs, rhs } => {
                 return self.binary_expression(*op, lhs, rhs, input, subqueries);
             }
@@ -423,15 +423,15 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
                 };
                 self.scalar_subquery_expression(&schema)
             }
-            CatalogOperands::Cast(expr, ty) => {
+            CatalogOperands::Cast => {
                 let mut value = if W::MAY_SUSPEND {
                     let owner = self.scope.control().capture();
                     crate::construction::retain_with(owner.control(), || {
-                        self.cast_expression(expr, ty, input, subqueries, work)
+                        self.cast_expression(expression, input, subqueries, work)
                     })?
                     .await
                 } else {
-                    self.cast_expression_inline(expr, ty, input, subqueries, work)
+                    self.cast_expression_inline(expression, input, subqueries, work)
                 }?;
                 value.bind_literal_site(expression);
                 Ok(value)

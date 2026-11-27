@@ -88,13 +88,27 @@ pub(super) fn removable(
                 args,
                 ..
             } if !uqa_sql::semantics::aggregates::is_builtin_aggregate(part) => {
+                if let Some(binding) = binding.as_ref().filter(|binding| !binding.builtin) {
+                    let function = if let Some(catalog) = context.routines {
+                        uqa_sql::routines::selected_bound_function_with_control(
+                            catalog, binding, control,
+                        )?
+                    } else {
+                        None
+                    };
+                    removable &= function.is_some_and(|function| {
+                        !function.def.returns_set()
+                            && function.def.volatility != FunctionVolatility::Volatile
+                    });
+                    return Ok(true);
+                }
                 let name =
                     uqa_sql::semantics::builtin_function_dispatch_name_with_control(name, control)?;
                 if context
                     .aggregates
                     .is_registered_aggregate_with_control(&name, control)?
                     || uqa_sql::semantics::sets::validation::builtin_returns_set(&name)
-                    || binding.as_ref().is_none_or(|binding| !binding.builtin)
+                    || binding.is_none()
                     || uqa_sql::semantics::volatility::builtin_function_volatility_with_control(
                         &name,
                         binding.as_ref(),

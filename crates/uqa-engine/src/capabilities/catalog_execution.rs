@@ -255,6 +255,21 @@ impl uqa_execution::catalog::services::CatalogSnapshotSource for Engine {
         .unwrap_or_else(|| BuiltinRoutinePermissions::new(self.catalog_read_view(), current_role))
     }
 
+    fn sql_routines_require_execute_checks(&self, role: &RoleReference) -> bool {
+        if let Some(snapshot) = &self.query_catalog_snapshot {
+            return snapshot.read_view.sql_routines_require_execute_checks(role);
+        }
+        if uqa_sql::catalog::roles::memberships::role_is_superuser(
+            &self.durable.roles.snapshot(),
+            role,
+        ) || self.durable.sql_user_functions.read().is_empty()
+        {
+            return false;
+        }
+        self.catalog_read_view()
+            .sql_routines_require_execute_checks(role)
+    }
+
     fn current_catalog_snapshot(&self) -> uqa_execution::catalog::CatalogReadView {
         self.restored_catalog_read_view()
     }

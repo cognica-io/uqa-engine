@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Initialize the surviving builtin calls before an executable query starts producing rows.
+//! Check execution privileges on surviving routine calls before an executable query starts producing rows.
 
 use crate::{
     catalog::security::builtin_routines::execution::BuiltinRoutinePermissions,
@@ -19,16 +19,24 @@ use uqa_sql::{
 
 mod inputs;
 
+pub(crate) fn required_checks(
+    context: &crate::catalog::context::CatalogContext<'_>,
+) -> Option<BuiltinRoutinePermissions> {
+    let role = context.current_role();
+    let check_user_routines = context.catalog.sql_routines_require_execute_checks(&role);
+    let permissions = context.catalog.builtin_routine_permissions(role);
+    (check_user_routines || !permissions.unrestricted()).then_some(permissions)
+}
+
 pub fn query<S: Clone + Send + Sync + 'static>(
     context: &SourceContext<'_, S>,
     plan: &QueryPlan,
     params: &[SQLParam],
     ctes: &CteScope<S>,
 ) -> Result<(), SQLError> {
-    let permissions = BuiltinRoutinePermissions::capture(&context.catalog);
-    if permissions.unrestricted() {
+    let Some(permissions) = required_checks(&context.catalog) else {
         return Ok(());
-    }
+    };
     initialize(
         context,
         &permissions,
@@ -185,6 +193,29 @@ fn initialize_root<S: Clone + Send + Sync + 'static>(
     Ok(())
 }
 
+fn require_call<S: Clone + Send + Sync + 'static>(
+    context: &SourceContext<'_, S>,
+    permissions: &BuiltinRoutinePermissions,
+    binding: &uqa_sql::ast::FunctionBinding,
+    scope: &CteScope<S>,
+) -> Result<(), SQLError> {
+    if binding.builtin {
+        return permissions.require_execute(binding);
+    }
+    let resources = context.ctes.production_resources()?;
+    if let Some(routine) = uqa_sql::routines::selected_bound_function_with_control(
+        context.catalog.routines,
+        binding,
+        &resources.control(),
+    )? {
+        context
+            .relational
+            .expression_scope(scope)?
+            .require_user_function_execute(&routine)?;
+    }
+    Ok(())
+}
+
 pub(crate) fn expression_calls<S: Clone + Send + Sync + 'static>(
     context: &SourceContext<'_, S>,
     permissions: &BuiltinRoutinePermissions,
@@ -199,7 +230,7 @@ pub(crate) fn expression_calls<S: Clone + Send + Sync + 'static>(
             ScalarExpr::Func {
                 binding: Some(binding),
                 ..
-            } => permissions.require_execute(binding)?,
+            } => require_call(context, permissions, binding, ctes)?,
             ScalarExpr::Func {
                 name,
                 args,
@@ -298,11 +329,11 @@ pub(crate) fn source_calls<S: Clone + Send + Sync + 'static>(
         SourcePlan::Function {
             binding: Some(binding),
             ..
-        } => permissions.require_execute(binding)?,
+        } => require_call(context, permissions, binding, ctes)?,
         SourcePlan::FunctionGroup { functions, .. } => {
             for function in functions {
                 if let Some(binding) = &function.binding {
-                    permissions.require_execute(binding)?;
+                    require_call(context, permissions, binding, ctes)?;
                 }
             }
         }

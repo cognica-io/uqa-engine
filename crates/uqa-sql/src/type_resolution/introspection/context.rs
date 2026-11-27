@@ -177,37 +177,17 @@ impl BinderContext<'_> {
             .map(|source| self.declared_source(name, source))
             .transpose()?
             .flatten();
-        if let (
-            ColumnType::DeclaredMultirange(multi),
-            Some(ColumnType::DeclaredRange(range)),
-            Some(resolver),
-        ) = (&*target, source.as_deref().map(base_type), self.resolver)
-        {
-            if let Some(catalog) = resolver.enum_labels() {
-                if let Some(identity) =
-                    catalog.value_range_cast_binding(range.oid, multi.oid, &self.control)?
-                {
-                    let (argument, _memory) = source.expect("declared range operand").into_parts();
-                    let selected = resolver
-                        .resolve_function_overload_with_control(
-                            &identity.name,
-                            Some(&identity),
-                            &[None],
-                            &[Some(argument)],
-                            false,
-                            &self.control,
-                        )?
-                        .ok_or_else(|| {
-                            SQLError::Internal(format!(
-                                "missing range cast function {}",
-                                identity.name
-                            ))
-                        })?;
-                    return Ok(CastInputs {
-                        function: Some(selected.binding.clone_with_control(&self.control)?),
-                        source: None,
-                    });
-                }
+        if let Some(resolver) = self.resolver {
+            if let Some(binding) = crate::type_resolution::declared_cast_function(
+                source.as_deref(),
+                &target,
+                resolver,
+                &self.control,
+            )? {
+                return Ok(CastInputs {
+                    function: Some(binding),
+                    source: None,
+                });
             }
         }
         Ok(CastInputs {

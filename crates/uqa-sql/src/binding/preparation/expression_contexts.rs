@@ -17,28 +17,36 @@ use uqa_core::Value;
 impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
     pub(super) fn cast_expression_inline<W: crate::catalog::work::Work + Send>(
         &mut self,
-        expr: &ScalarExpr,
-        ty: &str,
+        expression: &ScalarExpr,
         input: &RowSchema,
         subqueries: &[QueryPlan],
         work: &mut W,
     ) -> Result<ExpressionType, SQLError> {
         crate::catalog::work::inline_with(|| {
-            self.cast_expression(expr, ty, input, subqueries, work)
+            self.cast_expression(expression, input, subqueries, work)
         })
     }
 
     pub(super) async fn cast_expression<W: crate::catalog::work::Work + Send>(
         &mut self,
-        expr: &ScalarExpr,
-        ty: &str,
+        expression: &ScalarExpr,
         input: &RowSchema,
         subqueries: &[QueryPlan],
         work: &mut W,
     ) -> Result<ExpressionType, SQLError> {
+        let ScalarExpr::Cast { expr, ty, implicit } = expression else {
+            unreachable!()
+        };
         let target = self.type_name(ty)?;
-        self.cast_to_type(expr, &target, input, subqueries, work)
-            .await
+        self.cast_to_type(
+            expr,
+            &target,
+            (!implicit).then_some(expression),
+            input,
+            subqueries,
+            work,
+        )
+        .await
     }
 
     fn cast_to_pseudo(
@@ -75,6 +83,7 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
         &mut self,
         expr: &ScalarExpr,
         target: &ColumnType,
+        site: Option<&ScalarExpr>,
         input: &RowSchema,
         subqueries: &[QueryPlan],
         work: &mut W,
@@ -95,7 +104,7 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
                     crate::catalog::work::nested!(
                         W::MAY_SUSPEND,
                         control,
-                        self.cast_to_type(item, array_type, input, subqueries, work)
+                        self.cast_to_type(item, array_type, None, input, subqueries, work)
                     )?
                 } else {
                     self.expression_with_work(item, input, subqueries, work)
@@ -145,6 +154,16 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
             self.routines.enum_labels(),
             &self.scope.control(),
         )?;
+        if let Some(site) = site {
+            if let Some(binding) = crate::type_resolution::declared_cast_function(
+                source.ty.as_deref(),
+                target,
+                self.routines,
+                &self.scope.control(),
+            )? {
+                self.parameters.retain_call(site, &binding)?;
+            }
+        }
         if source
             .ty
             .as_ref()
