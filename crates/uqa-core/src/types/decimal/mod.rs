@@ -12,6 +12,7 @@ mod coefficient;
 mod comparison;
 mod conversion;
 mod format_budgeted;
+mod hashing;
 mod parse;
 mod parse_format;
 mod power;

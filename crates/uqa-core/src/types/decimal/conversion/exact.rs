@@ -41,15 +41,7 @@ impl DecimalValue {
             };
             return control.finish(Self::with_repr(repr), memory);
         }
-        let bits = value.to_bits();
-        let exponent = ((bits >> 52) & 0x7ff) as i32;
-        let mut significand = bits & ((1_u64 << 52) - 1);
-        let mut power = if exponent == 0 {
-            -1074
-        } else {
-            significand |= 1_u64 << 52;
-            exponent - 1023 - 52
-        };
+        let (mut significand, mut power) = super::finite_float_parts(value);
         if significand == 0 {
             return Self::from_i64_with_control(0, control);
         }
