@@ -16,7 +16,7 @@ use uqa_operators::PathWeightPredicate;
 
 use crate::pattern::{EdgePattern, GraphPattern, VertexPredicate};
 use crate::posting_list::{GraphPayload, GraphPostingList};
-use crate::rpq::{build_nfa, simplify, subset_construction, Dfa, DfaState, RegularPathExpr};
+use crate::rpq::{CompiledDfa, RegularPathExpr, StateId};
 use crate::store::{GraphStore, GraphStoreError, GraphStoreResult};
 
 mod aggregation;

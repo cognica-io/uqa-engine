@@ -13,6 +13,7 @@
 //! separately from ordinary posting payload merges.
 
 pub mod adapters;
+mod adjacency;
 pub mod age_names;
 pub use uqa_core::agtype;
 mod catalog;

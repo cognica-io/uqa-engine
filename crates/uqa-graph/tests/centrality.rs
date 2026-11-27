@@ -9,7 +9,7 @@
 use uqa_core::{Edge, Value, Vertex};
 use uqa_graph::{
     AggregationKind, BetweennessCentrality, GraphStore, MemoryGraphStore, MessagePassing, PageRank,
-    HITS,
+    TemporalTraverse, Traverse, HITS,
 };
 
 fn linear_corpus() -> MemoryGraphStore {
@@ -61,6 +61,38 @@ fn pagerank_normalizes_scores_into_unit_interval() {
         let s = entry.payload.score;
         assert!((0.0..=1.0).contains(&s), "score {s} out of range");
     }
+}
+
+#[test]
+fn hits_zero_iterations_preserve_initial_scores_after_an_endpoint_label_is_dropped() {
+    let mut store = MemoryGraphStore::new();
+    store.create_graph("g").unwrap();
+    let source = store.allocate_vertex_id("Source", "g").unwrap();
+    let target = store.allocate_vertex_id("Target", "g").unwrap();
+    let edge = store.allocate_edge_id("Link", "g").unwrap();
+    store
+        .add_vertex(Vertex::new(source, "Source"), "g")
+        .unwrap();
+    store
+        .add_vertex(Vertex::new(target, "Target"), "g")
+        .unwrap();
+    store
+        .add_edge(Edge::new(edge, source, target, "Link"), "g")
+        .unwrap();
+    store.drop_label("g", "Target").unwrap();
+    assert!(store.get_edge(edge).is_some());
+    let result = HITS::new("g").max_iterations(0).execute(&store).unwrap();
+    let [entry] = result.inner().entries() else {
+        panic!("one surviving vertex")
+    };
+    assert_eq!(entry.doc_id, source);
+    for field in ["hub_score", "authority_score"] {
+        assert_eq!(entry.payload.fields.get(field), Some(&Value::Float(1.0)));
+    }
+    assert!(matches!(
+        HITS::new("g").max_iterations(1).execute(&store),
+        Err(uqa_graph::GraphStoreError::CorruptGraph(_))
+    ));
 }
 
 #[test]
@@ -165,6 +197,98 @@ fn message_passing_rejects_non_finite_accumulation_and_layer_exhaustion() {
         .k_layers(u32::MAX)
         .execute(&g)
         .is_err());
+}
+
+#[test]
+fn traversal_and_centrality_share_one_subgraph_across_the_result() {
+    const COUNT: u64 = 512;
+    let mut store = MemoryGraphStore::new();
+    store.create_graph("star").unwrap();
+    for id in 1..=COUNT {
+        store.add_vertex(Vertex::new(id, "v"), "star").unwrap();
+        if id > 1 {
+            store.add_edge(Edge::new(id, 1, id, "e"), "star").unwrap();
+        }
+    }
+    for operator in ["traverse", "temporal", "pagerank"] {
+        let mut result = None;
+        let allocated = allocation_counter::measure(|| {
+            let postings = match operator {
+                "traverse" => Traverse::new(1, "star").execute(&store),
+                "temporal" => TemporalTraverse::new(1, "star").execute(&store),
+                _ => PageRank::new("star").max_iterations(2).execute(&store),
+            };
+            result = Some(postings.unwrap());
+        });
+        let result = result.unwrap();
+        assert_eq!(result.len(), COUNT as usize);
+        assert!(
+            allocated.bytes_current < 512 * 1024,
+            "{operator}: {allocated:?}"
+        );
+        let first = result.get_graph_payload(1).unwrap();
+        assert!(first.subgraph_vertices.iter().copied().eq(1..=COUNT));
+        if operator == "pagerank" {
+            assert!(first.subgraph_edges.is_empty());
+        } else {
+            assert!(first.subgraph_edges.iter().copied().eq(2..=COUNT));
+        }
+        for entry in result.inner() {
+            let payload = result.get_graph_payload(entry.doc_id).unwrap();
+            assert_eq!(
+                payload.subgraph_vertices.as_ptr(),
+                first.subgraph_vertices.as_ptr()
+            );
+            assert_eq!(
+                payload.subgraph_edges.as_ptr(),
+                first.subgraph_edges.as_ptr()
+            );
+            assert_eq!(payload.graph_name.as_ptr(), first.graph_name.as_ptr());
+            assert_eq!(payload.score_override, Some(entry.payload.score));
+        }
+    }
+}
+
+#[test]
+fn propagation_rounds_reuse_adjacency_and_score_buffers() {
+    let store = linear_corpus();
+    for operator in ["pagerank", "hits", "messages"] {
+        let allocations = |rounds| {
+            allocation_counter::measure(|| {
+                let result = match operator {
+                    "pagerank" => PageRank::new("g")
+                        .max_iterations(rounds)
+                        .tolerance(0.0)
+                        .execute(&store),
+                    "hits" => HITS::new("g")
+                        .max_iterations(rounds)
+                        .tolerance(0.0)
+                        .execute(&store),
+                    _ => MessagePassing::new("g").k_layers(rounds).execute(&store),
+                }
+                .unwrap();
+                assert_eq!(result.len(), 4);
+            })
+        };
+        let one = allocations(1);
+        let two = allocations(2);
+        let eight = allocations(8);
+        if operator == "messages" {
+            assert!(
+                one.count_total < two.count_total,
+                "{operator}: {one:?}, {two:?}"
+            );
+        } else {
+            assert_eq!(
+                one.count_total, two.count_total,
+                "{operator}: {one:?}, {two:?}"
+            );
+        }
+        assert_eq!(
+            two.count_total, eight.count_total,
+            "{operator}: {two:?}, {eight:?}"
+        );
+    }
 }
 
 fn score_map(gpl: &uqa_graph::GraphPostingList) -> std::collections::BTreeMap<u64, f64> {

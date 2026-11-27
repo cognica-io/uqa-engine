@@ -7,16 +7,17 @@
 //! MATCH expansion, vertex and relationship binding, and predicates.
 
 use super::{
-    agtype, pattern_variables, strict_bool, BTreeSet, Binding, BindingRow, CypherError,
-    CypherExecutor, CypherExpr, Direction, Edge, EdgeId, GraphStore, MatchClause, MatchState,
-    NodePattern, PathElement, PathPattern, RelDirection, RelPattern, ResultRow, Value, Vertex,
-    VertexId,
+    agtype, pattern_variables, strict_bool, BTreeSet, Binding, BindingRow, CypherError, CypherExpr,
+    Direction, Edge, EdgeId, GraphStore, MatchClause, MatchState, NodePattern, PathElement,
+    PathPattern, RelDirection, RelPattern, ResultRow, StatementReader, Value, Vertex, VertexId,
 };
 
 mod batch;
 mod borrowed;
+mod trail;
+use trail::{push_trail_edge, push_trail_vertex, Walk};
 
-impl<G: GraphStore> CypherExecutor<'_, G> {
+impl<G: GraphStore> StatementReader<'_, G> {
     pub(crate) fn exec_match(
         &self,
         clause: &MatchClause,
@@ -76,18 +77,19 @@ impl<G: GraphStore> CypherExecutor<'_, G> {
             position: None,
             trail: Vec::new(),
         }];
+        let need_trail = pattern.variable.is_some();
         let mut idx = 0;
         while idx < pattern.elements.len() {
             match &pattern.elements[idx] {
                 PathElement::Node(np) => {
-                    frontier = self.bind_node(np, &frontier)?;
+                    frontier = self.bind_node(np, &frontier, need_trail)?;
                     idx += 1;
                 }
                 PathElement::Rel(rp) => {
                     let Some(PathElement::Node(next_node)) = pattern.elements.get(idx + 1) else {
                         return Err(CypherError::Unsupported("path must end on a node".into()));
                     };
-                    frontier = self.traverse_rel(rp, next_node, frontier)?;
+                    frontier = self.traverse_rel(rp, next_node, frontier, need_trail)?;
                     idx += 2;
                 }
             }
@@ -110,37 +112,34 @@ impl<G: GraphStore> CypherExecutor<'_, G> {
         &self,
         np: &NodePattern,
         states: &[MatchState],
+        need_trail: bool,
     ) -> Result<Vec<MatchState>, CypherError> {
-        // Candidate vertex set: by label if specified, else everything in the graph.
-        let candidate_ids = self.node_candidate_ids(np)?;
+        let mut candidate_ids = None;
 
         let mut out = Vec::new();
         for state in states {
             // A variable already bound to a vertex pins the candidate.
-            if let Some(var) = &np.variable {
-                if let Some(Binding::Vertex(prev)) = state.row.get(var) {
-                    let vertex = prev.clone();
-                    if self.node_matches(np, &vertex, &state.row)? {
-                        let mut new_state = state.clone();
-                        new_state.trail.push(agtype::vertex_to_value(&vertex)?);
-                        new_state.position = Some(vertex);
-                        out.push(new_state);
+            if let Some(binding) = np.variable.as_ref().and_then(|var| state.row.get(var)) {
+                if let Binding::Vertex(vertex) = binding {
+                    if self.node_matches(np, vertex, &state.row)? {
+                        let mut next = state.clone();
+                        push_trail_vertex(&mut next.trail, vertex, need_trail)?;
+                        next.position = Some(vertex.clone());
+                        out.push(next);
                     }
-                    continue;
                 }
-                if state.row.contains_key(var)
-                    && !matches!(state.row.get(var), Some(Binding::Vertex(_)))
-                {
-                    // Bound to a non-vertex - the pattern cannot match.
-                    continue;
-                }
+                continue;
             }
-            self.for_each_node_vertex(np, &candidate_ids, |vertex| {
+            let candidates = match &candidate_ids {
+                Some(ids) => ids,
+                None => candidate_ids.insert(self.node_candidate_ids(np)?),
+            };
+            self.for_each_node_vertex(np, candidates, |vertex| {
                 if !self.node_matches(np, vertex, &state.row)? {
                     return Ok(());
                 }
                 let mut new_state = state.clone();
-                new_state.trail.push(agtype::vertex_to_value(vertex)?);
+                push_trail_vertex(&mut new_state.trail, vertex, need_trail)?;
                 if let Some(var) = &np.variable {
                     new_state
                         .row
@@ -199,8 +198,8 @@ impl<G: GraphStore> CypherExecutor<'_, G> {
         if let Some(props) = &np.properties {
             for (key, expr) in props {
                 let want = self.eval(expr, row)?;
-                let got = vertex.properties.get(key).cloned().unwrap_or(Value::Null);
-                if got == Value::Null || !agtype::eq(&got, &want) {
+                let got = vertex.properties.get(key).unwrap_or(&Value::Null);
+                if *got == Value::Null || !agtype::eq(got, &want) {
                     return Ok(false);
                 }
             }
@@ -220,8 +219,8 @@ impl<G: GraphStore> CypherExecutor<'_, G> {
         if let Some(props) = &rp.properties {
             for (key, expr) in props {
                 let want = self.eval(expr, row)?;
-                let got = edge.properties.get(key).cloned().unwrap_or(Value::Null);
-                if got == Value::Null || !agtype::eq(&got, &want) {
+                let got = edge.properties.get(key).unwrap_or(&Value::Null);
+                if *got == Value::Null || !agtype::eq(got, &want) {
                     return Ok(false);
                 }
             }
@@ -234,6 +233,7 @@ impl<G: GraphStore> CypherExecutor<'_, G> {
         rp: &RelPattern,
         next: &NodePattern,
         states: Vec<MatchState>,
+        need_trail: bool,
     ) -> Result<Vec<MatchState>, CypherError> {
         let direction = match rp.direction {
             RelDirection::Right => Direction::Out,
@@ -243,67 +243,21 @@ impl<G: GraphStore> CypherExecutor<'_, G> {
         let is_var_length = rp.min_hops.is_some() || rp.max_hops.is_some();
         let mut out = Vec::new();
         for state in states {
-            let Some(start) = state.position.clone() else {
+            let Some(start) = state.position.as_ref() else {
                 continue;
             };
             if is_var_length {
-                let min_hops = rp.min_hops.unwrap_or(1);
-                let max_hops = rp.max_hops.unwrap_or(min_hops.max(1));
-                // (reached vertex, edges so far, trail extension)
-                let mut buffer: Vec<(VertexId, Vec<Edge>, Vec<Value>)> =
-                    vec![(start.vertex_id, Vec::new(), Vec::new())];
-                let mut all_paths: Vec<(VertexId, Vec<Edge>, Vec<Value>)> = Vec::new();
-                if min_hops == 0 {
-                    all_paths.push((start.vertex_id, Vec::new(), Vec::new()));
-                }
-                for hop in 1..=max_hops {
-                    let mut next_buffer = Vec::new();
-                    for (vertex_id, edges_so_far, trail_so_far) in &buffer {
-                        for edge in self.outgoing_edges(*vertex_id, direction)? {
-                            if !self.rel_matches(rp, &edge, &state.row)? {
-                                continue;
-                            }
-                            let neighbor = if edge.source_id == *vertex_id {
-                                edge.target_id
-                            } else {
-                                edge.source_id
-                            };
-                            let Some(neighbor_vertex) = self.store.get_vertex(neighbor)? else {
-                                continue;
-                            };
-                            let mut new_edges = edges_so_far.clone();
-                            new_edges.push(edge.clone());
-                            let mut new_trail = trail_so_far.clone();
-                            new_trail.push(agtype::edge_to_value(&edge)?);
-                            new_trail.push(agtype::vertex_to_value(&neighbor_vertex)?);
-                            if hop >= min_hops {
-                                all_paths.push((neighbor, new_edges.clone(), new_trail.clone()));
-                            }
-                            next_buffer.push((neighbor, new_edges, new_trail));
-                        }
-                    }
-                    buffer = next_buffer;
-                    if buffer.is_empty() {
-                        break;
-                    }
-                }
-                for (end_id, edges, mut trail_ext) in all_paths {
-                    let Some(end_vertex) = self.store.get_vertex(end_id)? else {
-                        continue;
-                    };
-                    // The trail extension already ends with the reached
-                    // vertex except for zero-hop paths.
-                    if trail_ext.is_empty() {
-                        trail_ext.push(agtype::vertex_to_value(&end_vertex)?);
-                    }
+                for (vertex, walk) in
+                    self.variable_paths(rp, start, direction, &state.row, need_trail)?
+                {
                     self.push_reached_vertex(
                         &mut out,
                         rp,
                         next,
                         &state,
-                        Binding::EdgeList(edges),
-                        end_vertex,
-                        trail_ext,
+                        Binding::EdgeList(walk.edges),
+                        vertex,
+                        walk.trail,
                     )?;
                 }
             } else {
@@ -319,10 +273,8 @@ impl<G: GraphStore> CypherExecutor<'_, G> {
                     let Some(end_vertex) = self.store.get_vertex(neighbor_id)? else {
                         continue;
                     };
-                    let trail_ext = vec![
-                        agtype::edge_to_value(&edge)?,
-                        agtype::vertex_to_value(&end_vertex)?,
-                    ];
+                    let mut trail_ext = Vec::new();
+                    push_trail_edge(&mut trail_ext, &edge, &end_vertex, need_trail)?;
                     self.push_reached_vertex(
                         &mut out,
                         rp,
@@ -336,6 +288,60 @@ impl<G: GraphStore> CypherExecutor<'_, G> {
             }
         }
         Ok(out)
+    }
+
+    fn variable_paths(
+        &self,
+        pattern: &RelPattern,
+        start: &Vertex,
+        direction: Direction,
+        row: &BindingRow,
+        need_trail: bool,
+    ) -> Result<Vec<(Vertex, Walk)>, CypherError> {
+        let min_hops = pattern.min_hops.unwrap_or(1);
+        let max_hops = pattern.max_hops.unwrap_or(min_hops.max(1));
+        let mut reached = Vec::new();
+        if min_hops == 0 {
+            // The start vertex is already the last element of the incoming trail.
+            reached.push((start.clone(), Walk::default()));
+        }
+        let mut frontier = vec![(start.vertex_id, Walk::default())];
+        for hop in 1..=max_hops {
+            let mut next = Vec::new();
+            for (id, prior) in &frontier {
+                for edge in self.outgoing_edges(*id, direction)? {
+                    if !self.rel_matches(pattern, &edge, row)? {
+                        continue;
+                    }
+                    let other = if edge.source_id == *id {
+                        edge.target_id
+                    } else {
+                        edge.source_id
+                    };
+                    let Some(vertex) = self.store.get_vertex(other)? else {
+                        continue;
+                    };
+                    let mut walk = prior.clone();
+                    push_trail_edge(&mut walk.trail, &edge, &vertex, need_trail)?;
+                    if pattern.variable.is_some() {
+                        walk.edges.push(edge);
+                    }
+                    if hop >= min_hops {
+                        if hop < max_hops {
+                            next.push((other, walk.clone()));
+                        }
+                        reached.push((vertex, walk));
+                    } else {
+                        next.push((other, walk));
+                    }
+                }
+            }
+            if next.is_empty() {
+                break;
+            }
+            frontier = next;
+        }
+        Ok(reached)
     }
 
     #[expect(
@@ -427,3 +433,6 @@ impl<G: GraphStore> CypherExecutor<'_, G> {
     // RETURN / WITH
     // ------------------------------------------------------------------
 }
+
+#[cfg(test)]
+mod tests;

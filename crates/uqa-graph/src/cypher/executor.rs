@@ -248,6 +248,34 @@ impl<'a, G: GraphStore> CypherExecutor<'a, G> {
         &self,
         query: &CypherQuery,
     ) -> Result<(Vec<String>, Vec<ResultRow>), CypherError> {
+        let patterns = PatternCache::default();
+        StatementReader::new(self.store, self.graph, &self.params, &patterns).execute(query)
+    }
+}
+
+pub(super) struct StatementReader<'a, G: GraphStore> {
+    store: &'a G,
+    graph: &'a str,
+    params: &'a BTreeMap<String, Value>,
+    patterns: &'a PatternCache,
+}
+
+impl<'a, G: GraphStore> StatementReader<'a, G> {
+    pub(super) fn new(
+        store: &'a G,
+        graph: &'a str,
+        params: &'a BTreeMap<String, Value>,
+        patterns: &'a PatternCache,
+    ) -> Self {
+        Self {
+            store,
+            graph,
+            params,
+            patterns,
+        }
+    }
+
+    fn execute(&self, query: &CypherQuery) -> Result<(Vec<String>, Vec<ResultRow>), CypherError> {
         let mut bindings: Vec<BindingRow> = vec![BTreeMap::new()];
         let mut columns: Vec<String> = Vec::new();
         let mut rows: Vec<ResultRow> = Vec::new();
@@ -343,10 +371,12 @@ mod functions;
 mod helpers;
 mod matching;
 mod projection;
+mod regex;
+pub(super) use regex::PatternCache;
 
 use helpers::{
     aggregate_avg, aggregate_extreme, aggregate_sum, agtype_add, agtype_div, agtype_mod,
     agtype_pow, domain_float_fn, float_fn, is_aggregate, is_aggregate_name, null_or_bool,
-    numeric_op, pattern_variables, regex_match, return_label, sort_keyed, str_predicate, string_fn,
+    numeric_op, pattern_variables, return_label, sort_keyed, str_predicate, string_fn,
     unsupported_argument, validated_path_elements,
 };

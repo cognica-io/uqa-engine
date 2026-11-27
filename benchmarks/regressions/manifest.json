@@ -77750,6 +77750,162 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "test",
+      "test": "traversal_and_centrality_share_one_subgraph_across_the_result",
+      "cases": 1,
+      "source": "crates/uqa-graph/tests/centrality.rs",
+      "capability": "Linear retained graph result memory",
+      "workload": "Traverse a 512-vertex star with ordinary and temporal traversal and run two PageRank rounds.",
+      "invariant": "Each result retains less than 512 KiB. All 512 entries share the same vertex slice, edge slice and graph name and preserve their scores and sorted identities.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "test",
+      "test": "propagation_rounds_reuse_adjacency_and_score_buffers",
+      "cases": 1,
+      "source": "crates/uqa-graph/tests/centrality.rs",
+      "capability": "Bounded allocation for graph propagation rounds",
+      "workload": "Run PageRank, HITS and message passing for one, two and eight rounds on the same four-vertex chain.",
+      "invariant": "Every vertex has a posting. A single message-passing layer omits the adjacency cache, and subsequent rounds reuse their allocations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "looping_over_dense_path_states_requires_no_heap_allocation",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/rpq/dfa/tests.rs",
+      "capability": "Allocation-free regular path state transitions",
+      "workload": "Advance a compiled DFA through 8,192 alternating edge labels.",
+      "invariant": "Every step uses a numeric state ID. The final state accepts the path and execution allocates zero bytes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "repeated_cypher_patterns_match_without_allocating_or_recompiling",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/cypher/executor/regex.rs",
+      "capability": "Statement-owned Cypher pattern reuse",
+      "workload": "Evaluate the same unanchored Cypher pattern 2,048 times after the initial match.",
+      "invariant": "The warmed matches allocate no heap memory and the statement retains one compiled pattern.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "bound_start_vertex_does_not_enumerate_unrelated_vertices",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/cypher/executor/matching/tests.rs",
+      "capability": "Bound Cypher start vertices",
+      "workload": "Match the same bound vertex in graphs with one and 4,096 vertices.",
+      "invariant": "Both matches return the same binding and allocate the same number of bytes and buffers.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "unnamed_trails_validate_identifiers_in_entity_order_without_copying_properties",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/cypher/executor/matching/tests.rs",
+      "capability": "Cypher path materialization",
+      "workload": "Validate an unnamed vertex and edge with 64 KiB properties and four ordered identifier errors.",
+      "invariant": "Unnamed trail validation allocates zero times. Both path forms report the same first invalid identifier.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "exact_numeric_hashes_cover_all_representations_without_heap_allocation",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/tests/numeric_keys.rs",
+      "capability": "Hashing exact numeric keys",
+      "workload": "Hash equal bool, integer, binary float and decimal values through 64 passes. Include subnormals, large coefficients, extra display zeros, infinities and NaNs.",
+      "invariant": "Equivalent values have identical hashes across representation and scale boundaries. Distinct wide integer coefficients reach the map hasher, and the 64 passes allocate zero buffers.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "cached_neighbors_observe_read_cancellation_within_a_vertex",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/message_passing.rs",
+      "capability": "Cancellable graph propagation",
+      "workload": "Cancel a graph read while summing, averaging or taking the maximum over 1,024 cached neighbors.",
+      "invariant": "All aggregations return the original storage cancellation error within the row.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "hash_input_matches_independent_arbitrary_precision_quotients_and_fractional_digits",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/decimal/hashing/tests.rs",
+      "capability": "Exact numeric join keys",
+      "workload": "Hash single-word and multiword coefficients at eleven fractional scales, including the maximum SQL scale.",
+      "invariant": "Every emitted integer limb, fractional digit and partition length matches independent arbitrary-precision division.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "two_edge_match_allocates_only_surviving_payload_buffers",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/operators/gmatch.rs",
+      "capability": "Graph match payload allocation",
+      "workload": "Build a two-edge path payload whose first and last vertices coincide.",
+      "invariant": "Every allocation survives in the result. The ID slices are sorted and unique, and the graph name shares its original allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-joins",
+      "kind": "lib",
+      "test": "full_outer_join_extracts_each_key_once_and_retains_unmatched_row_order",
+      "cases": 1,
+      "source": "crates/uqa-joins/src/row_join/tests.rs",
+      "capability": "Full outer join key extraction",
+      "workload": "Join two left rows to four right rows with duplicates and unmatched endpoints.",
+      "invariant": "Each input key is evaluated once. Duplicate pairs and padded rows retain their order and values.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-joins",
+      "kind": "test",
+      "test": "right_input_preparation_scales_with_rows_for_text_vector_and_hybrid_joins",
+      "cases": 1,
+      "source": "crates/uqa-joins/tests/cross_paradigm.rs",
+      "capability": "Right-input preparation in similarity joins",
+      "workload": "Compare four-by-four and 32-by-32 inputs for text, vector and hybrid joins with no output pairs.",
+      "invariant": "Multiplying each side by eight increases total allocations at most eightfold for every join.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

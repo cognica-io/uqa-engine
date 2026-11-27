@@ -12,6 +12,10 @@ use super::{
 };
 
 impl GraphStore for PersistentGraphStore {
+    fn check_read(&self) -> GraphStoreResult<()> {
+        self.check_bound_read()
+    }
+
     fn vertex_id_page(
         &self,
         graph: &str,

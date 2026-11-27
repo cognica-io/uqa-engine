@@ -6,6 +6,8 @@
 
 //! Numeric aggregation over graph-result vertex payloads.
 
+use std::sync::Arc;
+
 use super::{
     value_as_f64, BTreeMap, BTreeSet, GraphPayload, GraphPostingList, GraphStore, GraphStoreError,
     GraphStoreResult, Payload, PostingEntry, PostingList, Value, VertexId,
@@ -102,8 +104,8 @@ impl<'a> VertexAggregation<'a> {
             0,
             GraphPayload {
                 subgraph_vertices: vertex_ids.into_iter().collect(),
-                subgraph_edges: Vec::new(),
-                graph_name: self.graph.to_string(),
+                subgraph_edges: Arc::default(),
+                graph_name: self.graph.into(),
                 score_override: Some(result),
             },
         );

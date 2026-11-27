@@ -98,3 +98,72 @@ fn numeric_keys_keep_order_and_container_results_independent_of_insertion_order(
         assert_eq!(reordered, expected);
     }
 }
+
+#[test]
+fn exact_numeric_hashes_cover_all_representations_without_heap_allocation() {
+    use std::hash::{DefaultHasher, Hash, Hasher};
+    fn hash(value: &Value) -> u64 {
+        let mut state = DefaultHasher::new();
+        value.numeric_hash_key().unwrap().hash(&mut state);
+        state.finish()
+    }
+    let mut pairs = vec![
+        (Value::Bool(false), decimal("-0.000")),
+        (Value::Bool(true), decimal("1.000")),
+        (Value::Int(i64::MIN), decimal("-9223372036854775808.000")),
+        (Value::Int(i64::MAX), decimal("9223372036854775807")),
+        (
+            Value::Float(0.1),
+            decimal("0.1000000000000000055511151231257827021181583404541015625"),
+        ),
+        (
+            decimal("12345678901234567890123456789012345678901234567890.10"),
+            decimal("12345678901234567890123456789012345678901234567890.10000"),
+        ),
+        (decimal("1e-1000"), decimal("10.000e-1001")),
+    ];
+    for scale in [26, 27, 28, 54, 1080, 16_382] {
+        pairs.push((
+            decimal(&format!("7e-{scale}")),
+            decimal(&format!("70e-{}", scale + 1)),
+        ));
+    }
+    for value in [
+        0.0,
+        -0.0,
+        -1.5,
+        f64::from_bits(1),
+        f64::MIN_POSITIVE,
+        f64::MAX,
+        f64::NEG_INFINITY,
+        f64::INFINITY,
+        f64::NAN,
+        f64::from_bits(0xfff8_0000_0000_0001),
+    ] {
+        pairs.push((
+            Value::Float(value),
+            Value::Decimal(DecimalValue::from_f64_exact(value)),
+        ));
+    }
+    for (left, right) in &pairs {
+        assert_eq!(left, right);
+    }
+    let allocations = allocation_counter::measure(|| {
+        for _ in 0..64 {
+            for (left, right) in &pairs {
+                assert_eq!(
+                    hash(std::hint::black_box(left)),
+                    hash(std::hint::black_box(right))
+                );
+            }
+        }
+    });
+    assert_eq!(allocations.count_total, 0, "{allocations:?}");
+    assert_ne!(hash(&Value::Int(1)), hash(&decimal("36893488147419103115")));
+    assert!(Value::Null.numeric_hash_key().is_none());
+    assert_ne!(hash(&Value::Float(0.1)), hash(&decimal("0.1")));
+    assert_ne!(
+        hash(&Value::Int(9_007_199_254_740_993)),
+        hash(&Value::Float(9_007_199_254_740_992.0))
+    );
+}
