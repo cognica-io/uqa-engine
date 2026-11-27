@@ -15,12 +15,11 @@ pub(in crate::mvcc) use liveness::local_file_registry;
 pub(in crate::mvcc) use liveness::{lease_file, ReceiptLeaseFile};
 
 use rusqlite::{Connection, OptionalExtension};
-use uqa_core::memory::BudgetedVec;
 use uqa_storage::{
     mvcc::{
-        receipt_lease_id, CommitStatus, DatabaseId, ReceiptAcknowledgement,
-        RetainedTransactionAllocation, SerializableGraph, SerializableLeases, StorageTransactionId,
-        VersionError, VersionResult,
+        receipt_lease_id, DatabaseId, ReceiptAcknowledgement, ReceiptReclamation,
+        ReceiptReclamationBatch, RetainedTransactionAllocation, SerializableGraph,
+        SerializableLeases, VersionError, VersionResult,
     },
     read_control::StorageReadControl,
 };
@@ -184,61 +183,48 @@ fn reclaim(
     let transaction = admission::begin(connection, control)?;
     native::check_mapping(&transaction, native)?;
     let header = codec::header(&transaction, identity)?;
-    let mut selected = BudgetedVec::new(control.memory());
+    let mut batch =
+        ReceiptReclamationBatch::new(identity, header.allocated, graph, leases, control);
     {
-        let mut statement = transaction.prepare_cached("SELECT allocation, status, managed FROM _uqa_mvcc_transactions WHERE status IN (3, 4) OR managed = 1 ORDER BY allocation")?;
+        let mut statement = transaction.prepare_cached("SELECT status, sequence, fingerprint, allocation, managed FROM _uqa_mvcc_transactions WHERE status IN (3, 4) OR managed = 1 ORDER BY allocation")?;
         let mut rows = statement.query([])?;
         while let Some(row) = rows.next()? {
             control.check().map_err(VersionError::from)?;
-            let allocation = codec::integer(codec::bytes(row, 0)?)?;
-            if allocation > header.allocated {
-                return Err(
-                    VersionError::InvalidEncoding("receipt exceeds allocation watermark").into(),
-                );
-            }
-            let id = StorageTransactionId::new(identity, allocation)?;
-            let status: i64 = row.get(1)?;
-            let acknowledged = matches!(status, 3 | 4);
-            if acknowledged && graph.retains_transaction_receipt(id) {
-                continue;
-            }
-            let managed: bool = row.get(2)?;
-            if acknowledged || (managed && !leases.is_alive(receipt_lease_id(id), control)?) {
-                // Decode authoritative status before preparing any change, including rejecting corruption. Unknown can never be inferred from owner death.
-                let status = codec::status(&transaction, id)?;
-                if status == CommitStatus::Unknown {
-                    return Err(VersionError::UnknownTransaction.into());
-                }
-                selected
-                    .push((
-                        allocation.to_be_bytes(),
-                        !graph.retains_transaction_receipt(id),
-                        matches!(status, CommitStatus::Committed(_)),
-                    ))
-                    .map_err(VersionError::from)?;
-                if selected.len() == 256 {
-                    break;
-                }
+            let id = batch.transaction(codec::integer(codec::bytes(row, 3)?)?)?;
+            let acknowledged = matches!(row.get::<_, i64>(0)?, 3 | 4);
+            if !batch.visit(
+                id,
+                acknowledged,
+                || Ok(row.get::<_, bool>(4)?),
+                || codec::receipt_status(row, id),
+            )? {
+                break;
             }
         }
     }
     let mut removed = 0;
-    for (allocation, delete, committed) in selected.iter() {
+    for (allocation, action) in batch.entries() {
         control.check().map_err(VersionError::from)?;
-        if *delete {
-            transaction
-                .prepare_cached("DELETE FROM _uqa_mvcc_transactions WHERE allocation = ?1")?
-                .execute([allocation.as_slice()])?;
-            removed += 1;
-        } else {
-            transaction
-                .prepare_cached(
-                    "UPDATE _uqa_mvcc_transactions SET status = ?2 WHERE allocation = ?1",
-                )?
-                .execute(rusqlite::params![
-                    allocation.as_slice(),
-                    if *committed { 4 } else { 3 }
-                ])?;
+        let allocation = allocation.to_be_bytes();
+        match action {
+            ReceiptReclamation::Remove => {
+                transaction
+                    .prepare_cached("DELETE FROM _uqa_mvcc_transactions WHERE allocation = ?1")?
+                    .execute([allocation.as_slice()])?;
+                removed += 1;
+            }
+            ReceiptReclamation::AcknowledgeCommitted | ReceiptReclamation::AcknowledgeAborted => {
+                let status = if action == ReceiptReclamation::AcknowledgeCommitted {
+                    4
+                } else {
+                    3
+                };
+                transaction
+                    .prepare_cached(
+                        "UPDATE _uqa_mvcc_transactions SET status = ?2 WHERE allocation = ?1",
+                    )?
+                    .execute(rusqlite::params![allocation.as_slice(), status])?;
+            }
         }
     }
     admission::commit(transaction, control)?;

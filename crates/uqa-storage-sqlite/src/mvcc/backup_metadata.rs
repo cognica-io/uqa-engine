@@ -21,8 +21,8 @@ use std::sync::Arc;
 use uqa_storage::{
     mvcc::{
         retain_backup_snapshot, retain_record_snapshot, CommitSequence, CommittedBackupSnapshot,
-        CommittedRecordSnapshot, DatabaseId, IdentifierWatermarkVisitor, MetadataEpoch,
-        SnapshotLease, VersionError, VersionResult, VersionedPersistence,
+        CommittedRecordSnapshot, DatabaseId, IdentifierEpochHistory, IdentifierWatermarkVisitor,
+        MetadataEpoch, SnapshotLease, VersionError, VersionResult, VersionedPersistence,
     },
     read_control::StorageReadControl,
 };
@@ -151,19 +151,14 @@ impl CommittedBackupSnapshot for Snapshot {
             while let Some(row) = rows.next()? {
                 control.cancellation().check().map_err(VersionError::from)?;
                 let namespace = codec::bytes(row, 0)?;
-                let value = if history::is_allocation(namespace) {
+                let value = if IdentifierEpochHistory::is_allocation(namespace) {
                     let watermark = codec::integer(codec::bytes(row, 1)?)?;
                     let created = codec::integer(codec::bytes(row, 2)?)?;
                     let head = codec::integer(codec::bytes(row, 3)?)?;
-                    history::validate_epochs(created, head, current)?;
-                    if created > epoch { None } else if head <= epoch { Some(watermark) } else {
+                    IdentifierEpochHistory::new(created, head, current)?.watermark_at(epoch, || Ok(watermark), |from, through| {
                         let _bindings = crate::read_control::reserve_bindings(control, &[namespace])?;
-                        let value = history::previous(connection, namespace, created, epoch)?.1;
-                        if value > watermark {
-                            return Err(VersionError::InvalidEncoding("identifier history exceeds its current watermark").into());
-                        }
-                        Some(value)
-                    }
+                        history::previous(connection, namespace, from, through).map(|(_, value)| value)
+                    })?
                 } else { None };
                 if !visit(namespace, value)? { break; }
             }

@@ -112,12 +112,20 @@ pub(super) fn status(
     let Some(row) = rows.next()? else {
         return Ok(CommitStatus::Unknown);
     };
-    match row.get::<_, i64>(0)? {
+    receipt_status(row, transaction)
+}
+
+pub(super) fn receipt_status(
+    row: &Row<'_>,
+    transaction: StorageTransactionId,
+) -> PhysicalResult<CommitStatus> {
+    let status: i64 = row.get(0)?;
+    match status {
         0 | 1 | 3
             if matches!(row.get_ref(1)?, ValueRef::Null)
                 && matches!(row.get_ref(2)?, ValueRef::Null) =>
         {
-            Ok(if row.get::<_, i64>(0)? == 0 {
+            Ok(if status == 0 {
                 CommitStatus::Pending
             } else {
                 CommitStatus::Aborted

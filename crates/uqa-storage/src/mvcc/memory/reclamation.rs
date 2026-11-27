@@ -28,11 +28,7 @@ impl MemoryVersionStore {
         if !state.snapshots.is_empty() {
             return Ok(TombstoneReclamationStep::Retained);
         }
-        if request.through > state.sequence {
-            return Err(VersionError::InvalidEncoding(
-                "tombstone cutoff exceeds committed visibility",
-            ));
-        }
+        request.validate_cutoff(state.sequence)?;
         let mut keys = BudgetedVec::new(control.memory());
         keys.reserve(TOMBSTONE_RECLAMATION_PAGE)?;
         let mut inspected = 0;
