@@ -77771,8 +77771,8 @@
       "cases": 1,
       "source": "crates/uqa-graph/tests/centrality.rs",
       "capability": "Bounded allocation for graph propagation rounds",
-      "workload": "Run PageRank, HITS and message passing for one and eight rounds on the same four-vertex chain.",
-      "invariant": "Each algorithm performs the same number of heap allocations for both round counts and returns a posting for each vertex.",
+      "workload": "Run PageRank, HITS and message passing for one, two and eight rounds on the same four-vertex chain.",
+      "invariant": "Every vertex has a posting. A single message-passing layer omits the adjacency cache, and subsequent rounds reuse their allocations.",
       "case_names": [
         ""
       ]
@@ -77837,9 +77837,48 @@
       "source": "crates/uqa-core/src/types/tests/numeric_keys.rs",
       "capability": "Hashing exact numeric keys",
       "workload": "Hash equal bool, integer, binary float and decimal values through 64 passes. Include subnormals, large coefficients, extra display zeros, infinities and NaNs.",
-      "invariant": "Each equivalent pair has the same hash and the 64 passes allocate zero buffers.",
+      "invariant": "Equivalent values have identical hashes across representation and scale boundaries. Distinct wide integer coefficients reach the map hasher, and the 64 passes allocate zero buffers.",
       "case_names": [
         ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "cached_neighbors_observe_read_cancellation_within_a_vertex",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/message_passing.rs",
+      "capability": "Cancellable graph propagation",
+      "workload": "Cancel a graph read while summing, averaging or taking the maximum over 1,024 cached neighbors.",
+      "invariant": "All aggregations return the original storage cancellation error within the row.",
+      "case_names": [
+        "message_passing::tests::cached_neighbors_observe_read_cancellation_within_a_vertex"
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "hash_input_matches_independent_arbitrary_precision_quotients_and_fractional_digits",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/decimal/hashing/tests.rs",
+      "capability": "Exact numeric join keys",
+      "workload": "Hash single-word and multiword coefficients at eleven fractional scales, including the maximum SQL scale.",
+      "invariant": "Every emitted integer limb, fractional digit and partition length matches independent arbitrary-precision division.",
+      "case_names": [
+        "types::decimal::hashing::tests::hash_input_matches_independent_arbitrary_precision_quotients_and_fractional_digits"
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "two_edge_match_allocates_only_surviving_payload_buffers",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/operators/gmatch.rs",
+      "capability": "Graph match payload allocation",
+      "workload": "Build a two-edge path payload whose first and last vertices coincide.",
+      "invariant": "Every allocation survives in the result. The ID slices are sorted and unique, and the graph name shares its original allocation.",
+      "case_names": [
+        "operators::gmatch::tests::two_edge_match_allocates_only_surviving_payload_buffers"
       ]
     },
     {

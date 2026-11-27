@@ -10,11 +10,11 @@
 
 use std::sync::Arc;
 
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
-use uqa_core::{Payload, PostingEntry, PostingList, Value, VertexId};
+use uqa_core::{Edge, EdgeId, Payload, PostingEntry, PostingList, Value, VertexId};
 
-use crate::adjacency::endpoint_index;
+use crate::adjacency::{edge_endpoint, vertex_index};
 use crate::posting_list::GraphPostingList;
 use crate::store::{GraphStore, GraphStoreError, GraphStoreResult};
 
@@ -189,27 +189,29 @@ impl<'a> HITS<'a> {
         let n = vertices.len();
         let mut incoming = Vec::with_capacity(n);
         let mut outgoing = Vec::with_capacity(n);
+        let neighbors = |edges: BTreeSet<EdgeId>,
+                         endpoint: fn(&Edge) -> VertexId|
+         -> GraphStoreResult<Vec<usize>> {
+            let mut indices = Vec::with_capacity(if self.max_iterations == 0 {
+                0
+            } else {
+                edges.len()
+            });
+            for eid in edges {
+                let id = edge_endpoint(store, "HITS", eid, endpoint)?;
+                if self.max_iterations > 0 {
+                    indices.push(vertex_index(&vertices, id, self.graph, eid)?);
+                }
+            }
+            Ok(indices)
+        };
         for &id in &vertices {
-            let sources = store
-                .in_edge_ids(id, self.graph)?
-                .into_iter()
-                .map(|eid| {
-                    endpoint_index(store, self.graph, &vertices, "HITS", eid, |edge| {
-                        edge.source_id
-                    })
-                })
-                .collect::<GraphStoreResult<Vec<_>>>()?;
-            incoming.push(sources);
-            let targets = store
-                .out_edge_ids(id, self.graph)?
-                .into_iter()
-                .map(|eid| {
-                    endpoint_index(store, self.graph, &vertices, "HITS", eid, |edge| {
-                        edge.target_id
-                    })
-                })
-                .collect::<GraphStoreResult<Vec<_>>>()?;
-            outgoing.push(targets);
+            incoming.push(neighbors(store.in_edge_ids(id, self.graph)?, |edge| {
+                edge.source_id
+            })?);
+            outgoing.push(neighbors(store.out_edge_ids(id, self.graph)?, |edge| {
+                edge.target_id
+            })?);
         }
 
         let mut hub = vec![1.0; n];

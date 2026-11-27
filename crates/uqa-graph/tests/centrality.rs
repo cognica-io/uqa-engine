@@ -64,6 +64,38 @@ fn pagerank_normalizes_scores_into_unit_interval() {
 }
 
 #[test]
+fn hits_zero_iterations_preserve_initial_scores_after_an_endpoint_label_is_dropped() {
+    let mut store = MemoryGraphStore::new();
+    store.create_graph("g").unwrap();
+    let source = store.allocate_vertex_id("Source", "g").unwrap();
+    let target = store.allocate_vertex_id("Target", "g").unwrap();
+    let edge = store.allocate_edge_id("Link", "g").unwrap();
+    store
+        .add_vertex(Vertex::new(source, "Source"), "g")
+        .unwrap();
+    store
+        .add_vertex(Vertex::new(target, "Target"), "g")
+        .unwrap();
+    store
+        .add_edge(Edge::new(edge, source, target, "Link"), "g")
+        .unwrap();
+    store.drop_label("g", "Target").unwrap();
+    assert!(store.get_edge(edge).is_some());
+    let result = HITS::new("g").max_iterations(0).execute(&store).unwrap();
+    let [entry] = result.inner().entries() else {
+        panic!("one surviving vertex")
+    };
+    assert_eq!(entry.doc_id, source);
+    for field in ["hub_score", "authority_score"] {
+        assert_eq!(entry.payload.fields.get(field), Some(&Value::Float(1.0)));
+    }
+    assert!(matches!(
+        HITS::new("g").max_iterations(1).execute(&store),
+        Err(uqa_graph::GraphStoreError::CorruptGraph(_))
+    ));
+}
+
+#[test]
 fn hits_sets_hub_authority_fields() {
     let g = star_corpus();
     let result = HITS::new("g").execute(&g).unwrap();
@@ -239,10 +271,22 @@ fn propagation_rounds_reuse_adjacency_and_score_buffers() {
             })
         };
         let one = allocations(1);
+        let two = allocations(2);
         let eight = allocations(8);
+        if operator == "messages" {
+            assert!(
+                one.count_total < two.count_total,
+                "{operator}: {one:?}, {two:?}"
+            );
+        } else {
+            assert_eq!(
+                one.count_total, two.count_total,
+                "{operator}: {one:?}, {two:?}"
+            );
+        }
         assert_eq!(
-            one.count_total, eight.count_total,
-            "{operator}: {one:?}, {eight:?}"
+            two.count_total, eight.count_total,
+            "{operator}: {two:?}, {eight:?}"
         );
     }
 }

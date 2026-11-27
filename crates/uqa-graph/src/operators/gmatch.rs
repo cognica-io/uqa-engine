@@ -36,6 +36,18 @@ pub struct GMatch<'a> {
     pub score: f64,
 }
 
+fn sorted_match_ids<const N: usize>(mut ids: [u64; N]) -> Arc<[u64]> {
+    ids.sort_unstable();
+    let mut kept = 0;
+    for index in 0..ids.len() {
+        if kept == 0 || ids[kept - 1] != ids[index] {
+            ids[kept] = ids[index];
+            kept += 1;
+        }
+    }
+    Arc::from(&ids[..kept])
+}
+
 impl<'a> GMatch<'a> {
     pub fn new(pattern: GraphPattern, graph: &'a str) -> Self {
         Self {
@@ -194,13 +206,10 @@ impl<'a> GMatch<'a> {
                     fields,
                 },
             ));
-            let mut subgraph_vertices = vec![edge.source_id, edge.target_id];
-            subgraph_vertices.sort_unstable();
-            subgraph_vertices.dedup();
             graph_payloads.insert(
                 doc_id,
                 GraphPayload {
-                    subgraph_vertices: subgraph_vertices.into(),
+                    subgraph_vertices: sorted_match_ids([edge.source_id, edge.target_id]),
                     subgraph_edges: [edge.edge_id].into(),
                     graph_name: Arc::clone(&graph_name),
                     score_override: Some(self.score),
@@ -364,21 +373,15 @@ impl<'a> GMatch<'a> {
             },
         );
 
-        let mut subgraph_edges = vec![first_edge.edge_id, second_edge.edge_id];
-        subgraph_edges.sort_unstable();
-        subgraph_edges.dedup();
-        let mut subgraph_vertices = vec![
-            first_edge.source_id,
-            first_edge.target_id,
-            second_edge.target_id,
-        ];
-        subgraph_vertices.sort_unstable();
-        subgraph_vertices.dedup();
         Ok((
             entry,
             GraphPayload {
-                subgraph_vertices: subgraph_vertices.into(),
-                subgraph_edges: subgraph_edges.into(),
+                subgraph_vertices: sorted_match_ids([
+                    first_edge.source_id,
+                    first_edge.target_id,
+                    second_edge.target_id,
+                ]),
+                subgraph_edges: sorted_match_ids([first_edge.edge_id, second_edge.edge_id]),
                 graph_name: Arc::clone(graph_name),
                 score_override: Some(self.score),
             },
@@ -665,4 +668,36 @@ fn endpoint_matches<G: GraphStore>(
         ))
     })?;
     Ok(pattern.satisfies(&endpoint))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn two_edge_match_allocates_only_surviving_payload_buffers() {
+        let operator = GMatch::new(GraphPattern::new(), "g");
+        let first = EdgePattern::new("a", "b");
+        let second = EdgePattern::new("b", "c");
+        let forward = Edge::new(8, 9, 3, "edge");
+        let back = Edge::new(4, 3, 9, "edge");
+        let name: Arc<str> = Arc::from("g");
+        let mut result = None;
+        let allocated = allocation_counter::measure(|| {
+            result = Some(
+                operator
+                    .two_edge_path_match(&first, &second, &forward, &back, 1, &name)
+                    .unwrap(),
+            );
+        });
+        assert_eq!(
+            i64::try_from(allocated.count_total).unwrap(),
+            allocated.count_current
+        );
+        let (_, payload) = result.unwrap();
+        assert_eq!(&*payload.subgraph_vertices, &[3, 9]);
+        assert_eq!(&*payload.subgraph_edges, &[4, 8]);
+        assert!(Arc::ptr_eq(&payload.graph_name, &name));
+        assert_eq!(&*sorted_match_ids([8, 8]), &[8]);
+    }
 }

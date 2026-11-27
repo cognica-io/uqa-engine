@@ -83,21 +83,30 @@ impl<'a> MessagePassing<'a> {
 
         let mut features = self.initial_features(store, &vertices)?;
         if self.k_layers > 0 {
-            let mut adjacency = Vec::with_capacity(vertices.len());
+            let mut adjacency = (self.k_layers > 1).then(|| Vec::with_capacity(vertices.len()));
             let mut next = Vec::with_capacity(vertices.len());
             // Validate and evaluate the first round in vertex order so a later
             // missing edge cannot overtake an earlier arithmetic error.
             for (index, &id) in vertices.iter().enumerate() {
                 let row = self.neighbor_indices(store, &vertices, id)?;
-                next.push(self.propagate_vertex(&features, index, &row, id)?);
-                adjacency.push(row);
+                next.push(
+                    self.propagate_vertex(&features, index, &row, id, || store.check_read())?,
+                );
+                if let Some(adjacency) = &mut adjacency {
+                    adjacency.push(row);
+                }
             }
             std::mem::swap(&mut features, &mut next);
-            for _ in 1..self.k_layers {
-                for (index, &id) in vertices.iter().enumerate() {
-                    next[index] = self.propagate_vertex(&features, index, &adjacency[index], id)?;
+            if let Some(adjacency) = adjacency {
+                for _ in 1..self.k_layers {
+                    for (index, &id) in vertices.iter().enumerate() {
+                        next[index] =
+                            self.propagate_vertex(&features, index, &adjacency[index], id, || {
+                                store.check_read()
+                            })?;
+                    }
+                    std::mem::swap(&mut features, &mut next);
                 }
-                std::mem::swap(&mut features, &mut next);
             }
         }
         self.build_result(&vertices, &features)
@@ -176,12 +185,19 @@ impl<'a> MessagePassing<'a> {
         index: usize,
         neighbors: &[usize],
         id: VertexId,
+        mut check_read: impl FnMut() -> GraphStoreResult<()>,
     ) -> GraphStoreResult<f64> {
+        check_read()?;
         let own = features[index];
         if neighbors.is_empty() {
             return Ok(own);
         }
-        let values = neighbors.iter().map(|&other| features[other]);
+        let values = neighbors.iter().enumerate().map(|(offset, &other)| {
+            if offset != 0 && offset.is_multiple_of(256) {
+                check_read()?;
+            }
+            Ok(features[other])
+        });
         let aggregate = aggregate_features(values, self.aggregation, id)?;
         finite_add(own, aggregate, id)
     }
@@ -239,21 +255,24 @@ fn numeric_feature(value: &Value, property: &str, vertex_id: VertexId) -> GraphS
 }
 
 fn aggregate_features(
-    values: impl ExactSizeIterator<Item = f64>,
+    mut values: impl ExactSizeIterator<Item = GraphStoreResult<f64>>,
     aggregation: AggregationKind,
     vertex_id: VertexId,
 ) -> GraphStoreResult<f64> {
     match aggregation {
-        AggregationKind::Max => values.reduce(f64::max).ok_or_else(|| {
-            GraphStoreError::CorruptGraph(format!(
-                "message-passing aggregation for vertex {vertex_id} has no values"
-            ))
-        }),
+        AggregationKind::Max => {
+            let first = values.next().ok_or_else(|| {
+                GraphStoreError::CorruptGraph(format!(
+                    "message-passing aggregation for vertex {vertex_id} has no values"
+                ))
+            })??;
+            values.try_fold(first, |maximum, value| Ok(maximum.max(value?)))
+        }
         AggregationKind::Sum | AggregationKind::Mean => {
             let count = values.len();
             let mut total = 0.0;
             for value in values {
-                total = finite_add(total, value, vertex_id)?;
+                total = finite_add(total, value?, vertex_id)?;
             }
             if aggregation == AggregationKind::Mean {
                 let count = u64::try_from(count).map_err(|_| {
@@ -285,4 +304,52 @@ fn finite_add(left: f64, right: f64, vertex_id: VertexId) -> GraphStoreResult<f6
 
 fn sigmoid(x: f64) -> f64 {
     1.0 / (1.0 + (-x).exp())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use uqa_core::{memory::MemoryBudget, CancellationToken};
+    use uqa_storage::read_control::StorageReadControl;
+
+    #[test]
+    fn cached_neighbors_observe_read_cancellation_within_a_vertex() {
+        let neighbors = [0; 1024];
+        for kind in [
+            AggregationKind::Mean,
+            AggregationKind::Sum,
+            AggregationKind::Max,
+        ] {
+            let token = CancellationToken::new();
+            let control = StorageReadControl::new(&MemoryBudget::new(0), &token);
+            let mut checks = 0;
+            let mut cancellation = None;
+            let result = MessagePassing::new("g").aggregation(kind).propagate_vertex(
+                &[1.0],
+                0,
+                &neighbors,
+                1,
+                || {
+                    checks += 1;
+                    if checks == 2 {
+                        token.cancel();
+                    }
+                    control.check().map_err(|cause| {
+                        assert!(matches!(
+                            &cause,
+                            uqa_storage::StorageBackendError::Cancelled(_)
+                        ));
+                        let error = GraphStoreError::from(cause);
+                        cancellation = Some(error.clone());
+                        error
+                    })
+                },
+            );
+            assert_eq!(checks, 2);
+            assert_eq!(
+                result.unwrap_err(),
+                cancellation.expect("bound read cancellation")
+            );
+        }
+    }
 }

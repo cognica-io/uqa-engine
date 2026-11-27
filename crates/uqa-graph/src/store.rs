@@ -48,6 +48,11 @@ pub type GraphStoreResult<T> = Result<T, GraphStoreError>;
 /// vertex / edge id space (a vertex can belong to multiple graphs).
 /// Mutations are scoped to a target graph by name.
 pub trait GraphStore {
+    /// Observe cancellation from the bound graph read while evaluating previously loaded data.
+    fn check_read(&self) -> GraphStoreResult<()> {
+        Ok(())
+    }
+
     /// Apply a group of mutations atomically. Persistent stores use a storage
     /// transaction or savepoint, never a cloned graph as a rollback image.
     /// Both errors and unwinding must restore the pre-operation state.
