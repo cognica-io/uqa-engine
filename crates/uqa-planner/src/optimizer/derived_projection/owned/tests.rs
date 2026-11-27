@@ -5,7 +5,7 @@
 //
 
 use super::*;
-use uqa_core::{memory::MemoryBudget, CancellationToken};
+use uqa_core::{memory::MemoryBudget, CancellationToken, Value};
 use uqa_sql::{
     plan::{AnalyzedSource, QueryPlan, UnifiedPlan},
     ColumnType,

@@ -7,16 +7,13 @@
 //! Eliminate unused scalar outputs of a simple derived source before constant evaluation.
 
 use crate::{AggregateClassifier, QueryBlockPlan, QueryPlan, RelationalPlan, SourcePlan};
-use uqa_core::{
-    memory::{ProductionControl, ProductionVec},
-    Value,
-};
+use uqa_core::memory::{ProductionControl, ProductionVec};
 use uqa_sql::{RowSchema, SQLError, ScalarExpr};
 
 mod demand;
 mod observations;
 pub(super) mod owned;
-use observations::{needed_by_grouping, needed_by_ordering, removable};
+mod replacements;
 pub use owned::prune_outputs as prune_owned_outputs;
 
 /// Catalog and lexical inputs for removing an unobserved output without losing its effects.
@@ -172,46 +169,12 @@ pub(super) fn prune_positions(
     if !expand_local_stars(inner, query.analyzed_source.as_deref(), schema) {
         return Ok(());
     }
-    let visible_ctes =
-        |name: &str| query.ctes.iter().any(|cte| cte.name == name) || (context.visible_ctes)(name);
-    let mut replacements = Vec::new();
-    for (index, projection) in inner.projections.iter().enumerate() {
-        if required(index)
-            || needed_by_ordering(inner, index, &context.production)?
-            || needed_by_grouping(
-                inner,
-                index,
-                query.analyzed_source.as_deref(),
-                &context.production,
-            )?
-            || !removable(&projection.expr, &inner.subqueries, context, &visible_ctes)?
-        {
-            continue;
-        }
-        // Retain the schema even though the enclosing query never reads this slot.
-        let ty = schema
-            .and_then(|schema| schema.column_types().get(index))
-            .cloned()
-            .flatten()
-            .or_else(|| {
-                uqa_sql::scalar_type(&projection.expr, &RowSchema::default(), &[])
-                    .ok()
-                    .flatten()
-            });
-        if let Some(ty) = ty {
-            replacements.push((
-                index,
-                ScalarExpr::TypedLiteral {
-                    collation_oid: schema.and_then(|schema| schema.column_collation(index)),
-                    composite_source: None,
-                    value: Value::Null,
-                    ty: ty.catalog_name(),
-                    bound_type: Some(ty),
-                    parameter_index: None,
-                },
-            ));
-        }
-    }
+    let replacements = replacements::collect(query, schema, required, context, |expression| {
+        Ok(expression.finish(&context.production)?)
+    })?;
+    let RelationalPlan::QueryBlock(inner) = &mut query.root else {
+        unreachable!("projection replacements require a query block")
+    };
     for (index, expression) in replacements {
         let projection = &mut inner.projections[index];
         projection.expr.visit(&mut |part| match part {
@@ -233,7 +196,7 @@ pub(super) fn prune_positions(
         if projection.alias.is_none() {
             projection.alias = Some(uqa_sql::semantics::projection_label_at(projection));
         }
-        projection.expr = expression;
+        projection.expr = expression.into_parts().0;
     }
     Ok(())
 }
@@ -282,6 +245,7 @@ pub(crate) fn expand_local_stars(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use uqa_core::Value;
     use uqa_sql::ast::FunctionVolatility;
     mod demand;
     mod required;

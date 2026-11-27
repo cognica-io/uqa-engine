@@ -6,12 +6,9 @@
 
 //! Unused outputs retain positional metadata while retiring their scalar owners immediately.
 
-use super::{observations, OutputPruningContext, RelationalPlan, RowSchema, SQLError, ScalarExpr};
+use super::{OutputPruningContext, RelationalPlan, RowSchema, SQLError, ScalarExpr};
 use crate::scratch::Buffer;
-use uqa_core::{
-    memory::{Produced, ProductionControl},
-    Value,
-};
+use uqa_core::memory::{Produced, ProductionControl};
 use uqa_sql::plan::{MutableQueryPlan, OwnedScalarExpr, QueryScalarSlot};
 
 mod stars;
@@ -70,61 +67,8 @@ pub(in crate::optimizer) fn prune_positions(
     if !expanded {
         return Ok(query);
     }
-    let RelationalPlan::QueryBlock(inner) = &query.root else {
-        unreachable!()
-    };
-    let visible_ctes =
-        |name: &str| query.ctes.iter().any(|cte| cte.name == name) || (context.visible_ctes)(name);
-    let mut replacements = Buffer::new(*control);
-    for (index, projection) in inner.projections.iter().enumerate() {
-        control.check()?;
-        if required(index)
-            || observations::needed_by_ordering(inner, index, control)?
-            || observations::needed_by_grouping(
-                inner,
-                index,
-                query.analyzed_source.as_deref(),
-                control,
-            )?
-            || !observations::removable(
-                &projection.expr,
-                &inner.subqueries,
-                context,
-                &visible_ctes,
-            )?
-        {
-            continue;
-        }
-        let ty = match schema.as_ref().and_then(|schema| schema.column_type(index)) {
-            Some(ty) => Some(ty.clone_with_control(control)?),
-            None => match uqa_sql::scalar_type_with_resolver_and_control(
-                &projection.expr,
-                &RowSchema::default(),
-                &[],
-                None,
-                control,
-            ) {
-                Ok(ty) => ty,
-                Err(error) if matches!(error.sqlstate(), Some("53200" | "57014")) => {
-                    return Err(error);
-                }
-                Err(_) => None,
-            },
-        };
-        if let Some(ty) = ty {
-            let expression = OwnedScalarExpr::typed_literal(
-                control.finish(Value::Null, control.empty_reservation())?,
-                ty.catalog_name_with_control(control)?,
-                Some(ty),
-                schema
-                    .as_ref()
-                    .and_then(|schema| schema.column_collation(index)),
-                None,
-                control,
-            )?;
-            replacements.push((index, expression))?;
-        }
-    }
+    let replacements =
+        super::replacements::collect(&query, schema.as_ref(), required, context, Ok)?;
     for (index, expression) in replacements {
         query = replace(query, index, expression, control)?;
     }

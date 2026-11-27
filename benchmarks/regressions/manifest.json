@@ -35901,6 +35901,19 @@
     {
       "package": "uqa-planner",
       "kind": "lib",
+      "test": "discarded_output_replacements_respect_the_operation_budget_before_publication",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/derived_projection/tests/demand.rs",
+      "capability": "Planning output demand",
+      "workload": "Discard all 128 integer output expressions using a 4 KiB allowance, then repeat with 1 MiB.",
+      "invariant": "Exhaustion returns 53200 with the original query intact. Sufficient memory produces 128 typed NULLs and releases the workspace on return.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
       "test": "output_demand_admits_scratch_before_growth_and_preserves_the_input_on_rejection",
       "cases": 1,
       "source": "crates/uqa-planner/src/optimizer/derived_projection/tests/demand.rs",

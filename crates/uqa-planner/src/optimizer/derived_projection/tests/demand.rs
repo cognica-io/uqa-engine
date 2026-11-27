@@ -228,3 +228,54 @@ fn output_demand_releases_partial_scratch_on_both_cancellations_and_unwind() {
         }
     }
 }
+
+#[test]
+fn discarded_output_replacements_respect_the_operation_budget_before_publication() {
+    let mut query = wide_query(128);
+    let names = uqa_sql::semantics::query_plan_output_columns(&query).unwrap();
+    query.analyzed_output = Some(RowSchema::with_types(
+        names,
+        vec![Some(uqa_sql::ColumnType::Integer); 128],
+    ));
+    let before = serde_json::to_value(&query).unwrap();
+    let token = CancellationToken::new();
+    let budget = MemoryBudget::new(4096);
+    let result = prune_outputs(
+        &mut query,
+        &[],
+        &|_| false,
+        None,
+        OutputPruningContext {
+            production: ProductionControl::new(&budget, &token, &token),
+            ..OutputPruningContext::new(&NoAggregates)
+        },
+    );
+    assert_eq!(result.unwrap_err().sqlstate(), Some("53200"));
+    assert_eq!(budget.used(), 0);
+    assert_eq!(serde_json::to_value(&query).unwrap(), before);
+
+    let budget = MemoryBudget::new(1024 * 1024);
+    prune_outputs(
+        &mut query,
+        &[],
+        &|_| false,
+        None,
+        OutputPruningContext {
+            production: ProductionControl::new(&budget, &token, &token),
+            ..OutputPruningContext::new(&NoAggregates)
+        },
+    )
+    .unwrap();
+    let RelationalPlan::QueryBlock(block) = &query.root else {
+        unreachable!();
+    };
+    assert!(block.projections.iter().all(|projection| matches!(
+        projection.expr,
+        ScalarExpr::TypedLiteral {
+            value: Value::Null,
+            bound_type: Some(uqa_sql::ColumnType::Integer),
+            ..
+        }
+    )));
+    assert_eq!(budget.used(), 0);
+}
