@@ -7,8 +7,7 @@
 //! Resume one probe and duplicate-key cursor without evaluating later candidates.
 
 use super::canonical_index::HashMatches;
-use super::{HashJoin, HybridHashIndex, HybridRowStore, JoinKind, MatchFlags, SpillState};
-use crate::spill::SpillBatchWriter;
+use super::{HashJoin, HybridHashIndex, HybridRowStore, JoinKind, MatchFlags};
 use crate::{Batch, ExecError, ExecResult, PhysicalRow};
 
 pub(super) struct HashJoinState {
@@ -150,33 +149,12 @@ impl HashJoin<'_> {
         rows: usize,
         demanded: bool,
     ) -> ExecResult<Option<Batch>> {
-        if let Some(batch) = self.output.as_mut().and_then(Iterator::next).transpose()? {
-            return Ok(Some(batch));
-        }
-        self.output = None;
-        let mut output =
-            crate::SpillBuffer::new(self.work_mem_bytes.saturating_sub(self.work_mem_bytes / 2));
-        let mut writer = SpillBatchWriter::new(self.schema.clone())?;
-        let mut produced = 0;
-        while produced < rows {
-            let Some(row) = self.next_hash_row(state, demanded)? else {
-                break;
-            };
-            writer.push(&mut output, row)?;
-            produced += 1;
-        }
-        if produced == 0 {
-            return Ok(None);
-        }
-        writer.finish(&mut output)?;
-        if output.has_spilled() {
-            self.output_spilled = SpillState::Spilled;
-        }
-        self.output = Some(output.drain()?);
-        self.output
-            .as_mut()
-            .expect("produced hash output")
-            .next()
-            .transpose()
+        let mut output = std::mem::take(&mut self.output);
+        let result =
+            output.drain_join_batch(self.schema.clone(), self.work_mem_bytes, rows, || {
+                self.next_hash_row(state, demanded)
+            });
+        self.output = output;
+        result
     }
 }

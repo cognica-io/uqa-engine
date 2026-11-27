@@ -6,7 +6,7 @@
 
 //! Join construction retains immutable scalar producers through physical execution.
 
-use super::{presence, HashJoin, SpillState};
+use super::{presence, HashJoin, JoinOutput, SpillState};
 use crate::physical::construction::OperatorBuild;
 use crate::scalar::PreparedExpressions;
 use crate::{
@@ -198,13 +198,12 @@ impl<'a> HashJoin<'a> {
             estimated_cardinality,
             build_left,
             work_mem_bytes,
-            output: None,
+            output: JoinOutput::default(),
             streaming_unique: None,
             streaming: None,
             probe_pending: crate::physical::demand::PendingRows::default(),
             initialized: false,
             prefetched_left: None,
-            output_spilled: SpillState::InMemory,
             right_input_spilled: SpillState::InMemory,
             hash_index_spilled: SpillState::InMemory,
             memory: None,

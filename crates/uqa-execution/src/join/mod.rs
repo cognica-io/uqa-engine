@@ -11,6 +11,8 @@ mod canonical_index;
 mod direct_index;
 mod iteration;
 mod nested_loop;
+mod output;
+use output::JoinOutput;
 pub(crate) mod presence;
 mod production;
 mod row_store;
@@ -88,13 +90,12 @@ pub struct HashJoin<'a> {
     estimated_cardinality: Option<u64>,
     build_left: bool,
     work_mem_bytes: usize,
-    output: Option<crate::spill::SpillDrain>,
+    output: JoinOutput,
     streaming_unique: Option<UniqueHashJoinState>,
     streaming: Option<HashJoinState>,
     probe_pending: crate::physical::demand::PendingRows,
     initialized: bool,
     prefetched_left: Option<Batch>,
-    output_spilled: SpillState,
     right_input_spilled: SpillState,
     hash_index_spilled: SpillState,
     memory: Option<uqa_core::memory::MemoryReservation>,
@@ -286,7 +287,7 @@ impl<'a> HashJoin<'a> {
     }
 
     pub fn output_has_spilled(&self) -> bool {
-        self.output_spilled.is_spilled()
+        self.output.spilled
     }
 
     pub fn right_input_has_spilled(&self) -> bool {
@@ -387,7 +388,7 @@ impl<'a> HashJoin<'a> {
 
         let mut output = SpillBuffer::new(output_budget);
         if left.len() == 0 {
-            self.output = Some(output.drain()?);
+            self.output.remaining = Some(output.drain()?);
             return Ok(());
         }
 
@@ -605,7 +606,7 @@ impl HashJoin<'_> {
         reason = "join driver keeps key layout, NULL policy, and output order aligned"
     )]
     fn initialize(&mut self, demanded: bool) -> ExecResult<()> {
-        self.output = None;
+        self.output.remaining = None;
         self.left_key_types = self
             .left_keys
             .iter()
@@ -618,7 +619,7 @@ impl HashJoin<'_> {
             .collect::<Result<_, _>>()?;
         self.streaming_unique = None;
         self.prefetched_left = None;
-        self.output_spilled = SpillState::InMemory;
+        self.output.spilled = false;
         self.right_input_spilled = SpillState::InMemory;
         self.hash_index_spilled = SpillState::InMemory;
 
@@ -631,7 +632,7 @@ impl HashJoin<'_> {
             self.left.open()?;
             self.prefetched_left = next_nonempty_batch(self.left.as_mut(), demanded)?;
             if self.prefetched_left.is_none() {
-                self.output = Some(SpillBuffer::new(output_budget).drain()?);
+                self.output.remaining = Some(SpillBuffer::new(output_budget).drain()?);
                 return Ok(());
             }
         }
@@ -682,7 +683,7 @@ impl HashJoin<'_> {
 
         if right.len() == 0 && matches!(self.kind, JoinKind::Inner) {
             let mut output = SpillBuffer::new(output_budget);
-            self.output = Some(output.drain()?);
+            self.output.remaining = Some(output.drain()?);
             return Ok(());
         }
 
@@ -765,9 +766,7 @@ impl HashJoin<'_> {
             self.streaming = Some(state);
             return result;
         }
-        self.output
-            .as_mut()
-            .map_or(Ok(None), |output| output.next().transpose())
+        self.output.next_pending()
     }
 }
 
@@ -781,13 +780,13 @@ impl PhysicalOperator for HashJoin<'_> {
     }
 
     fn open(&mut self) -> ExecResult<()> {
-        self.output = None;
+        self.output.remaining = None;
         self.streaming_unique = None;
         self.streaming = None;
         self.probe_pending.clear();
         self.prefetched_left = None;
         self.initialized = false;
-        self.output_spilled = SpillState::InMemory;
+        self.output.spilled = false;
         self.right_input_spilled = SpillState::InMemory;
         self.hash_index_spilled = SpillState::InMemory;
         Ok(())
@@ -802,7 +801,7 @@ impl PhysicalOperator for HashJoin<'_> {
     }
 
     fn close(&mut self) -> ExecResult<()> {
-        self.output = None;
+        self.output.remaining = None;
         self.left_key_types.clear();
         self.right_key_types.clear();
         self.streaming_unique = None;

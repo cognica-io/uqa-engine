@@ -10,7 +10,7 @@ use uqa_core::memory::{Produced, ProductionControl};
 use uqa_sql::ast::JoinKind;
 use uqa_sql::{ResultRow, SQLError};
 
-use super::{HybridRowStore, MatchFlags, SpillState, DEFAULT_JOIN_WORK_MEM_BYTES};
+use super::{HybridRowStore, JoinOutput, MatchFlags, SpillState, DEFAULT_JOIN_WORK_MEM_BYTES};
 
 mod iteration;
 use crate::{
@@ -32,7 +32,7 @@ pub struct NestedLoopJoin<'a> {
     right_nulls: PhysicalRow,
     schema: RowSchema,
     work_mem_bytes: usize,
-    output: Option<crate::spill::SpillDrain>,
+    output: JoinOutput,
     left_pending: crate::physical::demand::PendingRows,
     right_pending: crate::physical::demand::PendingRows,
     right_rows: Option<HybridRowStore>,
@@ -43,7 +43,6 @@ pub struct NestedLoopJoin<'a> {
     matched_left: bool,
     left_finished: bool,
     right_state: RightInputState,
-    output_spilled: SpillState,
     right_input_spilled: SpillState,
     memory: Option<uqa_core::memory::MemoryReservation>,
 }
@@ -157,7 +156,7 @@ impl<'a> NestedLoopJoin<'a> {
             right_nulls,
             schema,
             work_mem_bytes,
-            output: None,
+            output: JoinOutput::default(),
             left_pending: crate::physical::demand::PendingRows::default(),
             right_pending: crate::physical::demand::PendingRows::default(),
             right_rows: None,
@@ -168,7 +167,6 @@ impl<'a> NestedLoopJoin<'a> {
             matched_left: false,
             left_finished: false,
             right_state: RightInputState::Unopened,
-            output_spilled: SpillState::InMemory,
             right_input_spilled: SpillState::InMemory,
             memory: None,
         })
@@ -200,7 +198,7 @@ impl<'a> NestedLoopJoin<'a> {
     }
 
     pub fn output_has_spilled(&self) -> bool {
-        self.output_spilled.is_spilled()
+        self.output.spilled
     }
 
     /// Whether the repeatable nested-loop build input exceeded its memory
@@ -216,8 +214,7 @@ impl PhysicalOperator for NestedLoopJoin<'_> {
     }
 
     fn open(&mut self) -> ExecResult<()> {
-        self.output = None;
-        self.output_spilled = SpillState::InMemory;
+        self.output = JoinOutput::default();
         self.right_input_spilled = SpillState::InMemory;
         self.left_pending.clear();
         self.right_pending.clear();
@@ -246,7 +243,7 @@ impl PhysicalOperator for NestedLoopJoin<'_> {
     }
 
     fn close(&mut self) -> ExecResult<()> {
-        self.output = None;
+        self.output.remaining = None;
         self.current_left = None;
         self.right_rows = None;
         self.matched_right = None;

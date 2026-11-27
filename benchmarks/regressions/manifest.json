@@ -7904,6 +7904,110 @@
       ]
     },
     {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "ordinary_sizing_counts_nested_spare_capacity_and_keeps_inline_frames",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/value/retention/tests.rs",
+      "capability": "Retained value sizing",
+      "workload": "Count a nested value with spare capacity through 256 levels, including the inline traversal boundary.",
+      "invariant": "The measured size agrees with an independent sum of slot capacities and payload bytes at every depth. Up to 128 levels require zero heap allocations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "resident_scalar_and_registered_arguments_are_sized_without_allocating",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/aggregation/ordered_buffer/tests.rs",
+      "capability": "Aggregate input buffering",
+      "workload": "Append 10,000 presized nested values and argument lists to separate resident buffers.",
+      "invariant": "Appending owned values and sort keys allocates zero times. Both buffers retain all inputs within the memory allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "sixteen_interleaved_runs_preserve_input_order_with_logarithmic_head_comparisons",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/aggregation/ordered_buffer/tests.rs",
+      "capability": "Ordered aggregate merge",
+      "workload": "Merge 1,024 records from sixteen interleaved ordered runs.",
+      "invariant": "Every sequence is visited once in input order and comparisons remain within a logarithmic bound per selection.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "completed_groups_move_resident_values_and_window_reads_remain_repeatable",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/aggregation/ordered_buffer/tests.rs",
+      "capability": "Aggregate finalization",
+      "workload": "Finalize completed resident groups and read the same retained ordered window twice.",
+      "invariant": "Completed groups transfer the original allocations and repeated window output preserves its inputs.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "evaluated_keys_reuse_their_slots_and_new_groups_take_key_ownership",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/aggregation/adaptive.rs",
+      "capability": "Grouped aggregation",
+      "workload": "Probe the same computed group key 10,000 times after inserting its original owned vector.",
+      "invariant": "Insertion transfers the key allocation to the group. Later probes reuse the same scratch slots and incur zero allocations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "batches_reuse_subquery_plans_without_allocating",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/aggregation/adaptive.rs",
+      "capability": "Grouped aggregation",
+      "workload": "Consume 10,000 input batches for an aggregate whose HAVING clause contains a scalar subquery.",
+      "invariant": "Every batch refers to the prepared subquery collection without a heap allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "demanded_filter_visits_a_retained_batch_without_allocating_per_rejection",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/relational/tests/consumer_demand.rs",
+      "capability": "Bounded filter demand",
+      "workload": "Request one passing row from a materialized batch whose 4,096 candidates all fail the filter.",
+      "invariant": "The predicate sees each candidate exactly once and the bounded pull allocates zero times.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "join_output_moves_resident_rows_and_drains_spilled_rows_before_polling_again",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/join/output.rs",
+      "capability": "Bounded join output",
+      "workload": "Collect a resident string and sixteen disk-backed integer rows; drain the remainder with singleton demand and try a malformed row at both budgets.",
+      "invariant": "The resident string keeps its allocation. The spilled rows retain order and drain before the child is polled again. Both budgets report the same invalid slot.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
       "package": "uqa-execution",
       "kind": "lib",
       "test": "arithmetic_and_negation_infer_once_for_ten_thousand_rows_of_the_same_schema",

@@ -128,3 +128,34 @@ fn unrestricted_pipeline_retains_batches_and_zero_limit_evaluates_no_rows() {
     assert!(rows.is_empty());
     assert_eq!(calls.load(Ordering::Relaxed), 0);
 }
+
+#[test]
+fn demanded_filter_visits_a_retained_batch_without_allocating_per_rejection() {
+    struct Reject(AtomicUsize);
+    impl crate::RowPredicate for Reject {
+        fn keep_physical(&self, _: &RowSchema, _: &crate::PhysicalRow) -> ExecResult<bool> {
+            self.0.fetch_add(1, Ordering::Relaxed);
+            Ok(false)
+        }
+    }
+    let schema = RowSchema::new(vec!["n".into()]);
+    let rows = (0..4096)
+        .map(|n| crate::PhysicalRow::from_values(vec![Value::Int(n)]))
+        .collect();
+    let mut buffer = crate::SpillBuffer::new(8 << 20);
+    buffer
+        .push(Batch::from_physical_rows(schema.clone(), rows))
+        .unwrap();
+    let reject = Arc::new(Reject(AtomicUsize::new(0)));
+    let mut filter = Filter::with_row_predicate(
+        Box::new(crate::SpillScan::new(schema, buffer)),
+        reject.clone(),
+    );
+    filter.open().unwrap();
+    let allocations = allocation_counter::measure(|| {
+        assert!(filter.next_with_demand(ONE).unwrap().is_none());
+    });
+    assert_eq!(reject.0.load(Ordering::Relaxed), 4096);
+    assert_eq!(allocations.count_total, 0);
+    filter.close().unwrap();
+}
