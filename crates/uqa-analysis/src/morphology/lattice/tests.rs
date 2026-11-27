@@ -76,3 +76,65 @@ fn spilling_a_position_preserves_order_and_original_candidate_on_failed_growth()
     drop(lattice);
     assert_eq!(budget.used(), 0);
 }
+
+#[test]
+fn sparse_positions_fit_within_one_candidate_list_header_per_slot() {
+    let count = 512;
+    let slot_bytes = size_of::<BudgetedVec<Node>>();
+    let candidate_bytes = size_of::<Node>();
+    let budget = MemoryBudget::new((count + 1) * slot_bytes + candidate_bytes);
+    let mut poll = || Ok(());
+    let mut lattice = Lattice::new(Limits::default(), &budget, &mut poll).unwrap();
+    lattice.ensure(count - 1, &mut poll).unwrap();
+    assert_eq!(lattice.candidates, 1);
+    assert!(lattice.get(count - 1).is_empty());
+    assert!(budget.used() <= count * slot_bytes + candidate_bytes);
+    drop(lattice);
+    assert_eq!(budget.used(), 0);
+}
+
+#[test]
+fn ambiguous_positions_return_their_buffers_after_failed_growth_and_release() {
+    let budget = MemoryBudget::new(64 * 1024);
+    let mut poll = || Ok(());
+    let mut lattice = Lattice::new(Limits::default(), &budget, &mut poll).unwrap();
+    for pos in 0..3 {
+        for candidate_index in lattice.get(pos).len()..4 {
+            lattice
+                .push(
+                    pos,
+                    candidate(pos, i32::try_from(candidate_index).unwrap()),
+                    &mut poll,
+                )
+                .unwrap();
+        }
+        lattice.ensure(pos + 1, &mut poll).unwrap();
+    }
+    let used = budget.used();
+    let occupied = budget.reserve(budget.available()).unwrap();
+    assert!(matches!(
+        lattice.push(1, candidate(1, 7), &mut poll),
+        Err(AnalysisError::Memory(_))
+    ));
+    drop(occupied);
+    assert_eq!(budget.used(), used);
+    assert_eq!(lattice.candidates, 12);
+    assert_eq!(
+        lattice
+            .get(1)
+            .iter()
+            .map(|node| node.cost)
+            .collect::<Vec<_>>(),
+        [0, 1, 2, 3]
+    );
+    lattice.release_before(1, &mut poll).unwrap();
+    assert_eq!(budget.used(), used - 4 * size_of::<Node>());
+    lattice.prune(1, 2, 2, &mut poll).unwrap();
+    assert_eq!(lattice.candidates, 1);
+    assert_eq!(lattice.get(2)[0].cost, 2);
+    assert_eq!(budget.used(), used - 8 * size_of::<Node>());
+    lattice.clear_position(2);
+    assert_eq!(budget.used(), used - 12 * size_of::<Node>());
+    drop(lattice);
+    assert_eq!(budget.used(), 0);
+}
