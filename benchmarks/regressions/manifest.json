@@ -35927,6 +35927,19 @@
     {
       "package": "uqa-planner",
       "kind": "lib",
+      "test": "discarded_column_privileges_admit_new_names_and_borrow_existing_identities",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/derived_projection/tests/demand.rs",
+      "capability": "Planning output demand",
+      "workload": "Discard a qualified column with a 4 MiB qualifier under a 32 KiB planning allowance, with and without the same previously retained privilege. Exercise caller-owned and admitted query plans.",
+      "invariant": "Adding a new identity reports 53200 before copying its name. A previously retained identity permits pruning to a typed NULL without copying the qualifier or losing its privilege. Temporary reservations are released on both paths.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
       "test": "discarded_output_replacements_respect_the_operation_budget_before_publication",
       "cases": 1,
       "source": "crates/uqa-planner/src/optimizer/derived_projection/tests/demand.rs",

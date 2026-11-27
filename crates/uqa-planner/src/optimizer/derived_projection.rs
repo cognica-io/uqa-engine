@@ -14,8 +14,10 @@ mod demand;
 mod observations;
 pub(super) mod owned;
 mod replacements;
+mod target;
 pub(crate) use owned::expand_local_stars;
 pub use owned::prune_outputs as prune_owned_outputs;
+pub(super) use target::{prune_positions as prune_target_positions, ProjectionTarget};
 
 /// Catalog and lexical inputs for removing an unobserved output without losing its effects.
 #[derive(Clone, Copy)]
@@ -39,10 +41,8 @@ impl<'a> OutputPruningContext<'a> {
     }
 }
 
-pub(super) fn prune(
-    block: &mut QueryBlockPlan,
-    context: OutputPruningContext<'_>,
-) -> Result<(), SQLError> {
+#[cfg(test)]
+fn prune(block: &mut QueryBlockPlan, context: OutputPruningContext<'_>) -> Result<(), SQLError> {
     let Some(demanded) = demand::consumer_outputs(block, context.production)? else {
         return Ok(());
     };
@@ -100,11 +100,22 @@ pub fn prune_outputs(
     schema: Option<&RowSchema>,
     context: OutputPruningContext<'_>,
 ) -> Result<(), SQLError> {
-    let Some(demanded) = output_demand(query, aliases, required, schema, context.production)?
+    prune_named(query, aliases, required, schema, context)?;
+    Ok(())
+}
+
+fn prune_named<Q: ProjectionTarget>(
+    query: Q,
+    aliases: &[String],
+    required: &dyn Fn(&str) -> bool,
+    schema: Option<&RowSchema>,
+    context: OutputPruningContext<'_>,
+) -> Result<Q, SQLError> {
+    let Some(demanded) = output_demand(&query, aliases, required, schema, context.production)?
     else {
-        return Ok(());
+        return Ok(query);
     };
-    prune_positions(
+    target::prune_positions(
         query,
         &|position| demanded.get(position).copied().unwrap_or(true),
         schema,
@@ -142,68 +153,14 @@ pub(super) fn output_demand<'a>(
     Ok(Some(demanded))
 }
 
+#[cfg(test)]
 pub(super) fn prune_positions(
     query: &mut QueryPlan,
     required: &dyn Fn(usize) -> bool,
     schema: Option<&RowSchema>,
     context: OutputPruningContext<'_>,
 ) -> Result<(), SQLError> {
-    if query.analyzed_output.is_none() {
-        if let Some(schema) = schema {
-            query.analyzed_output = Some(schema.clone());
-            if let RelationalPlan::QueryBlock(block) = &mut query.root {
-                block.compute =
-                    block.compute_kind_with_control(context.aggregates, &context.production)?;
-            }
-        }
-    }
-    if matches!(query.root, RelationalPlan::SetOp { .. }) {
-        return super::union_projection::prune(query, required, context);
-    }
-    let schema = schema.or(query.analyzed_output.as_ref());
-    let RelationalPlan::QueryBlock(inner) = &mut query.root else {
-        return Ok(());
-    };
-    if inner.distinct || !inner.distinct_on.is_empty() || !inner.windows.is_empty() {
-        return Ok(());
-    }
-    if !expand_local_stars(
-        inner,
-        query.analyzed_source.as_deref(),
-        schema,
-        &context.production,
-    )? {
-        return Ok(());
-    }
-    let replacements = replacements::collect(query, schema, required, context, |expression| {
-        Ok(expression.finish(&context.production)?)
-    })?;
-    let RelationalPlan::QueryBlock(inner) = &mut query.root else {
-        unreachable!("projection replacements require a query block")
-    };
-    for (index, expression) in replacements {
-        let projection = &mut inner.projections[index];
-        projection.expr.visit(&mut |part| match part {
-            ScalarExpr::Column(column) => {
-                inner
-                    .privilege_columns
-                    .insert(uqa_sql::ColumnIdentity::unqualified(column.clone()));
-            }
-            ScalarExpr::QualifiedColumn { qualifier, column } => {
-                inner
-                    .privilege_columns
-                    .insert(uqa_sql::ColumnIdentity::qualified(
-                        qualifier.clone(),
-                        column.clone(),
-                    ));
-            }
-            _ => {}
-        });
-        if projection.alias.is_none() {
-            projection.alias = Some(uqa_sql::semantics::projection_label_at(projection));
-        }
-        projection.expr = expression.into_parts().0;
-    }
+    target::prune_positions(query, required, schema, context)?;
     Ok(())
 }
 

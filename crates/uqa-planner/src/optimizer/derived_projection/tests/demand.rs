@@ -279,3 +279,118 @@ fn discarded_output_replacements_respect_the_operation_budget_before_publication
     )));
     assert_eq!(budget.used(), 0);
 }
+
+fn qualified_privilege_query(already_required: bool) -> QueryPlan {
+    let mut query = wide_query(1);
+    query.analyzed_output = Some(RowSchema::with_types(
+        vec!["unused".into()],
+        vec![Some(uqa_sql::ColumnType::Integer)],
+    ));
+    let RelationalPlan::QueryBlock(block) = &mut query.root else {
+        unreachable!()
+    };
+    let qualifier = "q".repeat(4 * 1024 * 1024);
+    if already_required {
+        block
+            .privilege_columns
+            .insert(uqa_sql::ColumnIdentity::qualified(qualifier.clone(), "v"));
+    }
+    block.projections[0].expr = ScalarExpr::QualifiedColumn {
+        qualifier,
+        column: "v".into(),
+    };
+    query
+}
+
+#[test]
+fn discarded_column_privileges_admit_new_names_and_borrow_existing_identities() {
+    let token = CancellationToken::new();
+    for already_required in [false, true] {
+        let mut query = qualified_privilege_query(already_required);
+        let admitted_budget = MemoryBudget::new(32 * 1024 * 1024);
+        let admitted_control = ProductionControl::new(&admitted_budget, &token, &token);
+        let admitted = query.copy_for_rewrite(&admitted_control).unwrap();
+        let sibling = admitted_budget
+            .reserve(admitted_budget.available() - 32 * 1024)
+            .unwrap();
+        let budget = MemoryBudget::new(32 * 1024);
+        let mut result = None;
+        let allocation = allocation_counter::measure(|| {
+            result = Some(prune_outputs(
+                &mut query,
+                &[],
+                &|_| false,
+                None,
+                OutputPruningContext {
+                    production: ProductionControl::new(&budget, &token, &token),
+                    ..OutputPruningContext::new(&NoAggregates)
+                },
+            ));
+        });
+        assert!(
+            allocation.bytes_total < 32 * 1024,
+            "existing={already_required}: {allocation:?}"
+        );
+        let RelationalPlan::QueryBlock(block) = &query.root else {
+            unreachable!()
+        };
+        if already_required {
+            result.unwrap().unwrap();
+            assert_eq!(block.privilege_columns.len(), 1);
+            assert!(matches!(
+                block.projections[0].expr,
+                ScalarExpr::TypedLiteral {
+                    value: uqa_core::Value::Null,
+                    ..
+                }
+            ));
+        } else {
+            assert_eq!(result.unwrap().unwrap_err().sqlstate(), Some("53200"));
+            assert!(block.privilege_columns.is_empty());
+            assert!(matches!(
+                block.projections[0].expr,
+                ScalarExpr::QualifiedColumn { .. }
+            ));
+        }
+        assert_eq!(budget.used(), 0);
+
+        let mut result = None;
+        let allocation = allocation_counter::measure(|| {
+            result = Some(prune_owned_outputs(
+                admitted,
+                &[],
+                &|_| false,
+                None,
+                OutputPruningContext {
+                    production: admitted_control,
+                    ..OutputPruningContext::new(&NoAggregates)
+                },
+            ));
+        });
+        assert!(
+            allocation.bytes_total < 32 * 1024,
+            "admitted existing={already_required}: {allocation:?}"
+        );
+        if already_required {
+            let output = result.unwrap().unwrap();
+            let RelationalPlan::QueryBlock(block) = &output.root else {
+                unreachable!()
+            };
+            assert_eq!(block.privilege_columns.len(), 1);
+            assert!(matches!(
+                block.projections[0].expr,
+                ScalarExpr::TypedLiteral {
+                    value: uqa_core::Value::Null,
+                    ..
+                }
+            ));
+            assert_eq!(
+                admitted_budget.used(),
+                sibling.bytes() + output.reserved_bytes()
+            );
+        } else {
+            assert_eq!(result.unwrap().unwrap_err().sqlstate(), Some("53200"));
+        }
+        assert_eq!(admitted_budget.used(), sibling.bytes());
+    }
+}

@@ -8,8 +8,14 @@
 
 use super::{observations, OutputPruningContext, QueryPlan, RelationalPlan, RowSchema, SQLError};
 use crate::scratch::Buffer;
-use uqa_core::Value;
+use uqa_core::{memory::Produced, Value};
 use uqa_sql::plan::OwnedScalarExpr;
+
+pub(in crate::optimizer) struct Replacement<T> {
+    pub(super) index: usize,
+    pub(super) expression: T,
+    pub(super) alias: Option<Produced<String>>,
+}
 
 pub(super) fn collect<T>(
     query: &QueryPlan,
@@ -17,7 +23,7 @@ pub(super) fn collect<T>(
     required: &dyn Fn(usize) -> bool,
     context: OutputPruningContext<'_>,
     mut finish: impl FnMut(OwnedScalarExpr) -> Result<T, SQLError>,
-) -> Result<Buffer<(usize, T)>, SQLError> {
+) -> Result<Buffer<Replacement<T>>, SQLError> {
     let RelationalPlan::QueryBlock(inner) = &query.root else {
         unreachable!("projection replacements require a query block")
     };
@@ -69,7 +75,22 @@ pub(super) fn collect<T>(
                 None,
                 control,
             )?;
-            replacements.push((index, finish(expression)?))?;
+            replacements.push(Replacement {
+                index,
+                expression: finish(expression)?,
+                alias: None,
+            })?;
+        }
+    }
+    // Complete catalog and type observation before deriving labels for the selected substitutions.
+    for replacement in replacements.iter_mut() {
+        let projection = &inner.projections[replacement.index];
+        if projection.alias.is_none() {
+            replacement.alias = Some(uqa_sql::semantics::with_projection_label(
+                projection,
+                control,
+                |name| Ok(control.copy_text(name)?),
+            )?);
         }
     }
     Ok(replacements)

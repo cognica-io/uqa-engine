@@ -19,7 +19,6 @@ use uqa_sql::{
 mod block;
 mod commands;
 mod demand;
-pub(super) use demand::edit_caller_query;
 mod sources;
 
 pub(super) fn optimize_caller(

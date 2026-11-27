@@ -6,15 +6,46 @@
 
 //! Remove unobserved folded CTE outputs before their constant expressions are evaluated.
 
-pub(super) mod owned;
-
 use crate::{AggregateClassifier, QueryPlan, RelationalPlan};
 use uqa_core::memory::{ProductionControl, ProductionMap, ProductionVec};
 use uqa_sql::{semantics::volatility::VolatilityCatalog, SQLError};
 
+use uqa_sql::plan::{MutableQueryPlan, QueryChildSlot};
+
 mod demand;
 
-pub(super) fn prune(
+pub(super) fn prune_plan(
+    query: MutableQueryPlan,
+    aggregates: &dyn AggregateClassifier,
+    volatility: &dyn VolatilityCatalog,
+    routines: Option<&dyn uqa_sql::routines::RoutineResolution>,
+    production: ProductionControl<'_>,
+    storage: ProductionControl<'_>,
+) -> Result<MutableQueryPlan, SQLError> {
+    prune_folded(query, volatility, production, |query, index, required| {
+        query.map_query_child_with_parent(QueryChildSlot::Cte(index), &storage, |parent, body| {
+            let (before, remaining) = parent.ctes.split_at(index);
+            let (cte, after) = remaining.split_first().expect("scheduled CTE");
+            let visible = |name: &str| visible_from(name, before, &cte.name, cte.recursive, after);
+            super::derived_projection::owned::prune_plan_positions(
+                body,
+                required,
+                None,
+                super::OutputPruningContext {
+                    production,
+                    aggregates,
+                    routines,
+                    volatility: Some(volatility),
+                    visible_ctes: &visible,
+                },
+                storage,
+            )
+        })
+    })
+}
+
+#[cfg(test)]
+fn prune(
     query: &mut QueryPlan,
     aggregates: &dyn AggregateClassifier,
     volatility: &dyn VolatilityCatalog,

@@ -82,13 +82,13 @@ impl<'a, 'catalog> Context<'a, 'catalog> {
             volatility: routines.map(|scope| scope.volatility),
             visible_ctes: &visible_ctes,
         };
-        if self.storage.budget().is_none() && self.config.production.budget().is_some() {
-            super::owned::edit_caller_query(query, |query| {
-                super::derived_projection::prune_positions(query, required, None, context)
-            })
-        } else {
-            super::derived_projection::owned::prune_positions(query, required, None, context)
-        }
+        super::derived_projection::owned::prune_plan_positions(
+            query,
+            required,
+            None,
+            context,
+            self.storage,
+        )
     }
 
     fn statement(&self, plan: MutableExecutablePlan) -> Result<MutableExecutablePlan, SQLError> {

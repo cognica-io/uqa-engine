@@ -14,7 +14,7 @@ use crate::{
     SQLError, ScalarExpr,
 };
 use uqa_core::{
-    memory::{OwnedSet, Produced, ProductionControl},
+    memory::{Produced, ProductionControl},
     Value,
 };
 
@@ -141,39 +141,6 @@ impl MutableQueryPlan {
         Ok(self)
     }
 
-    /// Retain one privilege dependency after admitting its tree node. Duplicate identities retain the original node and release the unused supplied identity.
-    pub fn include_privilege_column(
-        mut self,
-        identity: Produced<crate::ColumnIdentity>,
-        control: &ProductionControl<'_>,
-    ) -> Result<Self, SQLError> {
-        self.assert_owner(control);
-        control.check()?;
-        let RelationalPlan::QueryBlock(block) = &mut self.query.root else {
-            return Err(SQLError::Internal(
-                "column privilege dependency requires a query block".into(),
-            ));
-        };
-        if block.privilege_columns.contains(&*identity) {
-            return Ok(self);
-        }
-        let node = control.reserve(OwnedSet::<crate::ColumnIdentity>::entry_bytes())?;
-        let (identity, payload) = identity.into_parts();
-        let memory = control.combine(payload, node);
-        block.privilege_columns.insert(identity);
-        if let Some(owner) = self.memory.as_mut() {
-            let RewriteMemory::Fields { direct, .. } = block_memory(owner)
-                .field_mut("privilege_columns")
-                .as_mut()
-                .expect("privilege column owner")
-            else {
-                unreachable!("query block field owner");
-            };
-            direct.absorb(memory.expect("controlled privilege dependency"));
-        }
-        Ok(self)
-    }
-
     /// Change only the allocation-free compute decision chosen by the planner.
     #[expect(
         clippy::needless_match,
@@ -285,7 +252,7 @@ fn projection_memory(memory: &mut RewriteMemory, index: usize) -> &mut RewriteMe
         .expect("projection item")
 }
 
-fn block_memory(memory: &mut RewriteMemory) -> &mut RewriteMemory {
+pub(super) fn block_memory(memory: &mut RewriteMemory) -> &mut RewriteMemory {
     memory
         .field_mut("root")
         .as_mut()
