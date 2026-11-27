@@ -22,6 +22,10 @@ pub(crate) fn register_range_constructors(
 ) -> Result<[u32; 5], SQLError> {
     let range = definition.column_type();
     let multi = definition.multirange_type();
+    let multirange_constructor = uqa_core::RelationIdentity::new(
+        &definition.identity.schema,
+        &definition.multirange.identity.name,
+    );
     let array = ColumnType::Array(Box::new(range.clone()));
     let subtype = &definition.subtype;
     let signatures: [(&str, &[&ColumnType]); 5] = [
@@ -35,7 +39,7 @@ pub(crate) fn register_range_constructors(
     for (index, (source, arguments)) in signatures.into_iter().enumerate() {
         let multirange = index >= 2;
         let (identity, result) = if multirange {
-            (&definition.multirange.identity, &multi)
+            (&multirange_constructor, &multi)
         } else {
             (&definition.identity, &range)
         };

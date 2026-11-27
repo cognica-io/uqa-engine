@@ -63,7 +63,7 @@ fn declared_ranges_and_constructors_match_postgresql_after_reopen(#[case] provid
     verify_declared_values(
         provider,
         include_str!("../../../../tests/parity/pg18/range_declaration.expected.json"),
-        9,
+        10,
     );
 }
 

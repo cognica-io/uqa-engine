@@ -205,6 +205,8 @@ The six PostgreSQL built-in range families are implemented as declared SQL ident
 
 Use `CREATE TYPE ... AS RANGE` to define a range over a subtype with B-tree ordering. The declaration creates the range, its multirange, both array types, the constructor functions and an explicit cast from the range to its multirange in one transaction. The subtype supplies the default collation and operator class. Use `collation` or `subtype_opclass` to select a different one and `multirange_type_name` to choose the multirange name.
 
+A schema-qualified `multirange_type_name` creates the multirange and its array in the named schema. All five constructor functions belong to the range’s schema. A string literal for `subtype` names one type and preserves its case and punctuation.
+
 ```sql execute
 CREATE TYPE wordrange AS RANGE (subtype = text, multirange_type_name = wordranges);
 SELECT wordrange('a', 'b'), wordrange('x', 'z', '[]')::wordranges;

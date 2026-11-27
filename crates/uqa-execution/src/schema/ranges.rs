@@ -185,20 +185,45 @@ impl<'a> Options<'a> {
     }
 }
 
+impl RangeCreationContext<'_> {
+    /// Rows inserted by one declaration can conflict at the unique index before they become visible to name lookup.
+    fn reserve_related_type(
+        &self,
+        name: RelationIdentity,
+        pending: &[&RelationIdentity],
+    ) -> Result<RelationIdentity, SQLError> {
+        if pending.contains(&&name) {
+            let namespace = crate::catalog::projection::schema_object_oid(
+                &self.catalog.catalog_read_view(),
+                &name.schema,
+            );
+            return Err(SQLError::Diagnostic {
+                sqlstate: "23505".into(),
+                message:
+                    "duplicate key value violates unique constraint \"pg_type_typname_nsp_index\""
+                        .into(),
+                detail: Some(format!(
+                    "Key (typname, typnamespace)=({}, {namespace}) already exists.",
+                    name.name
+                )),
+                hint: None,
+            });
+        }
+        self.types
+            .creation
+            .reserve_type_name(&name.qualified_name())
+    }
+}
+
 fn reserve_multirange_name(
-    types: &TypeLifecycleContext<'_>,
+    context: &RangeCreationContext<'_>,
     range: &RelationIdentity,
     requested: Option<RelationIdentity>,
 ) -> Result<RelationIdentity, SQLError> {
+    let types = &context.types;
     let creation = &types.creation;
     let name = if let Some(name) = requested {
         arrays::displace_array_type(creation, types.registries, &name)?;
-        if &name == range {
-            return Err(error(
-                "42710",
-                format!("type \"{}\" already exists", name.name),
-            ));
-        }
         name
     } else {
         let name = RelationIdentity::new(&range.schema, multirange_type_name(&range.name));
@@ -211,7 +236,7 @@ fn reserve_multirange_name(
         }
         name
     };
-    creation.reserve_type_name(&name.qualified_name())
+    context.reserve_related_type(name, &[range])
 }
 
 pub fn create_range(
@@ -240,16 +265,13 @@ pub fn create_range(
         multirange,
     } = Options::bind(context, declaration)?
         .resolve(context, shell.as_ref().map(|shell| shell.oid))?;
-    let multi = reserve_multirange_name(types, &range, multirange)?;
-    let array_name =
-        arrays::reserve_array_name_avoiding(creation, &range.schema, &range.name, &[&multi])?;
-    let range_array = RelationIdentity::new(&range.schema, &array_name);
-    let multi_array = arrays::reserve_array_name_avoiding(
-        creation,
-        &multi.schema,
-        &multi.name,
-        &[&range, &range_array],
-    )?;
+    let multi = reserve_multirange_name(context, &range, multirange)?;
+    let reserve_array = |element: &RelationIdentity, pending: &[&RelationIdentity]| {
+        let name = arrays::available_array_name(creation, &range.schema, &element.name);
+        context.reserve_related_type(RelationIdentity::new(&element.schema, name), pending)
+    };
+    let range_array = reserve_array(&range, &[&range, &multi])?;
+    let multi_array = reserve_array(&multi, &[&range, &multi, &range_array])?;
     let object_id = shell.as_ref().map_or_else(
         || (context.allocate_identity)(),
         |shell| Ok(shell.object_id),
@@ -277,7 +299,7 @@ pub fn create_range(
         object_id,
         oid,
         array_oid,
-        array_name,
+        array_name: range_array.name,
         owner: owner.identity(),
         usage_acl: creation.defaults.type_acl(owner.identity(), &range.schema),
         subtype,
@@ -292,7 +314,7 @@ pub fn create_range(
             object_id: multi_object_id,
             oid: multi_oid,
             array_oid: multi_array_oid,
-            array_name: multi_array,
+            array_name: multi_array.name,
             identity: multi,
         },
     };

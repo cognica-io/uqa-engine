@@ -30,22 +30,20 @@ pub fn reserve_array_name(
     schema: &str,
     name: &str,
 ) -> Result<String, SQLError> {
-    reserve_array_name_avoiding(creation, schema, name, &[])
+    let array_name = available_array_name(creation, schema, name);
+    creation.reserve_type_name(&RelationIdentity::new(schema, &array_name).qualified_name())?;
+    Ok(array_name)
 }
 
-/// A declaration publishing several types reserves names against its own pending records as well as the live catalog.
-pub(crate) fn reserve_array_name_avoiding(
+/// Select the name against the types visible to the current catalog command.
+pub(crate) fn available_array_name(
     creation: &RelationCreationContext<'_>,
     schema: &str,
     name: &str,
-    pending: &[&RelationIdentity],
-) -> Result<String, SQLError> {
-    let array_name = choose_array_type_name(name, |candidate| {
-        let id = RelationIdentity::new(schema, candidate);
-        pending.contains(&&id) || creation.type_name_in_use(&id)
-    });
-    creation.reserve_type_name(&RelationIdentity::new(schema, &array_name).qualified_name())?;
-    Ok(array_name)
+) -> String {
+    choose_array_type_name(name, |candidate| {
+        creation.type_name_in_use(&RelationIdentity::new(schema, candidate))
+    })
 }
 
 /// Move a generated array named `requested` to a new generated name. Returns whether an array held the name.

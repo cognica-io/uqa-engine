@@ -25,9 +25,9 @@ pub(super) fn compile_create_range(statement: &CreateRangeStmt) -> Result<Create
             ("subtype", Some(NodeEnum::TypeName(ty))) => {
                 RangeOptionValue::Type(compile_pg_type_reference(ty, "range subtype")?)
             }
-            ("subtype", Some(NodeEnum::String(name))) => {
-                RangeOptionValue::Type(crate::ColumnType::Named(name.sval.clone()))
-            }
+            ("subtype", Some(NodeEnum::String(name))) => RangeOptionValue::Type(
+                crate::ColumnType::Named(crate::expr::quote_ident(&name.sval)),
+            ),
             (_, Some(NodeEnum::TypeName(ty))) => RangeOptionValue::Name(qualified_name(&ty.names)?),
             (_, Some(NodeEnum::List(list))) => RangeOptionValue::Name(qualified_name(&list.items)?),
             (_, Some(NodeEnum::String(name))) => {
