@@ -22,6 +22,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - Opening a native SQLite database skips historical deletions when checking B-tree indexes and restores an unchanged catalog once. An encrypted SQLite open derives the passphrase key once and reuses it across physical connections. Notification, relation-lock and serializable transaction state use separate keys derived from the database key.
 
+- IVF tensor searches retain the best requested documents in bounded memory. HNSW releases upper-layer distances before the base search, and DiskANN tracks its frontier by node ID. Native SQLite exact vector searches reuse canonical vector norms across queries on the same snapshot.
+
 - Selective equality joins can probe a primary key or unique index with each outer row. A scalar subquery or a small positive `IN` subquery can also supply the keys for an indexed scan. Primary-key lookups stay selective before column statistics are collected, including in generic prepared plans.
 
 - Creating a graph with many new catalog identities now reuses the native lock registry's SQLite rollback journal. Each identity is still visible to other processes as soon as its reservation succeeds.
