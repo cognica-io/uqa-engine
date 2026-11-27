@@ -6,6 +6,8 @@
 
 //! Label and predicate based single-vertex matching.
 
+use std::sync::Arc;
+
 use super::{
     BTreeMap, DocId, GraphPayload, GraphPostingList, GraphStore, GraphStoreError, GraphStoreResult,
     Payload, PostingEntry, PostingList, VertexId, VertexPredicate, DEFAULT_GRAPH_SCORE,
@@ -46,6 +48,7 @@ impl<'a> VertexMatch<'a> {
             None => store.vertex_ids_in_graph(self.graph)?.into_iter().collect(),
         };
         let mut entries: Vec<PostingEntry> = Vec::new();
+        let graph_name: Arc<str> = self.graph.into();
         let mut graph_payloads: BTreeMap<DocId, GraphPayload> = BTreeMap::new();
         for vid in candidates {
             let vtx = store.get_vertex(vid)?.ok_or_else(|| {
@@ -60,9 +63,9 @@ impl<'a> VertexMatch<'a> {
             graph_payloads.insert(
                 vid,
                 GraphPayload {
-                    subgraph_vertices: vec![vid],
-                    subgraph_edges: Vec::new(),
-                    graph_name: self.graph.to_string(),
+                    subgraph_vertices: [vid].into(),
+                    subgraph_edges: Arc::default(),
+                    graph_name: Arc::clone(&graph_name),
                     score_override: Some(self.score),
                 },
             );

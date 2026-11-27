@@ -11,10 +11,13 @@
 //! prior feature via a residual sum. Final per-vertex feature is
 //! squashed through the sigmoid to land in `[0, 1]`.
 
+use std::sync::Arc;
+
 use std::collections::BTreeMap;
 
 use uqa_core::{DocId, Payload, PostingEntry, PostingList, Value, VertexId};
 
+use crate::adjacency::endpoint_index;
 use crate::posting_list::{GraphPayload, GraphPostingList};
 use crate::store::{GraphStore, GraphStoreError, GraphStoreResult};
 
@@ -79,18 +82,42 @@ impl<'a> MessagePassing<'a> {
         }
 
         let mut features = self.initial_features(store, &vertices)?;
-        for _ in 0..self.k_layers {
-            features = self.propagate_layer(store, &vertices, &features)?;
+        if self.k_layers > 0 {
+            let mut adjacency = (self.k_layers > 1).then(|| Vec::with_capacity(vertices.len()));
+            let mut next = Vec::with_capacity(vertices.len());
+            // Validate and evaluate the first round in vertex order so a later
+            // missing edge cannot overtake an earlier arithmetic error.
+            for (index, &id) in vertices.iter().enumerate() {
+                let row = self.neighbor_indices(store, &vertices, id)?;
+                next.push(
+                    self.propagate_vertex(&features, index, &row, id, || store.check_read())?,
+                );
+                if let Some(adjacency) = &mut adjacency {
+                    adjacency.push(row);
+                }
+            }
+            std::mem::swap(&mut features, &mut next);
+            if let Some(adjacency) = adjacency {
+                for _ in 1..self.k_layers {
+                    for (index, &id) in vertices.iter().enumerate() {
+                        next[index] =
+                            self.propagate_vertex(&features, index, &adjacency[index], id, || {
+                                store.check_read()
+                            })?;
+                    }
+                    std::mem::swap(&mut features, &mut next);
+                }
+            }
         }
-        self.build_result(vertices, &features)
+        self.build_result(&vertices, &features)
     }
 
     fn initial_features<G: GraphStore>(
         &self,
         store: &G,
         vertices: &[VertexId],
-    ) -> GraphStoreResult<BTreeMap<VertexId, f64>> {
-        let mut features = BTreeMap::new();
+    ) -> GraphStoreResult<Vec<f64>> {
+        let mut features = Vec::with_capacity(vertices.len());
         for vid in vertices {
             let vertex = store.get_vertex(*vid)?.ok_or_else(|| {
                 GraphStoreError::CorruptGraph(format!(
@@ -105,80 +132,81 @@ impl<'a> MessagePassing<'a> {
                 },
                 None => 1.0,
             };
-            features.insert(*vid, value);
+            features.push(value);
         }
         Ok(features)
     }
 
-    fn propagate_layer<G: GraphStore>(
+    fn neighbor_indices<G: GraphStore>(
         &self,
         store: &G,
         vertices: &[VertexId],
-        features: &BTreeMap<VertexId, f64>,
-    ) -> GraphStoreResult<BTreeMap<VertexId, f64>> {
-        let mut next = BTreeMap::new();
-        for vid in vertices {
-            let out_edges = store.out_edge_ids(*vid, self.graph)?;
-            let in_edges = store.in_edge_ids(*vid, self.graph)?;
-            let neighbor_count = out_edges.len().checked_add(in_edges.len()).ok_or_else(|| {
-                GraphStoreError::InvalidQuery(format!(
-                    "message-passing neighbor count overflows usize for vertex {vid}"
-                ))
-            })?;
-            let mut neighbor_values: Vec<f64> = Vec::new();
-            neighbor_values
-                .try_reserve_exact(neighbor_count)
-                .map_err(|error| {
-                    GraphStoreError::InvalidQuery(format!(
-                        "cannot allocate {neighbor_count} message-passing neighbors for vertex {vid}: {error}"
-                    ))
-                })?;
-            for eid in out_edges {
-                let edge = store.get_edge(eid)?.ok_or_else(|| {
-                    GraphStoreError::CorruptGraph(format!("missing message-passing edge {eid}"))
-                })?;
-                let value = features.get(&edge.target_id).ok_or_else(|| {
-                    GraphStoreError::CorruptGraph(format!(
-                        "edge {eid} references vertex {} outside graph {:?}",
-                        edge.target_id, self.graph
-                    ))
-                })?;
-                neighbor_values.push(*value);
-            }
-            for eid in in_edges {
-                let edge = store.get_edge(eid)?.ok_or_else(|| {
-                    GraphStoreError::CorruptGraph(format!("missing message-passing edge {eid}"))
-                })?;
-                let value = features.get(&edge.source_id).ok_or_else(|| {
-                    GraphStoreError::CorruptGraph(format!(
-                        "edge {eid} references vertex {} outside graph {:?}",
-                        edge.source_id, self.graph
-                    ))
-                })?;
-                neighbor_values.push(*value);
-            }
-            let own_feature = features.get(vid).copied().ok_or_else(|| {
-                GraphStoreError::CorruptGraph(format!(
-                    "message-passing feature state is missing vertex {vid}"
-                ))
-            })?;
-            let combined = if neighbor_values.is_empty() {
-                own_feature
-            } else {
-                let agg = aggregate_features(&neighbor_values, self.aggregation, *vid)?;
-                finite_add(own_feature, agg, *vid)?
-            };
-            next.insert(*vid, combined);
+        id: VertexId,
+    ) -> GraphStoreResult<Vec<usize>> {
+        let outgoing = store.out_edge_ids(id, self.graph)?;
+        let incoming = store.in_edge_ids(id, self.graph)?;
+        let count = outgoing.len().checked_add(incoming.len()).ok_or_else(|| {
+            GraphStoreError::InvalidQuery(format!(
+                "message-passing neighbor count overflows usize for vertex {id}"
+            ))
+        })?;
+        let mut indices = Vec::new();
+        indices.try_reserve_exact(count).map_err(|error| {
+            GraphStoreError::InvalidQuery(format!(
+                "cannot allocate {count} message-passing neighbors for vertex {id}: {error}"
+            ))
+        })?;
+        for eid in outgoing {
+            indices.push(endpoint_index(
+                store,
+                self.graph,
+                vertices,
+                "message-passing",
+                eid,
+                |edge| edge.target_id,
+            )?);
         }
-        Ok(next)
+        for eid in incoming {
+            indices.push(endpoint_index(
+                store,
+                self.graph,
+                vertices,
+                "message-passing",
+                eid,
+                |edge| edge.source_id,
+            )?);
+        }
+        Ok(indices)
+    }
+
+    fn propagate_vertex(
+        &self,
+        features: &[f64],
+        index: usize,
+        neighbors: &[usize],
+        id: VertexId,
+        mut check_read: impl FnMut() -> GraphStoreResult<()>,
+    ) -> GraphStoreResult<f64> {
+        check_read()?;
+        let own = features[index];
+        if neighbors.is_empty() {
+            return Ok(own);
+        }
+        let values = neighbors.iter().enumerate().map(|(offset, &other)| {
+            if offset != 0 && offset.is_multiple_of(256) {
+                check_read()?;
+            }
+            Ok(features[other])
+        });
+        let aggregate = aggregate_features(values, self.aggregation, id)?;
+        finite_add(own, aggregate, id)
     }
 
     fn build_result(
         &self,
-        mut vertices: Vec<VertexId>,
-        features: &BTreeMap<VertexId, f64>,
+        vertices: &[VertexId],
+        features: &[f64],
     ) -> GraphStoreResult<GraphPostingList> {
-        vertices.sort_unstable();
         let mut entries = Vec::new();
         entries.try_reserve_exact(vertices.len()).map_err(|error| {
             GraphStoreError::InvalidQuery(format!(
@@ -186,21 +214,17 @@ impl<'a> MessagePassing<'a> {
                 vertices.len()
             ))
         })?;
+        let graph_name: Arc<str> = self.graph.into();
         let mut graph_payloads: BTreeMap<DocId, GraphPayload> = BTreeMap::new();
-        for vid in &vertices {
-            let feature = features.get(vid).copied().ok_or_else(|| {
-                GraphStoreError::CorruptGraph(format!(
-                    "message-passing final state is missing vertex {vid}"
-                ))
-            })?;
+        for (vid, &feature) in vertices.iter().zip(features) {
             let calibrated = sigmoid(feature);
             entries.push(PostingEntry::new(*vid, Payload::with_score(calibrated)));
             graph_payloads.insert(
                 *vid,
                 GraphPayload {
-                    subgraph_vertices: vec![*vid],
-                    subgraph_edges: Vec::new(),
-                    graph_name: self.graph.to_string(),
+                    subgraph_vertices: [*vid].into(),
+                    subgraph_edges: Arc::default(),
+                    graph_name: Arc::clone(&graph_name),
                     score_override: Some(calibrated),
                 },
             );
@@ -231,23 +255,27 @@ fn numeric_feature(value: &Value, property: &str, vertex_id: VertexId) -> GraphS
 }
 
 fn aggregate_features(
-    values: &[f64],
+    mut values: impl ExactSizeIterator<Item = GraphStoreResult<f64>>,
     aggregation: AggregationKind,
     vertex_id: VertexId,
 ) -> GraphStoreResult<f64> {
     match aggregation {
-        AggregationKind::Max => values.iter().copied().reduce(f64::max).ok_or_else(|| {
-            GraphStoreError::CorruptGraph(format!(
-                "message-passing aggregation for vertex {vertex_id} has no values"
-            ))
-        }),
+        AggregationKind::Max => {
+            let first = values.next().ok_or_else(|| {
+                GraphStoreError::CorruptGraph(format!(
+                    "message-passing aggregation for vertex {vertex_id} has no values"
+                ))
+            })??;
+            values.try_fold(first, |maximum, value| Ok(maximum.max(value?)))
+        }
         AggregationKind::Sum | AggregationKind::Mean => {
+            let count = values.len();
             let mut total = 0.0;
             for value in values {
-                total = finite_add(total, *value, vertex_id)?;
+                total = finite_add(total, value?, vertex_id)?;
             }
             if aggregation == AggregationKind::Mean {
-                let count = u64::try_from(values.len()).map_err(|_| {
+                let count = u64::try_from(count).map_err(|_| {
                     GraphStoreError::InvalidQuery(format!(
                         "message-passing neighbor count exceeds u64 for vertex {vertex_id}"
                     ))
@@ -276,4 +304,52 @@ fn finite_add(left: f64, right: f64, vertex_id: VertexId) -> GraphStoreResult<f6
 
 fn sigmoid(x: f64) -> f64 {
     1.0 / (1.0 + (-x).exp())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use uqa_core::{memory::MemoryBudget, CancellationToken};
+    use uqa_storage::read_control::StorageReadControl;
+
+    #[test]
+    fn cached_neighbors_observe_read_cancellation_within_a_vertex() {
+        let neighbors = [0; 1024];
+        for kind in [
+            AggregationKind::Mean,
+            AggregationKind::Sum,
+            AggregationKind::Max,
+        ] {
+            let token = CancellationToken::new();
+            let control = StorageReadControl::new(&MemoryBudget::new(0), &token);
+            let mut checks = 0;
+            let mut cancellation = None;
+            let result = MessagePassing::new("g").aggregation(kind).propagate_vertex(
+                &[1.0],
+                0,
+                &neighbors,
+                1,
+                || {
+                    checks += 1;
+                    if checks == 2 {
+                        token.cancel();
+                    }
+                    control.check().map_err(|cause| {
+                        assert!(matches!(
+                            &cause,
+                            uqa_storage::StorageBackendError::Cancelled(_)
+                        ));
+                        let error = GraphStoreError::from(cause);
+                        cancellation = Some(error.clone());
+                        error
+                    })
+                },
+            );
+            assert_eq!(checks, 2);
+            assert_eq!(
+                result.unwrap_err(),
+                cancellation.expect("bound read cancellation")
+            );
+        }
+    }
 }

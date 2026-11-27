@@ -11,8 +11,9 @@ use super::functions::{
     validate_qualified_column, validate_unqualified_column, validate_window_function,
 };
 use crate::ast::RuleEvent;
+use crate::ir::children::Scope;
 use crate::routines::RoutineResolution;
-use crate::{FunctionTypeResolver, RowSchema, ScalarFrameBound};
+use crate::{FunctionTypeResolver, RowSchema};
 
 pub(super) fn validate_expression(
     rule_event: Option<RuleEvent>,
@@ -42,6 +43,9 @@ fn validate_expression_inner(
     params: &[SQLParam],
     resolver: &dyn FunctionTypeResolver,
 ) -> Result<(), SQLError> {
+    let validate_child = |child: &ScalarExpr| {
+        validate_expression(rule_event, routines, child, schema, None, params, resolver)
+    };
     match expression {
         ScalarExpr::Column(column) => validate_unqualified_column(schema, fallback, column),
         ScalarExpr::Position(position) => {
@@ -116,9 +120,7 @@ fn validate_expression_inner(
                 if crate::semantics::is_semantic_field_argument(name, args, argument_index)? {
                     continue;
                 }
-                validate_expression(
-                    rule_event, routines, argument, schema, None, params, resolver,
-                )?;
+                validate_child(argument)?;
             }
             if let Some(crate::ast::FunctionDispatch::BooleanTest(test)) =
                 binding.as_ref().and_then(|binding| binding.dispatch)
@@ -130,18 +132,10 @@ fn validate_expression_inner(
                 return require_scalar_boolean_test(routines, argument, schema, params, test);
             }
             for order in order_by {
-                validate_expression(
-                    rule_event,
-                    routines,
-                    &order.expr,
-                    schema,
-                    None,
-                    params,
-                    resolver,
-                )?;
+                validate_child(&order.expr)?;
             }
             if let Some(filter) = filter.as_deref() {
-                validate_expression(rule_event, routines, filter, schema, None, params, resolver)?;
+                validate_child(filter)?;
                 require_boolean_condition(filter, "FILTER", schema, params, resolver)?;
             }
             super::validate_call(routines, expression, schema, params, resolver)
@@ -149,44 +143,17 @@ fn validate_expression_inner(
         ScalarExpr::WindowCall {
             name,
             args,
-            spec,
             filter,
             modifiers,
+            ..
         } => {
-            for argument in args {
-                validate_expression(
-                    rule_event, routines, argument, schema, None, params, resolver,
-                )?;
-            }
-            if let Some(filter) = filter.as_deref() {
-                validate_expression(rule_event, routines, filter, schema, None, params, resolver)?;
-                require_boolean_condition(filter, "FILTER", schema, params, resolver)?;
-            }
-            for expression in &spec.partition_by {
-                validate_expression(
-                    rule_event, routines, expression, schema, None, params, resolver,
-                )?;
-            }
-            for order in &spec.order_by {
-                validate_expression(
-                    rule_event,
-                    routines,
-                    &order.expr,
-                    schema,
-                    None,
-                    params,
-                    resolver,
-                )?;
-            }
-            if let Some(frame) = &spec.frame {
-                for bound in [&frame.start, &frame.end] {
-                    if let ScalarFrameBound::Preceding(expression)
-                    | ScalarFrameBound::Following(expression) = bound
-                    {
-                        validate_expression(
-                            rule_event, routines, expression, schema, None, params, resolver,
-                        )?;
-                    }
+            for child in expression.children(Scope::Complete) {
+                validate_child(child)?;
+                if filter
+                    .as_deref()
+                    .is_some_and(|filter| std::ptr::eq(child, filter))
+                {
+                    require_boolean_condition(child, "FILTER", schema, params, resolver)?;
                 }
             }
             validate_window_function(
@@ -198,11 +165,6 @@ fn validate_expression_inner(
                 resolver,
             )
         }
-        ScalarExpr::Array(items)
-        | ScalarExpr::Row(items)
-        | ScalarExpr::CompositeRow { items, .. } => {
-            validate_items(rule_event, routines, items, schema, params, resolver)
-        }
         ScalarExpr::And(items) | ScalarExpr::Or(items) => {
             let construct = if matches!(expression, ScalarExpr::And(_)) {
                 "AND"
@@ -210,63 +172,45 @@ fn validate_expression_inner(
                 "OR"
             };
             for item in items {
-                validate_expression(rule_event, routines, item, schema, None, params, resolver)?;
+                validate_child(item)?;
                 require_boolean_condition(item, construct, schema, params, resolver)?;
             }
             Ok(())
         }
         ScalarExpr::Not(inner) => {
-            validate_expression(rule_event, routines, inner, schema, None, params, resolver)?;
+            validate_child(inner)?;
             require_boolean_condition(inner, "NOT", schema, params, resolver)
         }
-        ScalarExpr::Binary { lhs, rhs, .. } => {
-            validate_expression(rule_event, routines, lhs, schema, None, params, resolver)?;
-            validate_expression(rule_event, routines, rhs, schema, None, params, resolver)
-        }
-        ScalarExpr::UnaryMinus(inner)
-        | ScalarExpr::IsNull { expr: inner, .. }
-        | ScalarExpr::Cast { expr: inner, .. }
-        | ScalarExpr::Collated { expr: inner, .. } => {
-            validate_expression(rule_event, routines, inner, schema, None, params, resolver)
-        }
-        ScalarExpr::Between { expr, low, high } => {
-            for item in [expr.as_ref(), low.as_ref(), high.as_ref()] {
-                validate_expression(rule_event, routines, item, schema, None, params, resolver)?;
-            }
-            Ok(())
-        }
-        ScalarExpr::InList { expr, list, .. } => {
-            validate_expression(rule_event, routines, expr, schema, None, params, resolver)?;
-            validate_items(rule_event, routines, list, schema, params, resolver)
-        }
+        ScalarExpr::Array(_)
+        | ScalarExpr::Row(_)
+        | ScalarExpr::CompositeRow { .. }
+        | ScalarExpr::Binary { .. }
+        | ScalarExpr::UnaryMinus(_)
+        | ScalarExpr::IsNull { .. }
+        | ScalarExpr::Cast { .. }
+        | ScalarExpr::Collated { .. }
+        | ScalarExpr::Between { .. }
+        | ScalarExpr::InList { .. } => expression
+            .children(Scope::Complete)
+            .try_for_each(validate_child),
         ScalarExpr::Case {
             base,
             when,
             else_branch,
         } => {
             if let Some(base) = base.as_deref() {
-                validate_expression(rule_event, routines, base, schema, None, params, resolver)?;
+                validate_child(base)?;
             }
             for (condition, value) in when {
-                validate_expression(
-                    rule_event, routines, condition, schema, None, params, resolver,
-                )?;
+                validate_child(condition)?;
                 // A searched CASE tests each condition; a simple CASE compares the operand with each value.
                 if base.is_none() {
                     require_boolean_condition(condition, "CASE/WHEN", schema, params, resolver)?;
                 }
-                validate_expression(rule_event, routines, value, schema, None, params, resolver)?;
+                validate_child(value)?;
             }
             if let Some(else_branch) = else_branch.as_deref() {
-                validate_expression(
-                    rule_event,
-                    routines,
-                    else_branch,
-                    schema,
-                    None,
-                    params,
-                    resolver,
-                )?;
+                validate_child(else_branch)?;
             }
             Ok(())
         }
@@ -277,7 +221,7 @@ fn validate_expression_inner(
             .resolve_scalar_subquery_type(*index, schema, params)
             .map(drop),
         ScalarExpr::InSubquery { expr, subquery, .. } => {
-            validate_expression(rule_event, routines, expr, schema, None, params, resolver)?;
+            validate_child(expr)?;
             resolver
                 .resolve_scalar_subquery_type(*subquery, schema, params)
                 .map(drop)
@@ -342,18 +286,4 @@ fn require_scalar_boolean_test(
     } else {
         Ok(())
     }
-}
-
-fn validate_items(
-    rule_event: Option<RuleEvent>,
-    routines: &dyn RoutineResolution,
-    items: &[ScalarExpr],
-    schema: &RowSchema,
-    params: &[SQLParam],
-    resolver: &dyn FunctionTypeResolver,
-) -> Result<(), SQLError> {
-    for item in items {
-        validate_expression(rule_event, routines, item, schema, None, params, resolver)?;
-    }
-    Ok(())
 }

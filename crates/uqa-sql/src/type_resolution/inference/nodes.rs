@@ -101,16 +101,7 @@ pub(super) fn binary_type_with_control(
     )?;
     // An operator's `unknown` literal is read by the input function of the operand type the selected operator declares, as `coerce_type` reads it when the operator is resolved: a `regclass` column compared with `'name'` reads the literal as `oid`, and `1 + '1'` reads `'1'` as an integer.
     if left.is_some() != right.is_some()
-        && left
-            .as_deref()
-            .into_iter()
-            .chain(right.as_deref())
-            .all(|ty| {
-                !matches!(
-                    common::base_type(ty),
-                    ColumnType::Vector(_) | ColumnType::Tensor(_)
-                )
-            })
+        && operators::embedding_operand(left.as_deref(), right.as_deref()).is_none()
     {
         let selected = operators::binary_operator_types_with_control(
             *op,

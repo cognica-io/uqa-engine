@@ -5,6 +5,7 @@
 //
 
 use super::*;
+use crate::type_resolution::operators::catalog::SIGNATURES;
 use uqa_core::{
     memory::{MemoryBudget, ProductionControl},
     CancellationToken,

@@ -6,6 +6,7 @@
 
 //! Selected collation metadata follows logical bindings independently of value slots.
 
+use super::identity_lookup::ColumnKey;
 use super::{
     ColumnIdentity, ColumnType, InternalColumnRef, RowSchema, SchemaLayoutError,
     SchemaLayoutResult, SchemaMap,
@@ -102,7 +103,7 @@ impl Collations {
         result
     }
 
-    fn compact(&mut self) {
+    pub(super) fn compact(&mut self) {
         if self.0.as_ref().is_some_and(|bindings| {
             bindings.columns.is_empty()
                 && bindings.aliases.is_empty()
@@ -233,22 +234,14 @@ impl RowSchema {
                     return None;
                 }
                 let logical = self.unqualified_position(name);
-                (
-                    logical,
-                    logical.is_none().then(|| ColumnIdentity::unqualified(name)),
-                )
+                (logical, Some((None, name.as_str())))
             }
             crate::ScalarExpr::QualifiedColumn { qualifier, column } => {
                 if self.qualified_column_is_ambiguous(qualifier, column) {
                     return None;
                 }
                 let logical = self.qualified_position(qualifier, column);
-                (
-                    logical,
-                    logical
-                        .is_none()
-                        .then(|| ColumnIdentity::qualified(qualifier, column)),
-                )
+                (logical, Some((Some(qualifier.as_str()), column.as_str())))
             }
             crate::ScalarExpr::Position(position) if *position < self.len() => {
                 (Some(*position), None)
@@ -262,10 +255,11 @@ impl RowSchema {
             )
         } else {
             let identity = alias?;
-            let slot = *self.index.aliases.get(&identity)?;
+            let identity = &identity as &dyn ColumnKey;
+            let slot = *self.index.aliases.get(identity)?;
             (
                 (slot != super::NULL_SLOT).then_some(slot),
-                self.alias_collation(&identity),
+                self.alias_collation(identity),
             )
         };
         Some(super::ProjectedSlot::BoundInput {
@@ -364,15 +358,14 @@ impl RowSchema {
             .unqualified
             .get(name)
             .and_then(|position| self.column_collation(*position))
-            .or_else(|| self.hidden_collation(&ColumnIdentity::unqualified(name)))
+            .or_else(|| self.hidden_collation(&(None, name)))
     }
 
     pub fn qualified_collation(&self, qualifier: &str, name: &str) -> Option<u32> {
-        let identity = ColumnIdentity::qualified(qualifier, name);
-        self.qualified_identity_collation(&identity)
+        self.qualified_identity_collation(&(Some(qualifier), name))
     }
 
-    pub(crate) fn qualified_identity_collation(&self, identity: &ColumnIdentity) -> Option<u32> {
+    pub(super) fn qualified_identity_collation(&self, identity: &dyn ColumnKey) -> Option<u32> {
         if self.index.ambiguous_qualified.contains(identity) {
             return None;
         }
@@ -383,12 +376,12 @@ impl RowSchema {
             .or_else(|| self.hidden_collation(identity))
     }
 
-    fn hidden_collation(&self, identity: &ColumnIdentity) -> Option<u32> {
+    fn hidden_collation(&self, identity: &dyn ColumnKey) -> Option<u32> {
         self.alias_collation(identity)
             .or_else(|| self.virtual_collation(identity))
     }
 
-    pub(super) fn virtual_collation(&self, identity: &ColumnIdentity) -> Option<u32> {
+    pub(super) fn virtual_collation(&self, identity: &dyn ColumnKey) -> Option<u32> {
         self.index
             .cold
             .collations
@@ -406,7 +399,7 @@ impl RowSchema {
             })
     }
 
-    pub(super) fn alias_collation(&self, identity: &ColumnIdentity) -> Option<u32> {
+    pub(super) fn alias_collation(&self, identity: &dyn ColumnKey) -> Option<u32> {
         self.index
             .cold
             .collations

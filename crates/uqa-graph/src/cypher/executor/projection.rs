@@ -9,11 +9,11 @@
 use super::{
     aggregate_avg, aggregate_extreme, aggregate_sum, is_aggregate, nonnegative_i64_to_usize,
     return_label, sort_keyed, trunc_f64_to_i64, usize_to_i64, BTreeMap, BTreeSet, Binding,
-    BindingRow, CypherError, CypherExecutor, CypherExpr, GraphStore, OrderByItem, ResultRow,
-    ReturnItem, Value,
+    BindingRow, CypherError, CypherExpr, GraphStore, OrderByItem, ResultRow, ReturnItem,
+    StatementReader, Value,
 };
 
-impl<G: GraphStore> CypherExecutor<'_, G> {
+impl<G: GraphStore> StatementReader<'_, G> {
     pub(crate) fn exec_return_like(
         &self,
         items: &[ReturnItem],

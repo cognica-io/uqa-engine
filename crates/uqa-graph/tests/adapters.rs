@@ -52,7 +52,7 @@ fn posting_to_graph_attaches_only_declared_vertex_context() {
     assert_eq!(doc_ids(graph.inner()), vec![2, 4, 6]);
     for doc_id in [2, 4, 6] {
         let payload = graph.get_graph_payload(doc_id).unwrap();
-        assert_eq!(payload.subgraph_vertices, vec![2, 4, 6]);
+        assert_eq!(payload.subgraph_vertices.as_ref(), &[2, 4, 6]);
         assert_eq!(payload.subgraph_edges.len(), 0);
     }
 }

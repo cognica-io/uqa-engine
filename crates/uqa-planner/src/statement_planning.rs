@@ -185,18 +185,11 @@ pub(super) fn optimize_owned_plan_authorized(
         error: &callback_error,
         production: config.production,
     };
-    let mut volatile = Ok(false);
-    plan.as_plan_ref()
-        .visit_scalar_expressions(&mut |expression| {
-            if matches!(volatile, Ok(false)) {
-                volatile = uqa_sql::semantics::volatility::scalar_calls_are_volatile_with_control(
-                    context.volatility,
-                    expression,
-                    &config.production,
-                );
-            }
-        });
-    if volatile? {
+    if uqa_sql::semantics::volatility::plan_ref_contains_volatile_function_with_control(
+        context.volatility,
+        plan.as_plan_ref(),
+        &config.production,
+    )? {
         config.enable_filter_pushdown = false;
         config.enable_join_reordering = false;
     }

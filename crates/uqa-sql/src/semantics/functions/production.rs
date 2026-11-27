@@ -59,12 +59,7 @@ pub fn builtin_function_dispatch_name_with_control<'a>(
     control: &ProductionControl<'_>,
 ) -> Result<FunctionName<'a>, ValueRetentionError> {
     let lower = lowercase_function_name_with_control(name, control)?;
-    // The shared selector only borrows when the input has already been folded.
-    let selected_length = match super::builtin_function_dispatch_name(&lower) {
-        std::borrow::Cow::Borrowed(selected) => selected.len(),
-        std::borrow::Cow::Owned(_) => unreachable!("normalized function name"),
-    };
-    let offset = lower.len() - selected_length;
+    let offset = lower.len() - super::normalized_builtin_dispatch_name(&lower).len();
     match lower {
         FunctionName::Borrowed(name) => Ok(FunctionName::Borrowed(&name[offset..])),
         FunctionName::Owned(name) => {

@@ -95,11 +95,11 @@ impl RowSchema {
 
     /// Resolve one visible qualified identity to its logical position.
     pub fn qualified_position(&self, qualifier: &str, column: &str) -> Option<usize> {
-        let identity = ColumnIdentity::qualified(qualifier, column);
-        if self.index.ambiguous_qualified.contains(&identity) {
+        let identity = &(Some(qualifier), column) as &dyn ColumnKey;
+        if self.index.ambiguous_qualified.contains(identity) {
             return None;
         }
-        self.index.qualified.get(&identity).copied()
+        self.index.qualified.get(identity).copied()
     }
 
     pub fn physical_width(&self) -> usize {
@@ -234,9 +234,9 @@ impl RowSchema {
         for (logical, identity) in self.identities().iter().enumerate() {
             if identity.qualifier() == Some(qualifier) {
                 let slot = self.slot(logical).unwrap_or(NULL_SLOT);
-                visible_layout.insert((identity.clone(), slot));
+                visible_layout.insert((identity, slot));
                 entries.push((
-                    identity.clone(),
+                    identity,
                     Some(logical),
                     slot,
                     self.column_type(logical).cloned(),
@@ -245,10 +245,10 @@ impl RowSchema {
         }
         for (identity, slot) in &self.index.aliases {
             if identity.qualifier() == Some(qualifier)
-                && !visible_layout.contains(&(identity.clone(), *slot))
+                && !visible_layout.contains(&(identity, *slot))
             {
                 entries.push((
-                    identity.clone(),
+                    identity,
                     None,
                     *slot,
                     self.index.cold.aliases.get(identity).cloned().flatten(),

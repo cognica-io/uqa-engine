@@ -7,9 +7,8 @@
 //! Bounded breadth-first graph traversal.
 
 use super::{
-    BTreeMap, BTreeSet, DocId, EdgeId, GraphPayload, GraphPostingList, GraphStore, GraphStoreError,
-    GraphStoreResult, Payload, PostingEntry, PostingList, VertexId, VertexPredicate,
-    DEFAULT_GRAPH_SCORE,
+    BTreeSet, EdgeId, GraphPostingList, GraphStore, GraphStoreError, GraphStoreResult, VertexId,
+    VertexPredicate, DEFAULT_GRAPH_SCORE,
 };
 
 /// `Traverse_{v,l,k}` (Definition 2.2.1): BFS from `start_vertex` along
@@ -90,7 +89,7 @@ impl<'a> Traverse<'a> {
                     all_edges.insert(eid);
                 }
             }
-            visited.append(&mut frontier.clone());
+            visited.extend(frontier);
             frontier = next_frontier;
             if frontier.is_empty() {
                 break;
@@ -98,28 +97,9 @@ impl<'a> Traverse<'a> {
         }
         visited.append(&mut frontier);
 
-        let visited_vec: Vec<VertexId> = visited.iter().copied().collect();
-        let edges_vec: Vec<EdgeId> = all_edges.iter().copied().collect();
-
-        let mut entries: Vec<PostingEntry> = Vec::with_capacity(visited_vec.len());
-        let mut graph_payloads: BTreeMap<DocId, GraphPayload> = BTreeMap::new();
-        for vid in &visited_vec {
-            entries.push(PostingEntry::new(*vid, Payload::with_score(self.score)));
-            graph_payloads.insert(
-                *vid,
-                GraphPayload {
-                    subgraph_vertices: visited_vec.clone(),
-                    subgraph_edges: edges_vec.clone(),
-                    graph_name: self.graph.to_string(),
-                    score_override: Some(self.score),
-                },
-            );
-        }
-        GraphPostingList::try_from_parts(
-            PostingList::from_sorted_unchecked(entries),
-            graph_payloads,
-        )
-        .map_err(Into::into)
+        Ok(GraphPostingList::from_traversal(
+            visited, all_edges, self.graph, self.score,
+        ))
     }
 }
 

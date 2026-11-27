@@ -31,6 +31,8 @@ Vertex and edge identities are non-negative internal identifiers. Application pr
 
 ## Cypher pipeline
 
+Read and write statements reuse up to eight compiled `=~` patterns across rows and clauses. A pattern longer than 4,096 source bytes can still match and is released after the match. Non-string operands yield null, and an invalid pattern is reported when its string operands are evaluated.
+
 The Cypher parser produces an owned query representation for supported clauses. Execution carries a binding environment across `MATCH`, `OPTIONAL MATCH`, `UNWIND`, `WITH`, filtering, projection, grouping, ordering, skip, and limit. Mutation paths implement create, merge, set, delete, and detach delete semantics against the named store.
 
 `MERGE` separates its matched and created paths so `ON MATCH SET` and `ON CREATE SET` apply only to the correct branch. A mutation returning no values still enters SQL through a defined table-function schema.
@@ -44,6 +46,8 @@ Patterns retain node labels, relationship labels, direction, fixed or variable l
 Variable-length traversal must avoid invalid repeated states according to the path semantics and obey explicit bounds when supplied. Filters are pushed only where doing so preserves optional and path behavior.
 
 ## Regular path queries
+
+Regular and weighted path execution validate the NFA once, assign a numeric ID to each reachable closure, and carry that ID in the graph walk. The Rust `subset_construction` API exposes the corresponding sets of NFA states and their labelled transitions.
 
 RPQ syntax compiles with Thompson construction to an NFA and can convert to a DFA. Evaluation traverses the product of graph vertex and automaton state:
 
@@ -61,6 +65,8 @@ Parser depth is bounded at 256 and NFA or DFA states at 16,384. Weighted RPQ eva
 
 `GraphPostingList` pairs document support with graph payload while enforcing that graph payload keys belong to the support set. Union, intersection, difference, graph-name conflict, and overlapping subgraph operations use explicit policies.
 
+In Rust, `GraphPayload` shares its vertex and edge lists as `Arc<[VertexId]>` and `Arc<[EdgeId]>`, and its graph name as `Arc<str>`. A struct literal can convert owned vectors and strings with `.into()`. Traversal and centrality entries share one subgraph. The Phi codec materializes the lists when encoding an ordinary posting payload.
+
 Generic posting collision rules do not define graph overlap automatically. Every graph algebra operation must state whether it merges, selects, rejects, or removes graph context.
 
 ## Phi codec boundary
@@ -70,6 +76,8 @@ The Phi representation is a versioned lossless codec between `GraphPostingList` 
 Round-trip tests must compare complete graph payload, support, names, and reserved-field versions. An adapter that preserves only document identities is not lossless.
 
 ## Centrality and traversal support
+
+PageRank, HITS and message passing index their score arrays in sorted vertex-ID order. They resolve incident edges once and reuse two sets of scores across rounds. Parallel edges retain their multiplicity, and message passing visits outgoing edges before incoming edges. Zero message-passing layers read the initial features only.
 
 PageRank, HITS, and betweenness produce scored graph support. Traversal, neighbors, graph edges, temporal traversal, and RPQ produce membership or decorated support according to their node type. The engine then intersects, filters, joins, or fuses that carrier with relational and retrieval data.
 

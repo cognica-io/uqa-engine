@@ -45,3 +45,17 @@ impl DecimalValue {
             .flatten()
     }
 }
+
+/// Return the unsigned significand and binary exponent of a finite IEEE 754 value.
+pub(super) fn finite_float_parts(value: f64) -> (u64, i32) {
+    let bits = value.to_bits();
+    let exponent = ((bits >> 52) & 0x7ff) as i32;
+    let mut significand = bits & ((1_u64 << 52) - 1);
+    let power = if exponent == 0 {
+        -1074
+    } else {
+        significand |= 1_u64 << 52;
+        exponent - 1023 - 52
+    };
+    (significand, power)
+}

@@ -185,8 +185,8 @@ fn weighted_rpq_evaluates_the_real_path_predicate_and_preserves_path() {
         Some(&Value::Float(1.1))
     );
     let payload = result.get_graph_payload(3).unwrap();
-    assert_eq!(payload.subgraph_vertices, vec![1, 2, 3]);
-    assert_eq!(payload.subgraph_edges, vec![10, 11]);
+    assert_eq!(payload.subgraph_vertices.as_ref(), &[1, 2, 3]);
+    assert_eq!(payload.subgraph_edges.as_ref(), &[10, 11]);
 }
 
 #[test]
