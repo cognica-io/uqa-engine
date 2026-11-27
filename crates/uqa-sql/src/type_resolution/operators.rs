@@ -97,17 +97,14 @@ pub fn binary_operator_volatility(
 }
 
 pub fn binary_operator_by_oid(oid: i64) -> Option<BinaryOperatorCatalogEntry> {
-    catalog::SIGNATURES.iter().find_map(
-        |&(name, left, right, result_type, candidate, function_oid)| {
-            (candidate == oid).then_some(BinaryOperatorCatalogEntry {
-                name,
-                operand_types: [left, right],
-                result_type,
-                oid,
-                function_oid,
-            })
-        },
-    )
+    let &(name, left, right, result_type, _, function_oid) = catalog::by_oid(oid)?;
+    Some(BinaryOperatorCatalogEntry {
+        name,
+        operand_types: [left, right],
+        result_type,
+        oid,
+        function_oid,
+    })
 }
 
 /// Read the identity of the exact overload chosen by the shared operand resolver.

@@ -6,9 +6,19 @@
 
 //! Complete scalar IR traversal.
 
-use super::{ScalarExpr, ScalarFrameBound};
+use super::ScalarExpr;
+
+#[cfg(test)]
+std::thread_local! {
+    static VISITED_NODES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
 
 impl ScalarExpr {
+    #[cfg(test)]
+    pub(crate) fn visited_nodes() -> usize {
+        VISITED_NODES.get()
+    }
+
     /// Visit this expression and every nested scalar expression in pre-order.
     pub fn visit(&self, visitor: &mut impl FnMut(&Self)) {
         self.try_visit(&mut |expression| {
@@ -23,6 +33,8 @@ impl ScalarExpr {
         &'a self,
         visitor: &mut impl FnMut(&'a Self) -> Result<bool, E>,
     ) -> Result<(), E> {
+        #[cfg(test)]
+        VISITED_NODES.set(VISITED_NODES.get() + 1);
         if visitor(self)? {
             for child in self.children(super::children::Scope::Complete) {
                 child.try_visit(visitor)?;
@@ -33,9 +45,56 @@ impl ScalarExpr {
 
     /// Visit this expression and every nested scalar expression mutably in pre-order: a node is visited before its children, so the children of a node the visitor replaces are those of the replacement.
     pub fn visit_mut(&mut self, visitor: &mut impl FnMut(&mut Self)) {
-        visitor(self);
+        self.try_visit_mut(&mut |expression| {
+            visitor(expression);
+            Ok::<_, std::convert::Infallible>(true)
+        })
+        .unwrap_or_else(|never| match never {});
+    }
+
+    /// Visit mutable nodes in pre-order. Returning false skips the current children. An error skips all remaining nodes.
+    pub fn try_visit_mut<E>(
+        &mut self,
+        visitor: &mut impl FnMut(&mut Self) -> Result<bool, E>,
+    ) -> Result<(), E> {
+        if visitor(self)? {
+            for child in self.children_mut(super::children::Scope::Complete) {
+                child.try_visit_mut(visitor)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Visit each mutable node after its original children, stopping at the first error. Children introduced by a replacement are left to its caller.
+    pub fn try_visit_post_mut<E>(
+        &mut self,
+        visitor: &mut impl FnMut(&mut Self) -> Result<(), E>,
+    ) -> Result<(), E> {
         for child in self.children_mut(super::children::Scope::Complete) {
-            child.visit_mut(visitor);
+            child.try_visit_post_mut(visitor)?;
+        }
+        visitor(self)
+    }
+
+    /// Whether any scalar node satisfies the predicate, in pre-order.
+    pub fn any_node(&self, mut predicate: impl FnMut(&Self) -> bool) -> bool {
+        self.try_any_node(|node| Ok::<_, std::convert::Infallible>(predicate(node)))
+            .unwrap_or_else(|never| match never {})
+    }
+
+    /// Stop at the first matching node or predicate failure without descending into remaining children.
+    pub fn try_any_node<E>(
+        &self,
+        mut predicate: impl FnMut(&Self) -> Result<bool, E>,
+    ) -> Result<bool, E> {
+        match self.try_visit(&mut |node| match predicate(node) {
+            Ok(true) => Err(None),
+            Ok(false) => Ok(true),
+            Err(error) => Err(Some(error)),
+        }) {
+            Ok(()) => Ok(false),
+            Err(None) => Ok(true),
+            Err(Some(error)) => Err(error),
         }
     }
 
@@ -55,92 +114,26 @@ impl ScalarExpr {
         &'a self,
         visitor: &mut impl FnMut(&'a str) -> Result<(), E>,
     ) -> Result<bool, E> {
-        match self {
-            Self::Column(name) | Self::QualifiedColumn { column: name, .. } => {
-                visitor(name)?;
-                Ok(true)
-            }
-            Self::Literal(_)
-            | Self::TypedLiteral { .. }
-            | Self::RetainedLiteral(_)
-            | Self::Param(_)
-            | Self::InternalColumn(_) => Ok(true),
-            Self::Func {
-                args,
-                order_by,
-                filter,
-                ..
-            } => {
-                for expression in args
-                    .iter()
-                    .chain(order_by.iter().map(|order| &order.expr))
-                    .chain(filter.as_deref())
-                {
-                    if !expression.try_visit_columns(visitor)? {
-                        return Ok(false);
-                    }
+        match self.try_visit(&mut |expression| {
+            match expression {
+                Self::Column(name) | Self::QualifiedColumn { column: name, .. } => {
+                    visitor(name).map_err(Some)?;
                 }
-                Ok(true)
+                Self::Default
+                | Self::Star
+                | Self::QualifiedStar(_)
+                | Self::Position(_)
+                | Self::WindowCall { .. }
+                | Self::ScalarSubquery(_)
+                | Self::Exists { .. }
+                | Self::InSubquery { .. } => return Err(None),
+                _ => (),
             }
-            Self::Array(items)
-            | Self::Row(items)
-            | Self::CompositeRow { items, .. }
-            | Self::And(items)
-            | Self::Or(items) => {
-                for item in items {
-                    if !item.try_visit_columns(visitor)? {
-                        return Ok(false);
-                    }
-                }
-                Ok(true)
-            }
-            Self::Binary { lhs, rhs, .. } => {
-                Ok(lhs.try_visit_columns(visitor)? && rhs.try_visit_columns(visitor)?)
-            }
-            Self::UnaryMinus(expr)
-            | Self::Not(expr)
-            | Self::IsNull { expr, .. }
-            | Self::Cast { expr, .. }
-            | Self::Collated { expr, .. } => expr.try_visit_columns(visitor),
-            Self::Between { expr, low, high } => Ok(expr.try_visit_columns(visitor)?
-                && low.try_visit_columns(visitor)?
-                && high.try_visit_columns(visitor)?),
-            Self::InList { expr, list, .. } => {
-                for item in std::iter::once(expr.as_ref()).chain(list) {
-                    if !item.try_visit_columns(visitor)? {
-                        return Ok(false);
-                    }
-                }
-                Ok(true)
-            }
-            Self::Case {
-                base,
-                when,
-                else_branch,
-            } => {
-                for expression in base
-                    .as_deref()
-                    .into_iter()
-                    .chain(
-                        when.iter()
-                            .flat_map(|(condition, result)| [condition, result]),
-                    )
-                    .chain(else_branch.as_deref())
-                {
-                    if !expression.try_visit_columns(visitor)? {
-                        return Ok(false);
-                    }
-                }
-                Ok(true)
-            }
-            Self::Default
-            | Self::Star
-            | Self::QualifiedStar(_)
-            | Self::Position(_)
-            | Self::WindowCall { .. }
-            | Self::ScalarSubquery(_)
-            | Self::Exists { .. }
-            | Self::InSubquery { .. } => Ok(false),
+            Ok(true)
+        }) {
+            Ok(()) => Ok(true),
+            Err(None) => Ok(false),
+            Err(Some(error)) => Err(error),
         }
     }
 
@@ -171,244 +164,35 @@ impl ScalarExpr {
 
     #[must_use]
     pub fn contains_subquery(&self) -> bool {
-        match self {
-            Self::ScalarSubquery(_) | Self::Exists { .. } | Self::InSubquery { .. } => true,
-            Self::Func {
-                args,
-                order_by,
-                filter,
-                ..
-            } => {
-                args.iter().any(Self::contains_subquery)
-                    || order_by.iter().any(|order| order.expr.contains_subquery())
-                    || filter.as_deref().is_some_and(Self::contains_subquery)
-            }
-            Self::Array(items)
-            | Self::Row(items)
-            | Self::CompositeRow { items, .. }
-            | Self::And(items)
-            | Self::Or(items) => items.iter().any(Self::contains_subquery),
-            Self::Binary { lhs, rhs, .. } => lhs.contains_subquery() || rhs.contains_subquery(),
-            Self::UnaryMinus(expr)
-            | Self::Not(expr)
-            | Self::IsNull { expr, .. }
-            | Self::Cast { expr, .. }
-            | Self::Collated { expr, .. } => expr.contains_subquery(),
-            Self::Between { expr, low, high } => {
-                expr.contains_subquery() || low.contains_subquery() || high.contains_subquery()
-            }
-            Self::InList { expr, list, .. } => {
-                expr.contains_subquery() || list.iter().any(Self::contains_subquery)
-            }
-            Self::WindowCall {
-                args, spec, filter, ..
-            } => {
-                args.iter().any(Self::contains_subquery)
-                    || filter.as_deref().is_some_and(Self::contains_subquery)
-                    || spec.partition_by.iter().any(Self::contains_subquery)
-                    || spec
-                        .order_by
-                        .iter()
-                        .any(|order| order.expr.contains_subquery())
-                    || spec.frame.as_ref().is_some_and(|frame| {
-                        frame_has(&frame.start, Self::contains_subquery)
-                            || frame_has(&frame.end, Self::contains_subquery)
-                    })
-            }
-            Self::Case {
-                base,
-                when,
-                else_branch,
-            } => {
-                base.as_deref().is_some_and(Self::contains_subquery)
-                    || when.iter().any(|(condition, result)| {
-                        condition.contains_subquery() || result.contains_subquery()
-                    })
-                    || else_branch.as_deref().is_some_and(Self::contains_subquery)
-            }
-            Self::Default
-            | Self::Star
-            | Self::QualifiedStar(_)
-            | Self::Column(_)
-            | Self::QualifiedColumn { .. }
-            | Self::Position(_)
-            | Self::InternalColumn(_)
-            | Self::Literal(_)
-            | Self::TypedLiteral { .. }
-            | Self::RetainedLiteral(_)
-            | Self::Param(_) => false,
-        }
+        self.any_node(|node| {
+            matches!(
+                node,
+                Self::ScalarSubquery(_) | Self::Exists { .. } | Self::InSubquery { .. }
+            )
+        })
     }
 
     #[must_use]
     pub fn contains_parameter(&self) -> bool {
-        match self {
-            Self::Param(_) => true,
-            Self::Func {
-                args,
-                order_by,
-                filter,
-                ..
-            } => {
-                args.iter().any(Self::contains_parameter)
-                    || order_by.iter().any(|order| order.expr.contains_parameter())
-                    || filter.as_deref().is_some_and(Self::contains_parameter)
-            }
-            Self::Array(items)
-            | Self::Row(items)
-            | Self::CompositeRow { items, .. }
-            | Self::And(items)
-            | Self::Or(items) => items.iter().any(Self::contains_parameter),
-            Self::Binary { lhs, rhs, .. } => lhs.contains_parameter() || rhs.contains_parameter(),
-            Self::UnaryMinus(expr)
-            | Self::Not(expr)
-            | Self::IsNull { expr, .. }
-            | Self::Cast { expr, .. }
-            | Self::Collated { expr, .. }
-            | Self::InSubquery { expr, .. } => expr.contains_parameter(),
-            Self::Between { expr, low, high } => {
-                expr.contains_parameter() || low.contains_parameter() || high.contains_parameter()
-            }
-            Self::InList { expr, list, .. } => {
-                expr.contains_parameter() || list.iter().any(Self::contains_parameter)
-            }
-            Self::WindowCall {
-                args, spec, filter, ..
-            } => {
-                args.iter().any(Self::contains_parameter)
-                    || filter.as_deref().is_some_and(Self::contains_parameter)
-                    || spec.partition_by.iter().any(Self::contains_parameter)
-                    || spec
-                        .order_by
-                        .iter()
-                        .any(|order| order.expr.contains_parameter())
-                    || spec.frame.as_ref().is_some_and(|frame| {
-                        frame_has(&frame.start, Self::contains_parameter)
-                            || frame_has(&frame.end, Self::contains_parameter)
-                    })
-            }
-            Self::Case {
-                base,
-                when,
-                else_branch,
-            } => {
-                base.as_deref().is_some_and(Self::contains_parameter)
-                    || when.iter().any(|(condition, result)| {
-                        condition.contains_parameter() || result.contains_parameter()
-                    })
-                    || else_branch.as_deref().is_some_and(Self::contains_parameter)
-            }
-            Self::Default
-            | Self::Star
-            | Self::QualifiedStar(_)
-            | Self::Column(_)
-            | Self::QualifiedColumn { .. }
-            | Self::Position(_)
-            | Self::InternalColumn(_)
-            | Self::Literal(_)
-            | Self::TypedLiteral { .. }
-            | Self::RetainedLiteral(_)
-            | Self::ScalarSubquery(_)
-            | Self::Exists { .. } => false,
-        }
+        self.any_node(|node| matches!(node, Self::Param(_)))
     }
 
     #[must_use]
     pub fn contains_aggregate(&self, is_aggregate: &dyn Fn(&str) -> bool) -> bool {
-        match self {
-            Self::Func {
-                name,
-                args,
-                order_by,
-                filter,
-                ..
-            } => {
-                is_aggregate(name)
-                    || args
-                        .iter()
-                        .any(|expression| expression.contains_aggregate(is_aggregate))
-                    || order_by
-                        .iter()
-                        .any(|order| order.expr.contains_aggregate(is_aggregate))
-                    || filter
-                        .as_deref()
-                        .is_some_and(|expression| expression.contains_aggregate(is_aggregate))
-            }
-            Self::Array(items)
-            | Self::Row(items)
-            | Self::CompositeRow { items, .. }
-            | Self::And(items)
-            | Self::Or(items) => items
-                .iter()
-                .any(|expression| expression.contains_aggregate(is_aggregate)),
-            Self::Binary { lhs, rhs, .. } => {
-                lhs.contains_aggregate(is_aggregate) || rhs.contains_aggregate(is_aggregate)
-            }
-            Self::UnaryMinus(expr)
-            | Self::Not(expr)
-            | Self::IsNull { expr, .. }
-            | Self::Cast { expr, .. }
-            | Self::Collated { expr, .. }
-            | Self::InSubquery { expr, .. } => expr.contains_aggregate(is_aggregate),
-            Self::Between { expr, low, high } => {
-                expr.contains_aggregate(is_aggregate)
-                    || low.contains_aggregate(is_aggregate)
-                    || high.contains_aggregate(is_aggregate)
-            }
-            Self::InList { expr, list, .. } => {
-                expr.contains_aggregate(is_aggregate)
-                    || list
-                        .iter()
-                        .any(|item| item.contains_aggregate(is_aggregate))
-            }
-            Self::Case {
-                base,
-                when,
-                else_branch,
-            } => {
-                base.as_deref()
-                    .is_some_and(|expression| expression.contains_aggregate(is_aggregate))
-                    || when.iter().any(|(condition, result)| {
-                        condition.contains_aggregate(is_aggregate)
-                            || result.contains_aggregate(is_aggregate)
-                    })
-                    || else_branch
-                        .as_deref()
-                        .is_some_and(|expression| expression.contains_aggregate(is_aggregate))
-            }
-            Self::Default
-            | Self::Star
-            | Self::QualifiedStar(_)
-            | Self::Column(_)
-            | Self::QualifiedColumn { .. }
-            | Self::Position(_)
-            | Self::InternalColumn(_)
-            | Self::Literal(_)
-            | Self::TypedLiteral { .. }
-            | Self::RetainedLiteral(_)
-            | Self::Param(_)
-            | Self::ScalarSubquery(_)
-            | Self::Exists { .. }
-            | Self::WindowCall { .. } => false,
-        }
-    }
-}
-
-fn frame_has(bound: &ScalarFrameBound, predicate: fn(&ScalarExpr) -> bool) -> bool {
-    match bound {
-        ScalarFrameBound::Preceding(expression) | ScalarFrameBound::Following(expression) => {
-            predicate(expression)
-        }
-        ScalarFrameBound::UnboundedPreceding
-        | ScalarFrameBound::UnboundedFollowing
-        | ScalarFrameBound::CurrentRow => false,
+        self.try_visit(&mut |node| match node {
+            Self::Func { name, .. } if is_aggregate(name) => Err(()),
+            Self::WindowCall { .. } => Ok(false),
+            _ => Ok(true),
+        })
+        .is_err()
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{ScalarExpr, ScalarFrameBound};
+    use super::ScalarExpr;
     use crate::ast::{FrameExclusion, FrameMode};
+    use crate::ScalarFrameBound;
     use uqa_core::Value;
 
     #[test]
@@ -443,6 +227,45 @@ mod tests {
         assert_eq!(result, Err("grouping"));
         assert_eq!(visited.len(), 3);
         assert!(matches!(&visited[2], ScalarExpr::Column(name) if name == "reject"));
+    }
+
+    #[test]
+    fn fallible_mutable_walkers_preserve_replacement_order_and_stop_at_errors() {
+        let mut expression = ScalarExpr::Row(vec![
+            ScalarExpr::Param(0),
+            ScalarExpr::Param(1),
+            ScalarExpr::Param(2),
+        ]);
+        let mut reached = Vec::new();
+        expression
+            .try_visit_mut(&mut |node| {
+                if let ScalarExpr::Param(number) = node {
+                    reached.push(*number);
+                    if *number < 2 {
+                        let old = *number;
+                        *node = ScalarExpr::Array(vec![ScalarExpr::Param(10 + old)]);
+                        return Ok::<_, ()>(old == 0);
+                    }
+                }
+                Ok(true)
+            })
+            .unwrap();
+        assert_eq!(reached, [0, 10, 1, 2]);
+        reached.clear();
+        let result = expression.try_visit_post_mut(&mut |node| {
+            match node {
+                ScalarExpr::Param(number) => reached.push(*number),
+                ScalarExpr::Array(_) if reached == [10] => {
+                    *node = ScalarExpr::Param(20);
+                    reached.push(20);
+                }
+                ScalarExpr::Array(_) => return Err("stop"),
+                _ => (),
+            }
+            Ok(())
+        });
+        assert_eq!(result, Err("stop"));
+        assert_eq!(reached, [10, 20, 11]);
     }
 
     #[test]

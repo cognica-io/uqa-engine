@@ -86,17 +86,18 @@ struct Parent<N, I> {
 }
 
 impl OwnedScalarExpr {
-    pub(in crate::plan) async fn edit_from<W: Work, E: Edit<W>>(
+    pub(in crate::plan) fn edit_from<'a, W: Work, E: Edit<W>>(
         self,
         identity: E::Identity,
-        control: &ProductionControl<'_>,
-        work: &mut W,
-        edit: &mut E,
-    ) -> Result<Self, SQLError>
+        control: &'a ProductionControl<'a>,
+        work: &'a mut W,
+        edit: &'a mut E,
+    ) -> impl Future<Output = Result<Self, SQLError>> + 'a
     where
         W::Error: Into<SQLError>,
+        E::Identity: 'a,
     {
-        traverse(self, identity, control, work, edit).await
+        traverse(self, identity, control, work, edit)
     }
 }
 

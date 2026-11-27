@@ -126,3 +126,19 @@ fn view_entry_admission_and_both_cancellations_precede_catalog_callbacks() {
         assert_eq!(budget.used(), 0);
     }
 }
+
+#[test]
+fn first_volatile_call_stops_before_remaining_scalar_children() {
+    let catalog = Views::new();
+    let control = ProductionControl::uncontrolled();
+    let root = query("SELECT random()");
+    let crate::plan::RelationalPlan::QueryBlock(block) = root.root else {
+        panic!("query block")
+    };
+    let mut fields = vec![block.projections[0].expr.clone()];
+    fields.extend((0..4096).map(ScalarExpr::Position));
+    let expression = ScalarExpr::Row(fields);
+    let before = ScalarExpr::visited_nodes();
+    assert!(expr_contains_volatile_function_with_control(&catalog, &expression, &control).unwrap());
+    assert_eq!(ScalarExpr::visited_nodes() - before, 2);
+}

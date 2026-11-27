@@ -35878,6 +35878,97 @@
     {
       "package": "uqa-sql",
       "kind": "lib",
+      "test": "qualification_moves_the_admitted_name_and_parser_position",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/semantics/expression_shape/qualification/tests.rs",
+      "capability": "Column qualification with an existing name",
+      "workload": "Qualify an existing 4 KiB reference with one byte of additional allowance and repeat through the ordinary owner.",
+      "invariant": "Both paths retain the column buffer and its parser position. The retained result charges exactly 4,097 bytes and releases them on drop.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "name_type_and_collation_probes_borrow_each_visible_and_hidden_identity",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/identity_lookup/tests.rs",
+      "capability": "Borrowed column identity probes",
+      "workload": "Resolve visible, hidden and missing names, their collations and their projection slots sixteen times, including 4 KiB names.",
+      "invariant": "All resolutions retain their original types, slots, ambiguity and collation with zero heap allocations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "metadata_overlays_preserve_name_scope_without_rebuilding_lookup_indexes",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/schema/identity_lookup/tests.rs",
+      "capability": "Row schema metadata changes",
+      "workload": "Attach internal, score, wildcard and open-column metadata to a row with an outer scope.",
+      "invariant": "All six metadata operations preserve the outer boundary, leave the input schema intact and rebuild zero lookup indexes.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "nested_set_rewrite_keeps_owned_subtrees_and_assigns_levels_by_parentage",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/semantics/sets/tests.rs",
+      "capability": "Set-returning scalar rewrites",
+      "workload": "Rewrite a wide name under eight or 64 unary operators and compile nested and sibling generate_series calls.",
+      "invariant": "The ordinary expressions retain their owned column buffer at both depths and allocate zero times. Nested and sibling calls receive the original levels and placeholders.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "first_volatile_call_stops_before_remaining_scalar_children",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/semantics/volatility/production/tests.rs",
+      "capability": "Short-circuit scalar volatility",
+      "workload": "Classify a row whose leading random() call is followed by 4,096 scalar fields.",
+      "invariant": "Exactly two scalar nodes are visited. The row is volatile.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "stored_overload_normalizes_each_argument_once",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/type_resolution/fixed_builtin/registry/tests.rs",
+      "capability": "Fixed builtin overload lookup",
+      "workload": "Resolve a stored one-argument binding against all six declared signatures of ABS.",
+      "invariant": "Warm lookup selects the same descriptor using exactly the allocations and bytes required to normalize its single supplied argument.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "operator_name_index_keeps_catalog_order_and_lookup_visits_only_its_overloads",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/type_resolution/operators/resolution/tests.rs",
+      "capability": "Indexed binary operator declarations",
+      "workload": "Look up each catalog name and OID, then probe three overloads of the integer XOR operator and missing identities.",
+      "invariant": "Name groups retain declaration order. Each OID returns the original operand and result identities. Warm indexed probes allocate zero times.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
       "test": "borrowed_column_keys_preserve_owned_hash_and_identity",
       "cases": 1,
       "source": "crates/uqa-sql/src/schema/identity_lookup/tests.rs",

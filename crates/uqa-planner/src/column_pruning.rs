@@ -544,222 +544,129 @@ fn collect_from_prune_columns(
     }
 }
 
-#[expect(
-    clippy::too_many_lines,
-    reason = "preserves SELECT schema and row identity"
-)]
 fn collect_expr_prune_columns(
     expr: &ScalarExpr,
     scope: PruneScope<'_>,
     prune: &mut ColumnPrune,
     valid: &mut bool,
 ) {
-    match expr {
-        ScalarExpr::Column(column) => {
-            for qualifier in scope.qualifiers {
-                if qualifier.eq_ignore_ascii_case(column) {
-                    let Some(source) = prune.get_mut(qualifier) else {
-                        *valid = false;
-                        return;
-                    };
-                    source.retain_all();
-                }
+    let result = expr.try_visit(&mut |node| {
+        match node {
+            ScalarExpr::Column(column) => {
+                *valid &= collect_source_column(None, column, scope, prune);
             }
-            if let Some(qualifier) = scope.metadata_qualifier {
-                let metadata = match column.as_str() {
-                    DOC_ID_COLUMN if scope.legacy_doc_id => Some(true),
-                    SCORE_COLUMN if scope.legacy_score => Some(false),
-                    _ => None,
-                };
-                if let Some(doc_id) = metadata {
-                    let Some(source) = prune.get_mut(qualifier) else {
-                        *valid = false;
-                        return;
-                    };
-                    source.insert(column.to_string());
-                    if doc_id {
-                        source.metadata_mut().request_doc_id();
-                    } else {
-                        source.metadata_mut().request_score();
-                    }
-                    return;
-                }
+            ScalarExpr::QualifiedColumn { qualifier, column } => {
+                *valid &= collect_source_column(Some(qualifier), column, scope, prune);
             }
-            // A statically bound input has one owner even when an open document source could supply the same name. Preserve that binding instead of inventing a competing document field.
-            let bound_owner = scope.source_schema.and_then(|schema| {
-                let slot = schema.column_slot(column)?;
-                scope
-                    .qualifiers
-                    .iter()
-                    .any(|qualifier| schema.qualified_slot(qualifier, column) == Some(slot))
-                    .then_some((schema, slot))
-            });
-            for qualifier in scope.qualifiers {
-                if bound_owner.is_some_and(|(schema, slot)| {
-                    schema.qualified_slot(qualifier, column) != Some(slot)
-                }) {
-                    continue;
-                }
-                if let Some(columns) = prune.get_mut(qualifier) {
-                    columns.insert(column.to_string());
-                }
-            }
-        }
-        ScalarExpr::QualifiedColumn {
-            qualifier, column, ..
-        } => {
-            if scope.metadata_qualifier == Some(qualifier.as_str()) {
-                let metadata = match column.as_str() {
-                    DOC_ID_COLUMN if scope.legacy_doc_id => Some(true),
-                    SCORE_COLUMN if scope.legacy_score => Some(false),
-                    _ => None,
-                };
-                if let Some(doc_id) = metadata {
-                    let Some(source) = prune.get_mut(qualifier) else {
-                        *valid = false;
-                        return;
-                    };
-                    source.insert(column.to_string());
-                    if doc_id {
-                        source.metadata_mut().request_doc_id();
-                    } else {
-                        source.metadata_mut().request_score();
-                    }
-                    return;
-                }
-            }
-            if qualifier == META_QUALIFIER && !prune.contains_key(META_QUALIFIER) {
-                let Some(source) = scope
-                    .metadata_qualifier
-                    .and_then(|source| prune.get_mut(source))
-                else {
-                    *valid = false;
-                    return;
-                };
-                match column.as_str() {
-                    META_DOC_ID_COLUMN => source.metadata_mut().request_doc_id(),
-                    META_SCORE_COLUMN => source.metadata_mut().request_score(),
-                    _ => *valid = false,
-                }
-                return;
-            }
-            if let Some(columns) = prune.get_mut(qualifier) {
-                columns.insert(column.to_string());
-            } else {
-                *valid = false;
-            }
-        }
-        ScalarExpr::Literal(_)
-        | ScalarExpr::TypedLiteral { .. }
-        | ScalarExpr::RetainedLiteral(_)
-        | ScalarExpr::Param(_) => {}
-        ScalarExpr::Default
-        | ScalarExpr::Star
-        | ScalarExpr::Position(_)
-        | ScalarExpr::InternalColumn(_)
-        | ScalarExpr::QualifiedStar(_)
-        | ScalarExpr::ScalarSubquery(_)
-        | ScalarExpr::Exists { .. } => {
-            *valid = false;
-        }
-        ScalarExpr::Array(items)
-        | ScalarExpr::Row(items)
-        | ScalarExpr::CompositeRow { items, .. }
-        | ScalarExpr::And(items)
-        | ScalarExpr::Or(items) => {
-            for item in items {
-                collect_expr_prune_columns(item, scope, prune, valid);
-            }
-        }
-        ScalarExpr::Func {
-            name,
-            args,
-            order_by,
-            filter,
-            ..
-        } => {
-            // COUNT(*) consumes one unit per input row; the star is not a whole-row value. Its FILTER and aggregate ordering still depend on ordinary source columns.
-            if !(name.eq_ignore_ascii_case("count")
-                && matches!(args.as_slice(), [ScalarExpr::Star]))
+            ScalarExpr::Func {
+                name,
+                args,
+                order_by,
+                filter,
+                ..
+            } if name.eq_ignore_ascii_case("count")
+                && matches!(args.as_slice(), [ScalarExpr::Star]) =>
             {
-                for arg in args {
-                    collect_expr_prune_columns(arg, scope, prune, valid);
+                // COUNT(*) needs input rows. Only its ordering and FILTER expressions read source columns.
+                for order in order_by {
+                    collect_expr_prune_columns(&order.expr, scope, prune, valid);
                 }
-            }
-            for order in order_by {
-                collect_expr_prune_columns(&order.expr, scope, prune, valid);
-            }
-            if let Some(filter) = filter.as_ref() {
-                collect_expr_prune_columns(filter, scope, prune, valid);
-            }
-        }
-        ScalarExpr::Binary { lhs, rhs, .. } => {
-            collect_expr_prune_columns(lhs, scope, prune, valid);
-            collect_expr_prune_columns(rhs, scope, prune, valid);
-        }
-        ScalarExpr::Not(inner)
-        | ScalarExpr::UnaryMinus(inner)
-        | ScalarExpr::IsNull { expr: inner, .. }
-        | ScalarExpr::Cast { expr: inner, .. }
-        | ScalarExpr::Collated { expr: inner, .. } => {
-            collect_expr_prune_columns(inner, scope, prune, valid);
-        }
-        ScalarExpr::Between { expr, low, high } => {
-            collect_expr_prune_columns(expr, scope, prune, valid);
-            collect_expr_prune_columns(low, scope, prune, valid);
-            collect_expr_prune_columns(high, scope, prune, valid);
-        }
-        ScalarExpr::InList { expr, list, .. } => {
-            collect_expr_prune_columns(expr, scope, prune, valid);
-            for item in list {
-                collect_expr_prune_columns(item, scope, prune, valid);
-            }
-        }
-        ScalarExpr::WindowCall {
-            args, spec, filter, ..
-        } => {
-            for argument in args {
-                collect_expr_prune_columns(argument, scope, prune, valid);
-            }
-            if let Some(filter) = filter {
-                collect_expr_prune_columns(filter, scope, prune, valid);
-            }
-            for expression in &spec.partition_by {
-                collect_expr_prune_columns(expression, scope, prune, valid);
-            }
-            for order in &spec.order_by {
-                collect_expr_prune_columns(&order.expr, scope, prune, valid);
-            }
-            if let Some(frame) = &spec.frame {
-                for bound in [&frame.start, &frame.end] {
-                    if let uqa_sql::ScalarFrameBound::Preceding(expression)
-                    | uqa_sql::ScalarFrameBound::Following(expression) = bound
-                    {
-                        collect_expr_prune_columns(expression, scope, prune, valid);
-                    }
+                if let Some(filter) = filter {
+                    collect_expr_prune_columns(filter, scope, prune, valid);
                 }
+                return Ok(false);
             }
-            *valid = false;
+            ScalarExpr::Default
+            | ScalarExpr::Star
+            | ScalarExpr::Position(_)
+            | ScalarExpr::InternalColumn(_)
+            | ScalarExpr::QualifiedStar(_)
+            | ScalarExpr::ScalarSubquery(_)
+            | ScalarExpr::Exists { .. }
+            | ScalarExpr::WindowCall { .. }
+            | ScalarExpr::InSubquery { .. } => *valid = false,
+            _ => (),
         }
-        ScalarExpr::InSubquery { expr, .. } => {
-            collect_expr_prune_columns(expr, scope, prune, valid);
-            *valid = false;
-        }
-        ScalarExpr::Case {
-            base,
-            when,
-            else_branch,
-        } => {
-            if let Some(base) = base.as_ref() {
-                collect_expr_prune_columns(base, scope, prune, valid);
-            }
-            for (cond, result) in when {
-                collect_expr_prune_columns(cond, scope, prune, valid);
-                collect_expr_prune_columns(result, scope, prune, valid);
-            }
-            if let Some(else_branch) = else_branch.as_ref() {
-                collect_expr_prune_columns(else_branch, scope, prune, valid);
+        Ok::<_, std::convert::Infallible>(true)
+    });
+    result.unwrap_or_else(|never| match never {});
+}
+
+fn collect_source_column(
+    qualifier: Option<&str>,
+    column: &str,
+    scope: PruneScope<'_>,
+    prune: &mut ColumnPrune,
+) -> bool {
+    if qualifier.is_none() {
+        for relation in scope.qualifiers {
+            if relation.eq_ignore_ascii_case(column) {
+                let Some(source) = prune.get_mut(relation) else {
+                    return false;
+                };
+                source.retain_all();
             }
         }
     }
+    if let Some(owner) = scope
+        .metadata_qualifier
+        .filter(|owner| qualifier.is_none_or(|q| q == *owner))
+    {
+        let metadata = match column {
+            DOC_ID_COLUMN if scope.legacy_doc_id => Some(true),
+            SCORE_COLUMN if scope.legacy_score => Some(false),
+            _ => None,
+        };
+        if let Some(doc_id) = metadata {
+            let Some(source) = prune.get_mut(owner) else {
+                return false;
+            };
+            source.insert(column.to_owned());
+            if doc_id {
+                source.metadata_mut().request_doc_id();
+            } else {
+                source.metadata_mut().request_score();
+            }
+            return true;
+        }
+    }
+    if let Some(qualifier) = qualifier {
+        if qualifier == META_QUALIFIER && !prune.contains_key(META_QUALIFIER) {
+            let Some(source) = scope
+                .metadata_qualifier
+                .and_then(|owner| prune.get_mut(owner))
+            else {
+                return false;
+            };
+            match column {
+                META_DOC_ID_COLUMN => source.metadata_mut().request_doc_id(),
+                META_SCORE_COLUMN => source.metadata_mut().request_score(),
+                _ => return false,
+            }
+        } else if let Some(source) = prune.get_mut(qualifier) {
+            source.insert(column.to_owned());
+        } else {
+            return false;
+        }
+        return true;
+    }
+    // A statically bound input owns the field even if an open document source could supply its name.
+    let bound_owner = scope.source_schema.and_then(|schema| {
+        let slot = schema.column_slot(column)?;
+        scope
+            .qualifiers
+            .iter()
+            .any(|owner| schema.qualified_slot(owner, column) == Some(slot))
+            .then_some((schema, slot))
+    });
+    for owner in scope.qualifiers {
+        if bound_owner
+            .is_none_or(|(schema, slot)| schema.qualified_slot(owner, column) == Some(slot))
+        {
+            if let Some(source) = prune.get_mut(owner) {
+                source.insert(column.to_owned());
+            }
+        }
+    }
+    true
 }
