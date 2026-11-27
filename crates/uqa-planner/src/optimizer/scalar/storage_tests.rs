@@ -24,6 +24,48 @@ fn optimize_input(
 }
 
 #[test]
+fn caller_owned_projection_alias_charges_only_the_new_label() {
+    use uqa_core::{memory::MemoryBudget, CancellationToken};
+
+    for (limit, alias) in [
+        (32 * 1024, None),
+        (2 << 20, None),
+        (32 * 1024, Some("visible")),
+    ] {
+        let name = uqa_sql::ast::ReferenceName::from("x".repeat(1 << 20));
+        let name_pointer = name.as_ptr();
+        let mut projection = [ProjectionPlan {
+            expr: ScalarExpr::Column(name),
+            alias: alias.map(str::to_owned),
+        }];
+        let budget = MemoryBudget::new(limit);
+        let original = CancellationToken::new();
+        let invoking = CancellationToken::new();
+        let mut settings = config();
+        settings.production = ProductionControl::new(&budget, &original, &invoking);
+        let result = optimize_projections(&mut projection, &settings);
+        if limit < (1 << 20) && alias.is_none() {
+            assert_eq!(result.unwrap_err().sqlstate(), Some("53200"));
+            assert!(projection[0].alias.is_none());
+        } else {
+            result.unwrap();
+            let ScalarExpr::Column(column) = &projection[0].expr else {
+                panic!("column")
+            };
+            assert_eq!(column.as_ptr(), name_pointer);
+            assert_eq!(
+                projection[0].alias.as_deref(),
+                Some(alias.unwrap_or(column.as_str()))
+            );
+            if alias.is_none() {
+                assert!(budget.peak() >= (1 << 20));
+            }
+        }
+        assert_eq!(budget.used(), 0);
+    }
+}
+
+#[test]
 fn scalar_rewrite_reuses_surviving_boxes_and_array_capacity() {
     let input = ScalarExpr::Array(vec![
         ScalarExpr::Binary {

@@ -190,9 +190,10 @@ impl Context<'_, '_> {
     ) -> Result<MutableCommandPlan, SQLError> {
         let control = &self.config.production;
         let count = command.returning().expect("mutation RETURNING").len();
+        let production = super::super::scalar::ScalarProduction::admitted(self.config);
         for index in 0..count {
             let projections = command.returning().expect("mutation RETURNING");
-            if let Some(alias) = super::projection_alias(&projections[index], control)? {
+            if let Some(alias) = production.projection_alias(&projections[index])? {
                 command = command.replace_returning_alias(index, Some(alias), control)?;
             }
             command =

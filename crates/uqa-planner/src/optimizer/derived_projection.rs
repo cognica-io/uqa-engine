@@ -154,7 +154,8 @@ pub(super) fn prune_positions(
         if let Some(schema) = schema {
             query.analyzed_output = Some(schema.clone());
             if let RelationalPlan::QueryBlock(block) = &mut query.root {
-                block.compute = block.compute_kind(context.aggregates);
+                block.compute =
+                    block.compute_kind_with_control(context.aggregates, &context.production)?;
             }
         }
     }

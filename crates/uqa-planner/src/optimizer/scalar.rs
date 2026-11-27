@@ -37,14 +37,14 @@ pub(super) fn optimize_projections(
     projections: &mut [ProjectionPlan],
     config: &OptimizerConfig,
 ) -> Result<(), SQLError> {
+    let production = ScalarProduction::caller(config);
     for projection in projections {
-        if projection.alias.is_none()
-            && !matches!(
-                projection.expr,
-                ScalarExpr::Star | ScalarExpr::QualifiedStar(_)
-            )
-        {
-            projection.alias = Some(uqa_sql::semantics::projection_label_at(projection));
+        if let Some(label) = production.projection_alias(projection)? {
+            projection.alias = Some(
+                label
+                    .into_uncontrolled()
+                    .expect("caller-owned projection alias"),
+            );
         }
         optimize_scalar_slot(&mut projection.expr, config)?;
     }
@@ -100,6 +100,23 @@ impl<'a, 'scope> ScalarProduction<'a, 'scope> {
         } else {
             Ok(text)
         }
+    }
+
+    pub(super) fn projection_alias(
+        self,
+        projection: &ProjectionPlan,
+    ) -> Result<Option<uqa_core::memory::Produced<String>>, SQLError> {
+        if projection.alias.is_some()
+            || matches!(
+                projection.expr,
+                ScalarExpr::Star | ScalarExpr::QualifiedStar(_)
+            )
+        {
+            return Ok(None);
+        }
+        uqa_sql::semantics::with_projection_label(projection, &self.config.production, |name| {
+            self.copy_text(name).map(Some)
+        })
     }
 }
 

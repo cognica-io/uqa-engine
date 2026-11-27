@@ -24,7 +24,7 @@ pub(super) fn optimize_unified_plan(
         config.production.check()?;
         if query.analyzed_output.is_none() {
             if let RelationalPlan::QueryBlock(block) = &mut query.root {
-                block.compute = block.compute_kind(aggregates);
+                block.compute = block.compute_kind_with_control(aggregates, &config.production)?;
             }
         }
         Ok::<_, SQLError>(())
@@ -231,7 +231,7 @@ fn optimize_query_block(
 
     // Removing an unused aggregate's value does not remove its implicit group on empty input.
     if !matches!(block.compute, ComputePlan::Aggregate) {
-        block.compute = block.compute_kind(aggregates);
+        block.compute = block.compute_kind_with_control(aggregates, &config.production)?;
     }
     block.access = choose_access_path(block);
     Ok(())

@@ -6938,6 +6938,32 @@
       ]
     },
     {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "caller_owned_compute_classification_charges_registered_aggregate_observation",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/tests/aggregate_identity.rs",
+      "capability": "Aggregate classification",
+      "workload": "Plan a query against a registered aggregate under zero and 256 KiB operation allowances.",
+      "invariant": "The catalog uses the active allowance for every observation. Exhaustion returns 53200 and successful classification selects aggregate execution.",
+      "case_names": [
+        "optimizer::tests::aggregate_identity::caller_owned_compute_classification_charges_registered_aggregate_observation"
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "caller_owned_projection_alias_charges_only_the_new_label",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/scalar/storage_tests.rs",
+      "capability": "Output label allocation",
+      "workload": "Plan a projection with a 1 MiB column name under 32 KiB and 2 MiB allowances, with and without an explicit alias.",
+      "invariant": "The generated label is admitted before publication. Existing syntax keeps its address, explicit aliases survive and the workspace releases after handoff.",
+      "case_names": [
+        "optimizer::scalar::storage_tests::caller_owned_projection_alias_charges_only_the_new_label"
+      ]
+    },
+    {
       "package": "uqa-sql",
       "kind": "lib",
       "test": "caller_owned_grouping_admits_its_new_vector_before_handoff",

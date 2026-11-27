@@ -102,6 +102,7 @@ impl Context<'_, '_> {
 
     fn projections(&self, mut query: MutableQueryPlan) -> Result<MutableQueryPlan, SQLError> {
         let control = &self.config.production;
+        let production = super::super::scalar::ScalarProduction::admitted(self.config);
         let RelationalPlan::QueryBlock(block) = &query.root else {
             unreachable!()
         };
@@ -110,7 +111,7 @@ impl Context<'_, '_> {
             let RelationalPlan::QueryBlock(block) = &query.root else {
                 unreachable!()
             };
-            if let Some(alias) = super::projection_alias(&block.projections[index], control)? {
+            if let Some(alias) = production.projection_alias(&block.projections[index])? {
                 query = query.replace_projection_alias(index, Some(alias), control)?;
             }
             query =

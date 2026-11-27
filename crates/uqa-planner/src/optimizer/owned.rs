@@ -13,7 +13,7 @@ use uqa_sql::{
         MutableCommandPlan, MutableExecutablePlan, MutableQueryPlan, MutableSourcePlan,
         OwnedScalarExpr, QueryChildSlot, QueryScalarSlot,
     },
-    SQLError, ScalarExpr,
+    SQLError,
 };
 
 mod block;
@@ -230,23 +230,4 @@ impl Context<'_, '_> {
         }
         Ok(query)
     }
-}
-
-fn projection_alias(
-    projection: &super::ProjectionPlan,
-    control: &ProductionControl<'_>,
-) -> Result<Option<uqa_core::memory::Produced<String>>, SQLError> {
-    if projection.alias.is_some()
-        || matches!(
-            projection.expr,
-            ScalarExpr::Star | ScalarExpr::QualifiedStar(_)
-        )
-    {
-        return Ok(None);
-    }
-    Ok(Some(uqa_sql::semantics::with_projection_label(
-        projection,
-        control,
-        |name| Ok(control.copy_text(name)?),
-    )?))
 }
