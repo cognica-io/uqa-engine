@@ -62,9 +62,9 @@ pub(super) fn row(
         state.and_then(|state| state.reusable(context.row_schema(), context.function_hook()))
     {
         let values = evaluate_items(items, context, control)?;
-        let row = match descriptor {
+        let row = match descriptor.as_deref() {
             Some(descriptor) => {
-                uqa_core::RowValue::typed_shared_with_control(values, descriptor, control)?
+                uqa_core::RowValue::typed_shared_with_control(values, descriptor.clone(), control)?
             }
             None => uqa_core::RowValue::new_with_control(values, control)?,
         };

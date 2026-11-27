@@ -237,7 +237,7 @@ fn bound_builtin_dispatch_is_classified_once_and_authorized_for_every_row() {
         memory::{MemoryBudget, ProductionControl},
         CancellationToken,
     };
-    use uqa_sql::ast::{FunctionBinding, FunctionDispatch};
+    use uqa_sql::ast::{FunctionBinding, FunctionCallSyntax, FunctionDispatch};
     let function = |name: &str, dispatch, args| {
         let mut binding = FunctionBinding::dispatched(FunctionDispatch::ToHexInt4);
         binding.name = name.into();
@@ -248,7 +248,7 @@ fn bound_builtin_dispatch_is_classified_once_and_authorized_for_every_row() {
             args,
             distinct: false,
             order_by: Vec::new(),
-            order_syntax: Default::default(),
+            order_syntax: FunctionCallSyntax::default(),
             filter: None,
         }
     };

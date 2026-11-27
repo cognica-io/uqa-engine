@@ -18,6 +18,8 @@ use super::json::{jsonpath_candidate, jsonpath_match};
 use super::random;
 use super::scalar_dispatch::{eval_scalar_function_with_context, eval_sequence_function};
 
+type EvaluatedArguments = Vec<(Option<String>, Value)>;
+
 mod arguments;
 use arguments::MovedArguments;
 mod named;
@@ -36,7 +38,7 @@ pub use production::{
 /// An unbound call recorded no input collation, so collation-dependent built-ins use the database default collation.
 pub fn eval_function_call(
     name: &str,
-    call_args: Vec<(Option<String>, Value)>,
+    call_args: EvaluatedArguments,
     ctx: &EvalContext<'_>,
 ) -> Result<Value> {
     eval_function_call_inner(name, call_args, ctx, true, default_collation())
@@ -46,7 +48,7 @@ pub fn eval_function_call(
 /// runtime callbacks and SQL routines must not override this stable binding.
 pub fn eval_builtin_function_call(
     name: &str,
-    call_args: Vec<(Option<String>, Value)>,
+    call_args: EvaluatedArguments,
     ctx: &EvalContext<'_>,
 ) -> Result<Value> {
     eval_function_call_inner(name, call_args, ctx, false, default_collation())
@@ -62,7 +64,7 @@ fn default_collation() -> u32 {
 )]
 fn eval_function_call_inner(
     name: &str,
-    call_args: Vec<(Option<String>, Value)>,
+    call_args: EvaluatedArguments,
     ctx: &EvalContext<'_>,
     allow_dynamic_dispatch: bool,
     collation: u32,

@@ -6,7 +6,7 @@
 
 //! Evaluated arguments for validated generated built-ins keep their existing payload owner through SQL dispatch.
 
-use super::{arguments::MovedArguments, named::builtin_named_args};
+use super::{arguments::MovedArguments, named::builtin_named_args, EvaluatedArguments};
 use crate::{
     ast::{FunctionBinding, FunctionDispatch},
     error::{Result, SQLError},
@@ -25,7 +25,7 @@ enum BuiltinEvaluation {
 /// Execute the selected built-in with session semantics and ordinary argument ownership.
 pub fn eval_bound_builtin_function_call(
     binding: &FunctionBinding,
-    arguments: Vec<(Option<String>, Value)>,
+    arguments: EvaluatedArguments,
     context: &super::EvalContext<'_>,
 ) -> Result<Value> {
     let control = ProductionControl::uncontrolled();
@@ -48,7 +48,7 @@ pub fn eval_bound_builtin_function_call(
 pub fn eval_generated_function_call_with_control(
     name: &str,
     binding: Option<&FunctionBinding>,
-    arguments: Produced<Vec<(Option<String>, Value)>>,
+    arguments: Produced<EvaluatedArguments>,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Value>> {
     eval_builtin_function_call_with_control(
@@ -64,7 +64,7 @@ pub fn eval_generated_function_call_with_control(
 pub fn eval_builtin_function_call_with_control(
     name: &str,
     binding: Option<&FunctionBinding>,
-    arguments: Produced<Vec<(Option<String>, Value)>>,
+    arguments: Produced<EvaluatedArguments>,
     control: &ProductionControl<'_>,
     context: &super::EvalContext<'_>,
 ) -> Result<Produced<Value>> {
@@ -81,7 +81,7 @@ pub fn eval_builtin_function_call_with_control(
 fn evaluate(
     name: &str,
     binding: Option<&FunctionBinding>,
-    arguments: Produced<Vec<(Option<String>, Value)>>,
+    arguments: Produced<EvaluatedArguments>,
     control: &ProductionControl<'_>,
     context: &super::EvalContext<'_>,
     evaluation: BuiltinEvaluation,
@@ -100,7 +100,7 @@ fn evaluate(
         match evaluation {
             BuiltinEvaluation::Session => hook.require_builtin_execute(binding)?,
             BuiltinEvaluation::Admitted => {
-                hook.require_builtin_execute_with_control(binding, control)?
+                hook.require_builtin_execute_with_control(binding, control)?;
             }
         }
     }

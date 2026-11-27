@@ -6,6 +6,7 @@
 
 //! Positional dispatch moves argument values while preserving the names needed by overload diagnostics and host routines.
 
+use super::EvaluatedArguments;
 use crate::error::Result;
 use uqa_core::{
     memory::{MemoryReservation, Produced, ProductionControl, ProductionSmallVec},
@@ -14,13 +15,13 @@ use uqa_core::{
 
 pub(super) struct MovedArguments<'a> {
     pub(super) values: ProductionSmallVec<'a, [Value; 4]>,
-    pairs: Vec<(Option<String>, Value)>,
+    pairs: EvaluatedArguments,
     payload: Option<MemoryReservation>,
 }
 
 impl<'a> MovedArguments<'a> {
     pub(super) fn new(
-        arguments: Produced<Vec<(Option<String>, Value)>>,
+        arguments: Produced<EvaluatedArguments>,
         control: &ProductionControl<'a>,
     ) -> Result<Self> {
         let mut values = ProductionSmallVec::new(*control);
@@ -42,7 +43,7 @@ impl<'a> MovedArguments<'a> {
     pub(super) fn into_pairs(
         mut self,
         control: &ProductionControl<'_>,
-    ) -> Result<Produced<Vec<(Option<String>, Value)>>> {
+    ) -> Result<Produced<EvaluatedArguments>> {
         for (_, original) in self.pairs.iter_mut().rev() {
             control.check()?;
             *original = self

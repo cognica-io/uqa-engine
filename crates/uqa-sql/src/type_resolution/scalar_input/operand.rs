@@ -208,16 +208,10 @@ fn read_operand<T>(
         ScalarExpr::Func {
             binding: Some(binding),
             ..
-        } if binding
+        } => binding
             .invocation
             .as_ref()
-            .is_some_and(|invocation| invocation.return_type.is_some()) =>
-        {
-            binding
-                .invocation
-                .as_ref()
-                .and_then(|invocation| invocation.return_type.as_deref())
-        }
+            .and_then(|invocation| invocation.return_type.as_deref()),
         ScalarExpr::TypedLiteral { ty, .. }
         | ScalarExpr::CompositeRow {
             binding: crate::ast::CompositeRowBinding { ty, .. },
@@ -240,12 +234,8 @@ fn read_operand<T>(
                     return read(Operand::OwnedName(name), control).map(Some)
                 }
                 ArraySource::Unknown => return Ok(None),
-                ArraySource::Infer => {}
+                ArraySource::Infer => None,
             }
-            return inferred_type(expression, schema, params, control)?
-                .as_deref()
-                .map(bound)
-                .transpose();
         }
         ScalarExpr::Literal(Value::Int(value)) if i32::try_from(*value).is_ok() => {
             return bound(&ColumnType::Integer).map(Some);
@@ -254,13 +244,13 @@ fn read_operand<T>(
         ScalarExpr::Literal(Value::Bytes(_)) => return bound(&ColumnType::Bytea).map(Some),
         ScalarExpr::Literal(Value::BitString(_)) => return bound(&ColumnType::Bit(None)).map(Some),
         ScalarExpr::Literal(Value::Str(_) | Value::FixedChar(_)) => return Ok(None),
-        _ => {
-            let Some(ty) = inferred_type(expression, schema, params, control)? else {
-                return Ok(None);
-            };
-            return bound(&ty).map(Some);
-        }
+        _ => None,
     };
-    name.map(|name| read(Operand::Spelling(name), control))
-        .transpose()
+    match name {
+        Some(name) => read(Operand::Spelling(name), control).map(Some),
+        None => inferred_type(expression, schema, params, control)?
+            .as_deref()
+            .map(bound)
+            .transpose(),
+    }
 }

@@ -25,8 +25,8 @@ impl RowConstructorState {
         &self,
         schema: Option<&RowSchema>,
         hook: Option<&dyn EngineHook>,
-    ) -> Option<Option<RowDescriptor>> {
-        Some(self.known.get(schema, hook)?.as_deref().cloned())
+    ) -> Option<&Option<Produced<RowDescriptor>>> {
+        self.known.get(schema, hook)
     }
 
     pub(crate) fn observe(&self) -> bool {

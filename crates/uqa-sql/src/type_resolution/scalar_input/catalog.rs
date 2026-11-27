@@ -132,7 +132,7 @@ impl<'a> OperandCatalog<'a> {
             (Dependency::Independent, Some(scope))
                 if crate::compiler::fixed_type_name_with_control(name, control)? =>
             {
-                *saved = Dependency::Snapshot(scope.clone())
+                *saved = Dependency::Snapshot(scope.clone());
             }
             (Dependency::Snapshot(prior), Some(scope))
                 if prior.matches(scope)
