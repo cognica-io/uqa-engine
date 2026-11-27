@@ -197,6 +197,7 @@ native_enum!(crate::ast::MergeWhen {
     NothingNotMatchedBySource { condition }
 });
 
+native_enum!(crate::ast::ConflictTargetConstraint { Unqualified, Named(value0), Collations(value0) });
 native_struct!(crate::ast::OnConflict {
     predicate,
     constraint,

@@ -12,6 +12,8 @@ use crate::ast::{Expr, IndexKey, TableKeyConstraint};
 pub struct EnforcedKey {
     pub constraint: TableKeyConstraint,
     pub keys: Vec<IndexKey>,
+    /// Attribute collations recorded by CREATE INDEX, in key order. A missing legacy entry inherits the indexed column or expression's collation.
+    pub key_order: Vec<crate::ast::IndexColumnOrder>,
     pub index: Option<uqa_core::RelationIdentity>,
     pub index_catalog: Option<super::IndexCatalogIdentity>,
     /// Ordered parent incarnations used to bind a partition-root arbiter to its local physical index.
@@ -37,6 +39,7 @@ impl From<TableKeyConstraint> for EnforcedKey {
                 .cloned()
                 .map(IndexKey::Column)
                 .collect(),
+            key_order: Vec::new(),
             index: None,
             index_catalog: None,
             index_ancestors: Vec::new(),

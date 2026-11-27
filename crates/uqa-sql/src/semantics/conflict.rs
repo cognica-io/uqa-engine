@@ -14,7 +14,6 @@ use crate::{
     routines::RoutineResolution,
     SQLError, SQLParam, ScalarExpr as Expr,
 };
-use std::collections::BTreeSet;
 use uqa_core::{memory::ProductionControl, Value};
 
 mod production;
@@ -105,22 +104,50 @@ pub fn conflict_key_indices(
     keys: &[EnforcedKey],
     conflict: &ConflictPlan,
 ) -> Result<Vec<usize>, SQLError> {
-    if let Some(name) = &conflict.constraint {
+    if let crate::ast::ConflictTargetConstraint::Named(name) = &conflict.constraint {
         return constraint_target_index(catalog, table, keys, name);
     }
     if conflict.conflict_columns.is_empty() && conflict.expressions.is_empty() {
         return Ok((0..keys.len()).collect());
     }
     let columns = validate_conflict_columns(catalog, table, &conflict.conflict_columns)?;
-    let target = conflict
+    #[derive(Clone, Copy, PartialEq)]
+    enum Operand<'a> {
+        Column(&'a str),
+        Expression(&'a Expr),
+    }
+    fn operand(expr: &Expr) -> Operand<'_> {
+        match expr {
+            Expr::Column(name) => Operand::Column(name.as_str()),
+            _ => Operand::Expression(expr),
+        }
+    }
+    let mut target = conflict
         .conflict_columns
         .iter()
-        .map(String::as_str)
-        .collect::<BTreeSet<_>>();
+        .map(|column| (Operand::Column(column), None))
+        .collect::<Vec<_>>();
+    for (position, expr) in conflict.expressions.iter().enumerate() {
+        let collation = conflict
+            .constraint
+            .collation(position)
+            .map(|name| {
+                crate::catalog::collations::expression::select(
+                    name,
+                    None,
+                    None,
+                    Some(catalog.inference_context().routines),
+                )
+            })
+            .transpose()?;
+        target.push((operand(expr), collation));
+    }
+    let needs_key_collation = target.iter().any(|(_, oid)| oid.is_some());
     let mut legacy_scope = None;
-    let mut stored_identity = |syntax: &crate::ast::Expr| {
+    let mut stored_identity = |syntax: &crate::ast::Expr, read_collation: bool| {
         let mut plan = ExpressionPlan::lower(syntax.clone());
-        if needs_index_collations(syntax, &columns) {
+        let mut collation = None;
+        if read_collation || needs_index_collations(syntax, &columns) {
             let context = catalog.inference_context();
             let (snapshot, schema) = match &legacy_scope {
                 Some(scope) => scope,
@@ -129,49 +156,62 @@ pub fn conflict_key_indices(
                     crate::RowSchema::with_column_definitions(Some(table), &columns),
                 )),
             };
-            crate::binding::assign_stored_input_collations(
+            collation = Some(crate::binding::assign_stored_input_collations(
                 context.routines,
                 &mut plan,
                 schema,
                 &snapshot.context(),
-            )?;
+            )?);
         }
-        Ok::<_, SQLError>(inference_identity(plan.scalar))
+        Ok::<_, SQLError>((inference_identity(plan.scalar), collation))
     };
     let mut indexes = Vec::new();
     for (index, key) in keys.iter().enumerate() {
-        if key
-            .columns
-            .iter()
-            .map(String::as_str)
-            .collect::<BTreeSet<_>>()
-            != target
-        {
-            continue;
+        let mut satisfied = vec![false; target.len()];
+        let mut all_attributes_named = true;
+        for (position, attribute) in key.keys.iter().enumerate() {
+            let recorded = key
+                .key_order
+                .get(position)
+                .and_then(|order| order.collation_oid);
+            let expression;
+            let (value, collation) = match attribute {
+                crate::ast::IndexKey::Column(name) => {
+                    let oid = recorded.or_else(|| {
+                        if !needs_key_collation {
+                            return None;
+                        }
+                        let column = columns.iter().find(|column| column.name == *name)?;
+                        u32::try_from(crate::catalog::collations::declarations::column_oid(column))
+                            .ok()
+                    });
+                    (Operand::Column(name), oid)
+                }
+                crate::ast::IndexKey::Expression(syntax) => {
+                    let (identity, natural) =
+                        stored_identity(syntax, needs_key_collation && recorded.is_none())?;
+                    expression = identity;
+                    (operand(&expression), recorded.or(natural))
+                }
+            };
+            // A duplicated expression can occur at several positions with different collations. Each inference element must match one attribute of this index.
+            let mut named = false;
+            for ((wanted, qualifier), matched) in target.iter().zip(&mut satisfied) {
+                if *wanted == value {
+                    named = true;
+                    *matched |= qualifier.is_none() || *qualifier == collation;
+                }
+            }
+            all_attributes_named &= named;
         }
-        let expressions = key
-            .keys
-            .iter()
-            .filter_map(|key| match key {
-                crate::ast::IndexKey::Expression(expression) => Some(stored_identity(expression)),
-                crate::ast::IndexKey::Column(_) => None,
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        if !expressions
-            .iter()
-            .all(|expr| conflict.expressions.contains(expr))
-            || !conflict
-                .expressions
-                .iter()
-                .all(|expr| expressions.contains(expr))
-        {
+        if !all_attributes_named || satisfied.contains(&false) {
             continue;
         }
         if let Some(required) = key.predicate.as_deref() {
             let Some(given) = conflict.predicate.as_deref() else {
                 continue;
             };
-            if !implies(given, &stored_identity(required)?) {
+            if !implies(given, &stored_identity(required, false)?.0) {
                 continue;
             }
         }

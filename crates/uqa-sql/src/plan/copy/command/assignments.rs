@@ -73,7 +73,10 @@ impl Copying<'_> {
             predicate: self.field("predicate", |copying| {
                 copying.optional_scalar_box(conflict.predicate.as_deref())
             })?,
-            constraint: self.optional_text(conflict.constraint.as_deref())?,
+            constraint: crate::plan::copy::syntax::SyntaxCopy::copy_syntax(
+                &conflict.constraint,
+                self,
+            )?,
             conflict_columns: self.field("conflict_columns", |copying| {
                 copying.texts(&conflict.conflict_columns)
             })?,

@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Match an explicit collation in an `ON CONFLICT` target to the corresponding key of a single unique index. Omitted collations leave the key unrestricted.
+
 - Recursive CTEs produce the rows their consumers request, share them across references, and support finite recursion beyond 1,024 generations.
 - `unnest` resolves SQL routines alongside its built-in array, multirange and `tsvector` signatures in SELECT lists and FROM clauses.
 

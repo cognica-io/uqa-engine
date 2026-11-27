@@ -28,6 +28,7 @@ fn key(constraint: TableKeyConstraint, ancestors: Vec<[u8; 16]>) -> EnforcedKey 
     EnforcedKey {
         constraint,
         keys: Vec::new(),
+        key_order: Vec::new(),
         index: None,
         index_catalog: None,
         index_ancestors: ancestors,

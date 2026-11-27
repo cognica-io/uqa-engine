@@ -275,8 +275,10 @@ fn conflict_constraint_table<'a>(
     conflict: &ConflictPlan,
 ) -> &'a str {
     // Explicit arbiters belong to the INSERT target and map to descendant indexes by ancestry. Targetless DO NOTHING also considers unique indexes declared only on the physical partition.
-    if conflict.constraint.is_none()
-        && conflict.conflict_columns.is_empty()
+    if !matches!(
+        conflict.constraint,
+        uqa_sql::ast::ConflictTargetConstraint::Named(_)
+    ) && conflict.conflict_columns.is_empty()
         && conflict.expressions.is_empty()
     {
         physical_table

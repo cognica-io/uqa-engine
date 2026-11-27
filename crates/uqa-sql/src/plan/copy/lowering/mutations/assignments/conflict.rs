@@ -27,7 +27,32 @@ pub(in crate::plan::copy::lowering::mutations) async fn construct_conflict<
     copying.finish_input_field("action", field);
     let predicate =
         input::optional_boxed("predicate", source.predicate.as_deref(), copying, input).await?;
-    let constraint = input::optional_text(source.constraint.as_deref(), copying, input).await?;
+    let mut field = copying.begin_input_field()?;
+    let constraint = match &source.constraint {
+        crate::ast::ConflictTargetConstraint::Unqualified => {
+            crate::ast::ConflictTargetConstraint::Unqualified
+        }
+        crate::ast::ConflictTargetConstraint::Named(name) => {
+            crate::ast::ConflictTargetConstraint::Named(
+                field.take(input.text(name, field.control).await?),
+            )
+        }
+        crate::ast::ConflictTargetConstraint::Collations(names) => {
+            let mut values = uqa_core::memory::ProductionVec::new(field.control);
+            for name in names {
+                input.checkpoint().await?;
+                let (name, memory) = if let Some(name) = name {
+                    let (value, memory) = input.text(name, field.control).await?.into_parts();
+                    (Some(value), memory)
+                } else {
+                    (None, field.control.empty_reservation())
+                };
+                values.push_produced(field.control.finish(name, memory)?)?;
+            }
+            crate::ast::ConflictTargetConstraint::Collations(field.take(values.finish()?))
+        }
+    };
+    copying.finish_input_field("constraint", field);
     let mut field = copying.begin_input_field()?;
     let conflict_columns = input::texts(&source.conflict_columns, &mut field, input).await?;
     copying.finish_input_field("conflict_columns", field);

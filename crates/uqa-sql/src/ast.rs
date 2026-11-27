@@ -247,12 +247,33 @@ impl Default for ReturningAliases {
     }
 }
 
+/// A named constraint and explicit inference collations are alternative restrictions on the arbiter. Unqualified targets retain their original null encoding.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum ConflictTargetConstraint {
+    #[default]
+    Unqualified,
+    Named(String),
+    /// One optional collation per inference expression, in written order.
+    Collations(Vec<Option<String>>),
+}
+
+impl ConflictTargetConstraint {
+    #[must_use]
+    pub fn collation(&self, position: usize) -> Option<&str> {
+        match self {
+            Self::Collations(names) => names.get(position)?.as_deref(),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct OnConflict {
     #[serde(default)]
     pub predicate: Option<Box<Expr>>,
     #[serde(default)]
-    pub constraint: Option<String>,
+    pub constraint: ConflictTargetConstraint,
     /// Conflict target columns parsed from the `ON CONFLICT (col, ...)`
     /// list. Empty when the clause uses `ON CONFLICT DO NOTHING` with
     /// no target.

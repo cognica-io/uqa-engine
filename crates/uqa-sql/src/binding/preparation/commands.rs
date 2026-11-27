@@ -306,8 +306,17 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
         subqueries: &[QueryPlan],
     ) -> Result<(), SQLError> {
         self.in_placement(SetPlacement::IndexExpression, |analysis| {
-            for expression in &conflict.expressions {
+            for (position, expression) in conflict.expressions.iter().enumerate() {
                 analysis.expression(expression, input, subqueries)?;
+                if let Some(name) = conflict.constraint.collation(position) {
+                    crate::catalog::collations::expression::select_with_control(
+                        name,
+                        None,
+                        None,
+                        Some(analysis.routines),
+                        &analysis.scope.control(),
+                    )?;
+                }
             }
             Ok(())
         })?;

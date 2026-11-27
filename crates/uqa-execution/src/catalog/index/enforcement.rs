@@ -53,6 +53,7 @@ pub fn enforced_keys(
             }
             key.index = Some(index.relation.clone());
             key.index_ancestors = ancestors(catalog, table, definition.relationships.parent_index)?;
+            key.key_order = definition.column_order;
             key.index_catalog = definition.catalog;
             continue;
         }
@@ -63,6 +64,7 @@ pub fn enforced_keys(
                 index_catalog: definition.catalog,
                 index_ancestors: ancestors(catalog, table, definition.relationships.parent_index)?,
                 keys: index_keys.clone(),
+                key_order: definition.column_order,
                 predicate: definition.predicate,
                 constraint_owned: false,
                 constraint: TableKeyConstraint {

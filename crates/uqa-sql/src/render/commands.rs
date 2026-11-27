@@ -41,7 +41,7 @@ pub(super) fn insert_sql(statement: &InsertStmt) -> Result<String, SQLError> {
     }
     if let Some(conflict) = &statement.on_conflict {
         rendered.push_str(" ON CONFLICT");
-        if let Some(constraint) = &conflict.constraint {
+        if let crate::ast::ConflictTargetConstraint::Named(constraint) = &conflict.constraint {
             rendered.push_str(" ON CONSTRAINT ");
             rendered.push_str(&ident(constraint));
         }
@@ -51,12 +51,14 @@ pub(super) fn insert_sql(statement: &InsertStmt) -> Result<String, SQLError> {
                 .conflict_columns
                 .iter()
                 .map(|name| Ok(ident(name)))
-                .chain(
-                    conflict
-                        .expressions
-                        .iter()
-                        .map(|expr| Ok(format!("({})", render_expr(expr)?))),
-                )
+                .chain(conflict.expressions.iter().enumerate().map(|(i, expr)| {
+                    let mut key = format!("({})", render_expr(expr)?);
+                    if let Some(name) = conflict.constraint.collation(i) {
+                        key.push_str(" COLLATE ");
+                        key.push_str(name);
+                    }
+                    Ok(key)
+                }))
                 .collect::<Result<Vec<_>, SQLError>>()?;
             rendered.push_str(&keys.join(", "));
             rendered.push(')');

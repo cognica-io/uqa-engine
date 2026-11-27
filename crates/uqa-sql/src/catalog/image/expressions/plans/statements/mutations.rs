@@ -82,6 +82,7 @@ image_enum!(MergeWhen {
     6 => NothingNotMatched { condition },
     7 => NothingNotMatchedBySource { condition },
 });
+image_enum!(crate::ast::ConflictTargetConstraint { 0 => Unqualified, 1 => Named(name), 2 => Collations(names) });
 image_struct!(OnConflict {
     predicate,
     constraint,

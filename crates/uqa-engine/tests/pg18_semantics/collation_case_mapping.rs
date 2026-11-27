@@ -128,3 +128,17 @@ fn partial_index_predicates_match_postgresql_and_reopen(#[case] provider: usize)
         |case| case["reopen"] == true,
     );
 }
+
+#[rstest::rstest]
+#[case::memory(0)]
+#[case::sqlite_native(1)]
+#[case::sqlite_kv(2)]
+#[case::redb(3)]
+fn explicit_arbiter_collations_match_postgresql_and_reopen(#[case] provider: usize) {
+    verify_collations(
+        provider,
+        include_str!("../../../../tests/parity/pg18/conflict_inference_collations.expected.json"),
+        6,
+        |case| case["reopen"] == true,
+    );
+}

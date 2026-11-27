@@ -138,6 +138,31 @@ fn prepare_expression(
         control,
     )?;
     let (expression, _) = plan.into_parts(control)?;
+    // An expression-level COLLATE on the index operand disappears only if it preserves the operand's natural collation. An index-element qualifier is matched separately against the catalog attribute.
+    let mut operand: &ScalarExpr = &expression;
+    while let ScalarExpr::Collated { expr, .. } = operand {
+        operand = expr;
+    }
+    if let Some(clause) = crate::catalog::collations::expression::scalar_clause(operand)? {
+        let natural = crate::binding::inference_result_collation(
+            context.routines,
+            clause.argument,
+            schema,
+            binding.context_with_control(control)?,
+            params,
+            control,
+        )?;
+        let selected = crate::catalog::collations::expression::select_with_control(
+            clause.name,
+            clause.oid,
+            None,
+            Some(context.routines),
+            control,
+        )?;
+        if selected != natural {
+            return Ok(expression);
+        }
+    }
     let expression = expression.transform_nodes(control, &mut |_, expression| {
         if matches!(&*expression, ScalarExpr::QualifiedColumn { qualifier, .. } if qualifier == &statement.target_qualifier) {
             return expression.remove_reference_qualifier(control).map_err(Into::into);

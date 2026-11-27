@@ -561,13 +561,30 @@ pub(super) fn projection_metadata(
     })
 }
 
+/// Read an index expression's effective result collation in the same scope used to bind its inference element.
+pub(crate) fn inference_result_collation(
+    routines: &dyn RoutineResolution,
+    expression: &ScalarExpr,
+    schema: &RowSchema,
+    binding: super::production::ControlledBindingContext<'_>,
+    params: &[crate::SQLParam],
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<u32, SQLError> {
+    let mut scope = SchemaScope::for_analysis_with_control(binding, control)?;
+    Ok(
+        projection_metadata(&mut scope, routines, expression, schema, &[], params)?
+            .collation
+            .unwrap_or(0),
+    )
+}
+
 /// Record input collations and type-observer selections on already bound stored calls, as analysis records them for an executable statement. Constants and routine identities stay unchanged, while definitions without another analysis pass retain the complete selected metadata.
 pub(crate) fn assign_stored_input_collations(
     routines: &dyn RoutineResolution,
     expression: &mut crate::plan::ExpressionPlan,
     input: &RowSchema,
     binding: &BindingContext<'_>,
-) -> Result<(), SQLError> {
+) -> Result<u32, SQLError> {
     let mut analysis = Preparation {
         bound_condition_queries: None,
         routines,
@@ -575,11 +592,13 @@ pub(crate) fn assign_stored_input_collations(
         parameters: ParameterTypes::fixed(&[]).with_call_collations(),
         schema_expression: (),
     };
-    analysis.expression(&expression.scalar, input, &expression.subqueries)?;
+    let result = analysis.expression(&expression.scalar, input, &expression.subqueries)?;
+    let collation = u32::try_from(result.derivation.oid()).expect("selected collation OID");
     analysis
         .parameters
         .take_call_collations()
-        .apply(&mut expression.scalar, &mut expression.subqueries)
+        .apply(&mut expression.scalar, &mut expression.subqueries)?;
+    Ok(collation)
 }
 
 /// Restore input collations and type-observer selections on already bound stored queries without rereading constants or changing routine identities.
