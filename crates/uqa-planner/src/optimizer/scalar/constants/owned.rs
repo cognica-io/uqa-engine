@@ -110,7 +110,7 @@ pub(super) fn fold_selected(
         None => eligibility::scalar_type(&expression, resolver, control)?,
     };
     let (value, was_cast) = if strict_null {
-        // The result type is already selected. No operand coercion or function invocation contributes to a strict NULL result.
+        // The selected type and the NULL argument determine the result.
         drop(expression);
         (
             control.finish(Value::Null, control.empty_reservation())?,
@@ -121,15 +121,13 @@ pub(super) fn fold_selected(
             control.finish(Vec::new(), control.empty_reservation())?,
             control,
         )?;
-        let expression = if control.budget().is_some() && production.storage.budget().is_none() {
-            let admitted = expression.copy_for_rewrite(control)?;
-            drop(expression);
-            admitted
-        } else {
-            expression
-        };
-        let expression =
-            uqa_sql::bind_type_introspection_owned(expression, &empty, &[], resolver, control)?;
+        let expression = uqa_sql::bind_type_introspection_owned(
+            expression,
+            &empty,
+            &[],
+            resolver,
+            &production.storage,
+        )?;
         if let (
             Some(permissions),
             ScalarExpr::Func {

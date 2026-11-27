@@ -34165,6 +34165,19 @@
     {
       "package": "uqa-planner",
       "kind": "lib",
+      "test": "null_test_folding_keeps_caller_owned_text_for_evaluation",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/scalar/constants/tests/production.rs",
+      "capability": "Caller-owned constant evaluation",
+      "workload": "Apply IS NULL to a one MiB typed text literal using the Engine scalar evaluator under 16 KiB and under one MiB plus 8 KiB of scratch.",
+      "invariant": "The small allowance rejects evaluation with SQLSTATE 53200. The larger allowance returns false and releases all scratch.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
       "test": "produced_constant_clones_share_payload_metadata_and_live_allowance",
       "cases": 1,
       "source": "crates/uqa-planner/src/optimizer/scalar/constants/tests/production.rs",

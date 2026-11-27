@@ -84,6 +84,41 @@ fn strict_null_comparison_folds_without_binding_discarded_array_elements() {
 }
 
 #[test]
+fn null_test_folding_keeps_caller_owned_text_for_evaluation() {
+    const LENGTH: usize = 1 << 20;
+    let token = CancellationToken::new();
+    for bytes in [16 << 10, LENGTH + (8 << 10)] {
+        let memory = MemoryBudget::new(bytes);
+        let mut config =
+            crate::OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar_with_control);
+        config.production = ProductionControl::new(&memory, &token, &token);
+        let mut expression = ScalarExpr::IsNull {
+            expr: Box::new(ScalarExpr::TypedLiteral {
+                value: Value::Str("x".repeat(LENGTH)),
+                ty: "text".into(),
+                bound_type: Some(ColumnType::Text),
+                parameter_index: None,
+                collation_oid: None,
+                composite_source: None,
+            }),
+            negated: false,
+        };
+        let result = crate::optimizer::optimize_scalar_expression(&mut expression, &config);
+        if bytes < LENGTH {
+            assert_eq!(result.unwrap_err().sqlstate(), Some("53200"));
+        } else {
+            result.unwrap();
+            assert_eq!(
+                literal_value(&expression).unwrap().as_deref(),
+                Some(&Value::Bool(false))
+            );
+        }
+        drop(expression);
+        assert_eq!(memory.used(), 0);
+    }
+}
+
+#[test]
 fn constant_production_rejects_before_allocating_large_output() {
     for (bytes, cancelled) in [
         (0, None),
