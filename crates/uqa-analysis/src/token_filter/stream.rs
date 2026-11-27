@@ -69,9 +69,15 @@ impl PreparedCommonFilter<'_> {
                 |token, budget, poll| {
                     Ok(Some(match self {
                         Self::Lowercase(properties) => {
+                            if token.lowercase_ascii_in_place(poll)? {
+                                return Ok(None);
+                            }
                             super::lowercase::lower_budgeted(&token.term, properties, budget, poll)?
                         }
                         Self::ASCIIFolding => {
+                            if token.term.ascii_mut(poll)?.is_some() {
+                                return Ok(None);
+                            }
                             super::ascii::fold_budgeted(&token.term, budget, poll)?
                         }
                         _ if token.keyword => return Ok(None),
