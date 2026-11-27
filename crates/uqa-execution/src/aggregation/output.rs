@@ -9,8 +9,8 @@
 use super::{
     aggregate_slot_index, compile_group_slots, compile_having_aggregate_slots,
     compile_projection_aggregate_slots, contains_aggregate, eval_scalar, expr_references_columns,
-    exprs_match, group_context_row, AggregateAccumulator, PlanSubqueryArena, QueryBlockPlan,
-    QueryExpressionContext, SQLError, SQLParam, ScalarEvalContext, ScalarExpr, SpillBuffer, Value,
+    exprs_match, AggregateAccumulator, PlanSubqueryArena, QueryBlockPlan, QueryExpressionContext,
+    SQLError, SQLParam, ScalarEvalContext, ScalarExpr, SpillBuffer, Value,
 };
 use crate::{Batch, OwnedPhysicalRow, PhysicalRow, RowSchema};
 use uqa_sql::expr::RowLookup;
@@ -179,9 +179,24 @@ impl AggregateOutputPlan {
     }
 }
 
+#[derive(Clone, Copy)]
+pub(super) struct GroupOutputScope<'a> {
+    pub(super) group_by: &'a [ScalarExpr],
+    pub(super) subqueries: &'a [uqa_sql::plan::QueryPlan],
+}
+
+impl<'a> From<&'a QueryBlockPlan> for GroupOutputScope<'a> {
+    fn from(block: &'a QueryBlockPlan) -> Self {
+        Self {
+            group_by: &block.group_by,
+            subqueries: &block.subqueries,
+        }
+    }
+}
+
 pub(super) fn finish_group(
     context: &dyn QueryExpressionContext,
-    statement: &QueryBlockPlan,
+    scope: GroupOutputScope<'_>,
     output_plan: &AggregateOutputPlan,
     mut accumulators: Vec<AggregateAccumulator>,
     group_values: &[Value],
@@ -210,8 +225,8 @@ pub(super) fn finish_group(
             })
             .collect::<Result<Vec<_>, _>>()?;
         let hook = context;
-        let subquery_arena = PlanSubqueryArena::new(&statement.subqueries, Some(hook));
-        debug_assert_eq!(labels.len(), statement.projections.len());
+        let subquery_arena = PlanSubqueryArena::new(scope.subqueries, Some(hook));
+        debug_assert_eq!(labels.len(), output_plan.projections.len());
         let mut group_row = None;
         let mut values = Vec::with_capacity(output_plan.projections.len());
 
@@ -223,7 +238,7 @@ pub(super) fn finish_group(
                         .then(|| {
                             group_row.get_or_insert_with(|| {
                                 outer::group_row(
-                                    statement,
+                                    scope.group_by,
                                     group_values,
                                     output_plan.outer.as_deref(),
                                 )
@@ -263,7 +278,7 @@ pub(super) fn finish_group(
         if let Some(having) = output_plan.having.as_ref() {
             let having_row = having.uses_group_row.then(|| {
                 group_row.take().unwrap_or_else(|| {
-                    outer::group_row(statement, group_values, output_plan.outer.as_deref())
+                    outer::group_row(scope.group_by, group_values, output_plan.outer.as_deref())
                 })
             });
             let lookup = AggregateOutputLookup {

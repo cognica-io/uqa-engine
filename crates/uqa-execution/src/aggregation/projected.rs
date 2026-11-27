@@ -60,9 +60,6 @@ pub(super) fn group_hash<S: BuildHasher, Row: RowLookup>(
     build_hasher: &S,
     enums: Option<&dyn uqa_sql::expr::enums::EnumLabelCatalog>,
 ) -> ExecResult<u64> {
-    if let Some(key) = compact_text_pair(columns, row) {
-        return Ok(key);
-    }
     crate::distinct::hash_typed_row_with_catalog(
         build_hasher,
         columns

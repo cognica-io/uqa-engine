@@ -210,7 +210,7 @@ fn group_output_closes_every_state_on_success_filter_or_expression_failure() {
             instantiate_aggregate_accumulators(&vec![template; targets.len()], 1024).unwrap();
         let error = super::super::output::finish_group(
             &Services,
-            &block,
+            block.as_ref().into(),
             &plan,
             accumulators,
             &[],

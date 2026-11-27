@@ -8,7 +8,7 @@
 
 use crate::{OwnedPhysicalRow, PhysicalRow, RowSchema};
 use uqa_core::Value;
-use uqa_sql::{ast::InternalRelationId, plan::QueryBlockPlan, ScalarExpr};
+use uqa_sql::{ast::InternalRelationId, ScalarExpr};
 
 /// The enclosing fragment's original physical position, captured before set projections append extra local values.
 #[derive(Clone)]
@@ -66,11 +66,11 @@ pub(super) fn uses_finalized_inputs(
 }
 
 pub(super) fn group_row(
-    statement: &QueryBlockPlan,
+    group_by: &[ScalarExpr],
     group_values: &[Value],
     outer: Option<&OwnedPhysicalRow>,
 ) -> OwnedPhysicalRow {
-    let group = super::group_context_row(statement, group_values);
+    let group = crate::aggregation::analysis::group_key_row(group_by, group_values);
     let Some(outer) = outer else {
         return group;
     };

@@ -52,7 +52,7 @@ fn constant_group_outputs_read_finalized_slots_without_an_input_row() {
         assert_eq!(
             finish_group(
                 &Services,
-                &statement,
+                (&statement).into(),
                 &output,
                 accumulators,
                 &[Value::Bool(true)],
@@ -83,7 +83,7 @@ fn grouped_expression_outputs_keep_the_finalized_null_value() {
     assert_eq!(
         finish_group(
             &Services,
-            &statement,
+            (&statement).into(),
             &output,
             Vec::new(),
             &[Value::Null],
@@ -164,7 +164,7 @@ fn enclosing_group_outputs_survive_empty_input_and_appended_local_slots() {
                 assert_eq!(
                     finish_group(
                         &Services,
-                        &active,
+                        (&active).into(),
                         &output,
                         vec![count],
                         &keys,

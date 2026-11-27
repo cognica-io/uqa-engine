@@ -6,11 +6,12 @@
 
 //! Finalization for in-memory and spilled adaptive aggregate state.
 
+use crate::aggregation::output::GroupOutputScope;
 use crate::{PhysicalOperator, PhysicalRow, RowSchema};
 
 use super::{
-    AdaptiveAggregateSet, AggregateAccumulator, QueryBlockPlan, QueryExpressionContext, SQLError,
-    SQLParam, SpillBuffer, Value,
+    AdaptiveAggregateSet, AggregateAccumulator, QueryExpressionContext, SQLError, SQLParam,
+    SpillBuffer, Value,
 };
 
 impl AdaptiveAggregateSet {
@@ -40,15 +41,21 @@ impl AdaptiveAggregateSet {
         output_schema: &RowSchema,
         params: &[SQLParam],
     ) -> Result<SpillBuffer, SQLError> {
-        if self.groups.is_empty() && self.statement.group_by.is_empty() {
-            self.ensure_active_group(&[])?;
+        if self.groups.is_empty() && self.group_by.is_empty() {
+            self.ungrouped_index()?.ok_or_else(|| {
+                SQLError::Internal("abandoned aggregate state cannot accept projected rows".into())
+            })?;
         }
         let mut output = SpillBuffer::new(self.spill_budget);
         let mut pending = Vec::with_capacity(crate::batch::DEFAULT_BATCH_SIZE);
+        let scope = GroupOutputScope {
+            group_by: &self.group_by,
+            subqueries: &self.subqueries,
+        };
         for entry in &mut self.groups {
             if let Some(row) = super::super::output::finish_group(
                 context,
-                &self.statement,
+                scope,
                 &self.output_plan,
                 std::mem::take(&mut entry.state.accumulators),
                 &entry.key,
@@ -115,6 +122,10 @@ impl AdaptiveAggregateSet {
         let mut output = SpillBuffer::new(self.spill_budget);
         let mut pending = Vec::with_capacity(crate::batch::DEFAULT_BATCH_SIZE);
 
+        let scope = GroupOutputScope {
+            group_by: &self.group_by,
+            subqueries: &self.subqueries,
+        };
         let execution = (|| -> Result<(), SQLError> {
             while let Some(batch) = sorted
                 .next()
@@ -138,7 +149,7 @@ impl AdaptiveAggregateSet {
                     {
                         finish_merged_group(
                             context,
-                            &self.statement,
+                            scope,
                             &self.output_plan,
                             params,
                             output_schema,
@@ -161,7 +172,7 @@ impl AdaptiveAggregateSet {
             if let Some(key) = current_key.take() {
                 finish_merged_group(
                     context,
-                    &self.statement,
+                    scope,
                     &self.output_plan,
                     params,
                     output_schema,
@@ -191,7 +202,7 @@ impl AdaptiveAggregateSet {
 )]
 fn finish_merged_group(
     context: &dyn QueryExpressionContext,
-    statement: &QueryBlockPlan,
+    scope: GroupOutputScope<'_>,
     output_plan: &super::super::output::AggregateOutputPlan,
     params: &[SQLParam],
 
@@ -203,7 +214,7 @@ fn finish_merged_group(
 ) -> Result<(), SQLError> {
     if let Some(row) = super::super::output::finish_group(
         context,
-        statement,
+        scope,
         output_plan,
         accumulators,
         &key,
