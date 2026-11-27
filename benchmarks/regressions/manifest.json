@@ -41526,6 +41526,22 @@
     {
       "package": "uqa-engine",
       "kind": "lib",
+      "test": "implicit_reads_select_undo_only_before_the_first_write",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/transactions/snapshots/tests.rs",
+      "capability": "Session catalog and retained query snapshots",
+      "workload": "Read a temporary table and a sequence position, promote a writer, and roll back rows and nested writes on memory, native SQLite, SQLite Key/Value and redb.",
+      "invariant": "An implicit reader selects no transaction data until its first write. The writer captures its original rows once and preserves autonomous sequence changes on rollback.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
       "test": "unchanged_transaction_admission_captures_session_state_once",
       "cases": 4,
       "source": "crates/uqa-engine/src/transactions/snapshots/tests.rs",

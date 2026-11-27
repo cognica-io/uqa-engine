@@ -6,9 +6,13 @@
 
 //! Transaction data snapshots and rollback restoration.
 
-use super::{Engine, EngineDataSnapshot, SQLError, SessionStateSnapshot};
+use super::{
+    Engine, EngineDataSnapshot, SQLError, SessionStateSnapshot, TransactionFrame,
+    TransactionFrameKind,
+};
 use crate::TableDataSnapshot;
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 mod table;
 
@@ -22,6 +26,44 @@ pub(super) enum SnapshotBoundary {
     PrivateUndo,
 }
 
+pub(crate) enum FrameDataSnapshot {
+    Deferred,
+    Captured(Arc<EngineDataSnapshot>),
+    StorageSavepoint,
+}
+
+impl FrameDataSnapshot {
+    pub(super) fn outer(engine: &Engine, kind: TransactionFrameKind) -> Result<Self, SQLError> {
+        if kind == TransactionFrameKind::ImplicitRead {
+            Ok(Self::Deferred)
+        } else {
+            engine
+                .snapshot_transaction_data(SnapshotBoundary::CommittedOriginal)
+                .map(Self::Captured)
+        }
+    }
+
+    pub(crate) fn as_ref(&self) -> Option<&Arc<EngineDataSnapshot>> {
+        match self {
+            Self::Captured(snapshot) => Some(snapshot),
+            Self::Deferred | Self::StorageSavepoint => None,
+        }
+    }
+}
+
+impl TransactionFrame {
+    /// Select the outer frame's originals under transaction admission, before its first private mutation, autonomous sequence write or committed capture.
+    pub(crate) fn select_original_data(&mut self, engine: &Engine) -> Result<(), SQLError> {
+        if matches!(self.data_snapshot, FrameDataSnapshot::Deferred) {
+            let original = engine.snapshot_transaction_data(SnapshotBoundary::CommittedOriginal)?;
+            self.nontransactional_sequence_values =
+                Engine::transaction_sequence_values(Some(&original));
+            self.data_snapshot = FrameDataSnapshot::Captured(original);
+        }
+        Ok(())
+    }
+}
+
 impl Drop for crate::EngineSnapshotData {
     fn drop(&mut self) {
         // Retire immutable membership while its component source owners still exist.
@@ -32,10 +74,17 @@ impl Drop for crate::EngineSnapshotData {
 mod tests;
 
 impl Engine {
+    pub(crate) fn select_transaction_undo(&self) -> Result<(), SQLError> {
+        if let Some(frame) = self.session.transactions.lock().first_mut() {
+            frame.select_original_data(self)?;
+        }
+        Ok(())
+    }
+
     pub(super) fn snapshot_transaction_data(
         &self,
         boundary: SnapshotBoundary,
-    ) -> Result<Option<std::sync::Arc<EngineDataSnapshot>>, SQLError> {
+    ) -> Result<Arc<EngineDataSnapshot>, SQLError> {
         let mut tables = BTreeMap::new();
         let mut owners = BTreeMap::new();
         let generation = (matches!(boundary, SnapshotBoundary::CommittedOriginal)
@@ -58,7 +107,7 @@ impl Engine {
             .map(|registry| crate::state::SnapshotSources::new(registry, &tables, &durable))
             .transpose()
             .map_err(|error| Self::storage_tx_error("snapshot table source membership", &error))?;
-        Ok(Some(std::sync::Arc::new(EngineDataSnapshot {
+        Ok(Arc::new(EngineDataSnapshot {
             table_owners: owners,
             data: std::sync::Arc::new(crate::EngineSnapshotData {
                 tables,
@@ -67,7 +116,7 @@ impl Engine {
                 durable,
             }),
             foreign_memory_tables: self.extensions.foreign_memory_tables.read().clone(),
-        })))
+        }))
     }
 
     /// Memory-engine rollback path: snapshots only exist when no persistent

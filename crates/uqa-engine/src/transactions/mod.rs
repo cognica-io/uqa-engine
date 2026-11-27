@@ -34,6 +34,7 @@ mod savepoints;
 mod scope;
 use scope::TransactionScope;
 mod snapshots;
+pub(super) use snapshots::FrameDataSnapshot;
 
 mod constraints;
 pub(crate) use constraints::DeferredReferencedKey;

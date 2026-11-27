@@ -70,8 +70,9 @@ fn transaction_generations_preserve_private_savepoint_and_failed_statement_state
     sql(&engine, "BEGIN");
     let committed = engine.session.transactions.lock()[0]
         .data_snapshot
-        .clone()
-        .unwrap();
+        .as_ref()
+        .unwrap()
+        .clone();
     let committed_image = image(&committed);
     sql(&engine, "ALTER TABLE docs ADD COLUMN extra integer DEFAULT 7; UPDATE docs SET body='private'; SAVEPOINT retained");
     let private = engine.session.transactions.lock()[0].savepoints[0]
@@ -146,9 +147,13 @@ fn transaction_generations_share_large_table_metadata_and_restore_original_roots
     let constraints = table.key_constraints.snapshot();
     let mut snapshot = None;
     let allocated = allocation_counter::measure(|| {
-        snapshot = engine
-            .snapshot_transaction_data(super::super::snapshots::SnapshotBoundary::CommittedOriginal)
-            .unwrap();
+        snapshot = Some(
+            engine
+                .snapshot_transaction_data(
+                    super::super::snapshots::SnapshotBoundary::CommittedOriginal,
+                )
+                .unwrap(),
+        );
     });
     assert!(allocated.bytes_total < 64 * 1024, "{allocated:?}");
     let snapshot = snapshot.unwrap();

@@ -32,6 +32,18 @@ impl SequenceValueContext<'_> {
             .with_value_transaction(Box::new(|| self.nextval_locked(name)))
     }
 
+    fn begin_value_write(&self, temporary: bool) -> Result<(), SequenceValueError> {
+        if !temporary {
+            self.runtime
+                .require_sequence_value_durability()
+                .map_err(|error| {
+                    persistence::sequence_storage_error("retain sequence durability", error)
+                })?;
+        }
+        self.transactions.begin_value_write()?;
+        Ok(())
+    }
+
     fn nextval_locked(&self, name: &str) -> Result<i64, SequenceValueError> {
         let bound = self.bind_sequence_value_reference(name)?;
         loop {
@@ -40,13 +52,7 @@ impl SequenceValueContext<'_> {
             if self.runtime.current_transaction_is_read_only() && !target.temporary {
                 return Err(SequenceValueError::ReadOnly("nextval"));
             }
-            if !target.temporary {
-                self.runtime
-                    .require_sequence_value_durability()
-                    .map_err(|error| {
-                        persistence::sequence_storage_error("retain sequence durability", error)
-                    })?;
-            }
+            self.begin_value_write(target.temporary)?;
             let mut caches = self.runtime.caches();
             if Self::has_cached_nextval(&target, &caches) {
                 let result = self.runtime.with_sequence_histories(Box::new(|histories| {
@@ -208,13 +214,7 @@ impl SequenceValueContext<'_> {
                     max,
                 });
             }
-            if !target.temporary {
-                self.runtime
-                    .require_sequence_value_durability()
-                    .map_err(|error| {
-                        persistence::sequence_storage_error("retain sequence durability", error)
-                    })?;
-            }
+            self.begin_value_write(target.temporary)?;
             if let Some(value) = self.setval_target(target, value, is_called)? {
                 return Ok(value);
             }

@@ -10,7 +10,7 @@
 
 use super::{
     failed_transaction_error, snapshots::SnapshotBoundary, BackendTransactionMode,
-    ConstraintModeState, Engine, EngineDataSnapshot, SQLError, SessionStateSnapshot,
+    ConstraintModeState, Engine, FrameDataSnapshot, SQLError, SessionStateSnapshot,
     StorageBackendError, StorageSavepointId, TransactionCharacteristicsState,
     TransactionDirtyState, TransactionFrame, TransactionFrameKind, TransactionIntent,
     TransactionStatus,
@@ -173,9 +173,13 @@ impl Engine {
         let characteristics = self.default_transaction_characteristics();
         self.begin_transaction_frame(
             &mut stack,
-            read_only || characteristics.read_only,
+            read_only,
             true,
-            TransactionFrameKind::ImplicitStatement,
+            if read_only {
+                TransactionFrameKind::ImplicitRead
+            } else {
+                TransactionFrameKind::ImplicitStatement
+            },
             characteristics,
         )
     }
@@ -230,9 +234,10 @@ impl Engine {
         let started_at_micros = self.statement_timestamp_micros();
         let (storage_savepoint, data_snapshot, snapshot_change_baseline) = if outer {
             let (data_snapshot, baseline) =
-                self.begin_outer_transaction_with_notifications(read_only, defer_write_lock)?;
+                self.begin_outer_transaction_with_notifications(read_only, defer_write_lock, kind)?;
             (None, data_snapshot, baseline)
         } else {
+            stack[0].select_original_data(self)?;
             let baseline = stack[0].snapshot_change_baseline.clone();
             let savepoint = StorageSavepointId::allocate();
             if let Some(backend) = self.storage.backend.as_ref() {
@@ -241,10 +246,18 @@ impl Engine {
                         .savepoint(savepoint)
                         .map_err(|err| Self::storage_tx_error("nested BEGIN savepoint", &err))?;
                 }
-                (Some(savepoint), None, baseline)
+                (
+                    Some(savepoint),
+                    FrameDataSnapshot::StorageSavepoint,
+                    baseline,
+                )
             } else {
                 let snapshot = self.snapshot_transaction_data(SnapshotBoundary::PrivateUndo)?;
-                (Some(savepoint), snapshot, baseline)
+                (
+                    Some(savepoint),
+                    FrameDataSnapshot::Captured(snapshot),
+                    baseline,
+                )
             }
         };
         // Successful admission selects the rollback state from the same refreshed catalog as the data snapshot. The preceding state belongs only to failed-BEGIN recovery; retaining it would keep invalidated analysis alive and resurrect its cache on rollback.
@@ -268,11 +281,13 @@ impl Engine {
         let backend_mode = self.frame_backend_mode(outer, defer_write_lock);
         let (implicit_statement, explicit_transaction_block) = match kind {
             TransactionFrameKind::ExplicitBlock => (false, true),
-            TransactionFrameKind::ImplicitStatement => (true, false),
+            TransactionFrameKind::ImplicitStatement | TransactionFrameKind::ImplicitRead => {
+                (true, false)
+            }
             TransactionFrameKind::SimpleQuery => (false, false),
         };
         let nontransactional_sequence_values =
-            Self::transaction_sequence_values(data_snapshot.as_deref());
+            Self::transaction_sequence_values(data_snapshot.as_ref().map(std::sync::Arc::as_ref));
         stack.push(TransactionFrame {
             started_at_micros,
             implicit_statement,
@@ -334,15 +349,10 @@ impl Engine {
         &self,
         read_only: bool,
         defer_write_lock: bool,
-    ) -> Result<
-        (
-            Option<std::sync::Arc<EngineDataSnapshot>>,
-            crate::row_locks::RowChangeBaseline,
-        ),
-        SQLError,
-    > {
+        kind: TransactionFrameKind,
+    ) -> Result<(FrameDataSnapshot, crate::row_locks::RowChangeBaseline), SQLError> {
         self.begin_notification_transaction()?;
-        self.begin_outer_transaction_snapshot(read_only, defer_write_lock)
+        self.begin_outer_transaction_snapshot(read_only, defer_write_lock, kind)
             .map_err(|error| match self.rollback_notification_state() {
                 Ok(()) => error,
                 Err(notification_error) => SQLError::Internal(format!(
@@ -377,13 +387,8 @@ impl Engine {
         &self,
         read_only: bool,
         defer_write_lock: bool,
-    ) -> Result<
-        (
-            Option<std::sync::Arc<EngineDataSnapshot>>,
-            crate::row_locks::RowChangeBaseline,
-        ),
-        SQLError,
-    > {
+        kind: TransactionFrameKind,
+    ) -> Result<(FrameDataSnapshot, crate::row_locks::RowChangeBaseline), SQLError> {
         let Some(backend) = self.storage.backend.as_ref() else {
             let snapshot_gate = self
                 .row_locks
@@ -395,7 +400,7 @@ impl Engine {
             self.synchronize_catalog_registries()
                 .map_err(|err| Self::storage_tx_error("BEGIN registry refresh", &err))?;
             return Ok((
-                self.snapshot_transaction_data(SnapshotBoundary::CommittedOriginal)?,
+                FrameDataSnapshot::outer(self, kind)?,
                 snapshot_gate.baseline()?,
             ));
         };
@@ -442,8 +447,7 @@ impl Engine {
             .map_err(|error| Self::storage_tx_error("BEGIN pinned snapshot refresh", &error))
             .and_then(|()| snapshot_gate.baseline())
             .and_then(|baseline| {
-                self.snapshot_transaction_data(SnapshotBoundary::CommittedOriginal)
-                    .map(|snapshot| (snapshot, baseline))
+                FrameDataSnapshot::outer(self, kind).map(|snapshot| (snapshot, baseline))
             });
         snapshot.map_err(|error| {
             let original = before_refresh.unwrap_or_else(|| self.snapshot_session_state());

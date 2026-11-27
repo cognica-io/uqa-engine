@@ -89,6 +89,50 @@ fn prepare(job: &mut RestoreJob<'_>) {
 }
 
 #[test]
+fn backup_from_an_implicit_read_uses_the_committed_version_across_writer_promotion() {
+    let directory = tempfile::tempdir().unwrap();
+    let repo = repository(&directory.path().join("repository"));
+    let source = Engine::new();
+    source
+        .sql(
+            "CREATE TABLE items(id integer PRIMARY KEY); INSERT INTO items VALUES (1)",
+            &[],
+        )
+        .unwrap();
+
+    source.begin_implicit_statement_transaction(true).unwrap();
+    let full = capture(&source, &repo, None);
+    source.sql("DELETE FROM items", &[]).unwrap();
+    source.rollback().unwrap();
+
+    source.sql("INSERT INTO items VALUES (2)", &[]).unwrap();
+    source.begin_implicit_statement_transaction(true).unwrap();
+    source.sql("DELETE FROM items WHERE id=1", &[]).unwrap();
+    let incremental = capture(&source, &repo, Some(full.backup()));
+    source.rollback().unwrap();
+    drop(source);
+
+    let control = StorageReadControl::with_limit(32 << 20);
+    for (root, expected) in [
+        (full, vec![Value::Int(1)]),
+        (incremental, vec![Value::Int(1), Value::Int(2)]),
+    ] {
+        let mut job = begin(&repo, root, &control);
+        prepare(&mut job);
+        let rows = job
+            .publish()
+            .unwrap()
+            .sql("SELECT id FROM items ORDER BY id", &[])
+            .unwrap();
+        assert_eq!(
+            rows.rows.iter().map(|row| &row["id"]).collect::<Vec<_>>(),
+            expected.iter().collect::<Vec<_>>()
+        );
+    }
+    assert_eq!(control.memory().used(), 0);
+}
+
+#[test]
 fn memory_restore_job_activates_full_and_incremental_images_after_source_retirement() {
     for incremental in [false, true] {
         let directory = tempfile::tempdir().unwrap();

@@ -291,6 +291,7 @@ enum TransactionStatus {
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum TransactionFrameKind {
     ExplicitBlock,
+    ImplicitRead,
     ImplicitStatement,
     SimpleQuery,
 }
@@ -349,7 +350,7 @@ struct TransactionFrame {
     xid_levels: Vec<Option<u32>>,
     savepoints: Vec<TransactionSavepoint>,
     session_snapshot: SessionStateSnapshot,
-    data_snapshot: Option<std::sync::Arc<EngineDataSnapshot>>,
+    data_snapshot: transactions::FrameDataSnapshot,
     dirty_at_begin: TransactionDirtyState,
     prepared_changes: uqa_execution::statement::prepared::invalidation::PreparedInvalidationLog,
     /// Lock mark this frame started with. Rolling the whole frame back releases every acquisition at or above it, independent of the savepoint marks the frame allocated later.

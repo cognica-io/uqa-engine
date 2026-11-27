@@ -30,8 +30,9 @@ impl Engine {
                 message: "SAVEPOINT can only be used in transaction blocks".into(),
             });
         }
+        stack[0].select_original_data(self)?;
         let session_snapshot = self.snapshot_session_state();
-        let data_snapshot = self.snapshot_transaction_data(SnapshotBoundary::PrivateUndo)?;
+        let data_snapshot = Some(self.snapshot_transaction_data(SnapshotBoundary::PrivateUndo)?);
         let deferred = Self::backend_savepoints_deferred(stack);
         let storage_savepoint = StorageSavepointId::allocate();
         let frame = stack.last_mut().ok_or_else(|| {

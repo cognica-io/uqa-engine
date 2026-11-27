@@ -97,6 +97,10 @@ impl SequenceValueRuntime for Engine {
 }
 
 impl SequenceValueTransactions for Engine {
+    fn begin_value_write(&self) -> Result<(), SQLError> {
+        self.select_transaction_undo()
+    }
+
     fn with_value_transaction(
         &self,
         operation: SequenceValueOperation<'_>,

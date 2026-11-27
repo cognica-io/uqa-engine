@@ -497,6 +497,9 @@ impl Engine {
 
     fn promote_transaction_writer(&self, refresh: bool) -> Result<bool, SQLError> {
         let mut stack = self.session.transactions.lock();
+        if let Some(outer) = stack.first_mut() {
+            outer.select_original_data(self)?;
+        }
         let promoted = if stack
             .first()
             .is_some_and(|frame| frame.backend_mode == BackendTransactionMode::Versioned)
