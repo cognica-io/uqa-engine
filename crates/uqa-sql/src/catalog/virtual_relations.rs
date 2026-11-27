@@ -128,6 +128,42 @@ impl VirtualRelation {
         })
     }
 
+    pub const fn accepts_row_lock(self) -> bool {
+        matches!(
+            self,
+            Self::PgNamespace
+                | Self::PgClass
+                | Self::PgInherits
+                | Self::PgPartitionedTable
+                | Self::PgAttribute
+                | Self::PgAttrdef
+                | Self::PgConstraint
+                | Self::PgIndex
+                | Self::PgTrigger
+                | Self::PgRewrite
+                | Self::PgType
+                | Self::PgCast
+                | Self::PgOpclass
+                | Self::PgRange
+                | Self::PgEnum
+                | Self::PgProc
+                | Self::PgLanguage
+                | Self::PgExtension
+                | Self::PgForeignDataWrapper
+                | Self::PgForeignServer
+                | Self::PgForeignTable
+                | Self::PgDatabase
+                | Self::PgAuthid
+                | Self::PgAuthMembers
+                | Self::PgDefaultAcl
+                | Self::PgDescription
+                | Self::PgDepend
+                | Self::PgShdepend
+                | Self::AgGraph
+                | Self::AgLabel
+        )
+    }
+
     pub const fn kind(self) -> &'static str {
         if self.accepts_row_lock() {
             "table"

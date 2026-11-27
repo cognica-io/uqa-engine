@@ -518,6 +518,40 @@ pub(super) fn compile_call(stmt: &pg_query::protobuf::CallStmt) -> Result<Statem
     Ok(Statement::Call { name, args })
 }
 
+pub(super) fn compile_routine_name_change(
+    object_type: pg_query::protobuf::ObjectType,
+    target: Option<&Node>,
+    destination: &str,
+    set_schema: bool,
+) -> Result<Option<Statement>> {
+    use crate::ast::{AlterRoutineKind, RenameRoutineStmt};
+    use pg_query::protobuf::ObjectType;
+    let (kind, context) = match object_type {
+        ObjectType::ObjectFunction => (AlterRoutineKind::Function, "ALTER FUNCTION"),
+        ObjectType::ObjectProcedure => (AlterRoutineKind::Procedure, "ALTER PROCEDURE"),
+        ObjectType::ObjectRoutine => (AlterRoutineKind::Routine, "ALTER ROUTINE"),
+        _ => return Ok(None),
+    };
+    let Some(NodeEnum::ObjectWithArgs(object)) = target.and_then(|node| node.node.as_ref()) else {
+        return Err(SQLError::Internal(format!(
+            "{context}: malformed routine target"
+        )));
+    };
+    let CompiledRoutineTarget {
+        name,
+        arg_types,
+        arg_type_references,
+    } = compile_object_with_args(object, context)?;
+    Ok(Some(Statement::RenameRoutine(RenameRoutineStmt {
+        kind,
+        name,
+        arg_types,
+        arg_type_references,
+        new_name: render_relation_component(destination),
+        set_schema,
+    })))
+}
+
 pub(super) fn compile_drop_function(
     stmt: &pg_query::protobuf::DropStmt,
     is_procedure: bool,

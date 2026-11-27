@@ -13,7 +13,7 @@ mod identity;
 use super::relations::{
     collect_def_elem_options, validate_materialized_view_options, validate_view_options,
 };
-use super::routines::{compile_drop_function, compile_object_with_args, CompiledRoutineTarget};
+use super::routines::{compile_drop_function, compile_routine_name_change};
 use super::types::{
     compile_foreign_key_action, compile_foreign_key_match, preserve_alter_type_declaration,
     validate_foreign_key_set_columns,
@@ -24,8 +24,7 @@ use super::{
     NodeEnum, Result, SQLError, Statement, TableKeyConstraint, TableKeyConstraintKind,
 };
 use crate::ast::{
-    AlterRoutineKind, AlterSequence, EventEnableMode, ForeignKey, RelationPersistence,
-    RenameRoutineStmt, SequenceLifecycle, TableCheck,
+    AlterSequence, EventEnableMode, ForeignKey, RelationPersistence, SequenceLifecycle, TableCheck,
 };
 
 fn extract_strings(nodes: &[pg_query::protobuf::Node]) -> Result<Vec<String>> {
@@ -858,39 +857,6 @@ pub(super) fn compile_rename(stmt: &pg_query::protobuf::RenameStmt) -> Result<St
         return Ok(routine);
     }
     compile_relation_rename(stmt)
-}
-
-pub(super) fn compile_routine_name_change(
-    object_type: pg_query::protobuf::ObjectType,
-    target: Option<&Node>,
-    destination: &str,
-    set_schema: bool,
-) -> Result<Option<Statement>> {
-    use pg_query::protobuf::ObjectType;
-    let (kind, context) = match object_type {
-        ObjectType::ObjectFunction => (AlterRoutineKind::Function, "ALTER FUNCTION"),
-        ObjectType::ObjectProcedure => (AlterRoutineKind::Procedure, "ALTER PROCEDURE"),
-        ObjectType::ObjectRoutine => (AlterRoutineKind::Routine, "ALTER ROUTINE"),
-        _ => return Ok(None),
-    };
-    let Some(NodeEnum::ObjectWithArgs(object)) = target.and_then(|node| node.node.as_ref()) else {
-        return Err(SQLError::Internal(format!(
-            "{context}: malformed routine target"
-        )));
-    };
-    let CompiledRoutineTarget {
-        name,
-        arg_types,
-        arg_type_references,
-    } = compile_object_with_args(object, context)?;
-    Ok(Some(Statement::RenameRoutine(RenameRoutineStmt {
-        kind,
-        name,
-        arg_types,
-        arg_type_references,
-        new_name: render_relation_component(destination),
-        set_schema,
-    })))
 }
 
 fn compile_relation_rename(stmt: &pg_query::protobuf::RenameStmt) -> Result<Statement> {
