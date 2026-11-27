@@ -112,6 +112,55 @@ fn distinct_predicates_in_parameterized_mutations(#[case] provider: usize) {
 }
 
 #[test]
+fn distinct_mutations_compare_vector_and_tensor_columns() {
+    use uqa_engine::SQLParam;
+
+    let eng = engine();
+    eng.sql(
+        "CREATE TABLE items (id integer, v vector(2), t tensor(2))",
+        &[],
+    )
+    .unwrap();
+    eng.sql(
+        "INSERT INTO items VALUES (1, $1, $2), (2, NULL, NULL)",
+        &[
+            SQLParam::Vector(vec![1.0, 2.0]),
+            SQLParam::Tensor(vec![vec![3.0, 4.0]]),
+        ],
+    )
+    .unwrap();
+    let null = [SQLParam::scalar(Value::Null)];
+    for (sql, params, tag) in [
+        (
+            "UPDATE items SET id=id WHERE v IS NOT DISTINCT FROM v",
+            &[][..],
+            "UPDATE 2",
+        ),
+        (
+            "UPDATE items SET id=id WHERE t IS DISTINCT FROM t",
+            &[],
+            "UPDATE 0",
+        ),
+        (
+            "UPDATE items SET id=id WHERE $1 IS NOT DISTINCT FROM v",
+            &null,
+            "UPDATE 1",
+        ),
+        (
+            "DELETE FROM items WHERE t IS DISTINCT FROM $1",
+            &null,
+            "DELETE 1",
+        ),
+    ] {
+        let result = eng
+            .sql_batch(&[(sql, params)])
+            .unwrap_or_else(|error| panic!("{sql}: {error}"));
+        assert_eq!(result[0].command_tag.as_deref(), Some(tag), "{sql}");
+    }
+    assert_eq!(scalar(&eng, "SELECT id FROM items"), Value::Int(2));
+}
+
+#[test]
 fn row_comparisons_are_lexicographic() {
     let eng = engine();
     assert_eq!(scalar(&eng, "SELECT (1, 2) < (1, 3)"), Value::Bool(true));

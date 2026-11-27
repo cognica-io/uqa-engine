@@ -398,6 +398,9 @@ fn distinct_predicates_infer_equality_operand_types() {
         ("UPDATE assignment_target SET id=$1 WHERE $2 IS DISTINCT FROM value", vec![ColumnType::Integer, ColumnType::Array(Box::new(ColumnType::Integer))]),
         ("DELETE FROM assignment_target WHERE EXISTS (SELECT 1 WHERE assignment_target.id IS NOT DISTINCT FROM $1)", vec![ColumnType::Integer]),
         ("SELECT $1 IS DISTINCT FROM $2", vec![ColumnType::Text, ColumnType::Text]),
+        ("SELECT NULL::vector(3) IS NOT DISTINCT FROM NULL::vector(3)", vec![]),
+        ("UPDATE assignment_target SET id=id WHERE NULL::vector(3) IS DISTINCT FROM $1", vec![ColumnType::Vector(3)]),
+        ("DELETE FROM assignment_target WHERE $1 IS NOT DISTINCT FROM NULL::tensor(4)", vec![ColumnType::Tensor(4)]),
         ("DELETE FROM assignment_target WHERE ROW(id, value) IS NOT DISTINCT FROM ROW($1, $2)", vec![ColumnType::Integer, ColumnType::Array(Box::new(ColumnType::Integer))]),
     ] {
         let types = infer(sql, &vec![None; expected.len()])
