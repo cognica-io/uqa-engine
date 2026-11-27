@@ -107,7 +107,7 @@ pub(super) fn lock<'a, T>(
 pub(super) fn read<'a>(
     lock: &'a crate::state::SessionStateLock,
     cancellation: &CancellationToken,
-) -> Result<RwLockReadGuard<'a, crate::SessionStateSnapshot>, SQLError> {
+) -> Result<RwLockReadGuard<'a, crate::SessionState>, SQLError> {
     loop {
         cancellation.check()?;
         if let Some(guard) = lock.try_read_for(WAIT_SLICE) {

@@ -14,11 +14,11 @@ use std::time::Duration;
 use uqa_sql::semantics::parameters::catalog::{find_parameter, message_levels};
 use uqa_sql::semantics::parameters::definition::ParameterKind;
 
-use crate::SessionStateSnapshot;
+use crate::SessionState;
 
 /// The session's transactional values behind one lock. Each write, whatever restores or changes the values, leaves `client_level` at the `client_min_messages` the values hold, which the session's notice queue reads as notices arrive, and the session's cancellation token at the `lock_timeout` they hold, which lock waits read as they wait.
 pub(crate) struct SessionStateLock {
-    state: RwLock<SessionStateSnapshot>,
+    state: RwLock<SessionState>,
     client_level: Arc<AtomicU8>,
     /// The level when no assignment in the values names `client_min_messages`: the client's startup value or the default.
     reset_client_level: AtomicU8,
@@ -32,7 +32,7 @@ pub(crate) struct SessionStateLock {
 }
 
 impl SessionStateLock {
-    pub(crate) fn new(state: SessionStateSnapshot) -> Self {
+    pub(crate) fn new(state: SessionState) -> Self {
         let io_timing = state
             .session_vars
             .get("track_io_timing")
@@ -55,14 +55,14 @@ impl SessionStateLock {
         }
     }
 
-    pub(crate) fn read(&self) -> RwLockReadGuard<'_, SessionStateSnapshot> {
+    pub(crate) fn read(&self) -> RwLockReadGuard<'_, SessionState> {
         self.state.read()
     }
 
     pub(crate) fn try_read_for(
         &self,
         timeout: std::time::Duration,
-    ) -> Option<RwLockReadGuard<'_, SessionStateSnapshot>> {
+    ) -> Option<RwLockReadGuard<'_, SessionState>> {
         self.state.try_read_for(timeout)
     }
 
@@ -115,12 +115,12 @@ impl SessionStateLock {
 
 /// Exclusive access to the session's values; dropping it publishes the effective settings to consumers outside the lock.
 pub(crate) struct SessionStateWriteGuard<'a> {
-    guard: RwLockWriteGuard<'a, SessionStateSnapshot>,
+    guard: RwLockWriteGuard<'a, SessionState>,
     lock: &'a SessionStateLock,
 }
 
 impl Deref for SessionStateWriteGuard<'_> {
-    type Target = SessionStateSnapshot;
+    type Target = SessionState;
 
     fn deref(&self) -> &Self::Target {
         &self.guard

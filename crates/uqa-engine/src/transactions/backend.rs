@@ -318,12 +318,14 @@ impl Engine {
             if index != 0 {
                 frame
                     .session_snapshot
+                    .values
                     .graph_overlay
                     .clone_from(&graph_overlay);
             }
             for savepoint in &mut frame.savepoints {
                 savepoint
                     .session_snapshot
+                    .values
                     .graph_overlay
                     .clone_from(&graph_overlay);
             }

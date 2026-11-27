@@ -197,20 +197,26 @@ impl Engine {
     pub(super) fn snapshot_session_state(&self) -> SessionStateSnapshot {
         #[cfg(test)]
         tests::SESSION_SNAPSHOTS.set(tests::SESSION_SNAPSHOTS.get() + 1);
-        let mut snapshot = self.session.state.read().clone();
-        snapshot.portal_names = self.session.portals.lock().keys().cloned().collect();
-        snapshot.command_overlays = self
-            .session
-            .command_mutation_overlays
-            .lock()
-            .iter()
-            .map(uqa_execution::mutation::overlay::CommandMutationOverlay::checkpoint)
-            .collect();
-        snapshot
+        let (values, statement_cache) = {
+            let state = self.session.state.read();
+            (state.values.clone(), state.sql_statement_cache.checkpoint())
+        };
+        SessionStateSnapshot {
+            values,
+            statement_cache,
+            portal_names: self.session.portals.lock().keys().cloned().collect(),
+            command_overlays: self
+                .session
+                .command_mutation_overlays
+                .lock()
+                .iter()
+                .map(uqa_execution::mutation::overlay::CommandMutationOverlay::checkpoint)
+                .collect(),
+        }
     }
 
     pub(super) fn restore_session_state(&self, snapshot: &SessionStateSnapshot) {
-        let mut restored = snapshot.clone();
+        let mut restored = snapshot.values.clone();
         for (overlay, checkpoint) in self
             .session
             .command_mutation_overlays
@@ -220,16 +226,18 @@ impl Engine {
         {
             overlay.restore(checkpoint);
         }
-        restored.command_overlays.clear();
         let mut current = self.session.state.write();
         // Sequence DDL can restore an old object and its session value, while
         // DISCARD SEQUENCES must remain effective across every rollback boundary.
-        if current.sequence_discard_generation != snapshot.sequence_discard_generation {
+        if current.sequence_discard_generation != snapshot.values.sequence_discard_generation {
             restored.sequence_currvals = std::mem::take(&mut current.sequence_currvals);
             restored.last_sequence = current.last_sequence.take();
             restored.sequence_discard_generation = current.sequence_discard_generation;
         }
-        *current = restored;
+        current.values = restored;
+        current
+            .sql_statement_cache
+            .restore(&snapshot.statement_cache);
         drop(current);
         self.session
             .portals
@@ -243,6 +251,6 @@ impl Engine {
             .state
             .write()
             .graph_overlay
-            .clone_from(&snapshot.graph_overlay);
+            .clone_from(&snapshot.values.graph_overlay);
     }
 }

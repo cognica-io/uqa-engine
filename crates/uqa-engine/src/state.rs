@@ -7,7 +7,7 @@
 //! Ownership boundaries for storage, catalog, session, runtime, and epochs.
 
 use std::cell::RefCell;
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::collections::{BTreeMap, VecDeque};
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicI64, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use uqa_sql::catalog::roles::{RoleDefinitions, RoleMemberships};
@@ -54,8 +54,8 @@ mod session_state_lock;
 pub(crate) use session_state_lock::{message_level, SessionStateLock, SessionStateWriteGuard};
 
 use super::{
-    BayesianBM25Params, CommandMutationOverlay, RelationIdentity, SQLStatementCache,
-    TableFieldAnalyzerRegistry, TransactionFrame,
+    BayesianBM25Params, CommandMutationOverlay, RelationIdentity, TableFieldAnalyzerRegistry,
+    TransactionFrame,
 };
 
 pub(super) struct StorageContext {
@@ -516,20 +516,12 @@ impl SessionContext {
         random_state: super::SessionRandomState,
         query_retention: uqa_core::memory::MemoryBudget,
     ) -> Self {
-        let state = super::SessionStateSnapshot {
-            command_overlays: Vec::new(),
-            graph_overlay: None,
-            search_path: crate::session::default_search_path().into(),
-            temporary_namespace: None,
-            session_vars: BTreeMap::new(),
-            parameter_scopes: uqa_sql::semantics::parameters::ParameterScopes::default(),
-            sequence_currvals: BTreeMap::new(),
-            last_sequence: None,
-            sequence_discard_generation: 0,
-            sql_statement_cache: SQLStatementCache::default(),
-            portal_names: BTreeSet::new(),
-            listened_channels: Vec::new(),
-            authorization: uqa_sql::catalog::roles::session::SessionAuthorization::default(),
+        let state = super::SessionState {
+            values: super::SessionValues {
+                search_path: crate::session::default_search_path().into(),
+                ..super::SessionValues::default()
+            },
+            ..super::SessionState::default()
         };
         Self {
             statement_started_at_micros: AtomicI64::new(0),

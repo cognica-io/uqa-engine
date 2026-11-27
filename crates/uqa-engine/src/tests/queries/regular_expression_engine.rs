@@ -63,7 +63,7 @@ fn regex_compilation_preserves_native_admission_and_recovers(#[case] provider: P
     assert_eq!(error.sqlstate(), Some("53200"), "{provider:?}: {error}");
     // Failed compilation releases its scratch; parsed/logical SQL still belongs
     // to the session cache. Retain that exact owner across recovery and teardown.
-    let cached = engine.session.state.read().sql_statement_cache.clone();
+    let cached = engine.session.state.read().sql_statement_cache.checkpoint();
     let cached_bytes = retained.memory().used();
     assert!(cached_bytes > 0);
     assert_eq!(engine.transaction_depth(), 0);

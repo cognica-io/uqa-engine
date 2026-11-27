@@ -9,7 +9,7 @@
 use parking_lot::RwLockReadGuard;
 use std::ops::Deref;
 
-use crate::SessionStateSnapshot;
+use crate::SessionState;
 
 /// The search path of a session that has not set one.
 pub(crate) fn default_search_path() -> Vec<String> {
@@ -17,7 +17,7 @@ pub(crate) fn default_search_path() -> Vec<String> {
 }
 
 /// The schemas the session's search path names, with `$user` standing for the current role's name (`recomputeNamespacePath`). Schemas that do not exist or that the role may not use are skipped where names are looked up.
-pub(crate) fn effective_search_path(state: &SessionStateSnapshot) -> Vec<String> {
+pub(crate) fn effective_search_path(state: &SessionState) -> Vec<String> {
     state
         .search_path
         .iter()
@@ -33,12 +33,12 @@ pub(crate) fn effective_search_path(state: &SessionStateSnapshot) -> Vec<String>
 
 /// The session's effective search path, read while the session's values stay locked for reading, so that names a statement resolves against it see one search path and role.
 pub(crate) struct LockedSearchPath<'a> {
-    _state: RwLockReadGuard<'a, SessionStateSnapshot>,
+    _state: RwLockReadGuard<'a, SessionState>,
     path: Vec<String>,
 }
 
 impl<'a> LockedSearchPath<'a> {
-    pub(crate) fn new(state: RwLockReadGuard<'a, SessionStateSnapshot>) -> Self {
+    pub(crate) fn new(state: RwLockReadGuard<'a, SessionState>) -> Self {
         let path = effective_search_path(&state);
         Self {
             _state: state,
@@ -56,7 +56,7 @@ impl Deref for LockedSearchPath<'_> {
 }
 
 /// Lend effective names while the caller retains the session read guard.
-pub(crate) struct BorrowedSearchPath<'a>(pub(crate) &'a SessionStateSnapshot);
+pub(crate) struct BorrowedSearchPath<'a>(pub(crate) &'a SessionState);
 
 impl uqa_sql::catalog::resolution::candidates::SearchPathView for BorrowedSearchPath<'_> {
     fn len(&self) -> usize {

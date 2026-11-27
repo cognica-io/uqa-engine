@@ -43037,6 +43037,19 @@
     {
       "package": "uqa-engine",
       "kind": "lib",
+      "test": "a_write_after_snapshot_preserves_unaffected_statement_owners",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/statement_cache/tests.rs",
+      "capability": "Session statement-cache snapshots",
+      "workload": "Retain a full 256-statement cache and publish its next FIFO generation under a separate 16 KiB allowance.",
+      "invariant": "The successor evicts the oldest SQL, the checkpoint preserves its original plan, and the new SQL adds exactly one statement owner. Clearing both generations releases both allowances.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
       "test": "logical_plan_retirement_preserves_snapshots_and_failed_publication",
       "cases": 1,
       "source": "crates/uqa-engine/src/statement_cache/tests.rs",

@@ -5,7 +5,7 @@
 //
 
 //! Bind native sequence values to actual Engine session and catalog guards.
-use crate::{Engine, SessionLastSequenceReference, SessionSequenceValue, SessionStateSnapshot};
+use crate::{Engine, SessionLastSequenceReference, SessionSequenceValue, SessionState};
 use std::collections::BTreeMap;
 use uqa_core::RelationIdentity;
 use uqa_execution::catalog::sequence::values::context::{
@@ -15,7 +15,7 @@ use uqa_execution::catalog::sequence::values::context::{
 };
 use uqa_sql::{catalog::sequence_functions::value_error::SequenceValueError, SQLError};
 use uqa_storage::{PersistentStorageSession, StorageBackendResult};
-struct SessionRead<'a>(parking_lot::RwLockReadGuard<'a, SessionStateSnapshot>);
+struct SessionRead<'a>(parking_lot::RwLockReadGuard<'a, SessionState>);
 struct SessionWrite<'a>(crate::state::SessionStateWriteGuard<'a>);
 impl SequenceSessionRead for SessionRead<'_> {
     fn currvals(&self) -> &BTreeMap<RelationIdentity, SessionSequenceValue> {

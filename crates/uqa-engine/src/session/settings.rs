@@ -352,7 +352,7 @@ impl Engine {
 }
 
 pub(crate) fn restore_runtime_parameter(
-    state: &mut crate::SessionStateSnapshot,
+    state: &mut crate::SessionState,
     name: &str,
     value: crate::state::RuntimeParameterValue,
 ) {

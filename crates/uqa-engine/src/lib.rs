@@ -438,10 +438,28 @@ struct TransactionSavepoint {
     constraint_modes: ConstraintModeState,
 }
 
-/// Lightweight SQL-session state that follows transaction/savepoint rollback for every backend. It is intentionally separate from the database-sized memory-engine snapshot so persistent sessions receive identical SET, search-path, and statement-cache semantics. Sequence `currval` and last-used entries produced after the snapshot are reapplied because sequence functions are nontransactional in `PostgreSQL`.
+#[derive(Default)]
+struct SessionState {
+    values: SessionValues,
+    sql_statement_cache: SQLStatementCache,
+}
+
+impl std::ops::Deref for SessionState {
+    type Target = SessionValues;
+    fn deref(&self) -> &SessionValues {
+        &self.values
+    }
+}
+
+impl std::ops::DerefMut for SessionState {
+    fn deref_mut(&mut self) -> &mut SessionValues {
+        &mut self.values
+    }
+}
+
+/// Session values restored on transaction and savepoint rollback across storage providers.
 #[derive(Clone, Default)]
-struct SessionStateSnapshot {
-    command_overlays: Vec<uqa_execution::mutation::overlay::CommandOverlayCheckpoint>,
+struct SessionValues {
     /// A pinned physical graph view plus this transaction's changed identities. Savepoints retain only handles and changed-id checkpoints, never graph payload replicas.
     graph_overlay: Option<GraphTransactionOverlay>,
     search_path: Arc<Vec<String>>,
@@ -452,11 +470,17 @@ struct SessionStateSnapshot {
     sequence_currvals: BTreeMap<RelationIdentity, SessionSequenceValue>,
     last_sequence: Option<SessionLastSequenceReference>,
     sequence_discard_generation: u64,
-    sql_statement_cache: SQLStatementCache,
-    /// Names of portals that existed at this transaction or savepoint boundary. Rollback removes portals created later without rewinding cursor positions or resurrecting closed portals.
-    portal_names: BTreeSet<String>,
     listened_channels: Vec<String>,
     authorization: uqa_sql::catalog::roles::session::SessionAuthorization,
+}
+
+#[derive(Clone, Default)]
+struct SessionStateSnapshot {
+    values: SessionValues,
+    statement_cache: statement_cache::StatementCacheCheckpoint,
+    command_overlays: Vec<uqa_execution::mutation::overlay::CommandOverlayCheckpoint>,
+    /// Rollback removes portals opened after the boundary without rewinding or resurrecting earlier portals.
+    portal_names: BTreeSet<String>,
 }
 
 #[derive(Clone)]
