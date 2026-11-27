@@ -10,6 +10,8 @@ Lowercase and ASCII folding each processed an 8,192-byte owned scalar ASCII toke
 
 ## Posting and fusion allocations (2026-11-27 UTC)
 
+With 8,192 candidates scoring 0.001 on one signal and a second signal scoring 0.9 on the first document, using the explicit bound for a fully covering signal reduced scored documents from 8,192 to one. The result retained the exhaustive score bits. Partial coverage still admits the missing-score default when pruning. [Coverage regression](../../crates/uqa-scoring/src/fusion_wand.rs)
+
 The same Rust caller on macOS ARM64 measured allocations during each public operation with prebuilt inputs. The path and union comparisons use main at `557463e22`. The confidence-scaled pool comparisons use `e98499b30` before the WAND changes. The path returned the same scalar, the union preserved the decorated postings, and the two pool workloads returned identical document order and score bits for all ten results. [Implementation and regression tests](https://github.com/cognica-io/uqa-engine/pull/1485)
 
 | Operation | Allocations before | Allocations after | Memory measure | Bytes before | Bytes after |

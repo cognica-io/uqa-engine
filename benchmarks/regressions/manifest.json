@@ -9041,6 +9041,19 @@
     {
       "package": "uqa-scoring",
       "kind": "lib",
+      "test": "full_coverage_prunes_with_the_explicit_bound_and_partial_coverage_can_still_win",
+      "cases": 1,
+      "source": "crates/uqa-scoring/src/fusion_wand.rs",
+      "capability": "Exact confidence-scaled pool pruning",
+      "workload": "Combine 8,192 weak hits with one rare hit, then rank three partially overlapping signals where a missing score beats an explicit hit.",
+      "invariant": "The dense fixture scores only its winner with the exhaustive score bits. When coverage is partial, the correct missing-score winner and its bits are preserved.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-scoring",
+      "kind": "lib",
       "test": "sparse_pivot_skips_weak_scores_without_changing_the_top_document",
       "cases": 1,
       "source": "crates/uqa-scoring/src/fusion_wand.rs",
