@@ -359,24 +359,6 @@ pub(super) fn keys(
     )
 }
 
-pub(super) fn point_keys(
-    connection: &Connection,
-    prefix: &[u8],
-    after: Option<&[u8]>,
-    limit: usize,
-    control: &StorageReadControl,
-    visit: &mut impl FnMut(&[u8]) -> PhysicalResult<Option<bool>>,
-) -> PhysicalResult<()> {
-    let upper = prefix_upper_bound(prefix, control)?;
-    walk_keys(
-        after,
-        limit,
-        control,
-        &mut |after| next_key(connection, prefix, after, upper.as_deref(), control),
-        visit,
-    )
-}
-
 fn walk_keys(
     after: Option<&[u8]>,
     limit: usize,
@@ -485,7 +467,10 @@ fn run_info(
         }))
 }
 
-fn point_info(row: &rusqlite::Row<'_>, boundary: CommitSequence) -> PhysicalResult<Option<Info>> {
+pub(super) fn point_info(
+    row: &rusqlite::Row<'_>,
+    boundary: CommitSequence,
+) -> PhysicalResult<Option<Info>> {
     checked_point_info(codec::decode_head(row)?, boundary, || {
         if matches!(row.get_ref(2)?, ValueRef::Null) {
             return Ok(None);
@@ -585,7 +570,7 @@ fn value_bounded(
 }
 
 /// Visit a point payload that [`POINT_VALUE_SQL`] selected with its metadata. The admission order matches [`value_from_info`]: the declared length is checked and reserved before the payload's bytes are borrowed.
-fn inline_value(
+pub(super) fn inline_value(
     row: &rusqlite::Row<'_>,
     info: Info,
     max_bytes: usize,
