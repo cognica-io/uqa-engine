@@ -16,7 +16,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use uqa_analysis::analyzer::standard_analyzer;
+use uqa_analysis::analyzer::standard_term_analyzer;
 use uqa_core::{
     GeneralizedPayload, GeneralizedPostingEntry, GeneralizedPostingList, PostingEntry, Value,
 };
@@ -74,11 +74,11 @@ impl<'a> TextSimilarityJoin<'a> {
         if left_texts.peek().is_none() {
             return Ok(GeneralizedPostingList::from_unsorted(Vec::new()));
         }
-        let analyzer = standard_analyzer(self.language).compile()?;
+        let analyze = standard_term_analyzer(self.language)?;
         let mut right_tokens = None;
         let mut out = Vec::new();
         for (left, text) in left_texts {
-            let left_tokens: BTreeSet<String> = analyzer.analyze(text)?.into_iter().collect();
+            let left_tokens: BTreeSet<String> = analyze(text)?.into_iter().collect();
             if left_tokens.is_empty() {
                 continue;
             }
@@ -91,8 +91,7 @@ impl<'a> TextSimilarityJoin<'a> {
                         .iter()
                         .filter_map(|entry| text_field(entry, self.right_field))
                     {
-                        let tokens: BTreeSet<String> =
-                            analyzer.analyze(text)?.into_iter().collect();
+                        let tokens: BTreeSet<String> = analyze(text)?.into_iter().collect();
                         if !tokens.is_empty() {
                             prepared.push((entry, tokens));
                         }
