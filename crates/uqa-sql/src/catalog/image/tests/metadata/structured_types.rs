@@ -57,6 +57,7 @@ fn range() -> StoredRange {
         collation_oid: 0,
         canonical_oid: None,
         subtype_difference_oid: None,
+        constructor_oids: None,
         multirange: StoredMultirange {
             object_id: [12; 16],
             oid: 65541,
@@ -249,6 +250,10 @@ fn range_images_preserve_moved_multiranges_selected_support_and_acl_paths() {
         value.usage_acl = acl;
         value.canonical_oid = Some(80001);
         value.subtype_difference_oid = Some(80002);
+        value.constructor_oids = value
+            .usage_acl
+            .as_ref()
+            .map(|_| [81001, 81002, 81003, 81004, 81005]);
         value.collation_oid = 950;
         value.subtype = ColumnType::Domain {
             schema: "original".into(),

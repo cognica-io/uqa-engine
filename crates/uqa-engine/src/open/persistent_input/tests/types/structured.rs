@@ -27,6 +27,7 @@ fn publish(engine: &Engine, index: u8) {
         collation_oid: 0,
         canonical_oid: None,
         subtype_difference_oid: None,
+        constructor_oids: None,
         multirange: StoredMultirange {
             object_id: [index * 2 + 2; 16],
             oid: oid + 2,

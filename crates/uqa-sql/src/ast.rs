@@ -452,6 +452,7 @@ pub enum Statement {
     CreateShellType(String),
     CommentType(CommentType),
     CreateEnum(CreateEnum),
+    CreateRange(CreateRange),
     CreateCompositeType(CreateCompositeType),
     AlterEnum(AlterEnum),
     AlterTypeObject(AlterTypeObject),

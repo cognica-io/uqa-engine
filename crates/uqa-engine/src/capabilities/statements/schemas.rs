@@ -39,6 +39,18 @@ impl SchemaStatementInputs<StatementReadSnapshot> for Engine {
     ) -> uqa_execution::schema::composites::CompositeTypeContext<'_> {
         Engine::composite_type_context(self)
     }
+    fn range_creation_context(&self) -> uqa_execution::schema::ranges::RangeCreationContext<'_> {
+        uqa_execution::schema::ranges::RangeCreationContext {
+            types: self.type_lifecycle_context(),
+            catalog: self.catalog_execution(),
+            shells: self.shell_completion_context(),
+            routines: self.routine_registration_context(),
+            allocate_identity: || {
+                crate::new_nonzero_catalog_identity("range", "object identity")
+                    .map_err(|error| SQLError::Internal(error.to_string()))
+            },
+        }
+    }
     fn enum_type_context(&self) -> uqa_execution::schema::enums::EnumTypeContext<'_> {
         Engine::enum_type_context(self)
     }

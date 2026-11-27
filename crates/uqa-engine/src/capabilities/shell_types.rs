@@ -26,6 +26,7 @@ impl Engine {
     ) -> uqa_execution::schema::shell_types::ShellTypeContext<'_> {
         uqa_execution::schema::shell_types::ShellTypeContext {
             registries: uqa_execution::schema::types::arrays::UserTypeRegistries {
+                ranges: self,
                 enums: self,
                 domains: self,
                 composites: self,

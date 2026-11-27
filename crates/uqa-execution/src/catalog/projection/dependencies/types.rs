@@ -37,6 +37,16 @@ impl DependencyBuilder<'_> {
             self.record_namespace(multirange, &definition.multirange.identity.schema);
             self.recorder
                 .record(multirange, range, DependencyKind::Internal);
+            if let Some(constructors) = definition.constructor_oids {
+                for (index, oid) in constructors.into_iter().enumerate() {
+                    let owner = if index < 2 { range } else { multirange };
+                    self.recorder.record(
+                        ObjectAddress::whole(PROCEDURE_CLASS, oid),
+                        owner,
+                        DependencyKind::Internal,
+                    );
+                }
+            }
             for (class, oid) in [
                 (
                     TYPE_CLASS,

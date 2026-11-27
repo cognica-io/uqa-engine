@@ -17,6 +17,7 @@ pub trait DomainDependencyCatalog {
 }
 pub use crate::catalog::domain::DomainRegistryPublication;
 pub struct DomainDependencyContext<'a> {
+    pub ranges: &'a dyn crate::catalog::range_type::RangeRegistryPublication,
     pub catalog: &'a dyn DomainDependencyCatalog,
     pub publication: &'a dyn DomainRegistryPublication,
     pub enums: &'a dyn crate::catalog::enum_type::EnumRegistryPublication,
@@ -77,6 +78,15 @@ pub fn remove_types(
         let mut shells = shells_before.clone();
         shells.retain(|_, definition| !targets.contains(&definition.oid))?;
         crate::catalog::shell_type::publish(context.shells, &shells_before, shells)?;
+    }
+    let ranges_before = context.ranges.range_registry().clone();
+    if ranges_before
+        .values()
+        .any(|range| targets.contains(&range.oid))
+    {
+        let mut ranges = ranges_before.clone();
+        ranges.retain(|_, range| !targets.contains(&range.oid))?;
+        crate::catalog::range_type::publish(context.ranges, &ranges_before, ranges)?;
     }
     let enums_before = context.enums.enum_registry().clone();
     if enums_before

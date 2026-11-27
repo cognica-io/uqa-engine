@@ -27,6 +27,7 @@ impl Engine {
                 authority: self,
                 session: self,
             },
+            ranges: self,
             allocate_identity: || {
                 crate::new_nonzero_catalog_identity("enum", "object identity")
                     .map_err(|error| SQLError::Internal(error.to_string()))

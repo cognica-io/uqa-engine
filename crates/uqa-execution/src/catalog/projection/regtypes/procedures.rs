@@ -72,6 +72,28 @@ pub fn resolve_regprocedure_input_oid(
             })
         })
         .collect::<Result<Vec<_>, _>>()?;
+    lookup_signature(context, &catalog, schema, local, &argument_oids)?
+        .ok_or_else(|| input_error("42883", format!("function \"{name}\" does not exist")))
+}
+
+/// Resolve an exact input signature when the caller already has the catalog type OIDs, including shell types.
+pub fn routine_oid_for_arguments(
+    context: &CatalogContext<'_>,
+    schema: Option<&str>,
+    local: &str,
+    arguments: &[i64],
+) -> Result<Option<i64>, SQLError> {
+    let catalog = regtype_output_catalog(context)?;
+    lookup_signature(context, &catalog, schema, local, arguments)
+}
+
+fn lookup_signature(
+    context: &CatalogContext<'_>,
+    catalog: &RegtypeOutputCatalog,
+    schema: Option<&str>,
+    local: &str,
+    argument_oids: &[i64],
+) -> Result<Option<i64>, SQLError> {
     let find_in_schema = |schema: &str| {
         let namespace_oid = catalog
             .namespaces
@@ -99,7 +121,7 @@ pub fn resolve_regprocedure_input_oid(
             .iter()
             .find_map(|schema| find_in_schema(schema))
     };
-    oid.ok_or_else(|| input_error("42883", format!("function \"{name}\" does not exist")))
+    Ok(oid)
 }
 
 fn input_error(sqlstate: &str, message: String) -> SQLError {

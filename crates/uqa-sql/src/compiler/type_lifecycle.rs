@@ -45,6 +45,9 @@ pub(super) fn compile_type_statement(node: &NodeEnum) -> Result<Statement> {
         NodeEnum::CommentStmt(stmt) if type_object_kind(stmt.objtype()).is_some() => {
             compile_type_comment(stmt)
         }
+        NodeEnum::CreateRangeStmt(stmt) => {
+            super::ranges::compile_create_range(stmt).map(Statement::CreateRange)
+        }
         NodeEnum::CreateEnumStmt(stmt) => {
             super::enums::compile_create_enum(stmt).map(Statement::CreateEnum)
         }

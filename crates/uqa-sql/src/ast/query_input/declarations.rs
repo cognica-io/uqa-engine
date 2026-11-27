@@ -21,6 +21,7 @@ mod indexes;
 mod locking;
 mod namespaces;
 mod primitives;
+mod ranges;
 mod referenced_partition;
 mod relation_hierarchy;
 mod relation_lifecycle;

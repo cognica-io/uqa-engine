@@ -67,6 +67,7 @@ pub struct EnumTypeContext<'a> {
     pub identities: CatalogIdentityReservationContext<'a>,
     pub writer: &'a dyn SchemaStatementWriter,
     pub binding: TypeObjectBinding<'a>,
+    pub ranges: &'a dyn crate::catalog::range_type::RangeRegistryPublication,
     pub allocate_identity: fn() -> Result<[u8; 16], SQLError>,
     pub publication: &'a dyn EnumRegistryPublication,
     /// Domain and composite arrays share the type namespace with enum arrays.
@@ -109,6 +110,7 @@ pub fn create_enum(context: &EnumTypeContext<'_>, definition: CreateEnum) -> Res
     super::types::arrays::displace_array_type(
         &context.creation,
         super::types::arrays::UserTypeRegistries {
+            ranges: context.ranges,
             enums: context.publication,
             domains: context.domains,
             composites: context.composites,

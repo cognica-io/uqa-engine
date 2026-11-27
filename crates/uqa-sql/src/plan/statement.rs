@@ -374,6 +374,9 @@ impl UnifiedPlan {
                 Self::Command(Box::new(CommandPlan::CreateShellType(name)))
             }
             Statement::CreateEnum(value) => Self::Command(Box::new(CommandPlan::CreateEnum(value))),
+            Statement::CreateRange(value) => {
+                Self::Command(Box::new(CommandPlan::CreateRange(value)))
+            }
             Statement::CreateCompositeType(value) => {
                 Self::Command(Box::new(CommandPlan::CreateCompositeType(value)))
             }
@@ -607,6 +610,7 @@ impl CommandPlan {
             Self::CreateShellType(_) => "CreateShellType",
             Self::CommentType(_) => "CommentType",
             Self::CreateEnum(_) => "CreateEnum",
+            Self::CreateRange(_) => "CreateRange",
             Self::CreateCompositeType(_) => "CreateCompositeType",
             Self::AlterEnum(_) => "AlterEnum",
             Self::AlterTypeObject(_) => "AlterTypeObject",

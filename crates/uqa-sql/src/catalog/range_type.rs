@@ -40,6 +40,9 @@ pub struct StoredRange {
     /// Optional support routine identities, independent of routine names and the endpoint's native range family.
     pub canonical_oid: Option<u32>,
     pub subtype_difference_oid: Option<u32>,
+    /// The two range and three multirange constructors, in PostgreSQL signature order. Legacy catalog records can describe a type without SQL-generated routines.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub constructor_oids: Option<[u32; 5]>,
     pub multirange: StoredMultirange,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub usage_acl: Option<Vec<ObjectAclEntry>>,

@@ -44,6 +44,7 @@ impl Engine {
             identities: self.catalog_identity_reservation_context(),
             writer: self,
             bindings: self,
+            ranges: self,
             allocate_identity: || {
                 crate::new_nonzero_catalog_identity("domain", "object identity")
                     .map_err(|error| SQLError::Internal(error.to_string()))
@@ -131,6 +132,7 @@ use uqa_execution::schema::domains::dependencies::{
 impl Engine {
     pub(crate) fn domain_dependency_context(&self) -> DomainDependencyContext<'_> {
         DomainDependencyContext {
+            ranges: self,
             catalog: self,
             publication: self,
             enums: self,
@@ -206,6 +208,14 @@ impl TypeObjectCatalog for Engine {
     }
     fn format_drop_type(&self, oid: i64) -> Result<Option<String>, String> {
         uqa_execution::catalog::projection::format_type_object(&self.catalog_execution(), oid)
+    }
+    fn range_by_type_oid(&self, oid: u32) -> Option<uqa_sql::catalog::range_type::StoredRange> {
+        self.durable
+            .ranges
+            .read()
+            .values()
+            .find(|range| range.type_oids().contains(&oid))
+            .cloned()
     }
     fn enum_by_type_oid(&self, oid: u32) -> Option<uqa_sql::catalog::enum_type::StoredEnum> {
         self.durable

@@ -54,7 +54,7 @@ pub(super) fn user_routine_by_oid(
     }))
 }
 
-pub(super) fn builtin_routine_by_oid(oid: i64) -> Option<BuiltinRoutineCatalogEntry> {
+pub(crate) fn builtin_routine_by_oid(oid: i64) -> Option<BuiltinRoutineCatalogEntry> {
     static BUILTINS: OnceLock<BTreeMap<i64, BuiltinRoutineCatalogEntry>> = OnceLock::new();
     BUILTINS
         .get_or_init(|| {

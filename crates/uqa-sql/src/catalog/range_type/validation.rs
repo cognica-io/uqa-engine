@@ -117,6 +117,11 @@ async fn validate<'a>(
         }
         if !subtype(&definition.subtype, control, work).await?
             || definition.subtype_operator_class == 0
+            || definition.constructor_oids.is_some_and(|oids| {
+                oids.iter().enumerate().any(|(i, oid)| {
+                    *oid < crate::catalog::oids::FIRST_NORMAL_OBJECT_ID || oids[..i].contains(oid)
+                })
+            })
             || definition.canonical_oid == Some(0)
             || definition.subtype_difference_oid == Some(0)
         {

@@ -234,6 +234,7 @@ fn reorder_command_joins(
         | CommandPlan::CommentType(_)
         | CommandPlan::CreateShellType(_)
         | CommandPlan::CreateEnum(_)
+        | CommandPlan::CreateRange(_)
         | CommandPlan::CreateCompositeType(_)
         | CommandPlan::AlterEnum(_)
         | CommandPlan::AlterTypeObject(_)

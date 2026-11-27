@@ -124,7 +124,9 @@ This argument covers the native adapters only. Custom typed endpoints, installed
 
 The unchanged regression inventory validates 745 checks / 1,128 required cases. FDW ownership selection finds no affected handler input. The final product push supplies automatic regression evidence; source-equivalent progress updates belong in the PR body so they do not repeatedly start product CI. No timing comparison or whole-workspace local test run is claimed.
 
-## Shell publication and the remaining range declaration
+## Shell and range publication
+
+Issue [#1477](https://github.com/cognica-io/uqa-engine/issues/1477) covers SQL declaration, catalog publication of the range and multirange with their arrays and five constructors, rollback and persistent reopening. The [PostgreSQL 18.4 transcript](../../tests/parity/pg18/range_declaration.expected.json) includes constructor renames, schema changes, dependency errors and values read through the declared types. The wider operator, canonicalization and language acceptance requirements remain in record 65.
 
 The [shell catalog and type-description boundary](0018-shell-type-acceptance.md) is verified and merged in PR #935 as `342a7d1fc1` after the typed physical endpoint work. Its independent PostgreSQL catalog reference has 181 statements across all four providers, and the 28-step session reference passes all three persistent providers; the final source passes 448 focused tests, strict owner Clippy and the nine actual previous/current storage-format configurations. The linked acceptance record contains actual Linux/macOS regression, process and six FDW configuration results. This completes the shell prerequisite only: custom range declarations and original record 65 remain open.
 

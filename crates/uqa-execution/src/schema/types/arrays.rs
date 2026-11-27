@@ -18,6 +18,7 @@ use uqa_sql::{catalog::array_type_names::choose_array_type_name, SQLError};
 /// The registries whose generated array types share the type namespace.
 #[derive(Clone, Copy)]
 pub struct UserTypeRegistries<'a> {
+    pub ranges: &'a dyn crate::catalog::range_type::RangeRegistryPublication,
     pub enums: &'a dyn EnumRegistryPublication,
     pub domains: &'a dyn DomainRegistryPublication,
     pub composites: &'a dyn CompositeRegistryPublication,
@@ -29,8 +30,19 @@ pub fn reserve_array_name(
     schema: &str,
     name: &str,
 ) -> Result<String, SQLError> {
+    reserve_array_name_avoiding(creation, schema, name, &[])
+}
+
+/// A declaration publishing several types reserves names against its own pending records as well as the live catalog.
+pub(crate) fn reserve_array_name_avoiding(
+    creation: &RelationCreationContext<'_>,
+    schema: &str,
+    name: &str,
+    pending: &[&RelationIdentity],
+) -> Result<String, SQLError> {
     let array_name = choose_array_type_name(name, |candidate| {
-        creation.type_name_in_use(&RelationIdentity::new(schema, candidate))
+        let id = RelationIdentity::new(schema, candidate);
+        pending.contains(&&id) || creation.type_name_in_use(&id)
     });
     creation.reserve_type_name(&RelationIdentity::new(schema, &array_name).qualified_name())?;
     Ok(array_name)
@@ -109,6 +121,38 @@ pub fn displace_array_type(
                 SQLError::Internal("displaced composite array holder disappeared".into())
             })?;
         composite_type::publish(registries.composites, &before, registry)?;
+        return Ok(true);
+    }
+    let holder = registries
+        .ranges
+        .range_registry()
+        .iter()
+        .find_map(|(key, range)| {
+            if range.identity.schema == requested.schema && range.array_name == requested.name {
+                Some((key.clone(), false))
+            } else if range.multirange.identity.schema == requested.schema
+                && range.multirange.array_name == requested.name
+            {
+                Some((key.clone(), true))
+            } else {
+                None
+            }
+        });
+    if let Some((holder, multi)) = holder {
+        let moved = reserve_array_name(creation, &requested.schema, &requested.name)?;
+        let before = registries.ranges.range_registry().clone();
+        let mut registry = before.clone();
+        registry
+            .edit(&holder, |range| {
+                if multi {
+                    range.multirange.array_name = moved;
+                } else {
+                    range.array_name = moved;
+                }
+                Ok(())
+            })?
+            .ok_or_else(|| SQLError::Internal("displaced range array disappeared".into()))?;
+        crate::catalog::range_type::publish(registries.ranges, &before, registry)?;
         return Ok(true);
     }
     creation.runtime.displace_relation_array(requested)

@@ -404,6 +404,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- SQL clients can create a named range with `CREATE TYPE ... AS RANGE`. Its range and multirange constructors, array types and catalog dependencies share the declaration’s transaction.
+
+
 - Add `ALTER DEFAULT PRIVILEGES` and `pg_default_acl` for database-wide and schema-specific creation privileges. Support `DROP OWNED BY` for role lists, transactional privilege cleanup and dependency-aware removal of owned objects and their defaults.
 
 - Add full and incremental backup, verification, retention and restore to the standalone `usql backup` command and the interactive `\backup` command. [CLI reference](docs/manual/reference/03-cli.md)

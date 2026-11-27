@@ -22,6 +22,7 @@ fn range() -> StoredRange {
         collation_oid: 0,
         canonical_oid: None,
         subtype_difference_oid: None,
+        constructor_oids: None,
         usage_acl: None,
         multirange: StoredMultirange {
             object_id: [12; 16],

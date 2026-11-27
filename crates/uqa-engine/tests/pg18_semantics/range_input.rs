@@ -47,13 +47,31 @@ pub(super) fn open(provider: usize, path: &std::path::Path) -> Engine {
 #[case::sqlite_key_value(2)]
 #[case::redb(3)]
 fn range_input_matches_postgresql_and_durable_reopen(#[case] provider: usize) {
+    verify_declared_values(
+        provider,
+        include_str!("../../../../tests/parity/pg18/range_input_oracle.expected.json"),
+        2,
+    );
+}
+
+#[rstest::rstest]
+#[case::memory(0)]
+#[case::sqlite_native(1)]
+#[case::sqlite_key_value(2)]
+#[case::redb(3)]
+fn declared_ranges_and_constructors_match_postgresql_after_reopen(#[case] provider: usize) {
+    verify_declared_values(
+        provider,
+        include_str!("../../../../tests/parity/pg18/range_declaration.expected.json"),
+        7,
+    );
+}
+
+fn verify_declared_values(provider: usize, transcript: &str, reopen_cases: usize) {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("range-input.db");
     let engine = open(provider, &path);
-    let reference: serde_json::Value = serde_json::from_str(include_str!(
-        "../../../../tests/parity/pg18/range_input_oracle.expected.json"
-    ))
-    .unwrap();
+    let reference: serde_json::Value = serde_json::from_str(transcript).unwrap();
     let mut initial = reference.clone();
     initial["cases"]
         .as_array_mut()
@@ -71,6 +89,6 @@ fn range_input_matches_postgresql_and_durable_reopen(#[case] provider: usize) {
         .as_array_mut()
         .unwrap()
         .retain(|case| case["reopen"] == true);
-    assert_eq!(reopened["cases"].as_array().unwrap().len(), 2);
+    assert_eq!(reopened["cases"].as_array().unwrap().len(), reopen_cases);
     crate::pg18_oracle::verify(&engine, &reopened.to_string());
 }

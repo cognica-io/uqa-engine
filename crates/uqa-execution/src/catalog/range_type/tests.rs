@@ -47,6 +47,7 @@ fn definition() -> StoredRange {
         collation_oid: 0,
         canonical_oid: None,
         subtype_difference_oid: None,
+        constructor_oids: None,
         multirange: StoredMultirange {
             object_id: [2; 16],
             oid: oid("r_multirange"),

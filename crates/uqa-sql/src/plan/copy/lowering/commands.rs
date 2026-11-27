@@ -222,6 +222,9 @@ impl Copying<'_> {
             Statement::CommentType(value) => CommandPlan::CommentType(
                 self.field("value0", |copying| value.copy_syntax(copying))?,
             ),
+            Statement::CreateRange(value) => CommandPlan::CreateRange(
+                self.field("value0", |copying| value.copy_syntax(copying))?,
+            ),
             Statement::CreateEnum(value) => {
                 CommandPlan::CreateEnum(self.field("value0", |copying| value.copy_syntax(copying))?)
             }

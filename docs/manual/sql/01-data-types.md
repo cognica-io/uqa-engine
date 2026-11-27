@@ -203,6 +203,14 @@ Use `TIMESTAMPTZ` for instants and `TIMESTAMP` for timezone-independent wall-clo
 
 The six PostgreSQL built-in range families are implemented as declared SQL identities: `INT4RANGE` / `INT4MULTIRANGE`, `INT8RANGE` / `INT8MULTIRANGE`, `NUMRANGE` / `NUMMULTIRANGE`, `DATERANGE` / `DATEMULTIRANGE`, `TSRANGE` / `TSMULTIRANGE`, and `TSTZRANGE` / `TSTZMULTIRANGE`. Range literals use PostgreSQL bound notation, including unbounded and `empty` values, and multirange literals use braces around comma-separated range members.
 
+Use `CREATE TYPE ... AS RANGE` to define a range over a subtype with B-tree ordering. The declaration creates the range, its multirange, their array types and their constructors in the same transaction. The subtype supplies the default collation and operator class. Use `collation` or `subtype_opclass` to select a different one and `multirange_type_name` to choose the multirange name.
+
+```sql execute
+CREATE TYPE wordrange AS RANGE (subtype = text, multirange_type_name = wordranges);
+SELECT wordrange('a', 'b'), wordranges(wordrange('x', 'z', '[]'));
+DROP TYPE wordrange;
+```
+
 Range constructors accept two bounds and an optional flags string: `[]`, `[)`, `(]` or `()`. Omitted flags mean `[)`, and a NULL endpoint is unbounded. An explicit NULL flags argument raises `22000`; invalid flags raise `42601` with PostgreSQL's valid-flags HINT. Multirange normalization preserves PostgreSQL's selected numeric endpoint spelling, including equal bounds with different display scales.
 
 Multirange constructors accept individual ranges or a one-dimensional `VARIADIC` range array. NULL members raise `22004`, and a multidimensional array raises `21000`. A single NULL range or NULL variadic array produces SQL NULL; zero ranges or an empty array produce an empty multirange. Nondefault array lower bounds do not change the result.

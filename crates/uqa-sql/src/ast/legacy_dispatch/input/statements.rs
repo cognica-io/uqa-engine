@@ -64,6 +64,7 @@ pub(super) fn statement(value: &Statement, position: usize) -> Child<'_> {
             position,
         ),
         Statement::CreateEnum(_)
+        | Statement::CreateRange(_)
         | Statement::CreateCompositeType(_)
         | Statement::AlterEnum(_)
         | Statement::AlterTypeObject(_)

@@ -63,6 +63,7 @@ impl<'a> Fields<'a> {
             collation_oid,
             canonical_oid,
             subtype_difference_oid,
+            constructor_oids,
             multirange: _,
             usage_acl: _,
         } = value;
@@ -75,6 +76,13 @@ impl<'a> Fields<'a> {
         self.identity(*owner);
         self.scalar(subtype_operator_class.to_le_bytes());
         self.scalar(collation_oid.to_le_bytes());
+        if let Some(constructors) = constructor_oids {
+            // Tags 0 and 1 retain the original optional canonical OID encoding. Tag 2 prefixes a SQL declaration's generated routine dependencies.
+            self.scalar([2]);
+            for oid in constructors {
+                self.scalar(oid.to_le_bytes());
+            }
+        }
         self.optional_u32(*canonical_oid);
         self.optional_u32(*subtype_difference_oid);
     }

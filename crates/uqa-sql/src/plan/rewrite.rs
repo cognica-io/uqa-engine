@@ -355,6 +355,7 @@ pub(super) fn rewrite_command_scalars(
         | CommandPlan::CommentType(_)
         | CommandPlan::CreateShellType(_)
         | CommandPlan::CreateEnum(_)
+        | CommandPlan::CreateRange(_)
         | CommandPlan::CreateCompositeType(_)
         | CommandPlan::AlterEnum(_)
         | CommandPlan::AlterTypeObject(_)

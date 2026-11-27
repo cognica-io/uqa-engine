@@ -52,6 +52,7 @@ impl Engine {
                 session: self,
             },
             registries: UserTypeRegistries {
+                ranges: self,
                 enums: self,
                 domains: self,
                 composites: self,

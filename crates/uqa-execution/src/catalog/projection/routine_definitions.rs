@@ -18,6 +18,7 @@ use crate::catalog::{CatalogReadView, RelationNameResolution};
 use super::builtin_routines::BuiltinRoutineCatalogEntry;
 
 mod cache;
+pub(crate) use cache::builtin_routine_by_oid;
 pub(in crate::catalog) use cache::RoutineDefinitions;
 
 mod builtin_body;

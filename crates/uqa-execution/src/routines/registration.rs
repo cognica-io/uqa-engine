@@ -41,6 +41,9 @@ use uqa_sql::{
     SQLError,
 };
 
+mod ranges;
+pub(crate) use ranges::register_range_constructors;
+
 pub struct RoutineRegistrationContext<'a> {
     pub catalog: RoutineMutationContext<'a>,
     pub namespace: crate::schema::namespaces::relations::RelationCreationContext<'a>,
@@ -227,8 +230,16 @@ fn validate_routine_creation(
 
 pub fn register_sql_function(
     context: &RoutineRegistrationContext<'_>,
-    mut def: CreateFunction,
+    def: CreateFunction,
 ) -> Result<(), SQLError> {
+    register(context, def, None).map(|_| ())
+}
+
+fn register(
+    context: &RoutineRegistrationContext<'_>,
+    mut def: CreateFunction,
+    generated: Option<BoundRoutine>,
+) -> Result<uqa_sql::routines::SQLRoutine, SQLError> {
     let current_user = context.catalog.names.current_role();
     let requested_owner = match def.owner {
         Some(owner) => uqa_sql::catalog::roles::RoleReference::from_identity(
@@ -244,13 +255,16 @@ pub fn register_sql_function(
     let owner = locks.bind(&requested_owner)?;
     def.owner = Some(owner.identity());
     def.name = context.namespace.object_name(&def.name)?;
-    validate_routine_creation(context, &mut def, &current_user)?;
-    let checks_bodies = checks_function_bodies(context.configuration)?;
-    let bound = compile_catalog_bound_routine(
-        &context.definition,
-        &mut def,
-        body_compilation(checks_bodies),
-    )?;
+    let (checks_bodies, bound) = if let Some(bound) = generated {
+        (false, bound)
+    } else {
+        validate_routine_creation(context, &mut def, &current_user)?;
+        let checks = checks_function_bodies(context.configuration)?;
+        (
+            checks,
+            compile_catalog_bound_routine(&context.definition, &mut def, body_compilation(checks))?,
+        )
+    };
     let name = def.name.clone();
     let signature = routine_signature_types(&def);
     let new_oid = new_routine_oid(context, &name, &signature)?;
@@ -327,7 +341,8 @@ pub fn register_sql_function(
     drop(registry);
     drop(memberships);
     drop(roles);
-    finish_registration(context, &def, &published, &bound, checks_bodies)
+    finish_registration(context, &def, &published, &bound, checks_bodies)?;
+    Ok(published)
 }
 
 fn bind_initial_privileges(

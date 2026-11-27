@@ -258,6 +258,16 @@ fn with_acl(object: TypeObject, acl: Option<Vec<ObjectAclEntry>>) -> TypeObject 
             definition.usage_acl = acl;
             TypeObject::Shell(definition)
         }
+        TypeObject::Range {
+            mut definition,
+            multirange,
+        } => {
+            definition.usage_acl = acl;
+            TypeObject::Range {
+                definition,
+                multirange,
+            }
+        }
         TypeObject::Enum(mut definition) => {
             definition.usage_acl = acl;
             TypeObject::Enum(definition)
@@ -280,6 +290,9 @@ fn publish(context: &TypeLifecycleContext<'_>, object: TypeObject) -> Result<(),
             let mut registry = before.clone();
             registry.insert(definition.identity.qualified_name(), definition)?;
             crate::catalog::shell_type::publish(context.shells, &before, registry)
+        }
+        TypeObject::Range { definition, .. } => {
+            super::lifecycle::publish_range(context, &definition.identity.clone(), *definition)
         }
         TypeObject::Enum(definition) => {
             let before = context.registries.enums.enum_registry().clone();

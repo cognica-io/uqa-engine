@@ -45,7 +45,9 @@ use super::relation_catalog::relation_catalog_identities;
 mod procedures;
 mod type_names;
 use procedures::{format_regproc, format_regprocedure, lookup_regprocedure_oid};
-pub use procedures::{resolve_regprocedure_input_oid, routine_name_parts};
+pub use procedures::{
+    resolve_regprocedure_input_oid, routine_name_parts, routine_oid_for_arguments,
+};
 
 pub use type_names::{
     catalog_routine_type_oid, catalog_routine_type_oid_with_control, catalog_user_type_identity,

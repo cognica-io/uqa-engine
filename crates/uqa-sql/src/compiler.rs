@@ -37,6 +37,7 @@ mod hierarchy;
 mod locking;
 mod merge;
 mod names;
+mod ranges;
 mod relations;
 mod returning;
 mod routines;

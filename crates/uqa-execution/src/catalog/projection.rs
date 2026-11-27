@@ -185,10 +185,11 @@ mod mutation;
 pub use index_definition::pg_get_indexdef_value;
 mod routine_definitions;
 pub use mutation::virtual_relation_mutation_error;
-pub use regtypes::resolve_regprocedure_input_oid;
 pub(crate) use regtypes::routine_oid_exists;
 pub use regtypes::type_oid_exists;
 pub use regtypes::{format_type_name, format_type_name_with_control, format_type_value};
+pub use regtypes::{resolve_regprocedure_input_oid, routine_oid_for_arguments};
+pub(crate) use routine_definitions::builtin_routine_by_oid;
 pub(super) use routine_definitions::RoutineDefinitions;
 pub use routine_definitions::{
     pg_get_function_arguments_value, pg_get_function_identity_arguments_value,

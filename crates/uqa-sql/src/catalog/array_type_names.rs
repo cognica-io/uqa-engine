@@ -51,6 +51,16 @@ fn clipped_name(type_name: &str, overhead: usize) -> &str {
     &type_name[..length]
 }
 
+/// PostgreSQL inserts `multi` before the first literal `range` or appends `_multirange` to a clipped base.
+pub fn multirange_type_name(range: &str) -> String {
+    if let Some((prefix, suffix)) = range.split_once("range") {
+        let name = format!("{prefix}multirange{suffix}");
+        clipped_name(&name, 0).to_owned()
+    } else {
+        format!("{}_multirange", clipped_name(range, "_multirange".len()))
+    }
+}
+
 /// Select the first generated array name that no existing type in the namespace uses.
 pub fn choose_array_type_name(type_name: &str, mut in_use: impl FnMut(&str) -> bool) -> String {
     let mut pass = 0;

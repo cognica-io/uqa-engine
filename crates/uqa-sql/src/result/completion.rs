@@ -150,6 +150,7 @@ pub fn command_tag_name(command: &CommandPlan) -> &'static str {
         CommandPlan::CommentType(_) => "COMMENT",
         CommandPlan::CreateShellType(_)
         | CommandPlan::CreateEnum(_)
+        | CommandPlan::CreateRange(_)
         | CommandPlan::CreateCompositeType(_) => "CREATE TYPE",
         CommandPlan::AlterEnum(_) => "ALTER TYPE",
         CommandPlan::AlterTypeObject(statement) => match statement.kind {

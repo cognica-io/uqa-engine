@@ -92,6 +92,7 @@ impl CommandPlan {
             | Self::CommentType(_)
             | Self::CreateShellType(_)
             | Self::CreateEnum(_)
+            | Self::CreateRange(_)
             | Self::CreateCompositeType(_)
             | Self::AlterEnum(_)
             | Self::AlterTypeObject(_)

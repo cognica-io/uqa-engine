@@ -133,3 +133,24 @@ impl RangeSubtype {
         }
     }
 }
+
+/// Range attributes stay in source order because subtype and namespace lookup can fail before a later duplicate option.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateRange {
+    pub name: String,
+    pub options: Vec<RangeOption>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RangeOption {
+    pub name: String,
+    pub value: RangeOptionValue,
+    pub position: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum RangeOptionValue {
+    Type(ColumnType),
+    Name(String),
+    Invalid,
+}

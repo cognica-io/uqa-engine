@@ -65,6 +65,7 @@ fn catalog_type_projection_retains_exact_names_and_nested_domain_storage() {
         collation_oid: 0,
         canonical_oid: None,
         subtype_difference_oid: None,
+        constructor_oids: None,
         multirange: super::super::range_type::StoredMultirange {
             object_id: [5; 16],
             oid: 16_509,
