@@ -78053,6 +78053,19 @@
     {
       "package": "uqa-storage",
       "kind": "lib",
+      "test": "tensor_maxima_keep_signed_zero_bits_across_element_order_and_top_k",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/vector_index/query/tests.rs",
+      "capability": "Tensor score reduction",
+      "workload": "Score four tensors whose finite components yield positive or negative zero. Select one or four documents with and without a memory allowance.",
+      "invariant": "Mixed zeros retain positive zero in both orders, negative-only scores retain negative zero and top-k breaks equal scores by document identity.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
       "test": "probed_tensor_scores_preserve_bits_at_float_extremes_and_ties",
       "cases": 1,
       "source": "crates/uqa-storage/src/ivf_index/tests.rs",
