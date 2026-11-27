@@ -434,3 +434,49 @@ fn independent_beams_keep_frozen_priority_and_complete_each_physical_identity_on
         }
     }
 }
+
+#[test]
+fn frontier_reuses_membership_and_orders_each_new_priority_with_logarithmic_comparisons() {
+    const COUNT: usize = 512;
+    const LIMIT: usize = 256;
+    let mut data = oracle();
+    data.labels = vec![0; COUNT];
+    data.neighbors = vec![Vec::new(); COUNT];
+    data.vectors.clear();
+    let case = Case {
+        list: LIMIT,
+        beam: 1,
+        rounds: Vec::new(),
+        expanded: Vec::new(),
+        completion: Vec::new(),
+    };
+    let physical = MemoryBudget::new(4 << 20);
+    let control = StorageReadControl::with_limit(2 << 20);
+    let (source, manifest) = fixture_from(&data, 2, COUNT, &case, &physical);
+    let reader = reader(Arc::new(Source::new(source, false)), &manifest, 0, &control);
+    let mut traversal =
+        DiskANNTraversal::new(reader.clone(), &query(2, &control), &control).unwrap();
+    let mut stats = traversal.stats();
+    let workspace = traversal.workspace.as_mut().unwrap();
+    PRIORITY_COMPARISONS.set(0);
+    for id in (1..COUNT as u64).rev() {
+        workspace.admit(id, &reader, &control, &mut stats).unwrap();
+        workspace.admit(id, &reader, &control, &mut stats).unwrap();
+    }
+    assert_eq!(stats.pq_estimates, COUNT as u64);
+    assert!(PRIORITY_COMPARISONS.get() <= COUNT * (LIMIT.ilog2() as usize + 2));
+    assert!(workspace
+        .frontier
+        .iter()
+        .map(|candidate| candidate.node)
+        .eq(0..LIMIT as u64));
+    assert_eq!(ids(&traversal.next_beam().unwrap()), [0]);
+    let workspace = traversal.workspace.as_mut().unwrap();
+    workspace.admit(0, &reader, &control, &mut stats).unwrap();
+    assert_eq!(stats.pq_estimates, COUNT as u64);
+    workspace
+        .admit(COUNT as u64 - 1, &reader, &control, &mut stats)
+        .unwrap();
+    assert_eq!(stats.pq_estimates, COUNT as u64 + 1);
+    assert_eq!(workspace.frontier.last().unwrap().node, COUNT as u64 - 1);
+}

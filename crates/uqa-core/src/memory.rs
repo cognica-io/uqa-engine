@@ -29,7 +29,7 @@ mod vec;
 
 pub use deque::BudgetedDeque;
 pub use hash_index::{BudgetedHashIndex, BudgetedHashIndexIter, BudgetedHashIndexSlots};
-pub use hash_set::BudgetedHashSet;
+pub use hash_set::{BudgetedHashMap, BudgetedHashSet};
 pub use heap::BudgetedBinaryHeap;
 pub use map::{
     BudgetedMap, BudgetedMapIter, BudgetedSharedMap, BudgetedSharedMapBidirectionalIter,
@@ -237,6 +237,21 @@ impl MemoryReservation {
             }
         }
         self.bytes += additional;
+        Ok(())
+    }
+
+    /// Transfer an existing allocation to a direct child's retention limit. The parent and its ancestors already own the bytes. A failed claim keeps the original lease intact.
+    pub fn restrict_to_child(&mut self, child: &MemoryBudget) -> Result<(), MemoryError> {
+        assert!(
+            child
+                .0
+                .parent
+                .as_ref()
+                .is_some_and(|parent| parent.shares_allowance(&self.budget)),
+            "retention allowance must be a direct child"
+        );
+        child.0.claim(self.bytes)?;
+        self.budget = child.clone();
         Ok(())
     }
 

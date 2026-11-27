@@ -101,6 +101,7 @@ pub fn verify_compound_mutations(store: &dyn KeyValueStore) -> StorageBackendRes
             "successful evaluated batch",
         )?;
     }
+    verify_transaction_mutation(store, &discarded)?;
     store.begin_read_transaction()?;
     let mut called = false;
     let result = store.with_mutation(&mut |_, _| {
@@ -113,6 +114,39 @@ pub fn verify_compound_mutations(store: &dyn KeyValueStore) -> StorageBackendRes
         "read-only rejection precedes evaluation",
     )?;
     store.delete_prefix(PREFIX)?;
+    Ok(())
+}
+
+fn verify_transaction_mutation(
+    store: &dyn KeyValueStore,
+    discarded: &[u8],
+) -> StorageBackendResult<()> {
+    let receipt = store.completed_commit();
+    expect(
+        !store.try_with_transaction_mutation(&mut |_, _| panic!("idle mutation ran"))?,
+        "idle transaction-scoped mutation was declined",
+    )?;
+    expect_eq(
+        &store.completed_commit(),
+        &receipt,
+        "idle mutation preserves commit receipt",
+    )?;
+    store.begin_transaction()?;
+    expect(
+        store.try_with_transaction_mutation(&mut |_, batch| batch.put(discarded, b"private"))?,
+        "active transaction-scoped mutation ran",
+    )?;
+    expect_eq(
+        &store.get(discarded)?.as_deref(),
+        &Some(b"private".as_slice()),
+        "scoped write is private",
+    )?;
+    store.rollback_transaction()?;
+    expect(
+        !store.try_with_transaction_mutation(&mut |_, _| panic!("rolled-back mutation ran"))?
+            && store.get(discarded)?.is_none(),
+        "a completed transaction cannot be replaced by an implicit writer",
+    )?;
     Ok(())
 }
 

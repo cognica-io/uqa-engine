@@ -77906,6 +77906,97 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "base_layer_search_releases_upper_distances_and_decodes_each_candidate_once",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/hnsw_index/tests/reads.rs",
+      "capability": "HNSW base-layer distance workspace",
+      "workload": "Warm an upper-level distance, then search all 128 nodes of a 256-coordinate ring.",
+      "invariant": "The base search emits 128 neighbors, releases the upper cache and decodes at most 128 candidate vectors.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "frontier_reuses_membership_and_orders_each_new_priority_with_logarithmic_comparisons",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/diskann_index/search/tests.rs",
+      "capability": "DiskANN bounded frontier work",
+      "workload": "Offer 512 equal-priority candidates in reverse order, repeat each admission and revisit expanded and evicted nodes.",
+      "invariant": "The ordered frontier retains the first 256 node IDs. Duplicates consume no extra distance estimates and comparisons stay within a logarithmic bound per admission.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "tensor_top_k_uses_bounded_workspace_in_trained_and_untrained_search",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/ivf_index/tests.rs",
+      "capability": "Bounded tensor IVF selection",
+      "workload": "Query five of 1,024 documents with two vectors each before and after training under a 4 KiB allowance.",
+      "invariant": "Both routes return the canonical five scores and document IDs and release the complete workspace.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "probed_tensor_scores_preserve_bits_at_float_extremes_and_ties",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/ivf_index/tests.rs",
+      "capability": "IVF tensor score and ordering equivalence",
+      "workload": "Probe one, two and four centroids across seven query vectors, three top-k limits, ties, subnormals and overflowing dot products.",
+      "invariant": "Each result matches the document IDs and exact score bits of materializing every selected component and then reducing.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "cached_norms_preserve_every_canonical_score_bit",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/vector_index/cosine/tests.rs",
+      "capability": "Canonical cosine from retained norms",
+      "workload": "Score vector pairs with empty, mismatched, subnormal and overflowing components.",
+      "invariant": "Computing the query norm or both norms ahead of time preserves the canonical f32 score bits.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "retained_coordinates_keep_one_flat_tensor_and_reuse_norms_across_queries",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/vector_index/brute_force/cache/tests.rs",
+      "capability": "Retained SQLite vector storage",
+      "workload": "Warm the exact index with multiple tensor components and issue a second query on the same read snapshot.",
+      "invariant": "Coordinates use one contiguous array, every retained norm matches the canonical reduction and the second query reuses the snapshot.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "restricting_live_workspace_charges_only_its_receiving_child",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/tests.rs",
+      "capability": "Memory ownership transfer into a bounded child",
+      "workload": "Move a live parent allocation into a capped child budget and attempt the same transfer while the child is full.",
+      "invariant": "Ownership transfer charges the child once, preserves the parent peak and leaves the source fully charged when the child rejects admission.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }
