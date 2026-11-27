@@ -28,11 +28,7 @@ pub fn scalar_in_scope_contains_volatile_function_with_control(
     if scalar_calls_are_volatile_with_control(catalog, scalar, control)? {
         return Ok(true);
     }
-    let mut result = Ok(false);
-    scalar.visit(&mut |node| {
-        if !matches!(result, Ok(false)) {
-            return;
-        }
+    scalar.try_any_node(|node| {
         let index = match node {
             ScalarExpr::ScalarSubquery(index)
             | ScalarExpr::Exists {
@@ -41,13 +37,12 @@ pub fn scalar_in_scope_contains_volatile_function_with_control(
             | ScalarExpr::InSubquery {
                 subquery: index, ..
             } => *index,
-            _ => return,
+            _ => return Ok(false),
         };
-        result = subqueries.get(index).map_or(Ok(true), |query| {
+        subqueries.get(index).map_or(Ok(true), |query| {
             query_inner(catalog, query, &|_| false, visible_ctes, control)
-        });
-    });
-    result
+        })
+    })
 }
 
 pub fn query_contains_volatile_function_with_control(
@@ -284,12 +279,24 @@ pub fn unified_plan_contains_volatile_function_with_control(
     plan: &UnifiedPlan,
     control: &ProductionControl<'_>,
 ) -> Result<bool, SQLError> {
+    plan_ref_contains_volatile_function_with_control(catalog, plan.into(), control)
+}
+
+pub fn plan_ref_contains_volatile_function_with_control(
+    catalog: &dyn VolatilityCatalog,
+    plan: crate::plan::PlanRef<'_>,
+    control: &ProductionControl<'_>,
+) -> Result<bool, SQLError> {
     control.check()?;
-    let mut result = Ok(false);
-    plan.visit_scalar_expressions(&mut |expression| {
-        if matches!(result, Ok(false)) {
-            result = scalar_calls_are_volatile_with_control(catalog, expression, control);
+    match plan.try_visit_scalar_expressions(&mut |expression| {
+        if scalar_calls_are_volatile_with_control(catalog, expression, control).map_err(Some)? {
+            Err(None)
+        } else {
+            Ok(())
         }
-    });
-    result
+    }) {
+        Ok(()) => Ok(false),
+        Err(None) => Ok(true),
+        Err(Some(error)) => Err(error),
+    }
 }

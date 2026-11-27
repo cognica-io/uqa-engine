@@ -39,24 +39,25 @@ pub fn function_implicit_row_input(
 /// runtime callbacks and user-defined routine lookup. Already normalized names borrow the original full name or local-name slice; ASCII case folding owns one buffer.
 pub fn builtin_function_dispatch_name(name: &str) -> Cow<'_, str> {
     let lower = lowercase_function_name(name);
-    let Some((schema, local)) = lower.split_once('.') else {
-        return lower;
-    };
-    let is_builtin = match schema {
-        "ag_catalog" => is_age_catalog_function(local),
-        "pg_catalog" => is_pg_catalog_function_name(local),
-        _ => false,
-    };
-    if !is_builtin {
+    let offset = lower.len() - normalized_builtin_dispatch_name(&lower).len();
+    if offset == 0 {
         return lower;
     }
-    let offset = schema.len() + 1;
     match lower {
         Cow::Borrowed(lower) => Cow::Borrowed(&lower[offset..]),
         Cow::Owned(mut lower) => {
             lower.drain(..offset);
             Cow::Owned(lower)
         }
+    }
+}
+
+/// Select the dispatch spelling from an already ASCII-folded routine identity.
+pub(crate) fn normalized_builtin_dispatch_name(identity: &str) -> &str {
+    match identity.split_once('.') {
+        Some(("ag_catalog", local)) if is_age_catalog_function(local) => local,
+        Some(("pg_catalog", local)) if is_pg_catalog_function_name(local) => local,
+        _ => identity,
     }
 }
 

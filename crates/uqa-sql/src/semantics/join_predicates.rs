@@ -17,15 +17,7 @@ pub fn visit_join_conjuncts_with_control<'a>(
     control: &uqa_core::memory::ProductionControl<'_>,
     visit: &mut impl FnMut(&'a ScalarExpr) -> Result<(), crate::SQLError>,
 ) -> Result<(), crate::SQLError> {
-    control.check()?;
-    if let ScalarExpr::And(items) = expression {
-        for item in items {
-            visit_join_conjuncts_with_control(item, control, visit)?;
-        }
-        Ok(())
-    } else {
-        visit(expression)
-    }
+    super::expression_shape::visit_filter_parts_with_control(expression, control, visit)
 }
 
 /// Move an equality's selected operands to their own input scopes. Right-input positions change coordinates without copying either scalar tree.
@@ -66,16 +58,7 @@ pub fn bind_join_comparison_owned(
 }
 
 pub fn join_conjuncts(expr: &ScalarExpr) -> Vec<&ScalarExpr> {
-    match expr {
-        ScalarExpr::And(items) => {
-            let mut conjuncts = Vec::with_capacity(items.len());
-            for item in items {
-                conjuncts.extend(join_conjuncts(item));
-            }
-            conjuncts
-        }
-        _ => vec![expr],
-    }
+    super::expression_shape::flatten_and_filter_parts(expr)
 }
 
 /// Determine the input side of equality operands from structured identities and joined logical positions. Planning does not synthesize a sample row, and punctuation in a quoted identifier is never interpreted as a relation boundary.
@@ -85,14 +68,10 @@ pub fn decide_join_sides<'a>(
     lhs: &'a ScalarExpr,
     rhs: &'a ScalarExpr,
 ) -> Option<(&'a ScalarExpr, &'a ScalarExpr)> {
-    let binds = |expression, schema, offset| {
-        let (valid, has_column) = expression_binding(expression, schema, offset);
-        valid && has_column
-    };
-    if binds(lhs, left, 0) && binds(rhs, right, left.len()) {
+    if expression_binds(lhs, left, 0) && expression_binds(rhs, right, left.len()) {
         return Some((lhs, rhs));
     }
-    if binds(rhs, left, 0) && binds(lhs, right, left.len()) {
+    if expression_binds(rhs, left, 0) && expression_binds(lhs, right, left.len()) {
         return Some((rhs, lhs));
     }
     None
@@ -110,11 +89,7 @@ pub fn bind_join_sides<'a>(
 }
 
 fn local_join_key(expression: &ScalarExpr, offset: usize) -> Cow<'_, ScalarExpr> {
-    let mut has_position = false;
-    if offset != 0 {
-        expression.visit(&mut |part| has_position |= matches!(part, ScalarExpr::Position(_)));
-    }
-    if !has_position {
+    if offset == 0 || !expression.any_node(|part| matches!(part, ScalarExpr::Position(_))) {
         return Cow::Borrowed(expression);
     }
     let mut bound = expression.clone();
@@ -126,90 +101,30 @@ fn local_join_key(expression: &ScalarExpr, offset: usize) -> Cow<'_, ScalarExpr>
     Cow::Owned(bound)
 }
 
-fn expression_binding(expression: &ScalarExpr, schema: &RowSchema, offset: usize) -> (bool, bool) {
-    match expression {
-        ScalarExpr::Column(column) => (schema.unqualified_position(column).is_some(), true),
-        ScalarExpr::QualifiedColumn { qualifier, column } => {
-            (schema.qualified_position(qualifier, column).is_some(), true)
-        }
-        ScalarExpr::Position(position) => (
-            position
+fn expression_binds(expression: &ScalarExpr, schema: &RowSchema, offset: usize) -> bool {
+    let mut has_column = false;
+    let invalid = expression.any_node(|part| {
+        let bound = match part {
+            ScalarExpr::Column(name) => schema.unqualified_position(name).is_some(),
+            ScalarExpr::QualifiedColumn { qualifier, column } => {
+                schema.qualified_position(qualifier, column).is_some()
+            }
+            ScalarExpr::Position(position) => position
                 .checked_sub(offset)
                 .is_some_and(|position| position < schema.len()),
-            true,
-        ),
-        ScalarExpr::InternalColumn(column) => (schema.internal_slot(*column).is_some(), true),
-        ScalarExpr::Literal(_)
-        | ScalarExpr::TypedLiteral { .. }
-        | ScalarExpr::RetainedLiteral(_)
-        | ScalarExpr::Param(_) => (true, false),
-        ScalarExpr::Func {
-            args,
-            order_by,
-            filter,
-            ..
-        } => combine_bindings(
-            args.iter()
-                .chain(order_by.iter().map(|order| &order.expr))
-                .chain(filter.as_deref()),
-            schema,
-            offset,
-        ),
-        ScalarExpr::Array(items)
-        | ScalarExpr::Row(items)
-        | ScalarExpr::CompositeRow { items, .. }
-        | ScalarExpr::And(items)
-        | ScalarExpr::Or(items) => combine_bindings(items, schema, offset),
-        ScalarExpr::Binary { lhs, rhs, .. } => {
-            combine_bindings([lhs.as_ref(), rhs.as_ref()], schema, offset)
-        }
-        ScalarExpr::UnaryMinus(expr)
-        | ScalarExpr::Not(expr)
-        | ScalarExpr::IsNull { expr, .. }
-        | ScalarExpr::Cast { expr, .. }
-        | ScalarExpr::Collated { expr, .. }
-        | ScalarExpr::InSubquery { expr, .. } => expression_binding(expr, schema, offset),
-        ScalarExpr::Between { expr, low, high } => {
-            combine_bindings([expr.as_ref(), low.as_ref(), high.as_ref()], schema, offset)
-        }
-        ScalarExpr::InList { expr, list, .. } => {
-            combine_bindings(std::iter::once(expr.as_ref()).chain(list), schema, offset)
-        }
-        ScalarExpr::Case {
-            base,
-            when,
-            else_branch,
-        } => combine_bindings(
-            base.as_deref()
-                .into_iter()
-                .chain(
-                    when.iter()
-                        .flat_map(|(condition, value)| [condition, value]),
-                )
-                .chain(else_branch.as_deref()),
-            schema,
-            offset,
-        ),
-        ScalarExpr::WindowCall { .. }
-        | ScalarExpr::Default
-        | ScalarExpr::Star
-        | ScalarExpr::QualifiedStar(_)
-        | ScalarExpr::ScalarSubquery(_)
-        | ScalarExpr::Exists { .. } => (false, false),
-    }
-}
-
-fn combine_bindings<'a>(
-    expressions: impl IntoIterator<Item = &'a ScalarExpr>,
-    schema: &RowSchema,
-    offset: usize,
-) -> (bool, bool) {
-    expressions
-        .into_iter()
-        .map(|expression| expression_binding(expression, schema, offset))
-        .fold((true, false), |(valid, has_column), binding| {
-            (valid && binding.0, has_column || binding.1)
-        })
+            ScalarExpr::InternalColumn(column) => schema.internal_slot(*column).is_some(),
+            ScalarExpr::WindowCall { .. }
+            | ScalarExpr::Default
+            | ScalarExpr::Star
+            | ScalarExpr::QualifiedStar(_)
+            | ScalarExpr::ScalarSubquery(_)
+            | ScalarExpr::Exists { .. } => return true,
+            _ => return false,
+        };
+        has_column = true;
+        !bound
+    });
+    has_column && !invalid
 }
 
 #[cfg(test)]

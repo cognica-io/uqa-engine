@@ -19,7 +19,7 @@ fn owned_qualification_preserves_separate_ordering_scopes_and_exact_lifetimes() 
     let budget = MemoryBudget::new(1 << 20);
     let token = CancellationToken::new();
     let control = ProductionControl::new(&budget, &token, &token);
-    for projection in &block.projections {
+    for (index, projection) in block.projections.iter().enumerate() {
         let expected = crate::semantics::qualify_unqualified_columns(&projection.expr, "source");
         let mut output = None;
         let allocation = allocation_counter::measure(|| {
@@ -29,6 +29,52 @@ fn owned_qualification_preserves_separate_ordering_scopes_and_exact_lifetimes() 
             );
         });
         assert_eq!(output.as_deref(), Some(&expected));
+        let mut names = Vec::new();
+        output.as_deref().unwrap().visit(&mut |part| match part {
+            ScalarExpr::Column(name) => names.push((None, name.to_string(), name.position())),
+            ScalarExpr::QualifiedColumn { qualifier, column } => names.push((
+                Some(qualifier.to_string()),
+                column.to_string(),
+                column.position(),
+            )),
+            _ => (),
+        });
+        let original_positions = {
+            let mut positions = Vec::new();
+            projection.expr.visit(&mut |part| {
+                if let ScalarExpr::Column(name) = part {
+                    positions.push(name.position());
+                }
+            });
+            positions
+        };
+        assert_eq!(
+            names
+                .iter()
+                .map(|(_, _, position)| *position)
+                .collect::<Vec<_>>(),
+            original_positions
+        );
+        let columns = names
+            .iter()
+            .map(|(qualifier, column, _)| (qualifier.as_deref(), column.as_str()))
+            .collect::<Vec<_>>();
+        if index == 0 {
+            assert_eq!(
+                columns,
+                [(Some("source"), "x"), (None, "y"), (Some("source"), "z")]
+            );
+        } else {
+            assert_eq!(
+                columns,
+                [
+                    (Some("source"), "x"),
+                    (Some("source"), "z"),
+                    (None, "p"),
+                    (None, "q")
+                ]
+            );
+        }
         assert_eq!(allocation.bytes_current, budget.used() as i64);
         drop(output);
         assert_eq!(budget.used(), 0);

@@ -270,3 +270,72 @@ fn generated_distinct_booleans_accept_set_returning_comparisons() {
     let error = validate("SELECT NOT (generate_series(1,2) IS DISTINCT FROM 1)").unwrap_err();
     assert_eq!(error.sqlstate(), Some("42804"));
 }
+
+#[test]
+fn nested_set_rewrite_keeps_owned_subtrees_and_assigns_levels_by_parentage() {
+    use crate::ScalarExpr;
+
+    let schema = RowSchema::default();
+    let relation = crate::ast::InternalRelationId::allocate();
+    for depth in [8, 64] {
+        let text = "wide_scoped_column".repeat(256);
+        let original = text.as_ptr();
+        let mut expression = ScalarExpr::Column(text.into());
+        for _ in 0..depth {
+            expression = ScalarExpr::UnaryMinus(Box::new(expression));
+        }
+        let mut rewritten = None;
+        let mut calls = Vec::new();
+        let allocations = allocation_counter::measure(|| {
+            rewritten = Some(
+                super::rewrite_set_calls(
+                    &NoRoutines,
+                    &NoRoutines,
+                    expression,
+                    &mut calls,
+                    relation,
+                    &schema,
+                    &[],
+                )
+                .unwrap(),
+            );
+        });
+        assert_eq!(allocations.count_total, 0, "depth {depth}: {allocations:?}");
+        assert!(calls.is_empty());
+        let mut leaf = rewritten.as_ref().unwrap();
+        for _ in 0..depth {
+            let ScalarExpr::UnaryMinus(child) = leaf else {
+                panic!("unary input")
+            };
+            leaf = child;
+        }
+        assert!(matches!(leaf, ScalarExpr::Column(name) if name.as_ptr() == original));
+    }
+
+    let mut calls = Vec::new();
+    let expression =
+        block("SELECT generate_series(1, generate_series(1, 2)) + generate_series(3, 4)")
+            .projections
+            .remove(0)
+            .expr;
+    let result = super::rewrite_set_calls(
+        &NoRoutines,
+        &NoRoutines,
+        expression,
+        &mut calls,
+        relation,
+        &schema,
+        &[],
+    )
+    .unwrap();
+    assert_eq!(
+        calls.iter().map(|call| call.level).collect::<Vec<_>>(),
+        [0, 1, 0]
+    );
+    assert_eq!(
+        calls[1].args[1],
+        ScalarExpr::InternalColumn(relation.column(0))
+    );
+    assert!(matches!(result, ScalarExpr::Binary { lhs, rhs, .. }
+        if *lhs == ScalarExpr::InternalColumn(relation.column(1)) && *rhs == ScalarExpr::InternalColumn(relation.column(2))));
+}
