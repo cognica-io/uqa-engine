@@ -42,6 +42,23 @@ enum Boolean {
 }
 
 impl Boolean {
+    fn may_reduce(self, operands: &[OperatorTree]) -> bool {
+        match operands {
+            [] | [_] => false,
+            [a, b] => {
+                std::mem::discriminant(a) == std::mem::discriminant(b)
+                    || [a, b].into_iter().any(|operand| {
+                        matches!(
+                            (self, operand),
+                            (Self::Intersect, OperatorTree::Union(_))
+                                | (Self::Union, OperatorTree::Intersect(_))
+                        )
+                    })
+            }
+            _ => true,
+        }
+    }
+
     fn opposite_terms<'a>(self, key: &'a MembershipKey<'_>) -> &'a [usize] {
         match (self, key) {
             (Self::Intersect, MembershipKey::Union(ids))
@@ -52,7 +69,7 @@ impl Boolean {
 }
 
 fn reduce(mut operands: Vec<OperatorTree>, boolean: Boolean) -> OperatorTree {
-    if operands.len() > 1 {
+    if boolean.may_reduce(&operands) {
         let mut keep = {
             let mut index = MembershipIndex::default();
             let roots: Vec<_> = operands
@@ -186,6 +203,22 @@ mod tests {
             field: "value".into(),
             predicate: Predicate::Equals(Value::Int(value)),
             source: None,
+        }
+    }
+
+    #[test]
+    fn distinct_operand_shapes_do_not_index_unrelated_subtrees() {
+        for boolean in [Boolean::Intersect, Boolean::Union] {
+            let composed = OperatorTree::Composed((0..4096).map(filter).collect());
+            KEY_VISITS.with(|visits| visits.set(0));
+            let result = reduce(vec![composed, filter(-1)], boolean);
+            assert_eq!(KEY_VISITS.with(std::cell::Cell::get), 0);
+            let (OperatorTree::Intersect(terms) | OperatorTree::Union(terms)) = result else {
+                panic!("both operands must survive");
+            };
+            assert!(
+                matches!(&terms[..], [OperatorTree::Composed(children), OperatorTree::Filter { .. }] if children.len() == 4096)
+            );
         }
     }
 

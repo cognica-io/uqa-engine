@@ -6862,6 +6862,19 @@
     {
       "package": "uqa-planner",
       "kind": "lib",
+      "test": "distinct_operand_shapes_do_not_index_unrelated_subtrees",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/query_optimizer/algebra.rs",
+      "capability": "Boolean membership reduction",
+      "workload": "Combine a composition of 4,096 filters with a differently shaped filter under intersection and union.",
+      "invariant": "Both operands survive in order and the reducer visits zero nodes to construct membership keys.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
       "test": "fused_patterns_keep_declaration_and_constraint_order_and_move_edge_storage",
       "cases": 1,
       "source": "crates/uqa-planner/src/query_optimizer/graph_rewrites/tests.rs",
