@@ -77581,6 +77581,19 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "test",
+      "test": "propagation_rounds_reuse_adjacency_and_score_buffers",
+      "cases": 1,
+      "source": "crates/uqa-graph/tests/centrality.rs",
+      "capability": "Bounded allocation for graph propagation rounds",
+      "workload": "Run PageRank, HITS and message passing for one and eight rounds on the same four-vertex chain.",
+      "invariant": "Each algorithm performs the same number of heap allocations for both round counts and returns a posting for each vertex.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }

@@ -73,6 +73,8 @@ Round-trip tests must compare complete graph payload, support, names, and reserv
 
 ## Centrality and traversal support
 
+PageRank, HITS and message passing index their score arrays in sorted vertex-ID order. They resolve incident edges once and reuse two sets of scores across rounds. Parallel edges retain their multiplicity, and message passing visits outgoing edges before incoming edges. Zero message-passing layers read the initial features only.
+
 PageRank, HITS, and betweenness produce scored graph support. Traversal, neighbors, graph edges, temporal traversal, and RPQ produce membership or decorated support according to their node type. The engine then intersects, filters, joins, or fuses that carrier with relational and retrieval data.
 
 ## SQL composition

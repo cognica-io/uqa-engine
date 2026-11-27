@@ -217,6 +217,36 @@ fn traversal_and_centrality_share_one_subgraph_across_the_result() {
     }
 }
 
+#[test]
+fn propagation_rounds_reuse_adjacency_and_score_buffers() {
+    let store = linear_corpus();
+    for operator in ["pagerank", "hits", "messages"] {
+        let allocations = |rounds| {
+            allocation_counter::measure(|| {
+                let result = match operator {
+                    "pagerank" => PageRank::new("g")
+                        .max_iterations(rounds)
+                        .tolerance(0.0)
+                        .execute(&store),
+                    "hits" => HITS::new("g")
+                        .max_iterations(rounds)
+                        .tolerance(0.0)
+                        .execute(&store),
+                    _ => MessagePassing::new("g").k_layers(rounds).execute(&store),
+                }
+                .unwrap();
+                assert_eq!(result.len(), 4);
+            })
+        };
+        let one = allocations(1);
+        let eight = allocations(8);
+        assert_eq!(
+            one.count_total, eight.count_total,
+            "{operator}: {one:?}, {eight:?}"
+        );
+    }
+}
+
 fn score_map(gpl: &uqa_graph::GraphPostingList) -> std::collections::BTreeMap<u64, f64> {
     gpl.inner()
         .entries()
