@@ -63,11 +63,18 @@ pub(super) fn commit(
     control: &StorageReadControl,
 ) -> PhysicalResult<()> {
     // A BUSY COMMIT retains the transaction. Keep its staged effects and retry only COMMIT; dropping it on cancellation rolls those effects back. Other errors retain the caller's uncertain-outcome handling.
-    let result = retry(&transaction, false, control, || {
-        transaction.execute_batch("COMMIT").map_err(Into::into)
-    });
+    let result = commit_open(&transaction, control);
     drop(transaction);
     result
+}
+
+pub(super) fn commit_open(
+    connection: &Connection,
+    control: &StorageReadControl,
+) -> PhysicalResult<()> {
+    retry(connection, false, control, || {
+        connection.execute_batch("COMMIT").map_err(Into::into)
+    })
 }
 
 /// Record writes do their own cancellable admission. Restore the pool's previous timeout when returning the connection, including on an error or unwind.
