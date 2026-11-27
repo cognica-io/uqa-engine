@@ -30,41 +30,34 @@ pub(super) fn collect(
     output: &mut Buffer<Lifted>,
     control: &ProductionControl<'_>,
 ) -> Result<(), SQLError> {
-    control.check()?;
-    if let SourcePlan::Join { left, right, .. } = source {
-        if let Some(children) = &analyzed.children {
-            collect(left, &children.0, context, predicates, output, control)?;
-            collect(right, &children.1, context, predicates, output, control)?;
-        }
-    } else if let Some(candidate) = candidate(source, analyzed, context, predicates, control)? {
-        output.push(candidate)?;
-    }
+    visit_projectable(
+        source,
+        analyzed,
+        context,
+        control,
+        &mut |source, analyzed| {
+            if let Some(lifted) = candidate(source, analyzed, context, predicates, control)? {
+                output.push(lifted)?;
+            }
+            Ok(false)
+        },
+    )?;
     Ok(())
 }
 
 fn candidate(
-    source: &SourcePlan,
+    source: ProjectableSource<'_>,
     analyzed: &AnalyzedSource,
     context: &Context<'_>,
     predicates: &mut Buffer<OwnedScalarExpr>,
     control: &ProductionControl<'_>,
 ) -> Result<Option<Lifted>, SQLError> {
-    let SourcePlan::Subquery {
+    let ProjectableSource {
+        qualifier,
         body,
-        captured_output: None,
-        alias: Some(qualifier),
-        lateral: false,
-        ..
-    } = source
-    else {
-        return Ok(None);
-    };
-    let Some(input) = &body.analyzed_source else {
-        return Ok(None);
-    };
-    let RelationalPlan::QueryBlock(block) = &body.root else {
-        return Ok(None);
-    };
+        input,
+        block,
+    } = source;
     if !eligible_body(body, block, context, control)? {
         return Ok(None);
     }
@@ -135,12 +128,64 @@ fn candidate(
     }))
 }
 
-fn eligible_body(
-    body: &uqa_sql::plan::QueryPlan,
-    block: &uqa_sql::plan::QueryBlockPlan,
+pub(super) fn has_candidate(
+    source: &SourcePlan,
+    analyzed: &AnalyzedSource,
     context: &Context<'_>,
     control: &ProductionControl<'_>,
 ) -> Result<bool, SQLError> {
+    visit_projectable(source, analyzed, context, control, &mut |_, _| Ok(true))
+}
+
+fn visit_projectable(
+    source: &SourcePlan,
+    analyzed: &AnalyzedSource,
+    context: &Context<'_>,
+    control: &ProductionControl<'_>,
+    visit: &mut impl FnMut(ProjectableSource<'_>, &AnalyzedSource) -> Result<bool, SQLError>,
+) -> Result<bool, SQLError> {
+    control.check()?;
+    if let SourcePlan::Join { left, right, .. } = source {
+        let Some(children) = &analyzed.children else {
+            return Ok(false);
+        };
+        return Ok(
+            visit_projectable(left, &children.0, context, control, visit)?
+                || visit_projectable(right, &children.1, context, control, visit)?,
+        );
+    }
+    match projectable_source(source, context) {
+        Some(candidate) => visit(candidate, analyzed),
+        None => Ok(false),
+    }
+}
+
+struct ProjectableSource<'a> {
+    qualifier: &'a str,
+    body: &'a uqa_sql::plan::QueryPlan,
+    input: &'a AnalyzedSource,
+    block: &'a uqa_sql::plan::QueryBlockPlan,
+}
+
+/// Cheap structural admission for a borrowed derived table, shared by the parent and the copying pass.
+fn projectable_source<'a>(
+    source: &'a SourcePlan,
+    context: &Context<'_>,
+) -> Option<ProjectableSource<'a>> {
+    let SourcePlan::Subquery {
+        body,
+        captured_output: None,
+        alias: Some(qualifier),
+        lateral: false,
+        ..
+    } = source
+    else {
+        return None;
+    };
+    let input = body.analyzed_source.as_deref()?;
+    let RelationalPlan::QueryBlock(block) = &body.root else {
+        return None;
+    };
     if body.relations_bound != context.relations_bound
         || body.relation_privilege_subject.is_some()
         || !body.ctes.is_empty()
@@ -156,12 +201,28 @@ fn eligible_body(
         || block.limit.is_some()
         || block.offset.is_some()
         || !block.locking.is_empty()
-        || uqa_sql::semantics::volatility::query_contains_volatile_function_with_control(
-            context.volatility,
-            body,
-            control,
-        )?
     {
+        return None;
+    }
+    Some(ProjectableSource {
+        qualifier,
+        body,
+        input,
+        block,
+    })
+}
+
+fn eligible_body(
+    body: &uqa_sql::plan::QueryPlan,
+    block: &uqa_sql::plan::QueryBlockPlan,
+    context: &Context<'_>,
+    control: &ProductionControl<'_>,
+) -> Result<bool, SQLError> {
+    if uqa_sql::semantics::volatility::query_contains_volatile_function_with_control(
+        context.volatility,
+        body,
+        control,
+    )? {
         return Ok(false);
     }
     for projection in &block.projections {

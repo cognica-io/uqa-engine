@@ -644,3 +644,59 @@ fn scalar_output_without_a_query_qualification_allocates_no_transfer_workspace()
     });
     assert_eq!(allocation.bytes_total, 0, "{allocation:?}");
 }
+
+#[test]
+fn ineligible_derived_source_keeps_its_existing_query_without_scratch() {
+    use uqa_core::{
+        memory::{MemoryBudget, ProductionControl},
+        CancellationToken,
+    };
+
+    let mut input = analyzed("SELECT DISTINCT x AS k FROM (VALUES(1)) v(x)", "k = 1");
+    let RelationalPlan::QueryBlock(parent) = &mut input.root else {
+        panic!("parent query block");
+    };
+    let Some(SourcePlan::Subquery { body, .. }) = &mut parent.from else {
+        panic!("derived source");
+    };
+    let RelationalPlan::QueryBlock(child) = &mut body.root else {
+        panic!("child query block");
+    };
+    child.projections[0].expr = ScalarExpr::Literal(uqa_core::Value::Str("v".repeat(4 << 20)));
+    let budget = MemoryBudget::new(16 << 20);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&budget, &token, &token);
+    let input = input.copy_for_rewrite(&control).unwrap();
+    let retained = budget.used();
+    let sibling = budget.reserve(budget.available()).unwrap();
+    let mut output = None;
+    let allocation = allocation_counter::measure(|| {
+        output = Some(
+            owned::query_block(
+                input,
+                &Context {
+                    routines: &Catalog,
+                    volatility: &Catalog,
+                    relations_bound: false,
+                },
+                &control,
+            )
+            .unwrap(),
+        );
+    });
+    assert_eq!(allocation.count_total, 0);
+    assert_eq!(budget.used(), retained + sibling.bytes());
+    let output = output.unwrap();
+    let RelationalPlan::QueryBlock(parent) = &output.root else {
+        panic!("parent query block");
+    };
+    assert!(matches!(
+        &parent.from,
+        Some(SourcePlan::Subquery {
+            captured_output: None,
+            ..
+        })
+    ));
+    drop((output, sibling));
+    assert_eq!(budget.used(), 0);
+}

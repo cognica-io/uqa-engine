@@ -582,6 +582,19 @@
     {
       "package": "uqa-sql",
       "kind": "lib",
+      "test": "indexed_outer_replacements_preserve_duplicate_order_and_reuse_borrowed_columns",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/scoped_references/tests.rs",
+      "capability": "Indexed outer column substitution",
+      "workload": "Build one replacement index for an outer row and probe it repeatedly for two child queries and a whole-row reference.",
+      "invariant": "Ordinary and retained lookups allocate zero times, use the last duplicate, preserve output names and refuse a whole-row replacement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
       "test": "persisted_call_sites_preserve_runtime_fallback_and_require_concrete_function_identities",
       "cases": 1,
       "source": "crates/uqa-sql/src/catalog/stored_ast/sites/tests.rs",
@@ -6790,6 +6803,84 @@
       "capability": "Retained aggregate input metadata",
       "workload": "A metadata-wrapped integer column and a typed BIGINT literal widen addition beyond the INTEGER maximum.",
       "invariant": "Resolve positional columns through metadata while retaining the original selected operand types for width inference.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "parallel_join_predicates_cost_both_orientations_in_one_edge_scan",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/join_enumerator/tests.rs",
+      "capability": "Enumeration of parallel join predicates",
+      "workload": "Cost five predicates on a two-relation join with and without an indexed inner column.",
+      "invariant": "Five edge visits determine both orientations, preserving selected keys and exact cardinality.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "disjunction_pushdown_checks_calls_once_per_walk_and_copies_only_surviving_qualifiers",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/filter_pushdown/tests/production.rs",
+      "capability": "Disjunctive filter placement",
+      "workload": "Place two disjuncts containing four calls and a 4 MiB literal from a source present in just one disjunct.",
+      "invariant": "A 64 KiB allowance admits the two shared qualifiers in order and the catalog observes eight calls across the two walks.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "wide_absorption_indexes_each_member_once_and_moves_the_surviving_payload",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/query_optimizer/algebra.rs",
+      "capability": "Boolean membership absorption",
+      "workload": "Simplify 128 filters paired with opposite Boolean operators alongside a scored term with a 1 MiB buffer.",
+      "invariant": "Exactly 512 membership nodes are classified, 129 operands survive and the scored term retains its original allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "graph_edge_filter_preserves_buffers_and_shares_the_selected_predicate",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/query_optimizer/graph_rewrites/tests.rs",
+      "capability": "Graph edge predicate pushdown",
+      "workload": "Select an edge predicate with intersecting source and target aliases, duplicate edges and different labels.",
+      "invariant": "The original edge and graph buffers survive. Only both copies of the selected edge share the property predicate.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "fused_patterns_keep_declaration_and_constraint_order_and_move_edge_storage",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/query_optimizer/graph_rewrites/tests.rs",
+      "capability": "Graph pattern fusion",
+      "workload": "Fuse repeated variable declarations on both sides with an independently allocated long edge label.",
+      "invariant": "The last left declaration keeps its first position, right constraints append in order, and the edge retains its original label buffer.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "ineligible_derived_source_keeps_its_existing_query_without_scratch",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/derived_pullup/tests.rs",
+      "capability": "Derived source eligibility",
+      "workload": "Examine a DISTINCT derived source containing a 4 MiB literal while a sibling holds all remaining memory.",
+      "invariant": "The original source and all reservations survive without any heap allocation for speculative rewriting.",
       "case_names": [
         ""
       ]

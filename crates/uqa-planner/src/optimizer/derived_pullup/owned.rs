@@ -6,7 +6,7 @@
 
 //! A private derived-query candidate retains exact owners until every scope-sensitive replacement succeeds.
 
-use super::{contains_derived_source, ordinary_inner_source, Context, OptimizerConfig};
+use super::{ordinary_inner_source, Context, OptimizerConfig};
 use crate::scratch::Buffer;
 use uqa_core::memory::ProductionControl;
 use uqa_sql::{
@@ -45,7 +45,7 @@ pub(in crate::optimizer) fn rewrite(
     })
 }
 
-fn query_block(
+pub(super) fn query_block(
     query: MutableQueryPlan,
     context: &Context<'_>,
     control: &ProductionControl<'_>,
@@ -67,11 +67,12 @@ fn query_block(
         || !block.locking.is_empty()
         || !block.privilege_columns.is_empty()
         || input.schema.columns_are_open(None)
-        || !block
-            .from
-            .as_ref()
-            .is_some_and(|source| contains_derived_source(source) && ordinary_inner_source(source))
+        || !block.from.as_ref().is_some_and(ordinary_inner_source)
     {
+        return Ok(query);
+    }
+    let source = block.from.as_ref().expect("selected inner source");
+    if !candidates::has_candidate(source, &input, &context, control)? {
         return Ok(query);
     }
     let changed = query.copy_for_rewrite(control)?;
@@ -109,41 +110,47 @@ fn query_block(
         return Ok(query);
     }
     changed = changed.replace_where(combine(predicates, control)?, control)?;
-    for candidate in lifted {
+    // Capture produces closed expressions containing opaque relation attributes. An earlier source owns a duplicate identity just as it did before later sources were substituted.
+    let outputs = lifted
+        .iter()
+        .rev()
+        .flat_map(|candidate| candidate.outputs.iter())
+        .map(|(identity, expression)| (&**identity, &**expression));
+    let Some(substitutions) =
+        uqa_sql::binding::scoped_references::OuterColumnSubstitutions::new(outputs, control)?
+    else {
+        return Ok(query);
+    };
+    let RelationalPlan::QueryBlock(block) = &changed.root else {
+        unreachable!()
+    };
+    for index in 0..block.subqueries.len() {
         let mut complete = true;
-        let RelationalPlan::QueryBlock(block) = &changed.root else {
-            unreachable!()
-        };
-        for index in 0..block.subqueries.len() {
-            changed =
-                changed.map_query_child(QueryChildSlot::Subquery(index), control, |child| {
-                    let (child, rewritten) =
-                        uqa_sql::binding::scoped_references::substitute_outer_columns_owned(
-                            child,
-                            &input.schema,
-                            candidate
-                                .outputs
-                                .iter()
-                                .map(|(identity, expression)| (&**identity, &**expression)),
-                            control,
-                        )?;
-                    complete &= rewritten;
-                    Ok(child)
-                })?;
-            if !complete {
-                return Ok(query);
-            }
-        }
-        changed = transforms::local(changed, control, &mut |expression| {
-            expression.replace_nodes(control, &mut |node| {
-                candidate
-                    .outputs
-                    .iter()
-                    .find(|(identity, _)| identity_matches(identity, node))
-                    .map(|(_, value)| value.copy_for_rewrite(control).map_err(Into::into))
-                    .transpose()
-            })
+        changed = changed.map_query_child(QueryChildSlot::Subquery(index), control, |child| {
+            let (child, rewritten) = substitutions.substitute(child, &input.schema, control)?;
+            complete = rewritten;
+            Ok(child)
         })?;
+        if !complete {
+            return Ok(query);
+        }
+    }
+    changed = transforms::local(changed, control, &mut |expression| {
+        expression.replace_nodes(control, &mut |node| {
+            let replacement = match node {
+                ScalarExpr::Column(name) => substitutions.get(None, name),
+                ScalarExpr::QualifiedColumn { qualifier, column } => {
+                    substitutions.get(Some(qualifier), column)
+                }
+                _ => None,
+            };
+            replacement
+                .map(|value| value.copy_for_rewrite(control).map_err(Into::into))
+                .transpose()
+        })
+    })?;
+    drop(substitutions);
+    for candidate in lifted {
         changed = changed.map_source(control, |source| {
             replace_source(source, &candidate.qualifier, candidate.source, control)
         })?;
@@ -157,18 +164,6 @@ fn projections(query: &MutableQueryPlan) -> &[uqa_sql::plan::ProjectionPlan] {
         unreachable!()
     };
     &block.projections
-}
-
-fn identity_matches(identity: &ColumnIdentity, expression: &ScalarExpr) -> bool {
-    match expression {
-        ScalarExpr::Column(column) => {
-            identity.qualifier().is_none() && identity.column() == column.as_str()
-        }
-        ScalarExpr::QualifiedColumn { qualifier, column } => {
-            identity.qualifier() == Some(qualifier) && identity.column() == column.as_str()
-        }
-        _ => false,
-    }
 }
 
 fn identity_expression(
