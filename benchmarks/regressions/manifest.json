@@ -6862,12 +6862,12 @@
     {
       "package": "uqa-planner",
       "kind": "lib",
-      "test": "graph_edge_filter_preserves_buffers_and_shares_the_selected_predicate",
+      "test": "distinct_operand_shapes_do_not_index_unrelated_subtrees",
       "cases": 1,
-      "source": "crates/uqa-planner/src/query_optimizer/graph_rewrites/tests.rs",
-      "capability": "Graph edge predicate pushdown",
-      "workload": "Select an edge predicate with intersecting source and target aliases, duplicate edges and different labels.",
-      "invariant": "The original edge and graph buffers survive. Only both copies of the selected edge share the property predicate.",
+      "source": "crates/uqa-planner/src/query_optimizer/algebra.rs",
+      "capability": "Boolean membership reduction",
+      "workload": "Combine a composition of 4,096 filters with a differently shaped filter under intersection and union.",
+      "invariant": "Both operands survive in order and the reducer visits zero nodes to construct membership keys.",
       "case_names": [
         ""
       ]
@@ -6875,12 +6875,12 @@
     {
       "package": "uqa-planner",
       "kind": "lib",
-      "test": "distinct_operand_shapes_do_not_index_unrelated_subtrees",
+      "test": "graph_edge_filter_preserves_buffers_and_shares_the_selected_predicate",
       "cases": 1,
-      "source": "crates/uqa-planner/src/query_optimizer/algebra.rs",
-      "capability": "Boolean membership reduction",
-      "workload": "Combine a composition of 4,096 filters with a differently shaped filter under intersection and union.",
-      "invariant": "Both operands survive in order and the reducer visits zero nodes to construct membership keys.",
+      "source": "crates/uqa-planner/src/query_optimizer/graph_rewrites/tests.rs",
+      "capability": "Graph edge predicate pushdown",
+      "workload": "Select an edge predicate with intersecting source and target aliases, duplicate edges and different labels.",
+      "invariant": "The original edge and graph buffers survive. Only both copies of the selected edge share the property predicate.",
       "case_names": [
         ""
       ]
@@ -6914,32 +6914,6 @@
     {
       "package": "uqa-planner",
       "kind": "lib",
-      "test": "caller_owned_access_order_reuses_children_and_charges_only_the_permutation",
-      "cases": 1,
-      "source": "crates/uqa-planner/src/optimizer/access_path/owned.rs",
-      "capability": "Predicate ordering workspace",
-      "workload": "Reorder four large, caller-owned conjunction operands with zero or one kibibyte of scratch.",
-      "invariant": "The input buffer survives, four index slots bound scratch, and an exhausted allowance rejects the permutation.",
-      "case_names": [
-        ""
-      ]
-    },
-    {
-      "package": "uqa-planner",
-      "kind": "lib",
-      "test": "calibration_renames_the_call_in_its_existing_argument_storage",
-      "cases": 1,
-      "source": "crates/uqa-planner/src/optimizer/implicit_fusion/owned/tests.rs",
-      "capability": "Implicit fusion calibration",
-      "workload": "Rename a bound text retrieval predicate with a large argument and 32 bytes of free workspace.",
-      "invariant": "The new name replaces only the original name's capacity. The argument vector and selected binding keep their addresses and all reservations release on drop.",
-      "case_names": [
-        ""
-      ]
-    },
-    {
-      "package": "uqa-planner",
-      "kind": "lib",
       "test": "source_free_and_open_producers_keep_the_parent_without_scratch",
       "cases": 1,
       "source": "crates/uqa-planner/src/optimizer/derived_pullup/tests.rs",
@@ -6959,6 +6933,32 @@
       "capability": "Derived predicate pushdown",
       "workload": "Filter a derived table with a scalar subquery across LIMIT, OFFSET 0 and grouping sets while a sibling holds all remaining memory.",
       "invariant": "The outer qualification stays above each producer without allocating transfer workspace.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "caller_owned_access_order_reuses_children_and_charges_only_the_permutation",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/access_path/owned.rs",
+      "capability": "Predicate ordering workspace",
+      "workload": "Reorder four large, caller-owned conjunction operands with zero or one kibibyte of scratch.",
+      "invariant": "The input buffer survives, four index slots bound scratch, and an exhausted allowance rejects the permutation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "calibration_renames_the_call_in_its_existing_argument_storage",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/implicit_fusion/owned/tests.rs",
+      "capability": "Implicit fusion calibration",
+      "workload": "Rename a bound text retrieval predicate with a large argument and 32 bytes of free workspace.",
+      "invariant": "The new name replaces only the original name's capacity. The argument vector and selected binding keep their addresses and all reservations release on drop.",
       "case_names": [
         ""
       ]
@@ -34145,6 +34145,19 @@
       "capability": "Native planning constant ownership",
       "workload": "A four MiB repeat under zero/small allowance and cancellation from either owner.",
       "invariant": "Reject with 53200 or 57014 before output allocation, keep transient allocations below 16 KiB and release all failed production leases.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "strict_null_comparison_folds_without_binding_discarded_array_elements",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/scalar/constants/tests/production.rs",
+      "capability": "Strict NULL folding",
+      "workload": "Compare NULL with an array containing a 1 MiB literal using admitted and caller-owned syntax with 16 KiB of workspace.",
+      "invariant": "The result remains a typed Boolean NULL, the evaluator is never invoked and total scratch allocations stay below 16 KiB.",
       "case_names": [
         ""
       ]

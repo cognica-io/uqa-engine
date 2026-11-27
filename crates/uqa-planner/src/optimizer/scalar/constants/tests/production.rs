@@ -30,6 +30,60 @@ fn repeated(bytes: i64) -> ScalarExpr {
 }
 
 #[test]
+fn strict_null_comparison_folds_without_binding_discarded_array_elements() {
+    use crate::optimizer::scalar::ScalarProduction;
+    use uqa_sql::plan::OwnedScalarExpr;
+
+    let make_expression = || ScalarExpr::Binary {
+        op: BinaryOp::Equal,
+        lhs: Box::new(ScalarExpr::Literal(Value::Null)),
+        rhs: Box::new(ScalarExpr::Array(vec![
+            ScalarExpr::Literal(Value::Str("v".repeat(1 << 20))),
+            ScalarExpr::Cast {
+                expr: Box::new(ScalarExpr::Literal(Value::Str("x".into()))),
+                implicit: false,
+                ty: "text".into(),
+            },
+        ])),
+    };
+    let memory = MemoryBudget::new(4 << 20);
+    let token = CancellationToken::new();
+    let mut config = crate::OptimizerConfig::new(|_, _, _| panic!("strict NULL evaluation"));
+    config.production = ProductionControl::new(&memory, &token, &token);
+    for admitted in [false, true] {
+        let expression = make_expression();
+        let (input, scope) = if admitted {
+            (
+                expression.copy_for_rewrite(&config.production).unwrap(),
+                ScalarProduction::admitted(&config),
+            )
+        } else {
+            (
+                OwnedScalarExpr::uncontrolled(expression),
+                ScalarProduction::caller(&config),
+            )
+        };
+        let sibling = memory.reserve(memory.available() - (16 << 10)).unwrap();
+        let mut output = None;
+        let allocations = allocation_counter::measure(|| {
+            output = Some(owned::fold(input, None, scope));
+        });
+        let folded = output.unwrap().unwrap();
+        assert!(matches!(
+            &*folded,
+            ScalarExpr::TypedLiteral {
+                value: Value::Null,
+                bound_type: Some(ColumnType::Boolean),
+                ..
+            }
+        ));
+        assert!(allocations.bytes_total < 16 << 10, "{allocations:?}");
+        drop((folded, sibling));
+        assert_eq!(memory.used(), 0);
+    }
+}
+
+#[test]
 fn constant_production_rejects_before_allocating_large_output() {
     for (bytes, cancelled) in [
         (0, None),

@@ -109,20 +109,27 @@ pub(super) fn fold_selected(
         Some(ty) => Some(ty),
         None => eligibility::scalar_type(&expression, resolver, control)?,
     };
-    let empty = RowSchema::new_with_control(
-        control.finish(Vec::new(), control.empty_reservation())?,
-        control,
-    )?;
-    let expression = uqa_sql::bind_type_introspection_owned(
-        expression,
-        &empty,
-        &[],
-        resolver,
-        &production.storage,
-    )?;
-    let value = if strict_null {
-        control.finish(Value::Null, control.empty_reservation())?
+    let (value, was_cast) = if strict_null {
+        // The result type is already selected. No operand coercion or function invocation contributes to a strict NULL result.
+        drop(expression);
+        (
+            control.finish(Value::Null, control.empty_reservation())?,
+            false,
+        )
     } else {
+        let empty = RowSchema::new_with_control(
+            control.finish(Vec::new(), control.empty_reservation())?,
+            control,
+        )?;
+        let expression = if control.budget().is_some() && production.storage.budget().is_none() {
+            let admitted = expression.copy_for_rewrite(control)?;
+            drop(expression);
+            admitted
+        } else {
+            expression
+        };
+        let expression =
+            uqa_sql::bind_type_introspection_owned(expression, &empty, &[], resolver, control)?;
         if let (
             Some(permissions),
             ScalarExpr::Func {
@@ -133,15 +140,17 @@ pub(super) fn fold_selected(
         {
             permissions.require_execute_with_control(binding, control)?;
         }
-        evaluate(&expression, control)?
+        (
+            evaluate(&expression, control)?,
+            matches!(&*expression, ScalarExpr::Cast { .. }),
+        )
     };
     let literal = OwnedScalarExpr::literal(value, control)?;
     let untyped = !matches!(
         &*literal,
         ScalarExpr::Literal(Value::Int(_) | Value::Str(_))
-    ) && !matches!(&*expression, ScalarExpr::Cast { .. })
+    ) && !was_cast
         && eligibility::scalar_type(&literal, resolver, control)?.as_deref() == ty.as_deref();
-    drop(expression);
     let value = literal.into_literal_value(control)?;
     production.adopt(retained_result(value, ty, !untyped, config)?)
 }
