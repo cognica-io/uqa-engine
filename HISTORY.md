@@ -568,6 +568,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - A named zero-hop Cypher path now contains one vertex and zero relationships. Both the length and endpoints agree with Apache AGE.
 
+- Store binary operator and fixed-function indexes in fixed process storage so the first SQL request observes the same heap allocation limits as later requests.
 - Infer untyped parameters in `IS DISTINCT FROM` and `IS NOT DISTINCT FROM` from the equality operator’s operand types, including in `UPDATE` and `DELETE` predicates and their subqueries.
 
 - Preserve expression collations in table rewrites, partition bounds, routine and prepared-statement arguments, table-function results, joined columns and scalar subqueries. Text comparisons and hashing report indeterminate collations when evaluated, and partial-index inference respects the predicate’s collation.

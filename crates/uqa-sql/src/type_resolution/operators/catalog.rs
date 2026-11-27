@@ -6,7 +6,7 @@
 
 //! `PostgreSQL` 18.4 built-in binary operator signatures from `pg_catalog.pg_operator`.
 
-use std::{collections::HashMap, sync::LazyLock};
+use std::sync::LazyLock;
 
 type Signature = (
     &'static str,
@@ -17,40 +17,37 @@ type Signature = (
     i64,
 );
 
-#[derive(Default)]
-struct OperatorIndex {
-    by_name: HashMap<&'static str, Vec<&'static Signature>>,
-    by_oid: HashMap<i64, &'static Signature>,
-}
+// Row positions keep both indexes in process-owned fixed storage. The second key preserves declaration order among overloads and selects the first occurrence of an OID.
+static BY_NAME: LazyLock<[usize; SIGNATURES.len()]> = LazyLock::new(|| {
+    let mut rows = std::array::from_fn(|row| row);
+    rows.sort_unstable_by_key(|&row| (SIGNATURES[row].0, row));
+    rows
+});
 
-static INDEX: LazyLock<OperatorIndex> = LazyLock::new(|| {
-    let mut index = OperatorIndex::default();
-    for signature in SIGNATURES {
-        index
-            .by_name
-            .entry(signature.0)
-            .or_default()
-            .push(signature);
-        index.by_oid.entry(signature.4).or_insert(signature);
-    }
-    index
+static BY_OID: LazyLock<[usize; SIGNATURES.len()]> = LazyLock::new(|| {
+    let mut rows = std::array::from_fn(|row| row);
+    rows.sort_unstable_by_key(|&row| (SIGNATURES[row].4, row));
+    rows
 });
 
 pub(super) fn named(name: &str) -> impl ExactSizeIterator<Item = &'static Signature> {
-    let rows = if name.len() <= OPERATOR_NAME_BYTES {
-        INDEX
-            .by_name
-            .get(name)
-            .map(Vec::as_slice)
-            .unwrap_or_default()
+    let rows = if name.len() > OPERATOR_NAME_BYTES {
+        &[][..]
     } else {
-        &[]
+        let index = &*BY_NAME;
+        let start = index.partition_point(|&row| SIGNATURES[row].0 < name);
+        let tail = &index[start..];
+        &tail[..tail.partition_point(|&row| SIGNATURES[row].0 == name)]
     };
-    rows.iter().copied()
+    rows.iter().map(|&row| &SIGNATURES[row])
 }
 
 pub(super) fn by_oid(oid: i64) -> Option<&'static Signature> {
-    INDEX.by_oid.get(&oid).copied()
+    let position = BY_OID.partition_point(|&row| SIGNATURES[row].4 < oid);
+    BY_OID
+        .get(position)
+        .map(|&row| &SIGNATURES[row])
+        .filter(|signature| signature.4 == oid)
 }
 
 pub(super) const OPERATOR_NAME_BYTES: usize = {

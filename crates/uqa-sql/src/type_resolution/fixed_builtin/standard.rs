@@ -12,7 +12,7 @@ use super::registry::{
 };
 use crate::ast::ColumnType as T;
 
-declarations! { pub(super) fn register;
+declarations! { pub(super) static DECLARATIONS;
         "like" => &[
             Signature::new(const { &[T::Text, T::Text] }, T::Boolean),
             Signature::new(const { &[T::Name, T::Text] }, T::Boolean),
