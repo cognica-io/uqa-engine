@@ -5365,6 +5365,110 @@
       ]
     },
     {
+      "package": "uqa-storage-redb",
+      "kind": "lib",
+      "test": "snapshot_metadata_uses_one_range_and_preserves_header_error_order",
+      "cases": 1,
+      "source": "crates/uqa-storage-redb/src/mvcc/tests/metadata/window.rs",
+      "capability": "Physical redb snapshot header reads",
+      "workload": "Admit a fixed metadata table through the real redb range API, then remove the format and identity and invalidate the receipt limit.",
+      "invariant": "Each admission uses one ordered range and zero point reads. Combined damage reports the format, identity and receipt limit errors in order.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "mixed_private_and_committed_points_keep_one_lazy_read_window",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/mvcc/overlay/tests/selection.rs",
+      "capability": "Ordered mixed MVCC point selection",
+      "workload": "Read six ordered keys with duplicates, a spilled private overlay, absent committed keys and two visitor stops under a 32 KiB read allowance.",
+      "invariant": "Private-only requests open no committed cursor. Three physical requests share one cursor, retain caller order and release all charged memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "bulk_postings_read_source_metadata_in_batches_and_share_the_field_revision",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/inverted_index/tests/counts.rs",
+      "capability": "Batched SQLite posting source metadata",
+      "workload": "Look up one term across 130 documents in three posting clusters while counting physical source and statistics reads.",
+      "invariant": "Three source reads and one field revision read serve all 130 documents.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "reclaiming_two_histories_uses_bounded_statements_among_single_version_heads",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/tests/reclamation.rs",
+      "capability": "SQLite MVCC reclamation work",
+      "workload": "Keep one pinned snapshot while reclaiming two old revisions in databases with 32 and 256 live heads.",
+      "invariant": "Both sizes use at most 64 SELECTs, preserve the pinned values and reclaim exactly the two obsolete revisions.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-redb",
+      "kind": "lib",
+      "test": "interrupted_redb_image_commits_only_complete_private_chunks",
+      "cases": 1,
+      "source": "crates/uqa-storage-redb/src/mvcc/tests/backup_import.rs",
+      "capability": "Bounded private redb import commits",
+      "workload": "Write 129 records to a private redb import, interrupt the writer and read the closed target directly.",
+      "invariant": "Exactly 128 records are durable, and the unfinished format prevents ordinary opens.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "interrupted_sqlite_image_commits_only_complete_private_chunks",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/restore/tests/backup_import.rs",
+      "capability": "Bounded private SQLite import commits",
+      "workload": "Write 129 records to a private SQLite import, interrupt the writer and read the closed target directly.",
+      "invariant": "Exactly 128 records are durable, and the unfinished format prevents ordinary opens.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "wide_missing_point_projections_reuse_one_reference_buffer",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/document_store/native/decoded/tests.rs",
+      "capability": "SQLite document point projection allocation",
+      "workload": "Project 32 fields for 128 absent documents through both reentrant and borrowed point readers.",
+      "invariant": "Each scan visits all requested rows with NULL fields and uses at most two heap allocations for the projection.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "staged_versions_publish_their_fingerprint_in_one_metadata_insert",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/version_metadata/tests.rs",
+      "capability": "SQLite version metadata write amplification",
+      "workload": "Observe metadata inserts and updates while staging a value, an empty value and a tombstone.",
+      "invariant": "Each version produces one insert with its final digest or NULL for the tombstone, and no subsequent update.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
       "package": "uqa-storage",
       "kind": "lib",
       "test": "key_value_backup_import_accepts_literal_header_allocators_and_empty_records_for_both_mappings",
