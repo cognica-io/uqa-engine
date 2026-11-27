@@ -44,7 +44,7 @@ pub fn coverage_based_default(n_hits: usize, n_total: usize, floor: f64) -> f64 
     f64::midpoint(1.0 - r, 0.0) + floor * r
 }
 
-fn validate_probability_postings(
+pub(crate) fn validate_probability_postings(
     postings: &PostingList,
     operation: &str,
 ) -> StorageBackendResult<()> {
@@ -179,12 +179,7 @@ impl Operator for BayesianEvidenceFusionOperator {
                 ));
                 Ok(())
             },
-        )
-        .map_err(|error| match error {
-            evidence::EvidenceVisitError::Input(error)
-            | evidence::EvidenceVisitError::Output(error)
-            | evidence::EvidenceVisitError::Fusion(error) => error,
-        })?;
+        )?;
         let result = PostingList::from_sorted_unchecked(entries);
         Ok(match self.top_k {
             Some(k) => result.ranked().select_top_k(k),
@@ -312,12 +307,7 @@ impl Operator for RobustPositiveEvidencePoolOperator {
                 ));
                 Ok(())
             },
-        )
-        .map_err(|error| match error {
-            evidence::EvidenceVisitError::Input(error)
-            | evidence::EvidenceVisitError::Output(error)
-            | evidence::EvidenceVisitError::Fusion(error) => error,
-        })?;
+        )?;
         let result = PostingList::from_sorted_unchecked(entries);
         Ok(match self.top_k {
             Some(k) => result.ranked().select_top_k(k),

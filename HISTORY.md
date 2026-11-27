@@ -18,6 +18,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - `to_date` reads calendar templates across the PostgreSQL date range, including BC dates. Both `to_date` and `to_char` recognize ISO week dates and Julian days. `OVERLAPS` compares typed endpoints at their stored precision, handles reversed, instantaneous and partially unknown periods, and applies calendar intervals in the session time zone for `timestamptz` endpoints. Timestamp input without an explicit offset uses the session zone when converted to `timestamptz`, including in array literals, prepared statements and period endpoints. `timeofday()` displays the local time and abbreviation for the session zone.
 
+- Nested document lookups borrow intermediate values. Posting unions merge sorted inputs in one pass, and retrieval models reuse their fusion weights across documents in a batch.
+
 - Opening a native SQLite database skips historical deletions when checking B-tree indexes and restores an unchanged catalog once. An encrypted SQLite open derives the passphrase key once and reuses it across physical connections. Notification, relation-lock and serializable transaction state use separate keys derived from the database key.
 
 - Selective equality joins can probe a primary key or unique index with each outer row. A scalar subquery or a small positive `IN` subquery can also supply the keys for an indexed scan. Primary-key lookups stay selective before column statistics are collected, including in generic prepared plans.

@@ -56,7 +56,16 @@ pub fn run_multi_field_match(
             .with_base_rate(base_rate)
             .map_err(|error| SQLError::TypeMismatch(format!("multi-field fusion: {error}")))?;
     }
-    let mut out: Vec<ScoredEntry> = per_doc
+    if per_doc.is_empty() {
+        return Ok(Vec::new());
+    }
+    let batch = if active_field_count == 1 {
+        fusion.prepare(1, None, None, None)
+    } else {
+        fusion.prepare(n_fields, Some(&weights), None, None)
+    }
+    .map_err(|error| SQLError::TypeMismatch(format!("multi-field fusion: {error}")))?;
+    per_doc
         .into_iter()
         .map(|(doc_id, probabilities)| -> Result<ScoredEntry, SQLError> {
             let fused = if active_field_count == 1 {
@@ -67,20 +76,15 @@ pub fn run_multi_field_match(
                         "multi-field fusion document {doc_id} has no active signal"
                     ))
                 })?;
-                fusion.fuse(&[evidence])
+                batch.fuse(&[Some(evidence)])
             } else {
-                fusion
-                    .fuse_weighted_sparse(&probabilities, &weights)
-                    .map_err(|error| {
-                        SQLError::TypeMismatch(format!("multi-field fusion: {error}"))
-                    })?
-            };
+                batch.fuse(&probabilities)
+            }
+            .map_err(|error| SQLError::TypeMismatch(format!("multi-field fusion: {error}")))?;
             Ok(ScoredEntry {
                 doc_id,
                 score: fused,
             })
         })
-        .collect::<Result<Vec<_>, _>>()?;
-    out.sort_by_key(|e| e.doc_id);
-    Ok(out)
+        .collect()
 }
