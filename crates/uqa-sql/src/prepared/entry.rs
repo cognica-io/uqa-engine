@@ -78,7 +78,7 @@ impl PreparedStatementPlan {
 
     pub fn invalidate_executable(&mut self) {
         self.plan = None;
-        self.generic_domains = Default::default();
+        self.generic_domains = crate::prepared::domains::GenericDomainInputs::default();
         self.generic_cost = None;
     }
 

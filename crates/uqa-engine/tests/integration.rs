@@ -19,6 +19,8 @@ mod native_storage;
 mod notification_registry;
 #[path = "support/pg18_oracle.rs"]
 mod pg18_oracle;
+#[path = "support/pg18_peer.rs"]
+mod pg18_peer;
 #[path = "support/waits.rs"]
 mod waits;
 

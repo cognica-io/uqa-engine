@@ -58,7 +58,7 @@ impl Default for Inputs {
                 from_sql: false,
                 generic_plans: 0,
                 custom_plans: 5,
-                generic_domains: Default::default(),
+                generic_domains: uqa_sql::prepared::domains::GenericDomainInputs::default(),
                 generic_cost: None,
                 total_custom_cost: 5.0,
             })),

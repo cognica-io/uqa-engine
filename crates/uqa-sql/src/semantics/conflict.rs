@@ -97,31 +97,22 @@ fn inference_identity(expression: Expr) -> Expr {
     .expect("ordinary inference ownership")
 }
 
-/// Match the inference expressions analyzed by [`prepare_inference_predicate`] against the stored unique keys.
-pub fn conflict_key_indices(
+#[derive(Clone, Copy, PartialEq)]
+enum Operand<'a> {
+    Column(&'a str),
+    Expression(&'a Expr),
+}
+fn operand(expr: &Expr) -> Operand<'_> {
+    match expr {
+        Expr::Column(name) => Operand::Column(name.as_str()),
+        _ => Operand::Expression(expr),
+    }
+}
+
+fn inference_target<'a>(
     catalog: &dyn ConflictCatalog,
-    table: &str,
-    keys: &[EnforcedKey],
-    conflict: &ConflictPlan,
-) -> Result<Vec<usize>, SQLError> {
-    if let crate::ast::ConflictTargetConstraint::Named(name) = &conflict.constraint {
-        return constraint_target_index(catalog, table, keys, name);
-    }
-    if conflict.conflict_columns.is_empty() && conflict.expressions.is_empty() {
-        return Ok((0..keys.len()).collect());
-    }
-    let columns = validate_conflict_columns(catalog, table, &conflict.conflict_columns)?;
-    #[derive(Clone, Copy, PartialEq)]
-    enum Operand<'a> {
-        Column(&'a str),
-        Expression(&'a Expr),
-    }
-    fn operand(expr: &Expr) -> Operand<'_> {
-        match expr {
-            Expr::Column(name) => Operand::Column(name.as_str()),
-            _ => Operand::Expression(expr),
-        }
-    }
+    conflict: &'a ConflictPlan,
+) -> Result<Vec<(Operand<'a>, Option<u32>)>, SQLError> {
     let mut target = conflict
         .conflict_columns
         .iter()
@@ -142,6 +133,24 @@ pub fn conflict_key_indices(
             .transpose()?;
         target.push((operand(expr), collation));
     }
+    Ok(target)
+}
+
+/// Match the inference expressions analyzed by [`prepare_inference_predicate`] against the stored unique keys.
+pub fn conflict_key_indices(
+    catalog: &dyn ConflictCatalog,
+    table: &str,
+    keys: &[EnforcedKey],
+    conflict: &ConflictPlan,
+) -> Result<Vec<usize>, SQLError> {
+    if let crate::ast::ConflictTargetConstraint::Named(name) = &conflict.constraint {
+        return constraint_target_index(catalog, table, keys, name);
+    }
+    if conflict.conflict_columns.is_empty() && conflict.expressions.is_empty() {
+        return Ok((0..keys.len()).collect());
+    }
+    let columns = validate_conflict_columns(catalog, table, &conflict.conflict_columns)?;
+    let target = inference_target(catalog, conflict)?;
     let needs_key_collation = target.iter().any(|(_, oid)| oid.is_some());
     let mut legacy_scope = None;
     let mut stored_identity = |syntax: &crate::ast::Expr, read_collation: bool| {

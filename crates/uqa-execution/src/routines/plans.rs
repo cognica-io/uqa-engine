@@ -47,7 +47,7 @@ impl RoutinePlanVariants {
                 from_sql: false,
                 generic_plans: 0,
                 custom_plans: 0,
-                generic_domains: Default::default(),
+                generic_domains: uqa_sql::prepared::domains::GenericDomainInputs::default(),
                 generic_cost: None,
                 total_custom_cost: 0.0,
             },

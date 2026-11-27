@@ -76,15 +76,11 @@ pub fn prepare_inference_predicate_with_control(
     Ok(Some(output.expect("selected inference table")))
 }
 
-fn prepare_expression(
+fn validate_inference_expression(
     context: InferenceContext<'_>,
-    expression: OwnedScalarExpr,
-    statement: &InsertPlan,
-    schema: &RowSchema,
-    columns: &[ColumnDef],
-    params: &[SQLParam],
+    expression: &ScalarExpr,
     control: &ProductionControl<'_>,
-) -> Result<OwnedScalarExpr, SQLError> {
+) -> Result<(), SQLError> {
     let mut has_subquery = false;
     let mut has_window = false;
     expression.try_visit(&mut |node| {
@@ -107,7 +103,7 @@ fn prepare_expression(
     }
     if crate::semantics::aggregates::contains_aggregate_with_control(
         context.aggregates,
-        &expression,
+        expression,
         control,
     )? {
         return Err(predicate_error(
@@ -123,6 +119,19 @@ fn prepare_expression(
             control,
         )?);
     }
+    Ok(())
+}
+
+fn prepare_expression(
+    context: InferenceContext<'_>,
+    expression: OwnedScalarExpr,
+    statement: &InsertPlan,
+    schema: &RowSchema,
+    columns: &[ColumnDef],
+    params: &[SQLParam],
+    control: &ProductionControl<'_>,
+) -> Result<OwnedScalarExpr, SQLError> {
+    validate_inference_expression(context, &expression, control)?;
     let plan = MutableExpressionPlan::from_parts(
         expression,
         ScalarQueryArena::copy_from(&[], control)?,

@@ -68,5 +68,5 @@ fn prepared_inputs_follow_only_committed_peer_catalog_dependencies(
 ) {
     let directory = tempfile::tempdir().unwrap();
     let engine = open(provider, &directory.path().join("prepared-peer.db"));
-    crate::pg18_oracle::verify_peer(&engine, reference);
+    crate::pg18_peer::verify(&engine, reference);
 }
