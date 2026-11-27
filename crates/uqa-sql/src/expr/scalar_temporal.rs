@@ -10,21 +10,13 @@ use super::{
     coerce_temporal, format_pg_number, format_temporal, generate_random_uuid, typeof_value,
     value_to_string, DecimalValue, Result, SQLError, Value,
 };
-use uqa_core::memory::ProductionControl;
 
 mod immutable;
 pub(super) use immutable::eval_temporal_functions_with_control;
 
-pub(super) fn eval_temporal_functions(name: &str, args: &[Value]) -> Option<Result<Value>> {
+pub(super) fn eval_session_temporal(name: &str, args: &[Value]) -> Option<Result<Value>> {
     if let Some(result) = super::current_time::eval_current_time(name, args, None) {
         return Some(result);
-    }
-    if let Some(result) =
-        eval_temporal_functions_with_control(name, args, &ProductionControl::uncontrolled())
-    {
-        return Some(
-            result.map(|value| value.into_uncontrolled().expect("ordinary temporal result")),
-        );
     }
     const NAMES: &[&str] = &[
         "to_char",

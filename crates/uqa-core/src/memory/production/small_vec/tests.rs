@@ -93,3 +93,38 @@ fn scratch_refuses_growth_and_both_cancel_scopes_without_leaking() {
         assert_eq!(budget.used(), 0);
     }
 }
+
+#[test]
+fn inline_and_spilled_noncopy_values_move_once_and_drop_exactly_once() {
+    use std::{cell::Cell, rc::Rc};
+    struct Item(String, Rc<Cell<usize>>);
+    impl Drop for Item {
+        fn drop(&mut self) {
+            self.1.set(self.1.get() + 1);
+        }
+    }
+    let budget = MemoryBudget::new(32 * 1024);
+    let token = CancellationToken::new();
+    for control in [
+        ProductionControl::uncontrolled(),
+        ProductionControl::new(&budget, &token, &token),
+    ] {
+        let dropped = Rc::new(Cell::new(0));
+        let mut values = ProductionSmallVec::<[Item; 4]>::new(control);
+        let mut pointers = Vec::new();
+        for index in 0..32 {
+            let item = Item(index.to_string(), Rc::clone(&dropped));
+            pointers.push(item.0.as_ptr());
+            values.push(item).unwrap();
+        }
+        values.reserve(128).unwrap();
+        assert_eq!(dropped.get(), 0);
+        for pointer in pointers.into_iter().rev() {
+            let item = values.pop().unwrap();
+            assert_eq!(item.0.as_ptr(), pointer);
+        }
+        assert_eq!(dropped.get(), 32);
+        drop(values);
+        assert_eq!(budget.used(), 0);
+    }
+}

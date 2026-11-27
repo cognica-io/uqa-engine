@@ -128,9 +128,9 @@ pub use binary::{
     eval_comparison_truth_with_deferred_state, eval_comparison_truth_with_engine,
     eval_comparison_truth_with_enum_catalog, eval_record_comparison_truth_with_engine,
     eval_row_comparison_with_control, eval_value_comparison_truth_with_engine,
-    integer_width_for_literal, integer_width_for_type, truthy, type_comparison_can_fail,
-    validate_legacy_vector_comparison, value_comparison_can_fail, value_comparison_can_fail_from,
-    values_equal_nullable_with_control, values_equal_with_control,
+    integer_width_for_literal, integer_width_for_type, is_arithmetic, truthy,
+    type_comparison_can_fail, validate_legacy_vector_comparison, value_comparison_can_fail,
+    value_comparison_can_fail_from, values_equal_nullable_with_control, values_equal_with_control,
     visit_record_image_fields_with_catalog, with_btree_input, BTreeInput, IntegerWidth,
 };
 pub(crate) use binary::{datetime_out_of_range, division_by_zero, out_of_range};
@@ -182,16 +182,17 @@ mod diagnostics;
 mod evaluator;
 
 pub use builtin::{
-    bound_scalar_function_strictness, builtin_scalar_function_strictness,
-    eval_bound_builtin_function_call,
+    bound_scalar_function_strictness, builtin_scalar_function_strictness, BuiltinCallMetadata,
+    PreparedBuiltinCalls,
 };
 pub use call_arguments::{
     call_argument_name, call_argument_value, evaluate_call_args, validate_named_argument_order,
     validate_named_argument_order_with_control, variadic_argument_value, wrap_variadic_argument,
 };
 pub use call_dispatch::{
-    builtin_named_args, eval_builtin_function_call, eval_builtin_function_call_with_control,
-    eval_function_call, eval_generated_function_call_with_control,
+    builtin_named_args, eval_bound_builtin_function_call, eval_builtin_function_call,
+    eval_builtin_function_call_with_control, eval_function_call,
+    eval_generated_function_call_with_control,
 };
 pub use context::{
     cast_value_with_numeric_resolution_with_control, cast_value_with_resolution_with_control,

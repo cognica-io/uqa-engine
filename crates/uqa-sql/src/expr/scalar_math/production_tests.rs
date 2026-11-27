@@ -117,7 +117,7 @@ fn controlled_math_preserves_unicode_decimal_encoding_split_and_checksum_results
             .unwrap();
         assert_eq!(&*output, &expected, "{name}");
         assert_eq!(
-            eval_math_functions(name, &args).unwrap().unwrap(),
+            crate::expr::tests::eval_scalar_function(name, &args).unwrap(),
             expected,
             "{name}"
         );
@@ -156,7 +156,7 @@ fn scalar_null_and_error_precedence_stays_shared_without_admitting_copies() {
             vec![Value::Null, Value::Int(0), Value::Int(1), Value::Int(1)],
         ),
     ] {
-        let ordinary = eval_math_functions(name, &args).unwrap().unwrap_err();
+        let ordinary = crate::expr::tests::eval_scalar_function(name, &args).unwrap_err();
         let error = eval_math_functions_with_control(name, &args, &control)
             .unwrap()
             .unwrap_err();
@@ -170,9 +170,11 @@ fn scalar_null_and_error_precedence_stays_shared_without_admitting_copies() {
     assert_eq!(budget.used(), 0);
     assert!(eval_math_functions_with_control("random", &[], &control).is_none());
     assert_eq!(
-        eval_math_functions("format", &[text("%s:%L"), Value::Bool(true), Value::Int(7)])
-            .unwrap()
-            .unwrap(),
+        crate::expr::tests::eval_scalar_function(
+            "format",
+            &[text("%s:%L"), Value::Bool(true), Value::Int(7)]
+        )
+        .unwrap(),
         text("t:'7'")
     );
     assert_eq!(budget.used(), 0);

@@ -28,6 +28,7 @@ const SUBTYPES: &[RangeSubtype] = &[
     RangeSubtype::TimestampTz,
 ];
 
+#[cfg(test)]
 pub(super) fn eval_range_functions(name: &str, args: &[Value]) -> Option<Result<Value>> {
     eval_range_functions_with_control(name, args, &ProductionControl::uncontrolled())
         .map(|result| result.map(|value| value.into_uncontrolled().expect("ordinary range result")))

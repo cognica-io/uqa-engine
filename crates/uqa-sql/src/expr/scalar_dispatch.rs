@@ -10,47 +10,18 @@ use super::{to_i64, value_to_string_with_control, EvalContext, Result, SQLError,
 
 use uqa_core::memory::{Produced, ProductionControl};
 
-type ScalarFunctionDispatcher =
-    fn(&str, &[Value], Option<&dyn super::SQLValueCatalog>) -> Option<Result<Value>>;
-type RetainedScalarDispatcher =
+type ScalarDispatcher =
     fn(&str, &[Value], &ProductionControl<'_>) -> Option<Result<Produced<Value>>>;
-struct ScalarFamily {
-    ordinary: ScalarFunctionDispatcher,
-    retained: RetainedScalarDispatcher,
-}
-const FAMILIES: &[ScalarFamily] = &[
-    ScalarFamily {
-        ordinary: |name, args, _| super::scalar_core::eval_core_functions(name, args),
-        retained: super::scalar_core::eval_core_functions_with_control,
-    },
-    ScalarFamily {
-        ordinary: |name, args, _| super::scalar_math::eval_math_functions(name, args),
-        retained: super::scalar_math::eval_math_functions_with_control,
-    },
-    ScalarFamily {
-        ordinary: |name, args, _| super::scalar_temporal::eval_temporal_functions(name, args),
-        retained: super::scalar_temporal::eval_temporal_functions_with_control,
-    },
-    ScalarFamily {
-        ordinary: super::scalar_json::eval_json_functions,
-        retained: super::scalar_json::eval_json_functions_with_control,
-    },
-    ScalarFamily {
-        ordinary: |name, args, _| super::scalar_array::eval_array_functions(name, args),
-        retained: super::scalar_array::eval_array_functions_with_control,
-    },
-    ScalarFamily {
-        ordinary: |name, args, _| super::scalar_postgres::eval_postgres_functions(name, args),
-        retained: super::scalar_postgres::eval_postgres_functions_with_control,
-    },
-    ScalarFamily {
-        ordinary: |name, args, _| super::scalar_range::eval_range_functions(name, args),
-        retained: super::scalar_range::eval_range_functions_with_control,
-    },
-    ScalarFamily {
-        ordinary: |name, args, _| super::scalar_geospatial::eval_geospatial_functions(name, args),
-        retained: super::scalar_geospatial::eval_geospatial_functions_with_control,
-    },
+
+const FAMILIES: &[ScalarDispatcher] = &[
+    super::scalar_core::eval_core_functions_with_control,
+    super::scalar_math::eval_math_functions_with_control,
+    super::scalar_temporal::eval_temporal_functions_with_control,
+    super::scalar_json::eval_json_functions_with_control,
+    super::scalar_array::eval_array_functions_with_control,
+    super::scalar_postgres::eval_postgres_functions_with_control,
+    super::scalar_range::eval_range_functions_with_control,
+    super::scalar_geospatial::eval_geospatial_functions_with_control,
 ];
 
 // -------------------------------------------------------------------------
@@ -139,35 +110,14 @@ fn with_sequence_name<T>(
 /// `collation` is the call's input collation (`PostgreSQL`'s `inputcollid`), which collation-dependent built-ins consume.
 #[cfg(test)]
 pub(super) fn eval_scalar_function(name: &str, args: &[Value], collation: u32) -> Result<Value> {
-    eval_scalar_function_with_catalog(name, args, collation, None)
-}
-
-fn eval_scalar_function_with_catalog(
-    name: &str,
-    args: &[Value],
-    collation: u32,
-    catalog: Option<&dyn super::SQLValueCatalog>,
-) -> Result<Value> {
-    let name = name.strip_prefix("pg_catalog.").unwrap_or(name);
-    if super::builtin_scalar_function_strictness(name, args.len()) == Some(true)
-        && args.iter().any(|argument| matches!(argument, Value::Null))
-    {
-        return Ok(Value::Null);
-    }
-    if let Some(result) = super::scalar_core::eval_collated_functions_with_control(
+    evaluate_families(
         name,
         args,
         collation,
         &ProductionControl::uncontrolled(),
-    ) {
-        return result.map(|value| value.into_uncontrolled().expect("ordinary collated result"));
-    }
-    for family in FAMILIES {
-        if let Some(result) = (family.ordinary)(name, args, catalog) {
-            return result;
-        }
-    }
-    Err(SQLError::UnknownFunction(name.to_string()))
+        Some(&EvalContext::new(None, &[])),
+    )
+    .map(|value| value.into_uncontrolled().expect("ordinary scalar result"))
 }
 
 pub(super) fn eval_scalar_function_with_context(
@@ -176,30 +126,9 @@ pub(super) fn eval_scalar_function_with_context(
     context: &EvalContext<'_>,
     collation: u32,
 ) -> Result<Value> {
-    if name.strip_prefix("pg_catalog.").unwrap_or(name) == "uuidv7" {
-        return super::uuid::eval_uuid_v7(args, Some(context));
-    }
-    if let Some(result) = session_temporal(name, args, context, &ProductionControl::uncontrolled())
-    {
-        return result.map(|value| value.into_uncontrolled().expect("ordinary temporal result"));
-    }
-    if let Some(result) = eval_array_comparison_with_context(
-        name.strip_prefix("pg_catalog.").unwrap_or(name),
-        args,
-        &ProductionControl::uncontrolled(),
-        context,
-    ) {
-        return result.map(|value| value.into_uncontrolled().expect("ordinary array result"));
-    }
-    let catalog = context.engine.map(super::EngineValueCatalog);
-    eval_scalar_function_with_catalog(
-        name,
-        args,
-        collation,
-        catalog
-            .as_ref()
-            .map(|catalog| catalog as &dyn super::SQLValueCatalog),
-    )
+    let control = ProductionControl::uncontrolled();
+    evaluate_with_context(name, args, &control, context, collation, true)
+        .map(|value| value.into_uncontrolled().expect("ordinary scalar result"))
 }
 
 fn session_temporal(
@@ -245,26 +174,53 @@ pub(super) fn eval_generated_scalar_function_with_context(
     context: &EvalContext<'_>,
     collation: u32,
 ) -> Result<Produced<Value>> {
+    evaluate_with_context(name, args, control, context, collation, false)
+}
+
+fn evaluate_with_context(
+    name: &str,
+    args: &[Value],
+    control: &ProductionControl<'_>,
+    context: &EvalContext<'_>,
+    collation: u32,
+    session_functions: bool,
+) -> Result<Produced<Value>> {
+    let name = name.strip_prefix("pg_catalog.").unwrap_or(name);
+    if session_functions && name == "uuidv7" {
+        return Ok(control.finish(super::uuid::eval_uuid_v7(args, Some(context))?, None)?);
+    }
     if let Some(result) = session_temporal(name, args, context, control) {
         return result;
     }
-    if let Some(result) = eval_array_comparison_with_context(
-        name.strip_prefix("pg_catalog.").unwrap_or(name),
-        args,
-        control,
-        context,
-    ) {
+    if let Some(result) = eval_array_comparison_with_context(name, args, control, context) {
         return result;
     }
-    eval_generated_scalar_function(name, args, control, collation)
+    evaluate_families(
+        name,
+        args,
+        collation,
+        control,
+        session_functions.then_some(context),
+    )
 }
 
-/// Built-in families accepted by generated expressions use their existing admitted kernels in the same dispatch order. Stateful dispatch remains outside this interface.
+#[cfg(test)]
 pub(super) fn eval_generated_scalar_function(
     name: &str,
     args: &[Value],
     control: &ProductionControl<'_>,
     collation: u32,
+) -> Result<Produced<Value>> {
+    evaluate_families(name, args, collation, control, None)
+}
+
+/// The generated-expression validator admits the native families. Ordinary SQL can additionally call volatile and catalog-dependent functions through its session.
+fn evaluate_families(
+    name: &str,
+    args: &[Value],
+    collation: u32,
+    control: &ProductionControl<'_>,
+    session: Option<&EvalContext<'_>>,
 ) -> Result<Produced<Value>> {
     control.check()?;
     let name = name.strip_prefix("pg_catalog.").unwrap_or(name);
@@ -281,8 +237,21 @@ pub(super) fn eval_generated_scalar_function(
         return result;
     }
     for family in FAMILIES {
-        if let Some(result) = (family.retained)(name, args, control) {
+        if let Some(result) = family(name, args, control) {
             return result;
+        }
+    }
+    if let Some(context) = session {
+        let catalog = context.engine.map(super::EngineValueCatalog);
+        let catalog = catalog
+            .as_ref()
+            .map(|value| value as &dyn super::SQLValueCatalog);
+        let value = super::scalar_math::random_value(name)
+            .or_else(|| super::scalar_temporal::eval_session_temporal(name, args))
+            .or_else(|| super::scalar_json::eval_session_json(name, args, catalog))
+            .or_else(|| super::scalar_postgres::eval_session_postgres(name, args));
+        if let Some(value) = value {
+            return Ok(control.finish(value?, control.empty_reservation())?);
         }
     }
     Err(SQLError::UnknownFunction(name.to_string()))

@@ -8,9 +8,16 @@
 
 use std::sync::OnceLock;
 mod entries;
+mod metadata;
+pub(super) use metadata::{
+    same_schema, BuiltinCall, NamedCall, OperandMetadata, PreparedBuiltin, SchemaSlot,
+};
 mod rows;
 use entries::StateEntries;
+pub(super) use rows::ArrayConstructorState;
 pub(crate) use rows::RowConstructorState;
+#[cfg(test)]
+pub(super) use rows::CONSTRUCTOR_OBSERVATIONS;
 use uqa_sql::expr::composites::constructor::CompositeConstructorState;
 
 use crate::RowSchema;
@@ -105,7 +112,10 @@ pub struct FunctionCallStates {
     columns: Vec<(usize, OnceLock<ColumnSlot>)>,
     row_casts: Vec<(usize, OnceLock<RowCast>)>,
     numeric_operators: Vec<(usize, OnceLock<NumericCall>)>,
+    builtins: Vec<(usize, PreparedBuiltin)>,
+    operand_types: Vec<(usize, OperandMetadata)>,
     row_constructors: Vec<(usize, RowConstructorState)>,
+    array_constructors: Vec<(usize, ArrayConstructorState)>,
     composite_constructors: Vec<(usize, CompositeConstructorState)>,
 }
 
@@ -116,7 +126,10 @@ struct CallStateBuilder {
     columns: StateEntries<(usize, OnceLock<ColumnSlot>)>,
     row_casts: StateEntries<(usize, OnceLock<RowCast>)>,
     numeric_operators: StateEntries<(usize, OnceLock<NumericCall>)>,
+    builtins: StateEntries<(usize, PreparedBuiltin)>,
+    operand_types: StateEntries<(usize, OperandMetadata)>,
     row_constructors: StateEntries<(usize, RowConstructorState)>,
+    array_constructors: StateEntries<(usize, ArrayConstructorState)>,
     composite_constructors: StateEntries<(usize, CompositeConstructorState)>,
 }
 
@@ -129,7 +142,10 @@ impl CallStateBuilder {
             columns: StateEntries::new(control),
             row_casts: StateEntries::new(control),
             numeric_operators: StateEntries::new(control),
+            builtins: StateEntries::new(control),
+            operand_types: StateEntries::new(control),
             row_constructors: StateEntries::new(control),
+            array_constructors: StateEntries::new(control),
             composite_constructors: StateEntries::new(control),
         }
     }
@@ -141,12 +157,22 @@ impl CallStateBuilder {
     ) -> Result<(), SQLError> {
         let first_row_cast = self.row_casts.len();
         let first_numeric = self.numeric_operators.len();
+        let first_operand = self.operand_types.len();
+        let first_row = self.row_constructors.len();
+        let first_array = self.array_constructors.len();
         let mut parameter_dependent = false;
         expression.try_visit(&mut |expression| {
             control.check()?;
+            if let Some(entry) = OperandMetadata::for_expression(expression) {
+                self.operand_types.push(entry)?;
+            }
             match expression {
             ScalarExpr::Func { name, binding, args, .. } => {
                 self.add(args.as_ptr() as usize, function_slots(name, binding.as_ref(), args))?;
+                // A nonempty binding name owns its address even when a zero-argument expression moves.
+                if let Some(binding) = binding.as_ref().filter(|binding| binding.builtin && !binding.name.is_empty()) {
+                    self.builtins.push((binding.name.as_ptr() as usize, BuiltinCall::prepare(name, binding, args, control)?))?;
+                }
                 if let Some(invocation) = binding.as_ref().filter(|binding| !binding.builtin).and_then(|binding| binding.invocation.as_deref()) {
                     self.routines.push((std::ptr::from_ref(invocation) as usize, RoutineCallDescriptions::default()))?;
                 }
@@ -172,6 +198,7 @@ impl CallStateBuilder {
             ScalarExpr::Cast { expr, .. } => {
                 self.row_casts.push((std::ptr::from_ref(expr.as_ref()) as usize, OnceLock::new()))?;
             }
+            ScalarExpr::Array(items) if !items.is_empty() => self.array_constructors.push((items.as_ptr() as usize, ArrayConstructorState::default()))?,
             ScalarExpr::Row(items) => self.row_constructors.push((items.as_ptr() as usize, RowConstructorState::default()))?,
             ScalarExpr::CompositeRow { items, .. } => self.composite_constructors.push((items.as_ptr() as usize, CompositeConstructorState::default()))?,
             ScalarExpr::Param(_) => parameter_dependent = true,
@@ -187,6 +214,11 @@ impl CallStateBuilder {
         if parameter_dependent {
             self.row_casts.truncate(first_row_cast);
             self.numeric_operators.truncate(first_numeric);
+            self.operand_types.truncate(first_operand);
+            self.array_constructors.truncate(first_array);
+            for (_, state) in &mut self.row_constructors[first_row..] {
+                state.parameter_dependent = true;
+            }
         }
         Ok(())
     }
@@ -204,21 +236,27 @@ impl CallStateBuilder {
         control: &ProductionControl<'_>,
     ) -> Result<Produced<FunctionCallStates>, SQLError> {
         let mut memory = control.empty_reservation();
-        let (routines, lease) = self.routines.into_parts();
+        let (routines, lease) = self.routines.finish_index();
         memory = control.combine(memory, lease);
-        let (enums, lease) = self.enums.into_parts();
+        let (enums, lease) = self.enums.finish_index();
         memory = control.combine(memory, lease);
-        let (constant_casts, lease) = self.constant_casts.into_parts();
+        let (constant_casts, lease) = self.constant_casts.finish_index();
         memory = control.combine(memory, lease);
-        let (columns, lease) = self.columns.into_parts();
+        let (columns, lease) = self.columns.finish_index();
         memory = control.combine(memory, lease);
-        let (row_casts, lease) = self.row_casts.into_parts();
+        let (row_casts, lease) = self.row_casts.finish_index();
         memory = control.combine(memory, lease);
-        let (numeric_operators, lease) = self.numeric_operators.into_parts();
+        let (builtins, lease) = self.builtins.finish_index();
         memory = control.combine(memory, lease);
-        let (row_constructors, lease) = self.row_constructors.into_parts();
+        let (operand_types, lease) = self.operand_types.finish_index();
         memory = control.combine(memory, lease);
-        let (composite_constructors, lease) = self.composite_constructors.into_parts();
+        let (numeric_operators, lease) = self.numeric_operators.finish_index();
+        memory = control.combine(memory, lease);
+        let (array_constructors, lease) = self.array_constructors.finish_index();
+        memory = control.combine(memory, lease);
+        let (row_constructors, lease) = self.row_constructors.finish_index();
+        memory = control.combine(memory, lease);
+        let (composite_constructors, lease) = self.composite_constructors.finish_index();
         memory = control.combine(memory, lease);
         Ok(control.finish(
             FunctionCallStates {
@@ -228,7 +266,10 @@ impl CallStateBuilder {
                 columns,
                 row_casts,
                 numeric_operators,
+                builtins,
+                operand_types,
                 row_constructors,
+                array_constructors,
                 composite_constructors,
             },
             memory,
@@ -244,7 +285,10 @@ impl FunctionCallStates {
             && self.columns.is_empty()
             && self.row_casts.is_empty()
             && self.numeric_operators.is_empty()
+            && self.builtins.is_empty()
+            && self.operand_types.is_empty()
             && self.row_constructors.is_empty()
+            && self.array_constructors.is_empty()
             && self.composite_constructors.is_empty()
     }
 
@@ -282,6 +326,21 @@ impl FunctionCallStates {
             .map(|index| &self.row_casts[index].1)
     }
 
+    pub(super) fn builtin(&self, binding: &FunctionBinding) -> Option<&PreparedBuiltin> {
+        self.builtins
+            .binary_search_by_key(&(binding.name.as_ptr() as usize), |(key, _)| *key)
+            .ok()
+            .map(|index| &self.builtins[index].1)
+    }
+
+    pub(super) fn operand_metadata(&self, operand: &ScalarExpr) -> Option<&OperandMetadata> {
+        let address = std::ptr::from_ref(operand) as usize;
+        self.operand_types
+            .binary_search_by_key(&address, |(key, _)| *key)
+            .ok()
+            .map(|index| &self.operand_types[index].1)
+    }
+
     pub(crate) fn numeric_operator(
         &self,
         arguments: &[ScalarExpr],
@@ -291,6 +350,13 @@ impl FunctionCallStates {
             .binary_search_by_key(&address, |(key, _)| *key)
             .ok()
             .map(|index| &self.numeric_operators[index].1)
+    }
+
+    pub(super) fn array_constructor(&self, items: &[ScalarExpr]) -> Option<&ArrayConstructorState> {
+        self.array_constructors
+            .binary_search_by_key(&(items.as_ptr() as usize), |(key, _)| *key)
+            .ok()
+            .map(|index| &self.array_constructors[index].1)
     }
 
     pub(crate) fn row_constructor(&self, items: &[ScalarExpr]) -> Option<&RowConstructorState> {
@@ -335,6 +401,15 @@ impl FunctionCallStates {
             .binary_search_by_key(&(std::ptr::from_ref(left) as usize, 0), |(key, _)| *key)
             .ok()
             .map(|index| &self.enums[index].1)
+    }
+}
+
+impl uqa_sql::expr::PreparedBuiltinCalls for FunctionCallStates {
+    fn builtin_metadata(
+        &self,
+        binding: &FunctionBinding,
+    ) -> Option<&uqa_sql::expr::BuiltinCallMetadata> {
+        self.builtin(binding).map(|site| &site.metadata)
     }
 }
 
@@ -385,7 +460,10 @@ static EMPTY_CALL_STATES: FunctionCallStates = FunctionCallStates {
     columns: Vec::new(),
     row_casts: Vec::new(),
     numeric_operators: Vec::new(),
+    builtins: Vec::new(),
+    operand_types: Vec::new(),
     row_constructors: Vec::new(),
+    array_constructors: Vec::new(),
     composite_constructors: Vec::new(),
 };
 
@@ -405,36 +483,6 @@ impl<T> PreparedExpressions<T> {
         visit_roots(&expressions, &mut |expression| {
             calls.register(expression, control)
         })?;
-        calls.routines.sort_unstable_by_key(|(address, _)| *address);
-        calls.routines.dedup_by_key(|(address, _)| *address);
-        calls.enums.sort_unstable_by_key(|(address, _)| *address);
-        calls.enums.dedup_by_key(|(address, _)| *address);
-        calls
-            .constant_casts
-            .sort_unstable_by_key(|(address, _)| *address);
-        calls.constant_casts.dedup_by_key(|(address, _)| *address);
-        calls.columns.sort_unstable_by_key(|(address, _)| *address);
-        calls.columns.dedup_by_key(|(address, _)| *address);
-        calls
-            .row_casts
-            .sort_unstable_by_key(|(address, _)| *address);
-        calls.row_casts.dedup_by_key(|(address, _)| *address);
-        calls
-            .numeric_operators
-            .sort_unstable_by_key(|(address, _)| *address);
-        calls
-            .numeric_operators
-            .dedup_by_key(|(address, _)| *address);
-        calls
-            .row_constructors
-            .sort_unstable_by_key(|(address, _)| *address);
-        calls.row_constructors.dedup_by_key(|(address, _)| *address);
-        calls
-            .composite_constructors
-            .sort_unstable_by_key(|(address, _)| *address);
-        calls
-            .composite_constructors
-            .dedup_by_key(|(address, _)| *address);
         let calls = calls.finish(control)?;
         let calls = if calls.is_empty() {
             None

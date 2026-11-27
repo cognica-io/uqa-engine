@@ -13,6 +13,7 @@ use uqa_core::memory::{Produced, ProductionControl, ProductionString, Production
 mod order;
 mod properties;
 
+#[cfg(test)]
 pub(super) fn eval_array_functions(name: &str, args: &[Value]) -> Option<Result<Value>> {
     eval_array_functions_with_control(name, args, &ProductionControl::uncontrolled())
         .map(|result| result.map(ordinary))
@@ -61,6 +62,7 @@ pub(super) fn eval_dispatched_json_array_sort_with_control(
     eval_array_function("array_sort", args, true, control, catalog)
 }
 
+#[cfg(test)]
 fn ordinary(value: Produced<Value>) -> Value {
     value.into_uncontrolled().expect("ordinary array result")
 }

@@ -15,7 +15,7 @@ mod format;
 mod text;
 pub(super) use text::split_part;
 
-pub(super) fn eval_math_functions(name: &str, args: &[Value]) -> Option<Result<Value>> {
+pub(super) fn random_value(name: &str) -> Option<Result<Value>> {
     if name == "random" {
         // Lightweight pseudo-random value derived from system time.
         use std::time::{SystemTime, UNIX_EPOCH};
@@ -25,11 +25,7 @@ pub(super) fn eval_math_functions(name: &str, args: &[Value]) -> Option<Result<V
             .unwrap_or(0) as f64;
         return Some(Ok(Value::Float((time.sin().abs() * 1.0e9).fract())));
     }
-    eval_math_functions_with_control(name, args, &ProductionControl::uncontrolled()).map(|result| {
-        result?
-            .into_uncontrolled()
-            .map_err(|_| SQLError::Internal("ordinary math owner".into()))
-    })
+    None
 }
 
 #[expect(

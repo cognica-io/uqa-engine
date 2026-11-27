@@ -11,7 +11,9 @@ use super::{
     ordinary_output, plain, Produced, ProductionControl, ProductionVec, SQLError,
     ScalarEvalContext, ScalarExpr, Value,
 };
-use crate::scalar::state::{ColumnSlot, ConstantCast, ContextSchema, RowCast};
+use crate::scalar::state::{
+    ColumnSlot, ConstantCast, ContextSchema, OperandMetadata, RowCast, SchemaSlot,
+};
 use std::sync::OnceLock;
 use uqa_sql::ast::BinaryOp;
 use uqa_sql::expr::RowLookup;
@@ -25,21 +27,29 @@ pub(super) fn array(
     context: &ScalarEvalContext<'_>,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Value>, SQLError> {
-    let element_type = context.with_type_schema(|schema| {
-        uqa_sql::type_resolution::scalar_array_input_type_with_control(
-            items,
-            schema,
-            context.params(),
-            context.function_hook(),
-            control,
-        )
+    let schema = context.row_schema();
+    let hook = context.function_hook();
+    let slot = context.array_constructor(items);
+    let construct = |element: Option<&uqa_sql::ColumnType>| {
+        uqa_sql::expr::construct_array_with_control(items.len(), element, control, |i| {
+            eval_scalar_inner(&items[i], context, control)
+        })
+    };
+    if let Some(element) = slot.and_then(|slot| slot.get(schema, hook)) {
+        return construct(element.as_deref());
+    }
+    let observation = type_observation(
+        context,
+        slot.is_some_and(super::super::state::ArrayConstructorState::is_empty),
+    );
+    let element = context.with_type_schema(|schema| {
+        observation.array_input(items, schema, context.params(), control)
     })?;
-    uqa_sql::expr::construct_array_with_control(
-        items.len(),
-        element_type.as_deref(),
-        control,
-        |index| eval_scalar_inner(&items[index], context, control),
-    )
+    let value = construct(element.as_deref())?;
+    if let (Some(slot), Some(scope)) = (slot, observation.finish()) {
+        slot.publish(element, schema, scope);
+    }
+    Ok(value)
 }
 
 pub(super) fn row(
@@ -47,11 +57,30 @@ pub(super) fn row(
     context: &ScalarEvalContext<'_>,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Value>, SQLError> {
+    let state = context.row_constructor(items);
+    if let Some(descriptor) =
+        state.and_then(|state| state.reusable(context.row_schema(), context.function_hook()))
+    {
+        let values = evaluate_items(items, context, control)?;
+        let row = match descriptor {
+            Some(descriptor) => {
+                uqa_core::RowValue::typed_shared_with_control(values, descriptor, control)?
+            }
+            None => uqa_core::RowValue::new_with_control(values, control)?,
+        };
+        return finish_row(row, control);
+    }
+    let observation = type_observation(
+        context,
+        state.is_some_and(super::super::state::RowConstructorState::observe),
+    );
     let mut fields = ProductionVec::new(*control);
     fields.reserve(items.len())?;
     let mut complete = true;
     for item in items {
-        let field = row_field_type(item, context, control)?;
+        let field = context.with_type_schema(|schema| {
+            observation.record_field(item, schema, context.params(), control)
+        })?;
         if let Some(field) = field {
             fields.push_copy(field)?;
         } else {
@@ -61,22 +90,45 @@ pub(super) fn row(
     let values = evaluate_items(items, context, control)?;
     let row = if complete {
         let fields = fields.finish()?;
-        let state = context.row_constructor(items);
-        let row = if let Some(descriptor) = state.and_then(|state| state.shared(&fields)) {
+        if let Some(descriptor) = state.and_then(|state| state.shared(&fields)) {
             drop(fields);
             uqa_core::RowValue::typed_shared_with_control(values, descriptor, control)?
         } else {
             uqa_core::RowValue::typed_with_control(values, fields, control)?
-        };
-        if let (Some(state), Some(descriptor)) = (state, row.descriptor()) {
-            state.remember(descriptor, control)?;
         }
-        row
     } else {
         uqa_core::RowValue::new_with_control(values, control)?
     };
+    if let Some(state) = state {
+        state.remember(
+            row.descriptor(),
+            context.row_schema(),
+            observation.finish(),
+            control,
+        )?;
+    }
+    finish_row(row, control)
+}
+
+fn finish_row(
+    row: Produced<uqa_core::RowValue>,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>, SQLError> {
     let (row, memory) = row.into_parts();
     control.finish(Value::Row(row), memory).map_err(Into::into)
+}
+
+fn type_observation<'a>(
+    context: &ScalarEvalContext<'a>,
+    retain: bool,
+) -> uqa_sql::type_resolution::ScalarTypeObservation<'a> {
+    #[cfg(test)]
+    super::super::state::CONSTRUCTOR_OBSERVATIONS.with(|count| count.set(count.get() + 1));
+    if retain {
+        uqa_sql::type_resolution::ScalarTypeObservation::new(context.function_hook())
+    } else {
+        uqa_sql::type_resolution::ScalarTypeObservation::live(context.function_hook())
+    }
 }
 
 fn row_field_type(
@@ -157,49 +209,69 @@ fn binary_values(
         )?;
         return plain(value.map_or(Value::Null, Value::Bool), control);
     }
-    if (matches!(*left, Value::Float(_)) || matches!(*right, Value::Float(_)))
-        && matches!(
-            op,
-            BinaryOp::Add | BinaryOp::Subtract | BinaryOp::Multiply | BinaryOp::Divide
-        )
-        && context.with_type_schema(|schema| {
-            let is_real = |input| {
-                uqa_sql::type_resolution::scalar_operand_is_real_with_control(
-                    input,
-                    schema,
-                    context.params(),
+    let integer_width = if uqa_sql::expr::is_arithmetic(op) {
+        match (left, right) {
+            (Value::Int(_), Value::Int(_)) => {
+                let slot = match context.operand_metadata(lhs) {
+                    Some(OperandMetadata::Arithmetic { integer, .. }) => Some(integer),
+                    _ => None,
+                };
+                SchemaSlot::with_value(
+                    slot,
+                    context.row_schema(),
                     control,
-                )
-            };
-            Ok::<_, SQLError>(is_real(lhs)? && is_real(rhs)?)
-        })?
-    {
-        let value = uqa_sql::expr::eval_float_arithmetic_with_control(
-            op,
-            left,
-            right,
-            uqa_sql::expr::FloatWidth::Real,
-            control,
-        )?;
-        return plain(value, control);
-    }
-    // Integer operand widths constrain only integer arithmetic.
-    // Other carriers keep their existing
-    // numeric promotion without re-inferring the operand trees.
-    let integer_width = if matches!((left, right), (Value::Int(_), Value::Int(_)))
-        && matches!(
-            op,
-            BinaryOp::Add | BinaryOp::Subtract | BinaryOp::Multiply | BinaryOp::Divide
-        ) {
-        context.with_type_schema(|schema| {
-            uqa_sql::scalar_integer_operation_width_with_control(
-                lhs,
-                rhs,
-                schema,
-                context.params(),
-                control,
-            )
-        })?
+                    || {
+                        context.with_type_schema(|schema| {
+                            uqa_sql::scalar_integer_operation_width_with_control(
+                                lhs,
+                                rhs,
+                                schema,
+                                context.params(),
+                                control,
+                            )
+                        })
+                    },
+                    |width| Ok(*width),
+                )?
+            }
+            (Value::Float(_), _) | (_, Value::Float(_)) => {
+                let slot = match context.operand_metadata(lhs) {
+                    Some(OperandMetadata::Arithmetic { real, .. }) => Some(real),
+                    _ => None,
+                };
+                let real = SchemaSlot::with_value(
+                    slot,
+                    context.row_schema(),
+                    control,
+                    || {
+                        context.with_type_schema(|schema| {
+                            let is_real = |operand| {
+                                uqa_sql::type_resolution::scalar_operand_is_real_with_control(
+                                    operand,
+                                    schema,
+                                    context.params(),
+                                    control,
+                                )
+                            };
+                            Ok(is_real(lhs)? && is_real(rhs)?)
+                        })
+                    },
+                    |real| Ok(*real),
+                )?;
+                if real {
+                    let value = uqa_sql::expr::eval_float_arithmetic_with_control(
+                        op,
+                        left,
+                        right,
+                        uqa_sql::expr::FloatWidth::Real,
+                        control,
+                    )?;
+                    return plain(value, control);
+                }
+                None
+            }
+            _ => None,
+        }
     } else {
         None
     };
@@ -218,19 +290,32 @@ pub(super) fn unary_minus(
     context: &ScalarEvalContext<'_>,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Value>, SQLError> {
-    let source = context.with_type_schema(|schema| {
-        uqa_sql::type_resolution::scalar_negation_source_with_control(
-            inner,
-            schema,
-            context.params(),
-            control,
-        )
-    })?;
-    let value = eval_scalar_inner(inner, context, control)?;
-    uqa_sql::type_resolution::ScalarNegationSource::negate_with_control(
-        source.as_ref(),
-        &value,
+    let slot = match context.operand_metadata(inner) {
+        Some(OperandMetadata::Negation(source)) => Some(source),
+        _ => None,
+    };
+    SchemaSlot::with_value(
+        slot,
+        context.row_schema(),
         control,
+        || {
+            context.with_type_schema(|schema| {
+                uqa_sql::type_resolution::scalar_negation_source_with_control(
+                    inner,
+                    schema,
+                    context.params(),
+                    control,
+                )
+            })
+        },
+        |source| {
+            let value = eval_scalar_inner(inner, context, control)?;
+            uqa_sql::type_resolution::ScalarNegationSource::negate_with_control(
+                source.as_ref(),
+                &value,
+                control,
+            )
+        },
     )
 }
 
@@ -312,12 +397,7 @@ fn row_cast(
         let (RowCast::Resolved { schema, .. }
         | RowCast::Source { schema, .. }
         | RowCast::Catalog { schema, .. }) = state;
-        let same_schema = match (schema, context.row_schema()) {
-            (None, None) => true,
-            (Some(retained), Some(current)) => current.shares_index(retained),
-            _ => false,
-        };
-        if same_schema {
+        if super::super::state::same_schema(schema.as_ref(), context.row_schema()) {
             let value = eval_scalar_inner(expr, context, control)?;
             return match state {
                 RowCast::Resolved {

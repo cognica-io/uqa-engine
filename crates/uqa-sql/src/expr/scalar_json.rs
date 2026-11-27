@@ -9,20 +9,11 @@
 use super::{json, Result, SQLError, Value};
 use uqa_core::memory::{Produced, ProductionControl};
 
-pub(super) fn eval_json_functions(
+pub(super) fn eval_session_json(
     name: &str,
     args: &[Value],
     catalog: Option<&dyn super::SQLValueCatalog>,
 ) -> Option<Result<Value>> {
-    if let Some(value) =
-        eval_json_functions_with_control(name, args, &ProductionControl::uncontrolled())
-    {
-        return Some(value.map(|value| {
-            value
-                .into_uncontrolled()
-                .expect("ordinary JSON evaluation has no lease")
-        }));
-    }
     // Polymorphic builders and set-returning key enumeration retain their existing ordinary paths. The generation validator rejects these functions.
     Some(match name {
         "json_build_object" | "jsonb_build_object" => {

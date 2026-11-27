@@ -12,9 +12,8 @@ use crate::ast::{BinaryOp, Expr};
 use crate::error::{Result, SQLError};
 
 use super::binary::{eval_binary, eval_comparison_truth_with_engine, truthy};
-use super::builtin::eval_bound_builtin_function_call;
 use super::call_arguments::evaluate_call_args;
-use super::call_dispatch::eval_function_call;
+use super::call_dispatch::{eval_bound_builtin_function_call, eval_function_call};
 use super::casting::negate_value;
 use super::context::{cast_value_with_type_resolution, EvalContext};
 

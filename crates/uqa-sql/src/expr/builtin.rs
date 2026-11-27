@@ -12,9 +12,11 @@ use crate::ast::{FunctionBinding, FunctionDispatch};
 use crate::error::{Result, SQLError};
 
 use super::call_arguments::normalized_function_name;
-use super::call_dispatch::eval_selected_builtin_function_call;
 use super::context::EvalContext;
-use super::{random, scalar_array, scalar_postgres, scalar_range};
+use super::{scalar_array, scalar_postgres, scalar_range};
+
+mod metadata;
+pub use metadata::{BuiltinCallMetadata, PreparedBuiltinCalls};
 
 #[expect(
     clippy::too_many_lines,
@@ -292,91 +294,6 @@ pub fn bound_scalar_function_strictness(
         .builtin
         .then(|| builtin_scalar_function_strictness(&binding.name, argument_count))
         .flatten()
-}
-
-/// Evaluate a call's argument list, unwrapping `name => value`
-pub fn eval_bound_builtin_function_call(
-    binding: &FunctionBinding,
-    call_args: Vec<(Option<String>, Value)>,
-    ctx: &EvalContext<'_>,
-) -> Result<Value> {
-    if let Some(error) = &binding.resolution_error {
-        return Err(error.sql_error());
-    }
-    if let Some(hook) = ctx.engine {
-        hook.require_builtin_execute(binding)?;
-    }
-    let Some(dispatch) = binding.dispatch else {
-        let value = eval_selected_builtin_function_call(
-            &binding.name,
-            call_args,
-            ctx,
-            FunctionBinding::selected_input_collation(Some(binding)),
-        )?;
-        // Fixed signatures retain widths that the shared integer and floating carriers cannot enforce on their own.
-        if matches!(value, Value::Int(_) | Value::Float(_)) {
-            if let Some(
-                ty @ (crate::ColumnType::SmallInteger
-                | crate::ColumnType::Integer
-                | crate::ColumnType::Real),
-            ) = crate::fixed_builtin_return_type(binding)
-            {
-                return super::cast_value(&value, &ty.sql_name());
-            }
-        }
-        return Ok(value);
-    };
-    if let Some(result) = random::eval_dispatched_random_function(dispatch, &call_args, ctx) {
-        return result;
-    }
-    if call_args.iter().any(|(name, _)| name.is_some()) {
-        return Err(SQLError::Internal(format!(
-            "bound {} expression retained a named argument",
-            dispatch.label()
-        )));
-    }
-    let evaluated = call_args
-        .into_iter()
-        .map(|(_, value)| value)
-        .collect::<Vec<_>>();
-    if let FunctionDispatch::Enum {
-        operation,
-        type_oid,
-    } = dispatch
-    {
-        return super::enums::enum_function_value_with_state(
-            ctx.engine.and_then(super::EngineHook::enum_labels),
-            operation,
-            type_oid,
-            &evaluated,
-            ctx.enum_comparison_state(),
-        );
-    }
-    if let Some(result) = scalar_postgres::eval_comparison_with_context(
-        dispatch,
-        &evaluated,
-        &uqa_core::memory::ProductionControl::uncontrolled(),
-        ctx,
-        binding.input_collation,
-    ) {
-        return result.map(|value| {
-            value
-                .into_uncontrolled()
-                .expect("ordinary comparison result")
-        });
-    }
-    eval_dispatched_builtin_with_control(
-        binding,
-        dispatch,
-        &evaluated,
-        &uqa_core::memory::ProductionControl::uncontrolled(),
-        ctx,
-    )
-    .map(|value| {
-        value
-            .into_uncontrolled()
-            .expect("ordinary dispatched builtin result")
-    })
 }
 
 pub(super) fn eval_dispatched_builtin_with_control(

@@ -105,14 +105,16 @@ pub fn fixed_builtin_return_type_with_control(
     binding: &FunctionBinding,
     control: &uqa_core::memory::ProductionControl<'_>,
 ) -> Result<Option<uqa_core::memory::Produced<ColumnType>>, SQLError> {
-    registry::bound_signature(binding, control)?
-        .map(|signature| {
-            signature
-                .return_type
-                .clone_with_control(control)
-                .map_err(Into::into)
-        })
+    bound_result_type(binding, control)?
+        .map(|ty| ty.clone_with_control(control).map_err(Into::into))
         .transpose()
+}
+
+pub(crate) fn bound_result_type(
+    binding: &FunctionBinding,
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<Option<&'static ColumnType>, SQLError> {
+    Ok(registry::bound_signature(binding, control)?.map(|signature| &signature.return_type))
 }
 
 fn selected_return_type(

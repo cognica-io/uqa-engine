@@ -56,6 +56,28 @@ static PARSED_TYPE_NAMES: LazyLock<RwLock<HashMap<Box<str>, Option<ParsedRegtype
     LazyLock::new(|| RwLock::new(HashMap::new()));
 const RETAINED_TYPE_NAMES: usize = 4096;
 
+/// A bound object identity or an explicitly qualified SQL name can depend on an immutable catalog snapshot. Optional retention may decline when the name cannot be classified within the caller's scratch allowance.
+pub(crate) fn fixed_type_name_with_control(
+    name: &str,
+    control: &ProductionControl<'_>,
+) -> Result<bool> {
+    if crate::catalog::work::inline(crate::ast::UserTypeIdentity::parse_with_type_work(
+        name,
+        control,
+        &mut (),
+    ))?
+    .is_some()
+    {
+        return Ok(true);
+    }
+    let result = crate::parse_regtype_name_with_control(name, control);
+    match result {
+        Ok(parsed) => Ok(parsed.is_some_and(|name| name.names.len() == 2)),
+        Err(error) if error.sqlstate() == Some("57014") => Err(error),
+        Err(_) => Ok(false),
+    }
+}
+
 /// Parse exactly one `PostgreSQL` type-name string without accepting adjacent SQL expressions. `None` is the soft-failure shape used for inputs such as an empty string or `SETOF integer`; lexical and type-name syntax errors are retained for the caller.
 pub fn parse_regtype_name(input: &str) -> Result<Option<ParsedRegtypeName>> {
     let retained = PARSED_TYPE_NAMES

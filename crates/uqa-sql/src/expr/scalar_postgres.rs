@@ -22,16 +22,7 @@ pub(super) use arrays::{eval_postgres_arrays_with_catalog, eval_postgres_arrays_
 pub(super) use subscripts::eval_postgres_subscript_with_control;
 use uqa_core::memory::{Produced, ProductionControl};
 
-pub(super) fn eval_postgres_functions(name: &str, args: &[Value]) -> Option<Result<Value>> {
-    if let Some(result) =
-        eval_postgres_functions_with_control(name, args, &ProductionControl::uncontrolled())
-    {
-        return Some(result.map(|value| {
-            value
-                .into_uncontrolled()
-                .expect("ordinary PostgreSQL result")
-        }));
-    }
+pub(super) fn eval_session_postgres(name: &str, args: &[Value]) -> Option<Result<Value>> {
     const NAMES: &[&str] = &[
         "string_to_table",
         "current_database",

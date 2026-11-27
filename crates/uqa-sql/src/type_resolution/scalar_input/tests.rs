@@ -397,10 +397,16 @@ fn record_cast_names_preserve_named_sources_but_not_anonymous_nulls() {
             };
             for (preserve_domain, expected) in [(true, expected_source), (false, expected_operand)]
             {
-                let name =
-                    operand_type_name(&expression, &schema, &[], None, &control, preserve_domain)
-                        .unwrap()
-                        .unwrap();
+                let name = operand_type_name(
+                    &expression,
+                    &schema,
+                    &[],
+                    OperandCatalog::live(None),
+                    &control,
+                    preserve_domain,
+                )
+                .unwrap()
+                .unwrap();
                 assert_eq!(&*name, &expected);
                 assert_eq!(budget.used(), name.reserved_bytes());
                 drop(name);

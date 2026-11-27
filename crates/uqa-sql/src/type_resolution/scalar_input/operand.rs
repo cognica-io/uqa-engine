@@ -6,7 +6,9 @@
 
 //! Observe the same selected operand as a bound type or its explicit SQL spelling.
 
-use super::{array_source_name, base_type, inferred_type, resolve_operand_type, ArraySource};
+use super::{
+    array_source_name, base_type, inferred_type, resolve_operand_type, ArraySource, OperandCatalog,
+};
 use crate::{ast::ColumnType, schema::ScalarTypeSchema, SQLError, SQLParam, ScalarExpr};
 use uqa_core::{
     memory::{Produced, ProductionControl},
@@ -28,8 +30,8 @@ impl Operand<'_> {
         })
     }
 
-    fn is_real(self, control: &ProductionControl<'_>) -> Result<bool, SQLError> {
-        let name = match &self {
+    fn is_real(&self, control: &ProductionControl<'_>) -> Result<bool, SQLError> {
+        let name = match self {
             Self::Bound(ColumnType::Named(name)) => name.as_str(),
             Self::OwnedName(name) => name.as_str(),
             Self::Bound(ty) => return Ok(matches!(ty, ColumnType::Real)),
@@ -104,7 +106,7 @@ pub fn scalar_negation_source_with_control(
         expression,
         schema,
         params,
-        None,
+        OperandCatalog::live(None),
         control,
         false,
         |operand, control| operand.negation_source(control),
@@ -121,7 +123,7 @@ pub fn scalar_operand_is_real_with_control(
         expression,
         schema,
         params,
-        None,
+        OperandCatalog::live(None),
         control,
         false,
         |operand, control| operand.is_real(control),
@@ -133,7 +135,7 @@ pub(super) fn operand_type_name(
     expression: &ScalarExpr,
     schema: &dyn ScalarTypeSchema,
     params: &[SQLParam],
-    engine: Option<&dyn crate::expr::EngineHook>,
+    catalog: OperandCatalog<'_>,
     control: &ProductionControl<'_>,
     preserve_domain: bool,
 ) -> Result<Option<Produced<String>>, SQLError> {
@@ -141,7 +143,7 @@ pub(super) fn operand_type_name(
         expression,
         schema,
         params,
-        engine,
+        catalog,
         control,
         preserve_domain,
         |operand, control| operand.name(control),
@@ -152,7 +154,7 @@ fn read_operand<T>(
     expression: &ScalarExpr,
     schema: &dyn ScalarTypeSchema,
     params: &[SQLParam],
-    engine: Option<&dyn crate::expr::EngineHook>,
+    catalog: OperandCatalog<'_>,
     control: &ProductionControl<'_>,
     preserve_domain: bool,
     read: fn(Operand<'_>, &ProductionControl<'_>) -> Result<T, SQLError>,
@@ -168,15 +170,15 @@ fn read_operand<T>(
     };
     let name = match expression {
         ScalarExpr::Cast { expr, ty, .. } => {
-            if let Some(target) = resolve_operand_type(ty, engine, control)? {
+            if let Some(target) = resolve_operand_type(ty, catalog, control)? {
                 if matches!(*target, ColumnType::Record) {
                     let source_name =
-                        operand_type_name(expr, schema, params, engine, control, true)?;
+                        operand_type_name(expr, schema, params, catalog, control, true)?;
                     let source = match inferred_type(expr, schema, params, control)? {
                         Some(source) => Some(source),
                         None => source_name
                             .as_deref()
-                            .map(|name| resolve_operand_type(name, engine, control))
+                            .map(|name| resolve_operand_type(name, catalog, control))
                             .transpose()?
                             .flatten(),
                     };
@@ -222,10 +224,18 @@ fn read_operand<T>(
             ..
         } => Some(ty.as_str()),
         ScalarExpr::UnaryMinus(inner) => {
-            return read_operand(inner, schema, params, None, control, false, read);
+            return read_operand(
+                inner,
+                schema,
+                params,
+                OperandCatalog::live(None),
+                control,
+                false,
+                read,
+            );
         }
         ScalarExpr::Array(items) => {
-            match array_source_name(items, schema, params, engine, control)? {
+            match array_source_name(items, schema, params, catalog, control)? {
                 ArraySource::Known(name) => {
                     return read(Operand::OwnedName(name), control).map(Some)
                 }

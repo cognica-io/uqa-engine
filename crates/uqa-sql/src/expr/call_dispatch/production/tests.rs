@@ -6,7 +6,10 @@
 
 use super::*;
 use crate::ast::{FunctionDispatch, NumericOperator};
-use uqa_core::{memory::MemoryBudget, ArrayValue, CancellationToken};
+use uqa_core::{
+    memory::{MemoryBudget, ProductionVec},
+    ArrayValue, CancellationToken,
+};
 
 fn args(
     values: &[Value],

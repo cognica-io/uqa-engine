@@ -35,7 +35,7 @@ fn assert_value(name: &str, args: &[Value], expected: Value) {
         assert_eq!(memory.used(), value.capacity());
     }
     assert_eq!(
-        eval_json_functions(name, args, None).unwrap().unwrap(),
+        crate::expr::tests::eval_scalar_function(name, args).unwrap(),
         expected
     );
     drop(result);

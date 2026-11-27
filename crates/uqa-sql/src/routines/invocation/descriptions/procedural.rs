@@ -7,7 +7,7 @@
 //! Concrete procedural declarations retain metadata, never activation values.
 
 use super::{
-    conversion_slots, fixed_name, ColumnType, Produced, ProductionControl, RoutineCallDescription,
+    conversion_slots, ColumnType, Produced, ProductionControl, RoutineCallDescription,
     RoutineConversionEnvironment, RoutineValueDescription, SQLError, Value, ValueRetentionError,
 };
 use crate::plpgsql::{PLpgSQLCompilationIdentity, PLpgSQLFunction};
@@ -98,7 +98,7 @@ impl ProceduralRoutineDescription<'_> {
         if let Some(saved) = slot.get() {
             return Ok((saved.name.as_str() == name).then_some(saved));
         }
-        if !fixed_name(name) {
+        if !crate::compiler::fixed_type_name_with_control(name, &environment.control)? {
             return Ok(None);
         }
         match environment.control.copy_text(name) {

@@ -7906,6 +7906,71 @@
     {
       "package": "uqa-execution",
       "kind": "lib",
+      "test": "arithmetic_and_negation_infer_once_for_ten_thousand_rows_of_the_same_schema",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/scalar/state/metadata/tests.rs",
+      "capability": "Prepared scalar metadata",
+      "workload": "Evaluate prepared integer arithmetic and unary minus over 10,000 varying inputs to the same row layout.",
+      "invariant": "Each selected numeric width or source is resolved once. Every row retains its arithmetic result and overflow semantics.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "real_width_rechecks_changed_schemas_and_parameter_types",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/scalar/state/metadata/tests.rs",
+      "capability": "Prepared scalar metadata",
+      "workload": "Evaluate real and double precision inputs through changing row schemas and parameter declarations.",
+      "invariant": "Single-precision rounding and exact double values follow each active declaration with no stale widths.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "constructors_resolve_once_but_evaluate_every_row_and_follow_the_invoking_schema",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/scalar/state/metadata/tests.rs",
+      "capability": "Prepared scalar metadata",
+      "workload": "Construct a row and nested array across 10,000 input rows, then switch the column type.",
+      "invariant": "Only two observations are needed for the original layout. A distinct layout resolves both types again and every row retains its own values.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "row_field_metadata_follows_catalog_epochs_unqualified_names_and_lookup_callbacks",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/scalar/state/metadata/tests.rs",
+      "capability": "Prepared scalar metadata",
+      "workload": "Change a qualified type lookup epoch before or during resolution and compare an unqualified type under the same hooks.",
+      "invariant": "Each row uses the correct field OID. Immutable epochs reuse successful observations, and unqualified names remain live.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "bound_builtin_dispatch_is_classified_once_and_authorized_for_every_row",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/scalar/state/metadata/tests.rs",
+      "capability": "Prepared scalar metadata",
+      "workload": "Evaluate one prepared bound call across 10,000 varying rows with ordinary and admitted controls, and compare two independent zero-argument calls.",
+      "invariant": "Three calls need three immutable classifications. Each evaluated row checks current execution privilege and gives the expected result. Set-returning and denied calls preserve their SQLSTATEs.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
       "test": "prepared_row_constructors_share_descriptors_without_reusing_dynamic_types",
       "cases": 1,
       "source": "crates/uqa-execution/src/scalar/state/tests/row_descriptors.rs",
@@ -20512,6 +20577,19 @@
       "capability": "Admitted record collation production",
       "workload": "A ROW combines a selected input column, explicit unicode text and a typed null under ordinary, admitted, exhausted and cancelled evaluation.",
       "invariant": "Both producers retain identical descriptors; output owns its exact lease and failed evaluation releases scratch.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "inline_and_spilled_noncopy_values_move_once_and_drop_exactly_once",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/production/small_vec/tests.rs",
+      "capability": "Inline operand storage",
+      "workload": "Move 32 separately owned text payloads through four inline slots and two spills under ordinary and admitted controls.",
+      "invariant": "All 32 text addresses and their order survive growth, each destructor runs once and the allowance is released.",
       "case_names": [
         ""
       ]
@@ -38761,6 +38839,58 @@
       "capability": "Native mutation rule input admission",
       "workload": "Native UPDATE and DELETE actions with four MiB payloads, a 64 KiB remaining allowance and durable recovery.",
       "invariant": "All four providers reject before payload copying, leave target/action effects absent, recover and retain persistent results on reopen."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "session_callbacks_receive_original_positional_and_named_payloads_at_every_arity",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/call_dispatch/arguments/tests.rs",
+      "capability": "Scalar argument ownership",
+      "workload": "Pass a 4 MiB text and zero to five additional strings to positional and named host callbacks.",
+      "invariant": "Every callback receives each original allocation, with the original named argument order preserved across the inline-to-heap boundary.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "set_returning_builtin_metadata_accepts_catalog_qualification_without_allocation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/builtin/metadata/tests.rs",
+      "capability": "Prepared builtin set classification",
+      "workload": "Classify eight unqualified, qualified and near-miss names 10,000 times, including mixed ASCII case and a non-ASCII character.",
+      "invariant": "Each name retains its schema and identifier semantics with zero heap allocations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "prepared_numeric_results_resolve_once_and_preserve_width_budget_and_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/builtin/metadata/tests.rs",
+      "capability": "Prepared builtin return widths",
+      "workload": "Resolve the selected integer overload with an empty budget, admit it once and convert 10,000 numeric results with zero temporary bytes.",
+      "invariant": "The initial failure does not publish metadata. Every cached conversion is allocation-free, and overflow and either cancellation token preserve their SQLSTATEs.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "four_positional_slots_use_no_heap_and_refused_growth_releases_every_owner",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/expr/call_dispatch/arguments/tests.rs",
+      "capability": "Scalar argument ownership",
+      "workload": "Dispatch and restore four inline integer arguments at a zero-byte ceiling, then request a fifth slot.",
+      "invariant": "Four arguments allocate and reserve zero bytes. The fifth produces SQLSTATE 53200 with zero leaked bytes.",
+      "case_names": [
+        ""
+      ]
     },
     {
       "package": "uqa-sql",

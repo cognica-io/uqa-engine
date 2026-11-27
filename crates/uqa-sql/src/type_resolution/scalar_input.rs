@@ -17,6 +17,9 @@ use uqa_core::{
     Value,
 };
 
+mod catalog;
+use catalog::OperandCatalog;
+pub use catalog::{OperandTypeScope, ScalarTypeObservation};
 mod operand;
 use operand::operand_type_name;
 pub use operand::{
@@ -31,6 +34,22 @@ pub fn scalar_record_field_type_with_control(
     engine: Option<&dyn crate::expr::EngineHook>,
     control: &ProductionControl<'_>,
 ) -> Result<Option<uqa_core::RecordFieldType>, SQLError> {
+    record_field(
+        expression,
+        schema,
+        params,
+        OperandCatalog::live(engine),
+        control,
+    )
+}
+
+fn record_field(
+    expression: &ScalarExpr,
+    schema: &dyn ScalarTypeSchema,
+    params: &[SQLParam],
+    catalog: OperandCatalog<'_>,
+    control: &ProductionControl<'_>,
+) -> Result<Option<uqa_core::RecordFieldType>, SQLError> {
     control.check()?;
     if matches!(expression, ScalarExpr::Literal(Value::Null | Value::Str(_))) {
         return Ok(Some(uqa_core::RecordFieldType {
@@ -39,9 +58,7 @@ pub fn scalar_record_field_type_with_control(
             type_modifier: -1,
         }));
     }
-    let Some(ty) =
-        scalar_operand_type_with_engine_and_control(expression, schema, params, engine, control)?
-    else {
+    let Some(ty) = operand_type(expression, schema, params, catalog, control)? else {
         return Ok(None);
     };
     let collation_oid = if let Some(oid) = schema.input_collation(expression) {
@@ -75,6 +92,22 @@ pub fn scalar_operand_type_with_engine_and_control(
     engine: Option<&dyn crate::expr::EngineHook>,
     control: &ProductionControl<'_>,
 ) -> Result<Option<Produced<ColumnType>>, SQLError> {
+    operand_type(
+        expression,
+        schema,
+        params,
+        OperandCatalog::live(engine),
+        control,
+    )
+}
+
+fn operand_type(
+    expression: &ScalarExpr,
+    schema: &dyn ScalarTypeSchema,
+    params: &[SQLParam],
+    catalog: OperandCatalog<'_>,
+    control: &ProductionControl<'_>,
+) -> Result<Option<Produced<ColumnType>>, SQLError> {
     let bound = match expression {
         ScalarExpr::TypedLiteral { bound_type, .. }
         | ScalarExpr::CompositeRow { bound_type, .. } => bound_type.as_ref(),
@@ -85,10 +118,10 @@ pub fn scalar_operand_type_with_engine_and_control(
     if let Some(ty) = bound {
         return ty.clone_with_control(control).map(Some).map_err(Into::into);
     }
-    let Some(name) = operand_type_name(expression, schema, params, engine, control, true)? else {
+    let Some(name) = operand_type_name(expression, schema, params, catalog, control, true)? else {
         return Ok(None);
     };
-    resolve_operand_type(&name, engine, control)
+    resolve_operand_type(&name, catalog, control)
 }
 
 /// Retain an ARRAY constructor's analyzed scalar element identity without evaluating its items or repeating any input or domain checks. Bound item signatures take precedence over erased value carriers, including typed NULL and explicit record coercions.
@@ -131,18 +164,28 @@ pub fn scalar_array_input_type_with_control(
     engine: Option<&dyn crate::expr::EngineHook>,
     control: &ProductionControl<'_>,
 ) -> Result<Option<Produced<ColumnType>>, SQLError> {
+    array_input_type(items, schema, params, OperandCatalog::live(engine), control)
+}
+
+fn array_input_type(
+    items: &[ScalarExpr],
+    schema: &dyn ScalarTypeSchema,
+    params: &[SQLParam],
+    catalog: OperandCatalog<'_>,
+    control: &ProductionControl<'_>,
+) -> Result<Option<Produced<ColumnType>>, SQLError> {
     control.check()?;
     if items.is_empty() {
         return Ok(None);
     }
-    array_element_type_from_bound_inputs(items, schema, params, engine, control)
+    array_element_type_from_bound_inputs(items, schema, params, catalog, control)
 }
 
 fn array_element_type_from_bound_inputs(
     items: &[ScalarExpr],
     schema: &dyn ScalarTypeSchema,
     params: &[SQLParam],
-    engine: Option<&dyn crate::expr::EngineHook>,
+    catalog: OperandCatalog<'_>,
     control: &ProductionControl<'_>,
 ) -> Result<Option<Produced<ColumnType>>, SQLError> {
     let mut selection = super::common::CommonInputType::new();
@@ -155,21 +198,21 @@ fn array_element_type_from_bound_inputs(
             continue;
         }
         let ty = if let ScalarExpr::Array(nested) = item {
-            array_element_type_from_bound_inputs(nested, schema, params, engine, control)?
+            array_element_type_from_bound_inputs(nested, schema, params, catalog, control)?
                 .map(|element| ColumnType::array_with_control(element, control))
                 .transpose()?
         } else if matches!(item, ScalarExpr::Cast { .. }) {
-            operand_type_name(item, schema, params, engine, control, true)?
+            operand_type_name(item, schema, params, catalog, control, true)?
                 .as_deref()
-                .map(|name| resolve_operand_type(name, engine, control))
+                .map(|name| resolve_operand_type(name, catalog, control))
                 .transpose()?
                 .flatten()
         } else if let Some(ty) = inferred_type(item, schema, params, control)? {
             Some(ty)
         } else {
-            operand_type_name(item, schema, params, engine, control, true)?
+            operand_type_name(item, schema, params, catalog, control, true)?
                 .as_deref()
-                .map(|name| resolve_operand_type(name, engine, control))
+                .map(|name| resolve_operand_type(name, catalog, control))
                 .transpose()?
                 .flatten()
         };
@@ -187,11 +230,12 @@ fn array_element_type_from_bound_inputs(
 
 fn resolve_operand_type(
     name: &str,
-    engine: Option<&dyn crate::expr::EngineHook>,
+    catalog: OperandCatalog<'_>,
     control: &ProductionControl<'_>,
 ) -> Result<Option<Produced<ColumnType>>, SQLError> {
     control.check()?;
-    if let Some(engine) = engine {
+    catalog.observe(name, control)?;
+    if let Some(engine) = catalog.hook {
         let ty = engine.resolve_type_name(name).map_err(SQLError::Internal)?;
         control.check()?;
         if let Some(ty) = ty {
@@ -236,7 +280,14 @@ pub fn scalar_operand_type_name_with_control(
     params: &[SQLParam],
     control: &ProductionControl<'_>,
 ) -> Result<Option<Produced<String>>, SQLError> {
-    operand_type_name(expression, schema, params, None, control, false)
+    operand_type_name(
+        expression,
+        schema,
+        params,
+        OperandCatalog::live(None),
+        control,
+        false,
+    )
 }
 
 /// Casts retain a source domain's identity so an identity cast cannot re-run its constraints. Operator consumers continue to use the underlying type.
@@ -246,7 +297,14 @@ pub fn scalar_cast_source_type_name_with_control(
     params: &[SQLParam],
     control: &ProductionControl<'_>,
 ) -> Result<Option<Produced<String>>, SQLError> {
-    operand_type_name(expression, schema, params, None, control, true)
+    operand_type_name(
+        expression,
+        schema,
+        params,
+        OperandCatalog::live(None),
+        control,
+        true,
+    )
 }
 
 /// Binding has already coerced a constructor's items to their common type. Their retained call signatures keep that type even when catalog-free inference cannot resolve a routine or domain. Reading this metadata performs no cast and cannot repeat a domain check.
@@ -254,14 +312,14 @@ fn array_source_name(
     items: &[ScalarExpr],
     schema: &dyn ScalarTypeSchema,
     params: &[SQLParam],
-    engine: Option<&dyn crate::expr::EngineHook>,
+    catalog: OperandCatalog<'_>,
     control: &ProductionControl<'_>,
 ) -> Result<ArraySource, SQLError> {
     let mut selected: Option<Produced<String>> = None;
     let mut unresolved = false;
     for item in items {
         control.check()?;
-        let Some(name) = operand_type_name(item, schema, params, engine, control, true)? else {
+        let Some(name) = operand_type_name(item, schema, params, catalog, control, true)? else {
             unresolved |= !super::is_unknown_literal(item);
             continue;
         };

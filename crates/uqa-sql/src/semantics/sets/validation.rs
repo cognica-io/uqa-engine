@@ -27,27 +27,42 @@ use super::{PhysicalProjection, SetFunctionCatalog};
 use crate::binding::context::BindingContext;
 use crate::semantics::aggregates::is_aggregate;
 
+const SET_RETURNING_BUILTINS: &[&str] = &[
+    "aclexplode",
+    "generate_series",
+    "json_array_elements",
+    "json_array_elements_text",
+    "json_each",
+    "json_each_text",
+    "json_object_keys",
+    "jsonb_array_elements",
+    "jsonb_array_elements_text",
+    "jsonb_each",
+    "jsonb_each_text",
+    "jsonb_object_keys",
+    "pg_listening_channels",
+    "regexp_matches",
+    "regexp_split_to_table",
+    "string_to_table",
+    "unnest",
+];
+
 pub fn builtin_returns_set(name: &str) -> bool {
-    matches!(
-        name,
-        "generate_series"
-            | "pg_listening_channels"
-            | "unnest"
-            | "regexp_matches"
-            | "regexp_split_to_table"
-            | "string_to_table"
-            | "json_array_elements"
-            | "jsonb_array_elements"
-            | "json_array_elements_text"
-            | "jsonb_array_elements_text"
-            | "json_each"
-            | "jsonb_each"
-            | "json_each_text"
-            | "jsonb_each_text"
-            | "json_object_keys"
-            | "jsonb_object_keys"
-            | "aclexplode"
-    )
+    SET_RETURNING_BUILTINS.binary_search(&name).is_ok()
+}
+
+pub(super) fn bound_builtin_returns_set(name: &str) -> bool {
+    let local = match name.split_once('.') {
+        Some((schema, local)) if schema.eq_ignore_ascii_case("pg_catalog") => local,
+        _ => name,
+    };
+    SET_RETURNING_BUILTINS
+        .binary_search_by(|candidate| {
+            candidate
+                .bytes()
+                .cmp(local.bytes().map(|byte| byte.to_ascii_lowercase()))
+        })
+        .is_ok()
 }
 
 pub fn function_may_return_set(
