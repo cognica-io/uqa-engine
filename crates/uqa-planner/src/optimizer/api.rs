@@ -7,8 +7,7 @@
 //! Optimizer configuration, statistics seam, and public entry points.
 
 use super::{
-    reorder_unified_plan_joins, AggregateClassifier, JoinGraphError, RelationStats, ScalarExpr,
-    SourcePlan, UnifiedPlan,
+    AggregateClassifier, JoinGraphError, RelationStats, ScalarExpr, SourcePlan, UnifiedPlan,
 };
 use crate::LocalAccessEstimate;
 
@@ -19,6 +18,17 @@ pub enum OptimizerError {
     Expression(#[from] uqa_sql::SQLError),
     #[error(transparent)]
     JoinGraph(#[from] JoinGraphError),
+}
+
+impl OptimizerError {
+    pub(crate) fn into_sql(self) -> uqa_sql::SQLError {
+        match self {
+            Self::Expression(error) => error,
+            Self::JoinGraph(error) => {
+                uqa_sql::SQLError::Internal(format!("optimize SQL join order: {error}"))
+            }
+        }
+    }
 }
 
 pub type OptimizerResult<T> = Result<T, OptimizerError>;
@@ -265,11 +275,15 @@ pub fn optimize_with_aggregates_and_statistics(
     aggregates: &dyn AggregateClassifier,
     statistics: &dyn SourceStatistics,
 ) -> OptimizerResult<uqa_sql::plan::OwnedExecutablePlan> {
-    let plan = super::owned::optimize_caller(plan, config, aggregates)?;
+    let plan = super::owned::optimize_caller(
+        uqa_sql::plan::MutableExecutablePlan::uncontrolled(plan),
+        config,
+        aggregates,
+    )?;
     if config.enable_join_reordering {
-        reorder_unified_plan_joins(plan, statistics, &config.production)
+        super::join_reorder::reorder_caller_plan(plan, statistics, &config.production)
     } else {
-        Ok(plan.into())
+        Ok(plan.finish(&uqa_core::memory::ProductionControl::uncontrolled())?)
     }
 }
 

@@ -164,12 +164,7 @@ fn optimize_plan_authorized(
         crate::optimizer::optimize_owned_with_aggregates_and_statistics(
             plan, &config, aggregates, statistics,
         )
-        .map_err(|error| match error {
-            crate::optimizer::OptimizerError::Expression(error) => error,
-            crate::optimizer::OptimizerError::JoinGraph(error) => {
-                SQLError::Internal(format!("optimize SQL join order: {error}"))
-            }
-        })
+        .map_err(crate::optimizer::OptimizerError::into_sql)
     })?;
     optimized.finish(&config.production)
 }

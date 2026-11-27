@@ -108,19 +108,28 @@ impl MutableSourcePlan {
 
     /// Rewrite a derived or attached table query while keeping its original source box and namespace metadata.
     pub fn map_query(
-        mut self,
+        self,
         control: &ProductionControl<'_>,
         map: impl FnOnce(MutableQueryPlan) -> Result<MutableQueryPlan, SQLError>,
     ) -> Result<Self, SQLError> {
+        self.try_map_query(control, map)
+    }
+
+    /// Map a source's query body while retaining the callback's typed error.
+    pub fn try_map_query<E: From<SQLError>>(
+        mut self,
+        control: &ProductionControl<'_>,
+        map: impl FnOnce(MutableQueryPlan) -> Result<MutableQueryPlan, E>,
+    ) -> Result<Self, E> {
         self.assert_owner(control);
-        control.check()?;
+        control.check().map_err(SQLError::from)?;
         let Some(mut slot) = self.query_slot()? else {
             return Ok(self);
         };
         let input = slot.take();
         let output = map(input)?;
         output.assert_owner(control);
-        control.check()?;
+        control.check().map_err(SQLError::from)?;
         slot.restore(output);
         Ok(self)
     }
@@ -184,18 +193,28 @@ impl MutableSourcePlan {
     }
 
     pub fn map_child(
-        mut self,
+        self,
         slot: SourceChildSlot,
         control: &ProductionControl<'_>,
         map: impl FnOnce(Self) -> Result<Self, SQLError>,
     ) -> Result<Self, SQLError> {
+        self.try_map_child(slot, control, map)
+    }
+
+    /// Map a join input while retaining the callback's typed error.
+    pub fn try_map_child<E: From<SQLError>>(
+        mut self,
+        slot: SourceChildSlot,
+        control: &ProductionControl<'_>,
+        map: impl FnOnce(Self) -> Result<Self, E>,
+    ) -> Result<Self, E> {
         self.assert_owner(control);
-        control.check()?;
+        control.check().map_err(SQLError::from)?;
         let mut slot = self.child_slot(slot);
         let input = slot.take();
         let output = map(input)?;
         output.assert_owner(control);
-        control.check()?;
+        control.check().map_err(SQLError::from)?;
         slot.restore(output);
         Ok(self)
     }

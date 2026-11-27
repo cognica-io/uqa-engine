@@ -224,6 +224,30 @@ fn wide_inputs(plan: &UnifiedPlan, where_clause: bool) -> &[ScalarExpr] {
     items
 }
 
+fn select_borrowed_join(
+    plan: &UnifiedPlan,
+    control: &ProductionControl<'_>,
+) -> OptimizerResult<()> {
+    let UnifiedPlan::Query(query) = plan else {
+        unreachable!("fixture query")
+    };
+    let RelationalPlan::QueryBlock(block) = &query.root else {
+        unreachable!("fixture block")
+    };
+    let source = block.from.as_ref().unwrap();
+    let predicates =
+        super::super::traversal::where_predicates(source, block.r#where.as_ref(), *control)?;
+    let mut output = Output::new(control);
+    super::super::materialization::PreparedJoin::select(
+        source,
+        &predicates,
+        &|_: &str| None,
+        control,
+        &mut CallerPredicates::new(&mut output),
+    )
+    .map(drop)
+}
+
 fn wide_predicate_rejection(where_clause: bool) {
     let mut plan = UnifiedPlan::lower(
         uqa_sql::compile("SELECT a.id FROM a JOIN b ON a.id = b.id")
@@ -264,11 +288,12 @@ fn wide_predicate_rejection(where_clause: bool) {
         let _ = original.check();
         let _ = invoking.check();
         let control = ProductionControl::new(&budget, &original, &invoking);
-        let mut rewrite = JoinRewrite::new(plan, &control);
+        let complete_input = plan.clone();
         let allocation = allocation_counter::measure(|| {
-            let error = rewrite.run(&|_: &str| None, &control).unwrap_err();
-            let crate::optimizer::OptimizerError::Expression(error) = error else {
-                panic!("typed admission")
+            let crate::optimizer::OptimizerError::Expression(error) =
+                select_borrowed_join(&plan, &control).unwrap_err()
+            else {
+                panic!("typed join selection refusal")
             };
             assert_eq!(
                 error.sqlstate(),
@@ -281,13 +306,33 @@ fn wide_predicate_rejection(where_clause: bool) {
         );
         assert_eq!(allocation.bytes_current, 0);
         assert_eq!(budget.used(), 0);
-        let items = wide_inputs(&rewrite.plan, where_clause);
+        let items = wide_inputs(&plan, where_clause);
         assert_eq!(items.as_ptr(), pointer);
         assert_eq!(items.len(), 65536);
         assert!(items
             .iter()
             .all(|item| matches!(item, ScalarExpr::Literal(Value::Bool(true)))));
-        plan = rewrite.plan;
+        let mut result = None;
+        let allocation = allocation_counter::measure(|| {
+            result = Some(reorder_unified_plan_joins(
+                complete_input,
+                &|_: &str| None,
+                &control,
+            ));
+        });
+        let crate::optimizer::OptimizerError::Expression(error) = result.unwrap().unwrap_err()
+        else {
+            panic!("typed join refusal")
+        };
+        assert_eq!(
+            error.sqlstate(),
+            Some(if cancelled == 0 { "53200" } else { "57014" })
+        );
+        assert!(
+            allocation.bytes_total < 4 * limit.max(4096) as u64,
+            "{allocation:?}"
+        );
+        assert_eq!(budget.used(), 0);
     }
 }
 
@@ -309,13 +354,26 @@ fn non_join_sources_do_not_collect_unused_where_predicates() {
         let budget = MemoryBudget::new(0);
         let token = CancellationToken::new();
         let control = ProductionControl::new(&budget, &token, &token);
-        let mut rewrite = JoinRewrite::new(plan, &control);
+        let plan = MutableExecutablePlan::uncontrolled(plan);
+        let mut output = Output::new(&control);
+        let mut selected = None;
+        let storage = ProductionControl::uncontrolled();
         let allocation = allocation_counter::measure(|| {
-            rewrite.run(&|_: &str| None, &control).unwrap();
+            selected = Some(
+                super::super::traversal::reorder(
+                    plan,
+                    &|_: &str| None,
+                    &control,
+                    &storage,
+                    &mut CallerPredicates::new(&mut output),
+                )
+                .unwrap(),
+            );
         });
         assert_eq!(allocation.bytes_total, 0);
         assert_eq!(budget.used(), 0);
-        assert_eq!(wide_inputs(&rewrite.plan, true).len(), 65536);
+        let (plan, _) = selected.unwrap().finish(&storage).unwrap().into_parts();
+        assert_eq!(wide_inputs(&plan, true).len(), 65536);
     }
 }
 

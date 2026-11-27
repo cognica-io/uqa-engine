@@ -6,9 +6,7 @@
 
 //! Native optimizer traversal keeps mutable constructor owners through every ordered pass.
 
-use super::{
-    AggregateClassifier, ComputePlan, OptimizerConfig, RelationalPlan, SourcePlan, UnifiedPlan,
-};
+use super::{AggregateClassifier, ComputePlan, OptimizerConfig, RelationalPlan, SourcePlan};
 use uqa_core::memory::ProductionMap;
 use uqa_sql::{
     plan::{
@@ -25,13 +23,11 @@ pub(super) use demand::edit_caller_query;
 mod sources;
 
 pub(super) fn optimize_caller(
-    plan: UnifiedPlan,
+    plan: MutableExecutablePlan,
     config: &OptimizerConfig<'_>,
     aggregates: &dyn AggregateClassifier,
-) -> Result<UnifiedPlan, SQLError> {
-    let context = Context::caller(config, aggregates);
-    let plan = context.optimize(MutableExecutablePlan::uncontrolled(plan))?;
-    Ok(plan.finish(&context.scalars().storage)?.into_parts().0)
+) -> Result<MutableExecutablePlan, SQLError> {
+    Context::caller(config, aggregates).optimize(plan)
 }
 
 pub(super) fn optimize(

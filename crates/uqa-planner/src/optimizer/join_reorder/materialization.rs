@@ -8,7 +8,8 @@
 
 use super::{
     bindings::{PredicateBindings, PredicateGroups},
-    selection::SelectedGraph,
+    selection::{select_graph, SelectedGraph},
+    OptimizerResult, SourceStatistics,
 };
 use crate::{JoinExecutionStrategy, JoinPlan, OperatorKind};
 use std::ops::Range;
@@ -76,7 +77,20 @@ pub(super) struct PreparedJoin {
 }
 
 impl PreparedJoin {
-    pub(super) fn new(
+    pub(super) fn select(
+        source: &SourcePlan,
+        external: &[&ScalarExpr],
+        statistics: &dyn SourceStatistics,
+        work: &ProductionControl<'_>,
+        output: &mut impl PredicateOutput,
+    ) -> OptimizerResult<Option<Self>> {
+        let Some(selected) = select_graph(source, external, statistics, work)? else {
+            return Ok(None);
+        };
+        Ok(Some(Self::new(selected, output, work)?))
+    }
+
+    fn new(
         mut selected: SelectedGraph<'_>,
         output: &mut impl PredicateOutput,
         work: &ProductionControl<'_>,

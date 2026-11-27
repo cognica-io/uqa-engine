@@ -55,7 +55,6 @@ pub use implicit_fusion::query_contains_implicit_hybrid_fusion;
 
 use access_path::choose_access_path;
 use implicit_fusion::source_allows_unqualified_signals;
-use join_reorder::reorder_unified_plan_joins;
 pub(crate) use scalar::constants::{retain_computed_integer, retain_computed_integer_owned};
 pub(crate) use scalar::optimize_qualification;
 pub(crate) use scalar::optimize_qualification_owned;

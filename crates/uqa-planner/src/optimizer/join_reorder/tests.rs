@@ -4,7 +4,17 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
+use super::output::CallerPredicates;
 use super::*;
+use uqa_sql::plan::{MutableExecutablePlan, OwnedExecutablePlan};
+
+fn reorder_unified_plan_joins(
+    plan: UnifiedPlan,
+    statistics: &dyn SourceStatistics,
+    work: &ProductionControl<'_>,
+) -> OptimizerResult<OwnedExecutablePlan> {
+    traversal::reorder_caller_plan(MutableExecutablePlan::uncontrolled(plan), statistics, work)
+}
 
 mod admission;
 mod bindings;
@@ -75,9 +85,20 @@ fn unavailable_function_cost_does_not_copy_join_predicates() {
             *on = Some(predicate);
         }
         let control = ProductionControl::uncontrolled();
-        let mut rewrite = JoinRewrite::new(plan, &control);
+        let plan = MutableExecutablePlan::uncontrolled(plan);
+        let mut output = Output::new(&control);
+        let mut selected = None;
         let allocation = allocation_counter::measure(|| {
-            rewrite.run(&|_: &str| None, &control).unwrap();
+            selected = Some(
+                traversal::reorder(
+                    plan,
+                    &|_: &str| None,
+                    &control,
+                    &ProductionControl::uncontrolled(),
+                    &mut CallerPredicates::new(&mut output),
+                )
+                .unwrap(),
+            );
         });
         assert!(
             allocation.bytes_total < 4096,
@@ -208,11 +229,17 @@ fn reordered_inner_join_source(
     control: &ProductionControl<'_>,
 ) -> OptimizerResult<Option<SelectedSource>> {
     let mut output = Output::new(control);
-    let Some(selected) = selection::select_graph(source, external, statistics, control)? else {
+    let mut predicates = CallerPredicates::new(&mut output);
+    let Some(prepared) = super::materialization::PreparedJoin::select(
+        source,
+        external,
+        statistics,
+        control,
+        &mut predicates,
+    )?
+    else {
         return Ok(None);
     };
-    let mut predicates = super::output::CallerPredicates::new(&mut output);
-    let prepared = super::materialization::PreparedJoin::new(selected, &mut predicates, control)?;
     let original = std::mem::replace(
         source,
         SourcePlan::Table {
