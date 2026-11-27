@@ -8,123 +8,26 @@
 
 use std::sync::{Arc, OnceLock};
 
-use serde::{Deserialize, Serialize};
-
 use super::{DictionaryId, DictionaryResult, KuromojiDictionary, UserDictionary};
 
 mod hash;
 pub(crate) mod preparation;
 
-use crate::morphology::resources::{Artifact, Request, Resources};
+use crate::morphology::resources::{handles, Artifact, Resources};
 pub use crate::morphology::resources::{DictionaryBytes, ResourceCacheStats, ResourceLimits};
 pub use hash::ResourceHash;
 
 pub const DEFAULT_KUROMOJI_DICTIONARY: &str = "lucene-10.5.1";
 
-/// Names are resolved at compilation; persisted references use the exact artifact hash.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum DictionaryRequest {
-    Name(String),
-    Sha256(ResourceHash),
-}
+handles::dictionary_resolver!(ResourceHash, super::DictionaryError);
 
-impl std::fmt::Display for DictionaryRequest {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Name(name) => formatter.write_str(name),
-            Self::Sha256(hash) => write!(formatter, "sha256:{hash}"),
-        }
-    }
-}
-
-/// Untrusted resolver output: both the declared hash and the bundle are checked before caching.
-pub struct DictionaryArtifact {
-    pub sha256: ResourceHash,
-    pub bytes: DictionaryBytes,
-}
-
-/// Resolve explicit bytes without any implicit filesystem or network fallback.
-pub trait DictionaryResolver: Send + Sync {
-    fn resolve(&self, request: &DictionaryRequest) -> DictionaryResult<Option<DictionaryArtifact>>;
-}
-
-impl<F> DictionaryResolver for F
-where
-    F: Fn(&DictionaryRequest) -> DictionaryResult<Option<DictionaryArtifact>> + Send + Sync,
-{
-    fn resolve(&self, request: &DictionaryRequest) -> DictionaryResult<Option<DictionaryArtifact>> {
-        self(request)
-    }
-}
-
-/// An immutable validated model and the exact bytes required to resolve its artifact again.
-pub struct ResolvedDictionary {
-    image: crate::analyzer::image_source::DictionaryImageCache,
-    sha256: ResourceHash,
-    bytes: DictionaryBytes,
-    model: Arc<KuromojiDictionary>,
-}
-
-impl std::fmt::Debug for ResolvedDictionary {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter
-            .debug_struct("ResolvedDictionary")
-            .field("sha256", &self.sha256)
-            .field("model", &self.model)
-            .finish_non_exhaustive()
-    }
-}
-
-impl ResolvedDictionary {
-    pub(crate) fn image_source(
-        &self,
-        control: &uqa_core::memory::ProductionControl<'_>,
-    ) -> Result<crate::analyzer::image_source::DictionaryImage, uqa_core::ValueRetentionError> {
-        self.image.prepare(&self.bytes, control)
-    }
-    pub(crate) async fn image_source_with_work(
-        &self,
-        control: &uqa_core::memory::ProductionControl<'_>,
-        work: &mut impl crate::work::Work<uqa_core::ValueRetentionError>,
-    ) -> Result<crate::analyzer::image_source::DictionaryImage, uqa_core::ValueRetentionError> {
-        crate::analyzer::image_source::DictionaryImage::prepare_with(&self.bytes, control, work)
-            .await
-    }
-    pub fn sha256(&self) -> ResourceHash {
-        self.sha256
-    }
-    pub fn model(&self) -> &Arc<KuromojiDictionary> {
-        &self.model
-    }
-    pub fn bytes(&self) -> &[u8] {
-        self.bytes.as_ref()
-    }
-}
-
-/// Exact source identity is retained even when comments/whitespace compile to no user entries.
-pub struct ResolvedUserDictionary {
-    sha256: ResourceHash,
-    model_id: DictionaryId,
-    dictionary: Option<Arc<UserDictionary>>,
-    empty_source: Option<Arc<str>>,
-}
+pub type ResolvedDictionary = handles::ResolvedDictionary<KuromojiDictionary, ResourceHash>;
+pub type ResolvedUserDictionary =
+    handles::ResolvedUserDictionary<UserDictionary, DictionaryId, ResourceHash>;
 
 impl ResolvedUserDictionary {
-    pub fn sha256(&self) -> ResourceHash {
-        self.sha256
-    }
-    pub fn model_id(&self) -> DictionaryId {
-        self.model_id
-    }
-    pub fn dictionary(&self) -> Option<&Arc<UserDictionary>> {
-        self.dictionary.as_ref()
-    }
     pub fn source(&self) -> &str {
-        match &self.dictionary {
-            Some(dictionary) => dictionary.source(),
-            None => self.empty_source.as_deref().expect("retained empty rules"),
-        }
+        self.rule_source(UserDictionary::source)
     }
 }
 
@@ -185,19 +88,13 @@ impl KuromojiResources {
     ///
     /// A cached exact hash resolves without calling the host again. Names always consult the resolver so changing an alias cannot mutate an existing handle or disguise a new revision.
     pub fn load(&self, request: &DictionaryRequest) -> DictionaryResult<Arc<ResolvedDictionary>> {
-        let shared_request = match request {
-            DictionaryRequest::Name(name) => Request::Name(name),
-            DictionaryRequest::Sha256(hash) => Request::Sha256(hash.into_bytes()),
-        };
         self.0.resources.load(
-            shared_request,
+            request.as_request(),
             || {
-                self.0.resolver.resolve(request).map(|artifact| {
-                    artifact.map(|artifact| Artifact {
-                        sha256: artifact.sha256.into_bytes(),
-                        bytes: artifact.bytes,
-                    })
-                })
+                self.0
+                    .resolver
+                    .resolve(request)
+                    .map(|artifact| artifact.map(|a| a.map_hash(ResourceHash::into_bytes)))
             },
             |artifact| {
                 crate::morphology::work::inline(ResolvedDictionary::from_artifact_with(
@@ -217,13 +114,12 @@ impl KuromojiResources {
     ) -> DictionaryResult<Arc<ResolvedUserDictionary>> {
         self.0.resources.compile_user(source, model.id(), |hash| {
             let dictionary = UserDictionary::compile(source, model, self.limits().user_dictionary)?;
-            let empty_source = dictionary.is_none().then(|| Arc::from(source));
-            Ok(ResolvedUserDictionary {
-                sha256: ResourceHash::from_bytes(hash),
-                model_id: model.id(),
+            Ok(ResolvedUserDictionary::new(
+                ResourceHash::from_bytes(hash),
+                model.id(),
                 dictionary,
-                empty_source,
-            })
+                source,
+            ))
         })
     }
 }

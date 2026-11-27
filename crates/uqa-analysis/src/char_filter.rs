@@ -17,6 +17,7 @@ use uqa_core::memory::MemoryBudget;
 mod compiled;
 #[cfg(feature = "kuromoji")]
 mod iteration;
+mod literals;
 mod replacement;
 mod stream;
 mod width;

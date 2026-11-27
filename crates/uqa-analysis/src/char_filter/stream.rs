@@ -64,6 +64,7 @@ pub(super) fn replace_html(
     text.apply_edited(edited, budget, poll)
 }
 
+#[cfg(test)]
 pub(super) fn replace_literal(
     text: &mut FilteredText<'_>,
     old: &str,
@@ -71,42 +72,52 @@ pub(super) fn replace_literal(
     budget: &MemoryBudget,
     poll: &mut dyn FnMut() -> AnalysisResult<()>,
 ) -> AnalysisResult<()> {
-    poll()?;
     let edited = {
         let input = text.as_str();
         let mut builder = EditBuilder::new(input, budget, poll);
-        if old.is_empty() {
-            for (index, _) in input.char_indices() {
-                builder.check()?;
-                builder.edit(index..index, std::iter::once(new))?;
-            }
-            builder.edit(input.len()..input.len(), std::iter::once(new))?;
-        } else {
-            let input_bytes = input.as_bytes();
-            let old_bytes = old.as_bytes();
-            if let Some(last_start) = input_bytes.len().checked_sub(old_bytes.len()) {
-                let mut start = 0;
-                let mut scanned = 0;
-                while start <= last_start {
-                    if scanned % 1024 == 0 {
-                        builder.check()?;
-                    }
-                    if input.is_char_boundary(start)
-                        && bytes_equal(input_bytes, old_bytes, start, &mut builder)?
-                    {
-                        let end = start + old_bytes.len();
-                        builder.edit(start..end, std::iter::once(new))?;
-                        start = end;
-                    } else {
-                        start += 1;
-                    }
-                    scanned += 1;
-                }
-            }
-        }
+        edit_literal(input, old, new, &mut builder)?;
         builder.finish()?
     };
     text.apply_edited(edited, budget, poll)
+}
+
+pub(super) fn edit_literal(
+    input: &str,
+    old: &str,
+    new: &str,
+    builder: &mut EditBuilder<'_, '_>,
+) -> AnalysisResult<()> {
+    builder.check()?;
+    if old.is_empty() {
+        for (index, _) in input.char_indices() {
+            builder.check()?;
+            builder.edit(index..index, std::iter::once(new))?;
+        }
+        builder.edit(input.len()..input.len(), std::iter::once(new))?;
+    } else {
+        let input_bytes = input.as_bytes();
+        let old_bytes = old.as_bytes();
+        if let Some(last_start) = input_bytes.len().checked_sub(old_bytes.len()) {
+            let mut start = 0;
+            let mut scanned = 0;
+            while start <= last_start {
+                if scanned % 1024 == 0 {
+                    builder.check()?;
+                }
+                if input.is_char_boundary(start)
+                    && bytes_equal(input_bytes, old_bytes, start, builder)?
+                {
+                    let end = start + old_bytes.len();
+                    builder.edit(start..end, std::iter::once(new))?;
+                    start = end;
+                } else {
+                    start += 1;
+                }
+                scanned += 1;
+            }
+        }
+    }
+    Ok(())
 }
 
 fn bytes_equal(

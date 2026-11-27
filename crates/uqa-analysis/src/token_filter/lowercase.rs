@@ -89,7 +89,7 @@ fn lower(
     poll: &mut dyn FnMut() -> AnalysisResult<()>,
 ) -> AnalysisResult<Budgeted<TokenTerm>> {
     poll()?;
-    let mut following = characters.clone().enumerate().peekable();
+    let mut context = characters.clone().enumerate().peekable();
     let mut preceded_cased = false;
     for (index, character) in characters.enumerate() {
         if index % 1024 == 0 {
@@ -97,19 +97,14 @@ fn lower(
         }
         let Ok(character) = character else {
             output.push(character)?;
-            preceded_cased = false;
             continue;
         };
-        if character == 'Σ'
-            && preceded_cased
-            && !following_cased(&mut following, index, properties, poll)?
-        {
-            output.push(Ok('ς'))?;
+        if character == 'Σ' {
+            let final_sigma =
+                is_final_sigma(&mut context, index, &mut preceded_cased, properties, poll)?;
+            output.push(Ok(if final_sigma { 'ς' } else { 'σ' }))?;
         } else {
             lower_character(character, properties.profile, &mut output)?;
-        }
-        if !properties.ignorable(character) {
-            preceded_cased = properties.cased(character);
         }
     }
     output.finish(poll)
@@ -160,28 +155,43 @@ fn lower_character(
     })
 }
 
-fn following_cased(
-    following: &mut Peekable<impl Iterator<Item = (usize, Result<char, u16>)>>,
+/// The second iterator advances only when a capital sigma needs its original
+/// context. Lookahead consumes ignorable characters, leaving the next significant
+/// character for the context of a later sigma. Unpaired UTF-16 separates words.
+fn is_final_sigma(
+    context: &mut Peekable<impl Iterator<Item = (usize, Result<char, u16>)>>,
     current: usize,
+    preceded_cased: &mut bool,
     properties: &CaseProperties,
     poll: &mut dyn FnMut() -> AnalysisResult<()>,
 ) -> AnalysisResult<bool> {
-    loop {
-        let Some(&(index, character)) = following.peek() else {
-            return Ok(false);
-        };
+    while let Some((index, character)) = context.next_if(|(index, _)| *index < current) {
         if index % 1024 == 0 {
             poll()?;
         }
-        if index > current {
-            match character {
-                Ok(character) if properties.ignorable(character) => {}
-                Ok(character) => return Ok(properties.cased(character)),
-                Err(_) => return Ok(false),
-            }
+        match character {
+            Ok(c) if properties.ignorable(c) => {}
+            Ok(c) => *preceded_cased = properties.cased(c),
+            Err(_) => *preceded_cased = false,
         }
-        following.next();
     }
+    context.next(); // The current capital sigma is cased and is never case-ignorable.
+    if !std::mem::replace(preceded_cased, true) {
+        return Ok(false);
+    }
+    while let Some(&(index, character)) = context.peek() {
+        if index % 1024 == 0 {
+            poll()?;
+        }
+        match character {
+            Ok(c) if properties.ignorable(c) => {
+                context.next();
+            }
+            Ok(c) => return Ok(!properties.cased(c)),
+            Err(_) => return Ok(true),
+        }
+    }
+    Ok(true)
 }
 
 #[cfg(test)]

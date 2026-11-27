@@ -15,6 +15,8 @@ use super::error::check_limit;
 use super::limits::{DictionaryLimits, UserDictionaryLimits};
 use crate::cache::Cache;
 
+pub(crate) mod handles;
+
 /// Static bundles need no copied byte buffer; host-provided buffers share their allocation.
 #[derive(Clone)]
 pub enum DictionaryBytes {
@@ -94,19 +96,13 @@ impl std::fmt::Display for Request<'_> {
             Self::Name(name) => formatter.write_str(name),
             Self::Sha256(hash) => {
                 formatter.write_str("sha256:")?;
-                for byte in hash {
-                    write!(formatter, "{byte:02x}")?;
-                }
-                Ok(())
+                super::identity::display(hash, formatter)
             }
         }
     }
 }
 
-pub(crate) struct Artifact {
-    pub sha256: [u8; 32],
-    pub bytes: DictionaryBytes,
-}
+pub(crate) type Artifact = handles::DictionaryArtifact<[u8; 32]>;
 
 /// Resolve each name once per pipeline and reuse a verified artifact for its exact hash.
 pub(crate) struct Snapshot<K, V> {

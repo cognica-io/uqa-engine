@@ -9,9 +9,10 @@
 use regex::Regex;
 use uqa_core::memory::MemoryBudget;
 
+use super::literals::{replace_entities, LiteralMappings};
 use super::replacement::Replacement;
-use super::stream::{replace_html, replace_literal, replace_pattern};
-use super::{mapping_longest_first, CharFilter, HTML_ENTITIES};
+use super::stream::{replace_html, replace_pattern};
+use super::CharFilter;
 use crate::cooperative_regex::CooperativeRegex;
 use crate::{AnalysisError, AnalysisResult, FilteredText};
 
@@ -24,7 +25,7 @@ pub(crate) enum PreparedCharFilter<'a> {
         normalize_kanji: bool,
         normalize_kana: bool,
     },
-    Mapping(Vec<(String, String)>),
+    Mapping(LiteralMappings),
     PatternReplace {
         expression: Box<CooperativeRegex>,
         replacement: Replacement<'a>,
@@ -53,7 +54,7 @@ impl CharFilter {
                 normalize_kana: *normalize_kana,
             },
             Self::Mapping { mapping } => {
-                PreparedCharFilter::Mapping(mapping_longest_first(mapping, work).await?)
+                PreparedCharFilter::Mapping(LiteralMappings::prepare(mapping, work).await?)
             }
             Self::PatternReplace {
                 pattern,
@@ -139,15 +140,9 @@ impl PreparedCharFilter<'_> {
             )?,
             Self::HTMLStrip => {
                 replace_html(&mut text, budget, poll)?;
-                for (entity, replacement) in HTML_ENTITIES {
-                    replace_literal(&mut text, entity, replacement, budget, poll)?;
-                }
+                replace_entities(&mut text, budget, poll)?;
             }
-            Self::Mapping(mapping) => {
-                for (old, new) in mapping {
-                    replace_literal(&mut text, old, new, budget, poll)?;
-                }
-            }
+            Self::Mapping(mapping) => mapping.replace(&mut text, budget, poll)?,
             Self::PatternReplace {
                 expression,
                 replacement,

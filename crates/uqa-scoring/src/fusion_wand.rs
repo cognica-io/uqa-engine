@@ -156,14 +156,18 @@ impl ConfidenceScaledPoolWANDScorer {
                     row[i] = defaults[i];
                     if let Some(&(id, _)) = column.scores().first() {
                         if id == doc {
-                            row[i] = row[i].max(self.upper_bounds[i]);
+                            row[i] = if column.map.len() == total {
+                                self.upper_bounds[i]
+                            } else {
+                                defaults[i].max(self.upper_bounds[i])
+                            };
                         } else {
                             pivot = Some(pivot.map_or(id, |previous: u64| previous.min(id)));
                         }
                     }
                 }
                 // Until the next distinct head, only columns at doc can supply
-                // a hit. A missing score can exceed a signal's explicit bound.
+                // a hit. Only partial-coverage signals can supply a missing score.
                 if score_row(&row) < threshold {
                     let Some(pivot) = pivot else { break };
                     for column in &mut remaining {
@@ -379,6 +383,55 @@ mod tests {
                 scored: 2,
                 cursor_advances: 1
             }
+        );
+    }
+
+    #[test]
+    fn full_coverage_prunes_with_the_explicit_bound_and_partial_coverage_can_still_win() {
+        let dense = (1..=8192).map(|id| (id, 0.001)).collect();
+        let scorer = ConfidenceScaledPoolWANDScorer::new(
+            vec![dense, map(&[(1, 0.9)])],
+            vec![0.001, 0.9],
+            0.0,
+            1,
+        )
+        .unwrap();
+        let (heap, stats) = scorer.select().unwrap();
+        let winner = heap.peek().unwrap();
+        assert_eq!(winner.doc_id, 1);
+        assert_eq!(
+            winner.score.to_bits(),
+            crate::prob::confidence_scaled_log_odds_pool(&[0.001, 0.9], 0.0).to_bits()
+        );
+        assert_eq!(stats.total_candidates, 8192);
+        assert_eq!(stats.scored, 1);
+
+        // Both partial signals still have a head at document 2. Document 4
+        // wins because the first signal's missing score exceeds its hit bound.
+        let scorer = ConfidenceScaledPoolWANDScorer::new(
+            vec![
+                map(&[(1, 0.001), (2, 0.001), (3, 0.001)]),
+                map(&[(1, 0.6), (2, 0.6), (4, 0.6)]),
+                map(&[(1, 0.8)]),
+            ],
+            vec![0.001, 0.6, 0.8],
+            0.0,
+            1,
+        )
+        .unwrap();
+        let expected = crate::prob::confidence_scaled_log_odds_pool(
+            &[
+                coverage_based_default(3, 4, 0.01),
+                0.6,
+                coverage_based_default(1, 4, 0.01),
+            ],
+            0.0,
+        );
+        let actual = scorer.score_top_k().unwrap();
+        assert_eq!(actual.len(), 1);
+        assert_eq!(
+            (actual[0].0, actual[0].1.to_bits()),
+            (4, expected.to_bits())
         );
     }
 

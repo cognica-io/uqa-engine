@@ -28,7 +28,7 @@ pub(crate) enum Error {
     Manifest(#[from] serde_json::Error),
 }
 
-type Result<T> = std::result::Result<T, Error>;
+pub(crate) type Result<T> = std::result::Result<T, Error>;
 
 pub(crate) fn read_file(path: &Path, limit: usize) -> Result<Vec<u8>> {
     let file = File::open(path)?;
@@ -128,3 +128,4 @@ pub(crate) fn read_inputs(
 }
 
 pub(crate) mod hash;
+pub(crate) mod verify;

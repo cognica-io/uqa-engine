@@ -181,7 +181,7 @@ fn check_ranked_results(
             ]
         };
         for result in results {
-            let actual: Vec<_> = rank_top_k(&result.top_k, k)
+            let actual: Vec<_> = rank_top_k(&result.top_k, result.top_k.len())
                 .into_iter()
                 .map(|entry| (entry.doc_id, entry.score.to_bits()))
                 .collect();

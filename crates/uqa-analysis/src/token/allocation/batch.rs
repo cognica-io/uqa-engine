@@ -152,7 +152,7 @@ impl TokenBatchAllocation {
     pub(crate) fn map_terms(
         mut self,
         mut transform: impl FnMut(
-            &AnalysisToken,
+            &mut AnalysisToken,
             &MemoryBudget,
             &mut dyn FnMut() -> AnalysisResult<()>,
         ) -> AnalysisResult<Option<Budgeted<TokenTerm>>>,
