@@ -72,9 +72,7 @@ impl<B: DiskANNPersistentBackend> DiskANNJournalPruner for PersistentDiskANNMain
         control: &StorageReadControl,
     ) -> StorageBackendResult<DiskANNPruneResult> {
         control.check()?;
-        if !self.canonical.in_transaction() {
-            return Err(invalid("journal page requires the caller's transaction"));
-        }
+        // The retained catalog guard checks discovery cancellation inside the admitted transaction. A page can also have its own cancellation token.
         self.canonical.prune_page(
             &self.source,
             &*self.resolver,

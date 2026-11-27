@@ -24,7 +24,7 @@ use uqa_storage::{
     RelationIdentity, StorageBackendResult,
 };
 
-/// A session-bound handle with a fixed catalog identity and generation selection.
+/// A session-bound index handle. Each snapshot retains the generation selected when it opens.
 pub type SQLiteDiskANNHandle = PersistentDiskANNHandle<SQLiteDiskANNCanonical>;
 
 impl SQLiteDiskANNCanonical {
@@ -110,7 +110,7 @@ impl DiskANNPersistentBackend for SQLiteDiskANNCanonical {
     ) -> StorageBackendResult<DiskANNPruneResult> {
         self.index
             .conn
-            .with_native_write(|current, batch| {
+            .try_with_native_transaction_write(|current, batch| {
                 Ok(source.prune_captured_changes(
                     resolver,
                     coverage,
@@ -119,6 +119,6 @@ impl DiskANNPersistentBackend for SQLiteDiskANNCanonical {
                     control,
                 )?)
             })?
-            .ok_or_else(|| invalid("journal page requires a bound native session"))
+            .ok_or_else(|| invalid("journal page requires the caller's transaction"))
     }
 }

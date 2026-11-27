@@ -68,6 +68,7 @@ pub trait DiskANNPersistentBackend: DiskANNLifecycle {
         request: DiskANNStatisticsRequest,
         control: &StorageReadControl,
     ) -> StorageBackendResult<DiskANNStatisticsPage>;
+    /// Evaluate and stage this captured page inside the caller's active transaction. Admit the operation under the same session lock that guards staging and completion.
     fn prune_page(
         &self,
         source: &Self::Read,

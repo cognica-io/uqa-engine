@@ -202,6 +202,14 @@ impl KeyValueStore for SQLiteKeyValueStore {
         self.conn.with_records(|store| store.with_mutation(mutate))
     }
 
+    fn try_with_transaction_mutation(
+        &self,
+        mutate: &mut uqa_storage::key_value::KeyValueMutation<'_>,
+    ) -> StorageBackendResult<bool> {
+        self.conn
+            .with_records(|store| store.try_with_transaction_mutation(mutate))
+    }
+
     fn with_versioned_mutation(
         &self,
         mutate: &mut uqa_storage::key_value::KeyValueVersionedMutation<'_>,

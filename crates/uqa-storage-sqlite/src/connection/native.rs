@@ -19,6 +19,13 @@ pub(crate) struct NativeWriteSnapshot {
     pub(crate) committed: Option<uqa_storage::mvcc::CommitSequence>,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum NativeWriteMode {
+    AllowAutocommit,
+    RetainSnapshot,
+    RequireTransaction,
+}
+
 impl ManagedConnection {
     /// Prune one bounded `DiskANN` journal page in this connection's evaluated transaction. The captured source guards the catalog; the current committed canonical view and selected physical coverage determine deletion. Advance the returned cursor only after committing the caller's transaction.
     pub fn prune_diskann_changes(
@@ -247,7 +254,16 @@ impl ManagedConnection {
         &self,
         operation: impl FnOnce(&NativeSnapshot, &mut dyn KeyValueBatch) -> Result<R>,
     ) -> Result<Option<R>> {
-        self.native_write_result(operation, false)
+        self.native_write_result(operation, NativeWriteMode::AllowAutocommit)
+            .map(|result| result.map(|(value, _)| value))
+    }
+
+    /// Stage only while the caller owns an active transaction under this session gate.
+    pub(crate) fn try_with_native_transaction_write<R>(
+        &self,
+        operation: impl FnOnce(&NativeSnapshot, &mut dyn KeyValueBatch) -> Result<R>,
+    ) -> Result<Option<R>> {
+        self.native_write_result(operation, NativeWriteMode::RequireTransaction)
             .map(|result| result.map(|(value, _)| value))
     }
 
@@ -256,13 +272,13 @@ impl ManagedConnection {
         &self,
         operation: impl FnOnce(&NativeSnapshot, &mut dyn KeyValueBatch) -> Result<R>,
     ) -> Result<Option<(R, Option<NativeWriteSnapshot>)>> {
-        self.native_write_result(operation, true)
+        self.native_write_result(operation, NativeWriteMode::RetainSnapshot)
     }
 
     fn native_write_result<R>(
         &self,
         operation: impl FnOnce(&NativeSnapshot, &mut dyn KeyValueBatch) -> Result<R>,
-        retain_snapshot: bool,
+        mode: NativeWriteMode,
     ) -> Result<Option<(R, Option<NativeWriteSnapshot>)>> {
         self.surface_cleanup_failure()?;
         // This gate covers read/evaluate/stage, not just each individual byte-store call.
@@ -273,6 +289,9 @@ impl ManagedConnection {
         let database = logical.native.ok_or(SQLiteError::SessionMappingMismatch)?;
         let own_transaction = !logical.in_transaction();
         if own_transaction {
+            if mode == NativeWriteMode::RequireTransaction {
+                return Ok(None);
+            }
             logical.begin_transaction()?;
         }
         let mut scope = WriteScope {
@@ -285,7 +304,7 @@ impl ManagedConnection {
         let result = operation(&snapshot, &mut *batch)?;
         batch.commit()?;
         // This capture is advisory cache evidence; failure must not turn an already staged mutation into an error.
-        let staged = retain_snapshot
+        let staged = (mode == NativeWriteMode::RetainSnapshot)
             .then(|| NativeSnapshot::capture(logical, database).ok())
             .flatten();
         // A failed publication keeps its evaluated attempt for explicit receipt resolution.

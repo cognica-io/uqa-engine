@@ -207,14 +207,17 @@ impl<B: DiskANNPersistentBackend> DiskANNPersistentOwner for PersistentDiskANNHa
             options.parameters,
         )?;
         if clear {
-            self.canonical.clear_index(
-                &source,
-                &self.binding.index,
-                &*self.binding.resolver,
-                options,
-                temporary,
-                &self.binding.control,
-            )
+            super::lifecycle::structural_change(&self.canonical, || {
+                self.canonical
+                    .clear_vectors(&source, &self.binding.control)?;
+                self.canonical.rebuild_index(
+                    &self.binding.index,
+                    &*self.binding.resolver,
+                    options,
+                    temporary,
+                    &self.binding.control,
+                )
+            })
         } else {
             self.canonical.rebuild_source(
                 source,

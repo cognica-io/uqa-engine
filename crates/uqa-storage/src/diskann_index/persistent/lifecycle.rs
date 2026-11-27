@@ -120,21 +120,6 @@ pub trait DiskANNLifecycle: Send + Sync + Sized + 'static {
         self.publish(&coverage, resolver, &sealed, control)
     }
 
-    fn clear_index(
-        &self,
-        source: &Self::Read,
-        index: &RelationIdentity,
-        resolver: &dyn DiskANNIndexResolver,
-        options: DiskANNIndexOptions,
-        temporary: &DiskANNTemporaryBudget,
-        control: &StorageReadControl,
-    ) -> StorageBackendResult<()> {
-        structural_change(self, || {
-            self.clear_vectors(source, control)?;
-            self.rebuild_index(index, resolver, options, temporary, control)
-        })
-    }
-
     fn retire_index(
         &self,
         index: &RelationIdentity,
@@ -157,7 +142,7 @@ fn require_transaction<B: DiskANNLifecycle>(backend: &B) -> StorageBackendResult
     Ok(())
 }
 
-fn structural_change<B: DiskANNLifecycle>(
+pub(super) fn structural_change<B: DiskANNLifecycle>(
     backend: &B,
     operation: impl FnOnce() -> StorageBackendResult<()>,
 ) -> StorageBackendResult<()> {

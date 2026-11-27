@@ -25,7 +25,7 @@ use crate::{
 use std::sync::Arc;
 use uqa_core::DocId;
 
-/// A session-bound handle with a fixed catalog identity and generation selection.
+/// A session-bound index handle. Each snapshot retains the generation selected when it opens.
 pub type KeyValueDiskANNHandle = PersistentDiskANNHandle<KeyValueDiskANNCanonical>;
 
 impl KeyValueDiskANNCanonical {
@@ -104,16 +104,18 @@ impl DiskANNPersistentBackend for KeyValueDiskANNCanonical {
         control: &StorageReadControl,
     ) -> StorageBackendResult<DiskANNPruneResult> {
         let mut result = None;
-        self.index.store.with_mutation(&mut |read, batch| {
-            result = Some(source.prune_captured_changes(
-                resolver,
-                coverage,
-                (read, batch),
-                request,
-                control,
-            )?);
-            Ok(())
-        })?;
-        result.ok_or_else(|| invalid("journal page was not evaluated"))
+        self.index
+            .store
+            .try_with_transaction_mutation(&mut |read, batch| {
+                result = Some(source.prune_captured_changes(
+                    resolver,
+                    coverage,
+                    (read, batch),
+                    request,
+                    control,
+                )?);
+                Ok(())
+            })?;
+        result.ok_or_else(|| invalid("journal page requires the caller's transaction"))
     }
 }
