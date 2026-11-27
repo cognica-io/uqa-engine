@@ -140,38 +140,11 @@ pub fn optimize_plan(
         rules,
         aggregates,
         crate::optimizer::OptimizerConfig::new(constant_evaluator),
-        plan,
+        uqa_sql::plan::MutableExecutablePlan::uncontrolled(plan),
     )
 }
 
-pub(super) fn optimize_plan_authorized(
-    context: StatementStatisticsContext<'_>,
-    rules: &rule_inputs::RuleInputPlanningContext<'_>,
-    aggregates: &dyn crate::AggregateClassifier,
-    optimizer_config: crate::optimizer::OptimizerConfig<'_>,
-    mut plan: UnifiedPlan,
-) -> Result<uqa_sql::plan::OwnedExecutablePlan, SQLError> {
-    rule_inputs::rewrite_plan(rules, &mut plan, &optimizer_config)?;
-    let callback_error = std::cell::RefCell::new(None);
-    let statistics = CatalogSourceStatistics {
-        context,
-        error: &callback_error,
-        production: optimizer_config.production,
-    };
-    let optimized = optimize_plan_with_statistics(
-        context.volatility,
-        aggregates,
-        optimizer_config,
-        plan,
-        &statistics,
-    );
-    if let Some(error) = callback_error.into_inner() {
-        return Err(error);
-    }
-    optimized
-}
-
-pub(super) fn optimize_owned_plan_authorized(
+fn optimize_plan_authorized(
     context: StatementStatisticsContext<'_>,
     rules: &rule_inputs::RuleInputPlanningContext<'_>,
     aggregates: &dyn crate::AggregateClassifier,
@@ -179,12 +152,6 @@ pub(super) fn optimize_owned_plan_authorized(
     plan: uqa_sql::plan::MutableExecutablePlan,
 ) -> Result<uqa_sql::plan::OwnedExecutablePlan, SQLError> {
     let plan = rule_inputs::rewrite_plan_owned(rules, plan, &config)?;
-    let callback_error = std::cell::RefCell::new(None);
-    let statistics = CatalogSourceStatistics {
-        context,
-        error: &callback_error,
-        production: config.production,
-    };
     if uqa_sql::semantics::volatility::plan_ref_contains_volatile_function_with_control(
         context.volatility,
         plan.as_plan_ref(),
@@ -193,53 +160,18 @@ pub(super) fn optimize_owned_plan_authorized(
         config.enable_filter_pushdown = false;
         config.enable_join_reordering = false;
     }
-    let optimized = crate::optimizer::optimize_owned_with_aggregates_and_statistics(
-        plan,
-        &config,
-        aggregates,
-        &statistics,
-    );
-    if let Some(error) = callback_error.into_inner() {
-        return Err(error);
-    }
-    let optimized = optimized.map_err(|error| match error {
-        crate::optimizer::OptimizerError::Expression(error) => error,
-        crate::optimizer::OptimizerError::JoinGraph(error) => {
-            SQLError::Internal(format!("optimize SQL join order: {error}"))
-        }
+    let optimized = with_statistics(context, config.production, |statistics| {
+        crate::optimizer::optimize_owned_with_aggregates_and_statistics(
+            plan, &config, aggregates, statistics,
+        )
+        .map_err(|error| match error {
+            crate::optimizer::OptimizerError::Expression(error) => error,
+            crate::optimizer::OptimizerError::JoinGraph(error) => {
+                SQLError::Internal(format!("optimize SQL join order: {error}"))
+            }
+        })
     })?;
     optimized.finish(&config.production)
-}
-fn optimize_plan_with_statistics(
-    volatility_catalog: &dyn uqa_sql::semantics::volatility::VolatilityCatalog,
-    aggregates: &dyn crate::AggregateClassifier,
-    mut optimizer_config: crate::optimizer::OptimizerConfig<'_>,
-    plan: crate::UnifiedPlan,
-    statistics: &dyn crate::SourceStatistics,
-) -> Result<uqa_sql::plan::OwnedExecutablePlan, SQLError> {
-    if uqa_sql::semantics::volatility::unified_plan_contains_volatile_function(
-        volatility_catalog,
-        &plan,
-    ) {
-        // Predicate prioritization and DPccp both move expressions across
-        // physical evaluation boundaries.  A VOLATILE callback may observe
-        // or mutate state on every call, so even a logically equivalent join
-        // order can change SQL-visible behavior by changing its call count.
-        optimizer_config.enable_filter_pushdown = false;
-        optimizer_config.enable_join_reordering = false;
-    }
-    let optimized = crate::optimizer::optimize_with_aggregates_and_statistics(
-        plan,
-        &optimizer_config,
-        aggregates,
-        statistics,
-    );
-    optimized.map_err(|error| match error {
-        crate::optimizer::OptimizerError::Expression(error) => error,
-        crate::optimizer::OptimizerError::JoinGraph(error) => {
-            SQLError::Internal(format!("optimize SQL join order: {error}"))
-        }
-    })
 }
 
 pub mod prepared;
