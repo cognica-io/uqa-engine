@@ -21,13 +21,8 @@ fn qualify(
     qualifier: &str,
     control: &ProductionControl<'_>,
 ) -> Result<OwnedScalarExpr, SQLError> {
-    if let ScalarExpr::Column(column) = &*expression {
-        return Ok(OwnedScalarExpr::positioned_column(
-            control.copy_text(column)?,
-            Some(control.copy_text(qualifier)?),
-            column.position(),
-            control,
-        )?);
+    if matches!(&*expression, ScalarExpr::Column(_)) {
+        return Ok(expression.add_reference_qualifier(qualifier, control)?);
     }
     // Ordered aggregate keys and window specifications belong to their separate binding scopes.
     let (arguments, filter) = match &*expression {
@@ -42,7 +37,7 @@ fn qualify(
         ),
         ScalarExpr::WindowCall { args, filter, .. } => (
             Some(args.len()),
-            filter.is_some().then_some(expression.child_count() - 1),
+            filter.as_ref().map(|_| expression.child_count() - 1),
         ),
         _ => (None, None),
     };

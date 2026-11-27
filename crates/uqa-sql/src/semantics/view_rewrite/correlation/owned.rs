@@ -127,12 +127,7 @@ fn node(
             })
             .and_then(crate::ColumnIdentity::qualifier)
         {
-            return Ok(OwnedScalarExpr::positioned_column(
-                control.copy_text(column)?,
-                Some(control.copy_text(qualifier)?),
-                column.position(),
-                control,
-            )?);
+            return Ok(input.add_reference_qualifier(qualifier, control)?);
         }
     }
     Ok(input)

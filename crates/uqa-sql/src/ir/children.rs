@@ -12,7 +12,11 @@ use super::{ScalarExpr, ScalarFrameBound, ScalarOrder};
 pub(crate) enum Scope {
     Complete,
     Construction,
-    Observation { call_order: bool },
+    /// Aggregate projection slots bind window specifications before arguments and FILTER.
+    AggregateDependencies,
+    Observation {
+        call_order: bool,
+    },
 }
 
 fn take_option<T>(value: &mut Option<T>, index: &mut usize) -> Option<T> {
@@ -55,7 +59,7 @@ macro_rules! children {
                 partition: std::slice::$slice<'a, ScalarExpr>,
                 order: std::slice::$slice<'a, ScalarOrder>,
                 bounds: [Option<&'a $($mutable)* ScalarExpr>; 2],
-                filter_first: bool,
+                scope: Scope,
             },
             Case {
                 base: Option<&'a $($mutable)* ScalarExpr>,
@@ -81,13 +85,18 @@ macro_rules! children {
                     Self::Call { args, order, filter } => take_iterator(args, &mut index)
                         .or_else(|| take_iterator(order, &mut index).map(|order| & $($mutable)* order.expr))
                         .or_else(|| take_option(filter, &mut index)),
-                    Self::Window { args, filter, partition, order, bounds, filter_first } => {
-                        take_iterator(args, &mut index)
-                            .or_else(|| if *filter_first { take_option(filter, &mut index) } else { None })
+                    Self::Window { args, filter, partition, order, bounds, scope } => {
+                        let spec_first = matches!(scope, Scope::AggregateDependencies);
+                        let filter_first = matches!(scope, Scope::Complete);
+                        if !spec_first {
+                            if let Some(value) = take_iterator(args, &mut index) { return Some(value); }
+                        }
+                        (if filter_first { take_option(filter, &mut index) } else { None })
                             .or_else(|| take_iterator(partition, &mut index))
                             .or_else(|| take_iterator(order, &mut index).map(|order| & $($mutable)* order.expr))
                             .or_else(|| bounds.iter_mut().find_map(|bound| take_option(bound, &mut index)))
-                            .or_else(|| if *filter_first { None } else { take_option(filter, &mut index) })
+                            .or_else(|| if spec_first { take_iterator(args, &mut index) } else { None })
+                            .or_else(|| if !filter_first { take_option(filter, &mut index) } else { None })
                     }
                     Self::Case { base, pairs, pending, otherwise } => {
                         if let Some(value) = take_option(base, &mut index)
@@ -164,7 +173,7 @@ macro_rules! children {
                         }
                         $name::Window {
                             args: args.$iter(), filter: filter.$deref(), partition: spec.partition_by.$iter(),
-                            order: spec.order_by.$iter(), bounds, filter_first: !matches!(scope, Scope::Construction),
+                            order: spec.order_by.$iter(), bounds, scope,
                         }
                     }
                     Self::Case { base, when, else_branch } => $name::Case {

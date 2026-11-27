@@ -44,6 +44,43 @@ fn unary_and_inline_equality_types_need_no_heap_allowance() {
 }
 
 #[test]
+fn embedding_comparisons_share_operand_and_result_types() {
+    let budget = MemoryBudget::new(0);
+    let cancellation = CancellationToken::new();
+    let control = ProductionControl::new(&budget, &cancellation, &cancellation);
+    for ty in [ColumnType::Vector(3), ColumnType::Tensor(4)] {
+        for op in [
+            BinaryOp::Equal,
+            BinaryOp::NotEqual,
+            BinaryOp::Less,
+            BinaryOp::LessEqual,
+            BinaryOp::Greater,
+            BinaryOp::GreaterEqual,
+        ] {
+            for (left, right) in [(Some(&ty), None), (None, Some(&ty)), (Some(&ty), Some(&ty))] {
+                let selected =
+                    binary_operator_types_with_control(op, left, right, &control).unwrap();
+                assert_eq!((&selected[0], &selected[1]), (&ty, &ty));
+                let result = binary_result_type_with_control(op, left, right, &control)
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(selected[2], ColumnType::Boolean);
+                assert_eq!(selected[2], *result);
+            }
+            let error = binary_operator_types_with_control(
+                op,
+                Some(&ty),
+                Some(&ColumnType::Json),
+                &control,
+            )
+            .unwrap_err();
+            assert_eq!(error.sqlstate(), Some("42883"));
+        }
+    }
+    assert_eq!(budget.peak(), 0);
+}
+
+#[test]
 fn equality_array_type_retains_declared_modifiers_and_owns_one_result_copy() {
     let left = ColumnType::Array(Box::new(ColumnType::Varchar(Some(12))));
     let right = ColumnType::Array(Box::new(ColumnType::Varchar(Some(48))));

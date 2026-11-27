@@ -8,6 +8,7 @@
 
 use crate::ast::{ColumnType, InternalColumnRef};
 
+use super::identity_lookup::ColumnKey;
 use super::{ColumnIdentity, RowSchema, SchemaBuildMetadata, ScoreSource, NULL_SLOT};
 
 impl RowSchema {
@@ -87,19 +88,19 @@ impl RowSchema {
     /// Whether a visible, aliased, or static binding-only identity contains this exact unqualified column, independently of its declared type.
     #[must_use]
     pub fn has_unqualified_column(&self, column: &str) -> bool {
-        let identity = ColumnIdentity::unqualified(column);
+        let identity = &(None, column) as &dyn ColumnKey;
         self.index.unqualified.contains_key(column)
-            || self.index.aliases.contains_key(&identity)
-            || self.index.cold.binding_only.contains_key(&identity)
+            || self.index.aliases.contains_key(identity)
+            || self.index.cold.binding_only.contains_key(identity)
     }
 
     /// Whether a visible or hidden lookup identity contains this exact qualified column, independently of its static type or ambiguity.
     #[must_use]
     pub fn has_qualified_column(&self, qualifier: &str, column: &str) -> bool {
-        let identity = ColumnIdentity::qualified(qualifier, column);
-        self.index.qualified.contains_key(&identity)
-            || self.index.aliases.contains_key(&identity)
-            || self.index.cold.binding_only.contains_key(&identity)
+        let identity = &(Some(qualifier), column) as &dyn ColumnKey;
+        self.index.qualified.contains_key(identity)
+            || self.index.aliases.contains_key(identity)
+            || self.index.cold.binding_only.contains_key(identity)
     }
 
     /// Iterate over static name-binding identities that deliberately have no physical value slot or wildcard visibility.
@@ -142,40 +143,40 @@ impl RowSchema {
                 self.index
                     .cold
                     .aliases
-                    .get(&ColumnIdentity::unqualified(name))
+                    .get(&(None, name) as &dyn ColumnKey)
                     .and_then(Option::as_ref)
             })
             .or_else(|| {
                 self.index
                     .cold
                     .binding_only
-                    .get(&ColumnIdentity::unqualified(name))
+                    .get(&(None, name) as &dyn ColumnKey)
                     .and_then(Option::as_ref)
             })
     }
 
     /// Resolve a qualified logical identity to its static type.
     pub fn qualified_type(&self, qualifier: &str, column: &str) -> Option<&ColumnType> {
-        let identity = ColumnIdentity::qualified(qualifier, column);
-        if self.index.ambiguous_qualified.contains(&identity) {
+        let identity = &(Some(qualifier), column) as &dyn ColumnKey;
+        if self.index.ambiguous_qualified.contains(identity) {
             return None;
         }
         self.index
             .qualified
-            .get(&identity)
+            .get(identity)
             .and_then(|logical| self.column_type(*logical))
             .or_else(|| {
                 self.index
                     .cold
                     .aliases
-                    .get(&identity)
+                    .get(identity)
                     .and_then(Option::as_ref)
             })
             .or_else(|| {
                 self.index
                     .cold
                     .binding_only
-                    .get(&identity)
+                    .get(identity)
                     .and_then(Option::as_ref)
             })
     }
@@ -187,7 +188,7 @@ impl RowSchema {
     pub fn qualified_column_is_ambiguous(&self, qualifier: &str, column: &str) -> bool {
         self.index
             .ambiguous_qualified
-            .contains(&ColumnIdentity::qualified(qualifier, column))
+            .contains(&(Some(qualifier), column) as &dyn ColumnKey)
     }
 
     /// Add hidden structured lookup identities for existing logical positions.
@@ -283,62 +284,47 @@ impl RowSchema {
         input: &Self,
         aliases: &[(InternalColumnRef, usize, Option<ColumnType>)],
     ) -> Self {
-        let mut collations = input.index.cold.collations.clone();
-        let mut internal = input.index.executor_attributes.clone();
-        let mut internal_types = input.index.cold.executor_attribute_types.clone();
+        let mut result = input.clone();
+        if aliases.is_empty() {
+            return result;
+        }
+        let index = std::sync::Arc::make_mut(&mut result.index);
         for (column, slot, ty) in aliases {
-            collations.internal(
+            index.cold.collations.internal(
                 *column,
                 input.inherited_physical_collation(*slot),
                 ty.as_ref(),
             );
-            internal.insert(*column, *slot);
-            internal_types.insert(*column, ty.clone());
+            index.executor_attributes.insert(*column, *slot);
+            index
+                .cold
+                .executor_attribute_types
+                .insert(*column, ty.clone());
         }
-        Self::from_typed_parts_with_aliases_and_exact_precedence(
-            input.columns().to_vec(),
-            input.identities().to_vec(),
-            input.column_types().to_vec(),
-            input.index.slots.to_vec(),
-            input.physical_width(),
-            SchemaBuildMetadata {
-                collations,
-                record_fields: input.index.cold.record_fields.clone(),
-                aliases: input.index.aliases.clone(),
-                alias_types: input.index.cold.aliases.clone(),
-                internal,
-                internal_types,
-                score_sources: input.index.cold.score_sources.clone(),
-                wildcard_hidden: input.index.cold.wildcard_hidden.clone(),
-                binding_only: input.index.cold.binding_only.clone(),
-                lateral_restrictions: input.index.cold.lateral_restrictions.clone(),
-                local_width: input.index.cold.local_width,
-                row_types: input.index.cold.row_types.clone(),
-                row_presence: input.index.cold.row_presence.clone(),
-                open_qualifiers: input.index.cold.open_qualifiers.clone(),
-                extra_ambiguous_unqualified: input.index.ambiguous_unqualified.clone(),
-                extra_ambiguous_qualified: input.index.ambiguous_qualified.clone(),
-                ..SchemaBuildMetadata::default()
-            },
-        )
+        index.cold.collations.compact();
+        result
     }
 
     /// Restore structural identities from a row scope that occupies the trailing physical slots of this schema.
     pub fn with_trailing_internal_aliases(input: &Self, trailing: &Self) -> Self {
-        let mut collations = input.index.cold.collations.clone();
         let offset = input
             .physical_width()
             .checked_sub(trailing.physical_width())
             .expect("trailing internal-alias scope exceeds input row width");
-        let mut internal = input.index.executor_attributes.clone();
-        let mut internal_types = input.index.cold.executor_attribute_types.clone();
+        let mut result = input.clone();
+        if trailing.index.executor_attributes.is_empty()
+            && trailing.index.cold.executor_attribute_types.is_empty()
+        {
+            return result;
+        }
+        let index = std::sync::Arc::make_mut(&mut result.index);
         for (column, slot) in &trailing.index.executor_attributes {
             let slot = if *slot == NULL_SLOT {
                 NULL_SLOT
             } else {
                 offset + *slot
             };
-            if let Some(previous) = internal.insert(*column, slot) {
+            if let Some(previous) = index.executor_attributes.insert(*column, slot) {
                 assert_eq!(
                     previous, slot,
                     "structural identity moved between row scopes"
@@ -346,39 +332,24 @@ impl RowSchema {
             }
         }
         for (column, ty) in &trailing.index.cold.executor_attribute_types {
-            collations.internal(*column, trailing.internal_collation(*column), ty.as_ref());
-            if let Some(previous) = internal_types.insert(*column, ty.clone()) {
+            index.cold.collations.internal(
+                *column,
+                trailing.internal_collation(*column),
+                ty.as_ref(),
+            );
+            if let Some(previous) = index
+                .cold
+                .executor_attribute_types
+                .insert(*column, ty.clone())
+            {
                 assert_eq!(
                     previous, *ty,
                     "structural identity type changed between row scopes"
                 );
             }
         }
-        Self::from_typed_parts_with_aliases_and_exact_precedence(
-            input.columns().to_vec(),
-            input.identities().to_vec(),
-            input.column_types().to_vec(),
-            input.index.slots.to_vec(),
-            input.physical_width(),
-            SchemaBuildMetadata {
-                collations,
-                record_fields: input.index.cold.record_fields.clone(),
-                aliases: input.index.aliases.clone(),
-                alias_types: input.index.cold.aliases.clone(),
-                internal,
-                internal_types,
-                score_sources: input.index.cold.score_sources.clone(),
-                wildcard_hidden: input.index.cold.wildcard_hidden.clone(),
-                binding_only: input.index.cold.binding_only.clone(),
-                lateral_restrictions: input.index.cold.lateral_restrictions.clone(),
-                row_types: input.index.cold.row_types.clone(),
-                row_presence: input.index.cold.row_presence.clone(),
-                open_qualifiers: input.index.cold.open_qualifiers.clone(),
-                extra_ambiguous_unqualified: input.index.ambiguous_unqualified.clone(),
-                extra_ambiguous_qualified: input.index.ambiguous_qualified.clone(),
-                ..SchemaBuildMetadata::default()
-            },
-        )
+        index.cold.collations.compact();
+        result
     }
 
     /// Mark source-owned logical metadata attributes as explicitly
@@ -388,30 +359,15 @@ impl RowSchema {
         input: &Self,
         positions: impl IntoIterator<Item = usize>,
     ) -> Self {
-        let wildcard_hidden = positions.into_iter().collect();
-        Self::from_typed_parts_with_aliases_and_exact_precedence(
-            input.columns().to_vec(),
-            input.identities().to_vec(),
-            input.column_types().to_vec(),
-            input.index.slots.to_vec(),
-            input.physical_width(),
-            SchemaBuildMetadata {
-                collations: input.index.cold.collations.clone(),
-                record_fields: input.index.cold.record_fields.clone(),
-                aliases: input.index.aliases.clone(),
-                alias_types: input.index.cold.aliases.clone(),
-                internal: input.index.executor_attributes.clone(),
-                internal_types: input.index.cold.executor_attribute_types.clone(),
-                score_sources: input.index.cold.score_sources.clone(),
-                wildcard_hidden,
-                binding_only: input.index.cold.binding_only.clone(),
-                lateral_restrictions: input.index.cold.lateral_restrictions.clone(),
-                row_types: input.index.cold.row_types.clone(),
-                row_presence: input.index.cold.row_presence.clone(),
-                open_qualifiers: input.index.cold.open_qualifiers.clone(),
-                ..SchemaBuildMetadata::default()
-            },
-        )
+        let hidden: super::SchemaSet<_> = positions.into_iter().collect();
+        debug_assert!(hidden.iter().all(|position| *position < input.len()));
+        let mut result = input.clone();
+        if hidden != input.index.cold.wildcard_hidden {
+            std::sync::Arc::make_mut(&mut result.index)
+                .cold
+                .wildcard_hidden = hidden;
+        }
+        result
     }
 
     #[must_use]
@@ -454,72 +410,36 @@ impl RowSchema {
             input.index.executor_attributes.contains_key(&column),
             "score source must reference an existing internal attribute"
         );
-        let mut score_sources = input.index.cold.score_sources.clone();
+        let mut result = input.clone();
+        let score_sources = &mut std::sync::Arc::make_mut(&mut result.index)
+            .cold
+            .score_sources;
         score_sources.retain(|source| source.column != column);
         score_sources.push(ScoreSource {
             qualifier: qualifier.map(Box::<str>::from),
             column,
         });
-        Self::from_typed_parts_with_aliases_and_exact_precedence(
-            input.columns().to_vec(),
-            input.identities().to_vec(),
-            input.column_types().to_vec(),
-            input.index.slots.to_vec(),
-            input.physical_width(),
-            SchemaBuildMetadata {
-                collations: input.index.cold.collations.clone(),
-                record_fields: input.index.cold.record_fields.clone(),
-                aliases: input.index.aliases.clone(),
-                alias_types: input.index.cold.aliases.clone(),
-                internal: input.index.executor_attributes.clone(),
-                internal_types: input.index.cold.executor_attribute_types.clone(),
-                score_sources,
-                wildcard_hidden: input.index.cold.wildcard_hidden.clone(),
-                binding_only: input.index.cold.binding_only.clone(),
-                lateral_restrictions: input.index.cold.lateral_restrictions.clone(),
-                row_types: input.index.cold.row_types.clone(),
-                row_presence: input.index.cold.row_presence.clone(),
-                open_qualifiers: input.index.cold.open_qualifiers.clone(),
-                ..SchemaBuildMetadata::default()
-            },
-        )
+        result
     }
 
     /// Rebind every carried score source at a relation-alias boundary while retaining its opaque internal attribute identity.
     pub fn with_rebound_score_sources(input: &Self, qualifier: Option<&str>) -> Self {
-        let score_sources = input
+        let mut result = input.clone();
+        if input
             .index
             .cold
             .score_sources
             .iter()
-            .map(|source| ScoreSource {
-                qualifier: qualifier.map(Box::<str>::from),
-                column: source.column,
-            })
-            .collect();
-        Self::from_typed_parts_with_aliases_and_exact_precedence(
-            input.columns().to_vec(),
-            input.identities().to_vec(),
-            input.column_types().to_vec(),
-            input.index.slots.to_vec(),
-            input.physical_width(),
-            SchemaBuildMetadata {
-                collations: input.index.cold.collations.clone(),
-                record_fields: input.index.cold.record_fields.clone(),
-                aliases: input.index.aliases.clone(),
-                alias_types: input.index.cold.aliases.clone(),
-                internal: input.index.executor_attributes.clone(),
-                internal_types: input.index.cold.executor_attribute_types.clone(),
-                score_sources,
-                wildcard_hidden: input.index.cold.wildcard_hidden.clone(),
-                binding_only: input.index.cold.binding_only.clone(),
-                lateral_restrictions: input.index.cold.lateral_restrictions.clone(),
-                row_types: input.index.cold.row_types.clone(),
-                row_presence: input.index.cold.row_presence.clone(),
-                open_qualifiers: input.index.cold.open_qualifiers.clone(),
-                ..SchemaBuildMetadata::default()
-            },
-        )
+            .any(|source| source.qualifier.as_deref() != qualifier)
+        {
+            for source in &mut std::sync::Arc::make_mut(&mut result.index)
+                .cold
+                .score_sources
+            {
+                source.qualifier = qualifier.map(Box::<str>::from);
+            }
+        }
+        result
     }
 
     fn matching_score_sources<'a>(
@@ -614,47 +534,30 @@ impl RowSchema {
         input: &Self,
         identities: &[(ColumnIdentity, Option<ColumnType>)],
     ) -> Self {
-        let mut binding_only = input.index.cold.binding_only.clone();
-        let mut ambiguous_unqualified = input.index.ambiguous_unqualified.clone();
-        let mut ambiguous_qualified = input.index.ambiguous_qualified.clone();
+        let mut result = input.clone();
+        if identities.is_empty() {
+            return result;
+        }
+        let index = std::sync::Arc::make_mut(&mut result.index);
         for (identity, ty) in identities {
             if input.column_is_ambiguous(identity.column())
                 || input.has_unqualified_column(identity.column())
             {
-                ambiguous_unqualified.insert(Box::<str>::from(identity.column()));
+                index
+                    .ambiguous_unqualified
+                    .insert(Box::<str>::from(identity.column()));
             }
             if let Some(qualifier) = identity.qualifier() {
                 if input.has_qualified_column(qualifier, identity.column()) {
-                    ambiguous_qualified.insert(identity.clone());
+                    index.ambiguous_qualified.insert(identity.clone());
                 }
             }
-            binding_only
+            index
+                .cold
+                .binding_only
                 .entry(identity.clone())
                 .or_insert_with(|| ty.clone());
         }
-        Self::from_typed_parts_with_aliases_and_exact_precedence(
-            input.columns().to_vec(),
-            input.identities().to_vec(),
-            input.column_types().to_vec(),
-            input.index.slots.to_vec(),
-            input.physical_width(),
-            SchemaBuildMetadata {
-                collations: input.index.cold.collations.clone(),
-                record_fields: input.index.cold.record_fields.clone(),
-                aliases: input.index.aliases.clone(),
-                alias_types: input.index.cold.aliases.clone(),
-                internal: input.index.executor_attributes.clone(),
-                internal_types: input.index.cold.executor_attribute_types.clone(),
-                score_sources: input.index.cold.score_sources.clone(),
-                wildcard_hidden: input.index.cold.wildcard_hidden.clone(),
-                binding_only,
-                row_types: input.index.cold.row_types.clone(),
-                row_presence: input.index.cold.row_presence.clone(),
-                open_qualifiers: input.index.cold.open_qualifiers.clone(),
-                extra_ambiguous_unqualified: ambiguous_unqualified,
-                extra_ambiguous_qualified: ambiguous_qualified,
-                ..SchemaBuildMetadata::default()
-            },
-        )
+        result
     }
 }

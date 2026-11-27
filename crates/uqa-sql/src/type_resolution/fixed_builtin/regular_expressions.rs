@@ -10,7 +10,7 @@ use super::registry::{declarations, Signature};
 use crate::ast::ColumnType as T;
 use std::sync::LazyLock;
 
-declarations! { fn lookup_fixed(local);
+declarations! { fn register_fixed;
         "regexp_count" => &[
             Signature::named(const { &[T::Text, T::Text] }, &["string", "pattern"], T::Integer),
             Signature::named(const { &[T::Text, T::Text, T::Integer] }, &["string", "pattern", "start"], T::Integer),
@@ -119,12 +119,9 @@ static TEXT_ARRAY_SIGNATURES: LazyLock<[Signature; 2]> = LazyLock::new(|| {
     ]
 });
 
-pub(super) fn lookup(local: &str) -> Option<(&'static str, &'static [Signature])> {
-    if let Some(declarations) = lookup_fixed(local) {
-        return Some(declarations);
+pub(super) fn register(register: &mut impl FnMut(&'static str, &'static [Signature])) {
+    register_fixed(register);
+    for name in TEXT_ARRAY_FUNCTIONS {
+        register(name, &*TEXT_ARRAY_SIGNATURES);
     }
-    TEXT_ARRAY_FUNCTIONS
-        .into_iter()
-        .find(|name| local.eq_ignore_ascii_case(name))
-        .map(|name| (name, &TEXT_ARRAY_SIGNATURES[..]))
 }

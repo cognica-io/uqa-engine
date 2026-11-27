@@ -11,6 +11,9 @@ use super::{
     JoinKind, Node, NodeEnum, OrderBy, Projection, Result, SQLError, SelectStmt, SetOp, SetOpKind,
     Value, CTE,
 };
+use crate::semantics::locking::null_rejection::{
+    combine_truth_values, negate_truth_values, TRUTH_ANY, TRUTH_FALSE, TRUTH_NULL, TRUTH_TRUE,
+};
 mod cte;
 pub(in crate::compiler) use cte::compile_with_clause;
 
@@ -282,11 +285,6 @@ fn collect_visible_qualifiers(from: &FromClause, names: &mut std::collections::B
     }
 }
 
-const TRUTH_FALSE: u8 = 1;
-const TRUTH_TRUE: u8 = 2;
-const TRUTH_NULL: u8 = 4;
-const TRUTH_ANY: u8 = TRUTH_FALSE | TRUTH_TRUE | TRUTH_NULL;
-
 fn predicate_rejects_null_extended_side(
     expression: &Expr,
     qualifiers: &std::collections::BTreeSet<String>,
@@ -380,40 +378,6 @@ fn expression_is_null_with_side(
         }
         _ => false,
     }
-}
-
-fn negate_truth_values(values: u8) -> u8 {
-    (u8::from(values & TRUTH_FALSE != 0) * TRUTH_TRUE)
-        | (u8::from(values & TRUTH_TRUE != 0) * TRUTH_FALSE)
-        | (values & TRUTH_NULL)
-}
-
-fn combine_truth_values(left: u8, right: u8, and: bool) -> u8 {
-    let mut output = 0;
-    for lhs in [TRUTH_FALSE, TRUTH_TRUE, TRUTH_NULL] {
-        if left & lhs == 0 {
-            continue;
-        }
-        for rhs in [TRUTH_FALSE, TRUTH_TRUE, TRUTH_NULL] {
-            if right & rhs == 0 {
-                continue;
-            }
-            output |= if and {
-                match (lhs, rhs) {
-                    (TRUTH_FALSE, _) | (_, TRUTH_FALSE) => TRUTH_FALSE,
-                    (TRUTH_TRUE, TRUTH_TRUE) => TRUTH_TRUE,
-                    _ => TRUTH_NULL,
-                }
-            } else {
-                match (lhs, rhs) {
-                    (TRUTH_TRUE, _) | (_, TRUTH_TRUE) => TRUTH_TRUE,
-                    (TRUTH_FALSE, TRUTH_FALSE) => TRUTH_FALSE,
-                    _ => TRUTH_NULL,
-                }
-            };
-        }
-    }
-    output
 }
 
 pub(in crate::compiler) fn compile_values_lists(nodes: &[Node]) -> Result<Vec<Vec<Expr>>> {
