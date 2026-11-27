@@ -250,6 +250,12 @@ impl MutableSourcePlan {
         Ok((self.source, self.memory.into_parts()))
     }
 
+    /// Publish the surviving source and its reservation after releasing the temporary rewrite records.
+    pub fn finish(self, control: &ProductionControl<'_>) -> Result<Produced<SourcePlan>, SQLError> {
+        let (source, memory) = self.into_rewrite_parts(control)?;
+        Ok(control.finish(source, memory.and_then(RewriteMemory::into_reservation))?)
+    }
+
     /// Construct the one-row zero-column relation used by a scalar projection.
     pub fn unit(control: &ProductionControl<'_>) -> Result<Self, SQLError> {
         control.check()?;

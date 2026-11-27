@@ -6990,6 +6990,19 @@
       ]
     },
     {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "unselected_function_group_keeps_its_wide_argument_without_a_member_copy",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/owned/sources.rs",
+      "capability": "Range function planning",
+      "workload": "Optimize a single unbound ROWS FROM member containing a one-mebibyte argument with eight kibibytes of available workspace.",
+      "invariant": "Both input owners keep the existing argument buffer and its reservation. Allocations stay within the available workspace.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
       "package": "uqa-sql",
       "kind": "lib",
       "test": "caller_owned_local_scalar_edit_observes_cancellation_in_the_last_slot",

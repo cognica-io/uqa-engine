@@ -255,14 +255,9 @@ pub(super) fn optimize_source(
             source.edit_uncontrolled(|source| {
                 super::scalar::ScalarProduction::caller(config).source_inputs(source)
             })?;
-            match source {
-                SourcePlan::Function { .. } => {
-                    super::function_source::optimize(source, config, aggregates)?;
-                }
-                SourcePlan::FunctionGroup { .. } => {
-                    super::function_source::optimize_group(source, config, aggregates)?;
-                }
-                _ => {}
+            let context = super::owned::Context { config, aggregates };
+            if let Some(expanded) = super::function_source::expand(source, &context)? {
+                *source = expanded.finish(&config.production)?.into_parts().0;
             }
         }
         SourcePlan::Subquery { body, .. } => optimize_query(body, config, aggregates)?,
