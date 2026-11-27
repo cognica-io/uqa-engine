@@ -37,12 +37,7 @@ pub(super) fn optimize(
     })?;
     let plan = super::source_demand::owned::prune(plan, config, aggregates)?;
     let plan = rewrite_sources(plan, config, control)?;
-    Context {
-        config,
-        aggregates,
-        active: &config.active_inline_routines,
-    }
-    .plan(plan)
+    Context { config, aggregates }.plan(plan)
 }
 
 /// Source rewrites invalidate the analyzed layout. Compact discarded subqueries before planning live CTEs and evaluating constants.
@@ -63,7 +58,6 @@ pub(super) fn rewrite_sources(
 pub(in crate::optimizer) struct Context<'a, 'scope> {
     pub config: &'a OptimizerConfig<'scope>,
     pub aggregates: &'a dyn AggregateClassifier,
-    pub active: &'a [[u8; 16]],
 }
 
 impl Context<'_, '_> {
@@ -80,7 +74,7 @@ impl Context<'_, '_> {
         &self,
         expression: OwnedScalarExpr,
     ) -> Result<OwnedScalarExpr, SQLError> {
-        super::scalar::owned::optimize_with_active(expression, self.config, self.active)
+        super::scalar::owned::optimize(expression, self.config)
     }
 
     fn qualification(&self, expression: OwnedScalarExpr) -> Result<OwnedScalarExpr, SQLError> {
@@ -180,11 +174,10 @@ impl Context<'_, '_> {
             }
             RelationalPlan::Values { rows, .. } => {
                 if rows.iter().any(|row| !row.is_empty()) {
-                    let values = self.config.for_values_without_active()?;
+                    let values = self.config.for_values()?;
                     let nested = Context {
                         config: &values,
                         aggregates: self.aggregates,
-                        active: self.active,
                     };
                     let count = rows.len();
                     for row in 0..count {

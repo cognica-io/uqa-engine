@@ -10,7 +10,6 @@ use super::{
     conditional, constants, vector_thresholds, OptimizerConfig, SQLError, ScalarExpr,
     ScalarProduction, Value,
 };
-use uqa_core::memory::ProductionVec;
 use uqa_sql::{plan::OwnedScalarExpr, ColumnType};
 
 mod calls;
@@ -27,28 +26,11 @@ pub(super) fn optimize_in(
     expression: OwnedScalarExpr,
     production: ScalarProduction<'_, '_>,
 ) -> Result<OwnedScalarExpr, SQLError> {
-    Context {
-        production,
-        active_routines: &production.config.active_inline_routines,
-    }
-    .slot(expression)
-}
-
-pub(in crate::optimizer) fn optimize_with_active(
-    expression: OwnedScalarExpr,
-    config: &OptimizerConfig<'_>,
-    active_routines: &[[u8; 16]],
-) -> Result<OwnedScalarExpr, SQLError> {
-    Context {
-        production: ScalarProduction::admitted(config),
-        active_routines,
-    }
-    .slot(expression)
+    Context { production }.slot(expression)
 }
 
 struct Context<'a, 'scope> {
     production: ScalarProduction<'a, 'scope>,
-    active_routines: &'a [[u8; 16]],
 }
 
 impl Context<'_, '_> {

@@ -6,7 +6,7 @@
 
 //! Completed scalar rewrites preserve selected routine context and admitted constant results.
 
-use super::{constants, ColumnType, Context, OwnedScalarExpr, ProductionVec, SQLError, ScalarExpr};
+use super::{constants, ColumnType, Context, OwnedScalarExpr, SQLError, ScalarExpr};
 
 impl Context<'_, '_> {
     pub(super) fn finish(
@@ -33,36 +33,31 @@ impl Context<'_, '_> {
         {
             if order_by.is_empty() {
                 if let Some(inlined) =
-                    context.prepare_owned(binding, args, self.active_routines, control)?
+                    context.prepare_owned(binding, args, config.active_inline_routines, control)?
                 {
-                    let mut active = ProductionVec::new(*control);
-                    active.reserve(self.active_routines.len() + 1)?;
-                    for identity in self.active_routines {
-                        active.push_copy(*identity)?;
-                    }
-                    active.push_copy(inlined.identity)?;
-                    let active = active.finish()?;
-                    drop(expression);
-                    let nested = Context {
-                        production: super::ScalarProduction::admitted(config),
-                        active_routines: &active,
-                    };
-                    let expression = nested.scalar(inlined.expression).map_err(|error| {
-                        match inlined.error_context {
-                            Some(context) => {
-                                let (context, memory) = context.into_parts();
-                                let error = error.with_context(context);
-                                drop(memory);
-                                error
+                    return config.with_inline_routine(inlined.identity, |nested| {
+                        drop(expression);
+                        let nested = Context {
+                            production: super::ScalarProduction::admitted(nested),
+                        };
+                        let expression = nested.scalar(inlined.expression).map_err(|error| {
+                            match inlined.error_context {
+                                Some(context) => {
+                                    let (context, memory) = context.into_parts();
+                                    let error = error.with_context(context);
+                                    drop(memory);
+                                    error
+                                }
+                                None => error,
                             }
-                            None => error,
-                        }
-                    })?;
-                    let expression =
-                        constants::metadata::retain_record_result(expression, false, control)?;
-                    let expression =
-                        constants::metadata::retain_computed_integer(expression, None, control)?;
-                    return self.production.adopt(expression);
+                        })?;
+                        let expression =
+                            constants::metadata::retain_record_result(expression, false, control)?;
+                        let expression = constants::metadata::retain_computed_integer(
+                            expression, None, control,
+                        )?;
+                        self.production.adopt(expression)
+                    });
                 }
             }
         }

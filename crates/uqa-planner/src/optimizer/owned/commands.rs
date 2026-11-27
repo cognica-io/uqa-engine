@@ -82,11 +82,10 @@ impl Context<'_, '_> {
             unreachable!()
         };
         if plan.rows.iter().any(|row| !row.is_empty()) {
-            let config = self.config.for_values_without_active()?;
+            let config = self.config.for_values()?;
             let values = Context {
                 config: &config,
                 aggregates: self.aggregates,
-                active: self.active,
             };
             for row in 0..plan.rows.len() {
                 let CommandPlan::Insert(plan) = &*command else {

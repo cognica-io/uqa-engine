@@ -94,34 +94,31 @@ pub struct OptimizerConfig<'a> {
     >,
     /// Selected SQL functions expanded in the caller's plan, never in stored syntax.
     pub routine_inlining: Option<uqa_sql::routines::inlining::RoutineInliningContext<'a>>,
-    pub(super) active_inline_routines: Vec<[u8; 16]>,
+    pub(super) active_inline_routines: &'a [[u8; 16]],
 }
 
 impl OptimizerConfig<'_> {
-    pub(super) fn for_values(&self) -> Result<Self, uqa_sql::SQLError> {
-        let mut config = self.for_values_without_active()?;
-        config
-            .active_inline_routines
-            .clone_from(&self.active_inline_routines);
-        Ok(config)
+    /// Borrow the current call stack while extending it under the statement's allowance for a nested inline expansion.
+    pub(super) fn with_inline_routine<T>(
+        &self,
+        identity: [u8; 16],
+        optimize: impl FnOnce(&OptimizerConfig<'_>) -> Result<T, uqa_sql::SQLError>,
+    ) -> Result<T, uqa_sql::SQLError> {
+        let mut active = uqa_core::memory::ProductionVec::new(self.production);
+        active.reserve(self.active_inline_routines.len() + 1)?;
+        active.extend_from_slice(self.active_inline_routines)?;
+        active.push_copy(identity)?;
+        let active = active.finish()?;
+        let nested = OptimizerConfig {
+            active_inline_routines: &active,
+            ..self.clone()
+        };
+        optimize(&nested)
     }
 
-    pub(super) fn for_values_without_active(&self) -> Result<Self, uqa_sql::SQLError> {
-        let mut config = Self {
-            production: self.production,
-            coerced_conditionals: self.coerced_conditionals,
-            enable_filter_pushdown: self.enable_filter_pushdown,
-            enable_boolean_simplify: self.enable_boolean_simplify,
-            enable_vector_threshold_merge: self.enable_vector_threshold_merge,
-            enable_join_reordering: self.enable_join_reordering,
-            constant_evaluator: self.constant_evaluator,
-            constant_storage: self.constant_storage.clone(),
-            retain_values_constants: true,
-            constant_storage_factory: self.constant_storage_factory,
-            builtin_permissions: self.builtin_permissions.clone(),
-            routine_inlining: self.routine_inlining,
-            active_inline_routines: Vec::new(),
-        };
+    pub(super) fn for_values(&self) -> Result<Self, uqa_sql::SQLError> {
+        let mut config = self.clone();
+        config.retain_values_constants = true;
         if config.constant_storage.is_none() {
             if let Some(factory) = config.constant_storage_factory {
                 config.constant_storage = factory.0(&config.production)?;
@@ -145,7 +142,7 @@ impl OptimizerConfig<'_> {
             constant_storage_factory: None,
             builtin_permissions: None,
             routine_inlining: None,
-            active_inline_routines: Vec::new(),
+            active_inline_routines: &[],
         }
     }
 }

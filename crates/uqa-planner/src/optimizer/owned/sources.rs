@@ -40,11 +40,10 @@ impl Context<'_, '_> {
             }
             SourcePlan::Values { rows, .. } => {
                 if rows.iter().any(|row| !row.is_empty()) {
-                    let config = self.config.for_values_without_active()?;
+                    let config = self.config.for_values()?;
                     let nested = Context {
                         config: &config,
                         aggregates: self.aggregates,
-                        active: self.active,
                     };
                     for row in 0..rows.len() {
                         let SourcePlan::Values { rows, .. } = &*source else {

@@ -21656,6 +21656,19 @@
       ]
     },
     {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "values_inputs_reuse_the_enclosing_routine_stack",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-planner/src/optimizer/scalar/constants/tests/retained.rs",
+      "capability": "Bounded folded VALUES retention",
+      "workload": "Optimize standalone VALUES, a derived VALUES source and INSERT VALUES with zero or 4,096 enclosing routine identities.",
+      "invariant": "Each input allocates the same total bytes at both depths. VALUES borrows the enclosing identities during scalar planning."
+    },
+    {
       "package": "uqa-execution",
       "kind": "lib",
       "test": "values_sources_apply_only_the_predicates_placed_on_their_qualifier",

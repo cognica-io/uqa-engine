@@ -46,7 +46,7 @@ pub(in crate::optimizer) fn optimize(
         if let Some(inlined) = routines.prepare_table_owned(
             binding,
             args,
-            context.active,
+            context.config.active_inline_routines,
             column_aliases,
             column_types,
             control,
@@ -129,19 +129,13 @@ fn optimize_inlined(
 ) -> Result<MutableQueryPlan, SQLError> {
     let control = &context.config.production;
     let query = unit_source(query, control)?;
-    let mut active = ProductionVec::new(*control);
-    active.reserve(context.active.len() + 1)?;
-    for identity in context.active {
-        active.push_copy(*identity)?;
-    }
-    active.push_copy(identity)?;
-    let active = active.finish()?;
-    let nested = Context {
-        config: context.config,
-        aggregates: context.aggregates,
-        active: &active,
-    };
-    nested.query(query)
+    context.config.with_inline_routine(identity, |nested| {
+        Context {
+            config: nested,
+            aggregates: context.aggregates,
+        }
+        .query(query)
+    })
 }
 
 pub(in crate::optimizer) fn optimize_group(

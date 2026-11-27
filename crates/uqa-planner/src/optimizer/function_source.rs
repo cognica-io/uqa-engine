@@ -37,14 +37,14 @@ pub(super) fn optimize(
         if let Some(mut inlined) = context.prepare_table(
             binding,
             args,
-            &config.active_inline_routines,
+            config.active_inline_routines,
             column_aliases,
             column_types,
         )? {
             ensure_unit_source(&mut inlined.query);
-            let mut nested = config.clone();
-            nested.active_inline_routines.push(inlined.identity);
-            super::traversal::optimize_query(&mut inlined.query, &nested, aggregates)?;
+            config.with_inline_routine(inlined.identity, |nested| {
+                super::traversal::optimize_query(&mut inlined.query, nested, aggregates)
+            })?;
             let columns = uqa_sql::semantics::apply_table_function_aliases(
                 inlined
                     .declared_columns
