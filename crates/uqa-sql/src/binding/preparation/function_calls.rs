@@ -467,6 +467,8 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
         arguments: &mut ObservedFunctionArguments,
         selection: &SelectedFunctionArguments,
     ) -> Result<FunctionResult, SQLError> {
+        use crate::ast::FunctionDispatch;
+
         if binding.is_none()
             && self
                 .routines
@@ -474,17 +476,21 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
         {
             return Ok(FunctionResult::Selected(None));
         }
-        if matches!(
-            binding.and_then(|binding| binding.dispatch),
-            Some(crate::ast::FunctionDispatch::IsDistinct)
-        ) && matches!(original_args, [ScalarExpr::Row(_), ScalarExpr::Row(_)])
+        if let Some(dispatch @ (FunctionDispatch::IsDistinct | FunctionDispatch::ValueIsDistinct)) =
+            binding.and_then(|binding| binding.dispatch)
         {
             let [left, right] = &mut arguments.values[..] else {
                 return Err(SQLError::Internal(
-                    "ROW DISTINCT analysis lost its arguments".into(),
+                    "DISTINCT analysis requires two operands".into(),
                 ));
             };
-            self.coerce_row_comparison(BinaryOp::Equal, left, right, true)?;
+            if dispatch == FunctionDispatch::IsDistinct
+                && matches!(original_args, [ScalarExpr::Row(_), ScalarExpr::Row(_)])
+            {
+                self.coerce_row_comparison(BinaryOp::Equal, left, right, true)?;
+            } else {
+                self.binary(BinaryOp::Equal, left, right)?;
+            }
             return Ok(FunctionResult::Selected(Some(AnalysisType::Inline(
                 ColumnType::Boolean,
             ))));
