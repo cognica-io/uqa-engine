@@ -58,17 +58,19 @@ pub(super) struct Snapshot {
 impl Snapshot {
     fn read<T>(
         &self,
+        control: &StorageReadControl,
         operation: impl FnOnce(&Connection) -> PhysicalResult<T>,
     ) -> VersionResult<T> {
-        self.store.read(operation)
+        self.store.read(control, operation)
     }
 
     /// Run `operation` in one physical read when this snapshot's boundary is the database's latest commit, so the native projections, which each commit materializes in its own transaction, hold exactly this snapshot's committed records. Returns `None` when a newer commit exists.
     pub(super) fn read_latest<T>(
         &self,
+        control: &StorageReadControl,
         operation: impl FnOnce(&Connection) -> PhysicalResult<Option<T>>,
     ) -> VersionResult<Option<T>> {
-        self.read(|connection| {
+        self.read(control, |connection| {
             if codec::header(connection, self.store.identity)?.sequence != self.sequence {
                 return Ok(None);
             }
@@ -80,9 +82,10 @@ impl Snapshot {
     /// The caller must reconcile changes newer than this snapshot's boundary.
     pub(super) fn read_historical<T>(
         &self,
+        control: &StorageReadControl,
         operation: impl FnOnce(&Connection) -> PhysicalResult<Option<T>>,
     ) -> VersionResult<Option<T>> {
-        self.read(|connection| {
+        self.read(control, |connection| {
             if codec::header(connection, self.store.identity)?.sequence <= self.sequence {
                 return Ok(None);
             }
@@ -100,7 +103,9 @@ impl CommittedRecordSnapshot for Snapshot {
         control: &StorageReadControl,
     ) -> VersionResult<Option<uqa_storage::mvcc::RecordValueChunk>> {
         control.cancellation().check()?;
-        self.read(|connection| chunk::read(connection, key, self.sequence, offset, output, control))
+        self.read(control, |connection| {
+            chunk::read(connection, key, self.sequence, offset, output, control)
+        })
     }
     fn reclamation_epoch(&self) -> Option<u64> {
         Some(self.reclamation_epoch)
@@ -182,7 +187,9 @@ impl CommittedRecordSnapshot for Snapshot {
         visit: &mut RecordValueVisitor<'_>,
     ) -> VersionResult<()> {
         control.cancellation().check()?;
-        self.read(|connection| value(connection, key, self.sequence, control, visit))
+        self.read(control, |connection| {
+            value(connection, key, self.sequence, control, visit)
+        })
     }
 
     fn visit_value_bounded(
@@ -193,7 +200,7 @@ impl CommittedRecordSnapshot for Snapshot {
         visit: &mut RecordValueVisitor<'_>,
     ) -> VersionResult<()> {
         control.cancellation().check()?;
-        self.read(|connection| {
+        self.read(control, |connection| {
             value_bounded(connection, key, self.sequence, max_bytes, control, visit)
         })
     }
@@ -210,7 +217,7 @@ impl CommittedRecordSnapshot for Snapshot {
             return Ok(());
         };
         let first = first?;
-        self.read(|connection| {
+        self.read(control, |connection| {
             let mut next = Some(first);
             while let Some(key) = next {
                 control.check().map_err(VersionError::from)?;
@@ -236,7 +243,9 @@ impl CommittedRecordSnapshot for Snapshot {
         control: &StorageReadControl,
     ) -> VersionResult<Option<RecordMetadata>> {
         control.cancellation().check()?;
-        self.read(|connection| metadata(connection, key, self.sequence, control))
+        self.read(control, |connection| {
+            metadata(connection, key, self.sequence, control)
+        })
     }
 
     fn visit_metadata(
@@ -250,7 +259,7 @@ impl CommittedRecordSnapshot for Snapshot {
             return control.check().map_err(Into::into);
         }
         control.check()?;
-        self.read(|connection| loop {
+        self.read(control, |connection| loop {
             control.check().map_err(VersionError::from)?;
             let record = metadata(connection, requests.key(), self.sequence, control)?;
             requests.accept(record)?;
@@ -274,7 +283,7 @@ impl CommittedRecordSnapshot for Snapshot {
         if limit == 0 {
             return Ok(());
         }
-        self.read(|connection| {
+        self.read(control, |connection| {
             values::visit(
                 connection,
                 prefix,
@@ -299,7 +308,7 @@ impl CommittedRecordSnapshot for Snapshot {
         if limit == 0 {
             return Ok(());
         }
-        self.read(|connection| {
+        self.read(control, |connection| {
             ordered::visit(
                 connection,
                 prefix,

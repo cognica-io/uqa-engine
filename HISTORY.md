@@ -22,7 +22,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - Nested document lookups borrow intermediate values. Posting unions merge sorted inputs in one pass, and retrieval models reuse their fusion weights across documents in a batch. WAND and Block-Max WAND score materialized and cursor inputs through the same loop. Materialized searches report a candidate upper bound and expose the exact count on request.
 
-- SQLite and redb restore records and identifier watermarks in bounded private transactions. SQLite record format 70 writes each new version and its backup fingerprint together. MVCC reclamation and occurrence posting lookup read their SQLite metadata in batches.
+- SQLite and redb restore records and identifier watermarks in bounded private transactions. SQLite record format 70 writes each new version and its backup fingerprint together. MVCC reclamation and occurrence posting lookup read their SQLite metadata in batches. SQLite record snapshots wait for a concurrent rollback-journal writer when opening their read transaction, including when reopening a compressed database.
 
 - Opening a native SQLite database skips historical deletions when checking B-tree indexes and restores an unchanged catalog once. An encrypted SQLite open derives the passphrase key once and reuses it across physical connections. Notification, relation-lock and serializable transaction state use separate keys derived from the database key.
 

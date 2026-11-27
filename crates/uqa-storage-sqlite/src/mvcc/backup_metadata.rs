@@ -44,7 +44,7 @@ pub(super) fn capture(
     let mut metadata = None;
     let records = store.snapshots.capture(control, || {
         metadata = Some(store.metadata_snapshots.capture(control, || {
-            store.with_write(control, |connection| {
+            store.with_admission(control, |connection| {
                 let _permit = admission::permit(connection, control)?;
                 let transaction = admission::begin(connection, control)?;
                 native::check_mapping(&transaction, store.native)?;
@@ -103,7 +103,9 @@ impl CommittedBackupSnapshot for Snapshot {
         control: &StorageReadControl,
     ) -> VersionResult<Option<uqa_core::memory::BudgetedVec<u8>>> {
         control.cancellation().check()?;
-        let result = self.read(|connection, _| read::key_ceiling(connection, control))?;
+        let result = self.read(control, |connection, _| {
+            read::key_ceiling(connection, control)
+        })?;
         control.cancellation().check()?;
         Ok(result)
     }
@@ -143,7 +145,7 @@ impl CommittedBackupSnapshot for Snapshot {
     ) -> VersionResult<()> {
         control.cancellation().check()?;
         let limit = i64::try_from(limit).unwrap_or(i64::MAX);
-        self.read(|connection, current| {
+        self.read(control, |connection, current| {
             let epoch = self.metadata_epoch().as_u64();
             let _after = crate::read_control::reserve_bindings(control, &[after.unwrap_or_default()])?;
             let mut statement = connection.prepare_cached("SELECT i.namespace, i.watermark, e.created, e.head FROM _uqa_mvcc_identifiers AS i LEFT JOIN _uqa_mvcc_identifier_epochs AS e ON e.namespace = i.namespace WHERE i.namespace > ?1 ORDER BY i.namespace LIMIT ?2")?;

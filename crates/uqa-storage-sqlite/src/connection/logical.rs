@@ -272,25 +272,11 @@ impl ManagedConnection {
         }
     }
 
-    /// Run a record read on a pooled connection, with the connection's memory of the committed state a store last validated. A record connection pins no transaction, so the connection serves this call alone.
-    pub(crate) fn with_record_read<R>(
-        &self,
-        operation: impl FnOnce(&Connection, &std::cell::Cell<Option<super::ValidatedRead>>) -> Result<R>,
-    ) -> Result<R> {
-        self.surface_cleanup_failure()?;
-        let _gate = self.session.gate.read();
-        if !self.record_access || self.session.transaction.lock().is_some() {
-            return Err(SQLiteError::SessionMappingMismatch);
-        }
-        let connection = self.pool.checkout()?;
-        let physical = connection.physical()?;
-        operation(&physical.connection, &physical.validated_read)
-    }
-
+    /// Check out one record connection under the invoking cancellation token. Its validation cache belongs to this physical connection and its committed database state.
     pub(crate) fn with_record_connection<R>(
         &self,
         control: &StorageReadControl,
-        operation: impl FnOnce(&Connection) -> Result<R>,
+        operation: impl FnOnce(&Connection, &std::cell::Cell<Option<super::ValidatedRead>>) -> Result<R>,
     ) -> Result<R> {
         self.surface_cleanup_failure()?;
         let _gate = self.session.gate.read();
@@ -300,7 +286,8 @@ impl ManagedConnection {
         let connection = self
             .pool
             .checkout_with_cancellation(Some(control.cancellation()))?;
-        operation(connection.connection()?)
+        let physical = connection.physical()?;
+        operation(&physical.connection, &physical.validated_read)
     }
 
     pub(crate) fn bind_records(
@@ -450,7 +437,7 @@ mod tests {
         thread::scope(|scope| {
             let worker = scope.spawn(|| {
                 started_tx.send(()).unwrap();
-                let result = connection.with_record_connection(&control, |_| {
+                let result = connection.with_record_connection(&control, |_, _| {
                     panic!("cancelled checkout must not enter the operation")
                 });
                 finished_tx.send(result).unwrap();

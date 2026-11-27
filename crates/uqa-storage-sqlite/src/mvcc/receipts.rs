@@ -37,7 +37,7 @@ impl SQLiteRecordStore {
         let limit = i64::try_from(limit).ok().filter(|limit| *limit > 0).ok_or(
             VersionError::InvalidEncoding("invalid receipt retention limit"),
         )?;
-        self.with_write(control, |connection| {
+        self.with_admission(control, |connection| {
             let _permit = admission::permit(connection, control)?;
             let transaction = admission::begin(connection, control)?;
             native::check_mapping(&transaction, self.native)?;
@@ -67,7 +67,7 @@ impl SQLiteRecordStore {
     ) -> VersionResult<RetainedTransactionAllocation> {
         self.with_receipt_admission(control, |leases| {
             let mut owner = None;
-            let id = self.with_write(control, |connection| {
+            let id = self.with_admission(control, |connection| {
                 write::allocate_with_owner(
                     connection,
                     self.identity,
@@ -92,7 +92,7 @@ impl SQLiteRecordStore {
         self.recover_serializable(control)?;
         let held = self.serializable_admission(control)?;
         self.with_receipt_admission(control, |leases| {
-            let removed = self.with_write(control, |connection| {
+            let removed = self.with_admission(control, |connection| {
                 reclaim(
                     connection,
                     self.identity,
@@ -149,25 +149,27 @@ pub(super) fn validate_retained(
     acknowledgement: ReceiptAcknowledgement,
     control: &StorageReadControl,
 ) -> PhysicalResult<bool> {
-    admission::retry(connection, true, control, || {
-        let read = connection.unchecked_transaction()?;
-        let id = acknowledgement.transaction();
-        native::check_mapping(&read, native)?;
-        let header = codec::header(&read, id.database())?;
-        if id.allocation() > header.allocated {
-            return Err(VersionError::UnknownTransaction.into());
-        }
-        acknowledgement.validate(codec::status(&read, id)?)?;
-        let managed = read
-            .prepare_cached("SELECT managed FROM _uqa_mvcc_transactions WHERE allocation = ?1")?
-            .query_row([id.allocation().to_be_bytes().as_slice()], |row| {
-                row.get::<_, bool>(0)
-            })
-            .optional()?;
-        control.check().map_err(VersionError::from)?;
-        read.commit()?;
-        Ok(managed == Some(true))
-    })
+    let id = acknowledgement.transaction();
+    admission::read_header(
+        connection,
+        id.database(),
+        native,
+        control,
+        |read, header| {
+            if id.allocation() > header.allocated {
+                return Err(VersionError::UnknownTransaction.into());
+            }
+            acknowledgement.validate(codec::status(read, id)?)?;
+            let managed = read
+                .prepare_cached("SELECT managed FROM _uqa_mvcc_transactions WHERE allocation = ?1")?
+                .query_row([id.allocation().to_be_bytes().as_slice()], |row| {
+                    row.get::<_, bool>(0)
+                })
+                .optional()?;
+            control.check().map_err(VersionError::from)?;
+            Ok(managed == Some(true))
+        },
+    )
 }
 
 /// SSI and receipt admission remain held across this atomic main write. Authoritatively dead managed owners release their retry rights; manual owners never do so implicitly. Their original physical state still decides commit/abort, and every retained graph reference remains protected.

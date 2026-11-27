@@ -9249,6 +9249,19 @@
     {
       "package": "uqa-storage-sqlite",
       "kind": "lib",
+      "test": "record_read_admission_pins_the_snapshot_before_visiting_once",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/tests/admission.rs",
+      "capability": "SQLite MVCC read admission",
+      "workload": "Hold an exclusive rollback-journal writer while a snapshot reads its header, release or cancel the waiter, and return SQLite BUSY from a record visitor.",
+      "invariant": "A blocked snapshot runs its consumer once after admission or zero times after cancellation. A visitor error propagates once and the connection can open another snapshot.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
       "test": "managed_allocations_share_one_sync_without_relaxing_durable_receipts",
       "cases": 1,
       "source": "crates/uqa-storage-sqlite/src/mvcc/tests/receipts/allocations.rs",
