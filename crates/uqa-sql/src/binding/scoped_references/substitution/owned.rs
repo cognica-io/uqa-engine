@@ -12,7 +12,7 @@ use crate::{
     ColumnIdentity, RowSchema, SQLError, ScalarExpr,
 };
 use std::ptr::NonNull;
-use uqa_core::memory::{ProductionControl, ProductionMap, ProductionVec};
+use uqa_core::memory::{ProductionControl, ProductionMap};
 
 /// Substitute only references to the selected enclosing row. Read-only lexical traversal runs to completion before edits; missing layouts and unsupported whole-row replacements return the unchanged owner and false.
 pub fn substitute_outer_columns_owned<'i>(
@@ -39,29 +39,35 @@ impl<'i> OuterColumnSubstitutions<'i> {
         inputs: impl IntoIterator<Item = (&'i ColumnIdentity, &'i ScalarExpr)>,
         control: &ProductionControl<'_>,
     ) -> Result<Option<Self>, SQLError> {
-        let mut entries = ProductionVec::new(*control);
-        for (identity, expression) in inputs {
-            control.check()?;
-            if !is_closed_expression(expression, control)? {
-                return Ok(None);
-            }
-            entries.push_copy(((identity.qualifier(), identity.column()), expression))?;
-        }
-        if entries.is_empty() {
-            return Ok(Some(Self {
+        let mut closed = true;
+        let mut entries = inputs
+            .into_iter()
+            .map_while(|(identity, expression)| {
+                is_closed_expression(expression, control)
+                    .and_then(|valid| {
+                        if !valid {
+                            closed = false;
+                            return Ok(None);
+                        }
+                        let key = (identity.qualifier(), identity.column());
+                        Ok(Some((
+                            control.finish(key, control.empty_reservation())?,
+                            control.finish(expression, control.empty_reservation())?,
+                        )))
+                    })
+                    .transpose()
+            })
+            .peekable();
+        if entries.peek().is_none() {
+            return Ok(closed.then(|| Self {
                 values: SchemaMap::default(),
                 qualifiers: SchemaSet::default(),
             }));
         }
-        let values = SchemaMap::from_produced(
-            entries.iter().map(|&(key, expression)| {
-                Ok((
-                    control.finish(key, control.empty_reservation())?,
-                    control.finish(expression, control.empty_reservation())?,
-                ))
-            }),
-            control,
-        )?;
+        let values = SchemaMap::from_produced(entries, control)?;
+        if !closed {
+            return Ok(None);
+        }
         let qualifiers = SchemaSet::from_produced(
             values
                 .keys()

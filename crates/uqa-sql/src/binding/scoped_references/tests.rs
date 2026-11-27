@@ -223,6 +223,26 @@ fn controlled_query_inputs_admit_decoded_order_labels_and_preserve_output_preced
 }
 
 #[test]
+fn duplicate_outer_replacements_use_memory_for_one_identity() {
+    let key = crate::ColumnIdentity::qualified("outer_source", "v");
+    let first = ScalarExpr::Literal(uqa_core::Value::Int(1));
+    let last = ScalarExpr::Literal(uqa_core::Value::Int(2));
+    let memory = MemoryBudget::new(64 << 10);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&memory, &token, &token);
+    let inputs = std::iter::repeat_n((&key, &first), 100_000).chain([(&key, &last)]);
+    let substitutions = OuterColumnSubstitutions::new(inputs, &control)
+        .unwrap()
+        .unwrap();
+    assert!(std::ptr::eq(
+        substitutions.get(Some("outer_source"), "v").unwrap(),
+        std::ptr::from_ref(&last)
+    ));
+    drop(substitutions);
+    assert_eq!(memory.used(), 0);
+}
+
+#[test]
 fn indexed_outer_replacements_preserve_duplicate_order_and_reuse_borrowed_columns() {
     use crate::ColumnIdentity;
     use uqa_core::Value;
