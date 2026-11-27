@@ -65,26 +65,9 @@ fn sift_down(
     heap: &mut [DecoratedRow],
     keys: &SortComparison<'_>,
     width: usize,
-    mut parent: usize,
+    parent: usize,
 ) -> ExecResult<()> {
-    loop {
-        let left = parent * 2 + 1;
-        if left >= heap.len() {
-            break;
-        }
-        let right = left + 1;
-        let child = if right < heap.len()
-            && compare_records(keys, width, &heap[right], &heap[left])? == Ordering::Greater
-        {
-            right
-        } else {
-            left
-        };
-        if compare_records(keys, width, &heap[child], &heap[parent])? != Ordering::Greater {
-            break;
-        }
-        heap.swap(parent, child);
-        parent = child;
-    }
-    Ok(())
+    crate::spill::merge_heap::sift_down(heap, parent, |left, right| {
+        compare_records(keys, width, left, right).map(Ordering::reverse)
+    })
 }

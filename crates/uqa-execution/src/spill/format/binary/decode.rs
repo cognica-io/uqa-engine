@@ -215,13 +215,13 @@ pub(crate) fn decode_document(
     Ok((fields, &bytes[reader.position..]))
 }
 
-pub(super) struct BinaryReader<'a> {
+pub(crate) struct BinaryReader<'a> {
     bytes: &'a [u8],
     position: usize,
 }
 
 impl<'a> BinaryReader<'a> {
-    pub(super) fn new(bytes: &'a [u8]) -> Self {
+    pub(crate) fn new(bytes: &'a [u8]) -> Self {
         Self { bytes, position: 0 }
     }
 
@@ -244,11 +244,11 @@ impl<'a> BinaryReader<'a> {
             .map_err(|_| spill_error(format!("invalid {description} width")))
     }
 
-    fn read_u8(&mut self, description: &str) -> ExecResult<u8> {
+    pub(crate) fn read_u8(&mut self, description: &str) -> ExecResult<u8> {
         Ok(self.read_exact::<1>(description)?[0])
     }
 
-    pub(super) fn read_u64(&mut self, description: &str) -> ExecResult<u64> {
+    pub(crate) fn read_u64(&mut self, description: &str) -> ExecResult<u64> {
         self.read_exact::<8>(description).map(u64::from_le_bytes)
     }
 
@@ -260,7 +260,7 @@ impl<'a> BinaryReader<'a> {
         self.read_exact::<4>(description).map(i32::from_le_bytes)
     }
 
-    pub(super) fn read_count(
+    pub(crate) fn read_count(
         &mut self,
         description: &str,
         minimum_item_bytes: usize,
@@ -380,7 +380,7 @@ impl<'a> BinaryReader<'a> {
         Ok(origins)
     }
 
-    fn read_value(&mut self, depth: usize) -> ExecResult<Value> {
+    pub(crate) fn read_value(&mut self, depth: usize) -> ExecResult<Value> {
         Ok(self
             .read_value_with_control(depth, &ProductionControl::uncontrolled())?
             .into_uncontrolled()
@@ -414,7 +414,7 @@ impl<'a> BinaryReader<'a> {
         }
     }
 
-    fn finish(self, description: &str) -> ExecResult<()> {
+    pub(crate) fn finish(self, description: &str) -> ExecResult<()> {
         if self.position == self.bytes.len() {
             Ok(())
         } else {

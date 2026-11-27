@@ -65,6 +65,28 @@ fn native_payload_footprints_share_controlled_and_ordinary_counting() {
     }
 }
 
+#[test]
+fn ordinary_sizing_counts_nested_spare_capacity_and_keeps_inline_frames() {
+    let mut value = Value::Bytes(Vec::with_capacity(391));
+    let mut expected = 391;
+    for depth in 1..=256 {
+        let mut children = Vec::with_capacity(3);
+        expected += children.capacity() * size_of::<Value>();
+        children.push(Value::Null);
+        children.push(value);
+        value = Value::List(children);
+        let allocations = allocation_counter::measure(|| {
+            let bytes = value
+                .retained_payload_bytes_with_control(&ProductionControl::uncontrolled())
+                .unwrap();
+            assert_eq!(bytes, expected);
+        });
+        if depth <= 128 {
+            assert_eq!(allocations.count_total, 0, "depth {depth}");
+        }
+    }
+}
+
 fn text(capacity: usize) -> String {
     let mut text = String::with_capacity(capacity);
     text.push('x');

@@ -7,11 +7,10 @@
 //! Projection and HAVING evaluation for one finalized aggregate group.
 
 use super::{
-    aggregate_slot_index, aggregate_value_with_args, compile_group_slots,
-    compile_having_aggregate_slots, compile_projection_aggregate_slots, contains_aggregate,
-    eval_scalar, expr_references_columns, exprs_match, group_context_row, AggregateAccumulator,
-    PlanSubqueryArena, QueryBlockPlan, QueryExpressionContext, SQLError, SQLParam,
-    ScalarEvalContext, ScalarExpr, SpillBuffer, Value,
+    aggregate_slot_index, compile_group_slots, compile_having_aggregate_slots,
+    compile_projection_aggregate_slots, contains_aggregate, eval_scalar, expr_references_columns,
+    exprs_match, group_context_row, AggregateAccumulator, PlanSubqueryArena, QueryBlockPlan,
+    QueryExpressionContext, SQLError, SQLParam, ScalarEvalContext, ScalarExpr, SpillBuffer, Value,
 };
 use crate::{Batch, OwnedPhysicalRow, PhysicalRow, RowSchema};
 use uqa_sql::expr::RowLookup;
@@ -200,9 +199,9 @@ pub(super) fn finish_group(
         let aggregate_values = output_plan
             .finalizers
             .iter()
-            .zip(&accumulators)
+            .zip(&mut accumulators)
             .map(|(finalizer, accumulator)| {
-                aggregate_value_with_args(
+                super::finalize::finish_aggregate(
                     &finalizer.name,
                     accumulator,
                     &finalizer.args,

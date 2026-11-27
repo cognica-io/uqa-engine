@@ -493,6 +493,9 @@ fn merge_group(
     debug_assert!(runs.len() <= EXTERNAL_SORT_MERGE_FAN_IN);
     let mut cursors = Vec::with_capacity(runs.len());
     let mut heap = Vec::with_capacity(runs.len());
+    let compare = |left: &HeapItem, right: &HeapItem| {
+        compare_records(keys, source_width, &left.record, &right.record)
+    };
 
     for run in runs {
         cursors.push(MergeCursor::new(
@@ -503,14 +506,14 @@ fn merge_group(
         )?);
         let cursor = cursors.len() - 1;
         if let Some(record) = cursors[cursor].next_record()? {
-            heap_push(&mut heap, HeapItem { record, cursor }, keys, source_width)?;
+            crate::spill::merge_heap::push(&mut heap, HeapItem { record, cursor }, compare)?;
         }
     }
 
     let mut writer = SpillBatchWriter::new(run_schema.clone())?;
     let mut emitted = 0_usize;
     while !heap.is_empty() && keep.is_none_or(|keep| emitted < keep) {
-        let item = heap_pop(&mut heap, keys, source_width)?
+        let item = crate::spill::merge_heap::pop(&mut heap, compare)?
             .ok_or_else(|| ExecError::Other("external sort merge heap became empty".into()))?;
         let cursor = item.cursor;
         writer.push(&mut output, item.record.row)?;
@@ -518,72 +521,12 @@ fn merge_group(
             .checked_add(1)
             .ok_or_else(|| ExecError::Other("external sort emitted-row count overflow".into()))?;
         if let Some(record) = cursors[cursor].next_record()? {
-            heap_push(&mut heap, HeapItem { record, cursor }, keys, source_width)?;
+            crate::spill::merge_heap::push(&mut heap, HeapItem { record, cursor }, compare)?;
         }
     }
     writer.finish(&mut output)?;
     output.spill_pending()?;
     Ok(SortedRun { buffer: output })
-}
-
-fn compare_heap_items(
-    keys: &SortComparison<'_>,
-    source_width: usize,
-    left: &HeapItem,
-    right: &HeapItem,
-) -> ExecResult<Ordering> {
-    compare_records(keys, source_width, &left.record, &right.record)
-}
-
-fn heap_push(
-    heap: &mut Vec<HeapItem>,
-    item: HeapItem,
-    keys: &SortComparison<'_>,
-    source_width: usize,
-) -> ExecResult<()> {
-    heap.push(item);
-    let mut child = heap.len() - 1;
-    while child > 0 {
-        let parent = (child - 1) / 2;
-        if compare_heap_items(keys, source_width, &heap[child], &heap[parent])? != Ordering::Less {
-            break;
-        }
-        heap.swap(child, parent);
-        child = parent;
-    }
-    Ok(())
-}
-
-fn heap_pop(
-    heap: &mut Vec<HeapItem>,
-    keys: &SortComparison<'_>,
-    source_width: usize,
-) -> ExecResult<Option<HeapItem>> {
-    if heap.is_empty() {
-        return Ok(None);
-    }
-    let smallest = heap.swap_remove(0);
-    let mut parent = 0;
-    loop {
-        let left = parent * 2 + 1;
-        if left >= heap.len() {
-            break;
-        }
-        let right = left + 1;
-        let child = if right < heap.len()
-            && compare_heap_items(keys, source_width, &heap[right], &heap[left])? == Ordering::Less
-        {
-            right
-        } else {
-            left
-        };
-        if compare_heap_items(keys, source_width, &heap[child], &heap[parent])? != Ordering::Less {
-            break;
-        }
-        heap.swap(parent, child);
-        parent = child;
-    }
-    Ok(Some(smallest))
 }
 
 #[cfg(test)]

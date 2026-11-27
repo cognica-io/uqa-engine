@@ -6,9 +6,10 @@
 
 //! Built-in aggregate finalization and percentile/statistical helpers.
 
+use super::ordered_buffer::OrderedRows;
 use super::{
     cast_value, core_value_to_json, value_as_f64, AggregateAccumulator, AggregateValueBuffer,
-    DecimalValue, SQLError, ScalarExpr, Value,
+    AggregateValueRecord, DecimalValue, RegisteredAggregateRecord, SQLError, ScalarExpr, Value,
 };
 use uqa_core::ArrayValue;
 use uqa_sql::expr::enums::EnumLabelCatalog;
@@ -22,10 +23,6 @@ pub fn aggregate_value(
     aggregate_value_with_args(name, acc, &[], enums)
 }
 
-#[expect(
-    clippy::too_many_lines,
-    reason = "preserves aggregate NULL and type order"
-)]
 /// Finalize a built-in aggregate. JSON aggregates call their inputs' output functions, so enum inputs render through `enums`.
 pub fn aggregate_value_with_args(
     name: &str,
@@ -33,13 +30,56 @@ pub fn aggregate_value_with_args(
     args: &[ScalarExpr],
     enums: Option<&dyn EnumLabelCatalog>,
 ) -> Result<Value, SQLError> {
+    let inputs = AggregateInputs {
+        values: acc.values.input(),
+        distinct: acc.distinct.values.input(),
+        registered: acc.registered_ordered.input(),
+    };
+    finalize_aggregate(name, acc, args, enums, inputs)
+}
+
+struct AggregateInputs<'a> {
+    values: OrderedRows<'a, AggregateValueRecord>,
+    distinct: OrderedRows<'a, AggregateValueRecord>,
+    registered: OrderedRows<'a, RegisteredAggregateRecord>,
+}
+
+/// Own the resident inputs of a completed group while leaving host state available for cleanup.
+pub(super) fn finish_aggregate(
+    name: &str,
+    acc: &mut AggregateAccumulator,
+    args: &[ScalarExpr],
+    enums: Option<&dyn EnumLabelCatalog>,
+) -> Result<Value, SQLError> {
+    let values = std::mem::take(&mut acc.values.rows);
+    let distinct = std::mem::take(&mut acc.distinct.values.rows);
+    let registered = std::mem::take(&mut acc.registered_ordered.rows);
+    let inputs = AggregateInputs {
+        values: acc.values.with_rows(values),
+        distinct: acc.distinct.values.with_rows(distinct),
+        registered: acc.registered_ordered.with_rows(registered),
+    };
+    finalize_aggregate(name, acc, args, enums, inputs)
+}
+
+#[expect(
+    clippy::too_many_lines,
+    reason = "preserves aggregate NULL and type order"
+)]
+fn finalize_aggregate(
+    name: &str,
+    acc: &AggregateAccumulator,
+    args: &[ScalarExpr],
+    enums: Option<&dyn EnumLabelCatalog>,
+    inputs: AggregateInputs<'_>,
+) -> Result<Value, SQLError> {
     if !acc.distinct.is_empty() {
         let budget = acc.distinct.values.budget_bytes;
         let mut unique = acc.replay_with_budget(budget)?;
         unique.enum_comparison.clone_from(&acc.enum_comparison);
         let result = acc
             .distinct
-            .for_each(enums, |value| {
+            .for_each_input(inputs.distinct, enums, |value| {
                 if acc.registered.is_some() {
                     let Value::List(arguments) = value else {
                         return Err(SQLError::Internal(
@@ -51,10 +91,10 @@ pub fn aggregate_value_with_args(
                     unique.observe_with_enum_catalog(value, enums)
                 }
             })
-            .and_then(|()| aggregate_value_with_args(name, &unique, args, enums));
+            .and_then(|()| finish_aggregate(name, &mut unique, args, enums));
         return super::state::with_cleanup(result, unique.close());
     }
-    if let Some(value) = acc.registered_value(enums) {
+    if let Some(value) = acc.registered_value(inputs.registered, enums) {
         return value;
     }
     if !acc.state_plan.retains_values() && acc.values.next_sequence != 0 {
@@ -63,10 +103,10 @@ pub fn aggregate_value_with_args(
             enum_comparison: acc.enum_comparison.clone(),
             ..AggregateAccumulator::default()
         };
-        acc.values.for_each_ordered(enums, |record| {
+        inputs.values.for_each_ordered(enums, |record| {
             ordered.observe_with_enum_catalog(&record.value, enums)
         })?;
-        return aggregate_value_with_args(name, &ordered, args, enums);
+        return finish_aggregate(name, &mut ordered, args, enums);
     }
     let lname = uqa_sql::semantics::builtin_aggregate_dispatch_name(name).to_ascii_lowercase();
 
@@ -122,9 +162,9 @@ pub fn aggregate_value_with_args(
         }
         "min" => acc.min.clone().unwrap_or(Value::Null),
         "max" => acc.max.clone().unwrap_or(Value::Null),
-        "string_agg" => super::string_agg::finish(&acc.values, enums)?,
+        "string_agg" => super::string_agg::finish(inputs.values, enums)?,
         "array_agg" => {
-            let ordered_values = acc.values.ordered_values(enums)?;
+            let ordered_values = inputs.values.ordered_values(enums)?;
             if ordered_values.is_empty() {
                 return Ok(Value::Null);
             }
@@ -139,7 +179,7 @@ pub fn aggregate_value_with_args(
                 })?
         }
         "json_agg" | "jsonb_agg" => {
-            let ordered_values = acc.values.ordered_values(enums)?;
+            let ordered_values = inputs.values.ordered_values(enums)?;
             if ordered_values.is_empty() {
                 return Ok(Value::Null);
             }
@@ -158,7 +198,7 @@ pub fn aggregate_value_with_args(
             }
         }
         "json_object_agg" | "jsonb_object_agg" => {
-            let ordered_values = acc.values.ordered_values(enums)?;
+            let ordered_values = inputs.values.ordered_values(enums)?;
             let mut fields = Vec::with_capacity(ordered_values.len());
             for value in ordered_values {
                 let Value::List(pair) = value else {
@@ -231,14 +271,14 @@ pub fn aggregate_value_with_args(
         }
         "percentile_cont" => {
             let frac = percentile_fraction(args)?;
-            percentile_cont_with_catalog(&acc.values, frac, enums)?
+            percentile_cont_with_catalog(inputs.values, frac, enums)?
                 .map_or(Value::Null, Value::Float)
         }
         "percentile_disc" => {
             let frac = percentile_fraction(args)?;
-            percentile_disc_with_catalog(&acc.values, frac, enums)?.unwrap_or(Value::Null)
+            percentile_disc_with_catalog(inputs.values, frac, enums)?.unwrap_or(Value::Null)
         }
-        "mode" => mode_value_with_catalog(&acc.values, enums)?,
+        "mode" => mode_value_with_catalog(inputs.values, enums)?,
         _ => return Err(SQLError::UnknownFunction(format!("aggregate `{name}`"))),
     };
     Ok(value)
@@ -411,18 +451,18 @@ fn numeric_statistical_variance(
 }
 
 pub fn percentile_cont(values: &AggregateValueBuffer, frac: f64) -> Result<Option<f64>, SQLError> {
-    percentile_cont_with_catalog(values, frac, None)
+    percentile_cont_with_catalog(values.input(), frac, None)
 }
 
 fn percentile_cont_with_catalog(
-    values: &AggregateValueBuffer,
+    values: OrderedRows<'_, AggregateValueRecord>,
     frac: f64,
     enums: Option<&dyn EnumLabelCatalog>,
 ) -> Result<Option<f64>, SQLError> {
-    if values.next_sequence == 0 {
+    if values.buffer.next_sequence == 0 {
         return Ok(None);
     }
-    let position = frac * (values.next_sequence as f64 - 1.0);
+    let position = frac * (values.buffer.next_sequence as f64 - 1.0);
     let low = position.floor() as u64;
     let high = position.ceil() as u64;
     let mut low_value = None;
@@ -458,20 +498,20 @@ pub fn percentile_disc(
     values: &AggregateValueBuffer,
     frac: f64,
 ) -> Result<Option<Value>, SQLError> {
-    percentile_disc_with_catalog(values, frac, None)
+    percentile_disc_with_catalog(values.input(), frac, None)
 }
 
 fn percentile_disc_with_catalog(
-    values: &AggregateValueBuffer,
+    values: OrderedRows<'_, AggregateValueRecord>,
     frac: f64,
     enums: Option<&dyn EnumLabelCatalog>,
 ) -> Result<Option<Value>, SQLError> {
-    if values.next_sequence == 0 {
+    if values.buffer.next_sequence == 0 {
         return Ok(None);
     }
-    let rank = ((frac * values.next_sequence as f64).ceil() as u64)
+    let rank = ((frac * values.buffer.next_sequence as f64).ceil() as u64)
         .max(1)
-        .min(values.next_sequence);
+        .min(values.buffer.next_sequence);
     let mut value = None;
     let mut index = 0_u64;
     values.for_each_ordered(enums, |record| {
@@ -487,31 +527,33 @@ fn percentile_disc_with_catalog(
 }
 
 pub fn mode_value(values: &AggregateValueBuffer) -> Result<Value, SQLError> {
-    mode_value_with_catalog(values, None)
+    mode_value_with_catalog(values.input(), None)
 }
 
 fn mode_value_with_catalog(
-    values: &AggregateValueBuffer,
+    values: OrderedRows<'_, AggregateValueRecord>,
     enums: Option<&dyn EnumLabelCatalog>,
 ) -> Result<Value, SQLError> {
-    if values.next_sequence == 0 {
+    if values.buffer.next_sequence == 0 {
         return Ok(Value::Null);
     }
     let mut current_value = Value::Null;
     let mut current_count = 0_u64;
     let mut best_value = Value::Null;
     let mut best_count = 0_u64;
+    let key_type = values
+        .buffer
+        .key_types
+        .as_deref()
+        .and_then(|types| types.first())
+        .and_then(Option::as_ref);
     values.for_each_ordered(enums, |record| {
         // Group with the same equality as sorting; retain the first group on ties.
         if current_count != 0
             && !uqa_sql::expr::equal_selected_values_with_catalog(
                 &current_value,
                 &record.value,
-                values
-                    .key_types
-                    .as_deref()
-                    .and_then(|types| types.first())
-                    .and_then(Option::as_ref),
+                key_type,
                 &uqa_core::memory::ProductionControl::uncontrolled(),
                 enums,
             )?

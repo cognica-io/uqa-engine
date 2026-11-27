@@ -5,6 +5,7 @@
 //
 
 use super::*;
+use std::io::{Seek, SeekFrom, Write};
 use uqa_core::ArrayValue;
 
 mod argument_types;
@@ -189,7 +190,7 @@ fn collection_aggregate_rejects_a_spill_record_larger_than_writer_metadata() {
     run.file.as_file_mut().write_all(b"\n").unwrap();
     run.file.as_file_mut().flush().unwrap();
 
-    let error = values.ordered_values(None).unwrap_err();
+    let error = values.input().ordered_values(None).unwrap_err();
     assert!(error.to_string().contains("exceeds recorded maximum"));
 }
 

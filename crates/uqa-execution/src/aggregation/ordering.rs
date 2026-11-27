@@ -124,19 +124,3 @@ pub(super) fn sort_records<T>(
         compare(left, right)
     })
 }
-
-pub(super) fn minimum_by<T>(
-    items: impl Iterator<Item = T>,
-    compare: impl Fn(&T, &T) -> Result<Ordering, SQLError>,
-) -> Result<Option<T>, SQLError> {
-    let mut minimum = None;
-    for item in items {
-        if match &minimum {
-            Some(current) => compare(&item, current)?.is_lt(),
-            None => true,
-        } {
-            minimum = Some(item);
-        }
-    }
-    Ok(minimum)
-}

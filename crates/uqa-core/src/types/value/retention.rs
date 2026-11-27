@@ -11,6 +11,7 @@ use crate::{
     memory::{MemoryBudget, MemoryError, MemoryReservation, ProductionControl},
     CancellationToken, QueryCancelled,
 };
+use smallvec::Array;
 
 mod stack;
 use stack::Stack;
@@ -98,6 +99,13 @@ impl Value {
         &self,
         control: &ProductionControl<'_>,
     ) -> Result<usize, ValueRetentionError> {
+        if control.budget().is_none() {
+            let (bytes, children) = payload(self)?;
+            return Ok(match children {
+                Some(children) => count_children(bytes, children)?,
+                None => bytes,
+            });
+        }
         let mut total = 0_usize;
         self.visit_retained_payload(
             control.budget(),
@@ -132,7 +140,7 @@ impl Value {
         budget: Option<&'a MemoryBudget>,
         mut check: impl FnMut() -> Result<(), QueryCancelled> + Send + 'a,
     ) -> impl Iterator<Item = Result<usize, ValueRetentionError>> + Send + 'a {
-        let mut state = Some(Traversal::new(self, budget));
+        let mut state = Some(Traversal::<[Children; 0]>::new(self, budget));
         std::iter::from_fn(move || {
             let mut traversal = state.take()?;
             let result = check()
@@ -164,7 +172,7 @@ impl Value {
         mut check: impl FnMut() -> Result<(), QueryCancelled>,
         mut visit: impl FnMut(usize) -> Result<(), MemoryError>,
     ) -> Result<(), ValueRetentionError> {
-        let mut traversal = Traversal::new(self, budget);
+        let mut traversal = Traversal::<[Children; 0]>::new(self, budget);
         loop {
             check()?;
             match traversal.step()? {
@@ -182,12 +190,12 @@ enum Phase<'a> {
     Next,
 }
 
-struct Traversal<'a> {
-    stack: Stack<'a>,
+struct Traversal<'a, A: Array<Item = Children<'a>>> {
+    stack: Stack<'a, A>,
     phase: Phase<'a>,
 }
 
-impl<'a> Traversal<'a> {
+impl<'a, A: Array<Item = Children<'a>>> Traversal<'a, A> {
     fn new(value: &'a Value, budget: Option<&MemoryBudget>) -> Self {
         Self {
             stack: Stack::new(budget),
@@ -224,6 +232,19 @@ impl<'a> Traversal<'a> {
         }
         Ok(Some(0))
     }
+}
+
+// Keep the inline frames off scalar callers' stacks. Deeper native values use the same fallible overflow storage as resumable traversal.
+#[inline(never)]
+fn count_children(mut total: usize, children: Children<'_>) -> Result<usize, MemoryError> {
+    let mut traversal = Traversal::<[Children; 128]> {
+        stack: Stack::new(None),
+        phase: Phase::Push(Some(children)),
+    };
+    while let Some(bytes) = traversal.step()? {
+        total = total.checked_add(bytes).ok_or(MemoryError::SizeOverflow)?;
+    }
+    Ok(total)
 }
 
 fn payload(value: &Value) -> Result<(usize, Option<Children<'_>>), MemoryError> {

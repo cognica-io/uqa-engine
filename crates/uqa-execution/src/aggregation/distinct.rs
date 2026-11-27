@@ -52,13 +52,23 @@ impl DistinctTracker {
         self.values.push(value.clone(), sort_keys, enums)
     }
 
+    #[cfg(test)]
     pub(super) fn for_each(
         &self,
+        enums: Option<&dyn EnumLabelCatalog>,
+        observe: impl FnMut(&Value) -> Result<(), SQLError>,
+    ) -> Result<(), SQLError> {
+        self.for_each_input(self.values.input(), enums, observe)
+    }
+
+    pub(super) fn for_each_input(
+        &self,
+        input: super::ordered_buffer::OrderedRows<'_, super::AggregateValueRecord>,
         enums: Option<&dyn EnumLabelCatalog>,
         mut observe: impl FnMut(&Value) -> Result<(), SQLError>,
     ) -> Result<(), SQLError> {
         let mut previous: Option<Value> = None;
-        self.values.for_each_ordered(enums, |record| {
+        input.for_each_ordered(enums, |record| {
             if let Some(previous) = &previous {
                 if self.equal_inputs(previous, &record.value, enums)? {
                     return Ok(());

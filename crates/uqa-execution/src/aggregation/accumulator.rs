@@ -801,16 +801,16 @@ impl AggregateAccumulator {
 
     pub(super) fn registered_value(
         &self,
+        input: super::ordered_buffer::OrderedRows<'_, super::RegisteredAggregateRecord>,
         enums: Option<&dyn EnumLabelCatalog>,
     ) -> Option<Result<Value, SQLError>> {
         let function = self.registered.as_ref()?;
-        if self.registered_ordered.is_empty() {
+        if input.buffer.next_sequence == 0 {
             return Some(self.registered_state.finish());
         }
         Some((|| {
             let mut state = self.registered_state.replay(function.as_ref())?;
-            let result = self
-                .registered_ordered
+            let result = input
                 .observe_ordered_into(&mut state, enums)
                 .and_then(|()| state.finish());
             with_cleanup(result, state.close())
