@@ -132,7 +132,10 @@ impl<S: Clone> CteScope<S> {
         &self,
         query: &uqa_sql::plan::QueryPlan,
         control: &ProductionControl<'_>,
-        mut visit: impl FnMut(&uqa_sql::plan::CtePlanBody) -> Result<(), SQLError>,
+        mut visit: impl FnMut(
+            &uqa_sql::plan::CtePlanBody,
+            &dyn Fn(&str) -> bool,
+        ) -> Result<(), SQLError>,
     ) -> Result<(), SQLError> {
         control.check()?;
         if self.deferred_ctes.is_empty() {
@@ -158,7 +161,19 @@ impl<S: Clone> CteScope<S> {
                 None => visited.insert(identity),
             };
             if first {
-                visit(&plan.body)?;
+                visit(&plan.body, &|reference| {
+                    let Some(name) = uqa_core::RelationIdentity::borrowed_reference(reference)
+                        .filter(|reference| reference.schema.is_none())
+                        .map(|reference| reference.name)
+                    else {
+                        return false;
+                    };
+                    bindings.is_some_and(|bindings| {
+                        bindings.names.contains_name(name)
+                            || (bindings.own_reference
+                                && name == uqa_core::RelationName::decoded(&plan.name))
+                    })
+                })?;
                 if let Some(bindings) = bindings {
                     for (name, child) in &bindings.deferred {
                         pending.push((child, bindings.definitions.get(name)))?;

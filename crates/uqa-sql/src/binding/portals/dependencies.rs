@@ -8,10 +8,13 @@
 
 use super::{PortalBindingContext, SessionPortalTableDependencies};
 use crate::{
-    plan::{QueryPlan, RelationalPlan, SourcePlan},
+    plan::{PlanRef, QueryPlan, RelationalPlan, SourcePlan},
     registry::FunctionKind,
     SQLError,
 };
+
+use std::collections::BTreeSet;
+use uqa_core::memory::{ProductionControl, ProductionVec};
 
 fn collect_graph_function_dependency(
     name: &str,
@@ -88,349 +91,83 @@ pub fn session_portal_table_dependencies(
     query: &QueryPlan,
 ) -> Result<SessionPortalTableDependencies, SQLError> {
     let mut dependencies = SessionPortalTableDependencies::empty();
-    collect_session_portal_query_dependencies(
+    collect_plan_dependencies(
         inputs,
-        query,
+        PlanRef::Query(query),
+        &|_| false,
         &mut dependencies,
-        &mut std::collections::BTreeSet::new(),
-        &mut std::collections::BTreeSet::new(),
+        ProductionControl::uncontrolled(),
     )?;
     Ok(dependencies)
+}
+
+/// Collect physical inputs of the reachable plan. The caller identifies names provided by an enclosing execution scope. A view or stored routine starts its own SQL namespace.
+pub fn collect_plan_dependencies(
+    inputs: &PortalBindingContext<'_>,
+    plan: PlanRef<'_>,
+    visible_cte: &dyn Fn(&str) -> bool,
+    dependencies: &mut SessionPortalTableDependencies,
+    control: ProductionControl<'_>,
+) -> Result<(), SQLError> {
+    Collector {
+        inputs,
+        dependencies,
+        visiting_views: &mut BTreeSet::new(),
+        visiting_routines: &mut BTreeSet::new(),
+        control,
+    }
+    .plan(plan, visible_cte)
 }
 
 pub fn collect_session_portal_query_dependencies(
     inputs: &PortalBindingContext<'_>,
     query: &QueryPlan,
     dependencies: &mut SessionPortalTableDependencies,
-    visiting_views: &mut std::collections::BTreeSet<String>,
-    visiting_routines: &mut std::collections::BTreeSet<String>,
+    visiting_views: &mut BTreeSet<String>,
+    visiting_routines: &mut BTreeSet<String>,
 ) -> Result<(), SQLError> {
-    if dependencies.is_all() {
-        return Ok(());
-    }
-    for cte in &query.ctes {
-        collect_session_portal_cte_dependencies(
-            inputs,
-            &cte.body,
-            dependencies,
-            visiting_views,
-            visiting_routines,
-        )?;
-    }
-    collect_session_portal_relational_dependencies(
+    Collector {
         inputs,
-        &query.root,
         dependencies,
         visiting_views,
         visiting_routines,
-    )?;
-
-    let mut routines = Vec::new();
-    query.try_visit_scalar_expressions(&mut |root| {
-        root.try_visit_post(&mut |expression| {
-            if let crate::ScalarExpr::Func {
-                name,
-                binding,
-                args,
-                ..
-            } = expression
-            {
-                collect_graph_function_dependency(name, binding.as_ref(), args, dependencies);
-                routines.push((name.as_str(), binding.as_ref()));
-            }
-            Ok::<_, SQLError>(())
-        })
-    })?;
-    for (name, binding) in routines {
-        collect_session_portal_routine_dependencies(
-            inputs,
-            name,
-            binding,
-            dependencies,
-            visiting_views,
-            visiting_routines,
-        )?;
-        if dependencies.is_all() {
-            break;
-        }
+        control: ProductionControl::uncontrolled(),
     }
-    Ok(())
-}
-
-pub fn collect_session_portal_cte_dependencies(
-    inputs: &PortalBindingContext<'_>,
-    body: &crate::plan::CtePlanBody,
-    dependencies: &mut SessionPortalTableDependencies,
-    visiting_views: &mut std::collections::BTreeSet<String>,
-    visiting_routines: &mut std::collections::BTreeSet<String>,
-) -> Result<(), SQLError> {
-    match body {
-        crate::plan::CtePlanBody::Query(query) => collect_session_portal_query_dependencies(
-            inputs,
-            query,
-            dependencies,
-            visiting_views,
-            visiting_routines,
-        ),
-        crate::plan::CtePlanBody::Command(command) => {
-            if let Some(target) = command.mutation_target() {
-                collect_session_portal_relation_dependencies(
-                    inputs,
-                    target,
-                    true,
-                    dependencies,
-                    visiting_views,
-                    visiting_routines,
-                )?;
-            }
-            for cte in command.ctes() {
-                collect_session_portal_cte_dependencies(
-                    inputs,
-                    &cte.body,
-                    dependencies,
-                    visiting_views,
-                    visiting_routines,
-                )?;
-            }
-            for query in command.query_inputs() {
-                collect_session_portal_query_dependencies(
-                    inputs,
-                    query,
-                    dependencies,
-                    visiting_views,
-                    visiting_routines,
-                )?;
-            }
-            if let Some(source) = command.source_input() {
-                collect_session_portal_source_dependencies(
-                    inputs,
-                    source,
-                    dependencies,
-                    visiting_views,
-                    visiting_routines,
-                )?;
-            }
-            Ok(())
-        }
-    }
+    .plan(PlanRef::Query(query), &|_| false)
 }
 
 pub fn collect_session_portal_relational_dependencies(
     inputs: &PortalBindingContext<'_>,
     plan: &RelationalPlan,
     dependencies: &mut SessionPortalTableDependencies,
-    visiting_views: &mut std::collections::BTreeSet<String>,
-    visiting_routines: &mut std::collections::BTreeSet<String>,
+    visiting_views: &mut BTreeSet<String>,
+    visiting_routines: &mut BTreeSet<String>,
 ) -> Result<(), SQLError> {
-    match plan {
-        RelationalPlan::QueryBlock(block) => {
-            if let Some(source) = block.from.as_ref() {
-                collect_session_portal_source_dependencies(
-                    inputs,
-                    source,
-                    dependencies,
-                    visiting_views,
-                    visiting_routines,
-                )?;
-            }
-            for subquery in &block.subqueries {
-                collect_session_portal_query_dependencies(
-                    inputs,
-                    subquery,
-                    dependencies,
-                    visiting_views,
-                    visiting_routines,
-                )?;
-            }
-        }
-        RelationalPlan::SetOp {
-            left,
-            right,
-            subqueries,
-            ..
-        } => {
-            collect_session_portal_query_dependencies(
-                inputs,
-                left,
-                dependencies,
-                visiting_views,
-                visiting_routines,
-            )?;
-            collect_session_portal_query_dependencies(
-                inputs,
-                right,
-                dependencies,
-                visiting_views,
-                visiting_routines,
-            )?;
-            for subquery in subqueries {
-                collect_session_portal_query_dependencies(
-                    inputs,
-                    subquery,
-                    dependencies,
-                    visiting_views,
-                    visiting_routines,
-                )?;
-            }
-        }
-        RelationalPlan::Values { subqueries, .. } => {
-            for subquery in subqueries {
-                collect_session_portal_query_dependencies(
-                    inputs,
-                    subquery,
-                    dependencies,
-                    visiting_views,
-                    visiting_routines,
-                )?;
-            }
-        }
+    Collector {
+        inputs,
+        dependencies,
+        visiting_views,
+        visiting_routines,
+        control: ProductionControl::uncontrolled(),
     }
-    Ok(())
-}
-
-fn collect_session_portal_relation_dependencies(
-    inputs: &PortalBindingContext<'_>,
-    name: &str,
-    include_descendants: bool,
-    dependencies: &mut SessionPortalTableDependencies,
-    visiting_views: &mut std::collections::BTreeSet<String>,
-    visiting_routines: &mut std::collections::BTreeSet<String>,
-) -> Result<(), SQLError> {
-    if let Some(table) = inputs
-        .catalog
-        .try_resolve_table_name(name)
-        .map_err(|error| {
-            SQLError::Internal(format!(
-                "resolve cursor dependency relation `{name}`: {error}"
-            ))
-        })?
-    {
-        for table in inputs
-            .catalog
-            .hierarchy_scan_tables(&table, include_descendants)?
-        {
-            dependencies.insert(
-                uqa_core::RelationIdentity::from_legacy_name(&table).map_err(|error| {
-                    SQLError::Internal(format!(
-                        "resolve cursor dependency identity `{table}`: {error}"
-                    ))
-                })?,
-            );
-        }
-        return Ok(());
-    }
-    if crate::binding::view_dependencies::canonical_virtual_relation_reference(name).is_some() {
-        dependencies.tables = None;
-        dependencies.graph_catalog = true;
-        return Ok(());
-    }
-    if let Some(relation) = inputs.catalog.resolve_age_label_relation_name(name)? {
-        let relation =
-            uqa_core::RelationIdentity::from_legacy_name(&relation).map_err(SQLError::Internal)?;
-        dependencies.insert_graph(relation.schema);
-        return Ok(());
-    }
-    let key = name.to_ascii_lowercase();
-    if !visiting_views.insert(key.clone()) {
-        return Ok(());
-    }
-    if let Some(view) = inputs.catalog.view_plan(name)? {
-        collect_session_portal_query_dependencies(
-            inputs,
-            &view,
-            dependencies,
-            visiting_views,
-            visiting_routines,
-        )?;
-    }
-    visiting_views.remove(&key);
-    Ok(())
+    .relational(plan, &|_| false)
 }
 
 pub fn collect_session_portal_source_dependencies(
     inputs: &PortalBindingContext<'_>,
     source: &SourcePlan,
     dependencies: &mut SessionPortalTableDependencies,
-    visiting_views: &mut std::collections::BTreeSet<String>,
-    visiting_routines: &mut std::collections::BTreeSet<String>,
+    visiting_views: &mut BTreeSet<String>,
+    visiting_routines: &mut BTreeSet<String>,
 ) -> Result<(), SQLError> {
-    match source {
-        crate::plan::SourcePlan::RetainedRows(_) => Ok(()),
-        SourcePlan::Table {
-            name,
-            include_descendants,
-            ..
-        } => collect_session_portal_relation_dependencies(
-            inputs,
-            name,
-            *include_descendants,
-            dependencies,
-            visiting_views,
-            visiting_routines,
-        ),
-        SourcePlan::Join { left, right, .. } => {
-            collect_session_portal_source_dependencies(
-                inputs,
-                left,
-                dependencies,
-                visiting_views,
-                visiting_routines,
-            )?;
-            collect_session_portal_source_dependencies(
-                inputs,
-                right,
-                dependencies,
-                visiting_views,
-                visiting_routines,
-            )
-        }
-        SourcePlan::Subquery { body, .. } => collect_session_portal_query_dependencies(
-            inputs,
-            body,
-            dependencies,
-            visiting_views,
-            visiting_routines,
-        ),
-        SourcePlan::Function {
-            name,
-            binding,
-            relations,
-            args,
-            ..
-        } => {
-            collect_graph_function_dependency(name, binding.as_ref(), args, dependencies);
-            collect_session_portal_function_dependencies(
-                inputs,
-                name,
-                binding.as_ref(),
-                relations.as_ref(),
-                dependencies,
-                visiting_views,
-                visiting_routines,
-            )
-        }
-        SourcePlan::FunctionGroup { functions, .. } => {
-            for function in functions {
-                collect_graph_function_dependency(
-                    &function.name,
-                    function.binding.as_ref(),
-                    &function.args,
-                    dependencies,
-                );
-                collect_session_portal_function_dependencies(
-                    inputs,
-                    &function.name,
-                    function.binding.as_ref(),
-                    function.relations.as_ref(),
-                    dependencies,
-                    visiting_views,
-                    visiting_routines,
-                )?;
-            }
-            Ok(())
-        }
-        SourcePlan::Values { .. } => Ok(()),
+    Collector {
+        inputs,
+        dependencies,
+        visiting_views,
+        visiting_routines,
+        control: ProductionControl::uncontrolled(),
     }
+    .source(source, &|_| false)
 }
 
 pub fn collect_session_portal_function_dependencies(
@@ -439,22 +176,35 @@ pub fn collect_session_portal_function_dependencies(
     binding: Option<&crate::ast::FunctionBinding>,
     relations: Option<&crate::ast::OperatorJoinRelations>,
     dependencies: &mut SessionPortalTableDependencies,
-    visiting_views: &mut std::collections::BTreeSet<String>,
-    visiting_routines: &mut std::collections::BTreeSet<String>,
+    visiting_views: &mut BTreeSet<String>,
+    visiting_routines: &mut BTreeSet<String>,
 ) -> Result<(), SQLError> {
-    if let Some(relations) = relations {
-        for relation in [&relations.left, &relations.right] {
-            collect_session_portal_function_relation_dependency(inputs, relation, dependencies)?;
-        }
-    }
-    collect_session_portal_routine_dependencies(
+    Collector {
         inputs,
-        name,
-        binding,
         dependencies,
         visiting_views,
         visiting_routines,
-    )
+        control: ProductionControl::uncontrolled(),
+    }
+    .function(name, binding, relations)
+}
+
+pub fn collect_session_portal_routine_dependencies(
+    inputs: &PortalBindingContext<'_>,
+    name: &str,
+    binding: Option<&crate::ast::FunctionBinding>,
+    dependencies: &mut SessionPortalTableDependencies,
+    visiting_views: &mut BTreeSet<String>,
+    visiting_routines: &mut BTreeSet<String>,
+) -> Result<(), SQLError> {
+    Collector {
+        inputs,
+        dependencies,
+        visiting_views,
+        visiting_routines,
+        control: ProductionControl::uncontrolled(),
+    }
+    .routine(name, binding)
 }
 
 pub fn collect_session_portal_function_relation_dependency(
@@ -483,81 +233,358 @@ pub fn collect_session_portal_function_relation_dependency(
     Ok(())
 }
 
-pub fn collect_session_portal_routine_dependencies(
-    inputs: &PortalBindingContext<'_>,
-    name: &str,
-    binding: Option<&crate::ast::FunctionBinding>,
-    dependencies: &mut SessionPortalTableDependencies,
-    visiting_views: &mut std::collections::BTreeSet<String>,
-    visiting_routines: &mut std::collections::BTreeSet<String>,
-) -> Result<(), SQLError> {
-    if binding.is_some_and(|binding| binding.builtin) {
-        return Ok(());
-    }
-    let overloads = match binding {
-        Some(binding) => inputs
-            .routines
-            .lookup_bound_sql_functions_by_binding(binding),
-        None => inputs
-            .routines
-            .lookup_visible_sql_functions_for_analysis(name)?,
-    };
-    let Some(overloads) = overloads else {
-        return Ok(());
-    };
-    for function in overloads {
-        if function.def.is_procedure
-            || binding.is_some_and(|binding| {
-                crate::routines::routine_signature_types(&function.def) != binding.argument_types
-            })
-        {
-            continue;
+struct Collector<'a, 'c> {
+    inputs: &'a PortalBindingContext<'a>,
+    dependencies: &'a mut SessionPortalTableDependencies,
+    visiting_views: &'a mut BTreeSet<String>,
+    visiting_routines: &'a mut BTreeSet<String>,
+    control: ProductionControl<'c>,
+}
+
+impl Collector<'_, '_> {
+    fn plan(&mut self, plan: PlanRef<'_>, outer: &dyn Fn(&str) -> bool) -> Result<(), SQLError> {
+        self.control.check()?;
+        if self.dependencies.is_all() {
+            return Ok(());
         }
-        let signature = crate::routines::routine_signature_types(&function.def).join(",");
-        let key = format!("{}({signature})", function.def.name);
-        if !visiting_routines.insert(key.clone()) {
-            continue;
+        let declarations = match plan {
+            PlanRef::Query(query) => &query.ctes[..],
+            PlanRef::Command(command) => {
+                if let Some(target) = command.mutation_target() {
+                    self.relation(target, true, None)?;
+                }
+                command.ctes()
+            }
+        };
+        if declarations.is_empty() {
+            return self.root(plan, outer);
         }
-        match crate::routines::analyzable_routine_body(inputs.routines, &function)?
-            .as_deref()
-            .map(|body| &**body)
-        {
-            Some(crate::routines::CompiledFunctionBody::SQL(plans)) => {
-                for plan in plans {
-                    match plan {
-                        crate::plan::UnifiedPlan::Query(query) => {
-                            collect_session_portal_query_dependencies(
-                                inputs,
-                                query,
-                                dependencies,
-                                visiting_views,
-                                visiting_routines,
-                            )?;
-                        }
-                        crate::plan::UnifiedPlan::Command(_) => {
-                            *dependencies = SessionPortalTableDependencies::all();
-                        }
-                    }
-                    if dependencies.is_all() {
-                        break;
-                    }
+        let analysis = match plan {
+            PlanRef::Query(query) => crate::semantics::CteAnalysis::query(query, self.control)?,
+            PlanRef::Command(command) => {
+                crate::semantics::CteAnalysis::command(command, self.control)?
+            }
+        };
+        let reachable = analysis.reachable()?;
+        let recursive_query =
+            matches!(plan, PlanRef::Query(_)) && declarations.iter().any(|cte| cte.recursive);
+        let visible = |reference: &str, ceiling| {
+            analysis.resolves_before(reference, ceiling) || outer(reference)
+        };
+        for (index, cte) in declarations.iter().enumerate() {
+            self.control.check()?;
+            if reachable[index] {
+                let ceiling = if recursive_query || cte.recursive {
+                    declarations.len()
+                } else {
+                    index
+                };
+                self.plan((&cte.body).into(), &|name| visible(name, ceiling))?;
+                if let Some(cycle) = &cte.cycle {
+                    self.scalar_inputs(|visit| {
+                        visit(&cycle.mark_value)?;
+                        visit(&cycle.mark_default)
+                    })?;
                 }
             }
-            Some(crate::routines::CompiledFunctionBody::PLpgSQL(_)) => {
-                *dependencies = SessionPortalTableDependencies::all();
-            }
-            // Procedural fragments may be valid only under the settings in
-            // effect when execution reaches them. Unknown dependencies retain
-            // all tables without parsing or caching those fragments here.
-            None if function.def.language == "plpgsql" => {
-                *dependencies = SessionPortalTableDependencies::all();
-            }
-            None => {}
         }
-        visiting_routines.remove(&key);
-        if dependencies.is_all() {
-            break;
+        self.root(plan, &|name| visible(name, declarations.len()))
+    }
+
+    fn root(&mut self, plan: PlanRef<'_>, visible: &dyn Fn(&str) -> bool) -> Result<(), SQLError> {
+        match plan {
+            PlanRef::Query(query) => {
+                self.relational(&query.root, visible)?;
+                self.scalar_inputs(|visit| query.root.try_visit_scalar_inputs(false, visit))
+            }
+            PlanRef::Command(command) => {
+                for query in command.query_inputs() {
+                    self.plan(PlanRef::Query(query), visible)?;
+                }
+                if let Some(source) = command.source_input() {
+                    self.source(source, visible)?;
+                }
+                self.scalar_inputs(|visit| {
+                    for expression in command.expressions() {
+                        visit(expression)?;
+                    }
+                    if let Some(source) = command.source_input() {
+                        source.try_visit_expressions::<SQLError>(&mut |expression| {
+                            visit(expression)?;
+                            Ok(true)
+                        })?;
+                    }
+                    Ok(())
+                })
+            }
         }
     }
-    Ok(())
+
+    fn relational(
+        &mut self,
+        plan: &RelationalPlan,
+        visible: &dyn Fn(&str) -> bool,
+    ) -> Result<(), SQLError> {
+        let subqueries = match plan {
+            RelationalPlan::QueryBlock(block) => {
+                if let Some(source) = &block.from {
+                    self.source(source, visible)?;
+                }
+                &block.subqueries
+            }
+            RelationalPlan::SetOp {
+                left,
+                right,
+                subqueries,
+                ..
+            } => {
+                self.plan(PlanRef::Query(left), visible)?;
+                self.plan(PlanRef::Query(right), visible)?;
+                subqueries
+            }
+            RelationalPlan::Values { subqueries, .. } => subqueries,
+        };
+        for query in subqueries {
+            self.plan(PlanRef::Query(query), visible)?;
+        }
+        Ok(())
+    }
+
+    fn scalar_inputs<'q>(
+        &mut self,
+        roots: impl FnOnce(
+            &mut dyn FnMut(&'q crate::ScalarExpr) -> Result<(), SQLError>,
+        ) -> Result<(), SQLError>,
+    ) -> Result<(), SQLError> {
+        let mut routines = ProductionVec::new(self.control);
+        roots(&mut |root| {
+            root.try_visit_post(&mut |expression| {
+                self.control.check()?;
+                if let crate::ScalarExpr::Func {
+                    name,
+                    binding,
+                    args,
+                    ..
+                } = expression
+                {
+                    collect_graph_function_dependency(
+                        name,
+                        binding.as_ref(),
+                        args,
+                        self.dependencies,
+                    );
+                    if !binding.as_ref().is_some_and(|binding| binding.builtin) {
+                        routines.push_copy((name.as_str(), binding.as_ref()))?;
+                    }
+                }
+                Ok(())
+            })
+        })?;
+        for &(name, binding) in routines.iter() {
+            self.routine(name, binding)?;
+            if self.dependencies.is_all() {
+                break;
+            }
+        }
+        Ok(())
+    }
+
+    fn source(
+        &mut self,
+        source: &SourcePlan,
+        visible: &dyn Fn(&str) -> bool,
+    ) -> Result<(), SQLError> {
+        self.control.check()?;
+        match source {
+            SourcePlan::Table {
+                name,
+                include_descendants,
+                executable_query,
+                ..
+            } => {
+                if visible(name) {
+                    return Ok(());
+                }
+                self.relation(name, *include_descendants, executable_query.as_deref())
+            }
+            SourcePlan::Join { left, right, .. } => {
+                self.source(left, visible)?;
+                self.source(right, visible)
+            }
+            SourcePlan::Subquery { body, .. } => self.plan(PlanRef::Query(body), visible),
+            SourcePlan::Function {
+                name,
+                binding,
+                relations,
+                args,
+                ..
+            } => {
+                collect_graph_function_dependency(name, binding.as_ref(), args, self.dependencies);
+                self.function(name, binding.as_ref(), relations.as_ref())
+            }
+            SourcePlan::FunctionGroup { functions, .. } => {
+                for function in functions {
+                    collect_graph_function_dependency(
+                        &function.name,
+                        function.binding.as_ref(),
+                        &function.args,
+                        self.dependencies,
+                    );
+                    self.function(
+                        &function.name,
+                        function.binding.as_ref(),
+                        function.relations.as_ref(),
+                    )?;
+                }
+                Ok(())
+            }
+            SourcePlan::RetainedRows(_) | SourcePlan::Values { .. } => Ok(()),
+        }
+    }
+
+    fn function(
+        &mut self,
+        name: &str,
+        binding: Option<&crate::ast::FunctionBinding>,
+        relations: Option<&crate::ast::OperatorJoinRelations>,
+    ) -> Result<(), SQLError> {
+        if let Some(relations) = relations {
+            for relation in [&relations.left, &relations.right] {
+                collect_session_portal_function_relation_dependency(
+                    self.inputs,
+                    relation,
+                    self.dependencies,
+                )?;
+            }
+        }
+        self.routine(name, binding)
+    }
+
+    fn relation(
+        &mut self,
+        name: &str,
+        include_descendants: bool,
+        prepared: Option<&QueryPlan>,
+    ) -> Result<(), SQLError> {
+        if let Some(table) = self
+            .inputs
+            .catalog
+            .try_resolve_table_name(name)
+            .map_err(|error| {
+                SQLError::Internal(format!(
+                    "resolve cursor dependency relation `{name}`: {error}"
+                ))
+            })?
+        {
+            for table in self
+                .inputs
+                .catalog
+                .hierarchy_scan_tables(&table, include_descendants)?
+            {
+                self.dependencies.insert(
+                    uqa_core::RelationIdentity::from_legacy_name(&table).map_err(|error| {
+                        SQLError::Internal(format!(
+                            "resolve cursor dependency identity `{table}`: {error}"
+                        ))
+                    })?,
+                );
+            }
+            return Ok(());
+        }
+        if crate::binding::view_dependencies::canonical_virtual_relation_reference(name).is_some() {
+            self.dependencies.tables = None;
+            self.dependencies.graph_catalog = true;
+            return Ok(());
+        }
+        if let Some(relation) = self.inputs.catalog.resolve_age_label_relation_name(name)? {
+            let relation = uqa_core::RelationIdentity::from_legacy_name(&relation)
+                .map_err(SQLError::Internal)?;
+            self.dependencies.insert_graph(relation.schema);
+            return Ok(());
+        }
+        let key = name.to_ascii_lowercase();
+        if !self.visiting_views.insert(key.clone()) {
+            return Ok(());
+        }
+        if let Some(view) = prepared {
+            self.plan(PlanRef::Query(view), &|_| false)?;
+        } else if let Some(view) = self.inputs.catalog.view_plan(name)? {
+            self.plan(PlanRef::Query(&view), &|_| false)?;
+        }
+        self.visiting_views.remove(&key);
+        Ok(())
+    }
+
+    fn routine(
+        &mut self,
+        name: &str,
+        binding: Option<&crate::ast::FunctionBinding>,
+    ) -> Result<(), SQLError> {
+        if binding.is_some_and(|binding| binding.builtin) {
+            return Ok(());
+        }
+        let overloads = match binding {
+            Some(binding) => self
+                .inputs
+                .routines
+                .lookup_bound_sql_functions_by_binding(binding),
+            None => self
+                .inputs
+                .routines
+                .lookup_visible_sql_functions_for_analysis(name)?,
+        };
+        let Some(overloads) = overloads else {
+            return Ok(());
+        };
+        for function in overloads {
+            if function.def.is_procedure
+                || binding.is_some_and(|binding| {
+                    crate::routines::routine_signature_types(&function.def)
+                        != binding.argument_types
+                })
+            {
+                continue;
+            }
+            let signature = crate::routines::routine_signature_types(&function.def).join(",");
+            let key = format!("{}({signature})", function.def.name);
+            if !self.visiting_routines.insert(key.clone()) {
+                continue;
+            }
+            match crate::routines::analyzable_routine_body(self.inputs.routines, &function)?
+                .as_deref()
+                .map(|body| &**body)
+            {
+                Some(crate::routines::CompiledFunctionBody::SQL(plans)) => {
+                    for plan in plans {
+                        match plan {
+                            crate::plan::UnifiedPlan::Query(query) => {
+                                self.plan(PlanRef::Query(query), &|_| false)?;
+                            }
+                            crate::plan::UnifiedPlan::Command(_) => {
+                                *self.dependencies = SessionPortalTableDependencies::all();
+                            }
+                        }
+                        if self.dependencies.is_all() {
+                            break;
+                        }
+                    }
+                }
+                Some(crate::routines::CompiledFunctionBody::PLpgSQL(_)) => {
+                    *self.dependencies = SessionPortalTableDependencies::all();
+                }
+                // Procedural fragments may be valid only under the settings in
+                // effect when execution reaches them. Unknown dependencies retain
+                // all tables without parsing or caching those fragments here.
+                None if function.def.language == "plpgsql" => {
+                    *self.dependencies = SessionPortalTableDependencies::all();
+                }
+                None => {}
+            }
+            self.visiting_routines.remove(&key);
+            if self.dependencies.is_all() {
+                break;
+            }
+        }
+        Ok(())
+    }
 }

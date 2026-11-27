@@ -9,6 +9,7 @@
 pub mod age_cypher;
 pub mod aggregates;
 mod cte_order;
+pub(crate) use cte_order::analysis::CteAnalysis;
 pub mod cte_strategy;
 mod ctes;
 pub(crate) use cte_order::cte_positions_with_work;

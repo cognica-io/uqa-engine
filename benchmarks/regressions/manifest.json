@@ -41514,8 +41514,8 @@
       "cases": 4,
       "source": "crates/uqa-engine/src/session/retained_query/tests.rs",
       "capability": "Session catalog and retained query snapshots",
-      "workload": "Retain constants, a view and three outer CTE declarations, including a shadowed definition, and execute a recursive query on all four providers.",
-      "invariant": "A constant retains zero table snapshots. A view and each reachable deferred CTE retain the single underlying table visible to their definition.",
+      "workload": "Retain constants, stored views and routines, qualified and shadowed CTE inputs, and mandatory writes, then execute a recursive query on all four providers.",
+      "invariant": "Unused read-only CTEs retain no tables. Each reachable relation resolves in its own lexical scope, and a data-modifying CTE retains its target even when its result is unused.",
       "case_names": [
         "case_1_memory",
         "case_2_sqlite_native",

@@ -127,17 +127,21 @@ impl Engine {
         } else {
             let inputs = self.portal_binding_context();
             let mut dependencies =
-                uqa_sql::binding::portals::dependencies::session_portal_table_dependencies(
-                    &inputs, &plan,
-                )?;
-            scope.visit_deferred_query_inputs(&plan, control, |body| {
-                uqa_sql::binding::portals::dependencies::collect_session_portal_cte_dependencies(
+                uqa_sql::binding::portals::SessionPortalTableDependencies::empty();
+            let mut collect = |plan: uqa_sql::plan::PlanRef<'_>, visible: &dyn Fn(&str) -> bool| {
+                uqa_sql::binding::portals::dependencies::collect_plan_dependencies(
                     &inputs,
-                    body,
+                    plan,
+                    visible,
                     &mut dependencies,
-                    &mut std::collections::BTreeSet::new(),
-                    &mut std::collections::BTreeSet::new(),
+                    *control,
                 )
+            };
+            collect(uqa_sql::plan::PlanRef::Query(&plan), &|name| {
+                scope.is_visible_cte(name)
+            })?;
+            scope.visit_deferred_query_inputs(&plan, control, |body, visible| {
+                collect(body.into(), visible)
             })?;
             self.statement_read_snapshot_engine(&self.capture_query_read_snapshot(&dependencies)?)
         };
