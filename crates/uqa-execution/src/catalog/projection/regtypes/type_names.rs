@@ -181,6 +181,16 @@ pub struct CatalogEnumLabels<'a> {
 }
 
 impl uqa_sql::expr::enums::EnumLabelCatalog for CatalogEnumLabels<'_> {
+    fn value_range_cast_binding(
+        &self,
+        source: u32,
+        target: u32,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<uqa_core::memory::Produced<uqa_sql::ast::FunctionBinding>>, uqa_sql::SQLError>
+    {
+        self.catalog.range_cast_binding(source, target, control)
+    }
+
     fn value_range_type(
         &self,
         oid: u32,

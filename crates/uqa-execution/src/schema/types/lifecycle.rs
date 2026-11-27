@@ -346,7 +346,19 @@ fn set_owner(
     let Some((object, previous)) = candidate.value else {
         return Ok(());
     };
-    let new_owner = owner.identity();
+    publish_type_owner(context, object, previous, owner.identity())?;
+    drop(candidate.memberships);
+    drop(candidate.roles);
+    context.changes.catalog_registry_changed();
+    Ok(())
+}
+
+fn publish_type_owner(
+    context: &TypeLifecycleContext<'_>,
+    object: TypeObject,
+    previous: uqa_sql::catalog::roles::RoleIdentity,
+    new_owner: uqa_sql::catalog::roles::RoleIdentity,
+) -> Result<(), SQLError> {
     match object {
         TypeObject::Shell(mut definition) => {
             definition.owner = new_owner;
@@ -391,9 +403,6 @@ fn set_owner(
             )?;
         }
     }
-    drop(candidate.memberships);
-    drop(candidate.roles);
-    context.changes.catalog_registry_changed();
     Ok(())
 }
 

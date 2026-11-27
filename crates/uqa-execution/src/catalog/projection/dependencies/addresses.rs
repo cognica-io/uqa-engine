@@ -30,6 +30,8 @@ pub enum CatalogObject {
     },
     /// A standalone user-defined type.
     Type(u32),
+    /// The explicit cast removed with its range declaration.
+    RangeCast,
     /// A generated array type, which is part of its element type.
     ArrayType {
         element: u32,
@@ -149,9 +151,11 @@ impl CatalogObjects {
             NAMESPACE_CLASS => self
                 .namespace_name(address.object_id)
                 .map(|name| CatalogObject::Schema(name.to_string())),
-            CONSTRAINT_CLASS | ATTRIBUTE_DEFAULT_CLASS | REWRITE_CLASS | TRIGGER_CLASS => {
-                self.member_object(address)
-            }
+            uqa_sql::catalog::dependencies::CAST_CLASS
+            | CONSTRAINT_CLASS
+            | ATTRIBUTE_DEFAULT_CLASS
+            | REWRITE_CLASS
+            | TRIGGER_CLASS => self.member_object(address),
             _ => None,
         }
     }
@@ -226,6 +230,7 @@ impl CatalogObjects {
                     name: name.clone(),
                 }
             }
+            MemberObject::RangeCast { .. } => CatalogObject::RangeCast,
             MemberObject::Membership { .. } => return None,
         })
     }

@@ -14,6 +14,8 @@ pub const RELATION_CLASS: u32 = 1259;
 pub const TYPE_CLASS: u32 = 1247;
 /// `pg_proc`.
 pub const PROCEDURE_CLASS: u32 = 1255;
+/// `pg_cast`.
+pub const CAST_CLASS: u32 = 2605;
 pub const OPCLASS_CLASS: u32 = 2616;
 /// `pg_constraint`.
 pub const CONSTRAINT_CLASS: u32 = 2606;

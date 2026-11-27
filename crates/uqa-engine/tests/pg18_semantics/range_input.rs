@@ -63,7 +63,7 @@ fn declared_ranges_and_constructors_match_postgresql_after_reopen(#[case] provid
     verify_declared_values(
         provider,
         include_str!("../../../../tests/parity/pg18/range_declaration.expected.json"),
-        7,
+        9,
     );
 }
 
@@ -100,7 +100,7 @@ fn verify_declared_values(provider: usize, transcript: &str, reopen_cases: usize
 fn declared_range_publication_follows_transaction_visibility(#[case] provider: usize) {
     let directory = tempfile::tempdir().unwrap();
     let engine = open(provider, &directory.path().join("range-peers.db"));
-    crate::pg18_oracle::verify_peer(
+    crate::pg18_peer::verify(
         &engine,
         include_str!("../../../../tests/parity/pg18/range_declaration_sessions.expected.json"),
     );

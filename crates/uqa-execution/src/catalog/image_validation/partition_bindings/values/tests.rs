@@ -106,6 +106,7 @@ fn native_partition_range_comparison_uses_original_support_without_canonicalizat
         canonical_oid: Some(99999),
         subtype_difference_oid: None,
         constructor_oids: None,
+        cast_oid: None,
         multirange: StoredMultirange {
             object_id: [8; 16],
             oid: 91002,

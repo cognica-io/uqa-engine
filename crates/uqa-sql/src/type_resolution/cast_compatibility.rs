@@ -7,6 +7,7 @@
 //! Static cast compatibility that depends on declared SQL type identity.
 
 mod catalog;
+pub use catalog::{builtin_casts, CastCatalogRow};
 mod volatility;
 pub use volatility::{
     cast_volatility, cast_volatility_with_control, immutable_cast_type, pg_catalog_builtin_type,
@@ -73,6 +74,15 @@ pub(super) fn explicit_type_compatible_with_control(
     target: &ColumnType,
     control: &ProductionControl<'_>,
 ) -> Result<bool, SQLError> {
+    explicit_type_compatible_in_catalog(source, target, None, control)
+}
+
+fn explicit_type_compatible_in_catalog(
+    source: &ColumnType,
+    target: &ColumnType,
+    catalog: Option<&dyn crate::expr::SQLValueCatalog>,
+    control: &ProductionControl<'_>,
+) -> Result<bool, SQLError> {
     control.check()?;
     let source = base_type(source).without_type_modifiers_with_control(control)?;
     let target = base_type(target).without_type_modifiers_with_control(control)?;
@@ -81,6 +91,19 @@ pub(super) fn explicit_type_compatible_with_control(
         || record_coercion(&source, &target)
     {
         return Ok(true);
+    }
+    if let (ColumnType::DeclaredRange(range), ColumnType::DeclaredMultirange(multi)) =
+        (&*source, &*target)
+    {
+        return Ok(catalog
+            .map(|catalog| catalog.value_range_type(range.oid))
+            .transpose()?
+            .flatten()
+            .is_some_and(|descriptor| {
+                descriptor.cast_oid.is_some()
+                    && descriptor.range_oid == range.oid
+                    && descriptor.multirange_oid == multi.oid
+            }));
     }
     if catalog::context(
         &cast_catalog_name_with_control(&source, control)?,
@@ -98,9 +121,10 @@ pub(super) fn explicit_type_compatible_with_control(
             _ => None,
         };
         if let Some(source) = source {
-            return explicit_type_compatible_with_control(
+            return explicit_type_compatible_in_catalog(
                 array_element(source),
                 array_element(target),
+                catalog,
                 control,
             );
         }
@@ -119,14 +143,15 @@ fn cast_catalog_name_with_control(
     }
 }
 
-pub(super) fn validate_explicit_cast_with_control(
+pub(crate) fn validate_explicit_cast_with_control(
     source: Option<&ColumnType>,
     target: &ColumnType,
+    catalog: Option<&dyn crate::expr::SQLValueCatalog>,
     control: &ProductionControl<'_>,
 ) -> Result<(), SQLError> {
     control.check()?;
     if let Some(source) = source {
-        if !explicit_type_compatible_with_control(source, target, control)? {
+        if !explicit_type_compatible_in_catalog(source, target, catalog, control)? {
             return Err(undefined_cast(source, target));
         }
     }

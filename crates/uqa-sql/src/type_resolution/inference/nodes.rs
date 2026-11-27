@@ -67,6 +67,7 @@ pub(super) fn cast_type_with_control(
         cast_compatibility::validate_explicit_cast_with_control(
             source.as_deref(),
             target,
+            resolver.and_then(FunctionTypeResolver::enum_labels),
             control,
         )?;
     }

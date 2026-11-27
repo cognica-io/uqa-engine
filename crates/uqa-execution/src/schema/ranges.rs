@@ -55,6 +55,15 @@ struct Options<'a> {
     multirange: Option<RelationIdentity>,
 }
 
+struct ResolvedOptions {
+    subtype: ColumnType,
+    subtype_operator_class: u32,
+    collation_oid: u32,
+    canonical_oid: Option<u32>,
+    subtype_difference_oid: Option<u32>,
+    multirange: Option<RelationIdentity>,
+}
+
 impl<'a> Options<'a> {
     fn bind(
         context: &RangeCreationContext<'_>,
@@ -107,6 +116,102 @@ impl<'a> Options<'a> {
         }
         Ok(options)
     }
+
+    fn resolve(
+        self,
+        context: &RangeCreationContext<'_>,
+        shell_oid: Option<u32>,
+    ) -> Result<ResolvedOptions, SQLError> {
+        let Options {
+            subtype,
+            class,
+            collation,
+            canonical,
+            difference,
+            multirange,
+        } = self;
+        let subtype =
+            subtype.ok_or_else(|| error("42601", "type attribute \"subtype\" is required"))?;
+        let subtype_oid = type_metadata::pg_type_oid(&subtype);
+        if matches!(
+            subtype,
+            ColumnType::Record | ColumnType::AnyArray | ColumnType::Void | ColumnType::Pseudo(_)
+        ) || type_metadata::routine_pseudo_type_name(subtype_oid).is_some()
+        {
+            return Err(error(
+                "42804",
+                format!("range subtype cannot be {}", subtype.display_name()),
+            ));
+        }
+        let subtype_operator_class = support::operator_class(context, &subtype, class)?;
+        if collation.is_some() && type_metadata::pg_type_collation_oid(&subtype) == 0 {
+            return Err(error(
+                "42809",
+                "range collation specified but subtype does not support collation",
+            ));
+        }
+        let collation_oid = uqa_sql::catalog::collations::declarations::select(
+            context.catalog.routines,
+            &subtype,
+            collation,
+        )?;
+        let canonical_oid = canonical.map(|name| {
+            let oid = shell_oid.ok_or_else(|| SQLError::Diagnostic {
+                sqlstate: "42P17".into(),
+                message: "cannot specify a canonical function without a pre-created shell type".into(),
+                detail: None, hint: Some("Create the type as a shell type, then create its canonicalization function, then do a full CREATE TYPE.".into()),
+            })?;
+            support::routine(context, name, oid, true)
+        }).transpose()?;
+        let subtype_difference_oid = difference
+            .map(|name| {
+                support::routine(
+                    context,
+                    name,
+                    u32::try_from(subtype_oid).expect("type OID"),
+                    false,
+                )
+            })
+            .transpose()?;
+
+        Ok(ResolvedOptions {
+            subtype,
+            subtype_operator_class,
+            collation_oid,
+            canonical_oid,
+            subtype_difference_oid,
+            multirange,
+        })
+    }
+}
+
+fn reserve_multirange_name(
+    types: &TypeLifecycleContext<'_>,
+    range: &RelationIdentity,
+    requested: Option<RelationIdentity>,
+) -> Result<RelationIdentity, SQLError> {
+    let creation = &types.creation;
+    let name = if let Some(name) = requested {
+        arrays::displace_array_type(creation, types.registries, &name)?;
+        if &name == range {
+            return Err(error(
+                "42710",
+                format!("type \"{}\" already exists", name.name),
+            ));
+        }
+        name
+    } else {
+        let name = RelationIdentity::new(&range.schema, multirange_type_name(&range.name));
+        if &name == range || creation.type_name_in_use(&name) {
+            return Err(SQLError::Diagnostic {
+                sqlstate: "42710".into(), message: format!("type \"{}\" already exists", name.name),
+                detail: Some(format!("Failed while creating a multirange type for type \"{}\".", range.name)),
+                hint: Some("You can manually specify a multirange type name using the \"multirange_type_name\" attribute.".into()),
+            });
+        }
+        name
+    };
+    creation.reserve_type_name(&name.qualified_name())
 }
 
 pub fn create_range(
@@ -126,78 +231,16 @@ pub fn create_range(
     } else {
         creation.reserve_type_name(&name)?
     };
-    let Options {
+    let ResolvedOptions {
         subtype,
-        class,
-        collation,
-        canonical,
-        difference,
+        subtype_operator_class,
+        collation_oid,
+        canonical_oid,
+        subtype_difference_oid,
         multirange,
-    } = Options::bind(context, declaration)?;
-    let subtype =
-        subtype.ok_or_else(|| error("42601", "type attribute \"subtype\" is required"))?;
-    let subtype_oid = type_metadata::pg_type_oid(&subtype);
-    if matches!(
-        subtype,
-        ColumnType::Record | ColumnType::AnyArray | ColumnType::Void | ColumnType::Pseudo(_)
-    ) || type_metadata::routine_pseudo_type_name(subtype_oid).is_some()
-    {
-        return Err(error(
-            "42804",
-            format!("range subtype cannot be {}", subtype.display_name()),
-        ));
-    }
-    let subtype_operator_class = support::operator_class(context, &subtype, class)?;
-    if collation.is_some() && type_metadata::pg_type_collation_oid(&subtype) == 0 {
-        return Err(error(
-            "42809",
-            "range collation specified but subtype does not support collation",
-        ));
-    }
-    let collation_oid = uqa_sql::catalog::collations::declarations::select(
-        context.catalog.routines,
-        &subtype,
-        collation,
-    )?;
-    let canonical_oid = canonical.map(|name| {
-        let shell = shell.as_ref().ok_or_else(|| SQLError::Diagnostic {
-            sqlstate: "42P17".into(),
-            message: "cannot specify a canonical function without a pre-created shell type".into(),
-            detail: None, hint: Some("Create the type as a shell type, then create its canonicalization function, then do a full CREATE TYPE.".into()),
-        })?;
-        support::routine(context, name, shell.oid, true)
-    }).transpose()?;
-    let subtype_difference_oid = difference
-        .map(|name| {
-            support::routine(
-                context,
-                name,
-                u32::try_from(subtype_oid).expect("type OID"),
-                false,
-            )
-        })
-        .transpose()?;
-
-    let multi = if let Some(name) = multirange {
-        arrays::displace_array_type(creation, types.registries, &name)?;
-        if name == range {
-            return Err(error(
-                "42710",
-                format!("type \"{}\" already exists", name.name),
-            ));
-        }
-        creation.reserve_type_name(&name.qualified_name())?
-    } else {
-        let name = RelationIdentity::new(&range.schema, multirange_type_name(&range.name));
-        if name == range || creation.type_name_in_use(&name) {
-            return Err(SQLError::Diagnostic {
-                sqlstate: "42710".into(), message: format!("type \"{}\" already exists", name.name),
-                detail: Some(format!("Failed while creating a multirange type for type \"{}\".", range.name)),
-                hint: Some("You can manually specify a multirange type name using the \"multirange_type_name\" attribute.".into()),
-            });
-        }
-        creation.reserve_type_name(&name.qualified_name())?
-    };
+    } = Options::bind(context, declaration)?
+        .resolve(context, shell.as_ref().map(|shell| shell.oid))?;
+    let multi = reserve_multirange_name(types, &range, multirange)?;
     let array_name =
         arrays::reserve_array_name_avoiding(creation, &range.schema, &range.name, &[&multi])?;
     let range_array = RelationIdentity::new(&range.schema, &array_name);
@@ -213,20 +256,22 @@ pub fn create_range(
     )?;
     let multi_object_id = (context.allocate_identity)()?;
     let mut allocator = types.identities.allocator(allocate_catalog_object_id);
-    let mut allocate = |id: &[u8; 16]| -> Result<u32, SQLError> {
+    let mut allocate = |class, id: &[u8; 16]| -> Result<u32, SQLError> {
         let oid = allocator
-            .allocate_catalog_oid(CatalogOidClass::Type, id)
+            .allocate_catalog_oid(class, id)
             .map_err(|failure| {
                 uqa_sql::catalog::errors::storage_error("range catalog identity", &failure)
             })?;
-        u32::try_from(oid).map_err(|_| SQLError::Internal(format!("invalid range type OID {oid}")))
+        u32::try_from(oid)
+            .map_err(|_| SQLError::Internal(format!("invalid range catalog OID {oid}")))
     };
-    let array_oid = allocate(&object_id)?;
-    let multi_oid = allocate(&multi_object_id)?;
-    let multi_array_oid = allocate(&multi_object_id)?;
-    let oid = shell
-        .as_ref()
-        .map_or_else(|| allocate(&object_id), |shell| Ok(shell.oid))?;
+    let array_oid = allocate(CatalogOidClass::Type, &object_id)?;
+    let multi_oid = allocate(CatalogOidClass::Type, &multi_object_id)?;
+    let multi_array_oid = allocate(CatalogOidClass::Type, &multi_object_id)?;
+    let oid = shell.as_ref().map_or_else(
+        || allocate(CatalogOidClass::Type, &object_id),
+        |shell| Ok(shell.oid),
+    )?;
     creation.retain_owner(&owner)?;
     let mut definition = StoredRange {
         object_id,
@@ -241,6 +286,7 @@ pub fn create_range(
         canonical_oid,
         subtype_difference_oid,
         constructor_oids: None,
+        cast_oid: None,
         identity: range,
         multirange: StoredMultirange {
             object_id: multi_object_id,
@@ -256,6 +302,7 @@ pub fn create_range(
         &context.routines,
         &definition,
     )?);
+    definition.cast_oid = Some(allocate(CatalogOidClass::Cast, &object_id)?);
     let before = publication.range_registry().clone();
     let mut registry = before.clone();
     registry.insert(name, definition)?;

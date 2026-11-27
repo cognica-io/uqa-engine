@@ -87,6 +87,10 @@ pub(super) enum ConstraintOwner {
 /// An object that `getObjectDescription` names through the relation or roles it belongs to.
 #[derive(Debug, Clone)]
 pub(super) enum MemberObject {
+    RangeCast {
+        source: u32,
+        target: u32,
+    },
     Constraint {
         name: String,
         owner: ConstraintOwner,

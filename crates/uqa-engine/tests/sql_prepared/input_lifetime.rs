@@ -61,7 +61,7 @@ fn open(provider: usize, path: &std::path::Path) -> Engine {
 fn prepared_inputs_follow_only_committed_peer_catalog_dependencies(#[case] provider: usize) {
     let directory = tempfile::tempdir().unwrap();
     let engine = open(provider, &directory.path().join("prepared-peer.db"));
-    crate::pg18_oracle::verify_peer(
+    crate::pg18_peer::verify(
         &engine,
         include_str!("../../../../tests/parity/pg18/prepared_dependency_sessions.expected.json"),
     );

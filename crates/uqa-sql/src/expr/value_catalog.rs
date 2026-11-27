@@ -53,6 +53,17 @@ impl super::composites::CompositeTypeCatalog for ValueCompositeCatalog<'_> {
 /// Type metadata and enum support used to observe already admitted SQL values. Implementations borrow one statement catalog generation and never invoke type input.
 pub trait SQLValueCatalog {
     /// The selected endpoint layout of a range or multirange in this statement generation. Observation does not execute input, domain checks or a canonical support function.
+    /// The selected ordinary SQL function for a range-to-multirange cast, when this catalog publishes one.
+    fn value_range_cast_binding(
+        &self,
+        _source: u32,
+        _target: u32,
+        control: &ProductionControl<'_>,
+    ) -> Result<Option<Produced<crate::ast::FunctionBinding>>> {
+        control.check()?;
+        Ok(None)
+    }
+
     fn value_range_type(
         &self,
         _oid: u32,
@@ -197,6 +208,19 @@ impl SQLValueCatalog for EngineValueCatalog<'_> {
                 )
             })?
             .range_bound_equality_key(range_oid, value, control)
+    }
+
+    fn value_range_cast_binding(
+        &self,
+        source: u32,
+        target: u32,
+        control: &ProductionControl<'_>,
+    ) -> Result<Option<Produced<crate::ast::FunctionBinding>>> {
+        self.0
+            .enum_labels()
+            .map(|catalog| catalog.value_range_cast_binding(source, target, control))
+            .transpose()
+            .map(Option::flatten)
     }
 
     fn value_range_type(

@@ -9,7 +9,7 @@ mod anonymous;
 mod catalog;
 pub use catalog::call_catalog_validator;
 mod range_support;
-pub use range_support::call_range_canonical;
+pub use range_support::{call_range_canonical, call_range_cast};
 pub mod bodies;
 pub mod context;
 mod depth;

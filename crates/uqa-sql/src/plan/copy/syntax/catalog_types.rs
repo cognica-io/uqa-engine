@@ -67,6 +67,7 @@ syntax_struct!(crate::catalog::range_type::StoredRange {
     canonical_oid,
     subtype_difference_oid,
     constructor_oids,
+    cast_oid,
     multirange,
     usage_acl
 });

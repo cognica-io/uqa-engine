@@ -40,15 +40,30 @@ pub struct StoredRange {
     /// Optional support routine identities, independent of routine names and the endpoint's native range family.
     pub canonical_oid: Option<u32>,
     pub subtype_difference_oid: Option<u32>,
-    /// The two range and three multirange constructors, in PostgreSQL signature order. Legacy catalog records can describe a type without SQL-generated routines.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub constructor_oids: Option<[u32; 5]>,
     pub multirange: StoredMultirange,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub usage_acl: Option<Vec<ObjectAclEntry>>,
+    /// The two range and three multirange constructors, in `PostgreSQL` signature order. Legacy catalog records can describe a type without SQL-generated routines.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub constructor_oids: Option<[u32; 5]>,
+    /// The explicit range-to-multirange cast in `pg_cast`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cast_oid: Option<u32>,
 }
 
 impl StoredRange {
+    #[must_use]
+    pub fn cast(&self) -> Option<crate::type_resolution::CastCatalogRow> {
+        Some(crate::type_resolution::CastCatalogRow {
+            oid: self.cast_oid?,
+            source: self.oid,
+            target: self.multirange.oid,
+            function: self.constructor_oids?[3],
+            context: b'e',
+            method: b'f',
+        })
+    }
+
     #[must_use]
     pub fn reference(&self) -> RangeTypeReference {
         RangeTypeReference {
@@ -87,6 +102,7 @@ impl StoredRange {
         RangeValueDescriptor {
             range_oid: self.oid,
             multirange_oid: self.multirange.oid,
+            cast_oid: self.cast_oid,
             endpoint: self.subtype.clone(),
         }
     }

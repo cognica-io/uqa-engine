@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Built-in `pg_opclass` identities in PostgreSQL 18.4. B-tree selection and catalog projection read the same B-tree definitions.
+//! Built-in `pg_opclass` identities in `PostgreSQL` 18.4. B-tree selection and catalog projection read the same B-tree definitions.
 
 use super::builtin_btree_operator_classes;
 

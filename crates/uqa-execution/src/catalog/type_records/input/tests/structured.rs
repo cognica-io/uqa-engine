@@ -41,6 +41,7 @@ impl Fixture for StoredRange {
             canonical_oid: None,
             subtype_difference_oid: None,
             constructor_oids: None,
+            cast_oid: None,
             multirange: StoredMultirange {
                 object_id: [u8::try_from(index * 2 + 2).unwrap(); 16],
                 oid: oid + 2,

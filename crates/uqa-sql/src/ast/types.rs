@@ -162,7 +162,7 @@ pub enum ColumnType {
     Enum(super::EnumTypeReference),
     /// A composite type bound by catalog identity: a standalone composite type or a relation's row type.
     Composite(super::CompositeTypeReference),
-    /// PostgreSQL full-text lexemes with optional positions and weights.
+    /// `PostgreSQL` full-text lexemes with optional positions and weights.
     TsVector,
 }
 

@@ -255,16 +255,7 @@ fn register(
     let owner = locks.bind(&requested_owner)?;
     def.owner = Some(owner.identity());
     def.name = context.namespace.object_name(&def.name)?;
-    let (checks_bodies, bound) = if let Some(bound) = generated {
-        (false, bound)
-    } else {
-        validate_routine_creation(context, &mut def, &current_user)?;
-        let checks = checks_function_bodies(context.configuration)?;
-        (
-            checks,
-            compile_catalog_bound_routine(&context.definition, &mut def, body_compilation(checks))?,
-        )
-    };
+    let (checks_bodies, bound) = bind_registration(context, &mut def, &current_user, generated)?;
     let name = def.name.clone();
     let signature = routine_signature_types(&def);
     let new_oid = new_routine_oid(context, &name, &signature)?;
@@ -343,6 +334,21 @@ fn register(
     drop(roles);
     finish_registration(context, &def, &published, &bound, checks_bodies)?;
     Ok(published)
+}
+
+fn bind_registration(
+    context: &RoutineRegistrationContext<'_>,
+    def: &mut CreateFunction,
+    current_user: &uqa_sql::catalog::roles::RoleReference,
+    generated: Option<BoundRoutine>,
+) -> Result<(bool, BoundRoutine), SQLError> {
+    if let Some(bound) = generated {
+        return Ok((false, bound));
+    }
+    validate_routine_creation(context, def, current_user)?;
+    let checks = checks_function_bodies(context.configuration)?;
+    let bound = compile_catalog_bound_routine(&context.definition, def, body_compilation(checks))?;
+    Ok((checks, bound))
 }
 
 fn bind_initial_privileges(

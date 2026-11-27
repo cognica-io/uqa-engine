@@ -7,6 +7,7 @@
 //! Virtual `pg_catalog` relation builders.
 
 mod attributes;
+pub(super) mod casts;
 mod composites;
 mod constraint_definitions;
 mod constraints;

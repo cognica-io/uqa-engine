@@ -69,10 +69,28 @@ pub(crate) fn build_requested_catalog_rows(
     let catalog = metadata.as_deref().unwrap_or(catalog);
     let mut catalog_resolution = resolution.clone();
     catalog_resolution.set_lookup_mode(crate::catalog::RelationLookupMode::Bound);
-    let resolution = &catalog_resolution;
+    project_catalog_rows(
+        context,
+        catalog,
+        &catalog_resolution,
+        session,
+        relation,
+        request,
+    )
+    .map(Some)
+}
+
+fn project_catalog_rows(
+    context: &CatalogContext<'_>,
+    catalog: &CatalogReadView,
+    resolution: &RelationNameResolution,
+    session: &dyn CatalogSession,
+    relation: VirtualRelation,
+    request: &CatalogRequest,
+) -> Result<Vec<ResultRow>, SQLError> {
     let output = CatalogOutput(*context);
     let output = Some(&output as &dyn uqa_sql::expr::EngineHook);
-    Ok(Some(match relation {
+    Ok(match relation {
         VirtualRelation::InformationSchemaCatalogName => build_info_catalog_name(),
         VirtualRelation::InformationSchemata => build_info_schemata(catalog, resolution)?,
         VirtualRelation::InformationTables => build_info_tables(context, catalog, resolution)?,
@@ -127,6 +145,7 @@ pub(crate) fn build_requested_catalog_rows(
         VirtualRelation::PgType => {
             pg_catalog::build_requested_pg_type(context, catalog, resolution, request)?
         }
+        VirtualRelation::PgCast => pg_catalog::casts::rows(catalog),
         VirtualRelation::PgOpclass => pg_catalog::operator_classes::rows(),
         VirtualRelation::PgRange => pg_catalog::build_pg_range_with_catalog(catalog),
         VirtualRelation::PgEnum => build_pg_enum(catalog),
@@ -159,7 +178,7 @@ pub(crate) fn build_requested_catalog_rows(
         VirtualRelation::PgSequences => build_pg_sequences(catalog, session)?,
         VirtualRelation::AgGraph => build_ag_graph(catalog)?,
         VirtualRelation::AgLabel => build_ag_label(catalog)?,
-    }))
+    })
 }
 
 mod ag_catalog;

@@ -8,9 +8,7 @@
 
 use crate::binding::preparation::{LiteralInput, SchemaContext};
 
-use super::{
-    error, ColumnType, ExpressionType, Preparation, QueryPlan, RowSchema, SQLError, ScalarExpr,
-};
+use super::{ColumnType, ExpressionType, Preparation, QueryPlan, RowSchema, SQLError, ScalarExpr};
 use crate::ast::BinaryOp;
 use crate::catalog::collations::derivation::Derivation;
 use crate::semantics::sets::placement::SetPlacement;
@@ -118,18 +116,12 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
                     element.as_ref()
                 };
                 self.parameters.coerce_unknown(item, element)?;
-                if let Some(source) = &item.ty {
-                    if !crate::type_resolution::explicit_type_compatible(source, element) {
-                        return Err(error(
-                            "42846",
-                            format!(
-                                "cannot cast type {} to {}",
-                                source.display_name(),
-                                element.display_name()
-                            ),
-                        ));
-                    }
-                }
+                crate::type_resolution::validate_explicit_cast_with_control(
+                    item.ty.as_deref(),
+                    element,
+                    self.routines.enum_labels(),
+                    &control,
+                )?;
                 item.derivation = cast_collation(expression, item, element)?;
             }
             ExpressionType::combined(Some(array_type.clone()), &items)
@@ -147,20 +139,12 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
         }
         let initial_collation = cast_initial_collation(expr, &source, target)?;
         self.parameters.coerce_unknown(&mut source, target)?;
-        if source
-            .ty
-            .as_ref()
-            .is_some_and(|source| !crate::type_resolution::explicit_type_compatible(source, target))
-        {
-            return Err(error(
-                "42846",
-                format!(
-                    "cannot cast type {} to {}",
-                    source.ty.as_deref().expect("known source").display_name(),
-                    target.display_name()
-                ),
-            ));
-        }
+        crate::type_resolution::validate_explicit_cast_with_control(
+            source.ty.as_deref(),
+            target,
+            self.routines.enum_labels(),
+            &self.scope.control(),
+        )?;
         if source
             .ty
             .as_ref()

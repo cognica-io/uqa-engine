@@ -203,11 +203,11 @@ Use `TIMESTAMPTZ` for instants and `TIMESTAMP` for timezone-independent wall-clo
 
 The six PostgreSQL built-in range families are implemented as declared SQL identities: `INT4RANGE` / `INT4MULTIRANGE`, `INT8RANGE` / `INT8MULTIRANGE`, `NUMRANGE` / `NUMMULTIRANGE`, `DATERANGE` / `DATEMULTIRANGE`, `TSRANGE` / `TSMULTIRANGE`, and `TSTZRANGE` / `TSTZMULTIRANGE`. Range literals use PostgreSQL bound notation, including unbounded and `empty` values, and multirange literals use braces around comma-separated range members.
 
-Use `CREATE TYPE ... AS RANGE` to define a range over a subtype with B-tree ordering. The declaration creates the range, its multirange, their array types and their constructors in the same transaction. The subtype supplies the default collation and operator class. Use `collation` or `subtype_opclass` to select a different one and `multirange_type_name` to choose the multirange name.
+Use `CREATE TYPE ... AS RANGE` to define a range over a subtype with B-tree ordering. The declaration creates the range, its multirange, both array types, the constructor functions and an explicit cast from the range to its multirange in one transaction. The subtype supplies the default collation and operator class. Use `collation` or `subtype_opclass` to select a different one and `multirange_type_name` to choose the multirange name.
 
 ```sql execute
 CREATE TYPE wordrange AS RANGE (subtype = text, multirange_type_name = wordranges);
-SELECT wordrange('a', 'b'), wordranges(wordrange('x', 'z', '[]'));
+SELECT wordrange('a', 'b'), wordrange('x', 'z', '[]')::wordranges;
 DROP TYPE wordrange;
 ```
 

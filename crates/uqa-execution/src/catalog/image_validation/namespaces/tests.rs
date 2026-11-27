@@ -130,6 +130,7 @@ fn native_namespaces_check_indexes_and_independently_relocated_multiranges() {
                 canonical_oid: None,
                 subtype_difference_oid: None,
                 constructor_oids: None,
+                cast_oid: None,
                 multirange: StoredMultirange {
                     object_id: [4; 16],
                     oid: 30_002,

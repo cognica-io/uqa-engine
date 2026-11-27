@@ -226,6 +226,7 @@ fn native_range_references_preserve_companion_identity_and_endpoint_alignment() 
                 canonical_oid: None,
                 subtype_difference_oid: None,
                 constructor_oids: None,
+                cast_oid: None,
                 multirange: StoredMultirange {
                     object_id: [4; 16],
                     oid: 30_002,

@@ -18,9 +18,9 @@ use uqa_sql::catalog::languages::{language_name, PLPGSQL_EXTENSION, PLPGSQL_LANG
 use uqa_sql::SQLError;
 
 /// Catalogs whose objects `getObjectDescription` can name and that hold no objects in this catalog.
-const EMPTY_CLASSES: [u32; 25] = [
-    1213, 1418, 2601, 2602, 2603, 2605, 2607, 2613, 2616, 2617, 2753, 3256, 3381, 3456, 3466, 3576,
-    3600, 3601, 3602, 3764, 6100, 6104, 6106, 6237, 6243,
+const EMPTY_CLASSES: [u32; 24] = [
+    1213, 1418, 2601, 2602, 2603, 2607, 2613, 2616, 2617, 2753, 3256, 3381, 3456, 3466, 3576, 3600,
+    3601, 3602, 3764, 6100, 6104, 6106, 6237, 6243,
 ];
 
 pub(super) fn describe(
@@ -63,6 +63,21 @@ pub(super) fn describe(
         EXTENSION_CLASS => (object.object_id == PLPGSQL_EXTENSION)
             .then(|| language_name(PLPGSQL_LANGUAGE).map(|name| format!("extension {name}")))
             .flatten(),
+        uqa_sql::catalog::dependencies::CAST_CLASS => {
+            let types = match objects.member(object.class_id, object.object_id) {
+                Some(MemberObject::RangeCast { source, target }) => Some((*source, *target)),
+                _ => uqa_sql::type_resolution::builtin_casts()
+                    .find(|cast| cast.oid == object.object_id)
+                    .map(|cast| (cast.source, cast.target)),
+            };
+            if let Some((source, target)) = types {
+                type_name(context, objects, source)?
+                    .zip(type_name(context, objects, target)?)
+                    .map(|(source, target)| format!("cast from {source} to {target}"))
+            } else {
+                None
+            }
+        }
         CONSTRAINT_CLASS
         | ATTRIBUTE_DEFAULT_CLASS
         | REWRITE_CLASS
@@ -144,6 +159,7 @@ fn member_description(
             name,
             relation: oid,
         } => relation(*oid)?.map(|relation| format!("trigger {name} on {relation}")),
+        MemberObject::RangeCast { .. } => None,
         MemberObject::Membership { member, role } => objects
             .role_name(*member)
             .zip(objects.role_name(*role))

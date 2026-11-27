@@ -19,19 +19,7 @@ use uqa_storage::StorageBackendError;
 impl DeletionPlan {
     /// Remove each object in order, as `deleteObjectsInList` does, so nothing that remains names an object already removed. Surviving routine bodies that name removed columns in source aliases are rewritten, and stored `MERGE` plans are refreshed.
     pub(super) fn execute(self, context: &CatalogRemovalContext<'_>) -> Result<(), SQLError> {
-        // `heap_drop_with_catalog`'s `CheckTableNotInUse`: removing a table's constraints first must not discard the pending trigger events that forbid dropping it.
-        for object in &self.steps {
-            if let CatalogObject::Relation {
-                identity,
-                kind: RelationKind::Table,
-                ..
-            } = object
-            {
-                context
-                    .events
-                    .ensure_no_pending_trigger_events(&identity.qualified_name(), "DROP TABLE")?;
-            }
-        }
+        self.check_pending_table_events(context)?;
         let routines = routine_targets(context, &self.steps)?;
         let mut rewritten = Some(routine_alias_rewrites(context, &self.steps, &routines)?);
         // Surviving routines stop naming removed columns as soon as the last column is gone, before a later step, such as removing a schema, reloads the catalog and validates them.
@@ -111,7 +99,9 @@ impl DeletionPlan {
                 CatalogObject::ForeignWrapper { name, object_id } => {
                     context.foreign_wrappers.remove(name, *object_id)?;
                 }
-                CatalogObject::ArrayType { .. } | CatalogObject::RowType { .. } => {}
+                CatalogObject::ArrayType { .. }
+                | CatalogObject::RowType { .. }
+                | CatalogObject::RangeCast => {}
             }
             if Some(position) == last_column {
                 publish_routine_rewrites(context, rewritten.take())?;
@@ -121,6 +111,25 @@ impl DeletionPlan {
             context.tables.publication.prune_constraint_modes()?;
         }
         publish_routine_rewrites(context, rewritten.take())
+    }
+    fn check_pending_table_events(
+        &self,
+        context: &CatalogRemovalContext<'_>,
+    ) -> Result<(), SQLError> {
+        // `heap_drop_with_catalog`'s `CheckTableNotInUse`: removing a table's constraints first must not discard the pending trigger events that forbid dropping it.
+        for object in &self.steps {
+            if let CatalogObject::Relation {
+                identity,
+                kind: RelationKind::Table,
+                ..
+            } = object
+            {
+                context
+                    .events
+                    .ensure_no_pending_trigger_events(&identity.qualified_name(), "DROP TABLE")?;
+            }
+        }
+        Ok(())
     }
 }
 

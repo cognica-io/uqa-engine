@@ -51,7 +51,7 @@ fn clipped_name(type_name: &str, overhead: usize) -> &str {
     &type_name[..length]
 }
 
-/// PostgreSQL inserts `multi` before the first literal `range` or appends `_multirange` to a clipped base.
+/// `PostgreSQL` inserts `multi` before the first literal `range` or appends `_multirange` to a clipped base.
 pub fn multirange_type_name(range: &str) -> String {
     if let Some((prefix, suffix)) = range.split_once("range") {
         let name = format!("{prefix}multirange{suffix}");

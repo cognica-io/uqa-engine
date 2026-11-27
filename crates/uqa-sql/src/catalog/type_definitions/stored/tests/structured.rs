@@ -15,6 +15,7 @@ fn range() -> String {
         "subtype_operator_class":1978,"collation_oid":0,"canonical_oid":null,"subtype_difference_oid":20005,
         "multirange":{"object_id":vec![4u8;16],"oid":20002,"array_oid":20003,"array_name":"_multi","identity":{"schema":"other","name":"multi"}},
         "usage_acl":[{"role":null,"grantor":owner(),"grant_option":false}],
+        "constructor_oids":[20101,20102,20103,20104,20105],"cast_oid":20106,
     }).to_string()
 }
 fn composite() -> String {
@@ -66,6 +67,8 @@ fn stored_range_input_preserves_optional_support_and_multirange_identity_shapes(
             "subtype_difference_oid",
             "multirange",
             "usage_acl",
+            "constructor_oids",
+            "cast_oid",
         ],
         read,
     );

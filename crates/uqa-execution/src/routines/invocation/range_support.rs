@@ -4,7 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Canonical callbacks retain their catalog identity and invoke the existing routine owner with already admitted arguments.
+//! Range canonicalization and explicit coercion invoke the selected catalog routine with an already admitted range.
 
 use super::context::RoutineInvocationContext;
 use crate::catalog::CatalogReadView;
@@ -12,11 +12,7 @@ use uqa_core::{
     memory::{Produced, ProductionControl, ProductionVec},
     Value,
 };
-use uqa_sql::{
-    ast::{ColumnType, FunctionBinding},
-    routines::{resolution::RoutineCallKind, routine_signature_types},
-    SQLError,
-};
+use uqa_sql::{ast::ColumnType, routines::resolution::RoutineCallKind, SQLError};
 
 pub fn call_range_canonical(
     context: &RoutineInvocationContext<'_>,
@@ -26,11 +22,6 @@ pub fn call_range_canonical(
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Value>, SQLError> {
     control.check()?;
-    let missing = || SQLError::Routine {
-        sqlstate: "XX000".into(),
-        message: format!("cache lookup failed for function {oid}"),
-    };
-    let function = catalog.sql_function_by_oid(oid)?.ok_or_else(missing)?;
     let Value::Datum(datum) = value else {
         return Err(SQLError::Internal(
             "canonical callback requires a physical range".into(),
@@ -45,17 +36,72 @@ pub fn call_range_canonical(
                 datum.type_oid()
             ))
         })?;
-    let binding = FunctionBinding {
-        object_id: function.def.object_id,
-        name: function.def.name.clone(),
-        argument_types: routine_signature_types(&function.def),
-        builtin: false,
-        dispatch: None,
-        invocation: None,
-        value_binding: None,
-        resolution_error: None,
-        input_collation: None,
+    invoke(
+        context,
+        catalog,
+        definition,
+        RangeFunction::Canonical(oid),
+        value,
+        control,
+    )
+}
+
+/// Range declarations publish a function cast using the one-member multirange constructor.
+pub fn call_range_cast(
+    context: &RoutineInvocationContext<'_>,
+    catalog: &CatalogReadView,
+    source: u32,
+    target: u32,
+    value: &Value,
+    control: &ProductionControl<'_>,
+) -> Result<Option<Produced<Value>>, SQLError> {
+    control.check()?;
+    let Some(definition) = catalog.range_definition_by_oid(source)? else {
+        return Ok(None);
     };
+    let Some(cast) = definition
+        .cast()
+        .filter(|cast| cast.source == source && cast.target == target)
+    else {
+        return Ok(None);
+    };
+    if matches!(value, Value::Null) {
+        return Ok(Some(control.copy_value(value)?));
+    }
+    invoke(
+        context,
+        catalog,
+        definition,
+        RangeFunction::Cast(cast.function),
+        value,
+        control,
+    )
+    .map(Some)
+}
+
+#[derive(Clone, Copy)]
+enum RangeFunction {
+    Canonical(u32),
+    Cast(u32),
+}
+
+fn invoke(
+    context: &RoutineInvocationContext<'_>,
+    catalog: &CatalogReadView,
+    definition: &uqa_sql::catalog::range_type::StoredRange,
+    selected: RangeFunction,
+    value: &Value,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>, SQLError> {
+    let oid = match selected {
+        RangeFunction::Canonical(oid) | RangeFunction::Cast(oid) => oid,
+    };
+    let missing = || SQLError::Routine {
+        sqlstate: "XX000".into(),
+        message: format!("cache lookup failed for function {oid}"),
+    };
+    let function = catalog.sql_function_by_oid(oid)?.ok_or_else(missing)?;
+    let binding = function.catalog_binding(None, control)?;
     let matched = context
         .overloads
         .resolve_static_sql_routine_match(
@@ -77,12 +123,22 @@ pub fn call_range_canonical(
     let mut arguments = ProductionVec::new(*control);
     arguments.push_produced(control.copy_value(value)?)?;
     let (arguments, _argument_memory) = arguments.finish()?.into_parts();
-    let outcome = super::execution::execute_catalog_routine(
-        context,
-        &matched.function,
-        arguments,
-        &matched.invocation,
-    )?;
+    let outcome = match selected {
+        RangeFunction::Canonical(_) => super::execution::execute_catalog_routine(
+            context,
+            &matched.function,
+            arguments,
+            &matched.invocation,
+        ),
+        RangeFunction::Cast(_) => super::execution::execute_routine(
+            context,
+            &matched.function,
+            arguments,
+            &matched.invocation,
+            false,
+            None,
+        ),
+    }?;
     let result = if outcome.out_values.len() == 1 {
         outcome
             .out_values

@@ -60,6 +60,7 @@ impl VirtualRelation {
                 | Self::PgTrigger
                 | Self::PgRewrite
                 | Self::PgType
+                | Self::PgCast
                 | Self::PgOpclass
                 | Self::PgRange
                 | Self::PgEnum
@@ -534,6 +535,14 @@ impl VirtualRelation {
                 "enumtypid" => Inline(ColumnType::Oid),
                 "enumsortorder" => Inline(ColumnType::Real),
                 "enumlabel" => Inline(ColumnType::Name),
+            ],
+            Self::PgCast => columns![
+                "oid" => Inline(ColumnType::Oid),
+                "castsource" => Inline(ColumnType::Oid),
+                "casttarget" => Inline(ColumnType::Oid),
+                "castfunc" => Inline(ColumnType::Oid),
+                "castcontext" => Inline(ColumnType::InternalChar),
+                "castmethod" => Inline(ColumnType::InternalChar),
             ],
             Self::PgOpclass => columns![
                 "oid" => Inline(ColumnType::Oid),

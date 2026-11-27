@@ -32,6 +32,7 @@ impl<'a> Input<'a, '_> {
             canonical_oid: None,
             subtype_difference_oid: None,
             constructor_oids: None,
+            cast_oid: None,
             multirange: StoredMultirange {
                 object_id: [0; 16],
                 oid: 0,
@@ -58,6 +59,7 @@ impl<'a> Input<'a, '_> {
                 "multirange",
                 "usage_acl",
                 "constructor_oids",
+                "cast_oid",
             ],
             [2559, 4095],
             |input, field, token| {
@@ -75,6 +77,7 @@ impl<'a> Input<'a, '_> {
                     10 => value.subtype_difference_oid = optional(token)?,
                     11 => value.multirange = parts.take(input.stored_multirange(token)?),
                     12 => value.usage_acl = parts.take(input.stored_usage_acl(token)?),
+                    14 => value.cast_oid = optional(token)?,
                     13 => {
                         value.constructor_oids = match token {
                             JsonToken::Null => None,

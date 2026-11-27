@@ -168,6 +168,7 @@ impl Binder<'_, '_> {
         crate::type_resolution::cast_compatibility::validate_explicit_cast_with_control(
             source.as_deref(),
             &target,
+            self.resolver.and_then(FunctionTypeResolver::enum_labels),
             &self.context.control,
         )?;
         let mut original = &*expression;

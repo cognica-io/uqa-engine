@@ -10,7 +10,7 @@ use super::{register, BoundRoutine, RoutineBody, RoutineRegistrationContext};
 use uqa_sql::{
     ast::{
         CreateFunction, FunctionBody, FunctionParallel, FunctionParam, FunctionParamMode,
-        FunctionReturns, FunctionVolatility,
+        FunctionReturns, FunctionVolatility, RoutineAttributeClauses, RoutineSecurityAttributes,
     },
     catalog::range_type::StoredRange,
     ColumnType, SQLError,
@@ -76,14 +76,14 @@ pub(crate) fn register_range_constructors(
             volatility: FunctionVolatility::Immutable,
             strict: multirange,
             owner: Some(uqa_core::catalog_role::RoleIdentity::BOOTSTRAP),
-            security: Default::default(),
+            security: RoutineSecurityAttributes::default(),
             parallel: FunctionParallel::Safe,
             support: None,
             cost: Some(1.0),
             rows: None,
             config: Vec::new(),
             config_actions: Vec::new(),
-            attribute_clauses: Default::default(),
+            attribute_clauses: RoutineAttributeClauses::default(),
             execute_acl: None,
         };
         let published = register(

@@ -42,6 +42,7 @@ fn declared_range_fixed_and_variable_bounds_match_postgresql_physical_alignment(
             _ => unreachable!(),
         };
         let descriptor = RangeValueDescriptor {
+            cast_oid: None,
             range_oid: case["range_oid"].as_u64().unwrap() as u32,
             multirange_oid: case["multirange_oid"].as_u64().unwrap() as u32,
             endpoint,

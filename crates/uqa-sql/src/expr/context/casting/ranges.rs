@@ -20,6 +20,25 @@ pub(super) fn cast(
         ColumnType::DeclaredMultirange(reference) => reference.oid,
         _ => return Ok(None),
     };
+    if let (Some(ty), ColumnType::DeclaredMultirange(_)) = (source, target) {
+        if let ColumnType::DeclaredRange(range) = base_type(ty) {
+            let member;
+            let value = match value {
+                Value::Datum(datum)
+                    if matches!(ty, ColumnType::Domain { .. })
+                        && crate::catalog::type_metadata::pg_type_oid(ty)
+                            == i64::from(datum.type_oid()) =>
+                {
+                    member = Value::Datum(datum.field(range.oid, datum.offset()));
+                    &member
+                }
+                other => other,
+            };
+            if let Some(result) = engine.cast_range_to_multirange(range.oid, oid, value, control)? {
+                return Ok(Some(result));
+            }
+        }
+    }
     let same_type = |ty: &ColumnType| {
         crate::catalog::type_metadata::pg_type_oid(base_type(ty)) == i64::from(oid)
     };

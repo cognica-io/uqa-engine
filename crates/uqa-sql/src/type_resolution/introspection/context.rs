@@ -20,6 +20,12 @@ use crate::{
 };
 use uqa_core::memory::{Produced, ProductionControl};
 
+#[derive(Default)]
+pub(super) struct CastInputs {
+    pub(super) source: Option<Produced<ColumnType>>,
+    pub(super) function: Option<Produced<crate::ast::FunctionBinding>>,
+}
+
 #[derive(Clone, Copy)]
 pub(super) struct BinderContext<'a> {
     pub(super) schema: &'a dyn ScalarTypeSchema,
@@ -153,32 +159,94 @@ impl BinderContext<'_> {
         )
     }
 
-    pub(super) fn cast_requires_source(&self, target: &str) -> Result<bool, SQLError> {
+    pub(super) fn cast_inputs(
+        &self,
+        name: &str,
+        implicit: bool,
+        operand: &ScalarExpr,
+    ) -> Result<CastInputs, SQLError> {
+        if implicit {
+            return Ok(CastInputs::default());
+        }
+        let Some(target) = self.source_sensitive_cast_target(name)? else {
+            return Ok(CastInputs::default());
+        };
+        let source = self
+            .semantic(self.infer(operand))?
+            .flatten()
+            .map(|source| self.declared_source(name, source))
+            .transpose()?
+            .flatten();
+        if let (
+            ColumnType::DeclaredMultirange(multi),
+            Some(ColumnType::DeclaredRange(range)),
+            Some(resolver),
+        ) = (&*target, source.as_deref().map(base_type), self.resolver)
+        {
+            if let Some(catalog) = resolver.enum_labels() {
+                if let Some(identity) =
+                    catalog.value_range_cast_binding(range.oid, multi.oid, &self.control)?
+                {
+                    let (argument, _memory) = source.expect("declared range operand").into_parts();
+                    let selected = resolver
+                        .resolve_function_overload_with_control(
+                            &identity.name,
+                            Some(&identity),
+                            &[None],
+                            &[Some(argument)],
+                            false,
+                            &self.control,
+                        )?
+                        .ok_or_else(|| {
+                            SQLError::Internal(format!(
+                                "missing range cast function {}",
+                                identity.name
+                            ))
+                        })?;
+                    return Ok(CastInputs {
+                        function: Some(selected.binding.clone_with_control(&self.control)?),
+                        source: None,
+                    });
+                }
+            }
+        }
+        Ok(CastInputs {
+            source,
+            function: None,
+        })
+    }
+
+    fn source_sensitive_cast_target(
+        &self,
+        name: &str,
+    ) -> Result<Option<Produced<ColumnType>>, SQLError> {
         let Some(target) = self
             .semantic(super::super::inference::resolved_type_name(
-                target,
+                name,
                 self.resolver,
                 &self.control,
             ))?
             .flatten()
         else {
-            return Ok(false);
+            return Ok(None);
         };
-        let mut target = &*target;
-        while let ColumnType::Array(element) | ColumnType::Domain { base: element, .. } = target {
+        let mut base = &*target;
+        while let ColumnType::Array(element) | ColumnType::Domain { base: element, .. } = base {
             self.control.check()?;
-            target = element;
+            base = element;
         }
-        Ok(target.is_character_string()
+        let selected = base.is_character_string()
             || matches!(
-                target,
+                base,
                 ColumnType::Bytea
                     | ColumnType::Oid
                     | ColumnType::Xid
                     | ColumnType::Int2Vector
                     | ColumnType::OidVector
                     | ColumnType::InternalChar
-            ))
+                    | ColumnType::DeclaredMultirange(_)
+            );
+        Ok(selected.then_some(target))
     }
 
     pub(super) fn declared_source(

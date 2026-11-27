@@ -123,6 +123,17 @@ pub fn displace_array_type(
         composite_type::publish(registries.composites, &before, registry)?;
         return Ok(true);
     }
+    if displace_range_array(creation, registries, requested)? {
+        return Ok(true);
+    }
+    creation.runtime.displace_relation_array(requested)
+}
+
+fn displace_range_array(
+    creation: &RelationCreationContext<'_>,
+    registries: UserTypeRegistries<'_>,
+    requested: &RelationIdentity,
+) -> Result<bool, SQLError> {
     let holder = registries
         .ranges
         .range_registry()
@@ -155,5 +166,5 @@ pub fn displace_array_type(
         crate::catalog::range_type::publish(registries.ranges, &before, registry)?;
         return Ok(true);
     }
-    creation.runtime.displace_relation_array(requested)
+    Ok(false)
 }
