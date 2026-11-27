@@ -115,7 +115,11 @@ fn selected_binding_resource_failures_never_become_missing_signatures() {
 fn stored_overload_normalizes_each_argument_once() {
     let binding = binding("PG_CATALOG.ABS", "numeric");
     let control = ProductionControl::uncontrolled();
-    let expected = bound_signature(&binding, &control).unwrap().unwrap();
+    let mut selected = None;
+    let first_lookup = allocation_counter::measure(|| {
+        selected = bound_signature(&binding, &control).unwrap();
+    });
+    let expected = selected.unwrap();
     let one_argument = allocation_counter::measure(|| {
         let normalized =
             crate::type_resolution::canonical_routine_type_name_with_control("numeric", &control)
@@ -128,9 +132,11 @@ fn stored_overload_normalizes_each_argument_once() {
             expected
         ));
     });
-    assert_eq!(
-        lookup.count_total, one_argument.count_total,
-        "{lookup:?} vs {one_argument:?}"
-    );
-    assert_eq!(lookup.bytes_total, one_argument.bytes_total);
+    for measured in [first_lookup, lookup] {
+        assert_eq!(
+            measured.count_total, one_argument.count_total,
+            "{measured:?} vs {one_argument:?}"
+        );
+        assert_eq!(measured.bytes_total, one_argument.bytes_total);
+    }
 }
