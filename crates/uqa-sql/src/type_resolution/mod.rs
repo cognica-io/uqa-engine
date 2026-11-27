@@ -99,8 +99,10 @@ pub use scalar_input::{
     scalar_array_element_oid_with_control, scalar_array_element_type_with_control,
     scalar_array_input_type_with_control, scalar_cast_source_type_name_with_control,
     scalar_integer_operation_width, scalar_integer_operation_width_with_control,
+    scalar_negation_source_with_control, scalar_operand_is_real_with_control,
     scalar_operand_type_name, scalar_operand_type_name_with_control,
     scalar_operand_type_with_engine_and_control, scalar_record_field_type_with_control,
+    ScalarNegationSource,
 };
 pub(crate) use stored_constants::store_syntax_operand_coercions;
 pub use stored_constants::{

@@ -17,6 +17,12 @@ use uqa_core::{
     Value,
 };
 
+mod operand;
+use operand::operand_type_name;
+pub use operand::{
+    scalar_negation_source_with_control, scalar_operand_is_real_with_control, ScalarNegationSource,
+};
+
 /// Retain a ROW field's analyzed SQL identity before its scalar carrier erases widths and typed NULLs. Only syntax that `PostgreSQL` leaves unknown receives the unknown OID.
 pub fn scalar_record_field_type_with_control(
     expression: &ScalarExpr,
@@ -243,109 +249,6 @@ pub fn scalar_cast_source_type_name_with_control(
     operand_type_name(expression, schema, params, None, control, true)
 }
 
-fn operand_type_name(
-    expression: &ScalarExpr,
-    schema: &dyn ScalarTypeSchema,
-    params: &[SQLParam],
-    engine: Option<&dyn crate::expr::EngineHook>,
-    control: &ProductionControl<'_>,
-    preserve_domain: bool,
-) -> Result<Option<Produced<String>>, SQLError> {
-    control.check()?;
-    let type_name = |ty: &ColumnType| {
-        let ty = if preserve_domain {
-            ty
-        } else {
-            base_type(ty, control)?
-        };
-        ty.catalog_name_with_control(control)
-            .map_err(SQLError::from)
-    };
-    let name = match expression {
-        ScalarExpr::Cast { expr, ty, .. } => {
-            if let Some(target) = resolve_operand_type(ty, engine, control)? {
-                if matches!(*target, ColumnType::Record) {
-                    let source_name =
-                        operand_type_name(expr, schema, params, engine, control, true)?;
-                    let source = match inferred_type(expr, schema, params, control)? {
-                        Some(source) => Some(source),
-                        None => source_name
-                            .as_deref()
-                            .map(|name| resolve_operand_type(name, engine, control))
-                            .transpose()?
-                            .flatten(),
-                    };
-                    if source.as_deref().is_some_and(|source| {
-                        super::cast_compatibility::preserves_record_identity(source, &target)
-                    }) {
-                        if preserve_domain {
-                            return Ok(source_name);
-                        }
-                        return source.as_deref().map(type_name).transpose();
-                    }
-                }
-            }
-            Some(ty.as_str())
-        }
-        ScalarExpr::TypedLiteral {
-            bound_type: Some(ty),
-            ..
-        }
-        | ScalarExpr::Collated { ty, .. } => {
-            return type_name(ty).map(Some);
-        }
-        ScalarExpr::Func {
-            binding: Some(binding),
-            ..
-        } if binding
-            .invocation
-            .as_ref()
-            .is_some_and(|invocation| invocation.return_type.is_some()) =>
-        {
-            binding
-                .invocation
-                .as_ref()
-                .and_then(|invocation| invocation.return_type.as_deref())
-        }
-        ScalarExpr::TypedLiteral { ty, .. }
-        | ScalarExpr::CompositeRow {
-            binding: crate::ast::CompositeRowBinding { ty, .. },
-            ..
-        } => Some(ty.as_str()),
-        ScalarExpr::UnaryMinus(inner) => {
-            return scalar_operand_type_name_with_control(inner, schema, params, control);
-        }
-        ScalarExpr::Array(items) => {
-            match array_source_name(items, schema, params, engine, control)? {
-                ArraySource::Known(name) => return Ok(Some(name)),
-                ArraySource::Unknown => return Ok(None),
-                ArraySource::Infer => {}
-            }
-            return inferred_type(expression, schema, params, control)?
-                .as_deref()
-                .map(type_name)
-                .transpose();
-        }
-        ScalarExpr::Literal(Value::Int(value)) if i32::try_from(*value).is_ok() => {
-            return type_name(&ColumnType::Integer).map(Some);
-        }
-        ScalarExpr::Literal(Value::Int(_)) => return type_name(&ColumnType::BigInteger).map(Some),
-        ScalarExpr::Literal(Value::Bytes(_)) => return type_name(&ColumnType::Bytea).map(Some),
-        ScalarExpr::Literal(Value::BitString(_)) => {
-            return type_name(&ColumnType::Bit(None)).map(Some)
-        }
-        ScalarExpr::Literal(Value::Str(_) | Value::FixedChar(_)) => return Ok(None),
-        _ => {
-            let Some(ty) = inferred_type(expression, schema, params, control)? else {
-                return Ok(None);
-            };
-            return type_name(&ty).map(Some);
-        }
-    };
-    name.map(|name| control.copy_text(name).map_err(Into::into))
-        .transpose()
-}
-
 /// Binding has already coerced a constructor's items to their common type. Their retained call signatures keep that type even when catalog-free inference cannot resolve a routine or domain. Reading this metadata performs no cast and cannot repeat a domain check.
 fn array_source_name(
     items: &[ScalarExpr],
@@ -434,8 +337,7 @@ fn operand_width(
     let Some(ty) = inferred_type(expression, schema, params, control)? else {
         return Ok(None);
     };
-    let name = base_type(&ty, control)?.sql_name_with_control(control)?;
-    Ok(integer_width_for_type(&name))
+    bound_integer_width(&ty, control)
 }
 
 fn explicit_width(
@@ -448,7 +350,7 @@ fn explicit_width(
         ScalarExpr::TypedLiteral {
             bound_type: Some(ty),
             ..
-        } => integer_width_for_type(&base_type(ty, control)?.sql_name_with_control(control)?),
+        } => bound_integer_width(ty, control)?,
         ScalarExpr::Cast { ty, .. } | ScalarExpr::TypedLiteral { ty, .. } => {
             integer_width_for_type(ty)
         }
@@ -461,6 +363,27 @@ fn explicit_width(
             Some(left) => explicit_width(rhs, control)?.map(|right| left.max(right)),
             None => None,
         },
+        _ => None,
+    })
+}
+
+fn bound_integer_width(
+    ty: &ColumnType,
+    control: &ProductionControl<'_>,
+) -> Result<Option<IntegerWidth>, SQLError> {
+    let ty = base_type(ty, control)?;
+    Ok(match ty {
+        ColumnType::SmallInteger => Some(IntegerWidth::SmallInt),
+        ColumnType::Integer => Some(IntegerWidth::Integer),
+        ColumnType::BigInteger => Some(IntegerWidth::BigInt),
+        ColumnType::Named(name) => integer_width_for_type(name),
+        ColumnType::Enum(_)
+        | ColumnType::Composite(_)
+        | ColumnType::DeclaredRange(_)
+        | ColumnType::DeclaredMultirange(_) => {
+            // The public width query also accepts an explicit user type whose SQL spelling is an unquoted integer alias.
+            integer_width_for_type(&ty.sql_name_with_control(control)?)
+        }
         _ => None,
     })
 }

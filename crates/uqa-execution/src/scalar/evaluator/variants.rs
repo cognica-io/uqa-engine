@@ -8,8 +8,8 @@
 
 use super::{
     eval_scalar_inner, evaluate_items, evaluate_qualified_whole_row, execute_exists_subquery,
-    ordinary_output, plain, real_type_name, scalar_source_type, Produced, ProductionControl,
-    ProductionVec, SQLError, ScalarEvalContext, ScalarExpr, Value,
+    ordinary_output, plain, Produced, ProductionControl, ProductionVec, SQLError,
+    ScalarEvalContext, ScalarExpr, Value,
 };
 use crate::scalar::state::{ColumnSlot, ConstantCast, ContextSchema, RowCast};
 use std::sync::OnceLock;
@@ -17,7 +17,7 @@ use uqa_sql::ast::BinaryOp;
 use uqa_sql::expr::RowLookup;
 use uqa_sql::expr::{
     cast_value_with_resolution_with_control, cast_value_with_scoped_resolution,
-    eval_binary_values_with_engine, negate_value_with_control, truthy,
+    eval_binary_values_with_engine, truthy,
 };
 
 pub(super) fn array(
@@ -162,14 +162,17 @@ fn binary_values(
             op,
             BinaryOp::Add | BinaryOp::Subtract | BinaryOp::Multiply | BinaryOp::Divide
         )
-        && scalar_source_type(lhs, context, control)?
-            .map(|ty| real_type_name(&ty, control))
-            .transpose()?
-            .unwrap_or(false)
-        && scalar_source_type(rhs, context, control)?
-            .map(|ty| real_type_name(&ty, control))
-            .transpose()?
-            .unwrap_or(false)
+        && context.with_type_schema(|schema| {
+            let is_real = |input| {
+                uqa_sql::type_resolution::scalar_operand_is_real_with_control(
+                    input,
+                    schema,
+                    context.params(),
+                    control,
+                )
+            };
+            Ok::<_, SQLError>(is_real(lhs)? && is_real(rhs)?)
+        })?
     {
         let value = uqa_sql::expr::eval_float_arithmetic_with_control(
             op,
@@ -215,9 +218,20 @@ pub(super) fn unary_minus(
     context: &ScalarEvalContext<'_>,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Value>, SQLError> {
-    let source_ty = scalar_source_type(inner, context, control)?;
+    let source = context.with_type_schema(|schema| {
+        uqa_sql::type_resolution::scalar_negation_source_with_control(
+            inner,
+            schema,
+            context.params(),
+            control,
+        )
+    })?;
     let value = eval_scalar_inner(inner, context, control)?;
-    negate_value_with_control(&value, source_ty.as_deref().map(String::as_str), control)
+    uqa_sql::type_resolution::ScalarNegationSource::negate_with_control(
+        source.as_ref(),
+        &value,
+        control,
+    )
 }
 
 pub(super) fn not(

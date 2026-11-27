@@ -595,7 +595,17 @@ pub fn negate_value_with_control(
         return Ok(control.finish(Value::Null, control.empty_reservation())?);
     }
     let source = canonical_cast_source_with_control(source_ty, value, control)?;
-    let result = match (source.as_str(), value) {
+    negate_canonical_value(value, &source, control)
+}
+
+pub(crate) fn negate_canonical_value(
+    value: &Value,
+    source: &str,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>> {
+    control.check()?;
+    let result = match (source, value) {
+        (_, Value::Null) => Ok(Value::Null),
         ("int2", Value::Int(value)) => i16::try_from(*value)
             .ok()
             .and_then(i16::checked_neg)
@@ -625,7 +635,7 @@ pub fn negate_value_with_control(
         }
         _ => Err(crate::type_resolution::undefined_prefix_operator(
             "-",
-            postgres_type_display_name(source.as_str()),
+            postgres_type_display_name(source),
         )),
     }?;
     Ok(control.finish(result, control.empty_reservation())?)

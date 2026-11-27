@@ -640,6 +640,201 @@ fn integer_operand_widths_keep_literal_domain_and_parameter_rules() {
 }
 
 #[test]
+fn analyzed_integer_widths_use_the_bound_type_without_allocating_names() {
+    let schema = RowSchema::default();
+    let budget = MemoryBudget::new(0);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&budget, &token, &token);
+    for (ty, expected) in [
+        (ColumnType::SmallInteger, IntegerWidth::SmallInt),
+        (ColumnType::Integer, IntegerWidth::Integer),
+        (ColumnType::BigInteger, IntegerWidth::BigInt),
+        (
+            domain(domain(ColumnType::SmallInteger)),
+            IntegerWidth::SmallInt,
+        ),
+        (
+            ColumnType::Named(" PG_CATALOG.INT4 ".into()),
+            IntegerWidth::Integer,
+        ),
+    ] {
+        let operand = retained_operand(ty);
+        let allocations = allocation_counter::measure(|| {
+            for _ in 0..10_000 {
+                assert_eq!(
+                    scalar_integer_operation_width_with_control(
+                        &operand,
+                        &operand,
+                        &schema,
+                        &[],
+                        &control,
+                    )
+                    .unwrap(),
+                    Some(expected),
+                );
+            }
+        });
+        assert_eq!(allocations.count_total, 0, "{allocations:?}");
+    }
+    assert_eq!(budget.peak(), 0);
+}
+
+fn retained_operand(ty: ColumnType) -> ScalarExpr {
+    ScalarExpr::TypedLiteral {
+        value: Value::Null,
+        ty: "retained input".into(),
+        bound_type: Some(ty),
+        collation_oid: None,
+        composite_source: None,
+        parameter_index: None,
+    }
+}
+
+#[test]
+fn real_and_negation_read_bound_numeric_types_without_scratch() {
+    let schema = RowSchema::default();
+    let budget = MemoryBudget::new(0);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&budget, &token, &token);
+    for (ty, is_real, value, expected) in [
+        (
+            domain(ColumnType::Real),
+            true,
+            Value::Float(0.5),
+            Value::Float(-0.5),
+        ),
+        (
+            ColumnType::DoublePrecision,
+            false,
+            Value::Float(0.5),
+            Value::Float(-0.5),
+        ),
+        (
+            ColumnType::SmallInteger,
+            false,
+            Value::Int(-10),
+            Value::Int(10),
+        ),
+    ] {
+        let operand = retained_operand(ty);
+        let allocations = allocation_counter::measure(|| {
+            for _ in 0..10_000 {
+                assert_eq!(
+                    scalar_operand_is_real_with_control(&operand, &schema, &[], &control).unwrap(),
+                    is_real
+                );
+                let source =
+                    scalar_negation_source_with_control(&operand, &schema, &[], &control).unwrap();
+                assert_eq!(
+                    *ScalarNegationSource::negate_with_control(source.as_ref(), &value, &control)
+                        .unwrap(),
+                    expected
+                );
+            }
+        });
+        assert_eq!(allocations.count_total, 0);
+    }
+    let source = scalar_negation_source_with_control(
+        &retained_operand(ColumnType::SmallInteger),
+        &schema,
+        &[],
+        &control,
+    )
+    .unwrap();
+    assert_eq!(
+        ScalarNegationSource::negate_with_control(
+            source.as_ref(),
+            &Value::Int(i64::from(i16::MIN)),
+            &control
+        )
+        .unwrap_err()
+        .sqlstate(),
+        Some("22003")
+    );
+    assert_eq!(
+        *ScalarNegationSource::negate_with_control(source.as_ref(), &Value::Null, &control)
+            .unwrap(),
+        Value::Null
+    );
+    token.cancel();
+    assert_eq!(
+        ScalarNegationSource::negate_with_control(source.as_ref(), &Value::Null, &control)
+            .unwrap_err()
+            .sqlstate(),
+        Some("57014")
+    );
+    assert_eq!(budget.peak(), 0);
+}
+
+#[test]
+fn operand_aliases_and_user_type_identifiers_keep_their_sql_width_and_diagnostics() {
+    let schema = RowSchema::default();
+    let control = ProductionControl::uncontrolled();
+    for spelling in [
+        "real",
+        "float(12)",
+        r#"pg_catalog."float4""#,
+        "double precision",
+        "boolean",
+        "app.missing",
+    ] {
+        let expression = ScalarExpr::Cast {
+            expr: Box::new(ScalarExpr::Literal(Value::Null)),
+            ty: spelling.into(),
+            implicit: false,
+        };
+        let name = scalar_operand_type_name(&expression, &schema, &[]).unwrap();
+        let expected = matches!(ColumnType::from_sql_name(&name), Ok(ColumnType::Real));
+        assert_eq!(
+            scalar_operand_is_real_with_control(&expression, &schema, &[], &control).unwrap(),
+            expected,
+            "{spelling}"
+        );
+        let source =
+            scalar_negation_source_with_control(&expression, &schema, &[], &control).unwrap();
+        for value in [
+            Value::Null,
+            Value::Float(0.125),
+            Value::Int(i64::from(i16::MIN)),
+        ] {
+            let canonical = |res: Result<Produced<Value>, SQLError>| {
+                res.map(|v| v.into_uncontrolled().unwrap())
+                    .map_err(|error| (error.sqlstate().map(str::to_owned), error.to_string()))
+            };
+            assert_eq!(
+                canonical(ScalarNegationSource::negate_with_control(
+                    source.as_ref(),
+                    &value,
+                    &control
+                )),
+                canonical(crate::expr::negate_value_with_control(
+                    &value,
+                    Some(&name),
+                    &control
+                )),
+                "{spelling}"
+            );
+        }
+    }
+    for name in ["int2", "INT2", "smallint", "custom_type"] {
+        let ty = ColumnType::Enum(crate::ast::EnumTypeReference {
+            schema: "app".into(),
+            name: name.into(),
+            oid: 20001,
+            array_oid: 20002,
+        });
+        let expected = integer_width_for_type(&ty.sql_name());
+        let operand = retained_operand(ty);
+        assert_eq!(
+            scalar_integer_operation_width_with_control(&operand, &operand, &schema, &[], &control)
+                .unwrap(),
+            expected,
+            "{name}"
+        );
+    }
+}
+
+#[test]
 fn optional_operand_inference_does_not_swallow_allocation_failure() {
     let budget = MemoryBudget::new(1024);
     let token = CancellationToken::new();

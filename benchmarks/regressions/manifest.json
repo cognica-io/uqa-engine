@@ -11661,6 +11661,32 @@
     {
       "package": "uqa-sql",
       "kind": "lib",
+      "test": "analyzed_integer_widths_use_the_bound_type_without_allocating_names",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/type_resolution/scalar_input/tests.rs",
+      "capability": "Scalar arithmetic operand widths",
+      "workload": "Resolve each of five bound integer, nested domain and named alias inputs 10,000 times with zero bytes of scratch.",
+      "invariant": "Each result is the expected PostgreSQL integer width, with zero heap allocations and no memory reservations."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "real_and_negation_read_bound_numeric_types_without_scratch",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-sql/src/type_resolution/scalar_input/tests.rs",
+      "capability": "Scalar arithmetic operand widths",
+      "workload": "Observe real precision and negate bound float and integer operands over 10,000 iterations, then exercise smallint overflow, NULL and cancellation.",
+      "invariant": "The declared precision, signed value and SQLSTATE are preserved without a heap allocation or memory reservation for ordinary scalar results."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
       "test": "sort_group_key_collations_and_diagnostic_order_match_postgresql",
       "cases": 1,
       "case_names": [

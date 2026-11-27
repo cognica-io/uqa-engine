@@ -72,6 +72,7 @@ use uuid::generate_random_uuid;
 pub use uuid::{format_uuid_with_control, parse_uuid_bytes, parse_uuid_bytes_with_control};
 mod binary;
 mod casting;
+pub(crate) use casting::negate_canonical_value;
 pub use casting::numeric::NumericCast;
 pub use casting::resolved::ResolvedCast;
 mod collation;

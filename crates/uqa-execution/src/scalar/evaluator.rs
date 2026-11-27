@@ -563,29 +563,6 @@ fn execute_in_subquery(
     }
 }
 
-fn scalar_source_type(
-    expression: &ScalarExpr,
-    context: &ScalarEvalContext<'_>,
-    control: &ProductionControl<'_>,
-) -> Result<Option<Produced<String>>, SQLError> {
-    context.with_type_schema(|schema| {
-        uqa_sql::scalar_operand_type_name_with_control(
-            expression,
-            schema,
-            context.params(),
-            control,
-        )
-    })
-}
-
-fn real_type_name(name: &str, control: &ProductionControl<'_>) -> Result<bool, SQLError> {
-    match uqa_sql::ColumnType::from_sql_name_with_control(name, control) {
-        Ok(ty) => Ok(matches!(*ty, uqa_sql::ColumnType::Real)),
-        Err(error) if matches!(error.sqlstate(), Some("53200" | "57014")) => Err(error),
-        Err(_) => Ok(false),
-    }
-}
-
 pub(crate) fn scalar_integer_binary_width(
     lhs: &ScalarExpr,
     rhs: &ScalarExpr,
