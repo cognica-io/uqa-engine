@@ -117,7 +117,7 @@ impl ScalarExpr {
         match self.try_visit(&mut |expression| {
             match expression {
                 Self::Column(name) | Self::QualifiedColumn { column: name, .. } => {
-                    visitor(name).map_err(Some)?
+                    visitor(name).map_err(Some)?;
                 }
                 Self::Default
                 | Self::Star

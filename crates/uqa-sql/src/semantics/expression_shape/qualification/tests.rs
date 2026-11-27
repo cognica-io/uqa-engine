@@ -33,7 +33,7 @@ fn owned_qualification_preserves_separate_ordering_scopes_and_exact_lifetimes() 
         output.as_deref().unwrap().visit(&mut |part| match part {
             ScalarExpr::Column(name) => names.push((None, name.to_string(), name.position())),
             ScalarExpr::QualifiedColumn { qualifier, column } => names.push((
-                Some(qualifier.to_string()),
+                Some(qualifier.clone()),
                 column.to_string(),
                 column.position(),
             )),
