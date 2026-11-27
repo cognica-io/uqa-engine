@@ -6912,6 +6912,19 @@
       ]
     },
     {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "caller_owned_fusion_charges_construction_and_preserves_existing_arguments",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/implicit_fusion/owned/tests.rs",
+      "capability": "Implicit fusion workspace",
+      "workload": "Fuse two caller-owned predicates with a one-mebibyte argument under exhausted, cancelled and 32 KiB operation allowances.",
+      "invariant": "The operation admits new containers, preserves the original argument addresses, reports 53200 or 57014 at rejection, and releases every workspace reservation.",
+      "case_names": [
+        "optimizer::implicit_fusion::owned::tests::caller_owned_fusion_charges_construction_and_preserves_existing_arguments"
+      ]
+    },
+    {
       "package": "uqa-sql",
       "kind": "lib",
       "test": "caller_owned_subqueries_use_the_operation_allowance_for_remapping",

@@ -24,19 +24,16 @@ enum RetrievalSignalKind {
 pub(super) fn rewrite_implicit_hybrid_fusion(
     expression: &mut ScalarExpr,
     allow_unqualified_signals: bool,
-) {
-    let control = uqa_core::memory::ProductionControl::uncontrolled();
-    let input = std::mem::replace(expression, ScalarExpr::Literal(uqa_core::Value::Null));
-    *expression = owned::rewrite(
-        uqa_sql::plan::OwnedScalarExpr::uncontrolled(input),
-        allow_unqualified_signals,
-        &control,
-    )
-    .expect("ordinary fusion construction")
-    .finish(&control)
-    .expect("ordinary fusion result")
-    .into_uncontrolled()
-    .expect("ordinary fusion owner");
+    config: &super::OptimizerConfig<'_>,
+) -> Result<(), uqa_sql::SQLError> {
+    super::scalar::rewrite_ordinary_slot(expression, config, |input, production| {
+        owned::rewrite(
+            input,
+            allow_unqualified_signals,
+            &production.storage,
+            &config.production,
+        )
+    })
 }
 
 /// Return whether optimizing this query will introduce a fusion node that can

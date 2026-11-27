@@ -43,6 +43,7 @@ impl Context<'_, '_> {
                 expression,
                 allow_unqualified,
                 control,
+                control,
             )?;
             self.access_predicate(expression)
         })?;

@@ -180,7 +180,7 @@ pub(super) fn optimize_query_block(
     if let Some(predicate) = &mut block.r#where {
         super::optimize_qualification(predicate, config)?;
         let allow_unqualified_signals = source_allows_unqualified_signals(block.from.as_ref());
-        rewrite_implicit_hybrid_fusion(predicate, allow_unqualified_signals);
+        rewrite_implicit_hybrid_fusion(predicate, allow_unqualified_signals, config)?;
         if config.enable_filter_pushdown {
             prioritize_access_predicates(predicate, config)?;
         }
