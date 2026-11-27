@@ -44,8 +44,10 @@ pub use config::{
     DiskANNAlpha, DiskANNIndexParams, HNSWIndexParams, IVFIndexParams, VectorIndexOpenMode,
     VectorIndexSpec,
 };
-pub use cosine::cosine_similarity;
 pub(crate) use cosine::cosine_similarity_controlled;
+pub use cosine::{
+    cosine_similarity, cosine_similarity_with_norms, cosine_similarity_with_query_norm, vector_norm,
+};
 pub use retained::{RetainedVectorIndex, RetainedVectorIndexBuilder};
 
 #[cfg(test)]
@@ -175,28 +177,6 @@ pub(crate) fn deduplicate_scored_values(scored: &mut [(DocId, f32)]) -> usize {
         }
     }
     write
-}
-
-pub(crate) fn vector_norm(vector: &[f32]) -> f32 {
-    let mut squared_norm = 0.0_f32;
-    for value in vector {
-        squared_norm += value * value;
-    }
-    squared_norm.sqrt()
-}
-
-/// Cosine similarity when both vector norms were computed once outside the
-/// candidate loop. This preserves the raw-vector score while avoiding two
-/// norm reductions and two square roots for every candidate.
-pub(crate) fn cosine_similarity_with_norms(a: &[f32], b: &[f32], norm_a: f32, norm_b: f32) -> f32 {
-    if a.len() != b.len() || a.is_empty() || norm_a == 0.0 || norm_b == 0.0 {
-        return 0.0;
-    }
-    let mut dot = 0.0_f32;
-    for (x, y) in a.iter().zip(b) {
-        dot += x * y;
-    }
-    dot / (norm_a * norm_b)
 }
 
 pub trait VectorIndex: Send + Sync {

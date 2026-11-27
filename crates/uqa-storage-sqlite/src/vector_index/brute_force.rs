@@ -8,17 +8,20 @@
 
 use parking_lot::RwLock;
 use uqa_core::memory::{BudgetedVec, RetainedValue};
-use uqa_storage::read_control::StorageReadControl;
+use uqa_storage::{
+    read_control::StorageReadControl,
+    vector_index::{cosine_similarity_with_query_norm, vector_norm},
+};
 
 mod cache;
 
 use super::native::NativeVectorRead;
 use super::{
-    blob_to_vector, cosine_similarity, decode_doc_id, encode_doc_id, i64_to_usize, params,
-    select_top_k_scored, usize_to_u64, validate_persisted_ordinal_sequence,
-    validate_vector_ordinal_count, validate_vector_values, vector_to_blob, Arc, DocId,
-    EncodedDocVectors, ManagedConnection, Payload, PostingEntry, PostingList, SQLiteError,
-    SQLiteResult, StorageBackendResult, VectorIndex,
+    blob_to_vector, decode_doc_id, encode_doc_id, i64_to_usize, params, select_top_k_scored,
+    usize_to_u64, validate_persisted_ordinal_sequence, validate_vector_ordinal_count,
+    validate_vector_values, vector_to_blob, Arc, DocId, EncodedDocVectors, ManagedConnection,
+    Payload, PostingEntry, PostingList, SQLiteError, SQLiteResult, StorageBackendResult,
+    VectorIndex,
 };
 
 #[derive(Clone)]
@@ -91,9 +94,26 @@ impl SQLiteVectorIndex {
             &mut dyn FnMut(DocId, &[f32], &StorageReadControl) -> SQLiteResult<()>,
         ) -> SQLiteResult<()>,
     ) -> SQLiteResult<Option<BudgetedVec<(DocId, f32)>>> {
+        let query_norm = vector_norm(query);
+        Self::collect_scores(threshold, |emit| {
+            read(&mut |doc_id, vector, control| {
+                emit(
+                    doc_id,
+                    cosine_similarity_with_query_norm(query, vector, query_norm),
+                    control,
+                )
+            })
+        })
+    }
+
+    fn collect_scores(
+        threshold: Option<f32>,
+        read: impl FnOnce(
+            &mut dyn FnMut(DocId, f32, &StorageReadControl) -> SQLiteResult<()>,
+        ) -> SQLiteResult<()>,
+    ) -> SQLiteResult<Option<BudgetedVec<(DocId, f32)>>> {
         let mut scores: Option<BudgetedVec<(DocId, f32)>> = None;
-        read(&mut |doc_id, vector, control| {
-            let score = cosine_similarity(query, vector);
+        read(&mut |doc_id, score, control| {
             if threshold.is_none_or(|threshold| score >= threshold) {
                 let scores = scores.get_or_insert_with(|| BudgetedVec::new(control.memory()));
                 // Canonical and legacy cursors both order vectors by document and tensor ordinal.
