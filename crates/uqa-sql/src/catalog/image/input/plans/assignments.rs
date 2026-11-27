@@ -129,7 +129,14 @@ macro_rules! input_fields {
                     return Ok(Pending::new(None));
                 }
                 let predicate = $read!(self.plan_optional_scalar_box(memory, references))?;
-                let constraint = $read!(self.plan_optional_text(memory))?;
+                let constraint = match $read!(self.binary.array::<1>())?[0] {
+                    0 => crate::ast::ConflictTargetConstraint::Unqualified,
+                    1 => crate::ast::ConflictTargetConstraint::Named($read!(self.plan_text(memory))?),
+                    2 => crate::ast::ConflictTargetConstraint::Collations(plan_scalar_list!($read, self, memory, |input, memory| {
+                        Ok(Pending::new($read!(input.plan_optional_text(memory))?))
+                    })?.take()),
+                    _ => return Err(invalid("query inference constraint")),
+                };
                 let conflict_columns = $read!(self.plan_texts(memory))?;
                 let expressions = $read!(self.plan_scalars(memory, references))?;
                 let action = match $read!(self.binary.array::<1>())?[0] {

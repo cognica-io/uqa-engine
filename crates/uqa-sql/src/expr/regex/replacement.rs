@@ -8,8 +8,9 @@
 
 use super::{argument_text, engine, flags::ReFlags, parameter, plain, string};
 use crate::error::{Result, SQLError};
+use crate::expr::text_size::TextBuffer;
 use uqa_core::{
-    memory::{Produced, ProductionControl, ProductionString},
+    memory::{Produced, ProductionControl},
     Value,
 };
 use uqa_pg_regex::{CompileFlags, MatchSpan, REG_NOSUB};
@@ -151,7 +152,8 @@ fn replace(
     let mut regex = call.compile(pattern, cflags, collation, &mut allowance)?;
     let mut spans = [MatchSpan::UNSET; REPLACEMENT_SLOTS];
     let spans = &mut spans[..slots];
-    let mut output = ProductionString::new(*control);
+    let mut output = TextBuffer::new(control);
+    let mut remaining = input;
     let mut copied = 0;
     let mut matches = 0_usize;
     let mut search = search_start;
@@ -167,11 +169,19 @@ fn replace(
             search = whole.end + usize::from(whole.is_empty());
             continue;
         }
-        engine::push_text(&mut output, &points, copied..whole.start)?;
+        output.push_str(take_chars(&mut remaining, whole.start - copied, control)?)?;
+        let whole_text = take_chars(&mut remaining, whole.len(), control)?;
         if escapes == Escapes::None {
             output.push_str(replacement)?;
         } else {
-            expand(&mut output, replacement, spans, &points)?;
+            expand(
+                &mut output,
+                replacement,
+                spans,
+                whole_text,
+                whole.start,
+                control,
+            )?;
         }
         copied = whole.end;
         if occurrence > 0 {
@@ -180,47 +190,83 @@ fn replace(
         search = whole.end + usize::from(whole.is_empty());
     }
     drop(regex);
-    engine::push_text(&mut output, &points, copied..points.len())?;
-    output.finish().map_err(Into::into)
+    output.push_str(remaining)?;
+    output.finish()
+}
+
+/// Consume a character range of the original UTF-8 input without building another decoded string.
+fn take_chars<'a>(
+    remaining: &mut &'a str,
+    count: usize,
+    control: &ProductionControl<'_>,
+) -> Result<&'a str> {
+    let mut bytes = 0;
+    let mut chars = remaining.chars();
+    for index in 0..count {
+        if index % 1024 == 0 {
+            control.check()?;
+        }
+        let character = chars.next().ok_or_else(|| {
+            SQLError::Internal("regular expression span exceeds the input".into())
+        })?;
+        bytes += character.len_utf8();
+    }
+    let (prefix, tail) = remaining.split_at(bytes);
+    *remaining = tail;
+    Ok(prefix)
 }
 
 /// `appendStringInfoRegexpSubstr`: `\1` to `\9` insert a subexpression and `\&` the whole match, each empty when it did not take part in the match; `\\` inserts one backslash, and any other backslash is copied as written.
 fn expand(
-    output: &mut ProductionString<'_>,
-    replacement: &str,
+    output: &mut TextBuffer<'_>,
+    mut replacement: &str,
     spans: &[MatchSpan],
-    points: &[u32],
+    whole_text: &str,
+    match_start: usize,
+    control: &ProductionControl<'_>,
 ) -> Result<()> {
-    let mut characters = replacement.chars().peekable();
-    while let Some(character) = characters.next() {
-        if character != '\\' {
-            output.push(character)?;
-            continue;
-        }
-        let span = match characters.peek().copied() {
-            Some(digit @ '1'..='9') => {
-                characters.next();
-                let index = digit as usize - '0' as usize;
-                spans.get(index).copied().unwrap_or(MatchSpan::UNSET)
-            }
-            Some('&') => {
-                characters.next();
-                spans[0]
-            }
-            Some('\\') => {
-                characters.next();
+    // Replacement escapes can reference the first nine subexpressions. Decode each requested range once.
+    let mut captures = [None; REPLACEMENT_SLOTS];
+    captures[0] = Some(whole_text);
+    while let Some((prefix, rest)) = replacement.split_once('\\') {
+        output.push_str(prefix)?;
+        replacement = rest;
+        let Some(&escape) = rest.as_bytes().first() else {
+            output.push('\\')?;
+            return Ok(());
+        };
+        let slot = match escape {
+            b'1'..=b'9' => usize::from(escape - b'0'),
+            b'&' => 0,
+            b'\\' => {
                 output.push('\\')?;
+                replacement = &rest[1..];
                 continue;
             }
-            // A trailing backslash, or one before an ordinary character that is then copied in turn.
             _ => {
                 output.push('\\')?;
                 continue;
             }
         };
-        if let Some(range) = span.range() {
-            engine::push_text(output, points, range)?;
-        }
+        replacement = &rest[1..];
+        let capture = if let Some(cached) = captures[slot] {
+            cached
+        } else {
+            let text = match spans.get(slot).and_then(|span| span.range()) {
+                Some(range) => {
+                    let mut input = whole_text;
+                    let offset = range.start.checked_sub(match_start).ok_or_else(|| {
+                        SQLError::Internal("regular expression capture before match".into())
+                    })?;
+                    take_chars(&mut input, offset, control)?;
+                    take_chars(&mut input, range.len(), control)?
+                }
+                None => "",
+            };
+            captures[slot] = Some(text);
+            text
+        };
+        output.push_str(capture)?;
     }
-    Ok(())
+    output.push_str(replacement)
 }

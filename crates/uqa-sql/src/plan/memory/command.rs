@@ -205,6 +205,19 @@ impl ObserveAllocations for AssignmentPlan {
     }
 }
 
+impl ObserveAllocations for crate::ast::ConflictTargetConstraint {
+    fn observe_allocations<'a>(
+        &'a self,
+        observer: &mut AllocationObserver<'a, '_>,
+    ) -> Result<(), ValueRetentionError> {
+        match self {
+            Self::Unqualified => Ok(()),
+            Self::Named(name) => observer.child(name),
+            Self::Collations(names) => observer.child(names),
+        }
+    }
+}
+
 impl ObserveAllocations for ConflictPlan {
     fn observe_allocations<'a>(
         &'a self,

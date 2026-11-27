@@ -147,26 +147,7 @@ fn read_inputs_owned(
         .retain_result_metadata(),
         schema_expression: None,
     };
-    let mut finish_parameters = false;
-    let result = match plan.as_plan_ref() {
-        PlanRef::Query(query) => AnalyzedResult::Schema(analysis.query(query, None)?),
-        PlanRef::Command(command) => match command {
-            CommandPlan::CreateView { .. }
-            | CommandPlan::CreateTableAs { .. }
-            | CommandPlan::CreateMaterializedView { .. }
-            | CommandPlan::DeclareCursor { .. } => {
-                analysis.command(command)?;
-                AnalyzedResult::Command
-            }
-            _ if command.mutation_target().is_some() => {
-                finish_parameters = true;
-                analysis
-                    .command(command)?
-                    .map_or(AnalyzedResult::Command, AnalyzedResult::Schema)
-            }
-            _ => AnalyzedResult::Command,
-        },
-    };
+    let (result, finish_parameters) = analysis.executable_result(plan.as_plan_ref())?;
     let constants = analysis.parameters.take_input_constants();
     if finish_parameters {
         analysis.parameters.finish_produced()?;

@@ -65,10 +65,27 @@ fn bind_parameter_expressions(
     })
 }
 
-struct AnalyzedArgument {
-    source: Option<ColumnType>,
+struct AnalyzedArgument<'a> {
+    original: &'a ExpressionPlan,
+    host_type: Option<&'a ColumnType>,
+    bound: Option<uqa_sql::binding::BoundExpression>,
     constant: Option<Value>,
     converted: bool,
+}
+
+impl AnalyzedArgument<'_> {
+    fn expression(&self) -> &ExpressionPlan {
+        self.bound
+            .as_ref()
+            .map_or(self.original, |bound| &bound.plan)
+    }
+
+    fn source(&self) -> Option<&ColumnType> {
+        self.bound
+            .as_ref()
+            .and_then(|bound| bound.ty.as_deref())
+            .or(self.host_type)
+    }
 }
 
 fn bind_arguments(
@@ -86,17 +103,21 @@ fn bind_arguments(
         .map(|(index, (argument, target))| {
             validate_argument(context.validation.aggregates, argument)?;
             reject_set_argument(&context.validation, argument)?;
-            let source = if let Some(host_types) = host_types {
-                host_types[index].clone()
-            } else if matches!(
-                argument.scalar,
-                ScalarExpr::Literal(Value::Str(_) | Value::Null)
-            ) {
+            let host_type = host_types.and_then(|types| types[index].as_ref());
+            let bound = if host_types.is_some()
+                || matches!(
+                    argument.scalar,
+                    ScalarExpr::Literal(Value::Str(_) | Value::Null)
+                ) {
                 None
             } else {
-                (context.analyze_type)(argument)?
+                Some((context.bind_expression)(argument)?)
             };
-            if let (Some(source), Some(target)) = (&source, target) {
+            let source = bound
+                .as_ref()
+                .and_then(|bound| bound.ty.as_deref())
+                .or(host_type);
+            if let (Some(source), Some(target)) = (source, target) {
                 validate_assignment_type(index, source, target)?;
             }
             let constant = match (&argument.scalar, target) {
@@ -115,13 +136,16 @@ fn bind_arguments(
                     .as_ref()
                     .is_some_and(|target| !matches!(target, ColumnType::Domain { .. }));
             Ok(AnalyzedArgument {
-                source,
+                original: argument,
+                host_type,
+                bound,
                 constant,
                 converted,
             })
         })
         .collect::<Result<Vec<_>, SQLError>>()?;
-    for ((argument, target), analyzed) in arguments.iter().zip(types).zip(&mut analyzed) {
+    for (analyzed, target) in analyzed.iter_mut().zip(types) {
+        let argument = analyzed.expression();
         if analyzed.constant.is_none() && immutable_argument(&context.validation, &argument.scalar)
         {
             let value = eval_physical(argument, &context.evaluation)?;
@@ -131,7 +155,7 @@ fn bind_arguments(
                         context.assignment,
                         value,
                         parameter_base_type(target),
-                        analyzed.source.as_ref(),
+                        analyzed.source(),
                     )?
                 }
                 _ => value,
@@ -141,14 +165,13 @@ fn bind_arguments(
                 .is_some_and(|target| !contains_domain(target));
         }
     }
-    arguments
-        .iter()
+    analyzed
+        .into_iter()
         .zip(types.iter().cloned())
-        .zip(analyzed)
-        .map(|((argument, target), analyzed)| {
-            let value = match analyzed.constant {
+        .map(|(mut analyzed, target)| {
+            let value = match analyzed.constant.take() {
                 Some(value) => value,
-                None => eval_physical(argument, &context.evaluation)?,
+                None => eval_physical(analyzed.expression(), &context.evaluation)?,
             };
             match target {
                 Some(target) if analyzed.converted => Ok(SQLParam::typed_scalar(value, target)),
@@ -156,7 +179,7 @@ fn bind_arguments(
                     context.assignment,
                     value,
                     &target,
-                    analyzed.source.as_ref(),
+                    analyzed.source(),
                 )
                 .map(|value| SQLParam::typed_scalar(value, target)),
                 None => Ok(SQLParam::Scalar(value)),

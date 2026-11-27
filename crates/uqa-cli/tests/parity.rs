@@ -421,7 +421,7 @@ fn foreign_catalog_commands_do_not_require_source_handlers() {
     let output = run_usql(
         &[],
         "CREATE SERVER remote_source FOREIGN DATA WRAPPER duckdb_fdw;\n\
-         CREATE FOREIGN TABLE remote_items(cursor refcursor, ids smallint[], amount numeric(9,2)) SERVER remote_source OPTIONS (source 'items');\n\
+         CREATE FOREIGN TABLE remote_items(cursor refcursor, ids smallint[], amount numeric(9,2), terms tsvector[]) SERVER remote_source OPTIONS (source 'items');\n\
          CREATE FOREIGN DATA WRAPPER local_options HANDLER memory_fdw_handler;\n\
          CREATE SERVER ordered_options FOREIGN DATA WRAPPER local_options OPTIONS (z 'last', a 'first');\n\
          \\dt\n\\d remote_items\n\\dft\n\\dfs\n\\q\n",
@@ -438,6 +438,7 @@ fn foreign_catalog_commands_do_not_require_source_handlers() {
         "refcursor",
         "smallint[]",
         "numeric(9,2)",
+        "tsvector[]",
     ] {
         assert!(out.contains(expected), "missing {expected}: {out}");
     }

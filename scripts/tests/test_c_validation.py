@@ -132,25 +132,22 @@ class GitSelectionTests(unittest.TestCase):
         self.git("commit", "-qm", "Fixture update")
         return self.git("rev-parse", "HEAD")
 
-    def event(self, *, draft=False, action="ready_for_review"):
-        return {"action": action, "pull_request": {"draft": draft, "base": {"sha": self.base}}}
+    def select(self, kind="bindings", event=None, event_name="push", **kwargs):
+        if event is None:
+            event = {"ref": "refs/heads/main", "before": self.base}
+        return SCOPE.select(self.root, kind, event, event_name, self.git("rev-parse", "HEAD"), **kwargs)
 
-    def select(self, kind="bindings", event=None, event_name="pull_request", **kwargs):
-        return SCOPE.select(self.root, kind, self.event() if event is None else event,
-                            event_name, self.git("rev-parse", "HEAD"), **kwargs)
-
-    def test_runtime_only_ready_candidate_skips_both_matrices(self):
+    def test_runtime_only_main_change_skips_both_matrices(self):
         self.write("crates/uqa-storage/src/mvcc/overlay.rs", b"runtime\n")
         self.commit()
         for kind in SCOPE.WORKFLOWS:
             self.assertFalse(self.select(kind)["required"])
 
-    def test_ready_binding_source_and_main_push_require_validation(self):
+    def test_merged_binding_source_requires_validation(self):
         self.write("crates/uqa-ffi/src/value.rs", b"binding\n")
         self.commit()
         for kind in SCOPE.WORKFLOWS:
             self.assertTrue(self.select(kind)["required"])
-            self.assertTrue(self.select(kind, {"ref": "refs/heads/main", "before": self.base}, "push")["required"])
 
     def test_main_runtime_change_uses_same_ownership_selection(self):
         self.write("crates/uqa-engine/src/session.rs", b"runtime\n")
@@ -170,18 +167,21 @@ class GitSelectionTests(unittest.TestCase):
 
     def test_unknown_missing_and_zero_bases_fail_closed(self):
         for base in (None, "", "0" * 40, "a" * 40, "not-a-revision"):
-            event = self.event()
-            event["pull_request"]["base"]["sha"] = base
+            event = {"ref": "refs/heads/main", "before": base}
             for kind in SCOPE.WORKFLOWS:
                 self.assertTrue(self.select(kind, event)["required"])
 
-    def test_draft_and_non_ready_updates_wait_for_the_completed_batch(self):
-        for event in (self.event(draft=True), self.event(action="synchronize"), self.event(action="opened")):
-            self.assertFalse(self.select(event=event)["required"])
+    def test_pull_request_updates_do_not_select_binding_matrices(self):
+        self.write("crates/uqa-ffi/src/value.rs", b"binding\n")
+        self.commit()
+        for action in ("opened", "synchronize", "ready_for_review"):
+            event = {"action": action, "pull_request": {"draft": False, "base": {"sha": self.base}}}
+            for kind in SCOPE.WORKFLOWS:
+                self.assertFalse(self.select(kind, event, "pull_request")["required"])
 
     def test_explicit_full_calls_and_releases_require_every_configuration(self):
         for kind in SCOPE.WORKFLOWS:
-            self.assertTrue(self.select(kind, self.event(draft=True), force_all=True)["required"])
+            self.assertTrue(self.select(kind, {}, "workflow_call", force_all=True)["required"])
             self.assertTrue(self.select(kind, {}, "workflow_dispatch")["required"])
             self.assertTrue(self.select(kind, {"ref": "refs/tags/v1.2.3", "before": self.base}, "push")["required"])
 
@@ -256,7 +256,7 @@ class WorkflowContractTests(unittest.TestCase):
     def test_scopes_gate_all_heavy_jobs_and_full_callers_are_preserved(self):
         for kind, path in SCOPE.WORKFLOWS.items():
             source = (ROOT / path).read_text()
-            self.assertIn("cancel-in-progress: ${{ github.event_name == 'pull_request' && github.event.action == 'ready_for_review' }}", source)
+            self.assertIn("cancel-in-progress: false", source)
             self.assertIn("force_all:\n", source)
             self.assertIn("        default: true\n", source)
             self.assertIn("C_VALIDATION_FORCE_ALL: ${{ inputs.force_all }}", source)

@@ -55,7 +55,9 @@ pub fn remove_domain_constraint(
     }
     registry.insert(key, stored)?;
     crate::catalog::domain::publish(context.publication, &before, registry)?;
-    context.changes.catalog_registry_changed();
+    context.changes.catalog_registry_changed_kind(
+        crate::statement::prepared::invalidation::CatalogRegistryChange::DomainConstraintRemoval,
+    );
     Ok(())
 }
 

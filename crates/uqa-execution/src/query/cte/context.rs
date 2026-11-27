@@ -17,7 +17,22 @@ use uqa_sql::{
     SQLError, SQLParam, ScalarExpr,
 };
 
+/// A recursive term retains one immutable statement snapshot, its parameters, and the lexical scope that precedes the recursive relation.
+pub trait RecursiveTerm: Send {
+    fn scan(
+        &self,
+        working: Option<(&str, crate::SharedSpill, Option<usize>)>,
+    ) -> Result<Box<dyn crate::PhysicalOperator>, SQLError>;
+    fn functions(&self) -> &dyn EngineHook;
+}
+
 pub trait CteBodyExecutor<S: Clone>: Sync {
+    fn retain_recursive_term(
+        &self,
+        query: &QueryPlan,
+        params: &[SQLParam],
+        ctes: &CteScope<S>,
+    ) -> Result<Box<dyn RecursiveTerm>, SQLError>;
     /// Retain the active query allowance and its original cancellation owner for CTE analysis and scheduling.
     fn read_control(&self) -> Result<uqa_storage::read_control::StorageReadControl, SQLError>;
     /// Retain one read-only physical producer and its selected session inputs. A semantic materialization that cannot expose a pull operator returns None.

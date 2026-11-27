@@ -4,23 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use uqa_engine::Engine;
-
-fn open(provider: usize, path: &std::path::Path) -> Engine {
-    match provider {
-        0 => Engine::new(),
-        1 => Engine::open(path).unwrap(),
-        2 => Engine::from_persistent_provider(std::sync::Arc::new(
-            uqa_storage_sqlite::SQLiteKeyValueStorage::open(path).unwrap(),
-        ))
-        .unwrap(),
-        3 => Engine::from_persistent_provider(std::sync::Arc::new(
-            uqa_storage_redb::RedbStorage::open(path).unwrap(),
-        ))
-        .unwrap(),
-        _ => unreachable!(),
-    }
-}
+use crate::open_test_provider as open;
 
 #[rstest::rstest]
 #[case::memory(0)]
@@ -172,7 +156,7 @@ fn unnest_overloads_match_postgresql(#[case] provider: usize) {
                 .as_str()
                 .is_some_and(|sql| sql.starts_with("SELECT * FROM un_stored"))
         });
-        assert_eq!(rows["cases"].as_array().unwrap().len(), 1);
+        assert_eq!(rows["cases"].as_array().unwrap().len(), 2);
         crate::pg18_oracle::verify(&reopened, &rows.to_string());
     }
 }

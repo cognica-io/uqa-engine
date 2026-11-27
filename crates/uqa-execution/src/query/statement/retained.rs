@@ -42,6 +42,37 @@ pub fn try_build_retained_query_operator<'a, S: Clone + Send + Sync + 'static>(
     })
 }
 
+/// Recursive terms always have a bound SQL descriptor. A blocking root that cannot expose its child pipeline starts its ordinary execution on the first pull.
+pub fn build_recursive_term<'a, S: Clone + Send + Sync + 'static>(
+    context: &QueryContext<'a, S>,
+    plan: &'a QueryPlan,
+    params: &'a [SQLParam],
+    scope: &CteScope<S>,
+) -> Result<Box<dyn PhysicalOperator + 'a>, SQLError> {
+    if let Some(input) = try_build_retained_query_operator(context, plan, params, scope)? {
+        return Ok(input);
+    }
+    let resources = context.source.ctes.production_resources()?;
+    let schema = bind_query_plan_schema(
+        context.source.ctes.routines,
+        plan,
+        params,
+        scope,
+        scope.row_lock_outer_row().map(|row| &row.schema),
+    )?;
+    let mut scope = scope.copy_with_control(&resources.control())?;
+    let queries = context.source.ctes.queries;
+    crate::query::deferred::DeferredOperator::from_bound_schema_with_control(
+        Some(schema),
+        move || {
+            Ok(queries
+                .execute_query(plan, params, &mut scope)?
+                .into_public_operator())
+        },
+        &resources.control(),
+    )
+}
+
 fn build_retained_root<'a, S: Clone + Send + Sync + 'static>(
     context: &QueryContext<'a, S>,
     plan: &QueryPlan,

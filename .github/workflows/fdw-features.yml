@@ -1,18 +1,16 @@
 name: Foreign handler features
 
 on:
-  pull_request:
+  push:
     branches: [main]
-    types: [ready_for_review]
   workflow_call:
 
 permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-fdw-${{ github.event.pull_request.number || github.ref }}
-  # Only a completed replacement PR candidate supersedes the previous source.
-  cancel-in-progress: ${{ github.event_name == 'pull_request' && github.event.action == 'ready_for_review' }}
+  group: ${{ github.workflow }}-fdw-${{ github.ref }}
+  cancel-in-progress: false
 
 env:
   RUSTC_WRAPPER: ""

@@ -14,18 +14,12 @@ use uqa_core::{memory::ProductionControl, Value};
 
 type StoredExpression = construction::Output<Result<Nested<Expr>>>;
 
-syntax_enum!(crate::ast::BinaryOp {
-    Equal,
-    NotEqual,
-    Less,
-    LessEqual,
-    Greater,
-    GreaterEqual,
-    Add,
-    Subtract,
-    Multiply,
-    Divide
-});
+impl SyntaxCopy for crate::ast::BinaryOp {
+    fn copy_syntax(&self, copying: &mut Copying<'_>) -> Result<Self> {
+        copying.check()?;
+        Ok(*self)
+    }
+}
 
 macro_rules! expression_fields {
     ($source:expr, $input:ident, $field:ident; $($variant:ident $(($($item:ident),+))? $({$($member:ident),*})?),* $(,)?) => {

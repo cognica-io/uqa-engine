@@ -10,7 +10,7 @@ use uqa_sql::{
     catalog::index::IndexDefinition,
     schema::indexes::{
         keys::require_column_key,
-        names::{allocate_default_index_name, IndexNameCatalog},
+        names::{allocate_index_name_from_attributes, IndexNameCatalog},
         vectors::{resolve_vector_index_columns, resolve_vector_index_target, VectorIndexCatalog},
     },
     schema::SchemaExpressionCatalog,
@@ -91,7 +91,11 @@ pub fn run_create_index(
     let name = if let Some(name) = c.name.as_ref() {
         name.clone()
     } else {
-        allocate_default_index_name(context.names, &table_relation, &c.columns)?
+        allocate_index_name_from_attributes(
+            context.names,
+            &table_relation,
+            &uqa_sql::schema::indexes::keys::attribute_names(&c),
+        )?
     };
     let relation = uqa_core::RelationIdentity::new(&table_relation.schema, &name);
     uqa_sql::schema::indexes::system_columns::reject_system_column_index(

@@ -8,7 +8,10 @@ use super::{plain, string};
 use crate::{
     error::{Result, SQLError},
     expr::{
-        conversion::{to_i64_with_control, value_to_string_with_control},
+        conversion::{
+            argument_text, character_count, character_offsets, to_i64_with_control,
+            value_to_string_with_control,
+        },
         datums::binary_payload,
         out_of_range,
         scalar_helpers::{casing::CaseMapping, CompiledLikePattern},
@@ -30,6 +33,12 @@ pub(super) fn evaluate_collated(
         "upper" | "lower" | "casefold" | "initcap" => case_mapping(name, args, collation, control),
         "like" | "ilike" => like(args, name == "ilike", collation, control),
         "starts_with" => starts_with(args, collation, control),
+        "replace" => replace(args, collation, control),
+        "position" | "strpos" => search(args, collation, control),
+        "split_part" => crate::expr::scalar_math::split_part(args, collation, control),
+        "string_to_array" => {
+            crate::expr::scalar_postgres::string_to_array(args, collation, control)
+        }
         _ => unreachable!("collated text family membership was checked"),
     }
 }
@@ -49,15 +58,15 @@ pub(super) fn evaluate(
             trim(args, name != "rtrim", name != "ltrim", control)
         }
         "concat_op" => concat(args, control),
-        "replace" => replace(args, control),
+
         "substring" | "substr" => substring(args, control),
         "left" | "right" => left_or_right(args, name == "right", control),
-        "starts_with" => starts_with(
+        "starts_with" | "replace" | "position" | "strpos" => evaluate_collated(
+            name,
             args,
             crate::catalog::collations::DEFAULT_COLLATION_OID as u32,
             control,
         ),
-        "position" | "strpos" => search(args, control),
         "ascii" => {
             let source = value_to_string_with_control(&args[0], control)?;
             plain(
@@ -128,7 +137,7 @@ fn case_mapping(
     if matches!(value, Value::Null) {
         return plain(Value::Null, control);
     }
-    let source = value_to_string_with_control(value, control)?;
+    let source = argument_text(value, control)?;
     let subject = match name {
         "upper" => "upper() function",
         "initcap" => "initcap() function",
@@ -143,15 +152,6 @@ fn case_mapping(
         _ => unreachable!("case-mapping family"),
     };
     string(output, control)
-}
-
-fn character_count(text: &str, control: &ProductionControl<'_>) -> Result<usize> {
-    let mut count = 0;
-    for _ in text.chars() {
-        control.check()?;
-        count += 1;
-    }
-    Ok(count)
 }
 
 fn length(
@@ -286,26 +286,52 @@ fn concat(args: &[Value], control: &ProductionControl<'_>) -> Result<Produced<Va
         matches!(arg, Value::Bytes(_))
             || matches!(arg, Value::Datum(datum) if datum.type_oid() == 17)
     }) {
+        let [left, right] = args else {
+            return Err(SQLError::TypeMismatch(
+                "bytea concatenation takes two operands".into(),
+            ));
+        };
+        let left = binary_payload(left, control)?.expect("bytea left operand");
+        let right = binary_payload(right, control)?.expect("bytea right operand");
+        let length = left.bytes().len().saturating_add(right.bytes().len());
+        crate::expr::text_size::check_varlena_size(length)?;
         let mut output = ProductionVec::new(*control);
-        for value in args {
-            let payload = binary_payload(value, control)?.expect("every argument is bytea");
-            let bytes = payload.bytes();
-            output.reserve(bytes.len())?;
-            for byte in bytes {
-                output.push_copy(*byte)?;
-            }
+        output.reserve(length)?;
+        for &byte in left.bytes().iter().chain(right.bytes()) {
+            output.push_copy(byte)?;
         }
         let (output, memory) = output.finish()?.into_parts();
         return Ok(control.finish(Value::Bytes(output), memory)?);
     }
+    let [left, right] = args else {
+        return Err(SQLError::TypeMismatch(
+            "text concatenation takes two operands".into(),
+        ));
+    };
+    let left = crate::expr::conversion::argument_text(left, control)?;
+    let right = crate::expr::conversion::argument_text(right, control)?;
+    concatenate_text(&left, &right, control)
+}
+
+pub(in crate::expr) fn concatenate_text(
+    left: &str,
+    right: &str,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>> {
+    let length = left.len().saturating_add(right.len());
+    crate::expr::text_size::check_varlena_size(length)?;
     let mut output = ProductionString::new(*control);
-    for value in args {
-        output.push_str(&value_to_string_with_control(value, control)?)?;
-    }
+    output.reserve(length)?;
+    output.push_str(left)?;
+    output.push_str(right)?;
     string(output.finish()?, control)
 }
 
-fn replace(args: &[Value], control: &ProductionControl<'_>) -> Result<Produced<Value>> {
+fn replace(
+    args: &[Value],
+    collation: u32,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>> {
     if args.len() != 3 {
         return Err(SQLError::TypeMismatch("replace takes 3 args".into()));
     }
@@ -314,8 +340,12 @@ fn replace(args: &[Value], control: &ProductionControl<'_>) -> Result<Produced<V
     }
     let source = value_to_string_with_control(&args[0], control)?;
     let from = value_to_string_with_control(&args[1], control)?;
+    if source.is_empty() || from.is_empty() {
+        return string(source, control);
+    }
+    crate::expr::collation::string_comparison_order(collation)?;
     let to = value_to_string_with_control(&args[2], control)?;
-    let mut output = ProductionString::new(*control);
+    let mut output = crate::expr::text_size::TextBuffer::new(control);
     let mut previous = 0;
     for (index, matched) in source.match_indices(from.as_str()) {
         control.check()?;
@@ -423,18 +453,7 @@ fn slice(
     last: usize,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Value>> {
-    let mut start = source.len();
-    let mut end = source.len();
-    for (ordinal, (index, _)) in source.char_indices().enumerate() {
-        control.check()?;
-        if ordinal == first {
-            start = index;
-        }
-        if ordinal == last {
-            end = index;
-            break;
-        }
-    }
+    let (start, end) = character_offsets(source, first, last, control)?;
     string(control.copy_text(&source[start..end])?, control)
 }
 
@@ -472,7 +491,11 @@ fn starts_with(
     compare(source.as_bytes(), prefix.as_bytes())
 }
 
-fn search(args: &[Value], control: &ProductionControl<'_>) -> Result<Produced<Value>> {
+fn search(
+    args: &[Value],
+    collation: u32,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>> {
     if args.len() != 2 {
         return Err(SQLError::TypeMismatch("position takes 2 args".into()));
     }
@@ -499,6 +522,7 @@ fn search(args: &[Value], control: &ProductionControl<'_>) -> Result<Produced<Va
         }
         return plain(Value::Int(position), control);
     }
+    crate::expr::collation::string_comparison_order(collation)?;
     let source = value_to_string_with_control(&args[0], control)?;
     let needle = value_to_string_with_control(&args[1], control)?;
     control.check()?;

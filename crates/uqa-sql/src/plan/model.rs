@@ -527,7 +527,8 @@ impl RuleValuesInput {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ConflictPlan {
     pub predicate: Option<Box<ScalarExpr>>,
-    pub constraint: Option<String>,
+    #[serde(default)]
+    pub constraint: crate::ast::ConflictTargetConstraint,
     pub conflict_columns: Vec<String>,
     pub expressions: Vec<ScalarExpr>,
     pub action: ConflictActionPlan,

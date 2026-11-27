@@ -80,69 +80,20 @@ pub(super) fn optional_value_to_display_value(value: Option<&Value>) -> Result<V
 }
 
 pub(super) fn sql_type_name(ty: &ColumnType) -> String {
-    if ty != ty.without_temporal_modifiers() {
-        return ty.sql_name();
-    }
     match ty {
-        ColumnType::Named(name) => name.clone(),
-        ColumnType::SmallInteger => "smallint".into(),
-        ColumnType::Integer => "integer".into(),
-        ColumnType::BigInteger => "bigint".into(),
-        ColumnType::Oid => "oid".into(),
-        ColumnType::Xid => "xid".into(),
-        ColumnType::Void => "void".into(),
-        ColumnType::Boolean => "boolean".into(),
-        ColumnType::Text => "text".into(),
-        ColumnType::Name => "name".into(),
-        ColumnType::Uuid => "uuid".into(),
-        ColumnType::Varchar(Some(length)) => format!("character varying({length})"),
-        ColumnType::Varchar(None) => "character varying".into(),
         ColumnType::Bpchar => "character".into(),
-        ColumnType::Character(length) => format!("character({length})"),
-        ColumnType::Bit(_) | ColumnType::VarBit(_) | ColumnType::Pseudo(_) => ty.sql_name(),
-        ColumnType::Real => "real".into(),
-        ColumnType::DoublePrecision => "double precision".into(),
-        ColumnType::Numeric { precision, scale } => match (precision, scale) {
-            (Some(p), Some(s)) => format!("numeric({p},{s})"),
-            (Some(p), None) => format!("numeric({p})"),
-            _ => "numeric".into(),
-        },
-        ColumnType::Json => "json".into(),
-        ColumnType::JsonB => "jsonb".into(),
-        ColumnType::Bytea => "bytea".into(),
-        ColumnType::InternalChar => r#""char""#.into(),
-        ColumnType::Regproc => "regproc".into(),
-        ColumnType::Regprocedure => "regprocedure".into(),
-        ColumnType::RefCursor => "refcursor".into(),
-        ColumnType::Xml => "xml".into(),
-        ColumnType::Regclass => "regclass".into(),
-        ColumnType::Regcollation => "regcollation".into(),
-        ColumnType::Regnamespace => "regnamespace".into(),
-        ColumnType::Regrole => "regrole".into(),
-        ColumnType::Regtype => "regtype".into(),
-        ColumnType::PgNodeTree => "pg_node_tree".into(),
-        ColumnType::AclItem => "aclitem".into(),
-        ColumnType::Int2Vector => "int2vector".into(),
-        ColumnType::OidVector => "oidvector".into(),
-        ColumnType::AnyArray => "anyarray".into(),
-        ColumnType::Array(element) => format!("{}[]", sql_type_name(element)),
-        ColumnType::Record => "record".into(),
-        ColumnType::Date => "date".into(),
-        ColumnType::Time | ColumnType::TimePrecision(_) => "time".into(),
-        ColumnType::TimeTz | ColumnType::TimeTzPrecision(_) => "time with time zone".into(),
-        ColumnType::Timestamp | ColumnType::TimestampPrecision(_) => "timestamp".into(),
-        ColumnType::TimestampTz | ColumnType::TimestampTzPrecision(_) => {
-            "timestamp with time zone".into()
-        }
-        ColumnType::Interval | ColumnType::IntervalWithFields { .. } => "interval".into(),
-        ColumnType::Range(subtype) => subtype.range_name().into(),
-        ColumnType::Multirange(subtype) => subtype.multirange_name().into(),
-        ColumnType::DeclaredRange(_) | ColumnType::DeclaredMultirange(_) => ty.display_name(),
-        ColumnType::Vector(dim) => format!("vector({dim})"),
-        ColumnType::Tensor(dim) => format!("tensor({dim})"),
+        ColumnType::Numeric {
+            precision: Some(precision),
+            scale: None,
+        } => format!("numeric({precision})"),
+        ColumnType::Time => "time".into(),
+        ColumnType::Timestamp => "timestamp".into(),
         ColumnType::Domain { schema, name, .. } => format!("{schema}.{name}"),
         ColumnType::Enum(reference) => format!("{}.{}", reference.schema, reference.name),
         ColumnType::Composite(reference) => format!("{}.{}", reference.schema, reference.name),
+        ColumnType::DeclaredRange(_) | ColumnType::DeclaredMultirange(_) => ty.display_name(),
+        ColumnType::Array(element) => format!("{}[]", sql_type_name(element)),
+        _ => ty.sql_name(),
     }
 }
 
@@ -220,7 +171,27 @@ mod tests {
     }
 
     #[test]
-    fn refcursor_type_names_match_postgresql() {
-        assert_eq!(sql_type_name(&ColumnType::RefCursor), "refcursor");
+    fn schema_type_names_preserve_cli_spellings_and_sql_type_identity() {
+        for (ty, name) in [
+            (ColumnType::RefCursor, "refcursor"),
+            (ColumnType::TsVector, "tsvector"),
+            (ColumnType::Bpchar, "character"),
+            (ColumnType::Time, "time"),
+            (ColumnType::Timestamp, "timestamp"),
+            (ColumnType::TimePrecision(2), "time(2) without time zone"),
+            (
+                ColumnType::Numeric {
+                    precision: Some(5),
+                    scale: None,
+                },
+                "numeric(5)",
+            ),
+        ] {
+            assert_eq!(sql_type_name(&ty), name);
+            assert_eq!(
+                sql_type_name(&ColumnType::Array(Box::new(ty))),
+                format!("{name}[]")
+            );
+        }
     }
 }

@@ -17,6 +17,7 @@ use uqa_core::Value;
 /// Transform a declared bound for a new partition of `parent` into its stored form.
 pub fn transform_partition_bound(
     context: &PartitionContext<'_>,
+    bindings: &dyn crate::semantics::conflict::InferenceBindingScope,
     parent: &str,
     bound: &PartitionBound,
 ) -> Result<PartitionBound, SQLError> {
@@ -53,9 +54,11 @@ pub fn transform_partition_bound(
                     "LIST partitioned table has more than one partition key".into(),
                 ));
             };
+            let snapshot = bindings.binding_scope()?;
+            let binding = snapshot.context();
             let mut transformed: Vec<Value> = Vec::with_capacity(values.len());
             for expression in values {
-                let value = transform_value(context, expression, &key.name, key)?;
+                let value = transform_value(context, &binding, expression, &key.name, key)?;
                 // Equal constants appear once, as `transformPartitionBound` removes duplicates.
                 let mut duplicate = false;
                 for existing in &transformed {
@@ -86,9 +89,11 @@ pub fn transform_partition_bound(
                     "TO must specify exactly one value per partitioning column",
                 ));
             }
+            let snapshot = bindings.binding_scope()?;
+            let binding = snapshot.context();
             Ok(PartitionBound::Range {
-                lower: transform_range_datums(context, lower, &keys)?,
-                upper: transform_range_datums(context, upper, &keys)?,
+                lower: transform_range_datums(context, &binding, lower, &keys)?,
+                upper: transform_range_datums(context, &binding, upper, &keys)?,
             })
         }
         (PartitionStrategy::Range, _) => Err(invalid_table_definition(
@@ -121,6 +126,7 @@ pub(super) fn parent_partition_key(
 /// `transformPartitionRangeBounds`: `MINVALUE` and `MAXVALUE` pass through, NULL is rejected, and infinite bounds must continue to the last column.
 fn transform_range_datums(
     context: &PartitionContext<'_>,
+    binding: &crate::binding::BindingContext<'_>,
     datums: &[PartitionRangeDatum],
     keys: &[KeyColumn],
 ) -> Result<Vec<PartitionRangeDatum>, SQLError> {
@@ -147,7 +153,7 @@ fn transform_range_datums(
         } else {
             key.name.as_str()
         };
-        let value = transform_value(context, expression, name, key)?;
+        let value = transform_value(context, binding, expression, name, key)?;
         if matches!(value, Value::Null) {
             return Err(SQLError::Routine {
                 sqlstate: "42P17".into(),
@@ -184,19 +190,22 @@ fn validate_infinite_bounds(datums: &[PartitionRangeDatum]) -> Result<(), SQLErr
 /// `transformPartitionBoundValue`: analyze, coerce to the key type in assignment context, and evaluate once.
 fn transform_value(
     context: &PartitionContext<'_>,
+    binding: &crate::binding::BindingContext<'_>,
     expression: &Expr,
     column: &str,
     key: &KeyColumn,
 ) -> Result<Value, SQLError> {
     let plan = crate::plan::ExpressionPlan::lower(expression.clone());
     validate_bound_expression(context.schema, &plan.scalar)?;
-    let source = crate::type_resolution::common_context_expression_type(
-        &plan.scalar,
+    let analyzed = crate::schema::expressions::analyze_schema_expression(
+        &crate::schema::SchemaBindingContext {
+            catalog: context.schema,
+            binding,
+        },
+        expression,
         &crate::RowSchema::default(),
-        &[],
-        Some(context.types),
     )?;
-    if let Some(source) = source.as_ref() {
+    if let Some(source) = &analyzed.ty {
         if !crate::type_resolution::assignment_type_compatible(source, &key.ty) {
             return Err(SQLError::Routine {
                 sqlstate: "42804".into(),
@@ -207,12 +216,14 @@ fn transform_value(
             });
         }
     }
-    let value = context.expressions.evaluate_bound(expression, &[])?;
+    let value = context
+        .expressions
+        .evaluate_bound(&analyzed.expression, &[])?;
     crate::assignment::conversion::coerce_assignment_value(
         context.assignment,
         value,
         &key.ty,
-        source.as_ref(),
+        analyzed.ty.as_ref(),
     )
 }
 

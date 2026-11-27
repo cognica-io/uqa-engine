@@ -19,7 +19,7 @@ fn retained_mutation_fields_preserve_ordinary_paths_positions_and_query_order() 
         "MERGE INTO t USING s ON true WHEN MATCHED AND (SELECT 1) > 0 THEN UPDATE SET a[(SELECT 2)] = (SELECT 3) WHEN MATCHED THEN DELETE WHEN NOT MATCHED BY SOURCE AND (SELECT 4) > 0 THEN UPDATE SET a = (SELECT 5) WHEN NOT MATCHED BY SOURCE THEN DELETE WHEN NOT MATCHED AND (SELECT 6) > 0 THEN INSERT (a[(SELECT 8)]) OVERRIDING SYSTEM VALUE VALUES ((SELECT 7))",
         "MERGE INTO t USING s ON true WHEN MATCHED AND (SELECT 1) > 0 THEN DO NOTHING WHEN NOT MATCHED AND (SELECT 2) > 0 THEN DO NOTHING WHEN NOT MATCHED BY SOURCE AND (SELECT 3) > 0 THEN DO NOTHING",
     ] {
-        let statement = crate::compile(sql).unwrap().remove(0);
+        let statement = parse_statement(sql);
         let ordinary = UnifiedPlan::lower(statement.clone());
         let control = ProductionControl::new(&native, &token, &token);
         let controlled = UnifiedPlan::lower_borrowed_for_rewrite(
@@ -30,7 +30,8 @@ fn retained_mutation_fields_preserve_ordinary_paths_positions_and_query_order() 
         assert_eq!(serde_json::to_value(&*ordinary).unwrap(), serde_json::to_value(controlled_plan).unwrap(), "{sql}");
         drop(controlled);
         assert_eq!(native.used(), 0);
-        let (source, expected, expected_queries) = fixture(sql);
+        let (expected, expected_queries) = expected_field(*ordinary);
+        let source = source_field(statement);
         let ((value, memory, queries), polls) = complete(&mut input(Arc::new(source), &native, &work, &token, &token));
         assert_eq!(serde_json::to_value(&*value).unwrap(), serde_json::to_value(expected).unwrap(), "{sql}");
         assert_eq!(&*queries, &expected_queries, "{sql}");
@@ -43,7 +44,7 @@ fn retained_mutation_fields_preserve_ordinary_paths_positions_and_query_order() 
 
 #[test]
 fn retained_mutation_fields_keep_owned_names_and_nonconsecutive_source_positions() {
-    let (mut source, _, _) = fixture("UPDATE t SET (a, b) = (SELECT 1, 2)");
+    let mut source = source_field(parse_statement("UPDATE t SET (a, b) = (SELECT 1, 2)"));
     let Source::Assignments(assignments) = &mut source else {
         unreachable!()
     };

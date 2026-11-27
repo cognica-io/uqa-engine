@@ -40,7 +40,7 @@ syntax_nodes! {
     Statement: Statement, Query: SelectStmt, Source: FromClause, Expression: Expr,
     Set: SetOp, Cte: CTE, Cycle: CteCycleClause,
     Insert: InsertStmt, Update: UpdateStmt, Delete: DeleteStmt, Merge: MergeStmt,
-    Conflict: OnConflict, ConflictAction: OnConflictAction, MergeAction: MergeWhen,
+    Conflict: OnConflict, ConflictConstraint: crate::ast::ConflictTargetConstraint, ConflictAction: OnConflictAction, MergeAction: MergeWhen,
     Target: AssignmentTarget, Targets: AssignmentTargets, Step: AssignmentStep<Expr>,
     MultipleTargets: MultipleAssignmentTargets<Expr>, Assignment: (AssignmentTargets, Expr),
     Projection: Projection, Order: OrderBy, Function: TableFunction,
@@ -55,7 +55,7 @@ syntax_nodes! {
 
 syntax_members! {
     Statement, SelectStmt, FromClause, Expr, SetOp, CteCycleClause,
-    InsertStmt, UpdateStmt, DeleteStmt, MergeStmt, OnConflict, OnConflictAction, MergeWhen,
+    InsertStmt, UpdateStmt, DeleteStmt, MergeStmt, OnConflict, crate::ast::ConflictTargetConstraint, OnConflictAction, MergeWhen,
     AssignmentTarget, AssignmentTargets, AssignmentStep<Expr>, MultipleAssignmentTargets<Expr>,
     (AssignmentTargets, Expr), Projection, OrderBy, TableFunction,
     WindowDefinition, WindowSpec, WindowFrame, FrameBound,

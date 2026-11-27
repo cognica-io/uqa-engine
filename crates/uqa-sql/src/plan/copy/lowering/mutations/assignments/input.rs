@@ -127,4 +127,4 @@ pub(super) async fn optional_boxed<'s, I: ScalarInput<&'s Expr>>(
     Ok(value)
 }
 
-pub(super) use super::super::super::input::text::{optional_text, texts};
+pub(super) use super::super::super::input::text::texts;

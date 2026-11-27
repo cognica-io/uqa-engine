@@ -54,7 +54,7 @@ impl<'a> DefinitionImageReader<'a> {
                 self.row_binding(binding)?;
             }
             Expr::Binary { op, lhs, rhs } => {
-                self.fields.scalar([binary_tag(*op)]);
+                self.binary_operator(*op);
                 self.push(Frame::Node(rhs))?;
                 self.push(Frame::Node(lhs))?;
             }
@@ -209,17 +209,28 @@ fn tag(value: &Expr) -> Result<u8, SQLError> {
     })
 }
 
-pub(super) fn binary_tag(value: BinaryOp) -> u8 {
-    match value {
-        BinaryOp::Equal => 0,
-        BinaryOp::NotEqual => 1,
-        BinaryOp::Less => 2,
-        BinaryOp::LessEqual => 3,
-        BinaryOp::Greater => 4,
-        BinaryOp::GreaterEqual => 5,
-        BinaryOp::Add => 6,
-        BinaryOp::Subtract => 7,
-        BinaryOp::Multiply => 8,
-        BinaryOp::Divide => 9,
+impl DefinitionImageReader<'_> {
+    pub(super) fn binary_operator(&mut self, value: BinaryOp) {
+        let tag = match value {
+            BinaryOp::Equal => 0,
+            BinaryOp::NotEqual => 1,
+            BinaryOp::Less => 2,
+            BinaryOp::LessEqual => 3,
+            BinaryOp::Greater => 4,
+            BinaryOp::GreaterEqual => 5,
+            BinaryOp::Add => 6,
+            BinaryOp::Subtract => 7,
+            BinaryOp::Multiply => 8,
+            BinaryOp::Divide => 9,
+            BinaryOp::Compare {
+                operator,
+                collation,
+            } => {
+                self.fields.scalar([10 + operator as u8]);
+                self.fields.scalar(collation.oid().to_le_bytes());
+                return;
+            }
+        };
+        self.fields.scalar([tag]);
     }
 }

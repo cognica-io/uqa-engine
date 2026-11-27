@@ -7,10 +7,7 @@
 //! Complete stored index definitions retain the original syntax and allocation owners.
 
 use crate::{
-    ast::{
-        stored_input::{boolean, Input, InputError, Parts, Values},
-        IndexColumnOrder,
-    },
+    ast::stored_input::{boolean, Input, InputError, Parts, Values},
     catalog::index::{IndexCatalogIdentity, IndexDefinition, IndexRelationships},
     SQLError,
 };
@@ -71,7 +68,8 @@ impl<'a> Input<'a, '_> {
                     1 => value.relationships = input.index_relationships(token)?,
                     2 => value.included_columns = parts.take(input.texts(token)?),
                     3 => {
-                        value.column_order = parts.take(input.array(token, Self::index_order)?);
+                        value.column_order =
+                            parts.take(input.array(token, Self::index_column_order)?);
                     }
                     4 => value.key_names = parts.take(input.texts(token)?),
                     5 => value.key_types = parts.take(input.array(token, Self::column)?),
@@ -137,27 +135,6 @@ impl<'a> Input<'a, '_> {
             },
         )?;
         Ok(value)
-    }
-
-    fn index_order(
-        &mut self,
-        token: JsonToken<'a>,
-    ) -> Result<Produced<IndexColumnOrder>, InputError> {
-        let mut value = IndexColumnOrder::default();
-        self.fields(
-            token,
-            &["descending", "nulls_first"],
-            3,
-            |_, index, token| {
-                if index == 0 {
-                    value.descending = boolean(token)?;
-                } else {
-                    value.nulls_first = boolean(token)?;
-                }
-                Ok(())
-            },
-        )?;
-        self.scalar(value)
     }
 }
 

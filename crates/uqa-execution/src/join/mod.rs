@@ -76,6 +76,7 @@ pub struct HashJoin<'a> {
     right_keys: crate::scalar::PreparedExpressions<Produced<Vec<ScalarExpr>>>,
     left_key_types: Vec<Option<uqa_sql::ColumnType>>,
     right_key_types: Vec<Option<uqa_sql::ColumnType>>,
+    indeterminate_keys: Option<Produced<Vec<usize>>>,
     left_key_positions: Option<Produced<Vec<usize>>>,
     right_key_positions: Option<Produced<Vec<usize>>>,
     predicate: Option<crate::scalar::PreparedExpressions<Produced<ScalarExpr>>>,
@@ -360,9 +361,9 @@ impl<'a> HashJoin<'a> {
                 {
                     if let Some(hash) = positional_key_hash(
                         direct.hasher(),
-                        &batch.schema,
-                        &row,
+                        batch.schema.view(&row),
                         positions,
+                        self.indeterminate_keys(),
                         self.evaluator.enum_labels(),
                     )? {
                         direct.insert(hash, index)?;
@@ -463,6 +464,7 @@ impl<'a> HashJoin<'a> {
                         types.get(index).and_then(Option::as_ref),
                     )
                 }),
+                self.indeterminate_keys(),
                 self.evaluator.enum_labels(),
             );
         }
@@ -484,6 +486,7 @@ impl<'a> HashJoin<'a> {
                 .iter()
                 .enumerate()
                 .map(|(index, value)| (Some(value), types.get(index).and_then(Option::as_ref))),
+            self.indeterminate_keys(),
             self.evaluator.enum_labels(),
         )
     }
@@ -544,9 +547,9 @@ impl<'a> HashJoin<'a> {
                             index,
                             &state.build_rows,
                             build_positions,
-                            &batch.schema,
-                            &probe_row,
+                            batch.schema.view(&probe_row),
                             probe_positions,
+                            self.indeterminate_keys(),
                             self.evaluator.enum_labels(),
                         )?
                     }
@@ -653,9 +656,9 @@ impl HashJoin<'_> {
                 {
                     if let Some(hash) = positional_key_hash(
                         direct.hasher(),
-                        &batch.schema,
-                        &row,
+                        batch.schema.view(&row),
                         positions,
+                        self.indeterminate_keys(),
                         self.evaluator.enum_labels(),
                     )? {
                         direct.insert(hash, index)?;

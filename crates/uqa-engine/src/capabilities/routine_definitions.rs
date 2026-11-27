@@ -26,6 +26,19 @@ impl Engine {
     }
 }
 impl RoutineTypeCatalog for Engine {
+    fn domain_has_constraints_with_control(
+        &self,
+        oid: u32,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<bool>, SQLError> {
+        Ok(uqa_sql::catalog::domain::find_domain_by_oid(
+            self.durable.domains.read().values(),
+            oid,
+            control,
+        )?
+        .map(uqa_sql::catalog::domain::StoredDomain::has_constraints))
+    }
+
     fn shell_type_oid(&self, name: &str) -> Result<Option<u32>, SQLError> {
         uqa_execution::catalog::projection::shell_type_oid(&self.catalog_execution(), name)
     }

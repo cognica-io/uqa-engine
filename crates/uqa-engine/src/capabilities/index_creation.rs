@@ -293,6 +293,31 @@ impl IndexCreationPublication for Engine {
     ) -> Result<(), SQLError> {
         self.register_catalog_index_definition(name, method, table, keys, options, definition)
             .map_err(|error| storage_error("CREATE INDEX", &error))?;
+        let state = self
+            .try_table(table)
+            .map_err(|error| storage_error("CREATE INDEX", &error))?
+            .ok_or_else(|| SQLError::UnknownTable(table.into()))?;
+        let rows = self.table_doc_count(table)?;
+        if let Some(catalog) = self
+            .storage
+            .catalog
+            .as_deref()
+            .filter(|_| state.persistence != uqa_sql::ast::RelationPersistence::Temporary)
+        {
+            let mut sample =
+                crate::statistics::MaintenanceState::load_for(catalog, table, state.object_id())
+                    .map_err(|error| storage_error("read index population", &error))?;
+            sample.record_relation_rows(state.object_id(), rows);
+            sample
+                .save(catalog, table)
+                .map_err(|error| storage_error("publish index population", &error))?;
+            *state.statistics_maintenance.write() = sample;
+        } else {
+            state
+                .statistics_maintenance
+                .write()
+                .record_relation_rows(state.object_id(), rows);
+        }
         Ok(())
     }
     fn planned_partition_indexes(

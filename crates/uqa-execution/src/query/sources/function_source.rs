@@ -8,7 +8,7 @@
 
 use super::{
     attach_closed_qualifier_filter, qualify_source_operator_with_columns,
-    resolve_user_table_function, table_function_column_types, validate_table_function_alias_count,
+    resolve_user_table_function, validate_table_function_alias_count,
     validate_table_function_column_definition, ColumnPrune, CteScope, PhysicalOperator,
     QualifierFilters, RowsFromOperator, SQLError, SQLParam, SourceContext, SourcePlan,
     TableFunctionCall, TableFunctionTypeRequest,
@@ -191,7 +191,7 @@ fn build_table_function_operator<'a, S: Clone + Send + Sync + 'static>(
 ) -> Result<Box<dyn PhysicalOperator + 'a>, SQLError> {
     let outer_row = ctes.row_lock_outer_row().cloned();
     let hook = context.relational.expression_scope(ctes)?;
-    let initialized = initialize_function_source(context, &source, params, &hook, outer_row)?;
+    let initialized = initialize_function_source(context, &source, params, ctes, &hook, outer_row)?;
     let operator = initialized.operator(&source, prune, ctes.lock_identities.emit);
     attach_closed_qualifier_filter(
         operator,
@@ -236,6 +236,7 @@ fn initialize_function_source<'a, S: Clone + Send + Sync + 'static>(
     context: &SourceContext<'a, S>,
     source: &FunctionSource<'_>,
     params: &'a [SQLParam],
+    ctes: &CteScope<S>,
     hook: &std::sync::Arc<dyn crate::query::set_projection::SetFunctionRuntime + 'a>,
     outer_row: Option<crate::OwnedPhysicalRow>,
 ) -> Result<InitializedFunctionSource<'a>, SQLError> {
@@ -300,25 +301,33 @@ fn initialize_function_source<'a, S: Clone + Send + Sync + 'static>(
     ) {
         return Err(rows.fail(error));
     }
-    let types = table_function_column_types(
-        context.relational.catalog,
-        TableFunctionTypeRequest {
-            name: source.name,
-            binding: source.binding,
-            args: source.args,
-            user_function: resolved.as_ref().map(|resolved| &**resolved.function),
-            user_invocation: resolved
-                .as_ref()
-                .and_then(|resolved| resolved.binding.invocation.as_deref()),
-            declared_types: source.column_types,
-            columns: &columns,
-            ordinality: source.ordinality,
-        },
-        &input_schema,
-        params,
-        hook.as_ref(),
-    );
-    let schema = crate::RowSchema::with_types(columns.clone(), types);
+    let schema = (|| {
+        let resources = context.ctes.production_resources()?;
+        let control = resources.control();
+        uqa_sql::binding::bind_table_function_result_schema(
+            uqa_sql::semantics::TableFunctionAnalysis {
+                routines: context.relational.catalog,
+                types: hook.as_ref(),
+            },
+            TableFunctionTypeRequest {
+                name: source.name,
+                binding: source.binding,
+                args: source.args,
+                user_function: resolved.as_ref().map(|resolved| &**resolved.function),
+                user_invocation: resolved
+                    .as_ref()
+                    .and_then(|resolved| resolved.binding.invocation.as_deref()),
+                declared_types: source.column_types,
+                columns: &columns,
+                ordinality: source.ordinality,
+            },
+            &input_schema,
+            params,
+            || crate::query::binding::binding_context_with_control(ctes, &control),
+            &control,
+        )
+    })()
+    .map_err(|error| rows.fail(error))?;
     Ok(InitializedFunctionSource {
         columns,
         schema,

@@ -21,6 +21,8 @@ pub fn declaration(
     let options: std::collections::BTreeMap<String, String> =
         serde_json::from_str(&row.parameters_json)?;
     Ok(CreateIndex {
+        key_collations: Vec::new(),
+        attribute_names: definition.key_names,
         name: Some(row.relation.name.clone()),
         table: row.table_name.clone(),
         access_method: row.index_type.clone(),

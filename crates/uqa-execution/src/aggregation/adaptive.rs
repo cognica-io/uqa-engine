@@ -668,6 +668,7 @@ fn aggregate_target_has_variable_state(
         | AggregateStatePlan::Min
         | AggregateStatePlan::Max
         | AggregateStatePlan::Buffered
+        | AggregateStatePlan::StringAgg
         | AggregateStatePlan::BufferedWithNulls
         | AggregateStatePlan::BufferedArrays
         | AggregateStatePlan::Statistics => Ok(true),

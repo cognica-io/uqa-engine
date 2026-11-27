@@ -39,6 +39,35 @@ impl OwnedScalarExpr {
         collation_oid: Option<u32>,
         control: &ProductionControl<'_>,
     ) -> Result<Self> {
+        self.replace_literal_annotation(declaration, Some(bound_type), collation_oid, control)
+    }
+
+    /// Compare the literal by its catalog declaration after discarding its transient analysis cache.
+    pub(crate) fn literal_inference_identity(
+        self,
+        control: &ProductionControl<'_>,
+    ) -> Result<Self> {
+        let ScalarExpr::TypedLiteral {
+            ty,
+            collation_oid,
+            bound_type: Some(_),
+            ..
+        } = &self.expression
+        else {
+            return Ok(self);
+        };
+        let declaration = control.copy_text(ty)?;
+        let collation_oid = *collation_oid;
+        self.replace_literal_annotation(declaration, None, collation_oid, control)
+    }
+
+    fn replace_literal_annotation(
+        self,
+        declaration: Produced<String>,
+        bound_type: Option<Produced<ColumnType>>,
+        collation_oid: Option<u32>,
+        control: &ProductionControl<'_>,
+    ) -> Result<Self> {
         self.assert_owner(control);
         control.check()?;
         let (value, composite_source, parameter_index) = match &self.expression {
@@ -60,7 +89,13 @@ impl OwnedScalarExpr {
         let composite_source = lowering.composite_source(composite_source.map(Source::Borrowed))?;
         let value = lowering.value(Source::Borrowed(value))?;
         let (ty, declaration_memory) = declaration.into_parts();
-        let (bound_type, type_memory) = bound_type.into_parts();
+        let (bound_type, type_memory) = match bound_type {
+            Some(ty) => {
+                let (ty, memory) = ty.into_parts();
+                (Some(ty), memory)
+            }
+            None => (None, control.empty_reservation()),
+        };
         let metadata = control.combine(declaration_memory, type_memory);
         if let Some(owner) = &mut lowering.control {
             owner
@@ -71,7 +106,7 @@ impl OwnedScalarExpr {
             expression: ScalarExpr::TypedLiteral {
                 value,
                 ty,
-                bound_type: Some(bound_type),
+                bound_type,
                 parameter_index,
                 composite_source,
                 collation_oid,

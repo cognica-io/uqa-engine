@@ -31,6 +31,7 @@ pub struct PreparedPlanUpdate {
     pub composite_inputs: super::composites::CompositeInputs,
     pub reanalyzed: Option<PreparedPlanAnalysis>,
     pub generic_plan: Option<crate::plan::SharedExecutablePlan>,
+    pub generic_domains: super::domains::GenericDomainInputs,
     pub generic_cost: Option<f64>,
     pub custom_cost: Option<f64>,
 }

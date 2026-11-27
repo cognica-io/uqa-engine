@@ -186,7 +186,15 @@ pub fn allocate_default_index_name(
     table: &RelationIdentity,
     columns: &[crate::ast::IndexKey],
 ) -> Result<String, SQLError> {
-    let component = super::keys::key_names(columns).join("_");
+    allocate_index_name_from_attributes(catalog, table, &super::keys::key_names(columns))
+}
+
+pub fn allocate_index_name_from_attributes(
+    catalog: &dyn IndexNameCatalog,
+    table: &RelationIdentity,
+    names: &[String],
+) -> Result<String, SQLError> {
+    let component = names.join("_");
     for number in 0_u64.. {
         let label = if number == 0 {
             "idx".to_owned()

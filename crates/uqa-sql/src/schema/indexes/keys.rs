@@ -12,14 +12,17 @@ use crate::schema::SchemaBindingContext;
 use crate::{ast::CreateIndex, ColumnType, SQLError};
 
 pub fn key_names(keys: &[IndexKey]) -> Vec<String> {
-    let mut names = Vec::with_capacity(keys.len());
-    for key in keys {
-        let label = match key {
-            IndexKey::Column(column) => column.clone(),
-            IndexKey::Expression(expression) => {
-                expression_name(expression).map_or_else(|| "expr".into(), |(name, _)| name)
-            }
-        };
+    unique_attribute_names(keys.iter().map(|key| match key {
+        IndexKey::Column(column) => column.clone(),
+        IndexKey::Expression(expression) => {
+            expression_name(expression).map_or_else(|| "expr".into(), |(name, _)| name)
+        }
+    }))
+}
+
+pub(crate) fn unique_attribute_names(labels: impl Iterator<Item = String>) -> Vec<String> {
+    let mut names = Vec::with_capacity(labels.size_hint().0);
+    for label in labels {
         let mut name = label.clone();
         let mut suffix = 1_u64;
         while names.contains(&name) {
@@ -142,7 +145,16 @@ fn finish_index_keys(
         super::options::index_access_method(statement)?.as_str(),
         "" | "btree"
     );
-    for (key, analyzed) in statement.columns.iter_mut().zip(expressions) {
+    statement.column_order.resize(
+        statement.columns.len(),
+        crate::ast::IndexColumnOrder::default(),
+    );
+    for (position, (key, analyzed)) in statement.columns.iter_mut().zip(expressions).enumerate() {
+        let order = &mut statement.column_order[position];
+        let written = statement
+            .key_collations
+            .get(position)
+            .and_then(Option::as_deref);
         match key {
             IndexKey::Column(name) => {
                 let Some(column) = definitions.iter().find(|column| column.name == *name) else {
@@ -152,13 +164,39 @@ fn finish_index_keys(
                     }
                     return Err(SQLError::UnknownColumn(name.clone()));
                 };
+                let natural = column.collation_oid.unwrap_or_else(|| {
+                    u32::try_from(crate::catalog::type_metadata::pg_type_collation_oid(
+                        &column.ty,
+                    ))
+                    .expect("type collation OID")
+                });
+                let selected = super::index_key_collation(
+                    context.catalog,
+                    Some(&column.ty),
+                    natural,
+                    written,
+                    order.collation_oid,
+                )?;
+                order.overrides_collation = selected != natural;
+                order.collation_oid = order.overrides_collation.then_some(selected);
                 if btree {
                     require_default_btree_operator_class(&column.ty)?;
                 }
                 types.push(column.ty.clone());
             }
             IndexKey::Expression(expression) => {
-                super::validate_index_expression_immutability(
+                let clause = crate::catalog::collations::expression::ast_clause(expression)?
+                    .map(|clause| {
+                        crate::catalog::collations::expression::select(
+                            clause.name,
+                            clause.oid,
+                            analyzed.as_ref(),
+                            Some(context.catalog),
+                        )
+                    })
+                    .transpose()?;
+                while crate::catalog::collations::expression::discard_ast_clause(expression)? {}
+                let natural = super::plan_index_expression(
                     context.catalog,
                     &statement.table,
                     expression,
@@ -168,30 +206,53 @@ fn finish_index_keys(
                     .as_ref()
                     .expect("analyzed index expression")
                     .clone();
+                let selected = super::index_key_collation(
+                    context.catalog,
+                    Some(&ty),
+                    natural,
+                    written,
+                    clause.or(order.collation_oid),
+                )?;
+                order.overrides_collation = natural != selected;
+                order.collation_oid = Some(selected);
                 if btree {
                     require_default_btree_operator_class(&ty)?;
                 }
-                let column = match expression.as_ref() {
-                    crate::ast::Expr::Column(name) => Some(name.clone()),
-                    crate::ast::Expr::Cast { expr, .. } => {
-                        if let crate::ast::Expr::Column(name) = expr.as_ref() {
-                            definitions
-                                .iter()
-                                .any(|column| column.name == *name && column.ty == ty)
-                                .then(|| name.clone())
-                        } else {
-                            None
-                        }
-                    }
-                    _ => None,
-                };
-                if let Some(column) = column {
-                    *key = IndexKey::Column(column.to_string());
+                if let Some(name) = index_expression_column(expression, &ty, &definitions) {
+                    *key = IndexKey::Column(name);
                 }
                 types.push(ty);
             }
         }
     }
+    validate_index_attributes(statement, &definitions)?;
+    Ok(types)
+}
+
+fn index_expression_column(
+    expression: &Expr,
+    ty: &ColumnType,
+    definitions: &[crate::ast::ColumnDef],
+) -> Option<String> {
+    match expression {
+        Expr::Column(name) => Some(name.to_string()),
+        Expr::Cast { expr, .. } => {
+            let Expr::Column(name) = expr.as_ref() else {
+                return None;
+            };
+            definitions
+                .iter()
+                .any(|column| column.name == *name && &column.ty == ty)
+                .then(|| name.to_string())
+        }
+        _ => None,
+    }
+}
+
+fn validate_index_attributes(
+    statement: &CreateIndex,
+    definitions: &[crate::ast::ColumnDef],
+) -> Result<(), SQLError> {
     // As in `PostgreSQL`, an included column may repeat and may also be a key column.
     for name in &statement.included_columns {
         match definitions.iter().find(|column| column.name == *name) {
@@ -209,7 +270,7 @@ fn finish_index_keys(
                 }
             }
             IndexKey::Expression(expression) => {
-                for column in &definitions {
+                for column in definitions {
                     if column
                         .generated
                         .as_ref()
@@ -233,7 +294,7 @@ fn finish_index_keys(
             reject_virtual_generated_column(column)?;
         }
     }
-    Ok(types)
+    Ok(())
 }
 
 fn reject_virtual_generated_column(column: &crate::ast::ColumnDef) -> Result<(), SQLError> {
@@ -260,24 +321,33 @@ fn reject_unsupported_included_columns(statement: &CreateIndex) -> Result<(), SQ
     )))
 }
 
+/// Restored declarations without retained attribute names use their original key syntax.
+pub fn attribute_names(statement: &CreateIndex) -> std::borrow::Cow<'_, [String]> {
+    if !statement.attribute_names.is_empty() {
+        return std::borrow::Cow::Borrowed(&statement.attribute_names);
+    }
+    let keys: Vec<_> = statement
+        .columns
+        .iter()
+        .cloned()
+        .chain(
+            statement
+                .included_columns
+                .iter()
+                .cloned()
+                .map(IndexKey::Column),
+        )
+        .collect();
+    std::borrow::Cow::Owned(key_names(&keys))
+}
+
 /// Bind keys and predicates and retain the public attribute names assigned before expression simplification.
 pub fn prepare_index_definition(
     catalog: &dyn crate::schema::SchemaExpressionCatalog,
     bindings: &dyn crate::semantics::conflict::InferenceBindingScope,
     c: &mut CreateIndex,
 ) -> Result<crate::catalog::index::IndexDefinition, SQLError> {
-    let attribute_keys = c
-        .columns
-        .iter()
-        .cloned()
-        .chain(
-            c.included_columns
-                .iter()
-                .cloned()
-                .map(crate::ast::IndexKey::Column),
-        )
-        .collect::<Vec<_>>();
-    let key_names = key_names(&attribute_keys);
+    let key_names = attribute_names(c).into_owned();
     let binding = bindings.binding_scope()?;
     let scope = binding.context();
     let context = SchemaBindingContext {
@@ -294,7 +364,7 @@ pub fn prepare_index_definition(
     }
     reject_unsupported_included_columns(c)?;
     if let Some(predicate) = c.predicate.as_deref_mut() {
-        super::validate_index_expression_immutability(catalog, &c.table, predicate, true)?;
+        super::plan_index_expression(catalog, &c.table, predicate, true)?;
     }
     super::options::validate_index_options(c)?;
     let key_types = finish_index_keys(&context, c, &expressions)?;

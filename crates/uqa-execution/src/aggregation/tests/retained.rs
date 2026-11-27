@@ -47,18 +47,16 @@ fn numeric_and_boolean_transitions_observe_physical_fields_but_count_keeps_them_
 }
 
 #[test]
-fn string_aggregation_keeps_the_first_delimiter_unread_and_observes_later_delimiters() {
+fn string_aggregation_observes_the_first_delimiter_in_its_transition() {
     let malformed = Value::Datum(DatumValue::new(25, u32::MAX, vec![]));
-    let first = Value::List(vec![Value::Str("one".into()), malformed.clone()]);
+    let pair = Value::List(vec![Value::Str("one".into()), malformed.clone()]);
+    let mut state = super::super::string_agg::Transition::default();
     assert_eq!(
-        super::super::string_agg::finish(std::slice::from_ref(&first), None).unwrap(),
-        Value::Str("one".into())
-    );
-    let second = Value::List(vec![Value::Str("two".into()), malformed]);
-    assert_eq!(
-        super::super::string_agg::finish(&[first, second], None)
-            .unwrap_err()
-            .sqlstate(),
+        state.accept(&pair, None, |_| {}).unwrap_err().sqlstate(),
         Some("XX001")
     );
+    let null = Value::List(vec![Value::Null, malformed]);
+    state
+        .accept(&null, None, |_| panic!("NULL row emitted bytes"))
+        .unwrap();
 }

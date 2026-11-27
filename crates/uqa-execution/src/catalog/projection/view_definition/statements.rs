@@ -156,33 +156,33 @@ impl Deparser<'_> {
         let mut arbiter_scope = scope.clone();
         arbiter_scope.qualify = false;
         if !conflict.expressions.is_empty() || !conflict.conflict_columns.is_empty() {
-            let elements = if conflict.expressions.is_empty() {
-                conflict
-                    .conflict_columns
-                    .iter()
-                    .map(|column| quote_ident(column))
-                    .collect::<Vec<_>>()
-            } else {
-                conflict
-                    .expressions
-                    .iter()
-                    .map(|expression| {
-                        let rendered = self.expression(expression, &arbiter_scope, subqueries)?;
-                        Ok(match expression {
-                            ScalarExpr::Column(_)
-                            | ScalarExpr::QualifiedColumn { .. }
-                            | ScalarExpr::Func { .. } => rendered,
-                            _ => format!("({rendered})"),
-                        })
-                    })
-                    .collect::<Result<Vec<_>, SQLError>>()?
-            };
+            let mut elements = conflict
+                .conflict_columns
+                .iter()
+                .map(|column| quote_ident(column))
+                .collect::<Vec<_>>();
+            for (position, expression) in conflict.expressions.iter().enumerate() {
+                let rendered = self.expression(expression, &arbiter_scope, subqueries)?;
+                let mut element = match expression {
+                    ScalarExpr::Column(_)
+                    | ScalarExpr::QualifiedColumn { .. }
+                    | ScalarExpr::Func { .. } => rendered,
+                    _ => format!("({rendered})"),
+                };
+                if let Some(name) = conflict.constraint.collation(position) {
+                    element.push_str(" COLLATE ");
+                    element.push_str(name);
+                }
+                elements.push(element);
+            }
             write!(rendered, "({})", elements.join(", ")).expect("writing to a String cannot fail");
             if let Some(predicate) = &conflict.predicate {
                 let predicate = self.expression(predicate, &arbiter_scope, subqueries)?;
                 self.clause(rendered, "  WHERE ", &predicate, scope.indent);
             }
-        } else if let Some(constraint) = &conflict.constraint {
+        } else if let uqa_sql::ast::ConflictTargetConstraint::Named(constraint) =
+            &conflict.constraint
+        {
             write!(rendered, " ON CONSTRAINT {}", quote_ident(constraint))
                 .expect("writing to a String cannot fail");
         }

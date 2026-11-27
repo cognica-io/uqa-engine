@@ -187,6 +187,33 @@ fn hash_startup_respects_inner_and_outer_build_ownership_for_unequal_inputs() {
 }
 
 #[test]
+fn small_full_join_keeps_its_hash_keys_when_nested_loops_cost_less() {
+    let statistics = |_: &str| {
+        Some(RelationStats {
+            row_count: 2,
+            ..Default::default()
+        })
+    };
+    let estimator = PlanCostEstimator::new(&statistics);
+    let UnifiedPlan::Query(query) = plan("SELECT * FROM a JOIN b ON a.id=b.id") else {
+        unreachable!()
+    };
+    let RelationalPlan::QueryBlock(block) = &query.root else {
+        unreachable!()
+    };
+    let Some(SourcePlan::Join { left, right, .. }) = block.from.as_ref() else {
+        unreachable!()
+    };
+    let control = ProductionControl::uncontrolled();
+    assert!(estimator
+        .prefer_nested_loop(JoinKind::Inner, left, right, &control)
+        .unwrap());
+    assert!(!estimator
+        .prefer_nested_loop(JoinKind::Full, left, right, &control)
+        .unwrap());
+}
+
+#[test]
 fn join_cardinality_uses_its_qualification_including_an_unqualified_inner_join() {
     let statistics = |_: &str| {
         Some(RelationStats {

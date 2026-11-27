@@ -33,10 +33,24 @@ pub fn join_using_predicate_owned(
             column.comparison_type.as_ref(),
             control,
         )?;
-        predicates.push(
-            OwnedScalarExpr::binary(BinaryOp::Equal, lhs, rhs, control)?,
-            control,
-        )?;
+        let derivation = |schema: &RowSchema, position| {
+            crate::catalog::collations::derivation::Derivation::column(
+                schema.column_collation(position).unwrap_or(0),
+                schema.column_type(position),
+            )
+        };
+        let oid = derivation(left, column.left)
+            .combine(derivation(right, column.right))
+            .oid();
+        let op = BinaryOp::Equal.with_input_collation(
+            column
+                .comparison_type
+                .as_ref()
+                .filter(|ty| crate::schema::composites::type_is_collatable(ty))
+                .and_then(|_| u32::try_from(oid).ok())
+                .and_then(crate::catalog::collations::CollationSelection::from_oid),
+        );
+        predicates.push(OwnedScalarExpr::binary(op, lhs, rhs, control)?, control)?;
     }
     Ok(match predicates.len() {
         0 => None,

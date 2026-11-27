@@ -295,14 +295,14 @@ cp "$ASSET_SOURCE/${url##*/}" "$destination"
             self.assertNotEqual(failed.returncode, 0)
             self.assertEqual((work / "bin/usql").read_bytes(), self.payload + CLI.TARGETS[0].encode())
 
-    def test_release_builds_precede_publication_and_checks_do_not_run_on_each_push(self):
+    def test_release_builds_precede_publication_and_checks_select_main_inputs(self):
         release = (ROOT / ".github/workflows/release.yml").read_text()
         self.assertIn("include_cli: true", release)
         self.assertIn("needs: [resolve, python, javascript, c-packages, benchmarks]", release)
         self.assertIn("needs: [resolve, python, javascript, c-packages, crates-io]", release)
         checks = (ROOT / ".github/workflows/usql-release-checks.yml").read_text()
-        self.assertIn("types: [ready_for_review]", checks)
-        self.assertNotIn("  push:", checks)
+        self.assertIn("  push:\n    branches: [main]\n    paths:", checks)
+        self.assertNotIn("  pull_request:", checks)
         self.assertNotIn("workflow_dispatch:", checks)
         action = (ROOT / ".github/actions/package-usql/action.yml").read_text()
         self.assertIn("--features arrow,duckdb", action)

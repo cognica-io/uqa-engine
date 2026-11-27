@@ -7,7 +7,7 @@
 //! Recognize executables whose mutable dependencies are covered by their retained analysis snapshot.
 
 use super::PreparedStatementPlan;
-use crate::prepared::composites::CompositeInputs;
+use crate::prepared::{composites::CompositeInputs, domains::GenericDomainInputs};
 use crate::{
     ast::FunctionBinding,
     plan::{QueryPlan, RelationalPlan, SourcePlan, UnifiedPlan},
@@ -19,8 +19,11 @@ impl PreparedStatementPlan {
     /// Primitive expressions and selected fixed builtins can retain their executable across an unrelated registry refresh. Relations require exact analysis revisions, checked before every plan selection; surviving calls still check current execution privileges.
     #[must_use]
     pub fn has_tracked_executable_dependencies(&self) -> bool {
-        let composites = &self.composite_inputs;
-        let tracked_type = |ty: &ColumnType| independent_type(ty) || composites.tracks_type(ty);
+        let inputs = TrackedInputs {
+            composites: &self.composite_inputs,
+            domains: &self.generic_domains,
+        };
+        let tracked_type = |ty: &ColumnType| inputs.ty(ty);
         if self.needs_analysis
             || !self.dependencies.routines.is_empty()
             || !self
@@ -41,7 +44,7 @@ impl PreparedStatementPlan {
                 schema.record_fields(index).is_some()
                     && schema.column_types()[index]
                         .as_ref()
-                        .is_none_or(|ty| !composites.tracks_type(ty))
+                        .is_none_or(|ty| !inputs.composites.tracks_type(ty))
             })
         {
             return false;
@@ -60,11 +63,35 @@ impl PreparedStatementPlan {
         }
         self.plan
             .as_ref()
-            .is_some_and(|plan| independent_plan(plan, true, tracked_relations, composites))
+            .is_some_and(|plan| independent_plan(plan, true, tracked_relations, &inputs))
             // Composite analysis has replaced written type names and ROW casts with retained identities; its logical tree carries every remaining executable input.
-            && (composites.has_inputs()
-                || independent_plan(&self.source_plan, false, tracked_relations, composites))
-            && independent_plan(&self.logical_plan, false, tracked_relations, composites)
+            && (inputs.composites.has_inputs()
+                || independent_plan(&self.source_plan, false, tracked_relations, &inputs))
+            && independent_plan(&self.logical_plan, false, tracked_relations, &inputs)
+    }
+}
+
+struct TrackedInputs<'a> {
+    composites: &'a CompositeInputs,
+    domains: &'a GenericDomainInputs,
+}
+
+impl TrackedInputs<'_> {
+    fn ty(&self, ty: &ColumnType) -> bool {
+        if let ColumnType::Domain { oid, base, .. } = ty {
+            let mut base = &**base;
+            while let ColumnType::Domain { base: nested, .. } = base {
+                base = nested;
+            }
+            return self.domains.tracks_oid(*oid) && independent_type(base);
+        }
+        independent_type(ty) || self.composites.tracks_type(ty)
+    }
+
+    fn name(&self, name: &str) -> bool {
+        independent_type_name(name)
+            || self.composites.tracks_name(name)
+            || self.domains.tracks_name(name)
     }
 }
 
@@ -72,11 +99,11 @@ fn independent_plan(
     plan: &UnifiedPlan,
     executable: bool,
     tracked_relations: bool,
-    composites: &CompositeInputs,
+    inputs: &TrackedInputs<'_>,
 ) -> bool {
     match plan {
         UnifiedPlan::Query(query) => {
-            independent_query(query, executable, tracked_relations, composites)
+            independent_query(query, executable, tracked_relations, inputs)
         }
         UnifiedPlan::Command(_) => false,
     }
@@ -86,17 +113,33 @@ fn independent_query(
     query: &QueryPlan,
     executable: bool,
     tracked_relations: bool,
-    composites: &CompositeInputs,
+    inputs: &TrackedInputs<'_>,
 ) -> bool {
     if !query.ctes.is_empty() {
         return false;
     }
-    let admitted =
-        |expression: &ScalarExpr| independent_expression(expression, executable, composites);
+    let admitted = |expression: &ScalarExpr| independent_expression(expression, executable, inputs);
     match &query.root {
         RelationalPlan::QueryBlock(block) => {
-            block.from.as_ref().is_none_or(|source| {
-                tracked_relations && matches!(source, SourcePlan::Table { .. })
+            block.from.as_ref().is_none_or(|source| match source {
+                SourcePlan::Table { .. } => tracked_relations,
+                SourcePlan::Function {
+                    binding,
+                    relations,
+                    args,
+                    column_types,
+                    ..
+                } => {
+                    relations.is_none()
+                        && column_types.is_empty()
+                        && binding.as_ref().map_or(!executable, |binding| {
+                            independent_binding(binding)
+                                && crate::fixed_builtin_return_type(binding)
+                                    .is_some_and(|ty| independent_type(&ty))
+                        })
+                        && args.iter().all(admitted)
+                }
+                _ => false,
             }) && block.subqueries.is_empty()
                 && block.windows.is_empty()
                 && block.locking.is_empty()
@@ -112,8 +155,8 @@ fn independent_query(
             ..
         } => {
             subqueries.is_empty()
-                && independent_query(left, executable, tracked_relations, composites)
-                && independent_query(right, executable, tracked_relations, composites)
+                && independent_query(left, executable, tracked_relations, inputs)
+                && independent_query(right, executable, tracked_relations, inputs)
                 && order_by
                     .iter()
                     .map(|order| &order.expr)
@@ -130,7 +173,7 @@ fn independent_query(
 fn independent_expression(
     expression: &ScalarExpr,
     executable: bool,
-    composites: &CompositeInputs,
+    inputs: &TrackedInputs<'_>,
 ) -> bool {
     let mut independent = true;
     expression.visit(&mut |part| {
@@ -138,16 +181,14 @@ fn independent_expression(
             ScalarExpr::Literal(value) => independent_value(value),
             ScalarExpr::RetainedLiteral(literal) => {
                 // Retained values are already evaluated. Classify their selected identity without decoding resident or spilled payloads.
-                literal
-                    .ty
-                    .as_ref()
-                    .is_some_and(|ty| independent_type(ty) || composites.tracks_type(ty))
-                    && literal.declaration.as_deref().is_none_or(|name| {
-                        independent_type_name(name) || composites.tracks_name(name)
-                    })
+                literal.ty.as_ref().is_some_and(|ty| inputs.ty(ty))
+                    && literal
+                        .declaration
+                        .as_deref()
+                        .is_none_or(|name| inputs.name(name))
             }
-            ScalarExpr::Collated { ty, .. } => independent_type(ty) || composites.tracks_type(ty),
-            ScalarExpr::Cast { ty, .. } => independent_type_name(ty) || composites.tracks_name(ty),
+            ScalarExpr::Collated { ty, .. } => inputs.ty(ty),
+            ScalarExpr::Cast { ty, .. } => inputs.name(ty),
             ScalarExpr::TypedLiteral {
                 value,
                 ty,
@@ -158,12 +199,12 @@ fn independent_expression(
                 parameter_index.is_none()
                     && ((bound_type
                         .as_ref()
-                        .is_some_and(|ty| composites.tracks_type(ty))
-                        || composites.tracks_name(ty))
+                        .is_some_and(|ty| inputs.composites.tracks_type(ty))
+                        || inputs.composites.tracks_name(ty))
                         || (independent_value(value)
                             && bound_type
                                 .as_ref()
-                                .map_or_else(|| independent_type_name(ty), independent_type)))
+                                .map_or_else(|| inputs.name(ty), |ty| inputs.ty(ty))))
             }
             ScalarExpr::CompositeRow {
                 bound_type,
@@ -172,8 +213,8 @@ fn independent_expression(
             } => {
                 bound_type
                     .as_ref()
-                    .is_some_and(|ty| composites.tracks_type(ty))
-                    || composites.tracks_name(&binding.ty)
+                    .is_some_and(|ty| inputs.composites.tracks_type(ty))
+                    || inputs.composites.tracks_name(&binding.ty)
             }
             ScalarExpr::Func {
                 binding,
@@ -187,7 +228,8 @@ fn independent_expression(
                     && order_by.is_empty()
                     && filter.is_none()
                     && binding.as_ref().map_or(!executable, |binding| {
-                        tracked_field(binding, composites)
+                        tracked_field(binding, inputs.composites)
+                            || tracked_binary_operator(binding, args.len(), executable)
                             || (independent_binding(binding)
                                 && (!executable
                                     || (args.len() == binding.argument_types.len()
@@ -224,6 +266,25 @@ fn tracked_field(binding: &FunctionBinding, composites: &CompositeInputs) -> boo
             composites.tracks_oid(field.type_oid)
                 && (independent_type(&field.result_type)
                     || composites.tracks_type(&field.result_type))
+        })
+}
+
+/// A selected builtin operator with primitive operands and result cannot depend on a mutable type or routine. Polymorphic output conversions stay on the conservative path.
+fn tracked_binary_operator(binding: &FunctionBinding, arity: usize, executable: bool) -> bool {
+    let Some(crate::ast::FunctionDispatch::Concat { oid }) = &binding.dispatch else {
+        return false;
+    };
+    binding.builtin
+        && binding.object_id.is_none()
+        && binding.invocation.is_none()
+        && binding.resolution_error.is_none()
+        && arity == 2
+        // The parser records the operator before analysis selects its overload. Every surviving executable call must carry its catalog identity.
+        && oid.map_or(!executable, |oid| {
+            crate::type_resolution::binary_operator_by_oid(i64::from(oid)).is_some_and(|operator| {
+                operator.operand_types.iter().all(|name| independent_type_name(name))
+                    && independent_type_name(operator.result_type)
+            })
         })
 }
 

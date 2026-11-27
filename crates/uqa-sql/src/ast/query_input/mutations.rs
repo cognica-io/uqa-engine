@@ -70,9 +70,25 @@ stored_struct!(ReturningAliases {
     old_explicit: default(false),
     new_explicit: default(false)
 });
+impl Stored for crate::ast::ConflictTargetConstraint {
+    fn read<'a>(
+        input: &mut Input<'a, '_>,
+        token: JsonToken<'a>,
+        values: &Values<'_>,
+    ) -> Result<Native<Self>, InputError> {
+        let mut parts = Parts::new(input.control);
+        let value = match token {
+            JsonToken::Null => Self::Unqualified,
+            JsonToken::String(_) => Self::Named(parts.take(input.stored(token, values)?)),
+            _ => Self::Collations(parts.take(input.stored(token, values)?)),
+        };
+        parts.finish(value)
+    }
+}
+
 stored_struct!(OnConflict {
     predicate: default(None),
-    constraint: default(None),
+    constraint: default(crate::ast::ConflictTargetConstraint::Unqualified),
     conflict_columns: required,
     expressions: default(Vec::new()),
     action: required

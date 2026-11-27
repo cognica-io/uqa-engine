@@ -59,6 +59,7 @@ syntax_leaf!(
     crate::ast::FrameMode,
     crate::ast::FrameExclusion,
     crate::ast::OverridingKind,
+    crate::ast::ConflictTargetConstraint,
     crate::ColumnType
 );
 

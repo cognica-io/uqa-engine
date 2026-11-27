@@ -354,8 +354,8 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
                 collation,
             } => return self.collated_expression(expr, ty, *collation, input, subqueries),
             ScalarExpr::Cast { .. } => CatalogOperands::Cast,
-            ScalarExpr::Binary { op, lhs, rhs } => {
-                return self.binary_expression(*op, lhs, rhs, input, subqueries);
+            ScalarExpr::Binary { .. } => {
+                return self.binary_expression(expression, input, subqueries);
             }
             ScalarExpr::Not(inner) => return self.not_expression(inner, input, subqueries),
             ScalarExpr::And(items) | ScalarExpr::Or(items) => {
@@ -708,7 +708,7 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
                 let schema = self.scalar_query_schema(*subquery, input, subqueries)?;
                 let mut result = ExpressionType::resolved(schema.column_type(0).cloned());
                 if let Some(oid) = schema.column_collation(0) {
-                    result.derivation = Derivation::implicit(i64::from(oid));
+                    result.derivation = Derivation::column(oid, result.ty.as_deref());
                 }
                 self.binary(BinaryOp::Equal, &mut value, &mut result)?;
                 self.reject_set_inputs(

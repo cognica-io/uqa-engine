@@ -63,6 +63,9 @@ syntax_struct!(MergeStmt {
     returning,
     returning_aliases
 });
+syntax_enum!(crate::ast::ConflictTargetConstraint, crate::ast::ConflictTargetConstraint::Unqualified;
+    0 => Unqualified, 1 => Named(name), 2 => Collations(names),
+);
 syntax_struct!(OnConflict {
     predicate,
     constraint,

@@ -180,18 +180,7 @@ pub fn schema_expr_text(expr: &Expr) -> Result<String, SQLError> {
         Expr::Binary { op, lhs, rhs } => format!(
             "({} {} {})",
             schema_expr_text(lhs)?,
-            match op {
-                crate::ast::BinaryOp::Equal => "=",
-                crate::ast::BinaryOp::NotEqual => "<>",
-                crate::ast::BinaryOp::Less => "<",
-                crate::ast::BinaryOp::LessEqual => "<=",
-                crate::ast::BinaryOp::Greater => ">",
-                crate::ast::BinaryOp::GreaterEqual => ">=",
-                crate::ast::BinaryOp::Add => "+",
-                crate::ast::BinaryOp::Subtract => "-",
-                crate::ast::BinaryOp::Multiply => "*",
-                crate::ast::BinaryOp::Divide => "/",
-            },
+            op.sql(),
             schema_expr_text(rhs)?
         ),
         Expr::Not(inner) => format!("(NOT {})", schema_expr_text(inner)?),

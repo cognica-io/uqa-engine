@@ -103,12 +103,9 @@ def select(root: Path, kind: str, event: dict, event_name: str, revision: str,
         result["reason"] = "Explicit full validation requires every configuration."
         return result
     if event_name == "pull_request":
-        if (event.get("action") != "ready_for_review"
-                or event.get("pull_request", {}).get("draft", True)):
-            result.update(required=False, reason="Wait for the completed review candidate.")
-            return result
-        base = event.get("pull_request", {}).get("base", {}).get("sha")
-    elif event_name == "push" and event.get("ref", "").startswith("refs/heads/"):
+        result.update(required=False, reason="Product validation runs on the merged revision.")
+        return result
+    if event_name == "push" and event.get("ref", "").startswith("refs/heads/"):
         base = event.get("before")
     else:
         return result

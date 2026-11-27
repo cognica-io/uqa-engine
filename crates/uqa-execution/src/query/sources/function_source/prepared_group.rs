@@ -52,7 +52,14 @@ impl PreparedFunctionGroup {
             runtime,
             outer,
             |source| {
-                initialize_function_source(context, source, params, runtime, Some(outer.clone()))
+                initialize_function_source(
+                    context,
+                    source,
+                    params,
+                    ctes,
+                    runtime,
+                    Some(outer.clone()),
+                )
             },
         )
     }

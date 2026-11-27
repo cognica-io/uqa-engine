@@ -69,6 +69,12 @@ leaf!(usize, |input, _memory, read| read!(input.binary.count()));
 leaf!(Vec<String>, |input, memory, read| read!(
     input.plan_texts(memory)
 ));
+leaf!(Vec<Option<String>>, |input, memory, read| input_list!(
+    read,
+    input,
+    memory,
+    |input, memory| { read!(input.plan_optional_text(memory)) }
+));
 leaf!(Vec<usize>, |input, memory, read| input_list!(
     read,
     input,

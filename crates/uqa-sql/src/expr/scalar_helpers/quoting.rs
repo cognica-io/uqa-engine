@@ -35,15 +35,43 @@ pub fn quote_ident_with_control(
     ident: &str,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<String>, ValueRetentionError> {
+    render_identifier(ident, identifier_quotes(ident, control)?, control)
+}
+
+pub(crate) fn quote_sql_identifier(
+    ident: &str,
+    control: &ProductionControl<'_>,
+) -> crate::error::Result<Produced<String>> {
+    let quotes = identifier_quotes(ident, control)?;
+    if let Some(quotes) = quotes {
+        crate::expr::text_size::check_allocation_size(ident.len() as u128 + quotes as u128 + 3)?;
+    }
+    Ok(render_identifier(ident, quotes, control)?)
+}
+
+fn identifier_quotes(
+    ident: &str,
+    control: &ProductionControl<'_>,
+) -> Result<Option<usize>, ValueRetentionError> {
     control.check()?;
     let mut safe = !ident.is_empty();
+    let mut quotes = 0;
     for (index, character) in ident.chars().enumerate() {
         control.check()?;
         safe &= character.is_ascii_lowercase()
             || character == '_'
             || (index > 0 && character.is_ascii_digit());
+        quotes += usize::from(character == '"');
     }
-    if safe && !super::is_quoted_keyword(ident) {
+    Ok((!safe || super::is_quoted_keyword(ident)).then_some(quotes))
+}
+
+fn render_identifier(
+    ident: &str,
+    quotes: Option<usize>,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<String>, ValueRetentionError> {
+    if quotes.is_none() {
         return control.copy_text(ident);
     }
     let mut output = ProductionString::new(*control);

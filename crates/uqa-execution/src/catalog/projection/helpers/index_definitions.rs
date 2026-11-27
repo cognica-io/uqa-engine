@@ -44,6 +44,16 @@ pub fn indexdef(
                 .get(position)
                 .copied()
                 .unwrap_or_default();
+            if let Some(oid) = order.collation_oid.filter(|_| order.overrides_collation) {
+                let name = crate::catalog::projection::regtypes::format_expression_collation(
+                    catalog, resolution, oid,
+                )
+                .ok_or_else(|| {
+                    SQLError::Internal(format!("cache lookup failed for collation {oid}"))
+                })?;
+                column.push_str(" COLLATE ");
+                column.push_str(&name);
+            }
             if order.descending {
                 column.push_str(" DESC");
             }

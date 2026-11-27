@@ -13,6 +13,14 @@ use super::{
 };
 use crate::ast::{FunctionBinding, FunctionDispatch};
 
+pub(super) fn compile_collation_name(parts: &[Node]) -> Result<String> {
+    Ok(extract_strings(parts)?
+        .iter()
+        .map(|part| crate::expr::quote_ident(part))
+        .collect::<Vec<_>>()
+        .join("."))
+}
+
 /// Mark a dedicated `PostgreSQL` syntax expression as a polymorphic built-in call; the empty argument signature is inferred from the expression operands instead of representing a fixed overload.
 pub(super) fn builtin_syntax_call(name: &str, args: Vec<Expr>) -> Expr {
     Expr::Func {
@@ -98,11 +106,7 @@ pub(in crate::compiler) fn compile_expr(node: &Node) -> Result<Expr> {
                 .arg
                 .as_deref()
                 .ok_or_else(|| SQLError::Internal("COLLATE without an argument".into()))?;
-            let name = extract_strings(&clause.collname)?
-                .iter()
-                .map(|part| crate::expr::quote_ident(part))
-                .collect::<Vec<_>>()
-                .join(".");
+            let name = compile_collation_name(&clause.collname)?;
             Ok(dispatched_call(
                 FunctionDispatch::Collate { oid: None },
                 vec![compile_expr(argument)?, Expr::Literal(Value::Str(name))],

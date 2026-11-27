@@ -133,7 +133,11 @@ fn eval_dispatched(
         );
     }
     if let Some(result) = super::super::scalar_postgres::eval_comparison_with_context(
-        dispatch, arguments, control, context,
+        dispatch,
+        arguments,
+        control,
+        context,
+        binding.input_collation,
     ) {
         return result;
     }

@@ -133,7 +133,7 @@ fn check_total(bytes: usize) -> Result<(), SQLError> {
     }
 }
 
-/// Read unquoted and quoted lexemes, combine repeated words, then coalesce equal positions with their strongest weight.
+/// Read and normalize lexemes. Equal positions retain the strongest weight over the entries consumed before the position or count limit.
 pub fn parse(
     text: &str,
     control: &ProductionControl<'_>,
@@ -176,11 +176,9 @@ pub fn parse(
         )?)?;
     }
     let (mut entries, _entry_memory) = entries.finish()?.into_parts();
-    uqa_core::ordering::sort_by_with_control(
-        &mut entries,
-        &mut || control.check(),
-        |left, right, _| Ok(left.text.cmp(&right.text)),
-    )?;
+    crate::postgres_sort::sort_by(&mut entries, control, &|left, right| {
+        Ok(left.text.cmp(&right.text))
+    })?;
     let mut output = ProductionVec::new(*control);
     let mut bytes = 0usize;
     for words in entries.chunk_by(|a, b| a.text == b.text) {
@@ -188,25 +186,21 @@ pub fn parse(
         let mut ordered = ProductionVec::new(*control);
         for word in words {
             for &position in &word.positions {
-                ordered.push_copy((position.0, ordered.len(), position.1))?;
+                ordered.push_copy(position)?;
             }
         }
-        uqa_core::ordering::sort_by_with_control(
-            ordered.as_mut_slice(),
-            &mut || control.check(),
-            |&(left, left_order, _), &(right, right_order, _), _| {
-                Ok((left, left_order).cmp(&(right, right_order)))
-            },
-        )?;
+        crate::postgres_sort::sort_by(ordered.as_mut_slice(), control, &|left, right| {
+            Ok(left.0.cmp(&right.0))
+        })?;
         let mut positions = ProductionVec::new(*control);
         for same in ordered.chunk_by(|a, b| a.0 == b.0) {
-            let (position, _, mut weight) = same[0];
-            // uniquePos stops immediately on reaching the last representable entry. Only preceding groups consume every duplicate weight.
+            let (position, mut weight) = same[0];
+            // uniquePos checks the cutoff when it advances to a distinct position, before reading another weight at that position.
             if !positions.is_empty() && (position == 16383 || positions.len() == 255) {
                 positions.push_copy((position, weight))?;
                 break;
             }
-            for &(_, _, other) in &same[1..] {
+            for &(_, other) in &same[1..] {
                 control.check()?;
                 weight = weight.max(other);
             }
@@ -256,3 +250,6 @@ pub(crate) fn canonical_text(
     let (text, memory) = text.finish()?.into_parts();
     Ok(control.finish(uqa_core::Value::Str(text), memory)?)
 }
+
+#[cfg(test)]
+mod tests;

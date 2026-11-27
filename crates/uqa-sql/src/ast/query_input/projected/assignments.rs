@@ -66,6 +66,26 @@ impl Projected for AssignmentTargets {
     }
 }
 
+impl Projected for crate::ast::ConflictTargetConstraint {
+    fn read_value<'i, 'a>(
+        input: Input<'i>,
+        work: &'a mut crate::ast::query_input::projected::Work<'i>,
+    ) -> Result<Read<'a, Self>> {
+        frame(input.control, async move {
+            input.checkpoint(work).await?;
+            let mut parts = Parts::new(input.control);
+            let value = if input.value.kind() == uqa_core::json::JsonValueKind::Null {
+                Self::Unqualified
+            } else if input.value.as_str().is_some() {
+                Self::Named(parts.take(input.read(work).await?))
+            } else {
+                Self::Collations(parts.take(input.read(work).await?))
+            };
+            finish(parts, value)
+        })
+    }
+}
+
 impl Projected for IndexKey {
     const BUFFERED: bool = true;
     fn read_value<'i, 'a>(

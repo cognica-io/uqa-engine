@@ -17,7 +17,7 @@ fn retained_mutation_fields_retire_every_suspended_prefix_and_denied_destination
         "INSERT INTO t VALUES (0) ON CONFLICT (a) WHERE a > (SELECT 4) DO UPDATE SET a[(SELECT 1)] = (SELECT 2) WHERE a > (SELECT 3)",
         "MERGE INTO t USING s ON true WHEN MATCHED AND (SELECT 1) > 0 THEN UPDATE SET a[(SELECT 2)] = (SELECT 3) WHEN NOT MATCHED THEN INSERT (a[(SELECT 5)]) VALUES ((SELECT 4))",
     ] {
-        let (source, _, _) = fixture(sql);
+        let source = source_field(parse_statement(sql));
         let source = Arc::new(source);
         let (value, polls) = complete(&mut input(source.clone(), &native, &work, &token, &token));
         drop(value);
@@ -57,7 +57,7 @@ fn retained_mutation_fields_retire_deep_prefixes_after_late_callback_failure() {
             "INSERT INTO t VALUES (0) ON CONFLICT (a) WHERE a > (SELECT 99) DO UPDATE SET a = 1",
             "MERGE INTO t USING s ON true WHEN NOT MATCHED AND true THEN INSERT (a[(SELECT 99)]) VALUES (1)",
         ] {
-            let (mut source, _, _) = fixture(sql);
+            let mut source = source_field(parse_statement(sql));
             let mut deep = Expr::Literal(Value::Str("leaf".into()));
             for _ in 0..8192 { deep = Expr::Not(Box::new(deep)); }
             match &mut source {

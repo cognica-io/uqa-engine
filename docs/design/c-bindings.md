@@ -1440,7 +1440,7 @@ python3 scripts/check-engine-capabilities.py
 python3 scripts/check-integration-test-harnesses.py
 ```
 
-Product delivery additionally requires automatic performance regression results for the actual final source on Linux and macOS, including bounded work, memory, and output correctness. Build/archive success alone is insufficient. Follow the repository's draft-PR and ready-for-review batch workflow; use configured repository events and do not manually dispatch, rerun, or cancel workflows. Keep generated reports in ignored output directories or CI artifacts. Performance claims require a controlled host and an independently established noise bound.
+Product delivery additionally requires automatic performance regression results for the actual final source on Linux and macOS, including bounded work, memory, and output correctness. Build/archive success alone is insufficient. Run focused local tests and the lightweight PR checks before merge. Verify the automatic regression results on the merged revision of `main`. Use configured repository events to start workflows. Keep generated reports in ignored output directories or CI artifacts. Performance claims require a controlled host and an independently established noise bound.
 
 This document defines the interface and qualification contract. The [implementation ledger](../plans/0028-c-bindings.md) records completed implementation, source-scoped evidence and remaining work. Reviewing declarations or configuring CI does not verify a runtime, package, benchmark or release.
 

@@ -15,7 +15,7 @@ pub fn invalidate_execution_plans<'a>(
 ) {
     for entry in entries {
         if !entry.has_tracked_executable_dependencies() {
-            entry.plan = None;
+            entry.invalidate_executable();
         }
     }
 }
@@ -33,6 +33,8 @@ pub fn invalidate_execution_plans_with_routines<'a>(
 pub enum CatalogRegistryChange {
     Definitions,
     BuiltinRoutinePrivileges,
+    /// A surviving domain coercion reads its checks when invoked. A removed check could not have been assumed absent by a currently valid folded plan.
+    DomainConstraintRemoval,
 }
 
 impl CatalogRegistryChange {

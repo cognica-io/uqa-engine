@@ -78,14 +78,19 @@ pub(in crate::schema::indexes) fn materialize(
                         child_name.qualified_name()
                     )));
                 }
-                let name = uqa_sql::schema::indexes::names::allocate_default_index_name(
+                let attributes = if parent_definition.key_names.is_empty() {
+                    std::borrow::Cow::Owned(uqa_sql::schema::indexes::keys::key_names(&parent_keys))
+                } else {
+                    std::borrow::Cow::Borrowed(parent_definition.key_names.as_slice())
+                };
+                let name = uqa_sql::schema::indexes::names::allocate_index_name_from_attributes(
                     &CandidateNames {
                         catalog,
                         snapshot: catalog.snapshot(),
                         rows,
                     },
                     child_name,
-                    &parent_keys,
+                    &attributes,
                 )
                 .map_err(|error| uqa_storage::StorageBackendError::backend("index name", error))?;
                 let mut definition = parent_definition.clone();

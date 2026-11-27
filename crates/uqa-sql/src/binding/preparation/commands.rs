@@ -20,6 +20,32 @@ use std::borrow::Cow;
 mod references;
 
 impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
+    pub(super) fn executable_result(
+        &mut self,
+        plan: crate::plan::PlanRef<'_>,
+    ) -> Result<(crate::binding::statements::AnalyzedResult, bool), SQLError> {
+        use crate::{binding::statements::AnalyzedResult, plan::PlanRef};
+        match plan {
+            PlanRef::Query(query) => Ok((AnalyzedResult::Schema(self.query(query, None)?), false)),
+            PlanRef::Command(command) if command.mutation_target().is_some() => Ok((
+                self.command(command)?
+                    .map_or(AnalyzedResult::Command, AnalyzedResult::Schema),
+                true,
+            )),
+            PlanRef::Command(
+                command @ (CommandPlan::Call { .. }
+                | CommandPlan::CreateView { .. }
+                | CommandPlan::CreateTableAs { .. }
+                | CommandPlan::CreateMaterializedView { .. }
+                | CommandPlan::DeclareCursor { .. }),
+            ) => {
+                self.command(command)?;
+                Ok((AnalyzedResult::Command, false))
+            }
+            PlanRef::Command(_) => Ok((AnalyzedResult::Command, false)),
+        }
+    }
+
     pub(super) fn command(&mut self, command: &CommandPlan) -> Result<Option<RowSchema>, SQLError> {
         let lookup = self.scope.resolution.lookup_mode();
         self.scope.set_command_lookup_mode(command);
@@ -45,6 +71,20 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
         outer: Option<&RowSchema>,
     ) -> Result<Option<RowSchema>, SQLError> {
         match command {
+            CommandPlan::Call { args, .. } => {
+                crate::routines::call::validate_call_arguments(args)?;
+                let (decoded, _) = crate::ir::analyze_expression_call_arguments_with_control(
+                    args,
+                    &self.scope.control(),
+                )?;
+                let input = RowSchema::empty_with_control(&self.scope.control())?;
+                self.in_placement(SetPlacement::CallArgument, |analysis| {
+                    for argument in decoded.iter() {
+                        analysis.expression(argument.value, outer.unwrap_or(&input), &[])?;
+                    }
+                    Ok(())
+                })?;
+            }
             CommandPlan::Explain { body, .. } => {
                 self.plan(body)?;
             }
@@ -266,8 +306,17 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
         subqueries: &[QueryPlan],
     ) -> Result<(), SQLError> {
         self.in_placement(SetPlacement::IndexExpression, |analysis| {
-            for expression in &conflict.expressions {
+            for (position, expression) in conflict.expressions.iter().enumerate() {
                 analysis.expression(expression, input, subqueries)?;
+                if let Some(name) = conflict.constraint.collation(position) {
+                    crate::catalog::collations::expression::select_with_control(
+                        name,
+                        None,
+                        None,
+                        Some(analysis.routines),
+                        &analysis.scope.control(),
+                    )?;
+                }
             }
             Ok(())
         })?;

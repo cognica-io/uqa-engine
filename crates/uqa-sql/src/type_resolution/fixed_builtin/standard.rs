@@ -38,6 +38,12 @@ declarations! { pub(super) fn lookup(name);
             Signature::new(const { &[T::AnyArray, T::Integer] }, T::Integer),
         ],
         "lower" | "upper" | "initcap" => &[Signature::new(const { &[T::Text] }, T::Text)],
+        "strpos" => &[Signature::new(const { &[T::Text, T::Text] }, T::Integer)],
+        "position" => &[
+            Signature::new(const { &[T::Text, T::Text] }, T::Integer),
+            Signature::new(const { &[T::Bytea, T::Bytea] }, T::Integer),
+            Signature::new(const { &[T::Bit(None), T::Bit(None)] }, T::Integer),
+        ],
         "replace" => &[Signature::new(const { &[T::Text, T::Text, T::Text] }, T::Text)],
         "factorial" => &[Signature::new(const { &[T::BigInteger] }, numeric_type())],
         "mod" => &[

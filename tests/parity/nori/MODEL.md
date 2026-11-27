@@ -42,7 +42,7 @@ python3 -m unittest discover -s scripts/tests -p 'test_nori*.py'
 
 The 49,775,061-byte archive supplies 202,683,519 bytes across 43 builder inputs. Fresh arm64 runs and an independent amd64 Docker run produced all nine dictionary resources byte for byte equal to the pinned release jar, totaling 25,039,384 bytes. Equality covers the compiled FST, stable word ordering, dictionary buffers/maps, character classes, and connection matrix; it is stronger than comparing token examples alone. These are reproducibility and artifact-size measurements, not analysis throughput or runtime-memory measurements.
 
-Any input, runtime, file-inventory, size, or checksum difference fails the run before publishing an output directory. Existing output is preserved. `--write-manifest` records an intentional reviewed provenance change only after every regenerated resource matches the reference jar; it cannot accept different resource bytes. The packaged UQA bundle is never replaced by this command. Pre-merge CI's Nori regeneration job runs this comparison, exhaustive neutral model export, and all six reference drivers, then retains the model and regeneration manifests as artifacts.
+Any input, runtime, file-inventory, size, or checksum difference fails the run before publishing an output directory. Existing output is preserved. `--write-manifest` records an intentional reviewed provenance change only after every regenerated resource matches the reference jar; it cannot accept different resource bytes. The packaged UQA bundle is never replaced by this command. The Nori regeneration job on `main` runs this comparison, exhaustive neutral model export, and all six reference drivers, then retains the model and regeneration manifests as artifacts.
 
 ## Binary format version 1
 

@@ -567,8 +567,8 @@ pub(super) fn validate_table_function(
     input: &RowSchema,
     params: &[SQLParam],
     control: &uqa_core::memory::ProductionControl<'_>,
-) -> Result<Option<crate::semantics::ControlledUserTableFunction>, SQLError> {
-    if let Some(resolved) = crate::semantics::resolve_user_table_function_with_control(
+) -> Result<Option<crate::semantics::SelectedTableFunction>, SQLError> {
+    let selected = crate::semantics::resolve_table_function_with_control(
         crate::semantics::TableFunctionAnalysis { ..context },
         name,
         binding,
@@ -576,8 +576,12 @@ pub(super) fn validate_table_function(
         input,
         params,
         control,
-    )? {
-        return Ok(Some(resolved));
+    )?;
+    if matches!(
+        selected,
+        Some(crate::semantics::SelectedTableFunction::User(_))
+    ) {
+        return Ok(selected);
     }
     let identity = crate::semantics::lowercase_function_name_with_control(name, control)?;
     let lower = crate::semantics::builtin_function_dispatch_name_with_control(&identity, control)?;
@@ -588,7 +592,7 @@ pub(super) fn validate_table_function(
                 .routines
                 .has_registered_table_function_with_control(&identity, control)?)
     {
-        return Ok(None);
+        return Ok(selected);
     }
     Err(undefined_function(name, args, input, params, context.types))
 }

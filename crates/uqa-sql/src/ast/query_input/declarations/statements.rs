@@ -6,6 +6,7 @@
 
 use super::special::read_explain;
 use super::{invalid, Input, InputError, JsonToken, Native, Parts, Stored, Values};
+use crate::ast::stored_input::{boolean, optional};
 use crate::ast::{
     AlterForeignServer, CreateForeignServer, CreateForeignTable, CreateIndex, CursorDirection,
     DeclareCursorStmt, DeferredCreateForeignTable, DiscardTarget, DropKind, DropStmt,
@@ -14,6 +15,7 @@ use crate::ast::{
     TransactionCharacteristics, TransactionIsolationLevel, TransactionStmt, TruncateTarget,
     VacuumOption, VacuumOptionValue, VacuumStmt, VacuumTarget,
 };
+use uqa_core::memory::Produced;
 
 stored_struct!(AlterForeignServer {
     name: required,
@@ -59,6 +61,8 @@ stored_struct!(CreateIndex {
     if_not_exists: required,
     options: required,
     option_namespaces: defaulted,
+    key_collations: defaulted,
+    attribute_names: defaulted,
 });
 
 stored_enum!(CursorDirection {
@@ -126,9 +130,52 @@ stored_struct!(GeneratedColumn {
 
 stored_enum!(GeneratedColumnKind { Virtual, Stored });
 
-stored_struct!(IndexColumnOrder {
+impl<'a> Input<'a, '_> {
+    /// Stored index definitions and CREATE INDEX share the two required sort flags. Older positional records end before the optional collation fields.
+    pub(crate) fn index_column_order(
+        &mut self,
+        token: JsonToken<'a>,
+    ) -> Result<Produced<IndexColumnOrder>, InputError> {
+        let mut value = IndexColumnOrder::default();
+        self.fields_with_defaults(
+            token,
+            &[
+                "descending",
+                "nulls_first",
+                "collation_oid",
+                "overrides_collation",
+            ],
+            0b0011,
+            0b0011,
+            |_, index, token| {
+                match index {
+                    0 => value.descending = boolean(token)?,
+                    1 => value.nulls_first = boolean(token)?,
+                    2 => value.collation_oid = optional(token)?,
+                    _ => value.overrides_collation = boolean(token)?,
+                }
+                Ok(())
+            },
+        )?;
+        self.scalar(value)
+    }
+}
+
+impl Stored for IndexColumnOrder {
+    fn read<'a>(
+        input: &mut Input<'a, '_>,
+        token: JsonToken<'a>,
+        _: &Values<'_>,
+    ) -> Result<Native<Self>, InputError> {
+        Native::new(input.index_column_order(token)?, input.control)
+    }
+}
+
+projected_struct!(IndexColumnOrder {
     descending: required,
     nulls_first: required,
+    collation_oid: defaulted,
+    overrides_collation: defaulted,
 });
 
 stored_struct!(SetConstraintName {

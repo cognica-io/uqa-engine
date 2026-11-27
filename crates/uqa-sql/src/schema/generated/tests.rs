@@ -63,6 +63,7 @@ impl SchemaExpressionCatalog for Catalog {
         Ok(PlannedSchemaExpression {
             expression: expression.clone(),
             ty: Some(ColumnType::Integer),
+            collation: 0,
             immutable: true,
             constant: false,
         })

@@ -16,7 +16,7 @@ use uqa_core::RelationIdentity;
 use super::super::helpers::index_definitions::{index_columns, indexdef};
 use super::super::helpers::oids::{relation_oid, split_schema_name};
 use super::super::helpers::rows::{
-    bool_value, catalog_int2vector, catalog_usize, int_value, row, str_value,
+    bool_value, catalog_int2vector, catalog_oidvector, catalog_usize, int_value, row, str_value,
 };
 use super::table_relation_oid_from;
 
@@ -40,6 +40,18 @@ impl CatalogIndexRelation {
             || relation_oid(self.relkind, &self.relation.schema, &self.relation.name),
             |catalog| catalog.identity.oid,
         )
+    }
+
+    fn key_collation(
+        &self,
+        position: usize,
+        source: Option<&uqa_sql::ast::ColumnDef>,
+    ) -> Option<u32> {
+        self.definition
+            .column_order
+            .get(position)
+            .and_then(|order| order.collation_oid)
+            .or_else(|| source.and_then(|column| column.collation_oid))
     }
 
     /// Stored key types and included-column types define both `pg_attribute` and storage dependencies.
@@ -77,7 +89,9 @@ impl CatalogIndexRelation {
                 .ok_or_else(|| {
                     SQLError::Internal("missing expression index attribute type".into())
                 })?;
-            columns.push(uqa_sql::ast::ColumnDef::nullable(name, ty));
+            let mut attribute = uqa_sql::ast::ColumnDef::nullable(name, ty);
+            attribute.collation_oid = self.key_collation(position, source);
+            columns.push(attribute);
         }
         for (position, name) in self.definition.included_columns.iter().enumerate() {
             let ty = table_columns
@@ -94,10 +108,9 @@ impl CatalogIndexRelation {
                 .key_names
                 .get(self.columns.len() + position)
                 .unwrap_or(name);
-            columns.push(uqa_sql::ast::ColumnDef::nullable(
-                attribute_name,
-                ty.clone(),
-            ));
+            let mut attribute = uqa_sql::ast::ColumnDef::nullable(attribute_name, ty.clone());
+            attribute.collation_oid = Some(0);
+            columns.push(attribute);
         }
         Ok(columns)
     }
@@ -308,7 +321,7 @@ pub fn build_pg_index(
                     "pg_index.indkey",
                 )?,
             ),
-            ("indcollation", Value::Null),
+            ("indcollation", index_collations(index, table_cols)?),
             ("indclass", Value::Null),
             ("indoption", index_options(index)?),
             (
@@ -343,6 +356,35 @@ pub fn build_pg_index(
         ]));
     }
     Ok(rows)
+}
+
+fn index_collations(
+    index: &CatalogIndexRelation,
+    table_cols: &[uqa_sql::ast::ColumnDef],
+) -> Result<Value, SQLError> {
+    catalog_oidvector(
+        index
+            .columns
+            .iter()
+            .enumerate()
+            .map(|(position, key)| {
+                let column = key
+                    .column()
+                    .and_then(|name| table_cols.iter().find(|col| col.name == name));
+                let oid = index
+                    .key_collation(position, column)
+                    .map(i64::from)
+                    .unwrap_or_else(|| {
+                        column
+                            .map(|col| &col.ty)
+                            .or_else(|| index.definition.key_types.get(position))
+                            .map_or(0, uqa_sql::catalog::type_metadata::pg_type_collation_oid)
+                    });
+                Value::Int(oid)
+            })
+            .collect(),
+        "pg_index.indcollation",
+    )
 }
 
 fn index_options(index: &CatalogIndexRelation) -> Result<Value, SQLError> {

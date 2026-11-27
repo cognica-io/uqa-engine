@@ -26,6 +26,8 @@ use input::Walk;
 pub enum ValueSite {
     /// A collation clause removed by the selected operand coercion.
     DiscardCollation,
+    /// Selected input collation on a stored binary comparison.
+    Comparison(crate::ast::BinaryOp),
     /// A ROW DISTINCT predicate expanded into its selected field comparisons.
     RowDistinct,
     /// Positions grouped into a scalar-array comparison; the other IN items become individual comparisons.
@@ -653,6 +655,13 @@ where
                     return Err(shape_error("function ordering"));
                 }
                 self.plain(ValueSite::FunctionOrder(*bound)).await?;
+            }
+            ScalarExpr::Binary { op, .. } if matches!(bound, ScalarExpr::Binary { op: selected, .. } if selected != op) =>
+            {
+                let ScalarExpr::Binary { op: selected, .. } = bound else {
+                    unreachable!()
+                };
+                self.plain(ValueSite::Comparison(*selected)).await?;
             }
             _ => self.plain(ValueSite::Node).await?,
         }

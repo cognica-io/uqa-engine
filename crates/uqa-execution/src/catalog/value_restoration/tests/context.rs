@@ -180,6 +180,10 @@ impl crate::mutation::constraints::context::MutationRead for Fixture {
 }
 
 impl uqa_sql::semantics::conflict::ConflictCatalog for Fixture {
+    fn inference_context(&self) -> uqa_sql::semantics::conflict::InferenceContext<'_> {
+        unreachable!("physical catalog fixtures never bind an INSERT conflict target")
+    }
+
     fn try_describe_table(&self, table: &str) -> Result<Option<Vec<ColumnDef>>, String> {
         assert_eq!(table, TABLE);
         let stored = self

@@ -8,6 +8,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Preserve prepared domain checks across unrelated catalog changes in other sessions. Adding a constraint to a previously unconstrained domain rebuilds generic plans that folded its cast.
+- Match an explicit collation in an `ON CONFLICT` target to the corresponding key of a single unique index. Omitted collations leave the key unrestricted.
+
+- Recursive CTEs produce the rows their consumers request, share them across references, and support finite recursion beyond 1,024 generations.
 - `unnest` resolves SQL routines alongside its built-in array, multirange and `tsvector` signatures in SELECT lists and FROM clauses.
 
 - Browser package builds use Emscripten 7.0.0 and LLVM 18's libclang on Ubuntu. The PostgreSQL parser bindings build against this SDK's headers.
@@ -555,6 +559,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Add joint redb record and autonomous identifier snapshots for backup image adapters. Retained metadata generations preserve allocation watermarks while later writes and bounded reads continue; redb record format 64 upgrades existing allocations atomically and requires updated database owners.
 
 ### Fixed
+
+- Preserve expression collations in table rewrites, partition bounds, routine and prepared-statement arguments, table-function results, joined columns and scalar subqueries. Text comparisons and hashing report indeterminate collations when evaluated, and partial-index inference respects the predicate’s collation.
+
+- SQL text functions and `string_agg` enforce PostgreSQL’s 1 GB allocation limit. Oversized requests report the diagnostic for the operation that crosses the limit, including the requested append size for string buffers.
 
 - Resolve casts to `unknown` and polymorphic pseudo-types using the operand and catalog identity. Preserve domain and prepared result types and reject invalid stored column declarations.
 

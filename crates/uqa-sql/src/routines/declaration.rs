@@ -61,6 +61,16 @@ pub(crate) async fn routine_returns_trigger_with_work(
 }
 
 pub trait RoutineTypeCatalog {
+    /// Whether this particular domain currently enforces a CHECK or NOT NULL. A catalog without a constraint view leaves its coercions executable.
+    fn domain_has_constraints_with_control(
+        &self,
+        _oid: u32,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<bool>, SQLError> {
+        control.check()?;
+        Ok(None)
+    }
+
     /// Resolve an undefined type without inventing a value layout.
     fn shell_type_oid(&self, _name: &str) -> Result<Option<u32>, SQLError> {
         Ok(None)

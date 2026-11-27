@@ -140,6 +140,21 @@ fn statement_evaluation_observes_engine_cancel_through_the_statement_scope() {
 }
 
 #[test]
+fn recursive_work_table_stops_on_cancellation_and_releases_its_readers() {
+    let engine = Arc::new(Engine::new());
+    let observations = register_cancel_and_observe(&engine);
+    let query = "WITH RECURSIVE r(n) AS (VALUES(1) UNION ALL SELECT n+1 FROM r WHERE n<4 AND (n<2 OR cancel_and_observe())) SELECT n FROM r";
+    let rows = engine.sql(&format!("{query} LIMIT 2"), &[]).unwrap();
+    assert_eq!(rows.rows.len(), 2);
+    assert!(observations.lock().unwrap().is_empty());
+    assert_observed_cancel_request(&observations, engine.sql(query, &[]));
+    engine.reset_cancellation();
+    let rows = engine.sql(&format!("{query} LIMIT 2"), &[]).unwrap();
+    assert_eq!(rows.rows[1]["n"], Value::Int(2));
+    assert!(observations.lock().unwrap().is_empty());
+}
+
+#[test]
 fn portal_worker_evaluation_observes_engine_cancel() {
     let engine = Arc::new(Engine::new());
     let observations = register_cancel_and_observe(&engine);

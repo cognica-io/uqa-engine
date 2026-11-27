@@ -133,7 +133,7 @@ impl QueryOutput {
             .transpose()?;
         let mut value = ExpressionType::resolved_produced(field_type, control)?;
         if let Some(oid) = field.collation {
-            value.derivation = Derivation::implicit(i64::from(oid));
+            value.derivation = Derivation::column(oid, value.ty.as_deref());
         }
         if let Some(record) = field.record {
             value.record_fields.clone_from(&record.types);

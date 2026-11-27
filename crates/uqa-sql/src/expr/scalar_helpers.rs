@@ -15,6 +15,7 @@ pub(crate) use quoting::append_sql_literal;
 pub use quoting::quote_ident;
 pub use quoting::quote_ident_with_control;
 pub use quoting::quote_literal_with_control;
+pub(crate) use quoting::quote_sql_identifier;
 
 // --------------------------------------------------------------------
 // JSON helpers

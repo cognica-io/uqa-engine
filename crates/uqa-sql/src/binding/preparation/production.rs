@@ -30,9 +30,11 @@ pub use procedural::{
 mod explain;
 pub use explain::read_generic_explain_inputs_owned;
 mod stored;
-pub use stored::bind_expression_plan_routines_for_storage_owned;
 pub(crate) use stored::bind_expression_plan_routines_for_storage_with_work;
 pub(crate) use stored::bind_rule_inputs_owned;
+pub use stored::{
+    bind_executable_expression, bind_expression_plan_routines_for_storage_owned, BoundExpression,
+};
 
 pub struct PreparedOwnedInputs {
     pub plan: MutableExecutablePlan,

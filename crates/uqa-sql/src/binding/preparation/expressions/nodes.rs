@@ -29,7 +29,7 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
         result.initial_collation =
             u32::try_from(result.derivation.oid()).expect("type collation OID");
         if let Some(oid) = schema.column_collation(0) {
-            result.derivation = Derivation::implicit(i64::from(oid));
+            result.derivation = Derivation::column(oid, result.ty.as_deref());
             result.initial_collation = oid;
         }
         result.record_fields = schema.record_fields(0).cloned();
@@ -71,17 +71,21 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
 
     pub(super) fn binary_expression(
         &mut self,
-        op: BinaryOp,
-        lhs: &ScalarExpr,
-        rhs: &ScalarExpr,
+        expression: &ScalarExpr,
         input: &RowSchema,
         subqueries: &[QueryPlan],
     ) -> Result<ExpressionType, SQLError> {
+        let ScalarExpr::Binary { op, lhs, rhs } = expression else {
+            unreachable!("binary expression")
+        };
         let calls = self.set_calls();
         let mut left = self.expression(lhs, input, subqueries)?;
         let mut right = self.expression(rhs, input, subqueries)?;
-        if matches!((lhs, rhs), (ScalarExpr::Row(_), ScalarExpr::Row(_))) {
-            self.coerce_row_comparison(op, &mut left, &mut right, false)?;
+        if matches!(
+            (lhs.as_ref(), rhs.as_ref()),
+            (ScalarExpr::Row(_), ScalarExpr::Row(_))
+        ) {
+            self.coerce_row_comparison(op.uncollated(), &mut left, &mut right, false)?;
             self.reject_set_inputs(
                 calls,
                 crate::semantics::sets::placement::row_comparison_set_error,
@@ -90,7 +94,18 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
             result.derivation = ExpressionType::comparison(&left, &right);
             return Ok(result);
         }
-        let ty = self.binary(op, &mut left, &mut right)?;
+        let [left_type, _, ty] = self.binary_types(op.uncollated(), &mut left, &mut right)?;
+        if op.comparison().is_some() && crate::schema::composites::type_is_collatable(&left_type) {
+            let derivation = left.derivation.combine(right.derivation);
+            let oid = u32::try_from(derivation.oid()).expect("comparison collation OID");
+            let selection = crate::catalog::collations::CollationSelection::from_oid(oid);
+            if op.with_input_collation(selection) != op.uncollated()
+                || matches!(op, BinaryOp::Compare { .. })
+            {
+                self.parameters
+                    .retain_input_collation(expression, selection)?;
+            }
+        }
         Ok(ExpressionType::combined_owned(Some(ty), &[left, right]))
     }
 
@@ -290,7 +305,7 @@ impl<I: LiteralInput, C: SchemaContext> Preparation<'_, I, C> {
             )?;
         }
         if let Some(oid) = input.input_collation(expression) {
-            result.derivation = Derivation::implicit(i64::from(oid));
+            result.derivation = Derivation::column(oid, result.ty.as_deref());
             result.initial_collation = oid;
         }
         self.expression_record_fields(&mut result, expression, input, subqueries)?;

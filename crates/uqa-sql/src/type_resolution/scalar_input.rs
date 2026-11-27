@@ -69,6 +69,16 @@ pub fn scalar_operand_type_with_engine_and_control(
     engine: Option<&dyn crate::expr::EngineHook>,
     control: &ProductionControl<'_>,
 ) -> Result<Option<Produced<ColumnType>>, SQLError> {
+    let bound = match expression {
+        ScalarExpr::TypedLiteral { bound_type, .. }
+        | ScalarExpr::CompositeRow { bound_type, .. } => bound_type.as_ref(),
+        ScalarExpr::RetainedLiteral(literal) => literal.ty.as_ref(),
+        ScalarExpr::Collated { ty, .. } => Some(ty),
+        _ => None,
+    };
+    if let Some(ty) = bound {
+        return ty.clone_with_control(control).map(Some).map_err(Into::into);
+    }
     let Some(name) = operand_type_name(expression, schema, params, engine, control, true)? else {
         return Ok(None);
     };

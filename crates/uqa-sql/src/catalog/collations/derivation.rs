@@ -32,6 +32,15 @@ impl Derivation {
         }
     }
 
+    /// A collatable output column with `InvalidOid` is an implicit input to its parent expression. Noncollatable values have no derivation.
+    pub(crate) fn column(oid: u32, ty: Option<&ColumnType>) -> Self {
+        if ty.is_some_and(crate::schema::composites::type_is_collatable) {
+            Self::Implicit(i64::from(oid))
+        } else {
+            Self::None
+        }
+    }
+
     pub(crate) fn oid(self) -> i64 {
         match self {
             Self::None

@@ -183,12 +183,9 @@ pub(super) fn render_expr_in(
             format!("ROW({})::{}", expr_list(items)?, binding.ty)
         }
         Expr::Row(items) => format!("ROW({})", expr_list(items)?),
-        Expr::Binary { op, lhs, rhs } => format!(
-            "({} {} {})",
-            render_expr(lhs)?,
-            binary_operator_sql(*op),
-            render_expr(rhs)?
-        ),
+        Expr::Binary { op, lhs, rhs } => {
+            format!("({} {} {})", render_expr(lhs)?, op.sql(), render_expr(rhs)?)
+        }
         Expr::UnaryMinus(inner) => format!("(-{})", render_expr(inner)?),
         Expr::Not(inner) => format!("(NOT {})", render_expr(inner)?),
         Expr::And(items) => format!(
@@ -288,19 +285,4 @@ pub(super) fn render_expr_in(
             select_sql(body)?
         ),
     })
-}
-
-const fn binary_operator_sql(operator: crate::ast::BinaryOp) -> &'static str {
-    match operator {
-        crate::ast::BinaryOp::Equal => "=",
-        crate::ast::BinaryOp::NotEqual => "<>",
-        crate::ast::BinaryOp::Less => "<",
-        crate::ast::BinaryOp::LessEqual => "<=",
-        crate::ast::BinaryOp::Greater => ">",
-        crate::ast::BinaryOp::GreaterEqual => ">=",
-        crate::ast::BinaryOp::Add => "+",
-        crate::ast::BinaryOp::Subtract => "-",
-        crate::ast::BinaryOp::Multiply => "*",
-        crate::ast::BinaryOp::Divide => "/",
-    }
 }

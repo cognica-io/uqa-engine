@@ -283,6 +283,10 @@ impl MutationNamespace for Engine {
 }
 
 impl uqa_sql::semantics::conflict::ConflictCatalog for Engine {
+    fn inference_context(&self) -> uqa_sql::semantics::conflict::InferenceContext<'_> {
+        Engine::inference_context(self)
+    }
+
     fn try_describe_table(&self, table: &str) -> Result<Option<Vec<ColumnDef>>, String> {
         Engine::describe_table_in_execution(self, table).map_err(|error| error.to_string())
     }
