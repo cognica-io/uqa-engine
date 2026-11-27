@@ -39,7 +39,7 @@ pub fn binary_operator_types(
     )
 }
 
-/// Select through the same operator catalog while owning candidate, matching and result allocations under the caller's allowance.
+/// Select the operand and result types for catalog operators and intrinsic embedding comparisons under the caller's allowance.
 #[doc(hidden)]
 pub fn binary_operator_types_with_control(
     op: BinaryOp,
@@ -47,6 +47,13 @@ pub fn binary_operator_types_with_control(
     right: Option<&ColumnType>,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<[ColumnType; 3]>, SQLError> {
+    control.check()?;
+    if let Some(embedding) = super::embedding_operand(left, right) {
+        if let Some([lhs, rhs]) = super::embedding_comparison_operands(op, left, right, embedding)?
+        {
+            return result(lhs, rhs, &ColumnType::Boolean, control);
+        }
+    }
     named_binary_operator_types_with_control(op.sql(), left, right, control)
 }
 
