@@ -22,6 +22,8 @@ use uqa_core::{
 };
 use uqa_storage::{document_store::Document, StorageBackendError, StorageBackendResult};
 
+pub use uqa_storage::document_store::eval_path_in_document as eval_path;
+
 use crate::base::{missing_backend, ExecutionContext, Operator, OperatorResult};
 use crate::primitive::FilterOperator;
 
@@ -34,35 +36,6 @@ pub fn parse_path(path: &str) -> PathExpr {
             Err(_) => PathSegment::Key(seg.to_string()),
         })
         .collect()
-}
-
-/// Evaluate a path against a document, descending through `Value::Map`
-/// and `Value::List`. Returns `None` if any segment fails to resolve.
-pub fn eval_path(doc: &Document, path: &[PathSegment]) -> Option<Value> {
-    let mut current: Value = match path.first()? {
-        PathSegment::Key(k) => doc.get(k)?.clone(),
-        PathSegment::Index(_) => return None,
-    };
-    for seg in path.iter().skip(1) {
-        current = match (current, seg) {
-            (Value::Map(m), PathSegment::Key(k)) => m.get(k)?.clone(),
-            (Value::List(items), PathSegment::Index(i)) => items.get(*i)?.clone(),
-            (Value::List(items), PathSegment::Key(k)) => {
-                // Map a key over a list of maps: collect the key from each
-                // element so downstream callers see a list at the leaf.
-                let collected: Vec<Value> = items
-                    .into_iter()
-                    .filter_map(|v| match v {
-                        Value::Map(m) => m.get(k).cloned(),
-                        _ => None,
-                    })
-                    .collect();
-                Value::List(collected)
-            }
-            _ => return None,
-        };
-    }
-    Some(current)
 }
 
 /// Project `paths` out of `doc` into a flat map keyed by the dotted

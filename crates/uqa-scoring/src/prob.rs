@@ -60,6 +60,22 @@ pub fn prob_and(probs: &[f64]) -> f64 {
     s.exp()
 }
 
+/// Default probability for documents missing from a signal, interpolated
+/// by the signal's coverage (Section 5, Paper 3 / Section 4, Paper 4):
+///
+/// `default = 0.5 * (1 - r) + floor * r`
+///
+/// where `r = n_hits / n_total`. A signal that returns nothing reports
+/// neutral evidence (0.5, logit 0); a signal that covers everything
+/// flags absence as strong negative evidence (= floor, default 0.01).
+pub fn coverage_based_default(n_hits: usize, n_total: usize, floor: f64) -> f64 {
+    if n_total == 0 {
+        return 0.5;
+    }
+    let r = n_hits as f64 / n_total as f64;
+    f64::midpoint(1.0 - r, 0.0) + floor * r
+}
+
 /// Probabilistic OR in log space: `1 - exp(sum(ln(1 - p_i)))`.
 pub fn prob_or(probs: &[f64]) -> f64 {
     if probs.is_empty() {
@@ -80,9 +96,12 @@ pub fn confidence_scaled_log_odds_pool(probs: &[f64], alpha: f64) -> f64 {
     if probs.is_empty() {
         return 0.5;
     }
-    let n = probs.len() as f64;
-    let mean_logit: f64 = probs.iter().map(|&p| logit(p)).sum::<f64>() / n;
-    sigmoid(mean_logit * n.powf(alpha))
+    pool_with_confidence_scale(probs, (probs.len() as f64).powf(alpha))
+}
+
+pub(crate) fn pool_with_confidence_scale(probs: &[f64], scale: f64) -> f64 {
+    let mean_logit = probs.iter().copied().map(logit).sum::<f64>() / probs.len() as f64;
+    sigmoid(mean_logit * scale)
 }
 
 /// Weighted confidence-scaled log-odds ranking pool.

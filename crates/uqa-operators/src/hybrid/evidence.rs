@@ -7,7 +7,7 @@
 //! Exact evidence fusion over repeatable ordered score inputs.
 
 use std::iter::Peekable;
-use uqa_core::{DocId, ScoredEntry};
+use uqa_core::{DocId, Payload, PostingEntry, PostingList, ScoredEntry};
 use uqa_fusion::BayesianEvidenceFusion;
 use uqa_scoring::EvidenceLogit;
 use uqa_storage::StorageBackendError;
@@ -23,6 +23,90 @@ pub enum EvidenceVisitError<E> {
     Fusion(StorageBackendError),
 }
 
+impl From<EvidenceVisitError<StorageBackendError>> for StorageBackendError {
+    fn from(cause: EvidenceVisitError<StorageBackendError>) -> Self {
+        match cause {
+            EvidenceVisitError::Input(error)
+            | EvidenceVisitError::Output(error)
+            | EvidenceVisitError::Fusion(error) => error,
+        }
+    }
+}
+
+/// Materialize the coverage-adjusted signal rows required by batch fusers.
+pub fn fusion_probability_matrix(postings: &[PostingList]) -> (Vec<DocId>, Vec<Vec<f64>>) {
+    let mut ids = Vec::new();
+    let mut rows = Vec::new();
+    let Ok(()) = visit_covered_scores(postings, |id, scores| {
+        ids.push(id);
+        rows.push(scores.to_vec());
+        Ok::<_, std::convert::Infallible>(())
+    });
+    (ids, rows)
+}
+
+/// Fuse each document immediately for models whose output is independent of other rows.
+pub(crate) fn fuse_covered_scores<E>(
+    postings: &[PostingList],
+    mut fuse: impl FnMut(&[f64]) -> Result<f64, E>,
+) -> Result<PostingList, E> {
+    let mut entries = Vec::new();
+    visit_covered_scores(postings, |doc_id, scores| {
+        entries.push(PostingEntry::new(
+            doc_id,
+            Payload::with_score(fuse(scores)?),
+        ));
+        Ok::<_, E>(())
+    })?;
+    Ok(PostingList::from_sorted_unchecked(entries))
+}
+
+/// Visit calibrated inputs in document order. Coverage uses the size of the
+/// union, so count the identities before substituting a score for each miss.
+pub(crate) fn visit_covered_scores<E>(
+    postings: &[PostingList],
+    mut visit: impl FnMut(DocId, &[f64]) -> Result<(), E>,
+) -> Result<(), E> {
+    let mut total = 0;
+    visit_sparse_scores(postings, |_, _| {
+        total += 1;
+        Ok::<_, E>(())
+    })?;
+    if total == 0 {
+        return Ok(());
+    }
+    let defaults: Vec<_> = postings
+        .iter()
+        .map(|list| super::coverage_based_default(list.len(), total, 0.01))
+        .collect();
+    let mut scores = Vec::with_capacity(postings.len());
+    visit_sparse_scores(postings, |id, probabilities| {
+        scores.clear();
+        scores.extend(
+            probabilities
+                .iter()
+                .zip(&defaults)
+                .map(|(p, default)| p.unwrap_or(*default)),
+        );
+        visit(id, &scores)
+    })
+}
+
+/// Visit the scores present at every identity in the union of materialized signal lists.
+pub(crate) fn visit_sparse_scores<E>(
+    postings: &[PostingList],
+    visit: impl FnMut(DocId, &[Option<f64>]) -> Result<(), E>,
+) -> Result<(), E> {
+    let replay = |signal: usize| {
+        Ok::<_, E>(
+            postings[signal]
+                .iter()
+                .map(|entry| Ok(ScoredEntry::from_entry(entry))),
+        )
+    };
+    visit_ordered_union(postings.len(), replay, std::convert::identity, visit)
+}
+
 /// Validate every probability before emitting output, then fuse the union in ascending identity order. Each replay must return the same ascending input; repeated identities retain their last score, as in the materialized score map. Memory is proportional to the number of signals, not their populations.
 pub fn visit_exact_evidence<I, E>(
     fusion: &BayesianEvidenceFusion,
@@ -35,24 +119,29 @@ where
 {
     validate_probabilities(signal_count, &mut replay, "Bayesian evidence fusion")?;
     let mut evidence = Vec::with_capacity(signal_count);
-    visit_ordered_union(signal_count, replay, |doc_id, probabilities| {
-        evidence.clear();
-        for probability in probabilities.iter().flatten() {
-            evidence.push(
-                EvidenceLogit::from_prior_free_probability(*probability).map_err(|error| {
-                    EvidenceVisitError::Fusion(StorageBackendError::Other(error.to_string()))
-                })?,
-            );
-        }
-        let posterior = fusion.fuse(&evidence).map_err(|error| {
-            EvidenceVisitError::Fusion(StorageBackendError::Other(error.to_string()))
-        })?;
-        visit(ScoredEntry {
-            doc_id,
-            score: posterior.value(),
-        })
-        .map_err(EvidenceVisitError::Output)
-    })
+    visit_ordered_union(
+        signal_count,
+        replay,
+        EvidenceVisitError::Input,
+        |doc_id, probabilities| {
+            evidence.clear();
+            for probability in probabilities.iter().flatten() {
+                evidence.push(
+                    EvidenceLogit::from_prior_free_probability(*probability).map_err(|error| {
+                        EvidenceVisitError::Fusion(StorageBackendError::Other(error.to_string()))
+                    })?,
+                );
+            }
+            let posterior = fusion.fuse(&evidence).map_err(|error| {
+                EvidenceVisitError::Fusion(StorageBackendError::Other(error.to_string()))
+            })?;
+            visit(ScoredEntry {
+                doc_id,
+                score: posterior.value(),
+            })
+            .map_err(EvidenceVisitError::Output)
+        },
+    )
 }
 
 pub(super) fn validate_probabilities<I, E>(
@@ -73,38 +162,35 @@ where
     Ok(())
 }
 
-pub(super) fn visit_ordered_union<I, E>(
+pub(super) fn visit_ordered_union<I, E, V>(
     signal_count: usize,
     mut replay: impl FnMut(usize) -> Result<I, E>,
-    mut visit: impl FnMut(DocId, &[Option<f64>]) -> Result<(), EvidenceVisitError<E>>,
-) -> Result<(), EvidenceVisitError<E>>
+    input_error: impl Fn(E) -> V,
+    mut visit: impl FnMut(DocId, &[Option<f64>]) -> Result<(), V>,
+) -> Result<(), V>
 where
     I: Iterator<Item = Result<ScoredEntry, E>>,
 {
     let mut inputs = (0..signal_count)
-        .map(|signal| {
-            replay(signal)
-                .map(Iterator::peekable)
-                .map_err(EvidenceVisitError::Input)
-        })
+        .map(|signal| replay(signal).map(Iterator::peekable).map_err(&input_error))
         .collect::<Result<Vec<_>, _>>()?;
     let mut probabilities = vec![None; signal_count];
     loop {
         let mut next: Option<DocId> = None;
         for input in &mut inputs {
-            if let Some(id) = peek_identity(input).map_err(EvidenceVisitError::Input)? {
+            if let Some(id) = peek_identity(input).map_err(&input_error)? {
                 next = Some(next.map_or(id, |old| old.min(id)));
             }
         }
         let Some(doc_id) = next else { return Ok(()) };
         for (input, probability) in inputs.iter_mut().zip(&mut probabilities) {
             *probability = None;
-            while peek_identity(input).map_err(EvidenceVisitError::Input)? == Some(doc_id) {
+            while peek_identity(input).map_err(&input_error)? == Some(doc_id) {
                 *probability = Some(
                     input
                         .next()
                         .expect("peeked score")
-                        .map_err(EvidenceVisitError::Input)?
+                        .map_err(&input_error)?
                         .score,
                 );
             }

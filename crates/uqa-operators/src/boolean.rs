@@ -24,11 +24,12 @@ impl UnionOperator {
 
 impl Operator for UnionOperator {
     fn execute(&self, ctx: &ExecutionContext) -> OperatorResult {
-        let mut result = PostingList::new();
-        for operand in &self.operands {
-            result = result.merge_union(&operand.execute(ctx)?);
-        }
-        Ok(result)
+        let inputs = self
+            .operands
+            .iter()
+            .map(|operand| operand.execute(ctx))
+            .collect::<Result<_, _>>()?;
+        Ok(PostingList::merge_union_all(inputs))
     }
 
     fn cost_estimate(&self, stats: &IndexStats) -> f64 {

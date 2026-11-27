@@ -77,6 +77,14 @@ pub trait AttentionFuserDyn: Send + Sync {
 pub trait LearnedFuserDyn: Send + Sync {
     fn validate_inputs(&self, signal_count: usize) -> Result<(), &'static str>;
     fn fuse(&self, probs: &[f64]) -> Result<f64, &'static str>;
+
+    /// Score the union of sorted signals, using the coverage default for a missing score.
+    fn fuse_postings(
+        &self,
+        postings: &[uqa_core::PostingList],
+    ) -> Result<uqa_core::PostingList, &'static str> {
+        crate::hybrid::evidence::fuse_covered_scores(postings, |scores| self.fuse(scores))
+    }
 }
 
 impl AttentionFuserDyn for uqa_fusion::AttentionFusion {
@@ -166,6 +174,14 @@ impl LearnedFuserDyn for uqa_fusion::LearnedFusion {
 
     fn fuse(&self, probs: &[f64]) -> Result<f64, &'static str> {
         uqa_fusion::LearnedFusion::fuse(self, probs)
+    }
+
+    fn fuse_postings(
+        &self,
+        postings: &[uqa_core::PostingList],
+    ) -> Result<uqa_core::PostingList, &'static str> {
+        let batch = self.prepare(postings.len())?;
+        crate::hybrid::evidence::fuse_covered_scores(postings, |scores| batch.fuse(scores))
     }
 }
 

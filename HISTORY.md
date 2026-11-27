@@ -8,7 +8,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
-- Preserve prepared domain checks across unrelated catalog changes in other sessions. Adding a constraint to a previously unconstrained domain rebuilds generic plans that folded its cast.
+- Preserve prepared domain checks across unrelated catalog changes in other sessions. Generic plans track casts that resolve to a domain through the search path, including domains named like a built-in type. Adding a constraint to a previously unconstrained domain rebuilds plans that folded its cast.
 - Match an explicit collation in an `ON CONFLICT` target to the corresponding key of a single unique index. Omitted collations leave the key unrestricted.
 
 - Recursive CTEs produce the rows their consumers request, share them across references, and support finite recursion beyond 1,024 generations.
@@ -18,11 +18,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - `to_date` reads calendar templates across the PostgreSQL date range, including BC dates. Both `to_date` and `to_char` recognize ISO week dates and Julian days. `OVERLAPS` compares typed endpoints at their stored precision, handles reversed, instantaneous and partially unknown periods, and applies calendar intervals in the session time zone for `timestamptz` endpoints. Timestamp input without an explicit offset uses the session zone when converted to `timestamptz`, including in array literals, prepared statements and period endpoints. `timeofday()` displays the local time and abbreviation for the session zone.
 
+- Nested document lookups borrow intermediate values. Posting unions merge sorted inputs in one pass, and retrieval models reuse their fusion weights across documents in a batch. WAND and Block-Max WAND score materialized and cursor inputs through the same loop. Materialized searches report a candidate upper bound and expose the exact count on request.
+
 - Opening a native SQLite database skips historical deletions when checking B-tree indexes and restores an unchanged catalog once. An encrypted SQLite open derives the passphrase key once and reuses it across physical connections. Notification, relation-lock and serializable transaction state use separate keys derived from the database key.
 
 - Selective equality joins can probe a primary key or unique index with each outer row. A scalar subquery or a small positive `IN` subquery can also supply the keys for an indexed scan. Primary-key lookups stay selective before column statistics are collected, including in generic prepared plans.
 
 - Creating a graph with many new catalog identities now reuses the native lock registry's SQLite rollback journal. Each identity is still visible to other processes as soon as its reservation succeeds.
+
+- Lowercase and ASCII folding reuse owned ASCII token buffers. Character mappings share a scan for independent rules, and Korean and Japanese tokenizers reuse rolling slots for single-candidate positions. Token text, positions and original source offsets retain their existing semantics.
 
 - Independent analyzer catalogs now charge their own memory budgets for encoded analyzer and dictionary images. Closing a catalog or abandoning a failed installation releases its reservations even while another catalog uses the same analyzer.
 

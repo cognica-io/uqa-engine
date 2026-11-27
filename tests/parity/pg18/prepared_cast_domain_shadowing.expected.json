@@ -1,0 +1,23 @@
+{
+  "postgresql_version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+  "provenance": {"source": "PostgreSQL 18.4, builtin PG_UNICODE_FAST, captured through libpq Simple Query", "scope": "Prepared casts to integer and to a search-path domain named int4 before and after its constraint changes."},
+  "cases": [
+    {"sql":"SELECT version()","command_tags":["SELECT 1"],"error":null,"results":[{"columns":["version"],"type_oids":[25],"rows":[["PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"]]}],"notices":[]},
+    {"sql":"CREATE SCHEMA prepared_cast_scope","command_tags":["CREATE SCHEMA"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}],"notices":[]},
+    {"sql":"CREATE DOMAIN prepared_cast_scope.int4 AS pg_catalog.int4","command_tags":["CREATE DOMAIN"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}],"notices":[]},
+    {"sql":"SET search_path TO prepared_cast_scope, pg_catalog","command_tags":["SET"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}],"notices":[]},
+    {"sql":"SET plan_cache_mode TO force_generic_plan","command_tags":["SET"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}],"notices":[]},
+    {"sql":"PREPARE fixed_type AS SELECT 7::integer AS value","command_tags":["PREPARE"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}],"notices":[]},
+    {"sql":"PREPARE chosen_type AS SELECT (7::int4)::integer AS value","command_tags":["PREPARE"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}],"notices":[]},
+    {"sql":"PREPARE qualified_type AS SELECT (7::prepared_cast_scope.int4)::integer AS value","command_tags":["PREPARE"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}],"notices":[]},
+    {"sql":"EXECUTE fixed_type","command_tags":["SELECT 1"],"error":null,"results":[{"columns":["value"],"type_oids":[23],"rows":[["7"]]}],"notices":[]},
+    {"sql":"EXECUTE chosen_type","command_tags":["SELECT 1"],"error":null,"results":[{"columns":["value"],"type_oids":[23],"rows":[["7"]]}],"notices":[]},
+    {"sql":"EXECUTE qualified_type","command_tags":["SELECT 1"],"error":null,"results":[{"columns":["value"],"type_oids":[23],"rows":[["7"]]}],"notices":[]},
+    {"sql":"ALTER DOMAIN prepared_cast_scope.int4 ADD CONSTRAINT under_five CHECK (VALUE < 5)","command_tags":["ALTER DOMAIN"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}],"notices":[]},
+    {"sql":"EXECUTE fixed_type","command_tags":["SELECT 1"],"error":null,"results":[{"columns":["value"],"type_oids":[23],"rows":[["7"]]}],"notices":[]},
+    {"sql":"EXECUTE chosen_type","command_tags":[],"error":{"sqlstate":"23514","message":"value for domain int4 violates check constraint \"under_five\"","detail":null,"hint":null},"results":[],"notices":[]},
+    {"sql":"EXECUTE qualified_type","command_tags":[],"error":{"sqlstate":"23514","message":"value for domain int4 violates check constraint \"under_five\"","detail":null,"hint":null},"results":[],"notices":[]},
+    {"sql":"ALTER DOMAIN prepared_cast_scope.int4 DROP CONSTRAINT under_five","command_tags":["ALTER DOMAIN"],"error":null,"results":[{"columns":[],"type_oids":[],"rows":[]}],"notices":[]},
+    {"sql":"EXECUTE chosen_type","command_tags":["SELECT 1"],"error":null,"results":[{"columns":["value"],"type_oids":[23],"rows":[["7"]]}],"notices":[]}
+  ]
+}

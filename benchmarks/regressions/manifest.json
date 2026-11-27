@@ -8974,6 +8974,97 @@
       ]
     },
     {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "disjoint_many_list_union_moves_payloads_without_per_entry_allocations",
+      "cases": 1,
+      "source": "crates/uqa-core/src/posting_list.rs",
+      "capability": "Ordered posting union and exclusion",
+      "workload": "Merge 32 interleaved lists of 64 postings with a 1 KiB field each. Exclude the result from itself.",
+      "invariant": "The union returns 2,048 ordered documents in fewer than 32 allocations. Exclusion returns the empty list without allocating.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "scalar_path_lookup_borrows_the_document_at_every_depth",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/document_store/memory/tests.rs",
+      "capability": "Hierarchical document lookup",
+      "workload": "Read an integer through 32 nested maps and arrays with a 4 KiB unselected string at each level.",
+      "invariant": "The lookup returns the integer and performs zero allocations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-operators",
+      "kind": "lib",
+      "test": "adaptive_validation_and_mean_share_a_replay_and_preserve_centered_score_bits",
+      "cases": 1,
+      "source": "crates/uqa-operators/src/hybrid/positive/tests.rs",
+      "capability": "Adaptive evidence pooling",
+      "workload": "Pool two ordered streams with three probabilities each and compare each score with the independent centered-variance calculation.",
+      "invariant": "Both streams are read three times including output, and every score matches bit for bit.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-scoring",
+      "kind": "lib",
+      "test": "materialized_and_stored_cursors_seek_past_a_long_weak_range",
+      "cases": 1,
+      "source": "crates/uqa-scoring/src/wand/tests.rs",
+      "capability": "Text top-k scoring",
+      "workload": "Run WAND and Block-Max WAND on both positional lists and score cursors with 8,192 documents, two strong matches and k of one.",
+      "invariant": "Each path scores two documents, seeks once, computes IDF once per term and keeps the first document on a tie. The diagnostic counts exactly 8,192 candidates.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-scoring",
+      "kind": "lib",
+      "test": "overlapping_pool_inputs_use_bounded_scratch_independent_of_population",
+      "cases": 1,
+      "source": "crates/uqa-scoring/src/fusion_wand.rs",
+      "capability": "Confidence-scaled fusion top-k",
+      "workload": "Select ten documents from 32 completely overlapping score maps, first with 32 documents and then with 8,192.",
+      "invariant": "Both populations return the first ten document identities on ties, using identical peak scratch bytes and allocation counts with fewer than 32 allocations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-scoring",
+      "kind": "lib",
+      "test": "full_coverage_prunes_with_the_explicit_bound_and_partial_coverage_can_still_win",
+      "cases": 1,
+      "source": "crates/uqa-scoring/src/fusion_wand.rs",
+      "capability": "Exact confidence-scaled pool pruning",
+      "workload": "Combine 8,192 weak hits with one rare hit, then rank three partially overlapping signals where a missing score beats an explicit hit.",
+      "invariant": "The dense fixture scores only its winner with the exhaustive score bits. When coverage is partial, the correct missing-score winner and its bits are preserved.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-scoring",
+      "kind": "lib",
+      "test": "sparse_pivot_skips_weak_scores_without_changing_the_top_document",
+      "cases": 1,
+      "source": "crates/uqa-scoring/src/fusion_wand.rs",
+      "capability": "Confidence-scaled fusion top-k",
+      "workload": "Pool one 8,192-document signal with an overlapping two-document signal and request the best document.",
+      "invariant": "The pool scores two candidates, seeks past the weak range once and returns the exhaustive score bits and winning identity.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
       "package": "uqa-scoring",
       "kind": "lib",
       "test": "score_cursor_wand_and_bmw_match_materialized_wand",
@@ -22921,6 +23012,58 @@
       "capability": "Stable analyzer Unicode semantics",
       "workload": "Explicit sigma, Unicode-version boundaries and expanding lowercase mappings.",
       "invariant": "Output retains Unicode 16 semantics and releases every output reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "ascii_lowercase_and_folding_reuse_owned_terms_at_the_memory_limit",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/token/allocation/tests/common_filters/resources.rs",
+      "capability": "In-place ASCII token filters",
+      "workload": "Lowercase or fold an owned 8,192-byte ASCII token after reserving every remaining byte.",
+      "invariant": "Both operations allocate zero times, preserve the buffer and offsets, return the exact term and release all token and source leases.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "independent_compound_rules_scan_unmatched_input_once_with_no_allocation",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/char_filter/literals/tests.rs",
+      "capability": "Bounded literal mapping work",
+      "workload": "Apply 512 noninteracting compound keys to 32 KiB of unmatched text under a zero-byte allowance.",
+      "invariant": "The prepared scanner traverses one input, checks cancellation within each 1,024-byte block, allocates zero times and retains the original borrowed text.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "prepared_rules_retain_overlapping_priority_and_spans_across_generated_inputs",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/char_filter/literals/tests.rs",
+      "capability": "Ordered character mappings",
+      "workload": "Apply 256 generated mapping tables to eight six-character inputs each, including cascading, empty and overlapping rules and supplementary characters.",
+      "invariant": "The resulting text, final offsets, all UTF-8 source spans and covering UTF-16 spans equal ordered single-rule replacement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "rolling_single_candidate_positions_allocate_only_during_warmup",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/morphology/lattice/tests.rs",
+      "capability": "Rolling morphology lattice storage",
+      "workload": "Advance a two-position Viterbi frontier through 4,096 further positions, inserting one ordered candidate per position.",
+      "invariant": "Each backtrace candidate is retained in the ring, the steady-state loop allocates zero times and dropping the lattice releases every reserved byte.",
       "case_names": [
         ""
       ]

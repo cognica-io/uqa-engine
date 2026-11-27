@@ -34,9 +34,50 @@ pub(crate) struct Node {
     pub word: WordId,
 }
 
+// A released singleton returns its storage to the deque's ring. Empty slots
+// have no heap owner and ambiguous positions alone allocate a candidate list.
+enum Position {
+    Empty,
+    One(Node),
+    Many(BudgetedVec<Node>),
+}
+
+impl Position {
+    fn candidates(&self) -> &[Node] {
+        match self {
+            Self::Empty => &[],
+            Self::One(node) => std::slice::from_ref(node),
+            Self::Many(nodes) => nodes,
+        }
+    }
+
+    fn push(&mut self, node: Node, budget: &MemoryBudget) -> AnalysisResult<()> {
+        match self {
+            Self::Empty => *self = Self::One(node),
+            Self::One(first) => {
+                let mut nodes = BudgetedVec::new(budget);
+                nodes.reserve(2)?;
+                nodes.push(*first)?;
+                nodes.push(node)?;
+                *self = Self::Many(nodes);
+            }
+            Self::Many(nodes) => nodes.push(node)?,
+        }
+        Ok(())
+    }
+
+    fn rebase(&mut self) {
+        match self {
+            Self::One(node) => node.cost = 0,
+            Self::Many(nodes) => nodes[0].cost = 0,
+            Self::Empty => unreachable!("backtrace starts at a live candidate"),
+        }
+    }
+}
+
 pub(crate) struct Lattice<C> {
     base: usize,
-    positions: BudgetedDeque<BudgetedVec<Node>>,
+    positions: BudgetedDeque<Position>,
     candidates: usize,
     limits: C,
     budget: MemoryBudget,
@@ -97,14 +138,14 @@ impl<C: LatticeConfig> Lattice<C> {
                 if self.positions.len().is_multiple_of(1024) {
                     poll()?;
                 }
-                self.positions.push_back(BudgetedVec::new(&self.budget))?;
+                self.positions.push_back(Position::Empty)?;
             }
         }
         Ok(())
     }
 
     pub fn get(&self, position: usize) -> &[Node] {
-        &self.positions[position - self.base]
+        self.positions[position - self.base].candidates()
     }
 
     pub fn push(
@@ -120,20 +161,20 @@ impl<C: LatticeConfig> Lattice<C> {
                 .ok_or_else(|| self.limits.invalid("candidate count overflow"))?,
         )?;
         let nodes = &mut self.positions[position - self.base];
-        nodes.push(node)?;
+        nodes.push(node, &self.budget)?;
         self.candidates += 1;
         Ok(())
     }
 
     pub fn rebase(&mut self, position: usize) {
-        self.positions[position - self.base][0].cost = 0;
+        self.positions[position - self.base].rebase();
     }
 
     #[cfg(feature = "kuromoji")]
     pub fn clear_position(&mut self, position: usize) {
         let nodes = &mut self.positions[position - self.base];
-        self.candidates -= nodes.len();
-        nodes.clear();
+        self.candidates -= nodes.candidates().len();
+        *nodes = Position::Empty;
     }
 
     pub fn prune(
@@ -149,14 +190,13 @@ impl<C: LatticeConfig> Lattice<C> {
                 poll()?;
             }
             let nodes = &mut self.positions[position - self.base];
-            self.candidates -= nodes.len();
-            if position == keep {
-                nodes[0] = node;
-                nodes.truncate(1);
+            self.candidates -= nodes.candidates().len();
+            *nodes = if position == keep {
                 self.candidates += 1;
+                Position::One(node)
             } else {
-                nodes.clear();
-            }
+                Position::Empty
+            };
         }
         Ok(())
     }
@@ -171,10 +211,18 @@ impl<C: LatticeConfig> Lattice<C> {
             if work % 1024 == 0 {
                 poll()?;
             }
-            self.candidates -= self.positions.pop_front().expect("live prefix").len();
+            self.candidates -= self
+                .positions
+                .pop_front()
+                .expect("live prefix")
+                .candidates()
+                .len();
             self.base += 1;
             work += 1;
         }
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests;

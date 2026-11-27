@@ -7,11 +7,8 @@
 //! WAND / Block-Max-WAND exactness (Master plan Section 2.3,
 //! Theorem 4 from the master plan).
 //!
-//! Property: for any random corpus and any random subset of query
-//! terms, both `WANDScorer::score_top_k` and
-//! `BlockMaxWANDScorer::score_top_k` must return the same top-k doc-id
-//! set as exhaustive scoring (i.e. compute every doc's BM25 sum and
-//! sort). Pruning may not change correctness, only speed.
+//! Generated posting lists exercise both physical input forms and both BM25
+//! scorers against exhaustive scoring, including exact ties and score bits.
 
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
@@ -20,9 +17,10 @@ use std::sync::Arc;
 use proptest::prelude::*;
 use uqa_core::{DocId, IndexStats, Payload, PostingEntry, PostingList};
 use uqa_scoring::{
-    bm25::BM25Scorer, BM25Params, BlockMaxWANDScorer, Scorer, WANDQuery, WANDScorer,
+    rank_top_k, BM25Params, BM25Scorer, BayesianBM25Params, BayesianBM25Scorer, BlockMaxWANDScorer,
+    CursorBlockMaxWANDScorer, CursorWANDQuery, CursorWANDScorer, Scorer, WANDQuery, WANDScorer,
 };
-use uqa_storage::BlockMaxIndex;
+use uqa_storage::{BlockMaxIndex, MaterializedPostingCursor, PostingCursor, PostingScore};
 
 const TABLE: &str = "docs";
 const FIELD: &str = "body";
@@ -57,7 +55,7 @@ fn exhaustive_top_k(
     posting_lists: &[PostingList],
     scorers: &[Arc<dyn Scorer>],
     k: usize,
-) -> Vec<DocId> {
+) -> Vec<(DocId, u64)> {
     let mut all: BTreeSet<DocId> = BTreeSet::new();
     for pl in posting_lists {
         for e in pl {
@@ -87,18 +85,17 @@ fn exhaustive_top_k(
             .then_with(|| a.0.cmp(&b.0))
     });
     scored.truncate(k);
-    scored.into_iter().map(|(d, _)| d).collect()
-}
-
-fn bm25_scorer(stats: &Arc<IndexStats>) -> Arc<dyn Scorer> {
-    Arc::new(BM25Scorer::new(BM25Params::default(), stats.clone()))
+    scored
+        .into_iter()
+        .map(|(doc, score)| (doc, score.to_bits()))
+        .collect()
 }
 
 /// Generate a random corpus of `n_terms` posting lists, each of length
 /// `1..=corpus_size`, with random tf in `1..=8`. Adjacent doc ids may
 /// overlap, which matches the realistic case.
 fn corpus_strategy() -> impl Strategy<Value = (Vec<TermPostings>, usize)> {
-    (2usize..=4, 5usize..=20).prop_flat_map(|(n_terms, corpus_size)| {
+    (1usize..=4, 5usize..=20).prop_flat_map(|(n_terms, corpus_size)| {
         let term = proptest::collection::btree_set(1u64..=corpus_size as u64, 1..=corpus_size)
             .prop_flat_map(|ids| {
                 let len = ids.len();
@@ -109,96 +106,101 @@ fn corpus_strategy() -> impl Strategy<Value = (Vec<TermPostings>, usize)> {
     })
 }
 
-proptest! {
-    #![proptest_config(ProptestConfig {
-        cases: 96,
-        ..ProptestConfig::default()
-    })]
-
-    /// WAND top-k matches exhaustive scoring on every randomly-drawn
-    /// (corpus, query) pair. We compare doc-id sets at each rank
-    /// position so a swap caused by score ties is OK as long as the
-    /// resulting set is identical.
-    #[test]
-    fn wand_top_k_equals_exhaustive((terms_tfs, corpus_size) in corpus_strategy()) {
-        let stats = {
-            let mut s = IndexStats::default();
-            s.total_docs = corpus_size as u64;
-            s.avg_doc_length = 4.0;
-            Arc::new(s)
-        };
-        let posting_lists: Vec<PostingList> = terms_tfs.iter().map(pl_from_tfs).collect();
-        let scorers: Vec<Arc<dyn Scorer>> =
-            (0..terms_tfs.len()).map(|_| bm25_scorer(&stats)).collect();
-
-        let k = (corpus_size / 2).clamp(1, 10);
-        let q = WANDQuery::new(
-            posting_lists.clone(),
+fn check_ranked_results(
+    terms: &[TermPostings],
+    corpus_size: usize,
+    block_max: bool,
+) -> Result<(), TestCaseError> {
+    let mut stats = IndexStats::default();
+    stats.total_docs = corpus_size as u64;
+    stats.avg_doc_length = 4.0;
+    let stats = Arc::new(stats);
+    let lists: Vec<_> = terms.iter().map(pl_from_tfs).collect();
+    let keys: Vec<_> = (0..terms.len()).map(|i| format!("term_{i}")).collect();
+    let fields = vec![FIELD.to_owned(); terms.len()];
+    let raw = Arc::new(BM25Scorer::new(BM25Params::default(), stats.clone()));
+    let bayesian = Arc::new(
+        BayesianBM25Scorer::new(
+            BayesianBM25Params {
+                alpha: 1.4,
+                beta: 0.7,
+                base_rate: 0.1,
+                ..Default::default()
+            },
+            stats,
+        )
+        .unwrap(),
+    );
+    let mut bounds = BlockMaxIndex::new(8).unwrap();
+    if block_max {
+        for (list, key) in lists.iter().zip(&keys) {
+            bounds.build(list, raw.as_ref(), FIELD, key, TABLE).unwrap();
+        }
+    }
+    let k = (corpus_size / 2).clamp(1, 10);
+    for model in [raw as Arc<dyn Scorer>, bayesian] {
+        let scorers = vec![model; terms.len()];
+        let expected = exhaustive_top_k(&lists, &scorers, k);
+        let query = WANDQuery::new(
+            lists.clone(),
             scorers.clone(),
-            (0..terms_tfs.len()).map(|_| FIELD.into()).collect(),
-            (0..terms_tfs.len()).map(|i| format!("term_{i}")).collect(),
+            fields.clone(),
+            keys.clone(),
             k,
         )
         .unwrap();
-        let wand_result = WANDScorer::new(&q, None).score_top_k().unwrap();
-        let wand_ids: Vec<DocId> = wand_result.top_k.iter().map(|e| e.doc_id).collect();
-        let exhaustive = exhaustive_top_k(&posting_lists, &scorers, k);
+        let cursors = terms
+            .iter()
+            .map(|postings| {
+                let entries = postings
+                    .iter()
+                    .map(|&(doc_id, term_freq)| PostingScore {
+                        doc_id,
+                        term_freq,
+                        doc_length: term_freq,
+                    })
+                    .collect();
+                Box::new(MaterializedPostingCursor::new(entries).unwrap()) as Box<dyn PostingCursor>
+            })
+            .collect();
+        let cursor_query =
+            CursorWANDQuery::new(cursors, scorers, fields.clone(), keys.clone(), k).unwrap();
+        let results = if block_max {
+            [
+                BlockMaxWANDScorer::new(&query, None, &bounds, TABLE)
+                    .score_top_k()
+                    .unwrap(),
+                CursorBlockMaxWANDScorer::new(&cursor_query, &bounds, TABLE)
+                    .score_top_k()
+                    .unwrap(),
+            ]
+        } else {
+            [
+                WANDScorer::new(&query, None).score_top_k().unwrap(),
+                CursorWANDScorer::new(&cursor_query).score_top_k().unwrap(),
+            ]
+        };
+        for result in results {
+            let actual: Vec<_> = rank_top_k(&result.top_k, result.top_k.len())
+                .into_iter()
+                .map(|entry| (entry.doc_id, entry.score.to_bits()))
+                .collect();
+            prop_assert_eq!(&actual, &expected);
+        }
+    }
+    Ok(())
+}
 
-        let wand_set: BTreeSet<_> = wand_ids.iter().copied().collect();
-        let ex_set: BTreeSet<_> = exhaustive.iter().copied().collect();
-        prop_assert_eq!(
-            wand_set,
-            ex_set,
-            "WAND top-k diverged from exhaustive: wand={:?}, ex={:?}",
-            wand_ids,
-            exhaustive,
-        );
+proptest! {
+    #![proptest_config(ProptestConfig { cases: 96, ..ProptestConfig::default() })]
+
+    #[test]
+    fn wand_top_k_equals_exhaustive((terms, size) in corpus_strategy()) {
+        check_ranked_results(&terms,size,false)?;
     }
 
-    /// Block-Max WAND top-k matches exhaustive scoring on every
-    /// randomly-drawn (corpus, query) pair.
     #[test]
-    fn bmw_top_k_equals_exhaustive((terms_tfs, corpus_size) in corpus_strategy()) {
-        let stats = {
-            let mut s = IndexStats::default();
-            s.total_docs = corpus_size as u64;
-            s.avg_doc_length = 4.0;
-            Arc::new(s)
-        };
-        let posting_lists: Vec<PostingList> = terms_tfs.iter().map(pl_from_tfs).collect();
-        let scorers: Vec<Arc<dyn Scorer>> =
-            (0..terms_tfs.len()).map(|_| bm25_scorer(&stats)).collect();
-        let k = (corpus_size / 2).clamp(1, 10);
-
-        let mut block_max = BlockMaxIndex::new(8).unwrap();
-        for (i, pl) in posting_lists.iter().enumerate() {
-            let scorer = BM25Scorer::new(BM25Params::default(), stats.clone());
-            block_max
-                .build(pl, &scorer, FIELD, &format!("term_{i}"), TABLE)
-                .unwrap();
-        }
-
-        let q = WANDQuery::new(
-            posting_lists.clone(),
-            scorers.clone(),
-            (0..terms_tfs.len()).map(|_| FIELD.into()).collect(),
-            (0..terms_tfs.len()).map(|i| format!("term_{i}")).collect(),
-            k,
-        )
-        .unwrap();
-        let bmw = BlockMaxWANDScorer::new(&q, None, &block_max, TABLE);
-        let bmw_result = bmw.score_top_k().unwrap();
-        let bmw_ids: Vec<DocId> = bmw_result.top_k.iter().map(|e| e.doc_id).collect();
-        let exhaustive = exhaustive_top_k(&posting_lists, &scorers, k);
-
-        let bmw_set: BTreeSet<_> = bmw_ids.iter().copied().collect();
-        let ex_set: BTreeSet<_> = exhaustive.iter().copied().collect();
-        prop_assert_eq!(
-            bmw_set,
-            ex_set,
-            "BMW top-k diverged from exhaustive: bmw={:?}, ex={:?}",
-            bmw_ids,
-            exhaustive,
-        );
+    fn bmw_top_k_equals_exhaustive((terms, size) in corpus_strategy()) {
+        check_ranked_results(&terms,size,true)?;
     }
 }

@@ -55,8 +55,8 @@ use introspection::{
     require_vector_field, scored_term_count,
 };
 use posting::{
-    fuse_signal_batches_with, fuse_signals_with, numeric_score, scored_to_posting_list,
-    sparse_threshold_inline, static_operator, StaticPostingList,
+    fuse_signal_batches_with, numeric_score, scored_to_posting_list, sparse_threshold_inline,
+    static_operator, StaticPostingList,
 };
 
 type DriverResult<T> = Result<T, SQLError>;
