@@ -47,6 +47,70 @@ fn is_distinct_from_is_null_safe() {
     );
 }
 
+#[rstest::rstest]
+#[case::memory(0)]
+#[case::sqlite(1)]
+#[case::sqlite_key_value(2)]
+#[case::redb(3)]
+fn distinct_predicates_in_parameterized_mutations(#[case] provider: usize) {
+    use uqa_engine::SQLParam;
+
+    let directory = tempfile::tempdir().unwrap();
+    let engine = crate::open_test_provider(provider, &directory.path().join("distinct.db"));
+    for sql in [
+        "CREATE TABLE slots (slot_id bigint PRIMARY KEY, owner_id text, lease_token text)",
+        "INSERT INTO slots VALUES (1, 'm', 'a'), (2, 'm', NULL)",
+        "CREATE TABLE commit_lock (singleton bigint PRIMARY KEY, token text)",
+        "INSERT INTO commit_lock VALUES (1, NULL)",
+    ] {
+        engine.sql(sql, &[]).unwrap();
+    }
+    let update = "UPDATE slots SET owner_id=$1 WHERE lease_token IS NOT DISTINCT FROM $2";
+    let delete = "DELETE FROM slots WHERE slot_id=99 AND lease_token IS NOT DISTINCT FROM $1";
+    let nested = "UPDATE commit_lock SET token=$1 WHERE singleton=1 AND EXISTS (SELECT 1 FROM slots WHERE slot_id=1 AND lease_token IS NOT DISTINCT FROM $2)";
+    let distinct =
+        "UPDATE slots SET owner_id=$1 WHERE slot_id=99 AND lease_token IS DISTINCT FROM $2";
+    for (sql, parameters, tag) in [
+        (update, &[Some("matched"), Some("a")][..], "UPDATE 1"),
+        (delete, &[Some("a")], "DELETE 0"),
+        (nested, &[Some("t"), Some("a")], "UPDATE 1"),
+        (distinct, &[Some("unused"), Some("a")], "UPDATE 0"),
+        (update, &[Some("was_null"), None], "UPDATE 1"),
+        (delete, &[None], "DELETE 0"),
+        (nested, &[Some("unused"), None], "UPDATE 0"),
+        (distinct, &[Some("unused"), None], "UPDATE 0"),
+        (
+            "DELETE FROM slots WHERE $1 IS DISTINCT FROM lease_token",
+            &[None],
+            "DELETE 1",
+        ),
+    ] {
+        let params: Vec<_> = parameters
+            .iter()
+            .map(|value| {
+                SQLParam::scalar(value.map_or(Value::Null, |text| Value::Str(text.into())))
+            })
+            .collect();
+        let result = engine
+            .sql_batch(&[(sql, &params)])
+            .unwrap_or_else(|error| panic!("{sql} {parameters:?}: {error}"));
+        assert_eq!(
+            result[0].command_tag.as_deref(),
+            Some(tag),
+            "{sql} {parameters:?}"
+        );
+    }
+    assert_eq!(scalar(&engine, "SELECT slot_id FROM slots"), Value::Int(2));
+    assert_eq!(
+        scalar(&engine, "SELECT owner_id FROM slots"),
+        Value::Str("was_null".into())
+    );
+    assert_eq!(
+        scalar(&engine, "SELECT token FROM commit_lock"),
+        Value::Str("t".into())
+    );
+}
+
 #[test]
 fn row_comparisons_are_lexicographic() {
     let eng = engine();

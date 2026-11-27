@@ -385,3 +385,38 @@ fn stored_rule_whole_row_cast_visits_each_declared_field_before_reporting_its_er
     assert!(stored_rule_cast_windows(WIDTH, None, None) > last);
     stored_rule_cast_windows(WIDTH, Some(WIDTH - 1), Some(first + (last - first) / 2));
 }
+
+#[test]
+fn distinct_predicates_infer_equality_operand_types() {
+    let context = assignment_context();
+    let infer = |sql: &str, declared: &[Option<ColumnType>]| {
+        let plan = UnifiedPlan::lower(crate::compile(sql).unwrap().remove(0));
+        infer_prepared_parameter_types(&NoRoutines, &plan, declared, &context)
+    };
+    for (sql, expected) in [
+        ("SELECT id FROM assignment_target WHERE id IS NOT DISTINCT FROM $1", vec![ColumnType::Integer]),
+        ("UPDATE assignment_target SET id=$1 WHERE $2 IS DISTINCT FROM value", vec![ColumnType::Integer, ColumnType::Array(Box::new(ColumnType::Integer))]),
+        ("DELETE FROM assignment_target WHERE EXISTS (SELECT 1 WHERE assignment_target.id IS NOT DISTINCT FROM $1)", vec![ColumnType::Integer]),
+        ("SELECT $1 IS DISTINCT FROM $2", vec![ColumnType::Text, ColumnType::Text]),
+        ("DELETE FROM assignment_target WHERE ROW(id, value) IS NOT DISTINCT FROM ROW($1, $2)", vec![ColumnType::Integer, ColumnType::Array(Box::new(ColumnType::Integer))]),
+    ] {
+        let types = infer(sql, &vec![None; expected.len()])
+            .unwrap_or_else(|error| panic!("{sql}: {error}"));
+        assert_eq!(types, expected.into_iter().map(Some).collect::<Vec<_>>(), "{sql}");
+    }
+    for (sql, declared, expected) in [
+        (
+            "DELETE FROM assignment_target WHERE id IS DISTINCT FROM $1",
+            Some(ColumnType::Boolean),
+            "42883",
+        ),
+        (
+            "DELETE FROM assignment_target WHERE $1 IS DISTINCT FROM NULL",
+            None,
+            "42P18",
+        ),
+    ] {
+        let error = infer(sql, &[declared]).unwrap_err();
+        assert_eq!(error.sqlstate(), Some(expected), "{sql}: {error}");
+    }
+}
