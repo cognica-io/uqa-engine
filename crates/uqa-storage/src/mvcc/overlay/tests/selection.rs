@@ -39,7 +39,7 @@ fn spilled(control: &StorageReadControl) -> PrivateRecordChanges {
     changes
 }
 
-fn merged(changes: &PrivateRecordChanges) -> MergedRecordSnapshot {
+fn committed() -> crate::mvcc::MemoryRecordSnapshot {
     let committed = MemoryVersionStore::new(&MemoryBudget::new(1 << 20));
     let control = StorageReadControl::with_limit(1 << 20);
     committed
@@ -52,8 +52,12 @@ fn merged(changes: &PrivateRecordChanges) -> MergedRecordSnapshot {
             &control,
         )
         .unwrap();
+    committed.snapshot().unwrap()
+}
+
+fn merged(changes: &PrivateRecordChanges) -> MergedRecordSnapshot {
     MergedRecordSnapshot::new(
-        std::sync::Arc::new(committed.snapshot().unwrap()),
+        std::sync::Arc::new(committed()),
         changes.snapshot().unwrap(),
     )
 }
@@ -157,6 +161,64 @@ fn interrupted_selection_releases_readers_and_cannot_skip_a_partially_consumed_k
     ));
     assert_eq!(control.memory().used(), baseline);
     assert!(selected.metadata(&key(2), &read).is_err());
+    drop(selected);
+    assert_eq!(read.memory().used(), 0);
+}
+
+#[test]
+fn mixed_private_and_committed_points_keep_one_lazy_read_window() {
+    use crate::mvcc::test_support::WindowSnapshot;
+    use std::sync::Arc;
+
+    let control = StorageReadControl::with_limit(1 << 20);
+    let changes = spilled(&control);
+    let physical = Arc::new(WindowSnapshot::new(committed()));
+    let view = MergedRecordSnapshot::new(physical.clone(), changes.snapshot().unwrap());
+    let read = StorageReadControl::with_limit(32 << 10);
+    let mut selected = view.selected(&read);
+    let requests = [
+        key(1),
+        b"z".to_vec(),
+        key(7),
+        b"zz".to_vec(),
+        b"z".to_vec(),
+        key(1),
+    ];
+    let mut keys = requests.iter().map(|key| {
+        let mut bytes = BudgetedVec::new(read.memory());
+        bytes.extend_from_slice(key)?;
+        Ok(bytes)
+    });
+    let expected = [
+        Some(b"value".as_slice()),
+        Some(b"committed".as_slice()),
+        None,
+        None,
+        Some(b"committed".as_slice()),
+        Some(b"value".as_slice()),
+    ];
+    let mut position = 0;
+    let mut run = |stop| {
+        selected.visit_values(&mut keys, &read, &mut |key, record| {
+            assert_eq!(key, requests[position]);
+            assert_eq!(record.and_then(|record| record.value), expected[position]);
+            assert_eq!(
+                record.is_none(),
+                position == 3,
+                "only the missing key has no record"
+            );
+            position += 1;
+            Ok(position < stop)
+        })
+    };
+    run(1).unwrap();
+    physical.assert_reads(0, 0);
+    run(5).unwrap();
+    physical.assert_reads(1, 0);
+    assert_eq!(physical.requests(), 3);
+    run(6).unwrap();
+    assert_eq!(position, requests.len());
+    physical.assert_reads(1, 0);
     drop(selected);
     assert_eq!(read.memory().used(), 0);
 }
