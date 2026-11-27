@@ -26,16 +26,12 @@ env:
 
 jobs:
   fuzz:
-    name: fuzz ${{ matrix.target }}
+    name: Build and run nightly targets
     runs-on: ubuntu-24.04
     timeout-minutes: 60
-    strategy:
-      fail-fast: false
-      matrix:
-        target:
-          - sql_compile
-          - cypher_parse
-          - posting_list_round_trip
+    env:
+      CARGO_BUILD_JOBS: "1"
+      FUZZ_CODEGEN_UNITS: "16"
     steps:
       - uses: actions/checkout@v4
         with:
@@ -49,11 +45,43 @@ jobs:
           cache-targets: false
       - name: Install cargo-fuzz
         run: cargo +nightly install cargo-fuzz --version 0.13.2 --locked
-      - name: Run ${{ matrix.target }} fuzzer
-        run: cargo +nightly fuzz run ${{ matrix.target }} --fuzz-dir fuzz -- -max_total_time=${{ inputs.max_total_time || 300 }}
+      - name: Build all nightly targets
+        run: cargo +nightly fuzz build --fuzz-dir fuzz --codegen-units "$FUZZ_CODEGEN_UNITS"
+      - name: Run the three prebuilt targets
+        shell: bash
+        env:
+          FUZZ_SECONDS: ${{ inputs.max_total_time || '300' }}
+        run: |
+          targets=(sql_compile cypher_parse posting_list_round_trip)
+          pids=()
+          for target in "${targets[@]}"; do
+            cargo +nightly fuzz run "$target" --fuzz-dir fuzz --codegen-units "$FUZZ_CODEGEN_UNITS" -- "-max_total_time=$FUZZ_SECONDS" > "$RUNNER_TEMP/$target.log" 2>&1 &
+            pids+=("$!")
+          done
+          status=0
+          for index in "${!targets[@]}"; do
+            target="${targets[index]}"
+            wait "${pids[index]}" || status=1
+            echo "::group::$target"
+            cat "$RUNNER_TEMP/$target.log"
+            echo "::endgroup::"
+          done
+          exit "$status"
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
-          name: fuzz-artifacts-${{ matrix.target }}
-          path: fuzz/artifacts/**
+          name: fuzz-artifacts-sql_compile
+          path: fuzz/artifacts/**/sql_compile/**
+          if-no-files-found: ignore
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: fuzz-artifacts-cypher_parse
+          path: fuzz/artifacts/**/cypher_parse/**
+          if-no-files-found: ignore
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: fuzz-artifacts-posting_list_round_trip
+          path: fuzz/artifacts/**/posting_list_round_trip/**
           if-no-files-found: ignore

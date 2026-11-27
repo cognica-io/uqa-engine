@@ -23063,7 +23063,33 @@
       "source": "crates/uqa-analysis/src/morphology/lattice/tests.rs",
       "capability": "Rolling morphology lattice storage",
       "workload": "Advance a two-position Viterbi frontier through 4,096 further positions, inserting one ordered candidate per position.",
-      "invariant": "Each backtrace candidate is retained in the ring, the steady-state loop allocates zero times and dropping the lattice releases every reserved byte.",
+      "invariant": "Every retained word position is correct. Reusing a released candidate buffer allocates zero times after warmup and dropping the lattice returns every reserved byte.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "sparse_positions_fit_within_one_candidate_list_header_per_slot",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/morphology/lattice/tests.rs",
+      "capability": "Rolling morphology lattice storage",
+      "workload": "Open 512 lattice positions with only the start candidate occupied.",
+      "invariant": "The entire window fits the previous position-header allowance plus the start candidate, including the old buffer while the ring grows.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "ambiguous_positions_return_their_buffers_after_failed_growth_and_release",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/morphology/lattice/tests.rs",
+      "capability": "Rolling morphology lattice storage",
+      "workload": "Fill three ambiguous positions, deny one growth, release a prefix and prune to one candidate.",
+      "invariant": "Candidate ordering and counts survive the rejected growth. Releasing, pruning and clearing return each retired buffer's full capacity and dropping the lattice releases the remaining bytes.",
       "case_names": [
         ""
       ]
