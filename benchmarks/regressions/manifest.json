@@ -77852,7 +77852,7 @@
       "workload": "Cancel a graph read while summing, averaging or taking the maximum over 1,024 cached neighbors.",
       "invariant": "All aggregations return the original storage cancellation error within the row.",
       "case_names": [
-        "message_passing::tests::cached_neighbors_observe_read_cancellation_within_a_vertex"
+        ""
       ]
     },
     {
@@ -77865,7 +77865,7 @@
       "workload": "Hash single-word and multiword coefficients at eleven fractional scales, including the maximum SQL scale.",
       "invariant": "Every emitted integer limb, fractional digit and partition length matches independent arbitrary-precision division.",
       "case_names": [
-        "types::decimal::hashing::tests::hash_input_matches_independent_arbitrary_precision_quotients_and_fractional_digits"
+        ""
       ]
     },
     {
@@ -77878,7 +77878,7 @@
       "workload": "Build a two-edge path payload whose first and last vertices coincide.",
       "invariant": "Every allocation survives in the result. The ID slices are sorted and unique, and the graph name shares its original allocation.",
       "case_names": [
-        "operators::gmatch::tests::two_edge_match_allocates_only_surviving_payload_buffers"
+        ""
       ]
     },
     {
