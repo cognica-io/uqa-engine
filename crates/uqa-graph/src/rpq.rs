@@ -17,7 +17,11 @@
 //! ```
 //! Precedence (low to high): alternation, concatenation, star.
 
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::collections::BTreeSet;
+
+mod dfa;
+pub(crate) use dfa::CompiledDfa;
+pub use dfa::{subset_construction, Dfa, DfaState};
 
 pub use uqa_core::rpq::{parse_rpq, RPQParseError, RegularPathExpr};
 
@@ -376,25 +380,30 @@ pub fn epsilon_closure(
     states: &BTreeSet<StateId>,
 ) -> Result<BTreeSet<StateId>, RPQBuildError> {
     validate_nfa(nfa)?;
-    let mut closure = states.clone();
-    let mut stack: Vec<StateId> = states.iter().copied().collect();
-    while let Some(s) = stack.pop() {
-        let outgoing = nfa
-            .transitions
-            .get(usize::try_from(s).map_err(|_| {
-                RPQBuildError::InvalidNfa(format!("closure state {s} is not addressable"))
-            })?)
-            .ok_or_else(|| {
-                RPQBuildError::InvalidNfa(format!("closure state {s} is outside the NFA"))
-            })?;
-        for t in outgoing {
-            if t.label.is_none() && !closure.contains(&t.target) {
-                closure.insert(t.target);
-                stack.push(t.target);
+    for &state in states.iter().rev() {
+        let index = usize::try_from(state).map_err(|_| {
+            RPQBuildError::InvalidNfa(format!("closure state {state} is not addressable"))
+        })?;
+        if index >= nfa.transitions.len() {
+            return Err(RPQBuildError::InvalidNfa(format!(
+                "closure state {state} is outside the NFA"
+            )));
+        }
+    }
+    Ok(epsilon_closure_unchecked(nfa, states.clone()))
+}
+
+/// The automaton and seed IDs have been validated by the caller.
+fn epsilon_closure_unchecked(nfa: &Nfa, mut states: BTreeSet<StateId>) -> BTreeSet<StateId> {
+    let mut stack: Vec<_> = states.iter().copied().collect();
+    while let Some(state) = stack.pop() {
+        for edge in &nfa.transitions[state as usize] {
+            if edge.label.is_none() && states.insert(edge.target) {
+                stack.push(edge.target);
             }
         }
     }
-    Ok(closure)
+    states
 }
 
 fn validate_nfa(nfa: &Nfa) -> Result<(), RPQBuildError> {
@@ -432,89 +441,6 @@ fn validate_nfa(nfa: &Nfa) -> Result<(), RPQBuildError> {
         }
     }
     Ok(())
-}
-
-// -------------------------------------------------------------------------
-// DFA (subset construction)
-// -------------------------------------------------------------------------
-
-pub type DfaState = BTreeSet<StateId>;
-
-#[derive(Debug)]
-pub struct Dfa {
-    pub start: DfaState,
-    pub accepts: BTreeSet<DfaState>,
-    pub transitions: BTreeMap<DfaState, BTreeMap<String, DfaState>>,
-}
-
-/// Convert an NFA to a DFA via the standard subset construction.
-pub fn subset_construction(nfa: &Nfa) -> Result<Dfa, RPQBuildError> {
-    validate_nfa(nfa)?;
-    // Collect alphabet (non-epsilon transition labels).
-    let mut alphabet: BTreeSet<String> = BTreeSet::new();
-    for transitions in &nfa.transitions {
-        for t in transitions {
-            if let Some(label) = &t.label {
-                alphabet.insert(label.clone());
-            }
-        }
-    }
-
-    let initial = epsilon_closure(nfa, &BTreeSet::from([nfa.start]))?;
-    let mut transitions: BTreeMap<DfaState, BTreeMap<String, DfaState>> = BTreeMap::new();
-    let mut accepts: BTreeSet<DfaState> = BTreeSet::new();
-    let mut seen: BTreeSet<DfaState> = BTreeSet::from([initial.clone()]);
-    let mut work: VecDeque<DfaState> = VecDeque::from([initial.clone()]);
-
-    if initial.contains(&nfa.accept) {
-        accepts.insert(initial.clone());
-    }
-
-    while let Some(current) = work.pop_front() {
-        let mut step: BTreeMap<String, DfaState> = BTreeMap::new();
-        for label in &alphabet {
-            let mut next_nfa: BTreeSet<StateId> = BTreeSet::new();
-            for sid in &current {
-                let outgoing = nfa
-                    .transitions
-                    .get(usize::try_from(*sid).map_err(|_| {
-                        RPQBuildError::InvalidNfa(format!("DFA state {sid} is not addressable"))
-                    })?)
-                    .ok_or_else(|| {
-                        RPQBuildError::InvalidNfa(format!("DFA state {sid} is outside the NFA"))
-                    })?;
-                for t in outgoing {
-                    if t.label.as_deref() == Some(label.as_str()) {
-                        next_nfa.insert(t.target);
-                    }
-                }
-            }
-            if next_nfa.is_empty() {
-                continue;
-            }
-            let closed = epsilon_closure(nfa, &next_nfa)?;
-            step.insert(label.clone(), closed.clone());
-            if !seen.contains(&closed) {
-                if seen.len() >= MAX_DFA_STATES {
-                    return Err(RPQBuildError::DfaStateLimitExceeded {
-                        limit: MAX_DFA_STATES,
-                    });
-                }
-                seen.insert(closed.clone());
-                work.push_back(closed.clone());
-                if closed.contains(&nfa.accept) {
-                    accepts.insert(closed);
-                }
-            }
-        }
-        transitions.insert(current, step);
-    }
-
-    Ok(Dfa {
-        start: initial,
-        accepts,
-        transitions,
-    })
 }
 
 #[cfg(test)]

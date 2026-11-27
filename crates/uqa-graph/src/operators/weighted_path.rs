@@ -9,10 +9,9 @@
 use std::sync::Arc;
 
 use super::{
-    build_nfa, simplify, subset_construction, value_as_f64, BTreeMap, Dfa, DfaState, EdgeId,
-    GraphPayload, GraphPostingList, GraphStore, GraphStoreError, GraphStoreResult,
-    PathWeightPredicate, Payload, PostingEntry, PostingList, RegularPathExpr, Value, VecDeque,
-    VertexId, DEFAULT_GRAPH_SCORE,
+    value_as_f64, BTreeMap, CompiledDfa, EdgeId, GraphPayload, GraphPostingList, GraphStore,
+    GraphStoreError, GraphStoreResult, PathWeightPredicate, Payload, PostingEntry, PostingList,
+    RegularPathExpr, StateId, Value, VecDeque, VertexId, DEFAULT_GRAPH_SCORE,
 };
 
 /// A bounded regular-path walk whose accumulated numeric edge weight must
@@ -72,11 +71,7 @@ impl<'a> WeightedPathQuery<'a> {
                 self.score
             )));
         }
-        let simplified = simplify(&self.path)
-            .map_err(|error| GraphStoreError::InvalidQuery(error.to_string()))?;
-        let nfa = build_nfa(&simplified)
-            .map_err(|error| GraphStoreError::InvalidQuery(error.to_string()))?;
-        let dfa = subset_construction(&nfa)
+        let dfa = CompiledDfa::from_path(&self.path)
             .map_err(|error| GraphStoreError::InvalidQuery(error.to_string()))?;
         let starts: Vec<VertexId> = match self.start_vertex {
             Some(vertex) => {
@@ -125,18 +120,18 @@ impl<'a> WeightedPathQuery<'a> {
         &self,
         store: &G,
         start: VertexId,
-        dfa: &Dfa,
+        dfa: &CompiledDfa,
         accepted: &mut BTreeMap<VertexId, WeightedPathMatch>,
     ) -> GraphStoreResult<()> {
         let mut queue = VecDeque::from([WeightedWalk {
             vertex: start,
-            state: dfa.start.clone(),
+            state: CompiledDfa::START,
             hops: 0,
             weight: 0.0,
             vertices: vec![start],
             edges: Vec::new(),
         }]);
-        if dfa.accepts.contains(&dfa.start) && (self.predicate)(0.0) {
+        if dfa.accepting(CompiledDfa::START) && (self.predicate)(0.0) {
             record_weighted_match(accepted, start, 0.0, vec![start], Vec::new());
         }
 
@@ -144,14 +139,12 @@ impl<'a> WeightedPathQuery<'a> {
             if walk.hops >= self.max_hops {
                 continue;
             }
-            let Some(transitions) = dfa.transitions.get(&walk.state) else {
-                continue;
-            };
+            let transitions = dfa.transitions(walk.state);
             for edge_id in store.out_edge_ids(walk.vertex, self.graph)? {
                 let edge = store.get_edge(edge_id)?.ok_or_else(|| {
                     GraphStoreError::CorruptGraph(format!("missing weighted-path edge {edge_id}"))
                 })?;
-                let Some(next_state) = transitions.get(&edge.label) else {
+                let Some(&next_state) = transitions.get(&edge.label) else {
                     continue;
                 };
                 let edge_weight = match edge.properties.get(self.weight_property) {
@@ -173,7 +166,7 @@ impl<'a> WeightedPathQuery<'a> {
                 vertices.push(edge.target_id);
                 let mut edges = walk.edges.clone();
                 edges.push(edge_id);
-                if dfa.accepts.contains(next_state) && (self.predicate)(weight) {
+                if dfa.accepting(next_state) && (self.predicate)(weight) {
                     record_weighted_match(
                         accepted,
                         edge.target_id,
@@ -184,7 +177,7 @@ impl<'a> WeightedPathQuery<'a> {
                 }
                 queue.push_back(WeightedWalk {
                     vertex: edge.target_id,
-                    state: next_state.clone(),
+                    state: next_state,
                     hops: walk.hops.checked_add(1).ok_or_else(|| {
                         GraphStoreError::CorruptGraph("weighted path hop count overflow".into())
                     })?,
@@ -200,7 +193,7 @@ impl<'a> WeightedPathQuery<'a> {
 
 struct WeightedWalk {
     vertex: VertexId,
-    state: DfaState,
+    state: StateId,
     hops: usize,
     weight: f64,
     vertices: Vec<VertexId>,

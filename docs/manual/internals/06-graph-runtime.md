@@ -45,6 +45,8 @@ Variable-length traversal must avoid invalid repeated states according to the pa
 
 ## Regular path queries
 
+Regular and weighted path execution validate the NFA once, assign a numeric ID to each reachable closure, and carry that ID in the graph walk. The Rust `subset_construction` API exposes the corresponding sets of NFA states and their labelled transitions.
+
 RPQ syntax compiles with Thompson construction to an NFA and can convert to a DFA. Evaluation traverses the product of graph vertex and automaton state:
 
 $$

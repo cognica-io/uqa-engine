@@ -77594,6 +77594,19 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "looping_over_dense_path_states_requires_no_heap_allocation",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/rpq/dfa/tests.rs",
+      "capability": "Allocation-free regular path state transitions",
+      "workload": "Advance a compiled DFA through 8,192 alternating edge labels.",
+      "invariant": "Every step uses a numeric state ID. The final state accepts the path and execution allocates zero bytes.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }
