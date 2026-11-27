@@ -6,7 +6,7 @@
 
 //! Canonical encoded index, disk buckets, match flags, and spill transition.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{hash_map::Entry, BTreeMap, HashMap};
 use std::io::{BufRead, ErrorKind, IoSlice, Read, Seek, SeekFrom, Write};
 use std::path::Path;
 use std::sync::Arc;
@@ -59,29 +59,34 @@ impl HybridHashIndex {
             return disk.insert(&key, row_index);
         }
 
-        let record_bytes = key
+        let entry = self.memory.entry(key);
+        let record_bytes = entry
+            .key()
             .len()
-            .checked_add(if self.memory.contains_key(key.as_slice()) {
+            .checked_add(if matches!(entry, Entry::Occupied(_)) {
                 16
             } else {
                 16 + std::mem::size_of::<Vec<u64>>() + 2 * std::mem::size_of::<usize>()
             })
             .ok_or_else(|| ExecError::Other("join hash-index size overflow".into()))?;
-        let fits = self
+        if let Some(bytes) = self
             .memory_bytes
             .checked_add(record_bytes)
-            .is_some_and(|bytes| bytes <= self.budget_bytes);
-        if fits {
-            let indices = self.memory.entry(key).or_default();
-            Arc::get_mut(indices)
+            .filter(|bytes| *bytes <= self.budget_bytes)
+        {
+            Arc::get_mut(entry.or_default())
                 .ok_or_else(|| {
                     ExecError::Other("join index mutated during an active probe".into())
                 })?
                 .push(row_index);
-            self.memory_bytes += record_bytes;
+            self.memory_bytes = bytes;
             return Ok(());
         }
 
+        let key = match entry {
+            Entry::Vacant(entry) => entry.into_key(),
+            Entry::Occupied(entry) => entry.key().clone(),
+        };
         let mut disk = DiskHashIndex::new(None)?;
         for (existing_key, indices) in &self.memory {
             for index in indices.iter() {

@@ -6,7 +6,7 @@
 
 //! Memory-to-disk transition and exact bucketed spill storage.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, HashSet};
 use std::io::{BufRead, BufReader, ErrorKind, IoSlice, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use uqa_storage::temporary_file::TemporaryFile as File;
@@ -19,7 +19,7 @@ pub(super) const DISK_BUCKETS: u64 = 64;
 const COPY_BUFFER_BYTES: usize = 8 * 1024;
 
 pub(crate) struct SeenKeySet {
-    memory: BTreeSet<Vec<u8>>,
+    memory: HashSet<Vec<u8>, ahash::RandomState>,
     memory_bytes: usize,
     budget_bytes: usize,
     spill_directory: Option<PathBuf>,
@@ -29,7 +29,7 @@ pub(crate) struct SeenKeySet {
 impl SeenKeySet {
     pub(crate) fn new(budget_bytes: usize, spill_directory: Option<PathBuf>) -> Self {
         Self {
-            memory: BTreeSet::new(),
+            memory: HashSet::with_hasher(ahash::RandomState::new()),
             memory_bytes: 0,
             budget_bytes,
             spill_directory,
@@ -41,18 +41,19 @@ impl SeenKeySet {
         if let Some(disk) = self.disk.as_mut() {
             return disk.insert(&key);
         }
-        if self.memory.contains(&key) {
-            return Ok(false);
-        }
-
-        let fits = self
+        if let Some(bytes) = self
             .memory_bytes
             .checked_add(key.len())
-            .is_some_and(|bytes| bytes <= self.budget_bytes);
-        if fits {
-            self.memory_bytes += key.len();
-            self.memory.insert(key);
-            return Ok(true);
+            .filter(|bytes| *bytes <= self.budget_bytes)
+        {
+            let inserted = self.memory.insert(key);
+            if inserted {
+                self.memory_bytes = bytes;
+            }
+            return Ok(inserted);
+        }
+        if self.memory.contains(&key) {
+            return Ok(false);
         }
 
         // Build the disk set off to the side. A create/migration/write error
@@ -67,7 +68,7 @@ impl SeenKeySet {
             }
         }
         let inserted = disk.insert(&key)?;
-        self.memory.clear();
+        self.memory = HashSet::with_hasher(ahash::RandomState::new());
         self.memory_bytes = 0;
         self.disk = Some(disk);
         Ok(inserted)

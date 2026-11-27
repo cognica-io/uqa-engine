@@ -30,12 +30,12 @@ use uqa_sql::ResultRow;
 use crate::distinct::{encode_typed_non_null_key, EncodedKey};
 use crate::{
     Batch, ExecError, ExecResult, PhysicalOperator, PhysicalRow, ProjectedPredicate, RowSchema,
-    ScalarExpr, SharedExpressionEvaluator, SpillBuffer,
+    ScalarExpr, SharedExpressionEvaluator,
 };
 
 use crate::spill::MatchFlags;
 use canonical_index::{HybridHashIndex, MemoryMatchSummary};
-use direct_index::{direct_unique_match, positional_key_hash, DirectHashIndex};
+use direct_index::{positional_key_hash, DirectHashIndex, DirectMatches};
 use row_store::HybridRowStore;
 
 pub use nested_loop::NestedLoopJoin;
@@ -129,11 +129,11 @@ impl From<bool> for SpillState {
 /// preserve batch backpressure without a cardinality-sized output buffer.
 struct UniqueHashJoinState {
     build_rows: HybridRowStore,
-    hash_index: UniqueHashIndex,
+    hash_index: JoinHashIndex,
     build_left: bool,
 }
 
-enum UniqueHashIndex {
+enum JoinHashIndex {
     /// Simple column keys keep only hashes and row positions. Candidate keys
     /// are verified against the original build row slots.
     Direct(DirectHashIndex),
@@ -312,20 +312,45 @@ impl<'a> HashJoin<'a> {
         self.probe_pending.pull(self.left.as_mut(), demand)
     }
 
+    fn key_positions(&self, left: bool) -> Option<&[usize]> {
+        if left {
+            self.left_key_positions.as_deref()
+        } else {
+            self.right_key_positions.as_deref()
+        }
+        .map(Vec::as_slice)
+    }
+
+    fn positional_keys(&self, left: bool) -> ExecResult<&[usize]> {
+        self.key_positions(left)
+            .ok_or_else(|| ExecError::Other("direct join key positions are missing".into()))
+    }
+
+    fn key_for_side(
+        &self,
+        left: bool,
+        row: &PhysicalRow,
+        schema: &RowSchema,
+    ) -> ExecResult<Option<EncodedKey>> {
+        let (expressions, types) = if left {
+            (&self.left_keys, &self.left_key_types)
+        } else {
+            (&self.right_keys, &self.right_key_types)
+        };
+        self.key(expressions, types, self.key_positions(left), row, schema)
+    }
+
     fn rebuild_encoded_index(
         &self,
         rows: &mut HybridRowStore,
-        expressions: &crate::scalar::PreparedExpressions<Produced<Vec<ScalarExpr>>>,
-        types: &[Option<uqa_sql::ColumnType>],
-        positions: &[usize],
+        build_left: bool,
         budget_bytes: usize,
     ) -> ExecResult<HybridHashIndex> {
         let schema = rows.schema.clone();
         let mut index = HybridHashIndex::new(budget_bytes);
         for row_index in 0..rows.len() {
-            let key = rows.with_row(row_index, |row| {
-                self.key(expressions, types, Some(positions), row, &schema)
-            })?;
+            let key =
+                rows.with_row(row_index, |row| self.key_for_side(build_left, row, &schema))?;
             if let Some(key) = key {
                 index.insert(key, row_index)?;
             }
@@ -333,118 +358,97 @@ impl<'a> HashJoin<'a> {
         Ok(index)
     }
 
-    #[expect(
-        clippy::too_many_lines,
-        reason = "join driver keeps key layout, NULL policy, and output order aligned"
-    )]
-    fn open_build_left(&mut self, state_budget: usize, output_budget: usize) -> ExecResult<()> {
-        debug_assert!(matches!(self.kind, JoinKind::Inner));
-        let left_budget = state_budget / 2;
-        let hash_budget = state_budget.saturating_sub(left_budget);
-        let left_schema = self.left.row_schema().clone();
-        let mut left = HybridRowStore::new(left_schema, left_budget);
-        let direct_positions = self
-            .predicate
-            .is_none()
-            .then_some(())
-            .and(self.left_key_positions.as_deref().map(Vec::as_slice))
-            .zip(self.right_key_positions.as_deref().map(Vec::as_slice));
-        let mut direct_index = direct_positions.map(|_| DirectHashIndex::new(hash_budget));
-        let mut encoded_index = direct_index
-            .is_none()
-            .then(|| HybridHashIndex::new(hash_budget));
-        self.left.open()?;
-        while let Some(batch) = self.left.next()? {
-            for row in batch.rows {
-                let index = left.len();
-                if let (Some(direct), Some((positions, _))) =
-                    (direct_index.as_mut(), direct_positions)
-                {
-                    if let Some(hash) = positional_key_hash(
-                        direct.hasher(),
-                        batch.schema.view(&row),
-                        positions,
-                        self.indeterminate_keys(),
-                        self.evaluator.enum_labels(),
-                    )? {
-                        direct.insert(hash, index)?;
-                    }
-                } else if let Some(key) = self.key(
-                    &self.left_keys,
-                    &self.left_key_types,
-                    self.left_key_positions.as_deref().map(Vec::as_slice),
-                    &row,
-                    &batch.schema,
-                )? {
-                    encoded_index
-                        .as_mut()
-                        .ok_or_else(|| ExecError::Other("join hash index is missing".into()))?
-                        .insert(key, index)?;
-                }
-                left.push(row)?;
-            }
-        }
-        self.right_input_spilled = SpillState::InMemory;
-
-        let mut output = SpillBuffer::new(output_budget);
-        if left.len() == 0 {
-            self.output.remaining = Some(output.drain()?);
-            return Ok(());
-        }
-
-        let direct_is_unique = if let (Some(direct), Some((positions, _))) =
-            (direct_index.as_ref(), direct_positions)
-        {
-            !left.has_spilled()
-                && direct.keys_are_unique(
-                    &left,
-                    &left.schema,
-                    positions,
-                    self.evaluator.enum_labels(),
-                )?
+    fn build_side(&mut self, build_left: bool, state_budget: usize) -> ExecResult<()> {
+        let row_budget = state_budget / 2;
+        let hash_budget = state_budget - row_budget;
+        let simple_inner = matches!(self.kind, JoinKind::Inner) && self.predicate.is_none();
+        let direct = simple_inner
+            && self.key_positions(build_left).is_some()
+            && self.key_positions(!build_left).is_some();
+        let mut index = if direct {
+            JoinHashIndex::Direct(DirectHashIndex::new(hash_budget))
         } else {
-            false
+            JoinHashIndex::Encoded(HybridHashIndex::new(hash_budget))
         };
-        if direct_is_unique {
-            self.right.open()?;
-            self.streaming_unique = Some(UniqueHashJoinState {
-                build_rows: left,
-                hash_index: UniqueHashIndex::Direct(
-                    direct_index
-                        .take()
-                        .ok_or_else(|| ExecError::Other("direct join index is missing".into()))?,
-                ),
-                build_left: true,
-            });
+        let build = if build_left {
+            &mut self.left
+        } else {
+            &mut self.right
+        };
+        let mut rows = HybridRowStore::new(build.row_schema().clone(), row_budget);
+        build.open()?;
+        while let Some(batch) = if build_left {
+            self.left.next()?
+        } else {
+            self.right.next()?
+        } {
+            for row in batch.rows {
+                match &mut index {
+                    JoinHashIndex::Direct(index) => {
+                        let positions = self.positional_keys(build_left)?;
+                        if let Some(hash) = positional_key_hash(
+                            index.hasher(),
+                            batch.schema.view(&row),
+                            positions,
+                            self.indeterminate_keys(),
+                            self.evaluator.enum_labels(),
+                        )? {
+                            index.insert(hash, rows.len());
+                        }
+                    }
+                    JoinHashIndex::Encoded(index) => {
+                        if let Some(key) = self.key_for_side(build_left, &row, &batch.schema)? {
+                            index.insert(key, rows.len())?;
+                        }
+                    }
+                }
+                rows.push(row)?;
+            }
+        }
+        if !build_left {
+            self.right_input_spilled = rows.has_spilled().into();
+        }
+        if rows.len() == 0 && matches!(self.kind, JoinKind::Inner) {
             return Ok(());
         }
 
-        let left_by_key = match encoded_index {
-            Some(index) => index,
-            None => {
-                let (positions, _) = direct_positions
-                    .ok_or_else(|| ExecError::Other("direct join positions are missing".into()))?;
-                self.rebuild_encoded_index(
-                    &mut left,
-                    &self.left_keys,
-                    &self.left_key_types,
-                    positions,
-                    hash_budget,
-                )?
+        if matches!(&index, JoinHashIndex::Direct(direct) if rows.has_spilled() || !direct.is_available())
+        {
+            drop(index);
+            index = JoinHashIndex::Encoded(self.rebuild_encoded_index(
+                &mut rows,
+                build_left,
+                hash_budget,
+            )?);
+        }
+        let unique = match &index {
+            JoinHashIndex::Direct(direct) => direct.keys_are_unique(
+                &rows,
+                &rows.schema,
+                self.positional_keys(build_left)?,
+                self.evaluator.enum_labels(),
+            )?,
+            JoinHashIndex::Encoded(index) => {
+                simple_inner && !rows.has_spilled() && index.is_memory_unique()
             }
         };
-        self.hash_index_spilled = left_by_key.has_spilled().into();
-        if self.predicate.is_none() && !left.has_spilled() && left_by_key.is_memory_unique() {
-            self.right.open()?;
-            self.streaming_unique = Some(UniqueHashJoinState {
-                build_rows: left,
-                hash_index: UniqueHashIndex::Encoded(left_by_key),
-                build_left: true,
-            });
-            return Ok(());
+        if let JoinHashIndex::Encoded(index) = &index {
+            self.hash_index_spilled = index.has_spilled().into();
         }
-        self.right.open()?;
-        self.streaming = Some(HashJoinState::new(left, left_by_key, true, self.kind)?);
+        if build_left {
+            self.right.open()?;
+        } else if matches!(self.kind, JoinKind::Right | JoinKind::Full) {
+            self.left.open()?;
+        }
+        if unique {
+            self.streaming_unique = Some(UniqueHashJoinState {
+                build_rows: rows,
+                hash_index: index,
+                build_left,
+            });
+        } else {
+            self.streaming = Some(HashJoinState::new(rows, index, build_left, self.kind)?);
+        }
         Ok(())
     }
 
@@ -525,53 +529,30 @@ impl<'a> HashJoin<'a> {
             let mut output = Vec::with_capacity(batch.rows.len());
             for probe_row in batch.rows {
                 let index = match &state.hash_index {
-                    UniqueHashIndex::Direct(index) => {
-                        let (build_positions, probe_positions) = if state.build_left {
-                            (
-                                self.left_key_positions.as_deref().map(Vec::as_slice),
-                                self.right_key_positions.as_deref().map(Vec::as_slice),
-                            )
-                        } else {
-                            (
-                                self.right_key_positions.as_deref().map(Vec::as_slice),
-                                self.left_key_positions.as_deref().map(Vec::as_slice),
-                            )
-                        };
-                        let (Some(build_positions), Some(probe_positions)) =
-                            (build_positions, probe_positions)
-                        else {
-                            return Err(ExecError::Other(
-                                "direct join key positions are missing".into(),
-                            ));
-                        };
-                        direct_unique_match(
+                    JoinHashIndex::Direct(index) => {
+                        let build_positions = self.positional_keys(state.build_left)?;
+                        let probe_positions = self.positional_keys(!state.build_left)?;
+                        let probe = batch.schema.view(&probe_row);
+                        let catalog = self.evaluator.enum_labels();
+                        DirectMatches::for_probe(
+                            index,
+                            probe,
+                            probe_positions,
+                            self.indeterminate_keys(),
+                            catalog,
+                        )?
+                        .next(
                             index,
                             &state.build_rows,
                             build_positions,
-                            batch.schema.view(&probe_row),
+                            probe,
                             probe_positions,
-                            self.indeterminate_keys(),
-                            self.evaluator.enum_labels(),
+                            catalog,
                         )?
                     }
-                    UniqueHashIndex::Encoded(index) => {
-                        let expressions = if state.build_left {
-                            &self.right_keys
-                        } else {
-                            &self.left_keys
-                        };
-                        let types = if state.build_left {
-                            &self.right_key_types
-                        } else {
-                            &self.left_key_types
-                        };
-                        let positions = if state.build_left {
-                            self.right_key_positions.as_deref().map(Vec::as_slice)
-                        } else {
-                            self.left_key_positions.as_deref().map(Vec::as_slice)
-                        };
+                    JoinHashIndex::Encoded(index) => {
                         let Some(key) =
-                            self.key(expressions, types, positions, &probe_row, &batch.schema)?
+                            self.key_for_side(!state.build_left, &probe_row, &batch.schema)?
                         else {
                             continue;
                         };
@@ -601,10 +582,6 @@ impl<'a> HashJoin<'a> {
 }
 
 impl HashJoin<'_> {
-    #[expect(
-        clippy::too_many_lines,
-        reason = "join driver keeps key layout, NULL policy, and output order aligned"
-    )]
     fn initialize(&mut self, demanded: bool) -> ExecResult<()> {
         self.output.remaining = None;
         self.left_key_types = self
@@ -623,129 +600,14 @@ impl HashJoin<'_> {
         self.right_input_spilled = SpillState::InMemory;
         self.hash_index_spilled = SpillState::InMemory;
 
-        let state_budget = self.work_mem_bytes / 2;
-        let output_budget = self.work_mem_bytes.saturating_sub(state_budget);
-        if self.build_left {
-            return self.open_build_left(state_budget, output_budget);
-        }
-        if !matches!(self.kind, JoinKind::Right | JoinKind::Full) {
+        if !self.build_left && !matches!(self.kind, JoinKind::Right | JoinKind::Full) {
             self.left.open()?;
             self.prefetched_left = next_nonempty_batch(self.left.as_mut(), demanded)?;
             if self.prefetched_left.is_none() {
-                self.output.remaining = Some(SpillBuffer::new(output_budget).drain()?);
                 return Ok(());
             }
         }
-        let right_budget = state_budget / 2;
-        let hash_budget = state_budget.saturating_sub(right_budget);
-        let right_schema = self.right.row_schema().clone();
-        let mut right = HybridRowStore::new(right_schema, right_budget);
-        let direct_positions = (matches!(self.kind, JoinKind::Inner) && self.predicate.is_none())
-            .then_some(())
-            .and(self.right_key_positions.as_deref().map(Vec::as_slice))
-            .zip(self.left_key_positions.as_deref().map(Vec::as_slice));
-        let mut direct_index = direct_positions.map(|_| DirectHashIndex::new(hash_budget));
-        let mut encoded_index = direct_index
-            .is_none()
-            .then(|| HybridHashIndex::new(hash_budget));
-        self.right.open()?;
-        while let Some(batch) = self.right.next()? {
-            for row in batch.rows {
-                let index = right.len();
-                if let (Some(direct), Some((positions, _))) =
-                    (direct_index.as_mut(), direct_positions)
-                {
-                    if let Some(hash) = positional_key_hash(
-                        direct.hasher(),
-                        batch.schema.view(&row),
-                        positions,
-                        self.indeterminate_keys(),
-                        self.evaluator.enum_labels(),
-                    )? {
-                        direct.insert(hash, index)?;
-                    }
-                } else if let Some(key) = self.key(
-                    &self.right_keys,
-                    &self.right_key_types,
-                    self.right_key_positions.as_deref().map(Vec::as_slice),
-                    &row,
-                    &batch.schema,
-                )? {
-                    encoded_index
-                        .as_mut()
-                        .ok_or_else(|| ExecError::Other("join hash index is missing".into()))?
-                        .insert(key, index)?;
-                }
-                right.push(row)?;
-            }
-        }
-        self.right_input_spilled = right.has_spilled().into();
-
-        if right.len() == 0 && matches!(self.kind, JoinKind::Inner) {
-            let mut output = SpillBuffer::new(output_budget);
-            self.output.remaining = Some(output.drain()?);
-            return Ok(());
-        }
-
-        let direct_is_unique = if let (Some(direct), Some((positions, _))) =
-            (direct_index.as_ref(), direct_positions)
-        {
-            !right.has_spilled()
-                && direct.keys_are_unique(
-                    &right,
-                    &right.schema,
-                    positions,
-                    self.evaluator.enum_labels(),
-                )?
-        } else {
-            false
-        };
-        if direct_is_unique {
-            self.streaming_unique = Some(UniqueHashJoinState {
-                build_rows: right,
-                hash_index: UniqueHashIndex::Direct(
-                    direct_index
-                        .take()
-                        .ok_or_else(|| ExecError::Other("direct join index is missing".into()))?,
-                ),
-                build_left: false,
-            });
-            return Ok(());
-        }
-
-        let right_by_key = match encoded_index {
-            Some(index) => index,
-            None => {
-                let (positions, _) = direct_positions
-                    .ok_or_else(|| ExecError::Other("direct join positions are missing".into()))?;
-                self.rebuild_encoded_index(
-                    &mut right,
-                    &self.right_keys,
-                    &self.right_key_types,
-                    positions,
-                    hash_budget,
-                )?
-            }
-        };
-        self.hash_index_spilled = right_by_key.has_spilled().into();
-        if matches!(self.kind, JoinKind::Inner)
-            && self.predicate.is_none()
-            && !right.has_spilled()
-            && right_by_key.is_memory_unique()
-        {
-            self.streaming_unique = Some(UniqueHashJoinState {
-                build_rows: right,
-                hash_index: UniqueHashIndex::Encoded(right_by_key),
-                build_left: false,
-            });
-            return Ok(());
-        }
-
-        if matches!(self.kind, JoinKind::Right | JoinKind::Full) {
-            self.left.open()?;
-        }
-        self.streaming = Some(HashJoinState::new(right, right_by_key, false, self.kind)?);
-        Ok(())
+        self.build_side(self.build_left, self.work_mem_bytes / 2)
     }
 
     fn pull(&mut self, demand: Option<std::num::NonZeroUsize>) -> ExecResult<Option<Batch>> {

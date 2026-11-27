@@ -291,3 +291,51 @@ fn empty_left_inputs_request_right_rows_only_when_the_join_preserves_them() {
         }
     }
 }
+
+#[test]
+fn duplicate_inner_joins_keep_the_positional_index_in_both_build_directions() {
+    for build_left in [false, true] {
+        let input = |name: &str, id: &str, count: i64| {
+            TableScan::from_rows(
+                vec![name.into(), id.into()],
+                (0..count)
+                    .map(|i| row(&[(name, Value::Int(7)), (id, Value::Int(i))]))
+                    .collect(),
+            )
+        };
+        let left_rows = if build_left { 3 } else { 9 };
+        let right_rows = if build_left { 9 } else { 3 };
+        let mut join = HashJoin::new_with_work_mem(
+            Box::new(input("lk", "li", left_rows)),
+            Box::new(input("rk", "ri", right_rows)),
+            JoinKind::Inner,
+            vec![ScalarExpr::Column("lk".into())],
+            vec![ScalarExpr::Column("rk".into())],
+            evaluator(),
+            ResultRow::new(),
+            ResultRow::new(),
+            64 * 1024,
+        );
+        join.open().unwrap();
+        assert_eq!(join.builds_left_input(), build_left);
+        for probe in 0..9 {
+            for build in 0..3 {
+                let batch = join
+                    .next_with_demand(crate::physical::demand::ONE)
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(batch.rows.len(), 1);
+                assert!(join.streaming.as_ref().unwrap().uses_direct_index());
+                let (left, right) = if build_left {
+                    (build, probe)
+                } else {
+                    (probe, build)
+                };
+                assert_eq!(batch.rows[0].value(1), Some(&Value::Int(left)));
+                assert_eq!(batch.rows[0].value(3), Some(&Value::Int(right)));
+            }
+        }
+        assert!(join.next().unwrap().is_none());
+        join.close().unwrap();
+    }
+}

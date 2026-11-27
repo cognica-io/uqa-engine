@@ -7997,6 +7997,32 @@
     {
       "package": "uqa-execution",
       "kind": "lib",
+      "test": "direct_probe_resumes_duplicate_positions_and_rejects_hash_collisions",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/join/direct_index.rs",
+      "capability": "Resumable positional hash join",
+      "workload": "Place five positional build rows in a single hash bucket, including two distinct keys that collide with the probe.",
+      "invariant": "Successive reads yield the three SQL-equal positions in build order, skip colliding keys and reject a NULL probe.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "duplicate_inner_joins_keep_the_positional_index_in_both_build_directions",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/join/tests/input_demand.rs",
+      "capability": "Resumable positional hash join",
+      "workload": "Join three and nine duplicate keys in both build directions, requesting one output per pull.",
+      "invariant": "All 27 rows follow probe and build order. The resident positional index serves every match without re-encoding the build keys.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
       "test": "join_output_moves_resident_rows_and_drains_spilled_rows_before_polling_again",
       "cases": 1,
       "source": "crates/uqa-execution/src/join/output.rs",
