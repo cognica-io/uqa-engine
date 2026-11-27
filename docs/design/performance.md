@@ -6,6 +6,18 @@ This document records dated UQA Engine measurements, including controlled CI qua
 
 Ordinary traversal of a 512-vertex star with 511 edges retained 4,316,128 bytes on `a492473eb` and 80,272 bytes with shared vertex IDs, edge IDs and graph names on macOS ARM64. The same build retained 80,272 bytes for temporal traversal and 76,168 bytes for two PageRank rounds. These counts measure live heap allocations immediately after the operation returns, with the input graph constructed before measurement. Every posting retained its own score and referred to the complete sorted subgraph.
 
+## Join allocations (2026-11-27 UTC)
+
+On macOS ARM64 the same caller measured allocations inside the public text, vector and hybrid joins, with disjoint text and orthogonal vectors on the two sides and a similarity threshold of 1.0. Each join returned zero matches. The baseline was `c8294ac94`. Both sides contained the row count shown. [Join regressions](../../crates/uqa-joins/tests/cross_paradigm.rs)
+
+| Rows per side | Text join before → after | Vector join before → after | Hybrid join before → after |
+| --- | ---: | ---: | ---: |
+| 4, first call | 507 → 199 | 20 → 9 | 22 → 10 |
+| 4, subsequent call | 502 → 194 | 20 → 9 | 22 → 10 |
+| 32, subsequent call | 26,402 → 925 | 1,056 → 68 | 1,061 → 69 |
+
+Hashing 320 prebuilt numeric join keys, including a binary subnormal and a 40-digit decimal, took 3,200 allocations totaling 278,912 bytes on the same baseline. The new hash completed the same calls with zero allocations. [Numeric hash regressions](../../crates/uqa-joins/src/row_join.rs)
+
 ## Analyzer allocation and work counts (2026-11-27 UTC)
 
 On macOS ARM64 with Rust 1.95.0, the shared Korean and Japanese Viterbi lattice advanced a two-position frontier through 4,096 single-candidate positions. The original position vectors allocated 4,096 times for a total of 163,840 bytes after warm-up. Storing each candidate in its rolling position slot reduced both counts to zero. The regression checks each retained word position and releases the complete reservation on drop. [Lattice regression](../../crates/uqa-analysis/src/morphology/lattice/tests.rs)

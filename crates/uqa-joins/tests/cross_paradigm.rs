@@ -349,6 +349,12 @@ fn right_input_preparation_scales_with_rows_for_text_vector_and_hybrid_joins() {
         ]
     }
     let small = allocation_counts(4);
+    // Preparing the four-row text join also bounds the fixed cost of the standard analyzer.
+    assert!(
+        small[0] <= 384,
+        "four-row text join took {} allocations",
+        small[0]
+    );
     let large = allocation_counts(32);
     for (small, large) in small.into_iter().zip(large) {
         assert!(

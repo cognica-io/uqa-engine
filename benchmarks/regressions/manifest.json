@@ -77685,6 +77685,71 @@
       "case_names": [
         ""
       ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "bound_start_vertex_does_not_enumerate_unrelated_vertices",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/cypher/executor/matching/tests.rs",
+      "capability": "Bound Cypher start vertices",
+      "workload": "Match the same bound vertex in graphs with one and 4,096 vertices.",
+      "invariant": "Both matches return the same binding and allocate the same number of bytes and buffers.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-graph",
+      "kind": "lib",
+      "test": "unnamed_trails_validate_identifiers_in_entity_order_without_copying_properties",
+      "cases": 1,
+      "source": "crates/uqa-graph/src/cypher/executor/matching/tests.rs",
+      "capability": "Cypher path materialization",
+      "workload": "Validate an unnamed vertex and edge with 64 KiB properties and four ordered identifier errors.",
+      "invariant": "Unnamed trail validation allocates zero times. Both path forms report the same first invalid identifier.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "exact_numeric_hashes_cover_all_representations_without_heap_allocation",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/tests/numeric_keys.rs",
+      "capability": "Hashing exact numeric keys",
+      "workload": "Hash equal bool, integer, binary float and decimal values through 64 passes. Include subnormals, large coefficients, extra display zeros, infinities and NaNs.",
+      "invariant": "Each equivalent pair has the same hash and the 64 passes allocate zero buffers.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-joins",
+      "kind": "lib",
+      "test": "full_outer_join_extracts_each_key_once_and_retains_unmatched_row_order",
+      "cases": 1,
+      "source": "crates/uqa-joins/src/row_join/tests.rs",
+      "capability": "Full outer join key extraction",
+      "workload": "Join two left rows to four right rows with duplicates and unmatched endpoints.",
+      "invariant": "Each input key is evaluated once. Duplicate pairs and padded rows retain their order and values.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-joins",
+      "kind": "test",
+      "test": "right_input_preparation_scales_with_rows_for_text_vector_and_hybrid_joins",
+      "cases": 1,
+      "source": "crates/uqa-joins/tests/cross_paradigm.rs",
+      "capability": "Right-input preparation in similarity joins",
+      "workload": "Compare four-by-four and 32-by-32 inputs for text, vector and hybrid joins with no output pairs.",
+      "invariant": "Multiplying each side by eight increases total allocations at most eightfold for every join.",
+      "case_names": [
+        ""
+      ]
     }
   ]
 }
