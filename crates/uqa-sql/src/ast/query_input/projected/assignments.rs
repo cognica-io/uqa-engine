@@ -67,6 +67,7 @@ impl Projected for AssignmentTargets {
 }
 
 impl Projected for crate::ast::ConflictTargetConstraint {
+    const BUFFERED: bool = true;
     fn read_value<'i, 'a>(
         input: Input<'i>,
         work: &'a mut crate::ast::query_input::projected::Work<'i>,
@@ -79,7 +80,10 @@ impl Projected for crate::ast::ConflictTargetConstraint {
             } else if input.value.as_str().is_some() {
                 Self::Named(parts.take(input.read(work).await?))
             } else {
-                Self::Collations(parts.take(input.read(work).await?))
+                Self::Collations(parts.take(untagged(
+                    input.read(work).await,
+                    "ConflictTargetConstraint",
+                )?))
             };
             finish(parts, value)
         })

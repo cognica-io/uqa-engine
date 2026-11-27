@@ -72,7 +72,7 @@ fn stored_query_input_preserves_positional_defaults_and_internal_source_types() 
 
 #[test]
 fn stored_query_input_preserves_merge_identities_and_retired_replacements() {
-    let mut expression = query(QUERIES[11]);
+    let mut expression = query(MERGE_CTE);
     let bindings = &mut expression["ScalarSubquery"]["with"][0]["merge"]["target_column_bindings"];
     *bindings = json!({"removed": {"object_id":[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16],"attribute_number":3,"domain_dependencies":[40000,40001,40000]}});
     assert!(compare(&expression.to_string()));
