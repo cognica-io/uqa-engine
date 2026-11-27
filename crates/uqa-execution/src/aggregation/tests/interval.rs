@@ -105,8 +105,8 @@ fn interval_aggregate_values_and_overflow_match_postgresql() {
                 case["id"]
             ));
         }
-        assert!(accumulator.values.rows.is_empty());
-        assert!(accumulator.values.runs.is_empty());
+        assert!(accumulator.buffers().values.rows.is_empty());
+        assert!(accumulator.buffers().values.runs.is_empty());
     }
     assert!(failures.is_empty(), "{}", failures.join("\n\n"));
 }

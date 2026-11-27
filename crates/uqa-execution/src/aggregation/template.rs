@@ -103,30 +103,32 @@ impl AggregateAccumulatorTemplate {
 
     pub(super) fn restore_comparison(&self, accumulator: &mut AggregateAccumulator) {
         accumulator.enum_comparison.clone_from(&self.extrema);
-        accumulator.distinct.argument_count = self.distinct_arguments;
-        accumulator
-            .values
-            .key_types
-            .clone_from(&self.ordering_types);
-        accumulator
+        if self.distinct_arguments.is_none()
+            && self.ordering_types.is_none()
+            && self.ordering.is_none()
+            && accumulator.existing_buffers_mut().is_none()
+        {
+            return;
+        }
+        let buffers = accumulator.buffers_mut();
+        buffers.distinct.argument_count = self.distinct_arguments;
+        buffers.values.key_types.clone_from(&self.ordering_types);
+        buffers
             .distinct
             .values
             .key_types
             .clone_from(&self.ordering_types);
-        accumulator
+        buffers
             .registered_ordered
             .key_types
             .clone_from(&self.ordering_types);
-        accumulator
-            .values
-            .comparison_states
-            .clone_from(&self.ordering);
-        accumulator
+        buffers.values.comparison_states.clone_from(&self.ordering);
+        buffers
             .distinct
             .values
             .comparison_states
             .clone_from(&self.ordering);
-        accumulator
+        buffers
             .registered_ordered
             .comparison_states
             .clone_from(&self.ordering);

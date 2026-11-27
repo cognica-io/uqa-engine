@@ -58,7 +58,7 @@ fn scalar_range_mode_preserves_classes_in_memory_and_spill() {
                                 )
                                 .unwrap();
                         }
-                        assert_eq!(!accumulator.values.runs.is_empty(), budget == 1);
+                        assert_eq!(!accumulator.buffers().values.runs.is_empty(), budget == 1);
                         let actual = aggregate_value("mode", &accumulator, None).unwrap();
                         assert!(uqa_sql::expr::equal_selected_values_with_catalog(
                             &actual,
@@ -102,16 +102,18 @@ fn scalar_range_aggregate_distinct_preserves_classes_across_merge_runs() {
             for _ in 0..(AGGREGATE_MERGE_FAN_IN + 1).div_ceil(values.len()) {
                 for value in values.iter().rev() {
                     accumulator
+                        .buffers_mut()
                         .distinct
                         .insert(value, Vec::new(), None)
                         .unwrap();
                 }
             }
             if budget == 1 {
-                assert!(!accumulator.distinct.values.runs.is_empty());
+                assert!(!accumulator.buffers().distinct.values.runs.is_empty());
             }
             let mut observed = Vec::new();
             accumulator
+                .buffers()
                 .distinct
                 .for_each(None, |value| {
                     observed.push(value.clone());

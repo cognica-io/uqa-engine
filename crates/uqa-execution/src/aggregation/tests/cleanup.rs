@@ -142,6 +142,7 @@ fn ordered_and_distinct_replay_close_before_returning_values_or_errors() {
                     let args = vec![Value::Int(value)];
                     if distinct {
                         accumulator
+                            .buffers_mut()
                             .distinct
                             .insert(&Value::List(args), Vec::new(), None)
                             .unwrap();

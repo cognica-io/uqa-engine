@@ -177,7 +177,9 @@ fn legacy_vector_distinct_aggregates_compare_before_deduplicating_in_memory_and_
                 }
                 let result = (|| {
                     for _ in 0..count {
-                        acc.distinct.insert(&input, Vec::new(), None)?;
+                        acc.buffers_mut()
+                            .distinct
+                            .insert(&input, Vec::new(), None)?;
                     }
                     aggregate_value("count", &acc, None)
                 })();

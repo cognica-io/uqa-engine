@@ -10,6 +10,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - Graph traversal and centrality results share subgraph vertices, edges and names across postings. Rust callers can use `.into()` for these three `GraphPayload` fields.
 
+- Grouped aggregates retain only the state needed for each function. Ordered aggregates spill binary records and merge them in SQL order. Hash joins, DISTINCT and equality-based MERGE use bounded disk indexes as their inputs grow.
+
 - Prepared SQL expressions reuse numeric operand types, builtin signatures, and row and array descriptors across input rows. Scalar function callbacks receive the original argument payloads.
 - Preserve prepared domain checks across unrelated catalog changes in other sessions. Generic plans track casts that resolve to a domain through the search path, including domains named like a built-in type. Adding a constraint to a previously unconstrained domain rebuilds plans that folded its cast.
 - Match an explicit collation in an `ON CONFLICT` target to the corresponding key of a single unique index. Omitted collations leave the key unrestricted.

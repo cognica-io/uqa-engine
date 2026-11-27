@@ -148,9 +148,11 @@ fn aggregate_sort_support_keeps_its_enum_state_when_the_group_changes() {
                                 keys,
                                 Some(&catalog),
                             )?,
-                            1 => accumulator
-                                .distinct
-                                .insert(&value, Vec::new(), Some(&catalog))?,
+                            1 => accumulator.buffers_mut().distinct.insert(
+                                &value,
+                                Vec::new(),
+                                Some(&catalog),
+                            )?,
                             _ => accumulator.observe_registered(
                                 vec![Value::Int(1)],
                                 keys,

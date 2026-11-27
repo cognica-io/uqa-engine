@@ -72,11 +72,11 @@ fn integer_expression_and_count_use_positional_state_updates() {
         .observe_direct(&mut accumulators, &row, &[], None)
         .unwrap();
 
-    assert_eq!(accumulators[0].integer_sum, 12);
-    assert_eq!(accumulators[0].count, 1);
-    assert_eq!(accumulators[1].count, 1);
-    assert_eq!(accumulators[2].integer_sum, 3);
-    assert_eq!(accumulators[2].count, 1);
+    assert_eq!(accumulators[0].sum().integer_sum, 12);
+    assert_eq!(accumulators[0].count(), 1);
+    assert_eq!(accumulators[1].count(), 1);
+    assert_eq!(accumulators[2].sum().integer_sum, 3);
+    assert_eq!(accumulators[2].count(), 1);
 }
 
 #[test]
@@ -100,8 +100,8 @@ fn non_integer_input_falls_back_to_canonical_expression_evaluation() {
         .observe_direct(&mut accumulators, &row, &[], None)
         .unwrap();
 
-    assert_eq!(accumulators[0].count, 1);
-    assert_eq!(accumulators[0].sum, 3.0);
+    assert_eq!(accumulators[0].count(), 1);
+    assert_eq!(accumulators[0].sum().sum, 3.0);
 }
 
 #[test]
@@ -138,8 +138,8 @@ fn bigint_operand_cast_preserves_postgresql_widening_and_null_aggregation() {
             .unwrap();
     }
     // Independent PostgreSQL 18.6: SUM(price::bigint * quantity) over these three rows is -2; the NULL product does not contribute.
-    assert_eq!(accumulators[0].integer_sum, -2);
-    assert_eq!(accumulators[0].count, 2);
+    assert_eq!(accumulators[0].sum().integer_sum, -2);
+    assert_eq!(accumulators[0].count(), 2);
 }
 
 #[test]
@@ -185,7 +185,7 @@ fn projected_integer_arithmetic_preserves_postgresql_operand_widths() {
                 .observe_direct(&mut accumulators, &row, &[], None)
                 .unwrap_err();
             assert_eq!(error.sqlstate(), Some("22003"));
-            assert_eq!(accumulators[0].count, 0);
+            assert_eq!(accumulators[0].count(), 0);
         }
     }
 }

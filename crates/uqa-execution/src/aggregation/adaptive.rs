@@ -20,8 +20,8 @@ use uqa_sql::ast::ColumnType;
 use super::{
     aggregate_accumulator_templates, aggregate_targets, eval_scalar,
     instantiate_aggregate_accumulators, AggregateAccumulator, AggregateAccumulatorTemplate,
-    AggregateStatePlan, DecimalValue, PlanSubqueryArena, QueryBlockPlan, QueryExpressionContext,
-    SQLError, SQLParam, ScalarEvalContext, ScalarExpr, SpillBuffer, Value,
+    AggregateStatePlan, PlanSubqueryArena, QueryBlockPlan, QueryExpressionContext, SQLError,
+    SQLParam, ScalarEvalContext, ScalarExpr, SpillBuffer, Value,
 };
 #[cfg(test)]
 use crate::hash_canonical_row;
@@ -672,50 +672,20 @@ fn fixed_width_sum_type(ty: &ColumnType) -> bool {
 }
 
 fn estimate_group_bytes(key: &[Value], accumulators: &[AggregateAccumulator]) -> usize {
-    GROUP_ENTRY_OVERHEAD_BYTES
-        .saturating_add(key.iter().map(value_retained_bytes).sum::<usize>())
-        .saturating_add(
+    key.iter()
+        .map(value_retained_bytes)
+        .chain(
             accumulators
                 .iter()
-                .map(|accumulator| {
-                    std::mem::size_of::<AggregateAccumulator>()
-                        .saturating_add(
-                            accumulator
-                                .decimal_sum
-                                .as_ref()
-                                .map_or(0, DecimalValue::retained_bytes),
-                        )
-                        .saturating_add(accumulator.min.as_ref().map_or(0, value_retained_bytes))
-                        .saturating_add(accumulator.max.as_ref().map_or(0, value_retained_bytes))
-                        .saturating_add(
-                            accumulator
-                                .statistics_origin
-                                .as_ref()
-                                .map_or(0, DecimalValue::retained_bytes),
-                        )
-                        .saturating_add(
-                            accumulator
-                                .statistics_sum
-                                .as_ref()
-                                .map_or(0, DecimalValue::retained_bytes),
-                        )
-                        .saturating_add(
-                            accumulator
-                                .statistics_sum_squares
-                                .as_ref()
-                                .map_or(0, DecimalValue::retained_bytes),
-                        )
-                        .saturating_add(accumulator.distinct.values.memory_bytes)
-                        .saturating_add(accumulator.values.memory_bytes)
-                        .saturating_add(accumulator.registered_ordered.memory_bytes)
-                })
-                .sum::<usize>(),
+                .map(AggregateAccumulator::retained_bytes),
         )
+        .fold(GROUP_ENTRY_OVERHEAD_BYTES, usize::saturating_add)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use uqa_core::DecimalValue;
 
     fn aggregate(sql: &str, budget: usize) -> AdaptiveAggregateSet {
         use uqa_sql::plan::{RelationalPlan, UnifiedPlan};

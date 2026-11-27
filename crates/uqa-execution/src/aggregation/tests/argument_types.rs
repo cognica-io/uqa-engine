@@ -98,17 +98,22 @@ fn verify_arguments(
                 arguments.reverse();
             }
             accumulator
+                .buffers_mut()
                 .distinct
                 .insert(&Value::List(arguments), keys, None)
                 .unwrap();
         }
     }
-    assert_eq!(!accumulator.distinct.values.runs.is_empty(), budget == 1);
-    accumulator.distinct.argument_count = None;
-    accumulator.distinct.values.key_types = None;
+    assert_eq!(
+        !accumulator.buffers().distinct.values.runs.is_empty(),
+        budget == 1
+    );
+    accumulator.buffers_mut().distinct.argument_count = None;
+    accumulator.buffers_mut().distinct.values.key_types = None;
     template.restore_comparison(&mut accumulator);
     let mut observed = 0;
     accumulator
+        .buffers()
         .distinct
         .for_each(None, |value| {
             let Value::List(arguments) = value else {

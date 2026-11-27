@@ -8036,6 +8036,19 @@
     {
       "package": "uqa-execution",
       "kind": "lib",
+      "test": "streaming_aggregate_groups_keep_only_their_active_transition",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/aggregation/tests.rs",
+      "capability": "Aggregate transition memory",
+      "workload": "Create 4,096 groups for each of COUNT, SUM, MIN, MAX, BOOL_AND and BOOL_OR, observe two inputs and finalize every group.",
+      "invariant": "Each transition retains at most 128 inline bytes, allocates no heap storage per group and returns its exact SQL value.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
       "test": "growing_hash_partitions_bound_disk_work_for_distinct_keys_and_join_probes",
       "cases": 1,
       "source": "crates/uqa-execution/src/spill/partitioned/tests.rs",
@@ -14615,6 +14628,19 @@
       "capability": "Catalog-qualified character type identity",
       "workload": "Fixed-character and varying-character input with explicit length modifiers.",
       "invariant": "Truncation and padding match PostgreSQL; unmodified bpchar never imposes a one-character limit."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "spilled_tpch_results_match_postgresql_18",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-engine/tests/sql_tpch.rs",
+      "capability": "TPC-H execution with spilled workspaces",
+      "workload": "Run all 22 TPC-H queries on the reference fixture with work_mem set to 64 kB and collect the actual Q18 buffer counters.",
+      "invariant": "Every result column and ordered row agrees with PostgreSQL 18, and Q18 reads and writes temporary blocks."
     },
     {
       "package": "uqa-engine",

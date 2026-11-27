@@ -78,10 +78,10 @@ fn retained_integer_aggregate_metadata_keeps_positional_updates() {
             .unwrap();
     }
     // PostgreSQL reference: SUM(a*b)=31, SUM(a*b+1)=34; NULL does not contribute.
-    assert_eq!(accumulators[0].integer_sum, 31);
-    assert_eq!(accumulators[1].integer_sum, 34);
-    assert_eq!(accumulators[0].count, 3);
-    assert_eq!(accumulators[1].count, 3);
+    assert_eq!(accumulators[0].sum().integer_sum, 31);
+    assert_eq!(accumulators[1].sum().integer_sum, 34);
+    assert_eq!(accumulators[0].count(), 3);
+    assert_eq!(accumulators[1].count(), 3);
 }
 
 #[test]
@@ -120,7 +120,7 @@ fn retained_integer_aggregate_metadata_preserves_operand_width_and_errors() {
             )
             .unwrap_err();
         assert_eq!(error.sqlstate(), Some("22003"));
-        assert_eq!(accumulators[0].count, 0);
+        assert_eq!(accumulators[0].count(), 0);
     }
 }
 
@@ -144,8 +144,8 @@ fn retained_integer_aggregate_metadata_preserves_scalar_fallback_and_casts() {
     plans
         .observe_direct(&mut accumulators, &row, &[], None)
         .unwrap();
-    assert_eq!(accumulators[0].sum, 3.0);
-    assert_eq!(accumulators[0].count, 1);
+    assert_eq!(accumulators[0].sum().sum, 3.0);
+    assert_eq!(accumulators[0].count(), 1);
 
     // A narrowing cast is an operation, unlike retained result metadata.
     let targets = [aggregate(
@@ -189,7 +189,7 @@ fn retained_integer_aggregate_metadata_preserves_division_and_nulls() {
             None,
         )
         .unwrap();
-    assert_eq!(accumulators[0].count, 0);
+    assert_eq!(accumulators[0].count(), 0);
     let error = plans
         .observe_direct(
             &mut accumulators,
@@ -199,7 +199,7 @@ fn retained_integer_aggregate_metadata_preserves_division_and_nulls() {
         )
         .unwrap_err();
     assert_eq!(error.sqlstate(), Some("22012"));
-    assert_eq!(accumulators[0].count, 0);
+    assert_eq!(accumulators[0].count(), 0);
 }
 
 #[test]
@@ -232,5 +232,5 @@ fn retained_integer_aggregate_metadata_keeps_selected_operand_types() {
         )
         .unwrap();
     // PostgreSQL: a + 1::bigint widens the operation; stripping the operand metadata would overflow INTEGER.
-    assert_eq!(accumulators[0].integer_sum, 2_147_483_648);
+    assert_eq!(accumulators[0].sum().integer_sum, 2_147_483_648);
 }

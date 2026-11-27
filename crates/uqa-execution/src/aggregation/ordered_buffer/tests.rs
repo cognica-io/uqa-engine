@@ -51,6 +51,7 @@ fn completed_groups_move_resident_values_and_window_reads_remain_repeatable() {
     let text = "original allocation".repeat(1024);
     let pointer = text.as_ptr();
     accumulator
+        .buffers_mut()
         .values
         .push(Value::Str(text), Vec::new(), None)
         .unwrap();

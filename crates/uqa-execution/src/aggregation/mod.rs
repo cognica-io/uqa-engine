@@ -44,6 +44,7 @@ mod sort_fallback;
 pub(crate) mod state;
 mod string_agg;
 mod template;
+mod transitions;
 mod value_buffer;
 
 pub use accumulator::*;

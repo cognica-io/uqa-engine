@@ -69,6 +69,22 @@ fn assert_failure(error: &SQLError) {
 }
 
 #[test]
+fn registered_callbacks_observe_argument_tuples_and_scalar_inputs_keep_their_own_state() {
+    let (counts, template) = factory(usize::MAX);
+    let mut accumulator = template.instantiate(1024).unwrap();
+    accumulator.observe(&Value::Int(7)).unwrap();
+    assert_eq!(counts.observations.load(Ordering::SeqCst), 0);
+    accumulator
+        .observe_registered(vec![Value::Int(9)], Vec::new(), None)
+        .unwrap();
+    assert_eq!(counts.observations.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        aggregate_value("registered", &accumulator, None).unwrap(),
+        Value::Int(0)
+    );
+}
+
+#[test]
 fn creation_failure_precedes_observation_and_empty_group_finish() {
     let (counts, template) = factory(1);
     let error = match template.instantiate(1024) {
@@ -109,6 +125,7 @@ fn replay_creation_errors_preserve_diagnostics_without_observing_buffered_rows()
                 let arguments = vec![Value::Int(value)];
                 if distinct {
                     accumulator
+                        .buffers_mut()
                         .distinct
                         .insert(&Value::List(arguments), Vec::new(), None)
                         .unwrap();
@@ -124,9 +141,9 @@ fn replay_creation_errors_preserve_diagnostics_without_observing_buffered_rows()
             }
             assert_eq!(
                 if distinct {
-                    !accumulator.distinct.values.runs.is_empty()
+                    !accumulator.buffers().distinct.values.runs.is_empty()
                 } else {
-                    !accumulator.registered_ordered.runs.is_empty()
+                    !accumulator.buffers().registered_ordered.runs.is_empty()
                 },
                 budget == 1,
             );
