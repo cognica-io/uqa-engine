@@ -257,12 +257,12 @@ pub fn optimize_with_statistics(
 /// Optimize a fully lowered plan while classifying engine-local aggregates
 /// and costing join orders from the engine's relation statistics.
 pub fn optimize_with_aggregates_and_statistics(
-    mut plan: UnifiedPlan,
+    plan: UnifiedPlan,
     config: &OptimizerConfig,
     aggregates: &dyn AggregateClassifier,
     statistics: &dyn SourceStatistics,
 ) -> OptimizerResult<uqa_sql::plan::OwnedExecutablePlan> {
-    optimize_unified_plan(&mut plan, config, aggregates)?;
+    let plan = optimize_unified_plan(plan, config, aggregates)?;
     if config.enable_join_reordering {
         reorder_unified_plan_joins(plan, statistics, &config.production)
     } else {

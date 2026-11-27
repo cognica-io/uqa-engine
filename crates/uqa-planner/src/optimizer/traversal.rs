@@ -16,10 +16,10 @@ use super::{
 };
 
 pub(super) fn optimize_unified_plan(
-    plan: &mut UnifiedPlan,
+    mut plan: UnifiedPlan,
     config: &OptimizerConfig,
     aggregates: &dyn AggregateClassifier,
-) -> Result<(), SQLError> {
+) -> Result<UnifiedPlan, SQLError> {
     plan.try_visit_queries_mut(&mut |query| {
         config.production.check()?;
         if query.analyzed_output.is_none() {
@@ -29,8 +29,11 @@ pub(super) fn optimize_unified_plan(
         }
         Ok::<_, SQLError>(())
     })?;
-    super::source_demand::prune(plan, config, aggregates)?;
-    super::derived_pullup::rewrite(plan, config)?;
+    super::source_demand::prune(&mut plan, config, aggregates)?;
+    let storage = uqa_core::memory::ProductionControl::uncontrolled();
+    let plan = uqa_sql::plan::MutableExecutablePlan::uncontrolled(plan);
+    let plan = super::derived_pullup::rewrite(plan, config, &storage)?;
+    let (mut plan, _) = plan.finish(&storage)?.into_parts();
     // Analyzed layouts describe the original topology, not later source expansion or join order.
     plan.try_visit_queries_mut(&mut |query| {
         // Discarded scalar arenas must not keep an enclosing command's CTE alive during constant evaluation.
@@ -38,11 +41,11 @@ pub(super) fn optimize_unified_plan(
         query.analyzed_source = None;
         Ok::<_, SQLError>(())
     })?;
-    match plan {
+    match &mut plan {
         UnifiedPlan::Query(query) => optimize_query(query, config, aggregates)?,
         UnifiedPlan::Command(command) => optimize_command(command, config, aggregates)?,
     }
-    Ok(())
+    Ok(plan)
 }
 
 /// VALUES keeps the same bounded constant owner whether it is a command input, query root or range item.

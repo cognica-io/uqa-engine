@@ -36,7 +36,7 @@ pub(super) fn optimize(
         Ok((query, true))
     })?;
     let plan = super::source_demand::owned::prune(plan, config, aggregates)?;
-    let plan = super::derived_pullup::owned::rewrite(plan, config)?;
+    let plan = super::derived_pullup::rewrite(plan, config, control)?;
     let plan = plan.map_queries_while(control, &mut |query| {
         let query = query
             .prune_subqueries(control)?

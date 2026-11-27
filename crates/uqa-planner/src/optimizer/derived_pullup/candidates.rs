@@ -73,7 +73,7 @@ fn candidate(
     }
     drop(unique);
     let changed = body.copy_for_rewrite(control)?;
-    let (changed, expanded) = super::super::super::derived_projection::owned::expand_stars(
+    let (changed, expanded) = super::super::derived_projection::owned::expand_stars(
         changed,
         Some(&analyzed.schema),
         control,

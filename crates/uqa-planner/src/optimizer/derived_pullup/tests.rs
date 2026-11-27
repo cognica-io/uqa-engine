@@ -5,8 +5,10 @@
 //
 
 use super::*;
+use std::collections::BTreeSet;
 use uqa_sql::{
     ast::{FunctionBinding, FunctionVolatility},
+    plan::{AnalyzedSource, QueryPlan, UnifiedPlan},
     ColumnType,
 };
 
@@ -82,16 +84,45 @@ fn analyzed(body: &str, predicate: &str) -> QueryPlan {
     *query
 }
 
-fn lift(query: &mut QueryPlan) {
-    query_block(
-        query,
-        &Context {
-            routines: &Catalog,
-            volatility: &Catalog,
-            relations_bound: false,
-        },
+fn context() -> Context<'static> {
+    Context {
+        routines: &Catalog,
+        volatility: &Catalog,
+        relations_bound: false,
+    }
+}
+
+fn lift(query: QueryPlan) -> QueryPlan {
+    let control = ProductionControl::uncontrolled();
+    query_block(MutableQueryPlan::uncontrolled(query), &context(), &control)
+        .unwrap()
+        .finish(&control)
+        .unwrap()
+        .into_uncontrolled()
+        .unwrap()
+}
+
+fn push_predicate(query: QueryPlan) -> QueryPlan {
+    let control = ProductionControl::uncontrolled();
+    predicates::push(MutableQueryPlan::uncontrolled(query), &context(), &control)
+        .unwrap()
+        .finish(&control)
+        .unwrap()
+        .into_uncontrolled()
+        .unwrap()
+}
+
+fn qualify(sql: &str, schema: &RowSchema) -> (MutableQueryPlan, bool) {
+    let UnifiedPlan::Query(query) = UnifiedPlan::lower(uqa_sql::compile(sql).unwrap().remove(0))
+    else {
+        panic!("query")
+    };
+    transforms::qualify(
+        MutableQueryPlan::uncontrolled(*query),
+        schema,
+        &ProductionControl::uncontrolled(),
     )
-    .unwrap();
+    .unwrap()
 }
 
 #[test]
@@ -109,15 +140,8 @@ fn relation_authority_boundaries_retain_their_query_and_qualification() {
         };
         body.relation_privilege_subject = Some("input_reader".into());
         let before = serde_json::to_value(&query).unwrap();
-        lift(&mut query);
-        predicates::push(
-            &mut query,
-            &Context {
-                routines: &Catalog,
-                volatility: &Catalog,
-                relations_bound: false,
-            },
-        );
+        query = lift(query);
+        query = push_predicate(query);
         assert_eq!(serde_json::to_value(&query).unwrap(), before);
     }
 }
@@ -130,7 +154,7 @@ fn volatile_and_subquery_qualifications_precede_pure_outputs() {
             predicate,
         );
         let descriptor = query.analyzed_output.clone().unwrap();
-        lift(&mut query);
+        query = lift(query);
         let RelationalPlan::QueryBlock(block) = &query.root else {
             panic!("block")
         };
@@ -169,7 +193,7 @@ fn observable_producer_boundaries_keep_their_query_level() {
         "SELECT x AS k,row_number() OVER () AS z FROM (VALUES(0),(2)) v(x)",
     ] {
         let mut query = analyzed(body, "k=(SELECT 2)");
-        lift(&mut query);
+        query = lift(query);
         let RelationalPlan::QueryBlock(block) = query.root else {
             panic!("block")
         };
@@ -182,61 +206,29 @@ fn observable_producer_boundaries_keep_their_query_level() {
 
 #[test]
 fn independent_inputs_keep_distinct_structural_identities() {
-    let query = analyzed(
-        "SELECT x AS k,10/x AS z FROM (VALUES(0),(2)) v(x)",
-        "k=(SELECT 2)",
-    );
-    let RelationalPlan::QueryBlock(block) = &query.root else {
-        panic!("block")
+    let capture = || {
+        let query = lift(analyzed(
+            "SELECT x AS k,10/x AS z FROM (VALUES(0),(2)) v(x)",
+            "k=(SELECT 2)",
+        ));
+        let RelationalPlan::QueryBlock(block) = query.root else {
+            panic!("block")
+        };
+        let Some(SourcePlan::Subquery {
+            captured_output: Some(relation),
+            ..
+        }) = block.from
+        else {
+            panic!("captured source")
+        };
+        assert_eq!(block.projections[0].alias.as_deref(), Some("k"));
+        assert_eq!(
+            block.projections[0].expr,
+            ScalarExpr::InternalColumn(relation.column(0))
+        );
+        relation
     };
-    let candidate = candidate(
-        block.from.as_ref().unwrap(),
-        query.analyzed_source.as_ref().unwrap(),
-        &Context {
-            routines: &Catalog,
-            volatility: &Catalog,
-            relations_bound: false,
-        },
-        &mut Vec::new(),
-    )
-    .unwrap();
-    let first = candidate.expect("capture independent source identities");
-    let second = super::candidate(
-        block.from.as_ref().unwrap(),
-        query.analyzed_source.as_ref().unwrap(),
-        &Context {
-            routines: &Catalog,
-            volatility: &Catalog,
-            relations_bound: false,
-        },
-        &mut Vec::new(),
-    )
-    .unwrap()
-    .unwrap();
-    let SourcePlan::Subquery {
-        captured_output: Some(first_id),
-        ..
-    } = first.source
-    else {
-        panic!("first capture")
-    };
-    let SourcePlan::Subquery {
-        captured_output: Some(second_id),
-        ..
-    } = second.source
-    else {
-        panic!("second capture")
-    };
-    assert_ne!(first_id, second_id);
-    let key = ColumnIdentity::qualified("s", "k");
-    assert_eq!(
-        first.outputs[&key],
-        ScalarExpr::InternalColumn(first_id.column(0))
-    );
-    assert_eq!(
-        second.outputs[&key],
-        ScalarExpr::InternalColumn(second_id.column(0))
-    );
+    assert_ne!(capture(), capture());
 }
 
 #[test]
@@ -246,11 +238,15 @@ fn quoted_column_identity_and_whole_row_references_remain_distinct() {
         vec!["k".into(), "K".into()],
         vec![Some(ColumnType::Integer); 2],
     );
-    assert_eq!(
-        qualified_identity(&ColumnIdentity::unqualified("K"), &schema),
-        Some(ColumnIdentity::qualified("s", "K"))
+    let (qualified, complete) = qualify(r#"SELECT "K" FROM s"#, &schema);
+    assert!(complete);
+    let RelationalPlan::QueryBlock(block) = &qualified.root else {
+        panic!("block")
+    };
+    assert!(
+        matches!(&block.projections[0].expr, ScalarExpr::QualifiedColumn { qualifier, column } if qualifier == "s" && column.as_str() == "K")
     );
-    assert!(qualified_identity(&ColumnIdentity::unqualified("s"), &schema).is_none());
+    assert!(!qualify("SELECT s FROM s", &schema).1);
 }
 
 #[test]
@@ -266,7 +262,7 @@ fn stored_relation_lookup_modes_keep_their_definition_boundary() {
         panic!("derived")
     };
     body.relations_bound = true;
-    lift(&mut query);
+    query = lift(query);
     let RelationalPlan::QueryBlock(block) = query.root else {
         panic!("block")
     };
@@ -282,12 +278,13 @@ fn ordinary_sources_require_no_pullup_workspace() {
     let RelationalPlan::QueryBlock(block) = query.root else {
         panic!("block")
     };
-    let Some(SourcePlan::Subquery { mut body, .. }) = block.from else {
+    let Some(SourcePlan::Subquery { body, .. }) = block.from else {
         panic!("derived")
     };
+    let mut input = Some(*body);
     let allocations = allocation_counter::measure(|| {
         for _ in 0..4 {
-            lift(&mut body);
+            input = Some(lift(input.take().unwrap()));
         }
     });
     assert_eq!(allocations.count_total, 0);
@@ -317,7 +314,7 @@ fn input_capture_reads_only_demanded_values_and_keeps_producer_filter() {
         })
         .into(),
     );
-    lift(&mut query);
+    query = lift(query);
     let RelationalPlan::QueryBlock(block) = &query.root else {
         panic!("block")
     };
@@ -344,7 +341,7 @@ fn input_capture_reads_only_demanded_values_and_keeps_producer_filter() {
 #[test]
 fn captured_source_keeps_pure_predicates_at_its_scan_without_duplicate_evaluation() {
     let mut query = analyzed("SELECT x AS k,10/x AS z FROM (VALUES(0),(2)) v(x)", "k>0");
-    lift(&mut query);
+    query = lift(query);
     let RelationalPlan::QueryBlock(block) = &query.root else {
         panic!("block")
     };
@@ -386,15 +383,18 @@ fn stored_query_definitions_never_retain_transient_input_captures() {
             );
         });
         let before = serde_json::to_value(&plan).unwrap();
-        rewrite_plan(
-            &mut plan,
-            &Context {
-                routines: &Catalog,
-                volatility: &Catalog,
-                relations_bound: false,
-            },
+        let control = ProductionControl::uncontrolled();
+        let plan = rewrite_plan(
+            MutableExecutablePlan::uncontrolled(plan),
+            &context(),
+            &control,
+            &control,
         )
-        .unwrap();
+        .unwrap()
+        .finish(&control)
+        .unwrap()
+        .into_parts()
+        .0;
         assert_eq!(serde_json::to_value(&plan).unwrap(), before, "{sql}");
     }
 }
@@ -411,7 +411,7 @@ fn field_qualification_and_ordering_keep_selected_input_identity() {
             "SELECT x AS k,10/x AS z FROM (VALUES(0),(2)) v(x)",
             predicate,
         );
-        lift(&mut query);
+        query = lift(query);
         let RelationalPlan::QueryBlock(block) = &query.root else {
             panic!("query block")
         };
@@ -447,15 +447,11 @@ fn ordering_output_alias_wins_over_input_but_compound_expression_uses_input() {
         ("SELECT -k AS k FROM s ORDER BY k", false),
         ("SELECT -k AS k FROM s ORDER BY k+1", true),
     ] {
-        let UnifiedPlan::Query(query) =
-            UnifiedPlan::lower(uqa_sql::compile(sql).unwrap().remove(0))
-        else {
-            panic!("query")
-        };
-        let RelationalPlan::QueryBlock(mut block) = query.root else {
+        let (query, complete) = qualify(sql, &schema);
+        assert!(complete);
+        let RelationalPlan::QueryBlock(block) = &query.root else {
             panic!("block")
         };
-        assert!(qualify_block(&mut block, &schema));
         let mut qualified = false;
         block.order_by[0]
             .expr
@@ -470,14 +466,7 @@ fn independent_scalar_predicate_moves_once_below_distinct_outputs() {
         "SELECT DISTINCT x AS k,10/x AS z FROM (VALUES(0),(2))v(x)",
         "k=(SELECT 2)",
     );
-    predicates::push(
-        &mut query,
-        &Context {
-            routines: &Catalog,
-            volatility: &Catalog,
-            relations_bound: false,
-        },
-    );
+    query = push_predicate(query);
     let RelationalPlan::QueryBlock(block) = &query.root else {
         panic!("block")
     };
@@ -523,14 +512,7 @@ fn correlated_shared_and_sliced_scalar_predicates_keep_their_arenas() {
             block.projections[0].expr = ScalarExpr::ScalarSubquery(0);
         }
         let before = serde_json::to_value(&query).unwrap();
-        predicates::push(
-            &mut query,
-            &Context {
-                routines: &Catalog,
-                volatility: &Catalog,
-                relations_bound: false,
-            },
-        );
+        query = push_predicate(query);
         assert_eq!(
             serde_json::to_value(&query).unwrap(),
             before,
@@ -555,14 +537,7 @@ fn source_free_exists_preserves_three_valued_qualification() {
             "SELECT DISTINCT x AS k,10/x AS z FROM (VALUES(0),(2))v(x)",
             predicate,
         );
-        predicates::push(
-            &mut query,
-            &Context {
-                routines: &Catalog,
-                volatility: &Catalog,
-                relations_bound: false,
-            },
-        );
+        query = push_predicate(query);
         let RelationalPlan::QueryBlock(block) = &query.root else {
             panic!("block")
         };
@@ -601,14 +576,7 @@ fn exists_with_cardinality_or_effect_boundaries_is_not_inlined() {
             predicate,
         );
         let before = serde_json::to_value(&query).unwrap();
-        predicates::push(
-            &mut query,
-            &Context {
-                routines: &Catalog,
-                volatility: &Catalog,
-                relations_bound: false,
-            },
-        );
+        query = push_predicate(query);
         assert_eq!(serde_json::to_value(&query).unwrap(), before, "{predicate}");
     }
 }
@@ -632,15 +600,9 @@ fn scalar_output_without_a_query_qualification_allocates_no_transfer_workspace()
     };
     block.subqueries = extra.subqueries;
     block.projections[0].expr = ScalarExpr::ScalarSubquery(0);
+    let mut output = None;
     let allocation = allocation_counter::measure(|| {
-        predicates::push(
-            &mut query,
-            &Context {
-                routines: &Catalog,
-                volatility: &Catalog,
-                relations_bound: false,
-            },
-        );
+        output = Some(push_predicate(query));
     });
     assert_eq!(allocation.bytes_total, 0, "{allocation:?}");
 }
@@ -672,7 +634,7 @@ fn ineligible_derived_source_keeps_its_existing_query_without_scratch() {
     let mut output = None;
     let allocation = allocation_counter::measure(|| {
         output = Some(
-            owned::query_block(
+            query_block(
                 input,
                 &Context {
                     routines: &Catalog,

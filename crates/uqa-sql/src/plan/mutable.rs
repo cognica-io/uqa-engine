@@ -87,6 +87,29 @@ impl QueryPlan {
 }
 
 impl MutableQueryPlan {
+    /// Move a caller-owned query and its existing constructors into the editor.
+    #[must_use]
+    pub fn uncontrolled(query: QueryPlan) -> Self {
+        Self::from_rewrite_parts(query, None)
+    }
+
+    /// Publish a speculative replacement into the original query's ownership domain. A caller-owned query takes the successfully constructed syntax, while shared literal and schema payloads keep their individual leases.
+    pub fn commit_rewrite(
+        self,
+        replacement: Self,
+        control: &ProductionControl<'_>,
+    ) -> Result<Self, SQLError> {
+        control.check()?;
+        if self.memory.read().is_none() && control.budget().is_some() {
+            let (query, _workspace) = replacement.finish(control)?.into_parts();
+            Ok(Self::uncontrolled(query))
+        } else {
+            self.assert_owner(control);
+            replacement.assert_owner(control);
+            Ok(replacement)
+        }
+    }
+
     pub(in crate::plan) fn from_rewrite_parts(
         query: QueryPlan,
         memory: Option<RewriteMemory>,

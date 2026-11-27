@@ -6886,6 +6886,19 @@
       ]
     },
     {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "speculative_query_replacement_preserves_the_input_owner_and_moves_the_destination",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/mutable/tests/construction.rs",
+      "capability": "Speculative query replacement",
+      "workload": "Publish a private query rewrite over either caller-owned or admitted syntax, with a live or cancelled request.",
+      "invariant": "Successful output reuses its original projection buffer and keeps the input storage domain. Cancellation releases every constructor reservation.",
+      "case_names": [
+        "plan::mutable::tests::construction::speculative_query_replacement_preserves_the_input_owner_and_moves_the_destination"
+      ]
+    },
+    {
       "package": "uqa-planner",
       "kind": "lib",
       "test": "caller_owned_case_moves_its_existing_column_under_a_tight_work_budget",
