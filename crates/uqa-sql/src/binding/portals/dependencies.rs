@@ -125,25 +125,27 @@ pub fn collect_session_portal_query_dependencies(
         visiting_routines,
     )?;
 
-    let mut plan = crate::plan::UnifiedPlan::Query(Box::new(query.clone()));
     let mut routines = Vec::new();
-    plan.rewrite_scalar_expressions(&mut |expression| {
-        if let crate::ScalarExpr::Func {
-            name,
-            binding,
-            args,
-            ..
-        } = expression
-        {
-            collect_graph_function_dependency(name, binding.as_ref(), args, dependencies);
-            routines.push((name.clone(), binding.clone()));
-        }
-    });
+    query.try_visit_scalar_expressions(&mut |root| {
+        root.try_visit_post(&mut |expression| {
+            if let crate::ScalarExpr::Func {
+                name,
+                binding,
+                args,
+                ..
+            } = expression
+            {
+                collect_graph_function_dependency(name, binding.as_ref(), args, dependencies);
+                routines.push((name.as_str(), binding.as_ref()));
+            }
+            Ok::<_, SQLError>(())
+        })
+    })?;
     for (name, binding) in routines {
         collect_session_portal_routine_dependencies(
             inputs,
-            &name,
-            binding.as_ref(),
+            name,
+            binding,
             dependencies,
             visiting_views,
             visiting_routines,
@@ -155,7 +157,7 @@ pub fn collect_session_portal_query_dependencies(
     Ok(())
 }
 
-fn collect_session_portal_cte_dependencies(
+pub fn collect_session_portal_cte_dependencies(
     inputs: &PortalBindingContext<'_>,
     body: &crate::plan::CtePlanBody,
     dependencies: &mut SessionPortalTableDependencies,

@@ -23,6 +23,9 @@ use uqa_sql::{
     SQLError, SQLParam,
 };
 
+#[cfg(test)]
+mod tests;
+
 struct SessionQueryInputs {
     engine: Engine,
     plan: OwnedQueryPlan,
@@ -122,7 +125,21 @@ impl Engine {
                 .clone_from(&self.query_transaction_overlay);
             retained
         } else {
-            self.statement_read_snapshot_engine(&self.capture_statement_read_snapshot()?)
+            let inputs = self.portal_binding_context();
+            let mut dependencies =
+                uqa_sql::binding::portals::dependencies::session_portal_table_dependencies(
+                    &inputs, &plan,
+                )?;
+            scope.visit_deferred_query_inputs(&plan, control, |body| {
+                uqa_sql::binding::portals::dependencies::collect_session_portal_cte_dependencies(
+                    &inputs,
+                    body,
+                    &mut dependencies,
+                    &mut std::collections::BTreeSet::new(),
+                    &mut std::collections::BTreeSet::new(),
+                )
+            })?;
+            self.statement_read_snapshot_engine(&self.capture_query_read_snapshot(&dependencies)?)
         };
         Ok(RetainedSessionQuery {
             inputs: std::sync::Arc::new(SessionQueryInputs {

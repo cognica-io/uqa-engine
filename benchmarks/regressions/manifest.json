@@ -41497,6 +41497,51 @@
     {
       "package": "uqa-engine",
       "kind": "lib",
+      "test": "predicate_placement_uses_the_catalog_and_namespace_selected_by_the_statement",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/capabilities/tests/scoped_catalog.rs",
+      "capability": "Session catalog and retained query snapshots",
+      "workload": "Run three predicate placement operations eight times after changing the search path and installing a different relation of the same name.",
+      "invariant": "Keep the original statement catalog and namespace throughout placement and record zero new catalog captures.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "retained_query_detaches_only_referenced_tables_and_lexical_cte_inputs",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/session/retained_query/tests.rs",
+      "capability": "Session catalog and retained query snapshots",
+      "workload": "Retain constants, a view and three outer CTE declarations, including a shadowed definition, and execute a recursive query on all four providers.",
+      "invariant": "A constant retains zero table snapshots. A view and each reachable deferred CTE retain the single underlying table visible to their definition.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "unchanged_transaction_admission_captures_session_state_once",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/transactions/snapshots/tests.rs",
+      "capability": "Session catalog and retained query snapshots",
+      "workload": "Open a transaction with current session catalogs on memory, native SQLite, SQLite Key/Value and redb.",
+      "invariant": "Capture session state exactly once when opening the transaction and preserve rollback behavior.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
       "test": "native_retained_cte_inputs_admit_before_copying_and_keep_original_allowance",
       "cases": 12,
       "source": "crates/uqa-engine/src/tests/queries/planning_memory/scopes/retained.rs",

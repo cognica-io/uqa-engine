@@ -10,6 +10,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - Graph traversal and centrality results share subgraph vertices, edges and names across postings. Rust callers can use `.into()` for these three `GraphPayload` fields.
 
+- Retained queries reuse the statement’s catalog and detach the tables selected by their views and deferred CTEs. Opening a transaction with an up-to-date catalog captures session state once.
+
 - Grouped aggregates retain only the state needed for each function. Ordered aggregates spill binary records and merge them in SQL order. Hash joins, DISTINCT and equality-based MERGE use bounded disk indexes as their inputs grow.
 
 - Prepared SQL expressions reuse numeric operand types, builtin signatures, and row and array descriptors across input rows. Scalar function callbacks receive the original argument payloads.

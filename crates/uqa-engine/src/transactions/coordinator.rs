@@ -341,9 +341,8 @@ impl Engine {
         ),
         SQLError,
     > {
-        let before_admission = self.snapshot_session_state();
         self.begin_notification_transaction()?;
-        self.begin_outer_transaction_snapshot(read_only, defer_write_lock, &before_admission)
+        self.begin_outer_transaction_snapshot(read_only, defer_write_lock)
             .map_err(|error| match self.rollback_notification_state() {
                 Ok(()) => error,
                 Err(notification_error) => SQLError::Internal(format!(
@@ -378,7 +377,6 @@ impl Engine {
         &self,
         read_only: bool,
         defer_write_lock: bool,
-        session_snapshot: &SessionStateSnapshot,
     ) -> Result<
         (
             Option<std::sync::Arc<EngineDataSnapshot>>,
@@ -436,29 +434,23 @@ impl Engine {
             }
             gate
         };
-        if let Err(error) = self.refresh_pinned_transaction_snapshot() {
-            let refresh_error = Self::storage_tx_error("BEGIN pinned snapshot refresh", &error);
-            let recovered = self.recover_failed_begin_refresh(
-                backend.as_ref(),
-                session_snapshot,
-                refresh_error,
-            );
+        let mut before_refresh = None;
+        let snapshot = self
+            .refresh_pinned_transaction_snapshot_with(|| {
+                before_refresh = Some(self.snapshot_session_state());
+            })
+            .map_err(|error| Self::storage_tx_error("BEGIN pinned snapshot refresh", &error))
+            .and_then(|()| snapshot_gate.baseline())
+            .and_then(|baseline| {
+                self.snapshot_transaction_data(SnapshotBoundary::CommittedOriginal)
+                    .map(|snapshot| (snapshot, baseline))
+            });
+        snapshot.map_err(|error| {
+            let original = before_refresh.unwrap_or_else(|| self.snapshot_session_state());
+            let recovered = self.recover_failed_begin_refresh(backend.as_ref(), &original, error);
             self.row_locks.release_session(self.session_id);
-            return Err(recovered);
-        }
-        let baseline = match snapshot_gate.baseline() {
-            Ok(baseline) => baseline,
-            Err(error) => {
-                let recovered =
-                    self.recover_failed_begin_refresh(backend.as_ref(), session_snapshot, error);
-                self.row_locks.release_session(self.session_id);
-                return Err(recovered);
-            }
-        };
-        Ok((
-            self.snapshot_transaction_data(SnapshotBoundary::CommittedOriginal)?,
-            baseline,
-        ))
+            recovered
+        })
     }
 
     /// Register the physical backend writer this session holds in the logical lock manager. Eager writer frames (typed `begin`, direct transactions) and promoted deferred frames must both hold the structural backend-writer lock, otherwise a writer blocked on a row lock is invisible to the deadlock detector and a promoting SQL session waits at the storage layer instead of reporting `40P01`.

@@ -58,6 +58,31 @@ mod view_roots;
 #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 mod wrapper_roots;
 
+std::thread_local! {
+    pub(super) static SESSION_SNAPSHOTS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[rstest::rstest]
+#[case::memory(crate::tests::providers::Provider::Memory)]
+#[case::sqlite_native(crate::tests::providers::Provider::SQLiteNative)]
+#[case::sqlite_kv(crate::tests::providers::Provider::SQLiteKeyValue)]
+#[case::redb(crate::tests::providers::Provider::Redb)]
+fn unchanged_transaction_admission_captures_session_state_once(
+    #[case] provider: crate::tests::providers::Provider,
+) {
+    let directory = tempfile::tempdir().unwrap();
+    let engine = provider.open(&directory.path().join("session-snapshot.db"));
+    engine
+        .sql("CREATE TABLE admission_data(id integer)", &[])
+        .unwrap();
+    engine.begin().unwrap();
+    engine.commit().unwrap();
+    SESSION_SNAPSHOTS.set(0);
+    engine.begin().unwrap();
+    assert_eq!(SESSION_SNAPSHOTS.get(), 1);
+    engine.rollback().unwrap();
+}
+
 fn sql(engine: &Engine, text: &str) {
     engine.sql(text, &[]).unwrap();
 }

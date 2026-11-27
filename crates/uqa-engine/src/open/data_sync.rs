@@ -262,6 +262,14 @@ impl Engine {
     /// between a physical commit and publication of the matching in-process
     /// epochs, while allowing unchanged statements to retain their caches.
     pub(crate) fn refresh_pinned_transaction_snapshot(&self) -> StorageBackendResult<()> {
+        self.refresh_pinned_transaction_snapshot_with(|| {})
+    }
+
+    /// Call the rollback owner before the first refresh that may replace session-local catalog state.
+    pub(crate) fn refresh_pinned_transaction_snapshot_with(
+        &self,
+        mut before_refresh: impl FnMut(),
+    ) -> StorageBackendResult<()> {
         use std::sync::atomic::Ordering;
 
         let (storage_snapshot_unchanged, stable_storage_version) =
@@ -335,6 +343,7 @@ impl Engine {
             catalog_registry_epoch,
             committed_unchanged,
             previous_view.as_ref(),
+            &mut before_refresh,
         )? {
             self.observe_read_view(read_view, stable_storage_version);
             return Ok(());
@@ -349,6 +358,7 @@ impl Engine {
             self.observe_read_view(read_view, stable_storage_version);
             return Ok(());
         }
+        before_refresh();
         self.reload_catalog_snapshot(Some(table_catalog_epoch), Some(catalog_registry_epoch))?;
         // Newly restored table handles already include their statistics and
         // physical data snapshot. Do not decode the same statistics twice.

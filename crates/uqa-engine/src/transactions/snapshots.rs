@@ -195,6 +195,8 @@ impl TableDataSnapshot {
 
 impl Engine {
     pub(super) fn snapshot_session_state(&self) -> SessionStateSnapshot {
+        #[cfg(test)]
+        tests::SESSION_SNAPSHOTS.set(tests::SESSION_SNAPSHOTS.get() + 1);
         let mut snapshot = self.session.state.read().clone();
         snapshot.portal_names = self.session.portals.lock().keys().cloned().collect();
         snapshot.command_overlays = self
