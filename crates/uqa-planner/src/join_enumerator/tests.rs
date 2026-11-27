@@ -211,9 +211,9 @@ fn parallel_join_predicates_cost_both_orientations_in_one_edge_scan() {
     for select_index in [false, true] {
         let mut graph = JoinGraph::new();
         graph.add_relation("outer", 1.0).unwrap();
-        graph.add_relation("inner", 100000.0).unwrap();
+        graph.add_relation("inner", 100_000.0).unwrap();
         let factors = [0.5, 0.25, 0.003, 0.9, 0.75];
-        let mut cardinality = 100000.0;
+        let mut cardinality = 100_000.0;
         for (position, factor) in factors.into_iter().enumerate() {
             graph.add_edge(0, 1, factor).unwrap();
             cardinality *= factor;

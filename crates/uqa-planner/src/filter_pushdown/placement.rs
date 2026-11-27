@@ -86,6 +86,11 @@ pub(super) fn derived_disjuncts(
     control: &ProductionControl<'_>,
     visit: &mut dyn FnMut(&str, OwnedScalarExpr) -> Result<(), SQLError>,
 ) -> Result<(), SQLError> {
+    struct Projection<'a> {
+        branches: usize,
+        terms: Buffer<(usize, &'a ScalarExpr)>,
+    }
+
     let ScalarExpr::Or(disjuncts) = part else {
         return Ok(());
     };
@@ -95,11 +100,6 @@ pub(super) fn derived_disjuncts(
     {
         return Ok(());
     }
-    struct Projection<'a> {
-        branches: usize,
-        terms: Buffer<(usize, &'a ScalarExpr)>,
-    }
-
     let mut projections = OwnedMap::<&str, Projection<'_>>::new();
     for (branch, disjunct) in disjuncts.iter().enumerate() {
         let mut matching = 0;
@@ -258,7 +258,7 @@ impl<'a> PredicateColumns<'a> {
             }
             match node {
                 ScalarExpr::Column(name) => {
-                    result.unqualified.include(columns.readable_owner(name))
+                    result.unqualified.include(columns.readable_owner(name));
                 }
                 ScalarExpr::InternalColumn(_) => internal = true,
                 ScalarExpr::Func { .. } => result.has_calls = true,

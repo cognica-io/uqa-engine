@@ -135,20 +135,7 @@ pub(super) fn query_block(
             return Ok(query);
         }
     }
-    changed = transforms::local(changed, control, &mut |expression| {
-        expression.replace_nodes(control, &mut |node| {
-            let replacement = match node {
-                ScalarExpr::Column(name) => substitutions.get(None, name),
-                ScalarExpr::QualifiedColumn { qualifier, column } => {
-                    substitutions.get(Some(qualifier), column)
-                }
-                _ => None,
-            };
-            replacement
-                .map(|value| value.copy_for_rewrite(control).map_err(Into::into))
-                .transpose()
-        })
-    })?;
+    changed = transforms::substitute_local(changed, &substitutions, control)?;
     drop(substitutions);
     for candidate in lifted {
         changed = changed.map_source(control, |source| {

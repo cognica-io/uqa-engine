@@ -252,7 +252,7 @@ fn indexed_outer_replacements_preserve_duplicate_order_and_reuse_borrowed_column
             for _ in 0..1024 {
                 assert!(std::ptr::eq(
                     substitutions.get(Some("outer_source"), "v").unwrap(),
-                    &last
+                    std::ptr::from_ref(&last)
                 ));
                 assert!(substitutions.get(None, "v").is_none());
             }
