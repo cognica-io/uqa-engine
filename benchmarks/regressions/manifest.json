@@ -9041,6 +9041,19 @@
     {
       "package": "uqa-scoring",
       "kind": "lib",
+      "test": "full_coverage_prunes_with_the_explicit_bound_and_partial_coverage_can_still_win",
+      "cases": 1,
+      "source": "crates/uqa-scoring/src/fusion_wand.rs",
+      "capability": "Exact confidence-scaled pool pruning",
+      "workload": "Combine 8,192 weak hits with one rare hit, then rank three partially overlapping signals where a missing score beats an explicit hit.",
+      "invariant": "The dense fixture scores only its winner with the exhaustive score bits. When coverage is partial, the correct missing-score winner and its bits are preserved.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-scoring",
+      "kind": "lib",
       "test": "sparse_pivot_skips_weak_scores_without_changing_the_top_document",
       "cases": 1,
       "source": "crates/uqa-scoring/src/fusion_wand.rs",
@@ -22999,6 +23012,58 @@
       "capability": "Stable analyzer Unicode semantics",
       "workload": "Explicit sigma, Unicode-version boundaries and expanding lowercase mappings.",
       "invariant": "Output retains Unicode 16 semantics and releases every output reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "ascii_lowercase_and_folding_reuse_owned_terms_at_the_memory_limit",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/token/allocation/tests/common_filters/resources.rs",
+      "capability": "In-place ASCII token filters",
+      "workload": "Lowercase or fold an owned 8,192-byte ASCII token after reserving every remaining byte.",
+      "invariant": "Both operations allocate zero times, preserve the buffer and offsets, return the exact term and release all token and source leases.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "independent_compound_rules_scan_unmatched_input_once_with_no_allocation",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/char_filter/literals/tests.rs",
+      "capability": "Bounded literal mapping work",
+      "workload": "Apply 512 noninteracting compound keys to 32 KiB of unmatched text under a zero-byte allowance.",
+      "invariant": "The prepared scanner traverses one input, checks cancellation within each 1,024-byte block, allocates zero times and retains the original borrowed text.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "prepared_rules_retain_overlapping_priority_and_spans_across_generated_inputs",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/char_filter/literals/tests.rs",
+      "capability": "Ordered character mappings",
+      "workload": "Apply 256 generated mapping tables to eight six-character inputs each, including cascading, empty and overlapping rules and supplementary characters.",
+      "invariant": "The resulting text, final offsets, all UTF-8 source spans and covering UTF-16 spans equal ordered single-rule replacement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-analysis",
+      "kind": "lib",
+      "test": "rolling_single_candidate_positions_allocate_only_during_warmup",
+      "cases": 1,
+      "source": "crates/uqa-analysis/src/morphology/lattice/tests.rs",
+      "capability": "Rolling morphology lattice storage",
+      "workload": "Advance a two-position Viterbi frontier through 4,096 further positions, inserting one ordered candidate per position.",
+      "invariant": "Each backtrace candidate is retained in the ring, the steady-state loop allocates zero times and dropping the lattice releases every reserved byte.",
       "case_names": [
         ""
       ]

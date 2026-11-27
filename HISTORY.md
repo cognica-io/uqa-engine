@@ -28,6 +28,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - Creating a graph with many new catalog identities now reuses the native lock registry's SQLite rollback journal. Each identity is still visible to other processes as soon as its reservation succeeds.
 
+- Lowercase and ASCII folding reuse owned ASCII token buffers. Character mappings share a scan for independent rules, and Korean and Japanese tokenizers reuse rolling slots for single-candidate positions. Token text, positions and original source offsets retain their existing semantics.
+
 - Independent analyzer catalogs now charge their own memory budgets for encoded analyzer and dictionary images. Closing a catalog or abandoning a failed installation releases its reservations even while another catalog uses the same analyzer.
 
 - `EXCEPT` and `EXCEPT ALL` now return an unmatched final left row when the remaining right values sort before it. This also fixes `NOT EXISTS` checks over those results. Set operations match columns by position when output labels repeat.

@@ -95,6 +95,23 @@ impl TokenTerm {
         }
     }
 
+    /// Return a mutable scalar term only after checking its complete ASCII prefix in bounded chunks.
+    pub(crate) fn ascii_mut(
+        &mut self,
+        poll: &mut dyn FnMut() -> AnalysisResult<()>,
+    ) -> AnalysisResult<Option<&mut str>> {
+        let Representation::Unicode(text) = &mut self.0 else {
+            return Ok(None);
+        };
+        for bytes in text.as_bytes().chunks(1024) {
+            poll()?;
+            if !bytes.is_ascii() {
+                return Ok(None);
+            }
+        }
+        Ok(Some(text))
+    }
+
     pub fn as_str(&self) -> Option<&str> {
         match &self.0 {
             Representation::Unicode(text) => Some(text),

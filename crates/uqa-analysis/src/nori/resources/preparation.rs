@@ -54,11 +54,10 @@ impl ResolvedDictionary {
         work: &mut impl Work,
     ) -> DictionaryResult<Self> {
         let model = NoriDictionary::from_bytes_with(artifact.bytes.as_ref(), limits, work).await?;
-        Ok(Self {
-            image: crate::analyzer::image_source::DictionaryImageCache::default(),
-            sha256: ResourceHash::from_bytes(artifact.sha256),
-            bytes: artifact.bytes,
+        Ok(Self::new(
             model,
-        })
+            ResourceHash::from_bytes(artifact.sha256),
+            artifact.bytes,
+        ))
     }
 }

@@ -37,6 +37,35 @@ pub struct AnalysisToken {
 }
 
 impl AnalysisToken {
+    /// Lowercase an owned ASCII term without a second buffer. Oversized changed
+    /// buffers use the ordinary replacement path to release excess retained capacity.
+    pub(crate) fn lowercase_ascii_in_place(
+        &mut self,
+        poll: &mut dyn FnMut() -> AnalysisResult<()>,
+    ) -> AnalysisResult<bool> {
+        let capacity = self.term.allocation_bytes();
+        let Some(mut text) = self.term.ascii_mut(poll)? else {
+            return Ok(false);
+        };
+        // A fresh scalar buffer grows by doubling while ASCII characters are appended.
+        let compact = capacity > text.len().next_power_of_two();
+        let mut changed = false;
+        while !text.is_empty() {
+            poll()?;
+            let (chunk, rest) = text.split_at_mut(text.len().min(1024));
+            if chunk.as_bytes().iter().any(u8::is_ascii_uppercase) {
+                if compact {
+                    return Ok(false);
+                }
+                chunk.make_ascii_lowercase();
+                changed = true;
+            }
+            text = rest;
+        }
+        self.verbatim &= !changed;
+        Ok(true)
+    }
+
     pub fn term(&self) -> &TokenTerm {
         &self.term
     }

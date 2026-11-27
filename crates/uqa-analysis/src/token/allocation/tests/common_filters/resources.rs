@@ -191,6 +191,42 @@ fn no_expansion_and_whole_grams_transfer_buffers_with_a_full_allowance() {
 }
 
 #[test]
+fn ascii_lowercase_and_folding_reuse_owned_terms_at_the_memory_limit() {
+    let source = "UQA1".repeat(2048);
+    for (filter, expected) in [
+        (TokenFilter::Lowercase, source.to_ascii_lowercase()),
+        (TokenFilter::ASCIIFolding, source.clone()),
+    ] {
+        let budget = MemoryBudget::new(1 << 20);
+        let input = Tokenizer::Keyword
+            .tokenize_with_offsets_budgeted(&source, &budget, || Ok(()))
+            .unwrap();
+        let before = input.reserved_bytes();
+        let pointer = input.tokens()[0].term.as_str().unwrap().as_ptr();
+        let offsets = input.tokens()[0].offsets.clone();
+        let blocker = budget.reserve(budget.limit() - budget.used()).unwrap();
+        let mut output = None;
+        let cost = allocation_counter::measure(|| {
+            output = Some(apply(&filter, input, &mut || Ok(())).unwrap());
+        });
+        let output = output.unwrap();
+        assert_eq!(cost.count_total, 0, "{filter:?}: {cost:?}");
+        assert_eq!(output.reserved_bytes(), before);
+        assert_eq!(output.tokens()[0].term.as_str().unwrap().as_ptr(), pointer);
+        assert_eq!(output.tokens()[0].term.as_str(), Some(expected.as_str()));
+        assert_eq!(output.tokens()[0].verbatim, expected == source);
+        assert_eq!(output.tokens()[0].offsets, offsets);
+        // With morphology enabled the source projection holds a separate lease.
+        assert_eq!(budget.used(), budget.limit());
+        let (output, memory) = output.into_parts();
+        assert_eq!(owned_bytes(output), memory.bytes());
+        assert_eq!(budget.used(), memory.bytes() + blocker.bytes());
+        drop(memory);
+        assert_eq!(budget.used(), blocker.bytes());
+    }
+}
+
+#[test]
 fn replacement_keeps_original_capacity_until_changed_bytes_are_dropped() {
     for (source, changes) in [("uqa", false), ("UQA", true)] {
         let mut original = Tokenizer::Keyword.tokenize_with_offsets(source).unwrap();
@@ -207,9 +243,9 @@ fn replacement_keeps_original_capacity_until_changed_bytes_are_dropped() {
             Ok(())
         })
         .unwrap();
-        assert!(budget.peak() >= bytes + 3);
         assert_eq!(output.tokens()[0].term.as_str(), Some("uqa"));
         if changes {
+            assert!(budget.peak() >= bytes + 3);
             assert_ne!(
                 output.batch.tokens[0].term.as_str().unwrap().as_ptr(),
                 pointer
@@ -217,6 +253,7 @@ fn replacement_keeps_original_capacity_until_changed_bytes_are_dropped() {
             assert!(!output.batch.tokens[0].verbatim);
             assert!(output.reserved_bytes() < bytes);
         } else {
+            assert_eq!(budget.peak(), bytes);
             assert_eq!(
                 output.batch.tokens[0].term.as_str().unwrap().as_ptr(),
                 pointer

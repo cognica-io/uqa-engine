@@ -30,6 +30,9 @@ pub(crate) mod neutral;
 pub(crate) mod resources;
 
 #[cfg(any(feature = "nori", feature = "kuromoji"))]
+pub(crate) mod identity;
+
+#[cfg(any(feature = "nori", feature = "kuromoji"))]
 pub(crate) mod lattice;
 
 #[cfg(any(feature = "nori", feature = "kuromoji"))]
