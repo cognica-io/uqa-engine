@@ -13,6 +13,7 @@ use uqa_sql::{
     },
     prepared::{
         definition::{PreparedDefinition, PreparedDefinitionContext},
+        domains::GenericDomainInputs,
         entry::PreparedStatementPlan,
         planning::{PreparedPlanAnalysis, PreparedPlanSelection, PreparedPlanUpdate},
     },
@@ -207,12 +208,6 @@ fn select(
         |mode| Ok(control.copy_text(mode)?),
     )?;
     let needs_analysis = check_analysis && needs_analysis(&context.analysis, entry, control)?;
-    let mut generic_plan = if needs_analysis {
-        None
-    } else {
-        entry.plan.clone()
-    };
-    let mut generic_cost = entry.generic_cost;
     let reanalyzed = needs_analysis
         .then(|| reanalyze(&context.analysis, entry, control))
         .transpose()?;
@@ -226,12 +221,11 @@ fn select(
         .map_or(&entry.composite_inputs, |definition| {
             &definition.composite_inputs
         });
-    if generic_plan.is_some()
-        && inputs.generic_requires_rebuild_with_control(context.analysis.types, control)?
-    {
-        generic_plan = None;
-        generic_cost = None;
-    }
+    let CachedGeneric {
+        plan: mut generic_plan,
+        cost: mut generic_cost,
+        domains: mut generic_domains,
+    } = cached_generic(context, entry, inputs, needs_analysis, control)?;
     let usage = super::PreparedPlanUsage {
         has_parameters: !entry.parameter_types.is_empty()
             && uqa_sql::prepared::utility::requires_analysis(source),
@@ -267,6 +261,8 @@ fn select(
         let plan = projected
             .take()
             .map_or_else(|| source.copy_for_rewrite(control), Ok)?;
+        generic_domains =
+            GenericDomainInputs::capture(source, context.analysis.procedures, control)?;
         let generic = prepare_generic(context, inputs, plan, control)?;
         composite_inputs = generic.inputs;
         generic_cost = Some(generic.cost);
@@ -297,9 +293,49 @@ fn select(
             composite_inputs,
             reanalyzed,
             generic_plan,
+            generic_domains,
             generic_cost,
             custom_cost,
         },
+    })
+}
+
+struct CachedGeneric {
+    plan: Option<SharedExecutablePlan>,
+    cost: Option<f64>,
+    domains: GenericDomainInputs,
+}
+
+fn cached_generic(
+    context: &PreparedPlanningContext<'_>,
+    entry: &PreparedStatementPlan,
+    inputs: &uqa_sql::prepared::composites::CompositeInputs,
+    needs_analysis: bool,
+    control: &ProductionControl<'_>,
+) -> Result<CachedGeneric, SQLError> {
+    if needs_analysis {
+        return Ok(CachedGeneric {
+            plan: None,
+            cost: entry.generic_cost,
+            domains: GenericDomainInputs::default(),
+        });
+    }
+    if entry.plan.is_some()
+        && (inputs.generic_requires_rebuild_with_control(context.analysis.types, control)?
+            || entry
+                .generic_domains
+                .requires_rebuild(context.analysis.procedures, control)?)
+    {
+        return Ok(CachedGeneric {
+            plan: None,
+            cost: None,
+            domains: GenericDomainInputs::default(),
+        });
+    }
+    Ok(CachedGeneric {
+        plan: entry.plan.clone(),
+        cost: entry.generic_cost,
+        domains: entry.generic_domains.clone(),
     })
 }
 

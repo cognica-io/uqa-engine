@@ -44,6 +44,7 @@ pub(super) fn column(tag: &str) -> Option<ColumnType> {
         "DoublePrecision" => ColumnType::DoublePrecision,
         "Json" => ColumnType::Json,
         "Xml" => ColumnType::Xml,
+        "TsVector" => ColumnType::TsVector,
         "JsonB" => ColumnType::JsonB,
         "Bytea" => ColumnType::Bytea,
         "InternalChar" => ColumnType::InternalChar,

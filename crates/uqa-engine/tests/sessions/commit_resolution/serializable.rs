@@ -428,66 +428,65 @@ fn dropping_a_failed_scope_keeps_its_unknown_abort_for_explicit_resolution() {
     }
 }
 
-#[test]
-fn implicit_graph_abort_preserves_typed_completion_and_callback_ownership() {
+#[rstest::rstest]
+fn implicit_graph_abort_preserves_typed_completion_and_callback_ownership(
+    #[values("plain", "encrypted", "compressed", "compressed-encrypted", "redb")] provider: &str,
+    #[values(false, true)] persisted: bool,
+    #[values(false, true)] panic: bool,
+) {
     use std::collections::BTreeMap;
     use uqa_graph::{GraphStore, GraphStoreError};
 
-    for persisted in [false, true] {
-        for panic in [false, true] {
-            let (_directory, fixtures) = fixtures();
-            for persistence in fixtures {
-                let (root, store) = retained_engine(persistence.clone());
-                root.create_graph("completion_graph").unwrap();
-                root.sql("SET default_transaction_isolation = 'serializable'", &[])
-                    .unwrap();
-                let writes = persistence.foreground_record_writes();
-                let mut participant = None;
-                let mut calls = 0;
-                let error = root
-                    .graph_with_mut("completion_graph", |graph| {
-                        calls += 1;
-                        graph.add_vertex(
-                            uqa_core::Vertex {
-                                vertex_id: 1,
-                                label: "node".into(),
-                                properties: BTreeMap::new(),
-                            },
-                            "completion_graph",
-                        )?;
-                        let actor = store.serializable_read_context().unwrap().unwrap().id();
-                        participant = Some(actor);
-                        persistence.fail_serializable_abort(actor, persisted);
-                        assert!(!panic, "graph callback panicked");
-                        Err::<(), _>(GraphStoreError::from(StorageBackendError::Other(
-                            "graph callback rejected".into(),
-                        )))
-                    })
-                    .unwrap_err();
-                assert_unknown(&uqa_execution::storage_errors::storage_error(
-                    "graph", &error,
-                ));
-                assert_eq!(calls, 1);
-                assert_eq!(root.transaction_depth(), 1);
-                assert_eq!(
-                    root.pending_transaction_completion(),
-                    Some(TransactionOutcomeId::Serializable(participant.unwrap()))
-                );
-                assert_unknown(&root.close().unwrap_err());
-                persistence
-                    .serializable_fault
-                    .store(HEALTHY, Ordering::Release);
-                root.rollback().unwrap();
-                assert_eq!(root.transaction_depth(), 0);
-                assert_eq!(persistence.foreground_record_writes(), writes);
-                assert!(root
-                    .graph_with("completion_graph", |graph| graph.get_vertex(1))
-                    .unwrap()
-                    .unwrap()
-                    .unwrap()
-                    .is_none());
-                assert_eq!(calls, 1);
-            }
-        }
-    }
+    let directory = tempfile::tempdir().unwrap();
+    let persistence = fixture(directory.path(), provider);
+    let (root, store) = retained_engine(persistence.clone());
+    root.create_graph("completion_graph").unwrap();
+    root.sql("SET default_transaction_isolation = 'serializable'", &[])
+        .unwrap();
+    let writes = persistence.foreground_record_writes();
+    let mut participant = None;
+    let mut calls = 0;
+    let error = root
+        .graph_with_mut("completion_graph", |graph| {
+            calls += 1;
+            graph.add_vertex(
+                uqa_core::Vertex {
+                    vertex_id: 1,
+                    label: "node".into(),
+                    properties: BTreeMap::new(),
+                },
+                "completion_graph",
+            )?;
+            let actor = store.serializable_read_context().unwrap().unwrap().id();
+            participant = Some(actor);
+            persistence.fail_serializable_abort(actor, persisted);
+            assert!(!panic, "graph callback panicked");
+            Err::<(), _>(GraphStoreError::from(StorageBackendError::Other(
+                "graph callback rejected".into(),
+            )))
+        })
+        .unwrap_err();
+    assert_unknown(&uqa_execution::storage_errors::storage_error(
+        "graph", &error,
+    ));
+    assert_eq!(calls, 1);
+    assert_eq!(root.transaction_depth(), 1);
+    assert_eq!(
+        root.pending_transaction_completion(),
+        Some(TransactionOutcomeId::Serializable(participant.unwrap()))
+    );
+    assert_unknown(&root.close().unwrap_err());
+    persistence
+        .serializable_fault
+        .store(HEALTHY, Ordering::Release);
+    root.rollback().unwrap();
+    assert_eq!(root.transaction_depth(), 0);
+    assert_eq!(persistence.foreground_record_writes(), writes);
+    assert!(root
+        .graph_with("completion_graph", |graph| graph.get_vertex(1))
+        .unwrap()
+        .unwrap()
+        .unwrap()
+        .is_none());
+    assert_eq!(calls, 1);
 }

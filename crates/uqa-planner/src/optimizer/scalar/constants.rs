@@ -14,6 +14,7 @@ use uqa_sql::{scalar_type, FunctionTypeResolver, RowSchema, ScalarExpr};
 use super::Value;
 
 mod composites;
+mod domains;
 mod eligibility;
 pub(in crate::optimizer) mod metadata;
 pub(super) mod owned;
@@ -245,6 +246,10 @@ pub(super) fn fold_selected_literal(
         // Argument markers carry syntax for their enclosing call; only that call evaluates them as arguments.
         return Ok(expression);
     }
+    if let Some(domain) = domains::fold(&expression, config)? {
+        let (ty, _owner) = domain.ty.into_parts();
+        return ordinary_result(domain.value, Some(ty), true, config);
+    }
     if let ScalarExpr::Cast { expr, ty, .. } = &expression {
         if literal_value_with_control(expr, &config.production)?
             .as_deref()
@@ -315,13 +320,22 @@ pub(super) fn fold_selected_literal(
         unreachable!("evaluated literal")
     };
     let value = config.production.finish(value, memory)?;
+    ordinary_result(value, ty, !untyped, config)
+}
+
+fn ordinary_result(
+    value: Produced<Value>,
+    ty: Option<ColumnType>,
+    declared: bool,
+    config: &crate::OptimizerConfig<'_>,
+) -> Result<ScalarExpr, SQLError> {
     if config.production.budget().is_some() && value.reserved_bytes() > 0 {
-        return retain_produced_literal(value, ty, !untyped, config);
+        return retain_produced_literal(value, ty, declared, config);
     }
     // The ordinary result, or an inline scalar with an empty lease, owns no controlled allocation after this move.
     let (value, memory) = value.into_parts();
     drop(memory);
-    if untyped {
+    if !declared {
         return Ok(ScalarExpr::Literal(value));
     }
     Ok(match ty {

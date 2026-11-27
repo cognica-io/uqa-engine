@@ -7,7 +7,7 @@
 //! Catalog operator selection shares `PostgreSQL` function matching/ranking and owns only the requested operator's candidate types.
 
 use super::super::{common::base_type, BuiltinFunctionOverload};
-use super::{binary_operator_name, catalog::SIGNATURES, undefined_binary_operator};
+use super::{catalog::SIGNATURES, undefined_binary_operator};
 use crate::{
     ast::{BinaryOp, ColumnType},
     SQLError,
@@ -47,7 +47,7 @@ pub fn binary_operator_types_with_control(
     right: Option<&ColumnType>,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<[ColumnType; 3]>, SQLError> {
-    named_binary_operator_types_with_control(binary_operator_name(op), left, right, control)
+    named_binary_operator_types_with_control(op.sql(), left, right, control)
 }
 
 pub(crate) fn named_binary_operator_types(

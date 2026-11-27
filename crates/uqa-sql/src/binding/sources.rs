@@ -19,6 +19,7 @@ use crate::routines::RoutineResolution;
 
 mod execution;
 mod functions;
+pub use functions::bind_table_function_result_schema;
 mod relations;
 pub use execution::bind_source_plan_for_execution_owned;
 

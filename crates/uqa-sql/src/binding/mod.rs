@@ -43,7 +43,7 @@ mod scope;
 pub mod scoped_references;
 mod source_schemas;
 mod sources;
-pub use sources::bind_source_plan_schema_in_scope;
+pub use sources::{bind_source_plan_schema_in_scope, bind_table_function_result_schema};
 pub mod statements;
 mod type_resolution;
 mod variable_sites;
@@ -55,7 +55,6 @@ pub use execution::{
     ControlledExecutionBlock, ExecutionBindingOptions, ExecutionQueryBlock,
     ExecutionSourceBindings, SharedExecutionSourceBindings,
 };
-pub use preparation::bind_expression_plan_routines_for_storage_owned;
 pub(crate) use preparation::bind_expression_plan_routines_for_storage_with_work;
 pub(crate) use preparation::bind_routine_parameter_references_from;
 pub use preparation::{
@@ -72,7 +71,11 @@ pub(crate) use preparation::{
 };
 pub(crate) use preparation::{
     analyze_domain_check, analyze_stored_expression_inputs, analyze_table_check,
-    assign_stored_input_collations, read_prepared_inputs, retain_prepared_input_metadata,
+    assign_stored_input_collations, inference_result_collation, read_prepared_inputs,
+    retain_prepared_input_metadata,
+};
+pub use preparation::{
+    bind_executable_expression, bind_expression_plan_routines_for_storage_owned, BoundExpression,
 };
 
 #[cfg(test)]

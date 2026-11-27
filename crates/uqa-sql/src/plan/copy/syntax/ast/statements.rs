@@ -49,7 +49,9 @@ syntax_struct!(crate::ast::CreateIndex {
     nulls_not_distinct,
     if_not_exists,
     options,
-    option_namespaces
+    option_namespaces,
+    key_collations,
+    attribute_names,
 });
 
 syntax_enum!(crate::ast::CursorDirection {
@@ -132,7 +134,9 @@ syntax_enum!(crate::ast::GeneratedColumnKind { Virtual, Stored });
 
 syntax_struct!(crate::ast::IndexColumnOrder {
     descending,
-    nulls_first
+    nulls_first,
+    collation_oid,
+    overrides_collation,
 });
 
 native_struct!(crate::ast::InsertStmt {
@@ -193,6 +197,7 @@ native_enum!(crate::ast::MergeWhen {
     NothingNotMatchedBySource { condition }
 });
 
+native_enum!(crate::ast::ConflictTargetConstraint { Unqualified, Named(value0), Collations(value0) });
 native_struct!(crate::ast::OnConflict {
     predicate,
     constraint,

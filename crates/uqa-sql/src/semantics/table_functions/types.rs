@@ -14,6 +14,8 @@ use super::{
 use crate::{RowSchema, ScalarExpr};
 use uqa_core::memory::{Produced, ProductionControl, ProductionVec};
 
+use crate::expr::composites::OwnedCompositeTypeDescriptor;
+
 type Types<'a> = ProductionVec<'a, Option<ColumnType>>;
 
 /// Type probes preserve their established unknown-type fallback; resource failures of a controlled producer remain failures.
@@ -65,6 +67,37 @@ pub fn table_function_column_types_with_control(
     resolver: &dyn FunctionTypeResolver,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Vec<Option<ColumnType>>>, SQLError> {
+    table_function_columns(
+        TableFunctionAnalysis {
+            routines,
+            types: resolver,
+        },
+        request,
+        input,
+        params,
+        control,
+    )
+    .map(|result| result.types)
+}
+
+pub(crate) struct FunctionColumns {
+    pub types: Produced<Vec<Option<ColumnType>>>,
+    pub tuple: Option<OwnedCompositeTypeDescriptor>,
+}
+
+/// Preserve the selected tuple descriptor together with its result types so a range entry can use its declared attribute collations.
+pub(crate) fn table_function_columns(
+    analysis: TableFunctionAnalysis<'_>,
+    request: TableFunctionTypeRequest<'_>,
+    input: &RowSchema,
+    params: &[SQLParam],
+    control: &ProductionControl<'_>,
+) -> Result<FunctionColumns, SQLError> {
+    let TableFunctionAnalysis {
+        routines,
+        types: resolver,
+    } = analysis;
+    let mut tuple = None;
     control.check()?;
     let width = request
         .columns
@@ -85,7 +118,9 @@ pub fn table_function_column_types_with_control(
         }
         output
     } else if let Some(function) = request.user_function {
-        user_function_types(routines, function, request.user_invocation, control)?
+        let result = user_function_types(routines, function, request.user_invocation, control)?;
+        tuple = result.1;
+        result.0
     } else {
         builtin_types(routines, request, input, params, resolver, control)?
     };
@@ -107,7 +142,10 @@ pub fn table_function_column_types_with_control(
             control,
         )?;
     }
-    Ok(output.finish()?)
+    Ok(FunctionColumns {
+        types: output.finish()?,
+        tuple,
+    })
 }
 
 fn builtin_types<'a>(
@@ -122,6 +160,14 @@ fn builtin_types<'a>(
         crate::semantics::builtin_function_dispatch_name_with_control(request.name, control)?;
     match name.as_str() {
         "generate_series" => series_types(routines, request, input, params, resolver, control),
+        "unnest" if super::is_tsvector_unnest(request.binding) => fixed(
+            &[
+                ColumnType::Text,
+                ColumnType::Array(Box::new(ColumnType::SmallInteger)),
+                ColumnType::Array(Box::new(ColumnType::Text)),
+            ],
+            control,
+        ),
         "unnest" => {
             let mut output = ProductionVec::new(*control);
             for argument in request.args {
@@ -224,10 +270,10 @@ pub(super) fn element_type(
         control,
     )?
     .flatten();
-    ty.as_deref()
-        .and_then(crate::type_resolution::array_element_type)
-        .map(|ty| ty.clone_with_control(control).map_err(Into::into))
-        .transpose()
+    match ty.as_deref() {
+        Some(ty) => crate::type_resolution::unnest_result_type(ty, Some(resolver), control),
+        None => Ok(None),
+    }
 }
 
 fn user_call_types<'a>(
@@ -273,7 +319,8 @@ fn user_call_types<'a>(
             &matched.function,
             Some(&matched.invocation),
             control,
-        ),
+        )
+        .map(|(types, _)| types),
         None => Ok(ProductionVec::new(*control)),
     }
 }
@@ -283,7 +330,7 @@ fn user_function_types<'a>(
     function: &SQLUserFunction,
     invocation: Option<&RoutineInvocationBinding>,
     control: &ProductionControl<'a>,
-) -> Result<Types<'a>, SQLError> {
+) -> Result<(Types<'a>, Option<OwnedCompositeTypeDescriptor>), SQLError> {
     let mut output = ProductionVec::new(*control);
     if let Some(descriptor) = probe(
         super::user_function_composite_result_with_control(routines, function, invocation, control),
@@ -298,7 +345,7 @@ fn user_function_types<'a>(
                 control,
             )?;
         }
-        return Ok(output);
+        return Ok((output, Some(descriptor)));
     }
     let outputs = function
         .def
@@ -318,7 +365,7 @@ fn user_function_types<'a>(
                 .unwrap_or(&parameter.type_name);
             push_type(&mut output, resolve_type(routines, name, control)?, control)?;
         }
-        return Ok(output);
+        return Ok((output, None));
     }
     if let FunctionReturns::Scalar { type_name } | FunctionReturns::SetOf { type_name } =
         &function.def.returns
@@ -328,7 +375,7 @@ fn user_function_types<'a>(
             .unwrap_or(type_name);
         push_type(&mut output, resolve_type(routines, name, control)?, control)?;
     }
-    Ok(output)
+    Ok((output, None))
 }
 
 fn resolve_type(

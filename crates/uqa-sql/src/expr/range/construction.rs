@@ -11,8 +11,6 @@ use super::{
 };
 use uqa_core::memory::{MemoryReservation, Produced, ProductionVec};
 
-mod ordering;
-
 /// A host constructor supplies already converted endpoints. An absent bound is unbounded; an empty range invokes neither endpoint input nor canonical support.
 pub enum RangeBoundsInput {
     Empty,
@@ -263,7 +261,11 @@ pub(super) fn normalize_ranges<O: RangeConstruction + ?Sized>(
     drop(input);
     let mut ordered = RangeWorkspace::from_produced(ordered.finish()?);
     ordered.memory = control.combine(collecting.memory, ordered.memory);
-    ordering::sort(&mut ordered.value, operations, control)?;
+    crate::postgres_sort::sort_by(&mut ordered.value, control, &|left, right| {
+        left.cmp_by_with_control(right, control, |left, right, control| {
+            operations.compare_bounds(left, right, control)
+        })
+    })?;
     let mut normalized = ProductionVec::new(*control);
     normalized.reserve(ordered.value.len())?;
     let normalized = RangeWorkspace::from_produced(normalized.finish()?);

@@ -112,7 +112,7 @@ pub fn run_case(engine: &Engine, sql: &str) -> serde_json::Value {
 }
 
 /// Compare the diagnostic fields the transcript recorded; transcripts captured without `--details` omit DETAIL and HINT.
-fn error_matches(actual: &serde_json::Value, expected: &serde_json::Value) -> bool {
+pub(crate) fn error_matches(actual: &serde_json::Value, expected: &serde_json::Value) -> bool {
     match (actual.as_object(), expected.as_object()) {
         (Some(actual), Some(expected)) => expected.iter().all(|(field, value)| {
             let actual = actual.get(field).unwrap_or(&serde_json::Value::Null);

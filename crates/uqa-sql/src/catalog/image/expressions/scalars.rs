@@ -188,7 +188,7 @@ impl<'a> DefinitionImageReader<'a> {
                 self.row_binding(binding)?;
             }
             ScalarExpr::Binary { op, lhs, rhs } => {
-                self.fields.scalar([super::nodes::binary_tag(*op)]);
+                self.binary_operator(*op);
                 self.scalar_push(Part::Node(rhs))?;
                 self.scalar_push(Part::Node(lhs))?;
             }

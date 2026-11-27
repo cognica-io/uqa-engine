@@ -17,6 +17,7 @@ use crate::{
 pub struct AnalyzedSchemaExpression {
     pub expression: Expr,
     pub ty: Option<ColumnType>,
+    pub collation: u32,
     pub scalar: ScalarExpr,
     pub schema: RowSchema,
 }
@@ -98,6 +99,7 @@ impl VariableResolver for RelationReferences<'_> {
 pub struct PlannedSchemaExpression {
     pub expression: Expr,
     pub ty: Option<ColumnType>,
+    pub collation: u32,
     pub immutable: bool,
     pub constant: bool,
 }
@@ -116,7 +118,7 @@ pub fn analyze_schema_expression(
     let mut expression = expression.clone();
     let original = ExpressionPlan::lower(expression.clone());
     let mut analyzed = original.clone();
-    let source = crate::binding::analyze_stored_expression_inputs(
+    let (ty, collation) = crate::binding::analyze_stored_expression_inputs(
         context.catalog,
         &mut analyzed,
         context.binding,
@@ -140,7 +142,8 @@ pub fn analyze_schema_expression(
     );
     Ok(AnalyzedSchemaExpression {
         expression,
-        ty: source,
+        ty,
+        collation,
         scalar,
         schema: schema.clone(),
     })

@@ -118,6 +118,45 @@ impl<'a> PlanCostEstimator<'a, 'static> {
 }
 
 impl PlanCostEstimator<'_, '_> {
+    /// Compare the work of a direct predicate with building and probing hash keys for the same inputs.
+    pub(crate) fn prefer_nested_loop(
+        &self,
+        kind: JoinKind,
+        left: &SourcePlan,
+        right: &SourcePlan,
+        control: &ProductionControl<'_>,
+    ) -> Result<bool, SQLError> {
+        control.check()?;
+        // PostgreSQL requires a hash or merge path for a FULL JOIN with join keys.
+        if kind == JoinKind::Full {
+            return Ok(false);
+        }
+        let estimator = PlanCostEstimator {
+            statistics: self.statistics,
+            costs: self.costs.clone(),
+            cardinality: CardinalityEstimator::new(),
+            control: *control,
+        };
+        let left = estimator
+            .source(left, None, None, None, None)?
+            .rows
+            .max(1.0);
+        let right = estimator
+            .source(right, None, None, None, None)?
+            .rows
+            .max(1.0);
+        let hash = if kind == JoinKind::Inner {
+            OperatorKind::HashJoinInner
+        } else {
+            OperatorKind::HashJoinOuter
+        };
+        Ok(estimator
+            .costs
+            .estimate_join(OperatorKind::NestedLoopJoin, left, right)
+            .total()
+            < estimator.costs.estimate_join(hash, left, right).total())
+    }
+
     fn unary(&self, kind: OperatorKind, rows: f64) -> f64 {
         self.costs.estimate_unary(kind, rows).total()
     }

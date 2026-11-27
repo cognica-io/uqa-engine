@@ -165,6 +165,8 @@ SELECT format_type(1043, 12) AS bounded_text,
 
 ## Text functions
 
+Text and bytea results use PostgreSQL’s 1 GB allocation limit (1,073,741,823 bytes including allocation overhead). Functions such as `repeat` reject oversized lengths before allocation. Functions that assemble their result incrementally, including `regexp_replace` and `string_agg`, report SQLSTATE `54000` on the append that would exceed the limit.
+
 | Group | Functions |
 | --- | --- |
 | Case and shape | `upper`, `lower`, `casefold`, `initcap`, `reverse` |
@@ -191,6 +193,8 @@ SELECT '한글문자' ^@ '한글' AS matched,
 `casefold(text)` uses the Unicode 16 full default case-fold mapping and returns `text`. It is strict, immutable, parallel-safe, not leakproof, and available through `pg_catalog`; unrelated types, named arguments, and every arity other than one report SQLSTATE `42883`. The regular-expression functions accept PostgreSQL 18 named argument notation; `regexp_replace` also implements its `start` and `N` overloads.
 
 `lower`, `upper`, `initcap` and `casefold` map case under the call's input collation as PostgreSQL 18 does. `C`, `POSIX` and `ucs_basic` change ASCII letters only. `pg_c_utf8` uses Unicode's simple mappings, so `upper(chr(223) COLLATE "pg_c_utf8")` keeps the sharp s. `pg_unicode_fast` and the database default use Unicode's full mappings, special casing and PostgreSQL's final-sigma rule, so `upper(chr(223))` returns `SS`, and ICU collations such as `unicode` use ICU's root mappings and final-sigma rule. `initcap` starts a word after every character that is not a letter or digit, and under an ICU collation at ICU's word boundaries instead, so `initcap('foo_bar' COLLATE "unicode")` returns `Foo_bar` while the other collations return `Foo_Bar`. An explicit `COLLATE` clause or the collation of a column or domain selects the collation. Operands whose implicit collations conflict leave it indeterminate, which reports `42P22` with the hint `Use the COLLATE clause to set the collation explicitly.` when a non-NULL value needs it, and conflicting explicit collations report `42P21`. Calls in stored definitions keep the collation selected when the definition was created.
+
+An `ALTER COLUMN ... TYPE ... USING` expression reads each source column with its original collation. Partition bounds and arguments to `CALL` and `EXECUTE` also retain the collation selected for their expressions. Collatable results from a function in `FROM`, a merged `JOIN ... USING` column or a scalar subquery carry their derived collation into the outer query. When a text comparison, substring search or hash join reaches an indeterminate collation, the operation reports `42P22`. Use an explicit `COLLATE` on an operand to select the collation.
 
 `reverse(text)` reverses Unicode scalar values and `reverse(bytea)` reverses raw bytes. An unknown literal, NULL, or untyped parameter selects the preferred `text` overload; `varchar`, `character`, `name`, and internal `"char"` inputs are implicitly converted to `text`, while unrelated types and every call other than one positional argument report PostgreSQL's undefined-function SQLSTATE `42883`. Both overloads are strict, immutable, parallel-safe, and available through `pg_catalog`; unqualified user overloads participate in PostgreSQL search-path, exact-match, and preferred-type resolution before a stable function binding is stored in generated expressions.
 
@@ -616,7 +620,9 @@ The window functions are `row_number`, `rank`, `dense_rank`, `percent_rank`, `cu
 | Function | Implemented shape |
 | --- | --- |
 | `generate_series(start, stop [, step])` | Integer series with two or three arguments |
-| `unnest(array)` | One row per array value |
+| `unnest(array)` | One row per array element, in storage order |
+| `unnest(multirange)` | One row per range, in ascending order |
+| `unnest(tsvector)` | One row per lexeme, with its positions and weights |
 | `regexp_matches(string, pattern [, flags])` | One `text[]` row per match |
 | `regexp_split_to_table(string, pattern [, flags])` | One row per split value |
 | `string_to_table(text, delimiter)` | One row per split value |
@@ -641,6 +647,8 @@ Table functions accept a relation alias, positional output-column aliases, and a
 Each `ROWS FROM` member resolves as an ordinary table-function call against its own arguments and the active `search_path`. The group concatenates member columns in declaration order, emits as many rows as its longest member, and fills columns from exhausted members with SQL NULL. `WITH ORDINALITY` appends one group-wide, one-based `bigint` column after all member columns and resets for each correlated LATERAL invocation.
 
 The group construct does not itself mutate database or session state; each member retains the state and volatility behavior of that function. Range-function groups are implicitly lateral where PostgreSQL permits an earlier `FROM` item to supply an argument, and a `LEFT JOIN LATERAL` null-extends an empty group.
+
+Unary `unnest` participates in ordinary overload resolution. For example, a SQL function named `unnest(text)` accepts a text argument, while `unnest(ARRAY[1,2])` still expands the array. Use an explicit cast for an untyped string when more than one declaration matches.
 
 PostgreSQL gives unqualified multi-argument `unnest(array1, array2, ...)` special syntax only in a `FROM` range-function position, including as a member of `ROWS FROM`: it expands to independent unary `pg_catalog.unnest` members, zips them to the longest array, and NULL-pads shorter arrays, so a visible user-defined two-argument `unnest` cannot intercept that syntax. A single unqualified `unnest(array)` remains an ordinary overload-resolved call, a schema-qualified `schema.unnest(array1, array2)` remains one ordinary function call, and `pg_catalog.unnest(array1, array2)` reports undefined function (`42883`) because the catalog has no such ordinary signature. Outside a `FROM` range-function position, a multi-argument `unnest` is also an ordinary function call rather than this syntax transform.
 

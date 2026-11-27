@@ -15,7 +15,7 @@ python3 tests/parity/kuromoji/export_model.py --output target/kuromoji-reference
 python3 -m unittest scripts.tests.test_kuromoji_reference scripts.tests.test_nori_model_export scripts.tests.test_nori_csv_regeneration
 ```
 
-The default cache is `uqa-lucene-reference-jars` below Python's temporary directory. `--cache-dir PATH` selects another verified cache, `--offline` requires cached inputs and image, and `--platform linux/amd64` selects the CI architecture instead of the default `linux/arm64`. The checked manifests were generated and verified on arm64; required pre-merge CI independently regenerates and verifies on amd64. CI retains only compact manifests.
+The default cache is `uqa-lucene-reference-jars` below Python's temporary directory. `--cache-dir PATH` selects another verified cache, `--offline` requires cached inputs and image, and `--platform linux/amd64` selects the CI architecture instead of the default `linux/arm64`. The checked manifests were generated and verified on arm64; CI on `main` independently regenerates and verifies on amd64. CI retains only compact manifests.
 
 Generation and export require new output directories. Every input, file inventory, runtime and hash must match before an output directory is published. Model verification checks hashes first and then mounts the existing export read-only for comparison of every field with Lucene. Corruption, trailing bytes and unexpected files fail verification. Only an intentional reviewed reference change uses `--write-manifest`; it cannot be combined with `--verify-only`, and dictionary generation still must match every resource in the pinned jar.
 

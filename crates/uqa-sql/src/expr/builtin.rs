@@ -357,6 +357,7 @@ pub fn eval_bound_builtin_function_call(
         &evaluated,
         &uqa_core::memory::ProductionControl::uncontrolled(),
         ctx,
+        binding.input_collation,
     ) {
         return result.map(|value| {
             value

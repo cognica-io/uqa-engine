@@ -23,6 +23,10 @@ pub(super) trait KeyOutput {
         false
     }
 
+    fn hash_text(&self) -> ExecResult<()> {
+        Ok(())
+    }
+
     fn uses_declared_field_types(&self) -> bool {
         self.invokes_sql_hash_operator()
     }
@@ -50,6 +54,30 @@ pub(super) trait KeyOutput {
             control.check().map_err(resource_error)?;
         }
         Ok(())
+    }
+}
+
+/// Hashes arrays through their reached elements and physical datums through their decoded values.
+pub(super) struct IndeterminateHash<'a, O>(pub &'a mut O);
+
+impl<O: KeyOutput> KeyOutput for IndeterminateHash<'_, O> {
+    fn push_byte(&mut self, value: u8) -> ExecResult<()> {
+        self.0.push_byte(value)
+    }
+    fn extend_bytes(&mut self, values: &[u8]) -> ExecResult<()> {
+        self.0.extend_bytes(values)
+    }
+    fn enum_catalog(&self) -> Option<&dyn uqa_sql::expr::SQLValueCatalog> {
+        self.0.enum_catalog()
+    }
+    fn control(&self) -> Option<&StorageReadControl> {
+        self.0.control()
+    }
+    fn invokes_sql_hash_operator(&self) -> bool {
+        true
+    }
+    fn hash_text(&self) -> ExecResult<()> {
+        Err(uqa_sql::catalog::collations::indeterminate_error("string hashing").into())
     }
 }
 

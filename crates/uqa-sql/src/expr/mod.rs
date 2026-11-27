@@ -33,6 +33,7 @@ pub(crate) mod integer_input;
 mod json;
 mod json_strip;
 pub(crate) mod observations;
+pub mod text_size;
 pub use observations::sql_null_test_with_control;
 mod random;
 mod range;
@@ -124,9 +125,10 @@ pub use binary::{
     eval_comparison_truth, eval_comparison_truth_with_control,
     eval_comparison_truth_with_deferred_state, eval_comparison_truth_with_engine,
     eval_comparison_truth_with_enum_catalog, eval_record_comparison_truth_with_engine,
-    eval_value_comparison_truth_with_engine, integer_width_for_literal, integer_width_for_type,
-    truthy, type_comparison_can_fail, validate_legacy_vector_comparison, value_comparison_can_fail,
-    value_comparison_can_fail_from, values_equal_nullable_with_control, values_equal_with_control,
+    eval_row_comparison_with_control, eval_value_comparison_truth_with_engine,
+    integer_width_for_literal, integer_width_for_type, truthy, type_comparison_can_fail,
+    validate_legacy_vector_comparison, value_comparison_can_fail, value_comparison_can_fail_from,
+    values_equal_nullable_with_control, values_equal_with_control,
     visit_record_image_fields_with_catalog, with_btree_input, BTreeInput, IntegerWidth,
 };
 pub(crate) use binary::{datetime_out_of_range, division_by_zero, out_of_range};
@@ -136,10 +138,7 @@ pub use casting::{
     invalid_boolean_input, negate_value, negate_value_with_control, parse_boolean_input,
     parse_pg_array_literal, parse_pg_array_literal_with_control,
 };
-use conversion::{
-    allocation_error, float_to_i64_rounded, float_to_i64_trunc, nonnegative_usize, to_decimal,
-    to_i64,
-};
+use conversion::{allocation_error, float_to_i64_rounded, float_to_i64_trunc, to_decimal, to_i64};
 pub use conversion::{
     array_value_to_string, catalog_output_required, invalid_numeric_input, value_to_string,
     value_to_string_with_control, vector_value_to_string,

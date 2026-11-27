@@ -9,13 +9,14 @@
 use crate::scalar::plan::PhysicalEvalContext;
 use uqa_sql::{
     assignment::AssignmentContext, plan::ExpressionPlan,
-    prepared::arguments::ArgumentValidationContext, ColumnType, SQLError, SQLParam,
+    prepared::arguments::ArgumentValidationContext, SQLError, SQLParam,
 };
 
 pub struct ArgumentBindingContext<'a> {
     pub validation: ArgumentValidationContext<'a>,
     pub assignment: &'a dyn AssignmentContext,
-    pub analyze_type: &'a mut dyn FnMut(&ExpressionPlan) -> Result<Option<ColumnType>, SQLError>,
+    pub bind_expression:
+        &'a mut dyn FnMut(&ExpressionPlan) -> Result<uqa_sql::binding::BoundExpression, SQLError>,
     pub evaluation: PhysicalEvalContext<'a>,
 }
 

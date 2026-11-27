@@ -207,34 +207,33 @@ fn complete(input: &mut Input) -> (Output, usize) {
     panic!("field construction stopped progressing")
 }
 
-fn fixture(sql: &str) -> (Source, Field, Vec<i64>) {
-    let statement = crate::compile(sql).unwrap().remove(0);
-    let UnifiedPlan::Command(expected) = UnifiedPlan::lower(statement.clone()) else {
-        panic!("mutation fixture");
-    };
-    let (source, value, queries) = match (statement, *expected) {
-        (Statement::Update(source), CommandPlan::Update(value)) => (
-            Source::Assignments(source.assignments),
-            Field::Assignments(value.assignments),
-            value.subqueries,
-        ),
-        (Statement::Insert(source), CommandPlan::Insert(value)) if source.on_conflict.is_some() => {
-            (
-                Source::Conflict(source.on_conflict.unwrap()),
-                Field::Conflict(value.on_conflict.unwrap()),
-                value.subqueries,
-            )
+fn parse_statement(sql: &str) -> Statement {
+    crate::compile(sql).unwrap().remove(0)
+}
+
+fn source_field(statement: Statement) -> Source {
+    match statement {
+        Statement::Update(update) => Source::Assignments(update.assignments),
+        Statement::Insert(insert) => match insert.on_conflict {
+            Some(conflict) => Source::Conflict(conflict),
+            None => Source::Targets(insert.columns),
+        },
+        Statement::Merge(merge) => Source::Merge(merge.when_clauses),
+        _ => panic!("mutation fixture shape"),
+    }
+}
+
+fn expected_field(plan: CommandPlan) -> (Field, Vec<i64>) {
+    let (field, queries) = match plan {
+        CommandPlan::Update(update) => (Field::Assignments(update.assignments), update.subqueries),
+        CommandPlan::Insert(insert) => {
+            let field = match insert.on_conflict {
+                Some(conflict) => Field::Conflict(conflict),
+                None => Field::Targets(insert.columns),
+            };
+            (field, insert.subqueries)
         }
-        (Statement::Insert(source), CommandPlan::Insert(value)) => (
-            Source::Targets(source.columns),
-            Field::Targets(value.columns),
-            value.subqueries,
-        ),
-        (Statement::Merge(source), CommandPlan::Merge(value)) => (
-            Source::Merge(source.when_clauses),
-            Field::Merge(value.when_clauses),
-            value.subqueries,
-        ),
+        CommandPlan::Merge(merge) => (Field::Merge(merge.when_clauses), merge.subqueries),
         _ => panic!("mutation fixture shape"),
     };
     let queries = queries
@@ -249,5 +248,5 @@ fn fixture(sql: &str) -> (Source, Field, Vec<i64>) {
             value
         })
         .collect();
-    (source, value, queries)
+    (field, queries)
 }

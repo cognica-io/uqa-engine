@@ -27,12 +27,23 @@ declarations! { pub(super) fn lookup(name);
             Signature::new(const { &[T::Text, T::Text] }, T::Text),
         ],
         "current_schema" => &[Signature::new(&[], T::Name)],
+        "unnest" => &[
+            Signature::new(const { &[T::AnyArray] }, T::Pseudo(crate::ast::ExpressionPseudoType::AnyElement)),
+            Signature::new(const { &[T::Pseudo(crate::ast::ExpressionPseudoType::AnyMultiRange)] }, T::Pseudo(crate::ast::ExpressionPseudoType::AnyRange)),
+            Signature::named(const { &[T::TsVector] }, &["tsvector"], T::Record),
+        ],
         "array_dims" => &[Signature::new(const { &[T::AnyArray] }, T::Text)],
         "array_ndims" | "cardinality" => &[Signature::new(const { &[T::AnyArray] }, T::Integer)],
         "array_lower" | "array_upper" | "array_length" => &[
             Signature::new(const { &[T::AnyArray, T::Integer] }, T::Integer),
         ],
         "lower" | "upper" | "initcap" => &[Signature::new(const { &[T::Text] }, T::Text)],
+        "strpos" => &[Signature::new(const { &[T::Text, T::Text] }, T::Integer)],
+        "position" => &[
+            Signature::new(const { &[T::Text, T::Text] }, T::Integer),
+            Signature::new(const { &[T::Bytea, T::Bytea] }, T::Integer),
+            Signature::new(const { &[T::Bit(None), T::Bit(None)] }, T::Integer),
+        ],
         "replace" => &[Signature::new(const { &[T::Text, T::Text, T::Text] }, T::Text)],
         "factorial" => &[Signature::new(const { &[T::BigInteger] }, numeric_type())],
         "mod" => &[

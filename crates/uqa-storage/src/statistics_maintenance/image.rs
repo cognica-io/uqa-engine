@@ -20,7 +20,8 @@ use uqa_core::{
 mod tests;
 
 const MAGIC: [u8; 8] = *b"UQASMT01";
-const LENGTH: usize = 88;
+const LEGACY_LENGTH: usize = 88;
+const LENGTH: usize = LEGACY_LENGTH + 8;
 
 fn put<const N: usize>(bytes: &mut [u8; LENGTH], offset: &mut usize, value: [u8; N]) {
     bytes[*offset..*offset + N].copy_from_slice(&value);
@@ -53,6 +54,7 @@ enum State {
 /// Fixed inline output requires no payload allocation. Failure permanently retires the cursor; output must remain private until the enclosing image is complete.
 pub struct StatisticsMaintenanceImageReader<'a> {
     bytes: [u8; LENGTH],
+    length: usize,
     offset: usize,
     cancellation: &'a CancellationToken,
     state: State,
@@ -68,7 +70,12 @@ impl StatisticsMaintenance {
         let mut bytes = [0; LENGTH];
         let mut offset = 0;
         put(&mut bytes, &mut offset, MAGIC);
-        put(&mut bytes, &mut offset, 1u64.to_le_bytes());
+        let version = if self.relation_rows.is_some() {
+            2u64
+        } else {
+            1
+        };
+        put(&mut bytes, &mut offset, version.to_le_bytes());
         optional(&mut bytes, &mut offset, self.object_id);
         put(&mut bytes, &mut offset, self.generation.to_le_bytes());
         put(&mut bytes, &mut offset, self.changes.to_le_bytes());
@@ -93,9 +100,13 @@ impl StatisticsMaintenance {
             &mut offset,
             self.analysis_generation.map(u64::to_le_bytes),
         );
-        debug_assert_eq!(offset, LENGTH);
+        debug_assert_eq!(offset, LEGACY_LENGTH);
+        if let Some(rows) = self.relation_rows {
+            put(&mut bytes, &mut offset, rows.to_le_bytes());
+        }
         Ok(StatisticsMaintenanceImageReader {
             bytes,
+            length: offset,
             offset: 0,
             cancellation,
             state: State::Active,
@@ -124,7 +135,11 @@ impl StatisticsMaintenance {
     }
 
     async fn read_image_from(mut input: AsyncImageInput<'_>) -> ImageIoResult<Self> {
-        if input.array::<8>().await? != MAGIC || u64::from_le_bytes(input.array().await?) != 1 {
+        if input.array::<8>().await? != MAGIC {
+            return Err(ImageIoError::Invalid);
+        }
+        let version = u64::from_le_bytes(input.array().await?);
+        if !(1..=2).contains(&version) {
             return Err(ImageIoError::Invalid);
         }
         let value = Self {
@@ -136,6 +151,11 @@ impl StatisticsMaintenance {
             statistics_format: u32::from_le_bytes(input.array().await?),
             analyzed_at: read_optional(&mut input).await?.map(u64::from_le_bytes),
             analysis_generation: read_optional(&mut input).await?.map(u64::from_le_bytes),
+            relation_rows: if version == 2 {
+                Some(u64::from_le_bytes(input.array().await?))
+            } else {
+                None
+            },
         };
         input.end().await?;
         Ok(value)
@@ -153,10 +173,10 @@ impl StatisticsMaintenanceImageReader<'_> {
             State::Active => {}
         }
         self.cancellation.check()?;
-        let count = output.len().min(LENGTH - self.offset);
+        let count = output.len().min(self.length - self.offset);
         output[..count].copy_from_slice(&self.bytes[self.offset..self.offset + count]);
         self.offset += count;
-        self.state = if self.offset == LENGTH {
+        self.state = if self.offset == self.length {
             State::Complete
         } else {
             State::Active
@@ -176,8 +196,8 @@ impl StatisticsMaintenanceImageReader<'_> {
             cancellation: self.cancellation,
             written: 0,
         };
-        output.bytes(&self.bytes[self.offset..])?;
-        self.offset = LENGTH;
+        output.bytes(&self.bytes[self.offset..self.length])?;
+        self.offset = self.length;
         self.state = State::Complete;
         Ok(output.written)
     }

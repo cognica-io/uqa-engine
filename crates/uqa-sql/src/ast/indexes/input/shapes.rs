@@ -296,7 +296,7 @@ const MERGE_WHEN: Shape = Shape::Enum(&[
     ("NothingNotMatchedBySource", MERGE_CONDITION),
 ]);
 object!(CONFLICT {
-    "predicate": d(optional!(EXPR)), "constraint": d(optional!(TEXT)),
+    "predicate": d(optional!(EXPR)), "constraint": d(Shape::Choice(&optional!(TEXT), &array!(optional!(TEXT)))) ,
     "conflict_columns": r(array!(TEXT)), "expressions": d(array!(EXPR)), "action": r(node!(ConflictAction)),
 });
 object!(CONFLICT_UPDATE { "assignments": r(ASSIGNMENTS), "where": o(optional!(EXPR)) });

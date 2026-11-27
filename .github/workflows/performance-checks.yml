@@ -1,26 +1,6 @@
 name: Performance regression checks
 
 on:
-  pull_request:
-    branches: [main]
-    types: [ready_for_review]
-    paths:
-      - ".github/actions/select-validation-inputs/**"
-      - "crates/**"
-      - Cargo.toml
-      - Cargo.lock
-      - rust-toolchain.toml
-      - .config/nextest.toml
-      - .github/actions/setup-nextest/**
-      - .github/workflows/performance-checks.yml
-      - .github/workflows/performance-platform.yml
-      - .github/workflows/workspace-tests.yml
-      - benchmarks/regressions/**
-      - scripts/run-performance-checks.py
-      - scripts/tests/test_performance_checks.py
-      - scripts/performance_change_scope.py
-      - scripts/tests/test_performance_change_scope.py
-      - "!benchmarks/regressions/**/*.md"
   push:
     branches: [main]
     paths:
@@ -56,13 +36,12 @@ jobs:
         uses: ./.github/actions/select-validation-inputs
         with:
           kind: regression
-          base: ${{ github.event.pull_request.base.sha || github.event.before }}
-          before: ${{ github.event.action == 'synchronize' && github.event.before || '' }}
+          base: ${{ github.event.before }}
   platform:
     needs: scope
     if: needs.scope.outputs.required == 'true'
     name: Regression checks (ubuntu-24.04)
     concurrency:
-      group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}-ubuntu-24.04
+      group: ${{ github.workflow }}-${{ github.ref }}-ubuntu-24.04
       cancel-in-progress: true
     uses: ./.github/workflows/performance-platform.yml

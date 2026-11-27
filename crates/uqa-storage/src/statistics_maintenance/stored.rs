@@ -18,7 +18,7 @@ use uqa_core::{
     memory::{Budgeted, ProductionControl},
 };
 
-const FIELDS: [&str; 8] = [
+const FIELDS: [&str; 9] = [
     "object_id",
     "generation",
     "changes",
@@ -27,6 +27,7 @@ const FIELDS: [&str; 8] = [
     "statistics_format",
     "analyzed_at",
     "analysis_generation",
+    "relation_rows",
 ];
 
 impl StatisticsMaintenance {
@@ -124,6 +125,7 @@ async fn read(
             }
             6 => state.analyzed_at = optional_number(value)?,
             7 => state.analysis_generation = optional_number(value)?,
+            8 => state.relation_rows = optional_number(value)?,
             _ => unreachable!(),
         }
     }

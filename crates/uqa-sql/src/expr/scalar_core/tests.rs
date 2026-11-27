@@ -162,11 +162,7 @@ fn controlled_text_functions_keep_character_byte_and_boundary_semantics() {
         ("ltrim", vec![text("  x  ")], text("x  ")),
         ("rtrim", vec![text("  x  ")], text("  x")),
         ("trim", vec![text("\t \n")], text("")),
-        (
-            "replace",
-            vec![text("éa"), text(""), text("-")],
-            text("-é-a-"),
-        ),
+        ("replace", vec![text("éa"), text(""), text("-")], text("éa")),
         (
             "replace",
             vec![text("aaaaa"), text("aa"), text("x")],

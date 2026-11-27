@@ -134,6 +134,18 @@ pub(in crate::type_resolution) fn resolve_overload_with_control(
                     )?;
                 }
             }
+            if selected.binding.builtin && matches!(&selected.return_type, ColumnType::Pseudo(_)) {
+                let return_type = super::selected_return_type(
+                    &selected.return_type,
+                    argument_types,
+                    Some(resolver),
+                    control,
+                )?;
+                let (mut selection, memory) = selected.into_parts();
+                let (ty, type_memory) = return_type.into_parts();
+                selection.return_type = ty;
+                return Ok(control.finish(selection, control.combine(memory, type_memory))?);
+            }
             return Ok(selected);
         }
     }
@@ -143,6 +155,7 @@ pub(in crate::type_resolution) fn resolve_overload_with_control(
         argument_names,
         argument_types,
         explicit_variadic,
+        resolver,
         control,
     )
 }

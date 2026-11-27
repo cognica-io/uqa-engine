@@ -40,6 +40,7 @@ pub struct AggregateAccumulator {
     pub(super) state_plan: AggregateStatePlan,
     pub(super) values: AggregateValueBuffer,
     /// Shape of the first `array_agg(anyarray)` input observed in transition order.
+    pub(super) string_size: super::string_agg::Transition,
     pub(super) array_inputs: super::array_inputs::ArrayInputShape,
     /// Boolean folds for `BOOL_AND` / `BOOL_OR`. Stay `None` until the
     /// first observation so an empty input set returns `NULL` (matches
@@ -111,7 +112,9 @@ pub enum AggregateStatePlan {
     Max,
     BoolAnd,
     BoolOr,
-    /// Retains non-NULL inputs: `string_agg`, the ordered-set aggregates and the JSON object aggregates, whose pairs are never NULL.
+    /// Counts `StringInfo` appends before retaining unordered inputs. Ordered inputs reach the same transition after sorting.
+    StringAgg,
+    /// Retains non-NULL inputs: the ordered-set aggregates and the JSON object aggregates, whose pairs are never NULL.
     Buffered,
     /// Retains every input including NULL, as `array_agg` over non-array input, `json_agg` and `jsonb_agg` do.
     BufferedWithNulls,
@@ -154,8 +157,9 @@ impl AggregateStatePlan {
                 Self::Statistics
             }
             "array_agg" | "json_agg" | "jsonb_agg" => Self::BufferedWithNulls,
-            "string_agg" | "json_object_agg" | "jsonb_object_agg" | "percentile_cont"
-            | "percentile_disc" | "mode" => Self::Buffered,
+            "string_agg" => Self::StringAgg,
+            "json_object_agg" | "jsonb_object_agg" | "percentile_cont" | "percentile_disc"
+            | "mode" => Self::Buffered,
             _ => Self::Generic,
         }
     }
@@ -163,7 +167,11 @@ impl AggregateStatePlan {
     pub(super) fn retains_values(self) -> bool {
         matches!(
             self,
-            Self::Generic | Self::Buffered | Self::BufferedWithNulls | Self::BufferedArrays
+            Self::Generic
+                | Self::StringAgg
+                | Self::Buffered
+                | Self::BufferedWithNulls
+                | Self::BufferedArrays
         )
     }
 }
@@ -189,6 +197,7 @@ impl Default for AggregateAccumulator {
             state_plan: AggregateStatePlan::Generic,
             values: AggregateValueBuffer::default(),
             array_inputs: super::array_inputs::ArrayInputShape::default(),
+            string_size: super::string_agg::Transition::default(),
             bool_and: None,
             bool_or: None,
             statistics_count: 0,
@@ -226,6 +235,7 @@ impl AggregateAccumulator {
             state_plan: AggregateStatePlan::Generic,
             values: AggregateValueBuffer::new(component_budget),
             array_inputs: super::array_inputs::ArrayInputShape::default(),
+            string_size: super::string_agg::Transition::default(),
             bool_and: None,
             bool_or: None,
             statistics_count: 0,
@@ -430,6 +440,7 @@ impl AggregateAccumulator {
             AggregateStatePlan::Max => self.observe_max(value, enums)?,
             AggregateStatePlan::BoolAnd => self.observe_bool_and(value)?,
             AggregateStatePlan::BoolOr => self.observe_bool_or(value)?,
+            AggregateStatePlan::StringAgg => self.string_size.accept(value, enums, |_| {})?,
             AggregateStatePlan::Buffered
             | AggregateStatePlan::BufferedWithNulls
             | AggregateStatePlan::BufferedArrays => {}
@@ -733,7 +744,7 @@ impl AggregateAccumulator {
         Ok(())
     }
 
-    /// Ordered inputs reach the transition only after sorting, so array inputs are checked when the aggregate finishes.
+    /// Ordered array and string inputs reach their transition functions in sorted order.
     pub(super) fn observe_with_sort_keys(
         &mut self,
         value: &Value,
@@ -746,7 +757,9 @@ impl AggregateAccumulator {
                 _ => self.observe_null(keys, enums),
             };
         }
-        if self.state_plan.retains_values() {
+        if self.state_plan.retains_values()
+            && !matches!(self.state_plan, AggregateStatePlan::StringAgg)
+        {
             self.observe_state(value, enums)?;
         }
         self.values.push(value.clone(), keys, enums)?;

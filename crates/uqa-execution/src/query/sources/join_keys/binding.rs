@@ -29,13 +29,19 @@ pub(super) struct KeyBinding<'a> {
 pub(super) struct PairSelection {
     pub keys: Option<[Produced<ScalarExpr>; 2]>,
     pub merge_supported: bool,
+    pub indeterminate: bool,
 }
 
 impl KeyBinding<'_> {
-    pub fn select(&self, lhs: &ScalarExpr, rhs: &ScalarExpr) -> Result<PairSelection, SQLError> {
+    pub fn select(
+        &self,
+        op: BinaryOp,
+        lhs: &ScalarExpr,
+        rhs: &ScalarExpr,
+    ) -> Result<PairSelection, SQLError> {
         let control = &self.control;
         let bound = OwnedScalarExpr::binary(
-            BinaryOp::Equal,
+            op,
             lhs.copy_for_rewrite(control)?,
             rhs.copy_for_rewrite(control)?,
             control,
@@ -54,12 +60,19 @@ impl KeyBinding<'_> {
         )? {
             return Ok(PairSelection {
                 keys: None,
+                indeterminate: false,
                 merge_supported: false,
             });
         }
-        let ScalarExpr::Binary { lhs, rhs, .. } = &*bound else {
+        let ScalarExpr::Binary {
+            op: bound_op,
+            lhs,
+            rhs,
+        } = &*bound
+        else {
             unreachable!("binding preserves a comparison operator")
         };
+        let indeterminate = [op, *bound_op].into_iter().any(|op| matches!(op, BinaryOp::Compare { collation, .. } if collation == uqa_sql::catalog::collations::CollationSelection::INDETERMINATE));
         let constant = uqa_sql::type_resolution::comparison_key_is_constant(lhs)
             && uqa_sql::type_resolution::comparison_key_is_constant(rhs);
         let Some((left_key, right_key)) =
@@ -68,6 +81,7 @@ impl KeyBinding<'_> {
             // Constants remain predicates; they cannot make a non-joinable record clause into a hash join.
             return Ok(PairSelection {
                 keys: None,
+                indeterminate: false,
                 merge_supported: constant,
             });
         };
@@ -101,6 +115,7 @@ impl KeyBinding<'_> {
                 .then(|| Ok::<_, SQLError>([left_key.finish(control)?, right_key.finish(control)?]))
                 .transpose()?,
             merge_supported: support.ordering,
+            indeterminate,
         })
     }
 }

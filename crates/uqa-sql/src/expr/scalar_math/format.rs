@@ -6,10 +6,11 @@
 
 //! `format(formatstr, VARIADIC "any")` with `PostgreSQL` 18 conversion specifiers: `%[position$][-][width]type`, where the width may be `*` or `*position$` and the type is `s`, `I` or `L`.
 
-use uqa_core::memory::ProductionControl;
+use crate::expr::text_size::TextBuffer;
+use uqa_core::memory::{Produced, ProductionControl};
 
 use super::{Result, SQLError, Value};
-use crate::expr::scalar_helpers::{quote_ident_with_control, quote_literal_with_control};
+use crate::expr::scalar_helpers::{quote_literal_with_control, quote_sql_identifier};
 
 fn invalid_parameter(message: &str) -> SQLError {
     SQLError::Routine {
@@ -54,17 +55,20 @@ struct Specifier {
 
 /// Parse after `%`; `characters[index]` is the first character of the specifier.
 struct Parser<'a> {
-    characters: &'a [char],
+    characters: &'a str,
     index: usize,
 }
 
 impl Parser<'_> {
     fn current(&self) -> char {
-        self.characters[self.index]
+        self.characters[self.index..]
+            .chars()
+            .next()
+            .expect("current format character")
     }
 
     fn advance(&mut self) -> Result<()> {
-        self.index += 1;
+        self.index += self.current().len_utf8();
         if self.index >= self.characters.len() {
             return Err(specifier_error(
                 "unterminated format() type specifier".into(),
@@ -142,34 +146,43 @@ impl Parser<'_> {
 }
 
 /// The value's output-function text; `bool` prints `t` and `f`.
-fn output_text(value: &Value) -> Result<String> {
-    Ok(match value {
-        Value::Bool(true) => "t".into(),
-        Value::Bool(false) => "f".into(),
-        other => crate::expr::value_to_string(other)?,
-    })
+fn output_text<'a>(
+    value: &'a Value,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<std::borrow::Cow<'a, str>>> {
+    if let Value::Bool(value) = value {
+        return Ok(control.finish(
+            std::borrow::Cow::Borrowed(if *value { "t" } else { "f" }),
+            control.empty_reservation(),
+        )?);
+    }
+    crate::expr::conversion::argument_text(value, control)
 }
 
 /// A width argument: `int2` and `int4` values directly, NULL as zero, and any other type through its text as an `int4` input.
-fn width_value(value: &Value) -> Result<i32> {
+fn width_value(value: &Value, control: &ProductionControl<'_>) -> Result<i32> {
     match value {
         Value::Null => Ok(0),
         Value::Int(width) => i32::try_from(*width).map_err(|_| SQLError::Routine {
             sqlstate: "22003".into(),
             message: format!("value \"{width}\" is out of range for type integer"),
         }),
-        other => match crate::expr::cast_value(&Value::Str(output_text(other)?), "integer")? {
-            Value::Int(width) => i32::try_from(width).map_err(|_| out_of_range()),
-            other => Err(SQLError::Internal(format!(
-                "integer input produced {other:?}"
-            ))),
-        },
+        other => {
+            let text = output_text(other, control)?;
+            let width = crate::expr::casting::integer_from_text(&text, "integer")?;
+            i32::try_from(width).map_err(|_| out_of_range())
+        }
     }
 }
 
-fn append_padded(output: &mut String, text: &str, left_align: bool, width: i32) -> Result<()> {
+fn append_padded(
+    output: &mut TextBuffer<'_>,
+    text: &str,
+    left_align: bool,
+    width: i32,
+) -> Result<()> {
     if width == 0 {
-        output.push_str(text);
+        output.push_str(text)?;
         return Ok(());
     }
     let (left_align, width) = if width < 0 {
@@ -180,43 +193,46 @@ fn append_padded(output: &mut String, text: &str, left_align: bool, width: i32) 
     let width = usize::try_from(width).map_err(|_| out_of_range())?;
     let padding = width.saturating_sub(text.chars().count());
     if left_align {
-        output.push_str(text);
-        output.extend(std::iter::repeat_n(' ', padding));
+        output.push_str(text)?;
+        output.spaces(padding)?;
     } else {
-        output.extend(std::iter::repeat_n(' ', padding));
-        output.push_str(text);
+        output.spaces(padding)?;
+        output.push_str(text)?;
     }
     Ok(())
 }
 
 /// Evaluate `format`. `arguments[0]` is the format string; a NULL format string yields NULL.
-pub(super) fn format(arguments: &[Value]) -> Result<Value> {
+pub(super) fn format(
+    arguments: &[Value],
+    control: &ProductionControl<'_>,
+) -> Result<Produced<Value>> {
     let Some(format) = arguments.first() else {
         return Err(SQLError::TypeMismatch(
             "format needs a format string".into(),
         ));
     };
     if matches!(format, Value::Null) {
-        return Ok(Value::Null);
+        return Ok(control.finish(Value::Null, control.empty_reservation())?);
     }
-    let control = ProductionControl::uncontrolled();
-    let characters = output_text(format)?.chars().collect::<Vec<_>>();
-    let mut output = String::with_capacity(characters.len());
+    let characters = output_text(format, control)?;
+    let mut output = TextBuffer::new(control);
     let mut next = 1_usize;
     let mut parser = Parser {
         characters: &characters,
         index: 0,
     };
     while parser.index < characters.len() {
+        control.check()?;
         let character = parser.current();
         if character != '%' {
-            output.push(character);
-            parser.index += 1;
+            output.push(character)?;
+            parser.index += character.len_utf8();
             continue;
         }
         parser.advance()?;
         if parser.current() == '%' {
-            output.push('%');
+            output.push('%')?;
             parser.index += 1;
             continue;
         }
@@ -235,7 +251,7 @@ pub(super) fn format(arguments: &[Value]) -> Result<Value> {
             let value = arguments
                 .get(next)
                 .ok_or_else(|| invalid_parameter("too few arguments for format()"))?;
-            width = width_value(value)?;
+            width = width_value(value, control)?;
             next += 1;
         }
         if let Some(position) = specifier.argument {
@@ -246,24 +262,38 @@ pub(super) fn format(arguments: &[Value]) -> Result<Value> {
             .ok_or_else(|| invalid_parameter("too few arguments for format()"))?;
         next += 1;
         let text = match (specifier.conversion, value) {
-            ('s', Value::Null) => String::new(),
-            ('L', Value::Null) => "NULL".into(),
             ('I', Value::Null) => {
                 return Err(SQLError::Routine {
                     sqlstate: "22004".into(),
                     message: "null values cannot be formatted as an SQL identifier".into(),
                 })
             }
-            ('I', value) => quote_ident_with_control(&output_text(value)?, &control)?
-                .into_uncontrolled()
-                .map_err(|_| SQLError::Internal("ordinary identifier quoting owner".into()))?,
-            ('L', value) => quote_literal_with_control(&output_text(value)?, &control)?
-                .into_uncontrolled()
-                .map_err(|_| SQLError::Internal("ordinary literal quoting owner".into()))?,
-            (_, value) => output_text(value)?,
+            ('s' | 'L', Value::Null) => control.finish(
+                std::borrow::Cow::Borrowed(if specifier.conversion == 'L' {
+                    "NULL"
+                } else {
+                    ""
+                }),
+                control.empty_reservation(),
+            )?,
+            _ => output_text(value, control)?,
         };
-        append_padded(&mut output, &text, specifier.left_align, width)?;
+        let quoted;
+        let text: &str = match specifier.conversion {
+            'I' => {
+                quoted = quote_sql_identifier(&text, control)?;
+                &quoted
+            }
+            'L' if !matches!(value, Value::Null) => {
+                crate::expr::text_size::check_allocation_size(text.len() as u128 * 2 + 4)?;
+                quoted = quote_literal_with_control(&text, control)?;
+                &quoted
+            }
+            _ => &text,
+        };
+        append_padded(&mut output, text, specifier.left_align, width)?;
         parser.index += 1;
     }
-    Ok(Value::Str(output))
+    let (text, memory) = output.finish()?.into_parts();
+    Ok(control.finish(Value::Str(text), memory)?)
 }

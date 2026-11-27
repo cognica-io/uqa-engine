@@ -39,6 +39,28 @@ impl JoinOutputSource {
             Self::Cast { ty, .. } | Self::Coalesce { ty, .. } => Some(ty),
         }
     }
+    fn selected_collation(&self, schema: &RowSchema) -> Option<u32> {
+        use crate::catalog::collations::derivation::Derivation;
+
+        let derive = |position| {
+            schema
+                .column_collation(position)
+                .map_or(Derivation::None, |oid| {
+                    Derivation::column(oid, schema.column_type(position))
+                })
+        };
+        let selected = match self {
+            Self::Input(position) => return schema.inherited_column_collation(*position),
+            Self::Cast { input, ty } => derive(*input).coerce(schema.column_type(*input), ty),
+            Self::Coalesce { left, right, ty } => derive(*left)
+                .coerce(schema.column_type(*left), ty)
+                .combine(derive(*right).coerce(schema.column_type(*right), ty)),
+        };
+        self.selected_type(schema)
+            .filter(|ty| crate::schema::composites::type_is_collatable(ty))
+            .map(|_| u32::try_from(selected.oid()).expect("collation identity"))
+    }
+
     fn validate(&self, width: usize) -> Result<(), SQLError> {
         let message = match self {
             Self::Input(position) if *position >= width => {
@@ -95,6 +117,7 @@ pub fn compile_layout_with_control(
                 identity,
                 source_position(source),
                 source.selected_type(input),
+                source.selected_collation(input),
             )
         }),
         aliases.iter().map(|(identity, source)| {
@@ -102,6 +125,7 @@ pub fn compile_layout_with_control(
                 identity,
                 source_position(source),
                 source.selected_type(input),
+                source.selected_collation(input),
             )
         }),
         input.physical_width() + computed.len(),

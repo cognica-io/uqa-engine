@@ -16,6 +16,7 @@ pub(super) struct MappedOutput<'o, 'c> {
     output: &'o mut ProductionString<'c>,
     buffer: [u8; CAPACITY],
     length: usize,
+    bytes: u64,
     /// The admission or cancellation failure an ICU4X writer reported only as `fmt::Error`.
     error: Option<ValueRetentionError>,
 }
@@ -26,6 +27,7 @@ impl<'o, 'c> MappedOutput<'o, 'c> {
             output,
             buffer: [0; CAPACITY],
             length: 0,
+            bytes: 0,
             error: None,
         }
     }
@@ -44,7 +46,7 @@ impl<'o, 'c> MappedOutput<'o, 'c> {
         if text.len() > CAPACITY - self.length {
             self.flush()?;
             if text.len() > CAPACITY {
-                return self.output.push_str(text);
+                return Self::append(self.output, &mut self.bytes, text);
             }
         }
         self.buffer[self.length..self.length + text.len()].copy_from_slice(text.as_bytes());
@@ -88,12 +90,31 @@ impl<'o, 'c> MappedOutput<'o, 'c> {
         Ok(())
     }
 
+    fn append(
+        output: &mut ProductionString<'_>,
+        bytes: &mut u64,
+        text: &str,
+    ) -> Result<(), ValueRetentionError> {
+        *bytes += text.len() as u64;
+        // Keep counting after the result can no longer fit. PostgreSQL reports the full
+        // size requested on its second pass over the input.
+        if *bytes <= crate::expr::text_size::MAX_TEXT_BYTES as u64 {
+            output.push_str(text)?;
+        }
+        Ok(())
+    }
+
+    pub(super) fn finish(mut self) -> Result<(), crate::SQLError> {
+        self.flush()?;
+        crate::expr::text_size::check_case_mapping_size(self.bytes)
+    }
+
     /// Admit the buffered bytes; the caller flushes before it finishes the destination.
     pub(super) fn flush(&mut self) -> Result<(), ValueRetentionError> {
         if self.length > 0 {
             let text = std::str::from_utf8(&self.buffer[..self.length])
                 .expect("the buffer holds whole characters");
-            self.output.push_str(text)?;
+            Self::append(self.output, &mut self.bytes, text)?;
             self.length = 0;
         }
         Ok(())

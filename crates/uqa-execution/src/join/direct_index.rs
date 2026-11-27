@@ -13,15 +13,15 @@ use std::hash::BuildHasher;
 use smallvec::SmallVec;
 use uqa_core::Value;
 
-use crate::distinct::hash_typed_row_with_catalog;
-use crate::{ExecResult, PhysicalRow, RowSchema};
+use crate::distinct::hash_typed_row_with_collations;
+use crate::{ExecResult, PhysicalRowView, RowSchema};
 use uqa_sql::expr::enums::EnumLabelCatalog;
 
 use super::row_store::HybridRowStore;
 
 /// Allocation-free in-memory index for simple positional equality keys.
 ///
-/// Only the canonical hash and build-row position are retained. The key itself stays in the original [`PhysicalRow`]; hash collisions are resolved by comparing the mapped source slots. If the index exceeds its budget, its state is discarded and the caller rebuilds the spill-capable encoded index from the row store.
+/// Only the canonical hash and build-row position are retained. The key itself stays in the original [`crate::PhysicalRow`]; hash collisions are resolved by comparing the mapped source slots. If the index exceeds its budget, its state is discarded and the caller rebuilds the spill-capable encoded index from the row store.
 pub(super) struct DirectHashIndex {
     buckets: HashMap<u64, SmallVec<[u64; 1]>, ahash::RandomState>,
     memory_bytes: usize,
@@ -98,7 +98,11 @@ impl DirectHashIndex {
                         return Ok(false);
                     };
                     if positional_keys_equal(
-                        schema, left, positions, schema, right, positions, catalog,
+                        schema.view(left),
+                        positions,
+                        schema.view(right),
+                        positions,
+                        catalog,
                     )? {
                         return Ok(false);
                     }
@@ -111,55 +115,50 @@ impl DirectHashIndex {
 
 pub(super) fn positional_key_hash<S: BuildHasher>(
     build_hasher: &S,
-    schema: &RowSchema,
-    row: &PhysicalRow,
+    view: PhysicalRowView<'_>,
     positions: &[usize],
+    indeterminate: &[usize],
     catalog: Option<&dyn EnumLabelCatalog>,
 ) -> ExecResult<Option<u64>> {
-    let view = schema.view(row);
     if positions.iter().any(|position| {
         view.value_at(*position)
             .is_none_or(|value| matches!(value, Value::Null))
     }) {
         return Ok(None);
     }
-    hash_typed_row_with_catalog(
+    hash_typed_row_with_collations(
         build_hasher,
         positions
             .iter()
-            .map(|position| (view.value_at(*position), schema.column_type(*position))),
+            .map(|position| (view.value_at(*position), view.column_type(*position))),
+        indeterminate,
         catalog,
     )
     .map(Some)
 }
 
 fn positional_keys_equal(
-    left_schema: &RowSchema,
-    left_row: &PhysicalRow,
+    left: PhysicalRowView<'_>,
     left_positions: &[usize],
-    right_schema: &RowSchema,
-    right_row: &PhysicalRow,
+    right: PhysicalRowView<'_>,
     right_positions: &[usize],
     catalog: Option<&dyn EnumLabelCatalog>,
 ) -> ExecResult<bool> {
     if left_positions.len() != right_positions.len() {
         return Ok(false);
     }
-    let left = left_schema.view(left_row);
-    let right = right_schema.view(right_row);
     for (left_position, right_position) in left_positions.iter().zip(right_positions) {
-        let (Some(left), Some(right)) = (
+        let (Some(left_value), Some(right_value)) = (
             left.value_at(*left_position),
             right.value_at(*right_position),
         ) else {
             return Ok(false);
         };
         if !uqa_sql::expr::equal_selected_values_with_catalog(
-            left,
-            right,
-            left_schema
-                .column_type(*left_position)
-                .or_else(|| right_schema.column_type(*right_position)),
+            left_value,
+            right_value,
+            left.column_type(*left_position)
+                .or_else(|| right.column_type(*right_position)),
             &uqa_core::memory::ProductionControl::uncontrolled(),
             catalog,
         )? {
@@ -173,16 +172,16 @@ pub(super) fn direct_unique_match(
     index: &DirectHashIndex,
     build_rows: &HybridRowStore,
     build_positions: &[usize],
-    probe_schema: &RowSchema,
-    probe_row: &PhysicalRow,
+    probe: PhysicalRowView<'_>,
     probe_positions: &[usize],
+    indeterminate: &[usize],
     catalog: Option<&dyn EnumLabelCatalog>,
 ) -> ExecResult<Option<u64>> {
     let Some(hash) = positional_key_hash(
         index.hasher(),
-        probe_schema,
-        probe_row,
+        probe,
         probe_positions,
+        indeterminate,
         catalog,
     )?
     else {
@@ -191,11 +190,9 @@ pub(super) fn direct_unique_match(
     for row_index in index.candidates(hash) {
         if let Some(build_row) = build_rows.memory_row(*row_index) {
             if positional_keys_equal(
-                &build_rows.schema,
-                build_row,
+                build_rows.schema.view(build_row),
                 build_positions,
-                probe_schema,
-                probe_row,
+                probe,
                 probe_positions,
                 catalog,
             )? {
@@ -209,6 +206,7 @@ pub(super) fn direct_unique_match(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::PhysicalRow;
 
     #[test]
     fn positional_join_datum_keys_use_sql_equality_and_preserve_errors() {
@@ -223,7 +221,10 @@ mod tests {
         let fresh = PhysicalRow::from_values(vec![Value::Record(
             vec![("a".into(), Value::Bytes(b"x".to_vec()))].into(),
         )]);
-        assert!(positional_keys_equal(&schema, &old, &[0], &schema, &fresh, &[0], None).unwrap());
+        assert!(
+            positional_keys_equal(schema.view(&old), &[0], schema.view(&fresh), &[0], None)
+                .unwrap()
+        );
         let bad = PhysicalRow::from_values(vec![Value::Record(
             vec![(
                 "a".into(),
@@ -236,7 +237,7 @@ mod tests {
             .into(),
         )]);
         assert!(
-            positional_keys_equal(&schema, &bad, &[0], &schema, &bad, &[0], None)
+            positional_keys_equal(schema.view(&bad), &[0], schema.view(&bad), &[0], None)
                 .unwrap_err()
                 .to_string()
                 .contains("compressed pglz data is corrupt")

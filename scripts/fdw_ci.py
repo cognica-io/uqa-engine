@@ -91,12 +91,9 @@ def select(root: Path, event: dict, event_name: str, revision: str, *, fetch=Fal
     result = {"required": True, "fingerprint": fingerprint(root, revision),
               "revision": revision, "reason": "No reliable comparison; retain all configurations."}
     if event_name == "pull_request":
-        if (event.get("action") != "ready_for_review"
-                or event.get("pull_request", {}).get("draft", True)):
-            result.update(required=False, reason="Wait for the final ready-for-review transition.")
-            return result
-        base = event.get("pull_request", {}).get("base", {}).get("sha")
-    elif event_name == "push":
+        result.update(required=False, reason="Product validation runs on the merged revision.")
+        return result
+    if event_name == "push":
         base = event.get("before")
     else:
         return result
@@ -109,7 +106,6 @@ def select(root: Path, event: dict, event_name: str, revision: str, *, fetch=Fal
             if not fetch:
                 return result
             git(root, "fetch", "--no-tags", "--depth=1", "origin", base)
-        # checkout supplies the PR merge tree: base-to-merge excludes unrelated base changes.
         # Disabling rename detection retains both the removed and newly introduced paths.
         raw = git(root, "diff", "--name-only", "--no-renames", "-z", base, revision, "--")
     except subprocess.CalledProcessError:

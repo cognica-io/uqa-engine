@@ -99,22 +99,22 @@ env:
 jobs:
   test-linux:
     name: test Linux
-    if: ${{ github.event_name == 'push' || github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.run_rust) }}
+    if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_rust) }}
     uses: ./.github/workflows/workspace-tests.yml
     with:
       os: ubuntu-24.04
 
   test-macos:
     name: test macOS
-    if: ${{ github.event_name == 'push' || github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.run_rust) }}
+    if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_rust) }}
     uses: ./.github/workflows/workspace-tests.yml
     with:
       os: macos-26-arm64
-      check-regressions: ${{ github.event_name == 'push' || github.event_name == 'pull_request' }}
+      check-regressions: ${{ github.event_name == 'push' }}
 
   clippy:
     name: clippy ${{ matrix.label }}
-    if: ${{ github.event_name == 'push' || github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.run_rust) }}
+    if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_rust) }}
     runs-on: ${{ matrix.os == 'macos-26-arm64' && fromJSON('["self-hosted","macOS","ARM64","macos-arm64","macos-26-arm64"]') || matrix.os }}
     strategy:
       fail-fast: false
@@ -153,7 +153,7 @@ jobs:
 
   msrv:
     name: check minimum Rust versions
-    if: ${{ github.event_name == 'push' || github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.run_rust) }}
+    if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_rust) }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -175,7 +175,7 @@ jobs:
 
   doc:
     name: doc
-    if: ${{ github.event_name == 'push' || github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.run_rust) }}
+    if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_rust) }}
     runs-on: ubuntu-24.04
     env:
       RUSTDOCFLAGS: "-D warnings"
@@ -195,7 +195,7 @@ jobs:
 
   deny:
     name: deny
-    if: ${{ github.event_name == 'push' || github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.run_rust) }}
+    if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_rust) }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -208,7 +208,7 @@ jobs:
 
   upstream-regression-oracle:
     name: PostgreSQL upstream regression oracle
-    if: ${{ github.event_name == 'push' || github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.run_rust) }}
+    if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_rust) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -235,7 +235,7 @@ jobs:
 
   nori-reference:
     name: Lucene dictionaries and reference regeneration
-    if: ${{ github.event_name == 'push' || github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.run_rust) }}
+    if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_rust) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -284,7 +284,7 @@ jobs:
 
   nori-benchmark:
     name: Nori native analysis and indexing gate
-    if: ${{ github.event_name == 'push' || github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && (inputs.run_rust || inputs.run_nori_allocations)) }}
+    if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && (inputs.run_rust || inputs.run_nori_allocations)) }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -330,6 +330,15 @@ jobs:
     env:
       RESULTS: ${{ join(needs.*.result, ' ') }}
     steps:
+      - uses: actions/checkout@v4
+        if: github.event_name == 'pull_request'
+      - uses: actions/setup-python@v7
+        if: github.event_name == 'pull_request'
+        with:
+          python-version: "3.9"
+      - name: Test repository policy and benchmark reports
+        if: github.event_name == 'pull_request'
+        run: python3 -m unittest discover -s scripts/tests -p 'test_*.py'
       - name: Require every selected job to pass
         run: |
           case " $RESULTS " in

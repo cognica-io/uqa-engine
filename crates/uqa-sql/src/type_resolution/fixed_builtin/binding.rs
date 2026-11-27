@@ -91,6 +91,7 @@ pub(in crate::type_resolution) fn bind_call_in_place_with_control(
         &signature.names,
         &signature.effective,
         signature.explicit_variadic,
+        None,
         control,
     ) {
         Ok(selected) => selected,

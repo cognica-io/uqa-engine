@@ -12,6 +12,7 @@ use super::super::{
 };
 use crate::{
     ast::{BinaryOp, BooleanTest, FunctionDispatch},
+    catalog::collations::CollationSelection,
     error::{Result, SQLError},
 };
 use uqa_core::{
@@ -57,12 +58,13 @@ pub fn eval_distinct_boolean(
     }
 }
 
+#[cfg(test)]
 pub(super) fn evaluate(
     dispatch: FunctionDispatch,
     args: &[Value],
     control: &ProductionControl<'_>,
 ) -> Option<Result<Produced<Value>>> {
-    evaluate_with_context(dispatch, args, control, &EvalContext::new(None, &[]))
+    evaluate_with_context(dispatch, args, control, &EvalContext::new(None, &[]), None)
 }
 
 pub(in crate::expr) fn evaluate_with_context(
@@ -70,6 +72,7 @@ pub(in crate::expr) fn evaluate_with_context(
     args: &[Value],
     control: &ProductionControl<'_>,
     context: &EvalContext<'_>,
+    collation: Option<CollationSelection>,
 ) -> Option<Result<Produced<Value>>> {
     if let Some(result) =
         eval_distinct_boolean(dispatch, args.len(), |index| Ok(args[index].clone()))
@@ -79,10 +82,10 @@ pub(in crate::expr) fn evaluate_with_context(
         );
     }
     let result = match dispatch {
-        FunctionDispatch::AnyOperator => any_all(args, true, control, context),
-        FunctionDispatch::AllOperator => any_all(args, false, control, context),
+        FunctionDispatch::AnyOperator => any_all(args, true, control, context, collation),
+        FunctionDispatch::AllOperator => any_all(args, false, control, context, collation),
         FunctionDispatch::IsDistinct | FunctionDispatch::ValueIsDistinct => {
-            is_distinct(args, control, context)
+            is_distinct(args, control, context, collation)
         }
         FunctionDispatch::ValueNullTest { negated } => {
             let [value] = args else {
@@ -93,7 +96,7 @@ pub(in crate::expr) fn evaluate_with_context(
             Ok(Value::Bool(matches!(value, Value::Null) != negated))
         }
         FunctionDispatch::BooleanTest(test) => boolean_test(test, args),
-        FunctionDispatch::BetweenSymmetric => between_symmetric(args, control, context),
+        FunctionDispatch::BetweenSymmetric => between_symmetric(args, control, context, collation),
         _ => return None,
     };
     Some(result.and_then(|value| Ok(control.finish(value, control.empty_reservation())?)))
@@ -127,6 +130,7 @@ fn any_all(
     is_any: bool,
     control: &ProductionControl<'_>,
     context: &EvalContext<'_>,
+    collation: Option<CollationSelection>,
 ) -> Result<Value> {
     control.check()?;
     if args.len() != 3 {
@@ -144,7 +148,8 @@ fn any_all(
                 "operator `{other}` with ANY/ALL"
             )))
         }
-    };
+    }
+    .with_input_collation(collation);
     let Some(array) = args[1].array_view() else {
         if matches!(args[1], Value::Null) {
             return Ok(Value::Null);
@@ -172,6 +177,7 @@ fn is_distinct(
     args: &[Value],
     control: &ProductionControl<'_>,
     context: &EvalContext<'_>,
+    collation: Option<CollationSelection>,
 ) -> Result<Value> {
     control.check()?;
     let [left, right] = args else {
@@ -183,7 +189,14 @@ fn is_distinct(
         (Value::Null, Value::Null) => false,
         (Value::Null, _) | (_, Value::Null) => true,
         (left, right) => {
-            compare_value(BinaryOp::Equal, left, right, control, context, 0)? != Some(true)
+            compare_value(
+                BinaryOp::Equal.with_input_collation(collation),
+                left,
+                right,
+                control,
+                context,
+                0,
+            )? != Some(true)
         }
     };
     Ok(Value::Bool(distinct))
@@ -193,6 +206,7 @@ fn between_symmetric(
     args: &[Value],
     control: &ProductionControl<'_>,
     context: &EvalContext<'_>,
+    collation: Option<CollationSelection>,
 ) -> Result<Value> {
     control.check()?;
     let [value, low, high] = args else {
@@ -200,11 +214,11 @@ fn between_symmetric(
             "BETWEEN SYMMETRIC takes 3 args".into(),
         ));
     };
-    let forward = between(value, low, high, control, context, 0)?;
+    let forward = between(value, low, high, control, context, 0, collation)?;
     if forward == Value::Bool(true) {
         return Ok(forward);
     }
-    let backward = between(value, high, low, control, context, 2)?;
+    let backward = between(value, high, low, control, context, 2, collation)?;
     Ok(match (forward, backward) {
         (Value::Bool(true), _) | (_, Value::Bool(true)) => Value::Bool(true),
         (Value::Null, _) | (_, Value::Null) => Value::Null,
@@ -219,12 +233,27 @@ fn between(
     control: &ProductionControl<'_>,
     context: &EvalContext<'_>,
     slot: usize,
+    collation: Option<CollationSelection>,
 ) -> Result<Value> {
-    let ge = compare(BinaryOp::GreaterEqual, value, low, control, context, slot)?;
+    let ge = compare(
+        BinaryOp::GreaterEqual.with_input_collation(collation),
+        value,
+        low,
+        control,
+        context,
+        slot,
+    )?;
     if ge == Some(false) {
         return Ok(Value::Bool(false));
     }
-    let le = compare(BinaryOp::LessEqual, value, high, control, context, slot + 1)?;
+    let le = compare(
+        BinaryOp::LessEqual.with_input_collation(collation),
+        value,
+        high,
+        control,
+        context,
+        slot + 1,
+    )?;
     Ok(match (ge, le) {
         (_, Some(false)) => Value::Bool(false),
         (Some(true), Some(true)) => Value::Bool(true),

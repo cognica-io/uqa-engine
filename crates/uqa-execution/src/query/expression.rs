@@ -298,6 +298,15 @@ impl FunctionTypeResolver for ScopedExpressionEvaluator<'_> {
             .has_untyped_function_with_control(name, control)
     }
 
+    fn multirange_member_type_with_control(
+        &self,
+        ty: &uqa_sql::ColumnType,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<uqa_core::memory::Produced<uqa_sql::ColumnType>>, SQLError> {
+        self.context
+            .multirange_member_type_with_control(ty, control)
+    }
+
     fn resolve_collation_name_with_control(
         &self,
         name: &str,

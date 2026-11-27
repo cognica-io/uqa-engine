@@ -44,6 +44,7 @@ pub mod params;
 pub mod parser;
 pub mod plan;
 pub mod plpgsql;
+mod postgres_sort;
 mod production;
 pub mod registry;
 pub mod render;
@@ -52,6 +53,7 @@ pub mod routines;
 pub mod schema;
 pub mod semantics;
 mod sql_batch_error;
+pub mod tsvector;
 pub mod type_resolution;
 pub mod xml;
 

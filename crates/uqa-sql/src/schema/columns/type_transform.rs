@@ -131,13 +131,7 @@ fn original_row_schema(
     let relation = crate::RelationIdentity::from_legacy_name(table).map_err(|error| {
         SQLError::Internal(format!("resolve ALTER TABLE target `{table}`: {error}"))
     })?;
-    let schema = RowSchema::with_types(
-        columns.iter().map(|column| column.name.clone()).collect(),
-        columns
-            .iter()
-            .map(|column| Some(column.ty.clone()))
-            .collect(),
-    );
+    let schema = crate::schema::expressions::row_schema(columns);
     let canonical = relation.qualified_name();
     let aliases = [qualifier, table, relation.name.as_str(), canonical.as_str()]
         .into_iter()

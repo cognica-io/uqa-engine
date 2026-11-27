@@ -23,7 +23,7 @@ pub mod rows;
 mod statement;
 pub(crate) mod strategy;
 pub use context::CteExecutionContext;
-use recursive::materialize_recursive_cte;
+use recursive::build_recursive_cte;
 pub(crate) use statement::install_statement_ctes;
 pub use statement::{finish_statement_ctes, materialize_command_ctes, materialize_statement_ctes};
 
@@ -91,9 +91,9 @@ pub fn materialize_plan_ctes_with_filters<'a, S: Clone>(
     let plans = order_cte_plans_with_control(plans, control)?;
     for plan in plans.iter().copied() {
         if cte_references_own_name_with_control(plan, control)? {
-            let rows = {
+            let (operator, budget) = {
                 let mut cte_scope = ctes.enter_lock_identity_emission(false);
-                materialize_recursive_cte(
+                build_recursive_cte(
                     context,
                     plan,
                     params,
@@ -101,7 +101,7 @@ pub fn materialize_plan_ctes_with_filters<'a, S: Clone>(
                     output_filters.get(&plan.name),
                 )?
             };
-            ctes.insert_shared_with_control(&plan.name, rows, &control)?;
+            ctes.insert_producer_with_control(&plan.name, operator, budget, &control)?;
             continue;
         }
 

@@ -50,6 +50,33 @@ fn record_operands_preserve_postgresql_null_comparison_operators() {
 }
 
 #[test]
+fn row_constructor_comparison_evaluates_only_reached_pairs_in_the_ast() {
+    let row = crate::ResultRow::from([("zero".into(), Value::Int(0))]);
+    for (sql, expected) in [
+        ("SELECT ROW(0,1/zero) = ROW(1,0)", Value::Bool(false)),
+        (
+            "SELECT ROW(NULL::int,0,1/zero) <> ROW(1,1,0)",
+            Value::Bool(true),
+        ),
+        ("SELECT ROW(NULL::int,1/zero) >= ROW(1,0)", Value::Null),
+        ("SELECT ROW(1,1/zero) > ROW(0,0)", Value::Bool(true)),
+    ] {
+        let crate::Statement::Select(query) = crate::compile(sql).unwrap().remove(0) else {
+            unreachable!()
+        };
+        assert_eq!(
+            super::super::eval(
+                &query.projections[0].expr,
+                &EvalContext::new(Some(&row), &[])
+            )
+            .unwrap(),
+            expected,
+            "{sql}"
+        );
+    }
+}
+
+#[test]
 fn binary_inline_results_preserve_width_null_and_error_behavior_at_zero_budget() {
     let budget = MemoryBudget::new(0);
     let cancellation = CancellationToken::new();

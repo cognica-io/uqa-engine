@@ -76,15 +76,11 @@ pub fn prepare_inference_predicate_with_control(
     Ok(Some(output.expect("selected inference table")))
 }
 
-fn prepare_expression(
+fn validate_inference_expression(
     context: InferenceContext<'_>,
-    expression: OwnedScalarExpr,
-    statement: &InsertPlan,
-    schema: &RowSchema,
-    columns: &[ColumnDef],
-    params: &[SQLParam],
+    expression: &ScalarExpr,
     control: &ProductionControl<'_>,
-) -> Result<OwnedScalarExpr, SQLError> {
+) -> Result<(), SQLError> {
     let mut has_subquery = false;
     let mut has_window = false;
     expression.try_visit(&mut |node| {
@@ -107,7 +103,7 @@ fn prepare_expression(
     }
     if crate::semantics::aggregates::contains_aggregate_with_control(
         context.aggregates,
-        &expression,
+        expression,
         control,
     )? {
         return Err(predicate_error(
@@ -123,6 +119,19 @@ fn prepare_expression(
             control,
         )?);
     }
+    Ok(())
+}
+
+fn prepare_expression(
+    context: InferenceContext<'_>,
+    expression: OwnedScalarExpr,
+    statement: &InsertPlan,
+    schema: &RowSchema,
+    columns: &[ColumnDef],
+    params: &[SQLParam],
+    control: &ProductionControl<'_>,
+) -> Result<OwnedScalarExpr, SQLError> {
+    validate_inference_expression(context, &expression, control)?;
     let plan = MutableExpressionPlan::from_parts(
         expression,
         ScalarQueryArena::copy_from(&[], control)?,
@@ -138,6 +147,31 @@ fn prepare_expression(
         control,
     )?;
     let (expression, _) = plan.into_parts(control)?;
+    // An expression-level COLLATE on the index operand disappears only if it preserves the operand's natural collation. An index-element qualifier is matched separately against the catalog attribute.
+    let mut operand: &ScalarExpr = &expression;
+    while let ScalarExpr::Collated { expr, .. } = operand {
+        operand = expr;
+    }
+    if let Some(clause) = crate::catalog::collations::expression::scalar_clause(operand)? {
+        let natural = crate::binding::inference_result_collation(
+            context.routines,
+            clause.argument,
+            schema,
+            binding.context_with_control(control)?,
+            params,
+            control,
+        )?;
+        let selected = crate::catalog::collations::expression::select_with_control(
+            clause.name,
+            clause.oid,
+            None,
+            Some(context.routines),
+            control,
+        )?;
+        if selected != natural {
+            return Ok(expression);
+        }
+    }
     let expression = expression.transform_nodes(control, &mut |_, expression| {
         if matches!(&*expression, ScalarExpr::QualifiedColumn { qualifier, .. } if qualifier == &statement.target_qualifier) {
             return expression.remove_reference_qualifier(control).map_err(Into::into);
@@ -173,23 +207,19 @@ pub(super) fn inference_identity_owned(
     control: &ProductionControl<'_>,
 ) -> Result<OwnedScalarExpr, SQLError> {
     expression.transform_nodes(control, &mut |_, mut expression| {
-        while matches!(&*expression, ScalarExpr::Collated { .. }) {
+        // The selected operation retains its input collation. COLLATE wrappers only describe how analysis derived it.
+        while matches!(&*expression, ScalarExpr::Collated { .. })
+            || crate::catalog::collations::expression::scalar_clause(&expression)?.is_some()
+        {
             control.check()?;
             expression = expression.select_child(0);
         }
         if matches!(&*expression, ScalarExpr::Cast { .. }) {
             expression = expression.set_cast_implicit(false, control)?;
         }
-        if matches!(
-            &*expression,
-            ScalarExpr::Func {
-                binding: Some(_),
-                ..
-            }
-        ) {
-            expression = expression.set_call_input_collation(None, control)?;
-        }
-        Ok(expression)
+        expression
+            .literal_inference_identity(control)
+            .map_err(Into::into)
     })
 }
 

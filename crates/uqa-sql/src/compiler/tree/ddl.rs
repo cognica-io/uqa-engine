@@ -614,6 +614,8 @@ pub(in crate::compiler) fn compile_create_index(
     let access_method = stmt.access_method.clone();
     let mut columns = Vec::new();
     let mut column_order = Vec::new();
+    let mut key_collations = Vec::new();
+    let mut labels = Vec::with_capacity(stmt.index_params.len());
     for elt in &stmt.index_params {
         let inner = elt
             .node
@@ -625,16 +627,12 @@ pub(in crate::compiler) fn compile_create_index(
             )));
         };
         let key = compile_index_key(idx)?;
-        let descending = idx.ordering() == pg_query::protobuf::SortByDir::SortbyDesc;
-        let nulls_first = match idx.nulls_ordering() {
-            pg_query::protobuf::SortByNulls::SortbyNullsFirst => true,
-            pg_query::protobuf::SortByNulls::SortbyNullsLast => false,
-            _ => descending,
-        };
-        column_order.push(crate::ast::IndexColumnOrder {
-            descending,
-            nulls_first,
-        });
+        labels.push(index_attribute_name(idx));
+        if !idx.collation.is_empty() {
+            key_collations.resize(columns.len(), None);
+            key_collations.push(Some(super::compile_collation_name(&idx.collation)?));
+        }
+        column_order.push(index_column_order(idx));
         columns.push(key);
     }
     let name = if stmt.idxname.is_empty() {
@@ -683,7 +681,12 @@ pub(in crate::compiler) fn compile_create_index(
             )),
         })
         .collect::<Result<Vec<_>>>()?;
+    let attribute_names = crate::schema::indexes::keys::unique_attribute_names(
+        labels.into_iter().chain(included_columns.iter().cloned()),
+    );
     Ok(CreateIndex {
+        attribute_names,
+        key_collations,
         included_columns,
         column_order,
         predicate: stmt
@@ -702,6 +705,35 @@ pub(in crate::compiler) fn compile_create_index(
         options,
         option_namespaces,
     })
+}
+
+fn index_attribute_name(index: &pg_query::protobuf::IndexElem) -> String {
+    if !index.indexcolname.is_empty() {
+        index.indexcolname.clone()
+    } else if !index.name.is_empty() {
+        index.name.clone()
+    } else {
+        index
+            .expr
+            .as_deref()
+            .and_then(super::select::implicit_projection_name)
+            .unwrap_or_else(|| "expr".into())
+    }
+}
+
+fn index_column_order(index: &pg_query::protobuf::IndexElem) -> crate::ast::IndexColumnOrder {
+    let descending = index.ordering() == pg_query::protobuf::SortByDir::SortbyDesc;
+    let nulls_first = match index.nulls_ordering() {
+        pg_query::protobuf::SortByNulls::SortbyNullsFirst => true,
+        pg_query::protobuf::SortByNulls::SortbyNullsLast => false,
+        _ => descending,
+    };
+    crate::ast::IndexColumnOrder {
+        overrides_collation: false,
+        collation_oid: None,
+        descending,
+        nulls_first,
+    }
 }
 
 fn compile_index_key(index: &pg_query::protobuf::IndexElem) -> Result<crate::ast::IndexKey> {

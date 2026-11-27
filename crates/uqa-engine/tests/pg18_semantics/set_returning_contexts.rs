@@ -4,23 +4,7 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use uqa_engine::Engine;
-
-fn open(provider: usize, path: &std::path::Path) -> Engine {
-    match provider {
-        0 => Engine::new(),
-        1 => Engine::open(path).unwrap(),
-        2 => Engine::from_persistent_provider(std::sync::Arc::new(
-            uqa_storage_sqlite::SQLiteKeyValueStorage::open(path).unwrap(),
-        ))
-        .unwrap(),
-        3 => Engine::from_persistent_provider(std::sync::Arc::new(
-            uqa_storage_redb::RedbStorage::open(path).unwrap(),
-        ))
-        .unwrap(),
-        _ => unreachable!(),
-    }
-}
+use crate::open_test_provider as open;
 
 #[rstest::rstest]
 #[case::memory(0)]
@@ -147,4 +131,32 @@ fn set_returning_contexts_match_postgresql_and_reopen(#[case] provider: usize) {
     });
     assert_eq!(reference["cases"].as_array().unwrap().len(), 27);
     crate::pg18_oracle::verify(&engine, &reference.to_string());
+}
+
+#[rstest::rstest]
+#[case::memory(0)]
+#[case::sqlite(1)]
+#[case::sqlite_key_value(2)]
+#[case::redb(3)]
+fn unnest_overloads_match_postgresql(#[case] provider: usize) {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("unnest.db");
+    let engine = open(provider, &path);
+    let fixture = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../tests/parity/pg18/unnest_overloads.expected.json"
+    ));
+    crate::pg18_oracle::verify(&engine, fixture);
+    if provider != 0 {
+        drop(engine);
+        let reopened = open(provider, &path);
+        let mut rows: serde_json::Value = serde_json::from_str(fixture).unwrap();
+        rows["cases"].as_array_mut().unwrap().retain(|case| {
+            case["sql"]
+                .as_str()
+                .is_some_and(|sql| sql.starts_with("SELECT * FROM un_stored"))
+        });
+        assert_eq!(rows["cases"].as_array().unwrap().len(), 2);
+        crate::pg18_oracle::verify(&reopened, &rows.to_string());
+    }
 }

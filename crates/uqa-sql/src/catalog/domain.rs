@@ -14,6 +14,28 @@ use super::roles::RoleReference;
 mod production;
 pub mod validation;
 
+/// The optimizer can remove a domain coercion only after checking every domain through its base type.
+pub enum CoercionConstraints<'a> {
+    Unconstrained(&'a ColumnType),
+    Checked,
+    Unknown,
+}
+
+pub fn coercion_constraints<'a>(
+    mut ty: &'a ColumnType,
+    catalog: &dyn crate::routines::declaration::RoutineTypeCatalog,
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<CoercionConstraints<'a>, crate::SQLError> {
+    while let ColumnType::Domain { oid, base, .. } = ty {
+        match catalog.domain_has_constraints_with_control(*oid, control)? {
+            Some(false) => ty = base,
+            Some(true) => return Ok(CoercionConstraints::Checked),
+            None => return Ok(CoercionConstraints::Unknown),
+        }
+    }
+    Ok(CoercionConstraints::Unconstrained(ty))
+}
+
 pub fn domain_object_oid(object_id: &[u8; 16]) -> u32 {
     u32::try_from(super::oids::stable_object_oid("domain", object_id))
         .expect("catalog OIDs fit in u32")
@@ -38,6 +60,11 @@ pub struct StoredDomain<Owner = RoleIdentity> {
 }
 
 impl<Owner> StoredDomain<Owner> {
+    /// Even a NOT VALID check applies to each new coercion to this domain.
+    pub fn has_constraints(&self) -> bool {
+        self.definition.not_null.is_some() || !self.definition.checks.is_empty()
+    }
+
     pub fn column_type(&self) -> ColumnType {
         ColumnType::Domain {
             schema: self.identity.schema.clone(),

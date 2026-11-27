@@ -112,9 +112,19 @@ impl PreparedArgumentScopes for Engine {
                 name,
             )
         };
-        let mut analyze_type = |argument: &ExpressionPlan| {
-            uqa_execution::query::binding::analyze_expression_plan_type(
-                self, argument, parameters, &scope,
+        let mut bind_expression = |argument: &ExpressionPlan| {
+            let resources =
+                <Self as uqa_execution::routines::context::RoutineStatements>::planning_resources(
+                    self,
+                )?;
+            let control = resources.control();
+            uqa_sql::binding::bind_executable_expression(
+                self,
+                argument.copy_for_rewrite(&control)?,
+                parameters,
+                uqa_execution::query::binding::binding_context_with_control(&scope, &control)?,
+                &uqa_sql::RowSchema::empty_with_control(&control)?,
+                &control,
             )
         };
         operation(ArgumentBindingContext {
@@ -126,7 +136,7 @@ impl PreparedArgumentScopes for Engine {
                 parameters,
             },
             assignment: self,
-            analyze_type: &mut analyze_type,
+            bind_expression: &mut bind_expression,
             evaluation,
         })
     }

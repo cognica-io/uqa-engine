@@ -9,7 +9,7 @@
 use super::{EvalContext, Result, SQLError};
 use crate::ast::FunctionBinding;
 use uqa_core::{
-    memory::{Produced, ProductionControl, ProductionString},
+    memory::{Produced, ProductionControl},
     Value,
 };
 
@@ -60,16 +60,12 @@ pub(super) fn evaluate(
                 "concatenation text operand has an invalid carrier".into(),
             ));
         };
-        let mut output = ProductionString::new(*control);
-        for part in if position == 0 {
-            [converted, other]
+        let (left, right) = if position == 0 {
+            (converted, other)
         } else {
-            [other, converted]
-        } {
-            output.push_str(part)?;
-        }
-        let (text, memory) = output.finish()?.into_parts();
-        return Ok(control.finish(Value::Str(text), memory)?);
+            (other, converted)
+        };
+        return super::scalar_core::concatenate_text(left, right, control);
     }
     super::scalar_core::eval_core_functions_with_control("concat_op", arguments, control)
         .expect("existing concatenation kernel")

@@ -36,6 +36,7 @@ fn entry(source: &str, executable: &str) -> PreparedStatementPlan {
         from_sql: true,
         generic_plans: 1,
         custom_plans: 0,
+        generic_domains: crate::prepared::domains::GenericDomainInputs::default(),
         generic_cost: Some(1.0),
         total_custom_cost: 0.0,
     }

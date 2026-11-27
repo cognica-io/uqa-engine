@@ -19,6 +19,8 @@ mod native_storage;
 mod notification_registry;
 #[path = "support/pg18_oracle.rs"]
 mod pg18_oracle;
+#[path = "support/pg18_peer.rs"]
+mod pg18_peer;
 #[path = "support/waits.rs"]
 mod waits;
 
@@ -36,3 +38,19 @@ mod search;
 mod sql_tpch;
 #[path = "storage.rs"]
 mod storage;
+
+fn open_test_provider(provider: usize, path: &std::path::Path) -> Engine {
+    match provider {
+        0 => Engine::new(),
+        1 => Engine::open(path).unwrap(),
+        2 => Engine::from_persistent_provider(std::sync::Arc::new(
+            uqa_storage_sqlite::SQLiteKeyValueStorage::open(path).unwrap(),
+        ))
+        .unwrap(),
+        3 => Engine::from_persistent_provider(std::sync::Arc::new(
+            uqa_storage_redb::RedbStorage::open(path).unwrap(),
+        ))
+        .unwrap(),
+        _ => unreachable!(),
+    }
+}

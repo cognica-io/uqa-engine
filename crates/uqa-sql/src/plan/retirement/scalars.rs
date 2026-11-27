@@ -199,6 +199,15 @@ scalar_fields!(WindowDefinition<ScalarWindowSpec> { spec, name } skip { inherite
 scalar_fields!(AssignmentTarget<ScalarExpr> { indirection, column });
 scalar_fields!(MultipleAssignmentTargets<ScalarExpr> { targets } skip { source_positions, source_width });
 scalar_fields!(AssignmentPlan { target, value });
+impl Retire for crate::ast::ConflictTargetConstraint {
+    fn retire_step(&mut self, positions: &mut [usize], scalar: &mut Option<Retirement>) -> bool {
+        match self {
+            Self::Unqualified => true,
+            Self::Named(name) => name.retire_step(positions, scalar),
+            Self::Collations(names) => names.retire_step(positions, scalar),
+        }
+    }
+}
 scalar_fields!(ConflictPlan {
     predicate,
     expressions,

@@ -179,3 +179,45 @@ fn declared_range_input_adapters_invoke_selected_sql_routines_without_repeating_
     assert_eq!(error.sqlstate(), Some("XX000"));
     assert_eq!(error.to_string(), format!("function {oid} returned NULL"));
 }
+
+#[test]
+fn unnest_preserves_the_declared_member_type_and_bounds() {
+    let engine = Engine::new();
+    let mut definition = range();
+    definition.identity.name = "wordrange".into();
+    definition.array_name = "_wordrange".into();
+    definition.subtype = ColumnType::Text;
+    definition.collation_oid = 100;
+    definition.subtype_operator_class = 3126;
+    definition.multirange.identity.name = "wordranges".into();
+    definition.multirange.array_name = "_wordranges".into();
+    engine
+        .durable
+        .ranges
+        .write()
+        .insert("public.wordrange".into(), definition)
+        .unwrap();
+    let reference: serde_json::Value =
+        serde_json::from_str(include_str!("range_input/unnest.expected.json")).unwrap();
+    for case in reference["cases"].as_array().unwrap().iter().skip(2) {
+        let statement = case["sql"].as_str().unwrap();
+        let expected = &case["results"][0];
+        let result = engine.sql(statement, &[]).unwrap();
+        assert_eq!(serde_json::json!(result.columns), expected["columns"]);
+        let rows: Vec<_> = result
+            .rows
+            .iter()
+            .map(|row| {
+                result
+                    .columns
+                    .iter()
+                    .map(|name| match &row[name] {
+                        Value::Str(text) => text.as_str(),
+                        value => panic!("expected text, got {value:?}"),
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+        assert_eq!(serde_json::json!(rows), expected["rows"], "{statement}");
+    }
+}

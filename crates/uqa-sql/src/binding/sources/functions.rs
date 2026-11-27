@@ -11,11 +11,14 @@ use crate::{
     binding::SchemaScope,
     plan::{QueryPlan, SourcePlan},
     routines::RoutineResolution,
-    semantics::{ControlledUserTableFunction, TableFunctionTypeRequest},
+    semantics::{ControlledUserTableFunction, SelectedTableFunction, TableFunctionTypeRequest},
     type_resolution::FunctionTypeResolver,
     RowSchema, SQLError, SQLParam, ScalarExpr,
 };
 use uqa_core::memory::{Produced, ProductionVec};
+
+mod result;
+pub use result::bind_table_function_result_schema;
 
 #[cfg(test)]
 mod tests;
@@ -23,7 +26,7 @@ mod tests;
 #[derive(Clone, Copy)]
 struct FunctionSource<'a> {
     name: &'a str,
-    binding: &'a Option<FunctionBinding>,
+    binding: Option<&'a FunctionBinding>,
     output_name: &'a str,
     relations: &'a Option<OperatorJoinRelations>,
     args: &'a [ScalarExpr],
@@ -50,7 +53,7 @@ impl<'a> FunctionSource<'a> {
         };
         Self {
             name,
-            binding,
+            binding: binding.as_ref(),
             output_name,
             relations,
             args,
@@ -111,16 +114,22 @@ impl SchemaScope {
             params,
             type_resolver: &type_resolver,
         };
-        let user_function =
+        let selected =
             self.bind_function_call(routines, source, &context, operator_inputs.as_ref())?;
-        self.validate_function_result(routines, source, &context, user_function.as_ref())?;
+        let (binding, user_function) = match &selected {
+            Some(SelectedTableFunction::Builtin(binding)) => (Some(&**binding), None),
+            Some(SelectedTableFunction::User(user)) => (Some(&*user.binding), Some(user)),
+            None => (source.binding, None),
+        };
+        let source = FunctionSource { binding, ..source };
+        self.validate_function_result(routines, source, &context, user_function)?;
         let (columns, declared_host_columns) =
-            self.function_result_columns(routines, source, user_function.as_ref())?;
+            self.function_result_columns(routines, source, user_function)?;
         self.function_result_schema(
             routines,
             source,
             &context,
-            user_function.as_ref(),
+            user_function,
             &columns,
             declared_host_columns,
         )
@@ -132,7 +141,7 @@ impl SchemaScope {
         source: FunctionSource<'_>,
         context: &FunctionInputs<'_>,
         operator_inputs: Option<&(RowSchema, RowSchema)>,
-    ) -> Result<Option<ControlledUserTableFunction>, SQLError> {
+    ) -> Result<Option<SelectedTableFunction>, SQLError> {
         let FunctionSource {
             name,
             binding,
@@ -147,7 +156,7 @@ impl SchemaScope {
         } = *context;
         let resources = self.production.clone();
         let control = resources.control();
-        let user_function = if let Some((left, right)) = operator_inputs {
+        let selected = if let Some((left, right)) = operator_inputs {
             if self.validate_references {
                 let constant = RowSchema::empty_with_control(&control)?;
                 for (position, argument) in args.iter().enumerate() {
@@ -167,7 +176,7 @@ impl SchemaScope {
                 routines,
                 crate::binding::analysis::TableFunctionSourceValidation {
                     name,
-                    binding: binding.as_ref(),
+                    binding,
                     args,
                     subqueries,
                     input,
@@ -175,20 +184,20 @@ impl SchemaScope {
                 },
             )?
         } else {
-            crate::semantics::resolve_user_table_function_with_control(
+            crate::semantics::resolve_table_function_with_control(
                 crate::semantics::TableFunctionAnalysis {
                     routines,
                     types: type_resolver,
                 },
                 name,
-                binding.as_ref(),
+                binding,
                 args,
                 input,
                 params,
                 &control,
             )?
         };
-        Ok(user_function)
+        Ok(selected)
     }
 
     fn validate_function_result(
@@ -218,7 +227,7 @@ impl SchemaScope {
             routines,
             crate::semantics::ColumnDefinitionRequest {
                 name,
-                binding: binding.as_ref(),
+                binding,
                 user_function: user_function.as_ref().map(|resolved| &**resolved.function),
                 user_invocation: user_function
                     .as_ref()
@@ -246,6 +255,7 @@ impl SchemaScope {
     ) -> Result<(Produced<Vec<String>>, bool), SQLError> {
         let FunctionSource {
             name,
+            binding,
             output_name,
             alias,
             column_aliases,
@@ -272,7 +282,7 @@ impl SchemaScope {
                     .0,
             ));
         }
-        let catalog_columns = if !self.validate_references && user_function.is_none() {
+        let catalog_columns = if !self.validate_references && binding.is_none() {
             super::super::catalog_sources::user_function_output_columns_with_control(
                 self.catalog.as_ref(),
                 &self.resolution,
@@ -301,8 +311,9 @@ impl SchemaScope {
                     *ordinality,
                     &control,
                 )?,
-                None => crate::semantics::table_function_empty_schema_with_control(
+                None => crate::semantics::bound_table_function_empty_schema_with_control(
                     name,
+                    binding,
                     output_name,
                     alias.as_deref(),
                     column_aliases,
@@ -322,7 +333,7 @@ impl SchemaScope {
     }
 
     fn function_result_schema(
-        &self,
+        &mut self,
         routines: &dyn RoutineResolution,
         source: FunctionSource<'_>,
         context: &FunctionInputs<'_>,
@@ -340,42 +351,25 @@ impl SchemaScope {
             output_name,
             ..
         } = source;
-        let FunctionInputs {
-            input,
-            params,
-            type_resolver,
-            ..
-        } = *context;
-        let resources = self.production.clone();
-        let control = resources.control();
-        let types = crate::semantics::table_function_column_types_with_control(
+        let qualifier = alias.as_deref().unwrap_or(output_name);
+        let schema = self.table_function_result(
             routines,
             TableFunctionTypeRequest {
                 name,
-                binding: binding.as_ref(),
+                binding,
                 args,
-                user_function: user_function.as_ref().map(|resolved| &**resolved.function),
+                user_function: user_function.map(|resolved| &**resolved.function),
                 user_invocation: user_function
-                    .as_ref()
                     .and_then(|resolved| resolved.binding.invocation.as_deref()),
                 declared_types: column_types,
                 columns,
                 ordinality: *ordinality,
             },
-            input,
-            params,
-            type_resolver,
-            &control,
-        )?;
-        let qualifier = alias.as_deref().unwrap_or(output_name);
-        let schema = RowSchema::with_column_metadata_with_control(
+            context,
             Some(qualifier),
-            columns
-                .iter()
-                .zip(types.iter())
-                .map(|(name, ty)| (name.as_str(), ty.as_ref(), None)),
-            &control,
         )?;
+        let resources = self.production.clone();
+        let control = resources.control();
         Ok(
             if user_function.is_none()
                 && !declared_host_columns
@@ -412,7 +406,7 @@ impl SchemaScope {
             .first()
             .ok_or_else(|| SQLError::Internal("ROWS FROM group has no functions".into()))?;
         let mut columns = ProductionVec::new(control);
-        let mut types = ProductionVec::new(control);
+        let mut fields = ProductionVec::new(control);
         let mut open = false;
         for function in functions {
             let member = function.copy_for_execution(&control)?;
@@ -423,18 +417,20 @@ impl SchemaScope {
                     control.copy_text(schema.public_name(position).unwrap_or(column))?,
                 )?;
             }
-            for ty in schema.column_types() {
-                types.push_produced(if open {
-                    control.finish(None, control.empty_reservation())?
+            for (position, ty) in schema.column_types().iter().enumerate() {
+                let (ty, memory) = if open {
+                    (None, control.empty_reservation())
                 } else {
-                    crate::plan::copy::copy_syntax_with_control(ty, &control)?
-                })?;
+                    crate::plan::copy::copy_syntax_with_control(ty, &control)?.into_parts()
+                };
+                let collation = ty.as_ref().and_then(|_| schema.column_collation(position));
+                fields.push_produced(control.finish((ty, collation), memory)?)?;
             }
         }
         if *ordinality {
             columns.push_produced(control.copy_text("ordinality")?)?;
-            types.push_produced(control.finish(
-                (!open).then_some(crate::ColumnType::BigInteger),
+            fields.push_produced(control.finish(
+                ((!open).then_some(crate::ColumnType::BigInteger), None),
                 control.empty_reservation(),
             )?)?;
         }
@@ -449,17 +445,15 @@ impl SchemaScope {
         }
         let schema = RowSchema::with_column_metadata_with_control(
             Some(qualifier),
-            columns
-                .iter()
-                .zip(types.iter())
-                .enumerate()
-                .map(|(position, (name, ty))| {
+            columns.iter().zip(fields.iter()).enumerate().map(
+                |(position, (name, (ty, collation)))| {
                     (
                         column_aliases.get(position).unwrap_or(name).as_str(),
                         ty.as_ref(),
-                        None,
+                        *collation,
                     )
-                }),
+                },
+            ),
             &control,
         )?;
         if open {

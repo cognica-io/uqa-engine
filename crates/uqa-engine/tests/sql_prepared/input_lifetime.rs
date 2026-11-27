@@ -58,45 +58,15 @@ fn open(provider: usize, path: &std::path::Path) -> Engine {
 #[case::sqlite(1)]
 #[case::sqlite_key_value(2)]
 #[case::redb(3)]
-fn prepared_inputs_follow_only_committed_peer_catalog_dependencies(#[case] provider: usize) {
+fn prepared_inputs_follow_only_committed_peer_catalog_dependencies(
+    #[case] provider: usize,
+    #[values(
+        include_str!("../../../../tests/parity/pg18/prepared_dependency_sessions.expected.json"),
+        include_str!("../../../../tests/parity/pg18/prepared_domain_peer_plans.expected.json"),
+    )]
+    reference: &str,
+) {
     let directory = tempfile::tempdir().unwrap();
     let engine = open(provider, &directory.path().join("prepared-peer.db"));
-    let peer = engine.new_session().unwrap();
-    let oracle: serde_json::Value = serde_json::from_str(include_str!(
-        "../../../../tests/parity/pg18/prepared_dependency_sessions.expected.json"
-    ))
-    .unwrap();
-    for schedule in oracle["schedules"].as_array().unwrap() {
-        for step in schedule["steps"].as_array().unwrap() {
-            let session = if step["session"] == "A" {
-                &engine
-            } else {
-                &peer
-            };
-            let sql = step["sql"].as_str().unwrap();
-            let actual = crate::pg18_oracle::run_case(session, sql);
-            if let Some(state) = step["result"]["sqlstate"].as_str() {
-                assert_eq!(
-                    actual["error"]["sqlstate"], state,
-                    "{}: {sql}: {actual}",
-                    schedule["name"]
-                );
-                assert_eq!(
-                    actual["error"]["message"], step["result"]["message"],
-                    "{sql}"
-                );
-            } else {
-                assert!(
-                    actual["error"].is_null(),
-                    "{}: {sql}: {actual}",
-                    schedule["name"]
-                );
-                assert_eq!(
-                    actual["results"][0]["rows"], step["result"]["rows"],
-                    "{}: {sql}",
-                    schedule["name"]
-                );
-            }
-        }
-    }
+    crate::pg18_peer::verify(&engine, reference);
 }

@@ -32,7 +32,8 @@ fn borrowed_fixed_declarations_preserve_legacy_candidate_selection() {
         let expected =
             resolve_local_builtin_overload(name, None, &names, &types, &declared).unwrap();
         let selected =
-            resolve_overload_with_control(name, None, &names, &types, false, &control).unwrap();
+            resolve_overload_with_control(name, None, &names, &types, false, None, &control)
+                .unwrap();
         assert_eq!(*selected, expected);
         assert_eq!(budget.used(), selected.reserved_bytes());
         let bound = resolve_overload_with_control(
@@ -41,6 +42,7 @@ fn borrowed_fixed_declarations_preserve_legacy_candidate_selection() {
             &names,
             &types,
             false,
+            None,
             &control,
         )
         .unwrap();
@@ -67,7 +69,8 @@ fn fixed_selector_keeps_bound_and_unbound_diagnostics() {
     ] {
         let declared = overloads(name).unwrap();
         let expected = resolve_local_builtin_overload(name, None, &names, &types, &declared);
-        let result = resolve_overload_with_control(name, None, &names, &types, false, &control);
+        let result =
+            resolve_overload_with_control(name, None, &names, &types, false, None, &control);
         match (expected, result) {
             (Ok(expected), Ok(actual)) => assert_eq!(expected, *actual),
             (Err(expected), Err(actual)) => {
@@ -103,6 +106,7 @@ fn fixed_selector_keeps_bound_and_unbound_diagnostics() {
         &[None],
         &[Some(ColumnType::Integer)],
         false,
+        None,
         &control,
     )
     .unwrap_err();
@@ -116,7 +120,8 @@ fn fixed_matching_and_output_reservations_release_on_resource_failure() {
     for limit in [0, 32, 128, 1024] {
         let budget = MemoryBudget::new(limit);
         let control = ProductionControl::new(&budget, &cancellation, &cancellation);
-        let result = resolve_overload_with_control("abs", None, &[None], &[None], false, &control);
+        let result =
+            resolve_overload_with_control("abs", None, &[None], &[None], false, None, &control);
         if let Err(error) = &result {
             assert!(matches!(error.sqlstate(), Some("53200" | "42725")));
         }
@@ -141,6 +146,7 @@ fn fixed_matching_and_output_reservations_release_on_resource_failure() {
                 &[None],
                 &[Some(ColumnType::Integer)],
                 false,
+                None,
                 &control
             )
             .unwrap_err()

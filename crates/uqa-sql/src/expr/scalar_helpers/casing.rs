@@ -35,12 +35,7 @@ impl CaseMapping {
     /// Select the provider of `collation`, which is `PostgreSQL`'s `inputcollid`. An indeterminate collation (zero) reports the function-specific `42P22` diagnostic that `subject` names, such as `lower() function` or `ILIKE`.
     pub(in crate::expr) fn select(collation: u32, subject: &str) -> Result<Self, SQLError> {
         if collation == 0 {
-            return Err(SQLError::Diagnostic {
-                sqlstate: "42P22".into(),
-                message: format!("could not determine which collation to use for {subject}"),
-                detail: None,
-                hint: Some("Use the COLLATE clause to set the collation explicitly.".into()),
-            });
+            return Err(crate::catalog::collations::indeterminate_error(subject));
         }
         let ctype = builtin_collation_ctype(collation).ok_or_else(|| {
             SQLError::Internal(format!("cache lookup failed for collation {collation}"))
@@ -52,7 +47,7 @@ impl CaseMapping {
         self,
         text: &str,
         control: &ProductionControl<'_>,
-    ) -> Result<Produced<String>, ValueRetentionError> {
+    ) -> Result<Produced<String>, SQLError> {
         self.map(text, CaseKind::Lower, control)
     }
 
@@ -60,7 +55,7 @@ impl CaseMapping {
         self,
         text: &str,
         control: &ProductionControl<'_>,
-    ) -> Result<Produced<String>, ValueRetentionError> {
+    ) -> Result<Produced<String>, SQLError> {
         self.map(text, CaseKind::Upper, control)
     }
 
@@ -69,7 +64,7 @@ impl CaseMapping {
         self,
         text: &str,
         control: &ProductionControl<'_>,
-    ) -> Result<Produced<String>, ValueRetentionError> {
+    ) -> Result<Produced<String>, SQLError> {
         self.map(text, CaseKind::Fold, control)
     }
 
@@ -78,9 +73,10 @@ impl CaseMapping {
         self,
         text: &str,
         control: &ProductionControl<'_>,
-    ) -> Result<Produced<String>, ValueRetentionError> {
+    ) -> Result<Produced<String>, SQLError> {
         let mut output = ProductionString::new(*control);
         control.check()?;
+        crate::expr::text_size::check_allocation_size(text.len() as u128 + 1)?;
         output.reserve(text.len())?;
         let mut mapped = MappedOutput::new(&mut output);
         match self.ctype {
@@ -144,8 +140,8 @@ impl CaseMapping {
             }
             BuiltinCollationCtype::IcuRoot => icu_titlecase(text, &mut mapped, control)?,
         }
-        mapped.flush()?;
-        output.finish()
+        mapped.finish()?;
+        Ok(output.finish()?)
     }
 
     fn map(
@@ -153,9 +149,10 @@ impl CaseMapping {
         text: &str,
         kind: CaseKind,
         control: &ProductionControl<'_>,
-    ) -> Result<Produced<String>, ValueRetentionError> {
+    ) -> Result<Produced<String>, SQLError> {
         let mut output = ProductionString::new(*control);
         control.check()?;
+        crate::expr::text_size::check_allocation_size(text.len() as u128 + 1)?;
         output.reserve(text.len())?;
         let mut mapped = MappedOutput::new(&mut output);
         let characters = UnicodeCharacters::new(self.sigma_rule());
@@ -163,8 +160,8 @@ impl CaseMapping {
             control.check()?;
             self.map_range(text, start, end, kind, characters, &mut mapped, control)?;
         }
-        mapped.flush()?;
-        output.finish()
+        mapped.finish()?;
+        Ok(output.finish()?)
     }
 
     fn sigma_rule(self) -> FinalSigmaRule {

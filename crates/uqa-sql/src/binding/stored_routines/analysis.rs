@@ -157,6 +157,7 @@ impl CatalogRoutineAnalysisContext<'_> {
                 outer,
                 &scope.binding_context()?,
             )
+            .map(|_| ())
         })
     }
 }

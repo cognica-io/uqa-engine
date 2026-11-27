@@ -14,13 +14,14 @@ use crate::{
     routines::RoutineResolution,
     SQLError, SQLParam, ScalarExpr as Expr,
 };
-use std::collections::BTreeSet;
 use uqa_core::{memory::ProductionControl, Value};
 
 mod production;
 pub use production::prepare_inference_predicate_with_control;
 
 pub trait ConflictCatalog {
+    /// Namespace and routines used to recover analysis metadata from an older index expression.
+    fn inference_context(&self) -> InferenceContext<'_>;
     fn try_describe_table(&self, table: &str) -> Result<Option<Vec<ColumnDef>>, String>;
     /// The selected relation's named row type; catalogs without a type identity retain an anonymous row.
     fn relation_row_type(&self, _table: &str) -> Result<Option<crate::ColumnType>, SQLError> {
@@ -96,6 +97,45 @@ fn inference_identity(expression: Expr) -> Expr {
     .expect("ordinary inference ownership")
 }
 
+#[derive(Clone, Copy, PartialEq)]
+enum Operand<'a> {
+    Column(&'a str),
+    Expression(&'a Expr),
+}
+fn operand(expr: &Expr) -> Operand<'_> {
+    match expr {
+        Expr::Column(name) => Operand::Column(name.as_str()),
+        _ => Operand::Expression(expr),
+    }
+}
+
+fn inference_target<'a>(
+    catalog: &dyn ConflictCatalog,
+    conflict: &'a ConflictPlan,
+) -> Result<Vec<(Operand<'a>, Option<u32>)>, SQLError> {
+    let mut target = conflict
+        .conflict_columns
+        .iter()
+        .map(|column| (Operand::Column(column), None))
+        .collect::<Vec<_>>();
+    for (position, expr) in conflict.expressions.iter().enumerate() {
+        let collation = conflict
+            .constraint
+            .collation(position)
+            .map(|name| {
+                crate::catalog::collations::expression::select(
+                    name,
+                    None,
+                    None,
+                    Some(catalog.inference_context().routines),
+                )
+            })
+            .transpose()?;
+        target.push((operand(expr), collation));
+    }
+    Ok(target)
+}
+
 /// Match the inference expressions analyzed by [`prepare_inference_predicate`] against the stored unique keys.
 pub fn conflict_key_indices(
     catalog: &dyn ConflictCatalog,
@@ -103,57 +143,89 @@ pub fn conflict_key_indices(
     keys: &[EnforcedKey],
     conflict: &ConflictPlan,
 ) -> Result<Vec<usize>, SQLError> {
-    if let Some(name) = &conflict.constraint {
+    if let crate::ast::ConflictTargetConstraint::Named(name) = &conflict.constraint {
         return constraint_target_index(catalog, table, keys, name);
     }
     if conflict.conflict_columns.is_empty() && conflict.expressions.is_empty() {
         return Ok((0..keys.len()).collect());
     }
-    validate_conflict_columns(catalog, table, &conflict.conflict_columns)?;
-    let target = conflict
-        .conflict_columns
-        .iter()
-        .map(String::as_str)
-        .collect::<BTreeSet<_>>();
-    let indexes = keys
-        .iter()
-        .enumerate()
-        .filter_map(|(index, key)| {
-            (key.columns
-                .iter()
-                .map(String::as_str)
-                .collect::<BTreeSet<_>>()
-                == target
-                && {
-                    let expressions = key
-                        .keys
-                        .iter()
-                        .filter_map(|key| match key {
-                            crate::ast::IndexKey::Expression(expr) => Some(inference_identity(
-                                ExpressionPlan::lower((**expr).clone()).scalar,
-                            )),
-                            crate::ast::IndexKey::Column(_) => None,
-                        })
-                        .collect::<Vec<_>>();
-                    expressions
-                        .iter()
-                        .all(|expr| conflict.expressions.contains(expr))
-                        && conflict
-                            .expressions
-                            .iter()
-                            .all(|expr| expressions.contains(expr))
+    let columns = validate_conflict_columns(catalog, table, &conflict.conflict_columns)?;
+    let target = inference_target(catalog, conflict)?;
+    let needs_key_collation = target.iter().any(|(_, oid)| oid.is_some());
+    let mut legacy_scope = None;
+    let mut stored_identity = |syntax: &crate::ast::Expr, read_collation: bool| {
+        let mut plan = ExpressionPlan::lower(syntax.clone());
+        let mut collation = None;
+        if read_collation || needs_index_collations(syntax, &columns) {
+            let context = catalog.inference_context();
+            let (snapshot, schema) = match &legacy_scope {
+                Some(scope) => scope,
+                None => legacy_scope.insert((
+                    context.binding.binding_scope()?,
+                    crate::RowSchema::with_column_definitions(Some(table), &columns),
+                )),
+            };
+            collation = Some(crate::binding::assign_stored_input_collations(
+                context.routines,
+                &mut plan,
+                schema,
+                &snapshot.context(),
+            )?);
+        }
+        Ok::<_, SQLError>((inference_identity(plan.scalar), collation))
+    };
+    let mut indexes = Vec::new();
+    for (index, key) in keys.iter().enumerate() {
+        let mut satisfied = vec![false; target.len()];
+        let mut all_attributes_named = true;
+        for (position, attribute) in key.keys.iter().enumerate() {
+            let recorded = key
+                .key_order
+                .get(position)
+                .and_then(|order| order.collation_oid);
+            let expression;
+            let (value, collation) = match attribute {
+                crate::ast::IndexKey::Column(name) => {
+                    let oid = recorded.or_else(|| {
+                        if !needs_key_collation {
+                            return None;
+                        }
+                        let column = columns.iter().find(|column| column.name == *name)?;
+                        u32::try_from(crate::catalog::collations::declarations::column_oid(column))
+                            .ok()
+                    });
+                    (Operand::Column(name), oid)
                 }
-                && key.predicate.as_deref().is_none_or(|required| {
-                    conflict.predicate.as_deref().is_some_and(|given| {
-                        implies(
-                            given,
-                            &inference_identity(ExpressionPlan::lower(required.clone()).scalar),
-                        )
-                    })
-                }))
-            .then_some(index)
-        })
-        .collect::<Vec<_>>();
+                crate::ast::IndexKey::Expression(syntax) => {
+                    let (identity, natural) =
+                        stored_identity(syntax, needs_key_collation && recorded.is_none())?;
+                    expression = identity;
+                    (operand(&expression), recorded.or(natural))
+                }
+            };
+            // A duplicated expression can occur at several positions with different collations. Each inference element must match one attribute of this index.
+            let mut named = false;
+            for ((wanted, qualifier), matched) in target.iter().zip(&mut satisfied) {
+                if *wanted == value {
+                    named = true;
+                    *matched |= qualifier.is_none() || *qualifier == collation;
+                }
+            }
+            all_attributes_named &= named;
+        }
+        if !all_attributes_named || satisfied.contains(&false) {
+            continue;
+        }
+        if let Some(required) = key.predicate.as_deref() {
+            let Some(given) = conflict.predicate.as_deref() else {
+                continue;
+            };
+            if !implies(given, &stored_identity(required, false)?.0) {
+                continue;
+            }
+        }
+        indexes.push(index);
+    }
     if indexes.is_empty() {
         return Err(SQLError::Routine {
             sqlstate: "42P10".into(),
@@ -163,6 +235,42 @@ pub fn conflict_key_indices(
         });
     }
     Ok(indexes)
+}
+
+/// Older catalogs stored bare comparisons and omitted some calls' selected input collations. The SQL binder reconstructs that metadata against the indexed relation before comparing identities.
+fn needs_index_collations(syntax: &crate::ast::Expr, columns: &[ColumnDef]) -> bool {
+    use crate::ast::{Expr, FunctionDispatch};
+    use crate::catalog::collations::DEFAULT_COLLATION_OID;
+    if crate::binding::legacy_collations::expression_lacks_input_collation(syntax) {
+        return true;
+    }
+    let bare_operation = syntax.any_node(&|node| match node {
+        Expr::Binary { op, .. } => op.comparison().is_some() && op.input_collation().is_none(),
+        Expr::Func {
+            binding: Some(binding),
+            ..
+        } => {
+            binding.input_collation.is_none()
+                && matches!(binding.dispatch, Some(FunctionDispatch::Pattern { .. }))
+        }
+        _ => false,
+    });
+    bare_operation
+        && syntax.any_node(&|node| match node {
+            Expr::Column(name) | Expr::QualifiedColumn { column: name, .. } => {
+                columns.iter().any(|column| {
+                    column.name.as_str() == name.as_str()
+                        && column
+                            .collation_oid
+                            .is_some_and(|oid| i64::from(oid) != DEFAULT_COLLATION_OID)
+                })
+            }
+            Expr::Func {
+                binding: Some(binding),
+                ..
+            } => matches!(binding.dispatch, Some(FunctionDispatch::Collate { .. })),
+            _ => false,
+        })
 }
 
 /// Prove that every row for which `given` is true also makes `required` true. SQL NULL is never treated as false in a proof that would admit an invalid arbiter.
@@ -207,29 +315,23 @@ fn comparison(expr: &Expr) -> Option<(&Expr, BinaryOp, &Value)> {
     let Expr::Binary { op, lhs, rhs } = expr else {
         return None;
     };
-    if !matches!(
-        op,
-        BinaryOp::Equal
-            | BinaryOp::NotEqual
-            | BinaryOp::Less
-            | BinaryOp::LessEqual
-            | BinaryOp::Greater
-            | BinaryOp::GreaterEqual
-    ) {
-        return None;
-    }
-    if let Expr::Literal(value) = rhs.as_ref() {
+    let operator = op.comparison()?;
+    if let Expr::Literal(value) | Expr::TypedLiteral { value, .. } = rhs.as_ref() {
         return Some((lhs, *op, value));
     }
-    if let Expr::Literal(value) = lhs.as_ref() {
-        let reversed = match op {
+    if let Expr::Literal(value) | Expr::TypedLiteral { value, .. } = lhs.as_ref() {
+        let reversed = match operator.binary() {
             BinaryOp::Less => BinaryOp::Greater,
             BinaryOp::LessEqual => BinaryOp::GreaterEqual,
             BinaryOp::Greater => BinaryOp::Less,
             BinaryOp::GreaterEqual => BinaryOp::LessEqual,
-            other => *other,
+            other => other,
         };
-        return Some((rhs, reversed, value));
+        return Some((
+            rhs,
+            reversed.with_input_collation(op.input_collation()),
+            value,
+        ));
     }
     None
 }
@@ -242,8 +344,23 @@ fn comparison_implies(given: BinaryOp, left: &Value, required: BinaryOp, right: 
     if std::mem::discriminant(left) != std::mem::discriminant(right) {
         return false;
     }
-    let order = left.cmp(right);
-    match (given, required) {
+    if given.input_collation() != required.input_collation() {
+        return false;
+    }
+    let collation = given.input_collation().map_or(
+        crate::catalog::collations::DEFAULT_COLLATION_OID as u32,
+        crate::catalog::collations::CollationSelection::oid,
+    );
+    let Ok(order) = crate::expr::compare_typed_values_with_catalog_and_collation(
+        left,
+        right,
+        collation,
+        &ProductionControl::uncontrolled(),
+        None,
+    ) else {
+        return false;
+    };
+    match (given.uncollated(), required.uncollated()) {
         (Equal, Equal) | (NotEqual, NotEqual) => order.is_eq(),
         (Equal, NotEqual) => !order.is_eq(),
         (Equal | GreaterEqual, Greater) | (GreaterEqual, NotEqual) => order.is_gt(),
@@ -318,7 +435,7 @@ fn validate_conflict_columns(
     catalog: &dyn ConflictCatalog,
     table: &str,
     names: &[String],
-) -> Result<(), SQLError> {
+) -> Result<Vec<ColumnDef>, SQLError> {
     let columns = catalog
         .try_describe_table(table)
         .map_err(SQLError::Internal)?
@@ -333,7 +450,7 @@ fn validate_conflict_columns(
             return Err(SQLError::UnknownColumn(name.clone()));
         }
     }
-    Ok(())
+    Ok(columns)
 }
 
 #[cfg(test)]

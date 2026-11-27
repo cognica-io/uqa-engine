@@ -66,5 +66,28 @@
     "index": "CREATE UNIQUE INDEX folded_active ON sources(lower(email), tenant) WHERE active",
     "query": "INSERT INTO sources VALUES('ONE',1,true,5) ON CONFLICT(lower(email),tenant) WHERE active DO UPDATE SET n=excluded.n",
     "error": null
+  },
+  {
+    "table": "CREATE TABLE inferred_c(a text COLLATE \"C\")",
+    "index": "CREATE UNIQUE INDEX inferred_c_key ON inferred_c(a) WHERE a > 'a'",
+    "query": "INSERT INTO inferred_c VALUES ('q') ON CONFLICT (a) WHERE a > 'b' DO NOTHING",
+    "error": null
+  },
+  {
+    "table": "CREATE TABLE inferred_c(a text COLLATE \"C\")",
+    "index": "CREATE UNIQUE INDEX inferred_c_key ON inferred_c(a) WHERE a > 'a'",
+    "query": "INSERT INTO inferred_c VALUES ('q') ON CONFLICT (a) WHERE (a COLLATE \"POSIX\") > 'b' DO NOTHING",
+    "error": {
+      "sqlstate": "42P10",
+      "message": "there is no unique or exclusion constraint matching the ON CONFLICT specification",
+      "detail": null,
+      "hint": null
+    }
+  },
+  {
+    "table": "CREATE TABLE inferred_c(a text COLLATE \"C\")",
+    "index": "CREATE UNIQUE INDEX inferred_c_key ON inferred_c(a) WHERE a > 'a'",
+    "query": "INSERT INTO inferred_c VALUES ('q') ON CONFLICT (a) WHERE (a COLLATE \"C\") > 'b' DO NOTHING",
+    "error": null
   }
 ]

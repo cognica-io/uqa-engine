@@ -728,6 +728,105 @@ pub enum BinaryOp {
     Subtract,
     Multiply,
     Divide,
+    Compare {
+        operator: ComparisonOperator,
+        collation: crate::catalog::collations::CollationSelection,
+    },
+}
+
+/// A comparison whose operands have a selected non-default input collation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[repr(u8)]
+pub enum ComparisonOperator {
+    Equal = 0,
+    NotEqual = 1,
+    Less = 2,
+    LessEqual = 3,
+    Greater = 4,
+    GreaterEqual = 5,
+}
+
+impl ComparisonOperator {
+    #[must_use]
+    pub const fn binary(self) -> BinaryOp {
+        match self {
+            Self::Equal => BinaryOp::Equal,
+            Self::NotEqual => BinaryOp::NotEqual,
+            Self::Less => BinaryOp::Less,
+            Self::LessEqual => BinaryOp::LessEqual,
+            Self::Greater => BinaryOp::Greater,
+            Self::GreaterEqual => BinaryOp::GreaterEqual,
+        }
+    }
+}
+
+impl BinaryOp {
+    /// `PostgreSQL` spelling of the selected operator.
+    #[must_use]
+    pub const fn sql(self) -> &'static str {
+        match self {
+            Self::Equal => "=",
+            Self::NotEqual => "<>",
+            Self::Less => "<",
+            Self::LessEqual => "<=",
+            Self::Greater => ">",
+            Self::GreaterEqual => ">=",
+            Self::Add => "+",
+            Self::Subtract => "-",
+            Self::Multiply => "*",
+            Self::Divide => "/",
+            Self::Compare { operator, .. } => operator.binary().sql(),
+        }
+    }
+
+    #[must_use]
+    pub const fn comparison(self) -> Option<ComparisonOperator> {
+        match self {
+            Self::Equal => Some(ComparisonOperator::Equal),
+            Self::NotEqual => Some(ComparisonOperator::NotEqual),
+            Self::Less => Some(ComparisonOperator::Less),
+            Self::LessEqual => Some(ComparisonOperator::LessEqual),
+            Self::Greater => Some(ComparisonOperator::Greater),
+            Self::GreaterEqual => Some(ComparisonOperator::GreaterEqual),
+            Self::Compare { operator, .. } => Some(operator),
+            Self::Add | Self::Subtract | Self::Multiply | Self::Divide => None,
+        }
+    }
+
+    #[must_use]
+    pub const fn input_collation(self) -> Option<crate::catalog::collations::CollationSelection> {
+        match self {
+            Self::Compare { collation, .. } => Some(collation),
+            _ => None,
+        }
+    }
+
+    #[must_use]
+    pub const fn uncollated(self) -> Self {
+        match self {
+            Self::Compare { operator, .. } => operator.binary(),
+            simple => simple,
+        }
+    }
+
+    #[must_use]
+    pub fn with_input_collation(
+        self,
+        selection: Option<crate::catalog::collations::CollationSelection>,
+    ) -> Self {
+        match (self.comparison(), selection) {
+            (Some(operator), Some(collation))
+                if i64::from(collation.oid())
+                    != crate::catalog::collations::DEFAULT_COLLATION_OID =>
+            {
+                Self::Compare {
+                    operator,
+                    collation,
+                }
+            }
+            _ => self.uncollated(),
+        }
+    }
 }
 
 /// `Expr` restricted to value-producing forms used by `INSERT` rows.

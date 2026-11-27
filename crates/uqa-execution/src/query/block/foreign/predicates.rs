@@ -161,7 +161,11 @@ pub fn fdw_binary_op(op: BinaryOp) -> Option<uqa_fdw::PredicateOp> {
         BinaryOp::LessEqual => uqa_fdw::PredicateOp::LtEq,
         BinaryOp::Greater => uqa_fdw::PredicateOp::Gt,
         BinaryOp::GreaterEqual => uqa_fdw::PredicateOp::GtEq,
-        BinaryOp::Add | BinaryOp::Subtract | BinaryOp::Multiply | BinaryOp::Divide => return None,
+        BinaryOp::Compare { .. }
+        | BinaryOp::Add
+        | BinaryOp::Subtract
+        | BinaryOp::Multiply
+        | BinaryOp::Divide => return None,
     })
 }
 
@@ -173,7 +177,11 @@ pub fn fdw_reversed_binary_op(op: BinaryOp) -> Option<uqa_fdw::PredicateOp> {
         BinaryOp::LessEqual => uqa_fdw::PredicateOp::GtEq,
         BinaryOp::Greater => uqa_fdw::PredicateOp::Lt,
         BinaryOp::GreaterEqual => uqa_fdw::PredicateOp::LtEq,
-        BinaryOp::Add | BinaryOp::Subtract | BinaryOp::Multiply | BinaryOp::Divide => return None,
+        BinaryOp::Compare { .. }
+        | BinaryOp::Add
+        | BinaryOp::Subtract
+        | BinaryOp::Multiply
+        | BinaryOp::Divide => return None,
     })
 }
 

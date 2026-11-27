@@ -12,6 +12,48 @@ use uqa_core::{
 };
 
 impl<'a> Input<'a, '_> {
+    fn binary_operator(
+        &mut self,
+        token: JsonToken<'a>,
+    ) -> Result<crate::ast::BinaryOp, InputError> {
+        let (tag, object) = self.tag(token)?;
+        let op = if tag.as_str() == "Compare" {
+            if !object {
+                return Err(invalid());
+            }
+            let (mut operator, mut collation) = (None, None);
+            let body = self.next()?;
+            self.fields(
+                body,
+                &["operator", "collation"],
+                3,
+                |input, position, value| {
+                    if position == 0 {
+                        operator = Some(unit(&input.unit_tag(value)?)?);
+                    } else {
+                        let oid = crate::ast::stored_input::number(value)?;
+                        collation = Some(
+                            crate::catalog::collations::CollationSelection::from_oid(oid)
+                                .ok_or_else(invalid)?,
+                        );
+                    }
+                    Ok(())
+                },
+            )?;
+            crate::ast::BinaryOp::Compare {
+                operator: operator.expect("required comparison"),
+                collation: collation.expect("required collation"),
+            }
+        } else {
+            if object && self.next()? != JsonToken::Null {
+                return Err(invalid());
+            }
+            unit(&tag)?
+        };
+        self.close_tag(object)?;
+        Ok(op)
+    }
+
     pub(super) fn binary_expression(
         &mut self,
         token: JsonToken<'a>,
@@ -20,7 +62,7 @@ impl<'a> Input<'a, '_> {
         let (mut op, mut lhs, mut rhs) = (None, None, None);
         self.fields(token, &["op", "lhs", "rhs"], 7, |input, index, token| {
             match index {
-                0 => op = Some(unit(&input.unit_tag(token)?)?),
+                0 => op = Some(input.binary_operator(token)?),
                 1 => lhs = Some(input.child_box(token, children, Slot::First)?),
                 _ => rhs = Some(input.child_box(token, children, Slot::Second)?),
             }

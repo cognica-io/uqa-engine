@@ -169,6 +169,8 @@ impl Engine {
                 .catalog_registry
                 .seen
                 .store(registry_epoch, Ordering::Release);
+        } else {
+            self.invalidate_prepared_plans();
         }
     }
 
@@ -188,8 +190,8 @@ impl Engine {
             .table_data
             .seen
             .store(data_epoch, Ordering::Release);
+        // This is exactly the commit whose mutations the session already applied. Definition publishers delivered their own dependency invalidations.
         self.clear_bayesian_params_cache();
-        self.invalidate_prepared_plans();
     }
 
     /// An epoch may be published after the physical commit was already seen.

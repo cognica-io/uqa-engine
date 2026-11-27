@@ -8,7 +8,7 @@
 
 use super::{boxed, invalid, payload, Fields, MemoryReservation, SQLError, ScalarExpr};
 use crate::{
-    ast::{BinaryOp, FunctionCallSyntax, InternalColumnRef},
+    ast::{FunctionCallSyntax, InternalColumnRef},
     ir::ScalarOrder,
 };
 
@@ -160,19 +160,7 @@ impl Fields<'_> {
         }
         *value = match tag {
             13 => {
-                let op = match self.binary.array::<1>().await?[0] {
-                    0 => BinaryOp::Equal,
-                    1 => BinaryOp::NotEqual,
-                    2 => BinaryOp::Less,
-                    3 => BinaryOp::LessEqual,
-                    4 => BinaryOp::Greater,
-                    5 => BinaryOp::GreaterEqual,
-                    6 => BinaryOp::Add,
-                    7 => BinaryOp::Subtract,
-                    8 => BinaryOp::Multiply,
-                    9 => BinaryOp::Divide,
-                    _ => return Err(invalid("scalar binary operator tag")),
-                };
+                let op = self.binary_operator().await?;
                 ScalarExpr::Binary {
                     op,
                     lhs: boxed(ScalarExpr::Star, memory)?,

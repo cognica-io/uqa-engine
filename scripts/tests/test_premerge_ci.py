@@ -76,10 +76,7 @@ class PremergeCIWorkflowContractTest(unittest.TestCase):
         self.assertEqual(push_trigger, expected_trigger)
 
     def test_pull_request_validation_runs_only_for_completed_batches(self) -> None:
-        expected = {"ci.yml", "pr-checks.yml", "performance-checks.yml", "dependency-checks.yml",
-                    "regular-expression-checks.yml", "http-carrier-parity.yml",
-                    "fdw-features.yml", "wasm-build-checks.yml", "usql-release-checks.yml",
-                    "c-bindings.yml", "c-packages.yml"}
+        expected = {"ci.yml", "pr-checks.yml", "dependency-checks.yml"}
         actual = set()
         for path in (ROOT / ".github/workflows").glob("*.yml"):
             workflow = path.read_text(encoding="utf-8")
@@ -99,9 +96,9 @@ class PremergeCIWorkflowContractTest(unittest.TestCase):
                     self.assertNotIn(update, events)
         self.assertEqual(actual, expected)
 
-    def test_rust_jobs_run_for_ready_pr_main_push_or_selected_dispatch(self) -> None:
+    def test_rust_jobs_run_for_main_push_or_selected_dispatch(self) -> None:
         condition = (
-            "if: ${{ github.event_name == 'push' || github.event_name == 'pull_request' || "
+            "if: ${{ github.event_name == 'push' || "
             "(github.event_name == 'workflow_dispatch' && inputs.run_rust) }}"
         )
 
@@ -109,7 +106,28 @@ class PremergeCIWorkflowContractTest(unittest.TestCase):
         self.assertIn("(github.event_name == 'workflow_dispatch' && (inputs.run_rust || inputs.run_nori_allocations))", self.workflow)
         self.assertNotIn("if: ${{ inputs.run_rust }}", self.workflow)
 
-    def test_upstream_reference_is_required_by_the_merge_gate(self) -> None:
+    def test_pull_requests_run_repository_tests_without_product_jobs(self) -> None:
+        jobs = self.workflow.split("\njobs:\n", 1)[1]
+        blocks = re.split(r"(?m)^  ([a-z-]+):\n", jobs)
+        for name, job in zip(blocks[1::2], blocks[2::2]):
+            with self.subTest(job=name):
+                if name == "gate":
+                    self.assertIn("runs-on: ubuntu-24.04", job)
+                    self.assertIn("if: github.event_name == 'pull_request'\n        run: python3 -m unittest discover", job)
+                else:
+                    predicate = re.search(r"(?m)^    if: (.*)$", job)
+                    self.assertIsNotNone(predicate)
+                    self.assertRegex(predicate[1], r"github.event_name == '(push|workflow_dispatch)'")
+                    self.assertNotIn("pull_request", predicate[1])
+
+    def test_native_and_browser_workflows_qualify_main_pushes(self) -> None:
+        for name in ("performance-checks", "fdw-features", "c-bindings", "c-packages", "wasm-build-checks",
+                     "usql-release-checks", "http-carrier-parity", "regular-expression-checks"):
+            with self.subTest(workflow=name):
+                source = (WORKFLOW.parent / (name + ".yml")).read_text()
+                self.assertIn("  push:\n    branches: [main]\n", source)
+
+    def test_upstream_reference_is_required_by_the_status_gate(self) -> None:
         gate = self.workflow.split("  gate:\n", 1)[1]
         needs = gate.split("    needs: [", 1)[1].split("]", 1)[0]
         self.assertIn("upstream-regression-oracle", [name.strip() for name in needs.split(",")])
@@ -123,7 +141,7 @@ class PremergeCIWorkflowContractTest(unittest.TestCase):
             self.assertIn(f"uses: ./.github/workflows/{job}.yml", full)
         self.assertIn("  nori-benchmark:\n", self.workflow)
 
-    def test_nori_regeneration_and_all_reference_drivers_are_required_by_the_merge_gate(self) -> None:
+    def test_nori_regeneration_and_all_reference_drivers_are_required_by_the_status_gate(self) -> None:
         gate = self.workflow.split("  gate:\n", 1)[1]
         needs = gate.split("    needs: [", 1)[1].split("]", 1)[0]
         self.assertIn("nori-reference", [name.strip() for name in needs.split(",")])
@@ -203,7 +221,7 @@ class PremergeCIWorkflowContractTest(unittest.TestCase):
         self.assertIn("if: runner.os == 'macOS' && inputs.check-regressions", build)
         self.assertIn("uses: ./.github/actions/select-validation-inputs", build)
         self.assertIn("steps.regression.outputs.required == 'true'", build)
-        self.assertIn("os: macos-26-arm64\n      check-regressions: ${{ github.event_name == 'push' || github.event_name == 'pull_request' }}", self.workflow)
+        self.assertIn("os: macos-26-arm64\n      check-regressions: ${{ github.event_name == 'push' }}", self.workflow)
         self.assertLess(build.index("name: Retain macOS workspace test results"), build.index("--workspace-results"))
         self.assertNotIn("macos-26-arm64", (workflows / "performance-checks.yml").read_text())
         self.assertNotIn("self-hosted", (workflows / "performance-platform.yml").read_text())

@@ -61,14 +61,14 @@ impl OwnedScalarExpr {
     ) -> Result<Self> {
         self.assert_owner(control);
         control.check()?;
-        let ScalarExpr::Func {
-            binding: Some(binding),
-            ..
-        } = &mut self.expression
-        else {
-            panic!("input collation requires a selected call")
-        };
-        binding.input_collation = collation;
+        match &mut self.expression {
+            ScalarExpr::Func {
+                binding: Some(binding),
+                ..
+            } => binding.input_collation = collation,
+            ScalarExpr::Binary { op, .. } => *op = op.with_input_collation(collation),
+            _ => panic!("input collation requires a selected operation"),
+        }
         Ok(self)
     }
 

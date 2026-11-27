@@ -344,6 +344,16 @@ impl Selected<'_> {
                 *order_syntax = *bound;
                 Ok(true)
             }
+            Expr::Binary { op, .. } => match self.values.next() {
+                Some(ValueSite::Comparison(selected))
+                    if selected.uncollated() == op.uncollated() =>
+                {
+                    *op = *selected;
+                    Ok(true)
+                }
+                Some(ValueSite::Node) => Ok(changed),
+                _ => Err(mismatch("comparison")),
+            },
             _ => match self.values.next() {
                 Some(ValueSite::Node) => Ok(changed),
                 _ => Err(mismatch("expression")),

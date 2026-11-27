@@ -41,6 +41,7 @@ mod containment;
 pub(crate) mod enums;
 mod equality;
 pub(crate) mod field_selection;
+pub(crate) use common::unnest_result_type;
 pub use field_selection::relation_column as relation_field_column;
 pub use field_selection::relation_column_ref as relation_field_column_ref;
 mod fixed_builtin;
@@ -251,6 +252,16 @@ pub trait FunctionTypeResolver: Send + Sync {
     /// Resolve a catalog-owned SQL type name that is not represented by the
     /// built-in [`ColumnType::from_sql_name`] mapping, such as a domain.
     fn resolve_type_name(&self, _name: &str) -> Result<Option<ColumnType>, SQLError> {
+        Ok(None)
+    }
+
+    /// Resolve the member type of a catalog-declared multirange in the same statement snapshot.
+    fn multirange_member_type_with_control(
+        &self,
+        _ty: &ColumnType,
+        control: &uqa_core::memory::ProductionControl<'_>,
+    ) -> Result<Option<uqa_core::memory::Produced<ColumnType>>, SQLError> {
+        control.check()?;
         Ok(None)
     }
 

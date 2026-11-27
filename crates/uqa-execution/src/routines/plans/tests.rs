@@ -45,6 +45,7 @@ fn selection(plan: uqa_sql::plan::SharedExecutablePlan) -> PreparedPlanSelection
             composite_inputs: CompositeInputs::default(),
             reanalyzed: None,
             generic_plan: Some(plan),
+            generic_domains: uqa_sql::prepared::domains::GenericDomainInputs::default(),
             generic_cost: Some(1.0),
             custom_cost: None,
         },

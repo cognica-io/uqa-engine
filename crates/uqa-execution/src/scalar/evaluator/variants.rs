@@ -51,15 +51,7 @@ pub(super) fn row(
     fields.reserve(items.len())?;
     let mut complete = true;
     for item in items {
-        let field = context.with_type_schema(|schema| {
-            uqa_sql::type_resolution::scalar_record_field_type_with_control(
-                item,
-                schema,
-                context.params(),
-                context.function_hook(),
-                control,
-            )
-        })?;
+        let field = row_field_type(item, context, control)?;
         if let Some(field) = field {
             fields.push_copy(field)?;
         } else {
@@ -87,6 +79,22 @@ pub(super) fn row(
     control.finish(Value::Row(row), memory).map_err(Into::into)
 }
 
+fn row_field_type(
+    item: &ScalarExpr,
+    context: &ScalarEvalContext<'_>,
+    control: &ProductionControl<'_>,
+) -> Result<Option<uqa_core::RecordFieldType>, SQLError> {
+    context.with_type_schema(|schema| {
+        uqa_sql::type_resolution::scalar_record_field_type_with_control(
+            item,
+            schema,
+            context.params(),
+            context.function_hook(),
+            control,
+        )
+    })
+}
+
 pub(super) fn binary(
     op: BinaryOp,
     lhs: &ScalarExpr,
@@ -94,6 +102,24 @@ pub(super) fn binary(
     context: &ScalarEvalContext<'_>,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Value>, SQLError> {
+    if let (Some(op), ScalarExpr::Row(left), ScalarExpr::Row(right)) = (op.comparison(), lhs, rhs) {
+        let truth = uqa_sql::expr::eval_row_comparison_with_control(
+            op,
+            left,
+            right,
+            control,
+            context.function_hook(),
+            context.enum_binary_comparison_state(lhs),
+            |item| {
+                let field = row_field_type(item, context, control)?;
+                Ok((
+                    eval_scalar_inner(item, context, control)?,
+                    field.map(|field| field.oid),
+                ))
+            },
+        )?;
+        return plain(truth.map_or(Value::Null, Value::Bool), control);
+    }
     let left = eval_scalar_inner(lhs, context, control)?;
     let right = eval_scalar_inner(rhs, context, control)?;
     binary_values(op, lhs, rhs, &left, &right, context, control)
@@ -110,18 +136,8 @@ fn binary_values(
     context: &ScalarEvalContext<'_>,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Value>, SQLError> {
-    if matches!(
-        op,
-        BinaryOp::Equal
-            | BinaryOp::NotEqual
-            | BinaryOp::Less
-            | BinaryOp::LessEqual
-            | BinaryOp::Greater
-            | BinaryOp::GreaterEqual
-    ) {
-        if matches!((left, right), (Value::Row(_), Value::Row(_)))
-            && !matches!((lhs, rhs), (ScalarExpr::Row(_), ScalarExpr::Row(_)))
-        {
+    if op.comparison().is_some() {
+        if matches!((left, right), (Value::Row(_), Value::Row(_))) {
             let value = uqa_sql::expr::eval_record_comparison_truth_with_engine(
                 op,
                 left,

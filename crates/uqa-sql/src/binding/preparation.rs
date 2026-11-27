@@ -28,7 +28,8 @@ pub(crate) use production::bind_routine_parameter_references_from;
 pub(crate) use production::bind_rule_inputs_owned;
 pub(in crate::binding) use production::retain_input_metadata_owned;
 pub use production::{
-    bind_expression_plan_routines_for_storage_owned, resolve_variable_sites_owned,
+    bind_executable_expression, bind_expression_plan_routines_for_storage_owned,
+    resolve_variable_sites_owned, BoundExpression,
 };
 pub use production::{
     bind_routine_parameter_references_owned, parameter_input_types_with_control,
@@ -183,8 +184,6 @@ fn read_executable_inputs_inner(
     aliases: &dyn OidAliasInput,
     kind: InputAnalysisKind,
 ) -> Result<ExecutableInputAnalysis, SQLError> {
-    use super::statements::AnalyzedResult;
-
     let (declared, track_dependencies) = match kind {
         InputAnalysisKind::Host => (
             crate::params::bind_parameter_types(params, routines)?,
@@ -207,26 +206,8 @@ fn read_executable_inputs_inner(
         .retain_result_metadata(),
         schema_expression: None,
     };
-    let mut finish_parameters = false;
-    let result = match &*plan {
-        UnifiedPlan::Query(query) => AnalyzedResult::Schema(analysis.query(query, None)?),
-        UnifiedPlan::Command(command) => match command.as_ref() {
-            crate::plan::CommandPlan::CreateView { .. }
-            | crate::plan::CommandPlan::CreateTableAs { .. }
-            | crate::plan::CommandPlan::CreateMaterializedView { .. }
-            | crate::plan::CommandPlan::DeclareCursor { .. } => {
-                analysis.command(command)?;
-                AnalyzedResult::Command
-            }
-            _ if command.mutation_target().is_some() => {
-                finish_parameters = true;
-                analysis
-                    .command(command)?
-                    .map_or(AnalyzedResult::Command, AnalyzedResult::Schema)
-            }
-            _ => AnalyzedResult::Command,
-        },
-    };
+    let (result, finish_parameters) =
+        analysis.executable_result(crate::plan::PlanRef::from(&*plan))?;
     let constants = analysis.parameters.take_input_constants();
     if finish_parameters {
         analysis.parameters.finish()?;
@@ -336,6 +317,7 @@ fn analyze_schema_expression(
             kind,
         }),
     )
+    .map(|(ty, _)| ty)
 }
 
 /// Retain input literals in typed stored syntax before routine binding and publication.
@@ -344,7 +326,7 @@ pub(crate) fn analyze_stored_expression_inputs(
     expression: &mut crate::plan::ExpressionPlan,
     binding: &BindingContext<'_>,
     input: &RowSchema,
-) -> Result<Option<ColumnType>, SQLError> {
+) -> Result<(Option<ColumnType>, u32), SQLError> {
     analyze_expression_inputs(catalog, catalog, expression, input, binding, None)
 }
 
@@ -367,6 +349,7 @@ pub(crate) fn analyze_default_inputs(
             kind: SchemaExpressionKind::Default,
         }),
     )
+    .map(|(ty, _)| ty)
 }
 
 fn analyze_expression_inputs<'a>(
@@ -376,7 +359,7 @@ fn analyze_expression_inputs<'a>(
     input: &RowSchema,
     binding: &BindingContext<'_>,
     schema_expression: Option<SchemaExpressionContext<'a>>,
-) -> Result<Option<ColumnType>, SQLError> {
+) -> Result<(Option<ColumnType>, u32), SQLError> {
     let mut analysis = Preparation {
         bound_condition_queries: None,
         routines,
@@ -389,9 +372,8 @@ fn analyze_expression_inputs<'a>(
         ),
         schema_expression,
     };
-    let ty = analysis
-        .expression(&expression.scalar, input, &expression.subqueries)?
-        .ty;
+    let result = analysis.expression(&expression.scalar, input, &expression.subqueries)?;
+    let collation = u32::try_from(result.derivation.oid()).expect("type collation OID");
     analysis
         .parameters
         .collations
@@ -405,7 +387,10 @@ fn analyze_expression_inputs<'a>(
             routines,
             &[],
         )?;
-    Ok(ty.map(ownership::AnalysisType::into_ordinary))
+    Ok((
+        result.ty.map(ownership::AnalysisType::into_ordinary),
+        collation,
+    ))
 }
 
 fn retain_compute_kinds(routines: &dyn RoutineResolution, plan: &mut UnifiedPlan) {
@@ -576,13 +561,30 @@ pub(super) fn projection_metadata(
     })
 }
 
+/// Read an index expression's effective result collation in the same scope used to bind its inference element.
+pub(crate) fn inference_result_collation(
+    routines: &dyn RoutineResolution,
+    expression: &ScalarExpr,
+    schema: &RowSchema,
+    binding: super::production::ControlledBindingContext<'_>,
+    params: &[crate::SQLParam],
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<u32, SQLError> {
+    let mut scope = SchemaScope::for_analysis_with_control(binding, control)?;
+    Ok(
+        projection_metadata(&mut scope, routines, expression, schema, &[], params)?
+            .collation
+            .unwrap_or(0),
+    )
+}
+
 /// Record input collations and type-observer selections on already bound stored calls, as analysis records them for an executable statement. Constants and routine identities stay unchanged, while definitions without another analysis pass retain the complete selected metadata.
 pub(crate) fn assign_stored_input_collations(
     routines: &dyn RoutineResolution,
     expression: &mut crate::plan::ExpressionPlan,
     input: &RowSchema,
     binding: &BindingContext<'_>,
-) -> Result<(), SQLError> {
+) -> Result<u32, SQLError> {
     let mut analysis = Preparation {
         bound_condition_queries: None,
         routines,
@@ -590,11 +592,13 @@ pub(crate) fn assign_stored_input_collations(
         parameters: ParameterTypes::fixed(&[]).with_call_collations(),
         schema_expression: (),
     };
-    analysis.expression(&expression.scalar, input, &expression.subqueries)?;
+    let result = analysis.expression(&expression.scalar, input, &expression.subqueries)?;
+    let collation = u32::try_from(result.derivation.oid()).expect("selected collation OID");
     analysis
         .parameters
         .take_call_collations()
-        .apply(&mut expression.scalar, &mut expression.subqueries)
+        .apply(&mut expression.scalar, &mut expression.subqueries)?;
+    Ok(collation)
 }
 
 /// Restore input collations and type-observer selections on already bound stored queries without rereading constants or changing routine identities.

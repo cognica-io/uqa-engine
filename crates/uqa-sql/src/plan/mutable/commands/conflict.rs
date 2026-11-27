@@ -27,7 +27,10 @@ impl MutableCommandPlan {
             ));
         };
         if let Some(conflict) = &mut plan.on_conflict {
-            if conflict
+            if !matches!(
+                conflict.constraint,
+                crate::ast::ConflictTargetConstraint::Collations(_)
+            ) && conflict
                 .expressions
                 .iter()
                 .any(|expression| matches!(expression, ScalarExpr::Column(_)))

@@ -136,22 +136,45 @@ pub(in crate::compiler) fn compile_on_conflict(
     use crate::ast::{OnConflict, OnConflictAction};
     use pg_query::protobuf::OnConflictAction as PgAction;
 
+    use crate::ast::ConflictTargetConstraint;
     let mut conflict_columns = Vec::new();
     let mut expressions = Vec::new();
+    let mut constraint = ConflictTargetConstraint::Unqualified;
     if let Some(infer) = &clause.infer {
+        let collated = infer.index_elems.iter().any(|elem| {
+            matches!(elem.node.as_ref(), Some(NodeEnum::IndexElem(index)) if !index.collation.is_empty())
+        });
+        let mut collations = Vec::new();
         for elem in &infer.index_elems {
             let Some(NodeEnum::IndexElem(index)) = elem.node.as_ref() else {
                 return Err(SQLError::Unsupported("ON CONFLICT inference target".into()));
             };
-            if !index.name.is_empty() {
-                conflict_columns.push(index.name.clone());
+            let expression = if !index.name.is_empty() {
+                Expr::Column(index.name.clone().into())
             } else if let Some(expression) = &index.expr {
-                let expression = compile_expr(expression)?;
-                match &expression {
-                    Expr::Column(column) => conflict_columns.push(column.to_string()),
-                    _ => expressions.push(expression),
-                }
+                compile_expr(expression)?
+            } else {
+                return Err(SQLError::Internal(
+                    "empty ON CONFLICT inference element".into(),
+                ));
+            };
+            if collated {
+                collations.push(
+                    (!index.collation.is_empty())
+                        .then(|| super::compile_collation_name(&index.collation))
+                        .transpose()?,
+                );
+                expressions.push(expression);
+            } else if let Expr::Column(column) = &expression {
+                conflict_columns.push(column.to_string());
+            } else {
+                expressions.push(expression);
             }
+        }
+        if collated {
+            constraint = ConflictTargetConstraint::Collations(collations);
+        } else if !infer.conname.is_empty() {
+            constraint = ConflictTargetConstraint::Named(infer.conname.clone());
         }
     }
 
@@ -184,11 +207,7 @@ pub(in crate::compiler) fn compile_on_conflict(
             .map(compile_expr)
             .transpose()?
             .map(Box::new),
-        constraint: clause
-            .infer
-            .as_ref()
-            .filter(|infer| !infer.conname.is_empty())
-            .map(|infer| infer.conname.clone()),
+        constraint,
         conflict_columns,
         expressions,
         action,

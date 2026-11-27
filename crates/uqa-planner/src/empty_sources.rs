@@ -33,6 +33,101 @@ pub fn block_input_is_empty(block: &QueryBlockPlan) -> bool {
         || block.from.as_ref().is_some_and(source_is_empty)
 }
 
+/// Whether the recursive scan owns the plain target list after pulling up eligible one-row inputs.
+pub fn work_table_projection(
+    block: &QueryBlockPlan,
+    name: &str,
+    routines: &dyn uqa_sql::routines::RoutineResolution,
+    volatility: &dyn uqa_sql::semantics::volatility::VolatilityCatalog,
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<bool, uqa_sql::SQLError> {
+    if !matches!(block.compute, ComputePlan::Project) || block_input_is_empty(block) {
+        return Ok(false);
+    }
+    let foldable = |expression: &ScalarExpr| {
+        Ok(!uqa_sql::semantics::volatility::expr_contains_volatile_function_with_control(volatility, expression, control)?
+            && !uqa_sql::semantics::sets::static_setness::expression_may_return_set_statically_with_control(routines, expression, control)?)
+    };
+    match &block.from {
+        Some(source) => work_table_scan(source, name, &foldable),
+        None => Ok(false),
+    }
+}
+
+fn work_table_scan(
+    source: &SourcePlan,
+    name: &str,
+    foldable: &impl Fn(&ScalarExpr) -> Result<bool, uqa_sql::SQLError>,
+) -> Result<bool, uqa_sql::SQLError> {
+    Ok(match source {
+        SourcePlan::Table {
+            name: reference,
+            executable_query: None,
+            ..
+        } => uqa_core::RelationIdentity::borrowed_reference(reference).is_some_and(|reference| {
+            reference.schema.is_none() && reference.name == uqa_core::RelationName::decoded(name)
+        }),
+        SourcePlan::Join {
+            kind: JoinKind::Inner | JoinKind::Cross,
+            left,
+            right,
+            ..
+        } => {
+            (work_table_scan(left, name, foldable)? && removable_result(right, foldable)?)
+                || (work_table_scan(right, name, foldable)? && removable_result(left, foldable)?)
+        }
+        _ => false,
+    })
+}
+
+/// A one-row Result can disappear into the other join input only if pulling up its projection preserves the number of rows and every volatile evaluation.
+fn removable_result(
+    source: &SourcePlan,
+    foldable: &impl Fn(&ScalarExpr) -> Result<bool, uqa_sql::SQLError>,
+) -> Result<bool, uqa_sql::SQLError> {
+    let rows = match source {
+        SourcePlan::Values { rows, .. } => rows,
+        SourcePlan::Subquery { body, .. } if body.ctes.is_empty() => match &body.root {
+            RelationalPlan::Values { rows, .. } => rows,
+            RelationalPlan::QueryBlock(block) => {
+                if !matches!(block.compute, ComputePlan::Project)
+                    || block.from.is_some()
+                    || rejects_rows(block.r#where.as_ref())
+                    || block.having.is_some()
+                    || block.limit.is_some()
+                    || block.offset.is_some()
+                    || block.distinct
+                    || !block.distinct_on.is_empty()
+                    || !block.group_by.is_empty()
+                    || !block.grouping_sets.is_empty()
+                    || !block.windows.is_empty()
+                    || !block.order_by.is_empty()
+                    || !block.locking.is_empty()
+                {
+                    return Ok(false);
+                }
+                for projection in &block.projections {
+                    if !foldable(&projection.expr)? {
+                        return Ok(false);
+                    }
+                }
+                return Ok(true);
+            }
+            RelationalPlan::SetOp { .. } => return Ok(false),
+        },
+        _ => return Ok(false),
+    };
+    let [row] = rows.as_slice() else {
+        return Ok(false);
+    };
+    for value in row {
+        if !foldable(value)? {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
 fn passive_output(expression: &ScalarExpr) -> bool {
     matches!(
         expression,

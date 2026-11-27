@@ -54,6 +54,7 @@ fn stored_statistics_maintenance_matches_struct_defaults_fields_and_unsigned_val
         statistics_format: u32::MAX,
         analyzed_at: Some(9),
         analysis_generation: Some(10),
+        relation_rows: Some(42),
     };
     check(&serde_json::to_string(&complete).unwrap());
     for json in [

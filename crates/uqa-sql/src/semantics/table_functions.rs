@@ -15,7 +15,9 @@ use crate::{RowSchema, SQLError, SQLParam, ScalarExpr};
 use std::sync::Arc;
 
 mod columns;
-pub use columns::table_function_empty_schema_with_control;
+pub use columns::{
+    bound_table_function_empty_schema_with_control, table_function_empty_schema_with_control,
+};
 mod production;
 mod selection;
 mod types;
@@ -26,6 +28,7 @@ pub use production::{
 };
 pub(crate) use selection::resolve_table_function_binding_for_types_with_control;
 pub use types::table_function_column_types_with_control;
+pub(crate) use types::table_function_columns;
 
 mod column_definitions;
 pub use column_definitions::{
@@ -198,6 +201,30 @@ pub fn resolve_user_table_function_with_control(
     params: &[SQLParam],
     control: &uqa_core::memory::ProductionControl<'_>,
 ) -> Result<Option<ControlledUserTableFunction>, SQLError> {
+    Ok(
+        match resolve_table_function_with_control(
+            context, name, binding, args, input, params, control,
+        )? {
+            Some(SelectedTableFunction::User(function)) => Some(function),
+            _ => None,
+        },
+    )
+}
+
+pub(crate) enum SelectedTableFunction {
+    Builtin(uqa_core::memory::Produced<FunctionBinding>),
+    User(ControlledUserTableFunction),
+}
+
+pub(crate) fn resolve_table_function_with_control(
+    context: TableFunctionAnalysis<'_>,
+    name: &str,
+    binding: Option<&FunctionBinding>,
+    args: &[ScalarExpr],
+    input: &RowSchema,
+    params: &[SQLParam],
+    control: &uqa_core::memory::ProductionControl<'_>,
+) -> Result<Option<SelectedTableFunction>, SQLError> {
     let Some(binding) = resolve_table_function_binding_with_control(
         TableFunctionAnalysis { ..context },
         name,
@@ -211,7 +238,7 @@ pub fn resolve_user_table_function_with_control(
         return Ok(None);
     };
     if binding.builtin {
-        return Ok(None);
+        return Ok(Some(SelectedTableFunction::Builtin(binding)));
     }
     let signature = crate::function_call_argument_signature_with_control(
         args,
@@ -241,15 +268,28 @@ pub fn resolve_user_table_function_with_control(
         matched.invocation,
         control,
     )?;
-    Ok(Some(ControlledUserTableFunction {
-        function: matched.function,
-        binding,
-    }))
+    Ok(Some(SelectedTableFunction::User(
+        ControlledUserTableFunction {
+            function: matched.function,
+            binding,
+        },
+    )))
 }
 
 pub struct TableFunctionAnalysis<'a> {
     pub routines: &'a dyn RoutineResolution,
     pub types: &'a dyn FunctionTypeResolver,
+}
+
+/// OUT columns of the catalog declaration unnest(tsvector).
+pub const TSVECTOR_UNNEST_COLUMNS: [&str; 3] = ["lexeme", "positions", "weights"];
+
+pub fn is_tsvector_unnest(binding: Option<&FunctionBinding>) -> bool {
+    binding.is_some_and(|b| {
+        b.builtin
+            && b.name.rsplit('.').next() == Some("unnest")
+            && matches!(b.argument_types.as_slice(), [ty] if ty == "tsvector")
+    })
 }
 
 pub fn resolve_table_function_binding(
@@ -494,6 +534,7 @@ pub fn validate_table_function_alias_count(
     )
 }
 
+#[derive(Clone, Copy)]
 pub struct TableFunctionTypeRequest<'a> {
     pub name: &'a str,
     pub binding: Option<&'a FunctionBinding>,

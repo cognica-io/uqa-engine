@@ -106,6 +106,7 @@ fn kind(ty: &ColumnType) -> u32 {
         ColumnType::InternalChar => UQA_TYPE_INTERNAL_CHAR,
         ColumnType::RefCursor => UQA_TYPE_REFCURSOR,
         ColumnType::Xml => crate::abi::UQA_TYPE_XML,
+        ColumnType::TsVector => crate::abi::UQA_TYPE_TSVECTOR,
         ColumnType::Regproc => UQA_TYPE_REGPROC,
         ColumnType::Regprocedure => UQA_TYPE_REGPROCEDURE,
         ColumnType::Regclass => UQA_TYPE_REGCLASS,

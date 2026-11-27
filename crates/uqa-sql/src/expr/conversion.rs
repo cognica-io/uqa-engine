@@ -482,3 +482,57 @@ pub(crate) fn tensor_items(v: &Value) -> Result<&[Value]> {
         ))),
     }
 }
+
+pub(super) fn character_count(text: &str, control: &ProductionControl<'_>) -> Result<usize> {
+    let mut count = 0;
+    for _ in text.chars() {
+        control.check()?;
+        count += 1;
+    }
+    Ok(count)
+}
+
+/// Byte offsets of two zero-based character positions, clipped to the length of the text.
+pub(super) fn character_offsets(
+    text: &str,
+    first: usize,
+    last: usize,
+    control: &ProductionControl<'_>,
+) -> Result<(usize, usize)> {
+    let mut start = text.len();
+    let mut end = text.len();
+    let stop = first.max(last);
+    for (ordinal, (byte, _)) in text.char_indices().enumerate() {
+        control.check()?;
+        if ordinal == first {
+            start = byte;
+        }
+        if ordinal == last {
+            end = byte;
+        }
+        if ordinal == stop {
+            break;
+        }
+    }
+    Ok((start, end))
+}
+
+/// The text of an argument: borrowed where the value holds text, and otherwise written as its cast to `text` writes it, so a call admits no second copy of a text argument.
+pub(super) fn argument_text<'v>(
+    value: &'v Value,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<std::borrow::Cow<'v, str>>> {
+    control.check()?;
+    if let Value::Str(text) = value {
+        return control
+            .finish(
+                std::borrow::Cow::Borrowed(text.as_str()),
+                control.empty_reservation(),
+            )
+            .map_err(Into::into);
+    }
+    let (text, memory) = value_to_string_with_control(value, control)?.into_parts();
+    control
+        .finish(std::borrow::Cow::Owned(text), memory)
+        .map_err(Into::into)
+}

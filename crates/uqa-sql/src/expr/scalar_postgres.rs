@@ -15,7 +15,7 @@ pub use comparison::eval_distinct_boolean;
 pub(super) use comparison::evaluate_with_context as eval_comparison_with_context;
 mod immutable;
 pub(super) use immutable::{
-    eval_postgres_immutable_with_control, eval_postgres_integer_base_with_control,
+    eval_postgres_immutable_with_control, eval_postgres_integer_base_with_control, string_to_array,
 };
 pub(super) mod subscripts;
 pub(super) use arrays::{eval_postgres_arrays_with_catalog, eval_postgres_arrays_with_control};
@@ -98,7 +98,13 @@ pub(super) fn eval_dispatched_postgres_function_with_control(
     {
         return Some(result);
     }
-    comparison::evaluate(dispatch, args, control)
+    comparison::evaluate_with_context(
+        dispatch,
+        args,
+        control,
+        &super::EvalContext::new(None, &[]),
+        crate::catalog::collations::CollationSelection::from_oid(collation),
+    )
 }
 
 fn eval_postgres_function(name: &str, args: &[Value]) -> Result<Value> {
@@ -108,13 +114,16 @@ fn eval_postgres_function(name: &str, args: &[Value]) -> Result<Value> {
             // PostgreSQL scalar surface: math, strings, arrays, operators
             // lowered to internal functions.
             // -------------------------------------------------------------
-            "string_to_table" => {
-                immutable::string_to_array(args, &ProductionControl::uncontrolled()).map(|value| {
-                    value
-                        .into_uncontrolled()
-                        .expect("ordinary string_to_table result")
-                })
-            }
+            "string_to_table" => immutable::string_to_array(
+                args,
+                crate::catalog::collations::DEFAULT_COLLATION_OID as u32,
+                &ProductionControl::uncontrolled(),
+            )
+            .map(|value| {
+                value
+                    .into_uncontrolled()
+                    .expect("ordinary string_to_table result")
+            }),
             // The engine has one database and one logical user identity; schema
             // identifiers are intercepted above because they are session-scoped.
             "current_database" | "current_catalog" => Ok(Value::Str("uqa".into())),

@@ -1,19 +1,6 @@
 name: Regular expression WASM checks
 
 on:
-  pull_request:
-    branches: [main]
-    types: [ready_for_review]
-    paths:
-      - ".github/actions/select-validation-inputs/**"
-      - "scripts/performance_change_scope.py"
-      - "scripts/tests/test_performance_change_scope.py"
-      - "crates/uqa-pg-regex/**"
-      - "Cargo.toml"
-      - "Cargo.lock"
-      - "rust-toolchain.toml"
-      - "scripts/emscripten-flags.py"
-      - ".github/workflows/regular-expression-checks.yml"
   push:
     branches: [main]
     paths:
@@ -42,15 +29,14 @@ jobs:
         uses: ./.github/actions/select-validation-inputs
         with:
           kind: regex
-          base: ${{ github.event.pull_request.base.sha || github.event.before }}
-          before: ${{ github.event.action == 'synchronize' && github.event.before || '' }}
+          base: ${{ github.event.before }}
   wasm:
     needs: scope
     if: needs.scope.outputs.required == 'true'
     name: Emscripten frame and memory bounds (Rust ${{ matrix.rust }})
     runs-on: ubuntu-24.04
     concurrency:
-      group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}-${{ matrix.rust }}
+      group: ${{ github.workflow }}-${{ github.ref }}-${{ matrix.rust }}
       cancel-in-progress: true
     strategy:
       fail-fast: false

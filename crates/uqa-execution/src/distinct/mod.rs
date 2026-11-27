@@ -34,6 +34,7 @@ pub(crate) use encoding::{canonical_constraint_key, canonical_row_lock_keys_with
 pub(crate) use encoding::{encode_key, EncodedKey};
 pub(crate) use encoding::{
     encode_sql_key_with_types_and_catalog, encode_typed_non_null_key, hash_typed_row_with_catalog,
+    hash_typed_row_with_collations,
 };
 pub use memory::{CanonicalRowHashSet, ExactRowSet};
 pub(crate) use spill::SeenKeySet;

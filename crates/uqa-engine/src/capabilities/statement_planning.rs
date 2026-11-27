@@ -289,6 +289,31 @@ impl PlannerStatisticsCatalog for Engine {
     fn hierarchy_scan_tables(&self, table: &str) -> Result<Vec<String>, SQLError> {
         self.query_hierarchy_scan_tables(table, true)
     }
+    fn measured_relation_rows(&self, table: &str) -> Result<Option<u64>, SQLError> {
+        let failure = |error| storage_error("read relation sample", &error);
+        let Some(name) = self.try_resolve_query_table_name(table).map_err(failure)? else {
+            return Ok(None);
+        };
+        let Some(state) = self.try_query_table(&name).map_err(failure)? else {
+            return Ok(None);
+        };
+        if let Some(catalog) = self
+            .storage
+            .catalog
+            .as_deref()
+            .filter(|_| state.persistence != uqa_sql::ast::RelationPersistence::Temporary)
+        {
+            return Ok(crate::statistics::MaintenanceState::load_for(
+                catalog,
+                &name,
+                state.object_id(),
+            )
+            .map_err(failure)?
+            .relation_rows());
+        }
+        let population = state.statistics_maintenance.read().relation_rows();
+        Ok(population)
+    }
     fn table_row_count(&self, table: &str) -> Result<u64, SQLError> {
         self.table_row_estimate(table)
     }

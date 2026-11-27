@@ -33,12 +33,9 @@ pub(in crate::expr) fn string_comparison_order(
     collation: u32,
 ) -> Result<BuiltinCollationOrder, SQLError> {
     if collation == 0 {
-        return Err(SQLError::Diagnostic {
-            sqlstate: "42P22".into(),
-            message: "could not determine which collation to use for string comparison".into(),
-            detail: None,
-            hint: Some("Use the COLLATE clause to set the collation explicitly.".into()),
-        });
+        return Err(crate::catalog::collations::indeterminate_error(
+            "string comparison",
+        ));
     }
     builtin_collation_order(collation)
         .ok_or_else(|| SQLError::Internal(format!("cache lookup failed for collation {collation}")))

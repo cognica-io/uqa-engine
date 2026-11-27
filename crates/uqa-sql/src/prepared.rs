@@ -17,6 +17,7 @@ pub mod composites;
 pub mod defaults;
 pub mod definition;
 pub mod dependencies;
+pub mod domains;
 pub mod entry;
 pub mod ownership;
 pub mod planning;
@@ -110,10 +111,15 @@ pub fn execute_parameter_types(
         return Ok(Vec::new());
     }
     if argument_count != types.len() {
-        return Err(error(
-            "42601",
-            format!("wrong number of parameters for prepared statement \"{name}\""),
-        ));
+        return Err(SQLError::Diagnostic {
+            sqlstate: "42601".into(),
+            message: format!("wrong number of parameters for prepared statement \"{name}\""),
+            detail: Some(format!(
+                "Expected {} parameters but got {argument_count}.",
+                types.len()
+            )),
+            hint: None,
+        });
     }
     Ok(types)
 }

@@ -42,6 +42,10 @@ fn key(kind: TableKeyConstraintKind, columns: &[&str]) -> EnforcedKey {
 }
 
 impl ConflictCatalog for Catalog {
+    fn inference_context(&self) -> uqa_sql::semantics::conflict::InferenceContext<'_> {
+        unreachable!("the decision reads only enforced keys")
+    }
+
     fn try_describe_table(&self, _: &str) -> Result<Option<Vec<ColumnDef>>, String> {
         unreachable!("the decision reads only enforced keys")
     }

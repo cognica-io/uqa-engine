@@ -162,7 +162,12 @@ fn scalar_null_and_error_precedence_stays_shared_without_admitting_copies() {
             .unwrap_err();
         assert_eq!(error.to_string(), ordinary.to_string());
     }
-    assert!(eval_math_functions_with_control("format", &[text("%s")], &control).is_none());
+    let missing = eval_math_functions_with_control("format", &[text("%s")], &control)
+        .unwrap()
+        .unwrap_err();
+    assert_eq!(missing.sqlstate(), Some("22023"));
+    assert_eq!(missing.to_string(), "too few arguments for format()");
+    assert_eq!(budget.used(), 0);
     assert!(eval_math_functions_with_control("random", &[], &control).is_none());
     assert_eq!(
         eval_math_functions("format", &[text("%s:%L"), Value::Bool(true), Value::Int(7)])
@@ -170,6 +175,24 @@ fn scalar_null_and_error_precedence_stays_shared_without_admitting_copies() {
             .unwrap(),
         text("t:'7'")
     );
+    assert_eq!(budget.used(), 0);
+}
+
+#[test]
+fn format_reads_width_from_borrowed_text_with_a_small_output_allowance() {
+    let width = Value::Str(format!("{}0x3", " ".repeat(16 * 1024)));
+    let budget = MemoryBudget::new(128);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&budget, &token, &token);
+    let args = [text("%*s"), width, text("x")];
+    let expected = text("  x");
+    let allocations = allocation_counter::measure(|| {
+        let result = eval_math_functions_with_control("format", &args, &control)
+            .unwrap()
+            .unwrap();
+        assert_eq!(*result, expected);
+    });
+    assert!(allocations.bytes_max < 1024, "{allocations:?}");
     assert_eq!(budget.used(), 0);
 }
 

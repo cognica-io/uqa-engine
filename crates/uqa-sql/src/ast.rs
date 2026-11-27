@@ -126,6 +126,11 @@ pub struct GeneratedColumn {
 pub struct IndexColumnOrder {
     pub descending: bool,
     pub nulls_first: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub collation_oid: Option<u32>,
+    /// The index ordering differs from the collation of the column or stored expression.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub overrides_collation: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -154,6 +159,12 @@ pub struct CreateIndex {
     /// Explicit option namespaces retained for declaration-time validation.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub option_namespaces: Vec<String>,
+    /// Explicit names attached to index keys, resolved against the definition namespace.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub key_collations: Vec<Option<String>>,
+    /// Names assigned to key and INCLUDE attributes from the original parser nodes.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attribute_names: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -236,12 +247,33 @@ impl Default for ReturningAliases {
     }
 }
 
+/// A named constraint and explicit inference collations are alternative restrictions on the arbiter. Unqualified targets retain their original null encoding.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum ConflictTargetConstraint {
+    #[default]
+    Unqualified,
+    Named(String),
+    /// One optional collation per inference expression, in written order.
+    Collations(Vec<Option<String>>),
+}
+
+impl ConflictTargetConstraint {
+    #[must_use]
+    pub fn collation(&self, position: usize) -> Option<&str> {
+        match self {
+            Self::Collations(names) => names.get(position)?.as_deref(),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct OnConflict {
     #[serde(default)]
     pub predicate: Option<Box<Expr>>,
     #[serde(default)]
-    pub constraint: Option<String>,
+    pub constraint: ConflictTargetConstraint,
     /// Conflict target columns parsed from the `ON CONFLICT (col, ...)`
     /// list. Empty when the clause uses `ON CONFLICT DO NOTHING` with
     /// no target.
