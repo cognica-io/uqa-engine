@@ -21,20 +21,17 @@ use uqa_sql::{
 mod block;
 mod commands;
 mod demand;
+pub(super) use demand::edit_caller_query;
 mod sources;
 
 pub(super) fn optimize_caller(
-    mut plan: UnifiedPlan,
+    plan: UnifiedPlan,
     config: &OptimizerConfig<'_>,
     aggregates: &dyn AggregateClassifier,
 ) -> Result<UnifiedPlan, SQLError> {
     let context = Context::caller(config, aggregates);
-    plan.try_visit_queries_mut(&mut |query| {
-        query.edit_uncontrolled(|query| context.initialize_compute(query))
-    })?;
-    super::source_demand::prune(&mut plan, config, aggregates)?;
-    let output = context.optimize_sources(MutableExecutablePlan::uncontrolled(plan))?;
-    Ok(output.finish(&context.scalars().storage)?.into_parts().0)
+    let plan = context.optimize(MutableExecutablePlan::uncontrolled(plan))?;
+    Ok(plan.finish(&context.scalars().storage)?.into_parts().0)
 }
 
 pub(super) fn optimize(
@@ -42,12 +39,7 @@ pub(super) fn optimize(
     config: &OptimizerConfig<'_>,
     aggregates: &dyn AggregateClassifier,
 ) -> Result<MutableExecutablePlan, SQLError> {
-    let context = Context::admitted(config, aggregates);
-    let plan = plan.map_queries_while(&config.production, &mut |query| {
-        Ok((context.initialize_compute(query)?, true))
-    })?;
-    let plan = super::source_demand::owned::prune(plan, config, aggregates)?;
-    context.optimize_sources(plan)
+    Context::admitted(config, aggregates).optimize(plan)
 }
 
 pub(in crate::optimizer) struct Context<'a, 'scope> {
@@ -83,6 +75,15 @@ impl<'a, 'scope> Context<'a, 'scope> {
             aggregates,
             input: PlanInput::Caller,
         }
+    }
+
+    fn optimize(&self, plan: MutableExecutablePlan) -> Result<MutableExecutablePlan, SQLError> {
+        let storage = self.scalars().storage;
+        let plan = plan.map_queries_while(&storage, &mut |query| {
+            Ok((self.initialize_compute(query)?, true))
+        })?;
+        let plan = super::source_demand::prune(plan, self.config, self.aggregates, storage)?;
+        self.optimize_sources(plan)
     }
 
     fn scalars(&self) -> super::scalar::ScalarProduction<'a, 'scope> {

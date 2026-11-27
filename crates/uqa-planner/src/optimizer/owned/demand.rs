@@ -24,7 +24,7 @@ impl Context<'_, '_> {
             return Ok(query);
         };
         match self.input {
-            PlanInput::Caller => edit_ordinary(query, |query| {
+            PlanInput::Caller => edit_caller_query(query, |query| {
                 super::super::cte_projection::prune(
                     query,
                     self.aggregates,
@@ -59,7 +59,7 @@ impl Context<'_, '_> {
             visible_ctes: &|_| false,
         };
         match self.input {
-            PlanInput::Caller => edit_ordinary(query, |query| {
+            PlanInput::Caller => edit_caller_query(query, |query| {
                 let RelationalPlan::QueryBlock(block) = &mut query.root else {
                     unreachable!("query block demand");
                 };
@@ -70,7 +70,7 @@ impl Context<'_, '_> {
     }
 }
 
-fn edit_ordinary(
+pub(in crate::optimizer) fn edit_caller_query(
     query: MutableQueryPlan,
     edit: impl FnOnce(&mut QueryPlan) -> Result<(), SQLError>,
 ) -> Result<MutableQueryPlan, SQLError> {

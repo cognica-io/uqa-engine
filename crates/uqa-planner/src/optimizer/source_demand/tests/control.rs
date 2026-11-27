@@ -44,9 +44,37 @@ fn wide_query(width: usize) -> UnifiedPlan {
     UnifiedPlan::Query(query)
 }
 
+fn query_demand(plan: &UnifiedPlan, config: &OptimizerConfig<'_>) -> Result<(), SQLError> {
+    let UnifiedPlan::Query(query) = plan else {
+        unreachable!()
+    };
+    Context {
+        config,
+        aggregates: &|_: &str| false,
+        storage: ProductionControl::uncontrolled(),
+        ctes: None,
+    }
+    .query_demand(query)
+    .map(drop)
+}
+
+fn verify_refusal(plan: UnifiedPlan, config: &OptimizerConfig<'_>, expected: &str) {
+    let mut result = None;
+    let allocation = allocation_counter::measure(|| {
+        result = Some(prune(
+            MutableExecutablePlan::uncontrolled(plan),
+            config,
+            &|_: &str| false,
+            ProductionControl::uncontrolled(),
+        ));
+    });
+    assert!(allocation.bytes_total < 8192, "{allocation:?}");
+    assert_eq!(result.unwrap().unwrap_err().sqlstate(), Some(expected));
+}
+
 #[test]
 fn positional_wildcard_demand_rejects_before_copying_wide_descriptors() {
-    let mut plan = wide_query(1024);
+    let plan = wide_query(1024);
     let before = serde_json::to_value(&plan).unwrap();
     let parent = MemoryBudget::new(1024);
     let sibling = parent.reserve(512).unwrap();
@@ -56,19 +84,20 @@ fn positional_wildcard_demand_rejects_before_copying_wide_descriptors() {
     config.production = ProductionControl::new(&memory, &token, &token);
     let mut result = None;
     let allocation = allocation_counter::measure(|| {
-        result = Some(prune(&mut plan, &config, &|_: &str| false));
+        result = Some(query_demand(&plan, &config));
     });
     assert!(allocation.bytes_total < 8192, "{allocation:?}");
     assert_eq!(result.unwrap().unwrap_err().sqlstate(), Some("53200"));
     assert_eq!(memory.used(), 0);
     assert_eq!(parent.used(), sibling.bytes());
     assert_eq!(serde_json::to_value(&plan).unwrap(), before);
+    verify_refusal(plan, &config, "53200");
 }
 
 #[test]
 fn positional_demand_observes_both_cancellations_before_workspace_allocation() {
     for cancel_original in [false, true] {
-        let mut plan = wide_query(1024);
+        let plan = wide_query(1024);
         let before = serde_json::to_value(&plan).unwrap();
         let memory = MemoryBudget::new(0);
         let original = CancellationToken::new();
@@ -83,12 +112,13 @@ fn positional_demand_observes_both_cancellations_before_workspace_allocation() {
         config.production = ProductionControl::new(&memory, &original, &invoking);
         let mut result = None;
         let allocation = allocation_counter::measure(|| {
-            result = Some(prune(&mut plan, &config, &|_: &str| false));
+            result = Some(query_demand(&plan, &config));
         });
         assert!(allocation.bytes_total < 8192, "{allocation:?}");
         assert_eq!(result.unwrap().unwrap_err().sqlstate(), Some("57014"));
         assert_eq!(memory.peak(), 0);
         assert_eq!(serde_json::to_value(&plan).unwrap(), before);
+        verify_refusal(plan, &config, "57014");
     }
 }
 
@@ -96,7 +126,7 @@ fn positional_demand_observes_both_cancellations_before_workspace_allocation() {
 fn positional_cte_names_reject_before_copying_wide_identity() {
     let mut query = query("WITH q AS (SELECT 1) SELECT 7");
     query.ctes[0].name = "x".repeat(64 * 1024);
-    let mut plan = UnifiedPlan::Query(query);
+    let plan = UnifiedPlan::Query(query);
     let before = serde_json::to_value(&plan).unwrap();
     let memory = MemoryBudget::new(1024);
     let token = CancellationToken::new();
@@ -104,13 +134,14 @@ fn positional_cte_names_reject_before_copying_wide_identity() {
     config.production = ProductionControl::new(&memory, &token, &token);
     let mut result = None;
     let allocation = allocation_counter::measure(|| {
-        result = Some(prune(&mut plan, &config, &|_: &str| false));
+        result = Some(query_demand(&plan, &config));
     });
     assert!(allocation.bytes_total < 8192, "{allocation:?}");
     assert_eq!(result.unwrap().unwrap_err().sqlstate(), Some("53200"));
     assert!(memory.peak() > 0);
     assert_eq!(memory.used(), 0);
     assert_eq!(serde_json::to_value(&plan).unwrap(), before);
+    verify_refusal(plan, &config, "53200");
 }
 
 #[test]
@@ -223,10 +254,13 @@ fn positional_cte_definition_pruning_borrows_completed_demand() {
     let context = Context {
         config: &config,
         aggregates: &|_: &str| false,
+        storage: ProductionControl::uncontrolled(),
         ctes: Some(&scope),
     };
+    let query = MutableQueryPlan::uncontrolled(*query);
+    let mut result = None;
     let allocation = allocation_counter::measure(|| {
-        context.cte_definitions(&mut query, &[0]).unwrap();
+        result = Some(context.cte_definitions(query, &[0]).unwrap());
     });
     assert_eq!(allocation.bytes_total, 0, "{allocation:?}");
     assert_eq!(memory.used(), before);
