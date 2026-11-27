@@ -21,7 +21,6 @@
     clippy::explicit_iter_loop
 )]
 
-use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use uqa_core::{Payload, PostingEntry, PostingList};
@@ -30,32 +29,26 @@ use uqa_scoring::VectorProbabilityTransform;
 use uqa_storage::{StorageBackendError, StorageBackendResult};
 
 use crate::base::{
-    missing_backend, require_finite_score, require_probability, ExecutionContext, Operator,
-    OperatorResult,
+    missing_backend, require_finite_score, ExecutionContext, Operator, OperatorResult,
 };
-use crate::hybrid::coverage_based_default;
+use crate::hybrid::{
+    evidence::{fuse_covered_scores, fusion_probability_matrix, visit_sparse_scores},
+    validate_probability_postings,
+};
 use crate::primitive::{ScoreOperator, TermOperator};
 
-type ScoreMap = BTreeMap<u64, f64>;
-type CollectedScores = (Vec<ScoreMap>, BTreeSet<u64>);
-
-fn collect_score_maps(
+fn execute_signals(
     signals: &[Arc<dyn Operator>],
     ctx: &ExecutionContext,
-) -> StorageBackendResult<CollectedScores> {
-    let mut maps: Vec<ScoreMap> = Vec::with_capacity(signals.len());
-    let mut all_ids: BTreeSet<u64> = BTreeSet::new();
-    for sig in signals {
-        let pl = sig.execute(ctx)?;
-        let mut m: BTreeMap<u64, f64> = BTreeMap::new();
-        for entry in pl.iter() {
-            require_probability(entry.payload.score, "learned/attention fusion")?;
-            m.insert(entry.doc_id, entry.payload.score);
-            all_ids.insert(entry.doc_id);
-        }
-        maps.push(m);
-    }
-    Ok((maps, all_ids))
+) -> StorageBackendResult<Vec<PostingList>> {
+    signals
+        .iter()
+        .map(|signal| {
+            let list = signal.execute(ctx)?;
+            validate_probability_postings(&list, "learned/attention fusion")?;
+            Ok(list)
+        })
+        .collect()
 }
 
 fn require_single_active_evidence(probabilities: &[Option<f64>]) -> StorageBackendResult<f64> {
@@ -137,25 +130,10 @@ impl Operator for AttentionFusionOperator {
         self.attention
             .validate_inputs(self.signals.len(), self.query_features.len())
             .map_err(|error| StorageBackendError::Other(error.to_string()))?;
-        let (score_maps, all_ids) = collect_score_maps(&self.signals, ctx)?;
-        let total = all_ids.len();
-        if total == 0 {
-            return Ok(PostingList::default());
-        }
-        let defaults: Vec<f64> = score_maps
-            .iter()
-            .map(|m| coverage_based_default(m.len(), total, 0.01))
-            .collect();
-        let mut candidate_ids = Vec::with_capacity(total);
-        let mut probabilities = Vec::with_capacity(total);
-        for doc_id in all_ids {
-            let probs: Vec<f64> = score_maps
-                .iter()
-                .enumerate()
-                .map(|(j, m)| *m.get(&doc_id).unwrap_or(&defaults[j]))
-                .collect();
-            candidate_ids.push(doc_id);
-            probabilities.push(probs);
+        let signals = execute_signals(&self.signals, ctx)?;
+        let (candidate_ids, probabilities) = fusion_probability_matrix(&signals);
+        if candidate_ids.is_empty() {
+            return Ok(PostingList::new());
         }
         let fused = self
             .attention
@@ -199,38 +177,13 @@ impl LearnedFusionOperator {
 
 impl Operator for LearnedFusionOperator {
     fn execute(&self, ctx: &ExecutionContext) -> OperatorResult {
-        self.learned
-            .validate_inputs(self.signals.len())
+        let fuser = self
+            .learned
+            .prepare(self.signals.len())
             .map_err(|error| StorageBackendError::Other(error.to_string()))?;
-        let (score_maps, all_ids) = collect_score_maps(&self.signals, ctx)?;
-        let total = all_ids.len();
-        if total == 0 {
-            return Ok(PostingList::default());
-        }
-        let defaults: Vec<f64> = score_maps
-            .iter()
-            .map(|m| coverage_based_default(m.len(), total, 0.01))
-            .collect();
-        let mut entries: Vec<PostingEntry> = Vec::with_capacity(total);
-        for doc_id in all_ids {
-            let probs: Vec<f64> = score_maps
-                .iter()
-                .enumerate()
-                .map(|(j, m)| *m.get(&doc_id).unwrap_or(&defaults[j]))
-                .collect();
-            let fused = self
-                .learned
-                .fuse(&probs)
-                .map_err(|error| StorageBackendError::Other(error.to_string()))?;
-            entries.push(PostingEntry::new(
-                doc_id,
-                Payload {
-                    score: fused,
-                    ..Default::default()
-                },
-            ));
-        }
-        Ok(PostingList::from_sorted_unchecked(entries))
+        let signals = execute_signals(&self.signals, ctx)?;
+        fuse_covered_scores(&signals, |probs| fuser.fuse(probs))
+            .map_err(|error| StorageBackendError::Other(error.to_string()))
     }
 }
 
@@ -309,8 +262,7 @@ impl Operator for MultiFieldSearchOperator {
         // same per-field search analyzer that [`TermOperator`] uses
         // for matching, so term-frequency lookups see the tokens that
         // were actually indexed.
-        let mut per_field: Vec<BTreeMap<u64, f64>> = Vec::with_capacity(self.fields.len());
-        let mut all_ids: BTreeSet<u64> = BTreeSet::new();
+        let mut per_field = Vec::with_capacity(self.fields.len());
         for (field, query) in self.fields.iter().zip(&self.queries) {
             let analyzer = idx.search_analyzer_revision(field)?;
             let terms = uqa_storage::inverted_index::analyze_query_terms(&analyzer, query)?;
@@ -326,17 +278,12 @@ impl Operator for MultiFieldSearchOperator {
             );
             let score_op = ScoreOperator::new_keys(scorer, term_op, terms, field);
             let pl = score_op.execute(ctx)?;
-            let mut m: BTreeMap<u64, f64> = BTreeMap::new();
-            for entry in pl.iter() {
-                require_probability(entry.payload.score, "multi-field search")?;
-                m.insert(entry.doc_id, entry.payload.score);
-                all_ids.insert(entry.doc_id);
-            }
-            per_field.push(m);
+            validate_probability_postings(&pl, "multi-field search")?;
+            per_field.push(pl);
         }
 
-        let total = all_ids.len();
-        if total == 0 {
+        let active_field_count = per_field.iter().filter(|list| !list.is_empty()).count();
+        if active_field_count == 0 {
             return Ok(PostingList::default());
         }
 
@@ -355,7 +302,6 @@ impl Operator for MultiFieldSearchOperator {
             ));
         };
 
-        let active_field_count = per_field.iter().filter(|scores| !scores.is_empty()).count();
         let mut fusion = uqa_fusion::RobustPositiveEvidencePool::new(self.fusion_alpha)
             .map_err(|error| StorageBackendError::Other(error.to_string()))?;
         if self.bayesian_params.base_rate > 0.0 {
@@ -363,30 +309,24 @@ impl Operator for MultiFieldSearchOperator {
                 .with_base_rate(self.bayesian_params.base_rate)
                 .map_err(|error| StorageBackendError::Other(error.to_string()))?;
         }
-        let mut entries: Vec<PostingEntry> = Vec::with_capacity(total);
-        for doc_id in all_ids {
-            let probabilities: Vec<Option<f64>> = per_field
-                .iter()
-                .map(|scores| scores.get(&doc_id).copied())
-                .collect();
-            let fused = if active_field_count == 1 {
-                // A de-facto single signal skips the weighted mean and
-                // sqrt(n) scaling, but a configured prior still enters.
-                let evidence = require_single_active_evidence(&probabilities)?;
-                fusion.fuse(&[evidence])
-            } else {
-                fusion
-                    .fuse_weighted_sparse(&probabilities, &normalized)
-                    .map_err(|error| StorageBackendError::Other(error.to_string()))?
-            };
-            entries.push(PostingEntry::new(
-                doc_id,
-                Payload {
-                    score: fused,
-                    ..Default::default()
-                },
-            ));
+        let batch = if active_field_count == 1 {
+            fusion.prepare(1, None, None, None)
+        } else {
+            fusion.prepare(per_field.len(), Some(&normalized), None, None)
         }
+        .map_err(|error| StorageBackendError::Other(error.to_string()))?;
+        let mut entries = Vec::new();
+        visit_sparse_scores(&per_field, |doc_id, probabilities| {
+            let fused = if active_field_count == 1 {
+                let evidence = require_single_active_evidence(probabilities)?;
+                batch.fuse(&[Some(evidence)])
+            } else {
+                batch.fuse(probabilities)
+            }
+            .map_err(|error| StorageBackendError::Other(error.to_string()))?;
+            entries.push(PostingEntry::new(doc_id, Payload::with_score(fused)));
+            Ok::<_, StorageBackendError>(())
+        })?;
         Ok(PostingList::from_sorted_unchecked(entries))
     }
 

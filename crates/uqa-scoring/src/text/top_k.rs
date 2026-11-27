@@ -9,10 +9,7 @@
 use super::exhaustive::build_text_scorer;
 use super::statistics::{block_max_scorer_fingerprint, raw_bm25_params, search_stats_for_terms};
 use super::{storage_error, TextSearchAlgorithm, TextSearchError};
-use crate::{
-    rank_scored_entries_top_k, CursorBlockMaxWANDScorer, CursorWANDQuery, CursorWANDScorer,
-    ScoringMode, WANDStats,
-};
+use crate::{CursorWANDQuery, ScoringMode, WANDStats};
 use std::{collections::BTreeSet, sync::Arc};
 use uqa_core::ScoredEntry;
 use uqa_storage::{BlockMaxIndex, InvertedIndex, TokenTermKey, DEFAULT_BLOCK_SIZE};
@@ -98,10 +95,10 @@ pub(super) fn score_text_top_k(
     )
     .map_err(|error| storage_error("build WAND query", error))?;
 
-    let (result, algorithm) = match strategy {
+    let ((entries, stats), algorithm) = match strategy {
         TextSearchAlgorithm::Exhaustive | TextSearchAlgorithm::Wand => (
-            CursorWANDScorer::new(&wand_query)
-                .score_top_k()
+            wand_query
+                .score_ranked(None)
                 .map_err(|error| storage_error("execute WAND", error))?,
             TextSearchAlgorithm::Wand,
         ),
@@ -116,8 +113,8 @@ pub(super) fn score_text_top_k(
                 &fingerprint,
             )? {
                 (
-                    CursorBlockMaxWANDScorer::new(&wand_query, &block_max, table)
-                        .score_top_k()
+                    wand_query
+                        .score_ranked(Some((&block_max, table)))
                         .map_err(|error| storage_error("execute Block-Max WAND", error))?,
                     TextSearchAlgorithm::BlockMaxWand,
                 )
@@ -126,17 +123,13 @@ pub(super) fn score_text_top_k(
                 // invalidate blocks after planning. Exact WAND is the safe
                 // physical fallback; stale bounds are never consumed.
                 (
-                    CursorWANDScorer::new(&wand_query)
-                        .score_top_k()
+                    wand_query
+                        .score_ranked(None)
                         .map_err(|error| storage_error("execute WAND fallback", error))?,
                     TextSearchAlgorithm::Wand,
                 )
             }
         }
     };
-    let entries = rank_scored_entries_top_k(
-        result.top_k.iter().map(ScoredEntry::from_entry).collect(),
-        top_k,
-    );
-    Ok((entries, result.stats, algorithm))
+    Ok((entries, stats, algorithm))
 }

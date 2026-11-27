@@ -24,6 +24,17 @@ pub trait Scorer: Send + Sync {
     fn finalize_upper_bound(&self, term_upper_bounds: &[f64]) -> f64 {
         self.finalize_score(term_upper_bounds)
     }
+
+    /// IDF for document scoring and the bound for pruning this term.
+    fn wand_term_constants(&self, doc_freq: u64) -> (f64, f64) {
+        (self.idf(doc_freq), self.term_upper_bound(doc_freq))
+    }
+
+    /// The supplied sum follows the order of `term_upper_bounds`. Scorers
+    /// with a non-additive bound retain their full-prefix implementation.
+    fn finalize_upper_bound_with_sum(&self, term_upper_bounds: &[f64], _sum: f64) -> f64 {
+        self.finalize_upper_bound(term_upper_bounds)
+    }
 }
 
 impl Scorer for BM25Scorer {
@@ -46,6 +57,14 @@ impl Scorer for BM25Scorer {
     fn term_upper_bound(&self, doc_freq: u64) -> f64 {
         BM25Scorer::upper_bound(self, doc_freq)
     }
+
+    fn wand_term_constants(&self, doc_freq: u64) -> (f64, f64) {
+        BM25Scorer::wand_term_constants(self, doc_freq)
+    }
+
+    fn finalize_upper_bound_with_sum(&self, _term_upper_bounds: &[f64], sum: f64) -> f64 {
+        sum
+    }
 }
 
 impl Scorer for BayesianBM25Scorer {
@@ -67,5 +86,13 @@ impl Scorer for BayesianBM25Scorer {
 
     fn term_upper_bound(&self, doc_freq: u64) -> f64 {
         self.bm25.upper_bound(doc_freq)
+    }
+
+    fn wand_term_constants(&self, doc_freq: u64) -> (f64, f64) {
+        self.bm25.wand_term_constants(doc_freq)
+    }
+
+    fn finalize_upper_bound_with_sum(&self, _term_upper_bounds: &[f64], sum: f64) -> f64 {
+        self.calibrate_raw_value(sum)
     }
 }

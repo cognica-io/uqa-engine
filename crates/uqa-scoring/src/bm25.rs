@@ -112,7 +112,12 @@ impl BM25Scorer {
 
     /// Theorem 3.2.3 supremum: `boost * IDF(df)`.
     pub fn upper_bound(&self, doc_freq: u64) -> f64 {
-        self.params.boost * self.idf(doc_freq)
+        self.wand_term_constants(doc_freq).1
+    }
+
+    pub(crate) fn wand_term_constants(&self, doc_freq: u64) -> (f64, f64) {
+        let idf = self.idf(doc_freq);
+        (idf, self.params.boost * idf)
     }
 
     /// BM25 scores combine additively across query terms.

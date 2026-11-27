@@ -725,28 +725,40 @@ pub trait DocumentStore: Send + Sync {
 /// maps, integers descend into lists, and the implicit array-wildcard rule
 /// applies a string component over every map element of an array.
 pub fn eval_path_in_document(doc: &Document, path: &[PathSegment]) -> Option<Value> {
-    let mut current: Value = match path.first()? {
-        PathSegment::Key(k) => doc.get(k)?.clone(),
-        PathSegment::Index(_) => return None,
+    let (PathSegment::Key(root), mut rest) = path.split_first()? else {
+        return None;
     };
-    for seg in path.iter().skip(1) {
-        current = match (current, seg) {
-            (Value::Map(m), PathSegment::Key(k)) => m.get(k)?.clone(),
-            (Value::List(items), PathSegment::Index(i)) => items.get(*i)?.clone(),
-            (Value::List(items), PathSegment::Key(k)) => {
-                let collected: Vec<Value> = items
-                    .into_iter()
-                    .filter_map(|v| match v {
-                        Value::Map(m) => m.get(k).cloned(),
+    let mut value = doc.get(root)?;
+    while let Some((segment, tail)) = rest.split_first() {
+        value = match (value, segment) {
+            (Value::Map(fields), PathSegment::Key(key)) => fields.get(key)?,
+            (Value::List(items), PathSegment::Index(index)) => items.get(*index)?,
+            (Value::List(items), PathSegment::Key(_)) => {
+                // Consecutive keys project through maps in each element. An index
+                // selects from the resulting sequence after missing keys are skipped.
+                let key_count = rest
+                    .iter()
+                    .take_while(|part| matches!(part, PathSegment::Key(_)))
+                    .count();
+                let (keys, suffix) = rest.split_at(key_count);
+                let mut projected = items.iter().filter_map(|item| {
+                    keys.iter().try_fold(item, |item, key| match (item, key) {
+                        (Value::Map(fields), PathSegment::Key(key)) => fields.get(key),
                         _ => None,
                     })
-                    .collect();
-                Value::List(collected)
+                });
+                if let Some((PathSegment::Index(index), suffix)) = suffix.split_first() {
+                    value = projected.nth(*index)?;
+                    rest = suffix;
+                    continue;
+                }
+                return Some(Value::List(projected.cloned().collect()));
             }
             _ => return None,
         };
+        rest = tail;
     }
-    Some(current)
+    Some(value.clone())
 }
 
 mod memory;

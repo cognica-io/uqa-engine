@@ -25,7 +25,8 @@
 //! posting list from that support therefore creates default payloads and is
 //! not equal to the original decorated posting list in general.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::cmp::Reverse;
+use std::collections::{binary_heap::PeekMut, BTreeMap, BTreeSet, BinaryHeap};
 
 use crate::types::{
     DocId, GeneralizedPostingEntry, GraphPhiEnvelope, GraphPhiPayload, Payload, PostingEntry,
@@ -110,6 +111,39 @@ impl PostingList {
         Self::from_sorted_unchecked(out)
     }
 
+    /// Merge sorted lists in a single pass. Shared documents fold their
+    /// payloads in input order, exactly as successive binary unions would.
+    pub fn merge_union_all(mut lists: Vec<Self>) -> Self {
+        lists.retain(|list| !list.is_empty());
+        if lists.len() <= 1 {
+            return lists.pop().unwrap_or_default();
+        }
+        let mut entries: Vec<PostingEntry> =
+            Vec::with_capacity(lists.iter().map(Self::len).max().unwrap_or(0));
+        let mut inputs: Vec<_> = lists.into_iter().map(IntoIterator::into_iter).collect();
+        let mut heads: BinaryHeap<_> = inputs
+            .iter()
+            .enumerate()
+            .map(|(source, input)| Reverse((input.as_slice()[0].doc_id, source)))
+            .collect();
+        while let Some(mut head) = heads.peek_mut() {
+            let Reverse((doc_id, source)) = *head;
+            let input = &mut inputs[source];
+            let entry = input.next().expect("heap contains only nonempty lists");
+            if let Some(next) = input.as_slice().first() {
+                *head = Reverse((next.doc_id, source));
+            } else {
+                PeekMut::pop(head);
+            }
+            if let Some(previous) = entries.last_mut().filter(|entry| entry.doc_id == doc_id) {
+                previous.payload = merge_payloads(&previous.payload, &entry.payload);
+            } else {
+                entries.push(entry);
+            }
+        }
+        Self::from_sorted_unchecked(entries)
+    }
+
     /// Keep the intersection of both supports and merge payloads on each
     /// shared `doc_id`.
     ///
@@ -154,20 +188,12 @@ impl PostingList {
     /// subtrees; unlike [`Self::merge_intersection_owned`], it deliberately
     /// does not observe or combine scores, positions, or fields.
     pub fn merge_support_intersection_owned(mut self, other: &Self) -> Self {
-        let mut other_index = 0;
+        let mut lookup = other.lookup_ascending();
         self.entries.retain_mut(|entry| {
-            while other_index < other.entries.len()
-                && other.entries[other_index].doc_id < entry.doc_id
-            {
-                other_index += 1;
-            }
-            if other_index >= other.entries.len()
-                || other.entries[other_index].doc_id != entry.doc_id
-            {
+            if lookup(entry.doc_id).is_none() {
                 return false;
             }
             entry.payload = Payload::default();
-            other_index += 1;
             true
         });
         self
@@ -175,20 +201,12 @@ impl PostingList {
 
     #[inline(never)]
     fn merge_intersection_reusing_left(mut self, other: &Self) -> Self {
-        let mut other_index = 0;
+        let mut lookup = other.lookup_ascending();
         self.entries.retain_mut(|entry| {
-            while other_index < other.entries.len()
-                && other.entries[other_index].doc_id < entry.doc_id
-            {
-                other_index += 1;
-            }
-            if other_index >= other.entries.len()
-                || other.entries[other_index].doc_id != entry.doc_id
-            {
+            let Some(right) = lookup(entry.doc_id) else {
                 return false;
-            }
-            entry.payload = merge_payloads(&entry.payload, &other.entries[other_index].payload);
-            other_index += 1;
+            };
+            entry.payload = merge_payloads(&entry.payload, &right.payload);
             true
         });
         self
@@ -196,17 +214,16 @@ impl PostingList {
 
     /// `A - B`: entries of `A` whose `doc_id` does not appear in `B`.
     ///
-    /// A membership filter preserves left payloads and the sorted invariant;
-    /// the temporary `BTreeSet` provides deterministic `O(log |B|)` probes.
+    /// Walk both sorted inputs once, preserving the left payloads.
     pub fn exclude(&self, other: &Self) -> Self {
-        let other_ids: BTreeSet<DocId> = other.entries.iter().map(|e| e.doc_id).collect();
-        let out: Vec<PostingEntry> = self
+        let mut lookup = other.lookup_ascending();
+        let entries = self
             .entries
             .iter()
-            .filter(|e| !other_ids.contains(&e.doc_id))
+            .filter(|entry| lookup(entry.doc_id).is_none())
             .cloned()
             .collect();
-        Self::from_sorted_unchecked(out)
+        Self::from_sorted_unchecked(entries)
     }
 
     /// Build a score-ordered view without changing posting storage order.
@@ -232,6 +249,16 @@ impl PostingList {
             })
             .collect();
         Self::from_sorted_unchecked(entries)
+    }
+
+    /// Look up a nondecreasing sequence of document IDs in a single forward
+    /// pass. A repeated ID returns the same entry.
+    pub fn lookup_ascending<'a>(&'a self) -> impl FnMut(DocId) -> Option<&'a PostingEntry> {
+        let mut entries = self.iter().peekable();
+        move |id| {
+            while entries.next_if(|entry| entry.doc_id < id).is_some() {}
+            entries.peek().copied().filter(|entry| entry.doc_id == id)
+        }
     }
 
     /// Look up an entry by `doc_id`. O(log n) via binary search.
@@ -621,6 +648,83 @@ mod tests {
         let a = pl_of(&[1, 3, 5]);
         let b = pl_of(&[2, 3, 4, 5]);
         assert_eq!(ids(&a.merge_intersection(&b)), vec![3, 5]);
+    }
+
+    #[test]
+    fn many_list_union_matches_successive_payload_merges_in_operand_order() {
+        let lists: Vec<_> = [1e16, -1e16, 1.0]
+            .into_iter()
+            .enumerate()
+            .map(|(i, score)| {
+                let payload = Payload {
+                    positions: vec![i as u32, 10],
+                    score,
+                    fields: BTreeMap::from([("winner".into(), Value::Int(i as i64))]),
+                };
+                PostingList::from_unsorted(vec![
+                    PostingEntry::new(u64::MAX, payload),
+                    PostingEntry::new(u64::MAX, Payload::with_score(99.0)),
+                    PostingEntry::new(i as u64, Payload::with_score(-0.0)),
+                ])
+            })
+            .collect();
+        let expected = lists
+            .iter()
+            .fold(PostingList::new(), |acc, list| acc.merge_union(list));
+        let result = PostingList::merge_union_all(lists);
+        assert_eq!(result, expected);
+        let shared = &result.get_entry(u64::MAX).unwrap().payload;
+        assert_eq!(shared.score.to_bits(), 1.0f64.to_bits());
+        assert_eq!(shared.fields["winner"], Value::Int(2));
+        assert_eq!(
+            result.get_entry(0).unwrap().payload.score.to_bits(),
+            (-0.0f64).to_bits()
+        );
+        assert!(PostingList::merge_union_all(vec![PostingList::new()]).is_empty());
+        let nan = f64::from_bits(0x7ff8_0000_0000_1234);
+        let singleton = PostingList::from_sorted_unchecked(vec![PostingEntry::new(
+            7,
+            Payload::with_score(nan),
+        )]);
+        assert_eq!(
+            PostingList::merge_union_all(vec![PostingList::new(), singleton]).entries()[0]
+                .payload
+                .score
+                .to_bits(),
+            nan.to_bits()
+        );
+    }
+
+    #[test]
+    fn disjoint_many_list_union_moves_payloads_without_per_entry_allocations() {
+        let lists = (0..32)
+            .map(|signal| {
+                PostingList::from_sorted_unchecked(
+                    (0..64)
+                        .map(|row| {
+                            PostingEntry::new(
+                                row * 32 + signal,
+                                Payload {
+                                    fields: BTreeMap::from([(
+                                        "field".into(),
+                                        Value::Str("x".repeat(1024)),
+                                    )]),
+                                    ..Default::default()
+                                },
+                            )
+                        })
+                        .collect(),
+                )
+            })
+            .collect();
+        let mut result = PostingList::new();
+        let allocations =
+            allocation_counter::measure(|| result = PostingList::merge_union_all(lists));
+        assert!(result.doc_ids().eq(0..2048));
+        assert!(allocations.count_total < 32, "{allocations:?}");
+        let no_matches =
+            allocation_counter::measure(|| assert!(result.exclude(&result).is_empty()));
+        assert_eq!(no_matches.count_total, 0);
     }
 
     #[test]

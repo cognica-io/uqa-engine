@@ -185,7 +185,8 @@ impl RobustPositiveEvidencePool {
     }
 
     pub fn fuse_sparse(&self, probabilities: &[Option<f64>]) -> f64 {
-        self.fuse_validated(probabilities, None, None, None)
+        self.batch(probabilities.len(), None, None, None)
+            .fuse_validated(probabilities)
     }
 
     pub fn fuse_weighted(
@@ -212,53 +213,38 @@ impl RobustPositiveEvidencePool {
         logit_min: Option<&[f64]>,
         logit_max: Option<&[f64]>,
     ) -> Result<f64, &'static str> {
-        self.validate_configuration(probabilities.len(), weights, logit_min, logit_max)?;
-        Ok(self.fuse_validated(probabilities, weights, logit_min, logit_max))
+        Ok(self
+            .prepare(probabilities.len(), weights, logit_min, logit_max)?
+            .fuse_validated(probabilities))
     }
 
-    fn fuse_validated(
+    /// Prepare the confidence scale, prior and signal configuration once for a batch.
+    pub fn prepare<'a>(
         &self,
-        probabilities: &[Option<f64>],
-        weights: Option<&[f64]>,
-        logit_min: Option<&[f64]>,
-        logit_max: Option<&[f64]>,
-    ) -> f64 {
-        if probabilities.is_empty() {
-            return self.base_rate.unwrap_or(0.5);
-        }
+        signal_count: usize,
+        weights: Option<&'a [f64]>,
+        logit_min: Option<&'a [f64]>,
+        logit_max: Option<&'a [f64]>,
+    ) -> Result<PositiveEvidenceBatch<'a>, &'static str> {
+        self.validate_configuration(signal_count, weights, logit_min, logit_max)?;
+        Ok(self.batch(signal_count, weights, logit_min, logit_max))
+    }
 
-        // The single-signal identity (Proposition 4.3.2) only holds for
-        // prior-free pooling without normalization bounds; a configured
-        // prior must still enter once, and explicit logit bounds are a
-        // learned per-signal transform that must not be bypassed.
-        if probabilities.len() == 1 && self.base_rate.is_none() && logit_min.is_none() {
-            return probabilities[0].unwrap_or(0.5);
+    fn batch<'a>(
+        &self,
+        signal_count: usize,
+        weights: Option<&'a [f64]>,
+        logit_min: Option<&'a [f64]>,
+        logit_max: Option<&'a [f64]>,
+    ) -> PositiveEvidenceBatch<'a> {
+        PositiveEvidenceBatch {
+            pool: *self,
+            signal_count,
+            scale: (signal_count as f64).powf(self.alpha),
+            prior_logit: self.logit_base_rate(),
+            weights,
+            bounds: logit_min.zip(logit_max),
         }
-
-        let mut logit_sum = 0.0;
-        for (index, probability) in probabilities.iter().enumerate() {
-            let Some(probability) = probability else {
-                continue;
-            };
-            let raw_logit = lucene_logit(*probability);
-            let gated = match (logit_min, logit_max) {
-                // Validation guarantees min < max, so the range is
-                // strictly positive here.
-                (Some(minimums), Some(maximums)) => ((raw_logit - minimums[index])
-                    / (maximums[index] - minimums[index]))
-                    .clamp(0.0, 1.0),
-                _ => self.gating.apply(raw_logit),
-            };
-            logit_sum += weights.map_or(gated, |signal_weights| signal_weights[index] * gated);
-        }
-
-        let signal_count = probabilities.len() as f64;
-        let aggregate = if weights.is_some() {
-            logit_sum
-        } else {
-            logit_sum / signal_count
-        };
-        sigmoid(aggregate * signal_count.powf(self.alpha) + self.logit_base_rate())
     }
 
     pub fn validate_configuration(
@@ -287,6 +273,66 @@ impl RobustPositiveEvidencePool {
                     + self.logit_base_rate(),
             ),
         }
+    }
+}
+
+/// A positive-evidence pool prepared for a fixed set of signals.
+pub struct PositiveEvidenceBatch<'a> {
+    pool: RobustPositiveEvidencePool,
+    signal_count: usize,
+    scale: f64,
+    prior_logit: f64,
+    weights: Option<&'a [f64]>,
+    bounds: Option<(&'a [f64], &'a [f64])>,
+}
+
+impl PositiveEvidenceBatch<'_> {
+    pub fn fuse(&self, probabilities: &[Option<f64>]) -> Result<f64, &'static str> {
+        if probabilities.len() != self.signal_count {
+            return Err("probabilities length must equal signal count");
+        }
+        Ok(self.fuse_validated(probabilities))
+    }
+
+    fn fuse_validated(&self, probabilities: &[Option<f64>]) -> f64 {
+        if probabilities.is_empty() {
+            return self.pool.base_rate.unwrap_or(0.5);
+        }
+
+        // The single-signal identity (Proposition 4.3.2) only holds for
+        // prior-free pooling without normalization bounds; a configured
+        // prior must still enter once, and explicit logit bounds are a
+        // learned per-signal transform that must not be bypassed.
+        if probabilities.len() == 1 && self.pool.base_rate.is_none() && self.bounds.is_none() {
+            return probabilities[0].unwrap_or(0.5);
+        }
+
+        let mut logit_sum = 0.0;
+        for (index, probability) in probabilities.iter().enumerate() {
+            let Some(probability) = probability else {
+                continue;
+            };
+            let raw_logit = lucene_logit(*probability);
+            let gated = match self.bounds {
+                // Validation guarantees min < max, so the range is
+                // strictly positive here.
+                Some((minimums, maximums)) => ((raw_logit - minimums[index])
+                    / (maximums[index] - minimums[index]))
+                    .clamp(0.0, 1.0),
+                None => self.pool.gating.apply(raw_logit),
+            };
+            logit_sum += self
+                .weights
+                .map_or(gated, |signal_weights| signal_weights[index] * gated);
+        }
+
+        let signal_count = probabilities.len() as f64;
+        let aggregate = if self.weights.is_some() {
+            logit_sum
+        } else {
+            logit_sum / signal_count
+        };
+        sigmoid(aggregate * self.scale + self.prior_logit)
     }
 }
 

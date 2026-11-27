@@ -8,6 +8,17 @@ On macOS ARM64 with Rust 1.95.0, the shared Korean and Japanese Viterbi lattice 
 
 Lowercase and ASCII folding each processed an 8,192-byte owned scalar ASCII token at a fully reserved memory limit with zero allocations. A prepared literal mapping searched 32 KiB of unmatched text for 512 independent compound keys in one scan with zero allocations. Separate differential cases compare the transformed text and every original UTF-8 and covering UTF-16 span. [Token filter regression](../../crates/uqa-analysis/src/token/allocation/tests/common_filters/resources.rs) · [Mapping regressions](../../crates/uqa-analysis/src/char_filter/literals/tests.rs)
 
+## Posting and fusion allocations (2026-11-27 UTC)
+
+The same Rust caller on macOS ARM64 measured allocations during each public operation with prebuilt inputs. The path and union comparisons use main at `557463e22`. The confidence-scaled pool comparisons use `e98499b30` before the WAND changes. The path returned the same scalar, the union preserved the decorated postings, and the two pool workloads returned identical document order and score bits for all ten results. [Implementation and regression tests](https://github.com/cognica-io/uqa-engine/pull/1485)
+
+| Operation | Allocations before | Allocations after | Memory measure | Bytes before | Bytes after |
+| --- | ---: | ---: | --- | ---: | ---: |
+| Read a scalar through 32 nested levels | 5,152 | 0 | Total allocated | 4,890,624 | 0 |
+| Union 32 interleaved lists with 2,048 decorated postings | 101,440 | 44 | Total allocated | 58,293,248 | 263,072 |
+| Pool 2 overlapping signals over 8,192 documents, top 10 | 17,741 | 6 | Peak live | 160,888 | 848 |
+| Pool 32 overlapping signals over 8,192 documents, top 10 | 17,741 | 9 | Peak live | 161,368 | 11,168 |
+
 ## Cursor scan instruction counts (2026-11-21 UTC)
 
 The public SQL cursor returned the same 15,602 ordered integer pairs on all three revisions. Each build used Rust 1.95.0 on macOS ARM64 at optimization level 3 with 16 code-generation units and LTO disabled. The observer loaded the original 20,000-row fixture in one statement, set `work_mem` to 4 MB and used the benchmark’s cursor collector. Each column reports the median of five warmed calls. The complete query, cursor opening and result iteration were measured separately. [Cursor change and regression tests](https://github.com/cognica-io/uqa-engine/pull/1438)

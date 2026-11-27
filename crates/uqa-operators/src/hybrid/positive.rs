@@ -86,26 +86,33 @@ impl<'a> PreparedPositiveEvidencePool<'a> {
     where
         I: Iterator<Item = Result<ScoredEntry, E>>,
     {
-        validate_probabilities(self.signal_count, &mut replay, "positive-evidence pool")?;
         let adaptive = if self.options.weights.is_none() && self.options.adaptive_weights {
-            adaptive_weights(&self.fuser, self.signal_count, &mut replay)
-                .map_err(EvidenceVisitError::Input)?
+            adaptive_weights(&self.fuser, self.signal_count, &mut replay)?
         } else {
+            validate_probabilities(self.signal_count, &mut replay, "positive-evidence pool")?;
             None
         };
         let weights = self.options.weights.or(adaptive.as_deref());
-        visit_ordered_union(self.signal_count, replay, |doc_id, probabilities| {
-            let score = self
-                .fuser
-                .fuse_configured(
-                    probabilities,
-                    weights,
-                    self.options.logit_min,
-                    self.options.logit_max,
-                )
-                .map_err(|cause| EvidenceVisitError::Fusion(error(cause)))?;
-            visit(ScoredEntry { doc_id, score }).map_err(EvidenceVisitError::Output)
-        })
+        let batch = self
+            .fuser
+            .prepare(
+                self.signal_count,
+                weights,
+                self.options.logit_min,
+                self.options.logit_max,
+            )
+            .map_err(|cause| EvidenceVisitError::Fusion(error(cause)))?;
+        visit_ordered_union(
+            self.signal_count,
+            replay,
+            EvidenceVisitError::Input,
+            |doc_id, probabilities| {
+                let score = batch
+                    .fuse(probabilities)
+                    .map_err(|cause| EvidenceVisitError::Fusion(error(cause)))?;
+                visit(ScoredEntry { doc_id, score }).map_err(EvidenceVisitError::Output)
+            },
+        )
     }
 }
 
@@ -142,34 +149,49 @@ pub(super) fn adaptive_weights<I, E>(
     fuser: &RobustPositiveEvidencePool,
     signal_count: usize,
     replay: &mut impl FnMut(usize) -> Result<I, E>,
-) -> Result<Option<Vec<f64>>, E>
+) -> Result<Option<Vec<f64>>, EvidenceVisitError<E>>
 where
     I: Iterator<Item = Result<ScoredEntry, E>>,
 {
-    let mut spreads = Vec::with_capacity(signal_count);
+    let mut means = Vec::with_capacity(signal_count);
     for signal in 0..signal_count {
+        let checked = replay(signal)
+            .map_err(EvidenceVisitError::Input)?
+            .map(|entry| {
+                let entry = entry.map_err(EvidenceVisitError::Input)?;
+                crate::base::require_probability(entry.score, "positive-evidence pool")
+                    .map_err(EvidenceVisitError::Fusion)?;
+                Ok(entry)
+            });
         let mut count = 0usize;
-        let sum = unique_scores(replay(signal)?)
+        let sum = unique_scores(checked)
             .map(|score| {
                 score.map(|probability| {
                     count += 1;
                     fuser.gated_logit(probability)
                 })
             })
-            .sum::<Result<f64, E>>()?;
+            .sum::<Result<f64, _>>()?;
+        means.push((count, sum));
+    }
+
+    // Center around the final mean to preserve the model's exact score bits.
+    let mut spreads = Vec::with_capacity(signal_count);
+    for (signal, (count, sum)) in means.into_iter().enumerate() {
         if count < 2 {
             spreads.push(0.0);
             continue;
         }
         let mean = sum / count as f64;
-        let variance = unique_scores(replay(signal)?)
+        let variance = unique_scores(replay(signal).map_err(EvidenceVisitError::Input)?)
             .map(|score| {
                 score.map(|probability| {
                     let difference = fuser.gated_logit(probability) - mean;
                     difference * difference
                 })
             })
-            .sum::<Result<f64, E>>()?
+            .sum::<Result<f64, E>>()
+            .map_err(EvidenceVisitError::Input)?
             / count as f64;
         spreads.push(variance.sqrt());
     }

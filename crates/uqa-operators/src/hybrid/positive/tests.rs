@@ -119,6 +119,68 @@ fn positive_cursor_matches_original_sparse_duplicate_and_adaptive_score_bits() {
 }
 
 #[test]
+fn adaptive_validation_and_mean_share_a_replay_and_preserve_centered_score_bits() {
+    let samples = [[0.01, 0.01, 0.7], [0.2, 0.7, 0.9]];
+    let inputs = samples.map(|signal| {
+        signal
+            .into_iter()
+            .enumerate()
+            .map(|(doc_id, score)| ScoredEntry {
+                doc_id: doc_id as u64,
+                score,
+            })
+            .collect::<Vec<_>>()
+    });
+    let config = PositiveEvidencePoolOptions {
+        gating: LogitGating::Pass,
+        adaptive_weights: true,
+        ..options()
+    };
+    let expected = reference(&inputs, config);
+    let mut replays = [0; 2];
+    let mut actual = Vec::new();
+    PreparedPositiveEvidencePool::new(config, 2)
+        .unwrap()
+        .visit(
+            |i| {
+                replays[i] += 1;
+                Ok::<_, ()>(inputs[i].iter().cloned().map(Ok))
+            },
+            |entry| {
+                actual.push((entry.doc_id, entry.score.to_bits()));
+                Ok(())
+            },
+        )
+        .unwrap();
+    assert_eq!(actual, expected);
+    assert_eq!(replays, [3, 3]);
+}
+
+#[test]
+fn adaptive_validation_rejects_an_invalid_duplicate_before_output() {
+    let config = PositiveEvidencePoolOptions {
+        adaptive_weights: true,
+        ..options()
+    };
+    let pool = PreparedPositiveEvidencePool::new(config, 1).unwrap();
+    let error = pool
+        .visit(
+            |_| {
+                Ok::<_, ()>(
+                    [f64::NAN, 0.4]
+                        .into_iter()
+                        .map(|score| Ok(ScoredEntry { doc_id: 12, score })),
+                )
+            },
+            |_| panic!("invalid duplicate reached the consumer"),
+        )
+        .unwrap_err();
+    assert!(
+        matches!(error, EvidenceVisitError::Fusion(cause) if cause.to_string().contains("positive-evidence pool requires probability"))
+    );
+}
+
+#[test]
 fn positive_cursor_keeps_empty_signals_in_the_declared_count() {
     let inputs = [
         vec![ScoredEntry {

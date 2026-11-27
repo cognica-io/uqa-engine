@@ -28,23 +28,9 @@ use crate::vector::VectorSimilarityOperator;
 pub mod evidence;
 pub mod positive;
 
-/// Default probability for documents missing from a signal, interpolated
-/// by the signal's coverage (Section 5, Paper 3 / Section 4, Paper 4):
-///
-/// `default = 0.5 * (1 - r) + floor * r`
-///
-/// where `r = n_hits / n_total`. A signal that returns nothing reports
-/// neutral evidence (0.5, logit 0); a signal that covers everything
-/// flags absence as strong negative evidence (= floor, default 0.01).
-pub fn coverage_based_default(n_hits: usize, n_total: usize, floor: f64) -> f64 {
-    if n_total == 0 {
-        return 0.5;
-    }
-    let r = n_hits as f64 / n_total as f64;
-    f64::midpoint(1.0 - r, 0.0) + floor * r
-}
+pub use uqa_scoring::prob::coverage_based_default;
 
-fn validate_probability_postings(
+pub(crate) fn validate_probability_postings(
     postings: &PostingList,
     operation: &str,
 ) -> StorageBackendResult<()> {
@@ -179,12 +165,7 @@ impl Operator for BayesianEvidenceFusionOperator {
                 ));
                 Ok(())
             },
-        )
-        .map_err(|error| match error {
-            evidence::EvidenceVisitError::Input(error)
-            | evidence::EvidenceVisitError::Output(error)
-            | evidence::EvidenceVisitError::Fusion(error) => error,
-        })?;
+        )?;
         let result = PostingList::from_sorted_unchecked(entries);
         Ok(match self.top_k {
             Some(k) => result.ranked().select_top_k(k),
@@ -312,12 +293,7 @@ impl Operator for RobustPositiveEvidencePoolOperator {
                 ));
                 Ok(())
             },
-        )
-        .map_err(|error| match error {
-            evidence::EvidenceVisitError::Input(error)
-            | evidence::EvidenceVisitError::Output(error)
-            | evidence::EvidenceVisitError::Fusion(error) => error,
-        })?;
+        )?;
         let result = PostingList::from_sorted_unchecked(entries);
         Ok(match self.top_k {
             Some(k) => result.ranked().select_top_k(k),
