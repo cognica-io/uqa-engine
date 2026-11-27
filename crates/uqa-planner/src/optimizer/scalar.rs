@@ -60,9 +60,9 @@ pub(super) fn optimize_scalar_slot(
 
 /// Existing caller-owned syntax can be moved without charging its original allocations again. Newly evaluated values and scratch always belong to the active operation.
 #[derive(Clone, Copy)]
-struct ScalarProduction<'a, 'scope> {
-    config: &'a OptimizerConfig<'scope>,
-    storage: ProductionControl<'scope>,
+pub(super) struct ScalarProduction<'a, 'scope> {
+    pub(super) config: &'a OptimizerConfig<'scope>,
+    pub(super) storage: ProductionControl<'scope>,
 }
 
 impl<'a, 'scope> ScalarProduction<'a, 'scope> {
@@ -91,7 +91,7 @@ impl<'a, 'scope> ScalarProduction<'a, 'scope> {
     }
 }
 
-fn rewrite_ordinary_slot(
+pub(super) fn rewrite_ordinary_slot(
     expression: &mut ScalarExpr,
     config: &OptimizerConfig<'_>,
     rewrite: impl FnOnce(OwnedScalarExpr, ScalarProduction<'_, '_>) -> Result<OwnedScalarExpr, SQLError>,

@@ -63,27 +63,28 @@ impl MutableQueryPlan {
     }
 
     /// Compact the local scalar-query arena through SQL's existing namespace-aware remapping. Unreachable child payloads release before their constructor records, while the original arena capacity remains owned by the parent.
-    pub fn prune_subqueries(mut self, control: &ProductionControl<'_>) -> Result<Self, SQLError> {
-        self.prune_subqueries_in_place(control)?;
-        Ok(self)
+    pub fn prune_subqueries(self, control: &ProductionControl<'_>) -> Result<Self, SQLError> {
+        self.prune_subqueries_with_workspace(control, control)
     }
 
-    pub(super) fn prune_subqueries_in_place(
-        &mut self,
-        control: &ProductionControl<'_>,
-    ) -> Result<(), SQLError> {
-        self.assert_owner(control);
-        control.check()?;
+    /// Charge the slot-remapping workspace to the operation while compacting the original query and its constructor records in place.
+    pub fn prune_subqueries_with_workspace(
+        mut self,
+        storage: &ProductionControl<'_>,
+        workspace: &ProductionControl<'_>,
+    ) -> Result<Self, SQLError> {
+        self.assert_owner(storage);
+        storage.check()?;
         let fields = self.memory.as_mut().map(query_fields);
         super::super::subqueries::prune_query_with_retention(
             &mut self.query,
-            *control,
+            *workspace,
             |arena, keep| {
                 work::inline(compact(arena, fields, keep, None, None, &mut ()))
                     .expect("immediate compaction has no fallible commit operation");
             },
         )?;
-        Ok(())
+        Ok(self)
     }
 }
 

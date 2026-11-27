@@ -243,6 +243,46 @@ fn owned_query_arena_compaction_preserves_slots_and_releases_discarded_children(
 }
 
 #[test]
+fn caller_owned_subqueries_use_the_operation_allowance_for_remapping() {
+    let storage = ProductionControl::uncontrolled();
+    for (limit, cancel, expected) in [
+        (0, false, Some("53200")),
+        (0, true, Some("57014")),
+        (4096, false, None),
+    ] {
+        let budget = MemoryBudget::new(limit);
+        let token = CancellationToken::new();
+        let work = ProductionControl::new(&budget, &token, &token);
+        let query =
+            MutableQueryPlan::uncontrolled(query("SELECT (SELECT 'discarded'), (SELECT 'kept')"))
+                .retain_projections(&storage, |index, _| Ok(index == 1))
+                .unwrap();
+        let RelationalPlan::QueryBlock(block) = &query.root else {
+            panic!("block")
+        };
+        let buffer = block.subqueries.as_ptr();
+        if cancel {
+            token.cancel();
+        }
+        let result = query.prune_subqueries_with_workspace(&storage, &work);
+        if let Some(state) = expected {
+            assert_eq!(result.unwrap_err().sqlstate(), Some(state));
+        } else {
+            let output = result.unwrap();
+            let RelationalPlan::QueryBlock(block) = &output.root else {
+                panic!("block")
+            };
+            assert_eq!(block.subqueries.as_ptr(), buffer);
+            assert_eq!(block.subqueries.len(), 1);
+            assert_eq!(block.projections[0].expr, ScalarExpr::ScalarSubquery(0));
+            assert_eq!(output.reserved_bytes(), 0);
+            assert!(budget.peak() > 0);
+        }
+        assert_eq!(budget.used(), 0);
+    }
+}
+
+#[test]
 fn owned_query_arena_rejection_destroys_the_private_query_and_keeps_sibling_allowances() {
     let source = query("SELECT (SELECT 'discarded'), (SELECT 'kept')");
     let budget = MemoryBudget::new(4 * 1024 * 1024);

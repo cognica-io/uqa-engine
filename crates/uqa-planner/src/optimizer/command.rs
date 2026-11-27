@@ -61,7 +61,7 @@ pub(super) fn optimize_command(
             if let Some(predicate) = &mut plan.predicate {
                 super::optimize_qualification(predicate, config)?;
                 if config.enable_filter_pushdown {
-                    prioritize_access_predicates(predicate);
+                    prioritize_access_predicates(predicate, config)?;
                 }
             }
             optimize_projections(&mut plan.returning, config)?;
@@ -79,7 +79,7 @@ pub(super) fn optimize_command(
             if let Some(predicate) = &mut plan.predicate {
                 super::optimize_qualification(predicate, config)?;
                 if config.enable_filter_pushdown {
-                    prioritize_access_predicates(predicate);
+                    prioritize_access_predicates(predicate, config)?;
                 }
             }
             optimize_projections(&mut plan.returning, config)?;

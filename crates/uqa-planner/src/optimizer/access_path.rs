@@ -12,18 +12,13 @@ pub(super) mod owned;
 
 /// Put posting-list-compatible conjuncts before row residuals. The executor
 /// can then build the smallest candidate set before touching documents.
-pub(super) fn prioritize_access_predicates(expression: &mut ScalarExpr) {
-    let control = uqa_core::memory::ProductionControl::uncontrolled();
-    let input = std::mem::replace(expression, ScalarExpr::Literal(uqa_core::Value::Null));
-    *expression = owned::prioritize(
-        uqa_sql::plan::OwnedScalarExpr::uncontrolled(input),
-        &control,
-    )
-    .expect("ordinary access ordering")
-    .finish(&control)
-    .expect("ordinary access result")
-    .into_uncontrolled()
-    .expect("ordinary access owner");
+pub(super) fn prioritize_access_predicates(
+    expression: &mut ScalarExpr,
+    config: &super::OptimizerConfig<'_>,
+) -> Result<(), uqa_sql::SQLError> {
+    super::scalar::rewrite_ordinary_slot(expression, config, |input, production| {
+        owned::prioritize(input, &production.storage, &config.production)
+    })
 }
 
 pub(super) fn choose_access_path(block: &QueryBlockPlan) -> AccessPathPlan {

@@ -6886,6 +6886,32 @@
       ]
     },
     {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "caller_owned_access_order_reuses_children_and_charges_only_the_permutation",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/access_path/owned.rs",
+      "capability": "Predicate ordering workspace",
+      "workload": "Reorder four large, caller-owned conjunction operands with zero or one kibibyte of scratch.",
+      "invariant": "The input buffer survives, four index slots bound scratch, and an exhausted allowance rejects the permutation.",
+      "case_names": [
+        "optimizer::access_path::owned::tests::caller_owned_access_order_reuses_children_and_charges_only_the_permutation"
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "caller_owned_subqueries_use_the_operation_allowance_for_remapping",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/mutable/tests/children.rs",
+      "capability": "Scalar subquery remapping",
+      "workload": "Compact two caller-owned scalar subqueries with available, exhausted and cancelled remapping allocations.",
+      "invariant": "The remaining slot retains its arena allocation. Exhaustion and cancellation return their own SQLSTATE and release all workspace.",
+      "case_names": [
+        "plan::mutable::tests::children::caller_owned_subqueries_use_the_operation_allowance_for_remapping"
+      ]
+    },
+    {
       "package": "uqa-sql",
       "kind": "lib",
       "test": "speculative_query_replacement_preserves_the_input_owner_and_moves_the_destination",

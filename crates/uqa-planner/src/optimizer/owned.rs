@@ -36,19 +36,28 @@ pub(super) fn optimize(
         Ok((query, true))
     })?;
     let plan = super::source_demand::owned::prune(plan, config, aggregates)?;
-    let plan = super::derived_pullup::rewrite(plan, config, control)?;
-    let plan = plan.map_queries_while(control, &mut |query| {
-        let query = query
-            .prune_subqueries(control)?
-            .discard_source_analysis(control)?;
-        Ok((query, true))
-    })?;
+    let plan = rewrite_sources(plan, config, control)?;
     Context {
         config,
         aggregates,
         active: &config.active_inline_routines,
     }
     .plan(plan)
+}
+
+/// Source rewrites invalidate the analyzed layout. Compact discarded subqueries before planning live CTEs and evaluating constants.
+pub(super) fn rewrite_sources(
+    plan: MutableExecutablePlan,
+    config: &OptimizerConfig<'_>,
+    storage: &ProductionControl<'_>,
+) -> Result<MutableExecutablePlan, SQLError> {
+    let plan = super::derived_pullup::rewrite(plan, config, storage)?;
+    plan.map_queries_while(storage, &mut |query| {
+        let query = query
+            .prune_subqueries_with_workspace(storage, &config.production)?
+            .discard_source_analysis(storage)?;
+        Ok((query, true))
+    })
 }
 
 pub(in crate::optimizer) struct Context<'a, 'scope> {
@@ -89,7 +98,11 @@ impl Context<'_, '_> {
 
     fn access_predicate(&self, expression: OwnedScalarExpr) -> Result<OwnedScalarExpr, SQLError> {
         if self.config.enable_filter_pushdown {
-            super::access_path::owned::prioritize(expression, &self.config.production)
+            super::access_path::owned::prioritize(
+                expression,
+                &self.config.production,
+                &self.config.production,
+            )
         } else {
             Ok(expression)
         }

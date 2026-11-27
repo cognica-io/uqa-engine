@@ -32,15 +32,8 @@ pub(super) fn optimize_unified_plan(
     super::source_demand::prune(&mut plan, config, aggregates)?;
     let storage = uqa_core::memory::ProductionControl::uncontrolled();
     let plan = uqa_sql::plan::MutableExecutablePlan::uncontrolled(plan);
-    let plan = super::derived_pullup::rewrite(plan, config, &storage)?;
+    let plan = super::owned::rewrite_sources(plan, config, &storage)?;
     let (mut plan, _) = plan.finish(&storage)?.into_parts();
-    // Analyzed layouts describe the original topology, not later source expansion or join order.
-    plan.try_visit_queries_mut(&mut |query| {
-        // Discarded scalar arenas must not keep an enclosing command's CTE alive during constant evaluation.
-        super::subqueries::prune_query(query, config.production)?;
-        query.analyzed_source = None;
-        Ok::<_, SQLError>(())
-    })?;
     match &mut plan {
         UnifiedPlan::Query(query) => optimize_query(query, config, aggregates)?,
         UnifiedPlan::Command(command) => optimize_command(command, config, aggregates)?,
@@ -189,7 +182,7 @@ pub(super) fn optimize_query_block(
         let allow_unqualified_signals = source_allows_unqualified_signals(block.from.as_ref());
         rewrite_implicit_hybrid_fusion(predicate, allow_unqualified_signals);
         if config.enable_filter_pushdown {
-            prioritize_access_predicates(predicate);
+            prioritize_access_predicates(predicate, config)?;
         }
     }
     for expression in &mut block.group_by {
@@ -264,7 +257,7 @@ pub(super) fn optimize_source(
             if let Some(on) = on {
                 super::optimize_qualification(on, config)?;
                 if config.enable_filter_pushdown {
-                    prioritize_access_predicates(on);
+                    prioritize_access_predicates(on, config)?;
                 }
             }
         }
