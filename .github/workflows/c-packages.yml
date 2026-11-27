@@ -1,9 +1,6 @@
 name: C packages
 
 on:
-  pull_request:
-    branches: [main]
-    types: [ready_for_review]
   push:
     branches: [main]
   workflow_call:
@@ -21,9 +18,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: c-packages-${{ github.event.pull_request.number || github.ref }}
-  # Only a completed replacement PR candidate supersedes the previous source.
-  cancel-in-progress: ${{ github.event_name == 'pull_request' && github.event.action == 'ready_for_review' }}
+  group: c-packages-${{ github.ref }}
+  cancel-in-progress: false
 
 env:
   RUSTC_WRAPPER: ""

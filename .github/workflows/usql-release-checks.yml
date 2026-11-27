@@ -1,9 +1,8 @@
 name: usql release checks
 
 on:
-  pull_request:
+  push:
     branches: [main]
-    types: [ready_for_review]
     paths:
       - .gitattributes
       - crates/uqa-cli/**

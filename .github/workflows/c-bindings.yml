@@ -1,9 +1,6 @@
 name: C bindings
 
 on:
-  pull_request:
-    branches: [main]
-    types: [ready_for_review]
   push:
     branches: [main]
   workflow_dispatch:
@@ -29,9 +26,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: c-bindings-${{ github.event.pull_request.number || github.ref }}${{ inputs.group && format('-{0}-{1}', inputs.platform, inputs.group) || '' }}
-  # Only a completed replacement PR candidate supersedes the previous source.
-  cancel-in-progress: ${{ github.event_name == 'pull_request' && github.event.action == 'ready_for_review' }}
+  group: c-bindings-${{ github.ref }}${{ inputs.group && format('-{0}-{1}', inputs.platform, inputs.group) || '' }}
+  cancel-in-progress: false
 
 env:
   RUSTC_WRAPPER: ""
