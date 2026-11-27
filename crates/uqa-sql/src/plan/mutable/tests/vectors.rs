@@ -61,6 +61,41 @@ fn replacing_group_keys_releases_discarded_payloads_and_keeps_other_owners() {
 }
 
 #[test]
+fn caller_owned_grouping_admits_its_new_vector_before_handoff() {
+    let storage = ProductionControl::uncontrolled();
+    for limit in [0, 8192] {
+        let budget = MemoryBudget::new(limit);
+        let token = CancellationToken::new();
+        let workspace = ProductionControl::new(&budget, &token, &token);
+        let mut query = fixture();
+        let RelationalPlan::QueryBlock(block) = &query.root else {
+            panic!("query block")
+        };
+        let projections = block.projections.as_ptr();
+        let outcome = query.edit_uncontrolled(|query| {
+            let key =
+                OwnedScalarExpr::literal(workspace.copy_value(&Value::Bool(true))?, &workspace)?;
+            query.replace_group_by_with_workspace(std::iter::once(key), &storage, &workspace)
+        });
+        if limit == 0 {
+            assert_eq!(outcome.unwrap_err().sqlstate(), Some("53200"));
+            assert!(
+                matches!(&query.root, RelationalPlan::Values { rows, subqueries } if rows.is_empty() && subqueries.is_empty())
+            );
+        } else {
+            outcome.unwrap();
+            let RelationalPlan::QueryBlock(block) = &query.root else {
+                panic!("query block")
+            };
+            assert_eq!(block.projections.as_ptr(), projections);
+            assert_eq!(block.group_by, [ScalarExpr::Literal(Value::Bool(true))]);
+            assert!(budget.peak() >= size_of::<ScalarExpr>());
+        }
+        assert_eq!(budget.used(), 0);
+    }
+}
+
+#[test]
 fn rejected_group_container_drops_consumed_query_and_input_owners() {
     let source = fixture();
     let budget = MemoryBudget::new(4 * 1024 * 1024);

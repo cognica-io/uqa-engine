@@ -101,8 +101,8 @@ pub(super) fn optimize_query(
         optimize_cte(&mut cte.body, config, aggregates)?;
     }
     match &mut query.root {
-        RelationalPlan::QueryBlock(block) => {
-            optimize_query_block(block, config, aggregates, query.analyzed_output.is_none())?;
+        RelationalPlan::QueryBlock(_) => {
+            optimize_query_block(query, config, aggregates)?;
         }
         RelationalPlan::SetOp {
             left,
@@ -143,14 +143,22 @@ pub(super) fn optimize_query(
     Ok(())
 }
 
-pub(super) fn optimize_query_block(
-    block: &mut QueryBlockPlan,
+fn query_block_mut(query: &mut QueryPlan) -> &mut QueryBlockPlan {
+    let RelationalPlan::QueryBlock(block) = &mut query.root else {
+        unreachable!("SELECT block")
+    };
+    block
+}
+
+fn optimize_query_block(
+    query: &mut QueryPlan,
     config: &OptimizerConfig,
     aggregates: &dyn AggregateClassifier,
-    infer_output_demand: bool,
 ) -> Result<(), SQLError> {
+    let infer_output_demand = query.analyzed_output.is_none();
+    let block = query_block_mut(query);
+    let routines = config.routine_inlining.as_ref();
     if infer_output_demand {
-        let routines = config.routine_inlining.as_ref();
         super::derived_projection::prune(
             block,
             super::OutputPruningContext {
@@ -165,17 +173,13 @@ pub(super) fn optimize_query_block(
     if let Some(source) = &mut block.from {
         optimize_source(source, config, aggregates)?;
     }
-    super::source_constants::propagate_source_constants(
-        block,
-        config
-            .routine_inlining
-            .as_ref()
-            .map(|context| context.types),
-        config
-            .routine_inlining
-            .as_ref()
-            .map(|context| context.volatility),
+    super::source_constants::propagate_caller(
+        query,
+        routines.map(|context| context.types),
+        routines.map(|context| context.volatility),
+        config,
     )?;
+    let block = query_block_mut(query);
     super::optimize_projections(&mut block.projections, config)?;
     if let Some(predicate) = &mut block.r#where {
         super::optimize_qualification(predicate, config)?;
@@ -214,13 +218,14 @@ pub(super) fn optimize_query_block(
         }
     }
 
-    super::source_constants::simplify_constant_group(
-        block,
-        config
-            .routine_inlining
-            .as_ref()
-            .map(|context| context.types),
-    );
+    query.edit_uncontrolled(|query| {
+        super::source_constants::simplify_group(
+            query,
+            routines.map(|context| context.types),
+            super::scalar::ScalarProduction::caller(config),
+        )
+    })?;
+    let block = query_block_mut(query);
     let live_subqueries = super::subqueries::live_slots_for_block(block, config.production)?;
     super::subqueries::optimize_live(&mut block.subqueries, &live_subqueries, config, aggregates)?;
 

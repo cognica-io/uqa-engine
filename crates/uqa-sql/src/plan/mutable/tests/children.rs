@@ -18,6 +18,36 @@ fn query(sql: &str) -> QueryPlan {
 }
 
 #[test]
+fn caller_owned_local_scalar_edit_observes_cancellation_in_the_last_slot() {
+    for cancel_original in [false, true] {
+        let mut values = query("VALUES (1)");
+        let storage = ProductionControl::uncontrolled();
+        let budget = MemoryBudget::new(8192);
+        let original = CancellationToken::new();
+        let invoking = CancellationToken::new();
+        let workspace = ProductionControl::new(&budget, &original, &invoking);
+        let mut visited = 0;
+        let error = values
+            .edit_uncontrolled(|plan| {
+                plan.map_local_scalars(&storage, &workspace, |value| {
+                    visited += 1;
+                    let token = if cancel_original {
+                        &original
+                    } else {
+                        &invoking
+                    };
+                    token.cancel();
+                    Ok(value)
+                })
+            })
+            .unwrap_err();
+        assert_eq!(visited, 1);
+        assert_eq!(error.sqlstate(), Some("57014"));
+        assert_eq!(budget.used(), 0);
+    }
+}
+
+#[test]
 fn child_query_edits_retain_parent_containers_and_release_selected_payloads() {
     let fixtures = [
         (

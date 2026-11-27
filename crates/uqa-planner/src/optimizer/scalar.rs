@@ -66,14 +66,14 @@ pub(super) struct ScalarProduction<'a, 'scope> {
 }
 
 impl<'a, 'scope> ScalarProduction<'a, 'scope> {
-    fn admitted(config: &'a OptimizerConfig<'scope>) -> Self {
+    pub(super) fn admitted(config: &'a OptimizerConfig<'scope>) -> Self {
         Self {
             config,
             storage: config.production,
         }
     }
 
-    fn caller(config: &'a OptimizerConfig<'scope>) -> Self {
+    pub(super) fn caller(config: &'a OptimizerConfig<'scope>) -> Self {
         Self {
             config,
             storage: ProductionControl::uncontrolled(),
@@ -81,12 +81,24 @@ impl<'a, 'scope> ScalarProduction<'a, 'scope> {
     }
 
     /// Hand a newly produced constructor to the caller's syntax owner. Shared literal values retain their independent leases.
-    fn adopt(self, produced: OwnedScalarExpr) -> Result<OwnedScalarExpr, SQLError> {
+    pub(super) fn adopt(self, produced: OwnedScalarExpr) -> Result<OwnedScalarExpr, SQLError> {
         if self.storage.budget().is_none() && self.config.production.budget().is_some() {
             let syntax = produced.finish(&self.config.production)?.into_parts().0;
             Ok(OwnedScalarExpr::uncontrolled(syntax))
         } else {
             Ok(produced)
+        }
+    }
+
+    pub(super) fn copy_text(
+        self,
+        source: &str,
+    ) -> Result<uqa_core::memory::Produced<String>, SQLError> {
+        let text = self.config.production.copy_text(source)?;
+        if self.storage.budget().is_none() && self.config.production.budget().is_some() {
+            Ok(self.storage.finish(text.into_parts().0, None)?)
+        } else {
+            Ok(text)
         }
     }
 }

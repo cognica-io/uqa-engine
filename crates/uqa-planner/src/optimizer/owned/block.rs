@@ -25,11 +25,11 @@ impl Context<'_, '_> {
             )?;
         }
         query = query.map_source(control, |source| self.source(source))?;
-        query = super::super::source_constants::owned::propagate(
+        query = super::super::source_constants::propagate(
             query,
             routines.map(|context| context.types),
             routines.map(|context| context.volatility),
-            control,
+            super::super::scalar::ScalarProduction::admitted(self.config),
         )?;
         query = self.projections(query)?;
         let RelationalPlan::QueryBlock(block) = &query.root else {
@@ -75,10 +75,10 @@ impl Context<'_, '_> {
                 })?;
         }
         query = self.windows(query)?;
-        query = super::super::source_constants::owned::simplify_group(
+        query = super::super::source_constants::simplify_group(
             query,
             routines.map(|context| context.types),
-            control,
+            super::super::scalar::ScalarProduction::admitted(self.config),
         )?;
         let RelationalPlan::QueryBlock(block) = &query.root else {
             unreachable!()

@@ -64,6 +64,18 @@ pub struct MutableQueryPlan {
 }
 
 impl QueryPlan {
+    /// Move caller-owned syntax into a consuming edit and restore its result to the same slot. An error leaves an empty query in the slot.
+    pub fn edit_uncontrolled(
+        &mut self,
+        edit: impl FnOnce(MutableQueryPlan) -> Result<MutableQueryPlan, SQLError>,
+    ) -> Result<(), SQLError> {
+        let mut slot = edits::Slot::<MutableQueryPlan>::new(self, None);
+        let output = edit(slot.take())?;
+        output.assert_owner(&ProductionControl::uncontrolled());
+        slot.restore(output);
+        Ok(())
+    }
+
     /// Copy a complete query while keeping mutable constructor ownership separate. Every destination and ownership-record buffer is admitted before allocation; published immutable schemas retain their original shared owners.
     pub fn copy_for_rewrite(
         &self,
@@ -133,12 +145,10 @@ impl MutableQueryPlan {
     ) -> Result<Self, SQLError> {
         self.assert_owner(control);
         control.check()?;
-        let Some(mut slot) = self.scalar_slot(slot) else {
+        let Some(slot) = self.scalar_slot(slot) else {
             return Ok(self);
         };
-        let input = slot.take();
-        let output = input.rewrite(control, map)?;
-        slot.restore(output);
+        slot.rewrite(control, map)?;
         Ok(self)
     }
 

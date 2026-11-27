@@ -85,6 +85,18 @@ pub(super) enum BodySlot<'a> {
     Command(Slot<'a, MutableCommandPlan>),
 }
 
+impl Slot<'_, OwnedScalarExpr> {
+    pub(super) fn rewrite(
+        mut self,
+        storage: &uqa_core::memory::ProductionControl<'_>,
+        map: impl FnOnce(OwnedScalarExpr) -> Result<OwnedScalarExpr, crate::SQLError>,
+    ) -> Result<(), crate::SQLError> {
+        let output = self.take().rewrite(storage, map)?;
+        self.restore(output);
+        Ok(())
+    }
+}
+
 impl BodySlot<'_> {
     pub(super) fn take(&mut self) -> MutableExecutablePlan {
         match self {
