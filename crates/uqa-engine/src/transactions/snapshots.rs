@@ -7,8 +7,8 @@
 //! Transaction data snapshots and rollback restoration.
 
 use super::{
-    Engine, EngineDataSnapshot, SQLError, SessionStateSnapshot, TransactionFrame,
-    TransactionFrameKind,
+    Engine, EngineDataSnapshot, SQLError, SessionStateSnapshot, StorageSavepointId,
+    TransactionFrame, TransactionFrameKind,
 };
 use crate::TableDataSnapshot;
 use std::collections::BTreeMap;
@@ -39,6 +39,25 @@ impl FrameDataSnapshot {
         } else {
             engine
                 .snapshot_transaction_data(SnapshotBoundary::CommittedOriginal)
+                .map(Self::Captured)
+        }
+    }
+
+    pub(super) fn nested(
+        engine: &Engine,
+        stack: &[TransactionFrame],
+        savepoint: StorageSavepointId,
+    ) -> Result<Self, SQLError> {
+        if let Some(backend) = &engine.storage.backend {
+            if !Engine::backend_savepoints_deferred(stack) {
+                backend
+                    .savepoint(savepoint)
+                    .map_err(|error| Engine::storage_tx_error("nested BEGIN savepoint", &error))?;
+            }
+            Ok(Self::StorageSavepoint)
+        } else {
+            engine
+                .snapshot_transaction_data(SnapshotBoundary::PrivateUndo)
                 .map(Self::Captured)
         }
     }

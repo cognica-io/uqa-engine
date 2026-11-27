@@ -9,11 +9,10 @@
 //! Memory snapshot acquisition is ordered by the statement gate, the table registry and its per-table state, the durable registries (`graphs`, `models`, `scoring_params`, `views`, `catalog_indexes`, `database_security`, `schemas`, `path_indexes`, `sequences`, `sequence_object_ids`, `sequence_persistence`, `sequence_security`, `named_analyzers`, `table_field_analyzers`, `foreign_wrappers`, `foreign_servers`, `foreign_tables`, `foreign_table_security`, `sql_user_functions`, `roles`, `role_memberships`, `triggers`, and `rules`), and finally in-memory FDW rows. Durable restore uses the same registry order. Callers must enter through this coordinator instead of holding an individual registry lock across snapshot or restore.
 
 use super::{
-    failed_transaction_error, snapshots::SnapshotBoundary, BackendTransactionMode,
-    ConstraintModeState, Engine, FrameDataSnapshot, SQLError, SessionStateSnapshot,
-    StorageBackendError, StorageSavepointId, TransactionCharacteristicsState,
-    TransactionDirtyState, TransactionFrame, TransactionFrameKind, TransactionIntent,
-    TransactionStatus,
+    failed_transaction_error, BackendTransactionMode, ConstraintModeState, Engine,
+    FrameDataSnapshot, SQLError, SessionStateSnapshot, StorageBackendError, StorageSavepointId,
+    TransactionCharacteristicsState, TransactionDirtyState, TransactionFrame, TransactionFrameKind,
+    TransactionIntent, TransactionStatus,
 };
 
 impl Engine {
@@ -240,25 +239,8 @@ impl Engine {
             stack[0].select_original_data(self)?;
             let baseline = stack[0].snapshot_change_baseline.clone();
             let savepoint = StorageSavepointId::allocate();
-            if let Some(backend) = self.storage.backend.as_ref() {
-                if !Self::backend_savepoints_deferred(stack) {
-                    backend
-                        .savepoint(savepoint)
-                        .map_err(|err| Self::storage_tx_error("nested BEGIN savepoint", &err))?;
-                }
-                (
-                    Some(savepoint),
-                    FrameDataSnapshot::StorageSavepoint,
-                    baseline,
-                )
-            } else {
-                let snapshot = self.snapshot_transaction_data(SnapshotBoundary::PrivateUndo)?;
-                (
-                    Some(savepoint),
-                    FrameDataSnapshot::Captured(snapshot),
-                    baseline,
-                )
-            }
+            let snapshot = FrameDataSnapshot::nested(self, stack, savepoint)?;
+            (Some(savepoint), snapshot, baseline)
         };
         // Successful admission selects the rollback state from the same refreshed catalog as the data snapshot. The preceding state belongs only to failed-BEGIN recovery; retaining it would keep invalidated analysis alive and resurrect its cache on rollback.
         let session_snapshot = self.snapshot_session_state();
