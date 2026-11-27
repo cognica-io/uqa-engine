@@ -52,9 +52,21 @@ impl ManagedConnection {
         let sealed = self
             .diskann_generations(control)?
             .open_source(coverage.fingerprint().generation(), control)?;
+        self.publish_sealed_diskann_generation(coverage, resolver, &sealed, control)
+    }
+
+    pub(crate) fn publish_sealed_diskann_generation(
+        &self,
+        coverage: &uqa_storage::diskann_index::build::DiskANNCanonicalCoverage<
+            crate::vector_index::RetainedSQLiteDiskANNCanonical,
+        >,
+        resolver: &dyn uqa_storage::diskann_index::catalog::DiskANNIndexResolver,
+        sealed: &uqa_storage::key_value::KeyValueDiskANNSource,
+        control: &StorageReadControl,
+    ) -> uqa_storage::StorageBackendResult<()> {
         self.with_native_write(|snapshot, batch| {
             crate::vector_index::RetainedSQLiteDiskANNCanonical::publish_generation(
-                coverage, resolver, &sealed, snapshot, batch, control,
+                coverage, resolver, sealed, snapshot, batch, control,
             )?;
             Ok(())
         })?

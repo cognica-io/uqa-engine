@@ -32,7 +32,8 @@ pub use query::statistics::{DiskANNExecutionRoute, DiskANNExecutionStats, Vector
 pub(crate) mod retained;
 
 pub(crate) use canonical::{
-    canonical_vectors_equal, copy_vector, ordinal_count, selected_fingerprint,
+    canonical_vectors_equal, copy_vector, decode_vector_coordinates, ordinal_count,
+    selected_fingerprint,
 };
 pub use canonical::{decode_vector_bytes, SelectedVectorRead, VectorRead, VectorReadSnapshot};
 pub use collection::{

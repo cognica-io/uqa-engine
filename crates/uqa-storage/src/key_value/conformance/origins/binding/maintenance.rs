@@ -234,6 +234,12 @@ fn start_census(
             .is_err(),
         "shared memory cannot replace the original cancellation signal",
     )?;
+    expect(
+        captured
+            .statistics(page(), &control.with_temporary_limit(4096))
+            .is_err(),
+        "a census must retain its original temporary file allowance",
+    )?;
     let reservation = control
         .memory()
         .reserve(control.memory().limit() - control.memory().used())?;
@@ -380,10 +386,17 @@ fn failed_admission(
     generation: DiskANNGeneration,
 ) -> StorageBackendResult<()> {
     let captured = source(backend, control)?;
+    let captured_for_rebuild = source(backend, control)?;
     let mut options = diskann_runtime_fixture_options(2)?;
-    options.read.resident_bytes = 1;
     backend.begin_transaction()?;
     catalog.set_metadata("maintenance-failed-outer", "kept")?;
+    expect(
+        captured_for_rebuild
+            .rebuild(options, temporary, &control.with_temporary_limit(u64::MAX))
+            .is_err(),
+        "a rebuild must retain its original temporary file allowance",
+    )?;
+    options.read.resident_bytes = 1;
     expect(
         captured.rebuild(options, temporary, control).is_err(),
         "new resident generation requires admission before publication",

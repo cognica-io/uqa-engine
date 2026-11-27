@@ -27,7 +27,7 @@ use uqa_core::{
 use uqa_storage::{
     diskann_index::{
         format::{DiskANNCanonicalOrigin, DiskANNVectorVersion, CANONICAL_ORIGIN_BYTES},
-        DiskANNCanonicalRead, DiskANNCanonicalVectorVisitor,
+        DiskANNBoundRead, DiskANNCanonicalRead, DiskANNCanonicalVectorVisitor,
     },
     mvcc::VersionError,
     read_control::StorageReadControl,
@@ -161,43 +161,7 @@ impl RetainedSQLiteDiskANNCanonical {
         control: &StorageReadControl,
         visit: &mut DiskANNCanonicalVectorVisitor<'_>,
     ) -> StorageBackendResult<Option<DiskANNVectorVersion>> {
-        let Some(record) = self.record(document, control)? else {
-            return Ok(None);
-        };
-        if record.count() == 0 {
-            return Ok(Some(record.version()));
-        }
-        let document = encode_doc_id(document)?;
-        let dimensions = usize::try_from(self.dimensions)
-            .map_err(|_| invalid("canonical dimensions exceed platform size"))?;
-        let bytes = dimensions
-            .checked_mul(4)
-            .ok_or(uqa_core::memory::MemoryError::SizeOverflow)?;
-        let mut vector = BudgetedVec::new(control.memory());
-        vector.reserve(dimensions)?;
-        for ordinal in 0..record.count() {
-            self.read_payload(document, Some(ordinal), bytes, control, &mut |value| {
-                let value = value.ok_or_else(|| invalid("missing native canonical ordinal"))?;
-                if value.len() != bytes {
-                    return Err(invalid("native canonical vector width mismatch"));
-                }
-                vector.clear();
-                for (coordinate, chunk) in value.as_chunks::<4>().0.iter().enumerate() {
-                    if coordinate.is_multiple_of(1024) {
-                        self.check(control)?;
-                    }
-                    vector.push(f32::from_le_bytes(*chunk))?;
-                }
-                uqa_storage::vector_index::validate_vector_values_controlled(
-                    self.dimensions,
-                    &vector,
-                    Some(control),
-                )?;
-                visit(ordinal as u32, record.version(), &vector)
-            })?;
-        }
-        self.check(control)?;
-        Ok(Some(record.version()))
+        self.visit_canonical_document(document, control, visit)
     }
 
     fn record(

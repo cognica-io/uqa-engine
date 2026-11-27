@@ -6,6 +6,25 @@
 
 //! Runtime vector operations share the provider's original catalog and transaction owner.
 
+mod adoption;
+mod backend;
+mod lifecycle;
+mod live;
+mod maintenance;
+mod mutation;
+mod selection;
+pub use adoption::DiskANNAdoptedOrigins;
+pub use backend::DiskANNPersistentBackend;
+pub use lifecycle::DiskANNLifecycle;
+pub use live::{DiskANNLiveBinding, PersistentDiskANNHandle};
+pub use maintenance::PersistentDiskANNMaintenance;
+pub use mutation::{DiskANNMutationView, DiskANNRetainedMutation};
+pub use selection::DiskANNBoundRead;
+
+fn invalid(message: &'static str) -> StorageBackendError {
+    crate::mvcc::VersionError::InvalidEncoding(message).into_storage_error()
+}
+
 use super::{build::DiskANNTemporaryBudget, pages::DiskANNReadLimits, DiskANNIndexOptions};
 use crate::{
     read_control::StorageReadControl, vector_index::DiskANNIndexParams, StorageBackendError,
