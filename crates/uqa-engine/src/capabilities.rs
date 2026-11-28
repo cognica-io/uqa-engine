@@ -555,14 +555,14 @@ impl Engine {
         let current_revision = || {
             DefinitionRevision::new(
                 self.catalog_epochs(),
+                self.durable.view_revision.load(Ordering::Acquire),
                 self.runtime.regtype_output_cache.revision(),
             )
         };
         loop {
             control.check()?;
             let revision = current_revision();
-            let sources =
-                SessionDefinitions::current(&self.session, &self.durable, include_overlay);
+            let sources = SessionDefinitions::current(&self.session, include_overlay);
             let cached = self
                 .runtime
                 .catalog_views

@@ -6,7 +6,10 @@
 
 //! Copy-on-write catalog values: snapshots share ownership, never mutable state.
 
-use std::sync::Arc;
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    Arc,
+};
 
 use super::CatalogGeneration;
 
@@ -54,9 +57,10 @@ impl<T: Send + Sync + 'static, F: Send + Sync + 'static> MemoryCaptureSource for
     }
 }
 
-pub(crate) struct CatalogCell<T: Send + Sync + 'static, F: Send + Sync + 'static = T>(
-    MemoryCaptureCell<CatalogRoot<T, F>>,
-);
+pub(crate) struct CatalogCell<T: Send + Sync + 'static, F: Send + Sync + 'static = T> {
+    cell: MemoryCaptureCell<CatalogRoot<T, F>>,
+    view_revision: Option<Arc<AtomicU64>>,
+}
 
 /// Undo retains the immutable value; a registered source gives that exact generation its own capture identity.
 pub(crate) struct CatalogSnapshot<T: Send + Sync + 'static, F: Send + Sync + 'static = T> {
@@ -91,10 +95,13 @@ impl<T: Send + Sync + 'static, F: Send + Sync + 'static> CatalogCell<T, F> {
 
     pub(crate) fn from_snapshot(value: impl Into<CatalogGeneration<T>>) -> Self {
         let value = value.into();
-        Self(MemoryCaptureCell::new(CatalogRoot {
-            value,
-            capture: None,
-        }))
+        Self {
+            cell: MemoryCaptureCell::new(CatalogRoot {
+                value,
+                capture: None,
+            }),
+            view_revision: None,
+        }
     }
 
     pub(crate) fn capture_source(
@@ -164,34 +171,37 @@ impl<T: Send + Sync + 'static, F: Send + Sync + 'static> CatalogCell<T, F> {
                 cell.register(registry)?;
             }
         }
-        Ok(Self(cell))
+        Ok(Self {
+            cell,
+            view_revision: None,
+        })
     }
 
     pub(crate) fn key(
         &self,
     ) -> StorageBackendResult<uqa_storage::memory_capture::MemoryCaptureKey<CapturedMemoryValue<F>>>
     {
-        self.0.key()
+        self.cell.key()
     }
 
     pub(crate) fn read(&self) -> MappedRwLockReadGuard<'_, T> {
-        parking_lot::RwLockReadGuard::map(self.0.read(), |root| root.value.as_ref())
+        parking_lot::RwLockReadGuard::map(self.cell.read(), |root| root.value.as_ref())
     }
 
     #[cfg(test)]
     pub(crate) fn is_locked(&self) -> bool {
-        self.0.is_locked()
+        self.cell.is_locked()
     }
 
     pub(crate) fn snapshot(&self) -> CatalogGeneration<T> {
-        self.0.read().value.clone()
+        self.cell.read().value.clone()
     }
 
     pub(crate) fn source_snapshot(
         &self,
         registry: Option<&MemoryCaptureRegistry>,
     ) -> StorageBackendResult<CatalogSnapshot<T, F>> {
-        let root = self.0.read();
+        let root = self.cell.read();
         let value = root.value.clone();
         let source = registry
             .map(|registry| {
@@ -213,14 +223,29 @@ impl<T: Send + Sync + 'static, F: Send + Sync + 'static> CatalogCell<T, F> {
         Ok(CatalogSnapshot { source, value })
     }
 
+    pub(super) fn track_view_revision(&mut self, revision: &Arc<AtomicU64>) {
+        self.view_revision = Some(Arc::clone(revision));
+    }
+
+    fn advance_view_revision(&self) {
+        if let Some(revision) = &self.view_revision {
+            revision.fetch_add(1, Ordering::AcqRel);
+        }
+    }
+
     pub(crate) fn restore(&self, snapshot: &CatalogGeneration<T>) {
-        self.0.write().value = snapshot.clone();
+        let mut root = self.cell.write();
+        if !CatalogGeneration::ptr_eq(&root.value, snapshot) {
+            self.advance_view_revision();
+            root.value = snapshot.clone();
+        }
     }
 }
 
 impl<T: Clone + Send + Sync + 'static, F: Send + Sync + 'static> CatalogCell<T, F> {
     pub(crate) fn write(&self) -> MemoryCaptureWriteGuard<'_, T> {
-        MemoryCaptureWriteGuard::map(self.0.write(), |root| {
+        MemoryCaptureWriteGuard::map(self.cell.write(), |root| {
+            self.advance_view_revision();
             CatalogGeneration::make_mut(&mut root.value)
         })
     }

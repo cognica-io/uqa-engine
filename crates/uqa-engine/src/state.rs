@@ -157,6 +157,7 @@ impl StorageContext {
 pub(crate) use uqa_execution::catalog::view::{StoredView, StoredViewKind};
 
 pub(super) struct DurableCatalogState {
+    pub(super) view_revision: Arc<AtomicU64>,
     pub(super) domains: CatalogCell<
         TypeDefinitions<super::domains::StoredDomain>,
         CapturedTypeDefinitions<super::domains::StoredDomain>,
@@ -307,6 +308,7 @@ pub(super) struct DurableCatalogSnapshot {
 impl DurableCatalogState {
     pub(super) fn new() -> Self {
         Self {
+            view_revision: Arc::new(AtomicU64::new(0)),
             domains: CatalogCell::new(TypeDefinitions::new()),
             enums: CatalogCell::new(TypeDefinitions::new()),
             ranges: CatalogCell::new(TypeDefinitions::new()),
@@ -359,6 +361,45 @@ impl DurableCatalogState {
             triggers: CatalogCell::new(TriggerCatalog::new()),
             rules: CatalogCell::new(RuleCatalog::new()),
         }
+    }
+
+    /// Publish the installed definition cells under one revision, including restored and transaction-private writes that precede a catalog epoch.
+    pub(super) fn into_shared(mut self) -> Arc<Self> {
+        self.foreign_catalog
+            .track_view_revision(&self.view_revision);
+        self.foreign_wrappers
+            .track_view_revision(&self.view_revision);
+        self.foreign_servers
+            .track_view_revision(&self.view_revision);
+        self.sql_user_functions
+            .track_view_revision(&self.view_revision);
+        self.role_memberships
+            .track_view_revision(&self.view_revision);
+        self.domains.track_view_revision(&self.view_revision);
+        self.enums.track_view_revision(&self.view_revision);
+        self.ranges.track_view_revision(&self.view_revision);
+        self.shells.track_view_revision(&self.view_revision);
+        self.comments.track_view_revision(&self.view_revision);
+        self.composites.track_view_revision(&self.view_revision);
+        self.graphs.track_view_revision(&self.view_revision);
+        self.views.track_view_revision(&self.view_revision);
+        self.catalog_indexes
+            .track_view_revision(&self.view_revision);
+        self.database_security
+            .track_view_revision(&self.view_revision);
+        self.default_acls.track_view_revision(&self.view_revision);
+        self.schemas.track_view_revision(&self.view_revision);
+        self.sequences.track_view_revision(&self.view_revision);
+        self.graph_catalog_oids
+            .track_view_revision(&self.view_revision);
+        self.builtin_routine_security
+            .track_view_revision(&self.view_revision);
+        self.system_relation_security
+            .track_view_revision(&self.view_revision);
+        self.roles.track_view_revision(&self.view_revision);
+        self.triggers.track_view_revision(&self.view_revision);
+        self.rules.track_view_revision(&self.view_revision);
+        Arc::new(self)
     }
 
     /// Capture durable registries in the transaction coordinator's canonical lock order.

@@ -94,7 +94,7 @@ impl Engine {
         session.state.attach_cancellation(&runtime.cancellation);
         Self {
             storage,
-            durable: Arc::new(durable),
+            durable: durable.into_shared(),
             extensions: super::RuntimeExtensions::new(&session, &runtime.statement_gate),
             session,
             epochs: Arc::new(super::EpochCoordinator::new()),
@@ -509,7 +509,7 @@ impl Engine {
         session.state.attach_cancellation(&runtime.cancellation);
         Self {
             storage: super::StorageContext::persistent(catalog, backend, provider),
-            durable: Arc::new(super::DurableCatalogState::new()),
+            durable: super::DurableCatalogState::new().into_shared(),
             extensions: super::RuntimeExtensions::new(&session, &runtime.statement_gate),
             session,
             epochs: Arc::new(super::EpochCoordinator::new()),

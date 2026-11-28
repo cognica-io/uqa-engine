@@ -379,3 +379,61 @@ fn cached_catalog_observes_peer_commits_and_keeps_session_overlays_private(
         .iter()
         .any(|name| name == "private_graph"));
 }
+
+#[rstest::rstest]
+#[case::sqlite_native(crate::tests::providers::Provider::SQLiteNative)]
+#[case::sqlite_kv(crate::tests::providers::Provider::SQLiteKeyValue)]
+#[case::redb(crate::tests::providers::Provider::Redb)]
+fn reopened_catalog_retains_constraint_indexes(
+    #[case] provider: crate::tests::providers::Provider,
+) {
+    use uqa_core::memory::{MemoryBudget, ProductionControl, RetainedValue};
+    use uqa_core::{CancellationToken, RelationIdentity};
+
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("constraints.db");
+    let index = RelationIdentity::new("public", "docs_pkey");
+    {
+        let engine = provider.open(&path);
+        pause_automatic_statistics(&engine);
+        engine
+            .sql("CREATE TABLE docs(id integer PRIMARY KEY, body text)", &[])
+            .unwrap();
+    }
+    let engine = provider.open(&path);
+    pause_automatic_statistics(&engine);
+    let loaded = engine.durable.catalog_indexes.snapshot();
+    assert!(loaded.contains_key(&index));
+    let budget = MemoryBudget::new(1 << 20);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&budget, &token, &token);
+    let ordinary = engine.restored_catalog_read_view();
+    let charged = engine.catalog_read_view_with_control(&control).unwrap();
+    for view in [&ordinary, &charged] {
+        assert!(
+            RetainedValue::ptr_eq(&loaded, &view.snapshot().definitions.catalog_indexes),
+            "catalog capture must select the restored index definitions"
+        );
+    }
+    engine
+        .sql("ALTER TABLE docs DROP CONSTRAINT docs_pkey", &[])
+        .unwrap();
+    assert!(!engine
+        .catalog_read_view()
+        .snapshot()
+        .definitions
+        .catalog_indexes
+        .contains_key(&index));
+    assert!(ordinary
+        .snapshot()
+        .definitions
+        .catalog_indexes
+        .contains_key(&index));
+    engine
+        .sql("ALTER TABLE docs ADD PRIMARY KEY (id)", &[])
+        .unwrap();
+    drop((ordinary, charged, loaded, engine));
+    assert_eq!(budget.used(), 0);
+    let engine = provider.open(&path);
+    engine.sql("DROP TABLE docs", &[]).unwrap();
+}

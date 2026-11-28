@@ -6,9 +6,9 @@
 
 //! Reuse the immutable definitions selected by this Engine session.
 
-use super::{CatalogEpochs, CatalogReadView, DurableCatalogState, QueryRuntime, SessionContext};
+use super::{CatalogEpochs, CatalogReadView, QueryRuntime, SessionContext};
 use std::sync::Arc;
-use uqa_core::memory::{MemoryBudget, RetainedValue};
+use uqa_core::memory::MemoryBudget;
 use uqa_execution::catalog::{GraphCatalogOverlay, WeakCatalogReadGeneration};
 use uqa_sql::catalog::temporary_namespace::TemporaryNamespaceOids;
 
@@ -16,14 +16,16 @@ use uqa_sql::catalog::temporary_namespace::TemporaryNamespaceOids;
 pub(super) struct DefinitionRevision {
     tables: u64,
     registries: u64,
+    definitions: u64,
     session: u64,
 }
 
 impl DefinitionRevision {
-    pub(super) fn new(epochs: CatalogEpochs, session: u64) -> Self {
+    pub(super) fn new(epochs: CatalogEpochs, definitions: u64, session: u64) -> Self {
         Self {
             tables: epochs.table_catalog,
             registries: epochs.catalog_registry,
+            definitions,
             session,
         }
     }
@@ -79,21 +81,14 @@ impl QueryRuntime {
     }
 }
 
-/// Graph overlays and sequence positions can change within one catalog epoch. Their selected owners distinguish those changes without inspecting table definitions.
+/// Graph overlays and the temporary namespace are selected from session state independently of durable definitions.
 pub(super) struct SessionDefinitions {
     pub(super) overlay: Option<GraphCatalogOverlay>,
     temporary: Option<TemporaryNamespaceOids>,
-    graphs: RetainedValue<uqa_graph::GraphCatalog>,
-    graph_oids: RetainedValue<uqa_sql::catalog::graph_oids::GraphOidRegistry>,
-    sequences: RetainedValue<uqa_execution::catalog::sequence::registry::SequenceCatalog>,
 }
 
 impl SessionDefinitions {
-    pub(super) fn current(
-        session: &SessionContext,
-        durable: &DurableCatalogState,
-        include_overlay: bool,
-    ) -> Self {
+    pub(super) fn current(session: &SessionContext, include_overlay: bool) -> Self {
         let (overlay, temporary) = {
             let state = session.state.read();
             let overlay = if include_overlay {
@@ -109,13 +104,7 @@ impl SessionDefinitions {
             };
             (overlay, state.temporary_namespace)
         };
-        Self {
-            overlay,
-            temporary,
-            graphs: durable.graphs.snapshot(),
-            graph_oids: durable.graph_catalog_oids.snapshot(),
-            sequences: durable.sequences.snapshot(),
-        }
+        Self { overlay, temporary }
     }
 
     pub(super) fn matches(&self, view: &CatalogReadView) -> bool {
@@ -134,8 +123,5 @@ impl SessionDefinitions {
                     .temporary_namespace
                     .as_ref()
                     .map(|namespace| namespace.oids)
-            && RetainedValue::ptr_eq(&self.graphs, &selected.definitions.graphs)
-            && RetainedValue::ptr_eq(&self.graph_oids, &selected.definitions.graph_catalog_oids)
-            && RetainedValue::ptr_eq(&self.sequences, &selected.definitions.sequences)
     }
 }
