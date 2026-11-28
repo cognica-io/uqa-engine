@@ -94,7 +94,7 @@
   "scripts": {
     "build": "napi build --platform --no-js --release --features nori,kuromoji",
     "build:debug": "napi build --platform --no-js --features nori,kuromoji",
-    "test:types": "tsc --strict --skipLibCheck --noEmit --target ES2022 --module node16 tests/backup-handles.types.ts"
+    "test:types": "tsc --strict --skipLibCheck --noEmit --target ES2022 --module node16 tests/backup-handles.types.ts tests/sql-results.types.ts"
   },
   "devDependencies": {
     "@napi-rs/cli": "3.8.6"

@@ -56,7 +56,7 @@ function sendJSON(response, requestId, payload) {
   response.end(body);
 }
 
-async function withHTTPServer(run) {
+async function withHTTPServer(run, streamFrames) {
   const server = createServer(async (request, response) => {
     assert.equal(request.headers.authorization, "Bearer uqa_db_test");
     const payload = await readRequestJSON(request);
@@ -82,7 +82,7 @@ async function withHTTPServer(run) {
       return;
     }
     if (request.url === "/v1/sql/stream") {
-      const body = [
+      const frames = streamFrames ?? [
         {
           type: "metadata",
           columns: ["n"],
@@ -92,7 +92,8 @@ async function withHTTPServer(run) {
         },
         { type: "row", row: { n: 1 } },
         { type: "complete", row_count: 1, request_id: "qry_node_stream" },
-      ].map((frame) => `${JSON.stringify(frame)}\n`).join("");
+      ];
+      const body = frames.map((frame) => `${JSON.stringify(frame)}\n`).join("");
       response.writeHead(200, {
         "content-length": Buffer.byteLength(body),
         "content-type": "application/x-ndjson",
@@ -172,6 +173,25 @@ test("HTTP engine executes SQL, atomic batches, and streams", async () => {
     assert.deepEqual(frames.map((frame) => frame.type), ["metadata", "row", "complete"]);
     assert.deepEqual(frames[1].row, { n: 1 });
   });
+});
+
+test("native and JavaScript streams return the same SQL diagnostic fields", async () => {
+  const { HttpEngine: NativeHttpEngine } = require(join(dirname(packagePath), "index.js"));
+  for (const [diagnostic, expected] of [
+    [{ sqlstate: "42703", category: "undefined_column", statement_index: 0, position: 8 },
+      { sqlstate: "42703", category: "undefined_column", statementIndex: 0, position: 8 }],
+    [{ category: "other" }, { category: "other" }],
+  ]) {
+    const frame = { type: "error", code: "SQL_EXECUTION_FAILED", message: "failed",
+      request_id: "qry_node_stream", diagnostic };
+    await withHTTPServer(async (origin) => {
+      for (const Client of [NativeHttpEngine, uqa.HttpEngine]) {
+        const stream = await new Client(origin, "uqa_db_test").sqlStream("SELECT missing");
+        assert.deepEqual((await stream.nextFrame()).diagnostic, expected);
+        assert.equal(await stream.nextFrame(), null);
+      }
+    }, [frame]);
+  }
 });
 
 test("HTTP engine resolves local and Cloud projects through the CLI", async () => {
