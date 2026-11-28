@@ -220,11 +220,8 @@ impl<'a> Remapping<'a> {
 
     fn observe(&mut self, node: &ScalarExpr) -> Result<(), SQLError> {
         self.control.check()?;
-        if let ScalarExpr::ScalarSubquery(id)
-        | ScalarExpr::Exists { subquery: id, .. }
-        | ScalarExpr::InSubquery { subquery: id, .. } = node
-        {
-            self.observe_slot(*id)?;
+        if let Some(id) = crate::semantics::subquery_reference(node) {
+            self.observe_slot(id)?;
         }
         Ok(())
     }

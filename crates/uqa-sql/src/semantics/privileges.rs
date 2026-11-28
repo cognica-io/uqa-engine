@@ -10,6 +10,7 @@ pub mod columns;
 pub mod coverage;
 mod enforcement;
 
+use super::cte_order::{analysis::CteAnalysis, references::Selection};
 use crate::catalog::roles::RoleReference;
 use std::collections::BTreeSet;
 
@@ -551,9 +552,13 @@ fn analyze_query_plan_in_scope(
         let root = columns::stored::ctes(&plan.ctes, ctes, outer_scopes, universe, required)?;
         return analyze_relational_plan(&plan.root, &root, outer_scopes, universe, required);
     }
+    let selection = if ctes.purpose == AnalysisPurpose::Authorization {
+        Selection::Authorization
+    } else {
+        Selection::Reachable
+    };
     let reachable =
-        crate::semantics::cte_order::analysis::CteAnalysis::query(plan, ctes.control())?
-            .reachable()?;
+        CteAnalysis::query_with_selection(plan, ctes.control(), selection)?.reachable()?;
     let mut root_ctes = ctes.reborrow()?;
     let mut preceding_ctes = root_ctes.reborrow()?;
     for (index, cte) in plan.ctes.iter().enumerate() {

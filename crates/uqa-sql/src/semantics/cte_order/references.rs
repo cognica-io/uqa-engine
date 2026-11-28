@@ -7,12 +7,14 @@
 //! Borrow nested lexical namespaces while reporting references to enclosing definitions.
 
 use crate::{
-    plan::{CommandPlan, CtePlan, CtePlanBody, QueryPlan, RelationalPlan, SourcePlan},
+    plan::{
+        CommandPlan, CtePlan, CtePlanBody, QueryBlockPlan, QueryPlan, RelationalPlan, SourcePlan,
+    },
     SQLError,
 };
 use std::cell::RefCell;
 use uqa_core::{
-    memory::{ProductionControl, ProductionVec},
+    memory::{ProductionControl, ProductionMap, ProductionVec},
     RelationIdentity, RelationName,
 };
 
@@ -21,6 +23,7 @@ pub(in crate::semantics) type External<'a> = dyn Fn(&str) -> Result<(), SQLError
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(in crate::semantics) enum Selection {
     Reachable,
+    Authorization,
     Syntactic,
 }
 
@@ -70,7 +73,7 @@ impl<'p, 'c, 'e> Scope<'p, 'c, 'e> {
         self.control.check()?;
         let selected = resolve(&self.names, reference).filter(|index| *index < ceiling);
         match selected {
-            Some(index) if self.selection == Selection::Reachable => self.enqueue(index),
+            Some(index) if self.selection != Selection::Syntactic => self.enqueue(index),
             Some(_) => Ok(()),
             None => (self.external)(reference),
         }
@@ -204,10 +207,14 @@ pub(in crate::semantics) fn query_root(
     selection: Selection,
 ) -> Result<(), SQLError> {
     control.check()?;
+    let mut privilege_only = None;
     let subqueries = match root {
         RelationalPlan::QueryBlock(block) => {
             if let Some(input) = &block.from {
                 source(input, external, control, selection)?;
+            }
+            if selection != Selection::Authorization && !block.privilege_subqueries.is_empty() {
+                privilege_only = Some(privilege_only_slots(block, control)?);
             }
             &block.subqueries
         }
@@ -223,10 +230,38 @@ pub(in crate::semantics) fn query_root(
         }
         RelationalPlan::Values { subqueries, .. } => subqueries,
     };
-    for plan in subqueries {
-        query(plan, external, control, selection)?;
+    for (slot, plan) in subqueries.iter().enumerate() {
+        control.check()?;
+        if privilege_only
+            .as_ref()
+            .is_none_or(|slots| slots.get(&slot).is_none())
+        {
+            query(plan, external, control, selection)?;
+        }
     }
     Ok(())
+}
+
+/// A retained permission can share its slot with a surviving expression. Only slots whose last executable reference disappeared are excluded from CTE execution and reference counts.
+fn privilege_only_slots<'c>(
+    block: &QueryBlockPlan,
+    control: ProductionControl<'c>,
+) -> Result<ProductionMap<'c, usize, ()>, SQLError> {
+    let mut slots = ProductionMap::new(control);
+    for &slot in &block.privilege_subqueries {
+        slots.insert_copy(slot, ())?;
+    }
+    block.try_visit_expressions(&mut |expression| {
+        expression.try_visit(&mut |node| -> Result<bool, SQLError> {
+            control.check()?;
+            if let Some(slot) = crate::semantics::subquery_reference(node) {
+                slots.remove(&slot);
+            }
+            Ok(!slots.is_empty())
+        })?;
+        Ok::<_, SQLError>(!slots.is_empty())
+    })?;
+    Ok(slots)
 }
 
 fn source(

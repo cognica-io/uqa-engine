@@ -369,3 +369,69 @@ fn discarded_projection_subqueries_preserve_relation_and_column_authority() {
     drop(scope);
     assert_eq!(memory.used(), 0);
 }
+
+#[test]
+fn discarded_projection_subqueries_keep_cte_authority_without_materializing_definitions() {
+    let catalog = Catalog::new(vec!["id".into()]);
+    let memory = MemoryBudget::new(1 << 20);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&memory, &token, &token);
+    let scope = catalog.scope(&control);
+    let mut plan = query("WITH cold AS (SELECT id FROM public.samples), chain AS (SELECT (SELECT id FROM cold) AS id) SELECT (SELECT id FROM chain) AS discarded, 7 AS used");
+
+    let verify = |plan: &QueryPlan, executed: &[bool], references: &[bool]| {
+        let analysis = CteAnalysis::query(plan, control).unwrap();
+        assert_eq!(analysis.reachable().unwrap().as_slice(), executed);
+        for (index, expected) in references.iter().enumerate() {
+            assert_eq!(analysis.single_reference(index), *expected);
+        }
+        let mut universe = SourceLineage::default();
+        let mut required = Required::new();
+        analyze_query_plan(plan, &scope, &[], &mut universe, &mut required).unwrap();
+        assert_eq!(
+            universe
+                .tables
+                .iter()
+                .map(|(table, _)| table.as_str())
+                .collect::<Vec<_>>(),
+            ["public.samples"],
+        );
+        assert_eq!(
+            required
+                .iter()
+                .map(|col| (col.table.as_str(), col.column.as_str()))
+                .collect::<Vec<_>>(),
+            [("public.samples", "id")],
+        );
+        ensure_required_select(&universe, &required, &scope).unwrap();
+    };
+    verify(&plan, &[true, true], &[true, true]);
+
+    let RelationalPlan::QueryBlock(block) = &mut plan.root else {
+        panic!("block")
+    };
+    block.preserve_projection_privileges([0], &control).unwrap();
+    let shared = std::mem::replace(
+        &mut block.projections[0].expr,
+        ScalarExpr::Literal(uqa_core::Value::Null),
+    );
+    verify(&plan, &[false, false], &[true, false]);
+
+    let RelationalPlan::QueryBlock(block) = &mut plan.root else {
+        panic!("block")
+    };
+    block.projections[1].expr = shared;
+    verify(&plan, &[true, true], &[true, true]);
+
+    let crate::plan::CtePlanBody::Query(chain) = &mut plan.ctes[1].body else {
+        panic!("CTE query")
+    };
+    let RelationalPlan::QueryBlock(block) = &mut chain.root else {
+        panic!("CTE block")
+    };
+    block.preserve_projection_privileges([0], &control).unwrap();
+    block.projections[0].expr = ScalarExpr::Literal(uqa_core::Value::Null);
+    verify(&plan, &[false, true], &[false, true]);
+    drop(scope);
+    assert_eq!(memory.used(), 0);
+}

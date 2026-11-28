@@ -24,11 +24,6 @@ trait Visitor<S>: Send {
 }
 
 struct Collect<'a, 'c>(&'a mut Remapping<'c>);
-impl Collect<'_, '_> {
-    fn slot(&mut self, id: &usize) -> Result<(), SQLError> {
-        self.0.observe_slot(*id)
-    }
-}
 
 impl Visitor<&ScalarExpr> for Collect<'_, '_> {
     async fn expression<W: Work + Send>(
@@ -42,12 +37,6 @@ impl Visitor<&ScalarExpr> for Collect<'_, '_> {
 }
 
 struct Rewrite<'a, 'c>(&'a Remapping<'c>);
-impl Rewrite<'_, '_> {
-    fn slot(&mut self, id: &mut usize) -> Result<(), SQLError> {
-        self.0.rewrite_slot(id);
-        Ok(())
-    }
-}
 
 impl Visitor<&mut ScalarExpr> for Rewrite<'_, '_> {
     async fn expression<W: Work + Send>(
@@ -118,6 +107,8 @@ async fn checkpoint<W: Work>(
 }
 
 macro_rules! query {
+    (@slot Collect, $visitor:ident, $slot:ident) => { $visitor.0.observe_slot(*$slot)? };
+    (@slot Rewrite, $visitor:ident, $slot:ident) => { $visitor.0.rewrite_slot($slot) };
     ($name:ident, $visitor:ident, $inputs:ident, $roots:ident, $iter:ident, $reference:ident, $deref:ident, $order:ident, [$($mutable:tt)*], [$($mapmutable:tt)*]) => {
         pub(in crate::plan) async fn $name<W: Work + Send>(
             query: & $($mutable)* QueryPlan,
@@ -130,7 +121,7 @@ macro_rules! query {
                 RelationalPlan::QueryBlock(block) => {
                     for slot in block.privilege_subqueries.$iter() {
                         checkpoint(control, work).await?;
-                        visitor.slot(slot)?;
+                        query!(@slot $visitor, visitor, slot);
                     }
                     if let Some(input) = block.from.$reference() {
                         source(input, SourcePlan::$inputs, &mut visitor, control, work).await?;
