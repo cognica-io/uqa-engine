@@ -87,7 +87,7 @@ fn notification_json_preserves_full_width_and_control_values() {
         epoch: "919108f7-52d1-4320-9bac-f847db4148a8".parse().unwrap(),
         request_id: None,
     };
-    let value = event_value(NotificationEvent::Notification {
+    let value = event_value(&NotificationEvent::Notification {
         identity: identity.clone(),
         sequence: u64::MAX,
         notification: SQLNotification {
@@ -100,13 +100,13 @@ fn notification_json_preserves_full_width_and_control_values() {
     assert_eq!(value["processId"], i32::MIN);
     assert_eq!(value["channel"], "混合😀");
     assert_eq!(value["payload"], "\n\r\"\\한국어");
-    let gap = event_value(NotificationEvent::ResyncRequired {
+    let gap = event_value(&NotificationEvent::ResyncRequired {
         identity: identity.clone(),
         cause: Kind::SourceUnavailable,
     });
     assert_eq!(gap["cause"], Kind::SourceUnavailable.code());
     assert_eq!(gap["sequence"], JSON::Null);
-    let ready = event_value(NotificationEvent::Reconnected { identity });
+    let ready = event_value(&NotificationEvent::Reconnected { identity });
     assert_eq!(ready["kind"], "reconnected");
     assert_eq!(ready["cause"], JSON::Null);
 }

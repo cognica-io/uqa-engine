@@ -59,6 +59,7 @@ fn verify_catalog_allocation(engine: &Engine, temporary: bool) {
     let mut allocator = engine
         .catalog_identity_reservation_context()
         .allocator(uqa_execution::catalog::identity::allocate_catalog_object_id);
+    let initial = engine.restored_catalog_read_view();
     CATALOG_CAPTURES.set(0);
     let mut assigned = std::collections::BTreeSet::new();
     for _ in 0..20 {
@@ -67,7 +68,7 @@ fn verify_catalog_allocation(engine: &Engine, temporary: bool) {
             .unwrap();
         assert!(assigned.insert(oid));
     }
-    assert_eq!(CATALOG_CAPTURES.get(), 1);
+    assert_eq!(CATALOG_CAPTURES.get(), 0);
 
     engine
         .sql(
@@ -89,17 +90,21 @@ fn verify_catalog_allocation(engine: &Engine, temporary: bool) {
         oid: *oid,
     };
     CATALOG_CAPTURES.set(0);
-    assert!(allocator
+    let conflict = allocator
         .include_catalog_identity(&owner, CatalogOidClass::Constraint, identity)
-        .is_err());
-    assert_eq!(CATALOG_CAPTURES.get(), 1);
+        .unwrap_err()
+        .into_sql_error();
+    assert_eq!(conflict.sqlstate(), Some("XX000"));
+    let private = catalog_after_reservation(engine);
+    assert!(!std::ptr::eq(initial.snapshot(), private.snapshot()));
 
     engine.sql("ROLLBACK TO before_check", &[]).unwrap();
     CATALOG_CAPTURES.set(0);
     allocator
         .include_catalog_identity(&owner, CatalogOidClass::Constraint, identity)
         .unwrap();
-    assert_eq!(CATALOG_CAPTURES.get(), 1);
+    let restored = catalog_after_reservation(engine);
+    assert!(!std::ptr::eq(private.snapshot(), restored.snapshot()));
     engine.sql("ROLLBACK", &[]).unwrap();
     assert_eq!(
         engine
@@ -111,4 +116,15 @@ fn verify_catalog_allocation(engine: &Engine, temporary: bool) {
             .value_at(0, 0),
         Some(&Value::Int(0))
     );
+}
+
+fn catalog_after_reservation(engine: &Engine) -> uqa_execution::catalog::CatalogReadView {
+    let captures = CATALOG_CAPTURES.get();
+    assert!(
+        captures <= 1,
+        "reservation rebuilt the catalog {captures} times"
+    );
+    let view = engine.restored_catalog_read_view();
+    assert_eq!(CATALOG_CAPTURES.get(), captures);
+    view
 }

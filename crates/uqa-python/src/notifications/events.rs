@@ -7,31 +7,15 @@
 //! Exact notification values with content-free diagnostic formatting.
 
 use pyo3::prelude::*;
-use uqa_core::notifications::{NotificationEvent, NotificationIdentity, SQLNotification};
+use uqa_core::notifications::NotificationEvent;
 
 #[pyclass(name = "NotificationEvent", module = "uqa._uqa", frozen)]
 pub(crate) struct PyNotificationEvent(pub(super) NotificationEvent);
 
-impl PyNotificationEvent {
-    fn identity(&self) -> &NotificationIdentity {
-        match &self.0 {
-            NotificationEvent::Notification { identity, .. }
-            | NotificationEvent::ResyncRequired { identity, .. }
-            | NotificationEvent::Reconnected { identity } => identity,
-        }
-    }
-
-    fn notification(&self) -> Option<&SQLNotification> {
-        match &self.0 {
-            NotificationEvent::Notification { notification, .. } => Some(notification),
-            _ => None,
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use uqa_core::notifications::{NotificationIdentity, SQLNotification};
 
     #[test]
     fn python_values_preserve_full_width_sequences_and_private_payloads() {
@@ -91,21 +75,18 @@ mod tests {
 impl PyNotificationEvent {
     #[getter]
     fn kind(&self) -> &'static str {
-        match &self.0 {
-            NotificationEvent::Notification { .. } => "notification",
-            NotificationEvent::ResyncRequired { .. } => "resync_required",
-            NotificationEvent::Reconnected { .. } => "reconnected",
-        }
+        self.0.kind()
     }
 
     #[getter]
     fn epoch(&self) -> String {
-        self.identity().epoch.to_string()
+        self.0.identity().epoch.to_string()
     }
 
     #[getter]
     fn request_id(&self) -> Option<&str> {
-        self.identity()
+        self.0
+            .identity()
             .request_id
             .as_ref()
             .map(uqa_core::notifications::NotificationRequestId::as_str)
@@ -113,33 +94,29 @@ impl PyNotificationEvent {
 
     #[getter]
     fn sequence(&self) -> Option<u64> {
-        match self.0 {
-            NotificationEvent::Notification { sequence, .. } => Some(sequence),
-            _ => None,
-        }
+        self.0.sequence()
     }
 
     #[getter]
     fn process_id(&self) -> Option<i32> {
-        self.notification().map(|value| value.process_id)
+        self.0.notification().map(|value| value.process_id)
     }
 
     #[getter]
     fn channel(&self) -> Option<&str> {
-        self.notification().map(|value| value.channel.as_str())
+        self.0.notification().map(|value| value.channel.as_str())
     }
 
     #[getter]
     fn payload(&self) -> Option<&str> {
-        self.notification().map(|value| value.payload.as_str())
+        self.0.notification().map(|value| value.payload.as_str())
     }
 
     #[getter]
     fn cause(&self) -> Option<&'static str> {
-        match self.0 {
-            NotificationEvent::ResyncRequired { cause, .. } => Some(cause.code()),
-            _ => None,
-        }
+        self.0
+            .cause()
+            .map(uqa_core::notifications::NotificationFailureKind::code)
     }
 
     fn __repr__(&self) -> String {

@@ -59,3 +59,26 @@ mod database;
 #[cfg(feature = "test-support")]
 #[path = "tests/completion.rs"]
 mod completion;
+
+/// Keep copies alive until the shared limit rejects one, checking the charge on every successful copy.
+#[allow(unsafe_code)]
+unsafe fn fill_allowance(value: *const crate::UQAValue) -> Vec<*mut crate::UQAValue> {
+    let budget = unsafe { &*value }
+        .control()
+        .budget()
+        .expect("session-backed value");
+    let mut copies = Vec::new();
+    loop {
+        let before = budget.used();
+        let mut copy = std::ptr::null_mut();
+        let status = unsafe { crate::uqa_value_create_copy(value, &raw mut copy) };
+        if status == crate::UQA_ERROR_LIMIT {
+            assert!(copy.is_null());
+            assert_eq!(budget.used(), before);
+            return copies;
+        }
+        assert_eq!(status, crate::UQA_OK);
+        assert!(budget.used() - before >= size_of::<crate::UQAValue>());
+        copies.push(copy);
+    }
+}

@@ -56,7 +56,7 @@ function sendJSON(response, requestId, payload) {
   response.end(body);
 }
 
-async function withHTTPServer(run) {
+async function withHTTPServer(run, streamFrames) {
   const server = createServer(async (request, response) => {
     assert.equal(request.headers.authorization, "Bearer uqa_db_test");
     const payload = await readRequestJSON(request);
@@ -82,7 +82,7 @@ async function withHTTPServer(run) {
       return;
     }
     if (request.url === "/v1/sql/stream") {
-      const body = [
+      const frames = streamFrames ?? [
         {
           type: "metadata",
           columns: ["n"],
@@ -92,7 +92,8 @@ async function withHTTPServer(run) {
         },
         { type: "row", row: { n: 1 } },
         { type: "complete", row_count: 1, request_id: "qry_node_stream" },
-      ].map((frame) => `${JSON.stringify(frame)}\n`).join("");
+      ];
+      const body = frames.map((frame) => `${JSON.stringify(frame)}\n`).join("");
       response.writeHead(200, {
         "content-length": Buffer.byteLength(body),
         "content-type": "application/x-ndjson",
@@ -172,6 +173,25 @@ test("HTTP engine executes SQL, atomic batches, and streams", async () => {
     assert.deepEqual(frames.map((frame) => frame.type), ["metadata", "row", "complete"]);
     assert.deepEqual(frames[1].row, { n: 1 });
   });
+});
+
+test("native and JavaScript streams return the same SQL diagnostic fields", async () => {
+  const { HttpEngine: NativeHttpEngine } = require(join(dirname(packagePath), "index.js"));
+  for (const [diagnostic, expected] of [
+    [{ sqlstate: "42703", category: "undefined_column", statement_index: 0, position: 8 },
+      { sqlstate: "42703", category: "undefined_column", statementIndex: 0, position: 8 }],
+    [{ category: "other" }, { category: "other" }],
+  ]) {
+    const frame = { type: "error", code: "SQL_EXECUTION_FAILED", message: "failed",
+      request_id: "qry_node_stream", diagnostic };
+    await withHTTPServer(async (origin) => {
+      for (const Client of [NativeHttpEngine, uqa.HttpEngine]) {
+        const stream = await new Client(origin, "uqa_db_test").sqlStream("SELECT missing");
+        assert.deepEqual((await stream.nextFrame()).diagnostic, expected);
+        assert.equal(await stream.nextFrame(), null);
+      }
+    }, [frame]);
+  }
 });
 
 test("HTTP engine resolves local and Cloud projects through the CLI", async () => {
@@ -287,6 +307,26 @@ test("DiskANN example preserves canonical scores and committed rows through reop
     }
   } finally {
     rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("native result objects keep nested JSON numbers, ordering, and independent rows", async () => {
+  const engine = new uqa.Engine();
+  try {
+    const query = `SELECT '{"z":[9223372036854775807,18446744073709551615,1.25],"a":null}'::json AS payload,
+                  ARRAY[1,2] AS numbers FROM generate_series(1,2)`;
+    const result = await engine.sql(query);
+    assert.deepEqual(result, engine.sqlSync(query));
+    assert.deepEqual(result.columns, ["payload", "numbers"]);
+    assert.deepEqual(Object.keys(result.rows[0]), ["numbers", "payload"]);
+    assert.deepEqual(Object.keys(result.rows[0].payload), ["a", "z"]);
+    assert.deepEqual(result.rows[0].payload.z, [9223372036854775807n, Number("18446744073709551615"), 1.25]);
+    result.rows[0].numbers[0] = 9;
+    result.rows[0].payload.z.length = 0;
+    assert.deepEqual(result.rows[1].numbers, [1, 2]);
+    assert.equal(result.rows[1].payload.z.length, 3);
+  } finally {
+    engine.close();
   }
 });
 

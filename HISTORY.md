@@ -11,6 +11,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Planner output pruning now charges the temporary typed expressions it creates for unused columns against the planning memory limit, including when the caller supplies the query plan. Pruning keeps the table and column privileges required by scalar subqueries in those outputs. A materialized CTE referenced only by a discarded output still reports planning-time errors. Its rows are read only when a surviving expression needs them.
 - Graph traversal and centrality results share subgraph vertices, edges and names across postings. Rust callers can use `.into()` for these three `GraphPayload` fields.
 
+- Retained queries reuse the statement’s catalog and detach the tables selected by their views and deferred CTEs. Opening a transaction with an up-to-date catalog captures session state once. Transaction rollback retains immutable statement-cache roots. Updating one cached statement preserves the other statements and their execution plans. An implicit read selects rollback data when it first needs to write or supply a committed backup. Repeated catalog reads share table definitions and range descriptors within the same catalog revision and memory budget. Forward-only cursors stream FETCH and MOVE requests in bounded batches. A cursor promoted to holdable during a procedure retains the unread rows at their original positions.
+
+- The Rust HTTP client reads successive rows from a streamed SQL response without copying the remaining rows after each frame.
+
+- The Python binding reuses result column names, Decimal and JSON converters, and each aggregate group’s callback methods.
+
 - Grouped aggregates retain only the state needed for each function. Ordered aggregates spill binary records and merge them in SQL order. Hash joins, DISTINCT and equality-based MERGE use bounded disk indexes as their inputs grow.
 
 - Prepared SQL expressions reuse numeric operand types, builtin signatures, and row and array descriptors across input rows. Scalar function callbacks receive the original argument payloads.

@@ -210,6 +210,19 @@ pub fn cte_external_references_with_control<'p>(
     )
 }
 
+/// Enclosing CTEs referenced by a query after applying its own WITH declarations and their lexical visibility.
+pub fn query_external_cte_references_with_control<'p>(
+    plan: &QueryPlan,
+    visible: impl Iterator<Item = &'p str>,
+    control: ProductionControl<'_>,
+) -> Result<Produced<Vec<&'p str>>, SQLError> {
+    collect_names_with_control(
+        visible,
+        |external| references::query(plan, external, control, Selection::Reachable),
+        control,
+    )
+}
+
 fn collect_names<'a>(
     names: impl Iterator<Item = &'a str>,
     visit: impl FnOnce(&External<'_>) -> Result<(), SQLError>,

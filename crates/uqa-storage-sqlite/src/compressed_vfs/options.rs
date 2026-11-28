@@ -15,6 +15,23 @@ pub enum SQLiteCompressionCodec {
     LZ4,
 }
 
+impl std::str::FromStr for SQLiteCompressionCodec {
+    type Err = String;
+
+    fn from_str(name: &str) -> Result<Self, Self::Err> {
+        if name.eq_ignore_ascii_case("zstd") {
+            Ok(Self::Zstd)
+        } else if name.eq_ignore_ascii_case("lz4") {
+            Ok(Self::LZ4)
+        } else {
+            Err(format!(
+                "unsupported compression codec `{}`",
+                name.to_ascii_lowercase()
+            ))
+        }
+    }
+}
+
 impl SQLiteCompressionCodec {
     pub(super) const fn id(self) -> u32 {
         match self {
@@ -65,6 +82,26 @@ impl SQLiteCompressionOptions {
             level: 0,
             ..Self::default()
         }
+    }
+
+    /// Apply the codec's defaults to unspecified settings and validate the resulting geometry.
+    pub fn from_parts(
+        codec: SQLiteCompressionCodec,
+        page_size: Option<u32>,
+        chunk_pages: Option<u32>,
+        level: Option<i32>,
+    ) -> Result<Self, String> {
+        let defaults = match codec {
+            SQLiteCompressionCodec::Zstd => Self::zstd(),
+            SQLiteCompressionCodec::LZ4 => Self::lz4(),
+        };
+        Self {
+            codec,
+            page_size: page_size.unwrap_or(defaults.page_size),
+            chunk_pages: chunk_pages.unwrap_or(defaults.chunk_pages),
+            level: level.unwrap_or(defaults.level),
+        }
+        .validate()
     }
 
     pub fn validate(self) -> Result<Self, String> {

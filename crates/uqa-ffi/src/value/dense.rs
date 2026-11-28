@@ -45,14 +45,13 @@ ffi_fn!(uqa_value_get_vector_f32(value: *const UQAValue, out: *mut UQAVectorView
         if let SQLParam::Vector(values) = &**parameter { Some(values.as_slice()) } else { None }
     } else { None };
     let values = if let Some(values) = values { values } else {
-        if value.vector_data.get().is_none() {
+        value.cached(|extras| &extras.vector_data, || {
             let decoded = uqa_sql::expr::value_to_vector_with_control(value.observed()?, &value.control())?;
             if decoded.len() != dimensions as usize {
                 return Err(UQAError::new(UQA_ERROR_RANGE, "vector carrier does not match its declared dimension"));
             }
-            let _ = value.vector_data.set(decoded);
-        }
-        value.vector_data.get().ok_or_else(|| UQAError::state("vector decoder returned no data"))?.as_slice()
+            Ok(decoded)
+        })?.as_slice()
     };
     *out = UQAVectorView { data: values.as_ptr(), dimensions };
     Ok(UQA_OK)
@@ -68,11 +67,9 @@ ffi_fn!(uqa_value_get_tensor_f32(value: *const UQAValue, out: *mut UQATensorView
         if let SQLParam::TypedTensor(tensor) = &**parameter { Some(tensor) } else { None }
     } else { None };
     let tensor = if let Some(tensor) = tensor { tensor } else {
-        if value.tensor_data.get().is_none() {
-            let decoded = SQLTensor::from_value_with_control(value.observed()?, dimensions, &value.control())?;
-            let _ = value.tensor_data.set(decoded);
-        }
-        value.tensor_data.get().ok_or_else(|| UQAError::state("tensor decoder returned no data"))?
+        value.cached(|extras| &extras.tensor_data, || {
+            Ok(SQLTensor::from_value_with_control(value.observed()?, dimensions, &value.control())?)
+        })?
     };
     *out = UQATensorView {
         data: if tensor.values().is_empty() { std::ptr::null() } else { tensor.values().as_ptr() },

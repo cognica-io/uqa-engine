@@ -104,6 +104,15 @@ pub enum CtePlanBody {
     Command(Box<CommandPlan>),
 }
 
+impl<'a> From<&'a CtePlanBody> for PlanRef<'a> {
+    fn from(body: &'a CtePlanBody) -> Self {
+        match body {
+            CtePlanBody::Query(query) => Self::Query(query),
+            CtePlanBody::Command(command) => Self::Command(command),
+        }
+    }
+}
+
 impl CtePlanBody {
     pub fn query(&self) -> Option<&QueryPlan> {
         match self {

@@ -17,6 +17,25 @@ pub enum TextScoringMode {
     BayesianBM25,
 }
 
+impl std::str::FromStr for TextScoringMode {
+    type Err = String;
+
+    fn from_str(name: &str) -> Result<Self, Self::Err> {
+        if name.eq_ignore_ascii_case("bm25") {
+            Ok(Self::BM25)
+        } else if name.eq_ignore_ascii_case("bayesian")
+            || name.eq_ignore_ascii_case("bayesian_bm25")
+        {
+            Ok(Self::BayesianBM25)
+        } else {
+            Err(format!(
+                "unsupported scoring mode `{}`",
+                name.to_ascii_lowercase()
+            ))
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub enum AttentionSpec {
     Single {

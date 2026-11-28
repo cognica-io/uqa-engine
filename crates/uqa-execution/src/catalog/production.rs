@@ -6,7 +6,12 @@
 
 //! Immutable catalog capture admits the shared payloads before constructing their owners.
 
-use super::{CatalogReadSnapshot, CatalogReadView};
+use super::{
+    cache::CatalogDerivation,
+    composite_type::relations::RelationDescriptorCache,
+    projection::{DependencyCatalogCache, EventDefinitions, RoutineDefinitions},
+    CatalogReadGeneration, CatalogReadSnapshot, CatalogReadView,
+};
 use std::sync::Arc;
 use uqa_core::memory::{Produced, ProductionControl};
 use uqa_sql::SQLError;
@@ -20,33 +25,44 @@ impl CatalogReadView {
         let range_descriptors = if snapshot.definitions.ranges.is_empty() {
             None
         } else {
-            Some(default_shared(control)?)
+            let memory =
+                control.reserve(size_of::<Produced<super::range_type::RangeDescriptors>>())?;
+            Some(Box::new(control.finish(
+                super::range_type::RangeDescriptors::default(),
+                memory,
+            )?))
         };
-        Ok(Self {
-            snapshot: snapshot.into_shared(control)?,
-            relation_descriptors: default_shared(control)?,
+        let (snapshot, memory) = snapshot.into_parts();
+        let generation = CatalogReadGeneration {
+            snapshot,
+            relation_descriptors: RelationDescriptorCache::default(),
             range_descriptors,
-            dependencies: default_shared(control)?,
-            index_relations: default_shared(control)?,
-            constraint_definitions: default_shared(control)?,
-            event_definitions: default_shared(control)?,
-            routine_definitions: default_shared(control)?,
-            alias_output: default_shared(control)?,
+            dependencies: DependencyCatalogCache::default(),
+            index_relations: CatalogDerivation::default(),
+            constraint_definitions: CatalogDerivation::default(),
+            event_definitions: EventDefinitions::default(),
+            routine_definitions: RoutineDefinitions::default(),
+            alias_output: CatalogDerivation::default(),
+        };
+        Ok(Self::from_generation(
+            control.finish(generation, memory)?.into_shared(control)?,
+        ))
+    }
+
+    pub(super) fn from_generation(snapshot: Arc<Produced<CatalogReadGeneration>>) -> Self {
+        Self {
+            snapshot,
             graph_reads: None,
             prepared_catalog: None,
             physical_catalog: None,
             sequence_positions: None,
             latest_sequence_values: None,
-        })
+        }
     }
-}
 
-// These caches' default constructors contain only empty containers and synchronization fields.
-fn default_shared<T: Default>(
-    control: &ProductionControl<'_>,
-) -> Result<Arc<Produced<T>>, SQLError> {
-    let memory = control.reserve(size_of::<Produced<T>>())?;
-    Ok(Arc::new(control.finish(T::default(), memory)?))
+    pub fn downgrade_generation(&self) -> super::WeakCatalogReadGeneration {
+        super::WeakCatalogReadGeneration(Arc::downgrade(&self.snapshot))
+    }
 }
 
 mod tables;

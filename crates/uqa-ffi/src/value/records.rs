@@ -142,6 +142,6 @@ ffi_fn!(uqa_value_get_field(value: *const UQAValue, index: u32, out: *mut *const
     if index as usize >= view.len() {
         return Err(UQAError::new(UQA_ERROR_RANGE, "record field index is out of range"));
     }
-    *out = value.record_views.lock().field(value, &view, index, catalog)?;
+    *out = value.with_views(|extras| extras.record_views.lock().field(value, &view, index, catalog))?;
     Ok(UQA_OK)
 });

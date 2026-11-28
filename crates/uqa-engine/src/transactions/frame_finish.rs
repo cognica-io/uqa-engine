@@ -375,7 +375,9 @@ impl Engine {
             })
             .unwrap_or_default();
         let session_snapshot = stack.first().map(|frame| frame.session_snapshot.clone());
-        let snapshot = stack.first().and_then(|frame| frame.data_snapshot.clone());
+        let snapshot = stack
+            .first()
+            .and_then(|frame| frame.data_snapshot.as_ref().cloned());
         let dirty_at_begin = stack
             .first()
             .map_or_else(TransactionDirtyState::default, |frame| frame.dirty_at_begin);

@@ -18,9 +18,11 @@ use crate::{
     value::UQAValue,
 };
 use std::{cell::RefCell, sync::Arc};
-use uqa_core::memory::{BudgetedMap, BudgetedVec, MemoryReservation};
+use uqa_core::memory::{BudgetedVec, MemoryReservation};
 use uqa_sql::{SQLResult, SQLResultKind};
 
+mod cells;
+use cells::CellViews;
 mod columnar;
 pub(crate) use columnar::{columns as cursor_columns, CursorColumns, CursorSlice};
 
@@ -74,7 +76,7 @@ pub struct UQAResult {
 pub(crate) struct ResultData {
     pub(crate) native: NativeResult,
     types: types::TypeViews,
-    cells: RefCell<BudgetedMap<(u64, u32), Box<UQAValue>>>,
+    cells: RefCell<CellViews>,
     pub(crate) session: Arc<Session>,
     _memory: MemoryReservation,
 }
@@ -86,7 +88,7 @@ impl ResultData {
         boundary::boxed(Self {
             native: NativeResult::Materialized(SQLResult::empty()),
             types: types::TypeViews::new(&session.control()),
-            cells: RefCell::new(BudgetedMap::new(&session.memory)),
+            cells: RefCell::new(CellViews::new(&session.memory)),
             session: Arc::clone(session),
             _memory: memory,
         })
@@ -152,13 +154,10 @@ ffi_fn!(uqa_result_get_value(result: *mut UQAResult, row: u64, column: u32, out:
     let row_index = usize::try_from(row).map_err(|_| UQAError::new(UQA_ERROR_RANGE, "row index exceeds the addressable range"))?;
     let value = data.native.value_at(row_index, column_index).ok_or_else(|| UQAError::new(UQA_ERROR_RANGE, "row index is out of range"))?;
     let mut cells = data.cells.try_borrow_mut().map_err(|_| UQAError::new(UQA_ERROR_BUSY, "result is already being observed"))?;
-    if let Some(value) = cells.get(&(row, column)) { *out = std::ptr::from_ref(&**value); return Ok(UQA_OK); }
-    let ty = data.native.column_type(column_index);
-    let value = UQAValue::borrowed(value, ty, &data.session)?;
-    let pointer = std::ptr::from_ref(&*value);
-    let entry = cells.prepare_entry((row, column), value)?;
-    cells.insert_prepared(entry);
-    *out = pointer;
+    let index = u128::from(row) * data.native.column_count() as u128 + u128::from(column);
+    *out = cells.get_or_create(index, || {
+        UQAValue::borrowed(value, data.native.column_type(column_index), &data.session)
+    })?;
     Ok(UQA_OK)
 });
 ffi_fn!(uqa_result_get_affected_rows(result: *mut UQAResult, out: *mut u64) {

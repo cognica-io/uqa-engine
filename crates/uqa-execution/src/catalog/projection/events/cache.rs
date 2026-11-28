@@ -39,12 +39,16 @@ fn retained_triggers<'a>(
     catalog: &'a CatalogReadView,
     resolution: &RelationNameResolution,
 ) -> Result<&'a Triggers, SQLError> {
-    catalog.event_definitions.triggers.get_or_try_init(|| {
-        Ok(Triggers {
-            rows: super::build_catalog_triggers(catalog, resolution)?,
-            by_oid: OnceLock::new(),
+    catalog
+        .snapshot
+        .event_definitions
+        .triggers
+        .get_or_try_init(|| {
+            Ok(Triggers {
+                rows: super::build_catalog_triggers(catalog, resolution)?,
+                by_oid: OnceLock::new(),
+            })
         })
-    })
 }
 
 pub(crate) fn catalog_triggers<'a>(
@@ -76,7 +80,7 @@ pub(super) fn trigger_by_oid<'a>(
 }
 
 pub(super) fn rule_by_oid(catalog: &CatalogReadView, oid: i64) -> Option<&StoredRule> {
-    let lookup = catalog.event_definitions.rules.get_or_init(|| {
+    let lookup = catalog.snapshot.event_definitions.rules.get_or_init(|| {
         let mut by_oid = BTreeMap::new();
         for (relation, rules) in catalog.snapshot().definitions.rules.iter() {
             for (name, rule) in rules.iter() {
@@ -95,7 +99,7 @@ pub(super) fn rule_by_oid(catalog: &CatalogReadView, oid: i64) -> Option<&Stored
 }
 
 fn retained_views(catalog: &CatalogReadView) -> &ViewDefinitions {
-    catalog.event_definitions.views.get_or_init(|| {
+    catalog.snapshot.event_definitions.views.get_or_init(|| {
         let mut names = Vec::new();
         let mut by_rule = BTreeMap::new();
         let mut by_relation = BTreeMap::new();

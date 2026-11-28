@@ -6,11 +6,15 @@
 
 //! Copy-on-write catalog values: snapshots share ownership, never mutable state.
 
-use std::sync::Arc;
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    Arc, Weak,
+};
 
 use super::CatalogGeneration;
 
-use parking_lot::MappedRwLockReadGuard;
+use parking_lot::{MappedRwLockReadGuard, Mutex};
+use smallvec::SmallVec;
 use uqa_core::memory::{Budgeted, Produced, ProductionControl};
 use uqa_storage::{
     memory_capture::{
@@ -29,6 +33,28 @@ enum Capture<T, F> {
 struct CatalogRoot<T, F> {
     value: CatalogGeneration<T>,
     capture: Option<Capture<T, F>>,
+    view_revisions: Mutex<SmallVec<[Weak<AtomicU64>; 1]>>,
+}
+
+impl<T, F> CatalogRoot<T, F> {
+    fn new(value: CatalogGeneration<T>, capture: Option<Capture<T, F>>) -> Self {
+        Self {
+            value,
+            capture,
+            view_revisions: Mutex::default(),
+        }
+    }
+
+    fn advance_view_revisions(&mut self) {
+        self.view_revisions.get_mut().retain(|subscriber| {
+            if let Some(revision) = subscriber.upgrade() {
+                revision.fetch_add(1, Ordering::AcqRel);
+                true
+            } else {
+                false
+            }
+        });
+    }
 }
 
 impl<T: Send + Sync + 'static, F: Send + Sync + 'static> MemoryCaptureSource for CatalogRoot<T, F> {
@@ -54,9 +80,9 @@ impl<T: Send + Sync + 'static, F: Send + Sync + 'static> MemoryCaptureSource for
     }
 }
 
-pub(crate) struct CatalogCell<T: Send + Sync + 'static, F: Send + Sync + 'static = T>(
-    MemoryCaptureCell<CatalogRoot<T, F>>,
-);
+pub(crate) struct CatalogCell<T: Send + Sync + 'static, F: Send + Sync + 'static = T> {
+    cell: MemoryCaptureCell<CatalogRoot<T, F>>,
+}
 
 /// Undo retains the immutable value; a registered source gives that exact generation its own capture identity.
 pub(crate) struct CatalogSnapshot<T: Send + Sync + 'static, F: Send + Sync + 'static = T> {
@@ -91,10 +117,9 @@ impl<T: Send + Sync + 'static, F: Send + Sync + 'static> CatalogCell<T, F> {
 
     pub(crate) fn from_snapshot(value: impl Into<CatalogGeneration<T>>) -> Self {
         let value = value.into();
-        Self(MemoryCaptureCell::new(CatalogRoot {
-            value,
-            capture: None,
-        }))
+        Self {
+            cell: MemoryCaptureCell::new(CatalogRoot::new(value, None)),
+        }
     }
 
     pub(crate) fn capture_source(
@@ -153,10 +178,7 @@ impl<T: Send + Sync + 'static, F: Send + Sync + 'static> CatalogCell<T, F> {
         capture: Capture<T, F>,
         control: Option<&StorageReadControl>,
     ) -> StorageBackendResult<Self> {
-        let mut cell = MemoryCaptureCell::new(CatalogRoot {
-            value,
-            capture: Some(capture),
-        });
+        let mut cell = MemoryCaptureCell::new(CatalogRoot::new(value, Some(capture)));
         if let Some(registry) = registry {
             if let Some(control) = control {
                 cell.register_with_control(registry, control)?;
@@ -164,34 +186,34 @@ impl<T: Send + Sync + 'static, F: Send + Sync + 'static> CatalogCell<T, F> {
                 cell.register(registry)?;
             }
         }
-        Ok(Self(cell))
+        Ok(Self { cell })
     }
 
     pub(crate) fn key(
         &self,
     ) -> StorageBackendResult<uqa_storage::memory_capture::MemoryCaptureKey<CapturedMemoryValue<F>>>
     {
-        self.0.key()
+        self.cell.key()
     }
 
     pub(crate) fn read(&self) -> MappedRwLockReadGuard<'_, T> {
-        parking_lot::RwLockReadGuard::map(self.0.read(), |root| root.value.as_ref())
+        parking_lot::RwLockReadGuard::map(self.cell.read(), |root| root.value.as_ref())
     }
 
     #[cfg(test)]
     pub(crate) fn is_locked(&self) -> bool {
-        self.0.is_locked()
+        self.cell.is_locked()
     }
 
     pub(crate) fn snapshot(&self) -> CatalogGeneration<T> {
-        self.0.read().value.clone()
+        self.cell.read().value.clone()
     }
 
     pub(crate) fn source_snapshot(
         &self,
         registry: Option<&MemoryCaptureRegistry>,
     ) -> StorageBackendResult<CatalogSnapshot<T, F>> {
-        let root = self.0.read();
+        let root = self.cell.read();
         let value = root.value.clone();
         let source = registry
             .map(|registry| {
@@ -204,23 +226,39 @@ impl<T: Send + Sync + 'static, F: Send + Sync + 'static> CatalogCell<T, F> {
                         ));
                     }
                 };
-                registry.cell(CatalogRoot {
-                    value: value.clone(),
-                    capture: Some(capture),
-                })
+                registry.cell(CatalogRoot::new(value.clone(), Some(capture)))
             })
             .transpose()?;
         Ok(CatalogSnapshot { source, value })
     }
 
+    /// A table can be selected by multiple registries during catalog refresh. Register each reader under the existing root lock without changing the captured value.
+    pub(super) fn track_view_revision(&self, revision: &Arc<AtomicU64>) {
+        let root = self.cell.read();
+        let mut subscribers = root.view_revisions.lock();
+        let revision = Arc::downgrade(revision);
+        subscribers.retain(|subscriber| subscriber.strong_count() != 0);
+        if !subscribers
+            .iter()
+            .any(|subscriber| subscriber.ptr_eq(&revision))
+        {
+            subscribers.push(revision);
+        }
+    }
+
     pub(crate) fn restore(&self, snapshot: &CatalogGeneration<T>) {
-        self.0.write().value = snapshot.clone();
+        let mut root = self.cell.write();
+        if !CatalogGeneration::ptr_eq(&root.value, snapshot) {
+            root.advance_view_revisions();
+            root.value = snapshot.clone();
+        }
     }
 }
 
 impl<T: Clone + Send + Sync + 'static, F: Send + Sync + 'static> CatalogCell<T, F> {
     pub(crate) fn write(&self) -> MemoryCaptureWriteGuard<'_, T> {
-        MemoryCaptureWriteGuard::map(self.0.write(), |root| {
+        MemoryCaptureWriteGuard::map(self.cell.write(), |root| {
+            root.advance_view_revisions();
             CatalogGeneration::make_mut(&mut root.value)
         })
     }

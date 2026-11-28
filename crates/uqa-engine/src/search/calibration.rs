@@ -65,6 +65,22 @@ fn resolve_saved_params(params: &BTreeMap<String, f64>) -> BayesianBM25Params {
 }
 
 impl Engine {
+    /// Resolve a text scoring selection using the session's field calibration.
+    pub fn resolve_scoring_mode(
+        &self,
+        table: &str,
+        field: &str,
+        mode: uqa_sql::retrieval::TextScoringMode,
+    ) -> Result<uqa_scoring::ScoringMode, SQLError> {
+        use uqa_sql::retrieval::TextScoringMode;
+        match mode {
+            TextScoringMode::BM25 => Ok(uqa_scoring::ScoringMode::default()),
+            TextScoringMode::BayesianBM25 => self
+                .bayesian_params_for(table, field)
+                .map(uqa_scoring::ScoringMode::BayesianBM25),
+        }
+    }
+
     pub(crate) fn clear_bayesian_params_cache(&self) {
         self.runtime.bayesian_params_cache.write().clear();
     }

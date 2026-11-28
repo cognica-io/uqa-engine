@@ -7,8 +7,8 @@
 //! Engine creation, file detection, compression, and session creation.
 
 use super::{
-    compression_options, database_file_format_name, pyfunction, pymethods, runtime_error, Engine,
-    PathBuf, PyEngine, PyIOError, PyResult, RetainedValue,
+    compression_options, pyfunction, pymethods, runtime_error, Engine, PathBuf, PyEngine,
+    PyIOError, PyResult, RetainedValue,
 };
 
 #[pymethods]
@@ -63,7 +63,7 @@ impl PyEngine {
     fn detect_database_file(path: PathBuf) -> PyResult<&'static str> {
         let format = Engine::detect_database_file(&path)
             .map_err(|err| PyIOError::new_err(err.to_string()))?;
-        Ok(database_file_format_name(format))
+        Ok(format.as_str())
     }
 
     #[staticmethod]

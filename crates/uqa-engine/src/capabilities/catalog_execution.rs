@@ -282,7 +282,7 @@ impl uqa_execution::catalog::services::CatalogSnapshotSource for Engine {
 use uqa_core::Value;
 impl Engine {
     pub(crate) fn clear_regtype_output_cache(&self) {
-        self.runtime.regtype_output_cache.clear();
+        self.runtime.invalidate_catalog_views();
     }
 }
 

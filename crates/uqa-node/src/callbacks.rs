@@ -209,96 +209,9 @@ impl SQLTableFunction for JSTableFunction {
             .call(args)
             .map_err(|error| callback_error(&self.name, "call table callback", error))?
             .0;
-        table_function_result(value)
+        SQLTableFunctionResult::from_dynamic_value(value)
             .map_err(|error| callback_error(&self.name, "convert table result", error))
     }
-}
-
-fn table_function_result(value: Value) -> std::result::Result<SQLTableFunctionResult, String> {
-    match value {
-        Value::Map(mut result) => {
-            let columns = result
-                .remove("columns")
-                .ok_or_else(|| "table result object needs `columns`".to_string())?;
-            let rows = result
-                .remove("rows")
-                .ok_or_else(|| "table result object needs `rows`".to_string())?;
-            table_result_from_parts(columns, rows)
-        }
-        Value::List(mut pair) if is_table_result_pair(&pair) => {
-            let rows = pair.pop().expect("table result pair has two values");
-            let columns = pair.pop().expect("table result pair has two values");
-            table_result_from_parts(columns, rows)
-        }
-        rows @ Value::List(_) => table_rows(rows, Vec::new()),
-        _ => Err(
-            "table callback must return { columns, rows }, [columns, rows], or row objects"
-                .to_string(),
-        ),
-    }
-}
-
-fn is_table_result_pair(values: &[Value]) -> bool {
-    values.len() == 2
-        && matches!(&values[0], Value::List(columns) if columns.iter().all(|value| matches!(value, Value::Str(_) | Value::FixedChar(_))))
-        && matches!(&values[1], Value::List(_))
-}
-
-fn table_result_from_parts(
-    columns: Value,
-    rows: Value,
-) -> std::result::Result<SQLTableFunctionResult, String> {
-    let Value::List(columns) = columns else {
-        return Err("table result `columns` must be an array of strings".to_string());
-    };
-    let columns = columns
-        .into_iter()
-        .map(|column| match column {
-            Value::Str(column) | Value::FixedChar(column) => Ok(column),
-            _ => Err("table result `columns` must contain only strings".to_string()),
-        })
-        .collect::<std::result::Result<Vec<_>, _>>()?;
-    table_rows(rows, columns)
-}
-
-fn table_rows(
-    rows: Value,
-    mut columns: Vec<String>,
-) -> std::result::Result<SQLTableFunctionResult, String> {
-    let Value::List(rows) = rows else {
-        return Err("table result `rows` must be an array".to_string());
-    };
-    let mut converted = Vec::with_capacity(rows.len());
-    for row in rows {
-        match row {
-            Value::Map(values) => {
-                if columns.is_empty() {
-                    columns.extend(values.keys().cloned());
-                }
-                converted.push(
-                    columns
-                        .iter()
-                        .map(|column| values.get(column).cloned().unwrap_or(Value::Null))
-                        .collect(),
-                );
-            }
-            Value::List(values) => {
-                if columns.is_empty() {
-                    return Err("table callback row arrays require explicit `columns`".to_string());
-                }
-                if values.len() != columns.len() {
-                    return Err(format!(
-                        "table callback row has {} values but {} columns",
-                        values.len(),
-                        columns.len()
-                    ));
-                }
-                converted.push(values);
-            }
-            _ => return Err("each table callback row must be an object or array".to_string()),
-        }
-    }
-    Ok(SQLTableFunctionResult::new(columns, converted))
 }
 
 pub struct JSAggregateCallbacks {

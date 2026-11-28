@@ -179,3 +179,70 @@ fn live_composite_type_and_field_allocation_failures_preserve_prior_views() {
         }
     }
 }
+
+#[test]
+fn indexed_scalar_views_keep_sparse_reads_bounded_and_pointers_stable() {
+    let db = Database::new(UQA_OPEN_MEMORY);
+    db.sql(c"SELECT n FROM generate_series(0, 4095) AS v(n) ORDER BY n");
+    let read = |row| unsafe {
+        let mut value = ptr::null();
+        assert_eq!(
+            uqa_result_get_value(db.result, row, 0, &raw mut value),
+            UQA_OK
+        );
+        assert_eq!(integer(value), i64::try_from(row).unwrap());
+        value
+    };
+
+    let initial = db.bytes();
+    let last = read(4095);
+    let sparse_bytes = db.bytes() - initial;
+    assert!(
+        sparse_bytes <= 4096,
+        "last cell retained {sparse_bytes} bytes"
+    );
+    let pointers: Vec<_> = (0..256).map(read).collect();
+    let retained = db.bytes() - initial;
+    assert!(
+        retained <= 256 * 512 + 8192,
+        "scalar result views retained {retained} bytes"
+    );
+    for (row, pointer) in pointers.into_iter().enumerate().rev() {
+        assert_eq!(read(row as u64), pointer);
+    }
+    assert_eq!(read(4095), last);
+    assert_eq!(db.bytes() - initial, retained);
+}
+
+#[test]
+fn failed_first_numeric_view_releases_its_unpublished_cache() {
+    let db = Database::new(UQA_OPEN_MEMORY);
+    db.sql(c"SELECT 1.250::numeric");
+    unsafe {
+        let mut numeric = ptr::null();
+        assert_eq!(
+            uqa_result_get_value(db.result, 0, 0, &raw mut numeric),
+            UQA_OK
+        );
+        let bytes = db.bytes();
+        let mut text = UQAStringView::default();
+        assert_eq!(
+            target::reject_named("uqa::value::cache::UQAValueExtras", 0, || {
+                uqa_value_get_numeric(numeric, &raw mut text)
+            }),
+            UQA_ERROR_OUT_OF_MEMORY
+        );
+        assert!(text.data.is_null());
+        assert_eq!(db.bytes(), bytes);
+        assert_eq!(uqa_value_get_numeric(numeric, &raw mut text), UQA_OK);
+        assert_eq!(
+            std::slice::from_raw_parts(text.data.cast::<u8>(), text.size),
+            b"1.250"
+        );
+        let first = text.data;
+        let bytes = db.bytes();
+        assert_eq!(uqa_value_get_numeric(numeric, &raw mut text), UQA_OK);
+        assert_eq!(text.data, first);
+        assert_eq!(db.bytes(), bytes);
+    }
+}

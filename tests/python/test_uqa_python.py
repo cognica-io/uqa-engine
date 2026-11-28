@@ -469,6 +469,96 @@ def test_python_user_defined_functions() -> None:
         )
 
 
+def test_table_callback_accepts_a_row_iterator_in_declared_key_order() -> None:
+    engine = uqa.Engine()
+
+    def rows():
+        yield {"z": "first", "a": 1}
+        yield {"a": 2, "ignored": object()}
+
+    try:
+        engine.register_table_function("py_streamed_rows", rows)
+        result = engine.sql("SELECT * FROM py_streamed_rows() ORDER BY a")
+        assert result.columns == ["z", "a"]
+        assert result.rows == [{"a": 1, "z": "first"}, {"a": 2, "z": None}]
+    finally:
+        engine.close()
+
+
+def test_result_column_names_are_shared_across_rows() -> None:
+    engine = uqa.Engine()
+    result = engine.sql('SELECT n AS "column with spaces" FROM generate_series(1, 128) AS s(n) ORDER BY n')
+    column, = result.columns
+    rows = result.rows
+    assert [row[column] for row in rows] == list(range(1, 129))
+    assert all(next(iter(row)) is column for row in rows)
+    encoded = result.to_dict()
+    assert encoded["columns"][0] is column
+    assert all(next(iter(row)) is column for row in encoded["rows"])
+    rows[0][column] = -1
+    assert result.rows[0][column] == 1
+
+
+def test_aggregate_resolves_each_bound_method_once_per_group() -> None:
+    from collections import Counter
+
+    counts = []
+
+    class Sum:
+        def __init__(self):
+            self.total = 0
+            self.lookups = Counter()
+            counts.append(self.lookups)
+
+        def __getattribute__(self, name):
+            if name in ("observe", "step", "finish", "finalize"):
+                object.__getattribute__(self, "lookups")[name] += 1
+            return object.__getattribute__(self, name)
+
+        def step(self, value):
+            self.total += value
+
+        def finalize(self):
+            return self.total
+
+    engine = uqa.Engine()
+    engine.register_aggregate_function("py_group_sum", Sum)
+    result = engine.sql(
+        "SELECT n % 2 AS g, py_group_sum(n) AS s "
+        "FROM generate_series(1, 128) AS v(n) GROUP BY n % 2 ORDER BY g"
+    )
+    assert result.rows == [{"g": 0, "s": 4160}, {"g": 1, "s": 4096}]
+    assert counts == [dict.fromkeys(("observe", "step", "finish", "finalize"), 1)] * 2
+
+
+def test_aggregate_only_reports_a_missing_method_when_used() -> None:
+    class Empty:
+        def finish(self):
+            return 7
+
+    engine = uqa.Engine()
+    engine.register_aggregate_function("empty_only", Empty)
+    assert engine.sql("SELECT empty_only(n) AS s FROM generate_series(1, 0) AS v(n)").rows == [{"s": 7}]
+    with pytest.raises(RuntimeError, match="find aggregate observe"):
+        engine.sql("SELECT empty_only(n) FROM generate_series(1, 1) AS v(n)")
+
+
+def test_python_conversions_preserve_decimal_json_and_iterable_subclasses() -> None:
+    from decimal import Decimal
+
+    class ReverseList(list):
+        def __iter__(self):
+            return reversed(self)
+
+    engine = uqa.Engine()
+    row = engine.sql(
+        "SELECT $1::numeric AS d, $2 AS a, $3::jsonb AS j",
+        [Decimal("0.00123456789123456789"), ReverseList([1, 2, 3]), '{"payload": [null, true]}'],
+    ).rows[0]
+    assert row == {"d": Decimal("0.00123456789123456789"), "a": [3, 2, 1], "j": {"payload": [None, True]}}
+    assert isinstance(row["d"], Decimal)
+
+
 def test_open_auto_and_format_detection(tmp_path) -> None:
     plain = tmp_path / "plain.db"
     assert uqa.detect_database_file(plain) == "missing"

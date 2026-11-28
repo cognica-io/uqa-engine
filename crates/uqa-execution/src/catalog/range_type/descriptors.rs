@@ -23,7 +23,7 @@ impl CatalogReadView {
         &self,
         oid: u32,
     ) -> Result<Option<&uqa_sql::catalog::range_type::StoredRange>, SQLError> {
-        let Some(cache) = &self.range_descriptors else {
+        let Some(cache) = &self.snapshot.range_descriptors else {
             return Ok(None);
         };
         let definitions = cache.definitions.get_or_try_init(|| {
@@ -74,7 +74,7 @@ impl CatalogReadView {
         &self,
         oid: u32,
     ) -> Result<Option<Arc<RangeValueDescriptor>>, SQLError> {
-        let Some(cache) = &self.range_descriptors else {
+        let Some(cache) = &self.snapshot.range_descriptors else {
             return Ok(None);
         };
         let descriptors = cache.values.get_or_try_init(|| {

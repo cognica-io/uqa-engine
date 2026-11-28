@@ -57,6 +57,16 @@ pub(super) fn def_elem_float4(element: &DefElem, context: &str) -> Result<f32> {
     Ok(value as f32)
 }
 
+pub(super) fn compile_volatility(
+    element: &DefElem,
+    keyword: &str,
+) -> Result<crate::ast::FunctionVolatility> {
+    let value = super::def_elem_string(element)?;
+    value
+        .parse()
+        .map_err(|_| SQLError::TypeMismatch(format!("{keyword}: invalid volatility `{value}`")))
+}
+
 /// The PARALLEL setting a clause names, or the name itself when it is not SAFE, RESTRICTED or UNSAFE.
 pub(super) fn compile_parallel(
     element: &DefElem,

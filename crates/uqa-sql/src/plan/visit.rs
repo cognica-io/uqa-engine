@@ -86,13 +86,31 @@ impl QueryPlan {
         visit: &mut dyn FnMut(&'a ScalarExpr) -> Result<(), E>,
     ) -> Result<(), E> {
         try_visit_ctes(&self.ctes, visit)?;
-        match &self.root {
+        self.root.try_visit_scalar_inputs(true, visit)
+    }
+}
+
+impl RelationalPlan {
+    /// Visit the scalar roots owned by this relational level. A caller that follows nested queries in their lexical scopes can visit those levels separately.
+    pub(crate) fn try_visit_scalar_inputs<'a, E>(
+        &'a self,
+        descend_queries: bool,
+        visit: &mut dyn FnMut(&'a ScalarExpr) -> Result<(), E>,
+    ) -> Result<(), E> {
+        let subqueries = match self {
             RelationalPlan::QueryBlock(block) => {
                 for rewrite in &block.deferred_outer_rewrites {
                     rewrite.try_visit_scalar_expressions(visit)?;
                 }
                 if let Some(source) = &block.from {
-                    source.try_visit_scalar_expressions(visit)?;
+                    if descend_queries {
+                        source.try_visit_scalar_expressions(visit)?;
+                    } else {
+                        source.try_visit_expressions::<E>(&mut |expression| {
+                            visit(expression)?;
+                            Ok(true)
+                        })?;
+                    }
                 }
                 for expression in block
                     .expression_steps(super::query::ExpressionOrder::Visit)
@@ -100,9 +118,7 @@ impl QueryPlan {
                 {
                     visit(expression)?;
                 }
-                for subquery in &block.subqueries {
-                    subquery.try_visit_scalar_expressions(visit)?;
-                }
+                &block.subqueries
             }
             RelationalPlan::SetOp {
                 left,
@@ -113,8 +129,10 @@ impl QueryPlan {
                 subqueries,
                 ..
             } => {
-                left.try_visit_scalar_expressions(visit)?;
-                right.try_visit_scalar_expressions(visit)?;
+                if descend_queries {
+                    left.try_visit_scalar_expressions(visit)?;
+                    right.try_visit_scalar_expressions(visit)?;
+                }
                 for expression in order_by
                     .iter()
                     .map(|order| &order.expr)
@@ -123,17 +141,18 @@ impl QueryPlan {
                 {
                     visit(expression)?;
                 }
-                for subquery in subqueries {
-                    subquery.try_visit_scalar_expressions(visit)?;
-                }
+                subqueries
             }
             RelationalPlan::Values { rows, subqueries } => {
                 for expression in rows.iter().flatten() {
                     visit(expression)?;
                 }
-                for subquery in subqueries {
-                    subquery.try_visit_scalar_expressions(visit)?;
-                }
+                subqueries
+            }
+        };
+        if descend_queries {
+            for subquery in subqueries {
+                subquery.try_visit_scalar_expressions(visit)?;
             }
         }
         Ok(())

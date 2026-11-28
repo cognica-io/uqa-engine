@@ -28,6 +28,50 @@ fn lower_binding() -> FunctionBinding {
 }
 
 #[test]
+fn predicate_placement_uses_the_catalog_and_namespace_selected_by_the_statement() {
+    let engine = Engine::new();
+    engine.sql("CREATE SCHEMA selected; CREATE TABLE selected.items(id integer); SET search_path = selected", &[]).unwrap();
+    let scope = query_scope::new_for_statement(&engine, None).unwrap();
+    let uqa_sql::plan::UnifiedPlan::Query(query) = uqa_sql::plan::UnifiedPlan::lower(
+        uqa_sql::compile("SELECT v.id FROM items v WHERE v.id > 1")
+            .unwrap()
+            .remove(0),
+    ) else {
+        panic!("expected query")
+    };
+    let uqa_sql::plan::RelationalPlan::QueryBlock(block) = &query.root else {
+        panic!("expected query block")
+    };
+    let source = block.from.as_ref().unwrap();
+    let filters = || {
+        super::super::query_planning::qualifier_filters_for_stmt(&engine, block, source, &scope)
+            .unwrap()
+    };
+    let original = filters();
+    engine
+        .sql(
+            "CREATE SCHEMA later; CREATE TABLE later.items(other text); SET search_path = later",
+            &[],
+        )
+        .unwrap();
+    CATALOG_CAPTURES.set(0);
+    for _ in 0..8 {
+        let selected = filters();
+        assert_eq!(selected, original);
+        super::super::query_planning::final_filter_after_qualifier_pushdown(
+            &engine,
+            block,
+            source,
+            selected.as_ref(),
+            &scope,
+        )
+        .unwrap();
+        super::super::query_planning::cte_output_filters(&engine, &query, &scope).unwrap();
+    }
+    assert_eq!(CATALOG_CAPTURES.get(), 0);
+}
+
+#[test]
 fn scoped_collation_lookup_keeps_catalog_permissions_without_recapturing() {
     use uqa_sql::FunctionTypeResolver;
     let engine = Engine::new();

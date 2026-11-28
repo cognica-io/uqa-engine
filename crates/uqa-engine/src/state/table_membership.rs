@@ -6,7 +6,13 @@
 
 //! Table membership retains source identities, not mutable table owners.
 
-use std::{ops::Deref, sync::Arc};
+use std::{
+    ops::Deref,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
+};
 
 use parking_lot::MappedRwLockReadGuard;
 use uqa_core::{
@@ -168,7 +174,11 @@ impl PersistentTableRegistrySnapshot<'_> {
     }
 
     pub(crate) fn restore(&self) {
-        self.registry.cell.write().live.clone_from(&self.live);
+        let mut state = self.registry.cell.write();
+        if !RetainedValue::ptr_eq(&state.live, &self.live) {
+            state.live.clone_from(&self.live);
+            self.registry.view_revision.fetch_add(1, Ordering::AcqRel);
+        }
     }
 }
 
@@ -235,7 +245,21 @@ impl MemoryCaptureSource for Membership {
 
 type CapturedTableMembership = CapturedMemoryValue<(MembershipSnapshot, MemoryCaptureIdentity)>;
 
+pub(crate) struct TableCatalogRevision {
+    registry: Arc<AtomicU64>,
+    version: u64,
+}
+
+impl PartialEq for TableCatalogRevision {
+    fn eq(&self, other: &Self) -> bool {
+        self.version == other.version && Arc::ptr_eq(&self.registry, &other.registry)
+    }
+}
+
+impl Eq for TableCatalogRevision {}
+
 pub(crate) struct TableRegistry {
+    view_revision: Arc<AtomicU64>,
     cell: MemoryCaptureCell<State>,
     _image_memory: Option<uqa_core::memory::MemoryReservation>,
 }
@@ -262,8 +286,16 @@ impl TableRegistry {
         input.finish()
     }
 
+    pub(crate) fn revision(&self) -> TableCatalogRevision {
+        TableCatalogRevision {
+            registry: Arc::clone(&self.view_revision),
+            version: self.view_revision.load(Ordering::Acquire),
+        }
+    }
+
     pub(crate) fn persistent() -> Self {
         Self {
+            view_revision: Arc::default(),
             cell: MemoryCaptureCell::new(State {
                 live: RetainedValue::new(Tables::new()),
                 memory: None,
@@ -277,12 +309,18 @@ impl TableRegistry {
     }
 
     pub(crate) fn write(&self) -> TableRegistryWrite<'_> {
-        TableRegistryWrite(self.cell.write())
+        TableRegistryWrite {
+            state: self.cell.write(),
+            view_revision: &self.view_revision,
+        }
     }
 
     #[cfg(test)]
     pub(crate) fn try_write(&self) -> Option<TableRegistryWrite<'_>> {
-        self.cell.try_write().map(TableRegistryWrite)
+        self.cell.try_write().map(|state| TableRegistryWrite {
+            state,
+            view_revision: &self.view_revision,
+        })
     }
 
     #[cfg(test)]
@@ -315,6 +353,7 @@ impl TableRegistry {
             publication,
         });
         state.live = live;
+        self.view_revision.fetch_add(1, Ordering::AcqRel);
         Ok(())
     }
 
@@ -372,12 +411,15 @@ impl TableRegistry {
     }
 }
 
-pub(crate) struct TableRegistryWrite<'a>(MemoryCaptureWriteGuard<'a, State>);
+pub(crate) struct TableRegistryWrite<'a> {
+    state: MemoryCaptureWriteGuard<'a, State>,
+    view_revision: &'a Arc<AtomicU64>,
+}
 
 impl Deref for TableRegistryWrite<'_> {
     type Target = Tables;
     fn deref(&self) -> &Tables {
-        &self.0.live
+        &self.state.live
     }
 }
 
@@ -387,26 +429,33 @@ impl TableRegistryWrite<'_> {
         relation: RelationIdentity,
         table: Arc<TableState>,
     ) -> StorageBackendResult<Option<Arc<TableState>>> {
-        if let Some(memory) = &mut self.0.memory {
+        if let Some(memory) = &mut self.state.memory {
             let membership = memory.membership.with_table(&relation, &table)?;
             memory
                 .publication
                 .insert(&relation, &table, membership.sources.get(&relation))?;
             memory.membership = membership;
         }
-        Ok(RetainedValue::make_mut(&mut self.0.live).insert(relation, table))
+        table.track_catalog_view_revision(self.view_revision);
+        let previous = RetainedValue::make_mut(&mut self.state.live).insert(relation, table);
+        self.view_revision.fetch_add(1, Ordering::AcqRel);
+        Ok(previous)
     }
 
     pub(crate) fn remove(
         &mut self,
         relation: &RelationIdentity,
     ) -> StorageBackendResult<Option<Arc<TableState>>> {
-        if let Some(memory) = &mut self.0.memory {
+        if let Some(memory) = &mut self.state.memory {
             let membership = memory.membership.without_table(relation)?;
             memory.publication.remove(relation)?;
             memory.membership = membership;
         }
-        Ok(RetainedValue::make_mut(&mut self.0.live).remove(relation))
+        let removed = RetainedValue::make_mut(&mut self.state.live).remove(relation);
+        if removed.is_some() {
+            self.view_revision.fetch_add(1, Ordering::AcqRel);
+        }
+        Ok(removed)
     }
 
     pub(crate) fn rename(
@@ -414,25 +463,26 @@ impl TableRegistryWrite<'_> {
         from: &RelationIdentity,
         to: RelationIdentity,
     ) -> StorageBackendResult<Option<Arc<TableState>>> {
-        if self.0.live.contains_key(&to) {
+        if self.state.live.contains_key(&to) {
             return Ok(None);
         }
-        let Some(table) = self.0.live.get(from).cloned() else {
+        let Some(table) = self.state.live.get(from).cloned() else {
             return Ok(None);
         };
-        if let Some(memory) = &mut self.0.memory {
+        if let Some(memory) = &mut self.state.memory {
             let membership = memory.membership.with_rename(from, &to)?;
             memory.publication.rename(from, &to);
             memory.membership = membership;
         }
-        let live = RetainedValue::make_mut(&mut self.0.live);
+        let live = RetainedValue::make_mut(&mut self.state.live);
         live.remove(from);
         live.insert(to, table.clone());
+        self.view_revision.fetch_add(1, Ordering::AcqRel);
         Ok(Some(table))
     }
 
     pub(crate) fn replace(&mut self, live: Tables) -> StorageBackendResult<()> {
-        if let Some(memory) = &mut self.0.memory {
+        if let Some(memory) = &mut self.state.memory {
             let mut membership = Membership {
                 sources: BudgetedSharedMap::new(&memory.membership.memory).snapshot(),
                 memory: memory.membership.memory.clone(),
@@ -447,7 +497,11 @@ impl TableRegistryWrite<'_> {
                 publication,
             };
         }
-        self.0.live = RetainedValue::new(live);
+        for table in live.values() {
+            table.track_catalog_view_revision(self.view_revision);
+        }
+        self.state.live = RetainedValue::new(live);
+        self.view_revision.fetch_add(1, Ordering::AcqRel);
         Ok(())
     }
 
@@ -455,13 +509,17 @@ impl TableRegistryWrite<'_> {
         &mut self,
         mut keep: impl FnMut(&RelationIdentity, &Arc<TableState>) -> bool,
     ) -> StorageBackendResult<()> {
-        if self.0.memory.is_none() {
-            RetainedValue::make_mut(&mut self.0.live)
-                .retain(|relation, table| keep(relation, table));
+        if self.state.memory.is_none() {
+            let live = RetainedValue::make_mut(&mut self.state.live);
+            let before = live.len();
+            live.retain(|relation, table| keep(relation, table));
+            if before != live.len() {
+                self.view_revision.fetch_add(1, Ordering::AcqRel);
+            }
             return Ok(());
         }
         let retained = self
-            .0
+            .state
             .live
             .iter()
             .filter(|(name, table)| keep(name, table))

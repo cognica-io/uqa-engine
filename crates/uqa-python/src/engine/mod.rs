@@ -7,15 +7,14 @@
 //! Python Engine method families.
 
 use super::{
-    batch_from_py, calibration_report_to_py, compression_options, database_file_format_name,
-    document_from_py, ensure_callable, float_map_from_py, float_map_to_py, map_to_py,
-    params_from_py, parse_scoring_params, pyfunction, pymethods, runtime_error,
-    scored_entries_to_py, scoring_mode, validate_binary_label, validate_binary_labels,
-    validate_tensor, validate_vector, vector_values_from_py, Bound, Engine, HybridSearchParams,
-    PathBuf, Py, PyAggregateFunction, PyAny, PyDict, PyDictMethods, PyEngine, PyIOError, PyResult,
-    PyRuntimeError, PySQLResult, PyScalarFunction, PyTableFunction, PyValueError, Python,
-    RetainedValue, RobustHybridSearchParams, SQLFunctionOptions, SQLFunctionVolatility, SQLParam,
-    ScoredEntry,
+    batch_from_py, calibration_report_to_py, compression_options, document_from_py,
+    ensure_callable, float_map_from_py, float_map_to_py, map_to_py, params_from_py,
+    parse_scoring_params, pyfunction, pymethods, runtime_error, scored_entries_to_py, scoring_mode,
+    validate_binary_label, validate_binary_labels, validate_tensor, validate_vector,
+    vector_values_from_py, Bound, Engine, HybridSearchParams, PathBuf, Py, PyAggregateFunction,
+    PyAny, PyDict, PyDictMethods, PyEngine, PyIOError, PyResult, PyRuntimeError, PySQLResult,
+    PyScalarFunction, PyTableFunction, PyValueError, Python, RetainedValue,
+    RobustHybridSearchParams, SQLFunctionOptions, SQLFunctionVolatility, ScoredEntry,
 };
 
 mod calibration;

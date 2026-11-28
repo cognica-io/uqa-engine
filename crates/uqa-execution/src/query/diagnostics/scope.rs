@@ -40,6 +40,12 @@ pub struct InvocationRequest {
     io: IOContext,
 }
 
+impl InvocationRequest {
+    pub(crate) fn read_control(&self) -> Option<&StorageReadControl> {
+        self.control.as_ref()
+    }
+}
+
 pub struct RequestScope {
     previous: Option<InvocationRequest>,
     io: IOScope,

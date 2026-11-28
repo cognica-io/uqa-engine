@@ -3934,6 +3934,7 @@ dependencies = [
 name = "uqa-client"
 version = "0.6.3"
 dependencies = [
+ "allocation-counter",
  "axum",
  "getrandom 0.3.4",
  "httpdate",
@@ -4457,8 +4458,10 @@ dependencies = [
 name = "uqa-wasm"
 version = "0.6.3"
 dependencies = [
+ "allocation-counter",
  "base64",
  "parking_lot",
+ "serde",
  "serde_json",
  "uqa-core",
  "uqa-engine",

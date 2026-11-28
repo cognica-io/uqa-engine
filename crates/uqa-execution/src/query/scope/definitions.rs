@@ -127,6 +127,63 @@ impl DefinitionBindings {
 }
 
 impl<S: Clone> CteScope<S> {
+    /// Visit the deferred definitions this retained query can open. Each declaration captures its referenced outer bindings when it is installed, including the versions hidden by later declarations.
+    pub fn visit_deferred_query_inputs(
+        &self,
+        query: &uqa_sql::plan::QueryPlan,
+        control: &ProductionControl<'_>,
+        mut visit: impl FnMut(
+            &uqa_sql::plan::CtePlanBody,
+            &dyn Fn(&str) -> bool,
+        ) -> Result<(), SQLError>,
+    ) -> Result<(), SQLError> {
+        control.check()?;
+        if self.deferred_ctes.is_empty() {
+            return Ok(());
+        }
+        let names = uqa_sql::semantics::query_external_cte_references_with_control(
+            query,
+            self.deferred_ctes.keys().map(String::as_str),
+            *control,
+        )?;
+        let mut pending = uqa_core::memory::ProductionSmallVec::<
+            [(&RetainedCtePlan, Option<&Arc<DefinitionBindings>>); 8],
+        >::new(*control);
+        for &name in names.iter().rev() {
+            pending.push((&self.deferred_ctes[name], self.definition_scopes.get(name)))?;
+        }
+        let mut visited = uqa_core::memory::OwnedSet::new();
+        while let Some((plan, bindings)) = pending.pop() {
+            control.check()?;
+            let identity = (std::ptr::from_ref(plan.as_ref()), bindings.map(Arc::as_ptr));
+            let first = match control.budget() {
+                Some(budget) => visited.insert_budgeted(identity, budget)?,
+                None => visited.insert(identity),
+            };
+            if first {
+                visit(&plan.body, &|reference| {
+                    let Some(name) = uqa_core::RelationIdentity::borrowed_reference(reference)
+                        .filter(|reference| reference.schema.is_none())
+                        .map(|reference| reference.name)
+                    else {
+                        return false;
+                    };
+                    bindings.is_some_and(|bindings| {
+                        bindings.names.contains_name(name)
+                            || (bindings.own_reference
+                                && name == uqa_core::RelationName::decoded(&plan.name))
+                    })
+                })?;
+                if let Some(bindings) = bindings {
+                    for (name, child) in &bindings.deferred {
+                        pending.push((child, bindings.definitions.get(name)))?;
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// Prepare a definition in its original lexical bindings while retaining the invoking statement's catalog, row locks, scalar arena and transaction controls.
     pub fn definition_scope(&self, reference: &str) -> Option<Self> {
         self.definition_scope_with_control(reference, &ProductionControl::uncontrolled())

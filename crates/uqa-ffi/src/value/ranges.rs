@@ -87,31 +87,30 @@ fn observed(value: &UQAValue, multirange: bool) -> boundary::Result<&RangeViews>
     // Resolve the live declaration even when previously admitted views are already cached.
     let descriptor = RangeValueDescriptor::from_type_with_control(ty, catalog, &control)?
         .ok_or_else(wrong_type)?;
-    if value.ranges.get().is_none() {
-        let memory = control.reserve(size_of::<RangeViews>())?;
-        let native = RangeComparisonValue::from_type_with_control(
-            value.raw().ok_or_else(wrong_type)?,
-            ty,
-            catalog,
-            &control,
-        )?
-        .ok_or_else(wrong_type)?;
-        let range_type = descriptor.range_type_with_control(catalog, &control)?;
-        let views = boundary::boxed(RangeViews {
-            native,
-            descriptor,
-            range_type,
-            bounds: OnceLock::new(),
-            members: Mutex::new(Children::new(&control)),
-            _memory: memory,
-        })?;
-        let _ = value.ranges.set(views);
-    }
     value
-        .ranges
-        .get()
+        .cached(
+            |extras| &extras.ranges,
+            || {
+                let memory = control.reserve(size_of::<RangeViews>())?;
+                let native = RangeComparisonValue::from_type_with_control(
+                    value.raw().ok_or_else(wrong_type)?,
+                    ty,
+                    catalog,
+                    &control,
+                )?
+                .ok_or_else(wrong_type)?;
+                let range_type = descriptor.range_type_with_control(catalog, &control)?;
+                boundary::boxed(RangeViews {
+                    native,
+                    descriptor,
+                    range_type,
+                    bounds: OnceLock::new(),
+                    members: Mutex::new(Children::new(&control)),
+                    _memory: memory,
+                })
+            },
+        )
         .map(Box::as_ref)
-        .ok_or_else(|| UQAError::state("range observation returned no value"))
 }
 
 fn wrong_type() -> UQAError {

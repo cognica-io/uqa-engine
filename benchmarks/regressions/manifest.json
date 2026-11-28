@@ -9259,7 +9259,7 @@
       "source": "crates/uqa-engine/src/capabilities/tests/catalog_allocation.rs",
       "capability": "Catalog allocation retention",
       "workload": "Four providers; twenty OIDs each for ordinary and temporary tables, private constraints and savepoint rollback.",
-      "invariant": "Twenty allocations capture one catalog, private DDL rejects a conflicting owner, and rollback permits its released identity with one fresh capture.",
+      "invariant": "Twenty allocations reuse an existing snapshot without rebuilding it. Private DDL makes the allocator reject an occupied identity and savepoint rollback releases it. Each reservation reads the current generation, builds it at most once and leaves it available to the next catalog reader.",
       "case_names": [
         "case_1_memory",
         "case_2_sqlite",
@@ -19254,6 +19254,19 @@
       "capability": "Bit spill retention",
       "workload": "Zero-budget actual spill of partial bytes, distinct lengths and nested values, plus truncated and malformed records.",
       "invariant": "Binary restoration preserves complete representation and rejects corrupt padding."
+    },
+    {
+      "package": "uqa-client",
+      "kind": "lib",
+      "test": "a_chunk_with_thousands_of_rows_uses_linear_allocation_volume",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-client/src/sql_stream/tests.rs",
+      "capability": "HTTP SQL streaming",
+      "workload": "Read 2,048 and 4,096 row frames from single response chunks through SQLStream::next_frame.",
+      "invariant": "Doubling the row count grows total allocated bytes at most twofold plus 4 KiB while delivering every frame in order."
     },
     {
       "package": "uqa-client",
@@ -41308,6 +41321,32 @@
     {
       "package": "uqa-execution",
       "kind": "lib",
+      "test": "portal_batches_keep_exact_demand_and_count_moves_without_copying_rows",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/statement/portal/worker/tests.rs",
+      "capability": "Bounded physical consumer demand",
+      "workload": "Step four rows, then move over five rows before the requested seven-row boundary.",
+      "invariant": "Each request returns one response. Returned rows preserve order and release their allocation charge. MOVE returns only the count with zero buffered row allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "portal_batches_release_prior_rows_on_cancellation_and_yield_under_pressure",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/statement/portal/worker/tests.rs",
+      "capability": "Bounded physical consumer demand",
+      "workload": "Read a scalar result under a one-byte allowance and cancel a later request with an outstanding row.",
+      "invariant": "A single row can be handed directly to the reader. Cancellation reports 57014 and releases all retained batch bytes without publishing a partial result.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
       "test": "scope_capture_failure_is_the_portals_only_response_after_its_first_step",
       "cases": 1,
       "source": "crates/uqa-execution/src/statement/portal/worker/tests.rs",
@@ -42064,6 +42103,143 @@
       "invariant": "Reject before ordering allocation, keep cleanup diagnostics and close the previously constructed child exactly once.",
       "case_names": [
         ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "predicate_placement_uses_the_catalog_and_namespace_selected_by_the_statement",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/capabilities/tests/scoped_catalog.rs",
+      "capability": "Session catalog and retained query snapshots",
+      "workload": "Run three predicate placement operations eight times after changing the search path and installing a different relation of the same name.",
+      "invariant": "Keep the original statement catalog and namespace throughout placement and record zero new catalog captures.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "retained_query_detaches_only_referenced_tables_and_lexical_cte_inputs",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/session/retained_query/tests.rs",
+      "capability": "Session catalog and retained query snapshots",
+      "workload": "Retain constants, stored views and routines, qualified and shadowed CTE inputs, and mandatory writes, then execute a recursive query on all four providers.",
+      "invariant": "Unused read-only CTEs retain no tables. Each reachable relation resolves in its own lexical scope, and a data-modifying CTE retains its target even when its result is unused.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "catalog_generations_reuse_selected_tables_within_their_own_allowance",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/capabilities/tests/catalog_capture.rs",
+      "capability": "Session catalog and retained query snapshots",
+      "workload": "Read the table catalog and a SQL range repeatedly on four storage providers, retain a controlled view, and change the table inside a transaction and a savepoint.",
+      "invariant": "Repeated reads share the original table definitions and range descriptor. Each budget accounts for its own generation, releases it at the last drop, and exposes the correct table shape after DDL and rollback.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "cached_table_definitions_follow_publication_and_rollback_in_each_selecting_registry",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/table_catalog/tests.rs",
+      "capability": "Session catalog and retained query snapshots",
+      "workload": "Warm a catalog snapshot, share its table with a second registry, advance a row identifier, then publish and restore a column definition.",
+      "invariant": "Row identifier writes reuse the cached snapshot. Both registries observe each column change, retained readers preserve their original column names and repeated reads reuse the restored generation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "cached_catalog_observes_peer_commits_and_keeps_session_overlays_private",
+      "cases": 3,
+      "source": "crates/uqa-engine/src/capabilities/tests/catalog_capture.rs",
+      "capability": "Session catalog and retained query snapshots",
+      "workload": "Read a committed table through two sessions on each persistent provider, then create session-local temporary and graph definitions and roll back.",
+      "invariant": "New statements observe the peer's committed table shape. Retained views preserve their original table and graph definitions, while other sessions see only their own temporary namespace and committed graph names.",
+      "case_names": [
+        "case_1_sqlite_native",
+        "case_2_sqlite_kv",
+        "case_3_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "forward_cursor_delivers_only_requested_rows_without_materializing",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/session/portals/tests.rs",
+      "capability": "Bounded physical consumer demand",
+      "workload": "Fetch and move through a forward-only cursor with a volatile sequence projection on four storage providers.",
+      "invariant": "Each requested row advances the sequence exactly once. The live cursor owns no output file and reports the original values and positions through end of scan.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "forward_cursor_promoted_by_a_procedure_preserves_unread_rows_and_sequence_calls",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/session/portals/tests.rs",
+      "capability": "Bounded physical consumer demand",
+      "workload": "Commit after two rows inside a procedural cursor loop on four storage providers and consume the remaining four rows.",
+      "invariant": "Holding the cursor preserves its absolute position and the unread sequence values. The six source rows are evaluated and returned exactly once.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "implicit_reads_select_undo_only_before_the_first_write",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/transactions/snapshots/tests.rs",
+      "capability": "Session catalog and retained query snapshots",
+      "workload": "Read a temporary table and a sequence position, promote a writer, and roll back rows and nested writes on memory, native SQLite, SQLite Key/Value and redb.",
+      "invariant": "An implicit reader selects no transaction data until its first write. The writer captures its original rows once and preserves autonomous sequence changes on rollback.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "unchanged_transaction_admission_captures_session_state_once",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/transactions/snapshots/tests.rs",
+      "capability": "Session catalog and retained query snapshots",
+      "workload": "Open a transaction with current session catalogs on memory, native SQLite, SQLite Key/Value and redb.",
+      "invariant": "Capture session state exactly once when opening the transaction and preserve rollback behavior.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
       ]
     },
     {
@@ -43557,6 +43733,19 @@
       "capability": "Large statement plan ownership",
       "workload": "Reusable immutable integer input analysis beside a four-MiB original literal spelling and failed optimizer resource acquisition.",
       "invariant": "Select matching analysis before copying discarded input; preserve resource error order with less than 16 KiB allocated.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "a_write_after_snapshot_preserves_unaffected_statement_owners",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/statement_cache/tests.rs",
+      "capability": "Session statement-cache snapshots",
+      "workload": "Retain a full 256-statement cache and publish its next FIFO generation under a separate 16 KiB allowance.",
+      "invariant": "The successor evicts the oldest SQL, the checkpoint preserves its original plan, and the new SQL adds exactly one statement owner. Clearing both generations releases both allowances.",
       "case_names": [
         ""
       ]

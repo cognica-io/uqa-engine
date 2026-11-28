@@ -66,18 +66,7 @@ fn observation(tensor: bool) {
                 uqa_result_get_value(result, 0, 1, &raw mut text_value),
                 UQA_OK
             );
-            let mut retained = Vec::new();
-            loop {
-                let mut copy = ptr::null_mut();
-                let status = uqa_value_create_copy(text_value, &raw mut copy);
-                if status == UQA_ERROR_LIMIT {
-                    assert!(copy.is_null());
-                    break;
-                }
-                assert_eq!(status, UQA_OK);
-                retained.push(copy);
-                assert!(retained.len() < 32);
-            }
+            let retained = super::fill_allowance(text_value);
             assert!(!retained.is_empty());
             let mut vector_view = UQAVectorView::default();
             let mut tensor_view = UQATensorView::default();

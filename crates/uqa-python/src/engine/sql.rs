@@ -9,7 +9,7 @@
 use super::{
     batch_from_py, ensure_callable, params_from_py, pymethods, runtime_error, Bound, Py,
     PyAggregateFunction, PyAny, PyEngine, PyResult, PySQLResult, PyScalarFunction, PyTableFunction,
-    PyValueError, Python, SQLFunctionOptions, SQLFunctionVolatility, SQLParam,
+    PyValueError, Python, SQLFunctionOptions, SQLFunctionVolatility,
 };
 
 #[pymethods]
@@ -50,10 +50,7 @@ impl PyEngine {
         statements: &Bound<'_, PyAny>,
     ) -> PyResult<Vec<PySQLResult>> {
         let statements = batch_from_py(statements)?;
-        let borrowed: Vec<(&str, &[SQLParam])> = statements
-            .iter()
-            .map(|(sql, params)| (sql.as_str(), params.as_slice()))
-            .collect();
+        let borrowed = uqa_sql::params::borrow_sql_batch(&statements);
         let inner = self.inner()?;
         let results = py
             .detach(|| inner.sql_batch_with_labels(&borrowed))
@@ -129,15 +126,9 @@ impl PyEngine {
 }
 
 fn function_options(volatility: &str, may_mutate_engine: bool) -> PyResult<SQLFunctionOptions> {
-    let volatility = match volatility.to_ascii_lowercase().as_str() {
-        "volatile" => SQLFunctionVolatility::Volatile,
-        "stable" => SQLFunctionVolatility::Stable,
-        "immutable" => SQLFunctionVolatility::Immutable,
-        other => {
-            return Err(PyValueError::new_err(format!(
-                "unknown SQL function volatility `{other}`; expected volatile, stable, or immutable"
-            )));
-        }
-    };
+    let volatility = volatility
+        .to_ascii_lowercase()
+        .parse::<SQLFunctionVolatility>()
+        .map_err(PyValueError::new_err)?;
     Ok(SQLFunctionOptions::new(volatility, may_mutate_engine))
 }

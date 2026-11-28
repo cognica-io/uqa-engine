@@ -11,8 +11,7 @@ use pyo3::{
     types::{PyBytes, PyDict},
 };
 use uqa_engine::backup::{
-    BackupCapturePhase, BackupCaptureStep, OwnedBackupJob, OwnedRestoreJob, RestorePhase,
-    RestoredEngine,
+    BackupCaptureStep, OwnedBackupJob, OwnedRestoreJob, RestorePhase, RestoredEngine,
 };
 
 #[pyclass(name = "BackupJob", module = "uqa._uqa", frozen)]
@@ -38,16 +37,7 @@ impl PyBackupJob {
 
     #[getter]
     fn phase(&self, py: Python<'_>) -> PyResult<&'static str> {
-        let phase = self.0.run(py, |job| Ok(job.progress().phase))?;
-        Ok(match phase {
-            BackupCapturePhase::Capturing => "capturing",
-            BackupCapturePhase::Verifying => "verifying",
-            BackupCapturePhase::Prepared => "prepared",
-            BackupCapturePhase::Complete => "complete",
-            BackupCapturePhase::Cancelling => "cancelling",
-            BackupCapturePhase::Cancelled => "cancelled",
-            BackupCapturePhase::Failed => "failed",
-        })
+        self.0.run(py, |job| Ok(job.progress().phase.as_str()))
     }
 
     /// Actual source, image reuse, output and verification counters for this capture.
@@ -100,14 +90,9 @@ impl PyBackupJob {
         maximum_positions: usize,
         maximum_bytes: usize,
     ) -> PyResult<&'static str> {
-        let step = self
-            .0
-            .run(py, |job| job.advance(maximum_positions, maximum_bytes))?;
-        Ok(match step {
-            BackupCaptureStep::Pending => "pending",
-            BackupCaptureStep::Prepared => "prepared",
-            BackupCaptureStep::Complete => "complete",
-        })
+        self.0
+            .run(py, |job| job.advance(maximum_positions, maximum_bytes))
+            .map(BackupCaptureStep::as_str)
     }
 
     fn publish(&self, py: Python<'_>) -> PyResult<Py<PyBytes>> {
@@ -132,18 +117,6 @@ pub(super) struct PyRestoreJob(Handle<OwnedRestoreJob>);
 impl PyRestoreJob {
     pub(super) fn new(job: OwnedRestoreJob) -> Self {
         Self(Handle::new(job))
-    }
-}
-
-fn restore_phase(phase: RestorePhase) -> &'static str {
-    match phase {
-        RestorePhase::Reading => "reading",
-        RestorePhase::Validating => "validating",
-        RestorePhase::Prepared => "prepared",
-        RestorePhase::Publishing => "publishing",
-        RestorePhase::Complete => "complete",
-        RestorePhase::Cancelled => "cancelled",
-        RestorePhase::Failed => "failed",
     }
 }
 
@@ -173,13 +146,13 @@ impl PyRestoreJob {
 
     #[getter]
     fn phase(&self, py: Python<'_>) -> PyResult<&'static str> {
-        self.0.run(py, |job| Ok(restore_phase(job.phase())))
+        self.0.run(py, |job| Ok(job.phase().as_str()))
     }
 
     fn advance(&self, py: Python<'_>, maximum_object_bytes: usize) -> PyResult<&'static str> {
         self.0
             .run(py, |job| job.advance(maximum_object_bytes))
-            .map(restore_phase)
+            .map(RestorePhase::as_str)
     }
 
     fn advance_publication(

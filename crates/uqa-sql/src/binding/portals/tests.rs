@@ -174,13 +174,17 @@ fn sequence_errors_precede_dependency_capture_and_preserve_context() {
 #[test]
 fn dynamic_graph_arguments_retain_all_graph_dependencies_without_evaluation() {
     let catalog = Catalog::default();
-    let query = query("SELECT * FROM graph_pagerank($1)");
-    let dependencies =
-        dependencies::session_portal_table_dependencies(&catalog.inputs(), &query).unwrap();
-    assert!(dependencies.graphs.is_none());
-    assert!(dependencies.graph_catalog);
-    assert_eq!(dependencies.tables, Some(BTreeSet::new()));
-    assert!(catalog.events.borrow().is_empty());
+    for (sql, graphs, catalog_needed) in [
+        ("SELECT * FROM graph_pagerank($1)", None, true),
+        ("WITH unused AS (SELECT * FROM graph_pagerank($1)) SELECT 1", Some(BTreeSet::new()), false),
+        ("WITH unused AS (SELECT * FROM graph_pagerank($1)), live AS (SELECT * FROM graph_pagerank('sales')) SELECT * FROM live", Some(BTreeSet::from(["sales".to_string()])), true),
+    ] {
+        let dependencies = dependencies::session_portal_table_dependencies(&catalog.inputs(), &query(sql)).unwrap();
+        assert_eq!(dependencies.graphs, graphs, "{sql}");
+        assert_eq!(dependencies.graph_catalog, catalog_needed, "{sql}");
+        assert_eq!(dependencies.tables, Some(BTreeSet::new()), "{sql}");
+        assert!(catalog.events.borrow().is_empty(), "{sql}");
+    }
 }
 
 #[test]

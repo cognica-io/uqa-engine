@@ -6,19 +6,17 @@
 
 use super::{JSON, JS_MAX_SAFE_INTEGER};
 
-pub(super) fn req_str(args: &JSON, key: &str) -> Result<String, String> {
+pub(super) fn req_str<'a>(args: &'a JSON, key: &str) -> Result<&'a str, String> {
     args.get(key)
         .and_then(JSON::as_str)
-        .map(str::to_string)
         .ok_or_else(|| format!("missing string argument `{key}`"))
 }
 
-pub(super) fn opt_str(args: &JSON, key: &str) -> Result<Option<String>, String> {
+pub(super) fn opt_str<'a>(args: &'a JSON, key: &str) -> Result<Option<&'a str>, String> {
     match args.get(key) {
         None | Some(JSON::Null) => Ok(None),
         Some(value) => value
             .as_str()
-            .map(str::to_string)
             .map(Some)
             .ok_or_else(|| format!("`{key}` must be a string")),
     }

@@ -17,7 +17,7 @@ pub(in crate::catalog) struct IndexRelations {
 }
 
 fn retained(catalog: &CatalogReadView) -> Result<&IndexRelations, SQLError> {
-    catalog.index_relations.get_or_try_init(|| {
+    catalog.snapshot.index_relations.get_or_try_init(|| {
         let rows = super::build_index_relations(catalog)?;
         let mut by_oid = BTreeMap::new();
         let mut by_name = BTreeMap::new();

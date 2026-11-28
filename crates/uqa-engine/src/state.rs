@@ -7,7 +7,7 @@
 //! Ownership boundaries for storage, catalog, session, runtime, and epochs.
 
 use std::cell::RefCell;
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::collections::{BTreeMap, VecDeque};
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicI64, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use uqa_sql::catalog::roles::{RoleDefinitions, RoleMemberships};
@@ -47,15 +47,15 @@ pub(crate) use table_membership::PersistentTableRegistrySnapshot;
 pub(crate) use table_membership::SnapshotTableCut;
 #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 pub(crate) use table_membership::TableRegistryInput;
-pub(crate) use table_membership::TableRegistryMap;
 pub(crate) use table_membership::{MembershipSnapshot, SnapshotTableSources, TableRegistry};
+pub(crate) use table_membership::{TableCatalogRevision, TableRegistryMap};
 pub(crate) use uqa_core::memory::RetainedValue as CatalogGeneration;
 mod session_state_lock;
 pub(crate) use session_state_lock::{message_level, SessionStateLock, SessionStateWriteGuard};
 
 use super::{
-    BayesianBM25Params, CommandMutationOverlay, RelationIdentity, SQLStatementCache,
-    TableFieldAnalyzerRegistry, TransactionFrame,
+    BayesianBM25Params, CommandMutationOverlay, RelationIdentity, TableFieldAnalyzerRegistry,
+    TransactionFrame,
 };
 
 pub(super) struct StorageContext {
@@ -157,6 +157,7 @@ impl StorageContext {
 pub(crate) use uqa_execution::catalog::view::{StoredView, StoredViewKind};
 
 pub(super) struct DurableCatalogState {
+    pub(super) view_revision: Arc<AtomicU64>,
     pub(super) domains: CatalogCell<
         TypeDefinitions<super::domains::StoredDomain>,
         CapturedTypeDefinitions<super::domains::StoredDomain>,
@@ -307,6 +308,7 @@ pub(super) struct DurableCatalogSnapshot {
 impl DurableCatalogState {
     pub(super) fn new() -> Self {
         Self {
+            view_revision: Arc::new(AtomicU64::new(0)),
             domains: CatalogCell::new(TypeDefinitions::new()),
             enums: CatalogCell::new(TypeDefinitions::new()),
             ranges: CatalogCell::new(TypeDefinitions::new()),
@@ -359,6 +361,45 @@ impl DurableCatalogState {
             triggers: CatalogCell::new(TriggerCatalog::new()),
             rules: CatalogCell::new(RuleCatalog::new()),
         }
+    }
+
+    /// Publish the installed definition cells under one revision, including restored and transaction-private writes that precede a catalog epoch.
+    pub(super) fn into_shared(self) -> Arc<Self> {
+        self.foreign_catalog
+            .track_view_revision(&self.view_revision);
+        self.foreign_wrappers
+            .track_view_revision(&self.view_revision);
+        self.foreign_servers
+            .track_view_revision(&self.view_revision);
+        self.sql_user_functions
+            .track_view_revision(&self.view_revision);
+        self.role_memberships
+            .track_view_revision(&self.view_revision);
+        self.domains.track_view_revision(&self.view_revision);
+        self.enums.track_view_revision(&self.view_revision);
+        self.ranges.track_view_revision(&self.view_revision);
+        self.shells.track_view_revision(&self.view_revision);
+        self.comments.track_view_revision(&self.view_revision);
+        self.composites.track_view_revision(&self.view_revision);
+        self.graphs.track_view_revision(&self.view_revision);
+        self.views.track_view_revision(&self.view_revision);
+        self.catalog_indexes
+            .track_view_revision(&self.view_revision);
+        self.database_security
+            .track_view_revision(&self.view_revision);
+        self.default_acls.track_view_revision(&self.view_revision);
+        self.schemas.track_view_revision(&self.view_revision);
+        self.sequences.track_view_revision(&self.view_revision);
+        self.graph_catalog_oids
+            .track_view_revision(&self.view_revision);
+        self.builtin_routine_security
+            .track_view_revision(&self.view_revision);
+        self.system_relation_security
+            .track_view_revision(&self.view_revision);
+        self.roles.track_view_revision(&self.view_revision);
+        self.triggers.track_view_revision(&self.view_revision);
+        self.rules.track_view_revision(&self.view_revision);
+        Arc::new(self)
     }
 
     /// Capture durable registries in the transaction coordinator's canonical lock order.
@@ -516,20 +557,12 @@ impl SessionContext {
         random_state: super::SessionRandomState,
         query_retention: uqa_core::memory::MemoryBudget,
     ) -> Self {
-        let state = super::SessionStateSnapshot {
-            command_overlays: Vec::new(),
-            graph_overlay: None,
-            search_path: crate::session::default_search_path().into(),
-            temporary_namespace: None,
-            session_vars: BTreeMap::new(),
-            parameter_scopes: uqa_sql::semantics::parameters::ParameterScopes::default(),
-            sequence_currvals: BTreeMap::new(),
-            last_sequence: None,
-            sequence_discard_generation: 0,
-            sql_statement_cache: SQLStatementCache::default(),
-            portal_names: BTreeSet::new(),
-            listened_channels: Vec::new(),
-            authorization: uqa_sql::catalog::roles::session::SessionAuthorization::default(),
+        let state = super::SessionState {
+            values: super::SessionValues {
+                search_path: crate::session::default_search_path().into(),
+                ..super::SessionValues::default()
+            },
+            ..super::SessionState::default()
         };
         Self {
             statement_started_at_micros: AtomicI64::new(0),
@@ -729,6 +762,7 @@ pub(super) struct QueryRuntime {
     pub(super) notification_wake: Arc<parking_lot::Condvar>,
     pub(super) function_depth_limit: AtomicUsize,
     pub(super) bayesian_params_cache: RwLock<BTreeMap<String, BayesianBM25Params>>,
+    pub(super) catalog_views: Mutex<crate::capabilities::CatalogViewCache>,
     pub(super) regtype_output_cache: uqa_execution::catalog::cache::RegtypeOutputCache,
     pub(super) enum_label_cache: uqa_execution::catalog::enum_type::EnumLabelCache,
     pub(super) composite_descriptor_cache:
@@ -771,6 +805,7 @@ impl QueryRuntime {
             notification_wake: Arc::new(parking_lot::Condvar::new()),
             function_depth_limit: AtomicUsize::new(function_depth_limit),
             bayesian_params_cache: RwLock::new(BTreeMap::new()),
+            catalog_views: Mutex::default(),
             regtype_output_cache: uqa_execution::catalog::cache::RegtypeOutputCache::default(),
             enum_label_cache: uqa_execution::catalog::enum_type::EnumLabelCache::default(),
             composite_descriptor_cache:

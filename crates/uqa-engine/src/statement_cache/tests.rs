@@ -14,6 +14,17 @@ fn fixture() -> (Arc<uqa_sql::Statement>, SharedExecutablePlan) {
     (Arc::new(statement), plan)
 }
 
+fn same_roots(cache: &SQLStatementCache, previous: &StatementCacheCheckpoint) -> bool {
+    let current = cache.checkpoint.0.as_ref().unwrap();
+    let previous = previous.0.as_ref().unwrap();
+    current.entries.shares_root(&previous.entries)
+        && current
+            .insertion_order
+            .shares_root(&previous.insertion_order)
+        && current.optimized.shares_root(&previous.optimized)
+        && current.next_insertion == previous.next_insertion
+}
+
 #[test]
 fn logical_plan_retirement_preserves_snapshots_and_failed_publication() {
     let budget = MemoryBudget::new(1 << 20);
@@ -29,7 +40,7 @@ fn logical_plan_retirement_preserves_snapshots_and_failed_publication() {
     let mut cache = SQLStatementCache::default();
     publish(&mut cache, "payload", &statement, &plan, &control).unwrap();
     drop(plan);
-    let snapshot = cache.clone();
+    let snapshot = cache.checkpoint();
     let occupied = budget.reserve(budget.available()).unwrap();
     assert_eq!(
         cache
@@ -38,10 +49,7 @@ fn logical_plan_retirement_preserves_snapshots_and_failed_publication() {
             .sqlstate(),
         Some("53200")
     );
-    assert!(Arc::ptr_eq(
-        cache.state.as_ref().unwrap(),
-        snapshot.state.as_ref().unwrap()
-    ));
+    assert!(same_roots(&cache, &snapshot));
     assert!(cache.get("payload").unwrap().logical_plan.is_some());
     drop(occupied);
     cache.retire_logical("payload", &control).unwrap();
@@ -94,18 +102,15 @@ fn snapshots_share_leases_and_failed_writes_preserve_both_roots() {
     publish(&mut cache, "one", &statement, &plan, &control).unwrap();
     let retained = budget.used();
     let mut snapshot = None;
-    let allocation = allocation_counter::measure(|| snapshot = Some(cache.clone()));
+    let allocation = allocation_counter::measure(|| snapshot = Some(cache.checkpoint()));
     assert_eq!(allocation.bytes_total, 0);
     assert_eq!(budget.used(), retained);
     let snapshot = snapshot.unwrap();
 
-    // Permit the shared-state header and its first node, then reject the copy.
+    // Admit the SQL key and its shared owner, then reject tree publication.
+    let allowance = "two".len() + size_of::<Produced<String>>();
     let occupied = writer_budget
-        .reserve(
-            writer_budget.available()
-                - size_of::<CacheState>()
-                - OwnedMap::<CacheKey, CachedSQLStatement>::entry_bytes(),
-        )
+        .reserve(writer_budget.available() - allowance)
         .unwrap();
     assert_eq!(
         publish(&mut cache, "two", &statement, &plan, &writer)
@@ -113,10 +118,7 @@ fn snapshots_share_leases_and_failed_writes_preserve_both_roots() {
             .sqlstate(),
         Some("53200")
     );
-    assert!(Arc::ptr_eq(
-        cache.state.as_ref().unwrap(),
-        snapshot.state.as_ref().unwrap()
-    ));
+    assert!(same_roots(&cache, &snapshot));
     assert!(cache
         .get("one")
         .unwrap()
@@ -134,7 +136,7 @@ fn snapshots_share_leases_and_failed_writes_preserve_both_roots() {
     assert!(cache.get("two").is_some());
     assert_eq!(budget.used(), retained);
     drop(snapshot);
-    // The original key is still shared by the writer; its nodes were replaced.
+    // The original payload remains reachable while its old search paths retire.
     assert!(budget.used() > 0 && budget.used() < retained);
     cache.clear();
     assert_eq!(budget.used(), 0);
@@ -159,8 +161,8 @@ fn insertion_rejection_does_not_evict_or_leave_an_order_node() {
         .unwrap();
     }
     let before = budget.used();
-    // The text, its shared owner and order node fit; the entry node does not.
-    let allowance = 4 + size_of::<Produced<String>>() + OwnedMap::<u64, CacheKey>::entry_bytes();
+    // A key fits, but the full cache cannot publish replacement search paths.
+    let allowance = 4 + size_of::<Produced<String>>();
     let occupied = budget.reserve(budget.available() - allowance).unwrap();
     assert_eq!(
         publish(&mut cache, "next", &statement, &plan, &control)
@@ -172,7 +174,7 @@ fn insertion_rejection_does_not_evict_or_leave_an_order_node() {
     assert!(cache.get("0").is_some());
     assert!(cache.get("next").is_none());
     assert_eq!(
-        cache.state.as_ref().unwrap().insertion_order.len(),
+        cache.checkpoint.0.as_ref().unwrap().insertion_order.len(),
         SQL_STATEMENT_CACHE_LIMIT
     );
     drop(occupied);
@@ -195,7 +197,7 @@ fn invalidation_and_rollback_retain_independent_optimized_observations() {
     cache
         .set_optimized("one", plan.clone(), 2, &control)
         .unwrap();
-    let snapshot = cache.clone();
+    let snapshot = cache.checkpoint();
     let before = budget.used();
     let allocation = allocation_counter::measure(|| cache.invalidate_optimized());
     assert_eq!(allocation.bytes_total, 0);
@@ -212,7 +214,8 @@ fn invalidation_and_rollback_retain_independent_optimized_observations() {
         .unwrap();
     assert_eq!(snapshot.get("one").unwrap().catalog_epochs.table_data, 2);
     assert_eq!(cache.get("one").unwrap().catalog_epochs.table_data, 3);
-    cache = snapshot;
+    cache.restore(&snapshot);
+    drop(snapshot);
     assert_eq!(cache.get("one").unwrap().catalog_epochs.table_data, 2);
     assert_eq!(budget.used(), before);
     cache.clear();
@@ -247,4 +250,41 @@ fn either_cancellation_prevents_publication_and_releases_no_existing_lease() {
         cache.clear();
         assert_eq!(budget.used(), 0);
     }
+}
+
+#[test]
+fn a_write_after_snapshot_preserves_unaffected_statement_owners() {
+    let initial = MemoryBudget::new(4 << 20);
+    let writer = MemoryBudget::new(16 << 10);
+    let token = CancellationToken::new();
+    let initial_control = ProductionControl::new(&initial, &token, &token);
+    let update_control = ProductionControl::new(&writer, &token, &token);
+    let (statement, plan) = fixture();
+    let mut cache = SQLStatementCache::default();
+    for position in 0..SQL_STATEMENT_CACHE_LIMIT {
+        publish(
+            &mut cache,
+            &position.to_string(),
+            &statement,
+            &plan,
+            &initial_control,
+        )
+        .unwrap();
+    }
+    let checkpoint = cache.checkpoint();
+    let references = Arc::strong_count(&statement);
+    publish(&mut cache, "next", &statement, &plan, &update_control).unwrap();
+    assert_eq!(Arc::strong_count(&statement), references + 1);
+    assert!(cache.get("0").is_none());
+    assert!(checkpoint
+        .get("0")
+        .unwrap()
+        .logical_plan
+        .unwrap()
+        .ptr_eq(&plan));
+    assert!(checkpoint.get("next").is_none());
+    drop(checkpoint);
+    cache.clear();
+    assert_eq!(initial.used(), 0);
+    assert_eq!(writer.used(), 0);
 }

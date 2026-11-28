@@ -26,11 +26,15 @@ doc = false
 uqa-storage-sqlite = { workspace = true }
 base64 = "0.22"
 parking_lot = { workspace = true }
-serde_json = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true, features = ["raw_value"] }
 uqa-core = { workspace = true }
 uqa-engine = { workspace = true, default-features = false }
 uqa-scoring = { workspace = true }
 uqa-sql = { workspace = true }
+
+[target.'cfg(not(target_family = "wasm"))'.dev-dependencies]
+allocation-counter = "=0.8.1"
 
 [lints]
 workspace = true

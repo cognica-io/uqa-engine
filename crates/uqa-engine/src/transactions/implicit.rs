@@ -194,6 +194,7 @@ impl Engine {
                 });
             }
             engine.prepare_serializable_transaction_snapshot()?;
+            engine.select_transaction_undo()?;
             let value = f(engine)?;
             engine.publish_catalog_constraint_tuples()?;
             Ok(value)

@@ -140,7 +140,7 @@ impl<K: Ord, V> BudgetedSharedMapSnapshot<K, V> {
     where
         K: Borrow<Q>,
     {
-        lookup(&self.root, key)
+        lookup(&self.root, key).map(|(_, value)| value)
     }
 }
 
@@ -280,6 +280,14 @@ impl<K: Ord, V> BudgetedSharedMap<K, V> {
     where
         K: Borrow<Q>,
     {
+        lookup(&self.root, key).map(|(_, value)| value)
+    }
+
+    /// Borrow the original stored key together with its value in one lookup.
+    pub fn get_key_value<Q: Ord + ?Sized>(&self, key: &Q) -> Option<(&K, &V)>
+    where
+        K: Borrow<Q>,
+    {
         lookup(&self.root, key)
     }
 
@@ -315,10 +323,27 @@ impl<K: Ord, V> BudgetedSharedMap<K, V> {
         key: K,
     ) -> Result<PreparedSharedMapInsert<'_, K, V>, MemoryError> {
         let insertion = tree::prepare(&self.root, key, &self.memory)?;
-        Ok(PreparedSharedMapInsert {
+        Ok(self.prepared_insert(insertion))
+    }
+
+    /// Reserve new structural nodes against the invoking request while preserving all existing node owners.
+    pub fn prepare_insert_with_budget(
+        &mut self,
+        key: K,
+        memory: &MemoryBudget,
+    ) -> Result<PreparedSharedMapInsert<'_, K, V>, MemoryError> {
+        let insertion = tree::prepare(&self.root, key, memory)?;
+        Ok(self.prepared_insert(insertion))
+    }
+
+    fn prepared_insert(
+        &mut self,
+        insertion: tree::PreparedInsert<K, V>,
+    ) -> PreparedSharedMapInsert<'_, K, V> {
+        PreparedSharedMapInsert {
             map: self,
             insertion,
-        })
+        }
     }
 
     /// Visit keys in order, seeking the lower bound without traversing earlier entries or allocating a traversal buffer.
@@ -349,12 +374,12 @@ impl<K: Ord, V> BudgetedSharedMap<K, V> {
 fn lookup<'a, K: Borrow<Q>, V, Q: Ord + ?Sized>(
     mut link: &'a Link<K, V>,
     key: &Q,
-) -> Option<&'a V> {
+) -> Option<(&'a K, &'a V)> {
     while let Some(node) = link {
         match key.cmp(node.entry.0.borrow()) {
             Ordering::Less => link = &node.left,
             Ordering::Greater => link = &node.right,
-            Ordering::Equal => return Some(&node.entry.1),
+            Ordering::Equal => return Some((&node.entry.0, &node.entry.1)),
         }
     }
     None

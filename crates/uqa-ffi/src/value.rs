@@ -6,7 +6,6 @@
 
 //! Immutable C values borrow native carriers or own admitted parameter copies.
 
-use parking_lot::Mutex;
 use std::ffi::c_char;
 use std::sync::{Arc, OnceLock};
 use uqa_core::{
@@ -26,6 +25,8 @@ use crate::{
     types::UQAType,
 };
 
+mod cache;
+use cache::UQAValueExtras;
 mod scalars;
 pub use scalars::*;
 mod temporal;
@@ -51,26 +52,21 @@ pub use ranges::*;
 
 enum ValueSource {
     Owned(Produced<SQLParam>),
-    // The containing result owns these addresses until refill or release. No destructor owns them.
+    // The enclosing result, parent value or callback owns these addresses.
     Borrowed {
         value: *const Value,
         ty: Option<*const ColumnType>,
+    },
+    Argument {
+        value: *const Value,
+        ty: Option<Produced<ColumnType>>,
     },
 }
 
 pub struct UQAValue {
     source: ValueSource,
-    decoded: OnceLock<Produced<Value>>,
-    numeric_text: OnceLock<Produced<String>>,
-    uuid_bytes: OnceLock<[u8; 16]>,
-    vector_data: OnceLock<Produced<Vec<f32>>>,
-    tensor_data: OnceLock<Produced<uqa_sql::params::SQLTensor>>,
-    array_shape: OnceLock<Produced<Vec<crate::abi::UQAArrayDimension>>>,
-    array_children: Mutex<arrays::Children>,
-    record_views: Mutex<records::RecordViews>,
-    ranges: OnceLock<Box<ranges::RangeViews>>,
+    extras: OnceLock<Box<UQAValueExtras>>,
     parameter_type: Option<ColumnType>,
-    types: crate::types::TypeViews,
     pub(crate) session: Option<Arc<Session>>,
     _memory: Option<MemoryReservation>,
 }
@@ -89,30 +85,27 @@ impl UQAValue {
         ty: Option<&ColumnType>,
         session: Option<&Arc<Session>>,
     ) -> boundary::Result<Box<Self>> {
-        let memory = session
-            .map(|session| session.memory.reserve(size_of::<Self>()))
-            .transpose()?;
-        let control =
-            session.map_or_else(ProductionControl::uncontrolled, |session| session.control());
-        boundary::boxed(Self {
-            source: ValueSource::Borrowed {
+        Self::boxed(
+            ValueSource::Borrowed {
                 value,
                 ty: ty.map(std::ptr::from_ref),
             },
-            decoded: OnceLock::new(),
-            numeric_text: OnceLock::new(),
-            uuid_bytes: OnceLock::new(),
-            vector_data: OnceLock::new(),
-            tensor_data: OnceLock::new(),
-            array_shape: OnceLock::new(),
-            array_children: Mutex::new(arrays::Children::new(&control)),
-            record_views: Mutex::new(records::RecordViews::new(&control)),
-            ranges: OnceLock::new(),
-            types: crate::types::TypeViews::new(&control),
-            parameter_type: None,
-            session: session.cloned(),
-            _memory: memory,
-        })
+            None,
+            session.cloned(),
+        )
+    }
+
+    /// A callback borrows its value and owns the inferred type for the entire invocation.
+    pub(crate) fn argument(
+        value: &Value,
+        ty: Option<Produced<ColumnType>>,
+        session: &Arc<Session>,
+    ) -> boundary::Result<Box<Self>> {
+        Self::boxed(
+            ValueSource::Argument { value, ty },
+            None,
+            Some(Arc::clone(session)),
+        )
     }
 
     pub(crate) fn owned(
@@ -128,35 +121,22 @@ impl UQAValue {
             }
             _ => None,
         };
+        Self::boxed(ValueSource::Owned(value), parameter_type, session)
+    }
+
+    fn boxed(
+        source: ValueSource,
+        parameter_type: Option<ColumnType>,
+        session: Option<Arc<Session>>,
+    ) -> boundary::Result<Box<Self>> {
         let memory = session
             .as_ref()
             .map(|session| session.memory.reserve(size_of::<Self>()))
             .transpose()?;
         boundary::boxed(Self {
-            source: ValueSource::Owned(value),
-            decoded: OnceLock::new(),
-            numeric_text: OnceLock::new(),
-            uuid_bytes: OnceLock::new(),
-            vector_data: OnceLock::new(),
-            tensor_data: OnceLock::new(),
-            array_shape: OnceLock::new(),
-            array_children: Mutex::new(arrays::Children::new(
-                &session
-                    .as_ref()
-                    .map_or_else(ProductionControl::uncontrolled, |session| session.control()),
-            )),
-            types: crate::types::TypeViews::new(
-                &session
-                    .as_ref()
-                    .map_or_else(ProductionControl::uncontrolled, |session| session.control()),
-            ),
-            ranges: OnceLock::new(),
+            source,
+            extras: OnceLock::new(),
             parameter_type,
-            record_views: Mutex::new(records::RecordViews::new(
-                &session
-                    .as_ref()
-                    .map_or_else(ProductionControl::uncontrolled, |session| session.control()),
-            )),
             session,
             _memory: memory,
         })
@@ -171,8 +151,8 @@ impl UQAValue {
     pub(crate) fn raw(&self) -> Option<&Value> {
         match &self.source {
             ValueSource::Owned(parameter) => parameter.scalar_value(),
-            ValueSource::Borrowed { value, .. } => {
-                // Safety: only the containing result creates this pointer; C keeps that owner live.
+            ValueSource::Borrowed { value, .. } | ValueSource::Argument { value, .. } => {
+                // Safety: the result, parent value or callback keeps the input alive throughout observation.
                 #[allow(unsafe_code)]
                 unsafe {
                     Some(&**value)
@@ -186,8 +166,9 @@ impl UQAValue {
             ValueSource::Owned(parameter) => parameter
                 .declared_scalar_type()
                 .or(self.parameter_type.as_ref()),
+            ValueSource::Argument { ty, .. } => ty.as_deref(),
             ValueSource::Borrowed { ty, .. } => ty.map(|ty| {
-                // Safety: the immutable descriptor belongs to the same live result as the value.
+                // Safety: the same owner keeps the immutable descriptor alive during observation.
                 #[allow(unsafe_code)]
                 unsafe {
                     &*ty
@@ -206,22 +187,19 @@ impl UQAValue {
         let Value::Datum(datum) = value else {
             return Ok(value);
         };
-        if let Some(decoded) = self.decoded.get() {
-            return Ok(decoded);
-        }
-        let decoded = uqa_sql::expr::datums::read_with_catalog_and_control(
-            datum,
-            self.session
-                .as_ref()
-                .map(|session| session.native.as_ref() as &dyn uqa_sql::expr::EngineHook),
-            &self.control(),
+        let decoded = self.cached(
+            |extras| &extras.decoded,
+            || {
+                Ok(uqa_sql::expr::datums::read_with_catalog_and_control(
+                    datum,
+                    self.session
+                        .as_ref()
+                        .map(|session| session.native.as_ref() as &dyn uqa_sql::expr::EngineHook),
+                    &self.control(),
+                )?)
+            },
         )?;
-        // A concurrent immutable reader may publish first; the losing candidate releases its reservation.
-        let _ = self.decoded.set(decoded);
-        self.decoded
-            .get()
-            .map(|value| &**value)
-            .ok_or_else(|| UQAError::state("value decoder returned no value"))
+        Ok(decoded)
     }
 
     fn check_access(&self, access: ScalarAccess) -> boundary::Result<()> {
@@ -484,7 +462,7 @@ ffi_fn!(uqa_value_get_type(value: *const UQAValue, out: *mut *const UQAType) {
     let value = boundary::input(value)?;
     let _call = value.session.as_ref().map(|session| session.enter_value()).transpose()?;
     match value.ty() {
-        Some(ty) => { *out = value.types.get(0, ty, value.session.as_ref())?; Ok(UQA_OK) },
+        Some(ty) => { *out = value.with_views(|extras| extras.types.get(0, ty, value.session.as_ref()))?; Ok(UQA_OK) },
         None => Ok(UQA_DONE),
     }
 });

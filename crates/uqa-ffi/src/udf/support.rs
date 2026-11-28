@@ -11,7 +11,7 @@ use std::{
     sync::{Arc, Weak},
 };
 use uqa_core::{
-    memory::{BudgetedVec, Produced},
+    memory::{BudgetedSmallVec, Produced},
     Value,
 };
 use uqa_engine::SQLFunctionContext;
@@ -92,9 +92,8 @@ pub(super) fn session(context: &SQLFunctionContext) -> boundary::Result<Arc<Sess
 }
 
 pub(super) struct Arguments {
-    _values: BudgetedVec<Box<UQAValue>>,
-    _types: BudgetedVec<Option<Produced<ColumnType>>>,
-    pointers: BudgetedVec<*const UQAValue>,
+    _values: BudgetedSmallVec<[Box<UQAValue>; 4]>,
+    pointers: BudgetedSmallVec<[*const UQAValue; 4]>,
     count: u32,
 }
 
@@ -103,9 +102,9 @@ impl Arguments {
         let count = u32::try_from(values.len())
             .map_err(|_| UQAError::invalid("too many function arguments"))?;
         session.control().check()?;
-        let mut views = BudgetedVec::new(&session.memory);
-        let mut types = BudgetedVec::new(&session.memory);
-        let mut pointers = BudgetedVec::new(&session.memory);
+        let mut views = BudgetedSmallVec::new(&session.memory);
+        let mut types = BudgetedSmallVec::<[Option<Produced<ColumnType>>; 4]>::new(&session.memory);
+        let mut pointers = BudgetedSmallVec::new(&session.memory);
         views.reserve(values.len())?;
         types.reserve(values.len())?;
         pointers.reserve(values.len())?;
@@ -116,14 +115,13 @@ impl Arguments {
                 &session.control(),
             )?)?;
         }
-        for (value, ty) in values.iter().zip(types.iter()) {
-            let view = UQAValue::borrowed(value, ty.as_deref(), session)?;
+        for (value, ty) in values.iter().zip(types.iter_mut()) {
+            let view = UQAValue::argument(value, ty.take(), session)?;
             pointers.push(std::ptr::from_ref(&*view))?;
             views.push(view)?;
         }
         Ok(Self {
             _values: views,
-            _types: types,
             pointers,
             count,
         })

@@ -15,23 +15,16 @@ pub(crate) fn start_session_portal_worker(
     params: Vec<SQLParam>,
     directional: bool,
 ) -> SessionPortalWorker {
-    let (request_tx, request_rx) = std::sync::mpsc::channel();
-    let (response_tx, response_rx) = std::sync::mpsc::channel();
-    let join = std::thread::spawn(move || {
+    SessionPortalWorker::spawn(move |requests, responses| {
         let _statement_gate = engine.runtime.statement_gate.delegate_to_current_thread();
-        uqa_execution::statement::portal::worker::run(
+        uqa_execution::statement::portal::worker::run_batched(
             &engine,
             &engine.statement_thread_context(),
             &query,
             &params,
             directional,
-            request_rx,
-            response_tx,
+            requests,
+            responses,
         );
-    });
-    SessionPortalWorker {
-        requests: request_tx,
-        responses: response_rx,
-        join: Some(join),
-    }
+    })
 }

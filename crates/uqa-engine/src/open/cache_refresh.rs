@@ -227,6 +227,7 @@ impl Engine {
         registry_epoch: u64,
         committed_unchanged: bool,
         previous_view: Option<&uqa_storage::key_value::KeyValueReadRevision>,
+        before_refresh: &mut impl FnMut(),
     ) -> StorageBackendResult<bool> {
         let Some(catalog) = self.storage.catalog.as_ref() else {
             return Ok(false);
@@ -235,6 +236,9 @@ impl Engine {
             return Ok(false);
         };
         let previous = self.epochs.storage_cache_revisions.lock().clone();
+        if previous.as_ref() != Some(&current) {
+            before_refresh();
+        }
         let catalog_changed = previous.as_ref().is_none_or(|previous| {
             previous.table_catalog != current.table_catalog
                 || previous.storage_schema != current.storage_schema

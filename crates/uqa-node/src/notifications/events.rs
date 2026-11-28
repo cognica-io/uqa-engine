@@ -39,29 +39,11 @@ pub struct NativeNotificationEvent {
 
 impl From<NotificationEvent> for NativeNotificationEvent {
     fn from(value: NotificationEvent) -> Self {
-        let (kind, identity, sequence, notification, cause) = match value {
-            NotificationEvent::Notification {
-                identity,
-                sequence,
-                notification,
-            } => (
-                "notification",
-                identity,
-                Some(sequence),
-                Some(notification),
-                None,
-            ),
-            NotificationEvent::ResyncRequired { identity, cause } => (
-                "resync_required",
-                identity,
-                None,
-                None,
-                Some(cause.code().to_owned()),
-            ),
-            NotificationEvent::Reconnected { identity } => {
-                ("reconnected", identity, None, None, None)
-            }
-        };
+        let kind = value.kind().to_owned();
+        let identity = NativeNotificationIdentity::from(value.identity());
+        let sequence = value.sequence();
+        let cause = value.cause().map(|cause| cause.code().to_owned());
+        let notification = value.into_notification();
         let (process_id, channel, payload) = notification.map_or((None, None, None), |value| {
             (
                 Some(value.process_id),
@@ -70,9 +52,9 @@ impl From<NotificationEvent> for NativeNotificationEvent {
             )
         });
         Self {
-            kind: kind.to_owned(),
-            epoch: identity.epoch.to_string(),
-            request_id: identity.request_id.map(|value| value.to_string()),
+            kind,
+            epoch: identity.epoch,
+            request_id: identity.request_id,
             sequence: sequence.map(|value| BigInt {
                 sign_bit: false,
                 words: vec![value],

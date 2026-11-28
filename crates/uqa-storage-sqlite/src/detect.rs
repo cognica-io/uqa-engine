@@ -49,6 +49,18 @@ pub enum DatabaseFileFormat {
 }
 
 impl DatabaseFileFormat {
+    /// The format name returned by database inspection.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Missing => "missing",
+            Self::PlainSQLite => "sqlite",
+            Self::CompressedContainer { encrypted: false } => "compressed",
+            Self::CompressedContainer { encrypted: true } => "compressed_encrypted",
+            Self::Unrecognized => "unrecognized",
+        }
+    }
+
     /// Whether opening this file is known to require an encryption
     /// key. `Unrecognized` returns `true` because the dominant cause
     /// for an unrecognized header on a database path is `SQLCipher`

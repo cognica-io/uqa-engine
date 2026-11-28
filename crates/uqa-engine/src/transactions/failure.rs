@@ -67,7 +67,7 @@ fn statement_abort_snapshot(frame: &TransactionFrame) -> StatementAbortSnapshot 
     StatementAbortSnapshot {
         storage_savepoint: None,
         session: frame.session_snapshot.clone(),
-        data: frame.data_snapshot.clone(),
+        data: frame.data_snapshot.as_ref().cloned(),
         dirty: frame.dirty_at_begin,
         keep_mark: frame
             .storage_savepoint

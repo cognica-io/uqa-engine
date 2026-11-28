@@ -113,3 +113,58 @@ fn inline_table_catalog_capture_keeps_original_array_name_owners() {
     assert_eq!(native.used(), 0);
     assert_eq!(original.as_deref(), Some("_items"));
 }
+
+#[test]
+fn cached_table_definitions_follow_publication_and_rollback_in_each_selecting_registry() {
+    let engine = Engine::new();
+    engine
+        .sql("CREATE TABLE shared_fields(id integer)", &[])
+        .unwrap();
+    let relation = RelationIdentity::new("public", "shared_fields");
+    let table = engine.try_table("shared_fields").unwrap().unwrap();
+    let other = crate::state::TableRegistry::persistent();
+    other
+        .write()
+        .insert(relation.clone(), table.clone())
+        .unwrap();
+
+    let first = engine.catalog_read_view();
+    let other_before = other.revision();
+    *table.next_id.write() += 1;
+    assert!(std::ptr::eq(
+        first.snapshot(),
+        engine.catalog_read_view().snapshot()
+    ));
+    assert!(other_before == other.revision());
+
+    let original = table.columns.generation();
+    table
+        .columns
+        .write()
+        .edit(|columns| {
+            columns[0].name = "renamed".into();
+            Ok(())
+        })
+        .unwrap();
+    let renamed = engine.catalog_read_view();
+    let other_renamed = other.revision();
+    assert_eq!(
+        renamed.snapshot().tables[&relation].columns[0].name,
+        "renamed"
+    );
+    assert_eq!(first.snapshot().tables[&relation].columns[0].name, "id");
+    assert!(other_before != other_renamed);
+
+    table.columns.restore(&original);
+    let restored = engine.catalog_read_view();
+    assert_eq!(restored.snapshot().tables[&relation].columns[0].name, "id");
+    assert_eq!(
+        renamed.snapshot().tables[&relation].columns[0].name,
+        "renamed"
+    );
+    assert!(other_renamed != other.revision());
+    assert!(std::ptr::eq(
+        restored.snapshot(),
+        engine.catalog_read_view().snapshot()
+    ));
+}

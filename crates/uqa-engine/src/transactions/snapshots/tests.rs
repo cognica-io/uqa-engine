@@ -58,6 +58,86 @@ mod view_roots;
 #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 mod wrapper_roots;
 
+std::thread_local! {
+    pub(super) static SESSION_SNAPSHOTS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[rstest::rstest]
+#[case::memory(crate::tests::providers::Provider::Memory)]
+#[case::sqlite_native(crate::tests::providers::Provider::SQLiteNative)]
+#[case::sqlite_kv(crate::tests::providers::Provider::SQLiteKeyValue)]
+#[case::redb(crate::tests::providers::Provider::Redb)]
+fn unchanged_transaction_admission_captures_session_state_once(
+    #[case] provider: crate::tests::providers::Provider,
+) {
+    let directory = tempfile::tempdir().unwrap();
+    let engine = provider.open(&directory.path().join("session-snapshot.db"));
+    engine
+        .sql("CREATE TABLE admission_data(id integer)", &[])
+        .unwrap();
+    engine.begin().unwrap();
+    engine.commit().unwrap();
+    SESSION_SNAPSHOTS.set(0);
+    engine.begin().unwrap();
+    assert_eq!(SESSION_SNAPSHOTS.get(), 1);
+    engine.rollback().unwrap();
+}
+
+#[rstest::rstest]
+#[case::memory(crate::tests::providers::Provider::Memory)]
+#[case::sqlite_native(crate::tests::providers::Provider::SQLiteNative)]
+#[case::sqlite_kv(crate::tests::providers::Provider::SQLiteKeyValue)]
+#[case::redb(crate::tests::providers::Provider::Redb)]
+fn implicit_reads_select_undo_only_before_the_first_write(
+    #[case] provider: crate::tests::providers::Provider,
+) {
+    let directory = tempfile::tempdir().unwrap();
+    let engine = provider.open(&directory.path().join("implicit-read.db"));
+    sql(&engine, "CREATE TEMP TABLE read_rows(id integer); INSERT INTO read_rows VALUES (7); CREATE SEQUENCE read_seq; SELECT nextval('read_seq')");
+    engine.begin_implicit_statement_transaction(true).unwrap();
+    let row = || engine.sql("SELECT id FROM read_rows", &[]).unwrap().rows[0]["id"].clone();
+    assert_eq!(row(), Value::Int(7));
+    assert_eq!(engine.currval("read_seq").unwrap(), 1);
+    assert!(engine.session.transactions.lock()[0]
+        .data_snapshot
+        .as_ref()
+        .is_none());
+    sql(&engine, "UPDATE read_rows SET id = 8");
+    assert!(engine.session.transactions.lock()[0]
+        .data_snapshot
+        .as_ref()
+        .is_some());
+    assert_eq!(row(), Value::Int(8));
+    engine.rollback().unwrap();
+    assert_eq!(row(), Value::Int(7));
+
+    engine.begin_implicit_statement_transaction(true).unwrap();
+    assert_eq!(engine.nextval("read_seq").unwrap(), 2);
+    let snapshot = engine.session.transactions.lock()[0]
+        .data_snapshot
+        .as_ref()
+        .unwrap()
+        .clone();
+    assert_eq!(engine.setval("read_seq", 7).unwrap(), 7);
+    assert!(Arc::ptr_eq(
+        engine.session.transactions.lock()[0]
+            .data_snapshot
+            .as_ref()
+            .unwrap(),
+        &snapshot
+    ));
+    engine.rollback().unwrap();
+    assert_eq!(engine.currval("read_seq").unwrap(), 7);
+    assert_eq!(engine.nextval("read_seq").unwrap(), 8);
+
+    engine.begin_implicit_statement_transaction(true).unwrap();
+    engine.begin().unwrap();
+    sql(&engine, "UPDATE read_rows SET id = 9");
+    engine.commit().unwrap();
+    engine.rollback().unwrap();
+    assert_eq!(row(), Value::Int(7));
+}
+
 fn sql(engine: &Engine, text: &str) {
     engine.sql(text, &[]).unwrap();
 }

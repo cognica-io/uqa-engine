@@ -112,6 +112,21 @@ pub enum RestorePhase {
     Failed,
 }
 
+impl RestorePhase {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Reading => "reading",
+            Self::Validating => "validating",
+            Self::Prepared => "prepared",
+            Self::Publishing => "publishing",
+            Self::Complete => "complete",
+            Self::Cancelled => "cancelled",
+            Self::Failed => "failed",
+        }
+    }
+}
+
 /// An independently retained restored runtime. Clones refer to the same published Engine and preserve later writes.
 #[derive(Clone)]
 pub struct RestoredEngine(RetainedValue<Engine>);

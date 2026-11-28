@@ -6,21 +6,22 @@
 
 //! Node-API binding for authenticated local and Cloud HTTP SQL.
 
-use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use napi::bindgen_prelude::{AsyncBlock, AsyncBlockBuilder, Env, Error, Result};
+use napi::bindgen_prelude::{
+    AsyncBlock, AsyncBlockBuilder, Env, Error, Object, Result, ToNapiValue,
+};
+use napi::sys;
 use napi_derive::napi;
 use tokio::sync::Mutex;
 use uqa_client::{
     HttpEngine as CoreHttpEngine, HttpEngineError, SQLStream as CoreSQLStream,
     SQLStreamFrame as CoreSQLStreamFrame, SecretString,
 };
-use uqa_sql::SQLParam as CoreSQLParam;
 
 use crate::input::{batch_from_input, js_number_from_usize, params_from_input, ParamInput};
 use crate::results::SQLResult;
-use crate::value::JSValue;
+use crate::value::JSRow;
 
 #[napi]
 pub struct HttpEngine {
@@ -45,35 +46,39 @@ pub struct HttpSQLBatchExecution {
     pub request_id: String,
 }
 
-#[napi(object, js_name = "HttpSQLStreamFrame")]
+#[napi(object, object_from_js = false, js_name = "HttpSQLStreamFrame")]
 pub struct HttpSQLStreamFrame {
     pub r#type: String,
     pub columns: Option<Vec<String>>,
-    pub row: Option<BTreeMap<String, JSValue>>,
+    #[napi(ts_type = "Record<string, JSValue>")]
+    pub row: Option<JSRow>,
     pub row_count: Option<i64>,
     pub spilled_to_disk: Option<bool>,
     pub request_id: Option<String>,
     pub code: Option<String>,
     pub message: Option<String>,
+    #[napi(ts_type = "import(\"./http\").HttpSQLDiagnostic")]
     pub diagnostic: Option<HttpSQLDiagnostic>,
 }
 
-#[napi(object, js_name = "HttpSQLDiagnostic")]
-pub struct HttpSQLDiagnostic {
-    pub sqlstate: Option<String>,
-    pub category: String,
-    pub statement_index: Option<u32>,
-    pub position: Option<u32>,
-}
+pub struct HttpSQLDiagnostic(uqa_client::SQLDiagnostic);
 
-impl From<uqa_client::SQLDiagnostic> for HttpSQLDiagnostic {
-    fn from(value: uqa_client::SQLDiagnostic) -> Self {
-        Self {
-            sqlstate: value.sqlstate().map(str::to_owned),
-            category: value.category.as_str().to_owned(),
-            statement_index: value.statement_index,
-            position: value.position,
+impl ToNapiValue for HttpSQLDiagnostic {
+    unsafe fn to_napi_value(raw: sys::napi_env, value: Self) -> Result<sys::napi_value> {
+        let env = Env::from_raw(raw);
+        let mut object = Object::new(&env)?;
+        let diagnostic = value.0;
+        if let Some(sqlstate) = diagnostic.sqlstate() {
+            object.set("sqlstate", sqlstate)?;
         }
+        object.set("category", diagnostic.category.as_str())?;
+        if let Some(index) = diagnostic.statement_index {
+            object.set("statementIndex", index)?;
+        }
+        if let Some(position) = diagnostic.position {
+            object.set("position", position)?;
+        }
+        unsafe { Object::to_napi_value(raw, object) }
     }
 }
 
@@ -192,7 +197,7 @@ impl HttpEngine {
         let statements = batch_from_input(statements)?;
         let inner = Arc::clone(&self.inner);
         AsyncBlockBuilder::new(async move {
-            let borrowed = borrowed_statements(&statements);
+            let borrowed = uqa_sql::params::borrow_sql_batch(&statements);
             inner
                 .sql_batch(&borrowed)
                 .await
@@ -213,7 +218,7 @@ impl HttpEngine {
         let statements = batch_from_input(statements)?;
         let inner = Arc::clone(&self.inner);
         AsyncBlockBuilder::new(async move {
-            let borrowed = borrowed_statements(&statements);
+            let borrowed = uqa_sql::params::borrow_sql_batch(&statements);
             let output = inner
                 .sql_batch_with_metadata(&borrowed)
                 .await
@@ -306,11 +311,7 @@ impl TryFrom<CoreSQLStreamFrame> for HttpSQLStreamFrame {
             }
             CoreSQLStreamFrame::Row { row } => {
                 output.r#type = String::from("row");
-                output.row = Some(
-                    row.into_iter()
-                        .map(|(key, value)| (key, JSValue(value)))
-                        .collect(),
-                );
+                output.row = Some(JSRow(row));
             }
             CoreSQLStreamFrame::Complete {
                 row_count,
@@ -330,18 +331,11 @@ impl TryFrom<CoreSQLStreamFrame> for HttpSQLStreamFrame {
                 output.code = Some(code);
                 output.message = Some(message);
                 output.request_id = Some(request_id);
-                output.diagnostic = diagnostic.map(Into::into);
+                output.diagnostic = diagnostic.map(HttpSQLDiagnostic);
             }
         }
         Ok(output)
     }
-}
-
-fn borrowed_statements(statements: &[(String, Vec<CoreSQLParam>)]) -> Vec<(&str, &[CoreSQLParam])> {
-    statements
-        .iter()
-        .map(|(query, params)| (query.as_str(), params.as_slice()))
-        .collect()
 }
 
 fn http_error(error: HttpEngineError) -> Error {

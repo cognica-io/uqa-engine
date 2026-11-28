@@ -87,7 +87,7 @@ ffi_fn!(uqa_config_set_compression(config: *mut UQAConfig, codec: u32, level: i3
         UQA_COMPRESSION_ZSTD | UQA_COMPRESSION_LZ4 => {
             let codec = if codec == UQA_COMPRESSION_ZSTD { SQLiteCompressionCodec::Zstd } else { SQLiteCompressionCodec::LZ4 };
             if codec == SQLiteCompressionCodec::LZ4 && level != 0 { return Err(UQAError::invalid("LZ4 compression has no level setting")); }
-            Some(SQLiteCompressionOptions { codec, level, ..SQLiteCompressionOptions::default() }.validate()
+            Some(SQLiteCompressionOptions::from_parts(codec, None, None, Some(level))
                 .map_err(|message| UQAError::new(UQA_ERROR_INVALID_ARGUMENT, message))?)
         }
         _ => return Err(UQAError::invalid("invalid compression codec or level")),

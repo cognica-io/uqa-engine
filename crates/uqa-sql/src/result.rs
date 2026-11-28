@@ -107,13 +107,20 @@ impl SQLResult {
     ) -> Self {
         debug_assert_eq!(columns.len(), column_types.len());
         debug_assert!(positional_rows.as_ref().is_none_or(|values| {
-            values.len() == rows.len() && values.iter().all(|row| row.len() == columns.len())
+            (rows.is_empty() || values.len() == rows.len())
+                && values.iter().all(|row| row.len() == columns.len())
         }));
         if let Some(positional_rows) = positional_rows.as_ref() {
             let compatibility_labels = unique_compatibility_labels(&columns);
-            for (row, positional) in rows.iter_mut().zip(positional_rows) {
-                for (label, value) in compatibility_labels.iter().zip(positional) {
-                    row.insert(label.clone(), value.clone());
+            if rows.is_empty() {
+                rows.extend(
+                    positional_rows.iter().map(|values| {
+                        compatibility_values(&compatibility_labels, values).collect()
+                    }),
+                );
+            } else {
+                for (row, values) in rows.iter_mut().zip(positional_rows) {
+                    row.extend(compatibility_values(&compatibility_labels, values));
                 }
             }
         }
@@ -143,6 +150,11 @@ impl SQLResult {
         );
         result.row_schema = Some(schema);
         result
+    }
+
+    /// Build both positional and named output from rows emitted in descriptor order.
+    pub fn from_schema_positional_rows(schema: RowSchema, rows: Vec<Vec<Value>>) -> Self {
+        Self::from_schema_rows_with_positions(schema, Vec::new(), Some(rows))
     }
 
     /// Borrow the native descriptor, or construct the metadata supplied by a legacy or external result source. Runtime values never determine declared types or collations.
@@ -181,6 +193,13 @@ impl SQLResult {
             ..Self::default()
         }
     }
+}
+
+fn compatibility_values<'a>(
+    labels: &'a [String],
+    values: &'a [Value],
+) -> impl Iterator<Item = (String, Value)> + 'a {
+    labels.iter().cloned().zip(values.iter().cloned())
 }
 
 fn unique_compatibility_labels(columns: &[String]) -> Vec<String> {

@@ -6,9 +6,10 @@
 
 //! Session-owned parsed, logical, and optimized SQL statement cache.
 
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::{borrow::Borrow, cmp::Ordering};
-use uqa_core::memory::{MemoryReservation, OwnedMap, Produced, ProductionControl};
+use uqa_core::memory::{BudgetedSharedMap, MemoryBudget, Produced, ProductionControl};
+use uqa_sql::plan::SharedExecutablePlan;
 use uqa_sql::SQLError;
 
 use super::capabilities::CatalogEpochs;
@@ -19,18 +20,22 @@ const SQL_STATEMENT_CACHE_LIMIT: usize = 256;
 #[cfg(test)]
 mod tests;
 
-#[derive(Clone, Default)]
+#[derive(Default)]
 pub(super) struct SQLStatementCache {
-    state: Option<Arc<CacheState>>,
-    optimization_generation: u64,
-    has_optimized: bool,
+    checkpoint: StatementCacheCheckpoint,
+    ordinary_memory: OnceLock<MemoryBudget>,
 }
 
+/// A transaction or routine retains the map roots. Each entry keeps its original reservation and a successor changes only its search paths.
+#[derive(Clone, Default)]
+pub(super) struct StatementCacheCheckpoint(Option<CacheState>);
+
+#[derive(Clone)]
 struct CacheState {
-    entries: OwnedMap<CacheKey, CachedSQLStatement>,
-    insertion_order: OwnedMap<u64, CacheKey>,
+    entries: BudgetedSharedMap<CacheKey, CachedSQLStatement>,
+    insertion_order: BudgetedSharedMap<u64, CacheKey>,
+    optimized: BudgetedSharedMap<CacheKey, (SharedExecutablePlan, u64)>,
     next_insertion: u64,
-    _memory: Option<MemoryReservation>,
 }
 
 #[derive(Clone)]
@@ -66,7 +71,6 @@ pub(crate) struct CachedSQLStatement {
     catalog_epochs: CatalogEpochs,
     function_registry_revision: u64,
     pub(crate) parser: uqa_sql::parser::ParserMetadata,
-    optimization_generation: u64,
 }
 
 pub(super) struct SQLStatementInput {
@@ -80,44 +84,29 @@ pub(super) struct SQLStatementInput {
 pub(crate) use uqa_sql::catalog::session::PreparedStatementMetadata;
 pub(super) use uqa_sql::prepared::entry::PreparedStatementPlan;
 
-impl SQLStatementCache {
-    pub(super) fn get(&self, sql: &str) -> Option<CachedSQLStatement> {
-        let mut entry = self.state.as_ref()?.entries.get(sql)?.clone();
-        if entry.optimization_generation != self.optimization_generation {
-            entry.optimized_plan = None;
+impl StatementCacheCheckpoint {
+    fn get(&self, sql: &str) -> Option<CachedSQLStatement> {
+        let state = self.0.as_ref()?;
+        let mut entry = state.entries.get(sql)?.clone();
+        if let Some((plan, epoch)) = state.optimized.get(sql) {
+            entry.optimized_plan = Some(plan.clone());
+            entry.catalog_epochs.table_data = *epoch;
         }
         Some(entry)
     }
+}
 
-    /// Snapshots share their admitted allocation. A write copies shared nodes under
-    /// the invoking request before publishing any change; key and plan payloads
-    /// retain their original owners. Rollback only swaps existing shared handles.
-    fn update(
-        &mut self,
-        control: &ProductionControl<'_>,
-        update: impl FnOnce(&mut CacheState) -> Result<(), SQLError>,
-    ) -> Result<(), SQLError> {
-        control.check()?;
-        if let Some(state) = self.state.as_mut().and_then(Arc::get_mut) {
-            return update(state);
-        }
-        let mut state = CacheState::new(control)?;
-        if let Some(source) = &self.state {
-            state.next_insertion = source.next_insertion;
-            for (key, value) in &source.entries {
-                let mut value = value.clone();
-                if value.optimization_generation != self.optimization_generation {
-                    value.optimized_plan = None;
-                }
-                insert(&mut state.entries, key.clone(), value, control)?;
-            }
-            for (position, key) in &source.insertion_order {
-                insert(&mut state.insertion_order, *position, key.clone(), control)?;
-            }
-        }
-        update(&mut state)?;
-        self.state = Some(Arc::new(state));
-        Ok(())
+impl SQLStatementCache {
+    pub(super) fn checkpoint(&self) -> StatementCacheCheckpoint {
+        self.checkpoint.clone()
+    }
+
+    pub(super) fn restore(&mut self, checkpoint: &StatementCacheCheckpoint) {
+        self.checkpoint.clone_from(checkpoint);
+    }
+
+    pub(super) fn get(&self, sql: &str) -> Option<CachedSQLStatement> {
+        self.checkpoint.get(sql)
     }
 
     pub(super) fn insert(
@@ -126,35 +115,61 @@ impl SQLStatementCache {
         input: SQLStatementInput,
         control: &ProductionControl<'_>,
     ) -> Result<(), SQLError> {
-        let generation = self.optimization_generation;
-        self.update(control, |state| {
-            state.insert(sql, input, generation, control)
-        })
+        control.check()?;
+        let memory = mutation_budget(&self.ordinary_memory, control);
+        if let Some(state) = &mut self.checkpoint.0 {
+            return state.insert(sql, input, control, memory);
+        }
+        let mut state = CacheState::new(memory);
+        state.insert(sql, input, control, memory)?;
+        self.checkpoint.0 = Some(state);
+        Ok(())
     }
 
     pub(super) fn set_optimized(
         &mut self,
         sql: &str,
-        optimized_plan: uqa_sql::plan::SharedExecutablePlan,
+        optimized_plan: SharedExecutablePlan,
         data_epoch: u64,
         control: &ProductionControl<'_>,
     ) -> Result<(), SQLError> {
-        if self
-            .state
-            .as_ref()
-            .is_none_or(|state| !state.entries.contains_key(sql))
-        {
+        let Some(state) = &mut self.checkpoint.0 else {
             return Ok(());
-        }
-        let generation = self.optimization_generation;
-        self.update(control, |state| {
-            let entry = state.entries.get_mut(sql).expect("selected cache entry");
-            entry.optimized_plan = Some(optimized_plan);
-            entry.optimization_generation = generation;
-            entry.catalog_epochs.table_data = data_epoch;
-            Ok(())
-        })?;
-        self.has_optimized = true;
+        };
+        let Some((key, _)) = state.entries.get_key_value(sql) else {
+            return Ok(());
+        };
+        control.check()?;
+        let memory = mutation_budget(&self.ordinary_memory, control);
+        state
+            .optimized
+            .prepare_insert_with_budget(key.clone(), memory)?
+            .publish((optimized_plan, data_epoch));
+        Ok(())
+    }
+
+    fn update_statement(
+        &mut self,
+        sql: &str,
+        control: &ProductionControl<'_>,
+        replacement: impl FnOnce(&CachedSQLStatement) -> Option<CachedSQLStatement>,
+    ) -> Result<(), SQLError> {
+        let Some(state) = &mut self.checkpoint.0 else {
+            return Ok(());
+        };
+        let Some((key, entry)) = state.entries.get_key_value(sql) else {
+            return Ok(());
+        };
+        let Some(replacement) = replacement(entry) else {
+            return Ok(());
+        };
+        control.check()?;
+        let key = key.clone();
+        let memory = mutation_budget(&self.ordinary_memory, control);
+        state
+            .entries
+            .prepare_insert_with_budget(key, memory)?
+            .publish(replacement);
         Ok(())
     }
 
@@ -164,20 +179,11 @@ impl SQLStatementCache {
         analysis: Option<uqa_sql::binding::statements::AnalyzedStatement>,
         control: &ProductionControl<'_>,
     ) -> Result<(), SQLError> {
-        if self
-            .state
-            .as_ref()
-            .is_none_or(|state| !state.entries.contains_key(sql))
-        {
-            return Ok(());
-        }
-        self.update(control, |state| {
-            state
-                .entries
-                .get_mut(sql)
-                .expect("selected cache entry")
-                .analyzed_plan = analysis;
-            Ok(())
+        self.update_statement(sql, control, |entry| {
+            Some(CachedSQLStatement {
+                analyzed_plan: analysis,
+                ..entry.clone()
+            })
         })
     }
 
@@ -186,36 +192,18 @@ impl SQLStatementCache {
         sql: &str,
         control: &ProductionControl<'_>,
     ) -> Result<(), SQLError> {
-        if self.state.as_ref().is_none_or(|state| {
-            state
-                .entries
-                .get(sql)
-                .is_none_or(|entry| entry.logical_plan.is_none())
-        }) {
-            return Ok(());
-        }
-        self.update(control, |state| {
-            state
-                .entries
-                .get_mut(sql)
-                .expect("selected cache entry")
-                .logical_plan = None;
-            Ok(())
+        self.update_statement(sql, control, |entry| {
+            entry.logical_plan.as_ref()?;
+            Some(CachedSQLStatement {
+                logical_plan: None,
+                ..entry.clone()
+            })
         })
     }
 
     pub(super) fn invalidate_optimized(&mut self) {
-        if !std::mem::take(&mut self.has_optimized) {
-            return;
-        }
-        if let Some(state) = self.state.as_mut().and_then(Arc::get_mut) {
-            for entry in state.entries.values_mut() {
-                entry.optimized_plan = None;
-            }
-        } else if let Some(generation) = self.optimization_generation.checked_add(1) {
-            self.optimization_generation = generation;
-        } else {
-            self.clear();
+        if let Some(state) = &mut self.checkpoint.0 {
+            state.optimized = BudgetedSharedMap::new(state.optimized.budget());
         }
     }
 
@@ -224,22 +212,31 @@ impl SQLStatementCache {
     }
 }
 
+fn mutation_budget<'a>(
+    ordinary: &'a OnceLock<MemoryBudget>,
+    control: &ProductionControl<'a>,
+) -> &'a MemoryBudget {
+    control
+        .budget()
+        .unwrap_or_else(|| ordinary.get_or_init(|| MemoryBudget::new(usize::MAX)))
+}
+
 impl CacheState {
-    fn new(control: &ProductionControl<'_>) -> Result<Self, SQLError> {
-        Ok(Self {
-            entries: OwnedMap::new(),
-            insertion_order: OwnedMap::new(),
+    fn new(memory: &MemoryBudget) -> Self {
+        Self {
+            entries: BudgetedSharedMap::new(memory),
+            insertion_order: BudgetedSharedMap::new(memory),
+            optimized: BudgetedSharedMap::new(memory),
             next_insertion: 0,
-            _memory: control.reserve(size_of::<Self>())?,
-        })
+        }
     }
 
     fn insert(
         &mut self,
         sql: &str,
         input: SQLStatementInput,
-        optimization_generation: u64,
         control: &ProductionControl<'_>,
+        memory: &MemoryBudget,
     ) -> Result<(), SQLError> {
         let SQLStatementInput {
             statement,
@@ -248,61 +245,95 @@ impl CacheState {
             function_registry_revision,
             parser,
         } = input;
-        control.check()?;
-        let analyzed_plan = self
-            .entries
-            .get(sql)
-            .filter(|entry| {
+        let existing = self.entries.get_key_value(sql);
+        let analyzed_plan = existing
+            .filter(|(_, entry)| {
                 Arc::ptr_eq(&entry.statement, &statement)
                     && entry.catalog_epochs.table_catalog == catalog_epochs.table_catalog
                     && entry.catalog_epochs.catalog_registry == catalog_epochs.catalog_registry
                     && entry.function_registry_revision == function_registry_revision
                     && entry.parser.settings == parser.settings
             })
-            .and_then(|entry| entry.analyzed_plan.clone());
+            .and_then(|(_, entry)| entry.analyzed_plan.clone());
         let cached = CachedSQLStatement {
             statement,
-            logical_plan: if analyzed_plan.is_none() {
-                logical_plan
-            } else {
+            logical_plan: if analyzed_plan.is_some() {
                 None
+            } else {
+                logical_plan
             },
             optimized_plan: None,
             analyzed_plan,
             catalog_epochs,
             function_registry_revision,
             parser,
-            optimization_generation,
         };
-        if let Some(entry) = self.entries.get_mut(sql) {
-            *entry = cached;
+
+        if let Some((key, _)) = existing {
+            let key = key.clone();
+            let optimized = self
+                .optimized
+                .clone()
+                .into_mutation_budget(memory)
+                .with_remove(sql)?;
+            self.entries
+                .prepare_insert_with_budget(key, memory)?
+                .publish(cached);
+            self.optimized = optimized;
             return Ok(());
         }
+
         let next = self.next_insertion.checked_add(1).ok_or_else(|| {
             SQLError::Internal("statement cache insertion identity overflow".into())
         })?;
         let key = CacheKey(control.copy_text(sql)?.into_shared(control)?);
-        insert(
-            &mut self.insertion_order,
-            self.next_insertion,
-            key.clone(),
-            control,
-        )?;
-        if let Err(error) = insert(&mut self.entries, key, cached, control) {
-            self.insertion_order.remove(&self.next_insertion);
-            return Err(error);
+        if self.entries.len() < SQL_STATEMENT_CACHE_LIMIT {
+            return self.append(key, cached, next, memory);
         }
-        self.next_insertion = next;
-        while self.entries.len() > SQL_STATEMENT_CACHE_LIMIT {
-            let (position, key) = self
+        let (position, oldest) = self
+            .insertion_order
+            .first_from::<u64>(std::ops::Bound::Unbounded)
+            .expect("cached statement has insertion order");
+        let mut successor = Self {
+            entries: self
+                .entries
+                .clone()
+                .into_mutation_budget(memory)
+                .with_remove(oldest)?,
+            insertion_order: self
                 .insertion_order
-                .iter()
-                .next()
-                .map(|(position, key)| (*position, key.clone()))
-                .expect("cached statement has insertion order");
-            self.insertion_order.remove(&position);
-            self.entries.remove(key.0.as_str());
-        }
+                .clone()
+                .into_mutation_budget(memory)
+                .with_remove(position)?,
+            optimized: self
+                .optimized
+                .clone()
+                .into_mutation_budget(memory)
+                .with_remove(oldest)?,
+            next_insertion: self.next_insertion,
+        };
+        successor.append(key, cached, next, memory)?;
+        *self = successor;
+        Ok(())
+    }
+
+    fn append(
+        &mut self,
+        key: CacheKey,
+        entry: CachedSQLStatement,
+        next: u64,
+        memory: &MemoryBudget,
+    ) -> Result<(), SQLError> {
+        // Both indexes admit their complete updates before either one is published.
+        let order = self
+            .insertion_order
+            .prepare_insert_with_budget(self.next_insertion, memory)?;
+        let statement = self
+            .entries
+            .prepare_insert_with_budget(key.clone(), memory)?;
+        order.publish(key);
+        statement.publish(entry);
+        self.next_insertion = next;
         Ok(())
     }
 }
@@ -431,19 +462,4 @@ impl Engine {
             .sql_statement_cache
             .invalidate_optimized();
     }
-}
-
-fn insert<K: Ord, V>(
-    map: &mut OwnedMap<K, V>,
-    key: K,
-    value: V,
-    control: &ProductionControl<'_>,
-) -> Result<(), SQLError> {
-    control.check()?;
-    if let Some(budget) = control.budget() {
-        map.insert_budgeted(key, value, budget)?;
-    } else {
-        map.insert(key, value);
-    }
-    Ok(())
 }

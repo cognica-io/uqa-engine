@@ -46,18 +46,7 @@ fn range_admission_failure_cancellation_and_retry_preserve_native_state_on_all_p
                 uqa_value_create_typed_null(engine, c"integer".as_ptr(), &raw mut seed),
                 UQA_OK
             );
-            let mut owners = Vec::new();
-            loop {
-                let mut copy = ptr::null_mut();
-                let status = uqa_value_create_copy(seed, &raw mut copy);
-                if status == UQA_ERROR_LIMIT {
-                    assert!(copy.is_null());
-                    break;
-                }
-                assert_eq!(status, UQA_OK);
-                owners.push(copy);
-                assert!(owners.len() < 256);
-            }
+            let owners = super::fill_allowance(seed);
             let mut count = 99;
             assert_eq!(
                 uqa_value_get_range_count(multi, &raw mut count),

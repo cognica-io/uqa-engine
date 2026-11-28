@@ -55,11 +55,7 @@ impl Task for SQLBatchTask {
     type JsValue = Vec<SQLResult>;
 
     fn compute(&mut self) -> Result<Self::Output> {
-        let borrowed: Vec<(&str, &[CoreSQLParam])> = self
-            .statements
-            .iter()
-            .map(|(sql, params)| (sql.as_str(), params.as_slice()))
-            .collect();
+        let borrowed = uqa_sql::params::borrow_sql_batch(&self.statements);
         self.engine
             .sql_batch_with_labels(&borrowed)
             .map_err(runtime_error)

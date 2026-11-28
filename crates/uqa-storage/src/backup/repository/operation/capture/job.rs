@@ -35,6 +35,32 @@ pub enum BackupCaptureStep {
     Complete,
 }
 
+impl BackupCapturePhase {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Capturing => "capturing",
+            Self::Verifying => "verifying",
+            Self::Prepared => "prepared",
+            Self::Complete => "complete",
+            Self::Cancelling => "cancelling",
+            Self::Cancelled => "cancelled",
+            Self::Failed => "failed",
+        }
+    }
+}
+
+impl BackupCaptureStep {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Pending => "pending",
+            Self::Prepared => "prepared",
+            Self::Complete => "complete",
+        }
+    }
+}
+
 /// Actual source and repository work. Physical page traffic and elapsed-time acceptance are not inferred from these counters.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BackupCaptureProgress {

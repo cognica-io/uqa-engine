@@ -6,6 +6,8 @@
 
 //! JavaScript and core-value conversion.
 
+use napi::bindgen_prelude::{Array, Env};
+
 use super::{
     sys, BTreeMap, BigInt, Buffer, Error, Float32Array, Float64Array, FromNapiValue, JsValue, Null,
     Object, Result, ToNapiValue, TypeName, Uint8Array, Unknown, ValidateNapiValue, Value,
@@ -71,7 +73,7 @@ pub(super) unsafe fn value_to_napi(env: sys::napi_env, value: Value) -> Result<s
                 let parsed = serde_json::from_str(&value).map_err(|error| {
                     Error::from_reason(format!("invalid SQL JSON value: {error}"))
                 })?;
-                value_to_napi(env, value_from_json(parsed))
+                JSONValue::to_napi_value(env, JSONValue(parsed))
             }
             Value::Bytes(value) => Buffer::to_napi_value(env, Buffer::from(value)),
             value @ Value::BitString(_) => String::to_napi_value(
@@ -85,52 +87,117 @@ pub(super) unsafe fn value_to_napi(env: sys::napi_env, value: Value) -> Result<s
                 uqa_sql::expr::catalog_output_required(&value).to_string(),
             )),
             Value::LegacyVector(vector) => value_to_napi(env, Value::Array(vector.into_array())),
-            Value::Array(array) => Vec::<JSValue>::to_napi_value(
-                env,
-                array.into_elements().into_iter().map(JSValue).collect(),
-            ),
-            Value::List(values) => {
-                Vec::<JSValue>::to_napi_value(env, values.into_iter().map(JSValue).collect())
+            Value::Array(array) => {
+                array_to_napi(env, array.into_elements().into_iter().map(JSValue))
             }
-            Value::Row(values) => {
-                Vec::<JSValue>::to_napi_value(env, values.into_iter().map(JSValue).collect())
+            Value::List(values) => array_to_napi(env, values.into_iter().map(JSValue)),
+            Value::Row(row) => array_to_napi(env, row.into_values().into_iter().map(JSValue)),
+            Value::Record(record) => {
+                let (mut fields, _) = record.into_parts();
+                // The object has sorted keys and the last value of each repeated field.
+                fields.sort_by(|left, right| left.0.cmp(&right.0));
+                fields.dedup_by(|next, first| {
+                    if first.0 == next.0 {
+                        std::mem::swap(&mut first.1, &mut next.1);
+                        true
+                    } else {
+                        false
+                    }
+                });
+                object_to_napi(
+                    env,
+                    fields.into_iter().map(|(key, value)| (key, JSValue(value))),
+                )
             }
-            Value::Record(values) => BTreeMap::<String, JSValue>::to_napi_value(
-                env,
-                values
-                    .into_iter()
-                    .map(|(key, value)| (key, JSValue(value)))
-                    .collect(),
-            ),
-            Value::Map(values) => BTreeMap::<String, JSValue>::to_napi_value(
-                env,
-                values
-                    .into_iter()
-                    .map(|(key, value)| (key, JSValue(value)))
-                    .collect(),
-            ),
+            Value::Map(row) => JSRow::to_napi_value(env, JSRow(row)),
         }
     }
 }
 
-fn value_from_json(value: serde_json::Value) -> Value {
-    match value {
-        serde_json::Value::Null => Value::Null,
-        serde_json::Value::Bool(value) => Value::Bool(value),
-        serde_json::Value::Number(value) => value.as_i64().map_or_else(
-            || Value::Float(value.as_f64().unwrap_or(f64::NAN)),
-            Value::Int,
-        ),
-        serde_json::Value::String(value) => Value::Str(value),
-        serde_json::Value::Array(values) => {
-            Value::List(values.into_iter().map(value_from_json).collect())
+unsafe fn array_to_napi<T: ToNapiValue>(
+    raw: sys::napi_env,
+    values: impl ExactSizeIterator<Item = T>,
+) -> Result<sys::napi_value> {
+    let env = Env::from_raw(raw);
+    let len = u32::try_from(values.len())
+        .map_err(|_| Error::from_reason("array length exceeds uint32"))?;
+    let mut array = env.create_array(len)?;
+    for (index, value) in (0..len).zip(values) {
+        array.set(index, value)?;
+    }
+    unsafe { Array::to_napi_value(raw, array) }
+}
+
+unsafe fn object_to_napi<T: ToNapiValue>(
+    raw: sys::napi_env,
+    fields: impl IntoIterator<Item = (String, T)>,
+) -> Result<sys::napi_value> {
+    let env = Env::from_raw(raw);
+    let mut object = Object::new(&env)?;
+    for (key, value) in fields {
+        object.set(key, value)?;
+    }
+    unsafe { Object::to_napi_value(raw, object) }
+}
+
+struct JSONValue(serde_json::Value);
+
+impl ToNapiValue for JSONValue {
+    unsafe fn to_napi_value(env: sys::napi_env, value: Self) -> Result<sys::napi_value> {
+        use serde_json::Value as JSON;
+        unsafe {
+            match value.0 {
+                JSON::Null => Null::to_napi_value(env, Null),
+                JSON::Bool(value) => bool::to_napi_value(env, value),
+                JSON::Number(value) => match value.as_i64() {
+                    Some(value) => value_to_napi(env, Value::Int(value)),
+                    None => f64::to_napi_value(env, value.as_f64().unwrap_or(f64::NAN)),
+                },
+                JSON::String(value) => String::to_napi_value(env, value),
+                JSON::Array(values) => array_to_napi(env, values.into_iter().map(Self)),
+                JSON::Object(mut values) => {
+                    values.sort_keys();
+                    object_to_napi(
+                        env,
+                        values.into_iter().map(|(key, value)| (key, Self(value))),
+                    )
+                }
+            }
         }
-        serde_json::Value::Object(values) => Value::Map(
-            values
-                .into_iter()
-                .map(|(key, value)| (key, value_from_json(value)))
-                .collect(),
-        ),
+    }
+}
+
+pub struct JSRow(pub(super) BTreeMap<String, Value>);
+pub struct JSRows(pub(super) Vec<BTreeMap<String, Value>>);
+
+impl ToNapiValue for JSRow {
+    unsafe fn to_napi_value(env: sys::napi_env, row: Self) -> Result<sys::napi_value> {
+        unsafe {
+            object_to_napi(
+                env,
+                row.0.into_iter().map(|(key, value)| (key, JSValue(value))),
+            )
+        }
+    }
+}
+
+impl FromNapiValue for JSRow {
+    unsafe fn from_napi_value(env: sys::napi_env, value: sys::napi_value) -> Result<Self> {
+        let row = unsafe { BTreeMap::<String, JSValue>::from_napi_value(env, value) }?;
+        Ok(Self(document_from_js(row)))
+    }
+}
+
+impl ToNapiValue for JSRows {
+    unsafe fn to_napi_value(env: sys::napi_env, rows: Self) -> Result<sys::napi_value> {
+        unsafe { array_to_napi(env, rows.0.into_iter().map(JSRow)) }
+    }
+}
+
+impl FromNapiValue for JSRows {
+    unsafe fn from_napi_value(env: sys::napi_env, value: sys::napi_value) -> Result<Self> {
+        let rows = unsafe { Vec::<JSRow>::from_napi_value(env, value) }?;
+        Ok(Self(rows.into_iter().map(|row| row.0).collect()))
     }
 }
 

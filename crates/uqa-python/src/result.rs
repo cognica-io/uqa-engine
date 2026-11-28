@@ -6,9 +6,12 @@
 
 //! Python wrapper for SQL result sets.
 
+use pyo3::types::{PyList, PyListMethods, PyString};
+use std::collections::HashMap;
+
 use super::{
-    pyclass, pymethods, rows_to_py, BTreeMap, Py, PyAny, PyDict, PyDictMethods, PyResult, Python,
-    SQLResult, Value,
+    pyclass, pymethods, value_to_py, BTreeMap, Bound, Py, PyAny, PyDict, PyDictMethods, PyResult,
+    Python, SQLResult, Value,
 };
 
 #[pyclass(name = "SQLResult", module = "uqa._uqa", skip_from_py_object)]
@@ -32,8 +35,11 @@ impl From<SQLResult> for PySQLResult {
 #[pymethods]
 impl PySQLResult {
     #[getter]
-    fn columns(&self) -> Vec<String> {
-        self.columns.clone()
+    fn columns<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyList>> {
+        PyList::new(
+            py,
+            self.columns.iter().map(|name| PyString::intern(py, name)),
+        )
     }
 
     #[getter]
@@ -43,13 +49,25 @@ impl PySQLResult {
 
     #[getter]
     fn rows(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
-        rows_to_py(py, &self.rows)
+        let result = PyList::empty(py);
+        let mut names = HashMap::with_capacity(self.columns.len());
+        for row in &self.rows {
+            let dict = PyDict::new(py);
+            for (name, value) in row {
+                let key = names
+                    .entry(name.as_str())
+                    .or_insert_with(|| PyString::intern(py, name));
+                dict.set_item(&*key, value_to_py(py, value)?)?;
+            }
+            result.append(dict)?;
+        }
+        Ok(result.into_any().unbind())
     }
 
     fn to_dict(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         let dict = PyDict::new(py);
-        dict.set_item("columns", self.columns.clone())?;
-        dict.set_item("rows", rows_to_py(py, &self.rows)?)?;
+        dict.set_item("columns", self.columns(py)?)?;
+        dict.set_item("rows", self.rows(py)?)?;
         dict.set_item("affected_rows", self.affected_rows)?;
         Ok(dict.into_any().unbind())
     }

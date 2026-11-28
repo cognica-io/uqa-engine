@@ -6,6 +6,8 @@
 
 //! Runtime contracts for scalar, table, and aggregate extensions.
 
+mod dynamic_result;
+
 pub use crate::row_stream::{SQLRowSource, SQLRowStream};
 use uqa_core::Value;
 use uqa_sql::SQLError;

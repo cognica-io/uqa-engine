@@ -14,6 +14,7 @@ use super::{
 use uqa_core::{memory::ProductionControl, RelationName, RelationReference};
 
 pub(crate) struct TableRegistryInput {
+    view_revision: Arc<std::sync::atomic::AtomicU64>,
     live: Tables,
     memory: Option<MemoryTables>,
     control: StorageReadControl,
@@ -34,6 +35,7 @@ impl TableRegistryInput {
             })
             .transpose()?;
         Ok(Self {
+            view_revision: Arc::default(),
             live: Tables::new(),
             memory,
             control: control.clone(),
@@ -86,6 +88,7 @@ impl TableRegistryInput {
                 )?;
                 memory.membership = membership;
             }
+            table.track_catalog_view_revision(&self.view_revision);
             Ok::<_, StorageBackendError>(table)
         })?;
         Ok(self)
@@ -120,6 +123,7 @@ impl TableRegistryInput {
         };
         self.control.check()?;
         Ok(TableRegistry {
+            view_revision: self.view_revision,
             cell,
             _image_memory: Some(header),
         })

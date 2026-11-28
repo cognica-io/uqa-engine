@@ -60,6 +60,10 @@ pub trait SequenceValueRuntime {
 pub type SequenceValueOperation<'a> = Box<dyn FnOnce() -> Result<i64, SequenceValueError> + 'a>;
 
 pub trait SequenceValueTransactions {
+    /// Admit a change to the sequence position and its rollback history before locking either store.
+    fn begin_value_write(&self) -> Result<(), SQLError> {
+        Ok(())
+    }
     fn with_value_transaction(
         &self,
         operation: SequenceValueOperation<'_>,

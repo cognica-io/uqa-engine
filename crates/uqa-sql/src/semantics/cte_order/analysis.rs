@@ -156,7 +156,7 @@ impl<'p, 'c> CteAnalysis<'p, 'c> {
         Ok(analysis)
     }
 
-    pub(crate) fn primary(
+    fn primary(
         &mut self,
         visit: impl Fn(&External<'_>, Selection) -> Result<(), SQLError>,
     ) -> Result<(), SQLError> {
@@ -201,6 +201,10 @@ impl<'p, 'c> CteAnalysis<'p, 'c> {
             }
         }
         Ok(())
+    }
+
+    pub(crate) fn resolves_before(&self, reference: &str, ceiling: usize) -> bool {
+        references::resolve(&self.names, reference).is_some_and(|index| index < ceiling)
     }
 
     pub(crate) fn index(&self, name: &str) -> Option<usize> {

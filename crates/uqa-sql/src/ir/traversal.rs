@@ -43,6 +43,17 @@ impl ScalarExpr {
         Ok(())
     }
 
+    /// Visit each borrowed node after its children, stopping at the first error.
+    pub fn try_visit_post<'a, E>(
+        &'a self,
+        visitor: &mut impl FnMut(&'a Self) -> Result<(), E>,
+    ) -> Result<(), E> {
+        for child in self.children(super::children::Scope::Complete) {
+            child.try_visit_post(visitor)?;
+        }
+        visitor(self)
+    }
+
     /// Visit this expression and every nested scalar expression mutably in pre-order: a node is visited before its children, so the children of a node the visitor replaces are those of the replacement.
     pub fn visit_mut(&mut self, visitor: &mut impl FnMut(&mut Self)) {
         self.try_visit_mut(&mut |expression| {

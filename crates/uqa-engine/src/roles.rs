@@ -14,13 +14,13 @@ use uqa_sql::catalog::roles::{memberships::role_is_superuser, session::SessionAu
 use uqa_sql::semantics::parameters::{ParameterScope, ParameterScopes};
 use uqa_sql::SQLError;
 
-use crate::{Engine, SQLStatementCache, StorageBackendResult};
+use crate::{statement_cache::StatementCacheCheckpoint, Engine, StorageBackendResult};
 use uqa_execution::catalog::security::roles::persistence as role_catalog;
 
 pub(crate) struct RoutineSessionStateGuard<'a> {
     engine: &'a Engine,
     saved: Option<RoutineParameterSnapshot>,
-    sql_statement_cache: Option<SQLStatementCache>,
+    sql_statement_cache: Option<StatementCacheCheckpoint>,
     parameter_scope: Option<ParameterScope>,
     restore_effective: bool,
 }
@@ -41,8 +41,8 @@ impl RoutineSessionStateGuard<'_> {
 
     fn from_state<'a>(
         engine: &'a Engine,
-        state: &crate::SessionStateSnapshot,
-        sql_statement_cache: Option<SQLStatementCache>,
+        state: &crate::SessionState,
+        sql_statement_cache: Option<StatementCacheCheckpoint>,
     ) -> RoutineSessionStateGuard<'a> {
         RoutineSessionStateGuard {
             engine,
@@ -85,7 +85,7 @@ impl Drop for RoutineSessionStateGuard<'_> {
         state.authorization = saved.authorization;
         state.parameter_scopes = saved.parameter_scopes;
         if let Some(cache) = self.sql_statement_cache.take() {
-            state.sql_statement_cache = cache;
+            state.sql_statement_cache.restore(&cache);
         } else {
             state.sql_statement_cache.clear();
         }
@@ -168,7 +168,11 @@ impl Engine {
 
     pub(crate) fn routine_config_state_guard(&self) -> RoutineSessionStateGuard<'_> {
         let state = self.session.state.read();
-        RoutineSessionStateGuard::from_state(self, &state, Some(state.sql_statement_cache.clone()))
+        RoutineSessionStateGuard::from_state(
+            self,
+            &state,
+            Some(state.sql_statement_cache.checkpoint()),
+        )
     }
 
     pub(crate) fn routine_invocation_state_guard(

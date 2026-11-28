@@ -9,6 +9,8 @@
 mod fetch;
 mod statement_snapshot;
 mod table_snapshot;
+#[cfg(test)]
+mod tests;
 mod worker;
 pub(crate) use statement_snapshot::StatementReadSnapshot;
 pub(crate) use table_snapshot::RetainedCatalogSnapshot;
@@ -22,8 +24,8 @@ use crate::{
     SessionPortalTableSnapshots, SessionPortalViewSnapshots, StorageContext, TableState, Value,
 };
 use fetch::{
-    ensure_portal_rows_for_fetch, fetch_directional_query_portal, fetch_indices,
-    materialize_portal_to_end, select_portal_rows, uses_directional_query_execution,
+    ensure_portal_rows_for_fetch, fetch_indices, fetch_query_portal, materialize_portal_to_end,
+    select_portal_rows, uses_query_worker,
 };
 use uqa_sql::ast::{CursorDirection, FetchCursorStmt};
 
@@ -63,23 +65,11 @@ impl Engine {
         let holdable = metadata.is_holdable;
         let table_dependencies =
             uqa_sql::binding::portals::prepare_query(&self.portal_binding_context(), &mut query)?;
-        let snapshot_gate = self
-            .row_locks
-            .begin_change_snapshot(&self.runtime.cancellation)?;
-        let table_sources = {
-            let stack = self.session.transactions.lock();
-            let fixed_snapshot = stack
-                .first()
-                .and_then(|frame| frame.fixed_snapshot.as_ref());
-            self.capture_session_portal_table_sources(fixed_snapshot, &table_dependencies)
-        };
-        let transaction_overlay =
-            self.capture_session_portal_transaction_overlay(&table_sources)?;
-        snapshot_gate.baseline()?;
-        drop(snapshot_gate);
-        let table_snapshots =
-            self.detach_session_portal_table_snapshots(table_sources, transaction_overlay)?;
-        let catalog_snapshot = self.capture_session_portal_catalog_snapshot(&table_dependencies)?;
+        let StatementReadSnapshot {
+            tables: table_snapshots,
+            catalog: catalog_snapshot,
+            transaction_origin,
+        } = self.capture_query_read_snapshot(&table_dependencies)?;
         let view_snapshots = catalog_snapshot.views.clone();
         let sql_function_snapshots = catalog_snapshot.sql_user_functions.clone();
         let restart = holdable.then(|| SessionPortalRestart {
@@ -90,7 +80,6 @@ impl Engine {
             sql_function_snapshots: sql_function_snapshots.clone(),
             catalog_snapshot: std::sync::Arc::clone(&catalog_snapshot),
         });
-        let transaction_origin = self.allocate_session_portal_transaction_origin();
         let registration = self.session.portal_registry.register(metadata)?;
         let mut portals = self.session.portals.lock();
         portals.insert(
@@ -194,8 +183,8 @@ impl Engine {
             .remove(&fetch.name)
             .ok_or_else(|| cursor_error(&fetch.name, "does not exist", "34000"))?;
         let result = (|| {
-            if uses_directional_query_execution(&state) {
-                return fetch_directional_query_portal(
+            if uses_query_worker(&state) {
+                return fetch_query_portal(
                     self,
                     &mut state,
                     fetch.direction,
@@ -321,36 +310,31 @@ impl Engine {
         fixed_snapshot: Option<&crate::FixedTransactionSnapshot>,
         dependencies: &SessionPortalTableDependencies,
     ) -> Vec<SessionPortalTableSource> {
-        if let Some(snapshots) = &self.query_table_snapshots {
-            return snapshots
-                .iter()
-                .filter(|(relation, _)| dependencies.includes(relation))
-                .map(|(relation, table)| {
-                    (
-                        relation.clone(),
-                        std::sync::Arc::clone(table),
-                        std::sync::Arc::clone(table),
-                    )
-                })
-                .collect();
+        let collect = |tables: &crate::state::TableRegistryMap,
+                       fixed: Option<&crate::FixedTransactionSnapshot>| {
+            let source = |relation: &RelationIdentity, metadata: &std::sync::Arc<TableState>| {
+                let data = fixed
+                    .and_then(|snapshot| snapshot.table_for_live_relation(relation, metadata))
+                    .unwrap_or_else(|| std::sync::Arc::clone(metadata));
+                (relation.clone(), data, std::sync::Arc::clone(metadata))
+            };
+            match &dependencies.tables {
+                Some(required) => required
+                    .iter()
+                    .filter_map(|relation| {
+                        tables.get(relation).map(|table| source(relation, table))
+                    })
+                    .collect(),
+                None => tables
+                    .iter()
+                    .map(|(name, table)| source(name, table))
+                    .collect(),
+            }
+        };
+        match &self.query_table_snapshots {
+            Some(tables) => collect(tables, None),
+            None => collect(&self.storage.tables.read(), fixed_snapshot),
         }
-        let live_tables = self
-            .storage
-            .tables
-            .read()
-            .iter()
-            .filter(|(relation, _)| dependencies.includes(relation))
-            .map(|(relation, metadata)| (relation.clone(), std::sync::Arc::clone(metadata)))
-            .collect::<Vec<_>>();
-        live_tables
-            .into_iter()
-            .map(|(relation, metadata)| {
-                let data = fixed_snapshot
-                    .and_then(|snapshot| snapshot.table_for_live_relation(&relation, &metadata))
-                    .unwrap_or_else(|| std::sync::Arc::clone(&metadata));
-                (relation, data, metadata)
-            })
-            .collect()
     }
 
     fn detach_session_portal_table_snapshots(

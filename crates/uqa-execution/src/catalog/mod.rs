@@ -56,16 +56,7 @@ mod snapshot_read;
 /// Immutable catalog inputs with optional query read attribution. This view cannot change definitions, coordinate DDL, publish caches, or recover the enclosing engine.
 #[derive(Clone)]
 pub struct CatalogReadView {
-    snapshot: Arc<Produced<CatalogReadSnapshot>>,
-    relation_descriptors: Arc<Produced<composite_type::relations::RelationDescriptorCache>>,
-    range_descriptors: Option<Arc<Produced<range_type::RangeDescriptors>>>,
-    dependencies: Arc<Produced<projection::DependencyCatalogCache>>,
-    index_relations: Arc<Produced<cache::CatalogDerivation<projection::IndexRelations>>>,
-    constraint_definitions:
-        Arc<Produced<cache::CatalogDerivation<projection::ConstraintDefinitions>>>,
-    event_definitions: Arc<Produced<projection::EventDefinitions>>,
-    routine_definitions: Arc<Produced<projection::RoutineDefinitions>>,
-    alias_output: Arc<Produced<cache::CatalogDerivation<Arc<projection::RegtypeOutputCatalog>>>>,
+    snapshot: Arc<Produced<CatalogReadGeneration>>,
     graph_reads: Option<Arc<graph_reads::GraphCatalogRead>>,
     /// The owning session's catalog records, read only inside its retained statement transaction.
     prepared_catalog: Option<Arc<dyn uqa_storage::CatalogFacade>>,
@@ -75,6 +66,39 @@ pub struct CatalogReadView {
     sequence_positions: Option<Arc<crate::row_locks::RowLockManager>>,
     /// The committed value records of sequences, which also move without a catalog change. A sequence's state is read from them when no position covers it.
     latest_sequence_values: Option<Arc<dyn sequence::latest_values::LatestSequenceValues>>,
+}
+
+/// Immutable definitions and the descriptors derived only from those definitions share one lifetime.
+struct CatalogReadGeneration {
+    snapshot: CatalogReadSnapshot,
+    relation_descriptors: composite_type::relations::RelationDescriptorCache,
+    range_descriptors: Option<Box<Produced<range_type::RangeDescriptors>>>,
+    dependencies: projection::DependencyCatalogCache,
+    index_relations: cache::CatalogDerivation<projection::IndexRelations>,
+    constraint_definitions: cache::CatalogDerivation<projection::ConstraintDefinitions>,
+    event_definitions: projection::EventDefinitions,
+    routine_definitions: projection::RoutineDefinitions,
+    alias_output: cache::CatalogDerivation<Arc<projection::RegtypeOutputCatalog>>,
+}
+
+impl std::ops::Deref for CatalogReadGeneration {
+    type Target = CatalogReadSnapshot;
+
+    fn deref(&self) -> &Self::Target {
+        &self.snapshot
+    }
+}
+
+/// A cache can find a generation while its reader owns the allowance. Session storage and read attribution are attached by the caller selecting the generation.
+pub struct WeakCatalogReadGeneration(std::sync::Weak<Produced<CatalogReadGeneration>>);
+
+impl WeakCatalogReadGeneration {
+    pub fn upgrade_for(&self, budget: &uqa_core::memory::MemoryBudget) -> Option<CatalogReadView> {
+        let generation = self.0.upgrade()?;
+        generation
+            .is_retained_by(budget)
+            .then(|| CatalogReadView::from_generation(generation))
+    }
 }
 
 /// Immutable catalog names and durable registries captured at one statement boundary.

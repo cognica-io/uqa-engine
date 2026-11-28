@@ -280,16 +280,7 @@ pub(super) fn compile_create_function(
                 language = def_elem_string(elem)?.to_ascii_lowercase();
             }
             RoutineAttributeClause::Volatility => {
-                volatility = match def_elem_string(elem)?.as_str() {
-                    "immutable" => FunctionVolatility::Immutable,
-                    "stable" => FunctionVolatility::Stable,
-                    "volatile" => FunctionVolatility::Volatile,
-                    other => {
-                        return Err(SQLError::TypeMismatch(format!(
-                            "{keyword}: invalid volatility `{other}`"
-                        )));
-                    }
-                };
+                volatility = attributes::compile_volatility(elem, keyword)?;
             }
             RoutineAttributeClause::Strict => {
                 strict = def_elem_bool(elem, &format!("{keyword}: STRICT"))?;
@@ -612,9 +603,7 @@ pub(super) fn compile_drop_function(
 pub(super) fn compile_alter_routine(
     stmt: &pg_query::protobuf::AlterFunctionStmt,
 ) -> Result<crate::ast::AlterRoutineStmt> {
-    use crate::ast::{
-        AlterRoutineKind, AlterRoutineStmt, FunctionVolatility, RoutineAttributeClause,
-    };
+    use crate::ast::{AlterRoutineKind, AlterRoutineStmt, RoutineAttributeClause};
     use pg_query::protobuf::ObjectType;
 
     let (kind, keyword) = match stmt.objtype() {
@@ -680,16 +669,7 @@ pub(super) fn compile_alter_routine(
         }
         match clause {
             RoutineAttributeClause::Volatility => {
-                volatility = Some(match def_elem_string(element)?.as_str() {
-                    "immutable" => FunctionVolatility::Immutable,
-                    "stable" => FunctionVolatility::Stable,
-                    "volatile" => FunctionVolatility::Volatile,
-                    other => {
-                        return Err(SQLError::TypeMismatch(format!(
-                            "{keyword}: invalid volatility `{other}`"
-                        )))
-                    }
-                });
+                volatility = Some(attributes::compile_volatility(element, keyword)?);
             }
             RoutineAttributeClause::Strict => {
                 strict = Some(def_elem_bool(element, &format!("{keyword}: STRICT"))?);

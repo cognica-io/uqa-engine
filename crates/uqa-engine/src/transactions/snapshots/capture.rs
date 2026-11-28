@@ -56,11 +56,12 @@ impl Engine {
                     let admitted = authorize(engine)?;
                     let snapshot = loop {
                         control.check().map_err(|error| capture_error(&error))?;
-                        let Some(frames) = engine.session.transactions.try_lock_for(WAIT) else {
+                        let Some(mut frames) = engine.session.transactions.try_lock_for(WAIT)
+                        else {
                             admission_waited();
                             continue;
                         };
-                        if let Some(frame) = frames.first() {
+                        if let Some(frame) = frames.first_mut() {
                             break engine.capture_original_memory(frame, control);
                         }
                         if nested_operation {
@@ -91,9 +92,15 @@ impl Engine {
 
     fn capture_original_memory(
         &self,
-        frame: &TransactionFrame,
+        frame: &mut TransactionFrame,
         control: &StorageReadControl,
     ) -> StorageBackendResult<SnapshotCut> {
+        frame.select_original_data(self).map_err(|error| {
+            uqa_execution::storage_errors::catalog_read_error(
+                "select original memory transaction",
+                error,
+            )
+        })?;
         frame
             .data_snapshot
             .as_ref()
@@ -120,11 +127,11 @@ impl Engine {
         }
         let (capture, sources) = loop {
             control.check()?;
-            let Some(frames) = self.session.transactions.try_lock_for(WAIT) else {
+            let Some(mut frames) = self.session.transactions.try_lock_for(WAIT) else {
                 admission_waited();
                 continue;
             };
-            if let Some(frame) = frames.first() {
+            if let Some(frame) = frames.first_mut() {
                 return self.capture_original_memory(frame, control);
             }
             // Never wait for the statement gate while holding transaction admission: an operation can own that gate while starting its first frame.

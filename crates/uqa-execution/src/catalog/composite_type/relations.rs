@@ -208,6 +208,7 @@ pub fn descriptor(
 ) -> Result<Option<Arc<CompositeTypeDescriptor>>, SQLError> {
     let catalog = context.catalog_read_view();
     catalog
+        .snapshot
         .relation_descriptors
         .get_or_try_init(oid, || descriptor_in(context, &catalog, oid))
 }

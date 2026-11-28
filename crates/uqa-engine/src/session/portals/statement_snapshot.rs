@@ -14,9 +14,9 @@ use super::{
 /// Frozen table and catalog handles with no session, transaction, or mutation capability.
 #[derive(Clone)]
 pub(crate) struct StatementReadSnapshot {
-    tables: SessionPortalTableSnapshots,
-    catalog: SessionPortalCatalogSnapshot,
-    transaction_origin: u64,
+    pub(super) tables: SessionPortalTableSnapshots,
+    pub(super) catalog: SessionPortalCatalogSnapshot,
+    pub(super) transaction_origin: u64,
 }
 
 impl Engine {
@@ -24,7 +24,13 @@ impl Engine {
     pub(crate) fn capture_statement_read_snapshot(
         &self,
     ) -> Result<StatementReadSnapshot, SQLError> {
-        let dependencies = SessionPortalTableDependencies::all();
+        self.capture_query_read_snapshot(&SessionPortalTableDependencies::all())
+    }
+
+    pub(crate) fn capture_query_read_snapshot(
+        &self,
+        dependencies: &SessionPortalTableDependencies,
+    ) -> Result<StatementReadSnapshot, SQLError> {
         let snapshot_gate = self
             .row_locks
             .begin_change_snapshot(&self.runtime.cancellation)?;
@@ -33,7 +39,7 @@ impl Engine {
             let fixed_snapshot = stack
                 .first()
                 .and_then(|frame| frame.fixed_snapshot.as_ref());
-            self.capture_session_portal_table_sources(fixed_snapshot, &dependencies)
+            self.capture_session_portal_table_sources(fixed_snapshot, dependencies)
         };
         let transaction_overlay =
             self.capture_session_portal_transaction_overlay(&table_sources)?;
@@ -41,7 +47,7 @@ impl Engine {
         drop(snapshot_gate);
         let table_snapshots =
             self.detach_session_portal_table_snapshots(table_sources, transaction_overlay)?;
-        let catalog_snapshot = self.capture_session_portal_catalog_snapshot(&dependencies)?;
+        let catalog_snapshot = self.capture_session_portal_catalog_snapshot(dependencies)?;
         Ok(StatementReadSnapshot {
             tables: table_snapshots,
             catalog: catalog_snapshot,
