@@ -7,7 +7,9 @@
 use super::*;
 use crate::{Catalog, ManagedConnection, SQLiteDocumentStore};
 use uqa_storage::{
-    mvcc::VersionedSessionOptions, read_control::StorageReadControl, DocumentStore, StoredDocument,
+    mvcc::{VersionError, VersionedSessionOptions},
+    read_control::StorageReadControl,
+    DocumentStore, StoredDocument,
 };
 
 pub(super) fn fixture() -> SQLiteDocumentStore {
@@ -19,6 +21,39 @@ pub(super) fn fixture() -> SQLiteDocumentStore {
         })
         .unwrap();
     SQLiteDocumentStore::new(connection, "docs")
+}
+
+#[test]
+fn wide_missing_point_projections_reuse_one_reference_buffer() {
+    let store = fixture();
+    let snapshot = store.conn.native_snapshot().unwrap().unwrap();
+    let control = StorageReadControl::with_limit(1 << 20);
+    let read = NativeDocumentRead::with_control(&snapshot, "missing", &control, None).unwrap();
+    assert!(read.owner.is_none());
+    let ids: Vec<_> = (1..=128).collect();
+    let fields = ["tag"; 32];
+    for borrowed in [false, true] {
+        let mut count = 0;
+        let allocation = allocation_counter::measure(|| {
+            let mut visit = |id, present: bool, values: &[&Value]| {
+                assert_eq!(id, ids[count]);
+                assert!(!present);
+                assert_eq!(values.len(), fields.len());
+                assert!(values.iter().all(|value| **value == Value::Null));
+                count += 1;
+                true
+            };
+            if borrowed {
+                read.visit_borrowed_points(&ids, &fields, &mut visit)
+                    .unwrap();
+            } else {
+                read.visit_projection(&ids, &fields, &mut visit).unwrap();
+            }
+        });
+        assert_eq!(count, ids.len());
+        assert!(allocation.count_total <= 2, "{allocation:?}");
+        assert_eq!(control.memory().used(), 0);
+    }
 }
 
 #[test]

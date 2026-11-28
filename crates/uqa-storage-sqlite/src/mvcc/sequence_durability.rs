@@ -42,15 +42,8 @@ pub(super) fn synchronize(
     namespace: Option<native::NativeRecordNamespace>,
     control: &StorageReadControl,
 ) -> PhysicalResult<()> {
-    let current = admission::retry(connection, true, control, || {
-        let read = connection.unchecked_transaction()?;
-        native::check_mapping(&read, namespace)?;
-        let current = codec::header(&read, database)?;
-        control
-            .check()
-            .map_err(uqa_storage::mvcc::VersionError::from)?;
-        read.commit()?;
-        Ok(current)
+    let current = admission::read_header(connection, database, namespace, control, |_, header| {
+        Ok(header)
     })?;
     if current.sequence_durable == current.sequence {
         return Ok(());

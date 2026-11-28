@@ -12,7 +12,7 @@ use uqa_core::{memory::BudgetedBinaryHeap, DocId, PostingList};
 use super::state::{IVFData, IVFState, StoredVector};
 use crate::read_control::StorageReadControl;
 use crate::vector_index::{
-    cosine_similarity_with_norms,
+    cosine_similarity_with_norms, maximum_tensor_score,
     query::{check, nearest_normalized_centroids, postings_from_scores, TopK, VectorQueryBuffer},
     validate_vector_values, vector_norm,
 };
@@ -41,7 +41,7 @@ impl IVFData {
             let similarity =
                 cosine_similarity_with_norms(query, &vector.raw_vector, norm, vector.norm);
             if let Some((_, best)) = current.as_mut().filter(|(id, _)| *id == vector.doc_id) {
-                *best = best.max(similarity);
+                *best = maximum_tensor_score(*best, similarity);
             } else if let Some((document, best)) = current.replace((vector.doc_id, similarity)) {
                 top.offer_raw(document, best)?;
             }

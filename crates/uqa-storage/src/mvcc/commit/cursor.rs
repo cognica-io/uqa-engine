@@ -167,5 +167,5 @@ fn spilled_write(
         .value
         .map(|location| cursor.load_value(location, control))
         .transpose()?;
-    Ok(PreparedRecordWrite::from_shared(entry.key, entry.expected, value).with_kind(entry.kind))
+    Ok(entry.into_write(value))
 }

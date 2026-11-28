@@ -33,7 +33,7 @@ pub(super) fn visit(
     if before.is_some_and(|before| before <= prefix) {
         return Ok(());
     }
-    snapshot.read(|connection| {
+    snapshot.read(control, |connection| {
         let has_runs: bool = connection
             .prepare_cached("SELECT EXISTS(SELECT 1 FROM _uqa_mvcc_runs)")?
             .query_row([], |row| row.get(0))?;

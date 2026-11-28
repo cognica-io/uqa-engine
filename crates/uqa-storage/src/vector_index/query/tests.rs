@@ -107,6 +107,49 @@ fn provider_scores_preserve_tensor_maxima_ties_and_posting_order() {
 }
 
 #[test]
+fn tensor_maxima_keep_signed_zero_bits_across_element_order_and_top_k() {
+    let query = [-1.0, 0.0];
+    let negative = [f32::MAX, 0.0];
+    let positive = [0.0, 0.0];
+    let entries = [
+        (1, negative),
+        (1, negative),
+        (3, positive),
+        (3, negative),
+        (2, negative),
+        (2, positive),
+        (4, negative),
+    ];
+    let control = StorageReadControl::with_limit(4096);
+    for budget in [None, Some(&control)] {
+        for (k, expected) in [
+            (1, vec![(2, 0.0_f64)]),
+            (4, vec![(1, -0.0), (2, 0.0), (3, 0.0), (4, -0.0)]),
+        ] {
+            let result = scored_posting_list(
+                &query,
+                entries
+                    .iter()
+                    .map(|(document, vector)| (*document, vector.as_slice())),
+                k,
+                budget,
+            )
+            .unwrap();
+            assert_eq!(
+                result
+                    .iter()
+                    .map(|entry| (entry.doc_id, entry.payload.score.to_bits()))
+                    .collect::<Vec<_>>(),
+                expected
+                    .into_iter()
+                    .map(|(document, score)| (document, score.to_bits()))
+                    .collect::<Vec<_>>(),
+            );
+        }
+    }
+}
+
+#[test]
 fn candidate_scoring_unwinds_quota_and_midstream_cancellation_without_replaying_input() {
     let control = StorageReadControl::with_limit(4096);
     let vector = [1.0, 0.0];

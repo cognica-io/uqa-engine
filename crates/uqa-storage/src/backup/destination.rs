@@ -11,7 +11,9 @@ use crate::{mvcc::DatabaseRestore, read_control::StorageReadControl, PersistentS
 use std::{path::Path, sync::Arc};
 use uqa_core::memory::Budgeted;
 
+mod file;
 mod validation;
+pub use file::{restored_database_path, BackupFileInput};
 pub use validation::{
     BackupImageValidationStep, BackupImageValidationWork, OwnedBackupImageValidation,
 };

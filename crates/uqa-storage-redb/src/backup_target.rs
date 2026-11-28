@@ -7,23 +7,17 @@
 //! A redb destination retains its pinned private file until the enclosing catalog owner validates it.
 
 use crate::{RedbBackupImport, RedbBackupImportStep, RedbStorage};
-use std::{
-    path::{Path, PathBuf},
-    sync::Arc,
-};
+use std::{path::Path, sync::Arc};
 use uqa_storage::{
     backup::{
-        BackupError, BackupImageImportStep, BackupImageValidationStep, BackupImageValidator,
-        BackupImportLimits, BackupLease, BackupRestoreWorkStep, BackupResult, BackupRoot,
-        ImageProvider, OwnedBackupImageValidation, OwnedPersistentBackupImport,
-        PersistentBackupImport, PersistentBackupTarget, RestoreDirectory, RestoreFileWork,
+        restored_database_path, BackupError, BackupFileInput, BackupImageImportStep,
+        BackupImportLimits, BackupLease, BackupResult, BackupRoot, ImageProvider,
+        OwnedPersistentBackupImport, PersistentBackupTarget, RestoreDirectory,
     },
     mvcc::{DatabaseRestore, VersionedSessionOptions},
     read_control::StorageReadControl,
     PersistentStorageProvider,
 };
-
-const DATABASE: &str = "database";
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct RedbBackupTarget {
@@ -44,13 +38,11 @@ impl RedbBackupTarget {
         if root.cut().format.provider() != ImageProvider::Redb {
             return Err(BackupError::Unsupported("redb restore destination mapping"));
         }
-        OwnedPersistentBackupImport::create(control, || {
-            let file = if recover {
-                None
-            } else {
-                Some(directory.create_file(DATABASE)?)
-            };
-            let work = directory.begin_file_work(DATABASE, control, |_| {
+        OwnedPersistentBackupImport::from_file(
+            directory,
+            recover,
+            control,
+            |file, _| {
                 let input = file
                     .map(|file| {
                         RedbBackupImport::new(
@@ -65,15 +57,26 @@ impl RedbBackupTarget {
                     .transpose()?;
                 Ok(Import {
                     input,
-                    validation: None,
                     root,
                     request,
-                    target: self,
-                    control: control.clone(),
                 })
-            })?;
-            Ok(PinnedImport(work))
-        })
+            },
+            move |path, control| self.open_file(path, request, control),
+        )
+    }
+
+    fn open_file(
+        self,
+        path: &Path,
+        request: DatabaseRestore,
+        control: &StorageReadControl,
+    ) -> BackupResult<Arc<dyn PersistentStorageProvider>> {
+        Ok(Arc::new(RedbStorage::open_restored(
+            path,
+            request,
+            self.session_options,
+            control,
+        )?))
     }
 }
 
@@ -110,94 +113,32 @@ impl PersistentBackupTarget for RedbBackupTarget {
         request: DatabaseRestore,
         control: &StorageReadControl,
     ) -> BackupResult<Arc<dyn PersistentStorageProvider>> {
-        let capacity = directory
-            .as_os_str()
-            .len()
-            .checked_add(DATABASE.len() + 1)
-            .ok_or(BackupError::Invalid("restore pathname length"))?;
-        let _memory = control.memory().reserve(capacity)?;
-        let mut path = PathBuf::with_capacity(capacity);
-        path.push(directory);
-        path.push(DATABASE);
-        Ok(Arc::new(RedbStorage::open_restored(
-            path,
-            request,
-            self.session_options,
-            control,
-        )?))
+        let path = restored_database_path(directory, control)?;
+        self.open_file(&path, request, control)
     }
 }
 
 struct Import<'a> {
-    // An absent input denotes recovery of an already verified physical image. The enclosing owned importer admits validation only after this boundary succeeds.
     input: Option<RedbBackupImport<'a>>,
-    validation: Option<OwnedBackupImageValidation>,
     root: BackupRoot,
     request: DatabaseRestore,
-    target: RedbBackupTarget,
-    control: StorageReadControl,
 }
 
-struct PinnedImport<'a>(RestoreFileWork<Import<'a>>);
-
-impl PersistentBackupImport for PinnedImport<'_> {
-    fn advance(&mut self, maximum_object_bytes: usize) -> BackupResult<BackupImageImportStep> {
-        let mut result = BackupImageImportStep::Pending;
-        self.0.advance_with(|owner, path| {
-            owner.control.check()?;
-            if let Some(mut input) = owner.input.take() {
-                if input.advance_with_window(maximum_object_bytes)? == RedbBackupImportStep::Pending
-                {
-                    owner.input = Some(input);
-                    return Ok(BackupRestoreWorkStep::Pending);
-                }
-                drop(input);
-            } else {
-                RedbBackupImport::recover(path, owner.root, owner.request, &owner.control)?;
-            }
-            result = BackupImageImportStep::Imported;
-            Ok(BackupRestoreWorkStep::Pending)
-        })?;
-        Ok(result)
-    }
-
-    fn validate(&mut self, validator: &mut dyn BackupImageValidator) -> BackupResult<()> {
-        while self.advance_validation(validator, 64)? == BackupImageValidationStep::Pending {}
-        Ok(())
-    }
-
-    fn advance_validation(
+impl BackupFileInput for Import<'_> {
+    fn advance(
         &mut self,
-        validator: &mut dyn BackupImageValidator,
-        maximum_steps: usize,
-    ) -> BackupResult<BackupImageValidationStep> {
-        let step = self.0.advance_with(|owner, path| {
-            if owner.input.is_some() {
-                return Err(BackupError::Invalid("redb image import is incomplete"));
+        path: &Path,
+        maximum_object_bytes: usize,
+        control: &StorageReadControl,
+    ) -> BackupResult<BackupImageImportStep> {
+        if let Some(input) = &mut self.input {
+            if input.advance_with_window(maximum_object_bytes)? == RedbBackupImportStep::Pending {
+                return Ok(BackupImageImportStep::Pending);
             }
-            let mut validation = if let Some(validation) = owner.validation.take() {
-                validation
-            } else {
-                let provider = RedbStorage::open_restored(
-                    path,
-                    owner.request,
-                    owner.target.session_options,
-                    &owner.control,
-                )?;
-                validator.begin(Arc::new(provider), &owner.control)?
-            };
-            match validation.advance(maximum_steps)? {
-                BackupImageValidationStep::Pending => {
-                    owner.validation = Some(validation);
-                    Ok(BackupRestoreWorkStep::Pending)
-                }
-                BackupImageValidationStep::Complete => Ok(BackupRestoreWorkStep::Complete),
-            }
-        })?;
-        Ok(match step {
-            BackupRestoreWorkStep::Pending => BackupImageValidationStep::Pending,
-            BackupRestoreWorkStep::Complete => BackupImageValidationStep::Complete,
-        })
+        } else {
+            RedbBackupImport::recover(path, self.root, self.request, control)?;
+        }
+        Ok(BackupImageImportStep::Imported)
     }
 }
 
@@ -241,7 +182,7 @@ mod tests {
         assert!(RedbBackupTarget::default()
             .open(directory.path(), request, &control)
             .is_err());
-        assert!(!directory.path().join(DATABASE).exists());
+        assert!(!directory.path().join("database").exists());
         assert_eq!(control.memory().used(), 0);
     }
 }

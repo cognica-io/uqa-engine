@@ -21,6 +21,18 @@ pub use maintenance::{reclaim_key_value_diskann_tombstones, reclaim_tombstone_pr
 pub const RECLAMATION_EPOCH_NAMESPACE: &[u8] = b"\0uqa-reclamation-epoch-v1\0";
 pub const RECLAMATION_DOMAIN_PREFIX: &[u8] = b"\0uqa-reclamation-domain-v1\0";
 pub const TOMBSTONE_RECLAMATION_PAGE: usize = 64;
+const MAX_DOMAIN_BYTES: usize = 1024;
+
+/// Decode the prefix of a stored retirement domain while scanning identifier namespaces in order.
+pub fn reclamation_domain_prefix(namespace: &[u8]) -> VersionResult<Option<&[u8]>> {
+    let domain = namespace.strip_prefix(RECLAMATION_DOMAIN_PREFIX);
+    if domain.is_some_and(|prefix| prefix.len() > MAX_DOMAIN_BYTES) {
+        return Err(VersionError::InvalidEncoding(
+            "oversized reclamation domain",
+        ));
+    }
+    Ok(domain)
+}
 
 /// One finite pass keeps its original prefix and visibility cutoff. Later writes cannot join its candidate set; each step visits at most 64 eligible metadata entries. Run ordinary history reclamation first: only fully pruned current tombstones may be retired.
 pub struct TombstoneReclamationRequest<'a> {
@@ -33,11 +45,20 @@ impl TombstoneReclamationRequest<'_> {
     pub fn validate(&self, control: &StorageReadControl) -> VersionResult<()> {
         control.check()?;
         if self.prefix.is_empty()
-            || self.prefix.len() > 1024
+            || self.prefix.len() > MAX_DOMAIN_BYTES
             || self.after.is_some_and(|key| !key.starts_with(self.prefix))
         {
             return Err(VersionError::InvalidEncoding(
                 "invalid tombstone reclamation range",
+            ));
+        }
+        Ok(())
+    }
+
+    pub fn validate_cutoff(&self, current: CommitSequence) -> VersionResult<()> {
+        if self.through > current {
+            return Err(VersionError::InvalidEncoding(
+                "tombstone cutoff exceeds committed visibility",
             ));
         }
         Ok(())

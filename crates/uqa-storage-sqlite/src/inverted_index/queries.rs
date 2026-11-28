@@ -14,6 +14,10 @@ use super::{
 };
 use uqa_storage::clustered_postings::decode_occurrence_cluster;
 
+fn missing_posting_metadata() -> SQLiteError {
+    SQLiteError::StorageBackend("occurrence source metadata is missing".into())
+}
+
 pub(super) fn project_postings(entries: Vec<OccurrencePosting>) -> PostingList {
     PostingList::from_sorted_unchecked(
         entries
@@ -41,10 +45,44 @@ impl SQLiteInvertedIndex {
     ) -> SQLiteResult<()> {
         let metadata = self
             .read_field_metadata_on(conn, encode_index_u64("document", posting.doc_id)?, field)?
-            .ok_or_else(|| {
-                SQLiteError::StorageBackend("occurrence source metadata is missing".into())
-            })?;
+            .ok_or_else(missing_posting_metadata)?;
         Ok(metadata.validate_posting(posting, || Ok(()))?)
+    }
+
+    fn validate_cluster_metadata_on(
+        &self,
+        conn: &rusqlite::Connection,
+        field: &str,
+        postings: &[OccurrencePosting],
+        revision: &mut Option<super::IndexedFieldRevision>,
+    ) -> SQLiteResult<()> {
+        for batch in postings.chunks(900) {
+            let parameters = std::iter::repeat_n("?", batch.len())
+                .collect::<Vec<_>>()
+                .join(",");
+            let sql = format!("SELECT metadata_blob, doc_id FROM _occurrence_documents WHERE table_name = ? AND field = ? AND doc_id IN ({parameters}) ORDER BY doc_id");
+            let mut statement = conn.prepare_cached(&sql)?;
+            statement.raw_bind_parameter(1, self.table.as_str())?;
+            statement.raw_bind_parameter(2, field)?;
+            // Ignore unrepresentable keys in SQL and report them in posting order alongside missing or invalid metadata.
+            for (offset, posting) in batch.iter().enumerate() {
+                statement.raw_bind_parameter(3 + offset, i64::try_from(posting.doc_id).ok())?;
+            }
+            let mut rows = statement.raw_query();
+            for posting in batch {
+                let doc_id = encode_index_u64("document", posting.doc_id)?;
+                let Some(row) = rows.next()? else {
+                    return Err(missing_posting_metadata());
+                };
+                if row.get::<_, i64>(1)? != doc_id {
+                    return Err(missing_posting_metadata());
+                }
+                let bytes: Vec<u8> = row.get(0)?;
+                let metadata = self.decode_field_metadata_on(conn, field, &bytes, revision)?;
+                metadata.validate_posting(posting, || Ok(()))?;
+            }
+        }
+        Ok(())
     }
 
     pub(super) fn occurrence_postings_bulk(
@@ -68,6 +106,7 @@ impl SQLiteInvertedIndex {
                 values.extend(chunk.iter().map(|term| SqlValue::Blob(term.as_bytes().to_vec())));
                 let mut statement = conn.prepare(&sql)?;
                 let rows = statement.query_map(params_from_iter(values), |row| Ok((row.get::<_, Vec<u8>>(0)?, row.get::<_, i64>(1)?, row.get::<_, i64>(2)?, row.get::<_, Vec<u8>>(3)?, row.get::<_, Vec<u8>>(4)?)))?;
+                let mut revision = None;
                 for row in rows {
                     let (term, cluster, count, score, graph) = row?;
                     let cluster = decode_index_u64("posting cluster", cluster)?;
@@ -76,9 +115,7 @@ impl SQLiteInvertedIndex {
                     if count != entries.len() as u64 {
                         return Err(SQLiteError::StorageBackend("corrupt clustered posting: stored posting count mismatch".into()));
                     }
-                    for entry in &entries {
-                        self.validate_posting_metadata_on(conn, field, entry)?;
-                    }
+                    self.validate_cluster_metadata_on(conn, field, &entries, &mut revision)?;
                     by_term.entry(clustered_result(TokenTermKey::from_bytes(term))?).or_default().extend(entries);
                 }
             }

@@ -159,6 +159,16 @@ pub fn select_top_k_scored(scored: &mut Vec<(DocId, f32)>, k: usize) {
     }
 }
 
+/// Reduce two tensor element scores, ignoring a single NaN. Mixed signed zeros select +0, as in the score ordering used by top-k; two negative zeros retain their sign.
+pub(crate) fn maximum_tensor_score(left: f32, right: f32) -> f32 {
+    if left == 0.0 && right == 0.0 {
+        // IEEE addition keeps the negative sign only when both zeros are negative.
+        left + right
+    } else {
+        left.max(right)
+    }
+}
+
 /// Collapse tensor-vector scores to the best score for each document without
 /// allocating one tree node per candidate. The final sort performed by each
 /// caller restores the posting-list invariant after top-k selection.
@@ -171,7 +181,7 @@ pub(crate) fn deduplicate_scored_values(scored: &mut [(DocId, f32)]) -> usize {
     for read in 1..scored.len() {
         let (doc_id, score) = scored[read];
         if scored[write - 1].0 == doc_id {
-            scored[write - 1].1 = scored[write - 1].1.max(score);
+            scored[write - 1].1 = maximum_tensor_score(scored[write - 1].1, score);
         } else {
             scored[write] = (doc_id, score);
             write += 1;

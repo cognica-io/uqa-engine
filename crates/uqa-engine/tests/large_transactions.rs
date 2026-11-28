@@ -83,111 +83,126 @@ fn insert_rows(engine: &Engine, first: i64, rows: i64, chunk: i64, body: &str) {
     }
 }
 
-#[test]
-fn transactions_larger_than_the_session_allowance_commit() {
+#[rstest::rstest]
+#[case::sqlite_native("native SQLite", native_engine)]
+#[case::sqlite_key_value("SQLite KeyValue", key_value_engine)]
+#[case::redb("redb", redb_engine)]
+fn transactions_larger_than_the_session_allowance_commit(
+    #[case] backend: &str,
+    #[case] open: fn(&Path) -> Engine,
+) {
     let directory = tempfile::tempdir().unwrap();
-    for (backend, engine) in engines(directory.path()) {
-        exec(
-            &engine,
-            "CREATE TABLE docs (id integer PRIMARY KEY, body text NOT NULL)",
-        );
-        exec(&engine, "BEGIN");
-        insert_rows(&engine, 0, 40_000, 2_000, "payload");
-        exec(
-            &engine,
-            "UPDATE docs SET body = 'updated' WHERE id % 1000 = 0",
-        );
-        exec(&engine, "COMMIT");
-        assert_eq!(
-            scalar(&engine, "SELECT count(*) FROM docs"),
-            Value::Int(40_000),
-            "{backend}"
-        );
-        assert_eq!(
-            scalar(&engine, "SELECT count(*) FROM docs WHERE body = 'updated'"),
-            Value::Int(40),
-            "{backend}"
-        );
-        assert_eq!(
-            scalar(&engine, "SELECT body FROM docs WHERE id = 31234"),
-            Value::Str(format!("{}31234", "payload ".repeat(12))),
-            "{backend}"
-        );
-    }
+    let engine = open(directory.path());
+    exec(
+        &engine,
+        "CREATE TABLE docs (id integer PRIMARY KEY, body text NOT NULL)",
+    );
+    exec(&engine, "BEGIN");
+    insert_rows(&engine, 0, 40_000, 2_000, "payload");
+    exec(
+        &engine,
+        "UPDATE docs SET body = 'updated' WHERE id % 1000 = 0",
+    );
+    exec(&engine, "COMMIT");
+    assert_eq!(
+        scalar(&engine, "SELECT count(*) FROM docs"),
+        Value::Int(40_000),
+        "{backend}"
+    );
+    assert_eq!(
+        scalar(&engine, "SELECT count(*) FROM docs WHERE body = 'updated'"),
+        Value::Int(40),
+        "{backend}"
+    );
+    assert_eq!(
+        scalar(&engine, "SELECT body FROM docs WHERE id = 31234"),
+        Value::Str(format!("{}31234", "payload ".repeat(12))),
+        "{backend}"
+    );
 }
 
-#[test]
-fn a_rollback_to_a_savepoint_discards_only_the_changes_after_it_across_spills() {
+#[rstest::rstest]
+#[case::sqlite_native("native SQLite", native_engine)]
+#[case::sqlite_key_value("SQLite KeyValue", key_value_engine)]
+#[case::redb("redb", redb_engine)]
+fn a_rollback_to_a_savepoint_discards_only_the_changes_after_it_across_spills(
+    #[case] backend: &str,
+    #[case] open: fn(&Path) -> Engine,
+) {
     let directory = tempfile::tempdir().unwrap();
-    for (backend, engine) in engines(directory.path()) {
-        exec(
-            &engine,
-            "CREATE TABLE docs (id integer PRIMARY KEY, body text NOT NULL)",
-        );
-        exec(&engine, "BEGIN");
-        insert_rows(&engine, 0, 25_000, 2_500, "kept");
-        exec(&engine, "SAVEPOINT later");
-        insert_rows(&engine, 25_000, 25_000, 2_500, "discarded");
-        exec(&engine, "UPDATE docs SET body = 'changed' WHERE id <= 100");
-        exec(&engine, "ROLLBACK TO SAVEPOINT later");
-        exec(&engine, "UPDATE docs SET body = 'renamed' WHERE id = 7");
-        exec(&engine, "COMMIT");
-        assert_eq!(
-            scalar(&engine, "SELECT count(*) FROM docs"),
-            Value::Int(25_000),
-            "{backend}"
-        );
-        assert_eq!(
-            scalar(&engine, "SELECT count(*) FROM docs WHERE body = 'changed'"),
-            Value::Int(0),
-            "{backend}"
-        );
-        assert_eq!(
-            scalar(&engine, "SELECT body FROM docs WHERE id = 7"),
-            Value::Str("renamed".into()),
-            "{backend}"
-        );
-        assert_eq!(
-            scalar(&engine, "SELECT max(id) FROM docs"),
-            Value::Int(25_000),
-            "{backend}"
-        );
-    }
+    let engine = open(directory.path());
+    exec(
+        &engine,
+        "CREATE TABLE docs (id integer PRIMARY KEY, body text NOT NULL)",
+    );
+    exec(&engine, "BEGIN");
+    insert_rows(&engine, 0, 25_000, 2_500, "kept");
+    exec(&engine, "SAVEPOINT later");
+    insert_rows(&engine, 25_000, 25_000, 2_500, "discarded");
+    exec(&engine, "UPDATE docs SET body = 'changed' WHERE id <= 100");
+    exec(&engine, "ROLLBACK TO SAVEPOINT later");
+    exec(&engine, "UPDATE docs SET body = 'renamed' WHERE id = 7");
+    exec(&engine, "COMMIT");
+    assert_eq!(
+        scalar(&engine, "SELECT count(*) FROM docs"),
+        Value::Int(25_000),
+        "{backend}"
+    );
+    assert_eq!(
+        scalar(&engine, "SELECT count(*) FROM docs WHERE body = 'changed'"),
+        Value::Int(0),
+        "{backend}"
+    );
+    assert_eq!(
+        scalar(&engine, "SELECT body FROM docs WHERE id = 7"),
+        Value::Str("renamed".into()),
+        "{backend}"
+    );
+    assert_eq!(
+        scalar(&engine, "SELECT max(id) FROM docs"),
+        Value::Int(25_000),
+        "{backend}"
+    );
 }
 
 /// The rows each statement below writes, more than `ALLOWANCE` holds.
 const STATEMENT_ROWS: i64 = 12_000;
 
-#[test]
-fn statements_larger_than_the_session_allowance_complete() {
+#[rstest::rstest]
+#[case::sqlite_native("native SQLite", native_engine)]
+#[case::sqlite_key_value("SQLite KeyValue", key_value_engine)]
+#[case::redb("redb", redb_engine)]
+fn statements_larger_than_the_session_allowance_complete(
+    #[case] backend: &str,
+    #[case] open: fn(&Path) -> Engine,
+) {
     let directory = tempfile::tempdir().unwrap();
-    for (backend, engine) in engines(directory.path()) {
-        exec(
-            &engine,
-            "CREATE TABLE docs (id integer PRIMARY KEY, body text NOT NULL)",
-        );
-        insert_rows(&engine, 0, STATEMENT_ROWS, STATEMENT_ROWS, "payload");
-        exec(&engine, "UPDATE docs SET body = body || ' updated'");
-        exec(&engine, "BEGIN");
-        exec(&engine, "DELETE FROM docs WHERE id % 2 = 0");
-        exec(&engine, "UPDATE docs SET body = 'renamed' WHERE id % 3 = 0");
-        exec(&engine, "COMMIT");
-        assert_eq!(
-            scalar(&engine, "SELECT count(*) FROM docs"),
-            Value::Int(STATEMENT_ROWS / 2),
-            "{backend}"
-        );
-        assert_eq!(
-            scalar(&engine, "SELECT count(*) FROM docs WHERE body = 'renamed'"),
-            Value::Int(STATEMENT_ROWS / 6),
-            "{backend}"
-        );
-        assert_eq!(
-            scalar(&engine, "SELECT body FROM docs WHERE id = 7"),
-            Value::Str(format!("{}7 updated", "payload ".repeat(12))),
-            "{backend}"
-        );
-    }
+    let engine = open(directory.path());
+    exec(
+        &engine,
+        "CREATE TABLE docs (id integer PRIMARY KEY, body text NOT NULL)",
+    );
+    insert_rows(&engine, 0, STATEMENT_ROWS, STATEMENT_ROWS, "payload");
+    exec(&engine, "UPDATE docs SET body = body || ' updated'");
+    exec(&engine, "BEGIN");
+    exec(&engine, "DELETE FROM docs WHERE id % 2 = 0");
+    exec(&engine, "UPDATE docs SET body = 'renamed' WHERE id % 3 = 0");
+    exec(&engine, "COMMIT");
+    assert_eq!(
+        scalar(&engine, "SELECT count(*) FROM docs"),
+        Value::Int(STATEMENT_ROWS / 2),
+        "{backend}"
+    );
+    assert_eq!(
+        scalar(&engine, "SELECT count(*) FROM docs WHERE body = 'renamed'"),
+        Value::Int(STATEMENT_ROWS / 6),
+        "{backend}"
+    );
+    assert_eq!(
+        scalar(&engine, "SELECT body FROM docs WHERE id = 7"),
+        Value::Str(format!("{}7 updated", "payload ".repeat(12))),
+        "{backend}"
+    );
 }
 
 #[test]

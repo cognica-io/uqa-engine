@@ -9,7 +9,9 @@
 #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 mod import;
 #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
-pub use import::{KeyValueImageImportReader, KeyValueImportUnit};
+pub use import::{
+    KeyValueImageImportDriver, KeyValueImageImportReader, KeyValueImageWriter, KeyValueImportUnit,
+};
 
 use std::sync::Arc;
 
