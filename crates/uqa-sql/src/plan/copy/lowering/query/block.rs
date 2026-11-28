@@ -66,11 +66,10 @@ pub(in crate::plan::copy::lowering) async fn construct<'s, 'c, I: Input<'s, 'c>>
     block.subqueries = Read::new(control, input.finish_arena(copying))?
         .await?
         .take();
-    block.locking = field!(copying, "locking", |field| locking(
-        &statement.locking,
-        &mut field,
-        input,
-    )
+    block.locking = field!(copying, "locking", |field| retain(
+        control,
+        locking(&statement.locking, &mut field, input),
+    )?
     .await?);
     let compute = Read::new(control, input.compute(block, &control))?.await?;
     block.compute = compute;
