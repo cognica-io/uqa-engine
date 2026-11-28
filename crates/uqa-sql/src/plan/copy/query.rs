@@ -221,6 +221,11 @@ impl Copying<'_> {
             privilege_columns: self.field("privilege_columns", |copying| {
                 copying.set(&block.privilege_columns, Self::identity)
             })?,
+            privilege_subqueries: self.field("privilege_subqueries", |copying| {
+                let mut slots = uqa_core::memory::ProductionVec::new(copying.control);
+                slots.extend_from_slice(&block.privilege_subqueries)?;
+                Ok(copying.take(slots.finish()?))
+            })?,
             from: self.field("from", |copying| {
                 block
                     .from

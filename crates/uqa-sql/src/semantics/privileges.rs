@@ -165,14 +165,25 @@ fn collect_expression_and_subqueries(
         &ctes.control(),
         ctes.purpose,
     )? {
-        let plan = subqueries.get(subquery).ok_or_else(|| {
-            SQLError::Internal(format!(
-                "column privilege analysis cannot resolve scalar subquery slot {subquery}"
-            ))
-        })?;
-        analyze_query_plan(plan, ctes, scopes, universe, required)?;
+        analyze_subquery_slot(subquery, subqueries, ctes, scopes, universe, required)?;
     }
     Ok(())
+}
+
+fn analyze_subquery_slot(
+    slot: usize,
+    subqueries: &[QueryPlan],
+    ctes: &CteScope<'_, impl AsRef<[QueryPlan]>>,
+    scopes: &[&SourceLineage],
+    universe: &mut SourceLineage,
+    required: &mut Required,
+) -> Result<(), SQLError> {
+    let plan = subqueries.get(slot).ok_or_else(|| {
+        SQLError::Internal(format!(
+            "column privilege analysis cannot resolve scalar subquery slot {slot}"
+        ))
+    })?;
+    analyze_query_plan(plan, ctes, scopes, universe, required)
 }
 
 fn analyze_join_source_lineage(
@@ -424,6 +435,12 @@ fn analyze_query_block(
             &ctes.control(),
             ctes.purpose,
         )?;
+    }
+    if ctes.purpose == AnalysisPurpose::Authorization {
+        for slot in &block.privilege_subqueries {
+            ctes.control().check()?;
+            analyze_subquery_slot(*slot, &block.subqueries, ctes, &scopes, universe, required)?;
+        }
     }
     for projection in &block.projections {
         collect_expression_and_subqueries(

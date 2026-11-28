@@ -236,6 +236,12 @@ mod tests {
                 vec!["used".into(), "unused".into()],
                 vec![Some(uqa_sql::ColumnType::Integer); 2],
             ));
+            let RelationalPlan::QueryBlock(original) = &query.root else {
+                panic!("query block")
+            };
+            let ScalarExpr::ScalarSubquery(slot) = original.projections[1].expr else {
+                panic!("scalar subquery")
+            };
             prune_positions(
                 &mut query,
                 &|position| position == 0,
@@ -261,6 +267,13 @@ mod tests {
                 removed,
                 "{sql}, outer CTE={outer_cte}"
             );
+            assert_eq!(block.privilege_subqueries.contains(&slot), removed);
+            let live = crate::optimizer::subqueries::live_slots_for_block(
+                block,
+                ProductionControl::uncontrolled(),
+            )
+            .unwrap();
+            assert_eq!(live.get(&slot).is_some(), !removed);
         }
     }
 

@@ -269,6 +269,7 @@ fn discarded_output_replacements_respect_the_operation_budget_before_publication
     let RelationalPlan::QueryBlock(block) = &query.root else {
         unreachable!();
     };
+    assert_eq!(block.projections.len(), 128);
     assert!(block.projections.iter().all(|projection| matches!(
         projection.expr,
         ScalarExpr::TypedLiteral {
@@ -307,6 +308,7 @@ fn discarded_column_privileges_admit_new_names_and_borrow_existing_identities() 
     let token = CancellationToken::new();
     for already_required in [false, true] {
         let mut query = qualified_privilege_query(already_required);
+        let expected = uqa_sql::ColumnIdentity::qualified("q".repeat(4 * 1024 * 1024), "v");
         let admitted_budget = MemoryBudget::new(32 * 1024 * 1024);
         let admitted_control = ProductionControl::new(&admitted_budget, &token, &token);
         let admitted = query.copy_for_rewrite(&admitted_control).unwrap();
@@ -337,6 +339,7 @@ fn discarded_column_privileges_admit_new_names_and_borrow_existing_identities() 
         if already_required {
             result.unwrap().unwrap();
             assert_eq!(block.privilege_columns.len(), 1);
+            assert!(block.privilege_columns.contains(&expected));
             assert!(matches!(
                 block.projections[0].expr,
                 ScalarExpr::TypedLiteral {
@@ -377,6 +380,7 @@ fn discarded_column_privileges_admit_new_names_and_borrow_existing_identities() 
                 unreachable!()
             };
             assert_eq!(block.privilege_columns.len(), 1);
+            assert!(block.privilege_columns.contains(&expected));
             assert!(matches!(
                 block.projections[0].expr,
                 ScalarExpr::TypedLiteral {

@@ -40,6 +40,14 @@ impl MutableQueryPlan {
         if selected.iter().any(|(id, ())| *id >= width) {
             return Ok((self, destination, expression, false));
         }
+        if let RelationalPlan::QueryBlock(block) = &self.query.root {
+            for id in &block.privilege_subqueries {
+                control.check()?;
+                if *id >= width || selected.get(id).is_some() {
+                    return Ok((self, destination, expression, false));
+                }
+            }
+        }
         let mut exclusive = true;
         let mut checked = Ok(());
         crate::plan::subqueries::visit_root(&mut self.query.root, &mut |node| {
@@ -87,6 +95,12 @@ impl MutableQueryPlan {
             *arena_memory(owner) = memory;
         }
         compact(&mut self, &selected);
+        if let RelationalPlan::QueryBlock(block) = &mut self.query.root {
+            for slot in &mut block.privilege_subqueries {
+                control.check()?;
+                *slot = *retained.get(slot).expect("retained privilege subquery");
+            }
+        }
         let expression = expression.remap_subquery_ids(control, &mut |id| {
             *moved.get(&id).expect("selected expression query")
         })?;

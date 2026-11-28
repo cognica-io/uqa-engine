@@ -75602,6 +75602,32 @@
     {
       "package": "uqa-sql",
       "kind": "lib",
+      "test": "projection_privilege_slots_follow_compaction_in_both_query_owners",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/mutable/arenas/tests.rs",
+      "capability": "Retained scalar-query compaction",
+      "workload": "Compact an arena with one unused child, one authorization-only child and one evaluated child, using immediate and single-step execution.",
+      "invariant": "Preserve both retained children and their remapped slots, keep only the evaluated slot in its projection and release both memory budgets.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "projection_privilege_slots_remain_in_their_source_during_transfer",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/mutable/arenas/tests.rs",
+      "capability": "Retained scalar-query compaction",
+      "workload": "Move an exclusive scalar child and then request a transfer of the remaining privilege-only child.",
+      "invariant": "Remap the retained authority to the surviving source slot, decline its transfer without changing either arena and release all reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
       "test": "native_query_compaction_keeps_namespaces_and_paired_constructor_owners",
       "cases": 1,
       "source": "crates/uqa-sql/src/plan/mutable/arenas/tests.rs",

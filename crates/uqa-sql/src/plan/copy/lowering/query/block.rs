@@ -103,6 +103,7 @@ async fn projections<'s, 'c, I: Input<'s, 'c>>(
         copying.map(std::iter::empty(), |_, rewrite| Ok(rewrite))
     })?;
     block.privilege_columns = copying.field("privilege_columns", |_| Ok(OwnedSet::new()))?;
+    block.privilege_subqueries = copying.field("privilege_subqueries", |_| Ok(Vec::new()))?;
     Ok(())
 }
 

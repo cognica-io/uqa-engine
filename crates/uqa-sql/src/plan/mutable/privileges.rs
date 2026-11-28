@@ -4,17 +4,29 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Preserve the column authority carried by projections whose expressions are being replaced.
+//! Preserve the column and scalar-query authority of discarded projections.
 
 use super::{metadata::block_memory, MutableQueryPlan, RewriteMemory};
 use crate::{
     plan::{QueryBlockPlan, RelationalPlan},
     ColumnIdentity, SQLError, ScalarExpr,
 };
-use uqa_core::memory::{MemoryReservation, OwnedSet, Produced, ProductionControl};
+use uqa_core::memory::{
+    MemoryReservation, OwnedSet, Produced, ProductionControl, ProductionMap, ProductionVec,
+};
+
+struct PrivilegeMemory {
+    columns: Option<MemoryReservation>,
+    subqueries: Option<MemoryReservation>,
+}
 
 impl QueryBlockPlan {
-    /// Record referenced columns before replacing selected projection expressions in caller-owned syntax.
+    /// Whether replacing this query boundary must preserve recorded column or scalar-query access.
+    pub fn has_projection_privileges(&self) -> bool {
+        !self.privilege_columns.is_empty() || !self.privilege_subqueries.is_empty()
+    }
+
+    /// Record column and scalar-query references before replacing caller-owned projection expressions.
     pub fn preserve_projection_privileges(
         &mut self,
         positions: impl IntoIterator<Item = usize>,
@@ -28,7 +40,8 @@ impl QueryBlockPlan {
         &mut self,
         positions: impl IntoIterator<Item = usize>,
         control: &ProductionControl<'_>,
-    ) -> Result<Option<MemoryReservation>, SQLError> {
+    ) -> Result<PrivilegeMemory, SQLError> {
+        let mut subqueries = ProductionMap::new(*control);
         let mut added = OwnedSet::<ColumnIdentity>::new();
         let mut memory = control.empty_reservation();
         for position in positions {
@@ -41,6 +54,19 @@ impl QueryBlockPlan {
                     ScalarExpr::Column(column) => (None, column.as_str()),
                     ScalarExpr::QualifiedColumn { qualifier, column } => {
                         (Some(qualifier.as_str()), column.as_str())
+                    }
+                    ScalarExpr::ScalarSubquery(slot)
+                    | ScalarExpr::Exists { subquery: slot, .. }
+                    | ScalarExpr::InSubquery { subquery: slot, .. } => {
+                        if *slot >= self.subqueries.len() {
+                            return Err(SQLError::Internal(format!(
+                                "missing projection subquery slot {slot}"
+                            )));
+                        }
+                        if self.privilege_subqueries.binary_search(slot).is_err() {
+                            subqueries.insert_copy(*slot, ())?;
+                        }
+                        return Ok(true);
                     }
                     _ => return Ok(true),
                 };
@@ -56,9 +82,30 @@ impl QueryBlockPlan {
                 Ok::<_, SQLError>(true)
             })?;
         }
+        let slots = if subqueries.is_empty() {
+            None
+        } else {
+            for slot in &self.privilege_subqueries {
+                subqueries.insert_copy(*slot, ())?;
+            }
+            let mut slots = ProductionVec::new(*control);
+            slots.reserve(subqueries.len())?;
+            for (slot, ()) in subqueries {
+                slots.push_copy(slot)?;
+            }
+            Some(slots.finish()?)
+        };
         control.check()?;
         self.privilege_columns.append(added);
-        Ok(memory)
+        let subqueries = slots.and_then(|slots| {
+            let (slots, lease) = slots.into_parts();
+            self.privilege_subqueries = slots;
+            lease
+        });
+        Ok(PrivilegeMemory {
+            columns: memory,
+            subqueries,
+        })
     }
 }
 
@@ -87,7 +134,11 @@ impl MutableQueryPlan {
             ));
         };
         let memory = block.record_projection_privileges(positions, control)?;
-        self.retain_privilege_memory(memory);
+        self.retain_privilege_memory(memory.columns);
+        if let (Some(owner), Some(slots)) = (self.memory.as_mut(), memory.subqueries) {
+            *block_memory(owner).field_mut("privilege_subqueries") =
+                Some(RewriteMemory::direct(slots));
+        }
         Ok(self)
     }
 

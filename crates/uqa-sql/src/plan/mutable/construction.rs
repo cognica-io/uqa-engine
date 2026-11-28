@@ -324,6 +324,7 @@ pub(crate) fn empty_projection_block() -> QueryBlockPlan {
         windows: Vec::new(),
         projections: Vec::new(),
         privilege_columns: OwnedSet::new(),
+        privilege_subqueries: Vec::new(),
         from: None,
         r#where: None,
         compute: ComputePlan::Project,

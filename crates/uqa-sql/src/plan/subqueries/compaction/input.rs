@@ -24,6 +24,12 @@ trait Visitor<S>: Send {
 }
 
 struct Collect<'a, 'c>(&'a mut Remapping<'c>);
+impl Collect<'_, '_> {
+    fn slot(&mut self, id: &usize) -> Result<(), SQLError> {
+        self.0.observe_slot(*id)
+    }
+}
+
 impl Visitor<&ScalarExpr> for Collect<'_, '_> {
     async fn expression<W: Work + Send>(
         &mut self,
@@ -36,6 +42,13 @@ impl Visitor<&ScalarExpr> for Collect<'_, '_> {
 }
 
 struct Rewrite<'a, 'c>(&'a Remapping<'c>);
+impl Rewrite<'_, '_> {
+    fn slot(&mut self, id: &mut usize) -> Result<(), SQLError> {
+        self.0.rewrite_slot(id);
+        Ok(())
+    }
+}
+
 impl Visitor<&mut ScalarExpr> for Rewrite<'_, '_> {
     async fn expression<W: Work + Send>(
         &mut self,
@@ -115,6 +128,10 @@ macro_rules! query {
             let mut visitor = $visitor(remap);
             match & $($mutable)* query.root {
                 RelationalPlan::QueryBlock(block) => {
+                    for slot in block.privilege_subqueries.$iter() {
+                        checkpoint(control, work).await?;
+                        visitor.slot(slot)?;
+                    }
                     if let Some(input) = block.from.$reference() {
                         source(input, SourcePlan::$inputs, &mut visitor, control, work).await?;
                     }

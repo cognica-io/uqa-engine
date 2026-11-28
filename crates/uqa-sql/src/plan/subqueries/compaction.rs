@@ -93,6 +93,11 @@ pub(crate) fn prune_query_with_retention(
     let Some(remap) = work::inline(prepare_query_from(query, control, &mut ()))? else {
         return Ok(());
     };
+    if let RelationalPlan::QueryBlock(block) = &mut query.root {
+        for slot in &mut block.privilege_subqueries {
+            remap.rewrite_slot(slot);
+        }
+    }
     visit_root(&mut query.root, &mut |node| remap.rewrite(node));
     retain(query_arena(&mut query.root), &|index| remap.keep(index));
     Ok(())
@@ -219,11 +224,16 @@ impl<'a> Remapping<'a> {
         | ScalarExpr::Exists { subquery: id, .. }
         | ScalarExpr::InSubquery { subquery: id, .. } = node
         {
-            if *id >= self.arena_len {
-                self.invalid = true;
-            } else if !self.invalid {
-                self.slots.insert_copy(*id, 0)?;
-            }
+            self.observe_slot(*id)?;
+        }
+        Ok(())
+    }
+
+    fn observe_slot(&mut self, id: usize) -> Result<(), SQLError> {
+        if id >= self.arena_len {
+            self.invalid = true;
+        } else if !self.invalid {
+            self.slots.insert_copy(id, 0)?;
         }
         Ok(())
     }
@@ -254,8 +264,12 @@ impl<'a> Remapping<'a> {
 
     fn rewrite(&self, expression: &mut ScalarExpr) {
         if let Some(id) = subquery_id(expression) {
-            *id = *self.slots.get(id).expect("collected local subquery");
+            self.rewrite_slot(id);
         }
+    }
+
+    fn rewrite_slot(&self, slot: &mut usize) {
+        *slot = *self.slots.get(slot).expect("collected local subquery");
     }
 }
 

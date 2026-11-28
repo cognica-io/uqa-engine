@@ -84,10 +84,12 @@ pub(crate) fn expand_caller(
             // Admit the complete destination while the input is still intact. Publication moves the caller's existing fields and transfers the new allocations to the caller.
             let mut destination = ProductionVec::new(*control);
             destination.reserve(fields.len())?;
-            let (mut expanded, memory) = destination.finish()?.into_parts();
+            let (mut expanded, mut memory) = destination.finish()?.into_parts();
             let originals = std::mem::take(&mut block.projections);
             expanded.extend(resolve(fields, originals.into_iter(), |field| {
-                field.into_parts().0
+                let (projection, field_memory) = field.into_parts();
+                memory = control.combine(memory.take(), field_memory);
+                projection
             }));
             block.projections = expanded;
             drop(memory);

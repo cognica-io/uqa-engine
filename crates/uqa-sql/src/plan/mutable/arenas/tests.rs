@@ -352,3 +352,71 @@ fn native_query_compaction_bounds_deep_scalar_and_source_polling_stack() {
         .join()
         .unwrap();
 }
+
+#[test]
+fn projection_privilege_slots_follow_compaction_in_both_query_owners() {
+    let memory = MemoryBudget::new(1 << 20);
+    let scratch = MemoryBudget::new(1 << 20);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&memory, &token, &token);
+    let mut source = query("SELECT (SELECT 10), (SELECT 20), (SELECT 30)");
+    let RelationalPlan::QueryBlock(block) = &mut source.root else {
+        panic!("query block")
+    };
+    block.projections.drain(..2);
+    block.privilege_subqueries.push(1);
+    let pending = copied(&source, &control);
+    let (native, _) = complete(&mut input(pending, &memory, &scratch, &token, &token));
+    let immediate = source
+        .copy_for_rewrite(&control)
+        .unwrap()
+        .prune_subqueries(&control)
+        .unwrap();
+    for root in [&immediate.root, &native.root] {
+        let RelationalPlan::QueryBlock(block) = root else {
+            panic!("query block")
+        };
+        assert_eq!(block.subqueries.len(), 2);
+        assert_eq!(block.privilege_subqueries, [0]);
+        assert_eq!(block.projections[0].expr, ScalarExpr::ScalarSubquery(1));
+    }
+    drop((native, immediate));
+    assert_eq!(memory.used(), 0);
+    assert_eq!(scratch.used(), 0);
+}
+
+#[test]
+fn projection_privilege_slots_remain_in_their_source_during_transfer() {
+    let memory = MemoryBudget::new(1 << 20);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&memory, &token, &token);
+    let mut source = query("SELECT (SELECT 10), (SELECT 20)");
+    let RelationalPlan::QueryBlock(block) = &mut source.root else {
+        panic!("query block")
+    };
+    block.projections.clear();
+    block.privilege_subqueries.push(1);
+    let mut source = source.copy_for_rewrite(&control).unwrap();
+    let mut destination = query("SELECT 30").copy_for_rewrite(&control).unwrap();
+    for allowed in [true, false] {
+        let scalar = ScalarExpr::ScalarSubquery(0)
+            .copy_for_rewrite(&control)
+            .unwrap();
+        let moved;
+        (source, destination, _, moved) = source
+            .transfer_expression_to(destination, scalar, &control)
+            .unwrap();
+        assert_eq!(moved, allowed);
+        let RelationalPlan::QueryBlock(block) = &source.root else {
+            panic!("query block")
+        };
+        assert_eq!(block.privilege_subqueries, [0]);
+        assert_eq!(block.subqueries.len(), 1);
+        let RelationalPlan::QueryBlock(block) = &destination.root else {
+            panic!("query block")
+        };
+        assert_eq!(block.subqueries.len(), 1);
+    }
+    drop((source, destination));
+    assert_eq!(memory.used(), 0);
+}
