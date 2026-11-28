@@ -14,9 +14,8 @@ use redb::{ReadableTable, TableDefinition, WriteTransaction};
 use uqa_storage::{
     mvcc::{
         retain_backup_snapshot, retain_record_snapshot, CommitSequence, CommittedBackupSnapshot,
-        CommittedRecordSnapshot, DatabaseId, IdentifierWatermarkVisitor, MetadataEpoch,
-        SnapshotLease, VersionError, VersionResult, RECLAMATION_DOMAIN_PREFIX,
-        RECLAMATION_EPOCH_NAMESPACE,
+        CommittedRecordSnapshot, DatabaseId, IdentifierEpochHistory, IdentifierWatermarkVisitor,
+        MetadataEpoch, SnapshotLease, VersionError, VersionResult,
     },
     read_control::StorageReadControl,
 };
@@ -47,7 +46,7 @@ pub(super) fn initialize(transaction: &WriteTransaction, predecessor: bool) -> V
         for entry in identifiers.iter().map_err(redb_error)? {
             let (namespace, watermark) = entry.map_err(redb_error)?;
             let namespace = namespace.value();
-            if !is_allocation(namespace) {
+            if !IdentifierEpochHistory::is_allocation(namespace) {
                 continue;
             }
             if namespace.is_empty() {
@@ -63,10 +62,6 @@ pub(super) fn initialize(transaction: &WriteTransaction, predecessor: bool) -> V
         codec::read_u64(&metadata, EPOCH)?;
     }
     Ok(())
-}
-
-fn is_allocation(namespace: &[u8]) -> bool {
-    namespace != RECLAMATION_EPOCH_NAMESPACE && !namespace.starts_with(RECLAMATION_DOMAIN_PREFIX)
 }
 
 struct Snapshot {
@@ -142,7 +137,7 @@ pub(super) fn retain_previous(
         .map(|value| value.value());
     match (previous, head) {
         (Some(previous), Some((created, birth))) => {
-            validate_epochs(created, birth, epoch)?;
+            IdentifierEpochHistory::new(created, birth, epoch)?;
             if epoch == birth {
                 return Ok(());
             }
@@ -173,15 +168,6 @@ pub(super) fn retain_previous(
                 "identifier metadata head is missing or orphaned",
             ))
         }
-    }
-    Ok(())
-}
-
-fn validate_epochs(created: u64, birth: u64, current: u64) -> VersionResult<()> {
-    if created > birth || birth > current {
-        return Err(VersionError::InvalidEncoding(
-            "invalid identifier metadata epochs",
-        ));
     }
     Ok(())
 }
@@ -255,7 +241,7 @@ impl CommittedBackupSnapshot for Snapshot {
             control.cancellation().check()?;
             let (namespace, current) = entry.map_err(redb_error)?;
             let namespace = namespace.value();
-            let watermark = if is_allocation(namespace) {
+            let watermark = if IdentifierEpochHistory::is_allocation(namespace) {
                 let (created, birth) = births
                     .get(namespace)
                     .map_err(redb_error)?
@@ -263,29 +249,11 @@ impl CommittedBackupSnapshot for Snapshot {
                         "missing identifier metadata head",
                     ))?
                     .value();
-                validate_epochs(created, birth, current_epoch)?;
-                if created > epoch {
-                    None
-                } else if birth <= epoch {
-                    Some(codec::decode_u64(current.value())?)
-                } else {
-                    let value = history
-                        .range((namespace, created)..=(namespace, epoch))
-                        .map_err(redb_error)?
-                        .next_back()
-                        .transpose()
-                        .map_err(redb_error)?
-                        .map(|(_, value)| value.value())
-                        .ok_or(VersionError::InvalidEncoding(
-                            "missing retained identifier watermark",
-                        ))?;
-                    if value > codec::decode_u64(current.value())? {
-                        return Err(VersionError::InvalidEncoding(
-                            "identifier history exceeds its current watermark",
-                        ));
-                    }
-                    Some(value)
-                }
+                IdentifierEpochHistory::new(created, birth, current_epoch)?.watermark_at(
+                    epoch,
+                    || codec::decode_u64(current.value()),
+                    |from, through| Ok(previous(&history, namespace, from, through)?.1),
+                )?
             } else {
                 None
             };
@@ -298,6 +266,24 @@ impl CommittedBackupSnapshot for Snapshot {
     }
 }
 
+fn previous(
+    history: &impl ReadableTable<(&'static [u8], u64), u64>,
+    namespace: &[u8],
+    from: u64,
+    through: u64,
+) -> VersionResult<(u64, u64)> {
+    history
+        .range((namespace, from)..=(namespace, through))
+        .map_err(redb_error)?
+        .next_back()
+        .transpose()
+        .map_err(redb_error)?
+        .map(|(key, value)| (key.value().1, value.value()))
+        .ok_or(VersionError::InvalidEncoding(
+            "missing retained identifier watermark",
+        ))
+}
+
 /// Keep the predecessor visible to the oldest metadata lease and all later revisions. The physical writer is already admitted by both retention registries.
 pub(super) fn reclaim(
     transaction: &WriteTransaction,
@@ -308,12 +294,7 @@ pub(super) fn reclaim(
         &transaction.open_table(METADATA).map_err(redb_error)?,
         EPOCH,
     )?;
-    let horizon = oldest.map_or(epoch, MetadataEpoch::as_u64);
-    if horizon > epoch {
-        return Err(VersionError::InvalidEncoding(
-            "metadata lease exceeds the current epoch",
-        ));
-    }
+    let horizon = MetadataEpoch::reclamation_horizon(epoch, oldest)?;
     let births = transaction.open_table(BIRTHS).map_err(redb_error)?;
     let mut history = transaction.open_table(HISTORY).map_err(redb_error)?;
     for entry in births.iter().map_err(redb_error)? {
@@ -321,19 +302,10 @@ pub(super) fn reclaim(
         let (namespace, head) = entry.map_err(redb_error)?;
         let namespace = namespace.value();
         let (created, birth) = head.value();
-        validate_epochs(created, birth, epoch)?;
-        let cutoff = if birth <= horizon {
-            Some(birth)
-        } else {
-            history
-                .range((namespace, 0)..=(namespace, horizon))
-                .map_err(redb_error)?
-                .next_back()
-                .transpose()
-                .map_err(redb_error)?
-                .map(|(key, _)| key.value().1)
-        };
-        if let Some(cutoff) = cutoff.filter(|cutoff| *cutoff > 0) {
+        let revisions = IdentifierEpochHistory::new(created, birth, epoch)?;
+        if let Some(cutoff) = revisions.retained_epoch(horizon, |from, through| {
+            previous(&history, namespace, from, through).map(|(revision, _)| revision)
+        })? {
             loop {
                 control.cancellation().check()?;
                 let obsolete = history

@@ -11,6 +11,63 @@ use super::*;
 mod addressing;
 mod wal;
 
+#[test]
+fn staged_versions_publish_their_fingerprint_in_one_metadata_insert() {
+    use crate::mvcc::write::stage_record;
+    use uqa_storage::{
+        backup::RecordImageHasher, mvcc::CommitSequence, read_control::StorageReadControl,
+    };
+
+    let connection = Connection::open_in_memory().unwrap();
+    schema::initialize(&connection).unwrap();
+    let _permit = schema::WritePermit::acquire(&connection).unwrap();
+    connection.execute_batch(
+        "CREATE TEMP TABLE observations (kind TEXT, key BLOB, digest BLOB);
+         CREATE TEMP TRIGGER observe_insert AFTER INSERT ON main._uqa_mvcc_version_metadata BEGIN INSERT INTO observations VALUES ('insert', NEW.key, NEW.image_digest); END;
+         CREATE TEMP TRIGGER observe_update AFTER UPDATE ON main._uqa_mvcc_version_metadata BEGIN INSERT INTO observations VALUES ('update', NEW.key, NEW.image_digest); END;"
+    ).unwrap();
+    let control = StorageReadControl::with_limit(1 << 20);
+    let sequence = CommitSequence::from_u64(1);
+    let transaction = schema::begin(&connection).unwrap();
+    for (key, value) in [
+        (b"a", Some(b"value".as_slice())),
+        (b"b", Some(b"")),
+        (b"c", None),
+    ] {
+        stage_record(&transaction, key, value, sequence, &control).unwrap();
+    }
+    transaction.commit().unwrap();
+    let observations = connection
+        .prepare("SELECT kind, key, digest FROM observations ORDER BY rowid")
+        .unwrap()
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, Vec<u8>>(1)?,
+                row.get::<_, Option<Vec<u8>>>(2)?,
+            ))
+        })
+        .unwrap()
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .unwrap();
+    let digest = |value: &[u8]| {
+        Some(
+            RecordImageHasher::for_value(sequence, value, &control)
+                .unwrap()
+                .as_bytes()
+                .to_vec(),
+        )
+    };
+    assert_eq!(
+        observations,
+        [
+            ("insert".into(), b"a".to_vec(), digest(b"value")),
+            ("insert".into(), b"b".to_vec(), digest(b"")),
+            ("insert".into(), b"c".to_vec(), None),
+        ]
+    );
+}
+
 fn lengths(connection: &Connection) -> Vec<(Vec<u8>, Vec<u8>, Option<i64>)> {
     connection
         .prepare("SELECT key, sequence, payload_length FROM _uqa_mvcc_version_metadata ORDER BY key, sequence")

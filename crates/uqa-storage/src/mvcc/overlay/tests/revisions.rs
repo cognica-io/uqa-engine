@@ -131,3 +131,101 @@ fn private_revision_point_reads_preserve_replacements_tombstones_and_undo() {
     assert_eq!(control.memory().used(), 0);
     assert_eq!(read.memory().used(), 0);
 }
+
+#[test]
+fn command_resolution_preserves_forwarded_revisions_and_advances_changed_markers() {
+    use crate::mvcc::commit::RecordWriteKind;
+    use crate::mvcc::resolution::ResolutionMode;
+
+    for spill in [false, true] {
+        let control = StorageReadControl::with_limit(1 << 20);
+        let source = if spill {
+            PrivateRecordChanges::with_memory_tier_limit(control.memory(), 0)
+        } else {
+            PrivateRecordChanges::new(control.memory())
+        };
+        for (key, value, kind) in [
+            (b"az", Some(&b"old"[..]), RecordWriteKind::Canonical),
+            (b"aa", Some(&b"new"[..]), RecordWriteKind::Canonical),
+            (b"ad", None, RecordWriteKind::Canonical),
+            (b"mb", Some(&b"fixed"[..]), RecordWriteKind::Marker),
+        ] {
+            let write = PreparedRecordWrite::copy_bytes(key, None, value, &control)
+                .unwrap()
+                .with_kind(kind);
+            source.apply_owned(&[write], &control).unwrap();
+        }
+        let original = source.snapshot().unwrap();
+        let prepared = source.prepare(&control).unwrap();
+        assert_eq!(prepared.resident().is_none(), spill);
+        let store = MemoryVersionStore::new(control.memory());
+        let revision = |snapshot: &PrivateRecordSnapshot, key: &[u8]| {
+            snapshot
+                .revision_metadata(key, &control)
+                .unwrap()
+                .unwrap()
+                .1
+        };
+        for committed_key in [b"unrelated".as_slice(), b"mb"] {
+            store
+                .commit(
+                    &[RecordWrite {
+                        key: committed_key,
+                        expected: None,
+                        value: Some(b"fixed"),
+                    }],
+                    &control,
+                )
+                .unwrap();
+            let current = store.snapshot().unwrap();
+            let resolved = crate::mvcc::markers::resolve(
+                &prepared,
+                &current,
+                ResolutionMode::Command,
+                &control,
+            )
+            .unwrap();
+            for independent in [false, true] {
+                let separate = StorageReadControl::with_limit(1 << 20);
+                let target = if independent { &separate } else { &control };
+                let changes = PrivateRecordChanges::from_prepared(
+                    &resolved,
+                    Some(|key| Ok(key.get(..1))),
+                    target,
+                )
+                .unwrap();
+                let captured = changes.snapshot().unwrap();
+                for key in [b"aa", b"ad", b"az"] {
+                    assert_eq!(
+                        revision(&captured, key),
+                        revision(&original, key),
+                        "{key:?}"
+                    );
+                }
+                assert_eq!(
+                    captured.scope_revision(b"a", target).unwrap(),
+                    original.scope_revision(b"a", &control).unwrap(),
+                );
+                assert_eq!(
+                    revision(&captured, b"mb") == revision(&original, b"mb"),
+                    committed_key != b"mb",
+                );
+                let saved = StorageSavepointId::allocate();
+                changes.savepoint(saved).unwrap();
+                let same = changes.get(b"aa", target).unwrap().unwrap();
+                changes.apply_owned(&[same], target).unwrap();
+                assert_ne!(
+                    revision(&changes.snapshot().unwrap(), b"aa"),
+                    revision(&original, b"aa")
+                );
+                changes.rollback_to_savepoint(saved).unwrap();
+                assert_eq!(
+                    revision(&changes.snapshot().unwrap(), b"aa"),
+                    revision(&original, b"aa")
+                );
+                drop((captured, changes));
+                assert_eq!(separate.memory().used(), 0);
+            }
+        }
+    }
+}

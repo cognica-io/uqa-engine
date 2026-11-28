@@ -92,6 +92,10 @@ impl HNSWIndex {
         workspace: Control<'_>,
     ) -> StorageBackendResult<Candidates> {
         check(control)?;
+        if layer == 0 {
+            // Visited admits each base-layer neighbor once. Release upper-layer workspace before the queues grow.
+            query.enter_base_layer();
+        }
         let fallback = StorageReadControl::new(&self.memory, &uqa_core::CancellationToken::new());
         let workspace = workspace.unwrap_or(&fallback);
         let ef = ef.max(1);

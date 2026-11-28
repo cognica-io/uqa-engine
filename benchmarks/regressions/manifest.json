@@ -5365,6 +5365,110 @@
       ]
     },
     {
+      "package": "uqa-storage-redb",
+      "kind": "lib",
+      "test": "snapshot_metadata_uses_one_range_and_preserves_header_error_order",
+      "cases": 1,
+      "source": "crates/uqa-storage-redb/src/mvcc/tests/metadata/window.rs",
+      "capability": "Physical redb snapshot header reads",
+      "workload": "Admit a fixed metadata table through the real redb range API, then remove the format and identity and invalidate the receipt limit.",
+      "invariant": "Each admission uses one ordered range and zero point reads. Combined damage reports the format, identity and receipt limit errors in order.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "mixed_private_and_committed_points_keep_one_lazy_read_window",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/mvcc/overlay/tests/selection.rs",
+      "capability": "Ordered mixed MVCC point selection",
+      "workload": "Read six ordered keys with duplicates, a spilled private overlay, absent committed keys and two visitor stops under a 32 KiB read allowance.",
+      "invariant": "Private-only requests open no committed cursor. Three physical requests share one cursor, retain caller order and release all charged memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "bulk_postings_read_source_metadata_in_batches_and_share_the_field_revision",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/inverted_index/tests/counts.rs",
+      "capability": "Batched SQLite posting source metadata",
+      "workload": "Look up one term across 130 documents in three posting clusters while counting physical source and statistics reads.",
+      "invariant": "Three source reads and one field revision read serve all 130 documents.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "reclaiming_two_histories_uses_bounded_statements_among_single_version_heads",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/tests/reclamation.rs",
+      "capability": "SQLite MVCC reclamation work",
+      "workload": "Keep one pinned snapshot while reclaiming two old revisions in databases with 32 and 256 live heads.",
+      "invariant": "Both sizes use at most 64 SELECTs, preserve the pinned values and reclaim exactly the two obsolete revisions.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-redb",
+      "kind": "lib",
+      "test": "interrupted_redb_image_commits_only_complete_private_chunks",
+      "cases": 1,
+      "source": "crates/uqa-storage-redb/src/mvcc/tests/backup_import.rs",
+      "capability": "Bounded private redb import commits",
+      "workload": "Write 129 records to a private redb import, interrupt the writer and read the closed target directly.",
+      "invariant": "Exactly 128 records are durable, and the unfinished format prevents ordinary opens.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "interrupted_sqlite_image_commits_only_complete_private_chunks",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/restore/tests/backup_import.rs",
+      "capability": "Bounded private SQLite import commits",
+      "workload": "Write 129 records to a private SQLite import, interrupt the writer and read the closed target directly.",
+      "invariant": "Exactly 128 records are durable, and the unfinished format prevents ordinary opens.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "wide_missing_point_projections_reuse_one_reference_buffer",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/document_store/native/decoded/tests.rs",
+      "capability": "SQLite document point projection allocation",
+      "workload": "Project 32 fields for 128 absent documents through both reentrant and borrowed point readers.",
+      "invariant": "Each scan visits all requested rows with NULL fields and uses at most two heap allocations for the projection.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "staged_versions_publish_their_fingerprint_in_one_metadata_insert",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/version_metadata/tests.rs",
+      "capability": "SQLite version metadata write amplification",
+      "workload": "Observe metadata inserts and updates while staging a value, an empty value and a tombstone.",
+      "invariant": "Each version produces one insert with its final digest or NULL for the tombstone, and no subsequent update.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
       "package": "uqa-storage",
       "kind": "lib",
       "test": "key_value_backup_import_accepts_literal_header_allocators_and_empty_records_for_both_mappings",
@@ -9210,6 +9314,19 @@
     {
       "package": "uqa-storage-sqlite",
       "kind": "lib",
+      "test": "record_read_admission_pins_the_snapshot_before_visiting_once",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/tests/admission.rs",
+      "capability": "SQLite MVCC read admission",
+      "workload": "Hold an exclusive rollback-journal writer while a snapshot reads its header, release or cancel the waiter, and return SQLite BUSY from a record visitor.",
+      "invariant": "A blocked snapshot runs its consumer once after admission or zero times after cancellation. A visitor error propagates once and the connection can open another snapshot.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
       "test": "managed_allocations_share_one_sync_without_relaxing_durable_receipts",
       "cases": 1,
       "source": "crates/uqa-storage-sqlite/src/mvcc/tests/receipts/allocations.rs",
@@ -10753,6 +10870,19 @@
       "capability": "Private revision point reads",
       "workload": "Resident and spilled records, private tombstones, retained views, savepoint undo, replacement and cancellation.",
       "invariant": "One metadata lookup obtains the exact revision without reading values; private identities, visibility and allowance release remain unchanged.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "command_resolution_preserves_forwarded_revisions_and_advances_changed_markers",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/mvcc/overlay/tests/revisions.rs",
+      "capability": "Private revisions across command snapshots",
+      "workload": "Resident and spilled values and tombstones, two memory allowances, an immutable marker, an unrelated commit, a changed marker precondition and savepoint rollback.",
+      "invariant": "A forwarded write retains its private revision. A changed marker precondition or a new evaluation advances it. A prefix reports the newest revision among its records.",
       "case_names": [
         ""
       ]
@@ -68480,6 +68610,21 @@
       ]
     },
     {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "an_unrelated_commit_preserves_the_prepared_default_of_a_private_table",
+      "cases": 3,
+      "source": "crates/uqa-engine/tests/catalog/pg18_constraint_lifecycle/domain_constraints.rs",
+      "capability": "Prepared defaults across concurrent commits",
+      "workload": "Prepare an insert on a private table in native SQLite, SQLite Key/Value or redb. Commit to another table from a second session, change the domain default and then replace the original default function.",
+      "invariant": "The prepared insert returns 14 after the unrelated commit and 25 after the function replacement. The peer's row survives rollback.",
+      "case_names": [
+        "case_1_sqlite",
+        "case_2_sqlite_key_value",
+        "case_3_redb"
+      ]
+    },
+    {
       "package": "uqa-sql",
       "kind": "lib",
       "test": "database_authority_input_preserves_role_visits_without_copying_names_or_paths",
@@ -78059,6 +78204,110 @@
       "capability": "Right-input preparation in similarity joins",
       "workload": "Compare four-by-four and 32-by-32 inputs for text, vector and hybrid joins with no output pairs.",
       "invariant": "Multiplying each side by eight increases total allocations at most eightfold for every join.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "base_layer_search_releases_upper_distances_and_decodes_each_candidate_once",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/hnsw_index/tests/reads.rs",
+      "capability": "HNSW base-layer distance workspace",
+      "workload": "Warm an upper-level distance, then search all 128 nodes of a 256-coordinate ring.",
+      "invariant": "The base search emits 128 neighbors, releases the upper cache and decodes at most 128 candidate vectors.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "frontier_reuses_membership_and_orders_each_new_priority_with_logarithmic_comparisons",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/diskann_index/search/tests.rs",
+      "capability": "DiskANN bounded frontier work",
+      "workload": "Offer 512 equal-priority candidates in reverse order, repeat each admission and revisit expanded and evicted nodes.",
+      "invariant": "The ordered frontier retains the first 256 node IDs. Duplicates consume no extra distance estimates and comparisons stay within a logarithmic bound per admission.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "tensor_top_k_uses_bounded_workspace_in_trained_and_untrained_search",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/ivf_index/tests.rs",
+      "capability": "Bounded tensor IVF selection",
+      "workload": "Query five of 1,024 documents with two vectors each before and after training under a 4 KiB allowance.",
+      "invariant": "Both routes return the canonical five scores and document IDs and release the complete workspace.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "tensor_maxima_keep_signed_zero_bits_across_element_order_and_top_k",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/vector_index/query/tests.rs",
+      "capability": "Tensor score reduction",
+      "workload": "Score four tensors whose finite components yield positive or negative zero. Select one or four documents with and without a memory allowance.",
+      "invariant": "Mixed zeros retain positive zero in both orders, negative-only scores retain negative zero and top-k breaks equal scores by document identity.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "probed_tensor_scores_preserve_bits_at_float_extremes_and_ties",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/ivf_index/tests.rs",
+      "capability": "IVF tensor score and ordering equivalence",
+      "workload": "Probe one, two and four centroids across seven query vectors, three top-k limits, ties, subnormals and overflowing dot products.",
+      "invariant": "Each result matches the document IDs and exact score bits of materializing every selected component and then reducing.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "cached_norms_preserve_every_canonical_score_bit",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/vector_index/cosine/tests.rs",
+      "capability": "Canonical cosine from retained norms",
+      "workload": "Score vector pairs with empty, mismatched, subnormal and overflowing components.",
+      "invariant": "Computing the query norm or both norms ahead of time preserves the canonical f32 score bits.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "retained_coordinates_keep_one_flat_tensor_and_reuse_norms_across_queries",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/vector_index/brute_force/cache/tests.rs",
+      "capability": "Retained SQLite vector storage",
+      "workload": "Warm the exact index with multiple tensor components and issue a second query on the same read snapshot.",
+      "invariant": "Coordinates use one contiguous array, every retained norm matches the canonical reduction and the second query reuses the snapshot.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "restricting_live_workspace_charges_only_its_receiving_child",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/tests.rs",
+      "capability": "Memory ownership transfer into a bounded child",
+      "workload": "Move a live parent allocation into a capped child budget and attempt the same transfer while the child is full.",
+      "invariant": "Ownership transfer charges the child once, preserves the parent peak and leaves the source fully charged when the child rejects admission.",
       "case_names": [
         ""
       ]

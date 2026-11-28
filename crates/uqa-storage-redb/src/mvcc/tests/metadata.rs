@@ -9,6 +9,8 @@
 use super::*;
 use uqa_storage::mvcc::{IdentifierRequest, RecordWrite};
 
+mod window;
+
 #[test]
 fn formatless_predecessor_cannot_discard_heads_or_leave_two_directories() {
     let database = Arc::new(

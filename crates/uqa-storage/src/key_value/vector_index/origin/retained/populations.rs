@@ -7,13 +7,12 @@
 //! Generation census is a writable lifecycle operation. Metadata reads only decode one fixed header on their retained view.
 
 use super::super::KeyValueDiskANNPopulationRecords as Layout;
-use super::super::{invalid, KeyValueDiskANNCanonical, RetainedDiskANNCanonical};
+use super::RetainedDiskANNCanonical;
 use crate::diskann_index::{
     format::{DiskANNGeneration, DiskANNManifest, DiskANNOriginLayout},
-    pages::DiskANNPageSource,
     DiskANNCanonicalCounts, DiskANNCanonicalRead, DiskANNPopulationState,
 };
-use crate::key_value::{publication, KeyValueDiskANNSource};
+use crate::key_value::KeyValueDiskANNSource;
 use crate::mvcc::VersionError;
 use crate::{read_control::StorageReadControl, KeyValueBatch, StorageBackendResult};
 
@@ -72,30 +71,5 @@ impl RetainedDiskANNCanonical {
         let key = Layout::header_key(&self.vectors, generation, control)
             .map_err(VersionError::into_storage_error)?;
         batch.retire_diskann_population(&key)
-    }
-}
-
-impl KeyValueDiskANNCanonical {
-    /// Initialize an older selected generation's derived populations under its original catalog/head guards, without rebuilding the graph or evaluating any row expression.
-    pub(in crate::key_value) fn initialize_populations(
-        &self,
-        index: &crate::RelationIdentity,
-        resolver: &dyn crate::diskann_index::catalog::DiskANNIndexResolver,
-        control: &StorageReadControl,
-    ) -> StorageBackendResult<()> {
-        let source = self.retain_for_index(index, control)?;
-        let selected = source
-            .selected_source(resolver, control)?
-            .ok_or_else(|| invalid("population initialization has no selected generation"))?;
-        let generation = selected.generation();
-        if source.read_population(generation, control)?.is_some() {
-            return Ok(());
-        }
-        let scope = source.index_scope(resolver, control)?;
-        self.index.store.with_mutation(&mut |read, batch| {
-            source.require_current_index(read, batch, control)?;
-            publication::require_selected_generation(&scope, read, batch, generation, control)?;
-            source.publish_population(&selected, batch, control)
-        })
     }
 }

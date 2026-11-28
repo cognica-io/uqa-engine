@@ -74,6 +74,33 @@ pub fn verify_diskann_pruning(
     let source = coverage.source();
     let changed = canonical.replace(1, &[vec![0.0, 1.0]], &control)?;
     peer.commit_transaction()?;
+    let before = store.scan_prefix(&journal::prefix(TABLE, FIELD)?)?;
+    let receipt = store.completed_commit();
+    let error = crate::diskann_index::DiskANNPersistentBackend::prune_page(
+        &canonical,
+        source,
+        &Resolver,
+        &pruner,
+        page(64),
+        &control,
+    )
+    .expect_err("the provider must decline an idle writer at mutation admission");
+    expect(
+        error
+            .to_string()
+            .contains("journal page requires the caller's transaction"),
+        "idle page diagnostic",
+    )?;
+    expect_eq(
+        &store.scan_prefix(&journal::prefix(TABLE, FIELD)?)?,
+        &before,
+        "idle page preserves the journal",
+    )?;
+    expect_eq(
+        &store.completed_commit(),
+        &receipt,
+        "idle page preserves the receipt",
+    )?;
     let old_cursor = prune_pass(store, &canonical, source, &pruner, &control)?;
     expect_eq(
         &source.origin(1, &control)?,
@@ -414,8 +441,30 @@ fn finite_discovery(
     let canonical = KeyValueDiskANNCanonical::new(store.clone(), TABLE, FIELD, 2)?;
     let retained = canonical.retain(control)?;
     canonical.replace(9, &[], control)?;
+    let page_control =
+        StorageReadControl::new(control.memory(), &uqa_core::CancellationToken::new());
+    store.begin_transaction()?;
+    page_control.cancellation().cancel();
+    expect(
+        matches!(
+            pruner.prune(page(64), &page_control),
+            Err(crate::StorageBackendError::Cancelled(_))
+        ),
+        "page cancellation leaves the discovery token live",
+    )?;
+    let first = pruner.prune(page(64), control)?;
+    store.rollback_transaction()?;
+    expect(
+        pruner.prune(page(64), control).is_err(),
+        "completing the transaction declines a late page",
+    )?;
     store.begin_transaction()?;
     let result = pruner.prune(page(64), control)?;
+    expect_eq(
+        &result,
+        &first,
+        "rolled-back journal entries remain eligible",
+    )?;
     expect_eq(
         &(result.examined, result.removed, result.next),
         &(1, 1, None),
@@ -432,9 +481,20 @@ fn finite_discovery(
         "older reader preserves removed history",
     )?;
     original.cancellation().cancel();
+    let idle = pruner
+        .prune(page(64), control)
+        .expect_err("inactive session");
+    expect(
+        idle.to_string()
+            .contains("journal page requires the caller's transaction"),
+        "idle transaction is diagnosed before discovery cancellation",
+    )?;
     store.begin_transaction()?;
     expect(
-        pruner.prune(page(64), control).is_err(),
+        matches!(
+            pruner.prune(page(64), control),
+            Err(crate::StorageBackendError::Cancelled(_))
+        ),
         "finite discovery retains original cancellation",
     )?;
     store.rollback_transaction()

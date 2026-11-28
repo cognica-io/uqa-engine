@@ -54,6 +54,41 @@ fn protection() -> Protection {
     }
 }
 
+#[test]
+fn interrupted_redb_image_commits_only_complete_private_chunks() {
+    use crate::mvcc::{codec, identifiers, HEADS, METADATA};
+    use redb::ReadableTableMetadata;
+
+    let directory = tempfile::tempdir().unwrap();
+    let control = StorageReadControl::with_limit(32 << 20);
+    let source = RedbStorage::open(directory.path().join("source")).unwrap();
+    let store = source.store();
+    let mut batch = store.batch();
+    for id in 0_u32..192 {
+        batch.put(&id.to_be_bytes(), b"value").unwrap();
+    }
+    batch.commit().unwrap();
+    let (repository, root) = capture(&source, &directory.path().join("repository"), &control);
+    let target = directory.path().join("target");
+    let lease = repository.open_backup(root.backup(), &control).unwrap();
+    let request = DatabaseRestore::new(root.cut().source).unwrap();
+    let mut input =
+        RedbBackupImport::new(file(&target), lease, request, 1 << 20, 2 << 20, &control).unwrap();
+    while input.imported_records() + input.imported_identifiers() < 129 {
+        assert_eq!(input.advance().unwrap(), RedbBackupImportStep::Pending);
+    }
+    drop(input);
+    let database = redb::Database::open(&target).unwrap();
+    let read = database.begin_read().unwrap();
+    assert_eq!(
+        codec::read_u64(&read.open_table(METADATA).unwrap(), "format").unwrap(),
+        0
+    );
+    let stored = read.open_table(HEADS).unwrap().len().unwrap()
+        + read.open_table(identifiers::TABLE).unwrap().len().unwrap();
+    assert_eq!(stored, 128);
+}
+
 pub(super) fn capture(
     owner: &RedbStorage,
     path: &Path,

@@ -11,7 +11,7 @@ use uqa_core::{memory::BudgetedBinaryHeap, DocId, PostingList};
 use super::{prepare::Control, search::Candidate, store::Map, HNSWIndex};
 use crate::{
     vector_index::{
-        cosine_similarity_with_norms,
+        cosine_similarity_with_norms, maximum_tensor_score,
         query::{check, normalized_query, postings_from_unique_scores, VectorQueryBuffer},
         validate_vector_values, vector_norm,
     },
@@ -49,9 +49,9 @@ impl HNSWIndex {
                     let score =
                         cosine_similarity_with_norms(query, &vector.values, norm, vector.norm);
                     let key = u128::from(node.doc_id);
-                    let score = best
-                        .get(key)?
-                        .map_or(score, |value| f32::from_bits(*value as u32).max(score));
+                    let score = best.get(key)?.map_or(score, |value| {
+                        maximum_tensor_score(f32::from_bits(*value as u32), score)
+                    });
                     best.insert(key, u64::from(score.to_bits()), control)?;
                 }
             }
@@ -119,7 +119,9 @@ impl HNSWIndex {
             let score = cosine_similarity_with_norms(query, &vector.values, norm, vector.norm);
             if score >= threshold {
                 match current.as_mut() {
-                    Some((document, best)) if *document == node.doc_id => *best = best.max(score),
+                    Some((document, best)) if *document == node.doc_id => {
+                        *best = maximum_tensor_score(*best, score);
+                    }
                     _ => {
                         if let Some(previous) = current.replace((node.doc_id, score)) {
                             scored.push(previous)?;

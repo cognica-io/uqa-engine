@@ -20,6 +20,33 @@ pub use owned::ImageOwner;
 pub use reader::{ImagePreparation, ImageRead, ImageReader};
 pub use retained::with_retained_control;
 
+/// Drive an owning image cursor to completion, preserving its preparation checks and any original source cancellation during partial writes.
+pub(crate) fn write_from_cursor(
+    mut cursor: impl ImageRead,
+    writer: &mut dyn Write,
+    control: &StorageReadControl,
+    original: Option<&StorageReadControl>,
+) -> StorageBackendResult<u64> {
+    while !cursor.prepare(128)?.ready {}
+    with_retained_control(writer, original, |writer| {
+        let mut output = ImageOutput {
+            writer,
+            control,
+            written: 0,
+        };
+        let mut buffer = [0; 4096];
+        loop {
+            let count = cursor.read(&mut buffer)?;
+            if count == 0 {
+                break;
+            }
+            output.bytes(&buffer[..count])?;
+        }
+        control.check()?;
+        Ok(output.written)
+    })
+}
+
 /// Bounded binary output for an owning image codec. Failed output belongs to the enclosing unpublished artifact.
 pub struct ImageOutput<'a> {
     pub writer: &'a mut dyn Write,

@@ -8,11 +8,14 @@
 
 use std::{fs::File, path::Path};
 
-use redb::{Database, ReadableDatabase, ReadableTable};
+use redb::{Database, ReadableDatabase, ReadableTable, WriteTransaction};
 use uqa_storage::{
-    backup::{BackupError, BackupLeaseInput, BackupResult, BackupRoot, ImageProvider},
-    key_value::{KeyValueImageImportReader, KeyValueImageStep, KeyValueImportUnit},
-    mvcc::{BackupCursorKey, DatabaseRestore, DEFAULT_RECEIPT_RETENTION_LIMIT},
+    backup::{
+        BackupError, BackupImageImportStep, BackupLeaseInput, BackupRecordImageWriter,
+        BackupResult, BackupRoot, ImageProvider,
+    },
+    key_value::{KeyValueImageImportDriver, KeyValueImageImportReader, KeyValueImageWriter},
+    mvcc::{CommitSequence, DatabaseRestore, DEFAULT_RECEIPT_RETENTION_LIMIT},
     read_control::StorageReadControl,
 };
 
@@ -33,17 +36,7 @@ pub enum RedbBackupImportStep {
 /// Import a complete redb image into a new, private file. The enclosing restore operation must durably retain `DatabaseRestore` outside that file before construction, keep its directory private through logical catalog/artifact validation, and publish only after this owner has closed. This provider primitive does not create a repository restore intent or install a destination directory.
 ///
 /// Each advance imports at most one record, with its encoded value reserved against the supplied allowance before calling redb's public `insert_reserve`. Values above `maximum_value_bytes` fail explicitly. Repository frames and verification workspace have separate limits; redb's physical page cache is not this decoded-value allowance. An interrupted import retains record format zero, which ordinary opens reject. A failed final commit may have completed; resolve the exact retained request through `RedbStorage::open_restored`, never import into that file again.
-pub struct RedbBackupImport<'a> {
-    database: Option<Database>,
-    input: Option<KeyValueImageImportReader<'a>>,
-    root: BackupRoot,
-    request: DatabaseRestore,
-    control: StorageReadControl,
-    maximum_value_bytes: usize,
-    complete: bool,
-    records: u64,
-    identifiers: u64,
-}
+pub struct RedbBackupImport<'a>(KeyValueImageImportDriver<'a, ImageWriter>);
 
 impl<'a> RedbBackupImport<'a> {
     /// Resolve the atomic completion of this exact archive and history request. Partial imports keep format zero and reject; completed imports retain later writes. No input records or history are replayed.
@@ -130,24 +123,24 @@ impl<'a> RedbBackupImport<'a> {
     ) -> BackupResult<Self> {
         let root = input.root();
         initialize(&database, root, request, control)?;
-        Ok(Self {
-            database: Some(database),
-            input: Some(input),
-            root,
+        Ok(Self(KeyValueImageImportDriver::new(
+            input,
+            ImageWriter {
+                transaction: None,
+                database,
+            },
             request,
-            control: control.clone(),
             maximum_value_bytes,
-            complete: false,
-            records: 0,
-            identifiers: 0,
-        })
+            "redb import value",
+            control,
+        )))
     }
 
     pub const fn imported_records(&self) -> u64 {
-        self.records
+        self.0.imported_records()
     }
     pub const fn imported_identifiers(&self) -> u64 {
-        self.identifiers
+        self.0.imported_identifiers()
     }
 
     pub fn advance(&mut self) -> BackupResult<RedbBackupImportStep> {
@@ -159,104 +152,105 @@ impl<'a> RedbBackupImport<'a> {
         &mut self,
         maximum_object_bytes: usize,
     ) -> BackupResult<RedbBackupImportStep> {
-        let result = self.advance_inner(maximum_object_bytes);
-        if result.is_err() {
-            self.input = None;
-            self.database = None;
+        Ok(match self.0.advance(maximum_object_bytes)? {
+            BackupImageImportStep::Pending => RedbBackupImportStep::Pending,
+            BackupImageImportStep::Imported => RedbBackupImportStep::Complete,
+        })
+    }
+}
+
+struct ImageWriter {
+    // An unfinished private transaction aborts before its database file closes.
+    transaction: Option<WriteTransaction>,
+    database: Database,
+}
+
+impl ImageWriter {
+    fn transaction(&mut self) -> BackupResult<&WriteTransaction> {
+        if self.transaction.is_none() {
+            self.transaction = Some(physical_writer(&self.database)?);
         }
-        result
+        Ok(self
+            .transaction
+            .as_ref()
+            .expect("active private write transaction"))
+    }
+}
+
+impl BackupRecordImageWriter for ImageWriter {
+    fn identifier(
+        &mut self,
+        namespace: &[u8],
+        watermark: u64,
+        _control: &StorageReadControl,
+    ) -> BackupResult<()> {
+        let transaction = self.transaction()?;
+        let mut table = transaction
+            .open_table(identifiers::TABLE)
+            .map_err(redb_error)?;
+        if table.get(namespace).map_err(redb_error)?.is_some() {
+            return Err(BackupError::Invalid("duplicate imported identifier"));
+        }
+        table
+            .insert(namespace, watermark.to_be_bytes().as_slice())
+            .map_err(redb_error)?;
+        transaction
+            .open_table(backup_metadata::BIRTHS)
+            .map_err(redb_error)?
+            .insert(namespace, (0, 0))
+            .map_err(redb_error)?;
+        Ok(())
     }
 
-    fn advance_inner(&mut self, maximum_object_bytes: usize) -> BackupResult<RedbBackupImportStep> {
-        if self.complete {
-            return Ok(RedbBackupImportStep::Complete);
+    fn record(
+        &mut self,
+        key: &[u8],
+        revision: CommitSequence,
+        length: usize,
+        read: &mut dyn FnMut(&mut [u8]) -> BackupResult<usize>,
+        control: &StorageReadControl,
+    ) -> BackupResult<()> {
+        let size = super::heads::stored_size(revision.as_u64(), length)?;
+        let _value_reservation = control.memory().reserve(size)?;
+        let transaction = self.transaction()?;
+        let mut heads = transaction.open_table(HEADS).map_err(redb_error)?;
+        if heads.get(key).map_err(redb_error)?.is_some() {
+            return Err(BackupError::Invalid("duplicate imported record"));
         }
-        let input = self.input.as_mut().ok_or(BackupError::Finished)?;
-        let database = self.database.as_ref().expect("active import owns its file");
-        match input.advance(maximum_object_bytes)? {
-            KeyValueImageStep::Pending => return Ok(RedbBackupImportStep::Pending),
-            KeyValueImageStep::Complete => {
-                // The reader has retired its verification files and no provider sessions or snapshots were created. The exclusive history owner changes identity and format together.
-                activate(database, self.root, self.request, &self.control)?;
-                self.input = None;
-                self.database = None;
-                self.complete = true;
-                return Ok(RedbBackupImportStep::Complete);
-            }
-            KeyValueImageStep::Unit => (),
+        let mut versions = transaction.open_table(VERSIONS).map_err(redb_error)?;
+        super::heads::insert_from(
+            &mut super::heads::VersionWriter::new(transaction, Some(control)),
+            &mut heads,
+            &mut versions,
+            key,
+            revision.as_u64(),
+            length,
+            |destination| read_record_image(read, revision, destination),
+        )
+    }
+
+    fn flush(&mut self, control: &StorageReadControl) -> BackupResult<()> {
+        if let Some(transaction) = self.transaction.take() {
+            control.cancellation().check()?;
+            transaction.commit().map_err(redb_error)?;
         }
-        match input.current_unit().expect("selected mapping unit") {
-            KeyValueImportUnit::Identifier {
-                namespace,
-                watermark,
-            } => {
-                let transaction = physical_writer(database)?;
-                {
-                    let mut table = transaction
-                        .open_table(identifiers::TABLE)
-                        .map_err(redb_error)?;
-                    if table.get(namespace).map_err(redb_error)?.is_some() {
-                        return Err(BackupError::Invalid("duplicate imported identifier"));
-                    }
-                    table
-                        .insert(namespace, watermark.to_be_bytes().as_slice())
-                        .map_err(redb_error)?;
-                    transaction
-                        .open_table(backup_metadata::BIRTHS)
-                        .map_err(redb_error)?
-                        .insert(namespace, (0, 0))
-                        .map_err(redb_error)?;
-                }
-                self.control.cancellation().check()?;
-                transaction.commit().map_err(redb_error)?;
-                self.identifiers += 1;
-            }
-            KeyValueImportUnit::Record {
-                key,
-                revision,
-                value_bytes,
-            } => {
-                if value_bytes > self.maximum_value_bytes as u64 {
-                    return Err(BackupError::Limit {
-                        resource: "redb import value",
-                        required: value_bytes,
-                        limit: self.maximum_value_bytes as u64,
-                    });
-                }
-                let length = usize::try_from(value_bytes)
-                    .map_err(|_| BackupError::Invalid("redb import value length overflow"))?;
-                let size = super::heads::stored_size(revision.as_u64(), length)?;
-                let mut owned_key = BackupCursorKey::new(self.control.memory());
-                owned_key.extend_from_slice(key)?;
-                let _value_reservation = self.control.memory().reserve(size)?;
-                let transaction = physical_writer(database)?;
-                {
-                    let mut heads = transaction.open_table(HEADS).map_err(redb_error)?;
-                    if heads.get(&*owned_key).map_err(redb_error)?.is_some() {
-                        return Err(BackupError::Invalid("duplicate imported record"));
-                    }
-                    let mut versions = transaction.open_table(VERSIONS).map_err(redb_error)?;
-                    super::heads::insert_from(
-                        &mut super::heads::VersionWriter::new(&transaction, Some(&self.control)),
-                        &mut heads,
-                        &mut versions,
-                        &owned_key,
-                        revision.as_u64(),
-                        length,
-                        |destination| read_record_image(input, revision, destination),
-                    )?;
-                }
-                self.control.cancellation().check()?;
-                transaction.commit().map_err(redb_error)?;
-                self.records += 1;
-            }
-        }
-        Ok(RedbBackupImportStep::Pending)
+        Ok(())
+    }
+}
+
+impl KeyValueImageWriter for ImageWriter {
+    fn activate(
+        self,
+        root: BackupRoot,
+        request: DatabaseRestore,
+        control: &StorageReadControl,
+    ) -> BackupResult<()> {
+        activate(&self.database, root, request, control)
     }
 }
 
 fn read_record_image(
-    input: &mut KeyValueImageImportReader<'_>,
+    read_payload: &mut dyn FnMut(&mut [u8]) -> BackupResult<usize>,
     revision: uqa_storage::mvcc::CommitSequence,
     destination: &mut [u8],
 ) -> BackupResult<uqa_storage::backup::ImageDigest> {
@@ -264,14 +258,14 @@ fn read_record_image(
     let mut remaining = destination;
     while !remaining.is_empty() {
         let length = remaining.len().min(16 * 1024);
-        let read = input.read_current(&mut remaining[..length])?;
+        let read = read_payload(&mut remaining[..length])?;
         if read == 0 {
             return Err(BackupError::Invalid("truncated imported record"));
         }
         hash.update(&remaining[..read]);
         remaining = &mut remaining[read..];
     }
-    if input.read_current(&mut [0])? != 0 {
+    if read_payload(&mut [0])? != 0 {
         return Err(BackupError::Invalid("trailing imported record bytes"));
     }
     Ok(hash.finish())

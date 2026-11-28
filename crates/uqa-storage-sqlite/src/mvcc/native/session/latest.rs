@@ -43,7 +43,7 @@ impl NativeSnapshot {
         else {
             return Ok(None);
         };
-        let result = snapshot.read_latest(|connection| Ok(read(connection)?))?;
+        let result = snapshot.read_latest(control, |connection| Ok(read(connection)?))?;
         self.control.check()?;
         control.check()?;
         Ok(result)

@@ -20,15 +20,7 @@ const PREDECESSOR: &str = "SELECT h.key, CASE WHEN h.sequence <= ?3 AND h.compac
 
 #[test]
 fn latest_payload_join_matches_predecessors_with_less_sqlite_work() {
-    let connection = Connection::open_in_memory().unwrap();
-    connection.execute_batch(
-        "CREATE TABLE _uqa_mvcc_heads(key BLOB PRIMARY KEY, sequence BLOB, compacted INTEGER) WITHOUT ROWID;
-         CREATE TABLE _uqa_mvcc_versions(key BLOB, sequence BLOB, value BLOB, version_id INTEGER PRIMARY KEY)"
-    ).unwrap();
-    connection
-        .execute_batch(crate::mvcc::version_metadata::TABLE.1)
-        .unwrap();
-    crate::mvcc::version_metadata::create_triggers(&connection).unwrap();
+    let connection = crate::mvcc::read::history_test_connection();
     let sequence = 1_u64.to_be_bytes();
     let mut expected = Vec::new();
     for id in 0_u64..1024 {

@@ -9,9 +9,9 @@
 use redb::{ReadableTable, ReadableTableMetadata};
 use uqa_storage::{
     mvcc::{
-        receipt_lease_id, CommitStatus, ReceiptAcknowledgement, RetainedTransactionAllocation,
-        SerializableCoordinator, SerializableGraph, SerializableLeases, StorageTransactionId,
-        VersionError, VersionResult,
+        receipt_lease_id, ReceiptAcknowledgement, ReceiptReclamation, ReceiptReclamationBatch,
+        RetainedTransactionAllocation, SerializableCoordinator, SerializableGraph,
+        SerializableLeases, StorageTransactionId, VersionError, VersionResult,
     },
     read_control::StorageReadControl,
 };
@@ -185,46 +185,26 @@ fn reclaim_admitted(
         codec::validate_metadata(&metadata, store.identity)?;
         let allocated = codec::read_u64(&metadata, "allocated")?;
         let mut receipts = transaction.open_table(TRANSACTIONS).map_err(redb_error)?;
-        // This fixed candidate page is charged before use; its size never depends on retained receipt count. Existing graph and lease registries keep their own controlled owners.
-        let _workspace = control
-            .memory()
-            .reserve(std::mem::size_of::<[(u64, bool); 256]>())?;
-        let mut selected = [(0, false); 256];
-        let mut count = 0;
+        let mut batch =
+            ReceiptReclamationBatch::new(store.identity, allocated, graph, leases, control);
+        batch.reserve_page()?;
         for entry in receipts.iter().map_err(redb_error)? {
             control.cancellation().check()?;
             let (allocation, bytes) = entry.map_err(redb_error)?;
-            let allocation = allocation.value();
-            if allocation > allocated {
-                return Err(VersionError::InvalidEncoding(
-                    "receipt exceeds allocation watermark",
-                ));
-            }
-            let id = StorageTransactionId::new(store.identity, allocation)?;
+            let id = batch.transaction(allocation.value())?;
             let tag = codec::receipt_tag(bytes.value())?;
-            let acknowledged = matches!(tag & !codec::MANAGED_RECEIPT, 3 | 4);
-            let referenced = graph.retains_transaction_receipt(id);
-            if acknowledged && referenced {
-                continue;
-            }
-            if acknowledged
-                || (tag & codec::MANAGED_RECEIPT != 0
-                    && !leases.is_alive(receipt_lease_id(id), control)?)
-            {
-                // Decode the exact authoritative outcome before any change; owner absence never turns an unknown physical result into an abort.
-                if codec::decode_status(id, bytes.value())? == CommitStatus::Unknown {
-                    return Err(VersionError::UnknownTransaction);
-                }
-                selected[count] = (allocation, !referenced);
-                count += 1;
-                if count == selected.len() {
-                    break;
-                }
+            if !batch.visit(
+                id,
+                matches!(tag & !codec::MANAGED_RECEIPT, 3 | 4),
+                || Ok(tag & codec::MANAGED_RECEIPT != 0),
+                || codec::decode_status(id, bytes.value()),
+            )? {
+                break;
             }
         }
-        for &(allocation, delete) in &selected[..count] {
+        for (allocation, action) in batch.entries() {
             control.cancellation().check()?;
-            if delete {
+            if action == ReceiptReclamation::Remove {
                 receipts.remove(allocation).map_err(redb_error)?;
                 removed += 1;
             } else {
