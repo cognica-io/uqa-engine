@@ -6,9 +6,7 @@
 
 //! Native optimizer traversal keeps mutable constructor owners through every ordered pass.
 
-use super::{
-    AggregateClassifier, ComputePlan, OptimizerConfig, RelationalPlan, SourcePlan, UnifiedPlan,
-};
+use super::{AggregateClassifier, ComputePlan, OptimizerConfig, RelationalPlan, SourcePlan};
 use uqa_core::memory::ProductionMap;
 use uqa_sql::{
     plan::{
@@ -24,17 +22,11 @@ mod demand;
 mod sources;
 
 pub(super) fn optimize_caller(
-    mut plan: UnifiedPlan,
+    plan: MutableExecutablePlan,
     config: &OptimizerConfig<'_>,
     aggregates: &dyn AggregateClassifier,
-) -> Result<UnifiedPlan, SQLError> {
-    let context = Context::caller(config, aggregates);
-    plan.try_visit_queries_mut(&mut |query| {
-        query.edit_uncontrolled(|query| context.initialize_compute(query))
-    })?;
-    super::source_demand::prune(&mut plan, config, aggregates)?;
-    let output = context.optimize_sources(MutableExecutablePlan::uncontrolled(plan))?;
-    Ok(output.finish(&context.scalars().storage)?.into_parts().0)
+) -> Result<MutableExecutablePlan, SQLError> {
+    Context::caller(config, aggregates).optimize(plan)
 }
 
 pub(super) fn optimize(
@@ -42,12 +34,7 @@ pub(super) fn optimize(
     config: &OptimizerConfig<'_>,
     aggregates: &dyn AggregateClassifier,
 ) -> Result<MutableExecutablePlan, SQLError> {
-    let context = Context::admitted(config, aggregates);
-    let plan = plan.map_queries_while(&config.production, &mut |query| {
-        Ok((context.initialize_compute(query)?, true))
-    })?;
-    let plan = super::source_demand::owned::prune(plan, config, aggregates)?;
-    context.optimize_sources(plan)
+    Context::admitted(config, aggregates).optimize(plan)
 }
 
 pub(in crate::optimizer) struct Context<'a, 'scope> {
@@ -83,6 +70,15 @@ impl<'a, 'scope> Context<'a, 'scope> {
             aggregates,
             input: PlanInput::Caller,
         }
+    }
+
+    fn optimize(&self, plan: MutableExecutablePlan) -> Result<MutableExecutablePlan, SQLError> {
+        let storage = self.scalars().storage;
+        let plan = plan.map_queries_while(&storage, &mut |query| {
+            Ok((self.initialize_compute(query)?, true))
+        })?;
+        let plan = super::source_demand::prune(plan, self.config, self.aggregates, storage)?;
+        self.optimize_sources(plan)
     }
 
     fn scalars(&self) -> super::scalar::ScalarProduction<'a, 'scope> {
@@ -155,6 +151,19 @@ impl<'a, 'scope> Context<'a, 'scope> {
         }
     }
 
+    fn planned_ctes(
+        &self,
+        statement: uqa_sql::plan::PlanRef<'_>,
+    ) -> Result<uqa_core::memory::Produced<Vec<bool>>, SQLError> {
+        uqa_sql::semantics::planned_cte_declarations_with_control(
+            statement,
+            self.config
+                .routine_inlining
+                .map(|catalog| catalog.volatility),
+            self.config.production,
+        )
+    }
+
     pub(in crate::optimizer) fn query(
         &self,
         mut query: MutableQueryPlan,
@@ -166,17 +175,14 @@ impl<'a, 'scope> Context<'a, 'scope> {
             .apply_grouping(storage)?
             .prune_subqueries_with_workspace(storage, control)?;
         query = self.prune_cte_outputs(query)?;
-        let reachable = uqa_sql::semantics::reachable_cte_declarations_with_control(
-            uqa_sql::plan::PlanRef::Query(&query),
-            *control,
-        )?;
-        for (index, &selected) in reachable.iter().enumerate() {
+        let planned = self.planned_ctes(uqa_sql::plan::PlanRef::Query(&query))?;
+        for (index, &selected) in planned.iter().enumerate() {
             control.check()?;
             if selected {
                 query = query.map_cte(index, storage, |body| self.plan(body))?;
             }
         }
-        drop(reachable);
+        drop(planned);
         match &query.root {
             RelationalPlan::QueryBlock(_) => return self.block(query),
             RelationalPlan::SetOp { .. } => {

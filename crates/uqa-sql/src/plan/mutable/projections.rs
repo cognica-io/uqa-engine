@@ -15,6 +15,22 @@ pub struct OwnedProjection {
     pub alias: Option<Produced<String>>,
 }
 
+impl OwnedProjection {
+    /// Transfer the scalar and its label into a published projection with their combined reservation.
+    pub fn finish(
+        self,
+        control: &ProductionControl<'_>,
+    ) -> Result<Produced<ProjectionPlan>, SQLError> {
+        let (expr, mut memory) = self.expression.finish(control)?.into_parts();
+        let alias = self.alias.map(|alias| {
+            let (label, label_memory) = alias.into_parts();
+            memory = control.combine(memory.take(), label_memory);
+            label
+        });
+        Ok(control.finish(ProjectionPlan { expr, alias }, memory)?)
+    }
+}
+
 pub struct OwnedProjectionIter {
     pub(super) projections: std::vec::IntoIter<ProjectionPlan>,
     pub(super) memory: Option<RewriteMemory>,
@@ -73,16 +89,9 @@ impl ProjectionVector {
         let Some(mut copying) = Copying::for_rewrite(*control) else {
             let projections = projections
                 .map(|projection| {
-                    Ok(ProjectionPlan {
-                        expr: projection
-                            .expression
-                            .finish(control)?
-                            .into_uncontrolled()
-                            .expect("ordinary projection"),
-                        alias: projection
-                            .alias
-                            .map(|alias| alias.into_uncontrolled().expect("ordinary alias")),
-                    })
+                    projection
+                        .finish(control)
+                        .map(|field| field.into_uncontrolled().expect("ordinary projection"))
                 })
                 .collect::<Result<_, SQLError>>()?;
             return Ok(Self {

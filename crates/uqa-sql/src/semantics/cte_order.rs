@@ -35,11 +35,18 @@ pub fn reachable_command_cte_order_with_control(
     reachable_order(&CteAnalysis::command(command, control)?, control)
 }
 
-/// Select definitions for scalar initialization in declaration order. Recursive dependency cycles are rejected even among unread definitions.
+/// Select the definitions reachable from a statement. Recursive dependency cycles are rejected even among unread definitions.
 pub fn reachable_cte_declarations_with_control(
     statement: PlanRef<'_>,
     control: ProductionControl<'_>,
 ) -> Result<Produced<Vec<bool>>, SQLError> {
+    declaration_analysis(statement, control)?.reachable()
+}
+
+fn declaration_analysis<'p, 'c>(
+    statement: PlanRef<'p>,
+    control: ProductionControl<'c>,
+) -> Result<CteAnalysis<'p, 'c>, SQLError> {
     let analysis = match statement {
         PlanRef::Query(query) => CteAnalysis::query(query, control)?,
         PlanRef::Command(command) => CteAnalysis::command(command, control)?,
@@ -47,7 +54,37 @@ pub fn reachable_cte_declarations_with_control(
     if analysis.plans.iter().any(|plan| plan.recursive) {
         drop(analysis.order()?);
     }
-    analysis.reachable()
+    Ok(analysis)
+}
+
+/// `PostgreSQL` plans referenced materialized definitions before pruning consumers. Their constants undergo planning even when execution never requests a row.
+pub fn planned_cte_declarations_with_control(
+    statement: PlanRef<'_>,
+    catalog: Option<&dyn super::volatility::VolatilityCatalog>,
+    control: ProductionControl<'_>,
+) -> Result<Produced<Vec<bool>>, SQLError> {
+    let catalog = catalog.unwrap_or(&super::volatility::BuiltinVolatilityCatalog);
+    let analysis = declaration_analysis(statement, control)?;
+    let live = analysis.reachable()?;
+    let mut additional = ProductionVec::new(control);
+    for (index, &read) in live.iter().enumerate() {
+        control.check()?;
+        if !read
+            && analysis.has_reference(index)
+            && !super::cte_strategy::can_defer(&analysis, index, catalog, control)?
+        {
+            additional.push_copy(index)?;
+        }
+    }
+    if additional.is_empty() {
+        return Ok(live);
+    }
+    analysis.closure(
+        live.iter()
+            .enumerate()
+            .filter_map(|(index, &read)| read.then_some(index))
+            .chain(additional.iter().copied()),
+    )
 }
 
 fn reachable_order(

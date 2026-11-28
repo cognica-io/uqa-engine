@@ -122,9 +122,9 @@ fn idle_listener_recovers_an_exited_process_without_a_sender_wakeup(
         )
         .spawn()
         .unwrap();
-    let deadline = Instant::now() + Duration::from_secs(20);
+    let preparation_deadline = Instant::now() + Duration::from_secs(20);
     let ready = path.with_extension("sender-pid");
-    while !ready.is_file() && Instant::now() < deadline {
+    while !ready.is_file() && Instant::now() < preparation_deadline {
         if child.try_wait().unwrap().is_some() {
             break;
         }
@@ -142,11 +142,12 @@ fn idle_listener_recovers_an_exited_process_without_a_sender_wakeup(
         use std::os::unix::process::ExitStatusExt;
         assert_eq!(status.signal(), Some(libc::SIGKILL), "{status}");
     }
-    while pending.is_empty() && Instant::now() < deadline {
+    let delivery_deadline = Instant::now() + Duration::from_secs(20);
+    while pending.is_empty() && Instant::now() < delivery_deadline {
         // This is the listener's existing condition variable, not polling SQL or the registry. Only the surviving recovery worker can complete the delivery.
         listener.runtime.notification_wake.wait_for(
             &mut pending,
-            deadline.saturating_duration_since(Instant::now()),
+            delivery_deadline.saturating_duration_since(Instant::now()),
         );
     }
     assert_eq!(

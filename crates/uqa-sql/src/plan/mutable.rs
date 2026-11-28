@@ -35,6 +35,7 @@ pub(crate) mod memory;
 mod metadata;
 pub(crate) mod nodes;
 mod parents;
+mod privileges;
 pub(crate) mod projections;
 mod queries;
 mod scoped;

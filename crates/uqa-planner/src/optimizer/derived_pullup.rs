@@ -76,7 +76,7 @@ fn query_block(
     };
     if block.r#where.is_none()
         || !block.locking.is_empty()
-        || !block.privilege_columns.is_empty()
+        || block.has_projection_privileges()
         || input.schema.columns_are_open(None)
         || !block.from.as_ref().is_some_and(ordinary_inner_source)
     {

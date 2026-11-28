@@ -21,6 +21,7 @@ pub(in crate::semantics) type External<'a> = dyn Fn(&str) -> Result<(), SQLError
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(in crate::semantics) enum Selection {
     Reachable,
+    Authorization,
     Syntactic,
 }
 
@@ -70,7 +71,7 @@ impl<'p, 'c, 'e> Scope<'p, 'c, 'e> {
         self.control.check()?;
         let selected = resolve(&self.names, reference).filter(|index| *index < ceiling);
         match selected {
-            Some(index) if self.selection == Selection::Reachable => self.enqueue(index),
+            Some(index) if self.selection != Selection::Syntactic => self.enqueue(index),
             Some(_) => Ok(()),
             None => (self.external)(reference),
         }
@@ -204,10 +205,14 @@ pub(in crate::semantics) fn query_root(
     selection: Selection,
 ) -> Result<(), SQLError> {
     control.check()?;
+    let mut privilege_only = None;
     let subqueries = match root {
         RelationalPlan::QueryBlock(block) => {
             if let Some(input) = &block.from {
                 source(input, external, control, selection)?;
+            }
+            if selection == Selection::Reachable && !block.privilege_subqueries.is_empty() {
+                privilege_only = Some(block.privilege_only_subquery_slots(control)?);
             }
             &block.subqueries
         }
@@ -223,8 +228,14 @@ pub(in crate::semantics) fn query_root(
         }
         RelationalPlan::Values { subqueries, .. } => subqueries,
     };
-    for plan in subqueries {
-        query(plan, external, control, selection)?;
+    for (slot, plan) in subqueries.iter().enumerate() {
+        control.check()?;
+        if privilege_only
+            .as_ref()
+            .is_none_or(|slots| slots.get(&slot).is_none())
+        {
+            query(plan, external, control, selection)?;
+        }
     }
     Ok(())
 }

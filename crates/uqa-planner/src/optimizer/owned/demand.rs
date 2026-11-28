@@ -6,9 +6,7 @@
 
 //! Projection pruning borrows ordinary query fields or transfers their admitted constructors.
 
-use super::{Context, MutableQueryPlan, PlanInput, RelationalPlan, SQLError};
-use crate::QueryPlan;
-use uqa_core::memory::ProductionControl;
+use super::{Context, MutableQueryPlan, SQLError};
 
 impl Context<'_, '_> {
     pub(super) fn prune_cte_outputs(
@@ -23,24 +21,14 @@ impl Context<'_, '_> {
         else {
             return Ok(query);
         };
-        match self.input {
-            PlanInput::Caller => edit_ordinary(query, |query| {
-                super::super::cte_projection::prune(
-                    query,
-                    self.aggregates,
-                    routines.volatility,
-                    Some(routines.routines),
-                    self.config.production,
-                )
-            }),
-            PlanInput::Admitted => super::super::cte_projection::owned::prune(
-                query,
-                self.aggregates,
-                routines.volatility,
-                Some(routines.routines),
-                self.config.production,
-            ),
-        }
+        super::super::cte_projection::prune_plan(
+            query,
+            self.aggregates,
+            routines.volatility,
+            Some(routines.routines),
+            self.config.production,
+            self.scalars().storage,
+        )
     }
 
     pub(super) fn prune_derived_outputs(
@@ -58,26 +46,6 @@ impl Context<'_, '_> {
             volatility: routines.map(|scope| scope.volatility),
             visible_ctes: &|_| false,
         };
-        match self.input {
-            PlanInput::Caller => edit_ordinary(query, |query| {
-                let RelationalPlan::QueryBlock(block) = &mut query.root else {
-                    unreachable!("query block demand");
-                };
-                super::super::derived_projection::prune(block, demand)
-            }),
-            PlanInput::Admitted => super::super::derived_projection::owned::prune(query, demand),
-        }
+        super::super::derived_projection::owned::prune(query, demand, self.scalars().storage)
     }
-}
-
-fn edit_ordinary(
-    query: MutableQueryPlan,
-    edit: impl FnOnce(&mut QueryPlan) -> Result<(), SQLError>,
-) -> Result<MutableQueryPlan, SQLError> {
-    let mut query = query
-        .finish(&ProductionControl::uncontrolled())?
-        .into_uncontrolled()
-        .expect("ordinary projection input");
-    edit(&mut query)?;
-    Ok(MutableQueryPlan::uncontrolled(query))
 }

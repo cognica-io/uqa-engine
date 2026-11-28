@@ -31887,6 +31887,19 @@
     {
       "package": "uqa-sql",
       "kind": "lib",
+      "test": "retained_and_executable_subqueries_share_the_first_authorization_walk",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/semantics/privileges/coverage/tests.rs",
+      "capability": "Bounded authorization of shared scalar subqueries",
+      "workload": "Authorize a query with an executable scalar subquery, a retained one, and a slot shared by a retained and an executable projection.",
+      "invariant": "Each relation is analyzed once in its original order, and selecting a denied column from a discarded projection still raises SQLSTATE 42501.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
       "test": "complete_select_coverage_borrows_only_checked_original_nodes",
       "cases": 1,
       "source": "crates/uqa-sql/src/semantics/privileges/coverage/tests.rs",
@@ -34956,6 +34969,19 @@
     {
       "package": "uqa-planner",
       "kind": "lib",
+      "test": "join_predicate_groups_reuse_masks_and_preserve_order_within_each_join",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/join_reorder/tests/bindings.rs",
+      "capability": "Stable join predicate attachment",
+      "workload": "Assign 8192 predicates to balanced and right-deep 64-relation trees, including residuals and all pairs of relations.",
+      "invariant": "The original mask buffer is sufficient under a zero-byte allowance. Every predicate reaches its lowest covering join in input order and unbound residuals reach the root.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
       "test": "predicate_slots_retain_the_buffer_lease_when_expressions_move",
       "cases": 1,
       "source": "crates/uqa-planner/src/optimizer/join_reorder/tests/bindings.rs",
@@ -36005,6 +36031,19 @@
     {
       "package": "uqa-planner",
       "kind": "lib",
+      "test": "caller_wildcard_expansion_moves_existing_outputs_within_the_planning_allowance",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/derived_projection/owned/tests.rs",
+      "capability": "Caller-owned wildcard projection expansion",
+      "workload": "Expand a qualified wildcard beside a four MiB literal, repeat with an incompatible output width and with insufficient planning memory.",
+      "invariant": "Accepted and rejected layouts retain the original literal and alias addresses. Planning uses less than 32 KiB and releases all reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
       "test": "known_output_demand_borrows_wide_column_names",
       "cases": 1,
       "source": "crates/uqa-planner/src/optimizer/derived_projection/tests/demand.rs",
@@ -36024,6 +36063,32 @@
       "capability": "Planning output demand",
       "workload": "Observe all 1,024 required projection aliases without an analyzed row descriptor.",
       "invariant": "Allocate less than 8 KiB without copying label storage or changing the query.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "discarded_column_privileges_admit_new_names_and_borrow_existing_identities",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/derived_projection/tests/demand.rs",
+      "capability": "Planning output demand",
+      "workload": "Discard a qualified column with a 4 MiB qualifier under a 32 KiB planning allowance, with and without the same previously retained privilege. Exercise caller-owned and admitted query plans.",
+      "invariant": "Adding a new identity reports 53200 before copying its name. A previously retained identity permits pruning to a typed NULL without copying the qualifier or losing its privilege. Temporary reservations are released on both paths.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "discarded_output_replacements_respect_the_operation_budget_before_publication",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/derived_projection/tests/demand.rs",
+      "capability": "Planning output demand",
+      "workload": "Discard all 128 integer output expressions using a 4 KiB allowance, then repeat with 1 MiB.",
+      "invariant": "Exhaustion returns 53200 with the original query intact. Sufficient memory produces 128 typed NULLs and releases the workspace on return.",
       "case_names": [
         ""
       ]
@@ -39820,6 +39885,19 @@
       "capability": "View mutation authorization ownership",
       "workload": "Four MiB unused definitions and arenas, all mutation kinds and table/column privilege masks, small allowances, both cancellations and callback failure/unwind.",
       "invariant": "Authorization borrows immutable inputs, admits selected subjects and scratch, preserves complete ACL validation and error order, and releases exact request ownership."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_subquery_authorizes_block_and_lateral_input_columns_in_their_own_scopes",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/semantics/privileges/ownership_tests.rs",
+      "capability": "Scoped authorization of shared correlated subqueries",
+      "workload": "Reuse a subquery slot in a lateral function argument and a discarded projection with different visible inputs.",
+      "invariant": "The required columns include the outer relation from the lateral argument and the inner relation from the projection.",
+      "case_names": [
+        ""
+      ]
     },
     {
       "package": "uqa-sql",
@@ -75543,6 +75621,71 @@
       "capability": "Retained scalar-query compaction",
       "workload": "Select every CASE child by index and skip each suffix after every previously consumed prefix.",
       "invariant": "Preserve base, condition/result and ELSE order, exact remaining lengths and mutable reference uniqueness without rescanning skipped slice elements.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "projection_privilege_slots_follow_compaction_in_both_query_owners",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/mutable/arenas/tests.rs",
+      "capability": "Retained scalar-query compaction",
+      "workload": "Compact an arena with one unused child, one authorization-only child and one evaluated child, using immediate and single-step execution.",
+      "invariant": "Preserve both retained children and their remapped slots, keep only the evaluated slot in its projection and release both memory budgets.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "projection_privilege_owners_release_columns_and_replaced_slot_buffers_independently",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/mutable/arenas/tests.rs",
+      "capability": "Projection privilege memory",
+      "workload": "Capture and copy column and subquery privileges, add a second slot, clear the columns and release the remaining slots.",
+      "invariant": "Both constructors retain exactly the surviving slot capacity and return to the original allowance after clearing the privileges.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "materialized_definitions_with_discarded_consumers_are_planned_without_scheduling_rows",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/semantics/cte_strategy/tests/control.rs",
+      "capability": "Referenced CTE planning",
+      "workload": "Compare eight SELECT and DELETE statements with folded, volatile, materialized and multiply referenced definitions, with and without a catalog.",
+      "invariant": "Planning includes referenced materialized definitions and their dependencies. None of the discarded consumers schedules a row.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "materialized_cte_in_discarded_projection_is_planned_but_never_read",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/sql_cte.rs",
+      "capability": "Materialized CTE execution",
+      "workload": "Discard and then read a scalar projection that references a sequence through a materialized CTE. Compare SELECT and EXPLAIN on a constant division.",
+      "invariant": "An unread CTE leaves the sequence uncalled. A materialized division reports 22012 during planning and a folded division with a discarded consumer returns 7.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "projection_privilege_slots_remain_in_their_source_during_transfer",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/mutable/arenas/tests.rs",
+      "capability": "Retained scalar-query compaction",
+      "workload": "Move an exclusive scalar child and then request a transfer of the remaining privilege-only child.",
+      "invariant": "Remap the retained authority to the surviving source slot, decline its transfer without changing either arena and release all reservations.",
       "case_names": [
         ""
       ]

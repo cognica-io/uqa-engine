@@ -62,6 +62,7 @@ fn query_block(filter: ScalarExpr, from: SourcePlan) -> QueryBlockPlan {
     QueryBlockPlan {
         deferred_outer_rewrites: Vec::new(),
         privilege_columns: uqa_core::memory::OwnedSet::new(),
+        privilege_subqueries: Vec::new(),
         projections: Vec::new(),
         from: Some(from),
         r#where: Some(filter),

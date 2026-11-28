@@ -28,7 +28,7 @@ pub(super) fn push(
     if !uqa_sql::semantics::expr_contains_subquery(predicate)
         || block.subqueries.is_empty()
         || !block.locking.is_empty()
-        || !block.privilege_columns.is_empty()
+        || block.has_projection_privileges()
     {
         return Ok(query);
     }
@@ -59,7 +59,7 @@ pub(super) fn push(
     };
     if !crate::filter_pushdown::owned::accepts_output_predicates(producer)
         || !producer.locking.is_empty()
-        || !producer.privilege_columns.is_empty()
+        || producer.has_projection_privileges()
     {
         return Ok(query);
     }
@@ -217,7 +217,7 @@ fn simple_exists(
         || block.limit.is_some()
         || block.offset.is_some()
         || !block.locking.is_empty()
-        || !block.privilege_columns.is_empty()
+        || block.has_projection_privileges()
         || !block.subqueries.is_empty()
     {
         return Ok(None);

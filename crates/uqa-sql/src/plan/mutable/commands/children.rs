@@ -32,20 +32,30 @@ impl MutableCommandPlan {
 
     /// Rewrite a command-owned query while observing the command's unchanged namespace. The selected query temporarily becomes empty in its original container.
     pub fn map_query_child_with_parent(
-        mut self,
+        self,
         slot: CommandQuerySlot,
         control: &ProductionControl<'_>,
         map: impl FnOnce(&CommandPlan, MutableQueryPlan) -> Result<MutableQueryPlan, SQLError>,
     ) -> Result<Self, SQLError> {
+        self.try_map_query_child_with_parent(slot, control, map)
+    }
+
+    /// Map a command query in its namespace while retaining the callback's typed error.
+    pub fn try_map_query_child_with_parent<E: From<SQLError>>(
+        mut self,
+        slot: CommandQuerySlot,
+        control: &ProductionControl<'_>,
+        map: impl FnOnce(&CommandPlan, MutableQueryPlan) -> Result<MutableQueryPlan, E>,
+    ) -> Result<Self, E> {
         self.assert_owner(control);
-        control.check()?;
+        control.check().map_err(SQLError::from)?;
         let Some(mut position) = self.query_slot(slot) else {
             return Ok(self);
         };
         let input = position.take();
         let output = map(&self.command, input)?;
         output.assert_owner(control);
-        control.check()?;
+        control.check().map_err(SQLError::from)?;
         self.query_slot(slot)
             .expect("original command query")
             .restore(output);
@@ -62,19 +72,28 @@ impl MutableCommandPlan {
 
     /// Rewrite UPDATE/DELETE/MERGE's source without copying its command-owned box or scalar siblings.
     pub fn map_source_with_parent(
-        mut self,
+        self,
         control: &ProductionControl<'_>,
         map: impl FnOnce(&CommandPlan, MutableSourcePlan) -> Result<MutableSourcePlan, SQLError>,
     ) -> Result<Self, SQLError> {
+        self.try_map_source_with_parent(control, map)
+    }
+
+    /// Map a command source in its namespace while retaining the callback's typed error.
+    pub fn try_map_source_with_parent<E: From<SQLError>>(
+        mut self,
+        control: &ProductionControl<'_>,
+        map: impl FnOnce(&CommandPlan, MutableSourcePlan) -> Result<MutableSourcePlan, E>,
+    ) -> Result<Self, E> {
         self.assert_owner(control);
-        control.check()?;
+        control.check().map_err(SQLError::from)?;
         let Some(mut slot) = self.source_slot() else {
             return Ok(self);
         };
         let input = slot.take();
         let output = map(&self.command, input)?;
         output.assert_owner(control);
-        control.check()?;
+        control.check().map_err(SQLError::from)?;
         self.source_slot()
             .expect("original command source")
             .restore(output);
