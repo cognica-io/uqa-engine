@@ -59,6 +59,7 @@ fn verify_catalog_allocation(engine: &Engine, temporary: bool) {
     let mut allocator = engine
         .catalog_identity_reservation_context()
         .allocator(uqa_execution::catalog::identity::allocate_catalog_object_id);
+    let initial = engine.restored_catalog_read_view();
     CATALOG_CAPTURES.set(0);
     let mut assigned = std::collections::BTreeSet::new();
     for _ in 0..20 {
@@ -67,7 +68,7 @@ fn verify_catalog_allocation(engine: &Engine, temporary: bool) {
             .unwrap();
         assert!(assigned.insert(oid));
     }
-    assert_eq!(CATALOG_CAPTURES.get(), 1);
+    assert_eq!(CATALOG_CAPTURES.get(), 0);
 
     engine
         .sql(
@@ -88,18 +89,24 @@ fn verify_catalog_allocation(engine: &Engine, temporary: bool) {
         object_id: [9; 16],
         oid: *oid,
     };
+    let private = engine.restored_catalog_read_view();
+    assert!(!std::ptr::eq(initial.snapshot(), private.snapshot()));
     CATALOG_CAPTURES.set(0);
-    assert!(allocator
+    let conflict = allocator
         .include_catalog_identity(&owner, CatalogOidClass::Constraint, identity)
-        .is_err());
-    assert_eq!(CATALOG_CAPTURES.get(), 1);
+        .unwrap_err()
+        .into_sql_error();
+    assert_eq!(conflict.sqlstate(), Some("XX000"));
+    assert_eq!(CATALOG_CAPTURES.get(), 0);
 
     engine.sql("ROLLBACK TO before_check", &[]).unwrap();
+    let restored = engine.restored_catalog_read_view();
+    assert!(!std::ptr::eq(private.snapshot(), restored.snapshot()));
     CATALOG_CAPTURES.set(0);
     allocator
         .include_catalog_identity(&owner, CatalogOidClass::Constraint, identity)
         .unwrap();
-    assert_eq!(CATALOG_CAPTURES.get(), 1);
+    assert_eq!(CATALOG_CAPTURES.get(), 0);
     engine.sql("ROLLBACK", &[]).unwrap();
     assert_eq!(
         engine
