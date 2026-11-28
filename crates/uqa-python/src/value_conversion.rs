@@ -6,11 +6,16 @@
 
 //! Bidirectional conversion between Python objects and UQA values.
 
+use pyo3::{sync::PyOnceLock, types::PyType};
+
 use super::{
     BTreeMap, Bound, DecimalValue, IntoPyObjectExt, Py, PyAny, PyAnyMethods, PyBool, PyBytes,
     PyBytesMethods, PyDict, PyDictMethods, PyFloat, PyInt, PyIterator, PyList, PyListMethods,
     PyResult, PyString, PyTuple, PyTypeError, PyValueError, Python, TemporalValue, Value,
 };
+
+static DECIMAL: PyOnceLock<Py<PyType>> = PyOnceLock::new();
+static JSON_LOADS: PyOnceLock<Py<PyAny>> = PyOnceLock::new();
 
 pub(super) fn value_from_py(value: &Bound<'_, PyAny>) -> PyResult<Value> {
     if value.is_none() {
@@ -25,13 +30,6 @@ pub(super) fn value_from_py(value: &Bound<'_, PyAny>) -> PyResult<Value> {
     if value.is_instance_of::<PyFloat>() {
         return Ok(Value::Float(value.extract()?));
     }
-    let decimal_type = value.py().import("decimal")?.getattr("Decimal")?;
-    if value.is_instance(&decimal_type)? {
-        let text = value.str()?.extract::<String>()?;
-        return DecimalValue::parse(&text)
-            .map(Value::Decimal)
-            .ok_or_else(|| PyValueError::new_err(format!("invalid decimal value {text}")));
-    }
     if value.is_instance_of::<PyString>() {
         return Ok(Value::Str(value.extract()?));
     }
@@ -44,6 +42,16 @@ pub(super) fn value_from_py(value: &Bound<'_, PyAny>) -> PyResult<Value> {
             out.insert(key.extract::<String>()?, value_from_py(&value)?);
         }
         return Ok(Value::Map(out));
+    }
+    // Preserve Python's iteration protocol for list and tuple subclasses.
+    if !value.is_instance_of::<PyList>()
+        && !value.is_instance_of::<PyTuple>()
+        && value.is_instance(DECIMAL.import(value.py(), "decimal", "Decimal")?)?
+    {
+        let text = value.str()?.extract::<String>()?;
+        return DecimalValue::parse(&text)
+            .map(Value::Decimal)
+            .ok_or_else(|| PyValueError::new_err(format!("invalid decimal value {text}")));
     }
     let iterator = PyIterator::from_object(value)?;
     let values = iterator
@@ -65,9 +73,10 @@ pub(super) fn value_to_py(py: Python<'_>, value: &Value) -> PyResult<Py<PyAny>> 
         Value::Float(value) => value.into_py_any(py),
         Value::Decimal(value) => decimal_to_py(py, value),
         Value::Str(value) | Value::FixedChar(value) => value.into_py_any(py),
-        Value::Json(value) | Value::JsonB(value) => {
-            Ok(py.import("json")?.call_method1("loads", (value,))?.unbind())
-        }
+        Value::Json(value) | Value::JsonB(value) => Ok(JSON_LOADS
+            .import(py, "json", "loads")?
+            .call1((value,))?
+            .unbind()),
         Value::Bytes(value) => Ok(PyBytes::new(py, value).into_any().unbind()),
         Value::BitString(_) => uqa_sql::expr::value_to_string(value)
             .map_err(super::errors::runtime_error)?
@@ -113,7 +122,7 @@ pub(super) fn temporal_to_string(value: &TemporalValue) -> String {
 }
 
 pub(super) fn decimal_to_py(py: Python<'_>, value: &DecimalValue) -> PyResult<Py<PyAny>> {
-    let decimal_type = py.import("decimal")?.getattr("Decimal")?;
+    let decimal_type = DECIMAL.import(py, "decimal", "Decimal")?;
     Ok(decimal_type.call1((value.to_sql_string(),))?.unbind())
 }
 
@@ -123,14 +132,6 @@ pub(super) fn map_to_py(py: Python<'_>, values: &BTreeMap<String, Value>) -> PyR
         dict.set_item(key, value_to_py(py, value)?)?;
     }
     Ok(dict.into_any().unbind())
-}
-
-pub(super) fn rows_to_py(py: Python<'_>, rows: &[BTreeMap<String, Value>]) -> PyResult<Py<PyAny>> {
-    let list = PyList::empty(py);
-    for row in rows {
-        list.append(map_to_py(py, row)?)?;
-    }
-    Ok(list.into_any().unbind())
 }
 
 pub(super) fn float_map_to_py(

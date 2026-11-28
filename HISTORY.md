@@ -14,6 +14,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - The Rust HTTP client reads successive rows from a streamed SQL response without copying the remaining rows after each frame.
 
+- The Python binding reuses result column names, Decimal and JSON converters, and each aggregate group’s callback methods.
+
 - Grouped aggregates retain only the state needed for each function. Ordered aggregates spill binary records and merge them in SQL order. Hash joins, DISTINCT and equality-based MERGE use bounded disk indexes as their inputs grow.
 
 - Prepared SQL expressions reuse numeric operand types, builtin signatures, and row and array descriptors across input rows. Scalar function callbacks receive the original argument payloads.

@@ -66,9 +66,7 @@ use output::{
 };
 use params::{scalar, tensor, vector, PySQLParam};
 use result::PySQLResult;
-use value_conversion::{
-    float_map_from_py, float_map_to_py, map_to_py, rows_to_py, value_from_py, value_to_py,
-};
+use value_conversion::{float_map_from_py, float_map_to_py, map_to_py, value_from_py, value_to_py};
 
 #[pyclass(name = "Engine", module = "uqa._uqa")]
 struct PyEngine {

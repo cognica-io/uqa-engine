@@ -61,52 +61,55 @@ pub(super) struct PyAggregateFunction {
 
 impl SQLAggregateFunction for PyAggregateFunction {
     fn create_state(&self) -> Box<dyn SQLAggregateState> {
-        Python::attach(|py| match self.factory.bind(py).call0() {
-            Ok(state) => Box::new(PyAggregateStateWrapper {
+        Python::attach(|py| {
+            let methods = self
+                .factory
+                .bind(py)
+                .call0()
+                .map_err(|err| py_error_to_sql(py, &self.name, "create aggregate state", err))
+                .map(|state| {
+                    let method = |name, alternate, action| {
+                        state
+                            .getattr(name)
+                            .or_else(|_| state.getattr(alternate))
+                            .map(pyo3::Bound::unbind)
+                            .map_err(|err| py_error_to_sql(py, &self.name, action, err))
+                    };
+                    AggregateMethods {
+                        observe: method("observe", "step", "find aggregate observe"),
+                        finish: method("finish", "finalize", "find aggregate finish"),
+                        _state: state.unbind(),
+                    }
+                });
+            Box::new(PyAggregateStateWrapper {
                 name: self.name.clone(),
-                state: Some(state.unbind()),
-                init_error: None,
-            }),
-            Err(err) => Box::new(PyAggregateStateWrapper {
-                name: self.name.clone(),
-                state: None,
-                init_error: Some(py_error_to_sql(
-                    py,
-                    &self.name,
-                    "create aggregate state",
-                    err,
-                )),
-            }),
+                methods,
+            }) as Box<dyn SQLAggregateState>
         })
     }
 }
 
+struct AggregateMethods {
+    observe: Result<Py<PyAny>, SQLError>,
+    finish: Result<Py<PyAny>, SQLError>,
+    // Static methods and callable attributes may not retain the factory's state object.
+    _state: Py<PyAny>,
+}
+
 struct PyAggregateStateWrapper {
-    pub(super) name: String,
-    state: Option<Py<PyAny>>,
-    init_error: Option<SQLError>,
+    name: String,
+    methods: Result<AggregateMethods, SQLError>,
 }
 
 impl SQLAggregateState for PyAggregateStateWrapper {
     fn observe(&mut self, args: &[Value]) -> Result<(), SQLError> {
-        if let Some(err) = self.init_error.take() {
-            return Err(err);
-        }
-        let Some(state) = self.state.as_ref() else {
-            return Err(SQLError::Internal(format!(
-                "Python aggregate `{}` has no state",
-                self.name
-            )));
-        };
+        let methods = self.methods.as_ref().map_err(Clone::clone)?;
+        let observe = methods.observe.as_ref().map_err(Clone::clone)?;
         Python::attach(|py| {
-            let method = state
-                .bind(py)
-                .getattr("observe")
-                .or_else(|_| state.bind(py).getattr("step"))
-                .map_err(|err| py_error_to_sql(py, &self.name, "find aggregate observe", err))?;
             let py_args = values_to_py_tuple(py, args)
                 .map_err(|err| py_error_to_sql(py, &self.name, "prepare aggregate args", err))?;
-            method
+            observe
+                .bind(py)
                 .call1(py_args)
                 .map(|_| ())
                 .map_err(|err| py_error_to_sql(py, &self.name, "observe aggregate value", err))
@@ -114,22 +117,14 @@ impl SQLAggregateState for PyAggregateStateWrapper {
     }
 
     fn finish(&self) -> Result<Value, SQLError> {
-        if let Some(err) = self.init_error.as_ref() {
-            return Err(SQLError::Internal(err.to_string()));
-        }
-        let Some(state) = self.state.as_ref() else {
-            return Err(SQLError::Internal(format!(
-                "Python aggregate `{}` has no state",
-                self.name
-            )));
-        };
+        let methods = self
+            .methods
+            .as_ref()
+            .map_err(|err| SQLError::Internal(err.to_string()))?;
+        let finish = methods.finish.as_ref().map_err(Clone::clone)?;
         Python::attach(|py| {
-            let method = state
+            let result = finish
                 .bind(py)
-                .getattr("finish")
-                .or_else(|_| state.bind(py).getattr("finalize"))
-                .map_err(|err| py_error_to_sql(py, &self.name, "find aggregate finish", err))?;
-            let result = method
                 .call0()
                 .map_err(|err| py_error_to_sql(py, &self.name, "finish aggregate", err))?;
             value_from_py(&result)
