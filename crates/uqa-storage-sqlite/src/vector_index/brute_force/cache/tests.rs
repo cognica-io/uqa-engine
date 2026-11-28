@@ -25,6 +25,40 @@ fn nearest(index: &SQLiteVectorIndex, query: &[f32]) -> Vec<DocId> {
 }
 
 #[test]
+fn retained_coordinates_keep_one_flat_tensor_and_reuse_norms_across_queries() {
+    let (_, mut index) = fixture();
+    index
+        .add_many(3, vec![vec![3.0, 4.0], vec![-4.0, 3.0]])
+        .unwrap();
+    let first = index.search_knn(&[1.0, 0.0], 3).unwrap();
+    let cached = index
+        .cached_vectors
+        .read()
+        .as_ref()
+        .unwrap()
+        .coordinates
+        .clone();
+    assert_eq!(
+        &cached.values[..],
+        &[1.0, 0.0, 0.0, 1.0, 3.0, 4.0, -4.0, 3.0]
+    );
+    assert_eq!(&cached.rows[..], &[(1, 1.0), (2, 1.0), (3, 5.0), (3, 5.0)]);
+    assert_eq!(
+        first.entries()[2].payload.score.to_bits(),
+        f64::from(0.6_f32).to_bits()
+    );
+    let next = index.search_knn(&[0.0, 1.0], 3).unwrap();
+    assert_eq!(
+        next.entries()[2].payload.score.to_bits(),
+        f64::from(0.8_f32).to_bits()
+    );
+    let warm = index.cached_vectors.read();
+    let warm = &warm.as_ref().unwrap().coordinates;
+    assert_eq!(cached.values.as_ptr(), warm.values.as_ptr());
+    assert_eq!(cached.rows.as_ptr(), warm.rows.as_ptr());
+}
+
+#[test]
 fn exact_cache_keeps_committed_private_and_rolled_back_vector_generations() {
     let (connection, mut index) = fixture();
     assert_eq!(nearest(&index, &[1.0, 0.0]), [1]);

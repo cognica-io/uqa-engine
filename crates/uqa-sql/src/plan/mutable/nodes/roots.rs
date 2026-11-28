@@ -47,6 +47,33 @@ pub(super) struct Immediate<'a, 'b> {
     pub(super) work: (),
 }
 
+pub(super) struct MapRoots<'a, F> {
+    pub(super) map: F,
+    pub(super) storage: ProductionControl<'a>,
+    pub(super) work: (),
+}
+
+impl<F> Input for MapRoots<'_, F>
+where
+    F: FnMut(super::OwnedScalarExpr) -> Result<super::OwnedScalarExpr, SQLError>,
+{
+    type Work = ();
+
+    fn work(&mut self) -> &mut Self::Work {
+        &mut self.work
+    }
+
+    fn scalar(
+        &mut self,
+        expression: &mut ScalarExpr,
+        memory: Option<&mut Option<ScalarMemory>>,
+        _: &ProductionControl<'_>,
+    ) -> impl Future<Output = Result<(), SQLError>> + Send {
+        let slot = super::super::edits::Slot::new(expression, memory);
+        std::future::ready(slot.rewrite(&self.storage, &mut self.map))
+    }
+}
+
 impl Input for Immediate<'_, '_> {
     type Work = ();
     fn work(&mut self) -> &mut () {
@@ -124,6 +151,7 @@ pub(in crate::plan::mutable) async fn query<I: Input>(
             }
         }
     }
+    control.check()?;
     Ok(())
 }
 

@@ -8,7 +8,7 @@
 
 use super::{
     decision::{Decision, Memo},
-    JoinEdge, JoinGraph, MAX_DP_RELATIONS,
+    JoinGraph, MAX_DP_RELATIONS,
 };
 use crate::cost_model::{CostEstimator, OperatorKind};
 use uqa_core::{
@@ -94,28 +94,17 @@ impl<'g, 'a> Search<'g, 'a> {
         self.decisions.produce(mask).map(Some)
     }
 
-    fn edges(&self, left: u64, right: u64) -> impl Iterator<Item = &JoinEdge> {
-        self.graph.edges.iter().filter(move |edge| {
-            (edge.left & left != 0 && edge.right & right != 0)
-                || (edge.right & left != 0 && edge.left & right != 0)
-        })
-    }
-
     fn join(
         &self,
         left: Decision,
         right: Decision,
     ) -> Result<Option<Decision>, ValueRetentionError> {
         self.control.check()?;
-        let mut edges = self.edges(left.relations, right.relations).peekable();
-        let Some(&&edge) = edges.peek() else {
+        let mut edges = self.graph.connecting_edges(left.relations, right.relations);
+        let Some(first) = edges.next() else {
             return Ok(None);
         };
         let mut cardinality = left.cardinality * right.cardinality;
-        for edge in edges {
-            self.control.check()?;
-            cardinality *= edge.selectivity;
-        }
         let kind = OperatorKind::HashJoinInner;
         let join_cost = self
             .cost
@@ -127,15 +116,21 @@ impl<'g, 'a> Search<'g, 'a> {
             cost: join_cost + left.cost + right.cost,
             left: left.relations,
             right: right.relations,
-            edge: Some(edge),
+            edge: Some(*first),
             kind: Some(kind),
         };
-        for edge in self.edges(left.relations, right.relations) {
+        let mut index_limit = None;
+        let mut costed = [false; 2];
+        for edge in std::iter::once(first).chain(edges) {
             self.control.check()?;
-            for (outer, inner) in [(left, right), (right, left)] {
-                if edge.lookup_column(inner.relations).is_none() {
+            cardinality *= edge.selectivity;
+            for (direction, (outer, inner)) in
+                [(left, right), (right, left)].into_iter().enumerate()
+            {
+                if costed[direction] || edge.lookup_column(inner.relations).is_none() {
                     continue;
                 }
+                costed[direction] = true;
                 let probe_cost = self
                     .cost
                     .estimate_join(
@@ -146,18 +141,16 @@ impl<'g, 'a> Search<'g, 'a> {
                     .total();
                 let cost = outer.cost + probe_cost;
                 if cost < best.cost {
-                    best = Decision {
-                        relations: best.relations,
-                        cardinality: cardinality.min(outer.cardinality),
-                        cost,
-                        left: outer.relations,
-                        right: inner.relations,
-                        edge: Some(*edge),
-                        kind: Some(OperatorKind::IndexJoin),
-                    };
+                    best.cost = cost;
+                    best.left = outer.relations;
+                    best.right = inner.relations;
+                    best.edge = Some(*edge);
+                    best.kind = Some(OperatorKind::IndexJoin);
+                    index_limit = Some(outer.cardinality);
                 }
             }
         }
+        best.cardinality = index_limit.map_or(cardinality, |outer| cardinality.min(outer));
         Ok(Some(best))
     }
 
@@ -174,23 +167,21 @@ impl<'g, 'a> Search<'g, 'a> {
             let mut current = ProductionVec::new(self.control);
             for &mask in previous.iter() {
                 self.control.check()?;
-                let lowest = mask.trailing_zeros() as usize;
+                let mut adjacent = 0;
                 let mut nodes = mask;
                 while nodes != 0 {
-                    let node = nodes.trailing_zeros() as usize;
+                    adjacent |= self.neighbors[nodes.trailing_zeros() as usize];
                     nodes &= nodes - 1;
-                    let mut neighbors = self.neighbors[node] & !mask;
-                    while neighbors != 0 {
-                        let neighbor = neighbors.trailing_zeros() as usize;
-                        neighbors &= neighbors - 1;
-                        if neighbor <= lowest {
-                            continue;
-                        }
-                        let combined = mask | (1_u64 << neighbor);
-                        if connected.get(combined).is_none() {
-                            connected.insert(combined, ())?;
-                            current.push_copy(combined)?;
-                        }
+                }
+                let lowest = mask & mask.wrapping_neg();
+                adjacent &= !(mask | (lowest - 1));
+                while adjacent != 0 {
+                    let next = adjacent & adjacent.wrapping_neg();
+                    adjacent ^= next;
+                    let combined = mask | next;
+                    if connected.get(combined).is_none() {
+                        connected.insert(combined, ())?;
+                        current.push_copy(combined)?;
                     }
                 }
             }

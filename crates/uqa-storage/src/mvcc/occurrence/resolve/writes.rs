@@ -44,7 +44,7 @@ impl ResolvedChanges {
             .expect("an active occurrence resolution")
         {
             Target::Ordered(builder) => builder.push(write, control),
-            Target::Merged(changes) => changes.apply_owned(&[write], control),
+            Target::Merged(changes) => changes.adopt_write(&write, control),
         }
     }
 

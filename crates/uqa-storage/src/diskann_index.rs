@@ -33,7 +33,12 @@ pub use memory::{DiskANNMemoryIndex, DiskANNMemoryOptions};
 pub use metadata::DiskANNQueryMetadata;
 pub use metric::{ExactVectorReason, NavigationInput, NavigationVector, SquaredNavigationDistance};
 pub use options::DiskANNIndexOptions;
-pub use persistent::{DiskANNIndexBinding, DiskANNPersistentOwner, PersistentDiskANNIndex};
+pub use persistent::{
+    DiskANNAdoptedOrigins, DiskANNBoundRead, DiskANNIndexBinding, DiskANNLifecycle,
+    DiskANNLiveBinding, DiskANNMutationView, DiskANNPersistentBackend, DiskANNPersistentOwner,
+    DiskANNRetainedMutation, PersistentDiskANNHandle, PersistentDiskANNIndex,
+    PersistentDiskANNMaintenance,
+};
 pub use pq::{
     PQCodebook, PQDistance, PQLookupTable, PQTrainer, PQTrainingOptions, PQTrainingSummary,
 };

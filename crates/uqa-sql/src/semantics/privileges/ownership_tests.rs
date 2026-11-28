@@ -308,3 +308,160 @@ fn target_privilege_scope_borrows_arenas_and_restores_inherited_authority() {
     drop(scope);
     assert_eq!(budget.used(), 0);
 }
+
+#[test]
+fn discarded_projection_subqueries_preserve_relation_and_column_authority() {
+    let catalog = Catalog::new(vec!["id".into(), "measurement".into()]);
+    let memory = MemoryBudget::new(1 << 20);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&memory, &token, &token);
+    let scope = catalog.scope(&control);
+    let mut source = query("SELECT (SELECT s.measurement FROM public.samples AS s WHERE s.id = o.id), EXISTS (SELECT 1 FROM public.events), o.id IN (SELECT id FROM public.lookup) FROM public.outer_input AS o");
+    let check = |source: &QueryPlan| {
+        let mut universe = SourceLineage::default();
+        let mut required = Required::new();
+        analyze_query_plan(source, &scope, &[], &mut universe, &mut required).unwrap();
+        let tables = universe
+            .tables
+            .iter()
+            .map(|(table, _)| table.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            tables,
+            [
+                "public.events",
+                "public.lookup",
+                "public.outer_input",
+                "public.samples"
+            ]
+        );
+        let columns = required
+            .iter()
+            .map(|col| (col.table.as_str(), col.column.as_str()))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            columns,
+            [
+                ("public.lookup", "id"),
+                ("public.outer_input", "id"),
+                ("public.samples", "id"),
+                ("public.samples", "measurement")
+            ]
+        );
+        ensure_required_select(&universe, &required, &scope).unwrap();
+    };
+    check(&source);
+    let RelationalPlan::QueryBlock(block) = &mut source.root else {
+        panic!("query block")
+    };
+    block
+        .preserve_projection_privileges([2, 0], &control)
+        .unwrap();
+    block
+        .preserve_projection_privileges([1, 0], &control)
+        .unwrap();
+    assert_eq!(block.privilege_subqueries, [0, 1, 2]);
+    for projection in &mut block.projections {
+        projection.expr = ScalarExpr::Literal(uqa_core::Value::Null);
+    }
+    crate::plan::subqueries::prune_query_with_control(&mut source, control).unwrap();
+    check(&source);
+    drop(scope);
+    assert_eq!(memory.used(), 0);
+}
+
+#[test]
+fn discarded_projection_subqueries_keep_cte_authority_without_materializing_definitions() {
+    let catalog = Catalog::new(vec!["id".into()]);
+    let memory = MemoryBudget::new(1 << 20);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&memory, &token, &token);
+    let scope = catalog.scope(&control);
+    let mut plan = query("WITH cold AS (SELECT id FROM public.samples), chain AS (SELECT (SELECT id FROM cold) AS id) SELECT (SELECT id FROM chain) AS discarded, 7 AS used");
+
+    let verify = |plan: &QueryPlan, executed: &[bool]| {
+        let analysis = CteAnalysis::query(plan, control).unwrap();
+        assert_eq!(analysis.reachable().unwrap().as_slice(), executed);
+        for index in 0..plan.ctes.len() {
+            assert!(analysis.single_reference(index));
+        }
+        let mut universe = SourceLineage::default();
+        let mut required = Required::new();
+        analyze_query_plan(plan, &scope, &[], &mut universe, &mut required).unwrap();
+        assert_eq!(
+            universe
+                .tables
+                .iter()
+                .map(|(table, _)| table.as_str())
+                .collect::<Vec<_>>(),
+            ["public.samples"],
+        );
+        assert_eq!(
+            required
+                .iter()
+                .map(|col| (col.table.as_str(), col.column.as_str()))
+                .collect::<Vec<_>>(),
+            [("public.samples", "id")],
+        );
+        ensure_required_select(&universe, &required, &scope).unwrap();
+    };
+    verify(&plan, &[true, true]);
+
+    let RelationalPlan::QueryBlock(block) = &mut plan.root else {
+        panic!("block")
+    };
+    block.preserve_projection_privileges([0], &control).unwrap();
+    let shared = std::mem::replace(
+        &mut block.projections[0].expr,
+        ScalarExpr::Literal(uqa_core::Value::Null),
+    );
+    verify(&plan, &[false, false]);
+
+    let RelationalPlan::QueryBlock(block) = &mut plan.root else {
+        panic!("block")
+    };
+    block.projections[1].expr = shared;
+    verify(&plan, &[true, true]);
+
+    let crate::plan::CtePlanBody::Query(chain) = &mut plan.ctes[1].body else {
+        panic!("CTE query")
+    };
+    let RelationalPlan::QueryBlock(block) = &mut chain.root else {
+        panic!("CTE block")
+    };
+    block.preserve_projection_privileges([0], &control).unwrap();
+    block.projections[0].expr = ScalarExpr::Literal(uqa_core::Value::Null);
+    verify(&plan, &[false, true]);
+    drop(scope);
+    assert_eq!(memory.used(), 0);
+}
+
+#[test]
+fn retained_subquery_authorizes_block_and_lateral_input_columns_in_their_own_scopes() {
+    let catalog = Catalog::new(vec!["id".into()]);
+    let control = ProductionControl::uncontrolled();
+    let scope = catalog.scope(&control);
+    let mut plan = query("SELECT (SELECT 1 FROM generate_series(1, (SELECT id)) AS g(n) CROSS JOIN public.inner_input) FROM public.outer_input");
+    let RelationalPlan::QueryBlock(outer) = &mut plan.root else {
+        panic!("outer query block")
+    };
+    let RelationalPlan::QueryBlock(inner) = &mut outer.subqueries[0].root else {
+        panic!("inner query block")
+    };
+    assert_eq!(inner.subqueries.len(), 1);
+    inner.projections[0].expr = ScalarExpr::ScalarSubquery(0);
+    inner.preserve_projection_privileges([0], &control).unwrap();
+    inner.projections[0].expr = ScalarExpr::Literal(uqa_core::Value::Null);
+
+    let mut universe = SourceLineage::default();
+    let mut required = Required::new();
+    analyze_query_plan(&plan, &scope, &[], &mut universe, &mut required).unwrap();
+    let columns: Vec<_> = required
+        .iter()
+        .map(|column| (column.table.as_str(), column.column.as_str()))
+        .collect();
+    assert_eq!(
+        columns,
+        [("public.inner_input", "id"), ("public.outer_input", "id")]
+    );
+}

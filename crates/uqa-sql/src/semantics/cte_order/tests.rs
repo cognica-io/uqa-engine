@@ -45,6 +45,16 @@ fn reachable_order_respects_lexical_names_dependencies_and_mandatory_writes() {
         let plan = lower_sql(sql);
         let result = order(&plan, ProductionControl::uncontrolled()).unwrap();
         assert_eq!(result.as_slice(), &expected, "{sql}");
+        let declarations = reachable_cte_declarations_with_control(
+            PlanRef::from(&plan),
+            ProductionControl::uncontrolled(),
+        ).unwrap();
+        let selected_positions = declarations.iter().enumerate()
+            .filter_map(|(index, selected)| selected.then_some(index))
+            .collect::<Vec<_>>();
+        let mut expected_declarations = expected;
+        expected_declarations.sort_unstable();
+        assert_eq!(selected_positions, expected_declarations, "{sql}");
         let (definitions, reachable) = match &plan {
             UnifiedPlan::Query(query) => (query.ctes.as_slice(), crate::semantics::reachable_plan_cte_names(query)),
             UnifiedPlan::Command(command) => (command.ctes(), crate::semantics::reachable_command_cte_names(command)),

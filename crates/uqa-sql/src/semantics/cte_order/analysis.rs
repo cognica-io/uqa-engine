@@ -23,6 +23,7 @@ pub(crate) struct CteAnalysis<'p, 'c> {
     dependencies: Produced<Vec<Vec<usize>>>,
     primary: ProductionVec<'c, bool>,
     counts: ProductionVec<'c, u8>,
+    selection: Selection,
     control: ProductionControl<'c>,
 }
 
@@ -39,6 +40,14 @@ impl<'p, 'c> CteAnalysis<'p, 'c> {
     pub(crate) fn new(
         plans: impl IntoIterator<Item = &'p CtePlan>,
         control: ProductionControl<'c>,
+    ) -> Result<Self, SQLError> {
+        Self::with_selection(plans, control, Selection::Reachable)
+    }
+
+    fn with_selection(
+        plans: impl IntoIterator<Item = &'p CtePlan>,
+        control: ProductionControl<'c>,
+        selection: Selection,
     ) -> Result<Self, SQLError> {
         control.check()?;
         let mut retained = ProductionVec::new(control);
@@ -77,7 +86,7 @@ impl<'p, 'c> CteAnalysis<'p, 'c> {
                     Ok(())
                 },
                 control,
-                Selection::Reachable,
+                selection,
             )?;
             let mut selected = selected.into_inner();
             selected.as_mut_slice().sort_unstable();
@@ -106,6 +115,7 @@ impl<'p, 'c> CteAnalysis<'p, 'c> {
             names,
             dependencies: dependencies.finish()?,
             counts: counts.into_inner(),
+            selection,
             control,
         })
     }
@@ -114,7 +124,15 @@ impl<'p, 'c> CteAnalysis<'p, 'c> {
         query: &'p QueryPlan,
         control: ProductionControl<'c>,
     ) -> Result<Self, SQLError> {
-        let mut analysis = Self::new(&query.ctes, control)?;
+        Self::query_with_selection(query, control, Selection::Reachable)
+    }
+
+    pub(in crate::semantics) fn query_with_selection(
+        query: &'p QueryPlan,
+        control: ProductionControl<'c>,
+        selection: Selection,
+    ) -> Result<Self, SQLError> {
+        let mut analysis = Self::with_selection(&query.ctes, control, selection)?;
         analysis.primary(|external, selection| {
             references::query_root(&query.root, external, control, selection)
         })?;
@@ -155,7 +173,7 @@ impl<'p, 'c> CteAnalysis<'p, 'c> {
                 }
                 Ok(())
             },
-            Selection::Reachable,
+            self.selection,
         )?;
         let counts = RefCell::new(&mut self.counts);
         visit(
@@ -201,6 +219,10 @@ impl<'p, 'c> CteAnalysis<'p, 'c> {
             .iter()
             .enumerate()
             .filter_map(|(index, present)| present.then_some(index))
+    }
+
+    pub(crate) fn has_reference(&self, index: usize) -> bool {
+        self.counts[index] != 0
     }
 
     pub(crate) fn single_reference(&self, index: usize) -> bool {

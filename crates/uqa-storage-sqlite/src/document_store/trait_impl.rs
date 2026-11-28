@@ -17,12 +17,13 @@ use super::{
 
 impl DocumentStore for SQLiteDocumentStore {
     fn put(&mut self, doc_id: DocId, document: Document) -> StorageBackendResult<()> {
+        let mut fields = document.into_iter();
         if self
             .write_native(|read, batch| {
                 read.put(
                     batch,
                     doc_id,
-                    &document,
+                    fields.by_ref(),
                     read.metadata(doc_id)?.unwrap_or_default(),
                     None,
                 )
@@ -32,7 +33,7 @@ impl DocumentStore for SQLiteDocumentStore {
             return Ok(());
         }
         let metadata = self.get_metadata(doc_id)?.unwrap_or_default();
-        self.put_stored_inner(doc_id, &document, metadata, None)?;
+        self.put_stored_inner(doc_id, fields, metadata, None)?;
         Ok(())
     }
 
@@ -42,7 +43,7 @@ impl DocumentStore for SQLiteDocumentStore {
 
     fn put_stored(&mut self, doc_id: DocId, document: StoredDocument) -> StorageBackendResult<()> {
         let (fields, metadata) = document.into_parts();
-        self.put_stored_inner(doc_id, &fields, metadata, None)?;
+        self.put_stored_inner(doc_id, fields.into_iter(), metadata, None)?;
         Ok(())
     }
 
@@ -53,7 +54,7 @@ impl DocumentStore for SQLiteDocumentStore {
         namespace: uqa_storage::document_store::identifiers::DocumentIdNamespace,
     ) -> StorageBackendResult<()> {
         let (fields, metadata) = document.into_parts();
-        self.put_stored_inner(doc_id, &fields, metadata, Some(namespace))?;
+        self.put_stored_inner(doc_id, fields.into_iter(), metadata, Some(namespace))?;
         Ok(())
     }
 

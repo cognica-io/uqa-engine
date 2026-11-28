@@ -32,7 +32,9 @@ pub use catalog::KeyValueCatalog;
 mod backup;
 pub use backup::{KeyValueBackupImage, KeyValueImageStep, KeyValueImageUnit};
 #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
-pub use backup::{KeyValueImageImportReader, KeyValueImportUnit};
+pub use backup::{
+    KeyValueImageImportDriver, KeyValueImageImportReader, KeyValueImageWriter, KeyValueImportUnit,
+};
 mod diskann;
 pub use diskann::backup::diskann_backup_membership;
 pub use diskann::identifiers as diskann_identifiers;
@@ -491,6 +493,16 @@ pub trait KeyValueStore: Send + Sync {
     fn with_mutation(&self, _mutate: &mut KeyValueMutation<'_>) -> StorageBackendResult<()> {
         Err(StorageBackendError::Other(
             "atomic KeyValue evaluation is not supported by this store".into(),
+        ))
+    }
+
+    /// Invoke the callback exactly once inside the caller's active transaction, or return false when the session is idle. Admission and staging share the transaction owner's lock. Returning false preserves the last commit receipt and all records.
+    fn try_with_transaction_mutation(
+        &self,
+        _mutate: &mut KeyValueMutation<'_>,
+    ) -> StorageBackendResult<bool> {
+        Err(StorageBackendError::Other(
+            "transaction-scoped KeyValue evaluation is not supported by this store".into(),
         ))
     }
 

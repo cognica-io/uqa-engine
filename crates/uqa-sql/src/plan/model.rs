@@ -209,7 +209,7 @@ pub enum RelationalPlan {
 
 /// One SELECT block after `WITH` and set-operation structure has been pulled
 /// into explicit parent/child nodes.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct QueryBlockPlan {
     /// Transient outer-column substitutions whose local namespace is supplied by a runtime row descriptor. Stored syntax never retains an execution's view rewrite.
     #[serde(skip)]
@@ -221,6 +221,9 @@ pub struct QueryBlockPlan {
     /// Analyzed column reads retained when unused outputs are removed. These names authorize access but never evaluate the discarded values.
     #[serde(default, skip_serializing_if = "uqa_core::memory::OwnedSet::is_empty")]
     pub privilege_columns: uqa_core::memory::OwnedSet<crate::ColumnIdentity>,
+    /// Local scalar-query slots whose relation and column privileges are still required after an output is pruned.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub privilege_subqueries: Vec<usize>,
     pub from: Option<SourcePlan>,
     pub r#where: Option<ScalarExpr>,
     pub compute: ComputePlan,
@@ -241,6 +244,39 @@ pub struct QueryBlockPlan {
     /// `FOR UPDATE` / `FOR SHARE` clauses belonging to this query block.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub locking: Vec<crate::ast::LockingClause>,
+}
+
+// Nested query blocks also appear in the text EXPLAIN representation.
+impl std::fmt::Debug for QueryBlockPlan {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut block = formatter.debug_struct("QueryBlockPlan");
+        block
+            .field("deferred_outer_rewrites", &self.deferred_outer_rewrites)
+            .field("windows", &self.windows)
+            .field("projections", &self.projections)
+            .field("privilege_columns", &self.privilege_columns);
+        if !self.privilege_subqueries.is_empty() {
+            block.field("privilege_subqueries", &self.privilege_subqueries);
+        }
+        block
+            .field("from", &self.from)
+            .field("where", &self.r#where)
+            .field("compute", &self.compute)
+            .field("group_by", &self.group_by)
+            .field("grouping_sets", &self.grouping_sets)
+            .field("group_distinct", &self.group_distinct)
+            .field("having", &self.having)
+            .field("order_by", &self.order_by)
+            .field("limit", &self.limit)
+            .field("with_ties", &self.with_ties)
+            .field("offset", &self.offset)
+            .field("distinct", &self.distinct)
+            .field("distinct_on", &self.distinct_on)
+            .field("subqueries", &self.subqueries)
+            .field("access", &self.access)
+            .field("locking", &self.locking)
+            .finish()
+    }
 }
 
 /// Cross-paradigm access decision made after the relational and scalar

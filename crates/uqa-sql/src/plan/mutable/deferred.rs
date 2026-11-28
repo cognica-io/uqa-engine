@@ -7,8 +7,8 @@
 //! Deferred substitutions move with their exact item owners while source and scalar arenas retain their original namespaces.
 
 use super::{
-    Copying, MutableQueryPlan, RelationalPlan, RewriteMemory, ScalarArenaTransform,
-    ScalarQueryArena,
+    metadata::block_memory, Copying, MutableQueryPlan, RelationalPlan, RewriteMemory,
+    ScalarArenaTransform, ScalarQueryArena,
 };
 use crate::{semantics::view_rewrite::DeferredOuterRewrite, SQLError};
 use uqa_core::memory::{Budgeted, Produced, ProductionControl};
@@ -164,15 +164,6 @@ impl MutableQueryPlan {
     }
 }
 
-fn block_memory(memory: &mut RewriteMemory) -> &mut RewriteMemory {
-    memory
-        .field_mut("root")
-        .as_mut()
-        .expect("query root")
-        .field_mut("block")
-        .as_mut()
-        .expect("query block")
-}
 fn arena_queries(root: &mut RelationalPlan) -> &mut Vec<crate::plan::QueryPlan> {
     match root {
         RelationalPlan::QueryBlock(block) => &mut block.subqueries,

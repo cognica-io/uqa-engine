@@ -25,7 +25,12 @@ pub fn transfer_expression(
         return true;
     }
     let width = source.subqueries.len();
-    if selected.iter().any(|id| *id >= width) {
+    if selected.iter().any(|id| *id >= width)
+        || source
+            .privilege_subqueries
+            .iter()
+            .any(|id| *id >= width || selected.contains(id))
+    {
         return false;
     }
     let mut exclusive = true;
@@ -53,6 +58,9 @@ pub fn transfer_expression(
             retained.insert(id, source.subqueries.len());
             source.subqueries.push(query);
         }
+    }
+    for slot in &mut source.privilege_subqueries {
+        *slot = retained[slot];
     }
     crate::plan::rewrite_scalar_expression(expression, &mut |node| {
         if let Some(id) = super::subquery_id(node) {
@@ -87,6 +95,7 @@ mod tests {
     fn transfer_preserves_query_ownership_and_nested_arena_indices() {
         let mut source =
             block("SELECT (SELECT 11),(SELECT 22),(SELECT 33) WHERE (SELECT (SELECT 44))=44");
+        source.privilege_subqueries.push(2);
         let mut expression = source.r#where.take().unwrap();
         let mut destination = block("SELECT (SELECT 55)").subqueries;
         let nested_before = serde_json::to_value(&source.subqueries[3]).unwrap();
@@ -112,6 +121,15 @@ mod tests {
         ));
         assert_eq!(expression, ScalarExpr::ScalarSubquery(2));
         assert_eq!(source.projections[1].expr, ScalarExpr::ScalarSubquery(1));
+        assert_eq!(source.subqueries.len(), 2);
+        assert_eq!(source.privilege_subqueries, [1]);
+        let mut expression = source.projections.pop().unwrap().expr;
+        assert!(!transfer_expression(
+            &mut expression,
+            &mut source,
+            &mut destination
+        ));
+        assert_eq!(source.privilege_subqueries, [1]);
         assert_eq!(source.subqueries.len(), 2);
     }
 

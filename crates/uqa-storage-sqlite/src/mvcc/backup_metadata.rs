@@ -21,8 +21,8 @@ use std::sync::Arc;
 use uqa_storage::{
     mvcc::{
         retain_backup_snapshot, retain_record_snapshot, CommitSequence, CommittedBackupSnapshot,
-        CommittedRecordSnapshot, DatabaseId, IdentifierWatermarkVisitor, MetadataEpoch,
-        SnapshotLease, VersionError, VersionResult, VersionedPersistence,
+        CommittedRecordSnapshot, DatabaseId, IdentifierEpochHistory, IdentifierWatermarkVisitor,
+        MetadataEpoch, SnapshotLease, VersionError, VersionResult, VersionedPersistence,
     },
     read_control::StorageReadControl,
 };
@@ -44,7 +44,7 @@ pub(super) fn capture(
     let mut metadata = None;
     let records = store.snapshots.capture(control, || {
         metadata = Some(store.metadata_snapshots.capture(control, || {
-            store.with_write(control, |connection| {
+            store.with_admission(control, |connection| {
                 let _permit = admission::permit(connection, control)?;
                 let transaction = admission::begin(connection, control)?;
                 native::check_mapping(&transaction, store.native)?;
@@ -103,7 +103,9 @@ impl CommittedBackupSnapshot for Snapshot {
         control: &StorageReadControl,
     ) -> VersionResult<Option<uqa_core::memory::BudgetedVec<u8>>> {
         control.cancellation().check()?;
-        let result = self.read(|connection, _| read::key_ceiling(connection, control))?;
+        let result = self.read(control, |connection, _| {
+            read::key_ceiling(connection, control)
+        })?;
         control.cancellation().check()?;
         Ok(result)
     }
@@ -143,7 +145,7 @@ impl CommittedBackupSnapshot for Snapshot {
     ) -> VersionResult<()> {
         control.cancellation().check()?;
         let limit = i64::try_from(limit).unwrap_or(i64::MAX);
-        self.read(|connection, current| {
+        self.read(control, |connection, current| {
             let epoch = self.metadata_epoch().as_u64();
             let _after = crate::read_control::reserve_bindings(control, &[after.unwrap_or_default()])?;
             let mut statement = connection.prepare_cached("SELECT i.namespace, i.watermark, e.created, e.head FROM _uqa_mvcc_identifiers AS i LEFT JOIN _uqa_mvcc_identifier_epochs AS e ON e.namespace = i.namespace WHERE i.namespace > ?1 ORDER BY i.namespace LIMIT ?2")?;
@@ -151,19 +153,14 @@ impl CommittedBackupSnapshot for Snapshot {
             while let Some(row) = rows.next()? {
                 control.cancellation().check().map_err(VersionError::from)?;
                 let namespace = codec::bytes(row, 0)?;
-                let value = if history::is_allocation(namespace) {
+                let value = if IdentifierEpochHistory::is_allocation(namespace) {
                     let watermark = codec::integer(codec::bytes(row, 1)?)?;
                     let created = codec::integer(codec::bytes(row, 2)?)?;
                     let head = codec::integer(codec::bytes(row, 3)?)?;
-                    history::validate_epochs(created, head, current)?;
-                    if created > epoch { None } else if head <= epoch { Some(watermark) } else {
+                    IdentifierEpochHistory::new(created, head, current)?.watermark_at(epoch, || Ok(watermark), |from, through| {
                         let _bindings = crate::read_control::reserve_bindings(control, &[namespace])?;
-                        let value = history::previous(connection, namespace, created, epoch)?.1;
-                        if value > watermark {
-                            return Err(VersionError::InvalidEncoding("identifier history exceeds its current watermark").into());
-                        }
-                        Some(value)
-                    }
+                        history::previous(connection, namespace, from, through).map(|(_, value)| value)
+                    })?
                 } else { None };
                 if !visit(namespace, value)? { break; }
             }

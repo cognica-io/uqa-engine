@@ -74,6 +74,17 @@ impl PlanRef<'_> {
 }
 
 impl MutableExecutablePlan {
+    /// Transfer an ordinary statement and its existing children into a mutable owner.
+    #[must_use]
+    pub fn uncontrolled(plan: UnifiedPlan) -> Self {
+        match plan {
+            UnifiedPlan::Query(query) => Self::Query(MutableQueryPlan::uncontrolled(*query)),
+            UnifiedPlan::Command(command) => {
+                Self::Command(MutableCommandPlan::from_ordinary(*command))
+            }
+        }
+    }
+
     pub(in crate::plan) fn into_retirement(self, context: Context) -> CompletedStatement {
         let (node, memory) = match self {
             Self::Query(query) => {

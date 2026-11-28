@@ -19,6 +19,7 @@ use uqa_storage::{
         },
         format::{DiskANNChangeIdentity, CANONICAL_ORIGIN_BYTES, CHANGE_IDENTITY_BYTES},
         maintenance::{DiskANNStatisticsPage, DiskANNStatisticsRequest},
+        DiskANNBoundRead, DiskANNRetainedMutation,
     },
     key_value::{KeyValueDiskANNPruner, KeyValueRead},
     mvcc::VersionError,
@@ -33,8 +34,8 @@ impl RetainedSQLiteDiskANNCanonical {
         request: DiskANNStatisticsRequest,
         control: &StorageReadControl,
     ) -> StorageBackendResult<DiskANNStatisticsPage> {
-        self.check(control)?;
-        let page = pruner.statistics(
+        self.measure_journal(
+            pruner,
             &Journal {
                 source: self,
                 discovery: &self.snapshot,
@@ -42,9 +43,7 @@ impl RetainedSQLiteDiskANNCanonical {
             },
             request,
             control,
-        )?;
-        self.check(control)?;
-        Ok(page)
+        )
     }
 
     pub(crate) fn prune_changes(
@@ -92,50 +91,20 @@ impl RetainedSQLiteDiskANNCanonical {
         control: &StorageReadControl,
     ) -> StorageBackendResult<DiskANNPruneResult> {
         let (discovery, current, batch) = mutation;
-        let read = current.record_read();
-        self.require_current_index(&read, batch, control)?;
-        let owner = self
-            .owner
-            .ok_or_else(|| invalid("pruning has no canonical owner"))?;
-        let prefix = |family| {
-            Identity::new(family, owner)
-                .and_then(|identity| {
-                    identity.encode_prefix(&[ValueRef::Text(&self.field)], control)
-                })
-                .map_err(VersionError::into_storage_error)
-        };
-        let vectors = prefix(Family::Vectors)?;
-        let origins = prefix(Family::VectorOrigins)?;
-        if read.revision(&[&vectors, &origins])?.has_private_changes() {
-            return Err(invalid(
-                "journal pruning requires committed canonical input",
-            ));
-        }
-        let scope = self.index_scope(resolver, control)?;
-        let physical = crate::diskann::map_read(&read, current.database)?;
-        pruner.require_selected(
-            &scope,
-            self.dimensions,
-            self.index_parameters()
-                .ok_or_else(|| invalid("missing index parameters"))?,
-            &physical,
-            &mut crate::diskann::map_batch(batch, current.database, &current.control)?,
-            control,
-        )?;
-        let result = pruner.prune(
-            &mut JournalMutation {
-                read: Journal {
-                    source: self,
-                    discovery,
-                    current,
+        self.prune_journal(resolver, pruner, current, batch, control, |batch| {
+            pruner.prune(
+                &mut JournalMutation {
+                    read: Journal {
+                        source: self,
+                        discovery,
+                        current,
+                    },
+                    batch,
                 },
-                batch,
-            },
-            request,
-            control,
-        )?;
-        self.check(control)?;
-        Ok(result)
+                request,
+                control,
+            )
+        })
     }
 }
 

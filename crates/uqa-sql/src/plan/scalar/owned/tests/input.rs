@@ -65,7 +65,7 @@ where
     match kind {
         0 => OwnedScalarExpr::array_from(children, control, work).await,
         1 => OwnedScalarExpr::row_from(children, control, work).await,
-        2 | 3 => OwnedScalarExpr::boolean_from(children, kind == 2, control, work).await,
+        2 | 3 => OwnedScalarExpr::boolean_from(children, kind == 2, control, control, work).await,
         4 => {
             let condition = children.next().unwrap();
             let value = children.next().unwrap();
@@ -84,6 +84,7 @@ where
                 control.copy_text("selected")?,
                 None,
                 children,
+                control,
                 control,
                 work,
             )

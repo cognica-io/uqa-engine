@@ -6,6 +6,9 @@
 
 //! Shared record-image decoding validates envelope, revisions and complete repository integrity.
 
+mod writer;
+pub use writer::{BackupRecordImageWriter, RecordImageImportProgress};
+
 use uqa_core::memory::BudgetedVec;
 
 use crate::{

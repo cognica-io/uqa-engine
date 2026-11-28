@@ -289,6 +289,54 @@ fn single_reference_volatile_cte_is_materialized_once() {
 }
 
 #[test]
+fn materialized_cte_in_discarded_projection_is_planned_but_never_read() {
+    let engine = Engine::new();
+    exec(&engine, "CREATE TEMP SEQUENCE projection_calls");
+    let with_sequence = "WITH c AS MATERIALIZED (SELECT nextval('projection_calls') AS v)";
+    let source = "FROM (SELECT 7 AS used, (SELECT v FROM c) AS discarded) s";
+    assert_eq!(
+        ints(
+            &exec(&engine, &format!("{with_sequence} SELECT used {source}")),
+            "used"
+        ),
+        [7]
+    );
+    assert_eq!(
+        exec(&engine, "SELECT is_called FROM projection_calls").rows[0]["is_called"],
+        Value::Bool(false)
+    );
+    assert_eq!(
+        ints(
+            &exec(
+                &engine,
+                &format!("{with_sequence} SELECT discarded {source}")
+            ),
+            "discarded"
+        ),
+        [1]
+    );
+    assert_eq!(
+        exec(&engine, "SELECT is_called FROM projection_calls").rows[0]["is_called"],
+        Value::Bool(true)
+    );
+
+    // PostgreSQL plans a materialized definition even if the last consumer is pruned. A foldable single-reference definition disappears with its consumer.
+    let materialized = format!("WITH c AS MATERIALIZED (SELECT 1 / 0 AS v) SELECT used {source}");
+    for statement in [&materialized, &format!("EXPLAIN {materialized}")] {
+        assert_eq!(
+            engine.sql(statement, &[]).unwrap_err().sqlstate(),
+            Some("22012"),
+            "{statement}"
+        );
+    }
+    for materialization in ["", "NOT MATERIALIZED"] {
+        let folded =
+            format!("WITH c AS {materialization} (SELECT 1 / 0 AS v) SELECT used {source}");
+        assert_eq!(ints(&exec(&engine, &folded), "used"), [7]);
+    }
+}
+
+#[test]
 fn cte_insert_select_materializes_cte() {
     let engine = Engine::new();
     exec(

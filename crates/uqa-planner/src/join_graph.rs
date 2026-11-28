@@ -169,16 +169,20 @@ impl JoinGraph {
     /// graph. An edge is "between" `(s1, s2)` when one endpoint is in
     /// `s1` and the other is in `s2`.
     pub fn edges_between(&self, s1: u64, s2: u64) -> Vec<&JoinEdge> {
-        self.edges
-            .iter()
-            .filter(|e| {
-                let l_in_1 = e.left & s1 != 0;
-                let r_in_2 = e.right & s2 != 0;
-                let l_in_2 = e.left & s2 != 0;
-                let r_in_1 = e.right & s1 != 0;
-                (l_in_1 && r_in_2) || (l_in_2 && r_in_1)
-            })
-            .collect()
+        self.connecting_edges(s1, s2).collect()
+    }
+
+    pub(crate) fn connecting_edges(
+        &self,
+        left: u64,
+        right: u64,
+    ) -> impl Iterator<Item = &JoinEdge> {
+        self.edges.iter().filter(move |edge| {
+            #[cfg(test)]
+            EDGE_PROBES.set(EDGE_PROBES.get() + 1);
+            (edge.left & left != 0 && edge.right & right != 0)
+                || (edge.right & left != 0 && edge.left & right != 0)
+        })
     }
 
     pub fn full_set(&self) -> u64 {
@@ -289,4 +293,9 @@ mod tests {
             ));
         }
     }
+}
+
+#[cfg(test)]
+std::thread_local! {
+    pub(crate) static EDGE_PROBES: std::cell::Cell<usize> = const {std::cell::Cell::new(0)};
 }

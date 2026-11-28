@@ -153,6 +153,7 @@ fn execute_lateral_relational_root_output<S: Clone + Send + Sync + 'static>(
                     QueryBlockPlan {
                         deferred_outer_rewrites: Vec::new(),
                         privilege_columns: uqa_core::memory::OwnedSet::new(),
+                        privilege_subqueries: Vec::new(),
                         projections: Vec::new(),
                         from: None,
                         r#where: None,

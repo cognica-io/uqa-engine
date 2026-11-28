@@ -11,7 +11,47 @@ use uqa_sql::compile;
 use super::*;
 
 mod aggregate_identity;
+mod plan_ownership;
 mod retained_rows;
+
+#[test]
+fn cte_initialization_charges_reachability_and_checks_unread_recursive_cycles() {
+    use uqa_core::{
+        memory::{MemoryBudget, ProductionControl},
+        CancellationToken,
+    };
+
+    let mut differences = Vec::new();
+    for root in ["SELECT 1 AS n", "DELETE FROM target"] {
+        for (definitions, limit, expected) in [
+            ("unused AS (VALUES (1 / 0))", 0, Some("53200")),
+            ("unused AS (VALUES (1 / 0))", 64 * 1024, None),
+            (
+                "RECURSIVE a AS (SELECT * FROM b), b AS (SELECT * FROM a)",
+                64 * 1024,
+                Some("0A000"),
+            ),
+        ] {
+            let sql = format!("WITH {definitions} {root}");
+            let plan = UnifiedPlan::lower(compile(&sql).unwrap().remove(0));
+            let token = CancellationToken::new();
+            let memory = MemoryBudget::new(limit);
+            let mut config =
+                OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar_with_control);
+            config.production = ProductionControl::new(&memory, &token, &token);
+            let result = owned::Context::caller(&config, &api::NoRegisteredAggregates)
+                .plan(uqa_sql::plan::MutableExecutablePlan::uncontrolled(plan));
+            if result.as_ref().err().and_then(uqa_sql::SQLError::sqlstate) != expected {
+                differences.push(format!(
+                    "{sql} with {limit} bytes: {result:?}, expected {expected:?}"
+                ));
+            }
+            drop(result);
+            assert_eq!(memory.used(), 0);
+        }
+    }
+    assert!(differences.is_empty(), "{}", differences.join("\n"));
+}
 
 #[test]
 fn unused_command_ctes_are_not_constant_evaluated() {

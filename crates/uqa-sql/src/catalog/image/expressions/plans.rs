@@ -79,10 +79,11 @@ macro_rules! image_struct {
 }
 
 macro_rules! image_enum {
-    ($ty:ty { $($tag:literal => $name:ident $(($value:ident))? $({ $($field:ident),* $(,)? $(; $($skip:ident),+)? })?),* $(,)? } $(reject { $($rejected:pat => $message:literal),* $(,)? })?) => {
+    ($ty:ty { $($tag:literal => $name:ident $(($value:ident))? $({ $($field:ident),* $(,)? $(; $($skip:ident),+)? })?),* $(,)? } $(reject { $($rejected:pat => $message:literal),* $(,)? })? $(extended { $pat:pat if $guard:expr => $extra:literal, [$($prefix:expr),+] })?) => {
         impl Node for $ty {
             fn part(&self, position: usize) -> Result<Option<Part<'_>>, SQLError> {
                 Ok(match self {
+                    $($pat if $guard => variant(position, $extra, &[$($prefix),+]),)?
                     $(Self::$name $(($value))? $({$($field,)* $($($skip: _,)*)?})? =>
                         variant(position, $tag, &[$($value,)? $($($field,)*)?]),)*
                     $($($rejected => return Err(invalid($message)),)*)?
@@ -93,6 +94,10 @@ macro_rules! image_enum {
 }
 
 macro_rules! projected_struct {
+    ($mode:ident, $ty:ty { $($field:ident),* $(,)? } skip { $($skip:ident),* $(,)? } prefixed { $extra:ident }) => {
+        image_struct!($ty { $($field),* } skip { $($skip,)* $extra });
+        crate::plan::copy::stored_plan::project_struct!($mode, $ty { $($field,)* $extra } skip { $($skip),* });
+    };
     ($mode:ident, $($shape:tt)*) => {
         image_struct!($($shape)*);
         crate::plan::copy::stored_plan::project_struct!($mode, $($shape)*);
@@ -100,8 +105,8 @@ macro_rules! projected_struct {
 }
 
 macro_rules! projected_enum {
-    ($mode:ident, $ty:ty { $($shape:tt)* } $(reject { $bad:pat => $image:literal, $capture:literal })?) => {
-        image_enum!($ty { $($shape)* } $(reject { $bad => $image })?);
+    ($mode:ident, $ty:ty { $($shape:tt)* } $(reject { $bad:pat => $image:literal, $capture:literal })? $(extended { $($extra:tt)* })?) => {
+        image_enum!($ty { $($shape)* } $(reject { $bad => $image })? $(extended { $($extra)* })?);
         crate::plan::copy::stored_plan::project_enum!($mode, $ty { $($shape)* } $(reject { $bad => $capture })?);
     };
 }

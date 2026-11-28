@@ -39,10 +39,9 @@ pub(super) fn validate(
     while let Some(row) = rows.next()? {
         control.check().map_err(VersionError::from)?;
         let namespace = codec::bytes(row, 0)?;
-        let prefix = &namespace[RECLAMATION_DOMAIN_PREFIX.len()..];
-        if prefix.len() > 1024 {
-            return Err(VersionError::InvalidEncoding("oversized reclamation domain").into());
-        }
+        let Some(prefix) = uqa_storage::mvcc::reclamation_domain_prefix(namespace)? else {
+            break;
+        };
         prepared.validate_reclamation_epoch(
             prefix,
             codec::integer(codec::bytes(row, 1)?)?,
@@ -65,11 +64,7 @@ pub(super) fn reclaim(
     let transaction = admission::begin(connection, control)?;
     native::check_mapping(&transaction, mapped)?;
     let current = codec::header(&transaction, identity)?.sequence;
-    if request.through > current {
-        return Err(
-            VersionError::InvalidEncoding("tombstone cutoff exceeds committed visibility").into(),
-        );
-    }
+    request.validate_cutoff(current)?;
     let page = candidates(&transaction, request, control)?;
     if page.retired().len() != 0 {
         let next = epoch(&transaction)?

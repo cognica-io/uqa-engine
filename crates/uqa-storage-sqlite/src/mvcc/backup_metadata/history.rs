@@ -8,7 +8,10 @@
 
 use rusqlite::{params, Connection, OptionalExtension};
 use uqa_storage::{
-    mvcc::{MetadataEpoch, VersionError, RECLAMATION_DOMAIN_PREFIX, RECLAMATION_EPOCH_NAMESPACE},
+    mvcc::{
+        IdentifierEpochHistory, MetadataEpoch, VersionError, RECLAMATION_DOMAIN_PREFIX,
+        RECLAMATION_EPOCH_NAMESPACE,
+    },
     read_control::StorageReadControl,
 };
 
@@ -39,23 +42,12 @@ pub(super) fn epoch(connection: &Connection) -> PhysicalResult<u64> {
         .query_row([], |row| Ok(codec::bytes(row, 0).and_then(codec::integer)))?
 }
 
-pub(super) fn is_allocation(namespace: &[u8]) -> bool {
-    namespace != RECLAMATION_EPOCH_NAMESPACE && !namespace.starts_with(RECLAMATION_DOMAIN_PREFIX)
-}
-
-pub(super) fn validate_epochs(created: u64, head: u64, current: u64) -> PhysicalResult<()> {
-    if created > head || head > current {
-        return Err(VersionError::InvalidEncoding("invalid identifier metadata epochs").into());
-    }
-    Ok(())
-}
-
 pub(in crate::mvcc) fn retain_previous(
     connection: &Connection,
     namespace: &[u8],
     previous: Option<u64>,
 ) -> PhysicalResult<()> {
-    if !is_allocation(namespace) {
+    if !IdentifierEpochHistory::is_allocation(namespace) {
         return Ok(());
     }
     let current = epoch(connection)?;
@@ -73,7 +65,7 @@ pub(in crate::mvcc) fn retain_previous(
     match (previous, head) {
         (Some(watermark), Some((created, head))) => {
             let (created, head) = (created?, head?);
-            validate_epochs(created, head, current)?;
+            IdentifierEpochHistory::new(created, head, current)?;
             if head != current {
                 connection
                     .prepare_cached("INSERT INTO _uqa_mvcc_identifier_history VALUES (?1, ?2, ?3)")?
@@ -126,13 +118,8 @@ pub(in crate::mvcc) fn reclaim(
     control: &StorageReadControl,
 ) -> PhysicalResult<()> {
     let current = epoch(connection)?;
-    let horizon = oldest.map_or(current, MetadataEpoch::as_u64);
-    if horizon > current {
-        return Err(
-            VersionError::InvalidEncoding("metadata lease exceeds the current epoch").into(),
-        );
-    }
-    let mut statement = connection.prepare(
+    let horizon = MetadataEpoch::reclamation_horizon(current, oldest)?;
+    let mut statement = connection.prepare_cached(
         "SELECT namespace, created, head FROM _uqa_mvcc_identifier_epochs ORDER BY namespace",
     )?;
     let mut rows = statement.query([])?;
@@ -142,17 +129,13 @@ pub(in crate::mvcc) fn reclaim(
         let _bindings = crate::read_control::reserve_bindings(control, &[namespace])?;
         let created = codec::bytes(row, 1).and_then(codec::integer)?;
         let head = codec::integer(codec::bytes(row, 2)?)?;
-        validate_epochs(created, head, current)?;
-        let cutoff = if head <= horizon {
-            head
-        } else if created <= horizon {
-            previous(connection, namespace, created, horizon)?.0
-        } else {
-            0
-        };
-        if cutoff == 0 {
+        let history = IdentifierEpochHistory::new(created, head, current)?;
+        let Some(cutoff) = history.retained_epoch(horizon, |from, through| {
+            previous(connection, namespace, from, through).map(|(epoch, _)| epoch)
+        })?
+        else {
             continue;
-        }
+        };
         loop {
             control.cancellation().check().map_err(VersionError::from)?;
             let removed = connection.prepare_cached("DELETE FROM _uqa_mvcc_identifier_history WHERE namespace = ?1 AND epoch IN (SELECT epoch FROM _uqa_mvcc_identifier_history WHERE namespace = ?1 AND epoch < ?2 ORDER BY epoch LIMIT 128)")?

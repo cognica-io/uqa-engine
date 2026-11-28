@@ -13,11 +13,13 @@ use uqa_core::{memory::BudgetedMap, DocId, Payload, PostingEntry, PostingList};
 use super::{check, VectorQueryBuffer};
 use crate::{
     read_control::StorageReadControl,
-    vector_index::{cosine_similarity, deduplicate_scored_values, select_top_k_scored},
+    vector_index::{
+        cosine_similarity, deduplicate_scored_values, maximum_tensor_score, select_top_k_scored,
+    },
     StorageBackendResult,
 };
 
-/// Score validated provider candidates without replaying their iterator. Tensor reduction follows input order, including the existing floating-point maximum semantics; the resulting postings retain the ordinary caller-owned result boundary.
+/// Score validated provider candidates without replaying their iterator. Each tensor retains its maximum component score. The resulting postings belong to the caller.
 pub fn scored_posting_list<'a>(
     query: &[f32],
     entries: impl IntoIterator<Item = (DocId, &'a [f32])>,
@@ -47,12 +49,12 @@ impl BestScores {
             Self::Ordinary(scores) => {
                 scores
                     .entry(doc_id)
-                    .and_modify(|best| *best = best.max(score))
+                    .and_modify(|best| *best = maximum_tensor_score(*best, score))
                     .or_insert(score);
             }
             Self::Controlled(scores) => {
                 if let Some(best) = scores.get_mut(&doc_id) {
-                    *best = best.max(score);
+                    *best = maximum_tensor_score(*best, score);
                 } else {
                     scores.insert(doc_id, score)?;
                 }

@@ -197,30 +197,39 @@ impl Copying<'_> {
     }
 
     fn block_fields(&mut self, block: &QueryBlockPlan) -> Result<QueryBlockPlan> {
+        let deferred_outer_rewrites = self.field("deferred_outer_rewrites", |copying| {
+            if copying.purpose == CopyPurpose::Stored {
+                return Ok(Vec::new());
+            }
+            copying.map(block.deferred_outer_rewrites.iter(), |copying, rewrite| {
+                rewrite.copy_with(copying)
+            })
+        })?;
+        let windows = self.field("windows", |copying| {
+            copying.map(block.windows.iter(), |copying, window| {
+                Ok(crate::ast::WindowDefinition {
+                    name: copying.optional_text(window.name.as_deref())?,
+                    inherited: window.inherited,
+                    spec: copying.field("spec", |copying| copying.window(&window.spec))?,
+                })
+            })
+        })?;
+        let projections = self.field("projections", |copying| {
+            copying.map(block.projections.iter(), Self::projection)
+        })?;
+        let (privilege_columns, privilege_subqueries) =
+            self.field("projection_privileges", |copying| {
+                let columns = copying.set(&block.privilege_columns, Self::identity)?;
+                let mut slots = uqa_core::memory::ProductionVec::new(copying.control);
+                slots.extend_from_slice(&block.privilege_subqueries)?;
+                Ok((columns, copying.take(slots.finish()?)))
+            })?;
         Ok(QueryBlockPlan {
-            deferred_outer_rewrites: self.field("deferred_outer_rewrites", |copying| {
-                if copying.purpose == CopyPurpose::Stored {
-                    return Ok(Vec::new());
-                }
-                copying.map(block.deferred_outer_rewrites.iter(), |copying, rewrite| {
-                    rewrite.copy_with(copying)
-                })
-            })?,
-            windows: self.field("windows", |copying| {
-                copying.map(block.windows.iter(), |copying, window| {
-                    Ok(crate::ast::WindowDefinition {
-                        name: copying.optional_text(window.name.as_deref())?,
-                        inherited: window.inherited,
-                        spec: copying.field("spec", |copying| copying.window(&window.spec))?,
-                    })
-                })
-            })?,
-            projections: self.field("projections", |copying| {
-                copying.map(block.projections.iter(), Self::projection)
-            })?,
-            privilege_columns: self.field("privilege_columns", |copying| {
-                copying.set(&block.privilege_columns, Self::identity)
-            })?,
+            deferred_outer_rewrites,
+            windows,
+            projections,
+            privilege_columns,
+            privilege_subqueries,
             from: self.field("from", |copying| {
                 block
                     .from

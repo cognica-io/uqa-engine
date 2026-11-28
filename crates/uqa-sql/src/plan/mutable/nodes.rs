@@ -7,8 +7,8 @@
 //! Scalar-root traversal keeps each syntax node beside its constructor owner during edits.
 
 use super::{
-    memory::RewriteMemory, sources::query_source_memory, MutableQueryPlan, OwnedScalarExpr,
-    QueryScalarSlot, RelationalPlan, SourceChildSlot, SourceScalarSlot,
+    memory::RewriteMemory, sources::query_source_memory, MutableQueryPlan, MutableSourcePlan,
+    OwnedScalarExpr, QueryScalarSlot, RelationalPlan, SourceChildSlot, SourceScalarSlot,
 };
 use crate::{
     plan::{QueryPlan, SourcePlan},
@@ -30,6 +30,30 @@ pub(super) type Action<'a> = dyn FnMut(
     + 'a;
 
 impl MutableQueryPlan {
+    /// Rewrite each scalar root belonging to this query in clause order. FROM items and nested queries keep their own namespaces.
+    pub fn map_local_scalars(
+        mut self,
+        storage: &ProductionControl<'_>,
+        workspace: &ProductionControl<'_>,
+        map: impl FnMut(OwnedScalarExpr) -> Result<OwnedScalarExpr, SQLError>,
+    ) -> Result<Self, SQLError> {
+        self.assert_owner(storage);
+        storage.check()?;
+        let mut input = roots::MapRoots {
+            map,
+            storage: *storage,
+            work: (),
+        };
+        crate::catalog::work::inline(roots::query(
+            &mut self.query,
+            self.memory.as_mut(),
+            roots::QueryScope::Local,
+            workspace,
+            &mut input,
+        ))?;
+        Ok(self)
+    }
+
     /// Rewrite local scalar nodes in source-first order without moving their original addresses. The observer receives read-only syntax and returns an independently owned replacement; nested queries retain separate traversal boundaries.
     pub fn rewrite_root_scalar_nodes(
         mut self,
@@ -59,6 +83,32 @@ impl MutableQueryPlan {
             control,
             &mut action,
         )?;
+        Ok(self)
+    }
+}
+
+impl MutableSourcePlan {
+    /// Rewrite the scalar roots of this range item in declaration order. Join children and subqueries retain their own scopes.
+    pub fn map_local_scalars(
+        mut self,
+        storage: &ProductionControl<'_>,
+        workspace: &ProductionControl<'_>,
+        map: impl FnMut(OwnedScalarExpr) -> Result<OwnedScalarExpr, SQLError>,
+    ) -> Result<Self, SQLError> {
+        self.assert_owner(storage);
+        storage.check()?;
+        let mut input = roots::MapRoots {
+            map,
+            storage: *storage,
+            work: (),
+        };
+        crate::catalog::work::inline(roots::source(
+            &mut self.source,
+            self.memory.as_mut(),
+            workspace,
+            &mut input,
+        ))?;
+        workspace.check()?;
         Ok(self)
     }
 }

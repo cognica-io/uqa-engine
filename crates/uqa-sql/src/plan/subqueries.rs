@@ -65,7 +65,7 @@ pub(in crate::plan) fn query_arena(root: &mut RelationalPlan) -> &mut Vec<QueryP
     }
 }
 
-fn subquery_id(expression: &mut ScalarExpr) -> Option<&mut usize> {
+pub(super) fn subquery_id(expression: &mut ScalarExpr) -> Option<&mut usize> {
     match expression {
         ScalarExpr::ScalarSubquery(id)
         | ScalarExpr::Exists { subquery: id, .. }

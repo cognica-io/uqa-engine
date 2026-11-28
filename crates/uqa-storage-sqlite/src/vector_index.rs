@@ -12,9 +12,7 @@ use rusqlite::params;
 use uqa_core::{DocId, Payload, PostingEntry, PostingList};
 
 use crate::connection::{ManagedConnection, Result as SQLiteResult, SQLiteError};
-use uqa_storage::vector_index::{
-    cosine_similarity, select_top_k_scored, validate_vector_values, VectorIndex,
-};
+use uqa_storage::vector_index::{select_top_k_scored, validate_vector_values, VectorIndex};
 use uqa_storage::StorageBackendResult;
 
 mod brute_force;

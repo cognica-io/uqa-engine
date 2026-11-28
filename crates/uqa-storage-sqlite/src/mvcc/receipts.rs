@@ -15,12 +15,11 @@ pub(in crate::mvcc) use liveness::local_file_registry;
 pub(in crate::mvcc) use liveness::{lease_file, ReceiptLeaseFile};
 
 use rusqlite::{Connection, OptionalExtension};
-use uqa_core::memory::BudgetedVec;
 use uqa_storage::{
     mvcc::{
-        receipt_lease_id, CommitStatus, DatabaseId, ReceiptAcknowledgement,
-        RetainedTransactionAllocation, SerializableGraph, SerializableLeases, StorageTransactionId,
-        VersionError, VersionResult,
+        receipt_lease_id, DatabaseId, ReceiptAcknowledgement, ReceiptReclamation,
+        ReceiptReclamationBatch, RetainedTransactionAllocation, SerializableGraph,
+        SerializableLeases, VersionError, VersionResult,
     },
     read_control::StorageReadControl,
 };
@@ -38,7 +37,7 @@ impl SQLiteRecordStore {
         let limit = i64::try_from(limit).ok().filter(|limit| *limit > 0).ok_or(
             VersionError::InvalidEncoding("invalid receipt retention limit"),
         )?;
-        self.with_write(control, |connection| {
+        self.with_admission(control, |connection| {
             let _permit = admission::permit(connection, control)?;
             let transaction = admission::begin(connection, control)?;
             native::check_mapping(&transaction, self.native)?;
@@ -68,7 +67,7 @@ impl SQLiteRecordStore {
     ) -> VersionResult<RetainedTransactionAllocation> {
         self.with_receipt_admission(control, |leases| {
             let mut owner = None;
-            let id = self.with_write(control, |connection| {
+            let id = self.with_admission(control, |connection| {
                 write::allocate_with_owner(
                     connection,
                     self.identity,
@@ -93,7 +92,7 @@ impl SQLiteRecordStore {
         self.recover_serializable(control)?;
         let held = self.serializable_admission(control)?;
         self.with_receipt_admission(control, |leases| {
-            let removed = self.with_write(control, |connection| {
+            let removed = self.with_admission(control, |connection| {
                 reclaim(
                     connection,
                     self.identity,
@@ -150,25 +149,27 @@ pub(super) fn validate_retained(
     acknowledgement: ReceiptAcknowledgement,
     control: &StorageReadControl,
 ) -> PhysicalResult<bool> {
-    admission::retry(connection, true, control, || {
-        let read = connection.unchecked_transaction()?;
-        let id = acknowledgement.transaction();
-        native::check_mapping(&read, native)?;
-        let header = codec::header(&read, id.database())?;
-        if id.allocation() > header.allocated {
-            return Err(VersionError::UnknownTransaction.into());
-        }
-        acknowledgement.validate(codec::status(&read, id)?)?;
-        let managed = read
-            .prepare_cached("SELECT managed FROM _uqa_mvcc_transactions WHERE allocation = ?1")?
-            .query_row([id.allocation().to_be_bytes().as_slice()], |row| {
-                row.get::<_, bool>(0)
-            })
-            .optional()?;
-        control.check().map_err(VersionError::from)?;
-        read.commit()?;
-        Ok(managed == Some(true))
-    })
+    let id = acknowledgement.transaction();
+    admission::read_header(
+        connection,
+        id.database(),
+        native,
+        control,
+        |read, header| {
+            if id.allocation() > header.allocated {
+                return Err(VersionError::UnknownTransaction.into());
+            }
+            acknowledgement.validate(codec::status(read, id)?)?;
+            let managed = read
+                .prepare_cached("SELECT managed FROM _uqa_mvcc_transactions WHERE allocation = ?1")?
+                .query_row([id.allocation().to_be_bytes().as_slice()], |row| {
+                    row.get::<_, bool>(0)
+                })
+                .optional()?;
+            control.check().map_err(VersionError::from)?;
+            Ok(managed == Some(true))
+        },
+    )
 }
 
 /// SSI and receipt admission remain held across this atomic main write. Authoritatively dead managed owners release their retry rights; manual owners never do so implicitly. Their original physical state still decides commit/abort, and every retained graph reference remains protected.
@@ -184,61 +185,48 @@ fn reclaim(
     let transaction = admission::begin(connection, control)?;
     native::check_mapping(&transaction, native)?;
     let header = codec::header(&transaction, identity)?;
-    let mut selected = BudgetedVec::new(control.memory());
+    let mut batch =
+        ReceiptReclamationBatch::new(identity, header.allocated, graph, leases, control);
     {
-        let mut statement = transaction.prepare_cached("SELECT allocation, status, managed FROM _uqa_mvcc_transactions WHERE status IN (3, 4) OR managed = 1 ORDER BY allocation")?;
+        let mut statement = transaction.prepare_cached("SELECT status, sequence, fingerprint, allocation, managed FROM _uqa_mvcc_transactions WHERE status IN (3, 4) OR managed = 1 ORDER BY allocation")?;
         let mut rows = statement.query([])?;
         while let Some(row) = rows.next()? {
             control.check().map_err(VersionError::from)?;
-            let allocation = codec::integer(codec::bytes(row, 0)?)?;
-            if allocation > header.allocated {
-                return Err(
-                    VersionError::InvalidEncoding("receipt exceeds allocation watermark").into(),
-                );
-            }
-            let id = StorageTransactionId::new(identity, allocation)?;
-            let status: i64 = row.get(1)?;
-            let acknowledged = matches!(status, 3 | 4);
-            if acknowledged && graph.retains_transaction_receipt(id) {
-                continue;
-            }
-            let managed: bool = row.get(2)?;
-            if acknowledged || (managed && !leases.is_alive(receipt_lease_id(id), control)?) {
-                // Decode authoritative status before preparing any change, including rejecting corruption. Unknown can never be inferred from owner death.
-                let status = codec::status(&transaction, id)?;
-                if status == CommitStatus::Unknown {
-                    return Err(VersionError::UnknownTransaction.into());
-                }
-                selected
-                    .push((
-                        allocation.to_be_bytes(),
-                        !graph.retains_transaction_receipt(id),
-                        matches!(status, CommitStatus::Committed(_)),
-                    ))
-                    .map_err(VersionError::from)?;
-                if selected.len() == 256 {
-                    break;
-                }
+            let id = batch.transaction(codec::integer(codec::bytes(row, 3)?)?)?;
+            let acknowledged = matches!(row.get::<_, i64>(0)?, 3 | 4);
+            if !batch.visit(
+                id,
+                acknowledged,
+                || Ok(row.get::<_, bool>(4)?),
+                || codec::receipt_status(row, id),
+            )? {
+                break;
             }
         }
     }
     let mut removed = 0;
-    for (allocation, delete, committed) in selected.iter() {
+    for (allocation, action) in batch.entries() {
         control.check().map_err(VersionError::from)?;
-        if *delete {
-            transaction
-                .prepare_cached("DELETE FROM _uqa_mvcc_transactions WHERE allocation = ?1")?
-                .execute([allocation.as_slice()])?;
-            removed += 1;
-        } else {
-            transaction
-                .prepare_cached(
-                    "UPDATE _uqa_mvcc_transactions SET status = ?2 WHERE allocation = ?1",
-                )?
-                .execute(rusqlite::params![
-                    allocation.as_slice(),
-                    if *committed { 4 } else { 3 }
-                ])?;
+        let allocation = allocation.to_be_bytes();
+        match action {
+            ReceiptReclamation::Remove => {
+                transaction
+                    .prepare_cached("DELETE FROM _uqa_mvcc_transactions WHERE allocation = ?1")?
+                    .execute([allocation.as_slice()])?;
+                removed += 1;
+            }
+            ReceiptReclamation::AcknowledgeCommitted | ReceiptReclamation::AcknowledgeAborted => {
+                let status = if action == ReceiptReclamation::AcknowledgeCommitted {
+                    4
+                } else {
+                    3
+                };
+                transaction
+                    .prepare_cached(
+                        "UPDATE _uqa_mvcc_transactions SET status = ?2 WHERE allocation = ?1",
+                    )?
+                    .execute(rusqlite::params![allocation.as_slice(), status])?;
+            }
         }
     }
     admission::commit(transaction, control)?;

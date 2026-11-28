@@ -24,18 +24,28 @@ pub enum QueryChildSlot {
 impl MutableQueryPlan {
     /// Rewrite a query child while retaining its original parent box or arena slot. A failed callback destroys the complete private parent and all untouched siblings.
     pub fn map_query_child(
-        mut self,
+        self,
         slot: QueryChildSlot,
         control: &ProductionControl<'_>,
         map: impl FnOnce(Self) -> Result<Self, SQLError>,
     ) -> Result<Self, SQLError> {
+        self.try_map_query_child(slot, control, map)
+    }
+
+    /// Map a query child while retaining the callback's typed error.
+    pub fn try_map_query_child<E: From<SQLError>>(
+        mut self,
+        slot: QueryChildSlot,
+        control: &ProductionControl<'_>,
+        map: impl FnOnce(Self) -> Result<Self, E>,
+    ) -> Result<Self, E> {
         self.assert_owner(control);
-        control.check()?;
+        control.check().map_err(SQLError::from)?;
         let mut slot = self.query_slot(slot);
         let input = slot.take();
         let output = map(input)?;
         output.assert_owner(control);
-        control.check()?;
+        control.check().map_err(SQLError::from)?;
         slot.restore(output);
         Ok(self)
     }

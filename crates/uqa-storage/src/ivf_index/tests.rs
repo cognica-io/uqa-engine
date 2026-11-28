@@ -34,6 +34,107 @@ fn untrained_search_falls_back_to_brute_force() {
 }
 
 #[test]
+fn tensor_top_k_uses_bounded_workspace_in_trained_and_untrained_search() {
+    use crate::{
+        read_control::StorageReadControl,
+        vector_index::{cosine_similarity, select_top_k_scored},
+    };
+    let query = [2.0, -3.0];
+    for threshold in [64, 4096] {
+        let mut index = IVFIndex::with_params(2, 4, 4, threshold);
+        let mut expected = Vec::new();
+        for id in 0..1024 {
+            let vectors = vec![random_vector(id + 1, 2), random_vector(id + 7, 2)];
+            let best =
+                cosine_similarity(&query, &vectors[0]).max(cosine_similarity(&query, &vectors[1]));
+            expected.push((id, best));
+            index.add_many(id, vectors).unwrap();
+        }
+        select_top_k_scored(&mut expected, 5);
+        expected.sort_unstable_by_key(|&(doc, _)| doc);
+        let control = StorageReadControl::with_limit(4096);
+        let result = index.search_knn_with_control(&query, 5, &control).unwrap();
+        assert_eq!(
+            result
+                .entries()
+                .iter()
+                .map(|entry| (entry.doc_id, entry.payload.score.to_bits()))
+                .collect::<Vec<_>>(),
+            expected
+                .into_iter()
+                .map(|(doc, score)| (doc, f64::from(score).to_bits()))
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(control.memory().used(), 0);
+    }
+}
+
+#[test]
+fn probed_tensor_scores_preserve_bits_at_float_extremes_and_ties() {
+    use crate::vector_index::{
+        cosine_similarity,
+        query::{
+            nearest_normalized_centroids, normalized_query, postings_from_scores, VectorQueryBuffer,
+        },
+    };
+    let mut index = IVFIndex::with_params(2, 4, 1, 16);
+    for id in 1..=32 {
+        index.add(id, random_vector(id, 2)).unwrap();
+    }
+    let components = [
+        [f32::MAX, 0.0],
+        [-f32::MAX, -0.0],
+        [0.0, 0.0],
+        [f32::from_bits(1), -f32::from_bits(1)],
+        [-1.0, 0.0],
+        [1.0, 0.0],
+        [0.0, 1.0],
+    ];
+    for offset in 0..components.len() {
+        let tensor = (0..3)
+            .map(|step| components[(offset + step) % components.len()].to_vec())
+            .collect();
+        index.add_many(100 + offset as u64, tensor).unwrap();
+    }
+    let bits = |list: &uqa_core::PostingList| {
+        list.entries()
+            .iter()
+            .map(|e| (e.doc_id, e.payload.score.to_bits()))
+            .collect::<Vec<_>>()
+    };
+    for count in [1, 2, 4] {
+        index.set_nprobe(count);
+        for query in &components {
+            let (normalized, _) = normalized_query(query, None).unwrap();
+            for k in [1, 5, 64] {
+                let expected = {
+                    let data = index.data.read();
+                    let probes =
+                        nearest_normalized_centroids(&normalized, &data.centroids, count, None)
+                            .unwrap();
+                    let mut scores = VectorQueryBuffer::new(None);
+                    for &centroid in probes.iter() {
+                        for key in &data.inverted_lists[centroid] {
+                            let vector = &data.vectors[key];
+                            scores
+                                .push((vector.doc_id, cosine_similarity(query, &vector.raw_vector)))
+                                .unwrap();
+                        }
+                    }
+                    postings_from_scores(scores, Some(k), None).unwrap()
+                };
+                let actual = index.search_knn(query, k).unwrap();
+                assert_eq!(
+                    bits(&actual),
+                    bits(&expected),
+                    "nprobe={count}, k={k}, query={query:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn auto_trains_above_threshold() {
     let mut index = IVFIndex::with_params(4, 4, 2, 16);
     for doc_id in 0..32 {

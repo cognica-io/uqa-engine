@@ -8,6 +8,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Planner output pruning now charges the temporary typed expressions it creates for unused columns against the planning memory limit, including when the caller supplies the query plan. Pruning keeps the table and column privileges required by scalar subqueries in those outputs. A materialized CTE referenced only by a discarded output still reports planning-time errors. Its rows are read only when a surviving expression needs them.
 - Graph traversal and centrality results share subgraph vertices, edges and names across postings. Rust callers can use `.into()` for these three `GraphPayload` fields.
 
 - Retained queries reuse the statement’s catalog and detach the tables selected by their views and deferred CTEs. Opening a transaction with an up-to-date catalog captures session state once. Transaction rollback retains immutable statement-cache roots. Updating one cached statement preserves the other statements and their execution plans. An implicit read selects rollback data when it first needs to write or supply a committed backup. Repeated catalog reads share table definitions and range descriptors within the same catalog revision and memory budget. Forward-only cursors stream FETCH and MOVE requests in bounded batches. A cursor promoted to holdable during a procedure retains the unread rows at their original positions.
@@ -19,7 +20,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Grouped aggregates retain only the state needed for each function. Ordered aggregates spill binary records and merge them in SQL order. Hash joins, DISTINCT and equality-based MERGE use bounded disk indexes as their inputs grow.
 
 - Prepared SQL expressions reuse numeric operand types, builtin signatures, and row and array descriptors across input rows. Scalar function callbacks receive the original argument payloads.
-- Preserve prepared domain checks across unrelated catalog changes in other sessions. Generic plans track casts that resolve to a domain through the search path, including domains named like a built-in type. Adding a constraint to a previously unconstrained domain rebuilds plans that folded its cast.
+- Preserve prepared domain checks across unrelated catalog changes in other sessions. Generic plans track casts that resolve to a domain through the search path, including domains named like a built-in type. Adding a constraint to a previously unconstrained domain rebuilds plans that folded its cast. A prepared insert on a table created in the current transaction keeps its bound default when another session commits to an unrelated table.
 - Match an explicit collation in an `ON CONFLICT` target to the corresponding key of a single unique index. Omitted collations leave the key unrestricted.
 
 - Recursive CTEs produce the rows their consumers request, share them across references, and support finite recursion beyond 1,024 generations.
@@ -31,7 +32,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - Nested document lookups borrow intermediate values. Posting unions merge sorted inputs in one pass, and retrieval models reuse their fusion weights across documents in a batch. WAND and Block-Max WAND score materialized and cursor inputs through the same loop. Materialized searches report a candidate upper bound and expose the exact count on request.
 
+- SQLite and redb restore records and identifier watermarks in bounded private transactions. SQLite record format 70 writes each new version and its backup fingerprint together. MVCC reclamation and occurrence posting lookup read their SQLite metadata in batches. SQLite record snapshots wait for a concurrent rollback-journal writer when opening their read transaction, including when reopening a compressed database.
+
 - Opening a native SQLite database skips historical deletions when checking B-tree indexes and restores an unchanged catalog once. An encrypted SQLite open derives the passphrase key once and reuses it across physical connections. Notification, relation-lock and serializable transaction state use separate keys derived from the database key.
+
+- IVF tensor searches retain the best requested documents in bounded memory. Tensor score reduction selects positive zero when both zero signs occur and preserves negative zero when every element scores negative zero. HNSW releases upper-layer distances before the base search, and DiskANN tracks its frontier by node ID. Native SQLite exact vector searches reuse canonical vector norms across queries on the same snapshot.
+- Native SQLite DiskANN maintenance now requires the original temporary-file allowance for both a change census and a rebuild, as do the Key/Value storage providers.
 
 - Selective equality joins can probe a primary key or unique index with each outer row. A scalar subquery or a small positive `IN` subquery can also supply the keys for an indexed scan. Primary-key lookups stay selective before column statistics are collected, including in generic prepared plans.
 

@@ -30,7 +30,8 @@ pub fn prune_unused_query_outputs(
         block,
         query.analyzed_source.as_deref(),
         query.analyzed_output.as_ref(),
-    ) {
+        &uqa_core::memory::ProductionControl::uncontrolled(),
+    )? {
         return Ok(());
     }
     let projection_can_be_pruned = matches!(block.compute, ComputePlan::Project)

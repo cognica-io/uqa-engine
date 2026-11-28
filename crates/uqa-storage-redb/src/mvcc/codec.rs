@@ -18,20 +18,41 @@ pub(super) fn validate_metadata(
     table: &impl ReadableTable<&'static str, &'static [u8]>,
     expected: DatabaseId,
 ) -> VersionResult<()> {
-    if read_u64(table, "format")? != super::RECORD_FORMAT {
+    // These fixed header entries occupy one ordered slice. Read the current transaction's values on every admission, including while a logical snapshot survives a format or identity change.
+    let mut format = None;
+    let mut identity = None;
+    let mut limit = None;
+    for entry in table
+        .range("database"..="receipt_limit")
+        .map_err(redb_error)?
+    {
+        let (name, value) = entry.map_err(redb_error)?;
+        match name.value() {
+            "database" => identity = Some(value),
+            "format" => format = Some(value),
+            "receipt_limit" => limit = Some(value),
+            _ => (),
+        }
+    }
+    if metadata_integer(format.as_ref().map(redb::AccessGuard::value))? != super::RECORD_FORMAT {
         return Err(VersionError::InvalidEncoding("unknown record format"));
     }
-    if database_id(table)? != expected {
+    if decode_identity(identity.as_ref().map(redb::AccessGuard::value))? != expected {
         return Err(VersionError::WrongDatabase);
     }
-    receipt_limit(table)?;
+    check_receipt_limit(metadata_integer(
+        limit.as_ref().map(redb::AccessGuard::value),
+    )?)?;
     Ok(())
 }
 
 pub(super) fn receipt_limit(
     table: &impl ReadableTable<&'static str, &'static [u8]>,
 ) -> VersionResult<u64> {
-    let limit = read_u64(table, "receipt_limit")?;
+    check_receipt_limit(read_u64(table, "receipt_limit")?)
+}
+
+fn check_receipt_limit(limit: u64) -> VersionResult<u64> {
     if limit == 0 {
         return Err(VersionError::InvalidEncoding(
             "invalid receipt retention limit",
@@ -43,24 +64,27 @@ pub(super) fn receipt_limit(
 pub(super) fn database_id(
     table: &impl ReadableTable<&'static str, &'static [u8]>,
 ) -> VersionResult<DatabaseId> {
-    let bytes = table
-        .get("database")
-        .map_err(redb_error)?
-        .ok_or(VersionError::InvalidEncoding("missing database identity"))?;
-    Ok(DatabaseId::from_bytes(bytes.value().try_into().map_err(
-        |_| VersionError::InvalidEncoding("invalid database identity"),
-    )?))
+    let bytes = table.get("database").map_err(redb_error)?;
+    decode_identity(bytes.as_ref().map(redb::AccessGuard::value))
+}
+
+fn decode_identity(bytes: Option<&[u8]>) -> VersionResult<DatabaseId> {
+    let bytes = bytes.ok_or(VersionError::InvalidEncoding("missing database identity"))?;
+    Ok(DatabaseId::from_bytes(bytes.try_into().map_err(|_| {
+        VersionError::InvalidEncoding("invalid database identity")
+    })?))
 }
 
 pub(super) fn read_u64(
     table: &impl ReadableTable<&'static str, &'static [u8]>,
     key: &str,
 ) -> VersionResult<u64> {
-    let bytes = table
-        .get(key)
-        .map_err(redb_error)?
-        .ok_or(VersionError::InvalidEncoding("missing MVCC metadata"))?;
-    decode_u64(bytes.value())
+    let bytes = table.get(key).map_err(redb_error)?;
+    metadata_integer(bytes.as_ref().map(redb::AccessGuard::value))
+}
+
+fn metadata_integer(bytes: Option<&[u8]>) -> VersionResult<u64> {
+    decode_u64(bytes.ok_or(VersionError::InvalidEncoding("missing MVCC metadata"))?)
 }
 
 pub(super) fn decode_u64(bytes: &[u8]) -> VersionResult<u64> {

@@ -11,7 +11,7 @@ use crate::CommandPlan;
 use uqa_sql::plan::{CommandQuerySlot, MutableCommandPlan};
 
 impl Context<'_, '_> {
-    pub(super) fn command_owned(
+    pub(super) fn command(
         &self,
         mut command: MutableCommandPlan,
     ) -> Result<MutableCommandPlan, SQLError> {
@@ -23,7 +23,7 @@ impl Context<'_, '_> {
                 | CommandPlan::Delete(_)
                 | CommandPlan::Merge(_)
         ) {
-            return self.utility_owned(command);
+            return self.utility(command);
         }
         let scope = if command.ctes().is_empty() {
             None
@@ -31,9 +31,8 @@ impl Context<'_, '_> {
             Some(ctes::Scope::command(command.ctes(), *control, self.ctes)?)
         };
         let context = Context {
-            config: self.config,
-            aggregates: self.aggregates,
             ctes: scope.as_ref().or(self.ctes),
+            ..*self
         };
         for index in 0..command.ctes().len() {
             control.check()?;
@@ -43,7 +42,7 @@ impl Context<'_, '_> {
                 command.ctes()[index].recursive,
                 *control,
             )?;
-            command = command.map_cte(index, control, |body| context.statement_owned(body))?;
+            command = command.map_cte(index, &self.storage, |body| context.statement(body))?;
         }
         if let Some(scope) = &scope {
             scope.set_visible(command.ctes(), command.ctes().len(), true, *control)?;
@@ -56,34 +55,33 @@ impl Context<'_, '_> {
             _ => unreachable!(),
         };
         if insert {
-            command =
-                command.map_query_child(CommandQuerySlot::InsertSource, control, |query| {
-                    context.query_owned(query)
-                })?;
+            command = command.map_query_child(
+                CommandQuerySlot::InsertSource,
+                &self.storage,
+                |query| context.query(query),
+            )?;
         }
         for index in 0..count {
-            command =
-                command.map_query_child(CommandQuerySlot::Subquery(index), control, |query| {
-                    context.query_owned(query)
-                })?;
+            command = command.map_query_child(
+                CommandQuerySlot::Subquery(index),
+                &self.storage,
+                |query| context.query(query),
+            )?;
         }
-        command.map_source(control, |source| context.source_queries_owned(source))
+        command.map_source(&self.storage, |source| context.source_queries(source))
     }
 
-    fn utility_owned(
-        &self,
-        mut command: MutableCommandPlan,
-    ) -> Result<MutableCommandPlan, SQLError> {
-        let control = &self.config.production;
+    fn utility(&self, mut command: MutableCommandPlan) -> Result<MutableCommandPlan, SQLError> {
+        let control = &self.storage;
         match &*command {
             CommandPlan::CreateView { .. }
             | CommandPlan::CreateTableAs { .. }
             | CommandPlan::CreateMaterializedView { .. }
             | CommandPlan::DeclareCursor { .. } => {
-                command.map_query_body(control, |query| self.query_owned(query))
+                command.map_query_body(control, |query| self.query(query))
             }
             CommandPlan::Explain { .. } | CommandPlan::Prepare { .. } => {
-                command.map_executable_body(control, |body| self.statement_owned(body))
+                command.map_executable_body(control, |body| self.statement(body))
             }
             CommandPlan::Call { args, .. } => {
                 let count = args.len();
@@ -95,7 +93,7 @@ impl Context<'_, '_> {
                         command = command.map_query_child(
                             CommandQuerySlot::CallArgumentSubquery { argument, query },
                             control,
-                            |query| self.query_owned(query),
+                            |query| self.query(query),
                         )?;
                     }
                 }
@@ -111,7 +109,7 @@ impl Context<'_, '_> {
                         command = command.map_query_child(
                             CommandQuerySlot::ExecuteParameterSubquery { parameter, query },
                             control,
-                            |query| self.query_owned(query),
+                            |query| self.query(query),
                         )?;
                     }
                 }

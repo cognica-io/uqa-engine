@@ -148,7 +148,11 @@ fn prepared_private_roots_share_sorted_spill_and_preserve_undo() {
             if grouped {
                 assert_eq!(
                     retained.scope_revision(b"k", &control).unwrap(),
-                    retained.revision()
+                    source
+                        .snapshot()
+                        .unwrap()
+                        .scope_revision(b"k", &control)
+                        .unwrap()
                 );
             }
             let savepoint = StorageSavepointId::allocate();

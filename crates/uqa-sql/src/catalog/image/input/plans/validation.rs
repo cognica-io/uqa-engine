@@ -38,6 +38,14 @@ impl Frame {
                 RelationalPlan::QueryBlock(block) => {
                     self.references
                         .validate(block.subqueries.len(), block.windows.len())?;
+                    let slot = block.privilege_subqueries.get(position);
+                    if let Some(slot) = slot {
+                        if *slot >= block.subqueries.len()
+                            || (position > 0 && *slot <= block.privilege_subqueries[position - 1])
+                        {
+                            return Err(invalid("projection privilege subquery slot"));
+                        }
+                    }
                     if let Some(window) = block.windows.get(position) {
                         if window.spec.definition.is_some() {
                             return Err(invalid("canonical window call address"));
@@ -49,7 +57,7 @@ impl Frame {
                         }
                         Ok(false)
                     } else {
-                        Ok(true)
+                        Ok(slot.is_none())
                     }
                 }
                 RelationalPlan::SetOp { subqueries, .. }

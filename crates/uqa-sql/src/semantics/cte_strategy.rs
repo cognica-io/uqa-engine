@@ -11,7 +11,7 @@ use crate::{
     plan::{CtePlan, QueryPlan},
     semantics::{
         cte_order::analysis::CteAnalysis,
-        volatility::{query_contains_volatile_function, VolatilityCatalog},
+        volatility::{query_contains_volatile_function_with_control, VolatilityCatalog},
     },
     SQLError,
 };
@@ -49,28 +49,37 @@ pub fn schedule_plan_ctes_with_control<'a>(
         if !reachable[index] {
             continue;
         }
-        let cte = &plan.ctes[index];
-        let deferred = !cte.body.modifies_data()
-            && !analysis.recursive(index)
-            && match cte.materialization {
-                CteMaterialization::Default => analysis.single_reference(index),
-                CteMaterialization::Materialized => false,
-                CteMaterialization::NotMaterialized => true,
-            }
-            && matches!(
-                cte.body
-                    .query()
-                    .map_or(Ok(true), |query| query_contains_volatile_function(
-                        catalog, query
-                    )),
-                Ok(false)
-            );
         scheduled.push_copy(ScheduledCte {
-            plan: cte,
-            deferred,
+            plan: analysis.plans[index],
+            deferred: can_defer(&analysis, index, catalog, control)?,
         })?;
     }
     Ok(scheduled.finish()?)
+}
+
+pub(super) fn can_defer(
+    analysis: &CteAnalysis<'_, '_>,
+    index: usize,
+    catalog: &dyn VolatilityCatalog,
+    control: ProductionControl<'_>,
+) -> Result<bool, SQLError> {
+    let cte = analysis.plans[index];
+    let Some(query) = cte.body.query() else {
+        return Ok(false);
+    };
+    let foldable = match cte.materialization {
+        CteMaterialization::Default => analysis.single_reference(index),
+        CteMaterialization::Materialized => false,
+        CteMaterialization::NotMaterialized => true,
+    };
+    if !foldable || analysis.recursive(index) {
+        return Ok(false);
+    }
+    match query_contains_volatile_function_with_control(catalog, query, &control) {
+        Ok(volatile) => Ok(!volatile),
+        Err(error) if error.native_resource_error().is_some() => Err(error),
+        Err(_) => Ok(false),
+    }
 }
 
 /// Materialized WITH items split by native execution time: read dependencies precede the primary query; unread mutations finish afterward, last defined first.

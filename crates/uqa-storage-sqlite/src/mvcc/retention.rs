@@ -69,7 +69,7 @@ fn local_metadata_registry(
 
 #[cfg(not(any(windows, all(unix, not(target_os = "emscripten")))))]
 mod local {
-    use super::*;
+    use super::{database_path, Arc, DatabaseId, MetadataEpoch, SnapshotRegistry, VersionResult};
     use parking_lot::Mutex;
     use std::{
         collections::HashMap,
