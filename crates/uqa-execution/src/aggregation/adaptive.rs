@@ -6,6 +6,7 @@
 
 //! Adaptive streaming/hash aggregation with compact partial-state spill.
 
+use crate::aggregation::value_retained_bytes;
 use crate::RowSchemaExecution;
 mod finish;
 mod merge_keys;
@@ -19,8 +20,8 @@ use uqa_sql::ast::ColumnType;
 use super::{
     aggregate_accumulator_templates, aggregate_targets, eval_scalar,
     instantiate_aggregate_accumulators, AggregateAccumulator, AggregateAccumulatorTemplate,
-    AggregateStatePlan, DecimalValue, PlanSubqueryArena, QueryBlockPlan, QueryExpressionContext,
-    SQLError, SQLParam, ScalarEvalContext, ScalarExpr, SpillBuffer, Value,
+    AggregateStatePlan, PlanSubqueryArena, QueryBlockPlan, QueryExpressionContext, SQLError,
+    SQLParam, ScalarEvalContext, ScalarExpr, SpillBuffer, Value,
 };
 #[cfg(test)]
 use crate::hash_canonical_row;
@@ -49,7 +50,9 @@ type GroupIndex = HashMap<u64, GroupIndexBucket, ahash::RandomState>;
 type CompactTextGroupIndex = HashMap<u64, usize, ahash::RandomState>;
 
 pub(super) struct AdaptiveAggregateSet {
-    statement: Box<QueryBlockPlan>,
+    group_by: Vec<ScalarExpr>,
+    subqueries: std::sync::Arc<[uqa_sql::plan::QueryPlan]>,
+    key_scratch: Vec<Value>,
     group_types: Vec<Option<ColumnType>>,
     group_expressions: crate::scalar::PreparedExpressions<Vec<ScalarExpr>>,
     aggregate_targets: crate::scalar::PreparedExpressions<Vec<ScalarExpr>>,
@@ -168,7 +171,9 @@ impl AdaptiveAggregateSet {
                     })
                     .collect(),
             ),
-            statement: Box::new(statement),
+            group_by: statement.group_by,
+            subqueries: statement.subqueries.into(),
+            key_scratch: Vec::new(),
             aggregate_targets: crate::scalar::PreparedExpressions::scalars(aggregate_targets),
             accumulator_templates,
             output_plan,
@@ -230,11 +235,11 @@ impl AdaptiveAggregateSet {
     }
 
     pub(super) fn statement_subqueries_are_empty(&self) -> bool {
-        self.statement.subqueries.is_empty()
+        self.subqueries.is_empty()
     }
 
     pub(super) fn supports_storage_borrowed_rows(&self) -> bool {
-        self.statement.subqueries.is_empty()
+        self.subqueries.is_empty()
             && self.projected_group_columns.is_some()
             && self.projected_aggregate_plans.all_direct()
     }
@@ -249,7 +254,7 @@ impl AdaptiveAggregateSet {
             return Ok(());
         }
         let hook = context;
-        let subqueries = self.statement.subqueries.clone();
+        let subqueries = std::sync::Arc::clone(&self.subqueries);
         let subquery_arena = PlanSubqueryArena::new(&subqueries, Some(hook));
         for row in &batch.rows {
             let view = batch.schema.view(row);
@@ -258,9 +263,23 @@ impl AdaptiveAggregateSet {
                 .with_function_hook(hook)
                 .with_subquery_runner(&subquery_arena)
                 .with_physical_outer_row(&batch.schema, row);
-            if !self.consume_projected_group(&view, &context)? {
-                self.consume_context(&context)?;
+            let Some(index) = self.group_for_row(&view, &context)? else {
+                break;
+            };
+            if self
+                .projected_group_columns
+                .as_ref()
+                .is_some_and(|columns| !columns.is_empty())
+            {
+                self.observe_projected(index, &view, &context)?;
+            } else {
+                super::sort_fallback::observe_targets(
+                    &mut self.groups[index].state.accumulators,
+                    &self.aggregate_targets,
+                    &context.with_function_states(self.aggregate_targets.calls()),
+                )?;
             }
+            self.finish_observation(index)?;
             if self.abandoned {
                 break;
             }
@@ -268,77 +287,47 @@ impl AdaptiveAggregateSet {
         Ok(())
     }
 
-    fn consume_context(&mut self, context: &ScalarEvalContext<'_>) -> Result<(), SQLError> {
+    fn evaluated_group_index(
+        &mut self,
+        context: &ScalarEvalContext<'_>,
+    ) -> Result<Option<usize>, SQLError> {
+        self.key_scratch.clear();
         let group_context = (*context).with_function_states(self.group_expressions.calls());
-        let key = self
-            .group_expressions
-            .iter()
-            .map(|expression| eval_scalar(expression, &group_context))
-            .collect::<Result<Vec<_>, _>>()?;
-        self.consume_key_context(&key, context)
-    }
-
-    fn consume_key_context(
-        &mut self,
-        key: &[Value],
-        context: &ScalarEvalContext<'_>,
-    ) -> Result<(), SQLError> {
-        let hash = self.group_hash(
-            key,
-            context
-                .function_hook()
-                .and_then(uqa_sql::expr::EngineHook::enum_labels),
-        )?;
-        if self.observe_key_context(hash, key, context)? {
-            return self.handle_state_overflow();
+        for expression in self.group_expressions.iter() {
+            self.key_scratch
+                .push(eval_scalar(expression, &group_context)?);
         }
-        if !self.insert_group(key, hash)? {
-            return Ok(());
-        }
-        if !self.observe_key_context(hash, key, context)? {
-            return Err(SQLError::Internal(
-                "adaptive aggregate group was not initialized".into(),
-            ));
-        }
-        self.handle_state_overflow()
-    }
-
-    fn observe_key_context(
-        &mut self,
-        hash: u64,
-        key: &[Value],
-        context: &ScalarEvalContext<'_>,
-    ) -> Result<bool, SQLError> {
-        let Some(index) = matching_group_index(
+        let enums = context
+            .function_hook()
+            .and_then(uqa_sql::expr::EngineHook::enum_labels);
+        let hash = self.group_hash(&self.key_scratch, enums)?;
+        if let Some(index) = matching_group_index(
             &self.group_index,
             &self.groups,
             hash,
-            key,
+            &self.key_scratch,
             &self.group_types,
-            context
-                .function_hook()
-                .and_then(uqa_sql::expr::EngineHook::enum_labels),
-        )?
-        else {
-            return Ok(false);
-        };
-        let entry = &mut self.groups[index];
-        let state = &mut entry.state;
-        let previous_bytes = state.retained_bytes;
-        super::sort_fallback::observe_targets(
-            &mut state.accumulators,
-            &self.aggregate_targets,
-            &(*context).with_function_states(self.aggregate_targets.calls()),
-        )?;
+            enums,
+        )? {
+            self.key_scratch.clear();
+            return Ok(Some(index));
+        }
+        let key = std::mem::take(&mut self.key_scratch);
+        self.insert_group(key, hash)
+    }
+
+    fn finish_observation(&mut self, index: usize) -> Result<(), SQLError> {
         if self.variable_state {
-            state.retained_bytes = estimate_group_bytes(&entry.key, &state.accumulators);
+            let entry = &mut self.groups[index];
+            let updated = estimate_group_bytes(&entry.key, &entry.state.accumulators);
             self.retained_bytes = self
                 .retained_bytes
-                .checked_sub(previous_bytes)
-                .and_then(|bytes| bytes.checked_add(state.retained_bytes))
+                .checked_sub(entry.state.retained_bytes)
+                .and_then(|bytes| bytes.checked_add(updated))
                 .ok_or_else(|| SQLError::Internal("aggregate state size overflow".into()))?;
+            entry.state.retained_bytes = updated;
         }
-        Ok(true)
+        self.handle_state_overflow()
     }
 
     fn group_hash(
@@ -374,16 +363,16 @@ impl AdaptiveAggregateSet {
         try_pack_compact_text_pair(key.iter().map(Some))
     }
 
-    fn insert_group(&mut self, key: &[Value], hash: u64) -> Result<bool, SQLError> {
+    fn insert_group(&mut self, key: Vec<Value>, hash: u64) -> Result<Option<usize>, SQLError> {
         if self.abandoned {
-            return Ok(false);
+            return Ok(None);
         }
         let mut accumulators = instantiate_aggregate_accumulators(
             &self.accumulator_templates,
             self.accumulator_budget,
         )?;
-        let group_bytes = estimate_group_bytes(key, &accumulators);
-        if !self.statement.group_by.is_empty()
+        let group_bytes = estimate_group_bytes(&key, &accumulators);
+        if !self.group_by.is_empty()
             && self
                 .retained_bytes
                 .checked_add(group_bytes)
@@ -396,11 +385,11 @@ impl AdaptiveAggregateSet {
                 OverflowStrategy::SpillMergeablePartials => {}
                 OverflowStrategy::AbandonForReplay => {
                     self.abandon();
-                    return Ok(false);
+                    return Ok(None);
                 }
             }
         }
-        let compact_text_key = self.compact_text_group_key(key);
+        let compact_text_key = self.compact_text_group_key(&key);
         let Some(retained_bytes) = self.retained_bytes.checked_add(group_bytes) else {
             return super::state::with_cleanup(
                 Err(SQLError::Internal("aggregate state size overflow".into())),
@@ -410,7 +399,7 @@ impl AdaptiveAggregateSet {
         self.retained_bytes = retained_bytes;
         let index = self.groups.len();
         self.groups.push(GroupEntry {
-            key: key.to_vec(),
+            key,
             state: GroupState {
                 accumulators,
                 retained_bytes: group_bytes,
@@ -422,31 +411,24 @@ impl AdaptiveAggregateSet {
         {
             compact_index.insert(key, index);
         }
-        Ok(true)
+        Ok(Some(index))
     }
 
-    fn ensure_active_group(&mut self, key: &[Value]) -> Result<u64, SQLError> {
-        let hash = self.group_hash(key, None)?;
-        let exists = matching_group_index(
-            &self.group_index,
-            &self.groups,
-            hash,
-            key,
-            &self.group_types,
-            None,
-        )?
-        .is_some();
-        if !exists && !self.insert_group(key, hash)? {
-            Err(SQLError::Internal(
-                "abandoned aggregate state cannot accept projected rows".into(),
-            ))
-        } else {
-            Ok(hash)
+    fn ungrouped_index(&mut self) -> Result<Option<usize>, SQLError> {
+        match self.groups.len() {
+            0 => {
+                let hash = self.group_hash(&[], None)?;
+                self.insert_group(Vec::new(), hash)
+            }
+            1 => Ok(Some(0)),
+            _ => Err(SQLError::Internal(
+                "ungrouped aggregate retained more than one group".into(),
+            )),
         }
     }
 
     fn handle_state_overflow(&mut self) -> Result<(), SQLError> {
-        if self.statement.group_by.is_empty() || self.retained_bytes <= self.state_budget {
+        if self.group_by.is_empty() || self.retained_bytes <= self.state_budget {
             return Ok(());
         }
         match self.overflow_strategy {
@@ -690,113 +672,85 @@ fn fixed_width_sum_type(ty: &ColumnType) -> bool {
 }
 
 fn estimate_group_bytes(key: &[Value], accumulators: &[AggregateAccumulator]) -> usize {
-    GROUP_ENTRY_OVERHEAD_BYTES
-        .saturating_add(key.iter().map(value_retained_bytes).sum::<usize>())
-        .saturating_add(
+    key.iter()
+        .map(value_retained_bytes)
+        .chain(
             accumulators
                 .iter()
-                .map(|accumulator| {
-                    std::mem::size_of::<AggregateAccumulator>()
-                        .saturating_add(
-                            accumulator
-                                .decimal_sum
-                                .as_ref()
-                                .map_or(0, DecimalValue::retained_bytes),
-                        )
-                        .saturating_add(accumulator.min.as_ref().map_or(0, value_retained_bytes))
-                        .saturating_add(accumulator.max.as_ref().map_or(0, value_retained_bytes))
-                        .saturating_add(
-                            accumulator
-                                .statistics_origin
-                                .as_ref()
-                                .map_or(0, DecimalValue::retained_bytes),
-                        )
-                        .saturating_add(
-                            accumulator
-                                .statistics_sum
-                                .as_ref()
-                                .map_or(0, DecimalValue::retained_bytes),
-                        )
-                        .saturating_add(
-                            accumulator
-                                .statistics_sum_squares
-                                .as_ref()
-                                .map_or(0, DecimalValue::retained_bytes),
-                        )
-                        .saturating_add(accumulator.distinct.values.memory_bytes)
-                        .saturating_add(accumulator.values.memory_bytes)
-                        .saturating_add(accumulator.registered_ordered.memory_bytes)
-                })
-                .sum::<usize>(),
+                .map(AggregateAccumulator::retained_bytes),
         )
-}
-
-fn value_retained_bytes(value: &Value) -> usize {
-    std::mem::size_of::<Value>().saturating_add(match value {
-        Value::Str(value) | Value::FixedChar(value) | Value::Json(value) | Value::JsonB(value) => {
-            value.capacity()
-        }
-        Value::Bytes(value) => value.capacity(),
-        Value::BitString(value) => value.retained_bytes(),
-        Value::Enum(value) => value.retained_bytes(),
-        Value::Datum(value) => value.retained_bytes(),
-        Value::LegacyVector(vector) => vector.retained_bytes(),
-        Value::Array(array) => array
-            .retained_header_bytes()
-            .saturating_add(
-                array
-                    .elements()
-                    .len()
-                    .saturating_mul(std::mem::size_of::<Value>())
-                    .saturating_add(array.elements().iter().map(value_retained_bytes).sum()),
-            )
-            .saturating_add(
-                array
-                    .lower_bounds()
-                    .len()
-                    .saturating_mul(std::mem::size_of::<i32>()),
-            )
-            .saturating_add(
-                array
-                    .dimensions()
-                    .len()
-                    .saturating_mul(std::mem::size_of::<usize>()),
-            ),
-        Value::List(values) => values
-            .capacity()
-            .saturating_mul(std::mem::size_of::<Value>())
-            .saturating_add(values.iter().map(value_retained_bytes).sum()),
-        Value::Row(values) => values.iter().fold(
-            values.retained_buffer_bytes().unwrap_or(usize::MAX),
-            |bytes, value| bytes.saturating_add(value_retained_bytes(value)),
-        ),
-        Value::Record(fields) => fields.iter().fold(
-            fields.retained_buffer_bytes().unwrap_or(usize::MAX),
-            |bytes, (name, value)| {
-                bytes
-                    .saturating_add(name.capacity())
-                    .saturating_add(value_retained_bytes(value))
-            },
-        ),
-        Value::Map(values) => values.iter().fold(0usize, |bytes, (key, value)| {
-            bytes
-                .saturating_add(key.capacity())
-                .saturating_add(value_retained_bytes(value))
-                .saturating_add(3 * std::mem::size_of::<usize>())
-        }),
-        Value::Null
-        | Value::Void
-        | Value::Bool(_)
-        | Value::Int(_)
-        | Value::Float(_)
-        | Value::Temporal(_) => 0,
-        Value::Decimal(value) => value.retained_bytes(),
-    })
+        .fold(GROUP_ENTRY_OVERHEAD_BYTES, usize::saturating_add)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use uqa_core::DecimalValue;
+
+    fn aggregate(sql: &str, budget: usize) -> AdaptiveAggregateSet {
+        use uqa_sql::plan::{RelationalPlan, UnifiedPlan};
+        let UnifiedPlan::Query(query) =
+            UnifiedPlan::lower(uqa_sql::compile(sql).unwrap().remove(0))
+        else {
+            panic!("expected a query");
+        };
+        let RelationalPlan::QueryBlock(block) = query.root else {
+            panic!("expected a query block")
+        };
+        AdaptiveAggregateSet::new(
+            &crate::query::relational::values::test_support::Services,
+            *block,
+            false,
+            budget,
+            &RowSchema::default(),
+            &[],
+            None,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn evaluated_keys_reuse_their_slots_and_new_groups_take_key_ownership() {
+        let mut set = aggregate("SELECT count(*) GROUP BY true", 1 << 20);
+        let row = crate::OwnedPhysicalRow::new(
+            RowSchema::default(),
+            crate::PhysicalRow::from_values(Vec::new()),
+        );
+        let context = ScalarEvalContext::from_row_lookup(&row, &[]).with_row_schema(&row.schema);
+        let key = vec![Value::Bool(true)];
+        let pointer = key.as_ptr();
+        let hash = set.group_hash(&key, None).unwrap();
+        assert_eq!(set.insert_group(key, hash).unwrap(), Some(0));
+        assert_eq!(set.groups[0].key.as_ptr(), pointer);
+        assert_eq!(set.group_for_row(&row, &context).unwrap(), Some(0));
+        let slots = set.key_scratch.as_ptr();
+        assert!(set.key_scratch.capacity() >= 1);
+        let allocations = allocation_counter::measure(|| {
+            for _ in 0..10_000 {
+                assert_eq!(set.group_for_row(&row, &context).unwrap(), Some(0));
+            }
+        });
+        assert_eq!(set.key_scratch.as_ptr(), slots);
+        assert_eq!(allocations.count_total, 0);
+    }
+
+    #[test]
+    fn batches_reuse_subquery_plans_without_allocating() {
+        let mut set = aggregate("SELECT count(*) HAVING (SELECT 1) = 1", 1 << 20);
+        assert_eq!(set.subqueries.len(), 1);
+        let empty = Batch::from_physical_rows(RowSchema::default(), Vec::new());
+        let allocations = allocation_counter::measure(|| {
+            for _ in 0..10_000 {
+                set.consume(
+                    &crate::query::relational::values::test_support::Services,
+                    &empty,
+                    &[],
+                )
+                .unwrap();
+            }
+        });
+        assert_eq!(allocations.count_total, 0);
+    }
 
     #[test]
     fn datum_hash_buckets_compare_decoded_sql_values() {

@@ -19,6 +19,13 @@ pub(super) struct ArrayInputShape {
 }
 
 impl ArrayInputShape {
+    pub(super) fn retained_bytes(&self) -> usize {
+        size_of::<Self>()
+            + self.first.as_ref().map_or(0, |(dimensions, bounds)| {
+                dimensions.capacity() * size_of::<usize>() + bounds.capacity() * size_of::<i32>()
+            })
+    }
+
     /// Check one transition input in the order the transition function sees it.
     pub(super) fn accept(&mut self, value: &Value) -> Result<(), SQLError> {
         let physical;

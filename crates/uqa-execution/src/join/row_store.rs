@@ -11,7 +11,7 @@ use crate::{ExecError, ExecResult, IndexedSpill, PhysicalRow, RowSchema};
 /// Positional build-side row storage that only touches disk after its encoded
 /// memory budget is exhausted. Once spilled, every row lives in the indexed
 /// disk store so positional indices remain stable across the transition.
-pub(super) struct HybridRowStore {
+pub(crate) struct HybridRowStore {
     pub(super) schema: RowSchema,
     memory: Vec<PhysicalRow>,
     rows: u64,
@@ -21,7 +21,7 @@ pub(super) struct HybridRowStore {
 }
 
 impl HybridRowStore {
-    pub(super) fn new(schema: RowSchema, budget_bytes: usize) -> Self {
+    pub(crate) fn new(schema: RowSchema, budget_bytes: usize) -> Self {
         Self {
             schema,
             memory: Vec::new(),
@@ -49,7 +49,7 @@ impl HybridRowStore {
             .and_then(|index| self.memory.get(index))
     }
 
-    pub(super) fn push(&mut self, row: PhysicalRow) -> ExecResult<()> {
+    pub(crate) fn push(&mut self, row: PhysicalRow) -> ExecResult<()> {
         if let Some(disk) = self.disk.as_mut() {
             return disk.push(&row);
         }
@@ -85,7 +85,7 @@ impl HybridRowStore {
         Ok(())
     }
 
-    pub(super) fn with_row<T>(
+    pub(crate) fn with_row<T>(
         &mut self,
         index: u64,
         visitor: impl FnOnce(&PhysicalRow) -> ExecResult<T>,

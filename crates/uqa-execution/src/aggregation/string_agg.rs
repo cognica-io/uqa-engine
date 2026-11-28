@@ -84,7 +84,7 @@ fn bytes(value: &Value, binary: bool) -> Result<&[u8], SQLError> {
 }
 
 pub(super) fn finish(
-    values: &super::AggregateValueBuffer,
+    values: super::ordered_buffer::OrderedRows<'_, super::AggregateValueRecord>,
     catalog: Option<&dyn SQLValueCatalog>,
 ) -> Result<Value, SQLError> {
     let mut state = Transition::default();

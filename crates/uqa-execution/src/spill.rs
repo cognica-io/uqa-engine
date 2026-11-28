@@ -29,20 +29,26 @@ mod file;
 mod format;
 mod indexed;
 mod match_flags;
+pub(crate) mod merge_heap;
 mod segments;
 pub(crate) use file::SpillFileArena;
 pub(crate) use match_flags::MatchFlags;
 pub(crate) use segments::SpillSegmentDescriptor;
 
+pub(crate) use format::{
+    add_value_size, decode_document, decode_physical_row_record, encode_document,
+    encode_physical_row_record, encode_value, encoded_document_size, read_bounded_spill_record,
+    write_raw, write_u64, BinaryReader,
+};
 use format::{
     append_batches, decode_batch, encoded_batch_overhead_size, encoded_batch_size,
     encoded_borrowed_row_record_size, encoded_physical_row_record_size, open_spill_reader,
-    read_bounded_spill_record, spill_error,
+    spill_error,
 };
-pub(crate) use format::{
-    decode_document, decode_physical_row_record, encode_document, encode_physical_row_record,
-    encoded_document_size,
-};
+mod partitioned;
+#[cfg(test)]
+pub(crate) use partitioned::stable_hash;
+pub(crate) use partitioned::{DiskPositions, PartitionedKeys};
 mod batch_writer;
 pub(crate) use batch_writer::SpillBatchWriter;
 mod batch_layout;
@@ -937,3 +943,5 @@ where
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+pub(crate) use tests::temporary_reads;

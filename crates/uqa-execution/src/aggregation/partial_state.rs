@@ -6,7 +6,11 @@
 
 //! Encoding and merging of compact, mergeable aggregate partial states.
 
+use super::accumulator::Transition;
+use super::transitions::{observe_extreme, GenericState, StatisticsState, SumState};
+use super::AggregateStatePlan;
 use super::{AggregateAccumulator, DecimalValue, NumericInputKind, SQLError, ScalarExpr, Value};
+use std::cmp::Ordering;
 use uqa_sql::expr::IntervalFields;
 
 pub(super) fn partial_schema(
@@ -67,41 +71,84 @@ pub(super) fn decode_partial_group(
     Ok((values, accumulators))
 }
 
+// The 22-field spill record has a stable field order. Materialize it only at the codec boundary.
+#[derive(Default)]
+struct PartialFields {
+    values: GenericState,
+    statistics: StatisticsState,
+}
+
+impl PartialFields {
+    fn from_transition(transition: Transition) -> Self {
+        let mut fields = Self::default();
+        match transition {
+            Transition::Generic(state) => fields.values = *state,
+            Transition::Count(count) => fields.values.sum.count = count,
+            Transition::Sum(sum) => fields.values.sum = sum,
+            Transition::Min(value) => fields.values.min = value,
+            Transition::Max(value) => fields.values.max = value,
+            Transition::BoolAnd(value) => fields.values.bool_and = value,
+            Transition::BoolOr(value) => fields.values.bool_or = value,
+            Transition::Statistics(state) => fields.statistics = *state,
+            _ => {}
+        }
+        fields
+    }
+
+    fn into_transition(self, plan: AggregateStatePlan) -> Transition {
+        if self.values.sum.real {
+            return Transition::Sum(self.values.sum);
+        }
+        match plan {
+            AggregateStatePlan::Generic => Transition::Generic(Box::new(self.values)),
+            AggregateStatePlan::Count => Transition::Count(self.values.sum.count),
+            AggregateStatePlan::Sum | AggregateStatePlan::SumReal => {
+                Transition::Sum(self.values.sum)
+            }
+            AggregateStatePlan::Min => Transition::Min(self.values.min),
+            AggregateStatePlan::Max => Transition::Max(self.values.max),
+            AggregateStatePlan::BoolAnd => Transition::BoolAnd(self.values.bool_and),
+            AggregateStatePlan::BoolOr => Transition::BoolOr(self.values.bool_or),
+            AggregateStatePlan::Statistics => Transition::Statistics(Box::new(self.statistics)),
+            other => Transition::for_plan(other),
+        }
+    }
+}
+
 fn encode_accumulator(accumulator: AggregateAccumulator) -> Value {
+    let PartialFields { values, statistics } =
+        PartialFields::from_transition(accumulator.transition);
+    let GenericState {
+        sum,
+        min,
+        max,
+        bool_and,
+        bool_or,
+    } = values;
     Value::List(vec![
-        unsigned_bytes(accumulator.count),
-        float_bytes(accumulator.sum),
-        Value::Bytes(accumulator.integer_sum.to_be_bytes().to_vec()),
-        accumulator.decimal_sum.map_or(Value::Null, Value::Decimal),
-        Value::Int(numeric_kind_code(accumulator.numeric_inputs)),
-        accumulator.min.unwrap_or(Value::Null),
-        accumulator.max.unwrap_or(Value::Null),
-        accumulator.bool_and.map_or(Value::Null, Value::Bool),
-        accumulator.bool_or.map_or(Value::Null, Value::Bool),
-        unsigned_bytes(accumulator.statistics_count),
-        float_bytes(accumulator.statistics_mean),
-        float_bytes(accumulator.statistics_m2),
-        Value::Bool(accumulator.statistics_moments_valid),
-        Value::Bool(accumulator.statistics_has_float),
-        Value::Bool(accumulator.statistics_nonzero_deviation),
-        accumulator
-            .statistics_origin
-            .map_or(Value::Null, Value::Decimal),
-        accumulator
-            .statistics_sum
-            .map_or(Value::Null, Value::Decimal),
-        accumulator
-            .statistics_sum_squares
-            .map_or(Value::Null, Value::Decimal),
-        Value::Bool(matches!(
-            accumulator.state_plan,
-            super::AggregateStatePlan::SumReal
-        )),
-        accumulator
-            .interval_sum
+        unsigned_bytes(sum.count),
+        float_bytes(sum.sum),
+        Value::Bytes(sum.integer_sum.to_be_bytes().to_vec()),
+        sum.decimal_sum.map_or(Value::Null, Value::Decimal),
+        Value::Int(numeric_kind_code(sum.numeric_inputs)),
+        min.unwrap_or(Value::Null),
+        max.unwrap_or(Value::Null),
+        bool_and.map_or(Value::Null, Value::Bool),
+        bool_or.map_or(Value::Null, Value::Bool),
+        unsigned_bytes(statistics.count),
+        float_bytes(statistics.mean),
+        float_bytes(statistics.m2),
+        Value::Bool(statistics.moments_valid),
+        Value::Bool(statistics.has_float),
+        Value::Bool(statistics.nonzero_deviation),
+        statistics.origin.map_or(Value::Null, Value::Decimal),
+        statistics.sum.map_or(Value::Null, Value::Decimal),
+        statistics.sum_squares.map_or(Value::Null, Value::Decimal),
+        Value::Bool(sum.real),
+        sum.interval_sum
             .map_or(Value::Null, |sum| Value::Temporal(sum.value())),
-        unsigned_bytes(accumulator.interval_positive_infinity),
-        unsigned_bytes(accumulator.interval_negative_infinity),
+        unsigned_bytes(sum.interval_positive_infinity),
+        unsigned_bytes(sum.interval_negative_infinity),
     ])
 }
 
@@ -127,28 +174,30 @@ fn decode_accumulator(
         )));
     }
     let mut fields = fields.into_iter();
-    let mut accumulator = AggregateAccumulator::builtin_with_budget(name, budget_bytes);
-    accumulator.count = decode_unsigned(next(&mut fields)?, "count")?;
-    accumulator.sum = decode_float(next(&mut fields)?, "sum")?;
-    accumulator.integer_sum = decode_i128(next(&mut fields)?, "integer sum")?;
-    accumulator.decimal_sum = optional_decimal(next(&mut fields)?)?;
-    accumulator.numeric_inputs = decode_numeric_kind(next(&mut fields)?)?;
-    accumulator.min = optional_value(next(&mut fields)?);
-    accumulator.max = optional_value(next(&mut fields)?);
-    accumulator.bool_and = optional_bool(next(&mut fields)?, "bool_and")?;
-    accumulator.bool_or = optional_bool(next(&mut fields)?, "bool_or")?;
-    accumulator.statistics_count = decode_unsigned(next(&mut fields)?, "statistics count")?;
-    accumulator.statistics_mean = decode_float(next(&mut fields)?, "statistics mean")?;
-    accumulator.statistics_m2 = decode_float(next(&mut fields)?, "statistics m2")?;
-    accumulator.statistics_moments_valid = match next(&mut fields)? {
+    let mut state = PartialFields::default();
+    let sum = &mut state.values.sum;
+    let statistics = &mut state.statistics;
+    sum.count = decode_unsigned(next(&mut fields)?, "count")?;
+    sum.sum = decode_float(next(&mut fields)?, "sum")?;
+    sum.integer_sum = decode_i128(next(&mut fields)?, "integer sum")?;
+    sum.decimal_sum = optional_decimal(next(&mut fields)?)?;
+    sum.numeric_inputs = decode_numeric_kind(next(&mut fields)?)?;
+    state.values.min = optional_value(next(&mut fields)?);
+    state.values.max = optional_value(next(&mut fields)?);
+    state.values.bool_and = optional_bool(next(&mut fields)?, "bool_and")?;
+    state.values.bool_or = optional_bool(next(&mut fields)?, "bool_or")?;
+    statistics.count = decode_unsigned(next(&mut fields)?, "statistics count")?;
+    statistics.mean = decode_float(next(&mut fields)?, "statistics mean")?;
+    statistics.m2 = decode_float(next(&mut fields)?, "statistics m2")?;
+    statistics.moments_valid = match next(&mut fields)? {
         Value::Bool(value) => value,
         _ => return Err(SQLError::Internal("invalid statistics moments flag".into())),
     };
-    accumulator.statistics_has_float = match next(&mut fields)? {
+    statistics.has_float = match next(&mut fields)? {
         Value::Bool(value) => value,
         _ => return Err(SQLError::Internal("invalid statistics float flag".into())),
     };
-    accumulator.statistics_nonzero_deviation = match next(&mut fields)? {
+    statistics.nonzero_deviation = match next(&mut fields)? {
         Value::Bool(value) => value,
         _ => {
             return Err(SQLError::Internal(
@@ -156,19 +205,18 @@ fn decode_accumulator(
             ))
         }
     };
-    accumulator.statistics_origin = optional_decimal(next(&mut fields)?)?;
-    accumulator.statistics_sum = optional_decimal(next(&mut fields)?)?;
-    accumulator.statistics_sum_squares = optional_decimal(next(&mut fields)?)?;
-    match next(&mut fields)? {
-        Value::Bool(true) => accumulator.state_plan = super::AggregateStatePlan::SumReal,
-        Value::Bool(false) => {}
+    statistics.origin = optional_decimal(next(&mut fields)?)?;
+    statistics.sum = optional_decimal(next(&mut fields)?)?;
+    statistics.sum_squares = optional_decimal(next(&mut fields)?)?;
+    sum.real = match next(&mut fields)? {
+        Value::Bool(real) => real,
         _ => {
             return Err(SQLError::Internal(
                 "invalid aggregate float width flag".into(),
             ))
         }
-    }
-    accumulator.interval_sum = match next(&mut fields)? {
+    };
+    sum.interval_sum = match next(&mut fields)? {
         Value::Null => None,
         Value::Temporal(sum) => Some(IntervalFields::of(&sum).ok_or_else(|| {
             SQLError::Internal("partial aggregate interval sum is not an interval".into())
@@ -179,11 +227,14 @@ fn decode_accumulator(
             ))
         }
     };
-    accumulator.interval_positive_infinity =
+    sum.interval_positive_infinity =
         decode_unsigned(next(&mut fields)?, "positive interval infinity count")?;
-    accumulator.interval_negative_infinity =
+    sum.interval_negative_infinity =
         decode_unsigned(next(&mut fields)?, "negative interval infinity count")?;
-    Ok(accumulator)
+    Ok(AggregateAccumulator::with_budget(
+        state.into_transition(AggregateStatePlan::builtin(name)),
+        budget_bytes,
+    ))
 }
 
 fn next(values: &mut impl Iterator<Item = Value>) -> Result<Value, SQLError> {
@@ -197,10 +248,62 @@ pub(super) fn merge_accumulators(
     source: AggregateAccumulator,
     enums: Option<&dyn uqa_sql::expr::enums::EnumLabelCatalog>,
 ) -> Result<(), SQLError> {
+    let comparison = target.enum_comparison.as_deref();
+    let merge_extreme = |left: &mut Option<Value>, right: Option<Value>, order| {
+        if let Some(value) = right {
+            observe_extreme(left, &value, order, enums, comparison)?;
+        }
+        Ok::<_, SQLError>(())
+    };
+    match (&mut target.transition, source.transition) {
+        (Transition::Count(left), Transition::Count(right)) => {
+            *left = left
+                .checked_add(right)
+                .ok_or_else(|| SQLError::TypeMismatch("aggregate count overflow".into()))?;
+        }
+        (Transition::Sum(left), Transition::Sum(right)) => merge_sums(left, &right)?,
+        (Transition::Min(left), Transition::Min(right)) => {
+            merge_extreme(left, right, Ordering::Greater)?;
+        }
+        (Transition::Max(left), Transition::Max(right)) => {
+            merge_extreme(left, right, Ordering::Less)?;
+        }
+        (Transition::BoolAnd(left), Transition::BoolAnd(right)) => merge_bool(left, right, true),
+        (Transition::BoolOr(left), Transition::BoolOr(right)) => merge_bool(left, right, false),
+        (Transition::Statistics(left), Transition::Statistics(right)) => {
+            merge_statistics(left, *right)?;
+        }
+        (Transition::Generic(left), Transition::Generic(right)) => {
+            merge_sums(&mut left.sum, &right.sum)?;
+            merge_extreme(&mut left.min, right.min, Ordering::Greater)?;
+            merge_extreme(&mut left.max, right.max, Ordering::Less)?;
+            merge_bool(&mut left.bool_and, right.bool_and, true);
+            merge_bool(&mut left.bool_or, right.bool_or, false);
+        }
+        _ => {
+            return Err(SQLError::Internal(
+                "partial aggregate transitions do not match their target".into(),
+            ))
+        }
+    }
+    Ok(())
+}
+
+fn merge_bool(left: &mut Option<bool>, right: Option<bool>, conjunction: bool) {
+    if let Some(value) = right {
+        *left = Some(if conjunction {
+            left.unwrap_or(true) && value
+        } else {
+            left.unwrap_or(false) || value
+        });
+    }
+}
+
+fn merge_sums(target: &mut SumState, source: &SumState) -> Result<(), SQLError> {
     let target_float_total = numeric_total_as_float(target)?;
-    let source_float_total = numeric_total_as_float(&source)?;
+    let source_float_total = numeric_total_as_float(source)?;
     let target_decimal = decimal_component(target)?;
-    let source_decimal = decimal_component(&source)?;
+    let source_decimal = decimal_component(source)?;
     let has_decimal = target.numeric_inputs.has_decimal() || source.numeric_inputs.has_decimal();
     let has_float =
         numeric_has_float(target.numeric_inputs) || numeric_has_float(source.numeric_inputs);
@@ -251,117 +354,84 @@ pub(super) fn merge_accumulators(
     } else {
         0.0
     };
-    merge_statistics(target, &source)?;
-    if let Some(value) = source.min {
-        target.observe_min(&value, enums)?;
-    }
-    if let Some(value) = source.max {
-        target.observe_max(&value, enums)?;
-    }
-    target.bool_and = match (target.bool_and, source.bool_and) {
-        (Some(left), Some(right)) => Some(left && right),
-        (Some(value), None) | (None, Some(value)) => Some(value),
-        (None, None) => None,
-    };
-    target.bool_or = match (target.bool_or, source.bool_or) {
-        (Some(left), Some(right)) => Some(left || right),
-        (Some(value), None) | (None, Some(value)) => Some(value),
-        (None, None) => None,
-    };
     Ok(())
 }
 
-fn merge_statistics(
-    target: &mut AggregateAccumulator,
-    source: &AggregateAccumulator,
-) -> Result<(), SQLError> {
-    if source.statistics_count == 0 {
+fn merge_statistics(target: &mut StatisticsState, source: StatisticsState) -> Result<(), SQLError> {
+    if source.count == 0 {
         return Ok(());
     }
-    if target.statistics_count == 0 {
-        target.statistics_count = source.statistics_count;
-        target.statistics_mean = source.statistics_mean;
-        target.statistics_m2 = source.statistics_m2;
-        target.statistics_moments_valid = source.statistics_moments_valid;
-        target.statistics_has_float = source.statistics_has_float;
-        target.statistics_nonzero_deviation = source.statistics_nonzero_deviation;
-        target
-            .statistics_origin
-            .clone_from(&source.statistics_origin);
-        target.statistics_sum.clone_from(&source.statistics_sum);
-        target
-            .statistics_sum_squares
-            .clone_from(&source.statistics_sum_squares);
+    if target.count == 0 {
+        *target = source;
         return Ok(());
     }
     let combined = target
-        .statistics_count
-        .checked_add(source.statistics_count)
+        .count
+        .checked_add(source.count)
         .ok_or_else(|| SQLError::TypeMismatch("statistical aggregate count overflow".into()))?;
-    let moments_valid = target.statistics_moments_valid && source.statistics_moments_valid;
-    let has_float = target.statistics_has_float || source.statistics_has_float;
+    let moments_valid = target.moments_valid && source.moments_valid;
+    let has_float = target.has_float || source.has_float;
     if has_float && !moments_valid {
         return Err(SQLError::TypeMismatch(
             "numeric statistical state does not fit double precision".into(),
         ));
     }
     if moments_valid {
-        let delta = source.statistics_mean - target.statistics_mean;
-        let left = target.statistics_count as f64;
-        let right = source.statistics_count as f64;
+        let delta = source.mean - target.mean;
+        let left = target.count as f64;
+        let right = source.count as f64;
         let total = combined as f64;
-        target.statistics_mean += delta * right / total;
-        target.statistics_m2 += source.statistics_m2 + delta * delta * left * right / total;
+        target.mean += delta * right / total;
+        target.m2 += source.m2 + delta * delta * left * right / total;
     }
-    target.statistics_moments_valid = moments_valid;
-    target.statistics_has_float = has_float;
+    target.moments_valid = moments_valid;
+    target.has_float = has_float;
     if has_float {
-        target.statistics_origin = None;
-        target.statistics_sum = None;
-        target.statistics_sum_squares = None;
+        target.origin = None;
+        target.sum = None;
+        target.sum_squares = None;
     } else {
-        merge_exact_statistics(target, source)?;
+        merge_exact_statistics(target, &source)?;
     }
-    target.statistics_count = combined;
+    target.count = combined;
     Ok(())
 }
 
 fn merge_exact_statistics(
-    target: &mut AggregateAccumulator,
-    source: &AggregateAccumulator,
+    target: &mut StatisticsState,
+    source: &StatisticsState,
 ) -> Result<(), SQLError> {
     let target_origin = target
-        .statistics_origin
+        .origin
         .as_ref()
         .ok_or_else(|| SQLError::Internal("numeric statistical state omitted its origin".into()))?;
-    let source_origin = source.statistics_origin.as_ref().ok_or_else(|| {
+    let source_origin = source.origin.as_ref().ok_or_else(|| {
         SQLError::Internal("numeric statistical partial state omitted its origin".into())
     })?;
-    let target_sum = target.statistics_sum.as_ref().ok_or_else(|| {
+    let target_sum = target.sum.as_ref().ok_or_else(|| {
         SQLError::Internal("numeric statistical state omitted its deviation sum".into())
     })?;
-    let source_sum = source.statistics_sum.as_ref().ok_or_else(|| {
+    let source_sum = source.sum.as_ref().ok_or_else(|| {
         SQLError::Internal("numeric statistical partial state omitted its deviation sum".into())
     })?;
-    let target_squares = target.statistics_sum_squares.as_ref().ok_or_else(|| {
+    let target_squares = target.sum_squares.as_ref().ok_or_else(|| {
         SQLError::Internal("numeric statistical state omitted its deviation square sum".into())
     })?;
-    let source_squares = source.statistics_sum_squares.as_ref().ok_or_else(|| {
+    let source_squares = source.sum_squares.as_ref().ok_or_else(|| {
         SQLError::Internal(
             "numeric statistical partial state omitted its deviation square sum".into(),
         )
     })?;
-    target.statistics_nonzero_deviation |=
-        source.statistics_nonzero_deviation || source_origin != target_origin;
+    target.nonzero_deviation |= source.nonzero_deviation || source_origin != target_origin;
     if target_squares.is_nan() || source_squares.is_nan() {
         let nan = target_squares.checked_add(source_squares).ok_or_else(|| {
             SQLError::Internal("numeric special partial states did not produce NaN".into())
         })?;
-        target.statistics_sum = Some(nan.clone());
-        target.statistics_sum_squares = Some(nan);
+        target.sum = Some(nan.clone());
+        target.sum_squares = Some(nan);
         return Ok(());
     }
-    let source_count = DecimalValue::from_i128(i128::from(source.statistics_count))
+    let source_count = DecimalValue::from_i128(i128::from(source.count))
         .ok_or_else(|| SQLError::TypeMismatch("statistical aggregate count overflow".into()))?;
     let shift = source_origin.checked_sub(target_origin).ok_or_else(|| {
         SQLError::TypeMismatch("numeric statistical origin shift overflow".into())
@@ -389,9 +459,9 @@ fn merge_exact_statistics(
         .ok_or_else(|| {
             SQLError::TypeMismatch("numeric statistical deviation square sum overflow".into())
         })?;
-    target.statistics_sum = target_sum.checked_add(&shifted_sum);
-    target.statistics_sum_squares = target_squares.checked_add(&shifted_squares);
-    if target.statistics_sum.is_none() || target.statistics_sum_squares.is_none() {
+    target.sum = target_sum.checked_add(&shifted_sum);
+    target.sum_squares = target_squares.checked_add(&shifted_squares);
+    if target.sum.is_none() || target.sum_squares.is_none() {
         return Err(SQLError::TypeMismatch(
             "numeric statistical partial-state merge overflow".into(),
         ));
@@ -399,7 +469,7 @@ fn merge_exact_statistics(
     Ok(())
 }
 
-fn numeric_total_as_float(accumulator: &AggregateAccumulator) -> Result<f64, SQLError> {
+fn numeric_total_as_float(accumulator: &SumState) -> Result<f64, SQLError> {
     if numeric_has_float(accumulator.numeric_inputs) {
         return Ok(accumulator.sum);
     }
@@ -413,7 +483,7 @@ fn numeric_total_as_float(accumulator: &AggregateAccumulator) -> Result<f64, SQL
     Ok(accumulator.integer_sum as f64)
 }
 
-fn decimal_component(accumulator: &AggregateAccumulator) -> Result<Option<DecimalValue>, SQLError> {
+fn decimal_component(accumulator: &SumState) -> Result<Option<DecimalValue>, SQLError> {
     if accumulator.numeric_inputs.has_decimal() {
         return Ok(accumulator.decimal_sum.clone());
     }

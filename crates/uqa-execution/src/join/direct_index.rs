@@ -7,7 +7,7 @@
 //! Allocation-free direct index for simple positional equality keys.
 
 use crate::RowSchemaExecution;
-use std::collections::HashMap;
+use std::collections::{hash_map::Entry, HashMap};
 use std::hash::BuildHasher;
 
 use smallvec::SmallVec;
@@ -43,32 +43,29 @@ impl DirectHashIndex {
         self.buckets.hasher()
     }
 
-    pub(super) fn insert(&mut self, hash: u64, row_index: u64) -> ExecResult<()> {
+    pub(super) fn insert(&mut self, hash: u64, row_index: u64) {
         if self.overflowed {
-            return Ok(());
+            return;
         }
-
-        // Account for the hash, inline first row index, control bytes, and
-        // allocator/table slack. Duplicate-key indices need only one u64.
-        let record_bytes = if self.buckets.contains_key(&hash) {
+        let entry = self.buckets.entry(hash);
+        // Include the hash, inline index, control bytes and table slack once per bucket.
+        let record_bytes = if matches!(entry, Entry::Occupied(_)) {
             8
         } else {
             64
         };
-        let fits = self
+        if let Some(bytes) = self
             .memory_bytes
             .checked_add(record_bytes)
-            .is_some_and(|bytes| bytes <= self.budget_bytes);
-        if !fits {
-            self.buckets.clear();
+            .filter(|bytes| *bytes <= self.budget_bytes)
+        {
+            entry.or_default().push(row_index);
+            self.memory_bytes = bytes;
+        } else {
+            self.buckets = HashMap::with_hasher(self.buckets.hasher().clone());
             self.memory_bytes = 0;
             self.overflowed = true;
-            return Ok(());
         }
-
-        self.buckets.entry(hash).or_default().push(row_index);
-        self.memory_bytes += record_bytes;
-        Ok(())
     }
 
     pub(super) fn is_available(&self) -> bool {
@@ -168,45 +165,91 @@ fn positional_keys_equal(
     Ok(true)
 }
 
-pub(super) fn direct_unique_match(
-    index: &DirectHashIndex,
-    build_rows: &HybridRowStore,
-    build_positions: &[usize],
-    probe: PhysicalRowView<'_>,
-    probe_positions: &[usize],
-    indeterminate: &[usize],
-    catalog: Option<&dyn EnumLabelCatalog>,
-) -> ExecResult<Option<u64>> {
-    let Some(hash) = positional_key_hash(
-        index.hasher(),
-        probe,
-        probe_positions,
-        indeterminate,
-        catalog,
-    )?
-    else {
-        return Ok(None);
-    };
-    for row_index in index.candidates(hash) {
-        if let Some(build_row) = build_rows.memory_row(*row_index) {
-            if positional_keys_equal(
-                build_rows.schema.view(build_row),
-                build_positions,
-                probe,
-                probe_positions,
-                catalog,
-            )? {
-                return Ok(Some(*row_index));
+/// Resumable position in the original build bucket. The probe keeps its SQL row for exact collision checks.
+#[derive(Default)]
+pub(super) struct DirectMatches {
+    hash: Option<u64>,
+    offset: usize,
+}
+
+impl DirectMatches {
+    pub(super) fn for_probe(
+        index: &DirectHashIndex,
+        probe: PhysicalRowView<'_>,
+        positions: &[usize],
+        indeterminate: &[usize],
+        catalog: Option<&dyn EnumLabelCatalog>,
+    ) -> ExecResult<Self> {
+        let hash = positional_key_hash(index.hasher(), probe, positions, indeterminate, catalog)?;
+        Ok(Self { hash, offset: 0 })
+    }
+
+    pub(super) fn next(
+        &mut self,
+        index: &DirectHashIndex,
+        build_rows: &HybridRowStore,
+        build_positions: &[usize],
+        probe: PhysicalRowView<'_>,
+        probe_positions: &[usize],
+        catalog: Option<&dyn EnumLabelCatalog>,
+    ) -> ExecResult<Option<u64>> {
+        let Some(hash) = self.hash else {
+            return Ok(None);
+        };
+        let candidates = index.candidates(hash);
+        while let Some(&position) = candidates.get(self.offset) {
+            self.offset += 1;
+            if let Some(row) = build_rows.memory_row(position) {
+                if positional_keys_equal(
+                    build_rows.schema.view(row),
+                    build_positions,
+                    probe,
+                    probe_positions,
+                    catalog,
+                )? {
+                    return Ok(Some(position));
+                }
             }
         }
+        Ok(None)
     }
-    Ok(None)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::PhysicalRow;
+
+    #[test]
+    fn direct_probe_resumes_duplicate_positions_and_rejects_hash_collisions() {
+        let schema = RowSchema::new(vec!["key".into()]);
+        let mut rows = HybridRowStore::new(schema.clone(), usize::MAX);
+        let mut index = DirectHashIndex::new(usize::MAX);
+        let probe = PhysicalRow::from_values(vec![Value::Int(7)]);
+        let probe = schema.view(&probe);
+        let mut matches = DirectMatches::for_probe(&index, probe, &[0], &[], None).unwrap();
+        let hash = matches.hash.unwrap();
+        for value in [7, 8, 7, 9, 7] {
+            index.insert(hash, rows.len());
+            rows.push(PhysicalRow::from_values(vec![Value::Int(value)]))
+                .unwrap();
+        }
+        for expected in [Some(0), Some(2), Some(4), None, None] {
+            assert_eq!(
+                matches
+                    .next(&index, &rows, &[0], probe, &[0], None)
+                    .unwrap(),
+                expected
+            );
+        }
+        let null = PhysicalRow::from_values(vec![Value::Null]);
+        let null = schema.view(&null);
+        let mut absent = DirectMatches::for_probe(&index, null, &[0], &[], None).unwrap();
+        assert_eq!(
+            absent.next(&index, &rows, &[0], null, &[0], None).unwrap(),
+            None
+        );
+    }
 
     #[test]
     fn positional_join_datum_keys_use_sql_equality_and_preserve_errors() {

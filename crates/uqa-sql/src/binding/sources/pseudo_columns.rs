@@ -9,6 +9,16 @@
 use crate::{ColumnIdentity, ColumnType, RowSchema, SQLError};
 use uqa_core::memory::{ProductionControl, ProductionMap};
 
+/// Local table pseudo columns take their scope from the FROM input before enclosing columns become visible.
+pub fn query_expression_schema_with_control(
+    source: &RowSchema,
+    outer: Option<&RowSchema>,
+    control: &ProductionControl<'_>,
+) -> Result<RowSchema, SQLError> {
+    let local = with_query_table_pseudo_columns_with_control(source, control)?;
+    crate::binding::overlay_outer_schema_with_control(&local, outer, control)
+}
+
 pub fn with_query_table_pseudo_columns_with_control(
     schema: &RowSchema,
     control: &ProductionControl<'_>,

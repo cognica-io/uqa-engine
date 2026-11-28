@@ -14,7 +14,7 @@ use uqa_sql::{ast::BinaryOp, FunctionTypeResolver};
 mod binding;
 use binding::KeyBinding;
 
-pub(super) struct HashJoinKeys {
+pub(crate) struct HashJoinKeys {
     pub left: Produced<Vec<ScalarExpr>>,
     pub right: Produced<Vec<ScalarExpr>>,
     pub indeterminate: Produced<Vec<usize>>,
@@ -25,7 +25,7 @@ pub(super) struct HashJoinKeys {
     clippy::too_many_arguments,
     reason = "join selection shares the original SQL and resource contexts"
 )]
-pub(super) fn join_keys(
+pub(crate) fn join_keys(
     kind: JoinKind,
     predicate: Option<&ScalarExpr>,
     left: &RowSchema,

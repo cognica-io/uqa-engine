@@ -44,7 +44,7 @@ impl ValueWriter for ConstantWriter<'_> {
     }
 }
 
-pub(super) fn encode_value(writer: &mut impl Write, value: &Value, depth: usize) -> ExecResult<()> {
+pub(crate) fn encode_value(writer: &mut impl Write, value: &Value, depth: usize) -> ExecResult<()> {
     write_value(&mut OrdinaryWriter(writer), value, depth)
 }
 

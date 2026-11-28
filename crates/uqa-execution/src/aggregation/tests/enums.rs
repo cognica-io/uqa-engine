@@ -148,9 +148,11 @@ fn aggregate_sort_support_keeps_its_enum_state_when_the_group_changes() {
                                 keys,
                                 Some(&catalog),
                             )?,
-                            1 => accumulator
-                                .distinct
-                                .insert(&value, Vec::new(), Some(&catalog))?,
+                            1 => accumulator.buffers_mut().distinct.insert(
+                                &value,
+                                Vec::new(),
+                                Some(&catalog),
+                            )?,
                             _ => accumulator.observe_registered(
                                 vec![Value::Int(1)],
                                 keys,
@@ -178,30 +180,49 @@ fn aggregate_sort_support_keeps_its_enum_state_when_the_group_changes() {
 
 #[test]
 fn ordered_and_distinct_aggregates_keep_enum_order_across_memory_and_merge_runs() {
-    for budget in [1, 4096] {
+    for budget in [1, 4096, usize::MAX] {
         for shape in 0..3 {
             let catalog = Catalog::default();
             let mut values = AggregateValueBuffer::new(budget);
             let mut registered = RegisteredAggregateBuffer::new(budget);
             let mut distinct = DistinctTracker::new(budget);
+            let mut builtin_bytes = 0;
+            let mut registered_bytes = 0;
+            let workspace = uqa_core::memory::MemoryBudget::new(1 << 20);
+            let token = uqa_core::CancellationToken::new();
             for oid in [4, 5, 2].into_iter().cycle().take(18) {
                 let key = shaped(shape, physical(oid));
                 let keys = vec![AggregateSortKey::ascending(key.clone())];
+                let builtin_keys = keys.clone();
+                let arguments = vec![Value::Int(i64::from(oid))];
+                let key_bytes = |keys: &Vec<AggregateSortKey>| {
+                    keys.capacity() * size_of::<AggregateSortKey>()
+                        + keys[0]
+                            .value
+                            .retained_payload_bytes(&workspace, &token)
+                            .unwrap()
+                };
+                builtin_bytes += size_of::<AggregateValueRecord>() + key_bytes(&builtin_keys);
+                registered_bytes += size_of::<RegisteredAggregateRecord>()
+                    + arguments.capacity() * size_of::<Value>()
+                    + key_bytes(&keys);
                 values
-                    .push(Value::Int(i64::from(oid)), keys.clone(), Some(&catalog))
+                    .push(Value::Int(i64::from(oid)), builtin_keys, Some(&catalog))
                     .unwrap();
-                registered
-                    .push(vec![Value::Int(i64::from(oid))], keys, Some(&catalog))
-                    .unwrap();
+                registered.push(arguments, keys, Some(&catalog)).unwrap();
                 distinct.insert(&key, Vec::new(), Some(&catalog)).unwrap();
             }
             let expected: Vec<_> = [2, 5, 4]
                 .into_iter()
                 .flat_map(|oid| std::iter::repeat_n(Value::Int(oid), 6))
                 .collect();
-            assert_eq!(values.ordered_values(Some(&catalog)).unwrap(), expected);
+            assert_eq!(
+                values.input().ordered_values(Some(&catalog)).unwrap(),
+                expected
+            );
             let mut state = Values::default();
             registered
+                .input()
                 .observe_ordered_into(&mut state, Some(&catalog))
                 .unwrap();
             assert_eq!(state.0, expected);
@@ -213,7 +234,14 @@ fn ordered_and_distinct_aggregates_keep_enum_order_across_memory_and_merge_runs(
                 })
                 .unwrap();
             assert_eq!(unique, [2, 5, 4].map(|oid| shaped(shape, physical(oid))));
-            assert_eq!(!values.runs.is_empty(), budget == 1);
+            assert_eq!(!values.runs.is_empty(), builtin_bytes > budget);
+            assert_eq!(!registered.runs.is_empty(), registered_bytes > budget);
+            if builtin_bytes <= budget {
+                assert_eq!(values.memory_bytes, builtin_bytes);
+            }
+            if registered_bytes <= budget {
+                assert_eq!(registered.memory_bytes, registered_bytes);
+            }
         }
     }
 }

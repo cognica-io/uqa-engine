@@ -6,42 +6,57 @@
 
 use super::Children;
 use crate::memory::{BudgetedVec, MemoryBudget, MemoryError};
+use smallvec::{Array, SmallVec};
 
-pub(super) enum Stack<'a> {
+pub(super) struct Stack<'a, A: Array<Item = Children<'a>>> {
+    inline: SmallVec<A>,
+    overflow: Overflow<'a>,
+}
+
+enum Overflow<'a> {
     Ordinary(Vec<Children<'a>>),
     Admitted(BudgetedVec<Children<'a>>),
 }
 
-impl<'a> Stack<'a> {
+impl<'a, A: Array<Item = Children<'a>>> Stack<'a, A> {
     pub(super) fn new(budget: Option<&MemoryBudget>) -> Self {
-        budget.map_or_else(
-            || Self::Ordinary(Vec::new()),
-            |budget| Self::Admitted(BudgetedVec::new(budget)),
-        )
+        Self {
+            inline: SmallVec::new(),
+            overflow: budget.map_or_else(
+                || Overflow::Ordinary(Vec::new()),
+                |budget| Overflow::Admitted(BudgetedVec::new(budget)),
+            ),
+        }
     }
 
     pub(super) fn push(&mut self, value: Children<'a>) -> Result<(), MemoryError> {
-        match self {
-            Self::Ordinary(values) => {
+        if self.inline.len() < A::size() {
+            self.inline.push(value);
+            return Ok(());
+        }
+        match &mut self.overflow {
+            Overflow::Ordinary(values) => {
                 values.try_reserve(1)?;
                 values.push(value);
                 Ok(())
             }
-            Self::Admitted(values) => values.push(value),
+            Overflow::Admitted(values) => values.push(value),
         }
     }
 
     pub(super) fn last_mut(&mut self) -> Option<&mut Children<'a>> {
-        match self {
-            Self::Ordinary(values) => values.last_mut(),
-            Self::Admitted(values) => values.last_mut(),
+        match &mut self.overflow {
+            Overflow::Ordinary(values) => values.last_mut(),
+            Overflow::Admitted(values) => values.last_mut(),
         }
+        .or_else(|| self.inline.last_mut())
     }
 
     pub(super) fn pop(&mut self) -> Option<Children<'a>> {
-        match self {
-            Self::Ordinary(values) => values.pop(),
-            Self::Admitted(values) => values.pop(),
+        match &mut self.overflow {
+            Overflow::Ordinary(values) => values.pop(),
+            Overflow::Admitted(values) => values.pop(),
         }
+        .or_else(|| self.inline.pop())
     }
 }

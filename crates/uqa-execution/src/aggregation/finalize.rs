@@ -6,9 +6,10 @@
 
 //! Built-in aggregate finalization and percentile/statistical helpers.
 
+use super::ordered_buffer::OrderedRows;
 use super::{
     cast_value, core_value_to_json, value_as_f64, AggregateAccumulator, AggregateValueBuffer,
-    DecimalValue, SQLError, ScalarExpr, Value,
+    AggregateValueRecord, DecimalValue, RegisteredAggregateRecord, SQLError, ScalarExpr, Value,
 };
 use uqa_core::ArrayValue;
 use uqa_sql::expr::enums::EnumLabelCatalog;
@@ -22,10 +23,6 @@ pub fn aggregate_value(
     aggregate_value_with_args(name, acc, &[], enums)
 }
 
-#[expect(
-    clippy::too_many_lines,
-    reason = "preserves aggregate NULL and type order"
-)]
 /// Finalize a built-in aggregate. JSON aggregates call their inputs' output functions, so enum inputs render through `enums`.
 pub fn aggregate_value_with_args(
     name: &str,
@@ -33,14 +30,67 @@ pub fn aggregate_value_with_args(
     args: &[ScalarExpr],
     enums: Option<&dyn EnumLabelCatalog>,
 ) -> Result<Value, SQLError> {
-    if !acc.distinct.is_empty() {
-        let budget = acc.distinct.values.budget_bytes;
+    let buffers = acc.buffers();
+    let inputs = AggregateInputs {
+        values: buffers.values.input(),
+        distinct: buffers.distinct.values.input(),
+        registered: buffers.registered_ordered.input(),
+    };
+    finalize_aggregate(name, acc, args, enums, inputs)
+}
+
+struct AggregateInputs<'a> {
+    values: OrderedRows<'a, AggregateValueRecord>,
+    distinct: OrderedRows<'a, AggregateValueRecord>,
+    registered: OrderedRows<'a, RegisteredAggregateRecord>,
+}
+
+/// Own the resident inputs of a completed group while leaving host state available for cleanup.
+pub(super) fn finish_aggregate(
+    name: &str,
+    acc: &mut AggregateAccumulator,
+    args: &[ScalarExpr],
+    enums: Option<&dyn EnumLabelCatalog>,
+) -> Result<Value, SQLError> {
+    let (values, distinct, registered) = acc
+        .existing_buffers_mut()
+        .map(|buffers| {
+            (
+                std::mem::take(&mut buffers.values.rows),
+                std::mem::take(&mut buffers.distinct.values.rows),
+                std::mem::take(&mut buffers.registered_ordered.rows),
+            )
+        })
+        .unwrap_or_default();
+    let buffers = acc.buffers();
+    let inputs = AggregateInputs {
+        values: buffers.values.with_rows(values),
+        distinct: buffers.distinct.values.with_rows(distinct),
+        registered: buffers.registered_ordered.with_rows(registered),
+    };
+    finalize_aggregate(name, acc, args, enums, inputs)
+}
+
+#[expect(
+    clippy::too_many_lines,
+    reason = "preserves aggregate NULL and type order"
+)]
+fn finalize_aggregate(
+    name: &str,
+    acc: &AggregateAccumulator,
+    args: &[ScalarExpr],
+    enums: Option<&dyn EnumLabelCatalog>,
+    inputs: AggregateInputs<'_>,
+) -> Result<Value, SQLError> {
+    let buffers = acc.buffers();
+    if !buffers.distinct.is_empty() {
+        let budget = buffers.distinct.values.budget_bytes;
         let mut unique = acc.replay_with_budget(budget)?;
         unique.enum_comparison.clone_from(&acc.enum_comparison);
-        let result = acc
+        let result = buffers
             .distinct
-            .for_each(enums, |value| {
-                if acc.registered.is_some() {
+            .for_each_input(inputs.distinct, enums, |value| {
+                if acc.is_registered() {
                     let Value::List(arguments) = value else {
                         return Err(SQLError::Internal(
                             "registered DISTINCT input is not an argument tuple".into(),
@@ -51,84 +101,87 @@ pub fn aggregate_value_with_args(
                     unique.observe_with_enum_catalog(value, enums)
                 }
             })
-            .and_then(|()| aggregate_value_with_args(name, &unique, args, enums));
+            .and_then(|()| finish_aggregate(name, &mut unique, args, enums));
         return super::state::with_cleanup(result, unique.close());
     }
-    if let Some(value) = acc.registered_value(enums) {
+    if let Some(value) = acc.registered_value(inputs.registered, enums) {
         return value;
     }
-    if !acc.state_plan.retains_values() && acc.values.next_sequence != 0 {
-        let mut ordered = AggregateAccumulator {
-            state_plan: acc.state_plan,
-            enum_comparison: acc.enum_comparison.clone(),
-            ..AggregateAccumulator::default()
-        };
-        acc.values.for_each_ordered(enums, |record| {
+    if !acc.transition.plan().retains_values() && buffers.values.next_sequence != 0 {
+        let mut ordered = AggregateAccumulator::from_plan(acc.transition.plan());
+        ordered.enum_comparison.clone_from(&acc.enum_comparison);
+        inputs.values.for_each_ordered(enums, |record| {
             ordered.observe_with_enum_catalog(&record.value, enums)
         })?;
-        return aggregate_value_with_args(name, &ordered, args, enums);
+        return finish_aggregate(name, &mut ordered, args, enums);
     }
     let lname = uqa_sql::semantics::builtin_aggregate_dispatch_name(name).to_ascii_lowercase();
 
     let value = match lname.as_str() {
         "count" => Value::Int(
-            i64::try_from(acc.count)
+            i64::try_from(acc.count())
                 .map_err(|_| SQLError::TypeMismatch("aggregate count exceeds BIGINT".into()))?,
         ),
         "sum" => {
-            if acc.count == 0 {
+            let state = acc.sum();
+            if acc.count() == 0 {
                 Value::Null
-            } else if let Some(sum) = acc.interval_result()? {
+            } else if let Some(sum) = state.interval_result()? {
                 Value::Temporal(sum.value())
-            } else if acc.numeric_inputs.decimal_without_float() {
-                acc.decimal_sum.clone().map_or(Value::Null, Value::Decimal)
-            } else if acc.numeric_inputs.all_integers() {
-                Value::Int(i64::try_from(acc.integer_sum).map_err(|_| {
+            } else if state.numeric_inputs.decimal_without_float() {
+                state
+                    .decimal_sum
+                    .clone()
+                    .map_or(Value::Null, Value::Decimal)
+            } else if state.numeric_inputs.all_integers() {
+                Value::Int(i64::try_from(state.integer_sum).map_err(|_| {
                     SQLError::TypeMismatch("integer aggregate result exceeds BIGINT".into())
                 })?)
             } else {
-                Value::Float(acc.sum)
+                Value::Float(state.sum)
             }
         }
         "avg" => {
-            if acc.count == 0 {
+            let state = acc.sum();
+            if acc.count() == 0 {
                 Value::Null
-            } else if let Some(sum) = acc.interval_result()? {
+            } else if let Some(sum) = state.interval_result()? {
                 // `interval_avg` divides the sum by the count as a double precision factor.
-                Value::Temporal(sum.divide(acc.count as f64)?.value())
-            } else if acc.numeric_inputs.decimal_without_float() {
-                let divisor = DecimalValue::from_i64(i64::try_from(acc.count).map_err(|_| {
+                Value::Temporal(sum.divide(acc.count() as f64)?.value())
+            } else if state.numeric_inputs.decimal_without_float() {
+                let divisor = DecimalValue::from_i64(i64::try_from(acc.count()).map_err(|_| {
                     SQLError::TypeMismatch("aggregate count exceeds BIGINT".into())
                 })?);
-                let average = acc
+                let average = state
                     .decimal_sum
                     .as_ref()
                     .and_then(|sum| sum.checked_div_postgres(&divisor))
                     .ok_or_else(|| SQLError::TypeMismatch("decimal AVG overflow".into()))?;
                 Value::Decimal(average)
-            } else if acc.numeric_inputs.all_integers() {
-                let sum = DecimalValue::from_i128(acc.integer_sum)
+            } else if state.numeric_inputs.all_integers() {
+                let sum = DecimalValue::from_i128(state.integer_sum)
                     .ok_or_else(|| SQLError::TypeMismatch("integer AVG overflow".into()))?;
-                let divisor = DecimalValue::from_i128(i128::from(acc.count)).ok_or_else(|| {
-                    SQLError::TypeMismatch("aggregate count exceeds NUMERIC".into())
-                })?;
+                let divisor =
+                    DecimalValue::from_i128(i128::from(acc.count())).ok_or_else(|| {
+                        SQLError::TypeMismatch("aggregate count exceeds NUMERIC".into())
+                    })?;
                 let average = sum
                     .checked_div_postgres(&divisor)
                     .ok_or_else(|| SQLError::TypeMismatch("integer AVG overflow".into()))?;
                 Value::Decimal(average)
             } else {
-                Value::Float(acc.sum / acc.count as f64)
+                Value::Float(state.sum / acc.count() as f64)
             }
         }
-        "min" => acc.min.clone().unwrap_or(Value::Null),
-        "max" => acc.max.clone().unwrap_or(Value::Null),
-        "string_agg" => super::string_agg::finish(&acc.values, enums)?,
+        "min" => acc.min().cloned().unwrap_or(Value::Null),
+        "max" => acc.max().cloned().unwrap_or(Value::Null),
+        "string_agg" => super::string_agg::finish(inputs.values, enums)?,
         "array_agg" => {
-            let ordered_values = acc.values.ordered_values(enums)?;
+            let ordered_values = inputs.values.ordered_values(enums)?;
             if ordered_values.is_empty() {
                 return Ok(Value::Null);
             }
-            if let super::AggregateStatePlan::BufferedArrays = acc.state_plan {
+            if let super::AggregateStatePlan::BufferedArrays = acc.transition.plan() {
                 return super::array_inputs::ArrayInputShape::stack(ordered_values, enums);
             }
             ArrayValue::try_new(ordered_values)
@@ -139,7 +192,7 @@ pub fn aggregate_value_with_args(
                 })?
         }
         "json_agg" | "jsonb_agg" => {
-            let ordered_values = acc.values.ordered_values(enums)?;
+            let ordered_values = inputs.values.ordered_values(enums)?;
             if ordered_values.is_empty() {
                 return Ok(Value::Null);
             }
@@ -158,7 +211,7 @@ pub fn aggregate_value_with_args(
             }
         }
         "json_object_agg" | "jsonb_object_agg" => {
-            let ordered_values = acc.values.ordered_values(enums)?;
+            let ordered_values = inputs.values.ordered_values(enums)?;
             let mut fields = Vec::with_capacity(ordered_values.len());
             for value in ordered_values {
                 let Value::List(pair) = value else {
@@ -197,48 +250,48 @@ pub fn aggregate_value_with_args(
                 Value::Json(format!("{{ {text} }}"))
             }
         }
-        "bool_and" => match acc.bool_and {
+        "bool_and" => match acc.bool_and() {
             Some(b) => Value::Bool(b),
             None => Value::Null,
         },
-        "bool_or" => match acc.bool_or {
+        "bool_or" => match acc.bool_or() {
             Some(b) => Value::Bool(b),
             None => Value::Null,
         },
         "stddev" | "stddev_samp" => {
-            if acc.statistics_count < 2 {
+            if acc.statistics().count < 2 {
                 return Ok(Value::Null);
             }
-            statistical_standard_deviation(acc, true)?
+            statistical_standard_deviation(acc.statistics(), true)?
         }
         "stddev_pop" => {
-            if acc.statistics_count == 0 {
+            if acc.statistics().count == 0 {
                 return Ok(Value::Null);
             }
-            statistical_standard_deviation(acc, false)?
+            statistical_standard_deviation(acc.statistics(), false)?
         }
         "variance" | "var_samp" => {
-            if acc.statistics_count < 2 {
+            if acc.statistics().count < 2 {
                 return Ok(Value::Null);
             }
-            statistical_variance(acc, true)?
+            statistical_variance(acc.statistics(), true)?
         }
         "var_pop" => {
-            if acc.statistics_count == 0 {
+            if acc.statistics().count == 0 {
                 return Ok(Value::Null);
             }
-            statistical_variance(acc, false)?
+            statistical_variance(acc.statistics(), false)?
         }
         "percentile_cont" => {
             let frac = percentile_fraction(args)?;
-            percentile_cont_with_catalog(&acc.values, frac, enums)?
+            percentile_cont_with_catalog(inputs.values, frac, enums)?
                 .map_or(Value::Null, Value::Float)
         }
         "percentile_disc" => {
             let frac = percentile_fraction(args)?;
-            percentile_disc_with_catalog(&acc.values, frac, enums)?.unwrap_or(Value::Null)
+            percentile_disc_with_catalog(inputs.values, frac, enums)?.unwrap_or(Value::Null)
         }
-        "mode" => mode_value_with_catalog(&acc.values, enums)?,
+        "mode" => mode_value_with_catalog(inputs.values, enums)?,
         _ => return Err(SQLError::UnknownFunction(format!("aggregate `{name}`"))),
     };
     Ok(value)
@@ -330,31 +383,31 @@ pub fn aggregate_json_key_with_catalog(
 }
 
 fn statistical_variance(
-    accumulator: &AggregateAccumulator,
+    accumulator: &super::transitions::StatisticsState,
     sample: bool,
 ) -> Result<Value, SQLError> {
-    if accumulator.statistics_has_float {
+    if accumulator.has_float {
         let divisor = if sample {
-            accumulator.statistics_count as f64 - 1.0
+            accumulator.count as f64 - 1.0
         } else {
-            accumulator.statistics_count as f64
+            accumulator.count as f64
         };
-        return Ok(Value::Float(accumulator.statistics_m2 / divisor));
+        return Ok(Value::Float(accumulator.m2 / divisor));
     }
     numeric_statistical_variance(accumulator, sample).map(Value::Decimal)
 }
 
 fn statistical_standard_deviation(
-    accumulator: &AggregateAccumulator,
+    accumulator: &super::transitions::StatisticsState,
     sample: bool,
 ) -> Result<Value, SQLError> {
-    if accumulator.statistics_has_float {
+    if accumulator.has_float {
         let divisor = if sample {
-            accumulator.statistics_count as f64 - 1.0
+            accumulator.count as f64 - 1.0
         } else {
-            accumulator.statistics_count as f64
+            accumulator.count as f64
         };
-        return Ok(Value::Float((accumulator.statistics_m2 / divisor).sqrt()));
+        return Ok(Value::Float((accumulator.m2 / divisor).sqrt()));
     }
     let variance = numeric_statistical_variance(accumulator, sample)?;
     if variance.is_nan() {
@@ -370,15 +423,15 @@ fn statistical_standard_deviation(
 }
 
 fn numeric_statistical_variance(
-    accumulator: &AggregateAccumulator,
+    accumulator: &super::transitions::StatisticsState,
     sample: bool,
 ) -> Result<DecimalValue, SQLError> {
-    let count = DecimalValue::from_i128(i128::from(accumulator.statistics_count))
+    let count = DecimalValue::from_i128(i128::from(accumulator.count))
         .ok_or_else(|| SQLError::TypeMismatch("statistical aggregate count overflow".into()))?;
-    let sum = accumulator.statistics_sum.as_ref().ok_or_else(|| {
+    let sum = accumulator.sum.as_ref().ok_or_else(|| {
         SQLError::Internal("numeric statistical aggregate omitted its sum".into())
     })?;
-    let sum_squares = accumulator.statistics_sum_squares.as_ref().ok_or_else(|| {
+    let sum_squares = accumulator.sum_squares.as_ref().ok_or_else(|| {
         SQLError::Internal("numeric statistical aggregate omitted its square sum".into())
     })?;
     let numerator = count
@@ -388,11 +441,11 @@ fn numeric_statistical_variance(
                 .and_then(|square| total.checked_sub(&square))
         })
         .ok_or_else(|| SQLError::TypeMismatch("numeric statistical result overflow".into()))?;
-    if numerator <= DecimalValue::from_i64(0) && !accumulator.statistics_nonzero_deviation {
+    if numerator <= DecimalValue::from_i64(0) && !accumulator.nonzero_deviation {
         return Ok(DecimalValue::from_i64(0));
     }
     let denominator = if sample {
-        let count_minus_one = DecimalValue::from_i128(i128::from(accumulator.statistics_count - 1))
+        let count_minus_one = DecimalValue::from_i128(i128::from(accumulator.count - 1))
             .ok_or_else(|| SQLError::TypeMismatch("statistical aggregate count overflow".into()))?;
         count.checked_mul(&count_minus_one)
     } else {
@@ -411,18 +464,18 @@ fn numeric_statistical_variance(
 }
 
 pub fn percentile_cont(values: &AggregateValueBuffer, frac: f64) -> Result<Option<f64>, SQLError> {
-    percentile_cont_with_catalog(values, frac, None)
+    percentile_cont_with_catalog(values.input(), frac, None)
 }
 
 fn percentile_cont_with_catalog(
-    values: &AggregateValueBuffer,
+    values: OrderedRows<'_, AggregateValueRecord>,
     frac: f64,
     enums: Option<&dyn EnumLabelCatalog>,
 ) -> Result<Option<f64>, SQLError> {
-    if values.next_sequence == 0 {
+    if values.buffer.next_sequence == 0 {
         return Ok(None);
     }
-    let position = frac * (values.next_sequence as f64 - 1.0);
+    let position = frac * (values.buffer.next_sequence as f64 - 1.0);
     let low = position.floor() as u64;
     let high = position.ceil() as u64;
     let mut low_value = None;
@@ -458,20 +511,20 @@ pub fn percentile_disc(
     values: &AggregateValueBuffer,
     frac: f64,
 ) -> Result<Option<Value>, SQLError> {
-    percentile_disc_with_catalog(values, frac, None)
+    percentile_disc_with_catalog(values.input(), frac, None)
 }
 
 fn percentile_disc_with_catalog(
-    values: &AggregateValueBuffer,
+    values: OrderedRows<'_, AggregateValueRecord>,
     frac: f64,
     enums: Option<&dyn EnumLabelCatalog>,
 ) -> Result<Option<Value>, SQLError> {
-    if values.next_sequence == 0 {
+    if values.buffer.next_sequence == 0 {
         return Ok(None);
     }
-    let rank = ((frac * values.next_sequence as f64).ceil() as u64)
+    let rank = ((frac * values.buffer.next_sequence as f64).ceil() as u64)
         .max(1)
-        .min(values.next_sequence);
+        .min(values.buffer.next_sequence);
     let mut value = None;
     let mut index = 0_u64;
     values.for_each_ordered(enums, |record| {
@@ -487,31 +540,33 @@ fn percentile_disc_with_catalog(
 }
 
 pub fn mode_value(values: &AggregateValueBuffer) -> Result<Value, SQLError> {
-    mode_value_with_catalog(values, None)
+    mode_value_with_catalog(values.input(), None)
 }
 
 fn mode_value_with_catalog(
-    values: &AggregateValueBuffer,
+    values: OrderedRows<'_, AggregateValueRecord>,
     enums: Option<&dyn EnumLabelCatalog>,
 ) -> Result<Value, SQLError> {
-    if values.next_sequence == 0 {
+    if values.buffer.next_sequence == 0 {
         return Ok(Value::Null);
     }
     let mut current_value = Value::Null;
     let mut current_count = 0_u64;
     let mut best_value = Value::Null;
     let mut best_count = 0_u64;
+    let key_type = values
+        .buffer
+        .key_types
+        .as_deref()
+        .and_then(|types| types.first())
+        .and_then(Option::as_ref);
     values.for_each_ordered(enums, |record| {
         // Group with the same equality as sorting; retain the first group on ties.
         if current_count != 0
             && !uqa_sql::expr::equal_selected_values_with_catalog(
                 &current_value,
                 &record.value,
-                values
-                    .key_types
-                    .as_deref()
-                    .and_then(|types| types.first())
-                    .and_then(Option::as_ref),
+                key_type,
                 &uqa_core::memory::ProductionControl::uncontrolled(),
                 enums,
             )?

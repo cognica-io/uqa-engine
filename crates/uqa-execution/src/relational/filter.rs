@@ -175,28 +175,33 @@ impl<'a> Filter<'a> {
     fn filter_batch(&self, batch: Batch) -> ExecResult<Option<Batch>> {
         let mut kept = Vec::with_capacity(batch.rows.len());
         for row in batch.rows {
-            let keep = match &self.condition {
-                FilterCondition::Expression {
-                    predicate,
-                    evaluator,
-                } => truthy(&evaluator.evaluate_physical_with_function_states(
-                    predicate,
-                    &batch.schema,
-                    &row,
-                    predicate.calls(),
-                )?)?,
-                FilterCondition::Row(predicate) => predicate.keep_physical(&batch.schema, &row)?,
-                FilterCondition::Unresolved(column) => {
-                    return Err(ExecError::SQL(uqa_sql::SQLError::Internal(format!(
-                        "a predicate placed on its input reads {}, which the input does not produce", column.as_str()
-                    ))));
-                }
-            };
-            if keep {
+            if self.condition.keep(&batch.schema, &row)? {
                 kept.push(row);
             }
         }
         Ok((!kept.is_empty()).then(|| Batch::from_physical_rows(self.schema.clone(), kept)))
+    }
+}
+
+impl FilterCondition<'_> {
+    fn keep(&self, schema: &RowSchema, row: &crate::PhysicalRow) -> ExecResult<bool> {
+        match self {
+            Self::Expression {
+                predicate,
+                evaluator,
+            } => truthy(&evaluator.evaluate_physical_with_function_states(
+                predicate,
+                schema,
+                row,
+                predicate.calls(),
+            )?)
+            .map_err(Into::into),
+            Self::Row(predicate) => predicate.keep_physical(schema, row),
+            Self::Unresolved(column) => Err(ExecError::SQL(uqa_sql::SQLError::Internal(format!(
+                "a predicate placed on its input reads {}, which the input does not produce",
+                column.as_str()
+            )))),
+        }
     }
 }
 
@@ -214,14 +219,11 @@ impl Filter<'_> {
         };
         let mut kept = Vec::new();
         while kept.len() < demand.get() {
-            let Some(batch) = self
-                .input_pending
-                .pull(self.child.as_mut(), Some(crate::physical::demand::ONE))?
-            else {
+            let Some(row) = self.input_pending.next_row(self.child.as_mut(), true)? else {
                 break;
             };
-            if let Some(batch) = self.filter_batch(batch)? {
-                kept.extend(batch.rows);
+            if self.condition.keep(self.child.row_schema(), &row)? {
+                kept.push(row);
             }
         }
         Ok((!kept.is_empty()).then(|| Batch::from_physical_rows(self.schema.clone(), kept)))

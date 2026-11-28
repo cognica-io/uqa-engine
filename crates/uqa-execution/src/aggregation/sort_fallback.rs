@@ -140,7 +140,7 @@ pub(super) fn aggregate_sorted_input(
                     })?;
                     if let Some(row) = super::output::finish_group(
                         context,
-                        statement,
+                        statement.into(),
                         &output_plan,
                         std::mem::take(&mut current_accumulators),
                         &finished_key,
@@ -171,7 +171,7 @@ pub(super) fn aggregate_sorted_input(
         if let Some(key) = current_key.take() {
             if let Some(row) = super::output::finish_group(
                 context,
-                statement,
+                statement.into(),
                 &output_plan,
                 std::mem::take(&mut current_accumulators),
                 &key,
@@ -184,7 +184,7 @@ pub(super) fn aggregate_sorted_input(
             let accumulators = instantiate_aggregate_accumulators(&templates, accumulator_budget)?;
             if let Some(row) = super::output::finish_group(
                 context,
-                statement,
+                statement.into(),
                 &output_plan,
                 accumulators,
                 &[],

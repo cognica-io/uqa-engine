@@ -33,7 +33,7 @@ pub(super) fn view_merge_pair_schema(source: &RowSchema) -> RowSchema {
     RowSchema::join(&header, source, std::iter::empty())
 }
 
-fn encode_view_merge_pair(
+pub(super) fn encode_view_merge_pair(
     kind: MergePairKind,
     target: Option<&[Value]>,
     source: &OwnedPhysicalRow,
@@ -94,22 +94,6 @@ pub(super) fn decode_view_merge_pair(encoded: OwnedPhysicalRow) -> Result<ViewMe
         target,
         source: encoded,
     })
-}
-
-pub(super) fn push_view_merge_pair(
-    pairings: &mut crate::SpillBuffer,
-    schema: &RowSchema,
-    kind: MergePairKind,
-    target: Option<&[Value]>,
-    source: &OwnedPhysicalRow,
-) -> Result<(), SQLError> {
-    pairings
-        .push(crate::Batch::from_physical_rows(
-            schema.clone(),
-            vec![encode_view_merge_pair(kind, target, source)],
-        ))
-        .map(|_| ())
-        .map_err(crate::physical::physical_exec_error)
 }
 
 #[cfg(test)]

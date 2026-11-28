@@ -14,9 +14,7 @@ mod table;
 pub mod where_filter;
 use crate::query::privileges::ensure_select_privileges_for_query_block;
 use crate::query::{
-    binding::{
-        binding_context, validate_query_block_expression_types, validate_query_block_references,
-    },
+    binding::{validate_query_block_expression_types, validate_query_block_references},
     consumer::QueryOutputMode,
     output::{QueryOutput, QueryRows},
     projection::{expand_from_star_columns, physical_work_mem_bytes},
@@ -37,9 +35,6 @@ use uqa_sql::{
     plan::{
         source_projection::SourceProjection, AccessPathPlan, ComputePlan, ProjectionPlan,
         QueryBlockPlan, SourcePlan,
-    },
-    semantics::sets::validation::{
-        validate_query_set_contexts, validate_source_set_contexts_before_build,
     },
     semantics::{
         expect_column_name, flatten_and_filter_parts, projection_columns,

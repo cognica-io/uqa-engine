@@ -98,8 +98,8 @@ fn range_join_preserves_direct_encoded_and_spilled_multiplicities() {
                         .expect("unique smaller input must select streaming join");
                     assert!(matches!(
                         (&state.hash_index, computed),
-                        (super::super::UniqueHashIndex::Direct(_), false)
-                            | (super::super::UniqueHashIndex::Encoded(_), true)
+                        (super::super::JoinHashIndex::Direct(_), false)
+                            | (super::super::JoinHashIndex::Encoded(_), true)
                     ));
                 }
                 let mut count = first_batch.map_or(0, |batch| batch.len());

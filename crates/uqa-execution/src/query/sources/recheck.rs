@@ -7,6 +7,7 @@
 //! Rebuild physical source and scalar projection below a tuple-lock boundary.
 
 use super::{CteScope, SourceContext};
+use crate::query::sources::block_source::{build_block_source, BlockSourceAccess};
 use crate::query::PhysicalProjection;
 use crate::{PhysicalOperator, Project};
 use std::sync::Arc;
@@ -36,33 +37,15 @@ pub fn build_row_lock_recheck_operator<'a, S: Clone + Send + Sync + 'static>(
         ctes.row_lock_outer_row().map(|row| &row.schema),
         &context.ctes.production_resources()?.control(),
     )?;
-    let column_prune =
-        context
-            .planning
-            .column_prune(statement, from, ctes, Some(&source_schema))?;
-    let qualifier_filters = context.planning.qualifier_filters(statement, from, ctes)?;
-    let source_row_locks = crate::query::locking::resolve_row_locks(
-        context.locking,
+    let (mut operator, qualifier_filters) = build_block_source(
+        context,
+        statement,
         from,
-        &statement.locking,
-        statement.r#where.as_ref(),
         params,
         ctes,
+        &source_schema,
+        BlockSourceAccess::LockRecheck,
     )?;
-    let mut operator = {
-        let mut scoped_ctes = ctes.enter_source_row_locks_with_control(
-            source_row_locks,
-            &context.ctes.production_resources()?.control(),
-        )?;
-        super::build_join_operator_with_recheck_pins(
-            context,
-            from,
-            params,
-            &mut scoped_ctes,
-            column_prune.as_ref(),
-            qualifier_filters.as_ref(),
-        )?
-    };
     if let Some(outer_row) = ctes.row_lock_outer_row() {
         operator = Box::new(crate::ScopeOverlay::new(operator, outer_row.clone()));
     }

@@ -28,22 +28,49 @@ impl SpillBatchWriter {
     }
 
     pub(crate) fn push(&mut self, output: &mut SpillBuffer, record: PhysicalRow) -> ExecResult<()> {
-        let mut candidate_size = self.pending_size;
-        candidate_size.append(&record)?;
-        let exceeds_budget = candidate_size.bytes() > output.budget_bytes();
-        if exceeds_budget && !self.pending.is_empty() {
-            self.flush(output)?;
-            candidate_size = self.pending_size;
-            candidate_size.append(&record)?;
-        }
-        self.pending.push(record);
-        self.pending_size = candidate_size;
-        if self.pending_size.bytes() > output.budget_bytes()
-            || self.pending.len() == crate::batch::DEFAULT_BATCH_SIZE
-        {
+        self.append(record, output.budget_bytes(), |writer| writer.flush(output))?;
+        if self.pending.len() == crate::batch::DEFAULT_BATCH_SIZE {
             self.flush(output)?;
         }
         Ok(())
+    }
+
+    /// Collect one output batch directly. Allocate a spill buffer only when its rows exceed the byte allowance.
+    pub(crate) fn push_or_spill(
+        &mut self,
+        record: PhysicalRow,
+        budget: usize,
+        spill: &mut Option<SpillBuffer>,
+    ) -> ExecResult<()> {
+        self.append(record, budget, |writer| {
+            writer.flush(spill.get_or_insert_with(|| SpillBuffer::new(budget)))
+        })
+    }
+
+    fn append(
+        &mut self,
+        record: PhysicalRow,
+        budget: usize,
+        mut flush: impl FnMut(&mut Self) -> ExecResult<()>,
+    ) -> ExecResult<()> {
+        let mut candidate = self.pending_size;
+        candidate.append(&record)?;
+        if candidate.bytes() > budget && !self.pending.is_empty() {
+            flush(self)?;
+            candidate = self.pending_size;
+            candidate.append(&record)?;
+        }
+        self.pending.push(record);
+        self.pending_size = candidate;
+        if candidate.bytes() > budget {
+            flush(self)?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn into_batch(self) -> Option<crate::Batch> {
+        (!self.pending.is_empty())
+            .then(|| crate::Batch::from_physical_rows(self.schema, self.pending))
     }
 
     pub(crate) fn finish(mut self, output: &mut SpillBuffer) -> ExecResult<()> {

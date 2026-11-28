@@ -14,10 +14,14 @@ use uqa_sql::ScalarExpr;
 pub use uqa_sql::semantics::aggregates::*;
 
 pub fn group_context_row(stmt: &QueryBlockPlan, group_values: &[Value]) -> OwnedPhysicalRow {
+    group_key_row(&stmt.group_by, group_values)
+}
+
+pub(super) fn group_key_row(group_by: &[ScalarExpr], group_values: &[Value]) -> OwnedPhysicalRow {
     let mut columns = Vec::new();
     let mut identities = Vec::new();
     let mut values = Vec::new();
-    for (expr, value) in stmt.group_by.iter().zip(group_values) {
+    for (expr, value) in group_by.iter().zip(group_values) {
         match expr {
             ScalarExpr::Column(column) => {
                 columns.push(column.to_string());

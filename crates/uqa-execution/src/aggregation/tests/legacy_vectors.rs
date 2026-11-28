@@ -61,14 +61,14 @@ fn legacy_vector_ordered_aggregates_preserve_errors_across_memory_and_merge_runs
                 for value in 0..count {
                     builtin.push(Value::Int(value), keys.clone(), None)?;
                 }
-                builtin.ordered_values(None)
+                builtin.input().ordered_values(None)
             })();
             let mut state = ObservedValues::default();
             let registered_result = (|| {
                 for value in 0..count {
                     registered.push(vec![Value::Int(value)], keys.clone(), None)?;
                 }
-                registered.observe_ordered_into(&mut state, None)
+                registered.input().observe_ordered_into(&mut state, None)
             })();
             if count == 1 {
                 assert_eq!(builtin_result.unwrap(), vec![Value::Int(0)]);
@@ -95,7 +95,7 @@ fn legacy_vector_ordered_aggregates_preserve_errors_across_memory_and_merge_runs
                 .unwrap();
         }
         assert_eq!(
-            buffer.ordered_values(None).unwrap(),
+            buffer.input().ordered_values(None).unwrap(),
             vec![Value::Int(0), Value::Int(1)]
         );
     }
@@ -177,7 +177,9 @@ fn legacy_vector_distinct_aggregates_compare_before_deduplicating_in_memory_and_
                 }
                 let result = (|| {
                     for _ in 0..count {
-                        acc.distinct.insert(&input, Vec::new(), None)?;
+                        acc.buffers_mut()
+                            .distinct
+                            .insert(&input, Vec::new(), None)?;
                     }
                     aggregate_value("count", &acc, None)
                 })();

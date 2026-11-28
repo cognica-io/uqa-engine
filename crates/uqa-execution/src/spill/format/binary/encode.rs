@@ -18,7 +18,7 @@ use super::MAX_VALUE_DEPTH;
 
 mod value;
 pub(crate) use value::encode_constant_record_with_control;
-use value::encode_value;
+pub(crate) use value::encode_value;
 
 const ROW_METADATA_LOCK_ORIGINS: usize = 1;
 
@@ -277,7 +277,7 @@ fn add_record_size(
     reason = "ordinary inlining retains a per-scalar call; the recursive visitor stays out of line"
 )]
 #[inline(always)]
-fn add_value_size(total: &mut usize, value: &Value, depth: usize) -> ExecResult<()> {
+pub(crate) fn add_value_size(total: &mut usize, value: &Value, depth: usize) -> ExecResult<()> {
     if depth > MAX_VALUE_DEPTH {
         return Err(spill_error("spill value nesting exceeds 128 levels"));
     }
@@ -593,7 +593,7 @@ fn write_tag(writer: &mut impl Write, tag: u8) -> ExecResult<()> {
     write_raw(writer, &[tag], "value tag")
 }
 
-pub(super) fn write_u64(writer: &mut impl Write, value: usize) -> ExecResult<()> {
+pub(crate) fn write_u64(writer: &mut impl Write, value: usize) -> ExecResult<()> {
     let value = u64::try_from(value).map_err(|_| spill_error("spill length exceeds u64"))?;
     write_raw(writer, &value.to_le_bytes(), "length")
 }
@@ -603,7 +603,7 @@ pub(super) fn write_bytes(writer: &mut impl Write, value: &[u8]) -> ExecResult<(
     write_raw(writer, value, "byte payload")
 }
 
-pub(super) fn write_raw(
+pub(crate) fn write_raw(
     writer: &mut impl Write,
     value: &[u8],
     description: &str,

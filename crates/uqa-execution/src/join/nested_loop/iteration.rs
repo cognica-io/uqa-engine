@@ -6,11 +6,7 @@
 
 //! Demand fills one repeatable right prefix and advances each join candidate once.
 
-use super::{
-    Batch, ExecError, ExecResult, JoinKind, NestedLoopJoin, PhysicalRow, RightInputState,
-    SpillState,
-};
-use crate::spill::SpillBatchWriter;
+use super::{Batch, ExecError, ExecResult, JoinKind, NestedLoopJoin, PhysicalRow, RightInputState};
 
 impl NestedLoopJoin<'_> {
     fn ensure_right(&mut self, position: u64, demanded: bool) -> ExecResult<bool> {
@@ -125,33 +121,12 @@ impl NestedLoopJoin<'_> {
     }
 
     pub(super) fn pull(&mut self, rows: usize, demanded: bool) -> ExecResult<Option<Batch>> {
-        if let Some(batch) = self.output.as_mut().and_then(Iterator::next).transpose()? {
-            return Ok(Some(batch));
-        }
-        self.output = None;
-        let mut output =
-            crate::SpillBuffer::new(self.work_mem_bytes.saturating_sub(self.work_mem_bytes / 2));
-        let mut writer = SpillBatchWriter::new(self.schema.clone())?;
-        let mut produced = 0;
-        while produced < rows {
-            let Some(row) = self.next_joined_row(demanded)? else {
-                break;
-            };
-            writer.push(&mut output, row)?;
-            produced += 1;
-        }
-        if produced == 0 {
-            return Ok(None);
-        }
-        writer.finish(&mut output)?;
-        if output.has_spilled() {
-            self.output_spilled = SpillState::Spilled;
-        }
-        self.output = Some(output.drain()?);
-        self.output
-            .as_mut()
-            .expect("produced output")
-            .next()
-            .transpose()
+        let mut output = std::mem::take(&mut self.output);
+        let result =
+            output.drain_join_batch(self.schema.clone(), self.work_mem_bytes, rows, || {
+                self.next_joined_row(demanded)
+            });
+        self.output = output;
+        result
     }
 }

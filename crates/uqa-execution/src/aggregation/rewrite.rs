@@ -220,7 +220,7 @@ pub fn observe_aggregate(
     let enums = ctx
         .function_hook()
         .and_then(uqa_sql::expr::EngineHook::enum_labels);
-    if acc.registered.is_some() {
+    if acc.is_registered() {
         let values = uqa_sql::expr::enums::render_host_arguments(
             ctx.function_hook()
                 .and_then(uqa_sql::expr::EngineHook::enum_labels),
@@ -233,7 +233,10 @@ pub fn observe_aggregate(
             sort_keys.push(super::ordering::AggregateSortKey::ordered(v, ob));
         }
         if distinct {
-            return acc.distinct.insert(&Value::List(values), sort_keys, enums);
+            return acc
+                .buffers_mut()
+                .distinct
+                .insert(&Value::List(values), sort_keys, enums);
         }
         acc.observe_registered(values, sort_keys, enums)?;
         return Ok(());
@@ -261,7 +264,7 @@ pub fn observe_builtin_aggregate_value(
     }
     if distinct {
         if acc.admits_null_input() || !matches!(value, Value::Null) {
-            acc.distinct.insert(value, sort_keys, enums)?;
+            acc.buffers_mut().distinct.insert(value, sort_keys, enums)?;
         }
         return Ok(());
     }

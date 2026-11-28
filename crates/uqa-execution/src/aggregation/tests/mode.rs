@@ -42,7 +42,7 @@ fn check_reference(budget_bytes: usize) {
             }
             let should_spill =
                 budget_bytes == 1 && values.iter().any(|v| !matches!(v, Value::Null));
-            assert_eq!(!accumulator.values.runs.is_empty(), should_spill);
+            assert_eq!(!accumulator.buffers().values.runs.is_empty(), should_spill);
             assert_eq!(
                 aggregate_value("mode", &accumulator, None).unwrap(),
                 expected,

@@ -5,6 +5,7 @@
 //
 
 use super::*;
+use std::io::{Seek, SeekFrom, Write};
 use uqa_core::ArrayValue;
 
 mod argument_types;
@@ -67,8 +68,8 @@ fn streaming_aggregate_does_not_retain_or_spill_inputs() {
         accumulator.observe(&Value::Int(value)).unwrap();
     }
 
-    assert!(accumulator.values.rows.is_empty());
-    assert!(accumulator.values.runs.is_empty());
+    assert!(accumulator.buffers().values.rows.is_empty());
+    assert!(accumulator.buffers().values.runs.is_empty());
     assert_eq!(
         aggregate_value("sum", &accumulator, None).unwrap(),
         Value::Int(end * (end - 1) / 2)
@@ -87,8 +88,8 @@ fn qualified_streaming_aggregates_keep_the_same_bounded_state() {
         for value in 0..4097 {
             accumulator.observe(&Value::Int(value)).unwrap();
         }
-        assert!(accumulator.values.rows.is_empty(), "{name}");
-        assert!(accumulator.values.runs.is_empty(), "{name}");
+        assert!(accumulator.buffers().values.rows.is_empty(), "{name}");
+        assert!(accumulator.buffers().values.runs.is_empty(), "{name}");
         assert_eq!(
             aggregate_value(name, &accumulator, None).unwrap(),
             expected,
@@ -102,11 +103,11 @@ fn collection_aggregate_still_retains_inputs() {
     let mut accumulator = AggregateAccumulator::builtin("array_agg");
     accumulator.observe(&Value::Int(7)).unwrap();
 
-    assert_eq!(accumulator.count, 0);
-    assert_eq!(accumulator.decimal_sum, None);
-    assert_eq!(accumulator.min, None);
-    assert_eq!(accumulator.max, None);
-    assert_eq!(accumulator.values.rows.len(), 1);
+    assert_eq!(accumulator.count(), 0);
+    assert_eq!(accumulator.sum().decimal_sum, None);
+    assert_eq!(accumulator.min(), None);
+    assert_eq!(accumulator.max(), None);
+    assert_eq!(accumulator.buffers().values.rows.len(), 1);
     assert_eq!(
         aggregate_value("array_agg", &accumulator, None).unwrap(),
         Value::Array(ArrayValue::try_new(vec![Value::Int(7)]).expect("one-dimensional array"))
@@ -133,12 +134,15 @@ fn ordered_aggregate_buffers_reject_sequence_overflow_without_appending() {
 #[test]
 fn streaming_aggregate_counts_report_overflow() {
     let mut count = AggregateAccumulator::builtin("count");
-    count.count = u64::MAX;
+    count.transition = super::accumulator::Transition::Count(u64::MAX);
     let error = count.observe(&Value::Int(1)).unwrap_err();
     assert!(error.to_string().contains("count overflow"));
 
     let mut statistics = AggregateAccumulator::builtin("stddev_pop");
-    statistics.statistics_count = u64::MAX;
+    let super::accumulator::Transition::Statistics(state) = &mut statistics.transition else {
+        panic!("statistics transition");
+    };
+    state.count = u64::MAX;
     let error = statistics.observe(&Value::Int(1)).unwrap_err();
     assert!(error.to_string().contains("count overflow"));
 }
@@ -158,9 +162,9 @@ fn tiny_budget_collection_aggregate_spills_and_merge_streams_exact_order() {
             .unwrap();
     }
 
-    assert!(!accumulator.values.runs.is_empty());
-    assert!(accumulator.values.runs.len() < AGGREGATE_MERGE_FAN_IN);
-    assert!(accumulator.values.memory_bytes <= accumulator.values.budget_bytes);
+    assert!(!accumulator.buffers().values.runs.is_empty());
+    assert!(accumulator.buffers().values.runs.len() < AGGREGATE_MERGE_FAN_IN);
+    assert!(accumulator.buffers().values.memory_bytes <= accumulator.buffers().values.budget_bytes);
     let expected = Value::Array(
         ArrayValue::try_new((0..512_i64).map(Value::Int).collect()).expect("one-dimensional array"),
     );
@@ -189,7 +193,7 @@ fn collection_aggregate_rejects_a_spill_record_larger_than_writer_metadata() {
     run.file.as_file_mut().write_all(b"\n").unwrap();
     run.file.as_file_mut().flush().unwrap();
 
-    let error = values.ordered_values(None).unwrap_err();
+    let error = values.input().ordered_values(None).unwrap_err();
     assert!(error.to_string().contains("exceeds recorded maximum"));
 }
 
@@ -234,34 +238,71 @@ fn distinct_inputs_reject_a_spill_record_larger_than_writer_metadata() {
 }
 
 #[test]
+fn streaming_aggregate_groups_keep_only_their_active_transition() {
+    let integers = [Value::Int(3), Value::Int(7)];
+    let booleans = [Value::Bool(true), Value::Bool(false)];
+    for (name, inputs, expected) in [
+        ("count", &integers, Value::Int(2)),
+        ("sum", &integers, Value::Int(10)),
+        ("min", &integers, Value::Int(3)),
+        ("max", &integers, Value::Int(7)),
+        ("bool_and", &booleans, Value::Bool(false)),
+        ("bool_or", &booleans, Value::Bool(true)),
+    ] {
+        let template = AggregateAccumulatorTemplate::builtin(name, None);
+        let mut groups = Vec::with_capacity(4096);
+        let allocations = allocation_counter::measure(|| {
+            for _ in 0..4096 {
+                let mut group = template.instantiate(1024).unwrap();
+                for value in inputs {
+                    group.observe(value).unwrap();
+                }
+                groups.push(group);
+            }
+        });
+        assert_eq!(allocations.count_total, 0, "{name}");
+        let bytes = size_of_val(&groups[0]);
+        assert!(bytes <= 128, "{name}: {bytes} bytes per group");
+        for group in groups {
+            assert_eq!(group.retained_bytes(), bytes, "{name}");
+            assert_eq!(
+                aggregate_value(name, &group, None).unwrap(),
+                expected,
+                "{name}"
+            );
+        }
+    }
+}
+
+#[test]
 fn builtins_only_update_state_used_by_their_finalizer() {
     let mut count = AggregateAccumulator::builtin("count");
     count.observe(&Value::Int(7)).unwrap();
-    assert_eq!(count.count, 1);
-    assert_eq!(count.decimal_sum, None);
-    assert_eq!(count.min, None);
-    assert_eq!(count.max, None);
+    assert_eq!(count.count(), 1);
+    assert_eq!(count.sum().decimal_sum, None);
+    assert_eq!(count.min(), None);
+    assert_eq!(count.max(), None);
 
     let mut sum = AggregateAccumulator::builtin("sum");
     sum.observe(&Value::Int(7)).unwrap();
-    assert_eq!(sum.count, 1);
-    assert_eq!(sum.integer_sum, 7);
-    assert_eq!(sum.decimal_sum, None);
-    assert_eq!(sum.min, None);
-    assert_eq!(sum.max, None);
+    assert_eq!(sum.count(), 1);
+    assert_eq!(sum.sum().integer_sum, 7);
+    assert_eq!(sum.sum().decimal_sum, None);
+    assert_eq!(sum.min(), None);
+    assert_eq!(sum.max(), None);
 
     let mut min = AggregateAccumulator::builtin("min");
     min.observe(&Value::Int(7)).unwrap();
-    assert_eq!(min.count, 0);
-    assert_eq!(min.decimal_sum, None);
-    assert_eq!(min.min, Some(Value::Int(7)));
-    assert_eq!(min.max, None);
+    assert_eq!(min.count(), 0);
+    assert_eq!(min.sum().decimal_sum, None);
+    assert_eq!(min.min(), Some(&Value::Int(7)));
+    assert_eq!(min.max(), None);
 
     let mut bool_or = AggregateAccumulator::builtin("bool_or");
     bool_or.observe(&Value::Bool(true)).unwrap();
-    assert_eq!(bool_or.count, 0);
-    assert_eq!(bool_or.bool_and, None);
-    assert_eq!(bool_or.bool_or, Some(true));
+    assert_eq!(bool_or.count(), 0);
+    assert_eq!(bool_or.bool_and(), None);
+    assert_eq!(bool_or.bool_or(), Some(true));
 }
 
 #[test]
@@ -269,33 +310,36 @@ fn statistical_aggregate_uses_constant_exact_numeric_state() {
     let mut accumulator = AggregateAccumulator::builtin("stddev_pop");
     accumulator.observe(&Value::Int(7)).unwrap();
 
-    assert_eq!(accumulator.statistics_count, 1);
+    assert_eq!(accumulator.statistics().count, 1);
     assert_eq!(
         accumulator
-            .statistics_origin
+            .statistics()
+            .origin
             .as_ref()
             .map(DecimalValue::to_sql_string),
         Some("7".into())
     );
     assert_eq!(
         accumulator
-            .statistics_sum
+            .statistics()
+            .sum
             .as_ref()
             .map(DecimalValue::to_sql_string),
         Some("0".into())
     );
     assert_eq!(
         accumulator
-            .statistics_sum_squares
+            .statistics()
+            .sum_squares
             .as_ref()
             .map(DecimalValue::to_sql_string),
         Some("0".into())
     );
-    assert_eq!(accumulator.decimal_sum, None);
-    assert_eq!(accumulator.min, None);
-    assert_eq!(accumulator.max, None);
-    assert!(accumulator.values.rows.is_empty());
-    assert!(accumulator.values.runs.is_empty());
+    assert_eq!(accumulator.sum().decimal_sum, None);
+    assert_eq!(accumulator.min(), None);
+    assert_eq!(accumulator.max(), None);
+    assert!(accumulator.buffers().values.rows.is_empty());
+    assert!(accumulator.buffers().values.runs.is_empty());
 }
 
 #[test]
@@ -439,7 +483,7 @@ fn integer_sum_stays_exact_beyond_float_precision() {
         aggregate_value("sum", &accumulator, None).unwrap(),
         Value::Int(9_007_199_254_740_993)
     );
-    assert_eq!(accumulator.decimal_sum, None);
+    assert_eq!(accumulator.sum().decimal_sum, None);
 }
 
 #[test]
@@ -447,14 +491,14 @@ fn integer_average_returns_numeric_until_mixed_with_float() {
     let mut integers = AggregateAccumulator::builtin("avg");
     integers.observe(&Value::Int(2)).unwrap();
     integers.observe(&Value::Int(3)).unwrap();
-    assert_eq!(integers.sum, 0.0);
+    assert_eq!(integers.sum().sum, 0.0);
     assert_eq!(
         aggregate_value("avg", &integers, None).unwrap(),
         Value::Decimal(DecimalValue::parse("2.5000000000000000").unwrap())
     );
 
     integers.observe(&Value::Float(1.5)).unwrap();
-    assert_eq!(integers.sum, 6.5);
+    assert_eq!(integers.sum().sum, 6.5);
     assert_eq!(
         aggregate_value("avg", &integers, None).unwrap(),
         Value::Float(6.5 / 3.0)
@@ -474,7 +518,7 @@ fn decimal_sum_absorbs_integers_observed_before_and_after_it() {
         aggregate_value("sum", &accumulator, None).unwrap(),
         Value::Decimal(DecimalValue::parse("5.5").unwrap())
     );
-    assert_eq!(accumulator.sum, 0.0);
+    assert_eq!(accumulator.sum().sum, 0.0);
 }
 
 #[test]
@@ -485,10 +529,10 @@ fn decimal_sum_is_converted_to_float_only_when_a_float_is_observed() {
         .observe(&Value::Decimal(DecimalValue::parse("0.5").unwrap()))
         .unwrap();
     accumulator.observe(&Value::Int(3)).unwrap();
-    assert_eq!(accumulator.sum, 0.0);
+    assert_eq!(accumulator.sum().sum, 0.0);
 
     accumulator.observe(&Value::Float(1.25)).unwrap();
-    assert_eq!(accumulator.sum, 6.75);
+    assert_eq!(accumulator.sum().sum, 6.75);
     accumulator
         .observe(&Value::Decimal(DecimalValue::parse("0.25").unwrap()))
         .unwrap();
@@ -503,15 +547,18 @@ fn decimal_sum_is_converted_to_float_only_when_a_float_is_observed() {
 #[test]
 fn aggregate_finalizers_report_integer_width_overflow() {
     let mut count = AggregateAccumulator::builtin("count");
-    count.count = i64::MAX as u64 + 1;
+    count.transition = super::accumulator::Transition::Count(i64::MAX as u64 + 1);
     assert!(aggregate_value("count", &count, None)
         .unwrap_err()
         .to_string()
         .contains("exceeds BIGINT"));
 
     let mut sum = AggregateAccumulator::builtin("sum");
-    sum.count = 1;
-    sum.integer_sum = i128::from(i64::MAX) + 1;
+    let super::accumulator::Transition::Sum(state) = &mut sum.transition else {
+        panic!("sum transition");
+    };
+    state.count = 1;
+    state.integer_sum = i128::from(i64::MAX) + 1;
     assert!(aggregate_value("sum", &sum, None)
         .unwrap_err()
         .to_string()

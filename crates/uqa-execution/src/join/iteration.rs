@@ -7,26 +7,38 @@
 //! Resume one probe and duplicate-key cursor without evaluating later candidates.
 
 use super::canonical_index::HashMatches;
-use super::{HashJoin, HybridHashIndex, HybridRowStore, JoinKind, MatchFlags, SpillState};
-use crate::spill::SpillBatchWriter;
+use super::{
+    DirectHashIndex, DirectMatches, HashJoin, HybridHashIndex, HybridRowStore, JoinHashIndex,
+    JoinKind, MatchFlags,
+};
+use crate::RowSchemaExecution;
 use crate::{Batch, ExecError, ExecResult, PhysicalRow};
 
 pub(super) struct HashJoinState {
     pub(super) build_rows: HybridRowStore,
-    pub(super) index: HybridHashIndex,
+    index: ProbeIndex,
     pub(super) build_left: bool,
     matched_build: Option<MatchFlags>,
     probe: Option<PhysicalRow>,
-    matches: HashMatches,
     matched_probe: bool,
     probe_finished: bool,
     unmatched_position: u64,
 }
 
+enum ProbeIndex {
+    Direct(DirectHashIndex, DirectMatches),
+    Encoded(HybridHashIndex, HashMatches),
+}
+
 impl HashJoinState {
+    #[cfg(test)]
+    pub(super) fn uses_direct_index(&self) -> bool {
+        matches!(self.index, ProbeIndex::Direct(..))
+    }
+
     pub(super) fn new(
         build_rows: HybridRowStore,
-        index: HybridHashIndex,
+        index: JoinHashIndex,
         build_left: bool,
         kind: JoinKind,
     ) -> ExecResult<Self> {
@@ -35,11 +47,13 @@ impl HashJoinState {
             .transpose()?;
         Ok(Self {
             build_rows,
-            index,
+            index: match index {
+                JoinHashIndex::Direct(index) => ProbeIndex::Direct(index, DirectMatches::default()),
+                JoinHashIndex::Encoded(index) => ProbeIndex::Encoded(index, HashMatches::empty()),
+            },
             build_left,
             matched_build,
             probe: None,
-            matches: HashMatches::empty(),
             matched_probe: false,
             probe_finished: false,
             unmatched_position: 0,
@@ -63,23 +77,23 @@ impl HashJoin<'_> {
             return Ok(false);
         };
         let schema = input.row_schema().clone();
-        let (keys, types, positions) = if state.build_left {
-            (
-                &self.right_keys,
-                &self.right_key_types,
-                self.right_key_positions.as_deref().map(Vec::as_slice),
-            )
-        } else {
-            (
-                &self.left_keys,
-                &self.left_key_types,
-                self.left_key_positions.as_deref().map(Vec::as_slice),
-            )
-        };
-        state.matches = match self.key(keys, types, positions, &row, &schema)? {
-            Some(key) => state.index.match_cursor(key)?,
-            None => HashMatches::empty(),
-        };
+        match &mut state.index {
+            ProbeIndex::Direct(index, matches) => {
+                *matches = DirectMatches::for_probe(
+                    index,
+                    schema.view(&row),
+                    self.positional_keys(!state.build_left)?,
+                    self.indeterminate_keys(),
+                    self.evaluator.enum_labels(),
+                )?;
+            }
+            ProbeIndex::Encoded(index, matches) => {
+                *matches = match self.key_for_side(!state.build_left, &row, &schema)? {
+                    Some(key) => index.match_cursor(key)?,
+                    None => HashMatches::empty(),
+                };
+            }
+        }
         state.probe = Some(row);
         state.matched_probe = false;
         Ok(true)
@@ -110,11 +124,29 @@ impl HashJoin<'_> {
                 }
                 return Ok(None);
             }
-            if let Some(position) = state.matches.next()? {
-                let probe = state
-                    .probe
-                    .as_ref()
-                    .ok_or_else(|| ExecError::Other("hash join candidate has no probe".into()))?;
+            let probe = state
+                .probe
+                .as_ref()
+                .ok_or_else(|| ExecError::Other("hash join candidate has no probe".into()))?;
+            let next = match &mut state.index {
+                ProbeIndex::Direct(index, matches) => {
+                    let schema = if state.build_left {
+                        self.right.row_schema()
+                    } else {
+                        self.left.row_schema()
+                    };
+                    matches.next(
+                        index,
+                        &state.build_rows,
+                        self.positional_keys(state.build_left)?,
+                        schema.view(probe),
+                        self.positional_keys(!state.build_left)?,
+                        self.evaluator.enum_labels(),
+                    )?
+                }
+                ProbeIndex::Encoded(_, matches) => matches.next()?,
+            };
+            if let Some(position) = next {
                 let joined = state.build_rows.with_row(position, |build| {
                     let joined = if state.build_left {
                         PhysicalRow::concat(build, probe)
@@ -150,33 +182,12 @@ impl HashJoin<'_> {
         rows: usize,
         demanded: bool,
     ) -> ExecResult<Option<Batch>> {
-        if let Some(batch) = self.output.as_mut().and_then(Iterator::next).transpose()? {
-            return Ok(Some(batch));
-        }
-        self.output = None;
-        let mut output =
-            crate::SpillBuffer::new(self.work_mem_bytes.saturating_sub(self.work_mem_bytes / 2));
-        let mut writer = SpillBatchWriter::new(self.schema.clone())?;
-        let mut produced = 0;
-        while produced < rows {
-            let Some(row) = self.next_hash_row(state, demanded)? else {
-                break;
-            };
-            writer.push(&mut output, row)?;
-            produced += 1;
-        }
-        if produced == 0 {
-            return Ok(None);
-        }
-        writer.finish(&mut output)?;
-        if output.has_spilled() {
-            self.output_spilled = SpillState::Spilled;
-        }
-        self.output = Some(output.drain()?);
-        self.output
-            .as_mut()
-            .expect("produced hash output")
-            .next()
-            .transpose()
+        let mut output = std::mem::take(&mut self.output);
+        let result =
+            output.drain_join_batch(self.schema.clone(), self.work_mem_bytes, rows, || {
+                self.next_hash_row(state, demanded)
+            });
+        self.output = output;
+        result
     }
 }

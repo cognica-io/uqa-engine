@@ -17,14 +17,14 @@ use crate::physical::{ExecError, ExecResult};
 use super::SPILL_MAGIC;
 
 mod binary;
+pub(crate) use binary::{
+    add_value_size, decode_constant_record, decode_document, decode_physical_row_record,
+    encode_constant_record_with_control, encode_document, encode_physical_row_record, encode_value,
+    encoded_document_size, write_raw, write_u64, BinaryReader,
+};
 pub(super) use binary::{
     append_batches, decode_batch, encoded_batch_overhead_size, encoded_batch_size,
     encoded_borrowed_row_record_size, encoded_physical_row_record_size,
-};
-pub(crate) use binary::{
-    decode_constant_record, decode_document, decode_physical_row_record,
-    encode_constant_record_with_control, encode_document, encode_physical_row_record,
-    encoded_document_size,
 };
 
 pub(super) const RECORD_PREFIX_BYTES: usize = std::mem::size_of::<u64>();
@@ -33,7 +33,7 @@ pub(super) fn spill_error(message: impl Into<String>) -> ExecError {
     ExecError::Other(message.into())
 }
 
-pub(super) fn read_bounded_spill_record<R: Read>(
+pub(crate) fn read_bounded_spill_record<R: Read>(
     reader: &mut R,
     max_record_bytes: usize,
     description: &str,

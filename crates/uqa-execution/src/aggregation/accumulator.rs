@@ -7,56 +7,50 @@
 //! Streaming aggregate state and registered aggregate adapters.
 
 use super::state::{with_cleanup, RegisteredAggregateState};
+use super::transitions::{increment, observe_extreme, GenericState, StatisticsState, SumState};
 use super::{
-    value_as_f64, AggregateValueBuffer, Arc, DecimalValue, DistinctTracker,
-    RegisteredAggregateBuffer, SQLAggregateFactory, SQLAggregateState, SQLError, Value,
+    AggregateValueBuffer, Arc, DistinctTracker, RegisteredAggregateBuffer, SQLAggregateFactory,
+    SQLAggregateState, SQLError, Value,
 };
-use uqa_core::TemporalInfinity;
+use std::{cmp::Ordering, num::NonZeroUsize, sync::LazyLock};
 use uqa_sql::expr::enums::{EnumComparisonState, EnumLabelCatalog};
-use uqa_sql::expr::IntervalFields;
 
+/// One group's active transition and its optional ordered or DISTINCT inputs.
 pub struct AggregateAccumulator {
-    pub(super) registered: Option<Arc<dyn SQLAggregateFactory>>,
-    pub(super) registered_state: RegisteredAggregateState,
-    pub(super) registered_ordered: RegisteredAggregateBuffer,
-    pub(super) count: u64,
-    pub(super) sum: f64,
-    pub(super) integer_sum: i128,
-    pub(super) decimal_sum: Option<DecimalValue>,
-    /// The finite `sumX` of `sum(interval)` and `avg(interval)`; infinite inputs are counted separately.
-    pub(super) interval_sum: Option<IntervalFields>,
-    pub(super) interval_positive_infinity: u64,
-    pub(super) interval_negative_infinity: u64,
-    pub(super) numeric_inputs: NumericInputKind,
-    pub(super) min: Option<Value>,
-    pub(super) max: Option<Value>,
-    /// MIN/MAX's transition support function belongs to the call, across groups and frame restarts.
+    pub(super) transition: Transition,
     pub(super) enum_comparison: Option<Arc<EnumComparisonState>>,
-    /// DISTINCT arguments are sorted with their SQL comparison operators before finalization.
-    pub(super) distinct: DistinctTracker,
-    /// Only collection, ordered-set, and statistical aggregates need
-    /// their complete input. Streaming aggregates keep constant-size
-    /// state and must not spill values that their finalizer never reads.
-    pub(super) state_plan: AggregateStatePlan,
+    component_budget: Option<NonZeroUsize>,
+    buffers: Option<Box<AggregateBuffers>>,
+}
+
+pub(super) enum Transition {
+    Generic(Box<GenericState>),
+    Count(u64),
+    Sum(SumState),
+    Min(Option<Value>),
+    Max(Option<Value>),
+    BoolAnd(Option<bool>),
+    BoolOr(Option<bool>),
+    StringAgg(super::string_agg::Transition),
+    Buffered,
+    BufferedWithNulls,
+    BufferedArrays(Box<super::array_inputs::ArrayInputShape>),
+    Statistics(Box<StatisticsState>),
+    Registered(Box<Registered>),
+}
+
+pub(super) struct Registered {
+    factory: Arc<dyn SQLAggregateFactory>,
+    state: RegisteredAggregateState,
+    // Direct scalar observations use the generic builtin transition. Host callbacks receive argument tuples through observe_registered.
+    scalar_input: Option<Box<GenericState>>,
+}
+
+#[derive(Default)]
+pub(super) struct AggregateBuffers {
     pub(super) values: AggregateValueBuffer,
-    /// Shape of the first `array_agg(anyarray)` input observed in transition order.
-    pub(super) string_size: super::string_agg::Transition,
-    pub(super) array_inputs: super::array_inputs::ArrayInputShape,
-    /// Boolean folds for `BOOL_AND` / `BOOL_OR`. Stay `None` until the
-    /// first observation so an empty input set returns `NULL` (matches
-    /// `PostgreSQL`).
-    pub(super) bool_and: Option<bool>,
-    pub(super) bool_or: Option<bool>,
-    /// Welford state for variance/stddev. This avoids retaining the complete group for statistical aggregates.
-    pub(super) statistics_count: u64,
-    pub(super) statistics_mean: f64,
-    pub(super) statistics_m2: f64,
-    pub(super) statistics_moments_valid: bool,
-    pub(super) statistics_has_float: bool,
-    pub(super) statistics_nonzero_deviation: bool,
-    pub(super) statistics_origin: Option<DecimalValue>,
-    pub(super) statistics_sum: Option<DecimalValue>,
-    pub(super) statistics_sum_squares: Option<DecimalValue>,
+    pub(super) distinct: DistinctTracker,
+    pub(super) registered_ordered: RegisteredAggregateBuffer,
 }
 
 #[derive(Clone, Copy, Default)]
@@ -176,108 +170,94 @@ impl AggregateStatePlan {
     }
 }
 
-impl Default for AggregateAccumulator {
-    fn default() -> Self {
-        Self {
-            registered: None,
-            registered_state: RegisteredAggregateState::default(),
-            registered_ordered: RegisteredAggregateBuffer::default(),
-            count: 0,
-            sum: 0.0,
-            integer_sum: 0,
-            decimal_sum: None,
-            interval_sum: None,
-            interval_positive_infinity: 0,
-            interval_negative_infinity: 0,
-            numeric_inputs: NumericInputKind::default(),
-            min: None,
-            max: None,
-            enum_comparison: None,
-            distinct: DistinctTracker::default(),
-            state_plan: AggregateStatePlan::Generic,
-            values: AggregateValueBuffer::default(),
-            array_inputs: super::array_inputs::ArrayInputShape::default(),
-            string_size: super::string_agg::Transition::default(),
-            bool_and: None,
-            bool_or: None,
-            statistics_count: 0,
-            statistics_mean: 0.0,
-            statistics_m2: 0.0,
-            statistics_moments_valid: true,
-            statistics_has_float: false,
-            statistics_nonzero_deviation: false,
-            statistics_origin: None,
-            statistics_sum: None,
-            statistics_sum_squares: None,
+impl Transition {
+    pub(super) fn for_plan(plan: AggregateStatePlan) -> Self {
+        match plan {
+            AggregateStatePlan::Generic => Self::Generic(Box::default()),
+            AggregateStatePlan::Count => Self::Count(0),
+            AggregateStatePlan::Sum | AggregateStatePlan::SumReal => Self::Sum(SumState {
+                real: matches!(plan, AggregateStatePlan::SumReal),
+                ..SumState::default()
+            }),
+            AggregateStatePlan::Min => Self::Min(None),
+            AggregateStatePlan::Max => Self::Max(None),
+            AggregateStatePlan::BoolAnd => Self::BoolAnd(None),
+            AggregateStatePlan::BoolOr => Self::BoolOr(None),
+            AggregateStatePlan::StringAgg => {
+                Self::StringAgg(super::string_agg::Transition::default())
+            }
+            AggregateStatePlan::Buffered => Self::Buffered,
+            AggregateStatePlan::BufferedWithNulls => Self::BufferedWithNulls,
+            AggregateStatePlan::BufferedArrays => Self::BufferedArrays(Box::default()),
+            AggregateStatePlan::Statistics => Self::Statistics(Box::default()),
+        }
+    }
+
+    pub(super) fn plan(&self) -> AggregateStatePlan {
+        match self {
+            Self::Generic(_) | Self::Registered(_) => AggregateStatePlan::Generic,
+            Self::Count(_) => AggregateStatePlan::Count,
+            Self::Sum(sum) if sum.real => AggregateStatePlan::SumReal,
+            Self::Sum(_) => AggregateStatePlan::Sum,
+            Self::Min(_) => AggregateStatePlan::Min,
+            Self::Max(_) => AggregateStatePlan::Max,
+            Self::BoolAnd(_) => AggregateStatePlan::BoolAnd,
+            Self::BoolOr(_) => AggregateStatePlan::BoolOr,
+            Self::StringAgg(_) => AggregateStatePlan::StringAgg,
+            Self::Buffered => AggregateStatePlan::Buffered,
+            Self::BufferedWithNulls => AggregateStatePlan::BufferedWithNulls,
+            Self::BufferedArrays(_) => AggregateStatePlan::BufferedArrays,
+            Self::Statistics(_) => AggregateStatePlan::Statistics,
         }
     }
 }
 
+impl Default for AggregateAccumulator {
+    fn default() -> Self {
+        Self::with_transition(Transition::for_plan(AggregateStatePlan::Generic), None)
+    }
+}
+
 impl AggregateAccumulator {
-    pub(super) fn with_budget(budget_bytes: usize) -> Self {
-        let component_budget = (budget_bytes / 2).max(1);
+    fn with_transition(transition: Transition, component_budget: Option<NonZeroUsize>) -> Self {
         Self {
-            registered: None,
-            registered_state: RegisteredAggregateState::default(),
-            registered_ordered: RegisteredAggregateBuffer::new(component_budget),
-            count: 0,
-            sum: 0.0,
-            integer_sum: 0,
-            decimal_sum: None,
-            interval_sum: None,
-            interval_positive_infinity: 0,
-            interval_negative_infinity: 0,
-            numeric_inputs: NumericInputKind::default(),
-            min: None,
-            max: None,
+            transition,
+            component_budget,
             enum_comparison: None,
-            distinct: DistinctTracker::new(component_budget),
-            state_plan: AggregateStatePlan::Generic,
-            values: AggregateValueBuffer::new(component_budget),
-            array_inputs: super::array_inputs::ArrayInputShape::default(),
-            string_size: super::string_agg::Transition::default(),
-            bool_and: None,
-            bool_or: None,
-            statistics_count: 0,
-            statistics_mean: 0.0,
-            statistics_m2: 0.0,
-            statistics_moments_valid: true,
-            statistics_has_float: false,
-            statistics_nonzero_deviation: false,
-            statistics_origin: None,
-            statistics_sum: None,
-            statistics_sum_squares: None,
+            buffers: None,
         }
     }
 
+    pub(super) fn from_plan(plan: AggregateStatePlan) -> Self {
+        Self::with_transition(Transition::for_plan(plan), None)
+    }
+
     pub fn builtin(name: &str) -> Self {
-        Self {
-            state_plan: AggregateStatePlan::builtin(name),
-            ..Self::default()
-        }
+        Self::from_plan(AggregateStatePlan::builtin(name))
     }
 
     pub fn builtin_with_input_type(
         name: &str,
         input_type: Option<&uqa_sql::ast::ColumnType>,
     ) -> Self {
-        let mut accumulator = Self::builtin(name);
-        accumulator.state_plan = AggregateStatePlan::builtin_with_input_type(name, input_type);
+        let mut accumulator = Self::from_plan(AggregateStatePlan::builtin_with_input_type(
+            name, input_type,
+        ));
         accumulator.enum_comparison = super::template::enum_extrema_state(name, input_type);
         accumulator
     }
 
+    #[cfg(test)]
     pub(super) fn builtin_with_budget(name: &str, budget_bytes: usize) -> Self {
         Self::from_plan_with_budget(AggregateStatePlan::builtin(name), budget_bytes)
     }
 
-    pub(super) fn from_plan_with_budget(
-        state_plan: AggregateStatePlan,
-        budget_bytes: usize,
-    ) -> Self {
-        let mut accumulator = Self::with_budget(budget_bytes);
-        accumulator.state_plan = state_plan;
-        accumulator
+    pub(super) fn from_plan_with_budget(plan: AggregateStatePlan, budget_bytes: usize) -> Self {
+        Self::with_budget(Transition::for_plan(plan), budget_bytes)
+    }
+
+    pub(super) fn with_budget(transition: Transition, budget_bytes: usize) -> Self {
+        Self::with_transition(transition, NonZeroUsize::new((budget_bytes / 2).max(1)))
     }
 
     pub(super) fn registered_with_budget(
@@ -289,24 +269,147 @@ impl AggregateAccumulator {
     }
 
     fn with_registered_state(
-        function: Arc<dyn SQLAggregateFactory>,
+        factory: Arc<dyn SQLAggregateFactory>,
         state: RegisteredAggregateState,
         budget_bytes: usize,
     ) -> Self {
-        let mut accumulator = Self::with_budget(budget_bytes);
-        accumulator.registered = Some(function);
-        accumulator.registered_state = state;
-        accumulator
+        Self::with_budget(
+            Transition::Registered(Box::new(Registered {
+                factory,
+                state,
+                scalar_input: None,
+            })),
+            budget_bytes,
+        )
     }
 
     pub(super) fn replay_with_budget(&self, budget_bytes: usize) -> Result<Self, SQLError> {
-        match &self.registered {
-            Some(function) => Ok(Self::with_registered_state(
-                Arc::clone(function),
-                self.registered_state.replay(function.as_ref())?,
+        match &self.transition {
+            Transition::Registered(registered) => Ok(Self::with_registered_state(
+                Arc::clone(&registered.factory),
+                registered.state.replay(registered.factory.as_ref())?,
                 budget_bytes,
             )),
-            None => Ok(Self::from_plan_with_budget(self.state_plan, budget_bytes)),
+            state => Ok(Self::from_plan_with_budget(state.plan(), budget_bytes)),
+        }
+    }
+
+    pub(super) fn is_registered(&self) -> bool {
+        matches!(self.transition, Transition::Registered(_))
+    }
+
+    pub(super) fn buffers(&self) -> &AggregateBuffers {
+        static EMPTY: LazyLock<AggregateBuffers> = LazyLock::new(AggregateBuffers::default);
+        self.buffers.as_deref().unwrap_or_else(|| &EMPTY)
+    }
+
+    pub(super) fn existing_buffers_mut(&mut self) -> Option<&mut AggregateBuffers> {
+        self.buffers.as_deref_mut()
+    }
+
+    pub(super) fn buffers_mut(&mut self) -> &mut AggregateBuffers {
+        self.buffers.get_or_insert_with(|| {
+            Box::new(
+                self.component_budget
+                    .map_or_else(AggregateBuffers::default, |budget| AggregateBuffers {
+                        values: AggregateValueBuffer::new(budget.get()),
+                        distinct: DistinctTracker::new(budget.get()),
+                        registered_ordered: RegisteredAggregateBuffer::new(budget.get()),
+                    }),
+            )
+        })
+    }
+
+    pub(super) fn retained_bytes(&self) -> usize {
+        use super::retained_size::payload_bytes;
+        use super::DecimalValue;
+        let decimal_bytes =
+            |value: &Option<DecimalValue>| value.as_ref().map_or(0, DecimalValue::retained_bytes);
+        let transition_bytes = match &self.transition {
+            Transition::Generic(state) => state.retained_bytes(),
+            Transition::Sum(state) => decimal_bytes(&state.decimal_sum),
+            Transition::Min(value) | Transition::Max(value) => {
+                value.as_ref().map_or(0, payload_bytes)
+            }
+            Transition::Statistics(state) => size_of::<StatisticsState>()
+                .saturating_add(decimal_bytes(&state.origin))
+                .saturating_add(decimal_bytes(&state.sum))
+                .saturating_add(decimal_bytes(&state.sum_squares)),
+            Transition::BufferedArrays(shape) => shape.retained_bytes(),
+            Transition::Registered(registered) => size_of::<Registered>().saturating_add(
+                registered
+                    .scalar_input
+                    .as_deref()
+                    .map_or(0, GenericState::retained_bytes),
+            ),
+            _ => 0,
+        };
+        let buffer_bytes = self.buffers.as_deref().map_or(0, |buffers| {
+            size_of::<AggregateBuffers>()
+                .saturating_add(buffers.values.memory_bytes)
+                .saturating_add(buffers.distinct.values.memory_bytes)
+                .saturating_add(buffers.registered_ordered.memory_bytes)
+        });
+        size_of::<Self>()
+            .saturating_add(transition_bytes)
+            .saturating_add(buffer_bytes)
+    }
+
+    pub(super) fn count(&self) -> u64 {
+        match &self.transition {
+            Transition::Count(count) => *count,
+            Transition::Sum(state) => state.count,
+            Transition::Generic(state) => state.sum.count,
+            _ => 0,
+        }
+    }
+
+    pub(super) fn sum(&self) -> &SumState {
+        static EMPTY: LazyLock<SumState> = LazyLock::new(SumState::default);
+        match &self.transition {
+            Transition::Sum(state) => state,
+            Transition::Generic(state) => &state.sum,
+            _ => &EMPTY,
+        }
+    }
+
+    pub(super) fn min(&self) -> Option<&Value> {
+        match &self.transition {
+            Transition::Min(value) => value.as_ref(),
+            Transition::Generic(state) => state.min.as_ref(),
+            _ => None,
+        }
+    }
+
+    pub(super) fn max(&self) -> Option<&Value> {
+        match &self.transition {
+            Transition::Max(value) => value.as_ref(),
+            Transition::Generic(state) => state.max.as_ref(),
+            _ => None,
+        }
+    }
+
+    pub(super) fn bool_and(&self) -> Option<bool> {
+        match &self.transition {
+            Transition::BoolAnd(value) => *value,
+            Transition::Generic(state) => state.bool_and,
+            _ => None,
+        }
+    }
+
+    pub(super) fn bool_or(&self) -> Option<bool> {
+        match &self.transition {
+            Transition::BoolOr(value) => *value,
+            Transition::Generic(state) => state.bool_or,
+            _ => None,
+        }
+    }
+
+    pub(super) fn statistics(&self) -> &StatisticsState {
+        static EMPTY: LazyLock<StatisticsState> = LazyLock::new(StatisticsState::default);
+        match &self.transition {
+            Transition::Statistics(state) => state,
+            _ => &EMPTY,
         }
     }
 
@@ -319,15 +422,17 @@ impl AggregateAccumulator {
         value: &Value,
         enums: Option<&dyn EnumLabelCatalog>,
     ) -> Result<(), SQLError> {
-        if let AggregateStatePlan::BufferedArrays = self.state_plan {
-            self.array_inputs.accept(value)?;
+        if let Transition::BufferedArrays(shape) = &mut self.transition {
+            shape.accept(value)?;
         }
         if matches!(value, Value::Null) {
             return self.observe_null(Vec::new(), enums);
         }
         self.observe_state(value, enums)?;
-        if self.state_plan.retains_values() {
-            self.values.push(value.clone(), Vec::new(), enums)?;
+        if self.transition.plan().retains_values() {
+            self.buffers_mut()
+                .values
+                .push(value.clone(), Vec::new(), enums)?;
         }
         Ok(())
     }
@@ -344,404 +449,80 @@ impl AggregateAccumulator {
     }
 
     pub(super) fn observe_projected_integer(&mut self, value: i64) -> Result<(), SQLError> {
-        match self.state_plan {
-            AggregateStatePlan::Count => {
-                self.count = self
-                    .count
-                    .checked_add(1)
-                    .ok_or_else(|| SQLError::TypeMismatch("aggregate count overflow".into()))?;
-                Ok(())
-            }
-            AggregateStatePlan::Sum | AggregateStatePlan::SumReal => {
-                self.count = self
-                    .count
-                    .checked_add(1)
-                    .ok_or_else(|| SQLError::TypeMismatch("aggregate count overflow".into()))?;
-                self.integer_sum = self
-                    .integer_sum
-                    .checked_add(i128::from(value))
-                    .ok_or_else(|| SQLError::TypeMismatch("integer aggregate overflow".into()))?;
-                if self.numeric_inputs.has_decimal() {
-                    let next = DecimalValue::from_i64(value);
-                    self.decimal_sum = Some(
-                        self.decimal_sum
-                            .as_ref()
-                            .and_then(|sum| sum.checked_add(&next))
-                            .ok_or_else(|| {
-                                SQLError::TypeMismatch("decimal aggregate overflow".into())
-                            })?,
-                    );
-                }
-                if self.numeric_inputs.has_float() {
-                    self.sum += value as f64;
-                }
-                Ok(())
+        match &mut self.transition {
+            Transition::Count(count) => increment(count),
+            Transition::Sum(sum) => {
+                increment(&mut sum.count)?;
+                sum.add_integer(value)
             }
             _ => self.observe(&Value::Int(value)),
         }
     }
 
-    pub(super) fn observe_state(
+    fn observe_state(
         &mut self,
         value: &Value,
         enums: Option<&dyn EnumLabelCatalog>,
     ) -> Result<(), SQLError> {
-        // Only transitions that inspect scalar payloads decode them. COUNT and
-        // collection transitions retain lazy inputs; MIN/MAX use SQL comparison.
+        // Decode lazy datums only for transitions that inspect their scalar contents.
         let decoded;
-        let value = if matches!(value, Value::Datum(_)) {
-            if matches!(
-                self.state_plan,
-                AggregateStatePlan::Generic
-                    | AggregateStatePlan::Sum
-                    | AggregateStatePlan::SumReal
-                    | AggregateStatePlan::BoolAnd
-                    | AggregateStatePlan::BoolOr
-                    | AggregateStatePlan::Statistics
+        let value = if matches!(value, Value::Datum(_))
+            && matches!(
+                self.transition,
+                Transition::Generic(_)
+                    | Transition::Registered(_)
+                    | Transition::Sum(_)
+                    | Transition::BoolAnd(_)
+                    | Transition::BoolOr(_)
+                    | Transition::Statistics(_)
             ) {
-                decoded = super::observation::read(value, enums)?;
-                &*decoded
-            } else {
-                value
-            }
+            decoded = super::observation::read(value, enums)?;
+            &*decoded
         } else {
             value
         };
-        match self.state_plan {
-            AggregateStatePlan::Generic => {
-                self.count = self
-                    .count
-                    .checked_add(1)
-                    .ok_or_else(|| SQLError::TypeMismatch("aggregate count overflow".into()))?;
-                if matches!(value, Value::Int(_) | Value::Float(_) | Value::Decimal(_)) {
-                    self.observe_sum(value)?;
-                }
-                self.observe_min(value, enums)?;
-                self.observe_max(value, enums)?;
-                if matches!(value, Value::Bool(_)) {
-                    self.observe_bool_and(value)?;
-                    self.observe_bool_or(value)?;
-                }
+        let comparison = self.enum_comparison.as_deref();
+        match &mut self.transition {
+            Transition::Generic(generic) => generic.observe(value, enums, comparison),
+            Transition::Count(count) => increment(count),
+            Transition::Sum(sum) => {
+                increment(&mut sum.count)?;
+                sum.observe(value)
             }
-            AggregateStatePlan::Count => {
-                self.count = self
-                    .count
-                    .checked_add(1)
-                    .ok_or_else(|| SQLError::TypeMismatch("aggregate count overflow".into()))?;
+            Transition::Min(current) => {
+                observe_extreme(current, value, Ordering::Greater, enums, comparison)
             }
-            AggregateStatePlan::Sum | AggregateStatePlan::SumReal => {
-                self.count = self
-                    .count
-                    .checked_add(1)
-                    .ok_or_else(|| SQLError::TypeMismatch("aggregate count overflow".into()))?;
-                self.observe_sum(value)?;
+            Transition::Max(current) => {
+                observe_extreme(current, value, Ordering::Less, enums, comparison)
             }
-            AggregateStatePlan::Min => self.observe_min(value, enums)?,
-            AggregateStatePlan::Max => self.observe_max(value, enums)?,
-            AggregateStatePlan::BoolAnd => self.observe_bool_and(value)?,
-            AggregateStatePlan::BoolOr => self.observe_bool_or(value)?,
-            AggregateStatePlan::StringAgg => self.string_size.accept(value, enums, |_| {})?,
-            AggregateStatePlan::Buffered
-            | AggregateStatePlan::BufferedWithNulls
-            | AggregateStatePlan::BufferedArrays => {}
-            AggregateStatePlan::Statistics => self.observe_statistics(value)?,
-        }
-        Ok(())
-    }
-
-    fn observe_statistics(&mut self, value: &Value) -> Result<(), SQLError> {
-        let previous_count = self.statistics_count;
-        let next_count = previous_count
-            .checked_add(1)
-            .ok_or_else(|| SQLError::TypeMismatch("statistical aggregate count overflow".into()))?;
-        if matches!(value, Value::Float(_)) {
-            if !self.statistics_moments_valid {
-                return Err(SQLError::TypeMismatch(
-                    "numeric statistical state does not fit double precision".into(),
-                ));
-            }
-            self.statistics_has_float = true;
-            self.observe_float_statistic(value_as_f64(value)?, next_count);
-        } else {
-            let decimal = match value {
-                Value::Int(value) => DecimalValue::from_i64(*value),
-                Value::Decimal(value) => value.clone(),
-                other => {
+            Transition::BoolAnd(current) => {
+                let Value::Bool(value) = value else {
                     return Err(SQLError::TypeMismatch(format!(
-                        "statistical aggregate requires a numeric value, got {other:?}"
-                    )))
-                }
-            };
-            if self.statistics_moments_valid {
-                if let Some(float) = decimal.to_f64() {
-                    self.observe_float_statistic(float, next_count);
-                } else {
-                    self.statistics_moments_valid = false;
-                    if self.statistics_has_float {
-                        return Err(SQLError::TypeMismatch(
-                            "numeric statistical input does not fit double precision".into(),
-                        ));
-                    }
-                }
-            }
-            if decimal.is_nan() || decimal.is_infinite() {
-                let nan = decimal.checked_sub(&decimal).ok_or_else(|| {
-                    SQLError::Internal("numeric special value did not produce NaN".into())
-                })?;
-                self.statistics_origin
-                    .get_or_insert_with(|| DecimalValue::from_i64(0));
-                self.statistics_sum = Some(nan.clone());
-                self.statistics_sum_squares = Some(nan);
-                self.statistics_nonzero_deviation = true;
-                self.statistics_count = next_count;
-                return Ok(());
-            }
-            if self
-                .statistics_sum_squares
-                .as_ref()
-                .is_some_and(DecimalValue::is_nan)
-            {
-                self.statistics_count = next_count;
-                return Ok(());
-            }
-            let origin = if let Some(origin) = &self.statistics_origin {
-                origin.clone()
-            } else {
-                let origin = decimal.clone();
-                self.statistics_origin = Some(origin.clone());
-                origin
-            };
-            let deviation = decimal.checked_sub(&origin).ok_or_else(|| {
-                SQLError::TypeMismatch("numeric statistical deviation overflow".into())
-            })?;
-            self.statistics_nonzero_deviation |= !deviation.is_zero();
-            let square = deviation.checked_mul(&deviation).ok_or_else(|| {
-                SQLError::TypeMismatch("numeric statistical deviation square overflow".into())
-            })?;
-            self.statistics_sum = Some(match self.statistics_sum.take() {
-                Some(sum) => sum.checked_add(&deviation).ok_or_else(|| {
-                    SQLError::TypeMismatch("numeric statistical deviation sum overflow".into())
-                })?,
-                None => deviation,
-            });
-            self.statistics_sum_squares = Some(match self.statistics_sum_squares.take() {
-                Some(sum) => sum.checked_add(&square).ok_or_else(|| {
-                    SQLError::TypeMismatch(
-                        "numeric statistical deviation square sum overflow".into(),
-                    )
-                })?,
-                None => square,
-            });
-        }
-        self.statistics_count = next_count;
-        Ok(())
-    }
-
-    fn observe_float_statistic(&mut self, value: f64, count: u64) {
-        let delta = value - self.statistics_mean;
-        self.statistics_mean += delta / count as f64;
-        let delta_after = value - self.statistics_mean;
-        self.statistics_m2 += delta * delta_after;
-    }
-
-    pub(super) fn observe_sum(&mut self, value: &Value) -> Result<(), SQLError> {
-        if let Value::Temporal(temporal) = value {
-            let interval = IntervalFields::of(temporal).ok_or_else(|| {
-                SQLError::TypeMismatch(format!(
-                    "SUM/AVG requires a numeric or interval value, got {value:?}"
-                ))
-            })?;
-            if let Some(infinity) = temporal.infinity() {
-                let count = match infinity {
-                    TemporalInfinity::Positive => &mut self.interval_positive_infinity,
-                    TemporalInfinity::Negative => &mut self.interval_negative_infinity,
+                        "BOOL_AND requires a boolean value, got {value:?}"
+                    )));
                 };
-                *count = count
-                    .checked_add(1)
-                    .ok_or_else(|| SQLError::TypeMismatch("aggregate count overflow".into()))?;
-                return Ok(());
+                *current = Some(current.unwrap_or(true) && *value);
+                Ok(())
             }
-            self.interval_sum = Some(
-                self.interval_sum
-                    .unwrap_or(IntervalFields::ZERO)
-                    .plus(interval)?,
-            );
-            return Ok(());
-        }
-        if !matches!(value, Value::Int(_) | Value::Float(_) | Value::Decimal(_)) {
-            return Err(SQLError::TypeMismatch(format!(
-                "SUM/AVG requires a numeric or interval value, got {value:?}"
-            )));
-        }
-        match value {
-            Value::Int(n) => {
-                self.integer_sum = self
-                    .integer_sum
-                    .checked_add(i128::from(*n))
-                    .ok_or_else(|| SQLError::TypeMismatch("integer aggregate overflow".into()))?;
-                if self.numeric_inputs.has_decimal() {
-                    let next = DecimalValue::from_i64(*n);
-                    self.decimal_sum = Some(
-                        self.decimal_sum
-                            .as_ref()
-                            .and_then(|sum| sum.checked_add(&next))
-                            .ok_or_else(|| {
-                                SQLError::TypeMismatch("decimal aggregate overflow".into())
-                            })?,
-                    );
-                }
-                if self.numeric_inputs.has_float() {
-                    self.sum += *n as f64;
-                }
-            }
-            Value::Decimal(d) => {
-                let next = match &self.decimal_sum {
-                    Some(sum) => sum.checked_add(d),
-                    None if self.integer_sum == 0 => Some(d.clone()),
-                    None => {
-                        DecimalValue::from_i128(self.integer_sum).and_then(|sum| sum.checked_add(d))
-                    }
-                }
-                .ok_or_else(|| SQLError::TypeMismatch("decimal aggregate overflow".into()))?;
-                self.decimal_sum = Some(next);
-                if self.numeric_inputs.has_float() {
-                    self.sum += d.to_f64().ok_or_else(|| {
-                        SQLError::TypeMismatch("decimal aggregate does not fit float".into())
-                    })?;
-                }
-                self.numeric_inputs.observe_decimal();
-            }
-            Value::Float(value) => {
-                if !self.numeric_inputs.has_float() {
-                    // Exact integer/decimal aggregates do not maintain a shadow
-                    // floating total. Convert the accumulated total only if a
-                    // floating input actually makes it necessary.
-                    self.sum = if self.numeric_inputs.has_decimal() {
-                        self.decimal_sum
-                            .as_ref()
-                            .and_then(DecimalValue::to_f64)
-                            .ok_or_else(|| {
-                                SQLError::TypeMismatch(
-                                    "decimal aggregate does not fit float".into(),
-                                )
-                            })?
-                    } else {
-                        self.integer_sum as f64
-                    };
-                }
-                self.sum = if self.count == 1 {
-                    *value
-                } else {
-                    self.combine_float_sum(self.sum, *value)?
+            Transition::BoolOr(current) => {
+                let Value::Bool(value) = value else {
+                    return Err(SQLError::TypeMismatch(format!(
+                        "BOOL_OR requires a boolean value, got {value:?}"
+                    )));
                 };
-                self.numeric_inputs.observe_float();
+                *current = Some(current.unwrap_or(false) || *value);
+                Ok(())
             }
-            _ => {
-                return Err(SQLError::TypeMismatch(format!(
-                    "SUM/AVG requires a numeric or interval value, got {value:?}"
-                )))
-            }
+            Transition::StringAgg(transition) => transition.accept(value, enums, |_| {}),
+            Transition::Statistics(statistics) => statistics.observe(value),
+            Transition::Buffered
+            | Transition::BufferedWithNulls
+            | Transition::BufferedArrays(_) => Ok(()),
+            Transition::Registered(registered) => registered
+                .scalar_input
+                .get_or_insert_with(Box::default)
+                .observe(value, enums, comparison),
         }
-        Ok(())
-    }
-
-    /// Select the interval result after all transitions, preserving finite overflow and later input errors even when both signs of infinity have been seen.
-    pub(super) fn interval_result(&self) -> Result<Option<IntervalFields>, SQLError> {
-        let infinity = match (
-            self.interval_positive_infinity != 0,
-            self.interval_negative_infinity != 0,
-        ) {
-            (true, true) => {
-                return Err(SQLError::Routine {
-                    sqlstate: "22008".into(),
-                    message: "interval out of range".into(),
-                })
-            }
-            (true, false) => Some(TemporalInfinity::Positive),
-            (false, true) => Some(TemporalInfinity::Negative),
-            (false, false) => None,
-        };
-        Ok(infinity.map_or(self.interval_sum, |value| {
-            IntervalFields::of(&value.interval())
-        }))
-    }
-
-    pub(super) fn combine_float_sum(&self, left: f64, right: f64) -> Result<f64, SQLError> {
-        use uqa_sql::expr::{eval_float_arithmetic, FloatWidth};
-        let width = if matches!(self.state_plan, AggregateStatePlan::SumReal) {
-            FloatWidth::Real
-        } else {
-            FloatWidth::DoublePrecision
-        };
-        match eval_float_arithmetic(
-            uqa_sql::ast::BinaryOp::Add,
-            &Value::Float(left),
-            &Value::Float(right),
-            width,
-        )? {
-            Value::Float(value) => Ok(value),
-            _ => Err(SQLError::Internal(
-                "floating sum lost its numeric carrier".into(),
-            )),
-        }
-    }
-
-    pub(super) fn observe_min(
-        &mut self,
-        value: &Value,
-        enums: Option<&dyn EnumLabelCatalog>,
-    ) -> Result<(), SQLError> {
-        match &self.min {
-            Some(cur)
-                if !super::ordering::compare_extrema_with_catalog(
-                    cur,
-                    value,
-                    enums,
-                    self.enum_comparison.as_deref(),
-                )?
-                .is_gt() => {}
-            _ => self.min = Some(value.clone()),
-        }
-        Ok(())
-    }
-
-    pub(super) fn observe_max(
-        &mut self,
-        value: &Value,
-        enums: Option<&dyn EnumLabelCatalog>,
-    ) -> Result<(), SQLError> {
-        match &self.max {
-            Some(cur)
-                if !super::ordering::compare_extrema_with_catalog(
-                    cur,
-                    value,
-                    enums,
-                    self.enum_comparison.as_deref(),
-                )?
-                .is_lt() => {}
-            _ => self.max = Some(value.clone()),
-        }
-        Ok(())
-    }
-
-    pub(super) fn observe_bool_and(&mut self, value: &Value) -> Result<(), SQLError> {
-        let Value::Bool(value) = value else {
-            return Err(SQLError::TypeMismatch(format!(
-                "BOOL_AND requires a boolean value, got {value:?}"
-            )));
-        };
-        self.bool_and = Some(self.bool_and.unwrap_or(true) && *value);
-        Ok(())
-    }
-
-    pub(super) fn observe_bool_or(&mut self, value: &Value) -> Result<(), SQLError> {
-        let Value::Bool(value) = value else {
-            return Err(SQLError::TypeMismatch(format!(
-                "BOOL_OR requires a boolean value, got {value:?}"
-            )));
-        };
-        self.bool_or = Some(self.bool_or.unwrap_or(false) || *value);
-        Ok(())
     }
 
     /// Ordered array and string inputs reach their transition functions in sorted order.
@@ -752,17 +533,19 @@ impl AggregateAccumulator {
         enums: Option<&dyn EnumLabelCatalog>,
     ) -> Result<(), SQLError> {
         if matches!(value, Value::Null) {
-            return match self.state_plan {
-                AggregateStatePlan::BufferedArrays => self.values.push(Value::Null, keys, enums),
+            return match self.transition.plan() {
+                AggregateStatePlan::BufferedArrays => {
+                    self.buffers_mut().values.push(Value::Null, keys, enums)
+                }
                 _ => self.observe_null(keys, enums),
             };
         }
-        if self.state_plan.retains_values()
-            && !matches!(self.state_plan, AggregateStatePlan::StringAgg)
+        if self.transition.plan().retains_values()
+            && !matches!(self.transition.plan(), AggregateStatePlan::StringAgg)
         {
             self.observe_state(value, enums)?;
         }
-        self.values.push(value.clone(), keys, enums)?;
+        self.buffers_mut().values.push(value.clone(), keys, enums)?;
         Ok(())
     }
 
@@ -772,8 +555,10 @@ impl AggregateAccumulator {
         keys: Vec<super::ordering::AggregateSortKey>,
         enums: Option<&dyn EnumLabelCatalog>,
     ) -> Result<(), SQLError> {
-        match self.state_plan {
-            AggregateStatePlan::BufferedWithNulls => self.values.push(Value::Null, keys, enums),
+        match self.transition.plan() {
+            AggregateStatePlan::BufferedWithNulls => {
+                self.buffers_mut().values.push(Value::Null, keys, enums)
+            }
             _ => Ok(()),
         }
     }
@@ -781,7 +566,7 @@ impl AggregateAccumulator {
     /// Whether DISTINCT keeps a NULL input. Array accumulation rejects it when the transition sees it.
     pub(super) fn admits_null_input(&self) -> bool {
         matches!(
-            self.state_plan,
+            self.transition.plan(),
             AggregateStatePlan::BufferedWithNulls | AggregateStatePlan::BufferedArrays
         )
     }
@@ -792,35 +577,44 @@ impl AggregateAccumulator {
         sort_keys: Vec<super::ordering::AggregateSortKey>,
         enums: Option<&dyn EnumLabelCatalog>,
     ) -> Result<(), SQLError> {
+        let Transition::Registered(registered) = &mut self.transition else {
+            return Err(SQLError::Internal(
+                "registered aggregate state is missing".into(),
+            ));
+        };
         if sort_keys.is_empty() {
-            self.registered_state.observe(&values)?;
-            return Ok(());
+            return registered.state.observe(&values);
         }
-        self.registered_ordered.push(values, sort_keys, enums)
+        self.buffers_mut()
+            .registered_ordered
+            .push(values, sort_keys, enums)
     }
 
     pub(super) fn registered_value(
         &self,
+        input: super::ordered_buffer::OrderedRows<'_, super::RegisteredAggregateRecord>,
         enums: Option<&dyn EnumLabelCatalog>,
     ) -> Option<Result<Value, SQLError>> {
-        let function = self.registered.as_ref()?;
-        if self.registered_ordered.is_empty() {
-            return Some(self.registered_state.finish());
+        let Transition::Registered(registered) = &self.transition else {
+            return None;
+        };
+        if input.buffer.next_sequence == 0 {
+            return Some(registered.state.finish());
         }
         Some((|| {
-            let mut state = self.registered_state.replay(function.as_ref())?;
-            let result = self
-                .registered_ordered
+            let mut state = registered.state.replay(registered.factory.as_ref())?;
+            let result = input
                 .observe_ordered_into(&mut state, enums)
                 .and_then(|()| state.finish());
             with_cleanup(result, state.close())
         })())
     }
 
-    /// Release registered host state before reporting completion or failure.
-    /// Repeated calls do not invoke host cleanup again. Abandoned accumulators
-    /// still release their state through best-effort `Drop` cleanup.
+    /// Release host state once, including after a partial failure or early close.
     pub fn close(&mut self) -> Result<(), SQLError> {
-        self.registered_state.close()
+        match &mut self.transition {
+            Transition::Registered(registered) => registered.state.close(),
+            _ => Ok(()),
+        }
     }
 }

@@ -8333,6 +8333,227 @@
       ]
     },
     {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "ordinary_sizing_counts_nested_spare_capacity_and_keeps_inline_frames",
+      "cases": 1,
+      "source": "crates/uqa-core/src/types/value/retention/tests.rs",
+      "capability": "Retained value sizing",
+      "workload": "Count a nested value with spare capacity through 256 levels, including the inline traversal boundary.",
+      "invariant": "The measured size agrees with an independent sum of slot capacities and payload bytes at every depth. Up to 128 levels require zero heap allocations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "resident_scalar_and_registered_arguments_are_sized_without_allocating",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/aggregation/ordered_buffer/tests.rs",
+      "capability": "Aggregate input buffering",
+      "workload": "Append 10,000 presized nested values and argument lists to separate resident buffers.",
+      "invariant": "Appending owned values and sort keys allocates zero times. Both buffers retain all inputs within the memory allowance.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "sixteen_interleaved_runs_preserve_input_order_with_logarithmic_head_comparisons",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/aggregation/ordered_buffer/tests.rs",
+      "capability": "Ordered aggregate merge",
+      "workload": "Merge 1,024 records from sixteen interleaved ordered runs.",
+      "invariant": "Every sequence is visited once in input order and comparisons remain within a logarithmic bound per selection.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "completed_groups_move_resident_values_and_window_reads_remain_repeatable",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/aggregation/ordered_buffer/tests.rs",
+      "capability": "Aggregate finalization",
+      "workload": "Finalize completed resident groups and read the same retained ordered window twice.",
+      "invariant": "Completed groups transfer the original allocations and repeated window output preserves its inputs.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "evaluated_keys_reuse_their_slots_and_new_groups_take_key_ownership",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/aggregation/adaptive.rs",
+      "capability": "Grouped aggregation",
+      "workload": "Probe the same computed group key 10,000 times after inserting its original owned vector.",
+      "invariant": "Insertion transfers the key allocation to the group. Later probes reuse the same scratch slots and incur zero allocations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "batches_reuse_subquery_plans_without_allocating",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/aggregation/adaptive.rs",
+      "capability": "Grouped aggregation",
+      "workload": "Consume 10,000 input batches for an aggregate whose HAVING clause contains a scalar subquery.",
+      "invariant": "Every batch refers to the prepared subquery collection without a heap allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "demanded_filter_visits_a_retained_batch_without_allocating_per_rejection",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/relational/tests/consumer_demand.rs",
+      "capability": "Bounded filter demand",
+      "workload": "Request one passing row from a materialized batch whose 4,096 candidates all fail the filter.",
+      "invariant": "The predicate sees each candidate exactly once and the bounded pull allocates zero times.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "query_block_binding_retains_the_outer_row_and_distinct_output_syntax",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/query/binding/sources/tests.rs",
+      "capability": "Query block binding",
+      "workload": "Bind an outer column in a derived SELECT DISTINCT with LIMIT using both the original and a separately bound input block.",
+      "invariant": "Binding retains the outer row allocation. Identical block inputs share their rewritten owner and deferring DISTINCT and LIMIT keeps the original output syntax.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "spilled_distinct_and_join_bound_physical_reads_for_colliding_partitions",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/join/tests/spill_work.rs",
+      "capability": "Partitioned execution spill",
+      "workload": "Build disk-only DISTINCT and join indexes for 32 and 128 two-kilobyte keys with identical low six hash bits, then probe every key.",
+      "invariant": "A fourfold increase in input requires at most seven times the observed encrypted temporary block reads in each operator. Every probe returns its exact set membership or build position.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "merge_equality_bounds_spilled_source_reads_and_preserves_duplicate_order",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/mutation/merge/pairing/candidates/tests.rs",
+      "capability": "MERGE source pairing",
+      "workload": "Probe 12, 48 and 192 targets against duplicates and NULLs with 512-byte source payloads and a one-byte budget. Repeat the 48-target workload in memory.",
+      "invariant": "Repeated equality probes preserve duplicate order and evaluate only matching candidates. Each fourfold increase costs at most seven times the encrypted block reads. The 48-key index uses fewer than twice the block reads of repeated scans. The 192-key index uses fewer block reads than repeated scans.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "streaming_aggregate_groups_keep_only_their_active_transition",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/aggregation/tests.rs",
+      "capability": "Aggregate transition memory",
+      "workload": "Create 4,096 groups for each of COUNT, SUM, MIN, MAX, BOOL_AND and BOOL_OR, observe two inputs and finalize every group.",
+      "invariant": "Each transition retains at most 128 inline bytes, allocates no heap storage per group and returns its exact SQL value.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "growing_hash_partitions_bound_disk_work_for_distinct_keys_and_join_probes",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/spill/partitioned/tests.rs",
+      "capability": "Partitioned execution spill",
+      "workload": "Insert and probe 256 and 1,024 unique keys in separate disk-only set and row-position indexes, including directory growth.",
+      "invariant": "The larger workload requires fewer than seven times the directory probes and fewer than 24 probes per input, including migration.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "disk_key_probes_check_the_complete_key_and_keep_insertion_order_across_growth",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/spill/partitioned/tests.rs",
+      "capability": "Partitioned execution spill",
+      "workload": "Force a full-hash collision between two 8,193-byte keys, resize the directory, and append duplicate positions while a cursor retains the old tail.",
+      "invariant": "Keys that differ only at the final byte retain separate insertion-ordered sequences. The old cursor stops at its original tail.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "cancelled_spill_operations_keep_the_previous_partition_and_sqlstate",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/spill/partitioned/tests.rs",
+      "capability": "Partitioned execution spill",
+      "workload": "Cancel an insertion at the growth boundary, release the request and add the same key.",
+      "invariant": "The cancelled request returns 57014, publishes no new key, and retains every earlier key and position after growth.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "direct_probe_resumes_duplicate_positions_and_rejects_hash_collisions",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/join/direct_index.rs",
+      "capability": "Resumable positional hash join",
+      "workload": "Place five positional build rows in a single hash bucket, including two distinct keys that collide with the probe.",
+      "invariant": "Successive reads yield the three SQL-equal positions in build order, skip colliding keys and reject a NULL probe.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "duplicate_inner_joins_keep_the_positional_index_in_both_build_directions",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/join/tests/input_demand.rs",
+      "capability": "Resumable positional hash join",
+      "workload": "Join three and nine duplicate keys in both build directions, requesting one output per pull.",
+      "invariant": "All 27 rows follow probe and build order. The resident positional index serves every match without re-encoding the build keys.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "join_output_moves_resident_rows_and_drains_spilled_rows_before_polling_again",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/join/output.rs",
+      "capability": "Bounded join output",
+      "workload": "Collect a resident string and sixteen disk-backed integer rows; drain the remainder with singleton demand and try a malformed row at both budgets.",
+      "invariant": "The resident string keeps its allocation. The spilled rows retain order and drain before the child is polled again. Both budgets report the same invalid slot.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
       "package": "uqa-execution",
       "kind": "lib",
       "test": "arithmetic_and_negation_infer_once_for_ten_thousand_rows_of_the_same_schema",
@@ -14862,6 +15083,19 @@
       "capability": "Catalog-qualified character type identity",
       "workload": "Fixed-character and varying-character input with explicit length modifiers.",
       "invariant": "Truncation and padding match PostgreSQL; unmodified bpchar never imposes a one-character limit."
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "spilled_tpch_results_match_postgresql_18",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-engine/tests/sql_tpch.rs",
+      "capability": "TPC-H execution with spilled workspaces",
+      "workload": "Run all 22 TPC-H queries on the reference fixture with work_mem set to 64 kB and collect the actual Q18 buffer counters.",
+      "invariant": "Every result column and ordered row agrees with PostgreSQL 18, and Q18 reads and writes temporary blocks."
     },
     {
       "package": "uqa-engine",

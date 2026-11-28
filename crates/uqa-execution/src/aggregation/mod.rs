@@ -7,9 +7,7 @@
 //! SQL aggregate planning, bounded execution, and finalization.
 
 use std::cmp::Ordering;
-use std::io::{BufRead, BufReader, BufWriter, Seek, SeekFrom, Write};
 use std::sync::Arc;
-use uqa_storage::temporary_file::TemporaryFile as File;
 
 use crate::{eval_scalar, ScalarEvalContext, ScalarExpr, ScalarOrder, SpillBuffer};
 use uqa_core::{DecimalValue, Value};
@@ -32,7 +30,10 @@ mod distinct;
 mod executor;
 mod finalize;
 mod observation;
+mod ordered_buffer;
 mod ordering;
+mod retained_size;
+pub(crate) use retained_size::value_retained_bytes;
 mod output;
 mod partial_state;
 mod projected;
@@ -43,6 +44,7 @@ mod sort_fallback;
 pub(crate) mod state;
 mod string_agg;
 mod template;
+mod transitions;
 mod value_buffer;
 
 pub use accumulator::*;
