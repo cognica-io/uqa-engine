@@ -10,7 +10,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - Graph traversal and centrality results share subgraph vertices, edges and names across postings. Rust callers can use `.into()` for these three `GraphPayload` fields.
 
-- Preserve prepared domain checks across unrelated catalog changes in other sessions. Generic plans track casts that resolve to a domain through the search path, including domains named like a built-in type. Adding a constraint to a previously unconstrained domain rebuilds plans that folded its cast.
+- Preserve prepared domain checks across unrelated catalog changes in other sessions. Generic plans track casts that resolve to a domain through the search path, including domains named like a built-in type. Adding a constraint to a previously unconstrained domain rebuilds plans that folded its cast. A prepared insert on a table created in the current transaction keeps its bound default when another session commits to an unrelated table.
 - Match an explicit collation in an `ON CONFLICT` target to the corresponding key of a single unique index. Omitted collations leave the key unrestricted.
 
 - Recursive CTEs produce the rows their consumers request, share them across references, and support finite recursion beyond 1,024 generations.

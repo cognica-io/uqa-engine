@@ -10810,6 +10810,19 @@
       ]
     },
     {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "command_resolution_preserves_forwarded_revisions_and_advances_changed_markers",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/mvcc/overlay/tests/revisions.rs",
+      "capability": "Private revisions across command snapshots",
+      "workload": "Resident and spilled values and tombstones, two memory allowances, an immutable marker, an unrelated commit, a changed marker precondition and savepoint rollback.",
+      "invariant": "A forwarded write retains its private revision. A changed marker precondition or a new evaluation advances it. A prefix reports the newest revision among its records.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
       "package": "uqa-execution",
       "kind": "lib",
       "test": "nested_scalar_calls_fit_the_native_routine_stack_budget",
@@ -68438,6 +68451,21 @@
         "case_2_sqlite",
         "case_3_sqlite_key_value",
         "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "an_unrelated_commit_preserves_the_prepared_default_of_a_private_table",
+      "cases": 3,
+      "source": "crates/uqa-engine/tests/catalog/pg18_constraint_lifecycle/domain_constraints.rs",
+      "capability": "Prepared defaults across concurrent commits",
+      "workload": "Prepare an insert on a private table in native SQLite, SQLite Key/Value or redb. Commit to another table from a second session, change the domain default and then replace the original default function.",
+      "invariant": "The prepared insert returns 14 after the unrelated commit and 25 after the function replacement. The peer's row survives rollback.",
+      "case_names": [
+        "case_1_sqlite",
+        "case_2_sqlite_key_value",
+        "case_3_redb"
       ]
     },
     {
