@@ -329,3 +329,28 @@ fn complete_query_permissions_keep_declared_inputs_and_the_selected_owner() {
         }
     }
 }
+
+#[test]
+fn retained_and_executable_subqueries_share_the_first_authorization_walk() {
+    let catalog = Catalog::new(false);
+    let scope = catalog.scope();
+    let mut plan = query("SELECT (SELECT id FROM first_input), (SELECT id FROM shared_input), (SELECT secret FROM discarded_input)");
+    let RelationalPlan::QueryBlock(block) = &mut plan.root else {
+        panic!("query block")
+    };
+    block
+        .preserve_projection_privileges([1, 2], &scope.control())
+        .unwrap();
+    block.projections[2].expr = crate::ScalarExpr::Literal(uqa_core::Value::Null);
+
+    let error = crate::semantics::privileges::ensure_select_privileges_for_query(&plan, &scope)
+        .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("42501"));
+    let lookups = catalog.lookups.borrow();
+    let analyzed: Vec<_> = lookups
+        .iter()
+        .filter(|(_, mode)| *mode == RelationLookupMode::Dynamic)
+        .map(|(name, _)| name.as_str())
+        .collect();
+    assert_eq!(analyzed, ["shared_input", "discarded_input", "first_input"]);
+}

@@ -31887,6 +31887,19 @@
     {
       "package": "uqa-sql",
       "kind": "lib",
+      "test": "retained_and_executable_subqueries_share_the_first_authorization_walk",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/semantics/privileges/coverage/tests.rs",
+      "capability": "Bounded authorization of shared scalar subqueries",
+      "workload": "Authorize a query with an executable scalar subquery, a retained one, and a slot shared by a retained and an executable projection.",
+      "invariant": "Each relation is analyzed once in its original order, and selecting a denied column from a discarded projection still raises SQLSTATE 42501.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
       "test": "complete_select_coverage_borrows_only_checked_original_nodes",
       "cases": 1,
       "source": "crates/uqa-sql/src/semantics/privileges/coverage/tests.rs",
@@ -39872,6 +39885,19 @@
       "capability": "View mutation authorization ownership",
       "workload": "Four MiB unused definitions and arenas, all mutation kinds and table/column privilege masks, small allowances, both cancellations and callback failure/unwind.",
       "invariant": "Authorization borrows immutable inputs, admits selected subjects and scratch, preserves complete ACL validation and error order, and releases exact request ownership."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_subquery_authorizes_block_and_lateral_input_columns_in_their_own_scopes",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/semantics/privileges/ownership_tests.rs",
+      "capability": "Scoped authorization of shared correlated subqueries",
+      "workload": "Reuse a subquery slot in a lateral function argument and a discarded projection with different visible inputs.",
+      "invariant": "The required columns include the outer relation from the lateral argument and the inner relation from the projection.",
+      "case_names": [
+        ""
+      ]
     },
     {
       "package": "uqa-sql",

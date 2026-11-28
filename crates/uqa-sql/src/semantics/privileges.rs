@@ -68,14 +68,15 @@ fn collect_column(
     Ok(())
 }
 
-fn collect_expression_columns(
+fn visit_expression_privileges(
     expression: &ScalarExpr,
     scopes: &[&SourceLineage],
     direct_star: bool,
     required: &mut Required,
     control: &ProductionControl<'_>,
     purpose: AnalysisPurpose,
-) -> Result<OwnedSet<usize>, SQLError> {
+    mut visit_subquery: impl FnMut(usize, &mut Required) -> Result<(), SQLError>,
+) -> Result<(), SQLError> {
     control.check()?;
     if direct_star {
         match expression {
@@ -83,13 +84,13 @@ fn collect_expression_columns(
                 if let Some(scope) = scopes.iter().find(|scope| !scope.output.is_empty()) {
                     scope.require_all(required, control)?;
                 }
-                return Ok(OwnedSet::new());
+                return Ok(());
             }
             ScalarExpr::QualifiedStar(qualifier) => {
                 if let Some(scope) = scopes.iter().find(|scope| scope.has_qualifier(qualifier)) {
                     scope.require_qualified_all(qualifier, required, control)?;
                 }
-                return Ok(OwnedSet::new());
+                return Ok(());
             }
             _ => {}
         }
@@ -146,7 +147,10 @@ fn collect_expression_columns(
         }
         Ok::<bool, SQLError>(true)
     })?;
-    Ok(subquery_ids)
+    for slot in subquery_ids {
+        visit_subquery(slot, required)?;
+    }
+    Ok(())
 }
 
 fn collect_expression_and_subqueries(
@@ -158,17 +162,15 @@ fn collect_expression_and_subqueries(
     universe: &mut SourceLineage,
     required: &mut Required,
 ) -> Result<(), SQLError> {
-    for subquery in collect_expression_columns(
+    visit_expression_privileges(
         expression,
         scopes,
         direct_star,
         required,
         &ctes.control(),
         ctes.purpose,
-    )? {
-        analyze_subquery_slot(subquery, subqueries, ctes, scopes, universe, required)?;
-    }
-    Ok(())
+        |slot, required| analyze_subquery_slot(slot, subqueries, ctes, scopes, universe, required),
+    )
 }
 
 fn analyze_subquery_slot(
@@ -437,22 +439,40 @@ fn analyze_query_block(
             ctes.purpose,
         )?;
     }
-    if ctes.purpose == AnalysisPurpose::Authorization {
-        for slot in &block.privilege_subqueries {
-            ctes.control().check()?;
-            analyze_subquery_slot(*slot, &block.subqueries, ctes, &scopes, universe, required)?;
-        }
+    let retained = match ctes.purpose {
+        AnalysisPurpose::Authorization => block.privilege_subqueries.as_slice(),
+        _ => &[],
+    };
+    for &slot in retained {
+        ctes.control().check()?;
+        analyze_subquery_slot(slot, &block.subqueries, ctes, &scopes, universe, required)?;
     }
-    for projection in &block.projections {
-        collect_expression_and_subqueries(
-            &projection.expr,
+    // Retained slots have already been analyzed against this block's complete lineage. FROM inputs and join predicates use their own column scopes.
+    let mut collect = |expression: &ScalarExpr, direct_star| {
+        visit_expression_privileges(
+            expression,
             &scopes,
-            true,
-            &block.subqueries,
-            ctes,
-            universe,
+            direct_star,
             required,
-        )?;
+            &ctes.control(),
+            ctes.purpose,
+            |slot, required| {
+                if retained.binary_search(&slot).is_err() {
+                    analyze_subquery_slot(
+                        slot,
+                        &block.subqueries,
+                        ctes,
+                        &scopes,
+                        universe,
+                        required,
+                    )?;
+                }
+                Ok(())
+            },
+        )
+    };
+    for projection in &block.projections {
+        collect(&projection.expr, true)?;
     }
     for expression in block
         .r#where
@@ -461,15 +481,7 @@ fn analyze_query_block(
         .chain(block.grouping_sets.iter().flatten())
         .chain(block.having.iter())
     {
-        collect_expression_and_subqueries(
-            expression,
-            &scopes,
-            false,
-            &block.subqueries,
-            ctes,
-            universe,
-            required,
-        )?;
+        collect(expression, false)?;
     }
     for expression in block
         .order_by
@@ -482,26 +494,10 @@ fn analyze_query_block(
         {
             continue;
         }
-        collect_expression_and_subqueries(
-            expression,
-            &scopes,
-            false,
-            &block.subqueries,
-            ctes,
-            universe,
-            required,
-        )?;
+        collect(expression, false)?;
     }
     for expression in block.limit.iter().chain(block.offset.iter()) {
-        collect_expression_and_subqueries(
-            expression,
-            &scopes,
-            false,
-            &block.subqueries,
-            ctes,
-            universe,
-            required,
-        )?;
+        collect(expression, false)?;
     }
     Ok(())
 }

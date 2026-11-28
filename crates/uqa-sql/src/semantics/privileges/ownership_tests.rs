@@ -435,3 +435,33 @@ fn discarded_projection_subqueries_keep_cte_authority_without_materializing_defi
     drop(scope);
     assert_eq!(memory.used(), 0);
 }
+
+#[test]
+fn retained_subquery_authorizes_block_and_lateral_input_columns_in_their_own_scopes() {
+    let catalog = Catalog::new(vec!["id".into()]);
+    let control = ProductionControl::uncontrolled();
+    let scope = catalog.scope(&control);
+    let mut plan = query("SELECT (SELECT 1 FROM generate_series(1, (SELECT id)) AS g(n) CROSS JOIN public.inner_input) FROM public.outer_input");
+    let RelationalPlan::QueryBlock(outer) = &mut plan.root else {
+        panic!("outer query block")
+    };
+    let RelationalPlan::QueryBlock(inner) = &mut outer.subqueries[0].root else {
+        panic!("inner query block")
+    };
+    assert_eq!(inner.subqueries.len(), 1);
+    inner.projections[0].expr = ScalarExpr::ScalarSubquery(0);
+    inner.preserve_projection_privileges([0], &control).unwrap();
+    inner.projections[0].expr = ScalarExpr::Literal(uqa_core::Value::Null);
+
+    let mut universe = SourceLineage::default();
+    let mut required = Required::new();
+    analyze_query_plan(&plan, &scope, &[], &mut universe, &mut required).unwrap();
+    let columns: Vec<_> = required
+        .iter()
+        .map(|column| (column.table.as_str(), column.column.as_str()))
+        .collect();
+    assert_eq!(
+        columns,
+        [("public.inner_input", "id"), ("public.outer_input", "id")]
+    );
+}
