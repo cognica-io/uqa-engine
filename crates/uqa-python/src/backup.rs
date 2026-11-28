@@ -71,12 +71,25 @@ fn fixed_bytes<const N: usize>(value: &[u8], field: &str) -> PyResult<[u8; N]> {
         .map_err(|_| PyValueError::new_err(format!("{field} must contain exactly {N} bytes")))
 }
 
+fn backup_identity<'a, T>(value: &'a [u8], name: &str) -> PyResult<T>
+where
+    T: TryFrom<&'a [u8], Error = uqa_engine::backup::ParseBackupIdentityError>,
+{
+    use uqa_engine::backup::ParseBackupIdentityError;
+    T::try_from(value).map_err(|error| match error {
+        ParseBackupIdentityError::Length => {
+            PyValueError::new_err(format!("{name} must contain exactly 16 bytes"))
+        }
+        ParseBackupIdentityError::Invalid(error) => runtime_error(error),
+    })
+}
+
 fn backup_id(value: &[u8]) -> PyResult<BackupId> {
-    BackupId::from_bytes(fixed_bytes(value, "backup ID")?).map_err(runtime_error)
+    backup_identity(value, "backup ID")
 }
 
 fn restore_id(value: &[u8]) -> PyResult<RestoreId> {
-    RestoreId::from_bytes(fixed_bytes(value, "restore ID")?).map_err(runtime_error)
+    backup_identity(value, "restore ID")
 }
 
 fn id_bytes(py: Python<'_>, id: [u8; 16]) -> Py<PyBytes> {

@@ -469,6 +469,22 @@ def test_python_user_defined_functions() -> None:
         )
 
 
+def test_table_callback_accepts_a_row_iterator_in_declared_key_order() -> None:
+    engine = uqa.Engine()
+
+    def rows():
+        yield {"z": "first", "a": 1}
+        yield {"a": 2, "ignored": object()}
+
+    try:
+        engine.register_table_function("py_streamed_rows", rows)
+        result = engine.sql("SELECT * FROM py_streamed_rows() ORDER BY a")
+        assert result.columns == ["z", "a"]
+        assert result.rows == [{"a": 1, "z": "first"}, {"a": 2, "z": None}]
+    finally:
+        engine.close()
+
+
 def test_result_column_names_are_shared_across_rows() -> None:
     engine = uqa.Engine()
     result = engine.sql('SELECT n AS "column with spaces" FROM generate_series(1, 128) AS s(n) ORDER BY n')

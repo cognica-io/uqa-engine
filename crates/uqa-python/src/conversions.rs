@@ -76,37 +76,28 @@ pub(super) fn values_to_py_tuple<'py>(
 pub(super) fn table_function_result_from_py(
     value: &Bound<'_, PyAny>,
 ) -> PyResult<SQLTableFunctionResult> {
-    if let Ok(dict) = value.cast::<PyDict>() {
-        let columns_obj = dict
+    let (mut columns, rows_obj) = if let Ok(dict) = value.cast::<PyDict>() {
+        let columns = dict
             .get_item("columns")?
             .ok_or_else(|| PyValueError::new_err("table function dict result needs `columns`"))?;
-        let rows_obj = dict
+        let rows = dict
             .get_item("rows")?
             .ok_or_else(|| PyValueError::new_err("table function dict result needs `rows`"))?;
-        let mut columns = columns_obj.extract::<Vec<String>>()?;
-        let rows = table_rows_from_py(&rows_obj, &mut columns)?;
-        return Ok(SQLTableFunctionResult { columns, rows });
-    }
+        (columns.extract::<Vec<String>>()?, rows)
+    } else if let Some(pair) = value
+        .cast::<PyTuple>()
+        .ok()
+        .filter(|tuple| tuple.len() == 2)
+    {
+        (
+            pair.get_item(0)?.extract::<Vec<String>>()?,
+            pair.get_item(1)?,
+        )
+    } else {
+        (Vec::new(), value.clone())
+    };
 
-    if let Ok(tuple) = value.cast::<PyTuple>() {
-        if tuple.len() == 2 {
-            let mut columns = tuple.get_item(0)?.extract::<Vec<String>>()?;
-            let rows_obj = tuple.get_item(1)?;
-            let rows = table_rows_from_py(&rows_obj, &mut columns)?;
-            return Ok(SQLTableFunctionResult { columns, rows });
-        }
-    }
-
-    let mut columns = Vec::new();
-    let rows = table_rows_from_py(value, &mut columns)?;
-    Ok(SQLTableFunctionResult { columns, rows })
-}
-
-pub(super) fn table_rows_from_py(
-    rows_obj: &Bound<'_, PyAny>,
-    columns: &mut Vec<String>,
-) -> PyResult<Vec<Vec<Value>>> {
-    let iterator = PyIterator::from_object(rows_obj)?;
+    let iterator = PyIterator::from_object(&rows_obj)?;
     let mut rows = Vec::new();
     for row in iterator {
         let row = row?;
@@ -117,7 +108,7 @@ pub(super) fn table_rows_from_py(
                 }
             }
             let mut values = Vec::with_capacity(columns.len());
-            for column in columns.iter() {
+            for column in &columns {
                 match dict.get_item(column)? {
                     Some(value) => values.push(value_from_py(&value)?),
                     None => values.push(Value::Null),
@@ -143,5 +134,5 @@ pub(super) fn table_rows_from_py(
             rows.push(values);
         }
     }
-    Ok(rows)
+    Ok(SQLTableFunctionResult { columns, rows })
 }

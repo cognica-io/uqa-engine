@@ -13,16 +13,15 @@ use pyo3::{
 };
 use std::{path::PathBuf, sync::Arc};
 use uqa_engine::backup::{
-    BackupKey, BackupLimits, BackupListing, LocalRepository, Protection, ProtectionId,
-    StorageReadControl, DEFAULT_BACKUP_MEMORY_BYTES, DEFAULT_BACKUP_WORKSPACE_BYTES,
+    BackupKey, BackupLimits, BackupListing, LocalRepository, Protection, StorageReadControl,
+    DEFAULT_BACKUP_MEMORY_BYTES, DEFAULT_BACKUP_WORKSPACE_BYTES,
 };
 
 fn protection(domain: Option<&[u8]>, key: Option<&[u8]>) -> PyResult<Protection> {
     match (domain, key) {
         (None, None) => Ok(Protection::Plaintext),
         (Some(domain), Some(key)) => Ok(Protection::Encrypted {
-            domain: ProtectionId::from_bytes(fixed_bytes(domain, "protection domain")?)
-                .map_err(runtime_error)?,
+            domain: super::backup_identity(domain, "protection domain")?,
             key: BackupKey::new(fixed_bytes(key, "repository key")?),
         }),
         _ => Err(PyValueError::new_err(

@@ -23,9 +23,9 @@ use uqa_engine::{
     SQLFunctionOptions, SQLFunctionVolatility, SQLParam, SQLResult, SQLScalarFunction,
     SQLTableFunction, SQLTableFunctionResult, ScoredEntry, ScoringMode,
 };
-use uqa_scoring::{BM25Params, CalibrationReport};
+use uqa_scoring::CalibrationReport;
 use uqa_sql::SQLError;
-use uqa_storage_sqlite::{DatabaseFileFormat, SQLiteCompressionOptions};
+use uqa_storage_sqlite::SQLiteCompressionOptions;
 
 mod backup;
 mod callbacks;
@@ -60,7 +60,7 @@ use inputs::{
     validate_vector, vector_values_from_py,
 };
 use migration::migrate_python_db;
-use options::{compression_options, database_file_format_name, scoring_mode};
+use options::{compression_options, scoring_mode};
 use output::{
     calibration_report_to_py, migration_report_to_py, parse_scoring_params, scored_entries_to_py,
 };

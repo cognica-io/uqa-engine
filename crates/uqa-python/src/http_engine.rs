@@ -17,7 +17,6 @@ use tokio::runtime::{Builder, Runtime};
 use uqa_client::{
     HttpEngine, HttpEngineError as CoreHttpEngineError, SQLStream, SQLStreamFrame, SecretString,
 };
-use uqa_sql::SQLParam;
 
 use super::{batch_from_py, map_to_py, params_from_py, PySQLResult};
 
@@ -142,7 +141,7 @@ impl PyHttpEngine {
         let inner = self.inner.clone();
         let statements = batch_from_py(statements)?;
         let results = run_http(py, async move {
-            let borrowed = borrowed_statements(&statements);
+            let borrowed = uqa_sql::params::borrow_sql_batch(&statements);
             inner.sql_batch(&borrowed).await
         })?;
         Ok(results.into_iter().map(Into::into).collect())
@@ -156,7 +155,7 @@ impl PyHttpEngine {
         let inner = self.inner.clone();
         let statements = batch_from_py(statements)?;
         let execution = run_http(py, async move {
-            let borrowed = borrowed_statements(&statements);
+            let borrowed = uqa_sql::params::borrow_sql_batch(&statements);
             inner.sql_batch_with_metadata(&borrowed).await
         })?;
         let request_id = execution.request_id().to_owned();
@@ -222,13 +221,6 @@ impl PyHttpSQLStream {
     fn __repr__(&self) -> String {
         format!("HttpSQLStream(request_id={:?})", self.request_id)
     }
-}
-
-fn borrowed_statements(statements: &[(String, Vec<SQLParam>)]) -> Vec<(&str, &[SQLParam])> {
-    statements
-        .iter()
-        .map(|(query, params)| (query.as_str(), params.as_slice()))
-        .collect()
 }
 
 pub(super) fn http_runtime() -> PyResult<&'static Runtime> {
