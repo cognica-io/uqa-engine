@@ -33,7 +33,7 @@ fn field_admission_and_cancellation_keep_existing_descriptors_on_every_provider(
             let mut next = UQAFieldDescriptor::default();
             assert_eq!(uqa_value_get_type(value, &raw mut ty), UQA_OK);
             assert_eq!(uqa_type_get_field(ty, 0, &raw mut first), UQA_OK);
-            let copies = fill_allowance(value);
+            let copies = super::fill_allowance(value);
             assert_eq!(uqa_type_get_field(ty, 1, &raw mut next), UQA_ERROR_LIMIT);
             assert!(next.ty.is_null() && next.name.data.is_null());
             assert_eq!(uqa_type_get_field(ty, 0, &raw mut next), UQA_OK);
@@ -135,24 +135,6 @@ fn open(flags: UQAOpenFlags, path: &CString) -> (*mut UQAEngine, *mut UQAResult)
     }
 }
 
-fn fill_allowance(value: *const UQAValue) -> Vec<*mut UQAValue> {
-    let mut copies = Vec::new();
-    unsafe {
-        loop {
-            let mut copy = ptr::null_mut();
-            match uqa_value_create_copy(value, &raw mut copy) {
-                UQA_OK => copies.push(copy),
-                UQA_ERROR_LIMIT => {
-                    assert!(copy.is_null());
-                    return copies;
-                }
-                status => panic!("unexpected copy status {status}"),
-            }
-            assert!(copies.len() < 256);
-        }
-    }
-}
-
 #[test]
 fn field_value_admission_and_cancellation_preserve_published_children_on_every_provider() {
     for flags in [
@@ -181,7 +163,7 @@ fn field_value_admission_and_cancellation_preserve_published_children_on_every_p
             let mut number = 0;
             assert_eq!(uqa_value_get_int32(first, &raw mut number), UQA_OK);
             assert_eq!(number, 1);
-            let copies = fill_allowance(first);
+            let copies = super::fill_allowance(first);
             // Native field observation reports its resource failure with SQLSTATE; C wrapper admission uses UQA_ERROR_LIMIT.
             assert_eq!(
                 uqa_value_get_field(value, 1, &raw mut second),

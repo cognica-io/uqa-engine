@@ -45,11 +45,9 @@ ffi_fn!(uqa_value_get_uuid_bytes(value: *const UQAValue, out: *mut UQABytesView)
     value.check_access(ScalarAccess::Uuid)?;
     let observed = value.observed()?;
     let Value::Str(text) = observed else { return Err(wrong_type(observed)); };
-    if value.uuid_bytes.get().is_none() {
-        let bytes = uqa_sql::expr::parse_uuid_bytes_with_control(text, &value.control())?;
-        let _ = value.uuid_bytes.set(bytes);
-    }
-    let bytes = value.uuid_bytes.get().ok_or_else(|| UQAError::state("UUID decoder returned no octets"))?;
+    let bytes = value.cached(|extras| &extras.uuid_bytes, || {
+        Ok(uqa_sql::expr::parse_uuid_bytes_with_control(text, &value.control())?)
+    })?;
     *out = UQABytesView { data: bytes.as_ptr(), size: bytes.len() };
     Ok(UQA_OK)
 });

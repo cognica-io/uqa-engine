@@ -166,11 +166,10 @@ ffi_fn!(uqa_value_get_numeric(value: *const UQAValue, out: *mut UQAStringView) {
     value.check_access(ScalarAccess::Numeric)?;
     let observed = value.observed()?;
     let Value::Decimal(number) = observed else { return Err(wrong_type(observed)); };
-    if value.numeric_text.get().is_none() {
-        let text = number.to_sql_string_with_control(&value.control())?;
-        let _ = value.numeric_text.set(text);
-    }
-    *out = value.numeric_text.get().ok_or_else(|| UQAError::state("numeric formatter returned no text"))?.as_str().into();
+    let text = value.cached(|extras| &extras.numeric_text, || {
+        Ok(number.to_sql_string_with_control(&value.control())?)
+    })?;
+    *out = text.as_str().into();
     Ok(UQA_OK)
 });
 

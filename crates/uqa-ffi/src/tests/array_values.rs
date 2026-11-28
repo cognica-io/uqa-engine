@@ -55,18 +55,7 @@ fn child_admission_preserves_existing_views_and_recovers_on_every_provider() {
             );
             assert_eq!(uqa_result_get_value(result, 0, 0, &raw mut array), UQA_OK);
             assert_eq!(uqa_value_get_element(array, 0, &raw mut first), UQA_OK);
-            let mut retained = Vec::new();
-            loop {
-                let mut copy = ptr::null_mut();
-                let status = uqa_value_create_copy(first, &raw mut copy);
-                if status == UQA_ERROR_LIMIT {
-                    assert!(copy.is_null());
-                    break;
-                }
-                assert_eq!(status, UQA_OK);
-                retained.push(copy);
-                assert!(retained.len() < 256);
-            }
+            let retained = super::fill_allowance(first);
             assert!(!retained.is_empty());
             let mut second = first;
             assert_eq!(

@@ -78,15 +78,14 @@ ffi_fn!(uqa_value_get_array_shape(value: *const UQAValue, out: *mut UQAArrayShap
         value.control().check()?;
         count = count.checked_mul(*length as u64).ok_or_else(|| UQAError::new(UQA_ERROR_RANGE, "array element count exceeds the C range"))?;
     }
-    if value.array_shape.get().is_none() {
+    let dimensions = value.cached(|extras| &extras.array_shape, || {
         let mut dimensions = ProductionVec::new(value.control());
         dimensions.reserve(array.dimensions().len())?;
         for (length, lower_bound) in array.dimensions().iter().zip(array.lower_bounds()) {
             dimensions.push_copy(UQAArrayDimension { length: *length as u64, lower_bound: *lower_bound })?;
         }
-        let _ = value.array_shape.set(dimensions.finish()?);
-    }
-    let dimensions = value.array_shape.get().ok_or_else(|| UQAError::state("array shape producer returned no dimensions"))?;
+        Ok(dimensions.finish()?)
+    })?;
     *out = UQAArrayShape { dimensions: if rank == 0 { std::ptr::null() } else { dimensions.as_ptr() }, rank, element_count: count };
     Ok(UQA_OK)
 });
@@ -99,7 +98,10 @@ ffi_fn!(uqa_value_get_element(value: *const UQAValue, index: u64, out: *mut *con
     let position = usize::try_from(index).map_err(|_| UQAError::new(UQA_ERROR_RANGE, "array element index exceeds the addressable range"))?;
     let element = array.element_at_row_major_with_control(position, &value.control())?
         .ok_or_else(|| UQAError::new(UQA_ERROR_RANGE, "array element index is out of range"))?;
-    let mut children = value.array_children.lock();
-    *out = children.get_or_create(index, &value.control(), || UQAValue::borrowed_with_session(element, element_type(value), value.session.as_ref()))?;
+    *out = value.with_views(|extras| {
+        extras.array_children.lock().get_or_create(index, &value.control(), || {
+            UQAValue::borrowed_with_session(element, element_type(value), value.session.as_ref())
+        })
+    })?;
     Ok(UQA_OK)
 });
