@@ -320,13 +320,23 @@ export function registerNotificationHTTPTests(packagePath) {
     assert.equal(calls, 1);
   });
 
-  test("HTTP notification cumulative input exceeds a frame limit while a consumer keeps exact FIFO order", { timeout: 15000 }, async (defer) => {
+  const fifoTransferTimeoutMs = 15000;
+  test("HTTP notification cumulative input exceeds a frame limit while a consumer keeps exact FIFO order", { timeout: fifoTransferTimeoutMs }, async (defer) => {
     const count = 400;
+    const ready = { ...data(fixture.ready), idle_timeout_ms: String(fifoTransferTimeoutMs) };
+    const notification = data(fixture.notification);
     const peer = await server(defer, (request, response) => {
-      headers(response); response.write(fixture.ready);
-      for (let n = 1; n <= count; n += 1) response.write(wire("notification", { ...data(fixture.notification), sequence: String(n) }));
+      headers(response); response.write(wire("ready", ready));
+      let bytes = 0;
+      for (let n = 1; n <= count; n += 1) {
+        const frame = wire("notification", { ...notification, sequence: String(n) });
+        response.write(frame);
+        bytes += Buffer.byteLength(frame);
+      }
+      assert.ok(bytes > ready.max_event_bytes);
     });
-    const sub = await new HttpEngine(peer.url, "secret").subscribeNotifications(fixture.channels, options);
+    const sub = await new HttpEngine(peer.url, "secret").subscribeNotifications(fixture.channels,
+      { ...options, maxIdleTimeoutMs: fifoTransferTimeoutMs });
     try {
       for (let n = 1; n <= count; n += 1) assert.equal((await sub.nextEvent()).sequence, BigInt(n));
     } finally { await sub.close(); }
