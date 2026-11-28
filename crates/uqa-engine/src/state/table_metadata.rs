@@ -36,6 +36,13 @@ impl<T: TableMetadataValue, F: Send + Sync + 'static> TableMetadataCell<T, F> {
         self.0.snapshot()
     }
 
+    pub(super) fn track_view_revision(
+        &self,
+        revision: &std::sync::Arc<std::sync::atomic::AtomicU64>,
+    ) {
+        self.0.track_view_revision(revision);
+    }
+
     pub(crate) fn read(&self) -> MappedRwLockReadGuard<'_, T> {
         MappedRwLockReadGuard::map(self.0.read(), |value| &**value)
     }

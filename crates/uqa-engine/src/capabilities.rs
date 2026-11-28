@@ -555,6 +555,7 @@ impl Engine {
         let current_revision = || {
             DefinitionRevision::new(
                 self.catalog_epochs(),
+                self.storage.tables.revision(),
                 self.durable.view_revision.load(Ordering::Acquire),
                 self.runtime.regtype_output_cache.revision(),
             )
@@ -567,7 +568,7 @@ impl Engine {
                 .runtime
                 .catalog_views
                 .lock()
-                .get(revision, control.budget());
+                .get(&revision, control.budget());
             if let Some(mut view) = cached.filter(|view| sources.matches(view)) {
                 if current_revision() != revision {
                     continue;

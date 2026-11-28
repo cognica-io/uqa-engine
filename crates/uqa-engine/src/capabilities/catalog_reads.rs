@@ -12,18 +12,25 @@ use uqa_core::memory::MemoryBudget;
 use uqa_execution::catalog::{GraphCatalogOverlay, WeakCatalogReadGeneration};
 use uqa_sql::catalog::temporary_namespace::TemporaryNamespaceOids;
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(PartialEq, Eq)]
 pub(super) struct DefinitionRevision {
     tables: u64,
+    table_definitions: crate::state::TableCatalogRevision,
     registries: u64,
     definitions: u64,
     session: u64,
 }
 
 impl DefinitionRevision {
-    pub(super) fn new(epochs: CatalogEpochs, definitions: u64, session: u64) -> Self {
+    pub(super) fn new(
+        epochs: CatalogEpochs,
+        table_definitions: crate::state::TableCatalogRevision,
+        definitions: u64,
+        session: u64,
+    ) -> Self {
         Self {
             tables: epochs.table_catalog,
+            table_definitions,
             registries: epochs.catalog_registry,
             definitions,
             session,
@@ -40,19 +47,19 @@ pub(crate) struct CatalogViewCache {
 impl CatalogViewCache {
     pub(super) fn get(
         &self,
-        revision: DefinitionRevision,
+        revision: &DefinitionRevision,
         budget: Option<&MemoryBudget>,
     ) -> Option<CatalogReadView> {
         if let Some(budget) = budget {
             let (cached, generation) = self.charged.as_ref()?;
-            if *cached == revision {
+            if cached == revision {
                 return generation.upgrade_for(budget);
             }
             return None;
         }
         self.ordinary
             .as_ref()
-            .filter(|(cached, _)| *cached == revision)
+            .filter(|(cached, _)| cached == revision)
             .map(|(_, view)| view.clone())
     }
 

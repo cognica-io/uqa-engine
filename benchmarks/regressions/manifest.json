@@ -41581,6 +41581,19 @@
     {
       "package": "uqa-engine",
       "kind": "lib",
+      "test": "cached_table_definitions_follow_publication_and_rollback_in_each_selecting_registry",
+      "cases": 1,
+      "source": "crates/uqa-engine/src/state/table_catalog/tests.rs",
+      "capability": "Session catalog and retained query snapshots",
+      "workload": "Warm a catalog snapshot, share its table with a second registry, advance a row identifier, then publish and restore a column definition.",
+      "invariant": "Row identifier writes reuse the cached snapshot. Both registries observe each column change, retained readers preserve their original column names and repeated reads reuse the restored generation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
       "test": "cached_catalog_observes_peer_commits_and_keeps_session_overlays_private",
       "cases": 3,
       "source": "crates/uqa-engine/src/capabilities/tests/catalog_capture.rs",

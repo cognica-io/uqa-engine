@@ -48,6 +48,13 @@ impl<T: TableDefinitionValue> TableDefinitionCell<T> {
         )?))
     }
 
+    pub(super) fn track_view_revision(
+        &self,
+        revision: &std::sync::Arc<std::sync::atomic::AtomicU64>,
+    ) {
+        self.0.track_view_revision(revision);
+    }
+
     pub(crate) fn read(&self) -> MappedRwLockReadGuard<'_, T> {
         MappedRwLockReadGuard::map(self.0.read(), |value| &**value)
     }

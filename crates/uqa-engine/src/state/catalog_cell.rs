@@ -8,12 +8,13 @@
 
 use std::sync::{
     atomic::{AtomicU64, Ordering},
-    Arc,
+    Arc, Weak,
 };
 
 use super::CatalogGeneration;
 
-use parking_lot::MappedRwLockReadGuard;
+use parking_lot::{MappedRwLockReadGuard, Mutex};
+use smallvec::SmallVec;
 use uqa_core::memory::{Budgeted, Produced, ProductionControl};
 use uqa_storage::{
     memory_capture::{
@@ -32,6 +33,28 @@ enum Capture<T, F> {
 struct CatalogRoot<T, F> {
     value: CatalogGeneration<T>,
     capture: Option<Capture<T, F>>,
+    view_revisions: Mutex<SmallVec<[Weak<AtomicU64>; 1]>>,
+}
+
+impl<T, F> CatalogRoot<T, F> {
+    fn new(value: CatalogGeneration<T>, capture: Option<Capture<T, F>>) -> Self {
+        Self {
+            value,
+            capture,
+            view_revisions: Mutex::default(),
+        }
+    }
+
+    fn advance_view_revisions(&mut self) {
+        self.view_revisions.get_mut().retain(|subscriber| {
+            if let Some(revision) = subscriber.upgrade() {
+                revision.fetch_add(1, Ordering::AcqRel);
+                true
+            } else {
+                false
+            }
+        });
+    }
 }
 
 impl<T: Send + Sync + 'static, F: Send + Sync + 'static> MemoryCaptureSource for CatalogRoot<T, F> {
@@ -59,7 +82,6 @@ impl<T: Send + Sync + 'static, F: Send + Sync + 'static> MemoryCaptureSource for
 
 pub(crate) struct CatalogCell<T: Send + Sync + 'static, F: Send + Sync + 'static = T> {
     cell: MemoryCaptureCell<CatalogRoot<T, F>>,
-    view_revision: Option<Arc<AtomicU64>>,
 }
 
 /// Undo retains the immutable value; a registered source gives that exact generation its own capture identity.
@@ -96,11 +118,7 @@ impl<T: Send + Sync + 'static, F: Send + Sync + 'static> CatalogCell<T, F> {
     pub(crate) fn from_snapshot(value: impl Into<CatalogGeneration<T>>) -> Self {
         let value = value.into();
         Self {
-            cell: MemoryCaptureCell::new(CatalogRoot {
-                value,
-                capture: None,
-            }),
-            view_revision: None,
+            cell: MemoryCaptureCell::new(CatalogRoot::new(value, None)),
         }
     }
 
@@ -160,10 +178,7 @@ impl<T: Send + Sync + 'static, F: Send + Sync + 'static> CatalogCell<T, F> {
         capture: Capture<T, F>,
         control: Option<&StorageReadControl>,
     ) -> StorageBackendResult<Self> {
-        let mut cell = MemoryCaptureCell::new(CatalogRoot {
-            value,
-            capture: Some(capture),
-        });
+        let mut cell = MemoryCaptureCell::new(CatalogRoot::new(value, Some(capture)));
         if let Some(registry) = registry {
             if let Some(control) = control {
                 cell.register_with_control(registry, control)?;
@@ -171,10 +186,7 @@ impl<T: Send + Sync + 'static, F: Send + Sync + 'static> CatalogCell<T, F> {
                 cell.register(registry)?;
             }
         }
-        Ok(Self {
-            cell,
-            view_revision: None,
-        })
+        Ok(Self { cell })
     }
 
     pub(crate) fn key(
@@ -214,29 +226,30 @@ impl<T: Send + Sync + 'static, F: Send + Sync + 'static> CatalogCell<T, F> {
                         ));
                     }
                 };
-                registry.cell(CatalogRoot {
-                    value: value.clone(),
-                    capture: Some(capture),
-                })
+                registry.cell(CatalogRoot::new(value.clone(), Some(capture)))
             })
             .transpose()?;
         Ok(CatalogSnapshot { source, value })
     }
 
-    pub(super) fn track_view_revision(&mut self, revision: &Arc<AtomicU64>) {
-        self.view_revision = Some(Arc::clone(revision));
-    }
-
-    fn advance_view_revision(&self) {
-        if let Some(revision) = &self.view_revision {
-            revision.fetch_add(1, Ordering::AcqRel);
+    /// A table can be selected by multiple registries during catalog refresh. Register each reader under the existing root lock without changing the captured value.
+    pub(super) fn track_view_revision(&self, revision: &Arc<AtomicU64>) {
+        let root = self.cell.read();
+        let mut subscribers = root.view_revisions.lock();
+        let revision = Arc::downgrade(revision);
+        subscribers.retain(|subscriber| subscriber.strong_count() != 0);
+        if !subscribers
+            .iter()
+            .any(|subscriber| subscriber.ptr_eq(&revision))
+        {
+            subscribers.push(revision);
         }
     }
 
     pub(crate) fn restore(&self, snapshot: &CatalogGeneration<T>) {
         let mut root = self.cell.write();
         if !CatalogGeneration::ptr_eq(&root.value, snapshot) {
-            self.advance_view_revision();
+            root.advance_view_revisions();
             root.value = snapshot.clone();
         }
     }
@@ -245,7 +258,7 @@ impl<T: Send + Sync + 'static, F: Send + Sync + 'static> CatalogCell<T, F> {
 impl<T: Clone + Send + Sync + 'static, F: Send + Sync + 'static> CatalogCell<T, F> {
     pub(crate) fn write(&self) -> MemoryCaptureWriteGuard<'_, T> {
         MemoryCaptureWriteGuard::map(self.cell.write(), |root| {
-            self.advance_view_revision();
+            root.advance_view_revisions();
             CatalogGeneration::make_mut(&mut root.value)
         })
     }

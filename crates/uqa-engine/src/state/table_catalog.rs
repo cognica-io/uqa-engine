@@ -18,6 +18,18 @@ impl TableState {
         (relation, table.catalog_snapshot())
     }
 
+    pub(super) fn track_catalog_view_revision(&self, revision: &Arc<std::sync::atomic::AtomicU64>) {
+        self.dropped_attributes.track_view_revision(revision);
+        self.row_type_array_name.track_view_revision(revision);
+        self.security.track_view_revision(revision);
+        self.columns.track_view_revision(revision);
+        self.columns_declared.track_view_revision(revision);
+        self.table_checks.track_view_revision(revision);
+        self.foreign_keys.track_view_revision(revision);
+        self.key_constraints.track_view_revision(revision);
+        self.hierarchy.track_view_revision(revision);
+    }
+
     pub(crate) fn catalog_snapshot(&self) -> CatalogTableSnapshot {
         CatalogTableSnapshot {
             dropped_attributes: self.dropped_attributes.snapshot(),

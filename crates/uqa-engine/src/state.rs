@@ -47,8 +47,8 @@ pub(crate) use table_membership::PersistentTableRegistrySnapshot;
 pub(crate) use table_membership::SnapshotTableCut;
 #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 pub(crate) use table_membership::TableRegistryInput;
-pub(crate) use table_membership::TableRegistryMap;
 pub(crate) use table_membership::{MembershipSnapshot, SnapshotTableSources, TableRegistry};
+pub(crate) use table_membership::{TableCatalogRevision, TableRegistryMap};
 pub(crate) use uqa_core::memory::RetainedValue as CatalogGeneration;
 mod session_state_lock;
 pub(crate) use session_state_lock::{message_level, SessionStateLock, SessionStateWriteGuard};
@@ -364,7 +364,7 @@ impl DurableCatalogState {
     }
 
     /// Publish the installed definition cells under one revision, including restored and transaction-private writes that precede a catalog epoch.
-    pub(super) fn into_shared(mut self) -> Arc<Self> {
+    pub(super) fn into_shared(self) -> Arc<Self> {
         self.foreign_catalog
             .track_view_revision(&self.view_revision);
         self.foreign_wrappers
