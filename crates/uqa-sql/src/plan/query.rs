@@ -309,6 +309,7 @@ impl QueryBlockPlan {
             windows,
             projections,
             privilege_columns: uqa_core::memory::OwnedSet::new(),
+            privilege_subqueries: Vec::new(),
             from: statement
                 .from
                 .map(|source| SourcePlan::lower_with(source, aggregates, &mut subqueries)),

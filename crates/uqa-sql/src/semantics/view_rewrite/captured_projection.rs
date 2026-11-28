@@ -254,6 +254,7 @@ impl CapturedViewProjection {
         block.r#where = Some(predicate.scalar);
         block.subqueries = predicate.subqueries;
         block.privilege_columns.clear();
+        block.privilege_subqueries.clear();
         block.projections = raw_names
             .iter()
             .enumerate()

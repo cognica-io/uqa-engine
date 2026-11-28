@@ -120,8 +120,15 @@ fn retained_values_preserve_raw_arrays_declared_names_and_parameter_origin() {
             collation_oid: Some(950),
             composite_source: None,
         };
-        let retained =
-            retain_large_literal(ordinary.clone(), settings.constant_storage.as_deref()).unwrap();
+        let retained = owned::retain_large_literal(
+            uqa_sql::plan::OwnedScalarExpr::uncontrolled(ordinary.clone()),
+            crate::optimizer::scalar::ScalarProduction::admitted(&settings),
+        )
+        .unwrap()
+        .finish(&settings.production)
+        .unwrap()
+        .into_uncontrolled()
+        .unwrap();
         assert_eq!(
             serde_json::to_vec(&retained).unwrap(),
             serde_json::to_vec(&ordinary).unwrap()
@@ -221,5 +228,79 @@ fn values_queries_bound_folded_payloads_before_cloning_their_native_plans() {
             });
             assert_eq!(count, 128);
         }
+    }
+}
+
+#[test]
+fn values_inputs_reuse_the_enclosing_routine_stack() {
+    use crate::optimizer::{optimize, OptimizerConfig};
+    use uqa_sql::plan::UnifiedPlan;
+
+    fn allocated(sql: &str, settings: &OptimizerConfig<'_>) -> u64 {
+        let plan = UnifiedPlan::lower(uqa_sql::compile(sql).unwrap().remove(0));
+        allocation_counter::measure(|| drop(optimize(plan, settings).unwrap())).bytes_total
+    }
+
+    let shallow = OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar_with_control);
+    let stack = vec![[7; 16]; 4096];
+    let nested = OptimizerConfig {
+        active_inline_routines: &stack,
+        ..shallow.clone()
+    };
+    let mut differences = Vec::new();
+    for sql in [
+        "VALUES (1), (2)",
+        "SELECT * FROM (VALUES (1), (2)) item(n)",
+        "INSERT INTO target VALUES (1), (2)",
+    ] {
+        allocated(sql, &shallow);
+        let ordinary = allocated(sql, &shallow);
+        let enclosing = allocated(sql, &nested);
+        if ordinary != enclosing {
+            differences.push((sql, ordinary, enclosing));
+        }
+    }
+    assert!(differences.is_empty(), "{differences:?}");
+
+    let rows = [vec![ScalarExpr::Literal(Value::Int(1))]];
+    for (allowance, cancel, expected) in [
+        (0, 0, Some("53200")),
+        (0, 1, Some("57014")),
+        (0, 2, Some("57014")),
+        (128 * 1024, 0, None),
+    ] {
+        let memory = uqa_core::memory::MemoryBudget::new(allowance);
+        let original = uqa_core::CancellationToken::new();
+        let invoking = uqa_core::CancellationToken::new();
+        let settings = OptimizerConfig {
+            production: uqa_core::memory::ProductionControl::new(&memory, &original, &invoking),
+            ..nested.clone()
+        };
+        if cancel == 1 {
+            original.cancel();
+        } else if cancel == 2 {
+            invoking.cancel();
+        }
+        let mut entered = false;
+        let result = settings.with_inline_routine([9; 16], |child| {
+            entered = true;
+            let (last, parents) = child.active_inline_routines.split_last().unwrap();
+            assert_eq!(last, &[9; 16]);
+            assert_eq!(parents, stack);
+            assert!(memory.used() >= std::mem::size_of_val(child.active_inline_routines));
+            assert!(child.for_values(&[Vec::new()])?.is_none());
+            let values = child.for_values(&rows)?.unwrap();
+            assert!(std::ptr::eq(
+                values.active_inline_routines,
+                child.active_inline_routines
+            ));
+            Ok(())
+        });
+        assert_eq!(
+            result.as_ref().err().and_then(uqa_sql::SQLError::sqlstate),
+            expected
+        );
+        assert_eq!(entered, expected.is_none());
+        assert_eq!(memory.used(), 0);
     }
 }

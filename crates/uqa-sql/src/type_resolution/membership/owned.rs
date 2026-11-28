@@ -151,6 +151,7 @@ where
             Some(binding),
             [lhs, array, operator].into_iter(),
             control,
+            control,
             work,
         )
         .await?
@@ -184,7 +185,7 @@ where
         drop(comparisons);
         output
     } else {
-        OwnedScalarExpr::boolean_from(comparisons, negated, control, work).await?
+        OwnedScalarExpr::boolean_from(comparisons, negated, control, control, work).await?
     };
     Ok(output)
 }

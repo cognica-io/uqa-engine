@@ -6,12 +6,12 @@
 
 //! Own the new predicate storage while the final join pass moves existing source trees.
 
-use super::ScalarExpr;
+use super::{bindings::PredicateGroups, materialization::PredicateOutput, ScalarExpr};
 use uqa_core::memory::{
     BudgetedMap, BudgetedVec, MemoryError, MemoryReservation, PreparedMapEntry, Produced,
     ProductionControl,
 };
-use uqa_sql::SQLError;
+use uqa_sql::{plan::OwnedScalarExpr, SQLError};
 
 pub(super) struct Output {
     predicates: Option<MemoryReservation>,
@@ -135,5 +135,70 @@ impl Conjunction {
             assert!(memory.is_none(), "ordinary output has no reservation");
         }
         ScalarExpr::And(values)
+    }
+}
+
+/// Ordinary source nodes carry no constructor records. Their new conjunctions must be fully admitted before detaching the caller's source.
+pub(super) struct CallerPredicates<'a> {
+    output: &'a mut Output,
+    buffers: [Option<Conjunction>; 63],
+}
+
+impl<'a> CallerPredicates<'a> {
+    pub(super) fn new(output: &'a mut Output) -> Self {
+        Self {
+            output,
+            buffers: std::array::from_fn(|_| None),
+        }
+    }
+}
+
+impl PredicateOutput for CallerPredicates<'_> {
+    fn copy_inferred(
+        &mut self,
+        expression: &ScalarExpr,
+        control: &ProductionControl<'_>,
+    ) -> Result<OwnedScalarExpr, SQLError> {
+        let expression = self
+            .output
+            .retain_predicate(expression.clone_with_control(control)?);
+        Ok(OwnedScalarExpr::uncontrolled(expression))
+    }
+
+    fn prepare(
+        &mut self,
+        groups: &PredicateGroups,
+        control: &ProductionControl<'_>,
+    ) -> Result<(), SQLError> {
+        for (buffer, range) in self.buffers.iter_mut().zip(groups.ranges()) {
+            if range.len() > 1 {
+                *buffer = Some(self.output.prepare_conjunction(range.len(), control)?);
+            }
+        }
+        Ok(())
+    }
+
+    fn take_conjunction_memory(&mut self, items: &[ScalarExpr]) -> Option<MemoryReservation> {
+        self.output.take_conjunction_memory(items)
+    }
+
+    fn conjunction(
+        &mut self,
+        node: usize,
+        children: impl ExactSizeIterator<Item = OwnedScalarExpr>,
+        storage: &ProductionControl<'_>,
+    ) -> Result<OwnedScalarExpr, SQLError> {
+        let mut buffer = self.buffers[node]
+            .take()
+            .expect("prepared caller conjunction");
+        for child in children {
+            buffer.push(
+                child
+                    .finish(storage)?
+                    .into_uncontrolled()
+                    .expect("caller-owned join predicate"),
+            );
+        }
+        Ok(OwnedScalarExpr::uncontrolled(buffer.publish(self.output)))
     }
 }

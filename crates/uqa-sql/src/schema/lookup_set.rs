@@ -30,7 +30,7 @@ impl<T> SchemaSet<T> {
 }
 
 impl<T: Ord + Hash> SchemaSet<T> {
-    pub(super) fn from_produced(
+    pub(crate) fn from_produced(
         entries: impl IntoIterator<Item = Result<Produced<T>, crate::SQLError>>,
         control: &ProductionControl<'_>,
     ) -> Result<Self, crate::SQLError> {

@@ -71,6 +71,7 @@ fn constant_field(
     }
 }
 
+#[cfg(test)]
 pub(in crate::optimizer::scalar) fn fold_composite_constructor(
     expression: ScalarExpr,
     types: Option<&dyn RoutineTypeCatalog>,
@@ -122,6 +123,7 @@ fn composite(expression: &ScalarExpr) -> Option<Composite<'_>> {
     })
 }
 
+#[cfg(test)]
 pub(super) fn fold_field(
     expression: &ScalarExpr,
     types: Option<&dyn RoutineTypeCatalog>,

@@ -12,18 +12,20 @@ use uqa_sql::{plan::OwnedScalarExpr, SQLError};
 
 pub(in crate::optimizer) fn prioritize(
     expression: OwnedScalarExpr,
-    control: &ProductionControl<'_>,
+    storage: &ProductionControl<'_>,
+    work: &ProductionControl<'_>,
 ) -> Result<OwnedScalarExpr, SQLError> {
-    expression.rewrite(control, |expression| {
+    work.check()?;
+    expression.rewrite(storage, |expression| {
         if !matches!(&*expression, ScalarExpr::And(_)) {
             return Ok(expression);
         }
         let mut expression =
-            expression.map_children(control, |_, child| prioritize(child, control))?;
+            expression.map_children(storage, |_, child| prioritize(child, storage, work))?;
         let ScalarExpr::And(items) = &*expression else {
             unreachable!("conjunction ordering")
         };
-        let mut permutation = ProductionVec::new(*control);
+        let mut permutation = ProductionVec::new(*work);
         permutation.reserve(items.len())?;
         let mut access_count = 0;
         for item in items {
@@ -34,7 +36,7 @@ pub(in crate::optimizer) fn prioritize(
         let mut access = 0;
         let mut residual = access_count;
         for destination in permutation.as_mut_slice() {
-            control.check()?;
+            work.check()?;
             let next = if *destination == 1 {
                 &mut access
             } else {
@@ -45,9 +47,9 @@ pub(in crate::optimizer) fn prioritize(
         }
         for index in 0..permutation.len() {
             while permutation[index] != index {
-                control.check()?;
+                work.check()?;
                 let destination = permutation[index];
-                expression = expression.swap_children(index, destination, control)?;
+                expression = expression.swap_children(index, destination, storage)?;
                 permutation.as_mut_slice().swap(index, destination);
             }
         }
@@ -100,7 +102,7 @@ mod tests {
         let before = budget.used();
         let mut output = None;
         let allocations = allocation_counter::measure(|| {
-            output = Some(prioritize(input, &control).unwrap());
+            output = Some(prioritize(input, &control, &control).unwrap());
         });
         let output = output.unwrap();
         assert_eq!(*output, expected);
@@ -113,6 +115,35 @@ mod tests {
         assert_eq!(output.reserved_bytes(), before);
         drop(output);
         assert_eq!(budget.used(), 0);
+    }
+
+    #[test]
+    fn caller_owned_access_order_reuses_children_and_charges_only_the_permutation() {
+        let storage = ProductionControl::uncontrolled();
+        for limit in [0, 1024] {
+            let source = input();
+            let ScalarExpr::And(items) = &source else {
+                unreachable!()
+            };
+            let pointer = items.as_ptr();
+            let budget = MemoryBudget::new(limit);
+            let token = CancellationToken::new();
+            let work = ProductionControl::new(&budget, &token, &token);
+            let result = prioritize(OwnedScalarExpr::uncontrolled(source), &storage, &work);
+            if limit == 0 {
+                assert_eq!(result.unwrap_err().sqlstate(), Some("53200"));
+            } else {
+                let output = result.unwrap();
+                let ScalarExpr::And(items) = &*output else {
+                    unreachable!()
+                };
+                assert_eq!(items.as_ptr(), pointer);
+                assert!(operator_compatible(&items[0]) && operator_compatible(&items[1]));
+                assert!(!operator_compatible(&items[2]) && !operator_compatible(&items[3]));
+                assert!(budget.peak() <= 4 * size_of::<usize>());
+            }
+            assert_eq!(budget.used(), 0);
+        }
     }
 
     #[test]
@@ -131,7 +162,7 @@ mod tests {
             if mode == 2 {
                 invoking.cancel();
             }
-            let error = prioritize(input, &control).unwrap_err();
+            let error = prioritize(input, &control, &control).unwrap_err();
             assert_eq!(
                 error.sqlstate(),
                 Some(if mode == 0 { "53200" } else { "57014" })

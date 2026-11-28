@@ -44,7 +44,7 @@ fn fusion_transfers_payloads_and_retains_only_exact_surviving_constructors() {
     let mut output = None;
     let allocations = allocation_counter::measure(|| {
         let input = source.copy_for_rewrite(&control).unwrap();
-        output = Some(rewrite(input, false, &control).unwrap());
+        output = Some(rewrite(input, false, &control, &control).unwrap());
     });
     let output = output.unwrap();
     let ScalarExpr::And(children) = &*output else {
@@ -64,6 +64,119 @@ fn fusion_transfers_payloads_and_retains_only_exact_surviving_constructors() {
     assert_eq!(output.reserved_bytes(), budget.used());
     drop(output);
     assert_eq!(budget.used(), 0);
+}
+
+#[test]
+fn calibration_renames_the_call_in_its_existing_argument_storage() {
+    let budget = MemoryBudget::new(1 << 20);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&budget, &token, &token);
+    let mut source = call("text_match", Some("items"));
+    let ScalarExpr::Func { binding, .. } = &mut source else {
+        panic!("call")
+    };
+    *binding = Some(uqa_sql::ast::FunctionBinding::builtin_by_name(
+        "text_match",
+        None,
+    ));
+    let input = source.copy_for_rewrite(&control).unwrap();
+    let ScalarExpr::Func {
+        args,
+        name,
+        binding: Some(binding),
+        ..
+    } = &*input
+    else {
+        panic!("call")
+    };
+    let arguments = args.as_ptr();
+    let selected_name = binding.name.as_ptr();
+    let original_capacity = name.capacity();
+    let before = input.reserved_bytes();
+    let sibling = budget.reserve(budget.available() - 32).unwrap();
+    let output = calibrate(input, &control, &control).unwrap();
+    let ScalarExpr::Func {
+        args,
+        name,
+        binding: Some(binding),
+        ..
+    } = &*output
+    else {
+        panic!("call")
+    };
+    assert_eq!(name, "bayesian_match");
+    assert_eq!(args.as_ptr(), arguments);
+    assert_eq!(binding.name, "text_match");
+    assert_eq!(binding.name.as_ptr(), selected_name);
+    assert_eq!(
+        output.reserved_bytes(),
+        before - original_capacity + name.capacity()
+    );
+    drop((output, sibling));
+    assert_eq!(budget.used(), 0);
+}
+
+#[test]
+fn caller_owned_fusion_charges_construction_and_preserves_existing_arguments() {
+    for (limit, cancel_original, cancel_invoking) in [
+        (0, false, false),
+        (32 * 1024, true, false),
+        (32 * 1024, false, true),
+        (32 * 1024, false, false),
+    ] {
+        let budget = MemoryBudget::new(limit);
+        let original = CancellationToken::new();
+        let invoking = CancellationToken::new();
+        let mut config = crate::optimizer::OptimizerConfig::new(
+            uqa_execution::scalar::eval_constant_scalar_with_control,
+        );
+        config.production = ProductionControl::new(&budget, &original, &invoking);
+        let mut text = call("text_match", Some("items"));
+        let ScalarExpr::Func { args, .. } = &mut text else {
+            panic!("text call")
+        };
+        let payload = "x".repeat(1 << 20);
+        let payload_pointer = payload.as_ptr();
+        args[1] = ScalarExpr::Literal(Value::Str(payload));
+        let argument_pointer = args.as_ptr();
+        let mut predicate = ScalarExpr::And(vec![text, call("knn_match", Some("items"))]);
+        if cancel_original {
+            original.cancel();
+        }
+        if cancel_invoking {
+            invoking.cancel();
+        }
+        let result = crate::optimizer::scalar::rewrite_ordinary_slot(
+            &mut predicate,
+            &config,
+            |input, production| {
+                super::rewrite(input, true, &production.storage, &config.production)
+            },
+        );
+        if limit == 0 || cancel_original || cancel_invoking {
+            assert_eq!(
+                result.unwrap_err().sqlstate(),
+                Some(if limit == 0 { "53200" } else { "57014" })
+            );
+        } else {
+            result.unwrap();
+            let ScalarExpr::Func { name, args, .. } = &predicate else {
+                panic!("fusion")
+            };
+            assert_eq!(name, "fuse_bayesian_evidence");
+            let ScalarExpr::Func { name, args, .. } = &args[0] else {
+                panic!("calibrated call")
+            };
+            assert_eq!(name, "bayesian_match");
+            assert_eq!(args.as_ptr(), argument_pointer);
+            let ScalarExpr::Literal(Value::Str(text)) = &args[1] else {
+                panic!("text argument")
+            };
+            assert_eq!(text.as_ptr(), payload_pointer);
+            assert!(budget.peak() > 0);
+        }
+        assert_eq!(budget.used(), 0);
+    }
 }
 
 #[test]
@@ -87,7 +200,7 @@ fn rejected_and_cancelled_fusion_releases_private_children_and_scratch() {
         if mode == 3 {
             invoking.cancel();
         }
-        let error = rewrite(input, true, &control).unwrap_err();
+        let error = rewrite(input, true, &control, &control).unwrap_err();
         assert_eq!(
             error.sqlstate(),
             Some(if mode < 2 { "53200" } else { "57014" })

@@ -282,6 +282,7 @@ async fn project<W: Work + Send>(
         root: RelationalPlan::QueryBlock(Box::new(QueryBlockPlan {
             deferred_outer_rewrites: Vec::new(),
             privilege_columns: uqa_core::memory::OwnedSet::new(),
+            privilege_subqueries: Vec::new(),
             windows: Vec::new(),
             projections,
             from: source,

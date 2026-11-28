@@ -48,6 +48,27 @@ pub(super) fn qualify(
     Ok((query, valid))
 }
 
+pub(super) fn substitute_local(
+    query: MutableQueryPlan,
+    substitutions: &uqa_sql::binding::scoped_references::OuterColumnSubstitutions<'_>,
+    control: &ProductionControl<'_>,
+) -> Result<MutableQueryPlan, SQLError> {
+    local(query, control, &mut |expression| {
+        expression.replace_nodes(control, &mut |node| {
+            let replacement = match node {
+                ScalarExpr::Column(name) => substitutions.get(None, name),
+                ScalarExpr::QualifiedColumn { qualifier, column } => {
+                    substitutions.get(Some(qualifier), column)
+                }
+                _ => None,
+            };
+            replacement
+                .map(|value| value.copy_for_rewrite(control).map_err(Into::into))
+                .transpose()
+        })
+    })
+}
+
 pub(super) fn local(
     mut query: MutableQueryPlan,
     control: &ProductionControl<'_>,

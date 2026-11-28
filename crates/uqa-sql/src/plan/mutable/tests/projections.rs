@@ -96,3 +96,21 @@ fn projection_iterator_unwind_retires_transferred_and_unvisited_items() {
     assert!(error.is_err());
     assert_eq!(budget.used(), 0);
 }
+
+#[test]
+fn invalid_privilege_projection_releases_prepared_columns_without_publishing_them() {
+    let mut query = fixture();
+    let RelationalPlan::QueryBlock(block) = &mut query.root else {
+        panic!("query block");
+    };
+    block.projections[0].expr = crate::ScalarExpr::Column("selected".into());
+    let budget = MemoryBudget::new(4096);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&budget, &token, &token);
+    let error = block
+        .preserve_projection_privileges([0, 2], &control)
+        .unwrap_err();
+    assert_eq!(error.sqlstate(), Some("XX000"));
+    assert!(block.privilege_columns.is_empty());
+    assert_eq!(budget.used(), 0);
+}

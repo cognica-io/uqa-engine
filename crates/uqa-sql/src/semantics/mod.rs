@@ -13,7 +13,8 @@ pub mod cte_strategy;
 mod ctes;
 pub(crate) use cte_order::cte_positions_with_work;
 pub use cte_order::{
-    order_cte_plans_with_control, reachable_command_cte_order_with_control,
+    order_cte_plans_with_control, planned_cte_declarations_with_control,
+    reachable_command_cte_order_with_control, reachable_cte_declarations_with_control,
     reachable_query_cte_order_with_control,
 };
 mod expression_shape;

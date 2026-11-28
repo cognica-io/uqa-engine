@@ -18,7 +18,7 @@ projected_struct!(recursive, QueryBlockPlan {
     windows, projections, privilege_columns, from, r#where, compute,
     group_by, grouping_sets, group_distinct, having, order_by, limit,
     with_ties, offset, distinct, distinct_on, subqueries, access, locking,
-} skip { deferred_outer_rewrites });
+} skip { deferred_outer_rewrites } prefixed { privilege_subqueries });
 projected_struct!(
     inline,
     CtePlan {
@@ -72,10 +72,13 @@ projected_struct!(
     }
 );
 
+// Tag 0 keeps the original query-block framing. Tag 3 prefixes the same block with its retained privilege slots.
 projected_enum!(inline, RelationalPlan {
     0 => QueryBlock(value),
     1 => SetOp { kind, all, left, right, order_by, limit, with_ties, offset, subqueries },
     2 => Values { rows, subqueries },
+} extended {
+    Self::QueryBlock(block) if !block.privilege_subqueries.is_empty() => 3, [&block.privilege_subqueries, block]
 });
 projected_enum!(inline, CtePlanBody { 0 => Query(value), 1 => Command(value) });
 projected_enum!(inline, AccessPathPlan { 0 => Row, 1 => OperatorTree { score_limit_pushdown }, 2 => Hybrid });

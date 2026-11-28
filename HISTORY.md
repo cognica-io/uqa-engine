@@ -8,6 +8,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Planner output pruning now charges the temporary typed expressions it creates for unused columns against the planning memory limit, including when the caller supplies the query plan. Pruning keeps the table and column privileges required by scalar subqueries in those outputs. A materialized CTE referenced only by a discarded output still reports planning-time errors. Its rows are read only when a surviving expression needs them.
 - Graph traversal and centrality results share subgraph vertices, edges and names across postings. Rust callers can use `.into()` for these three `GraphPayload` fields.
 
 - Prepared SQL expressions reuse numeric operand types, builtin signatures, and row and array descriptors across input rows. Scalar function callbacks receive the original argument payloads.

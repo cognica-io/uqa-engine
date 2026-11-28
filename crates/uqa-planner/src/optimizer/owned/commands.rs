@@ -15,17 +15,16 @@ impl Context<'_, '_> {
         &self,
         mut command: MutableCommandPlan,
     ) -> Result<MutableCommandPlan, SQLError> {
-        let control = &self.config.production;
-        command = command.prune_subqueries(control)?;
-        let reachable =
-            uqa_sql::semantics::reachable_command_cte_order_with_control(&command, *control)?;
-        for index in 0..command.ctes().len() {
-            control.check()?;
-            if reachable.contains(&index) {
+        let control = &self.scalars().storage;
+        command = command.prune_subqueries_with_workspace(control, &self.config.production)?;
+        let planned = self.planned_ctes(uqa_sql::plan::PlanRef::Command(&command))?;
+        for (index, &selected) in planned.iter().enumerate() {
+            self.config.production.check()?;
+            if selected {
                 command = command.map_cte(index, control, |body| self.plan(body))?;
             }
         }
-        drop(reachable);
+        drop(planned);
         match &*command {
             CommandPlan::Insert(_) => self.insert(command),
             CommandPlan::Update(_) => self.update(command),
@@ -52,8 +51,10 @@ impl Context<'_, '_> {
                         unreachable!()
                     };
                     let count = args[argument].subqueries.len();
-                    let live =
-                        super::super::subqueries::live_slots([&args[argument].scalar], *control)?;
+                    let live = super::super::subqueries::live_slots(
+                        [&args[argument].scalar],
+                        self.config.production,
+                    )?;
                     for (&query, ()) in &live {
                         if query < count {
                             command = command.map_query_child(
@@ -72,19 +73,18 @@ impl Context<'_, '_> {
     }
 
     fn insert(&self, mut command: MutableCommandPlan) -> Result<MutableCommandPlan, SQLError> {
-        let control = &self.config.production;
+        let control = &self.scalars().storage;
         command = command.map_query_child(CommandQuerySlot::InsertSource, control, |query| {
             self.query(query)
         })?;
         let CommandPlan::Insert(plan) = &*command else {
             unreachable!()
         };
-        if plan.rows.iter().any(|row| !row.is_empty()) {
-            let config = self.config.for_values_without_active()?;
+        if let Some(config) = self.config.for_values(&plan.rows)? {
             let values = Context {
                 config: &config,
                 aggregates: self.aggregates,
-                active: self.active,
+                input: self.input,
             };
             for row in 0..plan.rows.len() {
                 let CommandPlan::Insert(plan) = &*command else {
@@ -122,7 +122,7 @@ impl Context<'_, '_> {
     }
 
     fn update(&self, mut command: MutableCommandPlan) -> Result<MutableCommandPlan, SQLError> {
-        let control = &self.config.production;
+        let control = &self.scalars().storage;
         command = command.map_source(control, |source| self.source(source))?;
         let CommandPlan::Update(plan) = &*command else {
             unreachable!()
@@ -141,7 +141,7 @@ impl Context<'_, '_> {
     }
 
     fn merge(&self, mut command: MutableCommandPlan) -> Result<MutableCommandPlan, SQLError> {
-        let control = &self.config.production;
+        let control = &self.scalars().storage;
         command = command.map_source(control, |source| self.source(source))?;
         command = command.map_scalar(CommandScalarSlot::MergeJoin, control, |expression| {
             self.qualification(expression)
@@ -188,11 +188,12 @@ impl Context<'_, '_> {
         &self,
         mut command: MutableCommandPlan,
     ) -> Result<MutableCommandPlan, SQLError> {
-        let control = &self.config.production;
+        let control = &self.scalars().storage;
         let count = command.returning().expect("mutation RETURNING").len();
+        let production = self.scalars();
         for index in 0..count {
             let projections = command.returning().expect("mutation RETURNING");
-            if let Some(alias) = super::projection_alias(&projections[index], control)? {
+            if let Some(alias) = production.projection_alias(&projections[index])? {
                 command = command.replace_returning_alias(index, Some(alias), control)?;
             }
             command =
@@ -202,14 +203,14 @@ impl Context<'_, '_> {
         }
         let (live, count) = match &*command {
             CommandPlan::Insert(plan) => (
-                super::super::subqueries::live_slots(plan.expressions(), *control)?,
+                super::super::subqueries::live_slots(plan.expressions(), self.config.production)?,
                 plan.subqueries.len(),
             ),
             CommandPlan::Update(plan) => (
                 super::super::subqueries::live_slots_with_source(
                     plan.expressions(),
                     plan.source.as_deref(),
-                    *control,
+                    self.config.production,
                 )?,
                 plan.subqueries.len(),
             ),
@@ -217,7 +218,7 @@ impl Context<'_, '_> {
                 super::super::subqueries::live_slots_with_source(
                     plan.expressions(),
                     plan.source.as_deref(),
-                    *control,
+                    self.config.production,
                 )?,
                 plan.subqueries.len(),
             ),
@@ -225,14 +226,14 @@ impl Context<'_, '_> {
                 super::super::subqueries::live_slots_with_source(
                     plan.expressions(),
                     Some(&plan.source),
-                    *control,
+                    self.config.production,
                 )?,
                 plan.subqueries.len(),
             ),
             _ => unreachable!("mutation tail"),
         };
         for (&index, ()) in &live {
-            control.check()?;
+            self.config.production.check()?;
             if index < count {
                 command = command.map_query_child(
                     CommandQuerySlot::Subquery(index),

@@ -112,13 +112,25 @@ macro_rules! input_fields {
                 memory: &mut PlanMemory,
             ) -> Result<RelationalPlan, SQLError> {
                 Ok(match $read!(self.binary.array::<1>())?[0] {
-                    0 => {
+                    tag @ (0 | 3) => {
                         memory.grow(size_of::<QueryBlockPlan>())?;
+                        let privilege_subqueries = if tag == 3 {
+                            let slots = input_list!($read, self, memory, |input, _| {
+                                Ok($read!(input.binary.count())?)
+                            })?;
+                            if slots.is_empty() {
+                                return Err(invalid("empty projection privilege slot list"));
+                            }
+                            slots
+                        } else {
+                            Vec::new()
+                        };
                         RelationalPlan::QueryBlock(Box::new(QueryBlockPlan {
                             deferred_outer_rewrites: Vec::new(),
                             windows: Vec::new(),
                             projections: Vec::new(),
                             privilege_columns: OwnedSet::new(),
+                            privilege_subqueries,
                             from: None,
                             r#where: None,
                             compute: ComputePlan::Project,

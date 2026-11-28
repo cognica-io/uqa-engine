@@ -16,7 +16,7 @@ use std::collections::BTreeSet;
 
 use crate::types::Value;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Predicate {
     Equals(Value),
     NotEquals(Value),
@@ -39,7 +39,7 @@ pub enum Predicate {
 }
 
 /// One end of a [`Predicate::Range`].
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum RangeEnd {
     /// The value is part of the range.
     Inclusive(Value),

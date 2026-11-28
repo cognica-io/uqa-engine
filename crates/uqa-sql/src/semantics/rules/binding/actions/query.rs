@@ -331,6 +331,7 @@ fn projection_block(projections: Vec<ProjectionPlan>) -> QueryBlockPlan {
         windows: Vec::new(),
         projections,
         privilege_columns: uqa_core::memory::OwnedSet::new(),
+        privilege_subqueries: Vec::new(),
         from: None,
         r#where: None,
         compute: ComputePlan::Project,

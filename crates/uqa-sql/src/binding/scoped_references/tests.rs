@@ -221,3 +221,88 @@ fn controlled_query_inputs_admit_decoded_order_labels_and_preserve_output_preced
     assert_eq!(actual.len(), 3);
     assert_eq!(memory.used(), 0);
 }
+
+#[test]
+fn duplicate_outer_replacements_use_memory_for_one_identity() {
+    let key = crate::ColumnIdentity::qualified("outer_source", "v");
+    let first = ScalarExpr::Literal(uqa_core::Value::Int(1));
+    let last = ScalarExpr::Literal(uqa_core::Value::Int(2));
+    let memory = MemoryBudget::new(64 << 10);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&memory, &token, &token);
+    let inputs = std::iter::repeat_n((&key, &first), 100_000).chain([(&key, &last)]);
+    let substitutions = OuterColumnSubstitutions::new(inputs, &control)
+        .unwrap()
+        .unwrap();
+    assert!(std::ptr::eq(
+        substitutions.get(Some("outer_source"), "v").unwrap(),
+        std::ptr::from_ref(&last)
+    ));
+    drop(substitutions);
+    assert_eq!(memory.used(), 0);
+}
+
+#[test]
+fn indexed_outer_replacements_preserve_duplicate_order_and_reuse_borrowed_columns() {
+    use crate::ColumnIdentity;
+    use uqa_core::Value;
+
+    let target = RowSchema::with_qualified_types("outer_source", vec!["v".into()], vec![None]);
+    let key = ColumnIdentity::qualified("outer_source", "v");
+    let first = ScalarExpr::Literal(Value::Int(1));
+    let last = ScalarExpr::Literal(Value::Int(2));
+    let open = ScalarExpr::Column("free".into());
+    let memory = MemoryBudget::new(1 << 20);
+    let token = CancellationToken::new();
+    for control in [
+        ProductionControl::uncontrolled(),
+        ProductionControl::new(&memory, &token, &token),
+    ] {
+        assert!(
+            OuterColumnSubstitutions::new([(&key, &open), (&key, &last)], &control)
+                .unwrap()
+                .is_none()
+        );
+        let substitutions =
+            OuterColumnSubstitutions::new([(&key, &first), (&key, &last)], &control)
+                .unwrap()
+                .unwrap();
+        let used = memory.used();
+        let allocations = allocation_counter::measure(|| {
+            for _ in 0..1024 {
+                assert!(std::ptr::eq(
+                    substitutions.get(Some("outer_source"), "v").unwrap(),
+                    std::ptr::from_ref(&last)
+                ));
+                assert!(substitutions.get(None, "v").is_none());
+            }
+        });
+        assert_eq!(allocations.count_total, 0);
+        assert_eq!(memory.used(), used);
+        for text in ["SELECT outer_source.v", "SELECT v"] {
+            let child = query(text).copy_for_rewrite(&control).unwrap();
+            let (child, valid) = substitutions.substitute(child, &target, &control).unwrap();
+            assert!(valid);
+            let RelationalPlan::QueryBlock(block) = &child.root else {
+                panic!("query block");
+            };
+            assert_eq!(block.projections[0].expr, last);
+            assert_eq!(block.projections[0].alias.as_deref(), Some("v"));
+        }
+        let whole = query("SELECT outer_source");
+        let (child, valid) = substitutions
+            .substitute(whole.copy_for_rewrite(&control).unwrap(), &target, &control)
+            .unwrap();
+        assert!(!valid);
+        let RelationalPlan::QueryBlock(block) = &child.root else {
+            panic!("query block");
+        };
+        assert_eq!(
+            block.projections[0].expr,
+            ScalarExpr::Column("outer_source".into())
+        );
+        assert!(block.projections[0].alias.is_none());
+        drop((child, substitutions));
+        assert_eq!(memory.used(), 0);
+    }
+}

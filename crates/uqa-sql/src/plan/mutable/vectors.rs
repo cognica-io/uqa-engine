@@ -49,12 +49,25 @@ impl ScalarVector {
 impl MutableQueryPlan {
     /// Replace all grouping keys while preserving projection, source and grouping-set owners.
     pub fn replace_group_by(
-        mut self,
+        self,
         expressions: impl ExactSizeIterator<Item = OwnedScalarExpr>,
         control: &ProductionControl<'_>,
     ) -> Result<Self, SQLError> {
-        self.assert_owner(control);
-        control.check()?;
+        self.replace_group_by_with_workspace(expressions, control, control)
+    }
+
+    /// Move generated grouping keys from the operation to the query. A retained query keeps their leases and a caller-owned query takes the completed vector.
+    pub fn replace_group_by_with_workspace(
+        mut self,
+        expressions: impl ExactSizeIterator<Item = OwnedScalarExpr>,
+        storage: &ProductionControl<'_>,
+        control: &ProductionControl<'_>,
+    ) -> Result<Self, SQLError> {
+        self.assert_owner(storage);
+        storage.check()?;
+        if storage.budget().is_some() {
+            self.assert_owner(control);
+        }
         let replacement = ScalarVector::new(expressions, control)?;
         let RelationalPlan::QueryBlock(block) = &mut self.query.root else {
             return Err(SQLError::Internal(

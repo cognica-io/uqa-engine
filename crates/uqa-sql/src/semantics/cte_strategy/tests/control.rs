@@ -80,6 +80,32 @@ fn admitted_schedules_preserve_syntactic_consumers_lexical_shadowing_and_effects
 }
 
 #[test]
+fn materialized_definitions_with_discarded_consumers_are_planned_without_scheduling_rows() {
+    use crate::semantics::{
+        planned_cte_declarations_with_control, reachable_cte_declarations_with_control,
+    };
+    let control = ProductionControl::uncontrolled();
+    for (sql, planned) in [
+        ("WITH a AS MATERIALIZED (SELECT 1/0) SELECT 7", vec![false]),
+        ("WITH a AS MATERIALIZED (SELECT 1/0), b AS (SELECT * FROM a) SELECT 7", vec![true, false]),
+        ("WITH a AS (SELECT 1/0), b AS (SELECT * FROM a) SELECT 7", vec![false, false]),
+        ("WITH a AS (SELECT 1/0), b AS (SELECT * FROM a,a x) SELECT 7", vec![true, false]),
+        ("WITH a AS NOT MATERIALIZED (SELECT 1/0), b AS (SELECT * FROM a,a x) SELECT 7", vec![false, false]),
+        ("WITH a AS (SELECT 1/0), b AS MATERIALIZED (SELECT * FROM a), c AS (SELECT * FROM b) SELECT 7", vec![true, true, false]),
+        ("WITH a AS (SELECT random()), b AS (SELECT * FROM a) SELECT 7", vec![true, false]),
+        ("WITH a AS MATERIALIZED (SELECT 1/0), b AS (SELECT * FROM a) DELETE FROM t WHERE false", vec![true, false]),
+    ] {
+        let plan = UnifiedPlan::lower(crate::compile(sql).unwrap().remove(0));
+        for catalog in [None, Some(&Catalog(None) as &dyn VolatilityCatalog)] {
+            let declarations = planned_cte_declarations_with_control((&plan).into(), catalog, control).unwrap();
+            assert_eq!(declarations.as_slice(), planned, "{sql}");
+        }
+        let executed = reachable_cte_declarations_with_control((&plan).into(), control).unwrap();
+        assert!(executed.iter().all(|&read| !read), "{sql}");
+    }
+}
+
+#[test]
 fn schedule_memory_is_independent_of_borrowed_identifier_length() {
     let mut plan = query("WITH q AS (VALUES(1)) SELECT * FROM q");
     plan.ctes[0].name = "x".repeat(64 * 1024);
