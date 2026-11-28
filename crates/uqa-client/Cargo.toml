@@ -30,6 +30,7 @@ uqa-sql.workspace = true
 zeroize.workspace = true
 
 [dev-dependencies]
+allocation-counter = "=0.8.1"
 axum.workspace = true
 log = "0.4"
 tempfile = "3.13"

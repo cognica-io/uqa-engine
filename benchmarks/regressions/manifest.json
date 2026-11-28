@@ -18803,6 +18803,19 @@
     {
       "package": "uqa-client",
       "kind": "lib",
+      "test": "a_chunk_with_thousands_of_rows_uses_linear_allocation_volume",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-client/src/sql_stream/tests.rs",
+      "capability": "HTTP SQL streaming",
+      "workload": "Read 2,048 and 4,096 row frames from single response chunks through SQLStream::next_frame.",
+      "invariant": "Doubling the row count grows total allocated bytes at most twofold plus 4 KiB while delivering every frame in order."
+    },
+    {
+      "package": "uqa-client",
+      "kind": "lib",
       "test": "bit_string_parameters_do_not_silently_change_type_on_the_existing_wire_protocol",
       "cases": 1,
       "case_names": [

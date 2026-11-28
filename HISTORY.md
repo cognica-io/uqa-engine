@@ -12,6 +12,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - Retained queries reuse the statement’s catalog and detach the tables selected by their views and deferred CTEs. Opening a transaction with an up-to-date catalog captures session state once. Transaction rollback retains immutable statement-cache roots. Updating one cached statement preserves the other statements and their execution plans. An implicit read selects rollback data when it first needs to write or supply a committed backup. Repeated catalog reads share table definitions and range descriptors within the same catalog revision and memory budget. Forward-only cursors stream FETCH and MOVE requests in bounded batches. A cursor promoted to holdable during a procedure retains the unread rows at their original positions.
 
+- The Rust HTTP client reads successive rows from a streamed SQL response without copying the remaining rows after each frame.
+
 - Grouped aggregates retain only the state needed for each function. Ordered aggregates spill binary records and merge them in SQL order. Hash joins, DISTINCT and equality-based MERGE use bounded disk indexes as their inputs grow.
 
 - Prepared SQL expressions reuse numeric operand types, builtin signatures, and row and array descriptors across input rows. Scalar function callbacks receive the original argument payloads.

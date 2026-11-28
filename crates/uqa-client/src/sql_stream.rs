@@ -12,8 +12,7 @@ const MAX_STREAM_FRAME_BYTES: usize = 64 * 1024 * 1024;
 pub struct SQLStream {
     response: reqwest::Response,
     request_id: String,
-    buffer: Vec<u8>,
-    scan_start: usize,
+    lines: FrameLines,
     phase: StreamPhase,
     body_finished: bool,
 }
@@ -31,8 +30,7 @@ impl SQLStream {
         Self {
             response,
             request_id,
-            buffer: Vec::new(),
-            scan_start: 0,
+            lines: FrameLines::default(),
             phase: StreamPhase::AwaitingMetadata,
             body_finished: false,
         }
@@ -43,36 +41,33 @@ impl SQLStream {
     }
 
     pub async fn next_frame(&mut self) -> Result<Option<SQLStreamFrame>, HttpEngineError> {
+        if self.phase == StreamPhase::Finished {
+            return Ok(None);
+        }
         loop {
-            if self.phase == StreamPhase::Finished {
-                return Ok(None);
-            }
-            if self.phase == StreamPhase::Terminal {
-                return self.finish().await;
-            }
-            if let Some(newline) = self.next_newline() {
-                if newline > MAX_STREAM_FRAME_BYTES {
-                    return Err(HttpEngineError::StreamFrameTooLarge);
-                }
-                let line = take_line(&mut self.buffer, newline);
-                self.scan_start = 0;
-                if line_is_empty(&line) {
+            if let Some(line) = self.lines.next_line(MAX_STREAM_FRAME_BYTES)? {
+                if line_is_empty(line) {
                     continue;
                 }
-                return self.decode_frame(&line).map(Some);
-            }
-            if self.buffer.len() > MAX_STREAM_FRAME_BYTES {
-                return Err(HttpEngineError::StreamFrameTooLarge);
+                if self.phase == StreamPhase::Terminal {
+                    return Err(HttpEngineError::InvalidStreamSequence);
+                }
+                return self.phase.decode_frame(line, &self.request_id).map(Some);
             }
             if self.body_finished {
-                if self.buffer.is_empty() {
+                if self.phase == StreamPhase::Terminal {
+                    if !line_is_empty(self.lines.remaining()) {
+                        return Err(HttpEngineError::InvalidStreamSequence);
+                    }
+                    self.lines = FrameLines::default();
+                    self.phase = StreamPhase::Finished;
+                    return Ok(None);
+                }
+                let line = self.lines.take_remaining();
+                if line.is_empty() {
                     return Err(HttpEngineError::TruncatedStream);
                 }
-                if self.buffer.len() > MAX_STREAM_FRAME_BYTES {
-                    return Err(HttpEngineError::StreamFrameTooLarge);
-                }
-                let line = std::mem::take(&mut self.buffer);
-                return self.decode_frame(&line).map(Some);
+                return self.phase.decode_frame(line, &self.request_id).map(Some);
             }
             match self
                 .response
@@ -80,15 +75,19 @@ impl SQLStream {
                 .await
                 .map_err(HttpEngineError::transport)?
             {
-                Some(chunk) => {
-                    self.buffer.extend_from_slice(&chunk);
-                }
+                Some(chunk) => self.lines.append(&chunk),
                 None => self.body_finished = true,
             }
         }
     }
+}
 
-    fn decode_frame(&mut self, line: &[u8]) -> Result<SQLStreamFrame, HttpEngineError> {
+impl StreamPhase {
+    fn decode_frame(
+        &mut self,
+        line: &[u8],
+        request_id: &str,
+    ) -> Result<SQLStreamFrame, HttpEngineError> {
         let line = line.strip_suffix(b"\r").unwrap_or(line);
         let mut frame = serde_json::from_slice::<SQLStreamFrame>(line)
             .map_err(HttpEngineError::InvalidResponse)?;
@@ -105,11 +104,11 @@ impl SQLStream {
         }
         if frame
             .request_id()
-            .is_some_and(|request_id| request_id != self.request_id)
+            .is_some_and(|frame_id| frame_id != request_id)
         {
             return Err(HttpEngineError::StreamRequestIdMismatch);
         }
-        self.phase = match (&self.phase, &frame) {
+        *self = match (&*self, &frame) {
             (StreamPhase::AwaitingMetadata, SQLStreamFrame::Metadata { .. })
             | (StreamPhase::Rows, SQLStreamFrame::Row { .. }) => StreamPhase::Rows,
             (StreamPhase::AwaitingMetadata | StreamPhase::Rows, SQLStreamFrame::Error { .. })
@@ -118,55 +117,57 @@ impl SQLStream {
         };
         Ok(frame)
     }
+}
 
-    async fn finish(&mut self) -> Result<Option<SQLStreamFrame>, HttpEngineError> {
-        loop {
-            if let Some(newline) = self.next_newline() {
-                if newline > MAX_STREAM_FRAME_BYTES {
-                    return Err(HttpEngineError::StreamFrameTooLarge);
-                }
-                let line = take_line(&mut self.buffer, newline);
-                self.scan_start = 0;
-                if !line_is_empty(&line) {
-                    return Err(HttpEngineError::InvalidStreamSequence);
-                }
-                continue;
-            }
-            if self.buffer.len() > MAX_STREAM_FRAME_BYTES {
+#[derive(Default)]
+struct FrameLines {
+    bytes: Vec<u8>,
+    read_offset: usize,
+    scan_start: usize,
+}
+
+impl FrameLines {
+    fn next_line(&mut self, limit: usize) -> Result<Option<&[u8]>, HttpEngineError> {
+        let Some(offset) = self.bytes[self.scan_start..]
+            .iter()
+            .position(|&byte| byte == b'\n')
+        else {
+            self.scan_start = self.bytes.len();
+            if self.remaining().len() > limit {
                 return Err(HttpEngineError::StreamFrameTooLarge);
             }
-            if self.body_finished {
-                if !line_is_empty(&self.buffer) {
-                    return Err(HttpEngineError::InvalidStreamSequence);
-                }
-                self.buffer.clear();
-                self.phase = StreamPhase::Finished;
-                return Ok(None);
-            }
-            match self
-                .response
-                .chunk()
-                .await
-                .map_err(HttpEngineError::transport)?
-            {
-                Some(chunk) => {
-                    self.buffer.extend_from_slice(&chunk);
-                }
-                None => self.body_finished = true,
-            }
+            return Ok(None);
+        };
+        let newline = self.scan_start + offset;
+        if newline - self.read_offset > limit {
+            return Err(HttpEngineError::StreamFrameTooLarge);
         }
+        let start = self.read_offset;
+        self.read_offset = newline + 1;
+        self.scan_start = self.read_offset;
+        Ok(Some(&self.bytes[start..newline]))
     }
 
-    fn next_newline(&mut self) -> Option<usize> {
-        let start = self.scan_start.min(self.buffer.len());
-        let newline = self.buffer[start..]
-            .iter()
-            .position(|byte| *byte == b'\n')
-            .map(|offset| start + offset);
-        if newline.is_none() {
-            self.scan_start = self.buffer.len();
+    fn append(&mut self, chunk: &[u8]) {
+        let unread = self.remaining().len();
+        if self.read_offset > 0 && self.read_offset >= unread {
+            // Each moved byte is paid for by a byte already consumed since the previous compaction.
+            self.bytes.copy_within(self.read_offset.., 0);
+            self.bytes.truncate(unread);
+            self.scan_start -= self.read_offset;
+            self.read_offset = 0;
         }
-        newline
+        self.bytes.extend_from_slice(chunk);
+    }
+
+    fn remaining(&self) -> &[u8] {
+        &self.bytes[self.read_offset..]
+    }
+
+    fn take_remaining(&mut self) -> &[u8] {
+        let start = self.read_offset;
+        self.read_offset = self.bytes.len();
+        &self.bytes[start..]
     }
 }
 
@@ -174,9 +175,5 @@ fn line_is_empty(line: &[u8]) -> bool {
     line.is_empty() || line == b"\r"
 }
 
-fn take_line(buffer: &mut Vec<u8>, newline: usize) -> Vec<u8> {
-    let remainder = buffer.split_off(newline + 1);
-    let mut line = std::mem::replace(buffer, remainder);
-    line.truncate(newline);
-    line
-}
+#[cfg(test)]
+mod tests;
