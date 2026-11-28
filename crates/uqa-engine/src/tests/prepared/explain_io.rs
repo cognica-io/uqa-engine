@@ -284,11 +284,12 @@ fn cursor_spill_reads_follow_the_fetching_invocation(#[case] provider: Provider)
         let weak = Arc::downgrade(&engine);
         engine
             .register_scalar_function("fetch_io", move |_args: &[Value]| {
+                // The first FETCH can read a full sorted batch. Cross its boundary to measure physical spill reads in the current invocation.
                 let result = weak
                     .upgrade()
                     .unwrap()
-                    .sql("FETCH 1000 FROM measured_io", &[])?;
-                assert_eq!(result.rows.len(), 1000);
+                    .sql("FETCH 1024 FROM measured_io", &[])?;
+                assert_eq!(result.rows.len(), 1024);
                 Ok(Value::Int(1))
             })
             .unwrap();

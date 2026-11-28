@@ -40736,6 +40736,32 @@
     {
       "package": "uqa-execution",
       "kind": "lib",
+      "test": "portal_batches_keep_exact_demand_and_count_moves_without_copying_rows",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/statement/portal/worker/tests.rs",
+      "capability": "Bounded physical consumer demand",
+      "workload": "Step four rows, then move over five rows before the requested seven-row boundary.",
+      "invariant": "Each request returns one response. Returned rows preserve order and release their allocation charge. MOVE returns only the count with zero buffered row allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
+      "test": "portal_batches_release_prior_rows_on_cancellation_and_yield_under_pressure",
+      "cases": 1,
+      "source": "crates/uqa-execution/src/statement/portal/worker/tests.rs",
+      "capability": "Bounded physical consumer demand",
+      "workload": "Read a scalar result under a one-byte allowance and cancel a later request with an outstanding row.",
+      "invariant": "A single row can be handed directly to the reader. Cancellation reports 57014 and releases all retained batch bytes without publishing a partial result.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-execution",
+      "kind": "lib",
       "test": "scope_capture_failure_is_the_portals_only_response_after_its_first_step",
       "cases": 1,
       "source": "crates/uqa-execution/src/statement/portal/worker/tests.rs",
@@ -41552,6 +41578,38 @@
         "case_1_sqlite_native",
         "case_2_sqlite_kv",
         "case_3_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "forward_cursor_delivers_only_requested_rows_without_materializing",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/session/portals/tests.rs",
+      "capability": "Bounded physical consumer demand",
+      "workload": "Fetch and move through a forward-only cursor with a volatile sequence projection on four storage providers.",
+      "invariant": "Each requested row advances the sequence exactly once. The live cursor owns no output file and reports the original values and positions through end of scan.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "lib",
+      "test": "forward_cursor_promoted_by_a_procedure_preserves_unread_rows_and_sequence_calls",
+      "cases": 4,
+      "source": "crates/uqa-engine/src/session/portals/tests.rs",
+      "capability": "Bounded physical consumer demand",
+      "workload": "Commit after two rows inside a procedural cursor loop on four storage providers and consume the remaining four rows.",
+      "invariant": "Holding the cursor preserves its absolute position and the unread sequence values. The six source rows are evaluated and returned exactly once.",
+      "case_names": [
+        "case_1_memory",
+        "case_2_sqlite_native",
+        "case_3_sqlite_kv",
+        "case_4_redb"
       ]
     },
     {

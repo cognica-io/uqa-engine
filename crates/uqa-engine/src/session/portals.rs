@@ -9,6 +9,8 @@
 mod fetch;
 mod statement_snapshot;
 mod table_snapshot;
+#[cfg(test)]
+mod tests;
 mod worker;
 pub(crate) use statement_snapshot::StatementReadSnapshot;
 pub(crate) use table_snapshot::RetainedCatalogSnapshot;
@@ -22,8 +24,8 @@ use crate::{
     SessionPortalTableSnapshots, SessionPortalViewSnapshots, StorageContext, TableState, Value,
 };
 use fetch::{
-    ensure_portal_rows_for_fetch, fetch_directional_query_portal, fetch_indices,
-    materialize_portal_to_end, select_portal_rows, uses_directional_query_execution,
+    ensure_portal_rows_for_fetch, fetch_indices, fetch_query_portal, materialize_portal_to_end,
+    select_portal_rows, uses_query_worker,
 };
 use uqa_sql::ast::{CursorDirection, FetchCursorStmt};
 
@@ -181,8 +183,8 @@ impl Engine {
             .remove(&fetch.name)
             .ok_or_else(|| cursor_error(&fetch.name, "does not exist", "34000"))?;
         let result = (|| {
-            if uses_directional_query_execution(&state) {
-                return fetch_directional_query_portal(
+            if uses_query_worker(&state) {
+                return fetch_query_portal(
                     self,
                     &mut state,
                     fetch.direction,

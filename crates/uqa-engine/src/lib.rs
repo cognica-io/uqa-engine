@@ -534,6 +534,8 @@ enum SessionPortalData {
     Streaming {
         worker: SessionPortalWorker,
         materialized: Option<SessionPortalMaterialization>,
+        /// Number consumed from the forward-only worker, including rows discarded by MOVE.
+        forward_rows: usize,
         eof: bool,
         restart: Option<SessionPortalRestart>,
     },
@@ -549,12 +551,17 @@ struct SessionPortalRestart {
 }
 
 struct SessionPortalMaterialization {
+    /// Rows already consumed before a forward-only cursor became holdable.
+    preceding: usize,
     rows: uqa_execution::IndexedSpill,
 }
 
 use uqa_execution::statement::portal::worker::{
-    SessionPortalWorker, SessionPortalWorkerRequest, SessionPortalWorkerResponse,
+    ResumableQueryRequest as SessionPortalWorkerRequest, ResumableQueryResponse,
+    ResumableQueryWorker,
 };
+type SessionPortalWorker = ResumableQueryWorker<Vec<Value>>;
+type SessionPortalWorkerResponse = ResumableQueryResponse<Vec<Value>>;
 
 /// `PostgreSQL` distinguishes the positions before the first row and after the last row from a position on a row.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

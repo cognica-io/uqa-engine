@@ -12,22 +12,24 @@ use crate::{
 use std::{cell::Cell, sync::mpsc};
 use uqa_sql::{plan::UnifiedPlan, ColumnType};
 
-fn channels(
-    directional: bool,
-) -> (
-    SessionPortalRowConsumer,
-    mpsc::Sender<SessionPortalWorkerRequest>,
-    mpsc::Receiver<SessionPortalWorkerResponse>,
-) {
+type PortalChannels = (
+    WorkerRowConsumer<Vec<Value>>,
+    mpsc::Sender<ResumableQueryRequest>,
+    mpsc::Receiver<ResumableQueryResponse<Vec<Value>>>,
+);
+
+fn channels(directional: bool) -> PortalChannels {
     let (request_tx, requests) = mpsc::channel();
     let (responses, response_rx) = mpsc::channel();
     (
-        SessionPortalRowConsumer {
+        WorkerRowConsumer {
             diagnostics: QueryDiagnostics::request_scope(None),
             requests,
             responses,
             direction: Cell::new(PhysicalScanDirection::Forward),
-            directional,
+            output: WorkerOutput::Portal { directional },
+            project: std::convert::identity,
+            batch: RefCell::new(None),
             closed: Cell::new(false),
             public_width: Cell::new(0),
         },
@@ -55,7 +57,7 @@ fn duplicate_output_names_retain_their_positional_metadata() {
             ]),
         )
         .unwrap();
-    let SessionPortalWorkerResponse::Started { schema } = responses.recv().unwrap() else {
+    let ResumableQueryResponse::Started { schema } = responses.recv().unwrap() else {
         panic!("metadata must precede rows");
     };
     assert_eq!(schema.columns(), columns);
@@ -78,7 +80,7 @@ fn reordered_output_names_resolve_types_from_their_schema_positions() {
             .with_column_collations([None, Some(950)]),
         )
         .unwrap();
-    let SessionPortalWorkerResponse::Started { schema } = responses.recv().unwrap() else {
+    let ResumableQueryResponse::Started { schema } = responses.recv().unwrap() else {
         panic!("expected startup metadata");
     };
     assert_eq!(schema.column_types(), [Some(ColumnType::Text)]);
@@ -96,7 +98,7 @@ fn rows_use_public_width_without_exposing_internal_values() {
         let (consumer, requests, responses) = channels(false);
         let schema = RowSchema::new(vec!["a".into(), "b".into()]);
         consumer.public_width.set(public_width);
-        requests.send(SessionPortalWorkerRequest::Close).unwrap();
+        requests.send(ResumableQueryRequest::Close).unwrap();
         let control = consumer
             .consume(OwnedPhysicalRow::new(
                 schema,
@@ -104,7 +106,7 @@ fn rows_use_public_width_without_exposing_internal_values() {
             ))
             .unwrap();
         assert!(matches!(control, QueryConsumerControl::Stop));
-        let SessionPortalWorkerResponse::Row(values) = responses.recv().unwrap() else {
+        let ResumableQueryResponse::Row(values) = responses.recv().unwrap() else {
             panic!("expected positional row");
         };
         assert_eq!(values, expected);
@@ -116,7 +118,7 @@ fn rows_use_public_width_without_exposing_internal_values() {
 fn directional_requests_preserve_reverse_steps_and_rewind_handshake() {
     let (consumer, requests, responses) = channels(true);
     requests
-        .send(SessionPortalWorkerRequest::Step(
+        .send(ResumableQueryRequest::Step(
             PhysicalScanDirection::Backward,
             None,
         ))
@@ -127,34 +129,30 @@ fn directional_requests_preserve_reverse_steps_and_rewind_handshake() {
     ));
     assert!(matches!(
         responses.recv().unwrap(),
-        SessionPortalWorkerResponse::Eof
+        ResumableQueryResponse::Eof
     ));
     assert_eq!(consumer.scan_direction(), PhysicalScanDirection::Backward);
-    requests
-        .send(SessionPortalWorkerRequest::Rewind(None))
-        .unwrap();
+    requests.send(ResumableQueryRequest::Rewind(None)).unwrap();
     assert!(matches!(
         consumer.wait_for_request().unwrap(),
         QueryConsumerControl::Rewind
     ));
-    requests.send(SessionPortalWorkerRequest::Close).unwrap();
+    requests.send(ResumableQueryRequest::Close).unwrap();
     assert!(matches!(
         consumer.rewound().unwrap(),
         QueryConsumerControl::Stop
     ));
     assert!(matches!(
         responses.recv().unwrap(),
-        SessionPortalWorkerResponse::Rewound
+        ResumableQueryResponse::Rewound
     ));
 }
 
 #[test]
 fn forward_only_rewind_is_an_error_and_disconnect_stops_the_consumer() {
     let (consumer, requests, responses) = channels(false);
-    requests
-        .send(SessionPortalWorkerRequest::Rewind(None))
-        .unwrap();
-    let error = consumer.wait_for_request().err().expect("rewind must fail");
+    requests.send(ResumableQueryRequest::Rewind(None)).unwrap();
+    let error = consumer.wait_for_request().expect_err("rewind must fail");
     assert!(
         matches!(error, SQLError::Internal(message) if message == "forward-only cursor worker received a rewind request")
     );
@@ -298,4 +296,125 @@ fn scope_capture_failure_is_the_portals_only_response_after_its_first_step() {
             matches!(responses.as_slice(), [SessionPortalWorkerResponse::Error(error)] if error.sqlstate()==Some(sqlstate) && error.to_string()=="scope admission failed")
         );
     }
+}
+
+fn batch_request(
+    count: usize,
+    capture: bool,
+    control: &uqa_storage::read_control::StorageReadControl,
+) -> ResumableQueryRequest {
+    let diagnostics =
+        QueryDiagnostics::new(std::sync::Arc::default()).request_with_control(control.clone());
+    ResumableQueryRequest::StepBatch {
+        direction: PhysicalScanDirection::Forward,
+        max_rows: NonZeroUsize::new(count).unwrap(),
+        capture,
+        diagnostics: Some(diagnostics),
+    }
+}
+
+fn input_row(schema: &RowSchema, value: i64) -> OwnedPhysicalRow {
+    OwnedPhysicalRow::new(
+        schema.clone(),
+        PhysicalRow::from_values(vec![Value::Int(value)]),
+    )
+}
+
+#[test]
+fn portal_batches_keep_exact_demand_and_count_moves_without_copying_rows() {
+    let (consumer, requests, responses) = channels(true);
+    let schema = RowSchema::new(vec!["x".into()]);
+    consumer.public_width.set(1);
+    let storage = uqa_storage::read_control::StorageReadControl::with_limit(64 << 10);
+    requests.send(batch_request(4, true, &storage)).unwrap();
+    assert_eq!(
+        consumer.wait_for_request().unwrap(),
+        QueryConsumerControl::Continue
+    );
+    for index in 1..4 {
+        assert_eq!(
+            consumer.consume(input_row(&schema, index)).unwrap(),
+            QueryConsumerControl::Continue
+        );
+        assert!(matches!(
+            responses.try_recv(),
+            Err(mpsc::TryRecvError::Empty)
+        ));
+    }
+    requests.send(batch_request(7, false, &storage)).unwrap();
+    assert_eq!(
+        consumer.consume(input_row(&schema, 4)).unwrap(),
+        QueryConsumerControl::Continue
+    );
+    let ResumableQueryResponse::Batch(batch) = responses.recv().unwrap() else {
+        panic!("row batch")
+    };
+    assert_eq!((batch.processed, batch.exhausted), (4, false));
+    assert!(storage.memory().used() > 0);
+    let mut rows = Vec::new();
+    batch.append_to(&mut rows);
+    assert_eq!(
+        rows,
+        (1..=4).map(|i| vec![Value::Int(i)]).collect::<Vec<_>>()
+    );
+    assert_eq!(storage.memory().used(), 0);
+    for index in 5..10 {
+        assert_eq!(
+            consumer.consume(input_row(&schema, index)).unwrap(),
+            QueryConsumerControl::Continue
+        );
+        assert_eq!(storage.memory().used(), 0);
+        assert!(matches!(
+            responses.try_recv(),
+            Err(mpsc::TryRecvError::Empty)
+        ));
+    }
+    requests.send(ResumableQueryRequest::Close).unwrap();
+    assert_eq!(
+        consumer.direction_exhausted().unwrap(),
+        QueryConsumerControl::Stop
+    );
+    let ResumableQueryResponse::Batch(batch) = responses.recv().unwrap() else {
+        panic!("count batch")
+    };
+    assert_eq!((batch.processed, batch.exhausted), (5, true));
+    batch
+        .visit(|_| panic!("MOVE copied an output row"))
+        .unwrap();
+}
+
+#[test]
+fn portal_batches_release_prior_rows_on_cancellation_and_yield_under_pressure() {
+    let (consumer, requests, responses) = channels(false);
+    let schema = RowSchema::new(vec!["x".into()]);
+    consumer.public_width.set(1);
+    let tiny = uqa_storage::read_control::StorageReadControl::with_limit(1);
+    let ample = uqa_storage::read_control::StorageReadControl::with_limit(64 << 10);
+    requests.send(batch_request(8, true, &tiny)).unwrap();
+    consumer.wait_for_request().unwrap();
+    requests.send(batch_request(8, true, &ample)).unwrap();
+    consumer.consume(input_row(&schema, 17)).unwrap();
+    let ResumableQueryResponse::Batch(batch) = responses.recv().unwrap() else {
+        panic!("short batch")
+    };
+    assert_eq!((batch.processed, batch.exhausted), (1, false));
+    let mut rows = Vec::new();
+    batch.append_to(&mut rows);
+    assert_eq!(rows, [vec![Value::Int(17)]]);
+    assert_eq!(tiny.memory().used(), 0);
+    consumer.consume(input_row(&schema, 18)).unwrap();
+    assert!(ample.memory().used() > 0);
+    ample.cancellation().cancel();
+    assert_eq!(
+        consumer
+            .consume(input_row(&schema, 19))
+            .unwrap_err()
+            .sqlstate(),
+        Some("57014")
+    );
+    assert_eq!(ample.memory().used(), 0);
+    assert!(matches!(
+        responses.try_recv(),
+        Err(mpsc::TryRecvError::Empty)
+    ));
 }
