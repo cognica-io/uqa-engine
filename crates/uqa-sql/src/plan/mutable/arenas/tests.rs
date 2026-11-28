@@ -386,6 +386,54 @@ fn projection_privilege_slots_follow_compaction_in_both_query_owners() {
 }
 
 #[test]
+fn projection_privilege_owners_release_columns_and_replaced_slot_buffers_independently() {
+    let budget = MemoryBudget::new(1 << 20);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&budget, &token, &token);
+    for copy_privileges in [false, true] {
+        let mut source = query("SELECT (SELECT 10), (SELECT 20), t.n FROM t");
+        let initial = source.copy_for_rewrite(&control).unwrap().reserved_bytes();
+        assert_eq!(budget.used(), 0);
+        let positions = [0, 2];
+        let owner = if copy_privileges {
+            let RelationalPlan::QueryBlock(block) = &mut source.root else {
+                panic!("query block")
+            };
+            block
+                .preserve_projection_privileges(positions, &ProductionControl::uncontrolled())
+                .unwrap();
+            source.copy_for_rewrite(&control).unwrap()
+        } else {
+            source
+                .copy_for_rewrite(&control)
+                .unwrap()
+                .preserve_projection_privileges(positions, &control)
+                .unwrap()
+        };
+        let owner = owner
+            .preserve_projection_privileges([1, 2], &control)
+            .unwrap();
+        let before = budget.used();
+        let owner = owner.clear_privilege_columns(&control).unwrap();
+        let RelationalPlan::QueryBlock(block) = &owner.root else {
+            panic!("query block")
+        };
+        assert!(block.privilege_columns.is_empty());
+        assert_eq!(block.privilege_subqueries, [0, 1]);
+        assert!(budget.used() < before);
+        assert_eq!(
+            budget.used(),
+            initial + block.privilege_subqueries.capacity() * size_of::<usize>()
+        );
+        assert_eq!(owner.reserved_bytes(), budget.used());
+        let owner = owner.clear_projection_privileges(&control).unwrap();
+        assert_eq!(owner.reserved_bytes(), initial);
+        drop(owner);
+        assert_eq!(budget.used(), 0);
+    }
+}
+
+#[test]
 fn projection_privilege_slots_remain_in_their_source_during_transfer() {
     let memory = MemoryBudget::new(1 << 20);
     let token = CancellationToken::new();

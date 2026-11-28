@@ -102,8 +102,10 @@ async fn projections<'s, 'c, I: Input<'s, 'c>>(
     block.deferred_outer_rewrites = copying.field("deferred_outer_rewrites", |copying| {
         copying.map(std::iter::empty(), |_, rewrite| Ok(rewrite))
     })?;
-    block.privilege_columns = copying.field("privilege_columns", |_| Ok(OwnedSet::new()))?;
-    block.privilege_subqueries = copying.field("privilege_subqueries", |_| Ok(Vec::new()))?;
+    (block.privilege_columns, block.privilege_subqueries) = copying
+        .field("projection_privileges", |_| {
+            Ok((OwnedSet::new(), Vec::new()))
+        })?;
     Ok(())
 }
 

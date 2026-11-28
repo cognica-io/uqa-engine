@@ -158,11 +158,15 @@ impl MutableQueryPlan {
                 "projection privileges require a query block".into(),
             ));
         };
-        let memory = block.record_projection_privileges(positions, control)?;
-        self.retain_privilege_memory(memory.columns);
-        if let (Some(owner), Some(slots)) = (self.memory.as_mut(), memory.subqueries) {
-            *block_memory(owner).field_mut("privilege_subqueries") =
-                Some(RewriteMemory::direct(slots));
+        let previous = block.privilege_subqueries.capacity() * size_of::<usize>();
+        let added = block.record_projection_privileges(positions, control)?;
+        if let Some(owner) = self.memory.as_mut() {
+            let direct = projection_privilege_memory(owner);
+            direct.absorb(added.columns.expect("controlled privilege columns"));
+            if let Some(slots) = added.subqueries {
+                drop(direct.split(previous));
+                direct.absorb(slots);
+            }
         }
         Ok(self)
     }
@@ -182,21 +186,61 @@ impl MutableQueryPlan {
         };
         if !block.privilege_columns.contains(&*identity) {
             let memory = insert_column(&mut block.privilege_columns, identity, control)?;
-            self.retain_privilege_memory(memory);
+            if let Some(owner) = self.memory.as_mut() {
+                projection_privilege_memory(owner)
+                    .absorb(memory.expect("controlled privilege column"));
+            }
         }
         Ok(self)
     }
 
-    fn retain_privilege_memory(&mut self, memory: Option<MemoryReservation>) {
-        if let Some(owner) = self.memory.as_mut() {
-            let RewriteMemory::Fields { direct, .. } = block_memory(owner)
-                .field_mut("privilege_columns")
-                .as_mut()
-                .expect("privilege column owner")
-            else {
-                unreachable!("query block field owner")
-            };
-            direct.absorb(memory.expect("controlled privilege dependency"));
-        }
+    pub fn clear_privilege_columns(
+        self,
+        control: &ProductionControl<'_>,
+    ) -> Result<Self, SQLError> {
+        self.clear_privileges(false, control)
     }
+
+    pub(crate) fn clear_projection_privileges(
+        self,
+        control: &ProductionControl<'_>,
+    ) -> Result<Self, SQLError> {
+        self.clear_privileges(true, control)
+    }
+
+    fn clear_privileges(
+        mut self,
+        clear_subqueries: bool,
+        control: &ProductionControl<'_>,
+    ) -> Result<Self, SQLError> {
+        self.assert_owner(control);
+        control.check()?;
+        let RelationalPlan::QueryBlock(block) = &mut self.query.root else {
+            return Err(SQLError::Internal(
+                "privilege column reset requires a query block".into(),
+            ));
+        };
+        block.privilege_columns.clear();
+        if clear_subqueries {
+            block.privilege_subqueries = Vec::new();
+        }
+        if let Some(owner) = self.memory.as_mut() {
+            let direct = projection_privilege_memory(owner);
+            // The column nodes have been freed. Keep just the reservation for the surviving slot buffer.
+            *direct = direct.split(block.privilege_subqueries.capacity() * size_of::<usize>());
+        }
+        Ok(self)
+    }
+}
+
+// A block owns its recorded column nodes and scalar slots in one constructor field. Both allocations are empty on initial lowering.
+fn projection_privilege_memory(owner: &mut RewriteMemory) -> &mut MemoryReservation {
+    let RewriteMemory::Fields { direct, .. } = block_memory(owner)
+        .field_mut("projection_privileges")
+        .as_mut()
+        .expect("projection privilege owner")
+    else {
+        unreachable!("query block field owner")
+    };
+    direct
 }

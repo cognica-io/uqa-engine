@@ -115,41 +115,6 @@ impl MutableQueryPlan {
         Ok(self)
     }
 
-    pub fn clear_privilege_columns(
-        mut self,
-        control: &ProductionControl<'_>,
-    ) -> Result<Self, SQLError> {
-        self.assert_owner(control);
-        control.check()?;
-        let RelationalPlan::QueryBlock(block) = &mut self.query.root else {
-            return Err(SQLError::Internal(
-                "privilege column reset requires a query block".into(),
-            ));
-        };
-        block.privilege_columns.clear();
-        if let Some(memory) = self.memory.as_mut() {
-            *block_memory(memory).field_mut("privilege_columns") =
-                super::Copying::for_rewrite(*control).map(super::Copying::into_rewrite_memory);
-        }
-        Ok(self)
-    }
-
-    pub(crate) fn clear_projection_privileges(
-        self,
-        control: &ProductionControl<'_>,
-    ) -> Result<Self, SQLError> {
-        let mut query = self.clear_privilege_columns(control)?;
-        let RelationalPlan::QueryBlock(block) = &mut query.query.root else {
-            unreachable!("selected query block");
-        };
-        block.privilege_subqueries = Vec::new();
-        if let Some(memory) = query.memory.as_mut() {
-            *block_memory(memory).field_mut("privilege_subqueries") =
-                super::Copying::for_rewrite(*control).map(super::Copying::into_rewrite_memory);
-        }
-        Ok(query)
-    }
-
     /// Change only the allocation-free compute decision chosen by the planner.
     #[expect(
         clippy::needless_match,

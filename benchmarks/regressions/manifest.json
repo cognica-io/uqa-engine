@@ -75615,6 +75615,45 @@
     {
       "package": "uqa-sql",
       "kind": "lib",
+      "test": "projection_privilege_owners_release_columns_and_replaced_slot_buffers_independently",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/mutable/arenas/tests.rs",
+      "capability": "Projection privilege memory",
+      "workload": "Capture and copy column and subquery privileges, add a second slot, clear the columns and release the remaining slots.",
+      "invariant": "Both constructors retain exactly the surviving slot capacity and return to the original allowance after clearing the privileges.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "materialized_definitions_with_discarded_consumers_are_planned_without_scheduling_rows",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/semantics/cte_strategy/tests/control.rs",
+      "capability": "Referenced CTE planning",
+      "workload": "Compare eight SELECT and DELETE statements with folded, volatile, materialized and multiply referenced definitions, with and without a catalog.",
+      "invariant": "Planning includes referenced materialized definitions and their dependencies. None of the discarded consumers schedules a row.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "materialized_cte_in_discarded_projection_is_planned_but_never_read",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/sql_cte.rs",
+      "capability": "Materialized CTE execution",
+      "workload": "Discard and then read a scalar projection that references a sequence through a materialized CTE. Compare SELECT and EXPLAIN on a constant division.",
+      "invariant": "An unread CTE leaves the sequence uncalled. A materialized division reports 22012 during planning and a folded division with a discarded consumer returns 7.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
       "test": "projection_privilege_slots_remain_in_their_source_during_transfer",
       "cases": 1,
       "source": "crates/uqa-sql/src/plan/mutable/arenas/tests.rs",
